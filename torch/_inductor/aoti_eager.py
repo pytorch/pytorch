@@ -23,11 +23,11 @@ from .runtime.runtime_utils import cache_dir
 log = logging.getLogger(__name__)
 
 
-def aoti_eager_cache_dir(namespace: str, device: str):
+def aoti_eager_cache_dir(namespace: str, device: str) -> Path:
     return Path(cache_dir()) / "aoti_eager" / namespace / device
 
 
-def aoti_eager_op_conf_lock(op_func_name_with_overload: str):
+def aoti_eager_op_conf_lock(op_func_name_with_overload: str) -> Any:
     from filelock import FileLock
 
     # Avoid circular import
@@ -38,7 +38,9 @@ def aoti_eager_op_conf_lock(op_func_name_with_overload: str):
     return FileLock(os.path.join(lock_dir, op_conf_lock_file), timeout=LOCK_TIMEOUT)
 
 
-def create_symtype(cls, pytype, shape_env, val, duck=True):
+def create_symtype(
+    cls: Any, pytype: type, shape_env: ShapeEnv, val: Any, duck: bool = True
+) -> Any:
     symbol = shape_env.create_symbol(
         val,
         source=ConstantSource(f"__testing_only{len(shape_env.var_to_val)}"),
@@ -55,11 +57,13 @@ def create_symtype(cls, pytype, shape_env, val, duck=True):
     )
 
 
-def create_symint(shape_env, i: int, duck=True):
+def create_symint(shape_env: ShapeEnv, i: int, duck: bool = True) -> Any:
     return create_symtype(torch.SymInt, int, shape_env, i, duck=duck)
 
 
-def load_aoti_eager_cache(ns: str, op_func_name_with_overload: str, device_type: str):
+def load_aoti_eager_cache(
+    ns: str, op_func_name_with_overload: str, device_type: str
+) -> List[Optional[Dict[str, Any]]]:
     device_kernel_cache = aoti_eager_cache_dir(ns, device_type)
     op_conf = device_kernel_cache / f"{op_func_name_with_overload}.json"
     if not op_conf.exists():
@@ -137,11 +141,11 @@ def load_aoti_eager_cache(ns: str, op_func_name_with_overload: str, device_type:
         return []
 
 
-def supported_builtin_dtype_torch_dtype():
+def supported_builtin_dtype_torch_dtype() -> Dict[type, torch.dtype]:
     return {int: torch.int32, float: torch.float, bool: torch.bool}
 
 
-def supported_scalar_types():
+def supported_scalar_types() -> Tuple[type, ...]:
     type_to_torch_dtype = supported_builtin_dtype_torch_dtype()
     return tuple(type_to_torch_dtype.keys())
 
@@ -206,9 +210,7 @@ def extract_tensor_list_metadata(
     return metadata
 
 
-def extract_scalar_metadata(
-    device_type: str, input: Union[int, float, bool]
-) -> Dict[str, Any]:
+def extract_scalar_metadata(device_type: str, input: Any) -> Dict[str, Any]:
     assert isinstance(input, supported_scalar_types())
     metadata: Dict[str, Any] = {}
     metadata["is_dynamic"] = False
@@ -221,21 +223,21 @@ def extract_scalar_metadata(
     return metadata
 
 
-def extract_string_metadata(input: str):
+def extract_string_metadata(input: str) -> Dict[str, Any]:
     assert isinstance(input, str)
     metadata: Dict[str, Any] = {}
     metadata["string_value"] = input
     return metadata
 
 
-def extract_dtype_metadata(input: torch.dtype):
+def extract_dtype_metadata(input: torch.dtype) -> Dict[str, Any]:
     assert isinstance(input, torch.dtype)
     metadata: Dict[str, Any] = {}
     metadata["dtype_value"] = f"{input}"
     return metadata
 
 
-def extract_device_metadata(input: torch.device):
+def extract_device_metadata(input: torch.device) -> Dict[str, Any]:
     assert isinstance(input, torch.device)
     metadata: Dict[str, Any] = {}
     metadata["device_type_value"] = f"{input.type}"
@@ -243,15 +245,15 @@ def extract_device_metadata(input: torch.device):
     return metadata
 
 
-def extract_layout_metadata(input: torch.layout):
+def extract_layout_metadata(input: torch.layout) -> Dict[str, Any]:
     assert isinstance(input, torch.layout)
     metadata: Dict[str, Any] = {}
     metadata["layout_value"] = f"{input}"
     return metadata
 
 
-def mark_tensor_dim_as_dynamic(inputs):
-    def _mark_tensor_dim_as_dynamic(input_item):
+def mark_tensor_dim_as_dynamic(inputs: Any) -> None:
+    def _mark_tensor_dim_as_dynamic(input_item: Any) -> None:
         torch._dynamo.mark_dynamic(input_item, list(range(input_item.ndim)))
 
     for input_item in inputs:
@@ -275,7 +277,7 @@ def aoti_compile_with_persistent_cache(
     dynamic_shapes: Optional[Dict[str, Any]] = None,
     options: Optional[Dict[str, Any]] = None,
     disable_constraint_solver: bool = False,
-):
+) -> str:
     """
     Compile the given function with persistent cache for AOTI eager mode.
     """
