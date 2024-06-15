@@ -592,16 +592,6 @@ def mps_ops_modifier(ops):
     }
 
     MACOS_BEFORE_13_3_XFAILLIST = {
-        # Failure due to precision issues (still present on 13.3+) as well as non-standard behavior of
-        # cpu ops for the negative integers.
-        # Example for torch.polygamma(1, tensor([-0.9, -1.0], dtype=torch.float32)):
-        # - CPU output: tensor([102.668, 1.129e+15])
-        # - MPS output: tensor([102.6681, inf])
-        # In the latter case, inf is probably correct (this is what scipy does).
-        'polygamma': [torch.float32, torch.uint8],
-        'special.polygamma': [torch.float32, torch.int16, torch.int32, torch.int8],
-        'special.polygammaspecial_polygamma_n_0': [torch.float32, torch.int16, torch.int8],
-
         # Failures due to precision issues (due to fast-math). These has been fixed in MacOS 13.3+
         'tan': [torch.float32],
         'cdist': [torch.float32],
@@ -650,15 +640,6 @@ def mps_ops_modifier(ops):
         # Same issue as `argsort` with duplicate indices. This test checks both the sorted values and the indices.
         # The values of the sorted tensor match the CPU, but in case of the returned indices this results in undefined behaviour.
         'sort': [torch.int8, torch.uint8, torch.bool, torch.float16],
-
-        # Failure due to precision issues as well as non-standard behavior of cpu ops for the
-        # negative integers. Example for torch.polygamma(1, tensor([-0.9, -1.0], dtype=torch.float32)):
-        # - CPU output: tensor([102.668, 1.129e+15])
-        # - MPS output: tensor([102.6681, inf])
-        # In the latter case, inf is probably correct (this is what scipy does).
-        'polygamma': [torch.float32, torch.uint8],
-        'special.polygamma': [torch.float32, torch.int16, torch.int32, torch.int8],
-        'special.polygammaspecial_polygamma_n_0': [torch.float32, torch.int16, torch.int8],
     }
 
     MACOS_BEFORE_14_4_XFAILLIST = {
