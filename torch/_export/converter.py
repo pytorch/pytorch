@@ -216,6 +216,7 @@ class TS2FXGraphConverter:
         blocks_to_lifted_attrs: Dict[torch._C.Block, Set[str]],
     ):
         self.ts_graph = ts_graph
+        # breakpoint()
         self.name_to_param_map = name_to_param_map
         self.name_to_buffer_map = name_to_buffer_map
 
@@ -244,6 +245,10 @@ class TS2FXGraphConverter:
                 handler_func_name,
                 lambda node: self._convert_standard_operators(node),
             )
+
+    # def _name_pass(self):
+
+
 
     def is_top_level_graph(self):
         return isinstance(self.ts_graph, torch._C.Graph)
@@ -282,13 +287,14 @@ class TS2FXGraphConverter:
             raise ValueError(f"Input {value_name} not found")
 
     def convert(self) -> torch.fx.GraphModule:
+        # breakpoint()
         self.convert_graph_inputs()
 
         for node in self.ts_graph.nodes():
             self.convert_node(node)
 
         self.convert_graph_outputs()
-
+        # breakpoint()
         # Pass parameter and buffer to the root for lookup.
         gm = torch.fx.GraphModule(
             {**self.subgraphs, **self.name_to_param_map, **self.name_to_buffer_map},
@@ -338,6 +344,8 @@ class TS2FXGraphConverter:
                     )
                 )
                 fx_node = self.fx_graph.placeholder(normalized_name)
+                # breakpoint()
+
 
             self.name_to_node[name] = fx_node
 
@@ -354,20 +362,12 @@ class TS2FXGraphConverter:
             elif constant_kind == "s":
                 value = node.s("value")
             elif constant_kind == "t":
-                # lift tensor constant as a placeholder
-                placeholder_name = f"constant_{name}"
-                fx_node = self.fx_graph.placeholder(placeholder_name)
-                self.name_to_node[name] = fx_node
-                self.tensor_constants[placeholder_name] = node.t("value")
-
-                self.input_specs.append(
-                    InputSpec(
-                        InputKind.CONSTANT_TENSOR,
-                        arg=TensorArgument(name=placeholder_name),
-                        target=placeholder_name,
-                    )
+                name = "_".join(name.split("."))
+                alias_name = (
+                    f"lifted_tensor_{name}"  # Follow naming convention from EP tracing.
                 )
-
+                fx_node = self.fx_graph.get_attr(alias_name)
+                self.tensor_constants[alias_name] = node.t("value")
                 value = fx_node
             elif constant_kind == "ival":
                 value = node.ival("value")
@@ -393,7 +393,7 @@ class TS2FXGraphConverter:
                 return self.attribute_map[name]
             else:
                 raise ValueError(f"Attribute {name} not found")
-
+        # breakpoint()
         output_name = node.output().debugName()
 
         attr_name = node.s("name")

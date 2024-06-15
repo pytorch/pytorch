@@ -744,6 +744,47 @@ class TestConverter(TestCase):
 
         self._check_equal_ts_ep_converter(Module(), (torch.randn(3, 2),))
 
+    def test_prim_GetAttr(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.data = torch.randn(3, 2)
+            
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return x + self.data
+
+        class Goo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.data = torch.randn(3, 2)
+                self.foo = Foo()
+            
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                # return x + self.data + self.foo.data + self.foo(x)
+                return x + self.data
+
+
+        inp = (torch.randn(3, 2),)
+        goo = Goo()
+        # ep = torch.export.export(Goo(), inp, strict=False)
+        # print(f"ep.graph:{ep.graph}")
+
+        self._check_equal_ts_ep_converter(goo, inp)
+
+    def test_prim_SetAttr(self):
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = torch.randn(3, 2)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                self.x = self.x + x
+                return x + x
+
+        inp = (torch.randn(3, 2),)
+        self._check_equal_ts_ep_converter(Module(), inp)
+
+
 
 if __name__ == "__main__":
     run_tests()

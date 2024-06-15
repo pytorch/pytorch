@@ -721,6 +721,8 @@ class {module_name}(torch.nn.Module):
 
         cls = type(self)
         co_fields = self._graph._co_fields if hasattr(self._graph, "_co_fields") else {}
+
+        # breakpoint()
         cls.forward = _forward_from_src(self._code, python_code.globals, co_fields)
 
         # Determine whether this class explicitly defines a __call__ implementation

@@ -249,6 +249,7 @@ def _format_target(base: str, target: str) -> str:
             r = f'getattr({r}, "{e}")'
         else:
             r = f'{r}.{e}'
+            print(f"_format_target. r:{r}")
     return r
 
 class _InsertPoint:
@@ -375,6 +376,7 @@ class CodeGen:
         self, nodes, root_module: str, namespace: _Namespace, *,
         verbose: bool = False, include_stride: bool = False, include_device: bool = False
     ) -> PythonCode:
+        # breakpoint()
         free_vars: List[str] = []
         body: List[str] = []
         globals_: Dict[str, Any] = {}
@@ -455,7 +457,9 @@ class CodeGen:
             elif isinstance(arg, enum.Enum):
                 cls = arg.__class__
                 clsname = add_global(cls.__name__, cls)
-                return f"{clsname}.{arg.name}"
+                out = f"{clsname}.{arg.name}"
+                print(f"_get_repr. out: {out}")
+                return out
             return repr(arg)
 
         def _format_args(args: Tuple[Argument, ...], kwargs: Dict[str, Argument]) -> str:
@@ -548,6 +552,7 @@ class CodeGen:
                     maybe_type_annotation = f': "{dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}"'
 
             if node.op == 'placeholder':
+                # breakpoint()
                 assert isinstance(node.target, str)
                 maybe_default_arg = '' if not node.args else f' = {_get_repr(node.args[0])}'
                 free_vars.append(f'{node.target}{maybe_type_annotation}{maybe_default_arg}')
