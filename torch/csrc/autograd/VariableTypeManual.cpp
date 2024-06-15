@@ -2,7 +2,6 @@
 #include <ATen/TracerMode.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <c10/core/ScalarType.h>
-#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/FunctionsManual.h>
 #include <torch/csrc/autograd/VariableTypeUtils.h>
@@ -11,6 +10,7 @@
 #include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/autograd/generated/ViewFuncs.h>
 #include <torch/library.h>
+#include <optional>
 
 #include <utility>
 
@@ -240,7 +240,7 @@ const Tensor& resize_(
     c10::DispatchKeySet ks,
     const Tensor& self,
     SymIntArrayRef size,
-    c10::optional<MemoryFormat> optional_memory_format) {
+    std::optional<MemoryFormat> optional_memory_format) {
   auto& self_ = unpack(self, "self", 0);
   if (self.requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
@@ -262,7 +262,7 @@ const Tensor& resize_as_(
     c10::DispatchKeySet ks,
     const Tensor& self,
     const Tensor& the_template,
-    c10::optional<MemoryFormat> optional_memory_format) {
+    std::optional<MemoryFormat> optional_memory_format) {
   auto& self_ = unpack(self, "self", 0);
   auto& the_template_ = unpack(the_template, "the_template", 1);
   if (self.requires_grad()) {
@@ -400,7 +400,7 @@ static const Tensor& resize_(
     c10::DispatchKeySet ks,
     const Tensor& self,
     SymIntArrayRef size,
-    c10::optional<MemoryFormat> optional_memory_format) {
+    std::optional<MemoryFormat> optional_memory_format) {
   // Hold sizes to verify if we actually resize `self`.
   // Explicitly copy data, since resizing can move original data
   // and make references invalid.
@@ -424,7 +424,7 @@ static const Tensor& resize_as_(
     c10::DispatchKeySet ks,
     const Tensor& self,
     const Tensor& the_template,
-    c10::optional<MemoryFormat> optional_memory_format) {
+    std::optional<MemoryFormat> optional_memory_format) {
   // Hold sizes to verify if we actually resize `self`.
   // Explicitly copy data, since resizing can move original data
   // and make references invalid.

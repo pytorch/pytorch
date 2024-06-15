@@ -2,8 +2,8 @@
 
 #include <cstddef>
 
-#include <c10/util/Optional.h>
 #include <torch/csrc/jit/mobile/code.h>
+#include <optional>
 
 namespace torch {
 namespace jit {
@@ -32,11 +32,11 @@ class Frame {
     return code_.instructions_.at(pc_);
   }
 
-  c10::optional<int64_t> getDebugHandle() const {
+  std::optional<int64_t> getDebugHandle() const {
     return getDebugHandle(pc_);
   }
 
-  c10::optional<int64_t> getDebugHandle(size_t pc) const {
+  std::optional<int64_t> getDebugHandle(size_t pc) const {
     if (pc >= code_.debug_handles_.size()) {
       return {};
     }

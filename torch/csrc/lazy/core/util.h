@@ -9,8 +9,8 @@
 #include <functional>
 #include <vector>
 
-#include <c10/util/Optional.h>
 #include <c10/util/OptionalArrayRef.h>
+#include <optional>
 
 namespace torch {
 namespace lazy {
@@ -89,7 +89,7 @@ class MaybeRef {
   }
 
  private:
-  c10::optional<T> storage_;
+  std::optional<T> storage_;
   const T& ref_;
 };
 
@@ -109,12 +109,12 @@ std::vector<T> ToVector(const S& input) {
 }
 
 template <typename T>
-c10::optional<std::vector<T>> ToOptionalVector(
+std::optional<std::vector<T>> ToOptionalVector(
     c10::OptionalArrayRef<T> arrayRef) {
   if (arrayRef) {
     return arrayRef->vec();
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 template <typename T>

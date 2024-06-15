@@ -85,10 +85,10 @@ librosa>=0.6.2 ; python_version < "3.11"
 #Pinned versions:
 #test that import:
 
-mypy==1.8.0
+mypy==1.10.0
 # Pin MyPy version because new errors are likely to appear with each release
 #Description: linter
-#Pinned versions: 1.8.0
+#Pinned versions: 1.10.0
 #test that import: test_typing.py, test_type_hints.py
 
 networkx==2.8.8
@@ -134,9 +134,9 @@ opt-einsum==3.3
 #Pinned versions: 3.3
 #test that import: test_linalg.py
 
-optree==0.9.1
+optree==0.11.0
 #Description: A library for tree manipulation
-#Pinned versions: 0.9.1
+#Pinned versions: 0.11.0
 #test that import: test_vmap.py, test_aotdispatch.py, test_dynamic_shapes.py,
 #test_pytree.py, test_ops.py, test_control_flow.py, test_modules.py,
 #common_utils.py, test_eager_transforms.py, test_python_dispatch.py,
@@ -147,9 +147,9 @@ optree==0.9.1
 #test_pointwise_ops.py, test_dtensor_ops.py, test_torchinductor.py, test_fx.py,
 #test_fake_tensor.py, test_mps.py
 
-pillow==10.2.0
+pillow==10.3.0
 #Description:  Python Imaging Library fork
-#Pinned versions: 10.2.0
+#Pinned versions: 10.3.0
 #test that import:
 
 protobuf==3.20.2
@@ -228,12 +228,11 @@ scikit-image==0.20.0 ; python_version >= "3.10"
 #Pinned versions: 0.20.3
 #test that import:
 
-scipy==1.6.3 ; python_version < "3.10"
-scipy==1.8.1 ; python_version == "3.10"
-scipy==1.10.1 ; python_version == "3.11"
+scipy==1.10.1 ; python_version <= "3.11"
+scipy==1.12.0 ; python_version == "3.12"
 # Pin SciPy because of failing distribution tests (see #60347)
 #Description: scientific python
-#Pinned versions: 1.6.3
+#Pinned versions: 1.10.1
 #test that import: test_unary_ufuncs.py, test_torch.py,test_tensor_creation_ops.py
 #test_spectral_ops.py, test_sparse_csr.py, test_reductions.py,test_nn.py
 #test_linalg.py, test_binary_ufuncs.py
@@ -264,10 +263,10 @@ unittest-xml-reporting<=3.2.0,>=2.0.0
 #Pinned versions:
 #test that import:
 
-#wheel not found on aarch64, and source build requires rust
-lintrunner==0.10.7 ; platform_machine == "x86_64"
+#lintrunner is supported on aarch64-linux only from 0.12.4 version
+lintrunner==0.12.5
 #Description: all about linters!
-#Pinned versions: 0.10.7
+#Pinned versions: 0.12.5
 #test that import:
 
 rockset==1.0.3
@@ -280,9 +279,9 @@ ghstack==0.8.0
 #Pinned versions: 0.8.0
 #test that import:
 
-jinja2==3.1.3
+jinja2==3.1.4
 #Description: jinja2 template engine
-#Pinned versions: 3.1.3
+#Pinned versions: 3.1.4
 #test that import:
 
 pytest-cpp==2.3.0
@@ -311,3 +310,5 @@ lxml==5.0.0.
 #Description: This is a requirement of unittest-xml-reporting
 
 # Python-3.9 binaries
+
+PyGithub==2.3.0

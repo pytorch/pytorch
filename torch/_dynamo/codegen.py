@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import collections
 import dataclasses
 import re
@@ -10,6 +11,7 @@ from . import utils
 
 from .bytecode_transformation import (
     create_call_function,
+    create_call_method,
     create_dup_top,
     create_instruction,
     create_load_attr,
@@ -135,6 +137,23 @@ class PyCodegen:
                 )
             )
             output.extend(create_call_function(2, True))
+        elif (
+            isinstance(value, SymNodeVariable)
+            and value.python_type() == float
+            and not self.tx.export
+        ):
+            # This is a little unusual; force the output convention to be a
+            # Tensor here.  Don't do this for export because this is
+            # apparently load bearing for export tests (but I am a bit
+            # doubtful it actually works in the real world)
+            # NB: It works to add_graph_output on a computed expression
+            # as_tensor here, because we memoize as_tensor calls on
+            # SymNodeVariable!
+            graph_outputs_key = self.add_graph_output(value.as_tensor(self.tx))
+            self.load_graph_output(graph_outputs[graph_outputs_key].index)
+            output.extend(
+                [self.create_load_attr("item")] + create_call_function(0, True)
+            )
         elif isinstance(
             value,
             (
@@ -265,6 +284,12 @@ class PyCodegen:
         self.tx.output.update_co_names(name)
         return create_load_method(name)
 
+    def load_method(self, name):
+        self.append_output(self.create_load_method(name))
+
+    def call_method(self, nargs):
+        self.extend_output(create_call_method(nargs))
+
     def create_load_attr(self, name) -> Instruction:
         if name not in self.code_options["co_names"]:
             self.code_options["co_names"] += (name,)
@@ -322,6 +347,9 @@ class PyCodegen:
             create_instruction("POP_TOP"),
         ]
 
+    def pop_top(self):
+        self.append_output(create_instruction("POP_TOP"))
+
     def call_function(self, nargs: int, push_null: bool):
         self.extend_output(create_call_function(nargs, push_null=push_null))
 
@@ -370,7 +398,7 @@ class PyCodegen:
 
         graphargs = self.tx.output.graphargs
         for arg in graphargs:
-            if arg.is_unspecialized:
+            if arg.pass_arg_as_tensor:
                 self.extend_output(
                     [
                         self.create_load_python_module(torch, True),

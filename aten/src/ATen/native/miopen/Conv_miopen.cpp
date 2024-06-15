@@ -31,7 +31,7 @@ namespace at { namespace native {
 // See Note [ATen preprocessor philosophy]
 
 at::Tensor miopen_convolution(
-    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt /* optional */,
+    const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt /* optional */,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
     int64_t groups, bool benchmark, bool deterministic) {
   AT_ERROR("miopen_convolution: ATen not compiled with MIOpen support");
@@ -64,7 +64,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_convolution_backward(
 }
 
 at::Tensor miopen_convolution_transpose(
-    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt /* optional */,
+    const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt /* optional */,
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation,
     int64_t groups, bool benchmark, bool deterministic) {
   AT_ERROR("miopen_convolution_transpose: ATen not compiled with MIOpen support");
@@ -92,7 +92,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_convolution_transpose_backwa
 }
 
 at::Tensor miopen_depthwise_convolution(
-    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt /* optional */,
+    const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt /* optional */,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
     int64_t groups, bool benchmark, bool deterministic) {
   AT_ERROR("miopen_depthwise_convolution: ATen not compiled with MIOpen support");
@@ -122,13 +122,13 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_depthwise_convolution_backwa
 
 at::Tensor miopen_convolution_add_relu(
     const at::Tensor& input, const at::Tensor& weight, const at::Tensor& z,
-    const c10::optional<Scalar>& alpha, const c10::optional<Tensor>& bias, IntArrayRef stride,
+    const std::optional<Scalar>& alpha, const std::optional<Tensor>& bias, IntArrayRef stride,
     IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
   AT_ERROR("miopen_convolution_add_relu: ATen not compiled with MIOpen support");
 }
 
 at::Tensor miopen_convolution_relu(
-    const at::Tensor& input, const at::Tensor& weight, const c10::optional<Tensor>& bias,
+    const at::Tensor& input, const at::Tensor& weight, const std::optional<Tensor>& bias,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
   AT_ERROR("miopen_convolution_relu: ATen not compiled with MIOpen support");
 }
@@ -371,8 +371,8 @@ struct algorithm_search<miopenConvFwdAlgorithm_t> {
     Workspace ws(max_ws_size);
     MIOPEN_CHECK(miopenFindConvolutionForwardAlgorithm(
         args.handle,
-        args.idesc.desc(), args.input.data_ptr(),
-        args.wdesc.desc(), args.weight.data_ptr(),
+        args.idesc.desc(), args.input.const_data_ptr(),
+        args.wdesc.desc(), args.weight.const_data_ptr(),
         args.cdesc.desc(),
         args.odesc.desc(), args.output.data_ptr(),
         1,        // just return the fastest
@@ -444,8 +444,8 @@ struct algorithm_search<miopenConvBwdDataAlgorithm_t> {
     Workspace ws(max_ws_size);
     MIOPEN_CHECK(miopenFindConvolutionBackwardDataAlgorithm(
         args.handle,
-        args.odesc.desc(), args.output.data_ptr(),
-        args.wdesc.desc(), args.weight.data_ptr(),
+        args.odesc.desc(), args.output.const_data_ptr(),
+        args.wdesc.desc(), args.weight.const_data_ptr(),
         args.cdesc.desc(),
         args.idesc.desc(), args.input.data_ptr(),
         1,      // just return the fastest
@@ -517,8 +517,8 @@ struct algorithm_search<miopenConvBwdWeightsAlgorithm_t> {
     Workspace ws(max_ws_size);
     MIOPEN_CHECK(miopenFindConvolutionBackwardWeightsAlgorithm(
         args.handle,
-        args.odesc.desc(), args.output.data_ptr(),
-        args.idesc.desc(), args.input.data_ptr(),
+        args.odesc.desc(), args.output.const_data_ptr(),
+        args.idesc.desc(), args.input.const_data_ptr(),
         args.cdesc.desc(),
         args.wdesc.desc(), args.weight.data_ptr(),
         1,      // just return the fastest
@@ -599,7 +599,10 @@ void findAlgorithm(const ConvolutionArgs& args, bool benchmark, algo_t* algo) {
   cache.insert(args.params, *algo);
   wsscache.insert(args.params, perfResults.memory);
 
-  c10::hip::HIPCachingAllocator::emptyCache();
+  if (at::native::_cudnn_get_conv_benchmark_empty_cache()) {
+      c10::hip::HIPCachingAllocator::emptyCache();
+  }
+
 }
 
 template<typename algo_t>
@@ -682,7 +685,7 @@ void miopen_convolution_add_bias_(CheckedFrom c, const TensorArg& output, const 
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
 
-  MIOPEN_CHECK(miopenConvolutionForwardBias(handle, &one, bdesc.desc(), bias->data_ptr(),
+  MIOPEN_CHECK(miopenConvolutionForwardBias(handle, &one, bdesc.desc(), bias->const_data_ptr(),
                                      &zero, odesc.desc(), output->data_ptr()));
   */
 }
@@ -730,8 +733,8 @@ void raw_miopen_convolution_forward_out(
 
       MIOPEN_CHECK(miopenConvolutionForward(
         args.handle,
-        &one, args.idesc.desc(), input.data_ptr(),
-        args.wdesc.desc(), weight.data_ptr(),
+        &one, args.idesc.desc(), input.const_data_ptr(),
+        args.wdesc.desc(), weight.const_data_ptr(),
         args.cdesc.desc(), fwdAlg, &zero,
         args.odesc.desc(), output.data_ptr(), workspace.data, workspace.size));
   }
@@ -741,8 +744,8 @@ void raw_miopen_convolution_forward_out(
 
       MIOPEN_CHECK(miopenConvolutionForwardImmediate(
         args.handle,
-        args.wdesc.desc(), weight.data_ptr(),
-        args.idesc.desc(), input.data_ptr(),
+        args.wdesc.desc(), weight.const_data_ptr(),
+        args.idesc.desc(), input.const_data_ptr(),
         args.cdesc.desc(),
         args.odesc.desc(), output.data_ptr(), workspace.data, workspace.size, solution_id));
   }
@@ -792,7 +795,7 @@ Tensor miopen_convolution_forward(
 }
 
 Tensor miopen_convolution(
-    const Tensor& input_t, const Tensor& weight_t, const c10::optional<Tensor>& bias_t_opt,
+    const Tensor& input_t, const Tensor& weight_t, const std::optional<Tensor>& bias_t_opt,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
     int64_t groups, bool benchmark, bool deterministic)
 {
@@ -838,8 +841,8 @@ void raw_miopen_depthwise_convolution_forward_out(
 
       MIOPEN_CHECK(miopenConvolutionForward(
         args.handle,
-        &one, args.idesc.desc(), input.data_ptr(),
-        args.wdesc.desc(), weight.data_ptr(),
+        &one, args.idesc.desc(), input.const_data_ptr(),
+        args.wdesc.desc(), weight.const_data_ptr(),
         args.cdesc.desc(), fwdAlg, &zero,
         args.odesc.desc(), output.data_ptr(), workspace.data, workspace.size));
   }
@@ -849,8 +852,8 @@ void raw_miopen_depthwise_convolution_forward_out(
 
       MIOPEN_CHECK(miopenConvolutionForwardImmediate(
         args.handle,
-        args.wdesc.desc(), weight.data_ptr(),
-        args.idesc.desc(), input.data_ptr(),
+        args.wdesc.desc(), weight.const_data_ptr(),
+        args.idesc.desc(), input.const_data_ptr(),
         args.cdesc.desc(),
         args.odesc.desc(), output.data_ptr(), workspace.data, workspace.size, solution_id));
   }
@@ -893,7 +896,7 @@ Tensor miopen_depthwise_convolution_forward(
 }
 
 Tensor miopen_depthwise_convolution(
-    const Tensor& input_t, const Tensor& weight_t, const c10::optional<Tensor>& bias_t_opt,
+    const Tensor& input_t, const Tensor& weight_t, const std::optional<Tensor>& bias_t_opt,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
     int64_t groups, bool benchmark, bool deterministic)
 {
@@ -993,8 +996,8 @@ void raw_miopen_convolution_backward_weight_out(
 
       MIOPEN_CHECK(miopenConvolutionBackwardWeights(
           args.handle,
-          &one, args.odesc.desc(), grad_output.data_ptr(),
-          args.idesc.desc(), input.data_ptr(),
+          &one, args.odesc.desc(), grad_output.const_data_ptr(),
+          args.idesc.desc(), input.const_data_ptr(),
           args.cdesc.desc(), bwdFilterAlg, &zero,
           args.wdesc.desc(), grad_weight.data_ptr(), workspace.data, workspace.size));
   }
@@ -1004,8 +1007,8 @@ void raw_miopen_convolution_backward_weight_out(
 
       MIOPEN_CHECK(miopenConvolutionBackwardWeightsImmediate(
           args.handle,
-          args.odesc.desc(), grad_output.data_ptr(),
-          args.idesc.desc(), input.data_ptr(),
+          args.odesc.desc(), grad_output.const_data_ptr(),
+          args.idesc.desc(), input.const_data_ptr(),
           args.cdesc.desc(),
           args.wdesc.desc(), grad_weight.data_ptr(), workspace.data, workspace.size, solution_id));
   }
@@ -1037,8 +1040,8 @@ void raw_miopen_depthwise_convolution_backward_weight_out(
 
       MIOPEN_CHECK(miopenConvolutionBackwardWeights(
           args.handle,
-          &one, args.odesc.desc(), grad_output.data_ptr(),
-          args.idesc.desc(), input.data_ptr(),
+          &one, args.odesc.desc(), grad_output.const_data_ptr(),
+          args.idesc.desc(), input.const_data_ptr(),
           args.cdesc.desc(), bwdFilterAlg, &zero,
           args.wdesc.desc(), grad_weight.data_ptr(), workspace.data, workspace.size));
   }
@@ -1048,8 +1051,8 @@ void raw_miopen_depthwise_convolution_backward_weight_out(
 
       MIOPEN_CHECK(miopenConvolutionBackwardWeightsImmediate(
           args.handle,
-          args.odesc.desc(), grad_output.data_ptr(),
-          args.idesc.desc(), input.data_ptr(),
+          args.odesc.desc(), grad_output.const_data_ptr(),
+          args.idesc.desc(), input.const_data_ptr(),
           args.cdesc.desc(),
           args.wdesc.desc(), grad_weight.data_ptr(), workspace.data, workspace.size, solution_id));
   }
@@ -1242,8 +1245,8 @@ void raw_miopen_convolution_backward_input_out(
 
       MIOPEN_CHECK(miopenConvolutionBackwardData(
           args.handle,
-          &one, args.odesc.desc(), grad_output.data_ptr(),
-          args.wdesc.desc(), weight.data_ptr(),
+          &one, args.odesc.desc(), grad_output.const_data_ptr(),
+          args.wdesc.desc(), weight.const_data_ptr(),
           args.cdesc.desc(), bwdDataAlg, &zero,
           args.idesc.desc(), grad_input.mutable_data_ptr(), workspace.data, workspace.size));
   }
@@ -1253,8 +1256,8 @@ void raw_miopen_convolution_backward_input_out(
 
       MIOPEN_CHECK(miopenConvolutionBackwardDataImmediate(
           args.handle,
-          args.odesc.desc(), grad_output.data_ptr(),
-          args.wdesc.desc(), weight.data_ptr(),
+          args.odesc.desc(), grad_output.const_data_ptr(),
+          args.wdesc.desc(), weight.const_data_ptr(),
           args.cdesc.desc(),
           args.idesc.desc(), grad_input.mutable_data_ptr(), workspace.data, workspace.size, solution_id));
   }
@@ -1351,8 +1354,8 @@ void raw_miopen_depthwise_convolution_backward_input_out(
 
       MIOPEN_CHECK(miopenConvolutionBackwardData(
           args.handle,
-          &one, args.odesc.desc(), grad_output.data_ptr(),
-          args.wdesc.desc(), weight.data_ptr(),
+          &one, args.odesc.desc(), grad_output.const_data_ptr(),
+          args.wdesc.desc(), weight.const_data_ptr(),
           args.cdesc.desc(), bwdDataAlg, &zero,
           args.idesc.desc(), grad_input.mutable_data_ptr(), workspace.data, workspace.size));
   }
@@ -1362,8 +1365,8 @@ void raw_miopen_depthwise_convolution_backward_input_out(
 
       MIOPEN_CHECK(miopenConvolutionBackwardDataImmediate(
           args.handle,
-          args.odesc.desc(), grad_output.data_ptr(),
-          args.wdesc.desc(), weight.data_ptr(),
+          args.odesc.desc(), grad_output.const_data_ptr(),
+          args.wdesc.desc(), weight.const_data_ptr(),
           args.cdesc.desc(),
           args.idesc.desc(), grad_input.mutable_data_ptr(), workspace.data, workspace.size, solution_id));
   }
@@ -1460,7 +1463,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_depthwise_convolution_backwa
 }
 
 Tensor miopen_convolution_transpose(
-    const Tensor& input_t, const Tensor& weight_t, const c10::optional<Tensor>& bias_t_opt,
+    const Tensor& input_t, const Tensor& weight_t, const std::optional<Tensor>& bias_t_opt,
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation,
     int64_t groups, bool benchmark, bool deterministic)
 {
@@ -1528,11 +1531,11 @@ void raw_miopen_convolution_relu_out(
   float activ_gamma = static_cast<float>(0);
   miopenOperatorArgs_t fusionArgs;
   MIOPEN_CHECK(miopenCreateOperatorArgs(&fusionArgs));
-  MIOPEN_CHECK(miopenSetOpArgsConvForward(fusionArgs, convoOp, &alpha, &beta, weight.data_ptr()));
-  MIOPEN_CHECK(miopenSetOpArgsBiasForward(fusionArgs, biasOp, &alpha, &beta, bias.data_ptr()));
+  MIOPEN_CHECK(miopenSetOpArgsConvForward(fusionArgs, convoOp, &alpha, &beta, weight.const_data_ptr()));
+  MIOPEN_CHECK(miopenSetOpArgsBiasForward(fusionArgs, biasOp, &alpha, &beta, bias.const_data_ptr()));
   MIOPEN_CHECK(miopenSetOpArgsActivForward(fusionArgs, activOp, &alpha, &beta, activ_alpha, activ_beta, activ_gamma));
 
-  miopenExecuteFusionPlan(args.handle, fusePlanDesc, args.idesc.desc(), input.data_ptr(), args.odesc.desc(), output.data_ptr(), fusionArgs);
+  miopenExecuteFusionPlan(args.handle, fusePlanDesc, args.idesc.desc(), input.const_data_ptr(), args.odesc.desc(), output.data_ptr(), fusionArgs);
 
   // Cleanup
   miopenDestroyFusionPlan(fusePlanDesc);
@@ -1549,8 +1552,8 @@ Tensor miopen_convolution_add_relu(
     const Tensor& input,
     const Tensor& weight,
     const Tensor& z,
-    const c10::optional<Scalar>& alpha,
-    const c10::optional<Tensor>& bias,
+    const std::optional<Scalar>& alpha,
+    const std::optional<Tensor>& bias,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef dilation,
@@ -1604,7 +1607,7 @@ Tensor miopen_convolution_add_relu(
 Tensor miopen_convolution_relu(
     const Tensor& input,
     const Tensor& weight,
-    const c10::optional<Tensor>& bias,
+    const std::optional<Tensor>& bias,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef dilation,

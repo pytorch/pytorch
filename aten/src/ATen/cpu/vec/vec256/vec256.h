@@ -9,19 +9,22 @@
 #if !(defined(__VSX__)  || defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_ZVECTOR))
 #include <ATen/cpu/vec/vec256/vec256_float.h>
 #include <ATen/cpu/vec/vec256/vec256_float_neon.h>
+#include <ATen/cpu/vec/vec256/vec256_half_neon.h>
 #include <ATen/cpu/vec/vec256/vec256_bfloat16.h>
 #include <ATen/cpu/vec/vec256/vec256_double.h>
 #include <ATen/cpu/vec/vec256/vec256_int.h>
 #include <ATen/cpu/vec/vec256/vec256_qint.h>
 #include <ATen/cpu/vec/vec256/vec256_complex_float.h>
 #include <ATen/cpu/vec/vec256/vec256_complex_double.h>
-#include <ATen/cpu/vec/vec256/vec256_mask.h>
 #elif defined(__VSX__)  || defined(CPU_CAPABILITY_VSX)
 #include <ATen/cpu/vec/vec256/vsx/vec256_common_vsx.h>
 #else
 #include <ATen/cpu/vec/vec256/zarch/vec256_zarch.h>
 #include <ATen/cpu/vec/vec256/vec256_bfloat16.h>
 #endif
+
+#include <ATen/cpu/vec/vec256/vec256_convert.h>
+#include <ATen/cpu/vec/vec256/vec256_mask.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -70,7 +73,7 @@ std::ostream& operator<<(std::ostream& stream, const Vectorized<T>& vec) {
 }
 
 
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2)
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CAST (AVX2) ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -95,7 +98,8 @@ inline Vectorized<double> cast<double, int64_t>(const Vectorized<int64_t>& src) 
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GATHER ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
+#ifndef _MSC_VER
+// MSVC is not working well on complex function overload.
 template<int64_t scale = 1>
 std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<double>>
 inline gather(const double* base_addr, const Vectorized<int64_t>& vindex) {
@@ -107,9 +111,10 @@ std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorize
 inline gather(const float* base_addr, const Vectorized<int32_t>& vindex) {
   return _mm256_i32gather_ps(base_addr, vindex, scale);
 }
-
+#endif
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MASK GATHER ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
+#ifndef _MSC_VER
+// MSVC is not working well on complex function overload.
 template<int64_t scale = 1>
 std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<double>>
 inline mask_gather(const Vectorized<double>& src, const double* base_addr,
@@ -123,7 +128,7 @@ inline mask_gather(const Vectorized<float>& src, const float* base_addr,
                    const Vectorized<int32_t>& vindex, Vectorized<float>& mask) {
   return _mm256_mask_i32gather_ps(src, base_addr, vindex, mask, scale);
 }
-
+#endif
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CONVERT ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 // Only works for inputs in the range: [-2^51, 2^51]
@@ -303,6 +308,6 @@ inline Vectorized<uint8_t> flip(const Vectorized<uint8_t> & v) {
   return flip8(v);
 }
 
-#endif // (defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#endif // (defined(CPU_CAPABILITY_AVX2)
 
 }} // namepsace at::vec::CPU_CAPABILITY
