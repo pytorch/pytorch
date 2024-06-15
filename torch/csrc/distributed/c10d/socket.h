@@ -82,6 +82,8 @@ class Socket {
 
   bool waitForInput(std::chrono::milliseconds timeout);
 
+  std::string repr() const;
+
  private:
   explicit Socket(std::unique_ptr<SocketImpl>&& impl) noexcept;
 

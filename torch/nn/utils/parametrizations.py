@@ -1,22 +1,22 @@
 # mypy: allow-untyped-defs
-from enum import Enum, auto
-
-import torch
-from torch import Tensor
-from ..utils import parametrize
-from ..modules import Module
-from .. import functional as F
-
+from enum import auto, Enum
 from typing import Optional
 
-__all__ = ['orthogonal', 'spectral_norm', 'weight_norm']
+import torch
+import torch.nn.functional as F
+from torch import Tensor
+from torch.nn.modules import Module
+from torch.nn.utils import parametrize
+
+
+__all__ = ["orthogonal", "spectral_norm", "weight_norm"]
 
 
 def _is_orthogonal(Q, eps=None):
     n, k = Q.size(-2), Q.size(-1)
     Id = torch.eye(k, dtype=Q.dtype, device=Q.device)
     # A reasonable eps, but not too large
-    eps = 10. * n * torch.finfo(Q.dtype).eps
+    eps = 10.0 * n * torch.finfo(Q.dtype).eps
     return torch.allclose(Q.mH @ Q, Id, atol=eps)
 
 
@@ -41,11 +41,9 @@ class _OrthMaps(Enum):
 class _Orthogonal(Module):
     base: Tensor
 
-    def __init__(self,
-                 weight,
-                 orthogonal_map: _OrthMaps,
-                 *,
-                 use_trivialization=True) -> None:
+    def __init__(
+        self, weight, orthogonal_map: _OrthMaps, *, use_trivialization=True
+    ) -> None:
         super().__init__()
 
         # Note [Householder complex]
@@ -61,7 +59,9 @@ class _Orthogonal(Module):
         # them as independent tensors we would not maintain the constraint
         # An equivalent reasoning holds for rectangular matrices
         if weight.is_complex() and orthogonal_map == _OrthMaps.householder:
-            raise ValueError("The householder parametrization does not support complex tensors.")
+            raise ValueError(
+                "The householder parametrization does not support complex tensors."
+            )
 
         self.shape = weight.shape
         self.orthogonal_map = orthogonal_map
@@ -75,12 +75,17 @@ class _Orthogonal(Module):
             X = X.mT
             n, k = k, n
         # Here n > k and X is a tall matrix
-        if self.orthogonal_map == _OrthMaps.matrix_exp or self.orthogonal_map == _OrthMaps.cayley:
+        if (
+            self.orthogonal_map == _OrthMaps.matrix_exp
+            or self.orthogonal_map == _OrthMaps.cayley
+        ):
             # We just need n x k - k(k-1)/2 parameters
             X = X.tril()
             if n != k:
                 # Embed into a square matrix
-                X = torch.cat([X, X.new_zeros(n, n - k).expand(*X.shape[:-2], -1, -1)], dim=-1)
+                X = torch.cat(
+                    [X, X.new_zeros(n, n - k).expand(*X.shape[:-2], -1, -1)], dim=-1
+                )
             A = X - X.mH
             # A is skew-symmetric (or skew-hermitian)
             if self.orthogonal_map == _OrthMaps.matrix_exp:
@@ -88,7 +93,9 @@ class _Orthogonal(Module):
             elif self.orthogonal_map == _OrthMaps.cayley:
                 # Computes the Cayley retraction (I+A/2)(I-A/2)^{-1}
                 Id = torch.eye(n, dtype=A.dtype, device=A.device)
-                Q = torch.linalg.solve(torch.add(Id, A, alpha=-0.5), torch.add(Id, A, alpha=0.5))
+                Q = torch.linalg.solve(
+                    torch.add(Id, A, alpha=-0.5), torch.add(Id, A, alpha=0.5)
+                )
             # Q is now orthogonal (or unitary) of size (..., n, n)
             if n != k:
                 Q = Q[..., :k]
@@ -96,7 +103,7 @@ class _Orthogonal(Module):
         else:
             # X is real here, as we do not support householder with complex numbers
             A = X.tril(diagonal=-1)
-            tau = 2. / (1. + (A * A).sum(dim=-2))
+            tau = 2.0 / (1.0 + (A * A).sum(dim=-2))
             Q = torch.linalg.householder_product(A, tau)
             # The diagonal of X is 1's and -1's
             # We do not want to differentiate through this or update the diagonal of X hence the casting
@@ -111,8 +118,10 @@ class _Orthogonal(Module):
     @torch.autograd.no_grad()
     def right_inverse(self, Q: torch.Tensor) -> torch.Tensor:
         if Q.shape != self.shape:
-            raise ValueError(f"Expected a matrix or batch of matrices of shape {self.shape}. "
-                             f"Got a tensor of shape {Q.shape}.")
+            raise ValueError(
+                f"Expected a matrix or batch of matrices of shape {self.shape}. "
+                f"Got a tensor of shape {Q.shape}."
+            )
 
         Q_init = Q
         n, k = Q.size(-2), Q.size(-1)
@@ -133,9 +142,14 @@ class _Orthogonal(Module):
             # gives the original tensor. It is not clear how to do this.
             # Perhaps via some algebraic manipulation involving the QR like that of
             # Corollary 2.2 in Edelman, Arias and Smith?
-            if self.orthogonal_map == _OrthMaps.cayley or self.orthogonal_map == _OrthMaps.matrix_exp:
-                raise NotImplementedError("It is not possible to assign to the matrix exponential "
-                                          "or the Cayley parametrizations when use_trivialization=False.")
+            if (
+                self.orthogonal_map == _OrthMaps.cayley
+                or self.orthogonal_map == _OrthMaps.matrix_exp
+            ):
+                raise NotImplementedError(
+                    "It is not possible to assign to the matrix exponential "
+                    "or the Cayley parametrizations when use_trivialization=False."
+                )
 
             # If parametrization == _OrthMaps.householder, make Q orthogonal via the QR decomposition.
             # Here Q is always real because we do not support householder and complex matrices.
@@ -147,7 +161,7 @@ class _Orthogonal(Module):
             A.diagonal(dim1=-2, dim2=-1).sign_()
             # Equality with zero is ok because LAPACK returns exactly zero when it does not want
             # to use a particular reflection
-            A.diagonal(dim1=-2, dim2=-1)[tau == 0.] *= -1
+            A.diagonal(dim1=-2, dim2=-1)[tau == 0.0] *= -1
             return A.mT if transpose else A
         else:
             if n == k:
@@ -158,7 +172,9 @@ class _Orthogonal(Module):
                     Q = Q.clone()
             else:
                 # Complete Q into a full n x n orthogonal matrix
-                N = torch.randn(*(Q.size()[:-2] + (n, n - k)), dtype=Q.dtype, device=Q.device)
+                N = torch.randn(
+                    *(Q.size()[:-2] + (n, n - k)), dtype=Q.dtype, device=Q.device
+                )
                 Q = torch.cat([Q, N], dim=-1)
                 Q = _make_orthogonal(Q)
             self.base = Q
@@ -168,15 +184,17 @@ class _Orthogonal(Module):
             # householder(torch.zeros(m,n)) == torch.eye(m,n)
             # Poor man's version of eye_like
             neg_Id = torch.zeros_like(Q_init)
-            neg_Id.diagonal(dim1=-2, dim2=-1).fill_(-1.)
+            neg_Id.diagonal(dim1=-2, dim2=-1).fill_(-1.0)
             return neg_Id
 
 
-def orthogonal(module: Module,
-               name: str = 'weight',
-               orthogonal_map: Optional[str] = None,
-               *,
-               use_trivialization: bool = True) -> Module:
+def orthogonal(
+    module: Module,
+    name: str = "weight",
+    orthogonal_map: Optional[str] = None,
+    *,
+    use_trivialization: bool = True,
+) -> Module:
     r"""Apply an orthogonal or unitary parametrization to a matrix or a batch of matrices.
 
     Letting :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`, the parametrized
@@ -270,19 +288,25 @@ def orthogonal(module: Module,
     # We could implement this for 1-dim tensors as the maps on the sphere
     # but I believe it'd bite more people than it'd help
     if weight.ndim < 2:
-        raise ValueError("Expected a matrix or batch of matrices. "
-                         f"Got a tensor of {weight.ndim} dimensions.")
+        raise ValueError(
+            "Expected a matrix or batch of matrices. "
+            f"Got a tensor of {weight.ndim} dimensions."
+        )
 
     if orthogonal_map is None:
-        orthogonal_map = "matrix_exp" if weight.size(-2) == weight.size(-1) or weight.is_complex() else "householder"
+        orthogonal_map = (
+            "matrix_exp"
+            if weight.size(-2) == weight.size(-1) or weight.is_complex()
+            else "householder"
+        )
 
     orth_enum = getattr(_OrthMaps, orthogonal_map, None)
     if orth_enum is None:
-        raise ValueError('orthogonal_map has to be one of "matrix_exp", "cayley", "householder". '
-                         f'Got: {orthogonal_map}')
-    orth = _Orthogonal(weight,
-                       orth_enum,
-                       use_trivialization=use_trivialization)
+        raise ValueError(
+            'orthogonal_map has to be one of "matrix_exp", "cayley", "householder". '
+            f"Got: {orthogonal_map}"
+        )
+    orth = _Orthogonal(weight, orth_enum, use_trivialization=use_trivialization)
     parametrize.register_parametrization(module, name, orth, unsafe=True)
     return module
 
@@ -307,7 +331,7 @@ class _WeightNorm(Module):
         return weight_g, weight_v
 
 
-def weight_norm(module: Module, name: str = 'weight', dim: int = 0):
+def weight_norm(module: Module, name: str = "weight", dim: int = 0):
     r"""Apply weight normalization to a parameter in the given module.
 
     .. math::
@@ -353,7 +377,15 @@ def weight_norm(module: Module, name: str = 'weight', dim: int = 0):
     _weight_norm = _WeightNorm(dim)
     parametrize.register_parametrization(module, name, _weight_norm, unsafe=True)
 
-    def _weight_norm_compat_hook(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
+    def _weight_norm_compat_hook(
+        state_dict,
+        prefix,
+        local_metadata,
+        strict,
+        missing_keys,
+        unexpected_keys,
+        error_msgs,
+    ):
         g_key = f"{prefix}{name}_g"
         v_key = f"{prefix}{name}_v"
         if g_key in state_dict and v_key in state_dict:
@@ -361,6 +393,7 @@ def weight_norm(module: Module, name: str = 'weight', dim: int = 0):
             original1 = state_dict.pop(v_key)
             state_dict[f"{prefix}parametrizations.{name}.original0"] = original0
             state_dict[f"{prefix}parametrizations.{name}.original1"] = original1
+
     module._register_load_state_dict_pre_hook(_weight_norm_compat_hook)
     return module
 
@@ -371,17 +404,21 @@ class _SpectralNorm(Module):
         weight: torch.Tensor,
         n_power_iterations: int = 1,
         dim: int = 0,
-        eps: float = 1e-12
+        eps: float = 1e-12,
     ) -> None:
         super().__init__()
         ndim = weight.ndim
         if dim >= ndim or dim < -ndim:
-            raise IndexError("Dimension out of range (expected to be in range of "
-                             f"[-{ndim}, {ndim - 1}] but got {dim})")
+            raise IndexError(
+                "Dimension out of range (expected to be in range of "
+                f"[-{ndim}, {ndim - 1}] but got {dim})"
+            )
 
         if n_power_iterations <= 0:
-            raise ValueError('Expected n_power_iterations to be positive, but '
-                             f'got n_power_iterations={n_power_iterations}')
+            raise ValueError(
+                "Expected n_power_iterations to be positive, but "
+                f"got n_power_iterations={n_power_iterations}"
+            )
         self.dim = dim if dim >= 0 else dim + ndim
         self.eps = eps
         if ndim > 1:
@@ -392,8 +429,8 @@ class _SpectralNorm(Module):
 
             u = weight_mat.new_empty(h).normal_(0, 1)
             v = weight_mat.new_empty(w).normal_(0, 1)
-            self.register_buffer('_u', F.normalize(u, dim=0, eps=self.eps))
-            self.register_buffer('_v', F.normalize(v, dim=0, eps=self.eps))
+            self.register_buffer("_u", F.normalize(u, dim=0, eps=self.eps))
+            self.register_buffer("_v", F.normalize(v, dim=0, eps=self.eps))
 
             # Start with u, v initialized to some reasonable values by performing a number
             # of iterations of the power method
@@ -405,7 +442,9 @@ class _SpectralNorm(Module):
 
         if self.dim != 0:
             # permute dim to front
-            weight = weight.permute(self.dim, *(d for d in range(weight.dim()) if d != self.dim))
+            weight = weight.permute(
+                self.dim, *(d for d in range(weight.dim()) if d != self.dim)
+            )
 
         return weight.flatten(1)
 
@@ -449,10 +488,18 @@ class _SpectralNorm(Module):
             # Spectral norm of weight equals to `u^T W v`, where `u` and `v`
             # are the first left and right singular vectors.
             # This power iteration produces approximations of `u` and `v`.
-            self._u = F.normalize(torch.mv(weight_mat, self._v),      # type: ignore[has-type]
-                                  dim=0, eps=self.eps, out=self._u)   # type: ignore[has-type]
-            self._v = F.normalize(torch.mv(weight_mat.H, self._u),
-                                  dim=0, eps=self.eps, out=self._v)   # type: ignore[has-type]
+            self._u = F.normalize(
+                torch.mv(weight_mat, self._v),  # type: ignore[has-type]
+                dim=0,
+                eps=self.eps,
+                out=self._u,  # type: ignore[has-type]
+            )
+            self._v = F.normalize(
+                torch.mv(weight_mat.H, self._u),  # type: ignore[has-type]
+                dim=0,
+                eps=self.eps,
+                out=self._v,  # type: ignore[has-type]
+            )
 
     def forward(self, weight: torch.Tensor) -> torch.Tensor:
         if weight.ndim == 1:
@@ -477,11 +524,13 @@ class _SpectralNorm(Module):
         return value
 
 
-def spectral_norm(module: Module,
-                  name: str = 'weight',
-                  n_power_iterations: int = 1,
-                  eps: float = 1e-12,
-                  dim: Optional[int] = None) -> Module:
+def spectral_norm(
+    module: Module,
+    name: str = "weight",
+    n_power_iterations: int = 1,
+    eps: float = 1e-12,
+    dim: Optional[int] = None,
+) -> Module:
     r"""Apply spectral normalization to a parameter in the given module.
 
     .. math::
@@ -562,11 +611,18 @@ def spectral_norm(module: Module,
         )
 
     if dim is None:
-        if isinstance(module, (torch.nn.ConvTranspose1d,
-                               torch.nn.ConvTranspose2d,
-                               torch.nn.ConvTranspose3d)):
+        if isinstance(
+            module,
+            (
+                torch.nn.ConvTranspose1d,
+                torch.nn.ConvTranspose2d,
+                torch.nn.ConvTranspose3d,
+            ),
+        ):
             dim = 1
         else:
             dim = 0
-    parametrize.register_parametrization(module, name, _SpectralNorm(weight, n_power_iterations, dim, eps))
+    parametrize.register_parametrization(
+        module, name, _SpectralNorm(weight, n_power_iterations, dim, eps)
+    )
     return module

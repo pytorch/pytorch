@@ -309,7 +309,7 @@ struct PackedConvWeightsOnednn : public ConvPackedParamsBase<kSpatialDim> {
 
 namespace onednn_utils {
 
-static ideep::attr_t create_attr_by_post_op(
+inline ideep::attr_t create_attr_by_post_op(
     const c10::string_view& binary_post_op,
     double binary_alpha,
     double input1_scale,
@@ -389,27 +389,9 @@ static ideep::attr_t create_attr_by_post_op(
   return ideep::attr_t();
 }
 
-// Try to reorder tensor to expected desc at runtime
-// Do it in a `try...catch...` manner to avoid oneDNN's errors
-// TODO: Move it to third_party/ideep
-static void try_reorder(
-    ideep::tensor& t,
-    const ideep::tensor::desc&& desc,
-    ideep::scale_t scales) {
-  if (t.get_desc() != desc) {
-    try {
-      t = t.reorder_if_differ_in(desc);
-    } catch (...) {
-      ideep::tensor&& plain = t.to_public(nullptr, t.get_data_type());
-      t = plain.reorder_if_differ_in(desc);
-    }
-    t.set_scale(scales);
-  }
-}
-
 // ONEDNN requires symmetric quantization of weight
 // Use this util function to check.
-static bool is_weight_symmetric_quant(
+inline bool is_weight_symmetric_quant(
       const at::Tensor& weight,
       bool is_transposed_conv) {
   bool is_symmetric = true;
@@ -438,7 +420,7 @@ static bool is_weight_symmetric_quant(
 
 // When qengine is x86, use this util func to check if onednn kernel
 // is preferred than fbgemm's to get better performance.
-static bool should_use_onednn_quant(
+inline bool should_use_onednn_quant(
     const at::Tensor& weight,
     bool is_transposed_conv,
     int groups,
@@ -471,30 +453,5 @@ at::Tensor _qconv_prepack_onednn(
     torch::List<int64_t> dilation,
     int64_t groups,
     std::optional<torch::List<int64_t>> input_shape=c10::nullopt);
-
-static at::Tensor _quantized_convolution_onednn(
-    at::Tensor act, // contains quantized values but not QTensor
-    double act_scale,
-    int64_t act_zero_point,
-    at::Tensor weight, // MKLDNN tensor with quantized values
-    at::Tensor weight_scales,
-    at::Tensor weight_zero_points,
-    std::optional<at::Tensor> bias, // Bias is packed if not None
-    torch::List<int64_t> stride,
-    torch::List<int64_t> padding,
-    torch::List<int64_t> dilation,
-    bool transposed,
-    int64_t groups,
-    double output_scale,
-    int64_t output_zero_point,
-    std::optional<at::Tensor> accum=c10::nullopt, // accum to fused with conv add
-    double accum_scale=1.0,
-    int64_t accum_zero_point=0,
-    bool fp32_output=false,
-    std::optional<c10::string_view> binary_attr=c10::nullopt,
-    std::optional<at::Scalar> binary_alpha=c10::nullopt,
-    std::optional<c10::string_view> unary_attr=c10::nullopt,
-    torch::List<std::optional<at::Scalar>> unary_scalars=torch::List<std::optional<at::Scalar>>(),
-    std::optional<c10::string_view> unary_algorithm=c10::nullopt);
 
 #endif // #if AT_MKLDNN_ENABLED()

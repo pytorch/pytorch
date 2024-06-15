@@ -1940,6 +1940,15 @@ void initJITBindings(PyObject* module) {
             ss << self;
             return ss.str();
           })
+      .def(py::pickle(
+          [](const FunctionSchema& self) { // __getstate__
+            std::stringstream ss;
+            ss << self;
+            return py::str(ss.str());
+          },
+          [](py::str schema) { // __setstate__, note: no `self` argument
+            return parseSchema(schema);
+          }))
       .def_property_readonly(
           "is_mutable", [](FunctionSchema& self) { return self.is_mutable(); });
   py::class_<Argument>(m, "Argument")

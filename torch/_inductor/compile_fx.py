@@ -756,7 +756,11 @@ def fx_codegen_and_compile(
         post_grad_graphs_log.debug(
             "%s",
             lazy_format_graph_code(
-                "AFTER POST GRAD", gm, include_stride=True, include_device=True
+                "AFTER POST GRAD",
+                gm,
+                include_stride=True,
+                include_device=True,
+                colored=True,
             ),
         )
         trace_structured(

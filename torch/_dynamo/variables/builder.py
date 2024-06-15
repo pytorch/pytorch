@@ -14,6 +14,7 @@ import operator
 import re
 import sys
 import types
+import weakref
 from typing import Any, List, NamedTuple, Optional, Union
 
 from torch.utils._sympy.value_ranges import ValueRanges
@@ -184,6 +185,7 @@ from .user_defined import (
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
+    WeakRefVariable,
 )
 
 
@@ -383,6 +385,8 @@ class VariableBuilder:
             ((slice, range), cls.wrap_slice_range),
             (tuple(common_constant_types), cls.wrap_literal),
             (re.Pattern, cls.wrap_regex_pattern),
+            (weakref.ReferenceType, cls.wrap_weakref),
+            (torch.utils.hooks.RemovableHandle, cls.wrap_removable_handle),
         ]
 
         if config.trace_numpy and np:
@@ -400,6 +404,17 @@ class VariableBuilder:
         # TODO(jansel): something like a REPR_MATCH might be more robust here
         self.install_guards(GuardBuilder.ID_MATCH)
         return RegexPatternVariable(value)
+
+    def wrap_weakref(self, value: weakref.ReferenceType):
+        self.install_guards(GuardBuilder.TYPE_MATCH)
+        return WeakRefVariable(value, source=self.source)
+
+    def wrap_removable_handle(self, value):
+        # This means that the removable handle was created in some other frame.
+        # Our current infra requires the hook to be registered and removed in
+        # the same frame. So graph break.
+        # Related test - PYTORCH_TEST_WITH_DYNAMO=1 python test/test_autograd.py -k TestAutograd.test_hooks
+        unimplemented("unregistered hook removable handle")
 
     @classmethod
     @functools.lru_cache(None)
@@ -1819,40 +1834,47 @@ def wrap_fx_proxy_cls(
 
         return value
 
-    # with preserve_rng_state():
-    if example_value is None:
-        # only allow_non_graph_fake in this instance because we handle the non-fake
-        # cases properly below.
-        example_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
+    # See NOTE: [Deferring tensor pack/unpack hooks until runtime]
+    with torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
+        # with preserve_rng_state():
+        if example_value is None:
+            # only allow_non_graph_fake in this instance because we handle the non-fake
+            # cases properly below.
+            example_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
 
-    # Handle recursive calls here
-    elif maybe_get_fake_mode(example_value) is tx.fake_mode:
-        pass
+        # Handle recursive calls here
+        elif maybe_get_fake_mode(example_value) is tx.fake_mode:
+            pass
 
-    elif isinstance(example_value, torch.Tensor):
-        if tx.export:
-            # The legacy behavior for real value cache with subclasses was
-            # to perform a clone WITHOUT preserving the subclass.  It's
-            # not entirely clear this is what you actually want though.
-            with torch._C.DisableTorchFunctionSubclass():
-                proxy.tracer.real_value_cache[proxy.node] = _clone_input(example_value)
-        # NB: If we're ignoring subclass, then the expectation is you will
-        # take the returned TensorVariable and wrap it into a more
-        # accurate TensorVariable that is able to track subclass-ness;
-        # otherwise this is wrong!
-        kwargs = {
-            "is_tensor": target_cls in (TensorVariable, TensorWithTFOverrideVariable),
-        }
-        assert "source" in options and options["source"] is not None
-        kwargs["source"] = options["source"]
-        example_value = wrap_to_fake_tensor_and_record(example_value, tx=tx, **kwargs)
-    if isinstance(example_value, torch.Tensor) and (
-        maybe_get_fake_mode(example_value) is not tx.fake_mode
-    ):
-        raise InternalTorchDynamoError(
-            "`example_value` needs to be a `FakeTensor`"
-            f"wrapped by this instance of Dynamo. Found: {example_value}"
-        )
+        elif isinstance(example_value, torch.Tensor):
+            if tx.export:
+                # The legacy behavior for real value cache with subclasses was
+                # to perform a clone WITHOUT preserving the subclass.  It's
+                # not entirely clear this is what you actually want though.
+                with torch._C.DisableTorchFunctionSubclass():
+                    proxy.tracer.real_value_cache[proxy.node] = _clone_input(
+                        example_value
+                    )
+            # NB: If we're ignoring subclass, then the expectation is you will
+            # take the returned TensorVariable and wrap it into a more
+            # accurate TensorVariable that is able to track subclass-ness;
+            # otherwise this is wrong!
+            kwargs = {
+                "is_tensor": target_cls
+                in (TensorVariable, TensorWithTFOverrideVariable),
+            }
+            assert "source" in options and options["source"] is not None
+            kwargs["source"] = options["source"]
+            example_value = wrap_to_fake_tensor_and_record(
+                example_value, tx=tx, **kwargs
+            )
+        if isinstance(example_value, torch.Tensor) and (
+            maybe_get_fake_mode(example_value) is not tx.fake_mode
+        ):
+            raise InternalTorchDynamoError(
+                "`example_value` needs to be a `FakeTensor`"
+                f"wrapped by this instance of Dynamo. Found: {example_value}"
+            )
 
     if isinstance(example_value, torch.Tensor):
         is_parameter = isinstance(example_value, torch.nn.Parameter)

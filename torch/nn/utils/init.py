@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import inspect
+
 import torch
 
 
@@ -45,10 +46,10 @@ def skip_init(module_cls, *args, **kwargs):
 
     """
     if not issubclass(module_cls, torch.nn.Module):
-        raise RuntimeError(f'Expected a Module; got {module_cls}')
-    if 'device' not in inspect.signature(module_cls).parameters:
-        raise RuntimeError('Module must support a \'device\' arg to skip initialization')
+        raise RuntimeError(f"Expected a Module; got {module_cls}")
+    if "device" not in inspect.signature(module_cls).parameters:
+        raise RuntimeError("Module must support a 'device' arg to skip initialization")
 
-    final_device = kwargs.pop('device', 'cpu')
-    kwargs['device'] = 'meta'
+    final_device = kwargs.pop("device", "cpu")
+    kwargs["device"] = "meta"
     return module_cls(*args, **kwargs).to_empty(device=final_device)

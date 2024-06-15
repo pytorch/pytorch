@@ -24,13 +24,18 @@ from torch._inductor.pattern_matcher import (
     stable_topological_sort,
 )
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import get_gpu_shared_memory, run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
-from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
+from torch.testing._internal.common_utils import IS_LINUX, LazyVal, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.utils import _pytree as pytree
+
+
+is_A100 = LazyVal(
+    lambda: torch.cuda.is_available() and get_gpu_shared_memory() == 166912
+)
 
 
 class TestPatternMatcher(TestCase):
@@ -175,17 +180,25 @@ class TestPatternMatcher(TestCase):
         inductor_config.force_fuse_int_mm_with_mul = False
         self._test_fused_int_mm_mul_impl(fn1, args2, False)
 
-    def _test_mixed_impl(self, fn, args, mixed_mm_expected, fallback_mixed_mm_expected):
+    def _test_mixed_impl(
+        self,
+        fn,
+        args,
+        mixed_mm_expected,
+        fallback_mixed_mm_expected,
+        rtol=None,
+        atol=None,
+    ):
         torch._dynamo.reset()
         counters.clear()
         ref = fn(*args)
         test, (code,) = run_and_get_code(torch.compile(fn), *args)
-        torch.testing.assert_close(ref, test)
+        torch.testing.assert_close(ref, test, rtol=rtol, atol=atol)
         self.assertEqual("mixed_mm" in code, mixed_mm_expected)
         self.assertEqual("fallback_mixed_mm" in code, fallback_mixed_mm_expected)
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
-    @inductor_config.patch(force_mixed_mm=True)
+    @inductor_config.patch(mixed_mm_choice="triton")
     def test_mixed_mm(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
@@ -213,19 +226,24 @@ class TestPatternMatcher(TestCase):
             self._test_mixed_impl(fn, args, True, False)
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
-    @inductor_config.patch(force_mixed_mm=True)
+    @inductor_config.patch(mixed_mm_choice="triton")
     def test_mixed_mm_bad_cases(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
 
+        # when b is transposed and not contiguous, we skip triton and use fallback
         args_list = [
             (
                 torch.randn(8, 8, device="cuda", dtype=torch.float16),
-                torch.randint(-128, 127, (2, 8), dtype=torch.int8, device="cuda").t(),
+                torch.randint(-128, 127, (4, 8), dtype=torch.int8, device="cuda").t()[
+                    :, ::2
+                ],
             ),
             (
                 torch.randn(8, 8, device="cuda", dtype=torch.bfloat16),
-                torch.randint(0, 255, (2, 8), dtype=torch.uint8, device="cuda").t(),
+                torch.randint(0, 255, (4, 8), dtype=torch.uint8, device="cuda").t()[
+                    :, ::2
+                ],
             ),
         ]
 
@@ -233,7 +251,7 @@ class TestPatternMatcher(TestCase):
             self._test_mixed_impl(fn, args, True, True)
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
-    @inductor_config.patch(force_mixed_mm=True, max_autotune_gemm=True)
+    @inductor_config.patch(mixed_mm_choice="triton", max_autotune_gemm=True)
     def test_mixed_mm_epi_works(self):
         def fn(a, b, c, d):
             return torch.mm(a, b.to(a.dtype)) * c + d
@@ -263,6 +281,100 @@ class TestPatternMatcher(TestCase):
             self._test_mixed_impl(fn, args, True, False)
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @unittest.skipIf(not is_A100, "heuristic only run on A100")
+    @inductor_config.patch(mixed_mm_choice="heuristic")
+    def test_mixed_mm_heuristic_no(self):
+        def fn(a, b):
+            return torch.mm(a, b.to(a.dtype))
+
+        # examples that should not be selected by heuristic
+        mat1_dtype = torch.float16
+        args_list = [
+            (
+                torch.randn(1, 4097, dtype=mat1_dtype, device="cuda"),
+                torch.randint(-128, 127, (4097, 4096), dtype=torch.int8, device="cuda"),
+            ),
+            (
+                torch.randn(1, 4096, dtype=mat1_dtype, device="cuda"),
+                torch.randint(-128, 127, (4096, 4097), dtype=torch.int8, device="cuda"),
+            ),
+            (
+                torch.randn(8, 8, dtype=mat1_dtype, device="cuda"),
+                torch.randint(-128, 127, (8, 8), dtype=torch.int8, device="cuda"),
+            ),
+            (
+                torch.randn(8, 2048, dtype=mat1_dtype, device="cuda"),
+                torch.randint(-128, 127, (2048, 2048), dtype=torch.int8, device="cuda"),
+            ),
+            (
+                torch.randn(8, 2048, dtype=mat1_dtype, device="cuda"),
+                torch.randint(
+                    -128, 127, (2048, 2048), dtype=torch.int8, device="cuda"
+                ).t(),
+            ),
+            (
+                torch.randn(8, 4096, dtype=mat1_dtype, device="cuda"),
+                torch.randint(-128, 127, (4096, 4096), dtype=torch.int8, device="cuda")[
+                    :, ::2
+                ],
+            ),
+            (
+                torch.randn(1, 4096, dtype=torch.float32, device="cuda"),
+                torch.randint(-128, 127, (4096, 4096), dtype=torch.int8, device="cuda"),
+            ),
+        ]
+
+        for args in args_list:
+            self._test_mixed_impl(fn, args, True, True)
+
+    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @unittest.skipIf(not is_A100, "heuristic only run on A100")
+    @inductor_config.patch(mixed_mm_choice="heuristic")
+    def test_mixed_mm_heuristic_yes(self):
+        def fn(a, b):
+            return torch.mm(a, b.to(a.dtype))
+
+        mat1_dtype = torch.float16
+        # examples that should be selected by heuristic
+        args_list = [
+            (
+                torch.randn(1, 4096, dtype=mat1_dtype, device="cuda"),
+                torch.randint(-128, 127, (4096, 4096), dtype=torch.int8, device="cuda"),
+            ),
+            (
+                torch.randn(4, 4096, dtype=mat1_dtype, device="cuda"),
+                torch.randint(-128, 127, (4096, 4096), dtype=torch.int8, device="cuda"),
+            ),
+            (
+                torch.randn(8, 4096, dtype=mat1_dtype, device="cuda"),
+                torch.randint(-128, 127, (4096, 4096), dtype=torch.int8, device="cuda"),
+            ),
+            (
+                torch.randn(8, 4096, dtype=mat1_dtype, device="cuda"),
+                torch.randint(
+                    -128, 127, (4096, 4096), dtype=torch.int8, device="cuda"
+                ).t(),
+            ),
+            (
+                torch.randn(16, 4096, dtype=mat1_dtype, device="cuda"),
+                torch.randint(
+                    -128, 127, (8192, 4096), dtype=torch.int8, device="cuda"
+                ).t(),
+            ),
+            (
+                torch.randn(32, 4096, dtype=mat1_dtype, device="cuda"),
+                torch.randint(-128, 127, (4096, 8192), dtype=torch.int8, device="cuda"),
+            ),
+            (
+                torch.randn(64, 4096, dtype=mat1_dtype, device="cuda"),
+                torch.randint(-128, 127, (4096, 4096), dtype=torch.int8, device="cuda"),
+            ),
+        ]
+
+        for args in args_list:
+            self._test_mixed_impl(fn, args, True, False, rtol=0.01, atol=0.04)
+
+    @unittest.skipIf(not SM80OrLater, "need sm_80")
     def test_mixed_mm_gating(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
@@ -272,20 +384,40 @@ class TestPatternMatcher(TestCase):
             torch.randint(-128, 127, (8, 8), dtype=torch.int8, device="cuda"),
         )
         # will ignore the mixed_mm code (including fallback)
-        with inductor_config.patch({"force_mixed_mm": False, "use_mixed_mm": False}):
+        with inductor_config.patch(
+            {"mixed_mm_choice": "default", "use_mixed_mm": False}
+        ):
             self._test_mixed_impl(fn, args, False, False)
 
         # will use fallback_mixed_mm kernel due to no gemm_autotune
-        with inductor_config.patch({"force_mixed_mm": False, "use_mixed_mm": True}):
+        with inductor_config.patch(
+            {"mixed_mm_choice": "default", "use_mixed_mm": True}
+        ):
             self._test_mixed_impl(fn, args, True, True)
 
         # will use mixed_mm kernel
-        with inductor_config.patch({"force_mixed_mm": True, "use_mixed_mm": False}):
+        with inductor_config.patch(
+            {"mixed_mm_choice": "triton", "use_mixed_mm": False}
+        ):
             self._test_mixed_impl(fn, args, True, False)
 
         # shows that use_mixed_mm doesn't do anything if foce_mixed_mm is set
-        with inductor_config.patch({"force_mixed_mm": True, "use_mixed_mm": True}):
+        with inductor_config.patch({"mixed_mm_choice": "triton", "use_mixed_mm": True}):
             self._test_mixed_impl(fn, args, True, False)
+
+        # will use fallback_mixed_mm kernel
+        with inductor_config.patch({"mixed_mm_choice": "aten", "use_mixed_mm": False}):
+            self._test_mixed_impl(fn, args, True, True)
+
+        # will use fallback_mixed_mm kernel
+        with inductor_config.patch({"mixed_mm_choice": "aten", "use_mixed_mm": True}):
+            self._test_mixed_impl(fn, args, True, True)
+
+        # will use fallback_mixed_mm kernel because fallback is the only choice
+        with inductor_config.patch(
+            {"mixed_mm_choice": "aten", "use_mixed_mm": True, "max_autotune_gemm": True}
+        ):
+            self._test_mixed_impl(fn, args, True, True)
 
     @inductor_config.patch(use_mixed_mm=True)
     def test_mixed_mm_cpu(self):
@@ -404,6 +536,7 @@ class TestPatternMatcher(TestCase):
             torch.testing.assert_close(ref, test)
             self.assertFalse("uint4x2_mixed_mm" in code)
 
+    @inductor_config.patch(mixed_mm_choice="default")
     @inductor_config.patch(use_mixed_mm=False)
     def test_uint4x2_mixed_mm_gating_works(self):
         def fn(a, b):

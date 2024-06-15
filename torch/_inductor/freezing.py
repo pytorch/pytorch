@@ -115,7 +115,9 @@ def freeze(
         invalidate_eager_modules()
         discard_traced_gm_params(dynamo_gm)
 
-    log.debug("%s", lazy_format_graph_code("FROZEN GRAPH", aot_autograd_gm))
+    log.debug(
+        "%s", lazy_format_graph_code("FROZEN GRAPH", aot_autograd_gm, colored=True)
+    )
 
     return aot_autograd_gm, preserved_arg_indices
 

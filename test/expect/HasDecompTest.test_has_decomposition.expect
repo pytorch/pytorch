@@ -658,8 +658,6 @@ aten::argsort.stable
 aten::argsort.stable_out
 aten::as_strided
 aten::as_strided_
-aten::as_strided_copy
-aten::as_strided_copy.out
 aten::avg_pool2d
 aten::avg_pool2d.out
 aten::avg_pool2d_backward

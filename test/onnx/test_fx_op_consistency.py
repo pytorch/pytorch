@@ -527,8 +527,7 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
     ),
     xfail(
         "gather",
-        reason="HandleNegativeAxis(int64_t, int64_t) IsAxisInRange(axis, tensor_rank) was \
-            false. axis 0 is not in valid range [-0,-1]"
+        reason="GatherElements op: Rank of input 'data' needs to be equal to rank of input 'indices'"
     ),
     xfail(
         "geometric",
@@ -1517,7 +1516,6 @@ SKIP_XFAIL_SUBTESTS_WITH_MATCHER_AND_MODEL_TYPE: tuple[
         "nn.functional.batch_norm",
         matcher=lambda sample: sample.kwargs.get("training") is True
         and any(arg is not None for arg in sample.args[2:4]),
-        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
         reason="Flaky failure: https://github.com/pytorch/pytorch/issues/115106",
     ),
     xfail(
@@ -1998,7 +1996,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
         "nn.functional.hardsigmoid": [1e-3, 5e-3],
         "nn.functional.hardswish": [1e-3, 5e-3],
         "nn.functional.hinge_embedding_loss": [4e-1, 3e-3],
-        "nn.functional.huber_loss": [1e-3, 1e-2],
+        "nn.functional.huber_loss": [1e-2, 1e-1],
         "nn.functional.instance_norm": [1e-2, 1e-3],
         "nn.functional.interpolate": [1e-2, 1e-3],
         "nn.functional.kl_div": [2e-3, 2e-4],

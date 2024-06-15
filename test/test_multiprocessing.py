@@ -1061,6 +1061,15 @@ if __name__ == "__main__":
         t = torch.randn(5, 5).cuda()
         self.assertTrue(t.is_shared())
 
+    @unittest.skipIf(
+        sys.platform != "linux",
+        "Only runs on Linux; requires prctl(2)",
+    )
+    def test_set_thread_name(self):
+        name = "test name"
+        mp._set_thread_name(name)
+        self.assertEqual(mp._get_thread_name(), name)
+
 
 if __name__ == "__main__":
     run_tests()

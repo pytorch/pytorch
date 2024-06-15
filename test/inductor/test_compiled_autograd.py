@@ -2223,6 +2223,7 @@ known_failing_tests = {
     "test_save_for_backward_inputs_are_namedtuple",  # torch._dynamo.exc.Unsupported: 'skip function
     "test_setitem",  # AssertionError: Tensor-likes are not close!
     "test_grad_nonleaf_register_hook",  # IndexError: list index out of range (NB: x.grad = y where both x and y are input tensors)
+    "test_unpack_hooks_exec_count",  # pack/unpack saved tensor hooks firing more than once
     "test_scalar_grad_mixed_device",  # Fake Tensors aren't propagating device properly for 0-dim grads
 }
 

@@ -154,6 +154,19 @@ should now merrily print the tensor (exact output subject to randomness):
   Also, make sure you specify the correct configuration in the ``cmake --build .``
   line above.
 
+System Requirements
+-------------------
+
+To ensure smooth installation and usage of LibTorch, please ensure your system
+meets the following requirements:
+
+1. **GLIBC Version**:
+  - GLIBC 2.29 or newer for cxx11 ABI version
+  - GLIBC 2.17 or newer for pre-cxx11 ABI version
+
+2. **GCC Version**:
+  - GCC 9 or newer for cxx11 and pre-cxx11 ABI versions
+
 Visual Studio Extension
 -----------------------
 

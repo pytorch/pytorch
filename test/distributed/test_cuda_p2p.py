@@ -12,6 +12,8 @@ from torch.distributed._cuda_p2p import (
     get_p2p_buffer_size,
     is_cuda_p2p_group,
     p2p_usage_counter,
+    restride_A_for_fused_matmul_reduce_scatter,
+    restride_A_shard_for_fused_all_gather_matmul,
 )
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
@@ -215,6 +217,18 @@ class ProcessGroupCudaP2PTest(MultiProcessTestCase):
         dist.barrier()
         torch.cuda.synchronize()
         dist.destroy_process_group()
+
+    @parametrize("dim", [0, 1, 2])
+    def test_optimal_layout(self, dim: int) -> None:
+        t = torch.rand(8, 64, 32, 16)
+
+        x = restride_A_shard_for_fused_all_gather_matmul(t, dim)
+        self.assertTrue(x.movedim(dim, 0).is_contiguous())
+        self.assertTrue(torch.allclose(x, t))
+
+        x = restride_A_for_fused_matmul_reduce_scatter(t, dim)
+        self.assertTrue(x.movedim(dim, 0).is_contiguous())
+        self.assertTrue(torch.allclose(x, t))
 
 
 if __name__ == "__main__":

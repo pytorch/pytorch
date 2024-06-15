@@ -114,6 +114,8 @@ call_torchbind.py_impl(DispatchKey.Autograd)(
 
 @call_torchbind.py_functionalize_impl
 def call_torchbind_func(ctx, *args, **kwargs):
-    args = ctx.unwrap_tensors(args)
-    with ctx.redispatch_to_next():
-        return ctx.wrap_tensors(call_torchbind(*args, **kwargs))
+    from torch._higher_order_ops.effects import handle_effects
+
+    return handle_effects(
+        ctx.mode._allow_token_discovery, ctx.mode._tokens, call_torchbind, args, kwargs
+    )

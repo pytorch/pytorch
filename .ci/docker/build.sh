@@ -373,6 +373,13 @@ case "$image" in
     CONDA_CMAKE=yes
     EXECUTORCH=yes
     ;;
+  pytorch-linux-jammy-py3.12-halide)
+    CUDA_VERSION=12.4
+    ANACONDA_PYTHON_VERSION=3.12
+    GCC_VERSION=11
+    CONDA_CMAKE=yes
+    HALIDE=yes
+    ;;
   pytorch-linux-focal-linter)
     # TODO: Use 3.9 here because of this issue https://github.com/python/mypy/issues/13627.
     # We will need to update mypy version eventually, but that's for another day. The task
@@ -490,6 +497,7 @@ docker build \
        --build-arg "DOCS=${DOCS}" \
        --build-arg "INDUCTOR_BENCHMARKS=${INDUCTOR_BENCHMARKS}" \
        --build-arg "EXECUTORCH=${EXECUTORCH}" \
+       --build-arg "HALIDE=${HALIDE}" \
        --build-arg "XPU_VERSION=${XPU_VERSION}" \
        --build-arg "ACL=${ACL:-}" \
        --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \

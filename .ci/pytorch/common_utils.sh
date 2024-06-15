@@ -188,28 +188,6 @@ function clone_pytorch_xla() {
   fi
 }
 
-function checkout_install_torchdeploy() {
-  local commit
-  commit=$(get_pinned_commit multipy)
-  pushd ..
-  git clone --recurse-submodules https://github.com/pytorch/multipy.git
-  pushd multipy
-  git checkout "${commit}"
-  python multipy/runtime/example/generate_examples.py
-  BUILD_CUDA_TESTS=1 pip install -e .
-  popd
-  popd
-}
-
-function test_torch_deploy(){
- pushd ..
- pushd multipy
- ./multipy/runtime/build/test_deploy
- ./multipy/runtime/build/test_deploy_gpu
- popd
- popd
-}
-
 function checkout_install_torchbench() {
   local commit
   commit=$(get_pinned_commit torchbench)

@@ -512,6 +512,10 @@ def export(
     """
 
     if dynamo:
+        if isinstance(model, (torch.jit.ScriptModule, torch.jit.ScriptFunction)):
+            raise TypeError(
+                "Dynamo export does not support ScriptModule or ScriptFunction."
+            )
         # Unsupported parameters for dynamo export
         # TODO: These are not supported AT THE TIME
         warnings.warn(
@@ -519,7 +523,6 @@ def export(
             "do_constant_folding, keep_initializers_as_inputs, custom_opsets, export_modules_as_functions, and "
             "autograd_inlining are not supported for dynamo export at the moment."
         )
-        # TODO: check args normalization
         args = _decide_input_format(model, args)
         kwargs = {}
         if args is not None and isinstance(args[-1], dict):
@@ -527,18 +530,14 @@ def export(
             args = args[:-1]
         # TODO: refactor this when we have migrated ExportedProgam and
         # needs users to specify dynamic_axes
-        if dynamic_axes is None or not isinstance(dynamic_axes, dict):
-            dynamic_shapes = False
-        else:
-            dynamic_shapes = True
-            warnings.warn(
-                "Specified dynamic axes is not supported for dynamo export at the moment."
-            )
-        # TODO: expose more ExportOptions?
-        export_options = torch.onnx.ExportOptions(dynamic_shapes=dynamic_shapes)
-        onnx_program = torch.onnx.dynamo_export(
-            model, *args, **kwargs, export_options=export_options
+        dynamic_shapes = _from_dynamic_axes_to_dynamic_shapes(
+            model, dynamic_axes, input_names
         )
+        exported_program = torch.export.export(
+            model, args=args, kwargs=kwargs, dynamic_shapes=dynamic_shapes  # type: ignore[arg-type]
+        )
+        # TODO: expose ExportOptions?
+        onnx_program = torch.onnx.dynamo_export(exported_program, *args, **kwargs)
         if f is not None:
             onnx_program.save(f)
         return onnx_program
@@ -913,6 +912,65 @@ def _decide_input_format(model, args):
     except Exception as e:
         warnings.warn(f"Skipping _decide_input_format\n {e.args[0]}")
     return args
+
+
+@_beartype.beartype
+def _from_dynamic_axes_to_dynamic_shapes(
+    model,
+    dynamic_axes: Optional[
+        Union[Mapping[str, Mapping[int, str]], Mapping[str, Sequence[int]]]
+    ] = None,
+    input_names: Optional[Sequence[str]] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+
+    dynamic_axes examples:
+    (1) dynamic_axes = {"x": {0: "my_custom_axis_name_1"}, "y": {1: "my_custom_axis_name_2"}}
+    (2) dynamic_axes = {"x": [0], "y": [1]}
+
+    these will be converted to dynamic_shapes respectively:
+    (1) dynamic_shapes = {"x": {0: Dim("my_custom_axis_name_1")}, "y": {1: Dim("my_custom_axis_name_2")}}
+    (2) dynamic_shapes = {"x": {0: Dim("x_dim_0")}, "y": {1: Dim("y_dim_1")}}  # auto-generated dim names
+
+    """
+    if dynamic_axes is None:
+        return None
+
+    if input_names is None:
+        input_names_set = set()
+    else:
+        input_names_set = set(input_names)
+
+    dynamic_shapes: Dict[str, Optional[Any]] = {}
+    for input_name, axes in dynamic_axes.items():
+        if input_name in input_names_set:
+            raise ValueError(
+                "Assinging new input names is not supported yet. Please use model forward signature "
+                "to specify input names in dynamix_axes."
+            )
+        if isinstance(axes, dict):
+            dynamic_shapes[input_name] = {
+                k: torch.export.Dim(v) for k, v in axes.items()
+            }
+        elif isinstance(axes, list):
+            dynamic_shapes[input_name] = {
+                k: torch.export.Dim(f"{input_name}_dim_{k}") for k in axes
+            }
+        else:
+            raise TypeError(
+                f"dynamic_axes value must be either a dict or a list, but got {type(axes)}"
+            )
+    # torch.export.export needs static dim to present in dynamic_shapes
+    # for all input tensors, so we need to add them with None
+    try:
+        sig = _signature(model)
+    except ValueError as e:
+        warnings.warn(f"{e}, skipping auto filling None on static axes...")
+        return dynamic_shapes
+    for input_name in sig.parameters.keys():
+        if input_name not in dynamic_shapes:
+            dynamic_shapes[input_name] = None
+    return dynamic_shapes
 
 
 @_beartype.beartype

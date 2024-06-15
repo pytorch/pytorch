@@ -97,6 +97,9 @@ def can_auto_functionalize(op: torch._ops.OperatorBase) -> bool:
         # Tensor[], Tensor?[], Tensor[]?.
         return False
 
+    if len(schema.returns) == 1 and isinstance(schema.returns[0].type, torch.NoneType):
+        # Skip schema returns -> None
+        return True
     # The returns must not alias anything
     for ret in schema.returns:
         if ret.alias_info is None and type(ret.type) is torch.TensorType:

@@ -291,17 +291,21 @@ class IRNode:
     def get_traceback(self):
         return self.traceback
 
-    def common_repr(self):
+    def common_repr(self, shorten=True):
         origins = f"origins={getattr(self, 'origins', '')}"
-        if len(origins) > 64:
+        if shorten and len(origins) > 64:
             # this can get *very* long
             origins = f"{origins[:61]}..."
         return [origins]
 
-    def str_helper(self, lines):
-        lines = lines + self.common_repr()
-        lines = indent(",\n".join(map(str, lines)))
-        return f"{type(self).__name__}(\n{lines}\n)"
+    def str_helper(self, lines, shorten=True, multiline=True):
+        lines = lines + self.common_repr(shorten)
+        lines = list(map(str, lines))
+        if multiline:
+            new_lines = indent(",\n".join(lines))
+            return f"{type(self).__name__}(\n{new_lines}\n)"
+        else:
+            return f"{type(self).__name__}({lines})"
 
     def is_user_of(self, name):
         return name in self.get_read_names()
@@ -318,6 +322,10 @@ class IRNode:
 
     def get_size(self):
         raise NotImplementedError(f"get_size() is not implemented by {type(self)}!")
+
+    @property
+    def shape(self):
+        return self.get_size()
 
     def get_numel(self):
         return sympy_product(self.get_size())
@@ -2565,7 +2573,7 @@ class Layout(IRNode):
     def is_transposed(self):
         for left, right, size in zip(
             self.stride,
-            reversed(FlexibleLayout.contiguous_strides(self.size)),
+            reversed(FlexibleLayout.contiguous_strides(list(reversed(self.size)))),
             self.size,
         ):
             if size != 1 and left != right:
@@ -3191,7 +3199,11 @@ class NoneAsConstantBuffer(IRNode):
 class ShapeAsConstantBuffer(IRNode):
     def __init__(self, shape):
         super().__init__()
-        self.shape = shape
+        self._shape = shape
+
+    @property
+    def shape(self):
+        return self._shape
 
     def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
         return free_unbacked_symbols(self.shape)
@@ -5636,9 +5648,10 @@ class FallbackKernel(ExternKernelAlloc):
                 unbacked_bindings,
             ) = cls.process_kernel(kernel, *args, **kwargs)
 
+        device = cls.find_device(tensor_args, example_output)
         if example_output is None:
             packed = cls(
-                NoneLayout(None),
+                NoneLayout(device),
                 kernel,
                 tensor_args,
                 non_tensor_args,
@@ -5647,9 +5660,7 @@ class FallbackKernel(ExternKernelAlloc):
             )
 
         else:
-            device = cls.find_device(tensor_args, example_output)
             assert device, "Not sure where to find device info"
-
             packed = cls(
                 MultiOutputLayout(device),
                 kernel,
