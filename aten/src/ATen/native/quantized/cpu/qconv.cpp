@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <algorithm>
 #include <cmath>
+#include <string>
 #include <vector>
 
 #include <ATen/core/Tensor.h>
@@ -35,7 +36,6 @@
 #endif
 
 #include <c10/util/irange.h>
-#include <c10/util/string_utils.h>
 
 namespace {
 // To have a sanity check for maximum matrix size.
@@ -1620,7 +1620,11 @@ static at::Tensor _quantized_convolution_onednn(
   // The functions from ideep are heavy because they have complex data structures for unified API
   // oneDNN version >= 3.1.0 is required.
   using ideep::tensor;
-  auto weights_desc = packed_weight.get_desc();
+  auto weight_grouped = packed_weight.make_grouped_weights(groups, /* is_deconv */false);
+  auto weights_desc = tensor::desc(weight_grouped.get_dims(), ideep::data_type::s8, ideep::format_tag::any);
+  if (groups > 1) {
+    weights_desc = weights_desc.to_grouped(groups);
+  }
   auto dst_desc = dst.get_desc();
   auto bias_desc = with_bias ?
       tensor::desc(expected_bias.get_dims(), ideep::data_type::f32, ideep::format_tag::any) :
@@ -1631,7 +1635,7 @@ static at::Tensor _quantized_convolution_onednn(
   if (act_zero_point != 0) {
     op_attr.set_zero_points_mask(DNNL_ARG_SRC, 0);
   }
-  int oc_per_group = packed_weight.get_dim(0) / groups;
+  int oc_per_group = weight_grouped.get_dim(0) / groups;
   int wei_scale_mask = ideep::utils::conv_weight_scale_mask(weight_scales.numel(), oc_per_group, groups, false);
   op_attr.set_scales_mask(DNNL_ARG_WEIGHTS, wei_scale_mask);
   if (output_scale != 1.0f) {
@@ -1657,7 +1661,7 @@ static at::Tensor _quantized_convolution_onednn(
   auto primitive = dnnl::convolution_forward(primitive_desc);
 
   // Reorder weight if needed
-  auto expected_weight = packed_weight.reorder_if_differ_in(primitive_desc.weights_desc());
+  auto expected_weight = weight_grouped.reorder_if_differ_in(primitive_desc.weights_desc());
 
   // Prepare args and execute primitive
   tensor scratchpad(primitive_desc.scratchpad_desc());
@@ -1844,15 +1848,15 @@ class QConvInt8ForBC final {
       int64_t output_zero_point) {
     if (kReluFused) {
       TORCH_WARN_ONCE(
-          "Arguments [stride, padding, dilation, groups] in ops.quantized.conv"
-          + c10::to_string(kSpatialDim) + "d_relu, " +
-          "have been removed, please update your model to remove these arguments.");
+          "Arguments [stride, padding, dilation, groups] in ops.quantized.conv" +
+              std::to_string(kSpatialDim),
+          "d_relu, have been removed, please update your model to remove these arguments.");
       return packed_weight->apply_relu(act, output_scale, output_zero_point);
     } else {
       TORCH_WARN_ONCE(
-          "Arguments [stride, padding, dilation, groups] in ops.quantized.conv"
-          + c10::to_string(kSpatialDim) + "d, " +
-          "have been removed, please update your model to remove these arguments.");
+          "Arguments [stride, padding, dilation, groups] in ops.quantized.conv",
+          std::to_string(kSpatialDim),
+          "d, have been removed, please update your model to remove these arguments.");
       return packed_weight->apply(act, output_scale, output_zero_point);
     }
   }

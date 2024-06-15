@@ -2,6 +2,7 @@
 PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_rewrite_assert_with_msg and test_rewrite_assert_without_msg)
 """
+
 # Owner(s): ["module: dynamo"]
 import collections
 import contextlib
@@ -22,6 +23,7 @@ from typing import Any, Dict, Iterator, List, Tuple
 from unittest import mock
 
 import numpy as np
+
 import torch
 
 import torch._dynamo.test_case
@@ -30,9 +32,11 @@ import torch._dynamo.utils
 
 import torch._functorch.config
 import torch.library
+import torch.utils._pytree as pytree
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import CompileCounter, rand_strided, same
+from torch._inductor.utils import fresh_inductor_cache
 from torch.nn import functional as F
 
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
@@ -400,7 +404,7 @@ class ListConfig:
         try:
             return ListConfig.ListIterator(self, resolve)
         except Exception:
-            raise AssertionError
+            raise AssertionError from None
 
     def __init__(self):
         self._content = [
@@ -1148,13 +1152,12 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     def test_reformer_train(self):
         with torch.enable_grad():
             cnt = self._reformer(nopython=False)
-        # cant inline torch.autograd.Function means graph break
-        if torch._dynamo.config.assume_static_by_default:
-            self.assertExpectedInline(cnt.frame_count, """1""")
-            self.assertExpectedInline(cnt.op_count, """5""")
-        else:
-            self.assertExpectedInline(cnt.frame_count, """1""")
-            self.assertExpectedInline(cnt.op_count, """5""")
+        expected_op_count = (
+            """11""" if torch._dynamo.config.inline_inbuilt_nn_modules else """5"""
+        )
+
+        self.assertExpectedInline(cnt.frame_count, """1""")
+        self.assertExpectedInline(cnt.op_count, expected_op_count)
 
     @disable_translation_validation_if_dynamic_shapes
     def test_longformer_chunk(self):
@@ -1607,7 +1610,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_model(inp)
         opt_model(inp)
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 12)
+
+        self.assertEqual(
+            15 if torch._dynamo.config.inline_inbuilt_nn_modules else 12, cnt.op_count
+        )
 
     def test_exec_import(self):
         def fn1():
@@ -1740,8 +1746,11 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_mod = torch._dynamo.optimize("eager")(mod)
         opt_mod(x)
 
-        self.assertGreaterEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
-        self.assertGreaterEqual(torch._dynamo.utils.counters["frames"]["total"], 2)
+        # Not sure what this test is testing. It was earlier graph breaking on
+        # __dict__, so the counter >= 2. With __dict__ support, there is no
+        # graph break.
+        self.assertGreaterEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
+        self.assertGreaterEqual(torch._dynamo.utils.counters["frames"]["total"], 1)
 
     @torch._dynamo.config.patch("suppress_errors", True)
     def test_guard_fail_tensor_bool(self):
@@ -3046,7 +3055,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(AssertionError, "torch.Size"):
             opt_f(args)
         self.assertEqual(
-            torch._dynamo.utils.counters["unimplemented"][
+            torch._dynamo.utils.counters["graph_break"][
                 "assert with non-string message"
             ],
             1,
@@ -4736,6 +4745,17 @@ def forward(self, primals_1, primals_2):
             compiled_str = str(e)
         self.assertEqual(orig_str, compiled_str)
 
+    def test_nn_module_callable(self):
+        class M(nn.Module):
+            def forward(self, x):
+                return x.sin()
+
+        def f(m):
+            return callable(m)
+
+        res = torch.compile(f, fullgraph=True)(M())
+        self.assertTrue(res)
+
     def test_stk_sdd_is_transposed(self):
         trigger_graph_break = False
 
@@ -4970,6 +4990,117 @@ def forward(self, primals_1, primals_2):
 
         opt_fn = torch.compile(fn, backend="eager")
         opt_fn(np.ones([3, 3]))
+
+    def test_issue126128(self):
+        def fn():
+            x = torch.randn(1, 10)
+            y = torch.randn(10, 1)
+            return torch.mm(x, y).sum()
+
+        def fn2():
+            x = torch.randn(10, 100)
+            y = torch.randn(100, 10)
+            return torch.mm(x, y).sum()
+
+        with fresh_inductor_cache():
+            torch.compile(fn)()
+
+        torch.compile(fn2)()
+
+    def test_enum(self):
+        class ExplicitEnum(str, Enum):
+            @classmethod
+            def _missing_(cls, value):
+                raise ValueError(
+                    f"{value} is not a valid {cls.__name__}, please select one of {list(cls._value2member_map_.keys())}"
+                )
+
+        class PaddingStrategy(ExplicitEnum):
+            LONGEST = "longest"
+            MAX_LENGTH = "max_length"
+            DO_NOT_PAD = "do_not_pad"
+
+        def fn(x):
+            a = PaddingStrategy("longest")
+            if a == PaddingStrategy.LONGEST:
+                return torch.sin(x)
+            return torch.cos(x)
+
+        x = torch.randn(3, 3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_hasattr_builtin(self):
+        class MyClass:
+            foo: int = 1
+
+        def func(x, m):
+            if getattr(type(m), "foo", 0):
+                return x + MyClass.foo
+            return x
+
+        opt_func = torch.compile(func, backend="eager", fullgraph=True)
+        m = MyClass()
+        x = torch.zeros(())
+        self.assertEqual(func(x, m), opt_func(x, m))
+        self.assertEqual(func(x, 0), opt_func(x, 0))
+
+    def test_grad(self):
+        def fn(x, y):
+            x._grad = y
+            return x.grad.data
+
+        x = torch.randn(4, requires_grad=True)
+        y = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(fn(x, y), opt_fn(x, y))
+
+    def test_nn_module_stack_bc(self):
+        from torch._dynamo.mutation_guard import GenerationTracker
+
+        def compiler(gm, *args):
+            module_stacks = [
+                node.meta.get("nn_module_stack", None) for node in gm.graph.nodes
+            ]
+            module_stacks, _ = pytree.tree_flatten(module_stacks)
+            module_stacks = [x for x in module_stacks if isinstance(x, str)]
+            for stack in module_stacks:
+                self.assertTrue("_module" not in stack)
+            return gm.forward
+
+        class SubMod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.submod1 = SubMod()
+                self.submod2 = SubMod()
+
+            def forward(self, x):
+                return self.submod1(x) + self.submod2(x)
+
+        mod = Mod()
+        opt_mod = torch.compile(mod, backend=compiler)
+        opt_mod(torch.randn(2, 2))
+
+        with torch._dynamo.config.patch(inline_inbuilt_nn_modules=True):
+            mod = Mod()
+            opt_mod = torch.compile(mod, backend=compiler)
+            opt_mod(torch.randn(2, 2))
+
+        # an example similar to Pippy usecase
+        mod = Mod()
+        GenerationTracker.tag(mod.submod1)
+        GenerationTracker.mark_class_dynamic(type(mod.submod1))
+        mod = Mod()
+        opt_mod = torch.compile(mod, backend=compiler)
+        opt_mod(torch.randn(2, 2))
 
 
 instantiate_parametrized_tests(ReproTests)

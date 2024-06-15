@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# mypy: allow-untyped-defs
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -18,13 +19,22 @@ from torch.distributed.elastic.rendezvous import (
     RendezvousClosedError,
     RendezvousError,
     RendezvousHandler,
+    RendezvousInfo,
     RendezvousParameters,
+    RendezvousStoreInfo,
     RendezvousTimeoutError,
 )
 
 from .utils import parse_rendezvous_endpoint
 from .etcd_store import EtcdStore, cas_delay
 
+__all__ = [
+    "EtcdRendezvousRetryableFailure",
+    "EtcdRendezvousRetryImmediately",
+    "EtcdRendezvousHandler",
+    "EtcdRendezvous",
+    "create_rdzv_handler"
+]
 
 _log_fmt = logging.Formatter("%(levelname)s %(asctime)s %(message)s")
 _log_handler = logging.StreamHandler(sys.stderr)
@@ -153,7 +163,8 @@ class EtcdRendezvousHandler(RendezvousHandler):
         logger.info("Creating EtcdStore as the c10d::Store implementation")
         store = self._rdzv_impl.setup_kv_store(rdzv_version)
 
-        return store, rank, world_size
+        bootstrap_store_info = RendezvousStoreInfo.build(rank, store)
+        return RendezvousInfo(store, rank, world_size, bootstrap_store_info)
 
     def is_closed(self):
         try:

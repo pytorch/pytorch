@@ -75,12 +75,13 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     slowTest,
     TestCase,
+    xfailIfTorchDynamo,
 )
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 from torch.utils.cpp_extension import load_inline
-from torch.utils.hooks import RemovableHandle
+from torch.utils.hooks import RemovableHandle  # noqa: TCH001
 
 
 def graph_desc(fn):
@@ -153,7 +154,7 @@ class TestAutograd(TestCase):
 
     def test_grad_mode_class_decoration(self):
         # Decorating class is deprecated and should not be used
-        with self.assertWarnsRegex(UserWarning, "Decorating classes is deprecated"):
+        with self.assertWarnsRegex(FutureWarning, "Decorating classes is deprecated"):
 
             @torch.no_grad()
             class Foo:
@@ -1340,6 +1341,23 @@ class TestAutograd(TestCase):
         a.register_hook(tensor_prehook)
 
         b.backward()
+
+    def test_accumulate_grad_posthooks_should_not_execute(self):
+        def tensor_prehook(g):
+            raise RuntimeError
+
+        def posthook(gO, gI):
+            raise RuntimeError
+
+        a = torch.tensor(1.0, requires_grad=True)
+        a.register_hook(tensor_prehook)
+        b = torch.tensor(1.0, requires_grad=True)
+        c = a.clone()
+        acc = c.grad_fn.next_functions[0][0]
+        acc.register_hook(posthook)
+
+        out = a + b + c
+        out.sum().backward(inputs=[b])
 
     def test_hook_edge_case_when_called_with_grad(self):
         # grad executes the tensor hooks of the next node but not
@@ -2612,7 +2630,7 @@ class TestAutograd(TestCase):
 
                 except UnrecoverableException:
                     self.assertFalse(torch.is_grad_enabled())
-                    raise SecondaryException
+                    raise SecondaryException from None
 
         @torch.enable_grad()
         def coro_enable_grad(n=10):
@@ -2624,7 +2642,7 @@ class TestAutograd(TestCase):
 
                 except UnrecoverableException:
                     self.assertTrue(torch.is_grad_enabled())
-                    raise SecondaryException
+                    raise SecondaryException from None
 
         with torch.enable_grad():
             coro = coro_no_grad()
@@ -5936,13 +5954,13 @@ Done""",
         b = torch.rand(2, 2, requires_grad=True, dtype=torch.float64)
 
         with self.assertWarnsRegex(
-            UserWarning, "get_numerical_jacobian was part of PyTorch's private API"
+            FutureWarning, "`get_numerical_jacobian` was part of PyTorch's private API"
         ):
             jacobian = get_numerical_jacobian(fn, (a, b), target=a, eps=1e-6)
         self.assertEqual(jacobian[0], 2 * torch.eye(4, dtype=torch.double))
 
         with self.assertWarnsRegex(
-            UserWarning, "get_numerical_jacobian was part of PyTorch's private API"
+            FutureWarning, "`get_numerical_jacobian` was part of PyTorch's private API"
         ):
             jacobian = get_numerical_jacobian(fn, (a, b), eps=1e-6)
         self.assertEqual(jacobian[0], 2 * torch.eye(4, dtype=torch.double))
@@ -5962,7 +5980,7 @@ Done""",
 
         outputs = fn(a, b)
         with self.assertWarnsRegex(
-            UserWarning, "get_analytical_jacobian was part of PyTorch's private API"
+            FutureWarning, "`get_analytical_jacobian` was part of PyTorch's private API"
         ):
             (
                 jacobians,
@@ -5990,7 +6008,7 @@ Done""",
 
         outputs = NonDetFunc.apply(a, 1e-6)
         with self.assertWarnsRegex(
-            UserWarning, "get_analytical_jacobian was part of PyTorch's private API"
+            FutureWarning, "`get_analytical_jacobian` was part of PyTorch's private API"
         ):
             (
                 jacobians,
@@ -6980,6 +6998,8 @@ for shape in [(1,), ()]:
         self.assertEqual(b_grad, c_grad)
         self.assertEqual(b_grad, d_grad)
 
+    # PYTORCH_TEST_WITH_DYNAMO=1 test fails on CI but can't repro locally
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/127115")
     def test_checkpointing_without_reentrant_dataparallel(self):
         """
         Verifies gradient correctness when checkpoint without reentrant autograd
@@ -7037,6 +7057,8 @@ for shape in [(1,), ()]:
         # should only call hook once
         self.assertEqual(count, 1)
 
+    # https://github.com/pytorch/pytorch/issues/127115
+    @xfailIfTorchDynamo
     def test_checkpointing_without_reentrant_arbitrary_input_output(self):
         """
         Ensures checkpointing without reentrant autograd works with functions
@@ -9502,6 +9524,13 @@ for shape in [(1,), ()]:
             y = f(a)
             memory_with_hooks = torch.cuda.memory_allocated()
             self.assertEqual(memory_with_hooks, memory_without_grad)
+
+    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    def test_scalar_grad_mixed_device(self):
+        x = torch.tensor(1.0, requires_grad=True)
+        y = torch.randn(2, 2, device="cuda")
+        out = x * y
+        out.sum().backward()
 
     def test_multi_grad_all_hooks(self):
         t1 = torch.rand(2, requires_grad=True)

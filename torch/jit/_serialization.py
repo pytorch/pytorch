@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Serialization.
 
 This module contains functionality for serializing TorchScript modules, notably:

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import collections
@@ -39,20 +40,26 @@ from typing import (
     Union,
     ValuesView,
 )
+from typing_extensions import Concatenate, ParamSpec
 from unittest import mock
 
 import sympy
-from typing_extensions import Concatenate, ParamSpec
 
 import torch
-import torch._export
 import torch.utils._pytree as pytree
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import detect_fake_mode
 from torch.autograd import DeviceType
 from torch.autograd.profiler_util import EventList
+from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.passes.shape_prop import ShapeProp
-from torch.utils._sympy.functions import CeilDiv, CleanDiv, FloorDiv, ModularIndexing
+from torch.utils._sympy.functions import (
+    CeilDiv,
+    CleanDiv,
+    FloorDiv,
+    Identity,
+    ModularIndexing,
+)
 from torch.utils._sympy.symbol import make_symbol, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from . import config
@@ -63,7 +70,36 @@ log = logging.getLogger(__name__)
 _T = TypeVar("_T")
 VarRanges = Dict[sympy.Expr, sympy.Expr]
 
-ALIGNMENT = 16
+GPU_ALIGN_BYTES = 16
+
+ALIGN_BYTES = 64
+assert (ALIGN_BYTES & (ALIGN_BYTES - 1)) == 0 and ALIGN_BYTES >= 8, "must be power of 2"
+
+
+def _align(nbytes):
+    """Round up to the nearest multiple of ALIGN_BYTES"""
+    return (nbytes + ALIGN_BYTES - 1) & -ALIGN_BYTES
+
+
+def _is_aligned(v: sympy.Expr):
+    """v can be statically proven to be a multiple of ALIGN_BYTES"""
+    if isinstance(v, (sympy.Add, sympy.Max)):
+        return all(map(_is_aligned, v.args))
+    return isinstance(v, align) or sympy.gcd(v, ALIGN_BYTES) == ALIGN_BYTES
+
+
+class align(sympy.Function):
+    """Symbolically round up to the nearest multiple of ALIGN_BYTES"""
+
+    nargs = (1,)
+    is_integer = True
+
+    @classmethod
+    def eval(cls, value):
+        if isinstance(value, (int, sympy.Integer)):
+            return _align(int(value))
+        if _is_aligned(value):
+            return value
 
 
 def do_bench_using_profiling(fn: Callable[[], Any], warmup=25, rep=100) -> float:
@@ -153,10 +189,14 @@ def has_torchvision_roi_align() -> bool:
     try:
         from torchvision.ops import roi_align  # noqa: F401
 
+        torch._C._dispatch_has_kernel_for_dispatch_key("torchvision::nms", "Meta")
         return roi_align is not None and hasattr(
             getattr(torch.ops, "torchvision", None), "roi_align"
         )
     except ImportError:
+        return False
+    except RuntimeError as e:
+        assert "torchvision::nms does not exist" in str(e)
         return False
 
 
@@ -188,7 +228,7 @@ def ceildiv(
     numer: Union[int, sympy.Expr], denom: Union[int, sympy.Expr]
 ) -> Union[int, sympy.Expr]:
     if isinstance(numer, sympy.Expr) or isinstance(denom, sympy.Expr):
-        return CeilDiv(numer, denom)
+        return CeilDiv(sympy.sympify(numer), sympy.sympify(denom))
     # TODO: There is a bug in a call to this function, to repro:
     # python benchmarks/dynamo/huggingface.py --inductor -d cuda --accuracy
     # --amp --only YituTechConvBert --dynamic-shapes
@@ -339,7 +379,7 @@ def print_performance(
 ):
     timings = torch.tensor([timed(fn, args, times, device) for _ in range(repeat)])
     took = torch.median(timings) / times
-    print(f"{took/baseline:.6f}")
+    print(f"{took / baseline:.6f}")
     return took
 
 
@@ -386,7 +426,7 @@ P = ParamSpec("P")
 RV = TypeVar("RV", covariant=True)
 
 
-class CachedMethod(Generic[P, RV], Protocol):
+class CachedMethod(Protocol, Generic[P, RV]):
     @staticmethod
     def clear_cache(self) -> None:
         ...
@@ -540,7 +580,7 @@ def sympy_str(expr: sympy.Expr) -> str:
     if isinstance(expr, sympy.Mul):
         return " * ".join(map(sympy_str, expr.args))
 
-    if isinstance(expr, (ModularIndexing, CleanDiv, FloorDiv)):
+    if isinstance(expr, (ModularIndexing, CleanDiv, FloorDiv, Identity)):
         return f"{expr.func.__name__}({', '.join(map(sympy_str, expr.args))})"
     return str(expr)
 
@@ -569,6 +609,10 @@ def sympy_index_symbol_with_prefix(prefix: SymT, idx: int) -> sympy.Symbol:
     # NOTE: shape symbols are positive (> 0), but index variables are only
     # non-negative (>= 0).
     return make_symbol(prefix, idx, integer=True, nonnegative=True)
+
+
+def generate_assert(check):
+    return (check or config.debug_index_asserts) and config.assert_indirect_indexing
 
 
 def sympy_index_symbol(name: str) -> sympy.Symbol:
@@ -726,6 +770,8 @@ def fresh_inductor_cache(cache_entries=None):
     except Exception:
         log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
         raise
+    finally:
+        clear_inductor_caches()
 
 
 def argsort(seq) -> List[int]:
@@ -871,6 +917,21 @@ class IndentedBuffer:
         res.writelines(self._lines)
         res.writelines(other._lines)
         return res
+
+
+class FakeIndentedBuffer(IndentedBuffer):
+    def __init__(self):
+        super().__init__()
+
+    def __getattribute__(self, name):
+        if name == "__class__":  # Allow access to the class attribute
+            return object.__getattribute__(self, name)
+        raise RuntimeError(
+            f"Tried to call self.{name} on FakeIndentedBuffer. This buffer"
+            "is currently used on TritonTemplateKernel to prevent actual"
+            "writes to the body without explicitly specifying the body with"
+            "`TritonTemplateKernel.set_subgraph_body(name)`"
+        )
 
 
 @contextlib.contextmanager
@@ -1051,22 +1112,14 @@ class DebugDirManager:
 def run_and_get_code(fn, *args, **kwargs):
     from .graph import GraphLowering
 
-    compile_to_module = GraphLowering.compile_to_module
     source_codes: List[str] = []
 
-    def patched_compile_to_module(self):
-        mod = compile_to_module(self)
-        with open(mod.__file__) as f:
-            source_codes.append(f.read())
-        return mod
+    def save_output_code(code: str):
+        source_codes.append(code)
 
-    # If FX code caching is enabled, a hit prevents getting the code.
-    with config.patch({"fx_graph_cache": False}):
-        with mock.patch.object(
-            GraphLowering, "compile_to_module", patched_compile_to_module
-        ):
-            torch._dynamo.reset()
-            result = fn(*args, **kwargs)
+    with mock.patch.object(GraphLowering, "save_output_code", save_output_code):
+        torch._dynamo.reset()
+        result = fn(*args, **kwargs)
     return result, source_codes
 
 
@@ -1075,6 +1128,9 @@ def get_code(fn, *args, **kwargs):
     from .graph import GraphLowering
 
     source_codes: List[str] = []
+
+    def save_output_code(code: str):
+        source_codes.append(code)
 
     def patched_compile_to_module(self: GraphLowering):
         class DummyModule:
@@ -1091,18 +1147,17 @@ def get_code(fn, *args, **kwargs):
             self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
         )
         # Skip all the actual compiling.
+        nonlocal save_output_code
+        save_output_code(code)
 
-        source_codes.append(code)
         return DummyModule()
 
-    # If FX code caching is enabled, a hit prevents getting the code.
-    with config.patch({"fx_graph_cache": False}):
-        with mock.patch.object(
-            GraphLowering, "compile_to_module", patched_compile_to_module
-        ):
-            torch._dynamo.reset()
-            # Note the return here is None
-            _ = fn(*args, **kwargs)
+    with mock.patch.object(
+        GraphLowering, "compile_to_module", patched_compile_to_module
+    ), mock.patch.object(GraphLowering, "save_output_code", save_output_code):
+        torch._dynamo.reset()
+        # Note the return here is None
+        _ = fn(*args, **kwargs)
 
     return source_codes
 
@@ -1348,7 +1403,8 @@ def pass_execution_and_save(func, gm, inp, msg):
         print(f"Before:\n{gm.graph}", file=f)
         print(gm.graph, file=before_io)
         start_time = datetime.now()
-        func(gm.graph)
+        with GraphTransformObserver(gm, msg, config.trace.log_url_for_graph_xform):
+            func(gm.graph)
         time_elapsed = datetime.now() - start_time
         # recompile graph
         stable_topological_sort(gm.graph)
@@ -1446,6 +1502,7 @@ def get_cloned_parameter_buffer_name(name: str):
 
 
 def is_gpu(device: str):
+    assert isinstance(device, str) or device is None, device
     return device in ["cuda", "xpu"]
 
 
@@ -1496,7 +1553,7 @@ def dump_node_schedule(node_schedule):
     An API that can be used in pdb to dump a node_schedule.
     Right mainly dump the read/write dependencies but can add more as needed.
     """
-    from torch._inductor.codegen.triton import DisableReduction, EnableReduction
+    from torch._inductor.codegen.simd import DisableReduction, EnableReduction
     from torch._inductor.scheduler import SchedulerNode
 
     print(f"Node schedule with {len(node_schedule)} nodes")
@@ -1510,6 +1567,7 @@ def dump_node_schedule(node_schedule):
             is_red = node.is_reduction()
             print(f"{'red' if is_red else 'pw'} scheduler node")
             if is_red:
+                assert node.node is not None
                 print(f"original reduction hint {node.node.data.reduction_hint}")  # type: ignore[attr-defined]
             print("ReadDep:")
             for dep in node.read_writes.reads:
@@ -1528,7 +1586,9 @@ def tensor_is_aligned(tensor: torch.Tensor):
     # but symbolic storage_offsets are. For consistency, we suppress guard creation
     # upon performing this check: that ensures that we don't add recompiles when we
     # add this logic.
-    return (tensor.storage_offset() * get_dtype_size(tensor.dtype)) % ALIGNMENT == 0
+    return (
+        tensor.storage_offset() * get_dtype_size(tensor.dtype)
+    ) % GPU_ALIGN_BYTES == 0
 
 
 def should_assume_input_aligned(example_input: torch.Tensor):
@@ -1618,23 +1678,32 @@ def aoti_compile_with_persistent_cache(
     """
     Compile the given function with persistent cache for AOTI eager mode.
     """
-    flattened_inputs = pytree.arg_tree_leaves(*args, **kwargs)
-    assert all(
-        isinstance(input, torch.Tensor) for input in flattened_inputs
-    ), "Only support tensor for now"
     assert not dynamic, "Only support static shape for now"
+    from torch._export import aot_compile
+
+    type_to_torch_dtype = {int: torch.int32, float: torch.float, bool: torch.bool}
+    supported_scalar_types = tuple(type_to_torch_dtype.keys())
+    flattened_inputs = pytree.arg_tree_leaves(*args, **kwargs)
+    if not all(
+        isinstance(input, (supported_scalar_types, torch.Tensor))
+        for input in flattened_inputs
+    ):
+        raise NotImplementedError("Only support tensor, int, float, bool for now")
 
     persistent_cache = aoti_eager_cache_dir(ns, device_type)
-    persistent_cache.mkdir(parents=True, exist_ok=True)
+    if not persistent_cache.exists():
+        persistent_cache.mkdir(parents=True)
+
     persistent_cache_lib = persistent_cache / "lib"
-    persistent_cache_lib.mkdir(parents=True, exist_ok=True)
+    if not persistent_cache_lib.exists():
+        persistent_cache_lib.mkdir()
 
     with mock.patch.dict(
         os.environ,
         {"TORCHINDUCTOR_CACHE_DIR": persistent_cache_lib.absolute().as_posix()},
     ):
         try:
-            kernel_lib_path = torch._export.aot_compile(
+            kernel_lib_path = aot_compile(
                 f,
                 args,
                 kwargs,
@@ -1649,18 +1718,30 @@ def aoti_compile_with_persistent_cache(
             )
 
             kernel_metadata_items = []
-            for input_tensor in flattened_inputs:
+            for input in flattened_inputs:
                 # TODO(Eikan): To add dynamic support
                 metadata: Dict[str, Any] = {}
                 metadata["is_dynamic"] = dynamic
-                metadata["device_type"] = f"{input_tensor.device.type}"
-                if is_cpu_device([input_tensor]):
-                    metadata["device_index"] = -1
+
+                if isinstance(input, torch.Tensor):
+                    metadata["device_type"] = f"{input.device.type}"
+                    if is_cpu_device([input]):
+                        metadata["device_index"] = -1
+                    else:
+                        metadata["device_index"] = input.device.index
+                    metadata["dtype"] = f"{input.dtype}"
+                    metadata["sizes"] = list(input.size())
+                    metadata["strides"] = list(input.stride())
                 else:
-                    metadata["device_index"] = input_tensor.device.index
-                metadata["dtype"] = f"{input_tensor.dtype}"
-                metadata["sizes"] = list(input_tensor.size())
-                metadata["strides"] = list(input_tensor.stride())
+                    assert isinstance(input, supported_scalar_types)
+                    # Scalar tensor
+                    metadata["device_type"] = device_type
+                    metadata["device_index"] = -1 if device_type == "cpu" else 0
+                    metadata["dtype"] = f"{type_to_torch_dtype[type(input)]}"
+                    metadata["sizes"] = []
+                    metadata["strides"] = []
+                    metadata["scalar_value"] = input
+
                 kernel_metadata_items.append(metadata)
 
             kernel_meta_info: Dict[str, Any] = {}
@@ -1696,3 +1777,26 @@ def aoti_compile_with_persistent_cache(
             return kernel_lib_path
         except Exception as e:
             return ""
+
+
+def run_and_get_cpp_code(fn, *args, **kwargs):
+    # We use the patch context manager instead of using it as a decorator.
+    # In this way, we can ensure that the attribute is patched and unpatched correctly
+    # even if this run_and_get_cpp_code function is called multiple times.
+    with unittest.mock.patch.object(config, "debug", True):
+        torch._dynamo.reset()
+        import io
+        import logging
+
+        log_capture_string = io.StringIO()
+        ch = logging.StreamHandler(log_capture_string)
+        from torch._inductor.graph import output_code_log
+
+        output_code_log.addHandler(ch)
+        prev_level = output_code_log.level
+        output_code_log.setLevel(logging.DEBUG)
+        result = fn(*args, **kwargs)
+        s = log_capture_string.getvalue()
+        output_code_log.setLevel(prev_level)
+        output_code_log.removeHandler(ch)
+    return result, s
