@@ -22,6 +22,11 @@ from .constant import ConstantVariable
 if TYPE_CHECKING:
     from torch._guards import Source
 
+try:
+    from torch.distributed._composable.fsdp import _fsdp_param_group
+except ModuleNotFoundError:
+    _fsdp_param_group = None
+
 
 def wrap_bound_arg(tx, val, source=None):
     # Source propagation is best effort since not every object we encounter has a source to begin with.
@@ -339,9 +344,8 @@ class UserMethodVariable(UserFunctionVariable):
                     tx, self.fn.__name__, args, kwargs, constant=self.is_constant
                 )
         elif (
-            torch.distributed.is_available()
-            and self.fn
-            is torch.distributed._composable.fsdp._fsdp_param_group.FSDPParamGroup.use_training_state
+            _fsdp_param_group is not None
+            and _fsdp_param_group.FSDPParamGroup.use_training_state
         ):
             return variables.TorchCtxManagerClassVariable(self.fn).call_function(
                 tx, (self.obj, *args), kwargs

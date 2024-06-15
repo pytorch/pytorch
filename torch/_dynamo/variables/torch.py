@@ -51,6 +51,11 @@ try:
 except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
 
+try:
+    from torch.distributed._composable.fsdp import _fsdp_param_group
+except ModuleNotFoundError:
+    _fsdp_param_group = None  # type: ignore[assignment]
+
 log = logging.getLogger(__name__)
 
 supported_ctx_manager_classes = dict.fromkeys(
@@ -302,9 +307,8 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 tx, args[0].as_python_constant()
             )
         elif (
-            torch.distributed.is_available()
-            and self.value
-            is torch.distributed._composable.fsdp._fsdp_param_group.FSDPParamGroup.use_training_state
+            _fsdp_param_group is not None
+            and self.value is _fsdp_param_group.FSDPParamGroup.use_training_state
         ):
             assert len(args) == 2
             return FSDPParamGroupUseTrainingStateVariable.create(
