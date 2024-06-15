@@ -2147,25 +2147,35 @@ Tensor& take_along_dim_out(const Tensor& self, const Tensor& indices, std::optio
   return at::gather_out(result, self.view(-1), 0, indices.view(-1));
 }
 
-Tensor put_along_dim(const Tensor& self, const Tensor& indices, const Tensor& values, c10::optional<int64_t> opt_dim) {
+Tensor put_along_dim(
+    const Tensor& self,
+    const Tensor& indices,
+    const Tensor& values,
+    c10::optional<int64_t> opt_dim) {
   checkDevice("torch.put_along_dim():", {self, indices, values}, self.device());
-  // TODO Broadcasting and checks
-  if (opt_dim.has_value()) {
-	auto result = at::scatter(self, opt_dim.value(), indices, values);
-    return result;
-  } else {
-	// TODO
-	return self;
+  std::cout << "in put_along_dim variant" << std::endl;
+  TORCH_CHECK(opt_dim.has_value(), "None dim is not supported.");
+  auto new_indices_sizes = DimVector(indices.sizes());
+  for (int i = 0; i < indices.dim(); i++) {
+    if (i == opt_dim.value()) {
+      new_indices_sizes[i] = indices.size(i);
+    } else {
+      new_indices_sizes[i] = self.size(i);
+    }
   }
+  auto new_indices = at::broadcast_to(indices, new_indices_sizes);
+  auto new_values = at::broadcast_to(values, new_indices_sizes);
+  auto result = at::scatter(self, opt_dim.value(), new_indices, new_values);
+  return result;
 }
 
 Tensor& put_along_dim_out(const Tensor& self, const Tensor& indices, const Tensor& values, c10::optional<int64_t> opt_dim, Tensor& result) {
   checkDevice("torch.put_along_dim():", {self, indices, values}, self.device());
   // TODO Broadcasting and checks
   if (opt_dim.has_value()) {
-	result = at::scatter(self, opt_dim.value(), indices, values);
+    result = at::scatter(self, opt_dim.value(), indices, values);
   } else {
-	// TODO // dim is None
+    // TODO // dim is None
   }
   return result;
 }
