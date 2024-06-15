@@ -16,10 +16,7 @@ import torch.distributed.distributed_c10d as c10d
 import torch.distributed.rpc as rpc
 from torch.distributed import DistError, DistNetworkError, DistStoreError
 from torch.testing._internal.common_distributed import MultiThreadedTestCase
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-)
+from torch.testing._internal.common_utils import instantiate_parametrized_tests
 
 if not dist.is_available():
     print("torch.distributed not available, skipping tests", file=sys.stderr)
@@ -841,19 +838,11 @@ class TestPythonStore(TestCase):
 
 
 class TestMultiThreadedWait(MultiThreadedTestCase):
-    # TODO (xilunwu): Use less hacky means of instantiating stores.
-    # Note, stores accumulate values per test.
-    stores = [
-        dist.FileStore(tempfile.NamedTemporaryFile(delete=False).name, 1),
-        dist.HashStore(),
-        dist.PrefixStore(
-            "pre", dist.FileStore(tempfile.NamedTemporaryFile(delete=False).name, 1)
-        ),
-        create_tcp_store(use_libuv=False),
-        create_tcp_store(use_libuv=True),
-        dist.PrefixStore("pre", create_tcp_store(use_libuv=False)),
-        dist.PrefixStore("pre", create_tcp_store(use_libuv=True)),
-    ]
+    file_store = dist.FileStore(tempfile.NamedTemporaryFile(delete=False).name, 1)
+    hash_store = dist.HashStore()
+
+    tcp_store = create_tcp_store(use_libuv=False)
+    tcp_store_uv = create_tcp_store(use_libuv=True)
 
     @property
     def world_size(self):
@@ -863,16 +852,46 @@ class TestMultiThreadedWait(MultiThreadedTestCase):
         super().setUp()
         self._spawn_threads()
 
-    # Iterates over self.stores, keep 7 in sync with len(self.stores).
-    @parametrize("i", range(7))
-    def test_wait(self, i):
-        store = self.stores[i]
+    def _test_wait(self, store):
         store.set_timeout(timedelta(seconds=2))
         if dist.get_rank() == 0:
             store.wait(["key1"])
             self.assertEqual(b"value1", store.get("key1"))
         if dist.get_rank() == 1:
             store.set("key1", "value1")
+
+    def test_wait_hash_store(self):
+        self._test_wait(self.hash_store)
+
+    def test_wait_file_store(self):
+        self._test_wait(self.file_store)
+
+    def test_wait_prefix_file_store(self):
+        store = dist.PrefixStore("pre", self.file_store)
+        self._test_wait(store)
+
+    def _test_wait_tcp_store(self, master_store):
+        store = (
+            master_store
+            if dist.get_rank() == 0
+            else dist.TCPStore(
+                host_name=master_store.host,
+                port=master_store.port,
+                is_master=False,
+                wait_for_workers=False,
+                use_libuv=False,
+            )
+        )
+        self._test_wait(store)
+
+        prefix_store = dist.PrefixStore("pre", store)
+        self._test_wait(prefix_store)
+
+    def test_wait_tcp_store(self):
+        self._test_wait_tcp_store(self.tcp_store)
+
+    def test_wait_tcp_store_uv(self):
+        self._test_wait_tcp_store(self.tcp_store_uv)
 
 
 instantiate_parametrized_tests(TestMultiThreadedWait)

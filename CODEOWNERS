@@ -57,6 +57,7 @@ nn/qat/ @jerryzh168
 /.ci/docker/ @jeffdaily
 /.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @shunting314 @bertmaher @jeffdaily @jataylo @jithunnair-amd @pruthvistony
 /.ci/docker/ci_commit_pins/triton-rocm.txt @jeffdaily @jataylo @jithunnair-amd @pruthvistony
+/.ci/docker/ci_commit_pins/triton-xpu.txt @EikanWang @gujinghui
 
 # Github Actions
 # This list is for people wanting to be notified every time there's a change
@@ -131,6 +132,15 @@ caffe2/core/hip @jeffdaily @jithunnair-amd
 caffe2/operators/hip @jeffdaily @jithunnair-amd
 caffe2/operators/rnn/hip @jeffdaily @jithunnair-amd
 caffe2/utils/hip @jeffdaily @jithunnair-amd
+
+# XPU-specific files
+/aten/src/ATen/xpu/ @EikanWang @gujinghui
+/c10/xpu/ @EikanWang @gujinghui
+/torch/csrc/xpu/ @EikanWang @gujinghui
+/torch/xpu/ @EikanWang @gujinghui
+/test/xpu/ @EikanWang @gujinghui
+/test/test_xpu.py @EikanWang @gujinghui
+/third_party/xpu.txt @EikanWang @gujinghui
 
 # torch.export
 /torch/export/ @avikchaudhuri @gmagogsfm @tugsbayasgalan @zhxchen17
