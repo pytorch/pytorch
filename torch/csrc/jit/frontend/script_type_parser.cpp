@@ -137,10 +137,10 @@ std::optional<std::pair<TypePtr, int32_t>> ScriptTypeParser::parseBroadcastList(
   }
 
   if (expr.kind() != TK_SUBSCRIPT)
-    return c10::nullopt;
+    return std::nullopt;
   auto subscript = Subscript(expr);
   if (subscript.value().kind() != TK_VAR)
-    return c10::nullopt;
+    return std::nullopt;
   auto var = Var(subscript.value());
   auto subscript_exprs = subscript.subscript_exprs();
 
@@ -151,10 +151,10 @@ std::optional<std::pair<TypePtr, int32_t>> ScriptTypeParser::parseBroadcastList(
       TypePtr opt_type = OptionalType::create(broadcast_list->first);
       return std::pair<TypePtr, int32_t>(opt_type, broadcast_list->second);
     } else {
-      return c10::nullopt;
+      return std::nullopt;
     }
   } else if (var.name().name().find("BroadcastingList") != 0) {
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   if (subscript_exprs.size() != 1)
@@ -352,7 +352,7 @@ std::vector<IValue> ScriptTypeParser::evaluateDefaults(
 
   CompilationUnit cu;
   cu.define(
-      c10::nullopt,
+      std::nullopt,
       /*properties=*/{},
       /*propResolvers=*/{},
       {def},
@@ -407,7 +407,7 @@ std::vector<Argument> ScriptTypeParser::parseArgsFromDecl(
     auto decl_arg = *it;
 
     TypePtr type;
-    std::optional<int32_t> N = c10::nullopt;
+    std::optional<int32_t> N = std::nullopt;
     if (!decl_arg.type().present()) {
       // If this param doesn't have a type, default to "tensor"
       type = TensorType::getInferred();
@@ -421,7 +421,7 @@ std::vector<Argument> ScriptTypeParser::parseArgsFromDecl(
         type = parseTypeFromExpr(decl_arg.type().get());
       }
     }
-    std::optional<IValue> default_value = c10::nullopt;
+    std::optional<IValue> default_value = std::nullopt;
     if (decl_arg.defaultValue().present()) {
       default_value = *defaults_it++;
     }
@@ -431,7 +431,7 @@ std::vector<Argument> ScriptTypeParser::parseArgsFromDecl(
         N,
         default_value,
         decl_arg.kwarg_only(),
-        /*alias_info=*/c10::nullopt);
+        /*alias_info=*/std::nullopt);
     retval.push_back(arg);
   }
   return retval;
@@ -455,8 +455,8 @@ std::vector<Argument> ScriptTypeParser::parseReturnFromDecl(const Decl& decl) {
   return {Argument(
       "",
       parsed_type,
-      /*N =*/c10::nullopt,
-      /*default_value =*/c10::nullopt,
+      /*N =*/std::nullopt,
+      /*default_value =*/std::nullopt,
       /*kwarg_only =*/false)};
 }
 FunctionSchema ScriptTypeParser::parseSchemaFromDef(
