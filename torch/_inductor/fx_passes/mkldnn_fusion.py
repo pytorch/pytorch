@@ -790,9 +790,9 @@ if torch._C._has_mkldnn:
             add_node = match.output_node()
             linear_node = add_node.args[0]
             packed_weight_node = linear_node.args[1]
-            assert packed_weight_node.name == "_reorder_linear_weight"
+            assert packed_weight_node.target == mkldnn._reorder_linear_weight
             transpose_weight_node = packed_weight_node.args[0]
-            assert transpose_weight_node.name == "permute_default"
+            assert transpose_weight_node.target == aten.permute.default
             weight_meta = transpose_weight_node.args[0].meta.get("val")
             bias_node = add_node.args[1]
             if isinstance(bias_node, int):

@@ -5,8 +5,7 @@
 
 namespace py = pybind11;
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 PySavedVariableHooks::PySavedVariableHooks(
     py::function& pack_hook,
     py::function& unpack_hook)
@@ -65,14 +64,13 @@ void PyDefaultSavedVariableHooks::push_hooks(
 }
 
 void PyDefaultSavedVariableHooks::pop_hooks() {
-  auto [pack_hook, unpack_hook] = at::SavedTensorDefaultHooks::get_hooks();
+  auto [pack_hook, unpack_hook] = at::SavedTensorDefaultHooks::pop_hooks();
   TORCH_INTERNAL_ASSERT(pack_hook != nullptr && unpack_hook != nullptr);
   if (Py_IsInitialized()) {
     py::gil_scoped_acquire gil;
     Py_XDECREF(pack_hook);
     Py_XDECREF(unpack_hook);
   }
-  at::SavedTensorDefaultHooks::pop_hooks();
 }
 
 std::unique_ptr<SavedVariableHooks> PyDefaultSavedVariableHooks::get_hooks() {
@@ -86,5 +84,4 @@ std::unique_ptr<SavedVariableHooks> PyDefaultSavedVariableHooks::get_hooks() {
   return std::make_unique<PySavedVariableHooks>(pack_hook_, unpack_hook_);
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

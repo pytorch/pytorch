@@ -23,6 +23,9 @@ from torch.export.exported_program import (
 from torch.fx._symbolic_trace import is_fx_tracing
 from torch.utils._pytree import GetAttrKey, SequenceKey
 
+from ._remove_effect_tokens_pass import _remove_effect_tokens
+
+
 __all__ = ["InterpreterModule", "UnflattenedModule", "unflatten", "FlatArgsAdapter"]
 
 
@@ -485,6 +488,7 @@ def unflatten(
         An instance of :class:`UnflattenedModule`, which has the same module
         hierarchy as the original eager module pre-export.
     """
+    module = _remove_effect_tokens(module)
     return UnflattenedModule(module, flat_args_adapter)
 
 
@@ -731,13 +735,19 @@ class _ModuleFrame:
                     )
                     if isinstance(arg, ConstantArgument):
                         continue
-                    flat_arg_node.meta = copy.copy(self.seen_nodes[arg.name].meta)
-                    self.node_to_placeholder[self.seen_nodes[arg.name]] = flat_arg_node
+
+                    if arg.name in self.seen_nodes:
+                        flat_arg_node.meta = copy.copy(self.seen_nodes[arg.name].meta)
+                        self.node_to_placeholder[
+                            self.seen_nodes[arg.name]
+                        ] = flat_arg_node
 
             with self.parent.graph.inserting_before(self.parent_call_module):
                 input_nodes: List[Optional[torch.fx.Node]] = []
                 for input in signature.inputs:
                     if isinstance(input, ConstantArgument) and input.value is None:
+                        input_nodes.append(None)
+                    elif input.name not in self.seen_nodes:
                         input_nodes.append(None)
                     else:
                         assert isinstance(input, (TensorArgument, SymIntArgument))
@@ -801,18 +811,32 @@ class _ModuleFrame:
         if signature is not None and self.parent is not None:
             for output in signature.outputs:
                 if isinstance(output, (TensorArgument, SymIntArgument)):
-                    orig_outputs.append(self.seen_nodes[output.name])
+                    if output.name in self.seen_nodes:
+                        orig_outputs.append(self.seen_nodes[output.name])
+                    else:
+                        orig_outputs.append(None)
                 else:
                     raise RuntimeError(
                         f"Unsupported data type for output node: {output}"
                     )
 
+            def get_actual_output_node(output):
+                if output is None:
+                    return None
+
+                seen_node = self.seen_nodes[output.name]
+                if seen_node in self.node_map:
+                    return self.node_map[seen_node]
+                elif seen_node in self.node_to_placeholder:
+                    return self.node_to_placeholder[seen_node]
+                else:
+                    raise RuntimeError(
+                        f"Could not find output node {output}. Graph: {self.graph}"
+                    )
+
             tree_out_node = _generate_unflatten(
                 self.module,
-                tuple(
-                    self.node_map[self.seen_nodes[output.name]]
-                    for output in orig_outputs
-                ),
+                tuple(get_actual_output_node(output) for output in orig_outputs),
                 signature.out_spec,
             )
             parent_out: Optional[torch.fx.Node] = _generate_flatten(
@@ -852,6 +876,8 @@ class _ModuleFrame:
             self.parent.node_map[orig_outputs[0]] = parent_out
         else:
             for i, orig_output in enumerate(orig_outputs):
+                if orig_output is None:
+                    continue
                 # Use Proxy to record getitem access.
                 proxy_out = torch.fx.Proxy(parent_out)[i].node  # type: ignore[index]
                 proxy_out.meta["val"] = orig_output.meta.get("val")
