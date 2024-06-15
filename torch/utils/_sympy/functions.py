@@ -143,15 +143,13 @@ class FloorDiv(sympy.Function):
         if isinstance(base, FloorDiv):
             return FloorDiv(base.args[0], base.args[1] * divisor)
 
-        # gcd in sympy is over polynomials, so you'll end up with rationals if
-        # you do this.  Don't.
-        """
+        # Expands (x + y) // b into x // b + y // b.
+        # This only works if floor is an identity, i.e. x / b is an integer.
         if isinstance(base, sympy.Add):
-            for a in base.args:
-                gcd = sympy.gcd(a, divisor)
-                if gcd == divisor:
-                    return FloorDiv(base - a, divisor) + a / gcd
-        """
+            for term in base.args:
+                quotient = term / divisor
+                if quotient.is_integer:
+                    return FloorDiv(base - term, divisor) + quotient
 
         try:
             gcd = sympy.gcd(base, divisor)
