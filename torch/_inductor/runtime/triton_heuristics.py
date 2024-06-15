@@ -50,9 +50,9 @@ except ImportError:
 
 if triton is not None:
     from triton import Config
+    from triton.compiler import CompiledKernel
     from triton.runtime.autotuner import OutOfResources
     from triton.runtime.jit import KernelInterface
-    from triton.compiler import CompiledKernel
 
     try:
         from triton.compiler.compiler import ASTSource
