@@ -3553,7 +3553,9 @@ else:
     # FIXME: move to test indexing
     # The test fails for zero-dimensional tensors on XLA
     @onlyNativeDeviceTypes
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16,
+                                       torch.float8_e4m3fn, torch.float8_e4m3fnuz,
+                                       torch.float8_e5m2, torch.float8_e5m2fnuz))
     def test_index_select(self, device, dtype):
         num_src, num_out = 3, 5
 
@@ -3563,10 +3565,11 @@ else:
 
         def ref_index_select(src, dim, idx):
             # bfloat16 is just used on GPU, so it's not supported on numpy
-            if dtype == torch.bfloat16:
+            gpu_dtypes = (torch.bfloat16, torch.float8_e5m2, torch.float8_e5m2fnuz, torch.float8_e4m3fn, torch.float8_e4m3fnuz)
+            if dtype in gpu_dtypes:
                 src = src.float()
             out = torch.from_numpy(np.take(src.cpu().numpy(), idx.cpu().numpy(), axis=dim))
-            if dtype == torch.bfloat16:
+            if dtype in gpu_dtypes:
                 out = out.to(device=device, dtype=dtype)
             return out
 
@@ -6381,7 +6384,8 @@ else:
 
     @dtypes(*all_types_and_complex_and(
         torch.bool, torch.half, torch.bfloat16, torch.complex32,
-        torch.uint16, torch.uint32, torch.uint64))
+        torch.uint16, torch.uint32, torch.uint64, torch.float8_e4m3fn,
+        torch.float8_e4m3fnuz, torch.float8_e5m2, torch.float8_e5m2fnuz))
     def test_item(self, device, dtype):
         if torch.device(device).type == 'xla' and dtype in [torch.uint16, torch.uint32, torch.uint64]:
             self.skipTest('uint16,32,64 not implemented on XLA')
