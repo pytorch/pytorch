@@ -2170,11 +2170,15 @@ Tensor put_along_dim(
     const Tensor& values,
     c10::optional<int64_t> opt_dim) {
   checkDevice("torch.put_along_dim():", {self, indices, values}, self.device());
-  std::cout << "in put_along_dim variant" << std::endl;
-  TORCH_CHECK(opt_dim.has_value(), "None dim is not supported.");
-  auto [new_indices, new_values] = _put_along_dim_helper(self, indices, values, opt_dim.value());
-  auto result = at::scatter(self, opt_dim.value(), new_indices, new_values);
-  return result;
+  if (opt_dim.has_value()) {
+    TORCH_CHECK(opt_dim.has_value(), "None dim is not supported.");
+    auto [new_indices, new_values] = _put_along_dim_helper(self, indices, values, opt_dim.value());
+    return at::scatter(self, opt_dim.value(), new_indices, new_values);
+  } else {
+    TORCH_CHECK(indices.dim() == 1, "when axis=None, `indices` must have a single dimension");
+    auto result = at::scatter(self.flatten(), 0, indices, values);
+    return result.reshape(self.sizes());
+  }
 }
 
 Tensor& put_along_dim_out(const Tensor& self, const Tensor& indices, const Tensor& values, c10::optional<int64_t> opt_dim, Tensor& result) {
@@ -2183,7 +2187,9 @@ Tensor& put_along_dim_out(const Tensor& self, const Tensor& indices, const Tenso
     auto [new_indices, new_values] = _put_along_dim_helper(self, indices, values, opt_dim.value());
     at::scatter_out(result, self, opt_dim.value(), indices, values);
   } else {
-    // TODO // dim is None
+    TORCH_CHECK(indices.dim() == 1, "when axis=None, `indices` must have a single dimension");
+    at::scatter_out(result, self.flatten(), 0, indices, values);
+    result = result.reshape(self.sizes());
   }
   return result;
 }
