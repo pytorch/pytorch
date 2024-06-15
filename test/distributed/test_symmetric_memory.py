@@ -48,10 +48,6 @@ class SymmetricMemoryTest(MultiProcessTestCase):
     def world_size(self) -> int:
         return 2
 
-    # @property
-    # def ranks(self) -> List[int]:
-    #     return list(range(self.world_size))
-
     @property
     def device(self) -> torch.device:
         return torch.device(f"cuda:{self.rank}")

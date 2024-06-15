@@ -645,20 +645,16 @@ class _SymmetricMemory:
     ) -> None: ...
     @staticmethod
     def empty_strided_p2p(
-        size: torch.Size,
-        stride: List[int],
+        size: torch.types._size,
+        stride: torch.types._size,
         dtype: torch.dtype,
         device: torch.device,
         group_name: str,
     ) -> torch.Tensor: ...
-    @staticmethod
-    def empty_strided_persistent(
-        size: torch.Size,
-        stride: List[int],
-        dtype: torch.dtype,
-        device: torch.device,
-        group_name: str,
-    ) -> torch.Tensor: ...
+    @property
+    def rank(self) -> int: ...
+    @property
+    def world_size(self) -> int: ...
     @staticmethod
     def rendezvous(tensor: torch.Tensor) -> _SymmetricMemory: ...
     def get_buffer(

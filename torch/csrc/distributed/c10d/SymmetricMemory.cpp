@@ -44,52 +44,14 @@ class AllocatorMap {
       map_;
 };
 
+static std::unordered_map<std::string, GroupInfo> group_info_map{};
+
 // Data structures for tracking persistent allocations
 static std::unordered_map<uint64_t, void*> alloc_id_to_dev_ptr{};
 static std::unordered_map<uint64_t, c10::weak_intrusive_ptr<c10::StorageImpl>>
     alloc_id_to_storage{};
 
-static std::unordered_map<std::string, GroupInfo> group_info_map{};
-
-} // namespace
-
-namespace c10d {
-namespace symmetric_memory {
-
-void register_allocator(
-    c10::DeviceType device_type,
-    c10::intrusive_ptr<SymmetricMemoryAllocator> allocator) {
-  return AllocatorMap::get().register_allocator(
-      device_type, std::move(allocator));
-}
-
-c10::intrusive_ptr<SymmetricMemoryAllocator> get_allocator(
-    c10::DeviceType device_type) {
-  return AllocatorMap::get().get_allocator(device_type);
-}
-
-void set_group_info(
-    const std::string& group_name,
-    int rank,
-    int world_size,
-    c10::intrusive_ptr<Store> store) {
-  TORCH_CHECK(group_info_map.find(group_name) == group_info_map.end());
-  GroupInfo group_info;
-  group_info.rank = rank;
-  group_info.world_size = world_size;
-  group_info.store = std::move(store);
-  group_info_map.emplace(group_name, std::move(group_info));
-}
-
-const GroupInfo& get_group_info(const std::string& group_name) {
-  TORCH_CHECK(
-      group_info_map.find(group_name) != group_info_map.end(),
-      "get_group_info: no group info associated with the group name ",
-      group_name);
-  return group_info_map[group_name];
-}
-
-at::Tensor empty_strided_p2p_persistent(
+static at::Tensor empty_strided_p2p_persistent(
     c10::IntArrayRef size,
     c10::IntArrayRef stride,
     c10::ScalarType dtype,
@@ -139,6 +101,44 @@ at::Tensor empty_strided_p2p_persistent(
   alloc_id_to_storage.emplace(
       alloc_id, allocated.storage().getWeakStorageImpl());
   return allocated;
+}
+
+} // namespace
+
+namespace c10d {
+namespace symmetric_memory {
+
+void register_allocator(
+    c10::DeviceType device_type,
+    c10::intrusive_ptr<SymmetricMemoryAllocator> allocator) {
+  return AllocatorMap::get().register_allocator(
+      device_type, std::move(allocator));
+}
+
+c10::intrusive_ptr<SymmetricMemoryAllocator> get_allocator(
+    c10::DeviceType device_type) {
+  return AllocatorMap::get().get_allocator(device_type);
+}
+
+void set_group_info(
+    const std::string& group_name,
+    int rank,
+    int world_size,
+    c10::intrusive_ptr<Store> store) {
+  TORCH_CHECK(group_info_map.find(group_name) == group_info_map.end());
+  GroupInfo group_info;
+  group_info.rank = rank;
+  group_info.world_size = world_size;
+  group_info.store = std::move(store);
+  group_info_map.emplace(group_name, std::move(group_info));
+}
+
+const GroupInfo& get_group_info(const std::string& group_name) {
+  TORCH_CHECK(
+      group_info_map.find(group_name) != group_info_map.end(),
+      "get_group_info: no group info associated with the group name ",
+      group_name);
+  return group_info_map[group_name];
 }
 
 at::Tensor empty_strided_p2p(
