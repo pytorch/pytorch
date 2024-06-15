@@ -9582,6 +9582,7 @@ class CommonTemplate:
                 tuple(reversed(range(len(y_size))))
             ), torch.preserve_format
 
+    @skipIfXpu
     def test_resize_as(self):
         def fn(x, y, memory_format):
             return torch.ops.aten.resize_as(x, y, memory_format=memory_format)
