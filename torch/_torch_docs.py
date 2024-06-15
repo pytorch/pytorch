@@ -11526,6 +11526,43 @@ Example::
 )
 
 add_docstr(
+    torch.put_along_dim,
+    r"""
+put_along_dim(input, indices, values, dim) -> Tensor
+
+Put values into :attr:`input` from :attr:`values` by matching 1d indices from :attr:`indices` along the given :attr:`dim`.
+
+If :attr:`dim` is None, the input array is treated as if it has been flattened to 1d.
+
+Functions that return an index along a dimension, like :func:`torch.argsort` produce suitable indices for this function.
+
+.. note::
+    This function is similar to NumPy's `put_along_axis` except that it does not support
+    scalar :attr:`values`.
+
+Args:
+    {input}
+    indices (tensor): the indices into :attr:`input`. Must have long dtype.
+    values (tensor): the values to put into the :attr:`input` tensor.
+    dim (int, optional): dimension to select along.
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> t = torch.tensor([[1, 3, 2], [6, 4, 5]])
+    >>> indices = torch.tensor([[1], [0]])
+    >>> values = torch.tensor([[-1], [-2]])
+    >>> torch.put_along_dim(t, indices, values, dim=1)
+    tensor([[ 1, -1,  2],
+            [-2,  4,  5]])
+""".format(
+        **common_args
+    ),
+)
+
+add_docstr(
     torch.tan,
     r"""
 tan(input, *, out=None) -> Tensor
