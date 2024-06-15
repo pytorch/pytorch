@@ -3564,12 +3564,12 @@ else:
             return make_tensor(size_arg, dtype=dtype, device=device, low=None, high=None, noncontiguous=not contig)
 
         def ref_index_select(src, dim, idx):
-            # bfloat16 is just used on GPU, so it's not supported on numpy
-            gpu_dtypes = (torch.bfloat16, torch.float8_e5m2, torch.float8_e5m2fnuz, torch.float8_e4m3fn, torch.float8_e4m3fnuz)
-            if dtype in gpu_dtypes:
+            # some types not supported on numpy
+            not_np_dtypes = (torch.bfloat16, torch.float8_e5m2, torch.float8_e5m2fnuz, torch.float8_e4m3fn, torch.float8_e4m3fnuz)
+            if dtype in not_np_dtypes:
                 src = src.float()
             out = torch.from_numpy(np.take(src.cpu().numpy(), idx.cpu().numpy(), axis=dim))
-            if dtype in gpu_dtypes:
+            if dtype in not_np_dtypes:
                 out = out.to(device=device, dtype=dtype)
             return out
 
