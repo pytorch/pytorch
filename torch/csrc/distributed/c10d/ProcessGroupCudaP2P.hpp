@@ -128,7 +128,7 @@ class TORCH_API ProcessGroupCudaP2P : public Backend {
       const BarrierOptions& opts = BarrierOptions()) override;
 
   c10::intrusive_ptr<Work> intra_node_barrier(
-      c10::optional<std::vector<int64_t>> ranks = c10::nullopt);
+      c10::optional<std::vector<int64_t>> ranks = std::nullopt);
 
   at::Tensor get_p2p_buffer(
       size_t rank,
@@ -136,7 +136,7 @@ class TORCH_API ProcessGroupCudaP2P : public Backend {
       c10::ScalarType dtype,
       int64_t storage_offest = 0);
 
-  void shutdown(c10::optional<std::string> reason = c10::nullopt);
+  void shutdown(c10::optional<std::string> reason = std::nullopt);
 
  private:
   c10::intrusive_ptr<ProcessGroupNCCL> nccl_backend_;

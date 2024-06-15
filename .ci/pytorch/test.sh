@@ -284,7 +284,7 @@ test_python_legacy_jit() {
 test_python_shard() {
   # modify LD_LIBRARY_PATH to use the conda env
   original_ld_library_path=$LD_LIBRARY_PATH
-  export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$(dirname $(dirname $(which python)))/lib"
+  export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${CONDA_PREFIX}/lib"
   if [[ -z "$NUM_TEST_SHARDS" ]]; then
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
@@ -1246,9 +1246,6 @@ elif [[ "$TEST_CONFIG" == distributed ]]; then
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     test_rpc
   fi
-elif [[ "$TEST_CONFIG" == deploy ]]; then
-  checkout_install_torchdeploy
-  test_torch_deploy
 elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
   test_inductor_distributed
 elif [[ "${TEST_CONFIG}" == *inductor-halide* ]]; then
