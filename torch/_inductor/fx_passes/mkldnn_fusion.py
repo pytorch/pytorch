@@ -932,6 +932,8 @@ if torch._C._has_mkldnn:
                 return False
         # weight_idx is 1 for aten.mm and is 2 for aten.addmm
         weight_idx = 2 if linear_node.target == aten.addmm.default else 1
+        if linear_node.args[weight_idx].op != "get_attr":
+            return False
         input_meta_value = linear_node.args[weight_idx - 1].meta.get("val")
         weight_meta_value = linear_node.args[weight_idx].meta.get("val")
         if input_meta_value is None or weight_meta_value is None:
