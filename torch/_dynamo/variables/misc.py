@@ -664,6 +664,7 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "queue_callback":
+            assert tx.one_graph
             return variables.UserFunctionVariable(
                 torch._dynamo.external_utils.FakeCompiledAutogradEngine.queue_callback,
                 source=self.source,
@@ -693,6 +694,7 @@ class FakeCompiledAutogradEngineVariable(UserDefinedObjectVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "_exec_final_callbacks_stub":
+            assert tx.one_graph
             return variables.UserFunctionVariable(
                 torch._dynamo.external_utils.FakeCompiledAutogradEngine.exec_final_callbacks,
                 source=self.source,
