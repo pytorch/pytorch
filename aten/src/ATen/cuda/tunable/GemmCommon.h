@@ -80,10 +80,6 @@ struct GemmParams : OpParams {
     duplicate_inputs_ = false;
   }
 
-  std::string Signature() const override {
-    return c10::str(transa, transb, "_", m, "_", n, "_", k);
-  }
-
   size_t GetSize(bool duplicate_inputs) const {
     size_t size = sizeof(T) * ldc * n;
     if (duplicate_inputs) {
@@ -95,7 +91,19 @@ struct GemmParams : OpParams {
 
   GemmParams* DeepCopy(bool duplicate_inputs) const {
     GemmParams* copy = new GemmParams;
-    *copy = *this;
+    copy->transa = transa;
+    copy->transb = transb;
+    copy->m = m;
+    copy->n = n;
+    copy->k = k;
+    copy->alpha = alpha;
+    copy->a = a;
+    copy->lda = lda;
+    copy->b = b;
+    copy->ldb = ldb;
+    copy->beta = beta;
+    copy->c = c;
+    copy->ldc = ldc;
     c10::DeviceIndex device = 0;
     AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
     size_t c_size = ldc * n * sizeof(T);
@@ -140,13 +148,17 @@ struct GemmParams : OpParams {
   T* c;
   int64_t ldc;
 private:
+  virtual std::string CreateSignature() const override {
+    return c10::str(transa, transb, "_", m, "_", n, "_", k);
+  }
+
   bool duplicate_inputs_;
 };
 
 template <typename T>
 struct GemmAndBiasParams : OpParams {
-  std::string Signature() const override {
-    return c10::str(transa, transb, "_", m, "_", n, "_", k);
+  GemmAndBiasParams() {
+    duplicate_inputs_ = false;
   }
 
   size_t GetSize(bool duplicate_inputs) const {
@@ -160,7 +172,20 @@ struct GemmAndBiasParams : OpParams {
 
   GemmAndBiasParams* DeepCopy(bool duplicate_inputs) const {
     GemmAndBiasParams* copy = new GemmAndBiasParams;
-    *copy = *this;
+    copy->transa = transa;
+    copy->transb = transb;
+    copy->m = m;
+    copy->n = n;
+    copy->k = k;
+    copy->alpha = alpha;
+    copy->a = a;
+    copy->lda = lda;
+    copy->b = b;
+    copy->ldb = ldb;
+    copy->c = c;
+    copy->ldc = ldc;
+    copy->bias = bias;
+    copy->activation = activation;
     c10::DeviceIndex device = 0;
     AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
     size_t c_size = ldc * n * sizeof(T);
@@ -206,6 +231,10 @@ struct GemmAndBiasParams : OpParams {
   const T* bias;
   at::cuda::blas::GEMMAndBiasActivationEpilogue activation;
 private:
+  virtual std::string CreateSignature() const override {
+    return c10::str(transa, transb, "_", m, "_", n, "_", k);
+  }
+
   bool duplicate_inputs_;
 };
 
@@ -213,10 +242,6 @@ template <typename T>
 struct GemmStridedBatchedParams : OpParams {
   GemmStridedBatchedParams() {
     duplicate_inputs_ = false;
-  }
-
-  std::string Signature() const override {
-    return c10::str(transa, transb, "_", m, "_", n, "_", k, "_B_", batch);
   }
 
   size_t GetSize(bool duplicate_inputs) const {
@@ -230,7 +255,23 @@ struct GemmStridedBatchedParams : OpParams {
 
   GemmStridedBatchedParams* DeepCopy(bool duplicate_inputs) const {
     GemmStridedBatchedParams* copy = new GemmStridedBatchedParams;
-    *copy = *this;
+    copy->transa = transa;
+    copy->transb = transb;
+    copy->m = m;
+    copy->n = n;
+    copy->k = k;
+    copy->alpha = alpha;
+    copy->a = a;
+    copy->lda = lda;
+    copy->stride_a = stride_a;
+    copy->b = b;
+    copy->ldb = ldb;
+    copy->stride_b = stride_b;
+    copy->beta = beta;
+    copy->c = c;
+    copy->ldc = ldc;
+    copy->stride_c = stride_c;
+    copy->batch = batch;
     c10::DeviceIndex device = 0;
     AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
     size_t c_size = batch * stride_c * sizeof(T);
@@ -279,6 +320,10 @@ struct GemmStridedBatchedParams : OpParams {
   int64_t stride_c;
   int64_t batch;
 private:
+  virtual std::string CreateSignature() const override {
+    return c10::str(transa, transb, "_", m, "_", n, "_", k, "_B_", batch);
+  }
+
   bool duplicate_inputs_;
 };
 
@@ -286,10 +331,6 @@ template <typename T>
 struct ScaledGemmParams : OpParams {
   ScaledGemmParams() {
     duplicate_inputs_ = false;
-  }
-
-  std::string Signature() const override {
-    return c10::str(transa, transb, "_", m, "_", n, "_", k);
   }
 
   size_t GetSize(bool duplicate_inputs) const {
@@ -303,7 +344,27 @@ struct ScaledGemmParams : OpParams {
 
   ScaledGemmParams* DeepCopy(bool duplicate_inputs) const {
     ScaledGemmParams* copy = new ScaledGemmParams;
-    *copy = *this;
+    copy->transa = transa;
+    copy->transb = transb;
+    copy->m = m;
+    copy->n = n;
+    copy->k = k;
+    copy->a = a;
+    copy->a_scale_ptr = a_scale_ptr;
+    copy->lda = lda;
+    copy->a_dtype = a_dtype;
+    copy->b = b;
+    copy->b_scale_ptr = b_scale_ptr;
+    copy->ldb = ldb;
+    copy->b_dtype = b_dtype;
+    copy->bias_ptr = bias_ptr;
+    copy->bias_dtype = bias_dtype;
+    copy->c = c;
+    copy->c_scale_ptr = c_scale_ptr;
+    copy->ldc = ldc;
+    copy->c_dtype = c_dtype;
+    copy->amax_ptr = amax_ptr;
+    copy->use_fast_accum = use_fast_accum;
     c10::DeviceIndex device = 0;
     AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
     size_t c_size = ldc * n * sizeof(T);
@@ -355,6 +416,10 @@ struct ScaledGemmParams : OpParams {
   void* amax_ptr;
   bool use_fast_accum;
 private:
+  virtual std::string CreateSignature() const override {
+    return c10::str(transa, transb, "_", m, "_", n, "_", k);
+  }
+
   bool duplicate_inputs_;
 };
 

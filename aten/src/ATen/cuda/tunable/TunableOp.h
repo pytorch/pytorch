@@ -71,11 +71,11 @@ class TunableOp {
       return iter->second->Call(params);
     }
 
-    virtual std::string Signature() {
+    virtual std::string Signature() const {
       // According to C++17 standard https://wg21.link/n4659 section 15.7.4
       // > if the operand of typeid refers to the
       // > object under construction or destruction, typeid yields the std::type_info object representing the constructor
-      // > or destructor’s class.
+      // > or destructor's class.
       // So delay the op signature generation.
       c10::call_once(signature_init_once_, [this]() { signature_ = CreateSignature(); });
       return signature_;
@@ -253,7 +253,7 @@ class TunableOp {
     }
 
   private:
-    std::string CreateSignature() {
+    virtual std::string CreateSignature() const {
 #ifndef _WIN32
       const auto* name = typeid(*this).name();
       char buf[256];
@@ -267,16 +267,41 @@ class TunableOp {
     }
 
     mutable c10::once_flag signature_init_once_;
-    std::string signature_;
+    mutable std::string signature_;
 
     std::unordered_map<std::string, std::unique_ptr<Callable<ParamsT>>> ops_;
     std::vector<std::string> op_names_;
 };
 
 struct OpParams {
-  OpParams() {}
+  OpParams() = default;
   virtual ~OpParams() = default;
-  virtual std::string Signature() const = 0;
+  virtual std::string Signature() const {
+    // According to C++17 standard https://wg21.link/n4659 section 15.7.4
+    // > if the operand of typeid refers to the
+    // > object under construction or destruction, typeid yields the std::type_info object representing the constructor
+    // > or destructor's class.
+    // So delay the op signature generation.
+    c10::call_once(signature_init_once_, [this]() { signature_ = CreateSignature(); });
+    return signature_;
+  }
+
+ private:
+  virtual std::string CreateSignature() const {
+#ifndef _WIN32
+    const auto* name = typeid(*this).name();
+    char buf[256];
+    size_t buf_len = 256;
+    abi::__cxa_demangle(name, buf, &buf_len, nullptr);
+    buf[255] = '\0';
+    return buf;
+#else
+    return typeid(*this).name();
+#endif
+  }
+
+  mutable c10::once_flag signature_init_once_;
+  mutable std::string signature_;
 };
 
 } // namespace at::cuda::tunable
