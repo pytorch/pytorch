@@ -3344,9 +3344,9 @@ def gather(tensor, gather_list=None, dst=0, group=None, async_op=False):
 
     Args:
         tensor (Tensor): Input tensor.
-        gather_list (list[Tensor], optional): List of appropriately-sized
-            tensors to use for gathered data (default is None, must be specified
-            on the destination rank)
+        gather_list (list[Tensor], optional): List of appropriately,
+            same-sized tensors to use for gathered data
+            (default is None, must be specified on the destination rank)
         dst (int, optional): Destination rank on global process group (regardless of ``group`` argument). (default is 0)
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
