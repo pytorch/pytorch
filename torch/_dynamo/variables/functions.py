@@ -345,7 +345,7 @@ class UserMethodVariable(UserFunctionVariable):
                 )
         elif (
             _fsdp_param_group is not None
-            and _fsdp_param_group.FSDPParamGroup.use_training_state
+            and self.fn is _fsdp_param_group.FSDPParamGroup.use_training_state
         ):
             return variables.TorchCtxManagerClassVariable(self.fn).call_function(
                 tx, (self.obj, *args), kwargs
