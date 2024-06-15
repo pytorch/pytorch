@@ -106,6 +106,11 @@ std::tuple<Tensor, Tensor> weight_norm_backward_mps(const Tensor& grad_w,
   auto grad_v = at::empty_like(saved_v, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto grad_g = at::empty_like(saved_g, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
+  // Return early on empty inputs
+  if (grad_v.numel() == 0 || grad_g.numel() == 0) {
+    return std::tuple<Tensor, Tensor>{grad_v, grad_g};
+  }
+
   string key =
       "weight_norm_backward_mps_" + std::to_string(dim) + getTensorsStringKey({grad_w, saved_v, saved_g, saved_norms});
 
