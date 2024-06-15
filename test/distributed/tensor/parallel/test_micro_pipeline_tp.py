@@ -4,11 +4,11 @@ import unittest
 import torch
 import torch.distributed as dist
 from torch._inductor.utils import fresh_inductor_cache, run_and_get_triton_code
-from torch.distributed._cuda_p2p import test_with_non_cuda_p2p_group
 from torch.distributed._functional_collectives import (
     all_gather_tensor,
     reduce_scatter_tensor,
 )
+from torch.distributed._symmetric_memory import compile_test_mode
 from torch.distributed._tensor import DeviceMesh
 from torch.distributed._tensor.placement_types import Shard
 from torch.distributed.tensor.parallel import (
@@ -72,7 +72,7 @@ class MicroPipelineTPTest(TestCase):
         A_shard = torch.rand(*A_shard_shape, device="cuda")
         B = torch.rand(32, 16, device="cuda")
 
-        with test_with_non_cuda_p2p_group():
+        with compile_test_mode():
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, A_shard, B)
 
@@ -105,7 +105,7 @@ class MicroPipelineTPTest(TestCase):
             raise AssertionError(f"Invalid A_dims: {A_dims}")
         B = torch.rand(32, 16, device="cuda")
 
-        with test_with_non_cuda_p2p_group():
+        with compile_test_mode():
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, A, B)
 
@@ -133,7 +133,7 @@ class MicroPipelineTPTest(TestCase):
         else:
             raise AssertionError("Invalid shard_dim")
 
-        with test_with_non_cuda_p2p_group():
+        with compile_test_mode():
             compiled = torch.compile(model)
             code = run_and_get_triton_code(compiled, inp)
 

@@ -112,10 +112,8 @@ except ImportError:
 
 try:
     from torch._C._distributed_c10d import ProcessGroupNCCL
-    from torch._C._distributed_c10d import ProcessGroupCudaP2P
     ProcessGroupNCCL.__module__ = "torch.distributed.distributed_c10d"
-    ProcessGroupCudaP2P.__module__ = "torch.distributed.distributed_c10d"
-    __all__ += ["ProcessGroupNCCL", "ProcessGroupCudaP2P"]
+    __all__ += ["ProcessGroupNCCL"]
 except ImportError:
     _NCCL_AVAILABLE = False
 
@@ -1453,7 +1451,7 @@ def _shutdown_backend(pg):
         backend = pg._get_backend(torch.device("cuda"))
     except RuntimeError:
         pass
-    if is_nccl_available() and isinstance(backend, (ProcessGroupNCCL, ProcessGroupCudaP2P)):
+    if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
         # explictly call shutdown to ensure that NCCL resources are released
         backend._shutdown()
 

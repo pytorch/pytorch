@@ -1,175 +1,138 @@
-# mypy: allow-untyped-defs
-from collections import defaultdict
+import socket
+import uuid
+
 from contextlib import contextmanager
+from dataclasses import dataclass
 
 from functools import partial
-from typing import Callable, cast, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Callable, Dict, Generator, List, Optional, Tuple
 
 import torch
 import torch.distributed._functional_collectives as funcol
 
 import torch.distributed.distributed_c10d as c10d
-
-if TYPE_CHECKING:
-    from torch._C._distributed_c10d import _DistributedBackendOptions, Backend
+from torch._C._distributed_c10d import _SymmetricMemory
 
 
-"""
-This file contains the registration logic and Python APIs for
-``ProcessGroupCudaP2P`` (experimental).
+_group_name_to_store: Dict[str, c10d.Store] = {}
 
-``ProcessGroupCudaP2P`` is a thin wrapper around ``ProcessGroupNCCL``. By
-default, it routes all collectives to the underlying ``ProcessGroupNCCL``. In
-addition, ``ProcessGroupCudaP2P`` initializes a P2P workspace that allows
-direct GPU memory access among the members. The workspace can be used in Python
-to optimize intra-node communication patterns or to create custom intra-node
-collectives in CUDA.
 
-``ProcessGroupCudaP2P`` aims to bridge the gap where certain important patterns
-can be better optimized via fine-grained P2P memory access than with
-collectives in the latest version of NCCL. It is meant to complement NCCL
-rather than replacing it.
+def init_symm_mem_for_process_group(group_name: str) -> None:
+    """
+    Initialize symmetric memory capability for the process group.
+    """
+    if group_name in _group_name_to_store:
+        return
 
-Usage:
-
-    # Using ProcessGroupCudaP2P
-    dist.init_process_group(backend="cuda_p2p", ...)
-
-    # Using ProcessGroupCudaP2P while specifying ProcessGroupCudaP2P.Options
-    pg_options = ProcessGroupCudaP2P.Options()
-    dist.init_process_group(backend="cuda_p2p", pg_options=pg_options, ...)
-
-    # Using ProcessGroupCudaP2P while specifying ProcessGroupNCCL.Options
-    pg_options = ProcessGroupNCCL.Options()
-    dist.init_process_group(backend="cuda_p2p", pg_options=pg_options, ...)
-
-    # Using ProcessGroupCudaP2P while specifying both
-    # ProcessGroupCudaP2P.Options and ProcessGroupNCCL.Options
-    pg_options = ProcessGroupCudaP2P.Options()
-    pg_options.nccl_options = ProcessGroupNCCL.Options()
-    dist.init_process_group(backend="cuda_p2p", pg_options=pg_options, ...)
-
-    # Down-casting the backend to access p2p buffers for cuda_p2p specific
-    # optimizations
-    if is_cuda_p2p_group(group):
-        backend = get_cuda_p2p_backend(group)
-        if required_p2p_buffer_size > backend.get_buffer_size():
-            # fallback
-        p2p_buffer = backend.get_p2p_buffer(...)
+    group = c10d._resolve_process_group(group_name)
+    store = c10d.PrefixStore(
+        "symmetric_memory",
+        c10d._get_process_group_store(group),
+    )
+    hostname = socket.gethostname()
+    if group.rank() == 0:
+        uid = str(uuid.uuid4())
+        msg = f"{hostname}/{uid}"
+        store.set("init", msg)
     else:
-        # fallback
-"""
-
-
-def _create_cuda_p2p_group(
-    dist_backend_opts: "_DistributedBackendOptions",
-    options: Union[
-        "c10d.ProcessGroupCudaP2P.Options", "c10d.ProcessGroupNCCL.Options", None
-    ],
-) -> "Backend":
-    if not c10d.is_nccl_available():
-        raise RuntimeError("The cuda_p2p backend is not available")
-    if options is None:
-        options = c10d.ProcessGroupCudaP2P.Options()
-        options.nccl_options = c10d.ProcessGroupNCCL.Options()
-    elif isinstance(options, c10d.ProcessGroupNCCL.Options):
-        nccl_options = options
-        options = c10d.ProcessGroupCudaP2P.Options()
-        options.nccl_options = nccl_options
-    elif isinstance(options, c10d.ProcessGroupCudaP2P.Options):
-        if options.nccl_options is None:
-            options.nccl_options = c10d.ProcessGroupNCCL.Options()
-    else:
-        raise TypeError(
-            "options for cuda_p2p must be ProcessGroupCudaP2P.Options "
-            f"or ProcessGroupNCCL.Options (got: {type(options)})"
-        )
-
-    return c10d.ProcessGroupCudaP2P(
-        dist_backend_opts.store,
-        dist_backend_opts.group_rank,
-        dist_backend_opts.group_size,
-        options,
+        msg = store.get("init").decode("utf-8")
+        tokens = msg.split("/")
+        assert len(tokens) == 2, tokens
+        rank_0_hostname, uid = tokens
+        if hostname != rank_0_hostname:
+            raise RuntimeError(
+                "init_symmetric_memory_for_process_group() failed for "
+                f'group "{group_name}". Rank 0 and rank {group.rank()} '
+                f"are on different hosts ({rank_0_hostname} and {hostname})"
+            )
+    store = torch._C._distributed_c10d.FileStore(f"/tmp/{uid}", group.size())
+    # TODO: verify device connections
+    _group_name_to_store[group_name] = store
+    _SymmetricMemory.set_group_info(
+        group_name,
+        group.rank(),
+        group.size(),
+        store,
     )
 
 
-def is_cuda_p2p_group(group: c10d.ProcessGroup) -> bool:
-    if _test_with_non_cuda_p2p_group:
-        return True
-    if not c10d.is_nccl_available():
-        return False
-    try:
-        backend = group._get_backend(torch.device("cuda"))
-    except Exception:
-        return False
-    return isinstance(backend, c10d.ProcessGroupCudaP2P) and backend.is_p2p_available()
-
-
-def get_cuda_p2p_backend(group: c10d.ProcessGroup) -> "c10d.ProcessGroupCudaP2P":
-    if not is_cuda_p2p_group(group):
-        raise TypeError("group is not a cuda_p2p process group.")
-    return cast(
-        c10d.ProcessGroupCudaP2P,
-        group._get_backend(torch.device("cuda")),
-    )
-
-
-def get_p2p_buffer_size(group: c10d.ProcessGroup) -> int:
-    if not is_cuda_p2p_group(group):
-        return 0
-    backend = get_cuda_p2p_backend(group)
-    return backend.get_buffer_size()
-
-
-c10d.Backend.register_backend(
-    "cuda_p2p",
-    _create_cuda_p2p_group,
-    extended_api=True,
-    devices=["cuda"],
-)
-
-
-_test_with_non_cuda_p2p_group: bool = False
+_compile_test_mode: bool = False
 
 
 @contextmanager
-def test_with_non_cuda_p2p_group():
+def compile_test_mode() -> Generator[None, None, None]:
     """
-    Force ops in this file to work with non-cuda_p2p groups for testing
-    purposes. Not thread safe.
+    Make is_symm_mem_initialized() to always return True and the ops defined in
+    the symm_mem namespace to use fallback implementation.
+
+    The contextmanager is not thread safe.
     """
-    global _test_with_non_cuda_p2p_group
-    prev = _test_with_non_cuda_p2p_group
+    global _compile_test_mode
+    prev = _compile_test_mode
     try:
-        _test_with_non_cuda_p2p_group = True
+        _compile_test_mode = True
         yield
     finally:
-        _test_with_non_cuda_p2p_group = prev
+        _compile_test_mode = prev
 
 
-_current_p2p_usage_counter: Optional[Dict[str, int]] = None
+def is_symm_mem_initialized(group_name: str) -> bool:
+    return _compile_test_mode or group_name in _group_name_to_store
 
 
-@contextmanager
-def p2p_usage_counter():
-    """
-    Record the number of ops that utilized p2p capability for testing purposes.
-    Fallbacks are excluded.
-    """
-    global _current_p2p_usage_counter
-    prev = _current_p2p_usage_counter
-    try:
-        _current_p2p_usage_counter = defaultdict(int)
-        yield _current_p2p_usage_counter
-    finally:
-        _current_p2p_usage_counter = prev
+@dataclass
+class _Workspace:
+    size: int
+    tensor: Optional[torch.Tensor]
+
+
+_group_name_to_workspace: Dict[str, _Workspace] = {}
+
+
+def ensure_symm_mem_workspace_size(
+    group_name: str,
+    size: int,
+) -> None:
+    workspace = _group_name_to_workspace.setdefault(
+        group_name,
+        _Workspace(0, None),
+    )
+    workspace.size = max(workspace.size, size)
+
+
+def get_symm_mem_workspace(group_name: str, min_size: int) -> _SymmetricMemory:
+    workspace = _group_name_to_workspace.setdefault(
+        group_name,
+        _Workspace(0, None),
+    )
+    if workspace.tensor is None or workspace.size < min_size:
+        workspace.size = max(workspace.size, min_size)
+        print("init")
+        workspace.tensor = _SymmetricMemory.empty_strided_p2p(
+            (workspace.size // 4,),
+            [1],
+            torch.float,
+            torch.device(f"cuda:{torch.cuda.current_device()}"),
+            group_name,
+        )
+    return _SymmetricMemory.rendezvous(workspace.tensor)
+
+
+_backend_stream: Optional[torch.cuda.Stream] = None
+
+
+def _get_backend_stream() -> torch.cuda.Stream:
+    global _backend_stream
+    if _backend_stream is None:
+        _backend_stream = torch.cuda.Stream()
+    return _backend_stream
 
 
 def _pipelined_all_gather_and_consume(
     shard: torch.Tensor,
     shard_consumer: Callable[[torch.Tensor, int], None],
     ag_out: torch.Tensor,
-    group: c10d.ProcessGroup,
+    group_name: str,
 ) -> None:
     """
     Perform the following logic with micro-pipelined computation and
@@ -183,34 +146,26 @@ def _pipelined_all_gather_and_consume(
     NOTE:
     - The shard passed to shard consumer will always be contiguous.
     """
-    p2p_buf_sz_req = shard.numel() * shard.element_size()
-    if get_p2p_buffer_size(group) < p2p_buf_sz_req:
-        # We preferred the caller to handle fallback so that the computation
-        # doesn't need to be decomposed.
-        raise RuntimeError(
-            f"_pipelined_all_gather_and_consume on input with shape={shard.shape} "
-            f"and dtype={shard.dtype} requires {p2p_buf_sz_req} bytes of p2p buffers "
-            f"(got {get_p2p_buffer_size(group)} bytes)."
-        )
+    p2p_workspace_size_req = shard.numel() * shard.element_size()
+    symm_mem = get_symm_mem_workspace(group_name, min_size=p2p_workspace_size_req)
+    group_size = symm_mem.world_size
+    rank = symm_mem.rank
 
-    backend = get_cuda_p2p_backend(group)
-    group_size = group.size()
-    rank = group.rank()
+    backend_stream = _get_backend_stream()
+    backend_stream.wait_stream(torch.cuda.current_stream())
+    local_p2p_buf = symm_mem.get_buffer(rank, shard.shape, shard.dtype)
 
-    backend.stream().wait_stream(torch.cuda.current_stream())
-    local_p2p_buf = backend.get_p2p_buffer(rank, shard.shape, shard.dtype)
-
-    chunks = ag_out.chunk(group.size())
+    chunks = ag_out.chunk(group_size)
 
     # While consuming local shard, copy it to the local p2p buffer
     # in another stream.
     shard_consumer(shard, rank)
     chunks[rank].copy_(shard)
 
-    with torch.cuda.stream(backend.stream()):
+    with torch.cuda.stream(backend_stream):
         local_p2p_buf.copy_(shard)
-        work = backend.intra_node_barrier()
-    work.wait()
+        symm_mem.barrier(channel=0)
+    torch.cuda.current_stream().wait_stream(backend_stream)
 
     # At this point, all ranks have copied their local shard to
     # their local p2p buffer. Each rank can now copy and consume
@@ -219,24 +174,22 @@ def _pipelined_all_gather_and_consume(
         if i % 2 == 0:
             stream = torch.cuda.current_stream()
         else:
-            stream = backend.stream()
+            stream = backend_stream
         remote_rank = (i + rank) % group_size
-        remote_p2p_buf = backend.get_p2p_buffer(remote_rank, shard.shape, shard.dtype)
+        remote_p2p_buf = symm_mem.get_buffer(remote_rank, shard.shape, shard.dtype)
         with torch.cuda.stream(stream):
             chunks[remote_rank].copy_(remote_p2p_buf)
             shard_consumer(chunks[remote_rank], remote_rank)
 
-    torch.cuda.current_stream().wait_stream(backend.stream())
-
-    with torch.cuda.stream(backend.stream()):
-        work = backend.intra_node_barrier()
-    work.wait()
+    with torch.cuda.stream(backend_stream):
+        symm_mem.barrier(channel=0)
+    torch.cuda.current_stream().wait_stream(backend_stream)
 
 
 def _pipelined_produce_and_all2all(
     chunk_producer: Callable[[int, torch.Tensor], None],
     output: torch.Tensor,
-    group: c10d.ProcessGroup,
+    group_name: str,
 ) -> None:
     """
     Perform the following logic with micro-pipelined computation and
@@ -244,31 +197,23 @@ def _pipelined_produce_and_all2all(
 
         chunks = [
             chunk_producer(dst_rank, chunks[dst_rank])
-            for dst_rank in range(group.size()):
+            for dst_rank in range(group_size):
         ]
         dist.all_to_all_single(output=output, input=torch.cat(chunks))
     """
-    group_size = group.size()
-    rank = group.rank()
+    out_chunks = output.chunk(c10d._get_group_size_by_name(group_name))
+    p2p_workspace_size_req = out_chunks[0].numel() * out_chunks[0].element_size() * 2
+    symm_mem = get_symm_mem_workspace(group_name, min_size=p2p_workspace_size_req)
+    group_size = symm_mem.world_size
+    rank = symm_mem.rank
 
-    out_chunks = output.chunk(group_size)
-    p2p_buf_sz_req = out_chunks[0].numel() * out_chunks[0].element_size() * 2
-    if get_p2p_buffer_size(group) < p2p_buf_sz_req:
-        # We preferred the caller to handle fallback so that the computation
-        # doesn't need to be decomposed.
-        raise RuntimeError(
-            f"_pipelined_produce_and_all2all on output with shape={output.shape} "
-            f"and dtype={output.dtype} requires {p2p_buf_sz_req} bytes of p2p buffers "
-            f"(got {get_p2p_buffer_size(group)} bytes)."
-        )
-
-    backend = get_cuda_p2p_backend(group)
-    backend.stream().wait_stream(torch.cuda.current_stream())
+    backend_stream = _get_backend_stream()
+    backend_stream.wait_stream(torch.cuda.current_stream())
 
     def get_p2p_buf(rank: int, idx: int) -> torch.Tensor:
         assert idx in (0, 1)
         offset = 0 if idx == 0 else out_chunks[0].numel()
-        return backend.get_p2p_buffer(
+        return symm_mem.get_buffer(
             rank, out_chunks[0].shape, out_chunks[0].dtype, offset
         )
 
@@ -282,9 +227,9 @@ def _pipelined_produce_and_all2all(
     # No need to go through the p2p buffers.
     chunk_producer(rank, out_chunks[rank])
 
-    with torch.cuda.stream(backend.stream()):
+    with torch.cuda.stream(backend_stream):
         chunk_producer((rank + 1) % group_size, local_p2p_buf_0)
-        backend.intra_node_barrier()
+        symm_mem.barrier(channel=0)
         remote_p2p_buf = get_p2p_buf((rank - 1) % group_size, 0)
         out_chunks[(rank - 1) % group_size].copy_(remote_p2p_buf)
 
@@ -295,19 +240,18 @@ def _pipelined_produce_and_all2all(
             p2p_buf = local_p2p_buf_1
             remote_p2p_buf = get_p2p_buf(remote_rank, 1)
         else:
-            stream = backend.stream()
+            stream = backend_stream
             p2p_buf = local_p2p_buf_0
             remote_p2p_buf = get_p2p_buf(remote_rank, 0)
         with torch.cuda.stream(stream):
             chunk_producer((rank + step) % group_size, p2p_buf)
-            backend.intra_node_barrier()
+            symm_mem.barrier(channel=step % 2)
             out_chunks[remote_rank].copy_(remote_p2p_buf)
 
-    torch.cuda.current_stream().wait_stream(backend.stream())
-    backend.intra_node_barrier()
+    torch.cuda.current_stream().wait_stream(backend_stream)
 
 
-lib = torch.library.Library("cuda_p2p", "DEF")  # noqa: TOR901
+lib = torch.library.Library("symm_mem", "DEF")  # noqa: TOR901
 lib.define(
     "fused_all_gather_matmul(Tensor A, Tensor[] Bs, int gather_dim, str group_name) -> (Tensor, Tensor[])"
 )
@@ -347,6 +291,8 @@ def _fused_all_gather_matmul(
 
         all_gather_tensor(A_shard, gather_dim, group_name) @ B
     """
+    if _compile_test_mode:
+        return _fused_all_gather_matmul_fallback(A_shard, Bs, gather_dim, group_name)
     if A_shard.dim() < 2:
         raise ValueError("A_shard must be a matrix")
     for B in Bs:
@@ -356,17 +302,6 @@ def _fused_all_gather_matmul(
         raise ValueError("Invalid gather_dim")
 
     group = c10d._resolve_process_group(group_name)
-    p2p_buf_sz_req = A_shard.numel() * A_shard.element_size()
-    if (
-        _test_with_non_cuda_p2p_group
-        or get_p2p_buffer_size(group) < p2p_buf_sz_req
-        # Pipelining a mamtul with split-k is not supported
-        or gather_dim == len(A_shard.shape) - 1
-    ):
-        return _fused_all_gather_matmul_fallback(A_shard, Bs, gather_dim, group_name)
-
-    if _current_p2p_usage_counter is not None:
-        _current_p2p_usage_counter["fused_all_gather_matmul"] += 1
 
     # Move the gather_dim to the front and flatten the tensor into a 2D matrix.
     # The flattened tensor doesn't need to be contiguous (for computation
@@ -377,7 +312,7 @@ def _fused_all_gather_matmul(
     x = x.flatten(0, -2)
 
     # Helper function for reverting the above transformation
-    def unflatten(t):
+    def unflatten(t: torch.Tensor) -> torch.Tensor:
         return t.view(*leading_dims, -1).flatten(0, 1).movedim(0, gather_dim)
 
     ag_out = x.new_empty(
@@ -402,7 +337,7 @@ def _fused_all_gather_matmul(
         x,
         shard_consumer,
         ag_out,
-        group,
+        group_name,
     )
     return unflatten(ag_out), [unflatten(output) for output in outputs]
 
@@ -438,6 +373,10 @@ def _fused_matmul_reduce_scatter(
     - The K dim across ranks are currently accumulated with bf16 with results
       in accuracy loss.
     """
+    if _compile_test_mode:
+        return _fused_matmul_reduce_scatter_fallback(
+            A, B, reduce_op, scatter_dim, group_name
+        )
     if A.dim() < 2:
         raise ValueError("A_shard must be a matrix")
     if scatter_dim < 0 or scatter_dim >= A.dim():
@@ -454,14 +393,6 @@ def _fused_matmul_reduce_scatter(
     group = c10d._resolve_process_group(group_name)
     out_shape = [*A.shape[:-1], B.shape[1]]
     out_shape[scatter_dim] //= group.size()
-    p2p_buf_sz_req = torch.Size(out_shape).numel() * A.element_size() * 2
-    if _test_with_non_cuda_p2p_group or get_p2p_buffer_size(group) < p2p_buf_sz_req:
-        return _fused_matmul_reduce_scatter_fallback(
-            A, B, reduce_op, scatter_dim, group_name
-        )
-
-    if _current_p2p_usage_counter is not None:
-        _current_p2p_usage_counter["fused_matmul_reduce_scatter"] += 1
 
     # Move the gather_dim to the front and flatten the tensor into a 2D matrix
     x = A.movedim(scatter_dim, 0)
@@ -479,7 +410,7 @@ def _fused_matmul_reduce_scatter(
     _pipelined_produce_and_all2all(
         chunk_producer,
         stacked_partials,
-        group,
+        group_name,
     )
     # Ensures that the transpose and reduction produce contiguous result
     # in a single reduction kernel.
