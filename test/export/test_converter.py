@@ -36,7 +36,7 @@ class TestConverter(TestCase):
             ep = TS2EPConverter(ts_model, inp).convert()
             ep_list.append(ep)
             ep_out, _ = pytree.tree_flatten(ep.module()(*inp))
-            orig_out, _ = pytree.tree_flatten(mod(*inp))
+            orig_out, _ = pytree.tree_flatten(ts_model(*inp))
 
             # Check module.
             if isinstance(mod, torch.nn.Module):
