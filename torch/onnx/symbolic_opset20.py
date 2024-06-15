@@ -84,3 +84,9 @@ def _affine_grid_generator(
         size,
         align_corners_i=int(align_corners),
     )
+
+@_onnx_symbolic("aten::gelu")
+@symbolic_helper.parse_args("v", "s")
+@_beartype.beartype
+def gelu(g: jit_utils.GraphContext, self: _C.Value, approximate: str = "none"):
+    return g.op("Gelu", self, approximate_s = approximate)
