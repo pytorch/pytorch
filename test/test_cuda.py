@@ -4841,7 +4841,7 @@ class TestCudaOptims(TestCase):
 
         if in_place_unscale:
             scaler.unscale_(opt)
-            # the gradient should have been divided by 10 in-place
+            # the gradient should have been divided in-place
             self.assertEqual(weight.grad, torch.full_like(weight, fill_value=3))
 
         # the user sets a `grad_scale` value which should be fused with the optimizer step
