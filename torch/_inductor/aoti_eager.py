@@ -114,7 +114,7 @@ def extract_scalar_metadata(
     return metadata
 
 
-def extract_string_metadata(input: str):
+def extract_string_metadata(input: str) -> Dict[str, Any]:
     assert isinstance(input, str)
     metadata: Dict[str, Any] = {}
     metadata["string_value"] = input
