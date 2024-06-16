@@ -99,8 +99,7 @@ void initializeDtypes() {
 
 #define DEFINE_SCALAR_TYPE(_1, n) at::ScalarType::n,
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-  at::ScalarType all_scalar_types[] = {
+  auto all_scalar_types = {
       AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_SCALAR_TYPE)};
 
   for (at::ScalarType scalarType : all_scalar_types) {
