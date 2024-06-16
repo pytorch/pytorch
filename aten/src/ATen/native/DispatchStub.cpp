@@ -236,6 +236,9 @@ void* DispatchStubImpl::get_call_ptr(
 #ifdef HAVE_ZVECTOR_CPU_DEFINITION
   , void *ZVECTOR
 #endif
+#ifdef HAVE_SVE256_CPU_DEFINITION
+  , void *SVE256
+#endif
 ) {
 
   auto result = try_get_call_ptr(
@@ -256,6 +259,10 @@ void* DispatchStubImpl::get_call_ptr(
 #ifdef HAVE_ZVECTOR_CPU_DEFINITION
       ,
       ZVECTOR
+#endif
+#ifdef HAVE_SVE256_CPU_DEFINITION
+      ,
+      SVE256
 #endif
   );
   if (std::holds_alternative<ErrorType>(result)) {
@@ -288,6 +295,9 @@ DispatchResult DispatchStubImpl::try_choose_cpu_impl(
 #ifdef HAVE_ZVECTOR_CPU_DEFINITION
     , void *ZVECTOR
 #endif
+#ifdef HAVE_SVE256_CPU_DEFINITION
+    , void *SVE256
+#endif
   ){
 
   auto capability = static_cast<int>(get_cpu_capability());
@@ -318,6 +328,17 @@ DispatchResult DispatchStubImpl::try_choose_cpu_impl(
 #ifdef HAVE_ZVECTOR_CPU_DEFINITION
   if (capability >= static_cast<int>(CPUCapability::ZVECTOR)) {
     return ZVECTOR != nullptr ? DispatchResult(ZVECTOR) : ErrorType::MissingDeviceKernel;
+  }
+#endif
+#ifdef HAVE_SVE256_CPU_DEFINITION
+  if (capability >= static_cast<int>(CPUCapability::SVE256)) {
+    if (C10_UNLIKELY(!SVE256)) {
+      // dispatch to DEFAULT, since the SVE kernel is missing
+      TORCH_INTERNAL_ASSERT(DEFAULT, "DispatchStub: missing default kernel");
+      return DEFAULT;
+    } else {
+      return SVE256;
+    }
   }
 #endif
   return DEFAULT != nullptr ? DispatchResult(DEFAULT) : ErrorType::MissingDeviceKernel;
