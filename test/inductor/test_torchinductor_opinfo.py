@@ -485,6 +485,7 @@ inductor_one_sample = {
     ("nn.functional.alpha_dropout", "cuda"): {f16, f32, f64},
     ("nn.functional.avg_pool1d", "cuda"): {f16, f32, f64},
     ("nn.functional.avg_pool2d", "cuda"): {f16, f32, f64},
+    ("nn.functional.avg_pool3d", "cuda"): {f16, f32, f64},
     ("nn.functional.binary_cross_entropy", "cuda"): {f16},
     ("nn.functional.binary_cross_entropy_with_logits", "cuda"): {f16},
     ("nn.functional.conv2d", "cuda"): {f16},
