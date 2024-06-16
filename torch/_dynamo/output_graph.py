@@ -752,7 +752,9 @@ class OutputGraph:
         **options,
     ):
         if is_dynamic_nn_module(target, self.root_tx.export):
-            return variables.UnspecializedNNModuleVariable(target, **options)
+            # Instead of returning UnspecializedNNModuleVariable, call
+            # VariableBuilder so that it is tracked for mutation.
+            return VariableBuilder(self.current_tx, **options)(target)
 
         options = dict(options)
         assert "source" in options
