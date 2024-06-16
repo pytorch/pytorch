@@ -59,7 +59,7 @@ class Linear(Module):
         out_features: size of each output sample
         bias: If set to ``False``, the layer will not learn an additive bias.
             Default: ``True``
-        device: device on which the weight and device tensors will be allocated.
+        device: device on which the weight and bias tensors will be allocated.
             ``None`` uses the default device.
         dtype: data type of the weight and bias tensors, must be differentiable (float or complex).
             ``None`` uses the default dtype.
