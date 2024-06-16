@@ -292,7 +292,7 @@ test_python_shard() {
 
   # modify LD_LIBRARY_PATH to ensure it has the conda env.
   # This set of tests has been shown to be buggy without it for the split-build
-  time LD_LIBRARY_PATH="/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/lib:$LD_LIBRARY_PATH" python test/run_test.py --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS" --verbose $PYTHON_TEST_EXTRA_OPTION
+  time LD_LIBRARY_PATH="/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/lib" python test/run_test.py --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS" --verbose $PYTHON_TEST_EXTRA_OPTION
 
   assert_git_not_dirty
 }
