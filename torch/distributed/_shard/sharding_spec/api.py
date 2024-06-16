@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 import functools

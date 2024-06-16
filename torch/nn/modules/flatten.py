@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from .module import Module
 
 from typing import Tuple, Union

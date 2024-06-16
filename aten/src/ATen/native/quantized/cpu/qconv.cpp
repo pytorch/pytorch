@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <algorithm>
 #include <cmath>
+#include <string>
 #include <vector>
 
 #include <ATen/core/Tensor.h>
@@ -35,7 +36,6 @@
 #endif
 
 #include <c10/util/irange.h>
-#include <c10/util/string_utils.h>
 
 namespace {
 // To have a sanity check for maximum matrix size.
@@ -1848,15 +1848,15 @@ class QConvInt8ForBC final {
       int64_t output_zero_point) {
     if (kReluFused) {
       TORCH_WARN_ONCE(
-          "Arguments [stride, padding, dilation, groups] in ops.quantized.conv"
-          + c10::to_string(kSpatialDim) + "d_relu, " +
-          "have been removed, please update your model to remove these arguments.");
+          "Arguments [stride, padding, dilation, groups] in ops.quantized.conv" +
+              std::to_string(kSpatialDim),
+          "d_relu, have been removed, please update your model to remove these arguments.");
       return packed_weight->apply_relu(act, output_scale, output_zero_point);
     } else {
       TORCH_WARN_ONCE(
-          "Arguments [stride, padding, dilation, groups] in ops.quantized.conv"
-          + c10::to_string(kSpatialDim) + "d, " +
-          "have been removed, please update your model to remove these arguments.");
+          "Arguments [stride, padding, dilation, groups] in ops.quantized.conv",
+          std::to_string(kSpatialDim),
+          "d, have been removed, please update your model to remove these arguments.");
       return packed_weight->apply(act, output_scale, output_zero_point);
     }
   }

@@ -98,7 +98,7 @@ hf_Bert_large,pass,6
 
 
 
-hf_BigBird,pass,52
+hf_BigBird,pass,49
 
 
 
@@ -182,7 +182,7 @@ phlippe_densenet,pass,6
 
 
 
-phlippe_resnet,fail_accuracy,6
+phlippe_resnet,pass,6
 
 
 
