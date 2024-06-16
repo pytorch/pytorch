@@ -147,12 +147,12 @@ from .lists import (
 )
 from .misc import (
     AutogradEngineVariable,
-    FakeCompiledAutogradEngineVariable,
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
     ComptimeVariable,
     DebuggingVariable,
     DelayGraphBreakVariable,
+    FakeCompiledAutogradEngineVariable,
     GetAttrVariable,
     GetSetDescriptorVariable,
     InspectSignatureVariable,
@@ -732,7 +732,8 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.ID_MATCH)
             return AutogradEngineVariable(value, source=self.source)
         elif isinstance(value, types.MethodType) and isinstance(
-            getattr(value, "__self__", None), torch._dynamo.external_utils.FakeCompiledAutogradEngine
+            getattr(value, "__self__", None),
+            torch._dynamo.external_utils.FakeCompiledAutogradEngine,
         ):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return GetAttrVariable(
