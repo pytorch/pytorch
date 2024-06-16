@@ -1141,7 +1141,7 @@ class TestCompileTorchbind(TestCase):
             f(_empty_tensor_queue(), x),
             torch.compile(f, backend=backend)(_empty_tensor_queue(), x),
         )
-        if not torch._dynamo.is_compiling() and backend == "eager":
+        if not torch.compiler.is_compiling() and backend == "eager":
             self.assertExpectedInline(
                 backend.graphs[0].code.strip(),
                 """\

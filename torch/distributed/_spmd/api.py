@@ -168,18 +168,18 @@ aten = torch.ops.aten  # pyre-ignore
 
 @contextmanager
 def _enable_compile():
-    # The return value of torch._utils.is_compiling changes optimizer behavior.
+    # The return value of torch.compiler.is_compiling changes optimizer behavior.
     # We need that function to return True to include optimizer in the graph.
     # See: https://github.com/pytorch/pytorch/blob/a524123c91ab399c9dd6882c1189596dd77e7734/torch/optim/optimizer.py#L41
     def f_true():
         return True
 
-    orig_is_compiling_code = torch._utils.is_compiling.__code__
-    torch._utils.is_compiling.__code__ = f_true.__code__
+    orig_is_compiling_code = torch.compiler.is_compiling.__code__
+    torch.compiler.is_compiling.__code__ = f_true.__code__
     try:
         yield
     finally:
-        torch._utils.is_compiling.__code__ = orig_is_compiling_code
+        torch.compiler.is_compiling.__code__ = orig_is_compiling_code
 
 
 def _foreach_add_decomp(self, other, alpha=1):
