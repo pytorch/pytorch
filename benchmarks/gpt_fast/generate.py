@@ -172,8 +172,8 @@ def run_experiment(
     max_new_tokens: int = 200,
     top_k: int = 200,
     temperature: float = 0.8,
+    device: str = "cuda",
 ) -> None:
-    device = "cuda"
     print(f"Loading model {x.name}")
     t0 = time.time()
     model = _load_model(x)
@@ -221,7 +221,7 @@ def run_experiment(
 
 
 # token_per_sec and memory_bandwidth target numbers are for A100-40GB, which are different from the typical A100-80GB.
-def run_llama2_7b_bf16():
+def run_llama2_7b_bf16(device: str = "cuda"):
     from benchmark import Experiment
 
     model = GPTModelConfig(
@@ -235,22 +235,26 @@ def run_llama2_7b_bf16():
     token_per_sec, memory_bandwidth = run_experiment(model)
     return [
         Experiment(
-            "llama2_7b_bf16",
+            model.name,
             "token_per_sec",
             model.token_per_sec,
             f"{token_per_sec:.02f}",
+            model.mode,
+            device,
         ),
         Experiment(
-            "llama2_7b_bf16",
+            model.name,
             "memory_bandwidth(GB/s)",
             model.memory_bandwidth,
             f"{memory_bandwidth:.02f}",
+            model.mode,
+            device,
         ),
     ]
 
 
 # token_per_sec and memory_bandwidth target numbers are for A100-40GB, which are different from the typical A100-80GB.
-def run_llama2_7b_int8():
+def run_llama2_7b_int8(device: str = "cuda"):
     from benchmark import Experiment
 
     model = GPTModelConfig(
@@ -264,22 +268,26 @@ def run_llama2_7b_int8():
     token_per_sec, memory_bandwidth = run_experiment(model)
     return [
         Experiment(
-            "llama2_7b_int8",
+            model.name,
             "token_per_sec",
             model.token_per_sec,
             f"{token_per_sec:.02f}",
+            model.mode,
+            device,
         ),
         Experiment(
-            "llama2_7b_int8",
+            model.name,
             "memory_bandwidth(GB/s)",
             model.memory_bandwidth,
             f"{memory_bandwidth:.02f}",
+            model.mode,
+            device,
         ),
     ]
 
 
 # token_per_sec and memory_bandwidth target numbers are for A100-40GB, which are different from the typical A100-80GB.
-def run_mixtral_8x7b_int8():
+def run_mixtral_8x7b_int8(device: str = "cuda"):
     from benchmark import Experiment
 
     # We reduced the original number of layers from 32 to 16 to adapt CI memory limitation.
@@ -294,15 +302,19 @@ def run_mixtral_8x7b_int8():
     token_per_sec, memory_bandwidth = run_experiment(model)
     return [
         Experiment(
-            "mixtral_8x7b_int8",
+            model.name,
             "token_per_sec",
             model.token_per_sec,
             f"{token_per_sec:.02f}",
+            model.mode,
+            device,
         ),
         Experiment(
-            "mixtral_8x7b_int8",
+            model.name,
             "memory_bandwidth(GB/s)",
             model.memory_bandwidth,
             f"{memory_bandwidth:.02f}",
+            model.mode,
+            device,
         ),
     ]
