@@ -1342,6 +1342,23 @@ class TestAutograd(TestCase):
 
         b.backward()
 
+    def test_accumulate_grad_posthooks_should_not_execute(self):
+        def tensor_prehook(g):
+            raise RuntimeError
+
+        def posthook(gO, gI):
+            raise RuntimeError
+
+        a = torch.tensor(1.0, requires_grad=True)
+        a.register_hook(tensor_prehook)
+        b = torch.tensor(1.0, requires_grad=True)
+        c = a.clone()
+        acc = c.grad_fn.next_functions[0][0]
+        acc.register_hook(posthook)
+
+        out = a + b + c
+        out.sum().backward(inputs=[b])
+
     def test_hook_edge_case_when_called_with_grad(self):
         # grad executes the tensor hooks of the next node but not
         # grad_fn pre hooks or the post hooks
@@ -9317,6 +9334,34 @@ for shape in [(1,), ()]:
         with torch.autograd.graph.saved_tensors_hooks(lambda x: x, lambda x: x):
             out = Func.apply(a)
         out.backward()
+
+    def test_unpack_hooks_exec_count(self):
+        def f(x, y):
+            return x * y
+
+        pack_count = 0
+        unpack_count = 0
+
+        def pack_hook(x):
+            nonlocal pack_count
+            pack_count += 1
+            return x
+
+        # unpack hook shouldn't run during compilation, while we trace the forward
+        def unpack_hook(x):
+            nonlocal unpack_count
+            unpack_count += 1
+            return x
+
+        x = torch.ones(4, requires_grad=True)
+        y = torch.ones(4, requires_grad=False)
+        with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
+            out_test = f(x, y)
+            self.assertEqual(pack_count, 1)
+            self.assertEqual(unpack_count, 0)
+            out_test.sum().backward()
+            self.assertEqual(pack_count, 1)
+            self.assertEqual(unpack_count, 1)
 
     def test_save_on_cpu_and_checkpoint(self):
         a = torch.randn(2, 2, requires_grad=True)
