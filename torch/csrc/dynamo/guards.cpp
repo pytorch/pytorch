@@ -822,7 +822,6 @@ static PyObject* _reinterpret_tensor(PyObject* dummy, PyObject* args) {
   END_HANDLE_TH_ERRORS;
 }
 
-
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 static PyMethodDef _methods[] = {
     {"check_type_id", check_type_id, METH_VARARGS, nullptr},
