@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 from typing import Union, Iterable, List, Dict, Tuple, Optional, cast
 from typing_extensions import deprecated

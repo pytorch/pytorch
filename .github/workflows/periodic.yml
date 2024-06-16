@@ -42,7 +42,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9
-      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9
+      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9
       test-matrix: |
         { include: [
           { config: "nogpu_AVX512", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
@@ -65,7 +65,7 @@ jobs:
     uses: ./.github/workflows/_linux-build-label.yml
     with:
       build-environment: linux-focal-cuda12.4-py3.10-gcc9
-      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn8-py3-gcc9
+      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
@@ -120,7 +120,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-focal-cuda11.8-py3.9-gcc9
-      docker-image-name: pytorch-linux-focal-cuda11.8-cudnn8-py3-gcc9
+      docker-image-name: pytorch-linux-focal-cuda11.8-cudnn9-py3-gcc9
       cuda-arch-list: 8.6
       test-matrix: |
         { include: [
@@ -142,7 +142,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-focal-cuda11.8-py3.10-gcc9-debug
-      docker-image-name: pytorch-linux-focal-cuda11.8-cudnn8-py3-gcc9
+      docker-image-name: pytorch-linux-focal-cuda11.8-cudnn9-py3-gcc9
       build-with-debug: true
       test-matrix: |
         { include: [

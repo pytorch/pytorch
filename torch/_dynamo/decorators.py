@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # ruff: noqa: TCH004
 from dataclasses import dataclass
 from typing import TYPE_CHECKING

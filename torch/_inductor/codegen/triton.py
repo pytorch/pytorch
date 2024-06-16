@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import dataclasses
@@ -50,6 +51,7 @@ from ..utils import (
 from ..virtualized import _ops as ops, OpsHandler, ReductionType, StoreMode, V
 from ..wrapper_benchmark import get_kernel_category_by_source_code
 from .common import (
+    BackendFeature,
     CSE,
     CSEVariable,
     DeferredLine,
@@ -2349,10 +2351,18 @@ class TritonKernel(SIMDKernel):
         _, call_args, arg_types, _ = self.args.python_argdefs()
         for arg, arg_type in zip(call_args, arg_types):
             if isinstance(arg_type, TensorArg):
-                line = f"assert not {arg}.isnan().any().item()"
-                wrapper.writeline(line)
-                line = f"assert not {arg}.isinf().any().item()"
-                wrapper.writeline(line)
+                if V.graph.cpp_wrapper:
+                    if config.abi_compatible:
+                        wrapper.writeline(
+                            f'AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_check_inf_and_nan("{arg}", {arg}));'
+                        )
+                    else:
+                        wrapper.writeline(f'assert_inf_and_nan("{arg}", {arg});')
+                else:
+                    line = f"assert not {arg}.isnan().any().item()"
+                    wrapper.writeline(line)
+                    line = f"assert not {arg}.isinf().any().item()"
+                    wrapper.writeline(line)
 
     def create_cse_var(self, *args, **kwargs):
         return TritonCSEVariable(*args, **kwargs)
@@ -2423,6 +2433,28 @@ class TritonScheduling(SIMDScheduling):
     int32_type = "tl.int32"
     int64_type = "tl.int64"
     kernel_type = TritonKernel
+    backend_features = dict.fromkeys(  # dict for deterministic order
+        [
+            BackendFeature.FOREACH,
+            BackendFeature.BUCKETIZE,
+            BackendFeature.INPLACE_BUFFERS,
+            BackendFeature.MASKED_SCATTER_WITH_INDEX,
+            BackendFeature.SCAN,
+        ]
+    )
+    if torch.version.hip is None:
+        backend_features.update(
+            dict.fromkeys(
+                [
+                    # TODO: Move this above when ROCm triton adds support for multiple inputs
+                    BackendFeature.TUPLE_REDUCTION,
+                ]
+            )
+        )
+
+    @classmethod
+    def get_backend_features(cls, device: torch.device):
+        return cls.backend_features
 
     def codegen_comment(self, node_schedule):
         wrapper = V.graph.wrapper_code
