@@ -2425,7 +2425,7 @@ class AsyncScatterWork : public ProcessGroupGloo::AsyncWork {
             seq,
             "gloo:scatter",
             !inputs.empty() ? std::optional<std::vector<at::Tensor>>(inputs[0])
-                            : std::nullopt),
+                            : c10::nullopt),
         context(context),
         outputs(outputs),
         inputs(inputs),
@@ -2888,7 +2888,7 @@ class AsyncBarrierWork : public ProcessGroupGloo::AsyncWork {
             OpType::BARRIER,
             seq,
             "gloo:barrier",
-            std::nullopt),
+            c10::nullopt),
         context(context),
         priorWork(std::move(priorWork)),
         tag(tag) {}

@@ -1,6 +1,6 @@
 #pragma once
+#include <c10/util/Optional.h>
 #include <memory>
-#include <optional>
 #include <vector>
 
 #include <ATen/ThreadLocalState.h>
@@ -124,7 +124,7 @@ struct InterpreterContinuation {
       InterpreterState state_,
       Stack stack_,
       int64_t dist_autograd_context_id = 0,
-      std::optional<at::ThreadLocalState> tls_state = std::nullopt)
+      std::optional<at::ThreadLocalState> tls_state = c10::nullopt)
       : state(std::move(state_)),
         stack(std::move(stack_)),
         tls_state_(std::move(tls_state))
@@ -140,7 +140,7 @@ struct InterpreterContinuation {
  private:
   InterpreterState state;
   Stack stack;
-  std::optional<at::ThreadLocalState> tls_state_ = std::nullopt;
+  std::optional<at::ThreadLocalState> tls_state_ = c10::nullopt;
 #ifdef USE_DISTRIBUTED
   int64_t dist_autograd_context_id_;
 #endif
