@@ -30,7 +30,6 @@ from .distributed import BackwardHookVariable, DistributedVariable, PlacementVar
 from .functions import (
     FunctoolsPartialVariable,
     NestedUserFunctionVariable,
-    OverriddenUserFunctionVariable,
     SkipFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
@@ -97,6 +96,7 @@ from .user_defined import (
     RemovableHandleVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
+    WeakRefVariable,
 )
 
 __all__ = [
@@ -160,7 +160,6 @@ __all__ = [
     "UserDefinedClassVariable",
     "UserDefinedObjectVariable",
     "UserFunctionVariable",
-    "OverriddenUserFunctionVariable",
     "UserMethodVariable",
     "VariableTracker",
     "WithExitFunctionVariable",
