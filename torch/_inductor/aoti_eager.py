@@ -1,7 +1,7 @@
 import json
 import os
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from unittest import mock
 
 import torch
@@ -99,9 +99,7 @@ def extract_tensor_list_metadata(
     return metadata
 
 
-def extract_scalar_metadata(
-    device_type: str, input: Union[int, float, bool]
-) -> Dict[str, Any]:
+def extract_scalar_metadata(device_type: str, input: Any) -> Dict[str, Any]:
     assert isinstance(input, supported_scalar_types())
     metadata: Dict[str, Any] = {}
     metadata["is_dynamic"] = False
