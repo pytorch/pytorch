@@ -89,4 +89,4 @@ def _affine_grid_generator(
 @symbolic_helper.parse_args("v", "s")
 @_beartype.beartype
 def gelu(g: jit_utils.GraphContext, self: _C.Value, approximate: str = "none"):
-    return g.op("Gelu", self, approximate_s = approximate)
+    return g.op("Gelu", self, approximate_s=approximate)
