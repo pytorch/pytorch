@@ -574,6 +574,23 @@ class MiscTests(torch._inductor.test_case.TestCase):
         cleanup_op("mylib::foo")
         del lib
 
+    def test_auto_functionalize_can_with_none_return(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("foo(Tensor x, Tensor(a!) out) -> None")
+
+            def foo_impl(x, out):
+                out.copy_(x)
+
+            lib.impl("foo", foo_impl, "CompositeExplicitAutograd")
+            x = torch.randn(3)
+            out = torch.zeros(3)
+
+            @torch.compile
+            def f(x, out):
+                torch.ops.mylib.foo(x, out)
+
+            f(x, out)
+
     def test_user_defined_setattr1(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(obj):
@@ -10445,6 +10462,14 @@ fn
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+    def test_assert_size_stride(self):
+        x = torch.randn(2, 3, 4)
+        with self.assertRaisesRegex(
+            AssertionError,
+            "expected size 2==5, stride 12==9 at dim=0; expected size 3==6, stride 4==9 at dim=1; expected size 4==7, stride 1==10 at dim=2",
+        ):
+            torch._C._dynamo.guards.assert_size_stride(x, (5, 6, 7), (9, 9, 10))
 
     def test_module_dunder_dict(self):
         class MyModule(torch.nn.Module):
