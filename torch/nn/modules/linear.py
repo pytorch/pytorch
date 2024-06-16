@@ -3,10 +3,10 @@ import math
 from typing import Any
 
 import torch
-from torch import Tensor
+from torch import dtype, Tensor
 from torch.nn import functional as F, init
 from torch.nn.parameter import Parameter, UninitializedParameter
-
+from torch.types import Device
 from .lazy import LazyModuleMixin
 from .module import Module
 
@@ -59,6 +59,10 @@ class Linear(Module):
         out_features: size of each output sample
         bias: If set to ``False``, the layer will not learn an additive bias.
             Default: ``True``
+        device: device on which the weight and device tensors will be allocated.
+            ``None`` uses the default device.
+        dtype: data type of the weight and bias tensors, must be differentiable (float or complex).
+            ``None`` uses the default dtype.
 
     Shape:
         - Input: :math:`(*, H_{in})` where :math:`*` means any number of
@@ -95,8 +99,8 @@ class Linear(Module):
         in_features: int,
         out_features: int,
         bias: bool = True,
-        device=None,
-        dtype=None,
+        device: Device = None,
+        dtype: dtype = None
     ) -> None:
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
