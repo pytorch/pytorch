@@ -4829,7 +4829,7 @@ class TestCudaOptims(TestCase):
         dtypes=[torch.float32],
     )
     def test_grad_scaler_with_preset_grad_scale(
-        self, device, optim_info, in_place_unscale
+        self, device, dtype, optim_info, in_place_unscale
     ):
         weight = torch.ones((5, 5), device="cuda", requires_grad=True)
         weight.grad = torch.full_like(weight, fill_value=15)
@@ -4848,6 +4848,7 @@ class TestCudaOptims(TestCase):
         opt.grad_scale = torch.Tensor([3]).cuda()
         scaler.step(opt)
 
+        # check that the user's grad_scale was respected (i.e. the gradient was divided by 5 * 3)
         self.assertEqual(weight.grad, torch.full_like(weight, fill_value=1))
 
     @onlyCUDA
