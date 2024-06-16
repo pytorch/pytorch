@@ -27,6 +27,7 @@ class GPTModelConfig:
     quantizer: type
     token_per_sec: float
     memory_bandwidth: float
+    compilation_time: float
 
 
 def device_sync(device):
@@ -190,6 +191,7 @@ def run_experiment(
 
     aggregate_metrics = {"tokens_per_sec": [], "memory_bandwidth": []}
     start = -1
+    compilation_time = None
 
     for i in range(start, num_samples):
         device_sync(device=device)  # MKG
@@ -200,7 +202,8 @@ def run_experiment(
         )
 
         if i == -1:
-            print(f"Compilation time: {time.perf_counter() - t0:.2f} seconds")
+            compilation_time = time.perf_counter() - t0
+            print(f"Compilation time: {compilation_time:.2f} seconds")
             continue
 
         device_sync(device=device)  # MKG
@@ -217,7 +220,7 @@ def run_experiment(
     print(f"Average tokens/sec: {token_per_sec:.2f} tokens/sec")
     print(f"Average bandwidth achieved: {memory_bandwidth:.02f} GB/s")
     print(f"Memory used: {torch.cuda.max_memory_reserved() / 1e9:.02f} GB")
-    return token_per_sec, memory_bandwidth
+    return token_per_sec, memory_bandwidth, compilation_time
 
 
 # token_per_sec and memory_bandwidth target numbers are for A100-40GB, which are different from the typical A100-80GB.
@@ -231,8 +234,9 @@ def run_llama2_7b_bf16(device: str = "cuda"):
         LLaMAWeightOnlyInt8QuantHandler,
         94,
         1253,
+        162,
     )
-    token_per_sec, memory_bandwidth = run_experiment(model)
+    token_per_sec, memory_bandwidth, compilation_time = run_experiment(model)
     return [
         Experiment(
             model.name,
@@ -247,6 +251,14 @@ def run_llama2_7b_bf16(device: str = "cuda"):
             "memory_bandwidth(GB/s)",
             model.memory_bandwidth,
             f"{memory_bandwidth:.02f}",
+            model.mode,
+            device,
+        ),
+        Experiment(
+            model.name,
+            "compilation_time(s)",
+            model.compilation_time,
+            f"{compilation_time:.02f}",
             model.mode,
             device,
         ),
@@ -264,8 +276,9 @@ def run_llama2_7b_int8(device: str = "cuda"):
         LLaMAWeightOnlyInt8QuantHandler,
         144,
         957,
+        172,
     )
-    token_per_sec, memory_bandwidth = run_experiment(model)
+    token_per_sec, memory_bandwidth, compilation_time = run_experiment(model)
     return [
         Experiment(
             model.name,
@@ -280,6 +293,14 @@ def run_llama2_7b_int8(device: str = "cuda"):
             "memory_bandwidth(GB/s)",
             model.memory_bandwidth,
             f"{memory_bandwidth:.02f}",
+            model.mode,
+            device,
+        ),
+        Experiment(
+            model.name,
+            "compilation_time(s)",
+            model.compilation_time,
+            f"{compilation_time:.02f}",
             model.mode,
             device,
         ),
@@ -298,8 +319,9 @@ def run_mixtral_8x7b_int8(device: str = "cuda"):
         MixtralMoEWeightOnlyInt8QuantHandler,
         175,
         4129,
+        162,
     )
-    token_per_sec, memory_bandwidth = run_experiment(model)
+    token_per_sec, memory_bandwidth, compilation_time = run_experiment(model)
     return [
         Experiment(
             model.name,
@@ -314,6 +336,14 @@ def run_mixtral_8x7b_int8(device: str = "cuda"):
             "memory_bandwidth(GB/s)",
             model.memory_bandwidth,
             f"{memory_bandwidth:.02f}",
+            model.mode,
+            device,
+        ),
+        Experiment(
+            model.name,
+            "compilation_time(s)",
+            model.compilation_time,
+            f"{compilation_time:.02f}",
             model.mode,
             device,
         ),
