@@ -173,7 +173,7 @@ static std::optional<Node*> tryMerge(
     Node* to_merge,
     AliasDb* aliasDb) {
   if (!canMerge(fusion_group, to_merge, aliasDb)) {
-    return std::nullopt;
+    return c10::nullopt;
   }
 
   std::vector<Node*> nodes_to_merge = {to_merge};
@@ -190,7 +190,7 @@ static std::optional<Node*> tryMerge(
     GRAPH_UPDATE("Trying to move node next to fusion group: ", getHeader(n));
     if (!aliasDb->moveBeforeTopologicallyValid(n, move_point)) {
       GRAPH_UPDATE("Failed to move because of AliasDb checks!");
-      return std::nullopt;
+      return c10::nullopt;
     }
     move_point = n;
   }
