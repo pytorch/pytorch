@@ -1236,6 +1236,7 @@ TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
 TEST_MPS = torch.backends.mps.is_available()
 TEST_XPU = torch.xpu.is_available()
+TEST_HPU = True if (hasattr(torch, "hpu") and torch.hpu.is_available()) else False
 TEST_CUDA = torch.cuda.is_available()
 custom_device_mod = getattr(torch, torch._C._get_privateuse1_backend_name(), None)
 custom_device_is_available = hasattr(custom_device_mod, "is_available") and custom_device_mod.is_available()
@@ -1500,31 +1501,31 @@ TestEnvironment.def_flag("TEST_CUDA_MEM_LEAK_CHECK", env_var="PYTORCH_TEST_CUDA_
 
 # Dict of NumPy dtype -> torch dtype (when the correspondence exists)
 numpy_to_torch_dtype_dict = {
-    np.dtype(np.bool_)     : torch.bool,
-    np.dtype(np.uint8)     : torch.uint8,
-    np.dtype(np.uint16)    : torch.uint16,
-    np.dtype(np.uint32)    : torch.uint32,
-    np.dtype(np.uint64)    : torch.uint64,
-    np.dtype(np.int8)      : torch.int8,
-    np.dtype(np.int16)     : torch.int16,
-    np.dtype(np.int32)     : torch.int32,
-    np.dtype(np.int64)     : torch.int64,
-    np.dtype(np.float16)   : torch.float16,
-    np.dtype(np.float32)   : torch.float32,
-    np.dtype(np.float64)   : torch.float64,
-    np.dtype(np.complex64) : torch.complex64,
-    np.dtype(np.complex128): torch.complex128
+    np.bool_      : torch.bool,
+    np.uint8      : torch.uint8,
+    np.uint16     : torch.uint16,
+    np.uint32     : torch.uint32,
+    np.uint64     : torch.uint64,
+    np.int8       : torch.int8,
+    np.int16      : torch.int16,
+    np.int32      : torch.int32,
+    np.int64      : torch.int64,
+    np.float16    : torch.float16,
+    np.float32    : torch.float32,
+    np.float64    : torch.float64,
+    np.complex64  : torch.complex64,
+    np.complex128 : torch.complex128
 }
 
 
-# numpy dtypes like np.float64 are not instances, but rather classes. This leads
-# to rather absurd cases like np.float64 != np.dtype("float64") but
-# np.dtype(np.float64) == np.dtype("float64") and
-# np.dtype(np.dtype("float64")) == np.dtype("float64").  Especially when
-# checking against a reference we can't be sure which variant we get, so we
-# simply apply the conversion.
+# numpy dtypes like np.float64 are not instances, but rather classes. This leads to rather absurd cases like
+# np.float64 != np.dtype("float64") but np.float64 == np.dtype("float64").type.
+# Especially when checking against a reference we can't be sure which variant we get, so we simply try both.
 def numpy_to_torch_dtype(np_dtype):
-    return numpy_to_torch_dtype_dict[np.dtype(np_dtype)]
+    try:
+        return numpy_to_torch_dtype_dict[np_dtype]
+    except KeyError:
+        return numpy_to_torch_dtype_dict[np_dtype.type]
 
 
 def has_corresponding_torch_dtype(np_dtype):
@@ -1548,6 +1549,31 @@ torch_to_numpy_dtype_dict.update({
     torch.bfloat16: np.float32,
     torch.complex32: np.complex64
 })
+
+def skipIfNNModuleInlined(
+    msg="test doesn't currently work with nn module inlining",
+    condition=torch._dynamo.config.inline_inbuilt_nn_modules,
+):  # noqa: F821
+    def decorator(fn):
+        if not isinstance(fn, type):
+
+            @wraps(fn)
+            def wrapper(*args, **kwargs):
+                if condition:
+                    raise unittest.SkipTest(msg)
+                else:
+                    fn(*args, **kwargs)
+
+            return wrapper
+
+        assert isinstance(fn, type)
+        if condition:
+            fn.__unittest_skip__ = True
+            fn.__unittest_skip_why__ = msg
+
+        return fn
+
+    return decorator
 
 def skipIfRocm(func=None, *, msg="test doesn't currently work on the ROCm stack"):
     def dec_fn(fn):
@@ -1593,6 +1619,15 @@ def skipIfMps(fn):
     def wrapper(*args, **kwargs):
         if TEST_MPS:
             raise unittest.SkipTest("test doesn't currently work with MPS")
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
+def skipIfHpu(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if TEST_HPU:
+            raise unittest.SkipTest("test doesn't currently work with HPU")
         else:
             fn(*args, **kwargs)
     return wrapper
@@ -4988,6 +5023,7 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
         return m.group(0)
 
     s = re.sub(r'  File "([^"]+)", line \d+, in (.+)\n    .+\n( +[~^]+ *\n)?', repl_frame, s)
+    s = re.sub(r'(<function [^ ]+ at )0x[0-9a-fA-F]+', r'\1 0xN', s)
     s = re.sub(r"line \d+", "line N", s)
     s = re.sub(r".py:\d+", ".py:N", s)
     s = re.sub(file, os.path.basename(file), s)

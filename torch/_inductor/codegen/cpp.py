@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import contextlib
 import dataclasses
 import functools
@@ -49,6 +50,7 @@ from ..utils import (
 
 from ..virtualized import NullKernelHandler, ops, OpsValue, V
 from .common import (
+    BackendFeature,
     BracesBuffer,
     CppWrapperKernelArgs,
     CSE,
@@ -2061,6 +2063,7 @@ class CppVecKernel(CppKernel):
         tiling_factor=0,
         tiling_idx=-1,
         tiling_dtype=torch.float,
+        tail_size=None,
     ):
         super().__init__(args, num_threads)
         self.vec_isa = codecache.pick_vec_isa()
@@ -2069,7 +2072,8 @@ class CppVecKernel(CppKernel):
             tiling_factor = self.vec_isa.nelements(dtype=tiling_dtype)
         self.tiling_factor = tiling_factor
         self.tiling_idx = tiling_idx
-        self.num_elems = tiling_factor
+        self.tail_size = tail_size
+        self.num_elems = tail_size if tail_size else tiling_factor
 
     def _try_get_const_stride(self, index: sympy.Expr, itervar: sympy.Symbol):
         if self.index_indirect_depends_on(index, itervar):
@@ -2566,20 +2570,41 @@ class CppVecKernel(CppKernel):
         self, reduction_type, var, next_value, use_weight_recps=False
     ):
         if reduction_type == "max":
-            return f"at::vec::maximum({var}, {next_value})"
+            if self.tail_size:
+                return f"max_masked_reduce({var}, {next_value}, {self.tail_size})"
+            else:
+                return f"at::vec::maximum({var}, {next_value})"
         elif reduction_type == "min":
-            return f"at::vec::minimum({var}, {next_value})"
+            if self.tail_size:
+                return f"min_masked_reduce({var}, {next_value}, {self.tail_size})"
+            else:
+                return f"at::vec::minimum({var}, {next_value})"
         elif reduction_type == "sum":
-            return f"{var} + {next_value}"
+            if self.tail_size:
+                return f"sum_masked_reduce({var}, {next_value}, {self.tail_size})"
+            else:
+                return f"{var} + {next_value}"
         elif reduction_type == "prod":
-            return f"{var} * {next_value}"
+            if self.tail_size:
+                return f"prod_masked_reduce({var}, {next_value}, {self.tail_size})"
+            else:
+                return f"{var} * {next_value}"
         elif reduction_type == "xor_sum":
-            return f"{var} ^ {next_value}"
+            if self.tail_size:
+                return f"xor_sum_masked_reduce({var}, {next_value}, {self.tail_size})"
+            else:
+                return f"{var} ^ {next_value}"
         elif reduction_type == "welford_reduce":
             if use_weight_recps:
-                return f"welford_combine({var}, {next_value}, &weight_recps)"
+                if self.tail_size:
+                    return f"welford_combine({var}, {next_value}, {self.tail_size}, &weight_recps)"
+                else:
+                    return f"welford_combine({var}, {next_value}, &weight_recps)"
             else:
-                return f"welford_combine({var}, {next_value})"
+                if self.tail_size:
+                    return f"welford_combine({var}, {next_value}, {self.tail_size})"
+                else:
+                    return f"welford_combine({var}, {next_value})"
         elif reduction_type == "welford_combine":
             if isinstance(next_value, tuple):
                 # When reading a value from Inductor IR we have a tuple of variable names
@@ -2587,7 +2612,10 @@ class CppVecKernel(CppKernel):
             else:
                 # When combining intermediate accumulators we have a Welford<T> struct
                 mean, m2, weight = reduction_project(reduction_type, next_value)
-            return f"welford_combine({var}, {{{mean}, {m2}, {weight}}})"
+            if self.tail_size:
+                return f"welford_combine({var}, {{{mean}, {m2}, {weight}}}, {self.tail_size})"
+            else:
+                return f"welford_combine({var}, {{{mean}, {m2}, {weight}}})"
         else:
             raise NotImplementedError
 
@@ -2615,54 +2643,6 @@ class CppVecKernel(CppKernel):
             cond_print = f"{var} < {upper_scalar}"
         cond = f"({self._get_mask_type(var.dtype)}({cond})).all_masked()"
         return f'{self.assert_function}({cond}, "index out of bounds: {cond_print}")'
-
-
-class CppVecMaskKernel(CppVecKernel):
-    "A masked vector kernel for handling the tail loop"
-    overrides = CppVecOverrides  # type: ignore[assignment]
-
-    def __init__(
-        self,
-        args,
-        num_threads,
-        tail_size,
-        tiling_factor=0,
-        tiling_idx=-1,
-        tiling_dtype=torch.float,
-    ):
-        super().__init__(args, num_threads, tiling_factor, tiling_idx, tiling_dtype)
-        self.num_elems = tail_size
-
-    def reduction_combine_vec(
-        self, reduction_type, var, next_value, use_weight_recps=False
-    ):
-        if reduction_type == "max":
-            return f"max_masked_reduce({var}, {next_value}, {self.num_elems})"
-        elif reduction_type == "min":
-            return f"min_masked_reduce({var}, {next_value}, {self.num_elems})"
-        elif reduction_type == "sum":
-            return f"sum_masked_reduce({var}, {next_value}, {self.num_elems})"
-        elif reduction_type == "prod":
-            return f"prod_masked_reduce({var}, {next_value}, {self.num_elems})"
-        elif reduction_type == "xor_sum":
-            return f"xor_sum_masked_reduce({var}, {next_value}, {self.num_elems})"
-        elif reduction_type == "welford_reduce":
-            if use_weight_recps:
-                return f"welford_combine({var}, {next_value}, {self.num_elems}, &weight_recps)"
-            else:
-                return f"welford_combine({var}, {next_value}, {self.num_elems})"
-        elif reduction_type == "welford_combine":
-            if isinstance(next_value, tuple):
-                # When reading a value from Inductor IR we have a tuple of variable names
-                mean, m2, weight = next_value
-            else:
-                # When combining intermediate accumulators we have a Welford<T> struct
-                mean, m2, weight = reduction_project(reduction_type, next_value)
-            return (
-                f"welford_combine({var}, {{{mean}, {m2}, {weight}}}, {self.num_elems})"
-            )
-        else:
-            raise NotImplementedError
 
 
 class CppTile2DKernel(CppVecKernel):
@@ -2966,9 +2946,8 @@ class CppVecKernelChecker(CppVecKernel):
         return self.simd_vec
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        assert self._orig_wrapper_code is not None
         # Restore the wrapper_code
-        V.graph.wrapper_code = self._orig_wrapper_code
+        V.graph.wrapper_code = self._orig_wrapper_code  # type: ignore[assignment]
         self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
 
     def __enter__(self):
@@ -3201,7 +3180,7 @@ class CppKernelProxy(CppKernel):
         scheduler_node._lowp_fp_type = _lowp_fp_type  # type: ignore[attr-defined]
         return True
 
-    def legalize_lowp_fp_dtype(self, nodes):
+    def legalize_lowp_fp_dtype_loopbody(self, loop_body: ir.LoopBody):
         def add_to_dtype(sub_graph: torch.fx.Graph):
             def is_lowp_fp_load(node: torch.fx.Node):
                 if node.target not in ["load"]:
@@ -3339,11 +3318,11 @@ class CppKernelProxy(CppKernel):
 
             eliminate_to_dtype(sub_graph)
 
-        def _legalize_lowp_fp(loop_body: ir.LoopBody):
-            sub_blocks = [loop_body.root_block] + list(loop_body.subblocks.values())
-            for sub_block in sub_blocks:
-                add_to_dtype(sub_block.graph)
+        sub_blocks = [loop_body.root_block] + list(loop_body.subblocks.values())
+        for sub_block in sub_blocks:
+            add_to_dtype(sub_block.graph)
 
+    def legalize_lowp_fp_dtype(self, nodes):
         if all(
             isinstance(_node, SchedulerNode) and self.is_lowp_fp_scheduler(_node)
             for _node in nodes
@@ -3380,7 +3359,7 @@ class CppKernelProxy(CppKernel):
             should_legalize = not is_memory_copy_scheduler_node(node)
             if should_legalize:
                 body: ir.LoopBody = node._body
-                _legalize_lowp_fp(body)
+                self.legalize_lowp_fp_dtype_loopbody(body)
 
     def codegen_functions(self, fn_list, var_sizes_list, vec_dtype=torch.float):
         # TODO(jgong5): remove vec_dtype arg with alternative tiling factors for various dtypes
@@ -3522,11 +3501,11 @@ class CppKernelProxy(CppKernel):
                 if could_masked_vec:
                     tail_loop.steps = tail_loop.size - tail_loop.offset
                     masked_vec_kernel = codegen_kernel(
-                        CppVecMaskKernel,
-                        tail_loop.steps,
+                        CppVecKernel,
                         tiling_factors[0],
                         tiling_indices[0],
                         vec_dtype,
+                        tail_loop.steps,
                     )
                     tail_loop.set_kernel(masked_vec_kernel)
                     tail_loop.simd_vec = True
@@ -3565,8 +3544,8 @@ class CppKernelProxy(CppKernel):
                 inner_tail_loop.set_kernel(vec_kernel)
 
     def codegen_loop_bodies(self, loop_bodies, var_sizes_list):
-        # TODO(jgong5): support lowp legalization
         for body in loop_bodies:
+            self.legalize_lowp_fp_dtype_loopbody(body)
             DataTypePropagation.propagate_loopbody(body)
         self.codegen_functions(loop_bodies, var_sizes_list)
 
@@ -3639,10 +3618,21 @@ class CppScheduling(BaseScheduling):
     # https://github.com/python/cpython/commit/a285af7e626d1b81cf09f8b2bf7656f100bc1237
     # We set a conservative threshold here.
     MAX_FUSED_KERNEL_ARGS_NUM = 500
+    backend_features = dict.fromkeys(
+        [
+            BackendFeature.INPLACE_BUFFERS,
+        ]
+    )
+
+    @classmethod
+    def get_backend_features(cls, device: torch.device):
+        return cls.backend_features
 
     def __init__(self, scheduler):
+        super().__init__()
         self.scheduler = scheduler
-        self.reset_kernel_group()
+        if scheduler:
+            self.reset_kernel_group()
         self._ready_to_flush = False
 
     def _set_flush_status(self, status: bool):
@@ -3971,7 +3961,6 @@ class CppScheduling(BaseScheduling):
         kernel, render = ctb.make_kernel_render(ctb, epilogue_nodes=epilogue_ir_nodes)
         with kernel:
             for node in [template_node, *epilogue_nodes]:
-                node.decide_inplace_update()
                 node.mark_run()  # type: ignore[attr-defined]
             src_code = render()
 

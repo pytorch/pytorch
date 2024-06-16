@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import operator
+import os
 
 from torch._inductor.compile_worker.subproc_pool import (
     raise_testexc,
@@ -28,6 +29,21 @@ class TestCompileWorker(TestCase):
             a = pool.submit(raise_testexc)
             with self.assertRaises(TestException):
                 a.result()
+        finally:
+            pool.shutdown()
+
+    def test_crash(self):
+        pool = SubprocPool(2)
+        try:
+            with self.assertRaises(Exception):
+                a = pool.submit(os._exit, 1)
+                a.result()
+
+            # Pool should still be usable after a crash
+            b = pool.submit(operator.add, 100, 1)
+            c = pool.submit(operator.sub, 100, 1)
+            self.assertEqual(b.result(), 101)
+            self.assertEqual(c.result(), 99)
         finally:
             pool.shutdown()
 
