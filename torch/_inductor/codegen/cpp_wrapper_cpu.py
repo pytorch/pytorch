@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import math
 import os
@@ -15,7 +16,7 @@ import torch._ops
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey
 from .. import config, ir
 from ..codecache import CudaKernelParamCache
-from ..utils import cache_on_self, sympy_product
+from ..utils import _align, ALIGN_BYTES, cache_on_self, sympy_product
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import IndentedBuffer
@@ -238,8 +239,6 @@ class CppWrapperCpu(WrapperCodeGen):
                 };
                 """
             )
-
-        from .memory_planning import ALIGN_BYTES
 
         # Round up to the nearest multiple of ALIGN_BYTES
         # ALIGN_BYTES must be a power of 2
@@ -721,6 +720,11 @@ class CppWrapperCpu(WrapperCodeGen):
                 ), f"input {name=} cannot be symbolic"
                 self.write_input_output_info("inputs_info_", idx, name)
 
+            all_cuda = all(
+                V.graph.get_original_value_of_constant(name).is_cuda
+                for name in V.graph.constants.keys()
+                if name not in V.graph.folded_constants
+            )
             for idx, name in enumerate(V.graph.constants.keys()):
                 tensor = V.graph.get_original_value_of_constant(name)
                 assert isinstance(tensor, torch.Tensor)
@@ -731,14 +735,19 @@ class CppWrapperCpu(WrapperCodeGen):
                 self.prefix.writeline(
                     f"constants_info_[{idx}].offset = {tensor.storage_offset()};"
                 )
-                if tensor.is_mkldnn:
-                    self.prefix.writeline(
-                        f"constants_info_[{idx}].data_size = {torch.ops.mkldnn._nbytes(tensor)};"
-                    )
-                else:
-                    self.prefix.writeline(
-                        f"constants_info_[{idx}].data_size = {tensor.untyped_storage().nbytes()};"
-                    )
+
+                # If constants to serialize contain cpu tensors, we always align data_size it to 64.
+                # When loading the constants, the valid data will depends on the size
+                # not the data_size so there won't be correctness issue.
+                data_size = (
+                    torch.ops.mkldnn._nbytes(tensor)
+                    if tensor.is_mkldnn
+                    else tensor.untyped_storage().nbytes()
+                )
+                self.prefix.writeline(
+                    f"constants_info_[{idx}].data_size = {data_size if all_cuda else _align(data_size)};"
+                )
+
                 from_folded = "true" if name in V.graph.folded_constants else "false"
                 self.prefix.writeline(
                     f"constants_info_[{idx}].from_folded = {from_folded};"
@@ -1504,7 +1513,7 @@ class CppWrapperCpu(WrapperCodeGen):
         for buf in nodes.get_names():
             # TODO: Add buf name directly into check_inf_and_nan.
             self.writeline(
-                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_check_inf_and_nan({buf}));"
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_check_inf_and_nan({buf}));"
             )
 
     def codegen_device(self, device):

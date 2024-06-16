@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import dataclasses
 import functools
 import inspect
@@ -42,7 +43,9 @@ from torch._functorch.aot_autograd import aot_export_module
 from torch._guards import detect_fake_mode
 
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.functional_tensor import FunctionalTensor
 from torch._utils_internal import log_export_usage
 from torch.export.dynamic_shapes import _combine_args
 from torch.export.exported_program import OutputKind
@@ -122,6 +125,26 @@ DEFAULT_EXPORT_DYNAMO_CONFIG.reorderable_logging_functions = {
     print,
     warnings.warn,
 }
+
+
+COMPOSITE_OPS_THAT_CAN_BE_PRESERVED = [
+    torch.ops.aten.batch_norm.default,
+    torch.ops.aten.broadcast_to.default,
+    torch.ops.aten.chunk.default,
+    torch.ops.aten.conv_transpose1d.default,
+    torch.ops.aten.conv_transpose2d.input,
+    torch.ops.aten.conv_transpose3d.input,
+    torch.ops.aten.conv1d.default,
+    torch.ops.aten.conv2d.default,
+    torch.ops.aten.conv3d.default,
+    torch.ops.aten.flatten.using_ints,
+    torch.ops.aten.linear.default,
+    torch.ops.aten.reshape.default,
+    torch.ops.aten.sym_numel.default,
+    torch.ops.aten.sym_size.int,
+    torch.ops.aten.sym_storage_offset.default,
+    torch.ops.aten.sym_stride.int,
+]
 
 
 @contextmanager
@@ -220,7 +243,7 @@ def _convert_input_to_fake(gm, args, kwargs):
 
 
 @contextmanager
-def override_composite_implicit_decomp():
+def override_composite_implicit_decomp(ops_to_preserve):
     # This function overrides CompositeImplicitAutograd decomp for
     # functional composite ops. Ideally we want to not-decompose
     # ALL composite ops but today's C++ functinalization relies on
@@ -230,47 +253,47 @@ def override_composite_implicit_decomp():
     # functional but not really aka dropout), for these cases, we just decompose.
     saved_tables = {}
     patched_ops = set()
-    for name in torch.ops.aten:
-        op = getattr(torch.ops.aten, name)
-        for overload in op.overloads():
-            op_overload = getattr(op, overload)
-            from torch._subclasses.functional_tensor import FunctionalTensor
+    for op_overload in ops_to_preserve:
 
-            if (
-                op_overload
-                not in FunctionalTensor.maybe_aliasing_or_mutating_ops
-                + FunctionalTensor.metadata_fns
+        def can_preserve(op_overload):
+            if op_overload in FunctionalTensor.maybe_aliasing_or_mutating_ops:
+                return False
+            if op_overload in FunctionalTensor.metadata_fns:
+                return False
+
+            alias_info = len(
+                [i for i in op_overload._schema.arguments if i.alias_info is not None]
+            )
+
+            is_mutating_or_aliasing = alias_info != 0 or op_overload._schema.is_mutable
+
+            if is_mutating_or_aliasing:
+                return False
+
+            if not torch._C._dispatch_has_kernel(op_overload.name()):
+                return False
+
+            if not torch._C._dispatch_has_kernel_for_dispatch_key(
+                op_overload.name(), torch._C.DispatchKey.CompositeImplicitAutograd
             ):
-                alias_info = len(
-                    [
-                        i
-                        for i in op_overload._schema.arguments
-                        if i.alias_info is not None
-                    ]
+                return False
+
+            return True
+
+        if not can_preserve(op_overload):
+            continue
+
+        saved_tables[op_overload] = op_overload.py_kernels.copy()
+        patched_ops.add(op_overload)
+        for override_dispatch_key in [
+            torch._C.DispatchKey.AutogradCPU,
+            torch._C.DispatchKey.AutogradCUDA,
+            torch._C.DispatchKey.AutogradMeta,
+        ]:
+            if override_dispatch_key not in op_overload.py_kernels:
+                op_overload.py_impl(override_dispatch_key)(
+                    torch._C.DispatchKey.Autograd
                 )
-                is_mutating_or_aliasing = (
-                    alias_info != 0 or op_overload._schema.is_mutable
-                )
-                # TS dumps bunch of nonsense overloads so we ignore them as well.
-                if (
-                    not is_mutating_or_aliasing
-                    and torch._C._dispatch_has_kernel(op_overload.name())
-                    and torch._C._dispatch_has_kernel_for_dispatch_key(
-                        op_overload.name(),
-                        torch._C.DispatchKey.CompositeImplicitAutograd,
-                    )
-                ):
-                    saved_tables[op_overload] = op_overload.py_kernels.copy()
-                    patched_ops.add(op_overload)
-                    for override_dispatch_key in [
-                        torch._C.DispatchKey.AutogradCPU,
-                        torch._C.DispatchKey.AutogradCUDA,
-                        torch._C.DispatchKey.AutogradMeta,
-                    ]:
-                        if override_dispatch_key not in op_overload.py_kernels:
-                            op_overload.py_impl(override_dispatch_key)(
-                                torch._C.DispatchKey.Autograd
-                            )
 
     try:
         yield
@@ -1428,6 +1451,7 @@ def _export(
     _allow_complex_guards_as_runtime_asserts: bool = False,
     _disable_forced_specializations: Optional[bool] = False,
     _is_torch_jit_trace: bool = False,
+    _preserve_ops: Optional[List[OpOverload]] = None,
 ) -> ExportedProgram:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
@@ -1516,7 +1540,9 @@ def _export(
 
     # TODO we only want to do this for aot-dispatch for now. Pre-dispatch will be deleted soon
     override_decomp = (
-        override_composite_implicit_decomp() if not pre_dispatch else nullcontext()
+        override_composite_implicit_decomp(_preserve_ops if _preserve_ops else [])
+        if not pre_dispatch
+        else nullcontext()
     )
     with override_decomp:
         aten_export_artifact = export_func(

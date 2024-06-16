@@ -40,7 +40,7 @@ Important Note: The trustworthiness of a model is not binary. You must always de
 
 ### Untrusted inputs during training and prediction
 
-If you plan to open your model to untrusted inputs, be aware that inputs can also be used as vectors by malicious agents. To minimize risks, make sure to give your model only the permisisons strictly required, and keep your libraries updated with the lates security patches.
+If you plan to open your model to untrusted inputs, be aware that inputs can also be used as vectors by malicious agents. To minimize risks, make sure to give your model only the permissions strictly required, and keep your libraries updated with the latest security patches.
 
 If applicable, prepare your model against bad inputs and prompt injections. Some recommendations:
 - Pre-analysis: check how the model performs by default when exposed to prompt injection (e.g. using fuzzing for prompt injection).

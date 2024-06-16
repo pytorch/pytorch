@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Functions to export models into the ONNX IR format.
 
 These models can be loaded with the ONNX library and then

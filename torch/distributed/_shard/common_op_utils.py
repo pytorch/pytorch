@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 from torch.utils import _pytree as pytree
 from typing import Optional

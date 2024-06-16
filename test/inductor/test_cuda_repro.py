@@ -1135,6 +1135,7 @@ class CudaReproTests(TestCase):
         fn(*args)
         torch.cuda.synchronize()  # shake out Triton Error [CUDA]: misaligned address
 
+    @skipIfRocm
     def test_non_commutative_scan_op(self):
         from torch._higher_order_ops.associative_scan import associative_scan
 

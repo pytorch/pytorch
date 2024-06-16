@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from collections import defaultdict
 from dataclasses import dataclass
 from time import perf_counter_ns

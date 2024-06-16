@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import copy
 import functools
 import heapq
@@ -25,6 +26,7 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.fx.passes import graph_drawer
 from . import config
+from ._aot_autograd.logging_utils import get_aot_graph_name
 from .compile_utils import fx_graph_cse, get_aten_target
 
 if TYPE_CHECKING:
@@ -451,14 +453,16 @@ def _size_of(node: fx.Node) -> int:
         # layering violation)
         elif isinstance(val, (list, tuple)):
             return sum(
-                _tensor_nbytes(hint_int(n.numel(), fallback=4098), n.dtype)
+                _tensor_nbytes(hint_int(n.numel(), fallback=4096), n.dtype)
                 for n in val
                 if isinstance(n, torch.Tensor)
             )
         elif isinstance(val, torch.Tensor):
-            return _tensor_nbytes(hint_int(val.numel(), fallback=4098), val.dtype)
+            return _tensor_nbytes(hint_int(val.numel(), fallback=4096), val.dtype)
 
         raise RuntimeError(f"Unknown metadata type {type(val)}")
+    if node.op == "get_attr":
+        return 0
     raise RuntimeError("We should always have `val` metadata on the nodes")
 
 
@@ -532,25 +536,22 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
     for idx, node in enumerate(gm.graph.nodes):
         order[node] = idx
 
-    # Populate depth for the nodes. Depth is the distance from the inputs.
-    depths = {}
-    output_node = next(iter(gm.graph.find_nodes(op="output")))
-    for node in gm.graph.nodes:
-        if node.op == "placeholder":
-            depths[node] = 0
-        else:
-            depths[node] = max([depths[arg] for arg in node.all_input_nodes], default=0)
-
     def insert_node_in_graph(node):
-        if node in env:
-            return env[node]
+        cur_nodes = [node]
+        insertable_nodes = set()
+        while len(cur_nodes) > 0:
+            node = cur_nodes.pop()
+            if node in insertable_nodes or node in env:
+                continue
+            insertable_nodes.add(node)
 
-        # Bias traversal towards the nodes that have higher depth - prioritizes
-        # critical path first.
-        for arg, _ in sort_depths(node.all_input_nodes, depths):
-            env[arg] = insert_node_in_graph(arg)
-        env[node] = new_graph.node_copy(node, lambda x: env[x])
-        return env[node]
+            # Bias traversal towards the nodes that have higher depth - prioritizes
+            # critical path first.
+            cur_nodes += node.all_input_nodes
+
+        insertable_nodes = sorted(insertable_nodes, key=lambda n: order[n])
+        for node in insertable_nodes:
+            env[node] = new_graph.node_copy(node, lambda x: env[x])
 
     # Find first bwd node in the graph
     tangent_inputs = list(filter(_is_tangent, gm.graph.nodes))
@@ -750,7 +751,7 @@ def cleanup_recompute_tags(joint_module: fx.GraphModule) -> fx.GraphModule:
     return joint_module
 
 
-def get_saved_values(
+def solve_min_cut(
     joint_graph: fx.Graph,
     node_info: NodeInfo,
     min_cut_options: MinCutOptions,
@@ -877,7 +878,6 @@ def get_saved_values(
             return False
         if node in dont_ban:
             return False
-        # breakpoint()
         # This bans recomputation of the node unless we've been forced not to by
         # user annotation
         # NB: "recompute" > 0 means that user annotation has asked us to
@@ -1268,9 +1268,197 @@ def get_name_to_node(graph: fx.Graph):
     return name_to_node
 
 
+def greedy_knapsack(
+    memory: List[float], runtimes: List[float], max_memory: float
+) -> Tuple[float, List[int], List[int]]:
+    n = len(runtimes)
+    items = list(range(n))
+
+    # Sort items based on the ratio of runtime to memory in descending order
+    items = sorted(items, key=lambda i: runtimes[i] / memory[i], reverse=True)
+
+    total_memory = 0.0
+    total_runtime = 0.0
+    items_to_save = []
+    items_to_allow_recomputing = []
+
+    for i in items:
+        if total_memory + memory[i] <= max_memory:
+            total_memory += memory[i]
+            total_runtime += runtimes[i]
+            items_to_save.append(i)
+        else:
+            items_to_allow_recomputing.append(i)
+    return total_runtime, items_to_save, items_to_allow_recomputing
+
+
+def ilp_knapsack(
+    memory: List[float], runtimes: List[float], max_memory: float
+) -> Tuple[float, List[int], List[int]]:
+    import numpy as np
+
+    try:
+        from scipy.optimize import Bounds, LinearConstraint, milp
+    except ImportError:
+        raise RuntimeError(
+            "To use the ILP for memory budget checkpointing you need to install scipy"
+        ) from None
+
+    np_memory = np.array(memory)
+    np_runtimes = np.array(runtimes)
+    c = -np_runtimes  # type: ignore[operator]
+
+    memory_constraint = LinearConstraint(A=np_memory, ub=np.array(max_memory))
+    constraints = [memory_constraint]
+
+    integrality = np.ones_like(c)
+    res = milp(
+        c=c, constraints=constraints, integrality=integrality, bounds=Bounds(0, 1)
+    )
+    if not res.success:
+        raise RuntimeError("Somehow scipy solving failed")
+
+    items_to_save = []
+    items_to_allow_recomputing = []
+    for idx, i in enumerate(res.x):
+        if i == 1:
+            items_to_save.append(idx)
+        else:
+            items_to_allow_recomputing.append(idx)
+    return -res.fun, items_to_save, items_to_allow_recomputing
+
+
+def dp_knapsack(
+    memory: List[float], runtimes: List[float], max_memory: float
+) -> Tuple[float, List[int], List[int]]:
+    # Scaling factor to convert floating point weights to integers
+    S = 10000
+
+    # Quantize the memory weights
+    quantized_memory = torch.tensor(
+        [int(round(m * S)) for m in memory], dtype=torch.long, device="cpu"
+    )
+    runtimes = torch.tensor(runtimes, dtype=torch.float32, device="cpu")
+
+    # Quantized pseudopolynomial DP for 0-1 Knapsack
+    quantized_max_memory = int(round(max_memory * S))
+
+    n = len(memory)
+
+    # Initialize the DP table
+    # TODO(chilli): I think if needed, this memory can be optimized with sliding
+    # window trick + Hirschberg trick:
+    # https://codeforces.com/blog/entry/47247?#comment-316200
+    dp = torch.zeros(
+        (n + 1, quantized_max_memory + 1), dtype=torch.float32, device="cpu"
+    )
+
+    for i in range(1, n + 1):
+        current_memory = quantized_memory[i - 1]
+        current_runtime = runtimes[i - 1]
+
+        # Copy the previous row
+        dp[i, :] = dp[i - 1, :]
+
+        # Update dp[i, j] for all j >= current_memory
+        if current_memory == 0:
+            dp[i, :] = dp[i - 1, :] + current_runtime
+        else:
+            dp[i, current_memory:] = torch.maximum(
+                dp[i - 1, current_memory:],
+                dp[i - 1, :-current_memory] + current_runtime,
+            )
+
+    # Backtrack to find the items included in the knapsack
+    saved_items = []
+    recomputable_items = []
+    j: int = quantized_max_memory
+    for i in range(n, 0, -1):
+        if dp[i][j] != dp[i - 1][j]:
+            saved_items.append(i - 1)  # Include this item (indexing from 0)
+            j -= int(quantized_memory[i - 1].item())
+        else:
+            recomputable_items.append(i - 1)
+
+    saved_items.reverse()  # To get items in the order they were added
+
+    # The maximum runtime that can be achieved within the max_memory constraint
+    max_runtime = dp[n][quantized_max_memory].item()
+
+    return max_runtime, saved_items, recomputable_items
+
+
+def _optimize_runtime_with_given_memory(
+    memory: List[float],
+    runtimes: List[float],
+    max_memory: float,
+) -> Tuple[float, List[int], List[int]]:
+    SOLVER = config.activation_memory_budget_solver
+    if SOLVER == "greedy":
+        return greedy_knapsack(memory, runtimes, max_memory)
+    elif SOLVER == "ilp":
+        return ilp_knapsack(memory, runtimes, max_memory)
+    elif SOLVER == "dp":
+        return dp_knapsack(memory, runtimes, max_memory)
+    else:
+        raise RuntimeError(f"Not aware of memory budget knapsack solver: {SOLVER}")
+
+
+from torch.utils._mode_utils import no_dispatch
+
+
+def estimate_runtime(node):
+    RUNTIME_MODE = config.activation_memory_budget_runtime_estimator
+
+    def materialize_arg(x):
+        if isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.Tensor):
+            shape = list(x.meta["val"].shape)
+
+            def realize_symbol(d):
+                return hint_int(d, fallback=4096)
+
+            shape = [realize_symbol(s) for s in shape]
+            return x.meta["val"].new_zeros(shape)
+        elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymInt):
+            return hint_int(x.meta["val"], fallback=4096)
+        elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymFloat):
+            return 1.0
+        elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymBool):
+            return True
+        else:
+            return x
+
+    if RUNTIME_MODE == "testing":
+        return 1
+
+    elif RUNTIME_MODE == "profile":
+        from triton.testing import do_bench
+
+        with no_dispatch():
+            args, kwargs = pytree.tree_map(materialize_arg, (node.args, node.kwargs))
+            ms = do_bench(lambda: node.target(*args, **kwargs))
+            return ms
+
+    elif RUNTIME_MODE == "flops":
+        # todo(chilli): Normalize this to also return ms
+        from torch.utils.flop_counter import FlopCounterMode
+
+        args, kwargs = pytree.tree_map(materialize_arg, (node.args, node.kwargs))
+        with FlopCounterMode(display=False) as mode:
+            node.target(*args, **kwargs)
+        counted_flops = mode.get_total_flops()
+        return max(counted_flops, 1)
+    else:
+        raise RuntimeError(f"Not aware of runtime estimator: {RUNTIME_MODE}")
+
+
 def choose_saved_values_set(
     joint_graph: fx.Graph, node_info: NodeInfo, memory_budget=1
 ) -> List[fx.Node]:
+    if memory_budget > 1 or memory_budget < 0:
+        raise RuntimeError(
+            f"The valid ranges for memory budget are 0 <= m <= 1. The provided value is {memory_budget}"
+        )
     min_cut_options = MinCutOptions(
         ban_if_used_far_apart=config.ban_recompute_used_far_apart,
         ban_if_long_fusible_chains=config.ban_recompute_long_fusible_chains,
@@ -1287,16 +1475,164 @@ def choose_saved_values_set(
             ban_if_materialized_backward=False,
             ban_if_not_in_allowlist=False,
         )
-
     if memory_budget == 0:
         return node_info.inputs
 
-    runtime_optimized_saved_values, _ = get_saved_values(
+    runtime_optimized_saved_values, _ = solve_min_cut(
         joint_graph,
         node_info,
         min_cut_options,
     )
-    return runtime_optimized_saved_values
+    # return runtime_optimized_saved_values
+    if memory_budget == 1:
+        return runtime_optimized_saved_values
+
+    def estimate_activations_size(saved_values: List[fx.Node]) -> float:
+        return sum([_size_of(i) for i in saved_values]) / 1e9
+
+    min_act_size = estimate_activations_size(node_info.inputs)
+    max_act_size = estimate_activations_size(runtime_optimized_saved_values)
+    # The optimized choice is smaller than the inputs anyways
+    if max_act_size <= min_act_size:
+        return runtime_optimized_saved_values
+
+    def get_normalized_size(sz):
+        return (sz / 1e9) / (max_act_size - min_act_size)
+
+    def get_mem_ratio(activations: List[fx.Node]):
+        return (estimate_activations_size(activations) - min_act_size) / (
+            max_act_size - min_act_size
+        )
+
+    more_aggressive_options = replace(
+        min_cut_options,
+        ban_if_used_far_apart=False,
+        ban_if_long_fusible_chains=False,
+        ban_if_materialized_backward=False,
+    )
+    more_aggressive_saved_values, _ = solve_min_cut(
+        joint_graph, node_info, more_aggressive_options
+    )
+    if get_mem_ratio(more_aggressive_saved_values) < memory_budget:
+        return more_aggressive_saved_values
+
+    aggressive_options = replace(
+        more_aggressive_options,
+        ban_if_not_in_allowlist=False,
+    )
+    aggressive_recomputation_saved_values, banned_nodes = solve_min_cut(
+        joint_graph, node_info, aggressive_options
+    )
+
+    if get_mem_ratio(aggressive_recomputation_saved_values) < memory_budget:
+        return aggressive_recomputation_saved_values
+
+    from torch._inductor.fx_utils import get_node_storage
+
+    input_storages = {get_node_storage(node) for node in node_info.inputs}
+
+    def get_recomputable_banned_nodes(banned_nodes: List[fx.Node]) -> List[fx.Node]:
+        return [
+            i
+            for i in banned_nodes
+            if (
+                # Only allow recomputing nodes that are actually required for BW
+                i.dist_from_bw < int(1e9)  # type: ignore[attr-defined]
+                and get_node_storage(i) not in input_storages
+            )
+        ]
+
+    recomputable_banned_nodes = get_recomputable_banned_nodes(banned_nodes)
+
+    # default: runtime_optimized_saved_values
+    # more aggressive: more_aggressive_saved_values
+    # full aggressive: aggressive_recomputation_saved_values
+
+    all_recomputable_banned_nodes = sorted(
+        recomputable_banned_nodes, key=_size_of, reverse=True
+    )
+    if len(all_recomputable_banned_nodes) == 0:
+        return node_info.inputs
+    memories_banned_nodes = [
+        get_normalized_size(_size_of(i)) for i in all_recomputable_banned_nodes
+    ]
+    runtimes_banned_nodes = [
+        estimate_runtime(node) for node in all_recomputable_banned_nodes
+    ]
+    from torch.utils._mode_utils import no_dispatch
+
+    def get_saved_values_knapsack(memory_budget):
+        with no_dispatch():
+            (
+                expected_runtime,
+                saved_node_idxs,
+                recomputable_node_idxs,
+            ) = _optimize_runtime_with_given_memory(
+                memories_banned_nodes, runtimes_banned_nodes, max(memory_budget, 0)
+            )
+        dont_ban = set()
+        for idx in recomputable_node_idxs:
+            dont_ban.add(all_recomputable_banned_nodes[idx])
+        assert dont_ban.issubset(all_recomputable_banned_nodes)
+
+        saved_values, _ = solve_min_cut(
+            joint_graph,
+            node_info,
+            aggressive_options,
+            dont_ban,
+        )
+        return saved_values, expected_runtime
+
+    if config.visualize_memory_budget_pareto:
+        options = []
+        for sweep_memory_budget in range(100, -1, -5):
+            saved_values, expected_runtime = get_saved_values_knapsack(
+                sweep_memory_budget / 100
+            )
+            options.append(
+                (
+                    sweep_memory_budget,
+                    sum(runtimes_banned_nodes) - expected_runtime,
+                    get_mem_ratio(saved_values),
+                )
+            )
+
+        import matplotlib.pyplot as plt
+
+        x_values = [item[2] for item in options]
+        y_values = [item[1] for item in options]
+
+        # Plotting the values with updated axis labels and chart title
+        plt.figure(figsize=(10, 6))
+        plt.plot(x_values, y_values, marker="o")
+
+        # Adding labels for each point
+        for i, txt in enumerate(x_values):
+            plt.annotate(
+                f"{txt:.2f}",
+                (x_values[i], y_values[i]),
+                textcoords="offset points",
+                xytext=(0, 10),
+                ha="center",
+            )
+
+        plt.xlabel("Memory Budget")
+        plt.ylabel("Runtime of Recomputed Components")
+        plt.title("Pareto Frontier of Memory Budget vs. Recomputation Runtime")
+        plt.grid(True)
+        fig = plt.gcf()
+        plt.show()
+        fig_name = f"memory_budget_pareto_{get_aot_graph_name()}.png"
+        fig.savefig(fig_name)
+        log.warning("Generated Pareto frontier curve at %s", fig_name)
+
+    # todo(chilli): Estimated doesn't align exactly with actual - actual is
+    # usually less memory than estimated. i'm guessing (actually quite
+    # unsure about this) that's because estimated is just only including
+    # tensors we actually banned from recompute, but there may be other
+    # tensors that we choose to save.
+
+    return get_saved_values_knapsack(memory_budget=memory_budget)[0]
 
 
 def min_cut_rematerialization_partition(
@@ -1412,7 +1748,15 @@ def min_cut_rematerialization_partition(
             for user in node.users:
                 node.dist_from_bw = min(node.dist_from_bw, user.dist_from_bw + 1)
 
-    saved_values = choose_saved_values_set(joint_graph, node_info, memory_budget=1)
+    memory_budget = config.activation_memory_budget
+    for node in joint_graph.nodes:
+        if isinstance(node.meta.get("memory_budget", None), float):
+            memory_budget = node.meta["memory_budget"]
+            break
+    # print("Memory Budget: ", memory_budget)
+    saved_values = choose_saved_values_set(
+        joint_graph, node_info, memory_budget=memory_budget
+    )
     # save_for_backward on tensors and stashes symints in autograd .ctx
     saved_sym_nodes = list(filter(is_sym_node, saved_values))
     saved_values = list(filter(lambda n: not is_sym_node(n), saved_values))

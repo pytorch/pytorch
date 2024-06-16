@@ -1779,13 +1779,18 @@ void initJITBindings(PyObject* module) {
       [](py::handle op_overload_packet, py::args args, py::kwargs kwargs) {
         py::list ns_method =
             op_overload_packet.attr("_qualified_op_name").attr("split")("::");
-        return _maybe_handle_torch_function(
+        auto res = _maybe_handle_torch_function(
             py::cast<std::string>(ns_method[0]),
             py::cast<std::string>(ns_method[1]),
             "",
             false,
             args,
             kwargs);
+        if (res) {
+          return py::make_tuple(true, *res);
+        } else {
+          return py::make_tuple(false, py::none());
+        }
       });
 
   m.def(
