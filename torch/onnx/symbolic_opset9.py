@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """This file exports ONNX ops for opset 9.
 
 Opset 9 is supported by ONNX release 1.4.1
@@ -344,6 +345,20 @@ def reshape_as(g: jit_utils.GraphContext, self, other):
 @_onnx_symbolic("aten::add")
 @_beartype.beartype
 def add(g: jit_utils.GraphContext, self, other, alpha=None):
+    """
+    This function takes the add function and returns the corresponding ONNX operator.
+
+    This function is not meant to be called directly by the user.
+
+    Args:
+        g (GraphContext): The graph context.
+        self (Tensor): The first operand.
+        other (Tensor): The second operand.
+        alpha (float, optional): The scaling factor for the second operand. Defaults to None.
+
+    Returns:
+        ONNX operator.
+    """
     if symbolic_helper._is_value(self) and symbolic_helper._is_tensor_list(self):
         return symbolic_helper._onnx_opset_unsupported_detailed(
             "Add", 9, 11, "Add between list of tensors not supported", self
@@ -356,6 +371,21 @@ def add(g: jit_utils.GraphContext, self, other, alpha=None):
 @_onnx_symbolic("aten::sub")
 @_beartype.beartype
 def sub(g: jit_utils.GraphContext, self, other, alpha=None):
+    """
+    Consumes sub function and returns the corresponding ONNX operator.
+
+    This function is not meant to be called directly by the user.
+
+    Args:
+        g (GraphContext): The graph context.
+        self (Tensor): The first operand.
+        other (Tensor): The second operand.
+        alpha (Optional[Tensor]): A scaling factor to apply to the second operand.
+            If `alpha` is not provided, it defaults to 1.
+
+    Returns:
+        ONNX operator
+    """
     if alpha and symbolic_helper._scalar(symbolic_helper._maybe_get_scalar(alpha)) != 1:
         other = g.op("Mul", other, alpha)
     return g.op("Sub", self, other)
@@ -757,6 +787,16 @@ def atan2(g: jit_utils.GraphContext, self, other):
 @symbolic_helper.quantized_args(True, scale=1.0 / 256.0, zero_point=0)
 @_beartype.beartype
 def sigmoid(g: jit_utils.GraphContext, self):
+    """Converts the corresponding PyTorch function into ONNX operators.
+
+    It is not meant to be called directly by a user.
+
+    Args:
+        g (jit_utils.GraphContext): Graph context.
+        self (Tensor): the input tensor.
+    Returns:
+        ONNX operator
+    """
     return g.op("Sigmoid", self)
 
 

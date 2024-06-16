@@ -21,6 +21,15 @@ class TestConverter(TestCase):
         ep = TS2EPConverter(ts_model, inp).convert()
         ep_out, _ = pytree.tree_flatten(ep.module()(*inp))
         orig_out, _ = pytree.tree_flatten(mod(*inp))
+
+        # Check module.
+        if isinstance(mod, torch.nn.Module):
+            self.assertEqual(
+                ep.module().state_dict().keys(),
+                mod.state_dict().keys(),
+            )
+
+        # Check results.
         self.assertEqual(len(ep_out), len(orig_out))
         for ep_t, orig_t in zip(ep_out, orig_out):
             if isinstance(ep_t, torch.Tensor):
@@ -259,19 +268,234 @@ class TestConverter(TestCase):
                 x = x.cos()
                 return x + y
 
-        inp = torch.ones(1, 4)
+        inp = (torch.ones(4),)
         self._check_equal_ts_ep_converter(MUnpackList(), inp)
         inp = ((torch.zeros(1, 4), torch.ones(1, 4)),)
         self._check_equal_ts_ep_converter(MUnpackTuple(), inp)
 
+    def test_convert_nn_module_with_nested_param(self):
+        class M(torch.nn.Module):
+            def __init__(self, dim: int) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(dim, dim)
+
+            def forward(self, x: torch.Tensor):
+                return self.linear(x)
+
+        class NestedM(torch.nn.Module):
+            def __init__(self, dim: int) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(dim, dim)
+                self.m = M(dim)
+
+            def forward(self, x: torch.Tensor):
+                return self.linear(self.m(x))
+
+        class SuperNestedM(torch.nn.Module):
+            def __init__(self, dim: int) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(dim, dim)
+                self.m = NestedM(dim)
+
+            def forward(self, x: torch.Tensor):
+                return self.linear(self.m(x))
+
+        inp = (torch.ones(3),)
+        orig_m = NestedM(3)
+        ep = self._check_equal_ts_ep_converter(orig_m, inp)
+        orig_m = SuperNestedM(3)
+        ep = self._check_equal_ts_ep_converter(orig_m, inp)
+
+    def test_convert_nn_module_with_nested_buffer(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("w", torch.randn(1))
+
+            def forward(self, x: torch.Tensor):
+                return self.w + x
+
+        class NestedM(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.m = M()
+                self.register_buffer("w", torch.randn(1))
+
+            def forward(self, x: torch.Tensor):
+                return self.w + self.m(x)
+
+        class SuperNestedM(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.m = NestedM()
+                self.register_buffer("w", torch.randn(1))
+
+            def forward(self, x: torch.Tensor):
+                return self.w + self.m(x)
+
+        inp = (torch.ones(1),)
+        orig_m = NestedM()
+        ep = self._check_equal_ts_ep_converter(orig_m, inp)
+        orig_m = SuperNestedM()
+        ep = self._check_equal_ts_ep_converter(orig_m, inp)
+
+    def test_convert_nn_module_with_nested_if_and_buffer(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("w", torch.randn(1))
+
+            def forward(self, x: torch.Tensor):
+                return self.w + x
+
+        class NestedM(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.m1 = M()
+                self.m2 = M()
+                self.register_buffer("w", torch.randn(1))
+
+            def forward(self, x: torch.Tensor):
+                if torch.sum(x) > 1:
+                    return self.w + self.m1(x)
+                else:
+                    return self.w + self.m2(x)
+
+        # Super nested, parameters neeed to lifted
+        # multiple times.
+        class SuperNestedM(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.m1 = NestedM()
+                self.m2 = NestedM()
+                self.register_buffer("w", torch.randn(1))
+
+            def forward(self, x: torch.Tensor):
+                if torch.max(x) > 1:
+                    return self.w + self.m1(x)
+                else:
+                    return self.w + self.m2(x)
+
+        # Super nested module testing.
+        inp = (torch.ones(1),)
+        orig_m = SuperNestedM()
+        ep = self._check_equal_ts_ep_converter(orig_m, inp)
+
+        t = inp[0]
+        t -= 1
+        torch.testing.assert_close(
+            ep.module()(*inp),
+            orig_m(*inp),
+        )
+
+    def test_convert_nn_module_with_nested_if_and_param(self):
+        class M(torch.nn.Module):
+            def __init__(self, dim: int) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(dim, dim)
+
+            def forward(self, x: torch.Tensor):
+                return self.linear(x)
+
+        class NestedM(torch.nn.Module):
+            def __init__(self, dim: int) -> None:
+                super().__init__()
+                self.m1 = M(dim)
+                self.m2 = M(dim)
+                self.linear = torch.nn.Linear(dim, dim)
+
+            def forward(self, x: torch.Tensor):
+                if torch.sum(x) > 1:
+                    return self.linear(self.m1(x))
+                else:
+                    return self.linear(self.m2(x))
+
+        # Super nested, parameters neeed to lifted
+        # multiple times.
+        class SuperNestedM1(torch.nn.Module):
+            def __init__(self, dim: int) -> None:
+                super().__init__()
+                self.m1 = NestedM(dim)
+                self.m2 = NestedM(dim)
+                self.linear = torch.nn.Linear(dim, dim)
+
+            def forward(self, x: torch.Tensor):
+                if torch.max(x) > 1:
+                    return self.linear(self.m1(x))
+                else:
+                    return self.linear(self.m2(x))
+
+        # Super nested, even the input needs to be
+        # lifted recursively due to value propogation optimiztaion.
+        class SuperNestedM2(torch.nn.Module):
+            def __init__(self, dim: int) -> None:
+                super().__init__()
+                self.m1 = NestedM(dim)
+                self.m2 = NestedM(dim)
+                self.linear = torch.nn.Linear(dim, dim)
+
+            def forward(self, x: torch.Tensor):
+                if torch.sum(x) > 1:
+                    return self.linear(self.m1(x))
+                else:
+                    return self.linear(self.m2(x))
+
+        # Basic module testing.
+        inp = (torch.ones(3),)
+        orig_m = M(3)
+        ep = self._check_equal_ts_ep_converter(orig_m, inp)
+
+        t = inp[0]
+        t -= 0.8
+        torch.testing.assert_close(
+            ep.module()(*inp),
+            orig_m(*inp),
+        )
+
+        # Nested module testing.
+        inp = (torch.ones(3),)
+        orig_m = NestedM(3)
+        ep = self._check_equal_ts_ep_converter(orig_m, inp)
+
+        t = inp[0]
+        t -= 0.8
+        torch.testing.assert_close(
+            ep.module()(*inp),
+            orig_m(*inp),
+        )
+
+        # Super nested module testing.
+        inp = (torch.ones(3),)
+        orig_m = SuperNestedM1(3)
+        ep = self._check_equal_ts_ep_converter(orig_m, inp)
+
+        t = inp[0]
+        t -= 0.8
+        torch.testing.assert_close(
+            ep.module()(*inp),
+            orig_m(*inp),
+        )
+
+        # # Super nested module testing.
+        # inp = (torch.ones(3),)
+        # orig_m = SuperNestedM2(3)
+        # ep = self._check_equal_ts_ep_converter(orig_m, inp)
+
+        # t = inp[0]
+        # t -= 0.8
+        # torch.testing.assert_close(
+        #     ep.module()(*inp),
+        #     orig_m(*inp),
+        # )
+
     def test_ts2ep_converter_contains(self):
         class MIn(torch.nn.Module):
             def forward(self, x: torch.Tensor):
-                return x.dtype in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+                return x.dtype in [torch.float32, torch.float64]
 
         class MNotIn(torch.nn.Module):
             def forward(self, x: torch.Tensor):
-                return x.dtype in [-1]
+                return x.dtype in [torch.int8]
 
         class MTensorIn(torch.nn.Module):
             def forward(self, x: torch.Tensor, x_dict: Dict[torch.Tensor, str]):
@@ -321,6 +545,31 @@ class TestConverter(TestCase):
             inp = (torch.randn(3, 3),)
             m = M()
             self._check_equal_ts_ep_converter(m, inp)
+
+    def test_convert_func_without_param(self):
+        def func1(x, y):
+            return x + y
+
+        def func2(x, y):
+            if x.sum() > 0:
+                return x + y
+            else:
+                return x - y
+
+        inp = (
+            torch.tensor(1),
+            torch.tensor(1),
+        )
+        self._check_equal_ts_ep_converter(func1, inp)
+
+        ep = self._check_equal_ts_ep_converter(func2, inp)
+
+        t = inp[0]
+        t -= 1
+        torch.testing.assert_close(
+            ep.module()(*inp),
+            func2(*inp),
+        )
 
 
 if __name__ == "__main__":

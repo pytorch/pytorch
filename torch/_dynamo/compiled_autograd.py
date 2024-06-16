@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import contextlib
 import functools
 from typing import Dict, List, Optional, TYPE_CHECKING
@@ -271,12 +272,12 @@ class AutogradCompilerInstance:
         )
         set_locals_to_steal(graph, ["inputs"])
         compiled_autograd_log.info(
-            "%s", lazy_format_graph_code("Compiled autograd graph", graph)
+            "%s", lazy_format_graph_code("Compiled autograd graph", graph, colored=True)
         )
         verbose_log.debug(
             "%s",
             lazy_format_graph_code(
-                "Compiled autograd graph", graph, include_device=True
+                "Compiled autograd graph", graph, include_device=True, colored=True
             ),
         )
         trace_structured(
