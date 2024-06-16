@@ -14,6 +14,7 @@ import operator
 import re
 import sys
 import types
+import weakref
 from typing import Any, List, NamedTuple, Optional, Union
 
 from torch.utils._sympy.value_ranges import ValueRanges
@@ -184,6 +185,7 @@ from .user_defined import (
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
+    WeakRefVariable,
 )
 
 
@@ -313,7 +315,10 @@ class VariableBuilder:
 
         vt = self._wrap(value)
         vt.source = self.source
-        if self._can_lift_attrs_to_inputs(vt):
+        if (
+            self._can_lift_attrs_to_inputs(vt)
+            and value not in self.tx.output.side_effects
+        ):
             vt = self.tx.output.side_effects.track_object_existing(value, vt)
 
         self.tx.output.variable_tracker_cache.add(value, self.source, vt)
@@ -383,6 +388,8 @@ class VariableBuilder:
             ((slice, range), cls.wrap_slice_range),
             (tuple(common_constant_types), cls.wrap_literal),
             (re.Pattern, cls.wrap_regex_pattern),
+            (weakref.ReferenceType, cls.wrap_weakref),
+            (torch.utils.hooks.RemovableHandle, cls.wrap_removable_handle),
         ]
 
         if config.trace_numpy and np:
@@ -400,6 +407,17 @@ class VariableBuilder:
         # TODO(jansel): something like a REPR_MATCH might be more robust here
         self.install_guards(GuardBuilder.ID_MATCH)
         return RegexPatternVariable(value)
+
+    def wrap_weakref(self, value: weakref.ReferenceType):
+        self.install_guards(GuardBuilder.TYPE_MATCH)
+        return WeakRefVariable(value, source=self.source)
+
+    def wrap_removable_handle(self, value):
+        # This means that the removable handle was created in some other frame.
+        # Our current infra requires the hook to be registered and removed in
+        # the same frame. So graph break.
+        # Related test - PYTORCH_TEST_WITH_DYNAMO=1 python test/test_autograd.py -k TestAutograd.test_hooks
+        unimplemented("unregistered hook removable handle")
 
     @classmethod
     @functools.lru_cache(None)
