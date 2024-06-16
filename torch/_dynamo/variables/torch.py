@@ -126,6 +126,7 @@ tracing_state_functions = {
     torch._utils.is_compiling: True,
     torch.compiler.is_compiling: True,
     torch.compiler.is_dynamo_compiling: True,
+    torch.nn.modules.activation._is_make_fx_tracing: False,
 }
 
 bin_ops = dict.fromkeys(["add", "sub", "mul", "div", "sqrt"])
