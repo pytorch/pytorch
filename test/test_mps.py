@@ -2855,6 +2855,25 @@ class TestMPS(TestCaseMPS):
                                track_running_stats=track_running_stats, test_module=test_module)
 
     def test_weight_norm(self):
+        def validate_weight_norm_equality(model, cpu_model, x, cpu_x, dim):
+            cpu_norm = torch.nn.utils.parametrizations.weight_norm(cpu_model, dim=dim)
+            norm = torch.nn.utils.parametrizations.weight_norm(model, dim=dim)
+
+            cpu_out = cpu_norm(cpu_x)
+            out = norm(x)
+
+            self.assertEqual(cpu_out, out)
+
+            cpu_grad = torch.randn(cpu_out.shape)
+            grad = cpu_grad.to('mps')
+            cpu_out.backward(gradient=cpu_grad)
+            out.backward(gradient=grad)
+
+            self.assertEqual(cpu_model.parametrizations.weight.original0.grad, model.parametrizations.weight.original0.grad)
+            self.assertEqual(cpu_model.parametrizations.weight.original1.grad, model.parametrizations.weight.original1.grad)
+
+            self.assertEqual(x.grad, cpu_x.grad)
+
         def helper(dim, layer='linear', dtype=torch.float32):
             # linear layer
             if layer == 'linear':
@@ -2875,24 +2894,7 @@ class TestMPS(TestCaseMPS):
                     cpu_linear.bias.copy_(cpu_bias)
                     linear.weight.copy_(weight)
                     linear.bias.copy_(bias)
-
-                cpu_norm = torch.nn.utils.weight_norm(cpu_linear, dim=dim)
-                norm = torch.nn.utils.weight_norm(linear, dim=dim)
-
-                cpu_out = cpu_norm(cpu_x)
-                out = norm(x)
-
-                self.assertEqual(cpu_out, out)
-
-                cpu_grad = torch.randn(cpu_out.shape)
-                grad = cpu_grad.to('mps')
-                cpu_out.backward(gradient=cpu_grad)
-                out.backward(gradient=grad)
-
-                self.assertEqual(cpu_linear.weight_g.grad, linear.weight_g.grad)
-                self.assertEqual(cpu_linear.weight_v.grad, linear.weight_v.grad)
-
-                self.assertEqual(x.grad, cpu_x.grad)
+                validate_weight_norm_equality(linear, cpu_linear, x, cpu_x, dim)
 
             # conv layer
             if layer == 'conv':
@@ -2906,25 +2908,9 @@ class TestMPS(TestCaseMPS):
                     conv.weight.copy_(cpu_conv.weight)
                     conv.bias.copy_(cpu_conv.bias)
 
-                cpu_norm = torch.nn.utils.weight_norm(cpu_conv, dim=dim)
-                norm = torch.nn.utils.weight_norm(conv, dim=dim)
+                validate_weight_norm_equality(conv, cpu_conv, x, cpu_x, dim)
 
-                cpu_out = cpu_norm(cpu_x)
-                out = norm(x)
-
-                self.assertEqual(cpu_out, out)
-
-                cpu_grad = torch.randn(cpu_out.shape)
-                grad = cpu_grad.to('mps')
-                cpu_out.backward(gradient=cpu_grad)
-                out.backward(gradient=grad)
-
-                self.assertEqual(cpu_conv.weight_g.grad, conv.weight_g.grad)
-                self.assertEqual(cpu_conv.weight_v.grad, conv.weight_v.grad)
-
-                self.assertEqual(x.grad, cpu_x.grad)
-
-                # conv layer
+            # conv3d layer
             if layer == 'conv3d':
                 cpu_x = torch.randn((3, 5, 5, 4), device='cpu', dtype=dtype, requires_grad=True)
                 x = cpu_x.detach().clone().to('mps').requires_grad_()
@@ -2936,23 +2922,7 @@ class TestMPS(TestCaseMPS):
                     conv.weight.copy_(cpu_conv.weight)
                     conv.bias.copy_(cpu_conv.bias)
 
-                cpu_norm = torch.nn.utils.weight_norm(cpu_conv, dim=dim)
-                norm = torch.nn.utils.weight_norm(conv, dim=dim)
-
-                cpu_out = cpu_norm(cpu_x)
-                out = norm(x)
-
-                self.assertEqual(cpu_out, out)
-
-                cpu_grad = torch.randn(cpu_out.shape)
-                grad = cpu_grad.to('mps')
-                cpu_out.backward(gradient=cpu_grad)
-                out.backward(gradient=grad)
-
-                self.assertEqual(cpu_conv.weight_g.grad, conv.weight_g.grad)
-                self.assertEqual(cpu_conv.weight_v.grad, conv.weight_v.grad)
-
-                self.assertEqual(x.grad, cpu_x.grad)
+                validate_weight_norm_equality(conv, cpu_conv, x, cpu_x, dim)
 
         helper(0, layer='linear')
         helper(1, layer='linear')
