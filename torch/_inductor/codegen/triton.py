@@ -1436,7 +1436,8 @@ class TritonKernel(SIMDKernel):
                 # Compute the ND block shape from the linear block size.
                 # Use CielDiv to round leading dimensions up to 1.
                 # Non-leading dimensions are clamped to the size of the iteration range,
-                # while the leading dim can grow to accomodate a larger block size.
+                # while the leading dimension can exceed this to accomodate a larger
+                # block size.
                 linear_block_size = self._get_block_size(range_tree)
                 block_shape: List[sympy.Expr] = [
                     CeilDiv(linear_block_size, slice_numels[0])
