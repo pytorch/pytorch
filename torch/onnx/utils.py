@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Functions to export models into the ONNX IR format.
 
 These models can be loaded with the ONNX library and then
@@ -186,11 +187,10 @@ def exporter_context(model, mode: _C_onnx.TrainingMode, verbose: bool):
         yield (mode_ctx, apex_ctx, log_ctx, diagnostic_ctx)
 
 
-@_beartype.beartype
 def export(
     model: Union[torch.nn.Module, torch.jit.ScriptModule, torch.jit.ScriptFunction],
     args: Union[Tuple[Any, ...], torch.Tensor],
-    f: Union[str, io.BytesIO],
+    f: Optional[Union[str, io.BytesIO]] = None,
     export_params: bool = True,
     verbose: bool = False,
     training: _C_onnx.TrainingMode = _C_onnx.TrainingMode.EVAL,
@@ -206,7 +206,8 @@ def export(
     custom_opsets: Optional[Mapping[str, int]] = None,
     export_modules_as_functions: Union[bool, Collection[Type[torch.nn.Module]]] = False,
     autograd_inlining: Optional[bool] = True,
-) -> None:
+    dynamo: bool = False,
+) -> Optional[torch.onnx.ONNXProgram]:
     r"""Exports a model into ONNX format.
 
     If ``model`` is not a :class:`torch.jit.ScriptModule` nor a
@@ -500,6 +501,8 @@ def export(
         autograd_inlining (bool, default True): Flag used to control whether to inline autograd functions.
             Refer to https://github.com/pytorch/pytorch/pull/74765 for more details.
 
+        dynamo (bool, default False): Whether to export the model with Dynamo instead of TorchScript.
+
     Raises:
         :class:`torch.onnx.errors.CheckerError`: If the ONNX checker detects an invalid ONNX graph.
         :class:`torch.onnx.errors.UnsupportedOperatorError`: If the ONNX graph cannot be exported because it
@@ -507,6 +510,42 @@ def export(
         :class:`torch.onnx.errors.OnnxExporterError`: Other errors that can occur during export.
             All errors are subclasses of :class:`errors.OnnxExporterError`.
     """
+
+    if dynamo:
+        if isinstance(model, (torch.jit.ScriptModule, torch.jit.ScriptFunction)):
+            raise TypeError(
+                "Dynamo export does not support ScriptModule or ScriptFunction."
+            )
+        # Unsupported parameters for dynamo export
+        # TODO: These are not supported AT THE TIME
+        warnings.warn(
+            "f, export_params, verbose, training, input_names, output_names, operator_export_type, opset_version, "
+            "do_constant_folding, keep_initializers_as_inputs, custom_opsets, export_modules_as_functions, and "
+            "autograd_inlining are not supported for dynamo export at the moment."
+        )
+        args = _decide_input_format(model, args)
+        kwargs = {}
+        if args is not None and isinstance(args[-1], dict):
+            kwargs = args[-1]
+            args = args[:-1]
+        # TODO: refactor this when we have migrated ExportedProgam and
+        # needs users to specify dynamic_axes
+        dynamic_shapes = _from_dynamic_axes_to_dynamic_shapes(
+            model, dynamic_axes, input_names
+        )
+        exported_program = torch.export.export(
+            model, args=args, kwargs=kwargs, dynamic_shapes=dynamic_shapes  # type: ignore[arg-type]
+        )
+        # TODO: expose ExportOptions?
+        onnx_program = torch.onnx.dynamo_export(exported_program, *args, **kwargs)
+        if f is not None:
+            onnx_program.save(f)
+        return onnx_program
+
+    if f is None:
+        raise ValueError(
+            "Export destination must be specified for torchscript-onnx export."
+        )
 
     _export(
         model,
@@ -526,6 +565,8 @@ def export(
         export_modules_as_functions=export_modules_as_functions,
         autograd_inlining=autograd_inlining,
     )
+
+    return None
 
 
 @_beartype.beartype
@@ -870,8 +911,66 @@ def _decide_input_format(model, args):
         warnings.warn("No input args, skipping _decide_input_format")
     except Exception as e:
         warnings.warn(f"Skipping _decide_input_format\n {e.args[0]}")
-
     return args
+
+
+@_beartype.beartype
+def _from_dynamic_axes_to_dynamic_shapes(
+    model,
+    dynamic_axes: Optional[
+        Union[Mapping[str, Mapping[int, str]], Mapping[str, Sequence[int]]]
+    ] = None,
+    input_names: Optional[Sequence[str]] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+
+    dynamic_axes examples:
+    (1) dynamic_axes = {"x": {0: "my_custom_axis_name_1"}, "y": {1: "my_custom_axis_name_2"}}
+    (2) dynamic_axes = {"x": [0], "y": [1]}
+
+    these will be converted to dynamic_shapes respectively:
+    (1) dynamic_shapes = {"x": {0: Dim("my_custom_axis_name_1")}, "y": {1: Dim("my_custom_axis_name_2")}}
+    (2) dynamic_shapes = {"x": {0: Dim("x_dim_0")}, "y": {1: Dim("y_dim_1")}}  # auto-generated dim names
+
+    """
+    if dynamic_axes is None:
+        return None
+
+    if input_names is None:
+        input_names_set = set()
+    else:
+        input_names_set = set(input_names)
+
+    dynamic_shapes: Dict[str, Optional[Any]] = {}
+    for input_name, axes in dynamic_axes.items():
+        if input_name in input_names_set:
+            raise ValueError(
+                "Assinging new input names is not supported yet. Please use model forward signature "
+                "to specify input names in dynamix_axes."
+            )
+        if isinstance(axes, dict):
+            dynamic_shapes[input_name] = {
+                k: torch.export.Dim(v) for k, v in axes.items()
+            }
+        elif isinstance(axes, list):
+            dynamic_shapes[input_name] = {
+                k: torch.export.Dim(f"{input_name}_dim_{k}") for k in axes
+            }
+        else:
+            raise TypeError(
+                f"dynamic_axes value must be either a dict or a list, but got {type(axes)}"
+            )
+    # torch.export.export needs static dim to present in dynamic_shapes
+    # for all input tensors, so we need to add them with None
+    try:
+        sig = _signature(model)
+    except ValueError as e:
+        warnings.warn(f"{e}, skipping auto filling None on static axes...")
+        return dynamic_shapes
+    for input_name in sig.parameters.keys():
+        if input_name not in dynamic_shapes:
+            dynamic_shapes[input_name] = None
+    return dynamic_shapes
 
 
 @_beartype.beartype

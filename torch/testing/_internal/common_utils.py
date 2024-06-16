@@ -96,12 +96,15 @@ from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.utils._import_utils import _check_module_exists
 import torch.utils._pytree as pytree
 
-from .composite_compliance import no_dispatch
 try:
     import pytest
     has_pytest = True
 except ImportError:
     has_pytest = False
+
+
+def freeze_rng_state(*args, **kwargs):
+    return torch.testing._utils.freeze_rng_state(*args, **kwargs)
 
 
 # Class to keep track of test flags configurable by environment variables.
@@ -1233,6 +1236,7 @@ TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
 TEST_MPS = torch.backends.mps.is_available()
 TEST_XPU = torch.xpu.is_available()
+TEST_HPU = True if (hasattr(torch, "hpu") and torch.hpu.is_available()) else False
 TEST_CUDA = torch.cuda.is_available()
 custom_device_mod = getattr(torch, torch._C._get_privateuse1_backend_name(), None)
 custom_device_is_available = hasattr(custom_device_mod, "is_available") and custom_device_mod.is_available()
@@ -1494,8 +1498,6 @@ def disable_translation_validation_if_dynamic_shapes(fn):
 # See: https://github.com/pytorch/pytorch/pull/59402#issuecomment-858811135
 TestEnvironment.def_flag("TEST_CUDA_MEM_LEAK_CHECK", env_var="PYTORCH_TEST_CUDA_MEM_LEAK_CHECK")
 
-# True if CI is running TBB-enabled Pytorch
-IS_TBB = "tbb" in os.getenv("BUILD_ENVIRONMENT", "")
 
 # Dict of NumPy dtype -> torch dtype (when the correspondence exists)
 numpy_to_torch_dtype_dict = {
@@ -1548,6 +1550,31 @@ torch_to_numpy_dtype_dict.update({
     torch.complex32: np.complex64
 })
 
+def skipIfNNModuleInlined(
+    msg="test doesn't currently work with nn module inlining",
+    condition=torch._dynamo.config.inline_inbuilt_nn_modules,
+):  # noqa: F821
+    def decorator(fn):
+        if not isinstance(fn, type):
+
+            @wraps(fn)
+            def wrapper(*args, **kwargs):
+                if condition:
+                    raise unittest.SkipTest(msg)
+                else:
+                    fn(*args, **kwargs)
+
+            return wrapper
+
+        assert isinstance(fn, type)
+        if condition:
+            fn.__unittest_skip__ = True
+            fn.__unittest_skip_why__ = msg
+
+        return fn
+
+    return decorator
+
 def skipIfRocm(func=None, *, msg="test doesn't currently work on the ROCm stack"):
     def dec_fn(fn):
         reason = f"skipIfRocm: {msg}"
@@ -1592,6 +1619,15 @@ def skipIfMps(fn):
     def wrapper(*args, **kwargs):
         if TEST_MPS:
             raise unittest.SkipTest("test doesn't currently work with MPS")
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
+def skipIfHpu(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if TEST_HPU:
+            raise unittest.SkipTest("test doesn't currently work with HPU")
         else:
             fn(*args, **kwargs)
     return wrapper
@@ -1872,19 +1908,6 @@ def skipIfNoSciPy(fn):
             fn(*args, **kwargs)
     return wrapper
 
-
-def skipIfTBB(message="This test makes TBB sad"):
-    def dec_fn(fn):
-        @wraps(fn)
-        def wrapper(*args, **kwargs):
-            if IS_TBB:
-                raise unittest.SkipTest(message)
-            else:
-                fn(*args, **kwargs)
-        return wrapper
-    return dec_fn
-
-
 def skip_if_pytest(fn):
     @wraps(fn)
     def wrapped(*args, **kwargs):
@@ -1963,35 +1986,6 @@ def set_rng_seed(seed):
     if TEST_NUMPY:
         np.random.seed(seed)
 
-
-disable_functorch = torch._C._DisableFuncTorch
-
-
-@contextlib.contextmanager
-def freeze_rng_state():
-    # no_dispatch needed for test_composite_compliance
-    # Some OpInfos use freeze_rng_state for rng determinism, but
-    # test_composite_compliance overrides dispatch for all torch functions
-    # which we need to disable to get and set rng state
-    with no_dispatch(), disable_functorch():
-        rng_state = torch.get_rng_state()
-        if torch.cuda.is_available():
-            cuda_rng_state = torch.cuda.get_rng_state()
-    try:
-        yield
-    finally:
-        # Modes are not happy with torch.cuda.set_rng_state
-        # because it clones the state (which could produce a Tensor Subclass)
-        # and then grabs the new tensor's data pointer in generator.set_state.
-        #
-        # In the long run torch.cuda.set_rng_state should probably be
-        # an operator.
-        #
-        # NB: Mode disable is to avoid running cross-ref tests on thes seeding
-        with no_dispatch(), disable_functorch():
-            if torch.cuda.is_available():
-                torch.cuda.set_rng_state(cuda_rng_state)
-            torch.set_rng_state(rng_state)
 
 @contextlib.contextmanager
 def set_default_dtype(dtype):
@@ -2325,7 +2319,7 @@ def check_if_enable(test: unittest.TestCase):
 
                     print(f"Test {disabled_test} is disabled for some unrecognized ",
                           f"platforms: [{invalid_plats_str}]. Please edit issue {issue_url} to fix the platforms ",
-                          "assigned to this flaky test, changing \"Platforms: ...\" to a comma separated ",
+                          'assigned to this flaky test, changing "Platforms: ..." to a comma separated ',
                           f"subset of the following (or leave it blank to match all platforms): {valid_plats}")
 
                     # Sanitize the platforms list so that we continue to disable the test for any valid platforms given
@@ -2637,7 +2631,11 @@ class TestCase(expecttest.TestCase):
     # the test, skip it instead.
     _ignore_not_implemented_error = False
 
-    def __init__(self, method_name='runTest'):
+    def __init__(self, method_name='runTest', methodName='runTest'):
+        # methodName is the correct naming in unittest and testslide uses keyword arguments.
+        # So we need to use both to 1) not break BC and, 2) support testslide.
+        if methodName != "runTest":
+            method_name = methodName
         super().__init__(method_name)
 
         test_method = getattr(self, method_name, None)
@@ -2816,7 +2814,9 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                 super_run = torch._dynamo.optimize("aot_eager_decomp_partition")(super_run)
             elif TEST_WITH_TORCHDYNAMO:  # noqa: F821
                 # TorchDynamo optimize annotation
-                super_run = torch._dynamo.optimize("eager", nopython=nopython)(super_run)
+                # Assume eager-generated GraphModules will not error out.
+                # If we do, this is probably a Dynamo bug!
+                super_run = torch._dynamo.optimize("eager_noexcept", nopython=nopython)(super_run)
                 key = f"{self.__class__.__name__}.{self._testMethodName}"
                 from .dynamo_test_failures import dynamo_expected_failures, dynamo_skips
 
@@ -2903,6 +2903,9 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         if self._default_dtype_check_enabled:
             assert torch.get_default_dtype() == torch.float
 
+        # attempt to reset some global state at the end of the test
+        self._prev_grad_state = torch.is_grad_enabled()
+
     def tearDown(self):
         # There exists test cases that override TestCase.setUp
         # definition, so we cannot assume that _check_invariants
@@ -2916,6 +2919,10 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
 
         if self._default_dtype_check_enabled:
             assert torch.get_default_dtype() == torch.float
+
+        # attribute may not be defined, per above
+        if hasattr(self, '_prev_grad_state'):
+            torch.set_grad_enabled(self._prev_grad_state)
 
     @staticmethod
     def _make_crow_indices(n_rows, n_cols, nnz,
@@ -4433,8 +4440,8 @@ def check_test_defined_in_running_script(test_case):
     if running_script_path is None:
         return
     test_case_class_file = os.path.abspath(os.path.realpath(inspect.getfile(test_case.__class__)))
-    assert test_case_class_file == running_script_path, f"Class of loaded TestCase \"{test_case.id()}\" " \
-        f"is not defined in the running script \"{running_script_path}\", but in \"{test_case_class_file}\". Did you " \
+    assert test_case_class_file == running_script_path, f'Class of loaded TestCase "{test_case.id()}" ' \
+        f'is not defined in the running script "{running_script_path}", but in "{test_case_class_file}". Did you ' \
         "accidentally import a unittest.TestCase from another file?"
 
 def load_tests(loader, tests, pattern):
@@ -4740,24 +4747,6 @@ dtype_abbrs = {
 }
 
 
-def set_single_threaded_if_parallel_tbb(fn):
-    """Set test to be single threaded for parallel tbb.
-
-    See https://github.com/pytorch/pytorch/issues/64571#issuecomment-914691883
-    """
-    if not IS_TBB:
-        return fn
-
-    @wraps(fn)
-    def wrap_fn(*args, **kwargs):
-        num_threads = torch.get_num_threads()
-        torch.set_num_threads(1)
-        try:
-            return fn(*args, **kwargs)
-        finally:
-            torch.set_num_threads(num_threads)
-    return wrap_fn
-
 
 @functools.lru_cache
 def get_cycles_per_ms() -> float:
@@ -5034,6 +5023,7 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
         return m.group(0)
 
     s = re.sub(r'  File "([^"]+)", line \d+, in (.+)\n    .+\n( +[~^]+ *\n)?', repl_frame, s)
+    s = re.sub(r'(<function [^ ]+ at )0x[0-9a-fA-F]+', r'\1 0xN', s)
     s = re.sub(r"line \d+", "line N", s)
     s = re.sub(r".py:\d+", ".py:N", s)
     s = re.sub(file, os.path.basename(file), s)

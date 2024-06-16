@@ -1724,6 +1724,11 @@ class TestMeta(TestCase):
             out = f()
             self.assertEqual(out.shape, [10, 16])
 
+    def test_local_scalar_dense_call(self):
+        with self.assertRaisesRegex(RuntimeError, "cannot be called on meta tensors"):
+            meta_tensor = torch.randn(1, device='meta')
+            meta_tensor.item()
+
 instantiate_device_type_tests(TestMeta, globals())
 
 def print_op_str_if_not_supported(op_str):

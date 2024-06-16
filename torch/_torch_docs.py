@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Adds docstrings to functions defined in the torch._C module."""
 
 import re
@@ -4021,7 +4022,7 @@ Alias for :func:`torch.div`.
 add_docstr(
     torch.dot,
     r"""
-dot(input, other, *, out=None) -> Tensor
+dot(input, tensor, *, out=None) -> Tensor
 
 Computes the dot product of two 1D tensors.
 
@@ -4032,7 +4033,7 @@ Computes the dot product of two 1D tensors.
 
 Args:
     input (Tensor): first tensor in the dot product, must be 1D.
-    other (Tensor): second tensor in the dot product, must be 1D.
+    tensor (Tensor): second tensor in the dot product, must be 1D.
 
 Keyword args:
     {out}
@@ -4041,6 +4042,10 @@ Example::
 
     >>> torch.dot(torch.tensor([2, 3]), torch.tensor([2, 1]))
     tensor(7)
+
+    >>> t1, t2 = torch.tensor([0, 1]), torch.tensor([2, 3])
+    >>> torch.dot(t1, t2)
+    tensor(3)
 """.format(
         **common_args
     ),
@@ -7005,6 +7010,7 @@ add_docstr(
 nanmean(input, dim=None, keepdim=False, *, dtype=None, out=None) -> Tensor
 
 Computes the mean of all `non-NaN` elements along the specified dimensions.
+Input must be floating point or complex.
 
 This function is identical to :func:`torch.mean` when there are no `NaN` values
 in the :attr:`input` tensor. In the presence of `NaN`, :func:`torch.mean` will
@@ -7014,7 +7020,7 @@ propagate the `NaN` to the output whereas :func:`torch.nanmean` will ignore the
 {keepdim_details}
 
 Args:
-    {input}
+    input (Tensor): the input tensor, either of floating point or complex dtype
     {opt_dim}
     {keepdim}
 

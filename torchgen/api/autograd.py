@@ -321,6 +321,17 @@ _foreach_with_tensor_overload = {
     "_foreach_mul.Tensor",
     "_foreach_div.Tensor",
 }
+# The following do not support the alpha kwarg, which the nonforeach versions support.
+_skip_argument_len_check = {
+    "_foreach_add.Scalar",
+    "_foreach_add_.Scalar",
+    "_foreach_add.ScalarList",
+    "_foreach_add_.ScalarList",
+    "_foreach_sub.Scalar",
+    "_foreach_sub_.Scalar",
+    "_foreach_sub.ScalarList",
+    "_foreach_sub_.ScalarList",
+}
 
 
 # Checks if `function_schema` is a native, non-foreach function which `f`, a foreach function
@@ -334,6 +345,11 @@ def is_reference_for_foreach(
         and (
             not function_schema.name.name.inplace
             or str(f.func.name) in _foreach_with_inplace_ref
+        )
+        and (
+            str(f.func.name) in _skip_argument_len_check
+            or len(f.func.arguments.flat_non_out)
+            == len(function_schema.arguments.flat_non_out)
         )
         and all(
             ref_arg.type in (arg.type, getattr(arg.type, "elem", None))
