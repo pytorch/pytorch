@@ -235,7 +235,6 @@ exclude_patterns = [
     'torch/csrc/jit/serialization/import_legacy.cpp',
     'torch/csrc/jit/serialization/export.cpp',
     'torch/csrc/lazy/**/*',
-    'torch/csrc/mps/**/*',
 ]
 init_command = [
     'python3',
