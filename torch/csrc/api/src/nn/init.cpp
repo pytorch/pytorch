@@ -10,12 +10,9 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstddef>
 #include <tuple>
 
-namespace torch {
-namespace nn {
-namespace init {
+namespace torch::nn::init {
 namespace {
 struct Fan {
   explicit Fan(Tensor& tensor) {
@@ -68,7 +65,7 @@ double calculate_gain(NonlinearityType nonlinearity, double param) {
   return 1.0;
 }
 
-Tensor constant_(Tensor tensor, Scalar value) {
+Tensor constant_(const Tensor& tensor, const Scalar& value) {
   NoGradGuard guard;
   return tensor.fill_(value);
 }
@@ -95,6 +92,8 @@ Tensor dirac_(Tensor tensor) {
       case 5: // Volumetric convolution
         tensor[d][d][sizes[2] / 2][sizes[3] / 2][sizes[4] / 2] = 1;
         break;
+      default:
+        break;
     }
   }
 
@@ -108,12 +107,12 @@ Tensor eye_(Tensor matrix) {
   return torch::eye_out(matrix, matrix.size(0), matrix.size(1));
 }
 
-Tensor normal_(Tensor tensor, double mean, double std) {
+Tensor normal_(const Tensor& tensor, double mean, double std) {
   NoGradGuard guard;
   return tensor.normal_(mean, std);
 }
 
-Tensor ones_(Tensor tensor) {
+Tensor ones_(const Tensor& tensor) {
   NoGradGuard guard;
   return tensor.fill_(1);
 }
@@ -172,13 +171,13 @@ Tensor sparse_(Tensor tensor, double sparsity, double std) {
   return tensor;
 }
 
-Tensor uniform_(Tensor tensor, double low, double high) {
+Tensor uniform_(const Tensor& tensor, double low, double high) {
   NoGradGuard guard;
   return tensor.uniform_(low, high);
 }
 
 Tensor kaiming_uniform_(
-    Tensor tensor,
+    const Tensor& tensor,
     double a,
     FanModeType mode,
     NonlinearityType nonlinearity) {
@@ -190,7 +189,7 @@ Tensor kaiming_uniform_(
 }
 
 Tensor kaiming_normal_(
-    Tensor tensor,
+    const Tensor& tensor,
     double a,
     FanModeType mode,
     NonlinearityType nonlinearity) {
@@ -219,7 +218,7 @@ Tensor xavier_uniform_(Tensor tensor, double gain) {
   return tensor.uniform_(-a, a);
 }
 
-Tensor zeros_(Tensor tensor) {
+Tensor zeros_(const Tensor& tensor) {
   NoGradGuard guard;
   return tensor.zero_();
 }
@@ -250,6 +249,4 @@ std::tuple<int64_t, int64_t> _calculate_fan_in_and_fan_out(
   return std::tie(fan_in, fan_out);
 }
 
-} // namespace init
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn::init
