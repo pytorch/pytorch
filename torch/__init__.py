@@ -2007,6 +2007,7 @@ from torch import (
     backends as backends,
     cpu as cpu,
     cuda as cuda,
+    distributed as distributed,
     distributions as distributions,
     fft as fft,
     futures as futures,
