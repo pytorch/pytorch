@@ -431,7 +431,6 @@ inductor_one_sample = {
     "maximum": {b8},
     "min.binary": {b8},
     "minimum": {b8},
-    "ne": {b8},
     "new_empty_strided": {f16},
     "nn.functional.adaptive_avg_pool3d": {f16},
     "nn.functional.adaptive_max_pool1d": {f16, f32},
