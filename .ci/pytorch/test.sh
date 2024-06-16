@@ -282,11 +282,6 @@ test_python_legacy_jit() {
 }
 
 test_python_shard() {
-  # modify LD_LIBRARY_PATH to use the conda env
-  original_ld_library_path=$LD_LIBRARY_PATH
-  export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${CONDA_PREFIX}/lib"
-  echo "ld library path is: "
-  echo "$LD_LIBRARY_PATH"
   if [[ -z "$NUM_TEST_SHARDS" ]]; then
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
@@ -294,12 +289,12 @@ test_python_shard() {
 
   # Bare --include flag is not supported and quoting for lint ends up with flag not being interpreted correctly
   # shellcheck disable=SC2086
-  time LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${CONDA_PREFIX}/lib" python test/run_test.py --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS" --verbose $PYTHON_TEST_EXTRA_OPTION
+
+  # modify LD_LIBRARY_PATH to ensure it has the conda env.
+  # This set of tests has been shown to be buggy without it for the split-build
+  time LD_LIBRARY_PATH="/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/lib:$LD_LIBRARY_PATH" python test/run_test.py --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS" --verbose $PYTHON_TEST_EXTRA_OPTION
 
   assert_git_not_dirty
-  export LD_LIBRARY_PATH=$original_ld_library_path
-  echo "ld library path is: "
-  echo "$LD_LIBRARY_PATH"
 }
 
 test_python() {

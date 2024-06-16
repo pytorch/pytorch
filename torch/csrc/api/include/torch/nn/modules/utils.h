@@ -1,8 +1,8 @@
 #pragma once
 
 #include <c10/util/ArrayRef.h>
+#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
-#include <optional>
 
 #include <vector>
 
