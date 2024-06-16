@@ -3,8 +3,9 @@ import itertools
 import time
 from typing import Optional, Tuple
 
-from mixtral_moe_model import Transformer as MixtralMoE
+from mixtral_moe_model import ConditionalFeedForward, Transformer as MixtralMoE
 from mixtral_moe_quantize import (
+    ConditionalFeedForwardInt8,
     WeightOnlyInt8QuantHandler as MixtralMoEWeightOnlyInt8QuantHandler,
 )
 from model import Transformer as LLaMA
@@ -154,6 +155,7 @@ def _load_model(x: GPTModelConfig, device="cuda", precision=torch.bfloat16):
     return model.eval()
 
 
+# Only count activated parameters and buffers.
 def _get_model_size(model):
     model_size = 0
     for name, child in model.named_children():
@@ -164,6 +166,28 @@ def _get_model_size(model):
                     for p in itertools.chain(child.parameters(), child.buffers())
                 ]
             )
+
+    # Remove the inactivated experts from the model size if this is mixture of experts
+    # architecture, since only activated experts are loaded.
+    if hasattr(model.config, "num_experts"):
+        config = model.config
+        for submodule in model.modules():
+            if isinstance(
+                submodule, (ConditionalFeedForward, ConditionalFeedForwardInt8)
+            ):
+                model_size -= (
+                    sum(
+                        [
+                            p.numel() * p.dtype.itemsize
+                            for p in itertools.chain(
+                                submodule.parameters(), child.buffers()
+                            )
+                        ]
+                    )
+                    * (config.num_experts - config.num_activated_experts)
+                    / config.num_experts
+                )
+
     return model_size
 
 
@@ -318,7 +342,7 @@ def run_mixtral_8x7b_int8(device: str = "cuda"):
         "int8",
         MixtralMoEWeightOnlyInt8QuantHandler,
         175,
-        4129,
+        1280,
         162,
     )
     token_per_sec, memory_bandwidth, compilation_time = run_experiment(model)
