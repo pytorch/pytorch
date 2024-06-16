@@ -336,19 +336,21 @@ class ExprPrinterTests(InductorTestCase):
 
     def test_print_Min_Max(self):
         cases = (
-            (sympy.Min, "min"),
-            (sympy.Max, "max"),
+            (sympy.Min, "min", "<"),
+            (sympy.Max, "max", ">"),
         )
-        for f, s in cases:
+        for f, s, cmp in cases:
             x = sympy.Symbol("x", integer=True)
             expr = f(-2, x)
-            self.assertEqual(texpr(expr), f"tl.{s}imum(-2, x)")
+            self.assertEqual(
+                texpr(expr), f"((-2) * ((-2) {cmp}= (x)) + (x) * ((x) {cmp} (-2)))"
+            )
             self.assertEqual(cexpr(expr), f"std::{s}(-2L, x)")
 
             expr = f(x, 2 * x, 3 * x)
             self.assertEqual(
                 texpr(expr),
-                f"tl.{s}imum(x, tl.{s}imum(2*x, 3*x))",
+                f"((x) * ((x) {cmp}= (((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x))))) + (((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x)))) * ((((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x)))) {cmp} (x)))",  # noqa: B950 line too long
             )
             self.assertEqual(cexpr(expr), f"std::{s}({{x, 2L*x, 3L*x}})")
 
