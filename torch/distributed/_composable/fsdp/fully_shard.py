@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 
 from typing import Any, cast, NoReturn, Optional, Union
@@ -23,7 +24,7 @@ from ._fsdp_state import _get_module_fsdp_state, FSDPState
 
 # The decorator adds a state object to `module` that can be accessed via
 # `fully_shard.state(module)`. The state object and module are 1:1.
-@contract(state_cls=FSDPState)
+@contract(state_cls=FSDPState)  # type: ignore[operator]
 def fully_shard(
     module: nn.Module,
     *,
@@ -180,6 +181,8 @@ class FSDPModule:
                 that has a :meth:`wait` method to wait on the unshard op. If
                 ``False``, then returns ``None`` and waits on the handle inside
                 this function.
+
+        .. warning:: This method is experimental and subject to change.
 
         .. note:: If ``async_op=True``, then the user does not have to call
             :meth:`wait` on the returned handle if waiting on the unshard op
@@ -342,4 +345,8 @@ def register_fsdp_forward_method(module: nn.Module, method_name: str) -> None:
         return fsdp_state._post_forward(self, args, out)
 
     # Use `__get__` to make `wrapped_method` an instance method
-    setattr(module, method_name, wrapped_method.__get__(module, type(module)))
+    setattr(
+        module,
+        method_name,
+        wrapped_method.__get__(module, type(module)),  # type:ignore[attr-defined]
+    )

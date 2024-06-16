@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from functools import lru_cache
 from itertools import chain
 from typing import Callable, cast, Dict, List, Optional, Sequence, Tuple, Union

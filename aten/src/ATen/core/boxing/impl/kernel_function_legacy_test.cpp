@@ -40,10 +40,6 @@ int64_t incrementKernel(const Tensor& tensor, int64_t input) {
   return input + 1;
 }
 
-int64_t decrementKernel(const Tensor& tensor, int64_t input) {
-  return input - 1;
-}
-
 void expectCallsIncrement(DispatchKey dispatch_key) {
   at::AutoDispatchBelowAutograd mode;
 
@@ -53,17 +49,6 @@ void expectCallsIncrement(DispatchKey dispatch_key) {
   auto result = callOp(*op, dummyTensor(dispatch_key), 5);
   EXPECT_EQ(1, result.size());
   EXPECT_EQ(6, result[0].toInt());
-}
-
-void expectCallsDecrement(DispatchKey dispatch_key) {
-  at::AutoDispatchBelowAutograd mode;
-
-  // assert that schema and cpu kernel are present
-  auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
-  ASSERT_TRUE(op.has_value());
-  auto result = callOp(*op, dummyTensor(dispatch_key), 5);
-  EXPECT_EQ(1, result.size());
-  EXPECT_EQ(4, result[0].toInt());
 }
 
 TEST(OperatorRegistrationTestLegacyFunctionBasedKernel, givenKernel_whenRegistered_thenCanBeCalled) {
