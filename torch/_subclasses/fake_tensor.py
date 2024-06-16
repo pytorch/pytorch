@@ -884,7 +884,12 @@ def extract_tensor_metadata(t: torch.Tensor) -> "TensorMetadata":
     Extract the TensorMetadata of a tensor.
     """
     memory_format: Optional[torch.memory_format] = suggest_memory_format(t)
-    if is_sparse_any(t) or not t.is_contiguous(memory_format=memory_format):
+
+    if (
+        t._has_symbolic_sizes_strides
+        or is_sparse_any(t)
+        or not t.is_contiguous(memory_format=memory_format)
+    ):
         memory_format = None
 
     def convert_to_sym_hash(x: Union[int, SymInt]) -> Union[int, _SymExprHash]:
@@ -1494,23 +1499,24 @@ class FakeTensorMode(TorchDispatchMode):
             metadata.storage_bytes
         )
 
-        empty = torch.empty_strided(
-            shape,
-            stride,
-            dtype=metadata.dtype,
-            layout=metadata.layout,
-            device="meta",
-            requires_grad=metadata.requires_grad,
-        )
+        maybe_suppress: Callable[[], typing.ContextManager] = contextlib.nullcontext
+        if self.shape_env is not None:
+            maybe_suppress = self.shape_env.suppress_guards
+
+        with in_kernel_invocation_manager(self), maybe_suppress():
+            empty = torch.empty_strided(
+                shape,
+                stride,
+                dtype=metadata.dtype,
+                layout=metadata.layout,
+                device="meta",
+                requires_grad=metadata.requires_grad,
+            )
 
         if metadata.is_conj:
             torch._C._set_conj(empty, True)
         if metadata.is_neg:
             torch._C._set_neg(empty, True)
-
-        maybe_suppress: Callable[[], typing.ContextManager] = contextlib.nullcontext
-        if self.shape_env is not None:
-            maybe_suppress = self.shape_env.suppress_guards
 
         storage_offset = convert_from_sym_hash(metadata.storage_offset)
 
@@ -1868,13 +1874,13 @@ class FakeTensorMode(TorchDispatchMode):
 
         # Users can register FakeTensor rules for custom operators
         # Call them if they exist.
-        maybe_abstract_impl = torch._library.simple_registry.singleton.find(
+        maybe_fake_impl = torch._library.simple_registry.singleton.find(
             func.name()
-        ).abstract_impl.kernel
-        if maybe_abstract_impl:
-            ctx = torch._library.abstract_impl.AbstractImplCtx(self, func)
-            with torch._library.abstract_impl.set_ctx_getter(lambda: ctx), self:
-                result = maybe_abstract_impl(*args, **kwargs)
+        ).fake_impl.kernel
+        if maybe_fake_impl:
+            ctx = torch._library.fake_impl.FakeImplCtx(self, func)
+            with torch._library.fake_impl.set_ctx_getter(lambda: ctx), self:
+                result = maybe_fake_impl(*args, **kwargs)
                 return maybe_propagate_real_tensors(result)
 
         # special handling for funcs registered through `register_op_impl`,
