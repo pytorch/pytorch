@@ -9027,7 +9027,7 @@ class CommonTemplate:
         assertGeneratedKernelCountEqual(self, 0)
 
     @requires_gpu()
-    @parametrize("use_block_ptr", [False, True])
+    @parametrize("use_block_ptr", (False, True))
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Does not support SDPA or pre-SM80 hardware",
@@ -9065,6 +9065,9 @@ class CommonTemplate:
             _scaled_dot_product_efficient_attention = None
             return (getitem,)
 
+        if self.device == "cpu":
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
+
         DEVICE = torch.device(f"{GPU_TYPE}:0")
         DTYPE = torch.float16
         B = 3
@@ -9083,12 +9086,6 @@ class CommonTemplate:
         inps = (query, key, value, bias, weights)
 
         with config.patch("triton.use_block_ptr", use_block_ptr):
-            # Check code for block pointers
-            foo_opt = torch._dynamo.optimize("inductor")(foo)
-            code = run_and_get_triton_code(foo_opt, *inps)
-            have_block_ptr = code.count("tl.make_block_ptr") > 0
-            self.assertEqual(have_block_ptr, use_block_ptr)
-
             # Check accuracy
             self.common(
                 foo,
@@ -9096,6 +9093,12 @@ class CommonTemplate:
                 atol=0.02,
                 rtol=1e4,
             )
+
+            # Check code for block pointers
+            foo_opt = torch._dynamo.optimize("inductor")(foo)
+            code = run_and_get_triton_code(foo_opt, *inps)
+            have_block_ptr = code.count("tl.make_block_ptr") > 0
+            self.assertEqual(have_block_ptr, use_block_ptr)
 
     @requires_gpu()
     @unittest.skipIf(
