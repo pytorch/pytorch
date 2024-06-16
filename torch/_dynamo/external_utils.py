@@ -113,7 +113,7 @@ class FakeCompiledAutogradEngine:
         final_callbacks.clear()
 
     def _exec_final_callbacks_stub(self):
-        raise NotImplementedError
+        pass
 
 
 def call_hook_from_backward_state(*args, bw_state, hook_name: str, **kwargs):
