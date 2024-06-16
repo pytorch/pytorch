@@ -1781,4 +1781,4 @@ def aoti_compile_with_persistent_cache(
 
 def run_and_get_cpp_code(fn, *args, **kwargs):
     result, source_codes = run_and_get_code(fn, *args, **kwargs)
-    return result, source_codes[0]
+    return result, source_codes[0] if source_codes else ""
