@@ -10,6 +10,14 @@ def is_fbcode():
     return not hasattr(torch.version, "git_version")
 
 
+def fx_graph_remote_cache_default():
+    if os.environ.get("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE") == "1":
+        return True
+    if os.environ.get("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE") == "0":
+        return False
+    return None
+
+
 # add some debug printouts
 debug = False
 
@@ -22,8 +30,11 @@ verbose_progress = False
 # use fx aot graph codegen cache
 fx_graph_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE") == "1"
 
-# use fx aot graph codegen cache
-fx_graph_remote_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE") == "1"
+# use remote fx aot graph codegen cache
+# False: Disables the cache
+# True: Enables the cache
+# None: Not set -- Off for OSS, JustKnobs based for internal
+fx_graph_remote_cache: Optional[bool] = fx_graph_remote_cache_default()
 
 # enable autotune local cache
 autotune_local_cache = True
@@ -43,7 +54,7 @@ abi_compatible = (
 )
 
 c_shim_version = os.environ.get(
-    "TORCHINDUCTOR_C_SHIM_VERSION", "1" if (is_fbcode() and torch.version.hip) else "2"
+    "TORCHINDUCTOR_C_SHIM_VERSION", "1" if is_fbcode() else "2"
 )
 
 # dead code elimination

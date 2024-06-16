@@ -11,6 +11,7 @@ import sys
 import threading
 import typing
 from concurrent.futures import Future, ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from typing import Any, Callable, Dict
 
 from torch._inductor import config
@@ -180,16 +181,20 @@ class SubprocMain:
         self.read_pipe = read_pipe
         self.write_pipe = write_pipe
         self.write_lock = threading.Lock()
-        self.pool = ProcessPoolExecutor(
+        self.nprocs = nprocs
+        self.pool = self._new_pool(nprocs, True)
+        self.running = True
+
+    def _new_pool(self, nprocs, warm):
+        pool = ProcessPoolExecutor(
             nprocs,
             mp_context=multiprocessing.get_context("fork"),
             initializer=functools.partial(_async_compile_initializer, os.getpid()),
         )
-        multiprocessing.util.Finalize(
-            None, self.pool.shutdown, exitpriority=sys.maxsize
-        )
-        self.running = True
-        _warm_process_pool(self.pool, nprocs)
+        multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
+        if warm:
+            _warm_process_pool(pool, nprocs)
+        return pool
 
     def main(self):
         while True:
@@ -210,6 +215,17 @@ class SubprocMain:
         self.pool.shutdown()
 
     def submit(self, job_id, data):
+        while self.running:
+            try:
+                self._submit_inner(job_id, data)
+                return
+            except BrokenProcessPool:
+                # If any subprocess in the pool crashes, we get a BrokenProcessPool
+                # exception and the whole pool becomes unusable. Handle crashes by
+                # recreating the pool and resubmitting.
+                self.pool = self._new_pool(self.nprocs, False)
+
+    def _submit_inner(self, job_id, data):
         future = self.pool.submit(functools.partial(SubprocMain.do_job, data))
 
         def callback(_):
