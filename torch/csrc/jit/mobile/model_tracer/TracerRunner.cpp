@@ -117,10 +117,10 @@ void call_dependent_methods(std::set<std::string>& root_ops) {
   if (is_training && has_batchnorm) {
     at::batch_norm(
         at::ones({2, 2}),
-        std::nullopt,
-        std::nullopt,
-        std::nullopt,
-        std::nullopt,
+        c10::nullopt,
+        c10::nullopt,
+        c10::nullopt,
+        c10::nullopt,
         true,
         0.1,
         0.1,

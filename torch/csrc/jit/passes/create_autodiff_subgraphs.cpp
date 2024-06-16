@@ -287,7 +287,7 @@ class SubgraphSlicer {
         aliasDb_.moveBeforeTopologicallyValid(producer, consumer);
 
     if (!canMerge) {
-      return std::nullopt;
+      return c10::nullopt;
     }
 
     SubgraphUtils::mergeNodeIntoSubgraphAndUpdateAliasing(
@@ -305,11 +305,11 @@ class SubgraphSlicer {
 std::optional<bool> getProfileNodeRequiresGrad(Node* n) {
   TORCH_INTERNAL_ASSERT(n->kind() == prim::profile);
   if (!n->hasAttribute(attr::profiled_type)) {
-    return std::nullopt;
+    return c10::nullopt;
   }
   auto& type = n->ty(attr::profiled_type);
   if (type->castRaw<TensorType>() == nullptr) {
-    return std::nullopt;
+    return c10::nullopt;
   }
   return type->expectRef<TensorType>().requiresGrad();
 }
@@ -403,7 +403,7 @@ std::optional<bool> findRequiresGradForOutput(
     }
   }
 
-  return std::nullopt;
+  return c10::nullopt;
 }
 
 void AddRequiresGradToDifferentiableGraph(
