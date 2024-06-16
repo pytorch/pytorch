@@ -128,21 +128,21 @@ DEFAULT_EXPORT_DYNAMO_CONFIG.reorderable_logging_functions = {
 
 
 COMPOSITE_OPS_THAT_CAN_BE_PRESERVED = [
-    torch.ops.aten.batch_norm.default,
-    torch.ops.aten.broadcast_to.default,
-    torch.ops.aten.chunk.default,
+    # torch.ops.aten.batch_norm.default,
+    # torch.ops.aten.broadcast_to.default,
+    # torch.ops.aten.chunk.default,
     torch.ops.aten.conv_transpose1d.default,
     torch.ops.aten.conv_transpose2d.input,
     torch.ops.aten.conv_transpose3d.input,
     torch.ops.aten.conv1d.default,
     torch.ops.aten.conv2d.default,
     torch.ops.aten.conv3d.default,
-    torch.ops.aten.flatten.using_ints,
+    # torch.ops.aten.flatten.using_ints,
     torch.ops.aten.linear.default,
-    torch.ops.aten.reshape.default,
-    torch.ops.aten.sym_numel.default,
+    # torch.ops.aten.reshape.default,
+    # torch.ops.aten.sym_numel.default,  These are all aten ops that correspond to metadata queries
     torch.ops.aten.sym_size.int,
-    torch.ops.aten.sym_storage_offset.default,
+    # torch.ops.aten.sym_storage_offset.default,  These are all aten ops that correspond to metadata queries
     torch.ops.aten.sym_stride.int,
 ]
 
@@ -281,6 +281,9 @@ def override_composite_implicit_decomp(ops_to_preserve):
             return True
 
         if not can_preserve(op_overload):
+            warnings.warn(
+                f"We can't preserve {op_overload} in export because this op is not functional"
+            )
             continue
 
         saved_tables[op_overload] = op_overload.py_kernels.copy()
@@ -291,9 +294,32 @@ def override_composite_implicit_decomp(ops_to_preserve):
             torch._C.DispatchKey.AutogradMeta,
         ]:
             if override_dispatch_key not in op_overload.py_kernels:
-                op_overload.py_impl(override_dispatch_key)(
-                    torch._C.DispatchKey.Autograd
-                )
+                # conv1d, conv2d, conv3d don't work with default Autograd key
+                if op_overload == torch.ops.aten.conv1d.default:
+
+                    def fn(*args, **kwargs):
+                        with torch._C._AutoDispatchBelowAutograd():
+                            return torch.ops.aten.conv1d.default(*args, **kwargs)
+
+                    op_overload.py_impl(override_dispatch_key)(fn)
+                elif op_overload == torch.ops.aten.conv2d.default:
+
+                    def fn(*args, **kwargs):
+                        with torch._C._AutoDispatchBelowAutograd():
+                            return torch.ops.aten.conv2d.default(*args, **kwargs)
+
+                    op_overload.py_impl(override_dispatch_key)(fn)
+                elif op_overload == torch.ops.aten.conv3d.default:
+
+                    def fn(*args, **kwargs):
+                        with torch._C._AutoDispatchBelowAutograd():
+                            return torch.ops.aten.conv3d.default(*args, **kwargs)
+
+                    op_overload.py_impl(override_dispatch_key)(fn)
+                else:
+                    op_overload.py_impl(override_dispatch_key)(
+                        torch._C.DispatchKey.Autograd
+                    )
 
     try:
         yield

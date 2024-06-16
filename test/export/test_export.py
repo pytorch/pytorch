@@ -1071,16 +1071,32 @@ def forward(self, p_linear_weight, p_linear_bias, x):
             def __init__(self):
                 super().__init__()
                 self.conv = torch.nn.Conv2d(16, 33, 3)
+                self.conv1d = torch.nn.Conv1d(16, 33, 3)
                 self.linear = MyLinear()
 
-            def forward(self, x):
+            def forward(self, x, y):
                 x_conv = self.conv(x)
+                y_conv_1d = self.conv1d(y)
                 x_linear = self.linear(x_conv)
-                return x_linear.cos()
+                return x_linear.cos() + y_conv_1d.sum()
 
-        ep = torch.export._trace._export(Foo(), (torch.randn(20, 16, 50, 100),), _preserve_ops=torch.export._trace.COMPOSITE_OPS_THAT_CAN_BE_PRESERVED)
-        print(ep.graph)
-
+        ep = torch.export._trace._export(
+            Foo(),
+            (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50)),
+            _preserve_ops=torch.export._trace.COMPOSITE_OPS_THAT_CAN_BE_PRESERVED,
+        )
+        self.assertExpectedInline(
+            str(ep.graph_module.code).strip(),
+            """\
+def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_weight, c_linear_bias, x, y):
+    conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
+    conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
+    linear = torch.ops.aten.linear.default(conv2d, c_linear_weight, c_linear_bias);  conv2d = c_linear_weight = c_linear_bias = None
+    cos = torch.ops.aten.cos.default(linear);  linear = None
+    sum_1 = torch.ops.aten.sum.default(conv1d);  conv1d = None
+    add = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
+    return (add,)""",
+        )
 
     def test_derived_dim_out_of_order_simplified(self):
         _dimz = torch.export.Dim("_dimz", min=6, max=8)
