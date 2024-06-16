@@ -2305,6 +2305,7 @@ class InstructionTranslatorBase(
         self.nn_module_stack: Dict[str, Tuple[str, Type[Any]]] = {}
         # Flag to indicate whether tracing is used for export.
         self.export = export
+        self.one_graph = False
 
         self.current_speculation = None
 

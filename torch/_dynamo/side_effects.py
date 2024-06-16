@@ -481,6 +481,7 @@ class SideEffects:
 
     def get_ca_final_callbacks_var(self):
         from .variables.base import MutableLocal
+
         if self.ca_final_callbacks_var is None:
             self.ca_final_callbacks_var = variables.ListVariable(
                 [], mutable_local=MutableLocal()
