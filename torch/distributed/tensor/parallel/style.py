@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from abc import ABC, abstractmethod
-from typing import Optional, Union, Tuple, Dict
+from typing import Optional, Union, Tuple, Dict, Any
 from functools import partial
 
 import torch
@@ -400,6 +400,29 @@ class PrepareModuleInput(ParallelStyle):
             assert len(self.input_kwarg_layouts) == len(self.desired_input_kwarg_layouts), \
                 "input_kwarg_layouts and desired_input_kwarg_layouts should have same length!"
 
+    def _prepare_input_arg(
+        self,
+        input: Any,
+        mesh: DeviceMesh,
+        input_layout: Optional[Placement],
+        desired_layout: Optional[Placement]
+    ):
+        if input_layout is not None:
+            if isinstance(input, DTensor):
+                # TODO: re-enable the check once we fix the compile path
+                # assert inp.placements[0] == input_layout
+                dt_inp = input
+            else:
+                assert isinstance(input, torch.Tensor), "expecting input to be a torch.Tensor!"
+                dt_inp = DTensor.from_local(input, mesh, (input_layout,), run_check=False)
+
+            if desired_layout is not None and input_layout != desired_layout:
+                dt_inp = dt_inp.redistribute(placements=(desired_layout,))
+
+            return dt_inp.to_local() if self.use_local_output else dt_inp
+        else:
+            return input
+
     def _prepare_input_fn(self, inputs, device_mesh):
         if self.input_layouts is None:
             return inputs
@@ -411,19 +434,7 @@ class PrepareModuleInput(ParallelStyle):
 
         assert self.desired_input_layouts is not None, "desired module inputs should not be None!"
         for inp, input_layout, desired_layout in zip(inputs, self.input_layouts, self.desired_input_layouts):
-            if input_layout is not None:
-                if isinstance(inp, DTensor):
-                    # TODO: re-enable the check once we fix the compile path
-                    # assert inp.placements[0] == input_layout
-                    dt_inp = inp
-                else:
-                    dt_inp = DTensor.from_local(inp, device_mesh, (input_layout,), run_check=False)
-
-                if desired_layout is not None and input_layout != desired_layout:
-                    dt_inp = dt_inp.redistribute(placements=(desired_layout,))
-                prepared_inputs.append(dt_inp.to_local() if self.use_local_output else dt_inp)
-            else:
-                prepared_inputs.append(inp)
+            prepared_inputs.append(self._prepare_input_arg(inp, device_mesh, input_layout, desired_layout))
         return tuple(prepared_inputs)
 
     def _prepare_input_kwarg_fn(self, inputs, kwarg_inputs, device_mesh):
@@ -431,20 +442,10 @@ class PrepareModuleInput(ParallelStyle):
         prepared_kwarg_inputs = {}
         for kwarg_key in kwarg_inputs.keys():
             kwarg_val = kwarg_inputs[kwarg_key]
-            input_layout = None
-            if kwarg_key in self.input_kwarg_layouts:
-                input_layout = self.input_kwarg_layouts[kwarg_key]
-                assert isinstance(kwarg_val, torch.Tensor), f"input of key {kwarg_key} to the module should be a Tensor!"
-                kwarg_val = DTensor.from_local(kwarg_val, device_mesh, (input_layout,), run_check=False)
+            input_layout = self.input_kwarg_layouts.get(kwarg_key)
+            desired_input_layout = self.desired_input_kwarg_layouts.get(kwarg_key)
 
-                if kwarg_key in self.desired_input_kwarg_layouts:
-                    desired_layout = self.desired_input_kwarg_layouts[kwarg_key]
-                    if desired_layout != input_layout:
-                        kwarg_val = kwarg_val.redistribute(placements=(desired_layout,))
-
-                prepared_kwarg_inputs[kwarg_key] = kwarg_val.to_local() if self.use_local_output else kwarg_val
-            else:
-                prepared_kwarg_inputs[kwarg_key] = kwarg_val
+            prepared_kwarg_inputs[kwarg_key] = self._prepare_input_arg(kwarg_val, device_mesh, input_layout, desired_input_layout)
 
         return (prepared_arg_inputs, prepared_kwarg_inputs)
 
