@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 from torch.distributed._shard.sharded_tensor import (
     _sharded_op_impl,
