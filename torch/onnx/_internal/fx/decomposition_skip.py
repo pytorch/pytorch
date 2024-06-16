@@ -121,6 +121,44 @@ class UpsampleBilinear2DDecompSkip(DecompSkip):
         )
 
 
+class UpsampleTrilinear3DDecompSkip(DecompSkip):
+    op_callable = torch._C._nn.upsample_trilinear3d  # type: ignore[attr-defined]
+    onnxscript_function = torchlib_nn.aten_upsample_trilinear3d_vec  # type: ignore[attr-defined]
+    new_op_name = "upsample_trilinear3d"
+    new_op_schema = "(Tensor self, SymInt[]? output_size, bool align_corners, float[]? scale_factors) -> (Tensor)"
+
+    @classmethod
+    def register(cls, export_options: torch.onnx.ExportOptions):
+        if not hasattr(torch.ops, _NEW_OP_NAMESPACE) or not hasattr(
+            torch.ops.onnx_export, cls.new_op_name
+        ):
+            cls.register_custom_op()
+        torch._C._nn.upsample_trilinear3d = torch.ops.onnx_export.upsample_trilinear3d  # type: ignore[attr-defined]
+        if export_options.onnx_registry is None:
+            export_options.onnx_registry = torch.onnx.OnnxRegistry()
+        registry = export_options.onnx_registry
+        registry.register_op(
+            function=cls.onnxscript_function,
+            namespace=_NEW_OP_NAMESPACE,
+            op_name=cls.new_op_name,
+        )
+
+    @classmethod
+    def unregister(cls):
+        torch._C._nn.upsample_trilinear3d = cls.op_callable  # type: ignore[attr-defined]
+
+    @classmethod
+    def abstract(cls, input, output_size, align_corners, scale_factors):
+        osize = decompositions.upsample_compute_output_size(
+            input.size(), output_size, scale_factors
+        )
+        return torch.empty(
+            (input.size(0), input.size(1), input.size(2), *osize),
+            dtype=input.dtype,
+            device=input.device,
+        )
+
+
 class InstanceNormDecompSkip(DecompSkip):
     op_callable = torch.instance_norm  # type: ignore[attr-defined]
     onnxscript_function = torchlib_core.aten_instance_norm  # type: ignore[attr-defined]
@@ -176,6 +214,7 @@ class InstanceNormDecompSkip(DecompSkip):
 _DEFAULT_SKIP_LIST = [
     UpsampleBilinear2DDecompSkip,
     InstanceNormDecompSkip,
+    UpsampleTrilinear3DDecompSkip,
 ]
 
 
