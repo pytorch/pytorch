@@ -59,7 +59,7 @@ class CudaTimer : public Timer {
     // If it is never recorded/created, skip synchronize and calculation.
     // Otherwise it will throw cuda errors.
     if (!start_event.isCreated() || !end_event.isCreated()) {
-      return std::nullopt;
+      return c10::nullopt;
     }
     // set_runtime_stats_and_log is called at the beginning of forward call,
     // when it is cheap to synchronize the cuda events of previous iteration,
@@ -74,7 +74,7 @@ class CudaTimer : public Timer {
     // calculate the valid avg_time.
     // In this case, skip calculating the avg_time and return.
     if (milliseconds < 0) {
-      return std::nullopt;
+      return c10::nullopt;
     }
     return int64_t(milliseconds * kMilliSecondToNanosSecond);
   }
