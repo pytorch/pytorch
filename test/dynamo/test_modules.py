@@ -2512,6 +2512,19 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(eager_res, optim_res)
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_module_setattr(self):
+        models = torch.nn.Sequential(torch.nn.Linear(3, 3))
+        models[0].abc = False
+
+        def run():
+            models[0].abc = True
+            x = torch.randn(1, 3)
+            return models(x)
+
+        run = torch.compile(run, fullgraph=True)
+        run()
+        self.assertTrue(models[0].abc)
+
     def test_assign_does_not_exist(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
