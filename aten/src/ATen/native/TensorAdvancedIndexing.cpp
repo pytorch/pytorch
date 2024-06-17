@@ -2171,7 +2171,6 @@ Tensor put_along_dim(
     c10::optional<int64_t> opt_dim) {
   checkDevice("torch.put_along_dim():", {self, indices, values}, self.device());
   if (opt_dim.has_value()) {
-    TORCH_CHECK(opt_dim.has_value(), "None dim is not supported.");
     auto [new_indices, new_values] = _put_along_dim_helper(self, indices, values, opt_dim.value());
     return at::scatter(self, opt_dim.value(), new_indices, new_values);
   } else {
