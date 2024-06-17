@@ -656,7 +656,6 @@ id<MTLLibrary> MetalShaderLibrary::getLibrary(const std::initializer_list<std::s
 
 id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
   NSError* error = nil;
-
   MTLCompileOptions* options = compile_options;
   if (!options) {
     options = [[MTLCompileOptions new] autorelease];
@@ -665,7 +664,7 @@ id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
     [options setFastMathEnabled:NO];
   }
 
-  auto str = [NSString stringWithCString:src.c_str() encoding:NSASCIIStringEncoding];
+  const auto str = [NSString stringWithCString:src.c_str() encoding:NSASCIIStringEncoding];
   auto device = MPSDevice::getInstance()->device();
   library = [device newLibraryWithSource:str options:options error:&error];
   TORCH_CHECK(library, "Failed to create metal library, error: ", [[error description] UTF8String]);
