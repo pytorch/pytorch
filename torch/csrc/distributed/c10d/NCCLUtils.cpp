@@ -244,67 +244,48 @@ std::string getNcclErrorDetailStr(
 control_plane::RegisterHandler dumpHandler{
     "dump_nccl_trace_pickle",
     [](const control_plane::Request& req, control_plane::Response& res) {
-      auto params = req.params();
-      auto includeCollectives = true;
-      auto includeStackTraces = true;
-      auto onlyActive = false;
+      const auto params = req.params();
       size_t validParamCount = 0;
 
-      const auto& includeCollectivesIt = params.find("includecollectives");
-      if (includeCollectivesIt != params.end()) {
-        validParamCount++;
-        if (includeCollectivesIt->second == "false") {
-          std::cout << "includeCollectives: false" << std::endl;
-          includeCollectives = false;
-        } else if (includeCollectivesIt->second == "true") {
-          // do nothing since it's the default
-        } else {
-          res.setStatus(400);
-          res.setContent(
-              "Invalid value for " + includeCollectivesIt->first + ": " +
-                  includeCollectivesIt->second,
-              "text/plain");
-        }
-      }
-      const auto& includeStackTracesIt = params.find("includestacktraces");
-      if (includeStackTracesIt != params.end()) {
-        validParamCount++;
-        if (includeStackTracesIt->second == "false") {
-          includeStackTraces = false;
-        } else if (includeStackTracesIt->second == "true") {
-          // do nothing since it's the default
-        } else {
-          res.setStatus(400);
-          res.setContent(
-              "Invalid value for " + includeStackTracesIt->first + ": " +
-                  includeStackTracesIt->second,
-              "text/plain");
-          return;
-        }
-      }
-      const auto& onlyActiveIt = params.find("onlyactive");
-      if (onlyActiveIt != params.end()) {
-        validParamCount++;
-        if (onlyActiveIt->second == "true") {
-          onlyActive = true;
-        } else if (onlyActiveIt->second == "false") {
-          // do nothing since it's the default
-        } else {
-          res.setStatus(400);
-          res.setContent(
-              "Invalid value for " + onlyActiveIt->first + ": " +
-                  onlyActiveIt->second,
-              "text/plain");
-          return;
+      // valid params
+      const std::string includeCollectivesStr = "includecollectives";
+      const std::string includeStackTracesStr = "includestacktraces";
+      const std::string onlyActiveStr = "onlyactive";
+
+      std::unordered_map<std::string, bool> expectedParams = {
+          {includeCollectivesStr, true},
+          {includeStackTracesStr, true},
+          {onlyActiveStr, false}};
+
+      for (const auto& [paramName, paramValue] : params) {
+        auto it = expectedParams.find(paramName);
+        if (it != expectedParams.end()) {
+          validParamCount++;
+          if (paramValue == "true") {
+            it->second = true;
+          } else if (paramValue == "false") {
+            it->second = false;
+          } else {
+            res.setStatus(400);
+            res.setContent(
+                "Invalid value for " + paramName +
+                    " valid values are true or false",
+                "text/plain");
+            return;
+          }
         }
       }
       if (validParamCount < params.size()) {
         res.setStatus(400);
-        res.setContent("Invalid parameters", "text/plain");
+        res.setContent(
+            "Invalid parameters - unexpected param passed in", "text/plain");
         return;
       }
       res.setContent(
-          dump_nccl_trace(includeCollectives, includeStackTraces, onlyActive),
+          dump_nccl_trace(
+              expectedParams[includeCollectivesStr],
+              expectedParams[includeStackTracesStr],
+              expectedParams[onlyActiveStr]),
           "application/octet-stream");
     }};
 

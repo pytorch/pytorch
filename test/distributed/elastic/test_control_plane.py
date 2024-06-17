@@ -83,6 +83,7 @@ class WorkerServerTest(TestCase):
             self.assertIsInstance(out, dict)
             self.assertIn("version", out)
 
+    @requires_cuda
     def test_dump_nccl_trace_pickle_with_params(self) -> None:
         with local_worker_server() as pool:
             # bad key - not lower case
