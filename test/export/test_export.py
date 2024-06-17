@@ -672,7 +672,7 @@ class TestExport(TestCase):
                 return torch.ops.aten.chunk.default(x, 3, 0)
 
         gm = torch.export._trace._export(
-            Foo(), (torch.randn(3, 3),), pre_dispatch=False
+            Foo(), (torch.randn(3, 3),), pre_dispatch=False, _preserve_ops=[torch.ops.aten.linear.default]
         ).graph_module
         # linear is CompositeImplicitAutograd functional op so we should preserve it
         # chunk is CompositeImplicitAutograd non-functional op we decompose.

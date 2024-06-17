@@ -8,6 +8,7 @@ import time
 import warnings
 from contextlib import contextmanager, nullcontext
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from unittest.mock import patch
 
 import torch
 import torch._dynamo
@@ -320,9 +321,8 @@ def override_composite_implicit_decomp(ops_to_preserve):
                     op_overload.py_impl(override_dispatch_key)(
                         torch._C.DispatchKey.Autograd
                     )
-
     try:
-        yield
+        yield patched_ops
     finally:
         for op in patched_ops:
             op.py_kernels.clear()
@@ -1570,20 +1570,22 @@ def _export(
         if not pre_dispatch
         else nullcontext()
     )
-    with override_decomp:
-        aten_export_artifact = export_func(
-            mod,
-            args,
-            kwargs,
-            dynamic_shapes,
-            preserve_module_call_signature,
-            pre_dispatch,
-            original_state_dict,
-            orig_in_spec,
-            _allow_complex_guards_as_runtime_asserts,
-            _disable_forced_specializations,
-            _is_torch_jit_trace,
-        )
+    with override_decomp as patched_ops:
+        should_patch_ops = patch('torch._ops.OPS_THAT_SHOULDNT_GET_DECOMPOSED', patched_ops) if patched_ops is not None else nullcontext()
+        with should_patch_ops:
+            aten_export_artifact = export_func(
+                mod,
+                args,
+                kwargs,
+                dynamic_shapes,
+                preserve_module_call_signature,
+                pre_dispatch,
+                original_state_dict,
+                orig_in_spec,
+                _allow_complex_guards_as_runtime_asserts,
+                _disable_forced_specializations,
+                _is_torch_jit_trace,
+            )
 
     # Decompose here for readability.
     gm = aten_export_artifact.gm

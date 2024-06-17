@@ -373,7 +373,7 @@ class FunctionalTensorMode(TorchDispatchMode):
             # Not all funcs from __torch_dispatch__ are actual dispatcher ops,
             # e.g. prim.device
             and torch._C._dispatch_has_kernel(func.name())
-        ):
+        ):  
             with self:
                 r = func.decompose(*args, **kwargs)
                 if r is not NotImplemented:
