@@ -20,7 +20,7 @@ bool is_cpu_support_avx512() {
 #endif
 }
 
-bool is_cpu_support_vnni() {
+bool is_cpu_support_avx512_vnni() {
 #if !defined(__s390x__) && !defined(__powerpc__)
   return cpuinfo_initialize() && cpuinfo_has_x86_avx512vnni();
 #else
