@@ -389,7 +389,6 @@ def register_fsdp_forward_method(module: nn.Module, method_name: str) -> None:
         method_name,
         wrapped_method.__get__(module, type(module)),  # type:ignore[attr-defined]
     )
-    setattr(module, method_name, wrapped_method.__get__(module, type(module)))
 
 
 def _assert_all_fsdp_modules(modules: Iterable[Any]) -> None:
