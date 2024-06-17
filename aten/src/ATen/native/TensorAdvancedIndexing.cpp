@@ -2150,14 +2150,8 @@ Tensor& take_along_dim_out(const Tensor& self, const Tensor& indices, std::optio
 namespace {
 
 inline std::tuple<Tensor, Tensor> _put_along_dim_helper(const Tensor& self, const Tensor& indices, const Tensor& values, int64_t dim) {
-  auto new_indices_sizes = DimVector(indices.sizes());
-  for (int i = 0; i < indices.dim(); i++) {
-    if (i == dim) {
-      new_indices_sizes[i] = indices.size(i);
-    } else {
-      new_indices_sizes[i] = self.size(i);
-    }
-  }
+  auto new_indices_sizes = DimVector(self.sizes());
+  new_indices_sizes[dim] = indices.size(dim);
   auto new_indices = at::broadcast_to(indices, new_indices_sizes);
   auto new_values = at::broadcast_to(values, new_indices_sizes);
   return std::make_tuple(new_indices, new_values);
