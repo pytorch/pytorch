@@ -1,1 +1,1 @@
-pin_yolo_dep
+pin_yolo_efficientdet
