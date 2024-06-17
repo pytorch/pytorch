@@ -8632,21 +8632,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         a = torch.ones(2, 3)
         # Metadata changes are allowed on view tensors that are created from detach().
 
-    @skipIfNotRegistered("LayerNorm", "Skipping as LayerNorm is not registered")
-    def test_c10_layer_norm(self):
-        # test that we can call c10 ops and they return a reasonable result
-        X = torch.rand(5, 5, dtype=torch.float)
-        weight = torch.rand(*X.size()[1:], dtype=torch.float)
-        bias = torch.rand(*X.size()[1:], dtype=torch.float)
-        epsilon = 1e-4
-
-        expected_norm = torch.nn.functional.layer_norm(
-            X, X.size()[1:], weight=weight, bias=bias, eps=epsilon)
-        actual_norm, actual_mean, actual_stdev = \
-            torch.ops._caffe2.LayerNorm(torch.tensor(X), torch.tensor(
-                weight), torch.tensor(bias), 1, epsilon, True)
-        torch.testing.assert_close(expected_norm, actual_norm)
-
     def test_memory_format(self):
         def test_helper(x, memory_format):
             y = x.contiguous(memory_format=memory_format)
