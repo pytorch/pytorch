@@ -1530,14 +1530,69 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         return proxy_args
 
+    def create_mask_wrapped_node(
+        self, tx, query: "VariableTracker", mask_function: "VariableTracker"
+    ):
+        from torch._higher_order_ops.flex_attention import TransformGetItemToIndex
+        from .builder import SourcelessBuilder
+
+        tx: InstructionTranslator = tx
+
+        def create_scalar():
+            return query.call_method(
+                tx,
+                "new_empty",
+                (SourcelessBuilder.create(tx, []),),
+                {
+                    "dtype": SourcelessBuilder.create(tx, torch.int32),
+                },
+            )
+
+        bhmn = [create_scalar() for _ in range(4)]
+        new_args = [*bhmn]
+
+        with TransformGetItemToIndex():
+            (
+                (body_output, body_treespec),
+                body_graph,
+                body_lifted_freevars,
+            ) = speculate_subgraph(
+                tx,
+                mask_function,
+                new_args,
+                {},  # expect only args no kwargs for now
+                description="flex_attention",
+                source_target=self.value,
+                set_subgraph_inputs="flatten_manual",
+            )
+
+        body_name = add_subgraph(
+            tx,
+            "flex_attention",
+            torch.fx.GraphModule(tx.output.nn_modules, body_graph),
+        )
+
+        body_node = make_attr(tx, body_name)
+
+        # It is possible that the score-mod function captures some free variables that are not
+        # passed in as arguments. In this case, we need to lift them, which is handled by speculate_subgraph.
+        # We then need to create proxies for this + the inputs.
+
+        lifted_args = tuple(arg for arg in body_lifted_freevars.keys())
+
+        proxy_args = (body_node,) + lifted_args
+
+        return proxy_args
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from .builder import wrap_fx_proxy
 
-        query, key, value, score_mod = self.normalize_to_args(args, kwargs)
+        query, key, value, score_mod, mask = self.normalize_to_args(args, kwargs)
 
         p_args = self.create_wrapped_node(tx, query, score_mod)
+        mask_args = self.create_mask_wrapped_node(tx, query, mask)
         proxied_args = [query, key, value]
 
         # Store the invocation as a call
@@ -1559,7 +1614,7 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             proxy=tx.output.create_proxy(
                 "call_function",
                 self.value,
-                args=inp_args + p_args,
+                args=inp_args + p_args + mask_args,
                 kwargs={},
             ),
             example_value=example_value,

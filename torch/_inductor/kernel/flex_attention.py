@@ -188,8 +188,7 @@ flex_attention_template = TritonTemplate(
 
     Z = {{size("Q", 0)}}
     H = {{size("Q", 1)}}
-    Q_LEN = {{size("Q", 2)}}
-    KV_LEN = {{size("K", 2)}}
+    N_CTX = {{size("Q", 2)}}
 
     qk_scale = 1.0
     MATMUL_PRECISION = Q.dtype.element_ty
@@ -197,27 +196,26 @@ flex_attention_template = TritonTemplate(
     start_m = tl.program_id(0)
     off_hz = tl.program_id(1)
 
-    q_offset = off_hz * stride_qh
-    kv_offset = off_hz * stride_kh
+    qkv_offset = off_hz * stride_qh
     Q_block_ptr = tl.make_block_ptr(
-        base=Q + q_offset,
-        shape=(Q_LEN, BLOCK_DMODEL),
+        base=Q + qkv_offset,
+        shape=(N_CTX, BLOCK_DMODEL),
         strides=(stride_qm, stride_qk),
         offsets=(start_m * BLOCK_M, 0),
         block_shape=(BLOCK_M, BLOCK_DMODEL),
         order=(1, 0)
     )
     K_block_ptr = tl.make_block_ptr(
-        base=K + kv_offset,
-        shape=(BLOCK_DMODEL, KV_LEN),
+        base=K + qkv_offset,
+        shape=(BLOCK_DMODEL, N_CTX),
         strides=(stride_kk, stride_kn),
         offsets=(0, 0),
         block_shape=(BLOCK_DMODEL, BLOCK_N),
         order=(0, 1)
     )
     V_block_ptr = tl.make_block_ptr(
-        base=V + kv_offset,
-        shape=(KV_LEN, BLOCK_DMODEL),
+        base=V + qkv_offset,
+        shape=(N_CTX, BLOCK_DMODEL),
         strides=(stride_vk, stride_vn),
         offsets=(0, 0),
         block_shape=(BLOCK_N, BLOCK_DMODEL),
@@ -237,52 +235,72 @@ flex_attention_template = TritonTemplate(
     q = (q * qk_scale).to(MATMUL_PRECISION)
     # loop over k, v and update accumulator
     lo = 0
-    hi = KV_LEN
+    hi = N_CTX
     for start_n in range(lo, hi, BLOCK_N):
         start_n = tl.multiple_of(start_n, BLOCK_N)
-        # -- load k, v --
-        k = tl.load(K_block_ptr)
-        v = tl.load(V_block_ptr)
-        # -- compute qk ---
-        qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
-        qk = tl.dot(q, k.to(MATMUL_PRECISION), acc=qk)
-        # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
         m = offs_m[:, None]
         n = start_n + offs_n[None, :]
+
+        # ~~~~~~~~~~~~~~~~~~~ Compute block mask  ~~~~~~~~~~~~~~~~~~~
         {{ modification(
-            subgraph_number=0,
-            output_name="post_mod_scores",
-            score="qk",
+            subgraph_number=1,
+            output_name="mask_fn_output",
             b="off_hz // H",
             h="off_hz % H",
             m="m",
-            n="n",
-            out="qk"
+            n="n"
         ) | indent_except_first(2) }}
-        # TODO: In the case that score_mod is linear, this can be LICMed
-        if not SCORE_MOD_IS_LINEAR:
-            post_mod_scores *= 1.44269504
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-        # -- compute scaling constant ---
-        row_max = tl.max(post_mod_scores, 1)
-        m_i_new = tl.maximum(m_i, row_max)
+        mask_fn_output = mask_fn_output.to(tl.int32)
+        max_of_mask_fn_output = tl.max(mask_fn_output, axis=None)
 
-        alpha = tl.math.exp2(m_i - m_i_new)
-        p = tl.math.exp2(post_mod_scores - m_i_new[:, None])
-        if not ROWS_GUARANTEED_SAFE:
-            masked_out_rows = (m_i_new == float("-inf"))
-            alpha = tl.where(masked_out_rows, 0, alpha)
-            p = tl.where(masked_out_rows[:, None], 0, p)
+        # Skip masked-out block
+        if max_of_mask_fn_output == 1:
+            # -- load k, v --
+            k = tl.load(K_block_ptr)
+            v = tl.load(V_block_ptr)
+            # -- compute qk ---
+            qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
+            qk = tl.dot(q, k.to(MATMUL_PRECISION), acc=qk)
+            # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
+            {{ modification(
+                subgraph_number=0,
+                output_name="post_mod_scores",
+                score="qk",
+                b="off_hz // H",
+                h="off_hz % H",
+                m="m",
+                n="n",
+                out="qk"
+            ) | indent_except_first(3) }}
 
-        # -- scale and update acc --
-        acc_scale = l_i * 0 + alpha  # workaround some compiler bug
-        acc *= acc_scale[:, None]
-        acc = tl.dot(p.to(MATMUL_PRECISION), v.to(MATMUL_PRECISION), acc)
+            # apply mask for partial masked block
+            post_mod_scores = tl.where(mask_fn_output, post_mod_scores, float("-inf"))
 
-        # -- update m_i and l_i --
-        l_i = l_i * alpha + tl.sum(p, 1)
-        m_i = m_i_new
+            # TODO: In the case that score_mod is linear, this can be LICMed
+            if not SCORE_MOD_IS_LINEAR:
+                post_mod_scores *= 1.44269504
+            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+            # -- compute scaling constant ---
+            row_max = tl.max(post_mod_scores, 1)
+            m_i_new = tl.maximum(m_i, row_max)
+
+            alpha = tl.math.exp2(m_i - m_i_new)
+            p = tl.math.exp2(post_mod_scores - m_i_new[:, None])
+            if not ROWS_GUARANTEED_SAFE:
+                masked_out_rows = (m_i_new == float("-inf"))
+                alpha = tl.where(masked_out_rows, 0, alpha)
+                p = tl.where(masked_out_rows[:, None], 0, p)
+
+            # -- scale and update acc --
+            acc_scale = l_i * 0 + alpha  # workaround some compiler bug
+            acc *= acc_scale[:, None]
+            acc = tl.dot(p.to(MATMUL_PRECISION), v.to(MATMUL_PRECISION), acc)
+
+            # -- update m_i and l_i --
+            l_i = l_i * alpha + tl.sum(p, 1)
+            m_i = m_i_new
         # update pointers
         K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
         V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
@@ -300,7 +318,7 @@ flex_attention_template = TritonTemplate(
 
     # TODO dont want to write this if we dont require grad
     if OUTPUT_LOGSUMEXP:
-        l_ptrs = LSE + off_hz * Q_LEN + offs_m
+        l_ptrs = LSE + off_hz * N_CTX + offs_m
         lse = m_i + tl.math.log2(l_i)
         tl.store(l_ptrs, lse)
  """,
@@ -369,7 +387,7 @@ def _get_default_config_bwd(query) -> Tuple[int, int, int, int]:
 # TODO: We probably also need a layout constraint?
 @register_lowering(torch.ops.higher_order.flex_attention, type_promotion_kind=None)
 def flex_attention(*args, **kwargs):
-    query, key, value, subgraph, *other_buffers = args
+    query, key, value, subgraph, maskgraph, *other_buffers = args
     for buf in [query, key, value]:
         buf.realize()
     placeholder_inps = [
@@ -385,6 +403,20 @@ def flex_attention(*args, **kwargs):
     subgraph_buffer = build_subgraph_buffer(
         args, placeholder_inps, subgraph, graph_type=SubgraphType.FWD
     )
+
+    maskgraph_placeholder_inps = [
+        create_placeholder(name, dtype, query.get_device())
+        for name, dtype in [
+            ("b", torch.int32),
+            ("h", torch.int32),
+            ("m", torch.int32),
+            ("n", torch.int32),
+        ]
+    ]
+    maskgraph_buffer = build_subgraph_buffer(
+        args, maskgraph_placeholder_inps, maskgraph, graph_type=SubgraphType.FWD
+    )
+
     layout = FixedLayout(
         query.get_device(),
         query.get_dtype(),
@@ -421,6 +453,7 @@ def flex_attention(*args, **kwargs):
             layout=layout,
             subgraphs=[
                 subgraph_buffer,
+                maskgraph_buffer,
             ],
             mutated_inputs=[
                 logsumexp,
@@ -562,46 +595,70 @@ flex_attention_backward_template = TritonTemplate(
         num_steps = KV_LEN // BLOCK_N2
         for blk_idx in range(num_steps):
             offs_n2= curr_n + tl.arange(0, BLOCK_N2)
-            kT = tl.load(kT_ptrs)
-            vT = tl.load(vT_ptrs)
-            qk = tl.dot(q, kT)
-            # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
-            pre_mod_scores = qk
             m = offs_m2[:, None]
             n = offs_n2[None, :]
+
+            # ~~~~~~~~~~~~~~~~~~~ Compute block mask  ~~~~~~~~~~~~~~~~~~~
             {{ modification(
-                subgraph_number=0,
-                output_name="post_mod_scores",
-                score="qk",
+                subgraph_number=2,
+                output_name="mask_fn_output",
                 b="off_z",
                 h="off_h",
                 m="m",
-                n="n",
-                out="qk"
+                n="n"
             ) | indent_except_first(3) }}
-            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-            if not SCORE_MOD_IS_LINEAR:
-                post_mod_scores *= 1.44269504
-            p = tl.math.exp2(post_mod_scores - lse).to(MATMUL_PRECISION)
-            # Compute dP and dS.
-            dp = tl.dot(do, vT)
-            ds = p * (dp - Di[:, None])
-            # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
-            {{ modification(
-                subgraph_number=1,
-                output_name = "grad_scores",
-                score="pre_mod_scores",
-                b="off_z",
-                h="off_h",
-                m="m",
-                n="n",
-                grad_score_mod="ds"
-            ) | indent_except_first(3) }}
-            ds = grad_scores
-            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-            ds = ds.to(MATMUL_PRECISION)
-            # Compute dQ.
-            dq += tl.dot(ds, tl.trans(kT))
+
+            mask_fn_output = mask_fn_output.to(tl.int32)
+            max_of_mask_fn_output = tl.max(mask_fn_output, axis=None)
+
+            # Skip masked-out block
+            if max_of_mask_fn_output == 1:
+                kT = tl.load(kT_ptrs)
+                vT = tl.load(vT_ptrs)
+                qk = tl.dot(q, kT)
+                # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
+                pre_mod_scores = qk
+                m = offs_m2[:, None]
+                n = offs_n2[None, :]
+                {{ modification(
+                    subgraph_number=0,
+                    output_name="post_mod_scores",
+                    score="qk",
+                    b="off_z",
+                    h="off_h",
+                    m="m",
+                    n="n",
+                    out="qk"
+                ) | indent_except_first(4) }}
+                # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                # apply mask for qk
+                post_mod_scores = tl.where(mask_fn_output, post_mod_scores, float("-inf"))
+
+                if not SCORE_MOD_IS_LINEAR:
+                    post_mod_scores *= 1.44269504
+                p = tl.math.exp2(post_mod_scores - lse).to(MATMUL_PRECISION)
+                # Compute dP and dS.
+                dp = tl.dot(do, vT)
+                ds = p * (dp - Di[:, None])
+                # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
+                {{ modification(
+                    subgraph_number=1,
+                    output_name = "grad_scores",
+                    score="pre_mod_scores",
+                    b="off_z",
+                    h="off_h",
+                    m="m",
+                    n="n",
+                    grad_score_mod="ds"
+                ) | indent_except_first(4) }}
+                ds = grad_scores
+
+                # apply mask for ds
+                ds = tl.where(mask_fn_output, ds, 0.0)
+                # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                ds = ds.to(MATMUL_PRECISION)
+                # Compute dQ.
+                dq += tl.dot(ds, tl.trans(kT))
             # Increment pointers.
             curr_n += BLOCK_N2
             kT_ptrs += BLOCK_N2 * stride_km
@@ -633,53 +690,73 @@ flex_attention_backward_template = TritonTemplate(
         curr_m = start_m1
         num_steps = Q_LEN // BLOCK_M1
         for blk_idx in range(num_steps):
-            qT = tl.load(qT_ptrs)
             # Load LSE before computing qk to reduce pipeline stall.
             offs_m1 = curr_m + tl.arange(0, BLOCK_M1)
-            lse = tl.load(LSE + offs_m1)
-            qkT = tl.dot(k, qT)
-            # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
             m = offs_m1[None, :]
             n = offs_n1[:, None]
-            pre_mod_scores = qkT
+
             {{ modification(
-                subgraph_number=0,
-                output_name="post_mod_scores",
-                score="qkT",
+                subgraph_number=2,
+                output_name="mask_fn_output",
                 b="off_z",
                 h="off_h",
                 m="m",
-                n="n",
-                out="qkT"
+                n="n"
             ) | indent_except_first(3) }}
-            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-            if not SCORE_MOD_IS_LINEAR:
-                post_mod_scores *= 1.44269504
-            pT = tl.math.exp2(post_mod_scores - lse[None, :])
-            do = tl.load(do_ptrs)
-            # Compute dV.
-            ppT = pT
-            dv += tl.dot(ppT.to(MATMUL_PRECISION), do)
-            Di = tl.load(DELTA + offs_m1)
-            # Compute dP and dS.
-            dpT = tl.dot(v, tl.trans(do))
-            dsT = pT * (dpT - Di[None, :])
-            # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
-            m = offs_m1[None, :]
-            n = offs_n1[:, None]
-            {{ modification(
-                subgraph_number=1,
-                output_name = "grad_scores",
-                score="pre_mod_scores",
-                b="off_z",
-                h="off_h",
-                m="m",
-                n="n",
-                grad_score_mod="dsT"
-            ) | indent_except_first(3) }}
-            dsT = grad_scores
-            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-            dk += tl.dot(dsT.to(MATMUL_PRECISION), tl.trans(qT))
+            mask_fn_output = mask_fn_output.to(tl.int32)
+            max_of_mask_fn_output = tl.max(mask_fn_output, axis=None)
+
+            if max_of_mask_fn_output == 1:
+                qT = tl.load(qT_ptrs)
+
+                lse = tl.load(LSE + offs_m1)
+                qkT = tl.dot(k, qT)
+                # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
+                pre_mod_scores = qkT
+                {{ modification(
+                    subgraph_number=0,
+                    output_name="post_mod_scores",
+                    score="qkT",
+                    b="off_z",
+                    h="off_h",
+                    m="m",
+                    n="n",
+                    out="qkT"
+                ) | indent_except_first(4) }}
+
+                # apply mask for qk
+                post_mod_scores = tl.where(mask_fn_output, post_mod_scores, float("-inf"))
+                # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                if not SCORE_MOD_IS_LINEAR:
+                    post_mod_scores *= 1.44269504
+                pT = tl.math.exp2(post_mod_scores - lse[None, :])
+                do = tl.load(do_ptrs)
+                # Compute dV.
+                ppT = pT
+                dv += tl.dot(ppT.to(MATMUL_PRECISION), do)
+                Di = tl.load(DELTA + offs_m1)
+                # Compute dP and dS.
+                dpT = tl.dot(v, tl.trans(do))
+                dsT = pT * (dpT - Di[None, :])
+                # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
+                m = offs_m1[None, :]
+                n = offs_n1[:, None]
+                {{ modification(
+                    subgraph_number=1,
+                    output_name = "grad_scores",
+                    score="pre_mod_scores",
+                    b="off_z",
+                    h="off_h",
+                    m="m",
+                    n="n",
+                    grad_score_mod="dsT"
+                ) | indent_except_first(4) }}
+                dsT = grad_scores
+
+                # apply mask for dsT
+                dsT = tl.where(mask_fn_output, dsT, 0.0)
+                # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                dk += tl.dot(dsT.to(MATMUL_PRECISION), tl.trans(qT))
             # Increment pointers.
             curr_m += BLOCK_M1
             qT_ptrs += BLOCK_M1 * stride_qm
@@ -712,6 +789,7 @@ def flex_attention_backward(*args, **kwargs):
         grad_out,
         fw_graph,
         joint_graph,
+        mask_graph,
         *other_buffers,
     ) = args
     for buf in [query, key, value, grad_out]:
@@ -739,6 +817,19 @@ def flex_attention_backward(*args, **kwargs):
     ]
     joint_subgraph_buffer = build_subgraph_buffer(
         args, joint_placeholder_inps, joint_graph, graph_type=SubgraphType.JOINT_BWD
+    )
+
+    maskgraph_placeholder_inps = [
+        create_placeholder(name, dtype, query.get_device())
+        for name, dtype in [
+            ("b", torch.int32),
+            ("h", torch.int32),
+            ("m", torch.int32),
+            ("n", torch.int32),
+        ]
+    ]
+    maskgraph_buffer = build_subgraph_buffer(
+        args, maskgraph_placeholder_inps, mask_graph, graph_type=SubgraphType.FWD
     )
 
     layout_k = FixedLayout(
@@ -784,7 +875,7 @@ def flex_attention_backward(*args, **kwargs):
                 grad_value,
             ],
             layout=layout_k,  # We use store_output only for grad_key
-            subgraphs=[fw_subgraph_buffer, joint_subgraph_buffer],
+            subgraphs=[fw_subgraph_buffer, joint_subgraph_buffer, maskgraph_buffer],
             mutated_inputs=[grad_query, grad_value],
             call_sizes=query.get_size() + [key.get_size()[2]],
             num_stages=num_stages,

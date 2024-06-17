@@ -28,6 +28,10 @@ _score_mod_signature = Callable[
     [torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor
 ]
 
+_mask_signature = Callable[
+    [torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor
+]
+
 
 def _identity(
     score: torch.Tensor,
@@ -39,11 +43,21 @@ def _identity(
     return score
 
 
+def _no_mask(
+    batch: torch.Tensor,
+    head: torch.Tensor,
+    token_q: torch.Tensor,
+    token_kv: torch.Tensor,
+) -> torch.Tensor:
+    return token_q >= 0
+
+
 def _flex_attention(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
     score_mod: _score_mod_signature = _identity,
+    mask: _mask_signature = _no_mask,
 ) -> torch.Tensor:
     r"""This function implements scaled dot product attention with an arbitrary attention score modification function.
 
@@ -97,7 +111,7 @@ def _flex_attention(
         # mark head_dim always to be static
         for x in [query, key, value]:
             torch._dynamo.mark_static(x, -1)
-        out, _ = flex_attention_hop(query, key, value, score_mod)
+        out, _ = flex_attention_hop(query, key, value, score_mod, mask)
         return out
 
     # Some basic input validation
@@ -113,7 +127,7 @@ def _flex_attention(
             with _temp_remove_pre_dispatch_torch_function_mode():
                 out, _ = torch.compile(
                     flex_attention_hop, backend="eager", fullgraph=True
-                )(query, key, value, score_mod)
+                )(query, key, value, score_mod, mask)
                 return out
 
 
