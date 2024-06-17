@@ -1,8 +1,7 @@
 # mypy: allow-untyped-defs
 import inspect
 import typing
-
-import torch  # noqa: F401. Used to evaluate the type when converting types from string.
+from typing import List, Optional, Sequence, Union  # noqa: F401
 
 from .. import device, dtype, Tensor, types
 
@@ -14,6 +13,9 @@ def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
     write custom ops in real life:
     - none of the outputs alias any of the inputs or each other.
     - only the args listed in mutates_args are being mutated.
+    - string type annotations "device, dtype, Tensor, types" without library specification
+      are assumed to be torch.*. Similarly, string type annotations "Optional, List, Sequence, Union"
+      without library specification are assumed to be typing.*.
 
     Callers (e.g. the custom ops API) are responsible for checking these assumptions.
     """
@@ -26,11 +28,12 @@ def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
 
     def convert_type_string(annotation_type: str):
         try:
+            if annotation_type.startswith("torch."):
+                annotation_type = annotation_type[len("torch.") :]
             return eval(annotation_type)
         except Exception as e:
             error_fn(
-                f"Parameter {name} has unsupported type annotation "
-                f"{param.annotation}. It is not a type."
+                f"Unsupported type annotation {annotation_type}. It is not a type."
             )
 
     params = []
