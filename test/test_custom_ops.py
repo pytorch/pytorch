@@ -2480,7 +2480,7 @@ class TestCustomOpAPI(TestCase):
         opname = f"source{idx}"
         op = getattr(torch.ops._torch_testing, opname).default
         entry = torch._library.simple_registry.singleton.find(op._name)
-        source = entry.abstract_impl.kernel.source
+        source = entry.fake_impl.kernel.source
         assert source is not None
         self.assertTrue("custom_op_db.py" in source)
 
