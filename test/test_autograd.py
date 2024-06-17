@@ -8243,7 +8243,7 @@ for shape in [(1,), ()]:
         # Freshly created tensor of differentiable type with requires_grad=False
         # should also have nullptr AutogradMeta
         b = torch.tensor(1.0, requires_grad=False)
-        self.assertTrue(torch._C._has_null_autograd_meta(a))
+        self.assertTrue(torch._C._has_null_autograd_meta(b))
 
         # Transition from null to non-null AutogradMeta is probably monotonic today
         b.requires_grad_(True)
