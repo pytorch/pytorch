@@ -1655,6 +1655,9 @@ class GuardBuilder(GuardBuilderBase):
     def TORCH_FUNCTION_STATE(self, guard: Guard):
         pass  # we always guard on this via GlobalStateGuard()
 
+    def FSDP_TRAINING_STATE(self, guard: Guard):
+        pass  # we always guard on this via GlobalStateGuard()
+
     def DEFAULT_DEVICE(self, guard: Guard):
         """Guard on CURRENT_DEVICE per torch.utils._device"""
         assert guard.source is GuardSource.GLOBAL

@@ -11,6 +11,7 @@ from unittest import mock
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch import _inductor as inductor
 from torch._dynamo import compiled_autograd, config
 from torch._dynamo.utils import counters
@@ -1308,6 +1309,44 @@ main()
 
         self.check_output_and_recompiles(fn, 1)
 
+    def test_trace_run_with_rng_state(self):
+        bs = 1
+        n_local_heads = 1
+        seqlen = 2
+        head_dim = 2
+        cache_len = 2
+        xq = torch.ones((bs, n_local_heads, seqlen, head_dim), requires_grad=True, device="cpu")
+        xk = torch.ones((bs, n_local_heads, cache_len + seqlen, head_dim), requires_grad=True, device="cpu")
+            
+        def g(xq, xk):
+            # xq: (bs, n_local_heads, seqlen, head_dim)
+            # xk: (bs, n_local_heads, cache_len + seqlen, head_dim)
+            y = F.scaled_dot_product_attention(xq, xk, xk, is_causal=True)
+            z = torch.matmul(y, y)
+            return z
+
+        def h():
+            out = torch.utils.checkpoint.checkpoint(g, xq, xk, use_reentrant=False)
+            return out
+
+        def f():
+            # `run_with_rng_state` op only shows up when forward is compiled
+            out = torch.compile(h, fullgraph=True)()
+            out.sum().backward()
+            return out
+
+        compiler_fn = make_compiler_fn(fullgraph=True)
+
+        def make_compiler_fn_with_op_check():
+            def _compiler_fn(gm):
+                self.assertTrue(any(node.target is torch.ops.higher_order.run_with_rng_state for node in gm.graph.nodes))
+                return compiler_fn(gm)
+            return _compiler_fn
+
+        compiler_fn_with_op_check = make_compiler_fn_with_op_check()
+
+        self.check_output_and_recompiles(f, compiler_fn=compiler_fn_with_op_check, compile_fn=False)
+
     def test_autograd_cpp_node(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
@@ -2178,7 +2217,6 @@ known_failing_tests = {
     "test_autograd_node_isinstance",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertIsInstance
     "test_autograd_simple_views_python",  # torch._dynamo.exc.TorchRuntimeError: Failed running call_function
     "test_callback_adds_callback",  # torch._dynamo.exc.Unsupported: call_method UserDefinedObjectVariable
-    "test_callback_propagates_errors_from_device_thread",  # AssertionError: "blah" does not match "call_method
     "test_custom_autograd_no_early_free",  # torch.autograd.gradcheck.GradcheckError: While computing batched gradients
     "test_custom_function_cycle",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
     "test_custom_function_error",  # AssertionError: "must implement either the backward" does not match "call_function

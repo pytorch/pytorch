@@ -283,6 +283,7 @@ def aot_dispatch_autograd_graph(
     # See Note: [Fake Modules and AOTAutograd]
     torch._dynamo.utils.assert_no_fake_params_or_buffers(fx_g)
     fx_g.graph.eliminate_dead_code()
+
     fx_g.recompile()
     # TODO: in AOTAutograd, we create metadata like _indices_of_inps_to_detach to detect
     # when we need to manually detach() some inputs in the forward.

@@ -338,6 +338,10 @@ class UserMethodVariable(UserFunctionVariable):
                 return self.obj.call_method(
                     tx, self.fn.__name__, args, kwargs, constant=self.is_constant
                 )
+        elif variables.TorchCtxManagerClassVariable.is_matching_cls(self.fn):
+            return variables.TorchCtxManagerClassVariable(self.fn).call_function(
+                tx, (self.obj, *args), kwargs
+            )
         if self.is_constant:
             fn = getattr(self.obj.value, self.fn.__name__)
             return invoke_and_store_as_constant(tx, fn, self.get_name(), args, kwargs)

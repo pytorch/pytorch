@@ -376,7 +376,13 @@ class SideEffects:
             elif isinstance(var.mutable_local, AttributeMutationNew):
                 if isinstance(var, variables.AutogradFunctionContextVariable):
                     unimplemented("AutogradFunctionContextVariable escaped")
-                cg.load_import_from(utils.__name__, "object_new")
+                if "__call_nn_module_init" in self.store_attr_mutations.get(
+                    var.mutable_local, {}
+                ):
+                    assert isinstance(var, variables.UnspecializedNNModuleVariable)
+                    cg.load_import_from(utils.__name__, "nn_module_new")
+                else:
+                    cg.load_import_from(utils.__name__, "object_new")
                 cg(var.mutable_local.cls_source)
                 cg.extend_output(create_call_function(1, True))
                 cg.add_cache(var)
@@ -536,25 +542,9 @@ class SideEffects:
                     ]
                 )
             elif self.is_attribute_mutation(var):
-                # Applying mutations involves two steps: 1) Push all
-                # reconstructed objects onto the stack.  2) Call STORE_ATTR to
-                # apply the mutations.
-                #
-                # Dynamo must ensure that mutations are applied in the same
-                # order as in the original program. Therefore, two reverse
-                # operations occur below.
-                #
-                # The first reverse operation concerns `suffixes`. We apply
-                # suffixes in reverse order due to the way Python handles the
-                # stack. In Step 1, we push all reconstructed objects onto the
-                # stack, but the item at the top of the stack refers to the last
-                # attribute in the mutation order. If not fixed, this will apply
-                # the mutations of attributes in the reverse order.  To account
-                # for this reversal, we iterate through the mutable attributes
-                # in reverse order.
-                for name, value in reversed(
-                    self.store_attr_mutations.get(var.mutable_local, {}).items()
-                ):
+                for name, value in self.store_attr_mutations.get(
+                    var.mutable_local, {}
+                ).items():
                     if isinstance(var, variables.NewGlobalVariable):
                         cg.tx.output.update_co_names(name)
                         cg(value)
@@ -562,6 +552,8 @@ class SideEffects:
                         suffixes.append(
                             [create_instruction("STORE_GLOBAL", argval=name)]
                         )
+                    elif name == "__call_nn_module_init":
+                        pass  # handled in codegen_save_tempvars
                     elif isinstance(value, variables.DeletedVariable):
                         if isinstance(
                             var.mutable_local, AttributeMutationExisting

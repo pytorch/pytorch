@@ -154,8 +154,15 @@ class OptimizedModule(torch.nn.Module):
         if isinstance(self.dynamo_ctx, DisableContext):
             # No need to check trace rules
             self.forward = self.dynamo_ctx(self._orig_mod.__call__)
-        elif isinstance(self._orig_mod.forward, types.MethodType) and trace_rules.check(
-            self._orig_mod.forward
+        elif isinstance(self._orig_mod.forward, types.MethodType) and (
+            trace_rules.check(
+                self._orig_mod.forward
+            )
+            # TODO(yf225): this is a workaround to allow inplace fully-sharded module to
+            # still go into this branch (instead of the second branch).
+            # If we don't do this, `torch.compile(fully_shard(module_from_user_defined_module_class))` will ignore all module hooks which will break FSDP tracing.
+            # But, is this the right way to support it?
+            or getattr(self._orig_mod, "_is_fsdp_managed_module", False)
         ):
             # This may be a torch.nn.* instance in trace_rules.py which
             # won't trigger a frame evaluation workaround to add an extra

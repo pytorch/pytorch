@@ -48,6 +48,7 @@ from .group_batch_fusion import group_batch_fusion_passes, POST_GRAD_FUSIONS
 from .micro_pipeline_tp import patterns as micro_pipeline_tp_patterns
 from .pre_grad import is_same_dict, save_inductor_dict
 from .reinplace import reinplace_inplaceable_ops
+# from torch._functorch._aot_autograd import fsdp_fx_passes
 from .split_cat import POST_GRAD_PATTERNS
 
 if TYPE_CHECKING:
@@ -55,6 +56,7 @@ if TYPE_CHECKING:
 
 
 log = logging.getLogger(__name__)
+torch_log = logging.getLogger("torch")
 aten = torch.ops.aten
 prims = torch.ops.prims
 
@@ -131,11 +133,46 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     fake_tensor_updater.incremental_update()
 
+    from torch._dynamo.utils import lazy_format_graph_code
+
     # Keep these last, since they introduces mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
     reinplace_inplaceable_ops(gm.graph)
+    # is_bwd_graph = False
+    # for n in gm.graph.nodes:
+    #     if n.op == "placeholder" and not n.target.startswith("primals_"):
+    #         is_bwd_graph = True
+    #         break
+    # if not is_bwd_graph:
+    # torch_log.warning(lazy_format_graph_code("before FSDP passes: ", gm))
+    # if not config.use_fsdp_custom_op:
+    #     fsdp_fx_passes.remove_no_use_slice(gm)  # NOTE(yf225): can't use `gm.graph.eliminate_dead_code()` to do DCE because it seems to interact badly with inplace ops
+    #     fsdp_fx_passes.replace_noop_consecutive_permutes_with_original_input_if_first_permute_out_has_no_other_use(gm)
+    #     fsdp_fx_passes.reinplace_foreach_copy_if_input_has_no_other_aliases_in_graph(gm)
+    #     fsdp_fx_passes.remove_unnecessary_split_with_sizes(gm)  # only matters for CA BWD graph
+    #     # torch_log.warning(lazy_format_graph_code("before replace_foreach_all_gather_copy_out_pattern: ", gm))
+    #     fsdp_fx_passes.replace_foreach_all_gather_copy_out_pattern(gm)
+    #     fsdp_fx_passes.replace_foreach_all_gather_pattern(gm)
+    #     fsdp_fx_passes.replace_inplace_foreach_copy_with_inplace_copy(gm)
+    #     fsdp_fx_passes.remove_clone_if_input_is_alias_of_graph_input(gm)
+    #     fsdp_fx_passes.remove_no_use_reshape(gm)  # NOTE(yf225): can't use `gm.graph.eliminate_dead_code()` to do DCE because it seems to interact badly with inplace ops
+    #     fsdp_fx_passes.remove_no_use_empty(gm)  # NOTE(yf225): can't use `gm.graph.eliminate_dead_code()` to do DCE because it seems to interact badly with inplace ops
+    # else:
+    # fsdp_fx_passes.replace_noop_consecutive_permutes_with_original_input_if_first_permute_out_has_no_other_use(gm)
+    # fsdp_fx_passes.raise_all_gather_to_overlap_with_prev_layer_compute(gm)
+    # fsdp_fx_passes.sink_prev_reduce_scatter_wait_to_before_next_reduce_scatter(gm)
+    # torch_log.warning(lazy_format_graph_code("before decompose_all_gather_copy_in: ", gm))
+
+
+    # fsdp_fx_passes.reinplace_all_gather(gm)
+
+
+    # fsdp_fx_passes.raise_primal_resize_zero_if_primal_is_unused(gm)
+    # fsdp_fx_passes.remove_storage_resize_and_copy(gm)
+
     decompose_auto_functionalized(gm.graph)
 
+    torch_log.warning(lazy_format_graph_code("after FSDP FX passes: ", gm))
     gm.recompile()
     optimus_scuba_log["after_recompile_post_grad"] = upload_graph(gm.graph)
     gm.graph.lint()

@@ -14,10 +14,8 @@ import torch._numpy as tnp
 import torch.utils._pytree as pytree
 from .. import config, variables
 from ..bytecode_transformation import create_call_function, create_instruction
-from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
-from ..mutation_guard import unpatched_nn_module_init
 from ..source import AttrSource, GetItemSource, ODictGetItemSource, TypeSource
 from ..utils import (
     check_unspec_or_constant_args,
@@ -123,6 +121,7 @@ class SuperVariable(VariableTracker):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         inner_fn, source = self._resolved_getattr_and_source(self, name)
+
         if inner_fn is object.__init__:
             return LambdaVariable(identity)
         elif inner_fn is torch.nn.Module.__init__:
@@ -134,10 +133,12 @@ class SuperVariable(VariableTracker):
                 and isinstance(objvar.mutable_local, AttributeMutationNew)
                 and not (args or kwargs)
             ):
-                with do_not_convert_to_tracable_parameter():
-                    return variables.UserFunctionVariable(
-                        unpatched_nn_module_init, source=source
-                    ).call_function(tx, [self.objvar] + args, kwargs)
+                tx.output.side_effects.store_attr(
+                    objvar,
+                    "__call_nn_module_init",
+                    variables.ConstantVariable.create(True),
+                )
+                return variables.ConstantVariable.create(None)
             else:
                 unimplemented("super() nn.Module.__init__")
         elif isinstance(inner_fn, types.FunctionType):
@@ -180,19 +181,6 @@ class SuperVariable(VariableTracker):
             self.objvar, UserDefinedObjectVariable
         ):
             return self.objvar.method_setattr_standard(tx, *args, **kwargs)
-        elif inner_fn is object.__delattr__:
-            attr = args[0]
-            try:
-                attr = attr.as_python_constant()
-            except NotImplementedError:
-                unimplemented(f"non-const delattr attr: {attr}")
-            if not tx.output.side_effects.is_attribute_mutation(self.objvar):
-                unimplemented(f"delattr({self.objvar}, {attr}, ...)")
-
-            tx.output.side_effects.store_attr(
-                self.objvar, attr, variables.DeletedVariable()
-            )
-            return variables.ConstantVariable(None)
 
         unimplemented(f"non-function or method super: {inner_fn}")
 
@@ -641,6 +629,66 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
                     self.value.needs_input_grad
                 )
         return super().var_getattr(tx, name)
+
+
+class AutogradEngineVariable(UserDefinedObjectVariable):
+    """
+    Represents a torch._C._ImperativeEngine instance.
+    """
+
+    def __init__(
+        self,
+        value,
+        value_type=None,
+        **kwargs,
+    ):
+        super().__init__(value=value, value_type=value_type, **kwargs)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if name == "queue_callback":
+            return variables.UserFunctionVariable(
+                torch._dynamo.external_utils.CompiledAutogradEngine.queue_callback,
+                source=self.source,
+            ).call_function(tx, (tx.output.get_ca_final_callbacks_var(), *args), kwargs)
+        else:
+            unimplemented(f"torch._C._ImperativeEngine method: {name}")
+
+
+class CompiledAutogradEngineVariable(UserDefinedObjectVariable):
+    """
+    Represents a torch._dynamo.external_utils.CompiledAutogradEngine instance.
+    """
+
+    def __init__(
+        self,
+        value,
+        value_type=None,
+        **kwargs,
+    ):
+        super().__init__(value=value, value_type=value_type, **kwargs)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if name == "_exec_final_callbacks_stub":
+            return variables.UserFunctionVariable(
+                torch._dynamo.external_utils.CompiledAutogradEngine.exec_final_callbacks,
+                source=self.source,
+            ).call_function(tx, (tx.output.get_ca_final_callbacks_var(), *args), kwargs)
+        else:
+            unimplemented(
+                f"torch._dynamo.external_utils.CompiledAutogradEngine method: {name}"
+            )
 
 
 class LambdaVariable(VariableTracker):

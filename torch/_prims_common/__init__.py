@@ -1939,8 +1939,15 @@ def clone_preserve_strides(x):
         torch._C._dispatch_tls_set_dispatch_key_excluded(
             torch._C.DispatchKey.ADInplaceOrView, True
         )
-        buffer = torch.as_strided(x, (needed_size,), (1,), 0).clone()
-        return torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
+        if x.untyped_storage().size() == 0:
+            buffer = torch.empty(needed_size, dtype=x.dtype, device=x.device)
+            ret = torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
+            ret.untyped_storage().resize_(0)
+        else:
+            buffer = torch.as_strided(x, (needed_size,), (1,), 0).clone()
+            ret = torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
+        return ret
+
     finally:
         torch._C._dispatch_tls_set_dispatch_key_excluded(
             torch._C.DispatchKey.ADInplaceOrView, old

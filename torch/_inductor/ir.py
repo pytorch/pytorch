@@ -4926,6 +4926,7 @@ class ResizeStorageBytes(MutatingFirstArgExternKernel):
         )
         V.graph.mark_buffer_mutated(variable.get_name())
         self.name = V.graph.register_buffer(self)
+        self.resized_buf_name = variable.get_name()
         self.python_kernel_name = "inductor_ops.resize_storage_bytes_"
         self.cpp_kernel_name = "torch::inductor::resize_storage_bytes_"
         V.graph.never_reuse_buffers.add(variable.data.get_name())
@@ -5307,6 +5308,9 @@ class FallbackKernel(ExternKernelAlloc):
             is_optional_tensor = isinstance(
                 info.type, torch.OptionalType
             ) and isinstance(info.type.getElementType(), torch.TensorType)
+            is_list_tensor = isinstance(info.type, torch.ListType) and isinstance(
+                info.type.getElementType(), torch.TensorType
+            )
             if is_optional_tensor or isinstance(info.type, torch.TensorType):
                 # PyTorch also accepts None and scalar types for args marked as "Tensor".
                 # We're not going to check all of them here.
@@ -5316,12 +5320,16 @@ class FallbackKernel(ExternKernelAlloc):
                 return
             if info.alias_info is None:
                 return
-            # can_auto_functionalize already filters out mutable List[Tensor].
-            # We can support this in the future, but this is very uncommon.
-            assert isinstance(info.type, torch.TensorType) or is_optional_tensor
-            self.alias_names.append(arg.get_name())
-            if info.alias_info.is_write:
-                mark_node_as_mutating(self, arg)
+            if is_list_tensor:
+                for a in arg:
+                    self.alias_names.append(a.get_name())
+                    if info.alias_info.is_write:
+                        mark_node_as_mutating(self, a)
+            else:
+                assert isinstance(info.type, torch.TensorType) or is_optional_tensor
+                self.alias_names.append(arg.get_name())
+                if info.alias_info.is_write:
+                    mark_node_as_mutating(self, arg)
 
         for info, arg in torch._library.utils.zip_schema(schema, args, kwargs):
             handle_aliasing_and_mutation(info, arg)
@@ -8235,7 +8243,7 @@ class _CollectiveKernel(FallbackKernel):
     # mutation of the input buffers.
     @classmethod
     def create_inplace(
-        cls, kernel, inputs: Union[TensorBox, List[TensorBox]], *args, **kwargs
+        cls, kernel, mutated_inputs: Union[TensorBox, List[TensorBox]], *args, **kwargs
     ) -> None:
         cpp_kernel_name = kernel._name
         python_kernel_name = cpp_kernel_name.replace("::", ".")
@@ -8246,7 +8254,7 @@ class _CollectiveKernel(FallbackKernel):
                 non_tensor_args,
                 unflatten_args,
                 unbacked_bindings,
-            ) = cls.process_kernel(kernel, inputs, *args, **kwargs)
+            ) = cls.process_kernel(kernel, mutated_inputs, *args, **kwargs)
         assert not unbacked_bindings, f"{kernel} {unbacked_bindings}"
         for tensor_arg in tensor_args:
             tensor_arg.realize()
@@ -8335,6 +8343,15 @@ class _CollectiveKernel(FallbackKernel):
             packed.python_kernel_name = python_kernel_name
             packed.outputs = [packed]
             return packed
+
+    def codegen(self, wrapper):
+        super().codegen(wrapper)
+        # NOTE(yf225): It should always be safe to attempt to free the output of inplace-collective/wait_tensor right after the op,
+        # because downstream should depend on the input (instead of the output) of the inplace-collective/wait_tensor.
+        # This is important for being able to release collective memory as soon as possible by decreasing the collective output's refcount.
+        if isinstance(self.layout, NoneLayout):
+            from .codegen.wrapper import FreeIfNotReusedLine
+            wrapper.writeline(FreeIfNotReusedLine(wrapper, self))
 
 
 class _WaitKernel(_CollectiveKernel):
