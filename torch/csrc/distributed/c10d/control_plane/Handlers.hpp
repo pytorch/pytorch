@@ -1,7 +1,6 @@
 #pragma once
 
 #include <functional>
-#include <map>
 #include <string>
 
 #include <c10/macros/Export.h>
@@ -14,8 +13,6 @@ namespace control_plane {
 class TORCH_API Request {
  public:
   virtual ~Request() = default;
-
-  virtual const std::multimap<std::string, std::string>& params() const = 0;
 
   virtual const std::string& body() = 0;
 };
