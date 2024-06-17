@@ -68,7 +68,7 @@ from typing import (
 import torch.fx
 from torch import Tensor
 from torch._dynamo.mutation_guard import GenerationTracker
-from torch._dynamo.utils import preserve_rng_state
+from torch._dynamo.utils import counters, preserve_rng_state
 from torch._inductor.compile_fx import (
     align_inputs_from_check_idxs,
     copy_misaligned_inputs,
@@ -955,6 +955,9 @@ class CUDAGraphNode:
         # Fails on empty lists
         if dst_tensors:
             torch._foreach_copy_(dst_tensors, src_tensors)
+            counters["inductor"]["cudagraph_copies_due_to_non_static_inputs"] += len(
+                dst_tensors
+            )
 
     def check_static_inputs_are_stable(self, new_inputs):
         # avoid checking managed tensor static points since we already checked those in check_invariants

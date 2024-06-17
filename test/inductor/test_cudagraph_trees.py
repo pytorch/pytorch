@@ -1915,6 +1915,29 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             # and then two backward graphs
             self.run_static_input_param_test(fn, 6)
 
+        @torch._inductor.config.patch("triton.cudagraphs", True)
+        @torch._dynamo.config.patch("error_on_recompile", True)
+        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
+        def test_inference_graph(self):
+            def fn_eager(x, gO):
+                grad = gO * 10
+                x.grad = grad
+                return torch.ones(1)
+
+            with torch.device("cuda"):
+                for i in range(3):
+                    fn_compiled = torch.compile(fn_eager, mode="reduce-overhead")
+                    param = torch.nn.Parameter(torch.randn([2, 2]))
+                    gO = torch.randn([2, 2])
+                    out = fn_compiled(param, gO)
+                    param.grad = None
+
+            self.assertFalse(out.requires_grad)
+            # 1 from i=1 (recording), 1 from i=2 (running)
+            self.assertEqual(
+                counters["inductor"]["cudagraph_copies_due_to_non_static_inputs"], 2
+            )
+
     instantiate_parametrized_tests(CudaGraphTreeTests)
 
 if __name__ == "__main__":
