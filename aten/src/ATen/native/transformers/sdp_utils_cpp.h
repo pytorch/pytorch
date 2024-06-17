@@ -353,6 +353,58 @@ inline bool check_safe_kv_broadcast(at::Tensor const& param, bool debug) {
   return true;
 }
 
+template <bool supports_gqa>
+inline bool check_grouped_query_attention(sdp_params const& params, bool debug) {
+  const auto q_num_heads = params.query.sym_size(1);
+  const auto k_num_heads = params.key.sym_size(1);
+  const auto v_num_heads = params.value.sym_size(1);
+  const bool same_kv_heads = k_num_heads == v_num_heads;
+  if (!same_kv_heads){
+    if (debug) {
+      TORCH_WARN(
+          "Both fused kernels require key and value to have the same num_heads but got: ",
+          "Key sizes(): ",
+          params.key.sizes(),
+          ", Value sizes(): ",
+          params.value.sizes(),
+          " instead.");
+    }
+    return false;
+  }
+  // Check if grouped query attention is supported and validate the number of
+  // heads
+  if (supports_gqa && q_num_heads % k_num_heads != 0) {
+    if (debug) {
+      TORCH_WARN(
+          "FlashAttentionV2 only supports grouped query attention, where the number of heads in key/value must divide number of heads in query.",
+          "Got input Key sizes(): ",
+          params.key.sizes(),
+          ", Value sizes(): ",
+          params.value.sizes(),
+          " instead.");
+    }
+    return false;
+  }
+  // If grouped query attention is not supported, ensure query and key have the
+  // same number of heads
+  else if (!supports_gqa && q_num_heads != k_num_heads) {
+    if (debug) {
+      TORCH_WARN(
+          "MemoryEfficient attention requires query, key and value to have the same num_heads but got: ",
+          "Query.sizes(): ",
+          params.query.sizes(),
+          ", Key sizes(): ",
+          params.key.sizes(),
+          ", Value sizes(): ",
+          params.value.sizes(),
+          " instead.");
+    }
+    return false;
+  }
+  return true;
+}
+
+template <bool supports_gqa>
 inline bool check_batch_size_and_num_heads_dense(sdp_params const& params, bool debug) {
   // This is expected to be called after check_tensor_shapes ensuring that the
   // size() calls won't error since the inputs are all 4 dimensional
@@ -367,10 +419,7 @@ inline bool check_batch_size_and_num_heads_dense(sdp_params const& params, bool 
   auto q_num_heads = params.query.sym_size(1);
   auto k_num_heads = params.key.sym_size(1);
   auto v_num_heads = params.value.sym_size(1);
-  bool same_num_heads =
-      q_num_heads == k_num_heads && q_num_heads == v_num_heads;
-
-  if (!(same_batch_size && same_num_heads)) {
+  if (!(same_batch_size)){
     if (debug) {
       TORCH_WARN(
           "For dense inputs, both fused kernels require query, key and value to have the same batch_size and num_heads. ",
@@ -384,6 +433,8 @@ inline bool check_batch_size_and_num_heads_dense(sdp_params const& params, bool 
     }
     return false;
   }
+  return check_grouped_query_attention<supports_gqa>(params, debug);
+  // If all checks pass, return true
   return true;
 }
 

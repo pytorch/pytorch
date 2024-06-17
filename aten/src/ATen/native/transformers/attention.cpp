@@ -513,6 +513,19 @@ inline void validate_sdpa_input(
       "Scaled_dot_product_attention: Nested tensors for query / key are not supported "
       "when an explicit attn_mask is set");
   }
+  // GQA/MQA handling
+  const auto q_num_heads = query_.size(1);
+  const auto k_num_heads = key.size(1);
+  const auto v_num_heads = value.size(1);
+
+  bool all_equal = q_num_heads == k_num_heads && k_num_heads == v_num_heads;
+  bool key_divisible = q_num_heads % k_num_heads == 0;
+  bool value_divisible = q_num_heads % v_num_heads == 0;
+
+  TORCH_CHECK(all_equal || (key_divisible && value_divisible),
+              "query, key, and value must have the same number of heads, or "
+              "the number of heads in query must be divisible by the number of "
+              "heads in key and value for grouped query attention");
   return;
 }
 // This function is used to produce an attn_mask
@@ -606,6 +619,26 @@ bool should_compute_logsumexp(const Tensor& query, const Tensor& key, const Tens
   const bool any_inputs_require_grad = query.requires_grad() || key.requires_grad() || value.requires_grad();
   const bool gradmode_enabled = at::GradMode::is_enabled();
   return any_inputs_require_grad && gradmode_enabled;
+}
+
+std::tuple<at::Tensor, at::Tensor> pre_process_group_query_attention_input(
+    const at::Tensor& query,
+    const at::Tensor& key,
+    const at::Tensor& value) {
+  const auto q_num_heads = query.size(-3);
+  const auto k_num_heads = key.size(-3);
+  const auto v_num_heads = value.size(-3);
+
+  bool all_equal = q_num_heads == k_num_heads && k_num_heads == v_num_heads;
+
+  if (all_equal){
+    return std::make_tuple(key, value);
+  }
+  auto repeat_key_shape = query.size(-3) / key.size(-3);
+  auto repeat_value_shape = query.size(-3) / value.size(-3);
+  at::Tensor key_repeated = key.repeat_interleave(repeat_key_shape, -3);
+  at::Tensor value_repeated = value.repeat_interleave(repeat_value_shape, -3);
+  return std::make_tuple(std::move(key_repeated), std::move(value_repeated));
 }
 
 } // namespace
@@ -753,7 +786,10 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         attn_mask = at::ones_symint({L, S}, query.options().dtype(at::kBool)).tril();
         attn_mask = convert_boolean_attn_mask(attn_mask, query.dtype());
     }
-    auto attn = at::matmul(query, key.transpose(-2, -1) * scaling_factor);
+
+    // MQA/GQA handling, HOW SHOULD WE HANDLE NESTED TENSORS?
+    auto [key_expanded, value_expanded] = pre_process_group_query_attention_input(query_, key, value);
+    auto attn = at::matmul(query, key_expanded.transpose(-2, -1) * scaling_factor);
     if (attn_mask.has_value()) {
       if (at::areAnyTensorSubclassLike({attn, *attn_mask})) {
         attn = attn.add(*attn_mask);
@@ -769,13 +805,13 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         TORCH_WARN_ONCE("Dropout mask should only be used for testing purposes.");
         attn = attn.masked_fill(dropout_mask->logical_not(), 0.0);
         auto dropout_scaling = 1.0 / (1 - dropout_p);
-        return std::make_tuple(at::matmul(attn, value * dropout_scaling), attn);
+        return std::make_tuple(at::matmul(attn, value_expanded * dropout_scaling), attn);
       } else {
         attn = at::dropout(attn, dropout_p, true);
       }
     }
 
-    return std::make_tuple(at::matmul(attn, value), attn);
+    return std::make_tuple(at::matmul(attn, value_expanded), attn);
 }
 
 std::tuple<at::Tensor, at::Tensor>
