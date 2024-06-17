@@ -181,8 +181,19 @@ def get_device_states(*args) -> Tuple[List[int], List[torch.Tensor]]:
     return fwd_device_ids, fwd_device_states
 
 
-def set_device_states(devices, states) -> None:
-    device_module = _get_device_module(_infer_device_type(*states))
+def set_device_states(devices, states, *, device_type=None) -> None:
+    """Sets random number generator states for the specified devices.
+
+    Args:
+        devices: Device ids to set states for.
+        states: States to set.
+        device_type: ``device_type`` of the devices to set states for. Default
+            is the device returned by a call to ``DefaultDeviceType.get_device_type()``,
+            which is ``cuda`` if not changed by calling ``DefaultDeviceType::set_device_type()``.
+    """
+    if device_type is None:
+        device_type = DefaultDeviceType.get_device_type()
+    device_module = _get_device_module(device_type)
     for device, state in zip(devices, states):
         with device_module.device(device):
             device_module.set_rng_state(state)
@@ -280,13 +291,13 @@ class CheckpointFunction(torch.autograd.Function):
             if ctx.preserve_rng_state:
                 torch.set_rng_state(ctx.fwd_cpu_state)
                 if ctx.had_device_in_fwd:
-                    set_device_states(ctx.fwd_devices, ctx.fwd_device_states)
+                    set_device_states(ctx.fwd_devices, ctx.fwd_device_states, device_type=ctx.device)
             detached_inputs = detach_variable(tuple(inputs))
 
             device_autocast_ctx = torch.amp.autocast(
                 device_type=ctx.device, **ctx.device_autocast_kwargs
             ) if torch.amp.is_autocast_available(ctx.device) else contextlib.nullcontext()
-            with torch.enable_grad(), device_autocast_ctx, torch.cpu.amp.autocast(**ctx.cpu_autocast_kwargs):  # type: ignore[attr-defined]
+            with torch.enable_grad(), device_autocast_ctx, torch.amp.autocast("cpu", **ctx.cpu_autocast_kwargs):  # type: ignore[attr-defined]
                 outputs = ctx.run_function(*detached_inputs)
 
         if isinstance(outputs, torch.Tensor):
@@ -1494,7 +1505,7 @@ def _checkpoint_without_reentrant_generator(
             if preserve_rng_state:
                 torch.set_rng_state(fwd_cpu_state)
                 if had_device_in_fwd:
-                    set_device_states(fwd_devices, fwd_device_states)
+                    set_device_states(fwd_devices, fwd_device_states, device_type=device)
 
             device_autocast_ctx = torch.amp.autocast(
                 device_type=device, **device_autocast_kwargs
