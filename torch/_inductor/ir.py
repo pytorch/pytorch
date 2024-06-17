@@ -3548,9 +3548,9 @@ class TemplateBuffer(Buffer):
         self.name = V.graph.register_buffer(self)
 
     def get_read_writes(self):
-        return self.normalized_read_writes()
+        return self.extract_read_writes(normalize=True)
 
-    def normalized_read_writes(self):
+    def extract_read_writes(self, normalize):
         name = self.get_name()
         indexer = self.layout.make_indexer()
 
@@ -3559,7 +3559,7 @@ class TemplateBuffer(Buffer):
             return ops.store(name, indexer(index), "fake")
 
         deps = dependencies.extract_read_writes(
-            dummy, self.get_size(), (), normalize=True
+            dummy, self.get_size(), (), normalize=normalize
         )
         deps.reads = {dependencies.StarDep(x.get_name()) for x in self.inputs}
         return deps

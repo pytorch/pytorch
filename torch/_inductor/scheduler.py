@@ -764,15 +764,18 @@ class SchedulerNode(BaseSchedulerNode):
         group_fn = self.scheduler.get_backend(self.node.get_device()).group_fn
         self.group = (self.node.get_device(), group_fn(self._sizes))
 
+        # Don't normalize since normalization will merge loops which
+        # makes it hard to decide new loop orders.
+        should_normalize = (
+            not config.loop_ordering_after_fusion
+            or self.node.get_device().type != "cuda"
+        )
+
         if isinstance(self.node, ir.TemplateBuffer):
-            self.set_read_writes(self.node.normalized_read_writes())
-        else:
-            # Don't normalize since normalization will merge loops which
-            # makes it hard to decide new loop orders.
-            should_normalize = (
-                not config.loop_ordering_after_fusion
-                or self.node.get_device().type != "cuda"
+            self.set_read_writes(
+                self.node.extract_read_writes(normalize=should_normalize)
             )
+        else:
             self.set_read_writes(
                 dependencies.extract_read_writes(
                     self._body, *self._sizes, normalize=should_normalize
