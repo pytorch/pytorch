@@ -748,6 +748,20 @@ class TestConverter(TestCase):
         # inp = (torch.randn([2, 3, 4]),)
         # self._check_equal_ts_ep_converter(func6, inp)
 
+    def test_prim_tolist(self):
+        class Module(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> List[int]:
+                return x.tolist()
+
+        inp = (torch.tensor([1, 2, 3]),)
+        self._check_equal_ts_ep_converter(Module(), inp, ["script"])
+
+        class Module(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> List[List[int]]:
+                return x.tolist()
+
+        inp = (torch.tensor([[1, 2, 3], [4, 5, 6]]),)
+        self._check_equal_ts_ep_converter(Module(), inp, ["script"])
 
 if __name__ == "__main__":
     run_tests()
