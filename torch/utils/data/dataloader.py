@@ -18,7 +18,6 @@ from typing import Any, Callable, Generic, Iterable, List, Optional, TypeVar, Un
 
 import torch
 import torch.distributed as dist
-import torch.multiprocessing as multiprocessing
 import torch.utils.data.graph_settings
 from torch._utils import ExceptionWrapper
 from torch.utils.data import _utils
@@ -423,14 +422,14 @@ class DataLoader(Generic[T_co]):
         if multiprocessing_context is not None:
             if self.num_workers > 0:
                 if isinstance(multiprocessing_context, str):
-                    valid_start_methods = multiprocessing.get_all_start_methods()
+                    valid_start_methods = torch.multiprocessing.get_all_start_methods()
                     if multiprocessing_context not in valid_start_methods:
                         raise ValueError(
                             "multiprocessing_context option "
                             f"should specify a valid start method in {valid_start_methods!r}, but got "
                             f"multiprocessing_context={multiprocessing_context!r}"
                         )
-                    multiprocessing_context = multiprocessing.get_context(
+                    multiprocessing_context = torch.multiprocessing.get_context(
                         multiprocessing_context
                     )
 
@@ -1079,7 +1078,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         assert self._prefetch_factor > 0
 
         if loader.multiprocessing_context is None:
-            multiprocessing_context = multiprocessing
+            multiprocessing_context = torch.multiprocessing
         else:
             multiprocessing_context = loader.multiprocessing_context
 
