@@ -33,7 +33,6 @@ from torch.utils._triton import has_triton
 supported_platform = skipUnless(
     torch.cuda.is_available()
     and has_triton()
-    and torch.version.hip is None
     and torch.cuda.get_device_capability() >= (8, 0),
     "Requires CUDA and Triton",
 )
@@ -55,11 +54,6 @@ test_dtypes = (
 )
 
 test_dtypes_fast = [torch.float16]
-
-# TODO float16 was causing ERRORs for tests on ROCm
-# See https://github.com/pytorch/pytorch/issues/123531
-if common_utils.TEST_WITH_ROCM:
-    test_dtypes = [torch.float32]
 
 
 # --------- Useful score mod functions for testing ---------
