@@ -23,6 +23,7 @@ import threading
 import time
 import types
 import typing
+import warnings
 import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
@@ -2751,3 +2752,34 @@ class Lit:
 
     def __repr__(self):
         return self.s
+
+
+warn_once_cache: Set[str] = set()
+
+
+def warn_once(msg, stacklevel=1):
+    # Dynamo causes all warnings.warn (in user code and in Dynamo code) to print all the time.
+    # https://github.com/pytorch/pytorch/issues/128427.
+    # warn_once is a workaround: if the msg has been warned on before, then we will not
+    # warn again.
+    # NB: it's totally ok to store a cache of all the strings: this is what warnings.warn does as well.
+    if msg in warn_once_cache:
+        return
+    warn_once_cache.add(msg)
+    warnings.warn(msg, stacklevel=stacklevel + 1)
+
+
+def strip_color_from_string(text):
+    # This regular expression matches ANSI escape codes
+    ansi_escape = re.compile(r"\x1B[@-_][0-?]*[ -/]*[@-~]")
+    return ansi_escape.sub("", text)
+
+
+@contextlib.contextmanager
+def _disable_saved_tensors_hooks_during_tracing():
+    # See NOTE: [Deferring tensor pack/unpack hooks until runtime]
+    try:
+        prior = torch._C._autograd._saved_tensors_hooks_set_tracing(True)
+        yield
+    finally:
+        torch._C._autograd._saved_tensors_hooks_set_tracing(prior)

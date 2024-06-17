@@ -10,6 +10,7 @@ import copy
 import queue
 
 import torch
+import torch.multiprocessing
 from torch._utils import ExceptionWrapper
 
 from . import MP_STATUS_CHECK_INTERVAL
@@ -19,6 +20,8 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device):
     # This setting is thread local, and prevents the copy in pin_memory from
     # consuming all CPU cores.
     torch.set_num_threads(1)
+
+    torch.multiprocessing._set_thread_name("pt_data_pin")
 
     if device == "cuda":
         torch.cuda.set_device(device_id)
