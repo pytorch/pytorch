@@ -135,6 +135,7 @@ def aot_dispatch_base_graph(
     saved_updated_flat_args_subclasses_desugared = pytree.tree_map_only(
         torch.Tensor, lambda t: t.detach(), updated_flat_args_subclasses_desugared
     )
+    # NOTE(yf225): this is AOTAutograd fwd-only code path
     fw_module = _create_graph(
         fn_to_trace,
         updated_flat_args_subclasses_desugared,
