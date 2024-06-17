@@ -4707,12 +4707,18 @@ class ShapeEnv:
             r = ValueRanges(lower, upper)
             self.log.debug("_update_var_to_range %s = %s (new)", symbol, r)
             self.var_to_range[symbol] = r
+            # If the range is refined to singleton, set replacement
+            if self.var_to_range[symbol].is_singleton():
+                self._set_replacement(symbol, self.var_to_range[symbol].lower, "range_refined_to_singleton")
         else:
             old = self.var_to_range[symbol]
             new = old & ValueRanges(lower, upper)
             if new != old:
                 self.var_to_range[symbol] = new
                 self.log.debug("_update_var_to_range %s = %s (update)", symbol, new)
+                # If the range is refined to singleton, set replacement
+                if self.var_to_range[symbol].is_singleton():
+                    self._set_replacement(symbol, self.var_to_range[symbol].lower, "range_refined_to_singleton")
 
     def _set_replacement(self, a: "sympy.Symbol", tgt: "sympy.Expr", msg: str) -> None:
         """
