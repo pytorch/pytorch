@@ -714,7 +714,7 @@ class TestConverter(TestCase):
             )
 
         def func6(x):
-            return x.numel()
+            return x.numel(), torch.ones(x.numel())
 
         class M1(torch.nn.Module):
             def __init__(self, value):
