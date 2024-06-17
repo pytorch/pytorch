@@ -198,7 +198,14 @@ def _reduce_tensor(tensor):
     """
     Reduce the tensor to a stable key for caching.
     """
-    return (_ident, (extract_tensor_metadata_for_cache_key(FxGraphCachePickler._device_map, tensor),))
+    return (
+        _ident,
+        (
+            extract_tensor_metadata_for_cache_key(
+                FxGraphCachePickler._device_map, tensor
+            ),
+        ),
+    )
 
 
 class AOTAutogradCachePickler(FxGraphCachePickler):
