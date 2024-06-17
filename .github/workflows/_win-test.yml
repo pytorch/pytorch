@@ -92,7 +92,7 @@ jobs:
           retry_wait_seconds: 30
           command: |
             set -eu
-            python -m pip install rockset==1.0.3 'xdoctest>=1.1.0'
+            python3 -m pip install rockset==1.0.3 'xdoctest>=1.1.0'
 
       - name: Start monitoring script
         id: monitor-script
@@ -185,7 +185,7 @@ jobs:
         run: |
           pushd "${PYTORCH_FINAL_PACKAGE_DIR}"
           # shellcheck disable=SC2046,SC2102
-          python -mpip install $(echo *.whl)[opt-einsum,optree]
+          python3 -mpip install $(echo *.whl)[opt-einsum,optree]
           popd
 
           .ci/pytorch/win-test.sh
@@ -224,7 +224,8 @@ jobs:
 
       - name: Parse ref
         id: parse-ref
-        run: python .github/scripts/parse_ref.py
+        shell: bash
+        run: python3 .github/scripts/parse_ref.py
 
       - name: Uninstall PyTorch
         if: always()
@@ -233,7 +234,7 @@ jobs:
         run: |
           # This step removes PyTorch installed by the test to give a clean slate
           # to the next job
-          python -mpip uninstall -y torch
+          python3 -mpip uninstall -y torch
 
       - name: Teardown Windows
         uses: ./.github/actions/teardown-win
