@@ -87,13 +87,13 @@ def init_fake_distributed():
 
 def init_module_bw_hooks(allow_eager):
     def bw_pre_hook(mod, gO):
-        assert allow_eager or torch._dynamo.is_compiling()
+        assert allow_eager or torch.compiler.is_compiling()
         assert mod.weight.size() == (10, 10)
         mod.hook_count_pre.add_(1)
         return (torch.sin(gO[0] + 1.2),)
 
     def bw_post_hook(mod, gI, gO):
-        assert allow_eager or torch._dynamo.is_compiling()
+        assert allow_eager or torch.compiler.is_compiling()
         assert mod.weight.size() == (10, 10)
         mod.hook_count_post.add_(1)
         return (torch.sin(gI[0] + 3.4),)
