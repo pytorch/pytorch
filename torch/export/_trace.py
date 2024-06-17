@@ -149,23 +149,6 @@ def _strip_root(x):
     return x
 
 
-def _add_runtime_assertions_to_cond_in_subgraph(range_constraints, gm, fake_mode):
-    # We can't get rid of this yet, since for some reason
-    # insert_deferred_runtime_assertions doesn't add assertions to cond
-    # subgraphs
-    if len(range_constraints) > 0:
-        stack_trace = (
-            'File "torch/_export/passes/add_runtime_assertions_for_constraints_pass.py", line 46, '
-            "in _AddRuntimeAssertionsForInlineConstraintsPass"
-        )
-        with fake_mode, _set_node_metadata_hook(
-            gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
-        ):
-            res = _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints)(gm)
-        assert res is not None
-        gm = res.graph_module
-
-
 def _rewrite_node(gm):
     for node in gm.graph.nodes:
         if node.target == torch.ops.higher_order._export_tracepoint:
@@ -1511,12 +1494,6 @@ def _export(
         dynamic_shapes,
         num_lifted,
     )
-    if strict:
-        _add_runtime_assertions_to_cond_in_subgraph(
-            range_constraints,
-            gm,
-            fake_mode,
-        )
 
     # Make module signatures.
     module_call_signatures = {}
