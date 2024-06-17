@@ -959,7 +959,9 @@ def aot_module_simplified(
     )
 
     def dispatch_and_compile():
-        functional_call = create_functional_call(mod, params_spec, params_len)
+        from torch._inductor.compile_fx import recursive_pre_grad_passes
+        m = recursive_pre_grad_passes(mod, args)
+        functional_call = create_functional_call(m, params_spec, params_len)
         with compiled_autograd.disable():
             compiled_fn, _ = create_aot_dispatcher_function(
                 functional_call,

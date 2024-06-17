@@ -539,6 +539,8 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         # Different inputs and parameters, but all the same size
         c1 = self.gen_cache_key(MyMod(), config, inputs=[torch.ones((3, 3))])
         c2 = self.gen_cache_key(MyMod(), config, inputs=[torch.ones((3, 3))])
+        c3 = self.gen_cache_key(MyMod(), config, inputs=[torch.ones((3, 3))])
+        breakpoint()
         self.assertEqual(c1, c2)
 
     def test_normal_torch_function(self):

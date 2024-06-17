@@ -152,7 +152,7 @@ class StrobelightCLIFunctionProfiler:
             current_status = match.group(1)
             if current_status == "RUNNING":
                 return
-            elif current_status == "PREPARING":
+            elif current_status == "PREPARING" or current_status == "QUEUED":
                 time.sleep(10)
                 self._wait_for_running(counter + 1)
                 return

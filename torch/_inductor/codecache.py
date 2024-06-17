@@ -67,6 +67,15 @@ from torch._subclasses.fake_tensor import (
 )
 from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
 
+try:
+    from triton.compiler.compiler import triton_key
+
+    # Use triton_key instead of triton.__version__ as the version
+    # is not updated with each code change
+    triton_version = triton_key()
+except ModuleNotFoundError:
+    triton_version = None
+
 if TYPE_CHECKING:
     from concurrent.futures import Future
 
@@ -139,15 +148,6 @@ class CacheBase:
     @staticmethod
     @functools.lru_cache(None)
     def get_system() -> Dict[str, Any]:
-        try:
-            from triton.compiler.compiler import triton_key
-
-            # Use triton_key instead of triton.__version__ as the version
-            # is not updated with each code change
-            triton_version = triton_key()
-        except ModuleNotFoundError:
-            triton_version = None
-
         try:
             system: Dict[str, Any] = {
                 "device": {

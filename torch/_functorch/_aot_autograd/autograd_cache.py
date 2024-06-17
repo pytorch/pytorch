@@ -220,9 +220,10 @@ def autograd_cache_key(
     details = AOTAutogradCacheDetails(gm, example_inputs, config)
     # The prefix distinguishes among the other kinds of objects we cache
     key = "a" + AOTAutogradCachePickler.get_hash(details)
-    log.debug(
-        "Autograd graph cache hash details for key %s:\n%s", key, details.debug_str()
-    )
+    if log.isEnabledFor(logging.DEBUG):
+        log.debug(
+            "Autograd graph cache hash details for key %s:\n%s", key, details.debug_str()
+        )
     return key
 
 

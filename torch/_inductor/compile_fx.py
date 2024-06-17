@@ -248,11 +248,11 @@ def _get_subgraph_names(gm):
             yield body_subgraph_name
 
 
-def _recursive_pre_grad_passes(gm, example_inputs):
+def recursive_pre_grad_passes(gm, example_inputs):
     for subgraph_name in _get_subgraph_names(gm):
         subgraph = getattr(gm, subgraph_name)
         # as we don't have recursive example inputs, passing None here
-        new_subgraph = _recursive_pre_grad_passes(subgraph, example_inputs=None)
+        new_subgraph = recursive_pre_grad_passes(subgraph, example_inputs=None)
         setattr(gm, subgraph_name, new_subgraph)
     return pre_grad_passes(gm, example_inputs)
 
@@ -1332,7 +1332,7 @@ def compile_fx(
                 recursive_compile_fx,
             )
 
-        model_ = _recursive_pre_grad_passes(model_, example_inputs_)
+        model_ = model_
 
     if any(isinstance(x, (list, tuple, dict)) for x in example_inputs_):
         return flatten_graph_inputs(
