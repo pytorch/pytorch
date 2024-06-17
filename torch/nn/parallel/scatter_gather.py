@@ -102,7 +102,18 @@ def scatter_kwargs(
 def gather(outputs: Any, target_device: Union[int, torch.device], dim: int = 0) -> Any:
     r"""Gather tensors from different GPUs on a specified device.
 
-    Use 'cpu' for CPU to avoid a deprecation warning.
+    This function is useful for gathering the results of a distributed computation.
+    It takes a sequence of objects, one for each GPU, and returns a single object
+    on the specified device.
+
+    Args:
+        outputs (Any): A sequence of objects (potentially tensors) to gather.
+        target_device (Union[int, torch.device]): The device to gather the tensors to.
+            Use 'cpu' for CPU to avoid a deprecation warning.
+        dim (int, optional): The dimension along which to gather. Default: 0.
+
+    Returns:
+        Any: A gathered object (potentially tensor) on the specified device.
     """
 
     def gather_map(outputs):
