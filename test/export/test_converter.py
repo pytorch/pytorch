@@ -111,12 +111,65 @@ class TestConverter(TestCase):
 
     def test_aten_len(self):
         class Module(torch.nn.Module):
-            def forward(self, x):
+            def forward(self, x: torch.Tensor):
                 length = len(x)
                 return torch.ones(length)
 
+        # aten::len.Tensor
         inp = (torch.ones(2, 3),)
         self._check_equal_ts_ep_converter(Module(), inp)
+
+        class Module(torch.nn.Module):
+            def forward(self, x: List[int]):
+                length = len(x)
+                return torch.ones(length)
+
+        # aten::len.t
+        inp = ([1, 2, 3],)
+        self._check_equal_ts_ep_converter(Module(), inp, ["script"])
+
+        class Module(torch.nn.Module):
+            def forward(self, x: Dict[int, str]):
+                length = len(x)
+                return torch.ones(length)
+
+        # aten::len.Dict_int
+        inp = ({1: "a", 2: "b", 3: "c"},)
+        self._check_equal_ts_ep_converter(Module(), inp, ["script"])
+
+        class Module(torch.nn.Module):
+            def forward(self, x: Dict[bool, str]):
+                length = len(x)
+                return torch.ones(length)
+
+        # aten::len.Dict_bool
+        inp = ({True: "a", False: "b"},)
+        self._check_equal_ts_ep_converter(Module(), inp, ["script"])
+
+        class Module(torch.nn.Module):
+            def forward(self, x: Dict[float, str]):
+                length = len(x)
+                return torch.ones(length)
+
+        # aten::len.Dict_float
+        inp = ({1.2: "a", 3.4: "b"},)
+        self._check_equal_ts_ep_converter(Module(), inp, ["script"])
+
+        class Module(torch.nn.Module):
+            def forward(self, x: Dict[torch.Tensor, str]):
+                length = len(x)
+                return torch.ones(length)
+
+        # aten::len.Dict_Tensor
+        inp = ({torch.zeros(2, 3): "a", torch.ones(2, 3): "b"},)
+        self._check_equal_ts_ep_converter(Module(), inp, ["script"])
+
+        # aten::len.str and aten::len.Dict_str are not supported
+        # since torch._C._jit_flatten does not support str
+        # inp = ("abcdefg",)
+        # self._check_equal_ts_ep_converter(Module(), inp)
+        # inp = ({"a": 1, "b": 2},)
+        # self._check_equal_ts_ep_converter(Module(), inp)
 
     def test_aten___getitem___list(self):
         class Module(torch.nn.Module):

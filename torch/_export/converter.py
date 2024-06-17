@@ -91,6 +91,7 @@ kind_to_standard_operators = {
     "aten::__not__": operator.not_,
     "aten::__contains__": operator.contains,
     "prim::dtype": get_dtype_as_int,
+    "aten::len": len,
 }
 
 
