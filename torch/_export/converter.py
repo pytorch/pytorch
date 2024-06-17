@@ -54,6 +54,35 @@ def get_node_for_param_and_buffer(fx_graph, name, is_top_level_graph):
     return fx_graph.placeholder(name)
 
 
+_TORCH_DTYPE_TO_ENUM = {
+    torch.uint8: 0,
+    torch.int8: 1,
+    torch.int16: 2,
+    torch.int32: 3,
+    torch.int64: 4,
+    torch.float16: 5,
+    torch.float32: 6,
+    torch.float64: 7,
+    torch.complex32: 8,
+    torch.complex64: 9,
+    torch.complex128: 10,
+    torch.bool: 11,
+    torch.bfloat16: 15,
+}
+
+
+def get_dtype_as_int(tensor):
+    """
+    prim::dtype has the signature "Tensor a) -> int", where it gets the dtype of
+    the tensor and returns the integer corresponding to this dtype based on the
+    enum in ScalarType.h
+    """
+    dtype = tensor.dtype
+    if dtype not in _TORCH_DTYPE_TO_ENUM:
+        raise RuntimeError(f"Unsupported dtype {dtype}")
+    return _TORCH_DTYPE_TO_ENUM[dtype]
+
+
 # Those operators will be automatically populated to a instance method
 # of TS2FXGraphConverter with name convert_<namespace>_<opname>().
 # Please check __init__ for method population implementations.
@@ -63,6 +92,7 @@ kind_to_standard_operators = {
     "aten::__isnot__": operator.is_not,
     "aten::__not__": operator.not_,
     "aten::__contains__": operator.contains,
+    "prim::dtype": get_dtype_as_int,
 }
 
 
@@ -357,11 +387,6 @@ class TS2FXGraphConverter:
             self.constant_map[output_name] = device
         else:
             raise ValueError(f"Unsupported JitType ({input_type}) when get device")
-
-    def convert_prim_dtype(self, node: torch._C.Node):
-        dtype = node.input().type().dtype()
-        output_name = node.output().debugName()
-        self.constant_map[output_name] = dtype
 
     def convert_prim_GetAttr(self, node: torch._C.Node):
         def get_attr(name: str):

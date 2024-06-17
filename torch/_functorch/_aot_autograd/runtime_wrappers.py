@@ -200,12 +200,7 @@ def _create_runtime_wrapper(
             for idx in indices_of_inps_to_detach:
                 if isinstance(args_[idx], torch.Tensor):
                     args_[idx] = args_[idx].detach()
-            # It's possible to have trace_joint inside user specified with no_grad() region,
-            # if there is a nested with enable_grad(), that forces some outputs to require gradients.
-            # Therefore, we unconditionally turn on enable_grad() for compiled_fn execution.
-            with torch.autograd._force_original_view_tracking(
-                True
-            ), torch.enable_grad():
+            with torch.autograd._force_original_view_tracking(True):
                 all_outs = call_func_at_runtime_with_args(
                     compiled_fn, args_, disable_amp=disable_amp, steal_args=True
                 )
@@ -1831,6 +1826,15 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         CompiledFunction.metadata, out, offset_index=len(out) - 1
                     )
                     return tuple(out)
+
+                # Backward with forward inputs mutations is not supported in double backward.
+                if (
+                    torch.is_grad_enabled()
+                    and CompiledFunction.metadata.indices_of_inputs_that_requires_grad_with_mutations_in_bw
+                ):
+                    raise RuntimeError(
+                        "aot_autograd does not support input mutations with requires_grad in backward for create_graph=True"
+                    )
 
                 if torch.is_grad_enabled() and any(
                     t.requires_grad for t in all_args if isinstance(t, torch.Tensor)
