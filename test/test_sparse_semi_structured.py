@@ -21,7 +21,7 @@ from torch.sparse._semi_structured_conversions import (
 )
 
 from torch.testing import make_tensor
-
+from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -29,7 +29,6 @@ from torch.testing._internal.common_device_type import (
 
 from torch.testing._internal.common_dtype import all_types_and_complex
 import torch._dynamo.test_case
-
 from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
@@ -1108,6 +1107,22 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         # when setting using the last one (4)
         # in cuSPARSELt v0.5.0 there are only 4 alg_ids total, so we should remove the +1 here when we update.
         assert alg_id in range(CUSPARSELT_NUM_ALG_IDS + 1)
+
+    def test_cusparselt_backend(self):
+        version = _get_torch_cuda_version()
+        assert torch.backends.cusparselt.is_available()
+
+        # CUDA 11.8 has cuSPARSELt v0.4.0 support
+        if version == (11, 8):
+            assert torch.backends.cusparselt.version() == 400
+        # CUDA 12.1+ has cuSPARSELt v0.5.2 support added here: https://github.com/pytorch/builder/pull/1672/files
+        elif version == (12, 1):
+            assert torch.backends.cusparselt.version() == 502
+        elif version > (12, 1):
+            assert torch.backends.cusparselt.version() == 502
+        else:
+            assert torch.backends.cusparselt.version() is None
+
 
 instantiate_device_type_tests(TestSparseSemiStructured, globals(), only_for="cuda")
 instantiate_device_type_tests(TestSparseSemiStructuredCUTLASS, globals(), only_for="cuda")
