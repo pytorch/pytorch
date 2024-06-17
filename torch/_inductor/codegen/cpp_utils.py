@@ -291,3 +291,17 @@ def value_to_cpp(value, cpp_type):
         return f"std::numeric_limits<{cpp_type}>::quiet_NaN()"
     else:
         return f"static_cast<{cpp_type}>({repr(value)})"
+
+
+class PlaceHolderLine:
+    """A line that can be 'rewritten' by changing the placehoder"""
+
+    def __init__(self, place_holder, line_fn):
+        self.place_holder = place_holder
+        self.line_fn = line_fn
+
+    def __call__(self):
+        return self.line_fn(self.place_holder)
+
+    def update_place_holder(self, place_holder):
+        self.place_holder.name = place_holder
