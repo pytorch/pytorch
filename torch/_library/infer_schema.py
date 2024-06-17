@@ -3,6 +3,7 @@ import inspect
 import typing
 from typing import List, Optional, Sequence, Union  # noqa: F401
 
+import torch  # noqa: F401
 from .. import device, dtype, Tensor, types
 
 
@@ -28,8 +29,6 @@ def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
 
     def convert_type_string(annotation_type: str):
         try:
-            if annotation_type.startswith("torch."):
-                annotation_type = annotation_type[len("torch.") :]
             return eval(annotation_type)
         except Exception as e:
             error_fn(
