@@ -102,6 +102,12 @@ class TestExportTorchbind(TestCase):
                 test.tq_size_counter += 1
                 return len(self.queue)
 
+            def is_empty(self):
+                return len(self.queue) == 0
+
+            def float_size(self):
+                return float(len(self.queue))
+
         self.torch_bind_ops = [
             torch.ops._TorchScriptTesting.takes_foo,
             torch.ops._TorchScriptTesting.takes_foo_python_meta,
@@ -665,6 +671,47 @@ def forward(self, arg0_1, arg1_1):
         _assertEqualSkipScriptObject(self, gm(tq, x), mod(tq1, x))
         self.assertEqual(tq.size(), 0)
         self.assertEqual(tq1.size(), 0)
+
+    def test_non_strict_export_methods(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, tq, x):
+                x_cos = tq.pop() + tq.float_size() + self.linear(x)
+                if tq.is_empty():
+                    x_sin = self.linear(tq.pop()) - tq.size() + x
+                else:
+                    x_sin = tq.pop() + tq.size() + x
+                return x_sin, x_cos, tq
+
+        mod = Model()
+        tq = _empty_tensor_queue()
+        a = torch.randn(2, 2)
+        b = torch.randn(2, 2)
+        tq.push(a)
+        tq.push(b)
+        ep = torch.export.export(mod, (tq, torch.randn(2, 2)), strict=False)
+        self.assertExpectedInline(
+            ep.graph_module.code.strip(),
+            """\
+def forward(self, p_linear_weight, p_linear_bias, tq, x):
+    call_torchbind = torch.ops.higher_order.call_torchbind(tq, 'pop')
+    call_torchbind_1 = torch.ops.higher_order.call_torchbind(tq, 'float_size')
+    add = torch.ops.aten.add.Tensor(call_torchbind, 1.0);  call_torchbind = None
+    linear = torch.ops.aten.linear.default(x, p_linear_weight, p_linear_bias);  p_linear_weight = p_linear_bias = None
+    add_1 = torch.ops.aten.add.Tensor(add, linear);  add = linear = None
+    call_torchbind_2 = torch.ops.higher_order.call_torchbind(tq, 'is_empty')
+    call_torchbind_3 = torch.ops.higher_order.call_torchbind(tq, 'pop')
+    call_torchbind_4 = torch.ops.higher_order.call_torchbind(tq, 'size')
+    add_2 = torch.ops.aten.add.Tensor(call_torchbind_3, 0);  call_torchbind_3 = None
+    add_3 = torch.ops.aten.add.Tensor(add_2, x);  add_2 = x = None
+    return (add_3, add_1, tq)""",
+        )
+        self.assertEqual(tq.size(), 2)
+        self.assertTrue(tq.pop() is a)
+        self.assertTrue(tq.pop() is b)
 
     def test_identifying_torchbind_ops(self):
         for op in self.torch_bind_ops:

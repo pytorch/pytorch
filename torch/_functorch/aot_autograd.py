@@ -551,6 +551,19 @@ def create_aot_dispatcher_function(
 
             return [convert(idx, x) for idx, x in enumerate(flat_args)]
 
+        from torch._library.fake_class_registry import FakeScriptObject, to_fake_obj
+
+        # Tracing may mutate the states the fake script object,
+        # so we need to duplicate the fake script objects so that subsequent tracing
+        # won't be affected.
+        def _dup_fake_script_obj(fake_flat_args):
+            return [
+                to_fake_obj(detect_fake_mode(fake_flat_args), arg.real_obj)
+                if isinstance(arg, FakeScriptObject)
+                else arg
+                for arg in fake_flat_args
+            ]
+
         fake_flat_args = process_inputs(flat_args)
 
         needs_autograd = (
@@ -573,7 +586,7 @@ def create_aot_dispatcher_function(
                         keep_input_mutations=aot_config.keep_inference_input_mutations,
                         is_train=needs_autograd,
                         pre_dispatch=aot_config.pre_dispatch,
-                    )(*fake_flat_args)
+                    )(*_dup_fake_script_obj(fake_flat_args))
 
                 req_subclass_dispatch = requires_subclass_dispatch(
                     fake_flat_args, fw_metadata
@@ -694,7 +707,10 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False."""
         compiler_fn = choose_dispatcher(needs_autograd, aot_config)
 
         compiled_fn, fw_metadata = compiler_fn(
-            flat_fn, fake_flat_args, aot_config, fw_metadata=fw_metadata
+            flat_fn,
+            _dup_fake_script_obj(fake_flat_args),
+            aot_config,
+            fw_metadata=fw_metadata,
         )
         return compiled_fn, fw_metadata
 

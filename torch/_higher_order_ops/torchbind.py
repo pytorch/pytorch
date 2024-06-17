@@ -94,7 +94,13 @@ def inner(mode, *args, **kwargs):
                 class_name,
             )
 
-        return track_tensor_tree(out, out_proxy, constant=None, tracer=mode.tracer)
+        ret = track_tensor_tree(out, out_proxy, constant=None, tracer=mode.tracer)
+        if "val" not in out_proxy.node.meta:
+            assert out is None or isinstance(
+                out, (int, float, bool)
+            ), "Currently, only these constant dtypes are supported to be returned from torchbind methods."
+            out_proxy.node.meta["val"] = out
+        return ret
     else:
         return call_torchbind(*args, **kwargs)
 
