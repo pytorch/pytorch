@@ -129,6 +129,7 @@ from .functions import (
     CollectiveFunctionRewriteVariable,
     FunctoolsPartialVariable,
     TritonKernelVariable,
+    UserFunctionVariable,
     UserMethodVariable,
 )
 from .higher_order_ops import TorchHigherOrderOperatorVariable
@@ -152,7 +153,6 @@ from .misc import (
     ComptimeVariable,
     DebuggingVariable,
     DelayGraphBreakVariable,
-    FakeCompiledAutogradEngineVariable,
     GetAttrVariable,
     GetSetDescriptorVariable,
     InspectSignatureVariable,
@@ -484,6 +484,8 @@ class VariableBuilder:
         # We want to get those out and wrap those.
         value = inspect.getattr_static(value, "_torchdynamo_inline", value)
 
+        print(f"value: {value}")
+
         # Everything else (NB: order matters!)
         if is_traceable_wrapper_subclass(value) or istype(
             value, config.traceable_tensor_subclasses
@@ -731,16 +733,19 @@ class VariableBuilder:
         elif isinstance(value, torch._C._ImperativeEngine):
             self.install_guards(GuardBuilder.ID_MATCH)
             return AutogradEngineVariable(value, source=self.source)
-        elif isinstance(value, types.MethodType) and isinstance(
-            getattr(value, "__self__", None),
-            torch._dynamo.external_utils.FakeCompiledAutogradEngine,
+        elif (
+            value
+            is torch._dynamo.external_utils.FakeCompiledAutogradEngine._exec_final_callbacks_stub
         ):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return GetAttrVariable(
-                FakeCompiledAutogradEngineVariable(
-                    value.__self__, source=AttrSource(self.source, member="__self__")
-                ),
-                value.__name__,
+            return LambdaVariable(
+                lambda: UserFunctionVariable(
+                    torch._dynamo.external_utils.FakeCompiledAutogradEngine.exec_final_callbacks,
+                ).call_function(
+                    self.tx,
+                    (self.tx.output.side_effects.get_ca_final_callbacks_var(),),
+                    {},
+                )
             )
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if is_callable_allowed(value):

@@ -261,7 +261,7 @@ class AutogradCompilerInstance:
     def end_capture(self, outputs):
         self.fx_tracer.create_proxy(
             "call_function",
-            FakeCompiledAutogradEngine()._exec_final_callbacks_stub,
+            FakeCompiledAutogradEngine._exec_final_callbacks_stub,
             (),
             {},
         )

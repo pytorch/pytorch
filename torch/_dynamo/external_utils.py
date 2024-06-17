@@ -112,7 +112,8 @@ class FakeCompiledAutogradEngine:
             i += 1
         final_callbacks.clear()
 
-    def _exec_final_callbacks_stub(self):
+    @staticmethod
+    def _exec_final_callbacks_stub():
         pass
 
 
