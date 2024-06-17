@@ -68,6 +68,7 @@ include_patterns = [
     'aten/src/ATen/native/cudnn/*.cpp',
     'c10/**/*.h',
     'c10/**/*.cpp',
+    'distributed/c10d/*SymmetricMemory.*',
     'torch/csrc/**/*.h',
     'torch/csrc/**/*.hpp',
     'torch/csrc/**/*.cpp',
@@ -234,7 +235,6 @@ exclude_patterns = [
     'torch/csrc/jit/serialization/import_legacy.cpp',
     'torch/csrc/jit/serialization/export.cpp',
     'torch/csrc/lazy/**/*',
-    'torch/csrc/mps/**/*',
 ]
 init_command = [
     'python3',
@@ -1755,9 +1755,7 @@ exclude_patterns = [
     'torch/testing/_internal/codegen/__init__.py',
     'torch/testing/_internal/codegen/random_topo_test.py',
     'torch/testing/_internal/common_cuda.py',
-    'torch/testing/_internal/common_device_type.py',
     'torch/testing/_internal/common_distributed.py',
-    'torch/testing/_internal/common_dtype.py',
     'torch/testing/_internal/common_jit.py',
     'torch/testing/_internal/common_methods_invocations.py',
     'torch/testing/_internal/common_modules.py',
