@@ -10463,6 +10463,14 @@ fn
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_assert_size_stride(self):
+        x = torch.randn(2, 3, 4)
+        with self.assertRaisesRegex(
+            AssertionError,
+            "expected size 2==5, stride 12==9 at dim=0; expected size 3==6, stride 4==9 at dim=1; expected size 4==7, stride 1==10 at dim=2",
+        ):
+            torch._C._dynamo.guards.assert_size_stride(x, (5, 6, 7), (9, 9, 10))
+
     def test_module_dunder_dict(self):
         class MyModule(torch.nn.Module):
             def __init__(self):

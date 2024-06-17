@@ -7,10 +7,10 @@ from torch._C._distributed_c10d import _SymmetricMemory
 from torch.distributed._symmetric_memory import (
     _fused_all_gather_matmul_fallback,
     _fused_matmul_reduce_scatter_fallback,
+    enable_symm_mem_for_group,
     restride_A_for_fused_matmul_reduce_scatter,
     restride_A_shard_for_fused_all_gather_matmul,
 )
-from torch.distributed.distributed_c10d import _get_process_group_store
 
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
@@ -68,12 +68,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
             rank=self.rank,
             store=store,
         )
-        _SymmetricMemory.set_group_info(
-            "0",
-            self.rank,
-            self.world_size,
-            _get_process_group_store(dist.GroupMember.WORLD),
-        )
+        enable_symm_mem_for_group(dist.group.WORLD.group_name)
 
     def _verify_symmetric_memory(self, symm_mem):
         self.assertEqual(symm_mem.world_size, 2)

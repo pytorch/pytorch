@@ -17,9 +17,12 @@ from torch._C._distributed_c10d import _SymmetricMemory
 _group_name_to_store: Dict[str, c10d.Store] = {}
 
 
-def init_symm_mem_for_process_group(group_name: str) -> None:
+def enable_symm_mem_for_group(group_name: str) -> None:
     """
-    Initialize symmetric memory capability for the process group.
+    Enables symmetric memory for a process group.
+
+    Args:
+        group_name (str): the name of the process group.
     """
     if group_name in _group_name_to_store:
         return
@@ -29,6 +32,8 @@ def init_symm_mem_for_process_group(group_name: str) -> None:
         "symmetric_memory",
         c10d._get_process_group_store(group),
     )
+    # Use one store-based broadcast to bootstrap a file store from the process
+    # and simultaneously verify that all ranks are on the same host.
     hostname = socket.gethostname()
     if group.rank() == 0:
         uid = str(uuid.uuid4())
@@ -46,7 +51,7 @@ def init_symm_mem_for_process_group(group_name: str) -> None:
                 f"are on different hosts ({rank_0_hostname} and {hostname})"
             )
     store = torch._C._distributed_c10d.FileStore(f"/tmp/{uid}", group.size())
-    # TODO: verify device connections
+    # TODO: check device connectiivity
     _group_name_to_store[group_name] = store
     _SymmetricMemory.set_group_info(
         group_name,
@@ -56,65 +61,65 @@ def init_symm_mem_for_process_group(group_name: str) -> None:
     )
 
 
-_compile_test_mode: bool = False
+_is_test_mode: bool = False
 
 
 @contextmanager
-def compile_test_mode() -> Generator[None, None, None]:
+def _test_mode() -> Generator[None, None, None]:
     """
-    Make is_symm_mem_initialized() to always return True and the ops defined in
-    the symm_mem namespace to use fallback implementation.
+    Forces ``is_symm_mem_enabled_for_group()`` to return ``True`` and the ops
+    defined in the ``symm_mem`` namespace to use fallback implementations.
 
-    The contextmanager is not thread safe.
+    The context manager is not thread safe.
     """
-    global _compile_test_mode
-    prev = _compile_test_mode
+    global _is_test_mode
+    prev = _is_test_mode
     try:
-        _compile_test_mode = True
+        _is_test_mode = True
         yield
     finally:
-        _compile_test_mode = prev
+        _is_test_mode = prev
 
 
-def is_symm_mem_initialized(group_name: str) -> bool:
-    return _compile_test_mode or group_name in _group_name_to_store
+def is_symm_mem_enabled_for_group(group_name: str) -> bool:
+    """
+    Check if symmetric memory is enabled for a process group.
+
+    Args:
+        group_name (str): the name of the process group.
+    """
+    return _is_test_mode or group_name in _group_name_to_store
 
 
-@dataclass
-class _Workspace:
-    size: int
-    tensor: Optional[torch.Tensor]
-
-
-_group_name_to_workspace: Dict[str, _Workspace] = {}
-
-
-def ensure_symm_mem_workspace_size(
-    group_name: str,
-    size: int,
-) -> None:
-    workspace = _group_name_to_workspace.setdefault(
-        group_name,
-        _Workspace(0, None),
-    )
-    workspace.size = max(workspace.size, size)
+_group_name_to_workspace_tensor: Dict[str, Optional[torch.Tensor]] = {}
 
 
 def get_symm_mem_workspace(group_name: str, min_size: int) -> _SymmetricMemory:
-    workspace = _group_name_to_workspace.setdefault(
-        group_name,
-        _Workspace(0, None),
-    )
-    if workspace.tensor is None or workspace.size < min_size:
-        workspace.size = max(workspace.size, min_size)
-        workspace.tensor = _SymmetricMemory.empty_strided_p2p(
-            (workspace.size // 4,),
+    """
+    Get the symmetric memory workspace associated with the process group. If
+    ``min_size`` is greater than the workspace associated with ``group_name``,
+    the workspace will be re-allocated and re-rendezvous'd.
+
+    Args:
+        group_name (str): the name of the process group.
+        min_size (int): the size requirement for the workspace in bytes.
+
+    Returns:
+        _SymmetricMemory: the symmetric memory workspace associated with the
+        group.
+    """
+    tensor = _group_name_to_workspace_tensor.get(group_name)
+    size = tensor.numel() * tensor.element_size() if tensor is not None else 0
+    if tensor is None or size < min_size:
+        tensor = _SymmetricMemory.empty_strided_p2p(
+            (max(size, min_size),),
             [1],
-            torch.float,
+            torch.uint8,
             torch.device(f"cuda:{torch.cuda.current_device()}"),
             group_name,
         )
-    return _SymmetricMemory.rendezvous(workspace.tensor)
+        _group_name_to_workspace_tensor[group_name] = tensor
+    return _SymmetricMemory.rendezvous(tensor)
 
 
 _backend_stream: Optional[torch.cuda.Stream] = None
@@ -169,19 +174,19 @@ def _pipelined_all_gather_and_consume(
     # At this point, all ranks have copied their local shard to
     # their local p2p buffer. Each rank can now copy and consume
     # remote shards.
-    for i in range(1, group_size):
-        if i % 2 == 0:
+    for step in range(1, group_size):
+        if step % 2 == 0:
             stream = torch.cuda.current_stream()
         else:
             stream = backend_stream
-        remote_rank = (i + rank) % group_size
+        remote_rank = (step + rank) % group_size
         remote_p2p_buf = symm_mem.get_buffer(remote_rank, shard.shape, shard.dtype)
         with torch.cuda.stream(stream):
             chunks[remote_rank].copy_(remote_p2p_buf)
             shard_consumer(chunks[remote_rank], remote_rank)
 
     with torch.cuda.stream(backend_stream):
-        symm_mem.barrier(channel=0)
+        symm_mem.barrier(channel=group_size % 2)
     torch.cuda.current_stream().wait_stream(backend_stream)
 
 
@@ -292,7 +297,7 @@ def _fused_all_gather_matmul(
     Otherwise A_shard needs to be copied once.
 
     """
-    if _compile_test_mode:
+    if _is_test_mode:
         return _fused_all_gather_matmul_fallback(A_shard, Bs, gather_dim, group_name)
     if A_shard.dim() < 2:
         raise ValueError("A_shard must be a matrix")
@@ -363,7 +368,7 @@ def restride_A_shard_for_fused_all_gather_matmul(
 ) -> torch.Tensor:
     """
     Restride the `A_shard` arg of `fused_all_gather_matmul` for optimal perf.
-    See doc for `fused_all_gather_matmul` for detail.
+    See the doc for `fused_all_gather_matmul` for detail.
     """
     perm = list(range(len(t.shape)))
     perm.insert(0, perm.pop(scatter_dim))
@@ -402,10 +407,10 @@ def _fused_matmul_reduce_scatter(
     to be copied once.
 
     NOTE:
-    - The K dim across ranks are currently accumulated with bf16 with results
+    - The K dim across ranks are currently accumulated with bf16 which results
       in accuracy loss.
     """
-    if _compile_test_mode:
+    if _is_test_mode:
         return _fused_matmul_reduce_scatter_fallback(
             A, B, reduce_op, scatter_dim, group_name
         )
@@ -461,7 +466,7 @@ def restride_A_for_fused_matmul_reduce_scatter(
 ) -> torch.Tensor:
     """
     Restride the `A_shard` arg of `fused_matmul_reduce_scatter` for optimal
-    perf. See doc for `fused_matmul_reduce_scatter` for detail.
+    perf. See the doc for `fused_matmul_reduce_scatter` for detail.
     """
     perm = list(range(len(t.shape)))
     perm.insert(0, perm.pop(gather_dim))

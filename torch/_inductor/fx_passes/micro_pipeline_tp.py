@@ -221,7 +221,7 @@ def fuse_all_gather_matmul(match, shard, gather_dim, group_name):
 
     c10d = torch.ops._c10d_functional
     from torch.distributed._symmetric_memory import (
-        is_symm_mem_initialized,
+        is_symm_mem_enabled_for_group,
         restride_A_shard_for_fused_all_gather_matmul,
     )
 
@@ -229,7 +229,7 @@ def fuse_all_gather_matmul(match, shard, gather_dim, group_name):
         # Decomposing the matmul on the K dimension is not supported
         return
 
-    if not is_symm_mem_initialized(group_name):
+    if not is_symm_mem_enabled_for_group(group_name):
         return
 
     # Normalize zero-dim and non-zero-dim all_gather_tensor
@@ -316,11 +316,11 @@ def fuse_matmul_reduce_scatter(match, rs_input, reduce_op, scatter_dim, group_na
 
     c10d = torch.ops._c10d_functional
     from torch.distributed._symmetric_memory import (
-        is_symm_mem_initialized,
+        is_symm_mem_enabled_for_group,
         restride_A_for_fused_matmul_reduce_scatter,
     )
 
-    if not is_symm_mem_initialized(group_name):
+    if not is_symm_mem_enabled_for_group(group_name):
         return
 
     # Currently fused_matmul_reduce_scatter doesn't return the matmul result,
