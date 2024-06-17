@@ -881,15 +881,18 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             def foo2(x):
                 return x[2:]
 
-            x = torch.rand([10, 10], device="cuda", requires_grad=True)
             param_c = cdata(m.weight)
             for _ in range(3):
+                x = torch.rand([10, 10], device="cuda", requires_grad=True)
+                torch.compiler.cudagraph_mark_step_begin()
                 out1, alias_1, alias_2 = foo(m, x)
                 self.assertEqual(len({param_c, cdata(alias_1), cdata(alias_2)}), 1)
 
                 out2 = foo2(out1)
                 out2.sum().backward()
                 self.assertEqual(cdata(out1), cdata(out2))
+                m.weight.grad = None
+                m.bias.grad = None
 
             node = self.curr_node()
             first_node = next(node._path_from_root)
