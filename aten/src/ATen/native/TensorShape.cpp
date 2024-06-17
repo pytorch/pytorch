@@ -420,8 +420,9 @@ Tensor& set_storage_meta__symint(Tensor& result, Storage storage, c10::SymInt st
     // it.  TODO: Actually this might not quite be correct if we use special
     // pointers to track whether or not fake cuda tensors are pinned or not
     const auto itemsize = result.dtype().itemsize();
-    c10::SymInt new_size_bytes = at::detail::computeStorageNbytes(
-        size, stride, itemsize, std::move(storage_offset));
+    c10::SymInt new_size_bytes = result.is_contiguous()
+      ? at::detail::computeStorageNbytesContiguous(size, itemsize, std::move(storage_offset))
+      : at::detail::computeStorageNbytes(size, stride, itemsize, std::move(storage_offset));
     // TODO: When there are unbacked SymInts, we unconditionally skip the
     // setter.  This is technically wrong, but we cannot conveniently test
     // the real condition in many cases, because a lot of people are using

@@ -1501,7 +1501,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             with self.assertRaisesRegex(Exception, "overwritten by a subsequent run."):
                 out2 + out2
 
-        @skipIfRocm
         @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
         def test_conv_benchmark(self):
             with torch.backends.cudnn.flags(
