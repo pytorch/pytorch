@@ -664,18 +664,22 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "queue_callback":
-            if (
-                torch._dynamo.compiled_autograd.compiled_autograd_enabled
-                and tx.one_graph
-            ):
+            if torch._dynamo.compiled_autograd.compiled_autograd_enabled:
+                assert (
+                    tx.one_graph
+                ), "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True"
                 return variables.UserFunctionVariable(
                     torch._dynamo.external_utils.FakeCompiledAutogradEngine.queue_callback,
                     source=self.source,
                 ).call_function(
-                    tx, (tx.output.side_effects.get_ca_final_callbacks_var(), *args), kwargs
+                    tx,
+                    (tx.output.side_effects.get_ca_final_callbacks_var(), *args),
+                    kwargs,
                 )
             else:
-                unimplemented(f"queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True")
+                unimplemented(
+                    "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True"
+                )
         else:
             unimplemented(f"torch._C._ImperativeEngine method: {name}")
 
