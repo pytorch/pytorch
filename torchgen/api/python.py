@@ -442,7 +442,7 @@ class PythonSignature:
             return None
         # Below are the major changes in vararg vs. regular pyi signatures
         # vararg signatures also omit the asterix
-        schema_formals[0] = "*" + args[0].name + ": _int"
+        schema_formals[0] = "*" + args[0].name + ": Union[_int, SymInt]"
 
         returns_str = returns_str_pyi(self)
         # pyi also includes self (with no typing/defaults) for methods
