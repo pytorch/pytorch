@@ -91,7 +91,6 @@ jobs:
         id: parse-ref
         shell: bash
         run: |
-          echo "${GITHUB_PATH}"
           python3 .github/scripts/parse_ref.py
 
       - name: Get workflow job id
