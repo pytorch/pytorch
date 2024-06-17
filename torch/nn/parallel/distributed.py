@@ -804,7 +804,7 @@ class DistributedDataParallel(Module, Joinable):
         )
 
         # Initialize gradient buffers and register all reduce hook
-        self._delay_grad_buffer = None
+        self._delay_grad_buffer: Optional[torch.Tensor] = None
         self._delay_grad_views: List[torch.Tensor] = []
         self._delay_all_reduce_all_params = False
         if len(self._delay_all_reduce_params) != 0:
@@ -1482,7 +1482,7 @@ class DistributedDataParallel(Module, Joinable):
 
     def _should_disable_cpp_reducer(self) -> bool:
         return self._use_python_reducer and (
-            torch.compiler.is_compiling() or self._force_to_disable_cpp_reducer
+            torch._utils.is_compiling() or self._force_to_disable_cpp_reducer
         )
 
     def _pre_forward(self, *inputs, **kwargs):
@@ -1495,7 +1495,7 @@ class DistributedDataParallel(Module, Joinable):
                 h.remove()
             self._accum_grad_hooks.clear()
 
-        if not self._lazy_init_ran and not torch.compiler.is_compiling():
+        if not self._lazy_init_ran and not torch._utils.is_compiling():
             self._lazy_init()
 
         if self._delay_all_reduce_all_params:

@@ -134,13 +134,17 @@ def do_bench_cpu(fn, warmup=5, times=20):
 def cache_dir() -> str:
     cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
     if cache_dir is None:
-        sanitized_username = re.sub(r'[\\/:*?"<>|]', "_", getpass.getuser())
-        os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache_dir = os.path.join(
-            tempfile.gettempdir(),
-            "torchinductor_" + sanitized_username,
-        )
+        os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache_dir = default_cache_dir()
     os.makedirs(cache_dir, exist_ok=True)
     return cache_dir
+
+
+def default_cache_dir():
+    sanitized_username = re.sub(r'[\\/:*?"<>|]', "_", getpass.getuser())
+    return os.path.join(
+        tempfile.gettempdir(),
+        "torchinductor_" + sanitized_username,
+    )
 
 
 HAS_COLORAMA = True
