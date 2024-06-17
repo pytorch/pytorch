@@ -67,6 +67,21 @@ def _iter_constructors():
     yield torch.nested.nested_tensor
 
 
+# Returns True if the function recompiles between inputs1 and inputs2 with the
+# specified dynamic setting.
+def _recompiles_for_inputs(fn, inputs1, inputs2, dynamic=True):
+    compile_count = [0]
+
+    def counter(gm, example_inputs):
+        compile_count[0] += 1
+        return gm
+
+    compiled_f = torch.compile(fn, fullgraph=True, backend=counter, dynamic=dynamic)
+    compiled_f(*inputs1)
+    compiled_f(*inputs2)
+    return compile_count[0] > 1
+
+
 # Helper function to generate a pair of random nested tensors
 # one is contiguous, the other is not, but they appear to have same entries
 # an output nested tensor consists of
@@ -3728,6 +3743,27 @@ class TestNestedTensorSubclass(TestCase):
         ):
             torch.split(nt, [1, 2], 1)
 
+    def test_softmax(self, device):
+        nt = random_nt_from_dims(
+            [3, None, 5], device=device, dtype=torch.float32, layout=torch.jagged
+        )
+
+        # operate on dim=2
+        output = nt.softmax(dim=2)
+
+        @torch._dynamo.disable
+        def _compare_to_ref(nt, output, dim):
+            for in_component, out_component in zip(nt.unbind(), output.unbind()):
+                self.assertEqual(in_component.softmax(dim=dim), out_component)
+
+        # dim=2 -> dim=1 after unbind
+        _compare_to_ref(nt, output, dim=1)
+
+        # operate on dim=-1
+        output2 = nt.softmax(dim=-1)
+        torch._dynamo.disable(self.assertEqual)(output, output2)
+        _compare_to_ref(nt, output2, dim=-1)
+
     def test_views_inherit_ragged_dim(self, device):
         # view
         nt = random_nt_from_dims(
@@ -4797,19 +4833,18 @@ class TestNestedTensorSubclass(TestCase):
         check_results(fn, compiled_fn, generate_inp(20))
         self.assertEqual(compile_counter.frame_count, frame_count_2)
 
-    # Doesn't work until we have real views
-    @xfailIfTorchDynamo
     # Note 1: Math fallback doesn't work with bfloat16 on CUDA
     # Note 2: ROCm doesn't support flash attention or mem_efficient attention for NT
     @unittest.skipIf(
         TEST_WITH_ROCM,
         "ROCm doesn't support flash attention or mem_efficient attention for NT",
     )
-    @parametrize(
-        "dtype",
-        [torch.float16, torch.bfloat16, torch.float32]
-        if SM80OrLater
-        else [torch.float16, torch.float32],
+    @dtypes(
+        *(
+            [torch.float16, torch.bfloat16, torch.float32]
+            if SM80OrLater
+            else [torch.float16, torch.float32]
+        )
     )
     def test_sdpa(self, device, dtype):
         batch_size = 1
@@ -5152,8 +5187,6 @@ class TestNestedTensorSubclass(TestCase):
         )
         self.assertEqual(output._values, output_dense)
 
-    # Doesn't work until we have real views
-    @xfailIfTorchDynamo
     @onlyCUDA
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FUSED_ATTENTION,
@@ -5313,32 +5346,6 @@ class TestNestedTensorSubclass(TestCase):
         self.assertTrue(torch.allclose(attn_output_eager, attn_output))
         self.assertTrue(torch.allclose(value_grad, value.grad))
 
-    @dtypes(torch.float64, torch.float32, torch.half)
-    @onlyCUDA
-    def test_fbgemm_jagged_to_padded_dense_kernels(self, device, dtype):
-        values = torch.randn(10, 5, device=device, dtype=dtype)
-        offsets = torch.tensor([0, 1, 3, 8, 10], device=device, dtype=torch.int64)
-        max_length = offsets.diff().max().item()
-        padding_value = 1.3
-
-        # convert jagged -> padded dense
-        padded = torch.ops.aten._jagged_to_padded_dense_forward(
-            values, [offsets], [max_length], padding_value
-        )
-
-        batch_size = offsets.shape[0] - 1
-        expected_padded_shape = (batch_size, max_length, values.shape[-1])
-        self.assertEqual(padded.shape, expected_padded_shape)
-
-        # convert padded dense -> jagged
-        total_L = values.shape[0]
-        output_jagged = torch.ops.aten._padded_dense_to_jagged_forward(
-            padded, [offsets], total_L
-        )
-
-        # should be equivalent to the original values
-        self.assertEqual(values, output_jagged)
-
     @dtypes(torch.float32)
     def test_apply_(self, device, dtype):
         nt = random_nt_from_dims(
@@ -5368,21 +5375,236 @@ class TestNestedTensorSubclass(TestCase):
         self.assertIsNone(nt.grad)
         self.assertIsNone(nt._values.grad_fn)
 
-    @dtypes(torch.float32, torch.double, torch.half)
-    @parametrize("requires_grad", [False, True])
-    def test_sum(self, device, dtype, requires_grad):
+    @dtypes(torch.float64, torch.float32, torch.half)
+    def test_jagged_padded_dense_conversion_kernels(self, device, dtype):
+        values = torch.randn(10, 5, device=device, dtype=dtype)
+        offsets = torch.tensor([0, 1, 3, 8, 10], device=device, dtype=torch.int64)
+        max_length = offsets.diff().max().item()
+        padding_value = 1.3
+
+        # convert jagged -> padded dense
+        padded = torch.ops.aten._jagged_to_padded_dense_forward(
+            values, [offsets], [max_length], padding_value
+        )
+
+        batch_size = offsets.shape[0] - 1
+        expected_padded_shape = (batch_size, max_length, values.shape[-1])
+        self.assertEqual(padded.shape, expected_padded_shape)
+
+        # convert padded dense -> jagged
+        total_L = values.shape[0]
+        output_jagged = torch.ops.aten._padded_dense_to_jagged_forward(
+            padded, [offsets], total_L
+        )
+
+        # should be equivalent to the original values
+        self.assertEqual(values, output_jagged)
+
+        # success case: truncate to max length as needed
+        trunc_max_length = max_length - 1
+        trunc_padded = torch.ops.aten._jagged_to_padded_dense_forward(
+            values, [offsets], [trunc_max_length], padding_value
+        )
+        self.assertEqual(padded[:, :trunc_max_length, :], trunc_padded)
+
+        # specific to CPU impls
+        if device == "cpu":
+            # error case: multiple offsets on cpu since CPU kernels don't support more now
+            with self.assertRaisesRegex(
+                RuntimeError, "only a single jagged dim is supported"
+            ):
+                torch.ops.aten._jagged_to_padded_dense_forward(
+                    values, [offsets, offsets], [max_length, max_length], padding_value
+                )
+
+            with self.assertRaisesRegex(
+                RuntimeError, "only a single jagged dim is supported"
+            ):
+                torch.ops.aten._padded_dense_to_jagged_forward(
+                    padded, [offsets, offsets], total_L
+                )
+
+            # error case: > 1D offsets
+            offsets2d = offsets.unsqueeze(-1)
+            with self.assertRaisesRegex(RuntimeError, "expected 1D offsets"):
+                torch.ops.aten._jagged_to_padded_dense_forward(
+                    values, [offsets2d], [max_length], padding_value
+                )
+
+            with self.assertRaisesRegex(RuntimeError, "expected 1D offsets"):
+                torch.ops.aten._padded_dense_to_jagged_forward(
+                    padded, [offsets2d], total_L
+                )
+
+            # error case: final offset != total_L
+            offsets_wrong = offsets.clone().detach()
+            offsets_wrong[-1] = total_L + 1
+            with self.assertRaisesRegex(
+                RuntimeError, "final offset should match total_L value"
+            ):
+                torch.ops.aten._padded_dense_to_jagged_forward(
+                    padded, [offsets_wrong], total_L
+                )
+
+            # error case: 1D padded input
+            padded_wrong = padded.flatten().clone().detach()
+            with self.assertRaisesRegex(RuntimeError, "expected padded dim >= 2"):
+                torch.ops.aten._padded_dense_to_jagged_forward(
+                    padded_wrong, [offsets], total_L
+                )
+
+            # error case: batch item has length > max length
+            # max_length is 5 above; 7 here
+            offsets_wrong = torch.tensor(
+                [0, 1, 8, 9, 10], device=device, dtype=torch.int64
+            )
+            with self.assertRaisesRegex(RuntimeError, "found batch item of length"):
+                torch.ops.aten._padded_dense_to_jagged_forward(
+                    padded, [offsets_wrong], total_L
+                )
+
+    @dtypes(torch.float32)
+    @skipIfTorchDynamo("Test compiles internally")
+    @unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
+    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    def test_compile_preserves_metadata_cache(self, device, dtype):
+        # shape (B, *, D)
         nt = random_nt_from_dims(
-            [5, None, 10], device=device, dtype=dtype, layout=torch.jagged,
-            requires_grad=requires_grad)
+            [4, None, 3, 16],
+            device=device,
+            dtype=dtype,
+            layout=torch.jagged,
+            requires_grad=True,
+        )
 
-        output = nt.sum()
-        expected_output = nt._values.sum()
-        self.assertEqual(output, expected_output)
+        # expect min / max seqlen to be stored here
+        cache = dict(nt._metadata_cache)
 
-        if requires_grad:
-            # ensure gradients flow back correctly
-            output.backward()
-            self.assertEqual(nt.grad, torch.ones_like(nt))
+        @torch.compile
+        def f(nt):
+            q = nt.transpose(-3, -2)
+            output = F.scaled_dot_product_attention(q, q, q).transpose(-3, -2)
+            return output
+
+        output = f(nt)
+        output.backward(torch.ones_like(output))
+        self.assertEqual(output._metadata_cache, cache)
+
+    @dtypes(torch.float32)
+    @skipIfTorchDynamo("Test compiles internally")
+    @unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
+    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    def test_compile_with_dynamic_max_seq_len(self, device, dtype):
+        # shape (B, *, D)
+        # max seq len: 18
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(2, 5),
+                torch.randn(3, 5),
+                torch.randn(18, 5),
+            ],
+            layout=torch.jagged,
+        )
+
+        # max seq len: 19
+        nt2 = torch.nested.nested_tensor(
+            [
+                torch.randn(2, 5),
+                torch.randn(3, 5),
+                torch.randn(19, 5),
+            ],
+            layout=torch.jagged,
+        )
+
+        def f(nt):
+            # TODO: Replace with public API when we can use @properties
+            return torch.ones_like(nt) * nt._get_max_seqlen()
+
+        for dynamic in [False, True, None]:
+            self.assertFalse(_recompiles_for_inputs(f, (nt,), (nt2,), dynamic=dynamic))
+
+    @dtypes(torch.float32)
+    @skipIfTorchDynamo("Test compiles internally")
+    @unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
+    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    def test_compile_with_dynamic_min_seq_len(self, device, dtype):
+        # shape (B, *, D)
+        # min seq len: 7
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(7, 5),
+                torch.randn(8, 5),
+                torch.randn(9, 5),
+            ],
+            layout=torch.jagged,
+        )
+
+        # min seq len: 8
+        nt2 = torch.nested.nested_tensor(
+            [
+                torch.randn(8, 5),
+                torch.randn(9, 5),
+                torch.randn(10, 5),
+            ],
+            layout=torch.jagged,
+        )
+
+        def f(nt):
+            # TODO: Replace with public API when we can use @properties
+            return torch.ones_like(nt) * nt._get_min_seqlen()
+
+        for dynamic in [False, True, None]:
+            self.assertFalse(_recompiles_for_inputs(f, (nt,), (nt2,), dynamic=dynamic))
+
+    @dtypes(torch.float32)
+    @skipIfTorchDynamo("Test compiles internally")
+    @unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
+    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    def test_compile_with_propagated_dynamic_max_seq_len(self, device, dtype):
+        # shape (B, *, D)
+        # max seq len: 18
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(2, 5),
+                torch.randn(3, 5),
+                torch.randn(18, 5),
+            ],
+            layout=torch.jagged,
+        )
+
+        # max seq len: 19
+        nt2 = torch.nested.nested_tensor(
+            [
+                torch.randn(2, 5),
+                torch.randn(3, 5),
+                torch.randn(19, 5),
+            ],
+            layout=torch.jagged,
+        )
+
+        def f(nt):
+            nt2 = nt.sin() + 1
+            # TODO: Replace with public API when we can use @properties
+            return torch.ones_like(nt2) * nt2._get_max_seqlen()
+
+        ref = f(nt)
+        output = torch.compile(f, fullgraph=True, dynamic=False)(nt)
+        self.assertEqual(ref, output)
+
+        for dynamic in [False, True, None]:
+            self.assertFalse(_recompiles_for_inputs(f, (nt,), (nt2,), dynamic=dynamic))
 
 
 instantiate_parametrized_tests(TestNestedTensor)
