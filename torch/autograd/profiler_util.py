@@ -127,11 +127,18 @@ class EventList(list):
                         # this can't be a parent
                         current_events.pop()
                     else:
-                        parent.append_cpu_child(event)
-                        assert (
-                            event.cpu_parent is None
-                        ), f"There is already a CPU parent event for {event.key}"
-                        event.set_cpu_parent(parent)
+                        is_contain = False
+                        for child in parent.cpu_children:
+                            if (child.time_range.end <= event.time_range.end and child.time_range.start >= event.time_range.start):
+                                is_contain = True
+                                break
+
+                        if not is_contain:
+                            parent.append_cpu_child(event)
+                            assert (
+                                event.cpu_parent is None
+                            ), f"There is already a CPU parent event for {event.key}"
+                            event.set_cpu_parent(parent)
                         break
 
                 current_events.append(event)
