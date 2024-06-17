@@ -656,7 +656,7 @@ class TS2FXGraphConverter:
         # prim::tolist cannot be supported by `_convert_standard_operators`
         # since it requires call_method instead of call_function.
         target = "tolist"
-        args = ([self.get_fx_value(input) for input in node.inputs()][0],)
+        args = (self.get_fx_value(next(node.inputs())),)
         fx_node = self.fx_graph.call_method(target, args)
         output_name = node.output().debugName()
         self.name_to_node[output_name] = fx_node
