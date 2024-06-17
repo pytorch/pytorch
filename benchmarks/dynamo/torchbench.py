@@ -346,6 +346,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             model.train()
         else:
             model.eval()
+            model.requires_grad_(False)
+
         gc.collect()
         batch_size = benchmark.batch_size
         if model_name == "torchrec_dlrm":
