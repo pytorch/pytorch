@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import contextlib
 import dataclasses
 import functools
@@ -48,6 +49,7 @@ from ..utils import (
 
 from ..virtualized import NullKernelHandler, ops, OpsValue, V
 from .common import (
+    BackendFeature,
     BracesBuffer,
     CppWrapperKernelArgs,
     CSE,
@@ -186,12 +188,12 @@ def is_to_lowp_dtype(expr):
     return any(to_expr in expr for to_expr in to_exprs)
 
 
-def get_lowp_to_fp32_expr(lowp_var, kernel):
+def get_lowp_to_high_prec_expr(lowp_var, dtype, kernel):
     if isinstance(kernel, CppVecKernel):
-        return f"at::vec::convert<float>({lowp_var})"
+        return f"at::vec::convert<{DTYPE_TO_CPP[dtype]}>({lowp_var})"
     else:
         assert isinstance(kernel, CppKernel)
-        return f"c10::convert<float>({lowp_var})"
+        return f"c10::convert<{DTYPE_TO_CPP[dtype]}>({lowp_var})"
 
 
 index_value_name_counter = 1
@@ -275,11 +277,11 @@ def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: 
 
     original_index = index
 
-    div = sympy.Wild("divisor")
+    div = sympy.Wild("divisor", integer=True)
     if index.has(FloorDiv):
         index = index.replace(FloorDiv(var, div), visit_indexing_div)
 
-    mod = sympy.Wild("modulus")
+    mod = sympy.Wild("modulus", integer=True)
     if index.has(ModularIndexing):
         index = index.replace(ModularIndexing(var, div, mod), visit_modular_indexing)
 
@@ -1612,7 +1614,7 @@ class CppKernel(Kernel):
         finally:
             self._load_mask = prior
 
-    def cache_fp32_cse_var_before_lowp_store(self, var_to_store):
+    def cache_high_prec_cse_var_before_lowp_store(self, var_to_store):
         """
         https://github.com/pytorch/pytorch/issues/115260
         For FusedSchedulerNode[node1, node2], the node2 loads what node1 stores and the buffer is
@@ -1649,26 +1651,29 @@ class CppKernel(Kernel):
             # only need to cache fp32 cse var while var_to_store is lowp data
             return
 
-        def find_fp32_var(var, cache):
-            fp32_cse_var = None
-            fp32_cse_var_name = None
+        def find_high_prec_var(var, cache):
+            high_prec_cse_var = None
+            high_prec_cse_var_name = None
             for expr, cse_var in cache.items():
                 if cse_var == var:
                     if is_to_lowp_dtype(expr):
                         m = re.search(r"tmp\d+", expr)
                         if m is not None:
-                            fp32_cse_var_name = m.group()
-            if fp32_cse_var_name:
+                            high_prec_cse_var_name = m.group()
+            if high_prec_cse_var_name:
                 for cse_var in cache.values():
-                    if cse_var.name == fp32_cse_var_name:
-                        fp32_cse_var = cse_var
+                    if cse_var.name == high_prec_cse_var_name:
+                        high_prec_cse_var = cse_var
                         break
-                assert fp32_cse_var is not None
-            return fp32_cse_var
+                assert high_prec_cse_var is not None
+            return high_prec_cse_var
 
-        fp32_var = find_fp32_var(var_to_store, self.cse.cache)
-        if fp32_var:
-            self.cse.cache[get_lowp_to_fp32_expr(var_to_store, self)] = fp32_var
+        high_prec_var = find_high_prec_var(var_to_store, self.cse.cache)
+        if high_prec_var and high_prec_var.dtype in DTYPE_TO_CPP:
+            cache_key = get_lowp_to_high_prec_expr(
+                var_to_store, high_prec_var.dtype, self
+            )
+            self.cse.cache[cache_key] = high_prec_var
 
     def scale_index_with_offset(
         self, index: sympy.Expr, scale=1, itervar_idx=-1, offset=0
@@ -1747,7 +1752,7 @@ class CppKernel(Kernel):
     def store(self, name, index, value, mode=None):
         assert "buf" in name
         var = self.args.output(name)
-        self.cache_fp32_cse_var_before_lowp_store(value)
+        self.cache_high_prec_cse_var_before_lowp_store(value)
         index = self.rename_indexing(index)
         if mode is None:
             line = f"{var}[{cexpr_index(index)}] = {value};"
@@ -2342,7 +2347,7 @@ class CppVecKernel(CppKernel):
             value = self.broadcast(value)
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         var = self.args.output(name)
-        self.cache_fp32_cse_var_before_lowp_store(value)
+        self.cache_high_prec_cse_var_before_lowp_store(value)
         index = self.rename_indexing(index)
         code = self._get_store_line(value, var, index, V.graph.get_dtype(name))
         self.stores.splice(code.map(lambda x: DeferredLine(name, x)))
@@ -2849,9 +2854,8 @@ class CppVecKernelChecker(CppVecKernel):
         return self.simd_vec
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        assert self._orig_wrapper_code is not None
         # Restore the wrapper_code
-        V.graph.wrapper_code = self._orig_wrapper_code
+        V.graph.wrapper_code = self._orig_wrapper_code  # type: ignore[assignment]
         self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
 
     def __enter__(self):
@@ -3074,7 +3078,7 @@ class CppKernelProxy(CppKernel):
         scheduler_node._lowp_fp_type = _lowp_fp_type  # type: ignore[attr-defined]
         return True
 
-    def legalize_lowp_fp_dtype(self, nodes):
+    def legalize_lowp_fp_dtype_loopbody(self, loop_body: ir.LoopBody):
         def add_to_dtype(sub_graph: torch.fx.Graph):
             def is_lowp_fp_load(node: torch.fx.Node):
                 if node.target not in ["load"]:
@@ -3212,11 +3216,11 @@ class CppKernelProxy(CppKernel):
 
             eliminate_to_dtype(sub_graph)
 
-        def _legalize_lowp_fp(loop_body: ir.LoopBody):
-            sub_blocks = [loop_body.root_block] + list(loop_body.subblocks.values())
-            for sub_block in sub_blocks:
-                add_to_dtype(sub_block.graph)
+        sub_blocks = [loop_body.root_block] + list(loop_body.subblocks.values())
+        for sub_block in sub_blocks:
+            add_to_dtype(sub_block.graph)
 
+    def legalize_lowp_fp_dtype(self, nodes):
         if all(
             isinstance(_node, SchedulerNode) and self.is_lowp_fp_scheduler(_node)
             for _node in nodes
@@ -3253,7 +3257,7 @@ class CppKernelProxy(CppKernel):
             should_legalize = not is_memory_copy_scheduler_node(node)
             if should_legalize:
                 body: ir.LoopBody = node._body
-                _legalize_lowp_fp(body)
+                self.legalize_lowp_fp_dtype_loopbody(body)
 
     def codegen_functions(self, fn_list, var_sizes_list, vec_dtype=torch.float):
         # TODO(jgong5): remove vec_dtype arg with alternative tiling factors for various dtypes
@@ -3418,8 +3422,8 @@ class CppKernelProxy(CppKernel):
                 inner_tail_loop.set_kernel(vec_kernel)
 
     def codegen_loop_bodies(self, loop_bodies, var_sizes_list):
-        # TODO(jgong5): support lowp legalization
         for body in loop_bodies:
+            self.legalize_lowp_fp_dtype_loopbody(body)
             DataTypePropagation.propagate_loopbody(body)
         self.codegen_functions(loop_bodies, var_sizes_list)
 
@@ -3492,10 +3496,21 @@ class CppScheduling(BaseScheduling):
     # https://github.com/python/cpython/commit/a285af7e626d1b81cf09f8b2bf7656f100bc1237
     # We set a conservative threshold here.
     MAX_FUSED_KERNEL_ARGS_NUM = 500
+    backend_features = dict.fromkeys(
+        [
+            BackendFeature.INPLACE_BUFFERS,
+        ]
+    )
+
+    @classmethod
+    def get_backend_features(cls, device: torch.device):
+        return cls.backend_features
 
     def __init__(self, scheduler):
+        super().__init__()
         self.scheduler = scheduler
-        self.reset_kernel_group()
+        if scheduler:
+            self.reset_kernel_group()
         self._ready_to_flush = False
 
     def _set_flush_status(self, status: bool):
@@ -3824,7 +3839,6 @@ class CppScheduling(BaseScheduling):
         kernel, render = ctb.make_kernel_render(ctb, epilogue_nodes=epilogue_ir_nodes)
         with kernel:
             for node in [template_node, *epilogue_nodes]:
-                node.decide_inplace_update()
                 node.mark_run()  # type: ignore[attr-defined]
             src_code = render()
 

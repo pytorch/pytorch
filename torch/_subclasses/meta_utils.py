@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import contextlib
@@ -323,6 +324,7 @@ class MetaTensorDescriber:
             is_view=is_view,
             is_conj=t.is_conj(),
             is_neg=t.is_neg(),
+            is_parameter=isinstance(t, torch.nn.Parameter),
             is_traceable_wrapper_subclass=is_traceable_wrapper_subclass_v,
             is_nested=is_nested,
             is_functional=is_functional,
@@ -453,6 +455,7 @@ class MetaTensorDesc:
     is_functional: bool = False
     is_conj: bool = False
     is_neg: bool = False
+    is_parameter: bool = False
     stride: Optional[Tuple[int, ...]] = None
     storage_offset: int = 0
     # NB: We have a choice whether or not to store the id or a direct pointer
@@ -961,7 +964,8 @@ class MetaConverter:
                 # assumption of it being simplified out will fail and it may be guarded on,
                 # which will hard error.
                 sym_source = EphemeralSource("symint_visitor_fn")
-                symbol = shape_env.create_symbol(s, sym_source)
+
+                symbol = shape_env.create_symbol(s, sym_source, positive=None)
                 return shape_env.create_symintnode(symbol, hint=s, source=sym_source)
 
             real_to_fake_mapping = {}
@@ -1535,6 +1539,10 @@ class MetaConverter:
             # Need to reflect this in the generated FakeTensor.
             if t.storage is not None and t.storage.size == 0:
                 r.untyped_storage().resize_(0)
+
+            if t.is_parameter:
+                r._is_param = True
+
             self.set_tensor_memo(t, r)
 
         return self.get_tensor_memo(t)

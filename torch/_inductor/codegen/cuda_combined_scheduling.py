@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import Sequence, Union
 
 from ..scheduler import (
@@ -29,6 +30,9 @@ class CUDACombinedScheduling(BaseScheduling):
         self._triton_scheduling = TritonScheduling(scheduler)
         self._cuda_cpp_scheduling = CUDACPPScheduling(scheduler)
         self._rocm_cpp_scheduling = ROCmCPPScheduling(scheduler)
+
+    def get_backend_features(self, device):
+        return self._triton_scheduling.get_backend_features(device)
 
     def choose_node_backend(self, node: BaseSchedulerNode) -> BaseScheduling:
         if self._cuda_cpp_scheduling.is_cuda_cpp_template(node):
