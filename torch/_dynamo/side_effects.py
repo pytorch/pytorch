@@ -219,6 +219,14 @@ class SideEffects:
     ):
         """Start tracking a new variable for mutation"""
         assert variable.source is not None
+
+        if id(item) in self.id_to_variable:
+            raise AssertionError(
+                "Variable is already tracked for mutation. This could be "
+                "because you are not using VariableBuilder to construct "
+                "the variable tracker."
+            )
+
         variable.mutable_local = mutable_cls(variable.source)
         self.id_to_variable[id(item)] = variable
         self.keepalive.append(item)
@@ -307,19 +315,22 @@ class SideEffects:
         visited: Any = set({})
 
         def visit(var: VariableTracker):
-            if isinstance(var.mutable_local, AttributeMutationNew):
-                if var in visited:
-                    return
-                visited.add(var)
-                # Object may have been mutated, store this mutation.
-                live_new_objects.add(var.mutable_local)
-                # It's possible that we have mutated the value of this variable
-                # to be another one. The new value is in store_attr_mutations.
-                # Also recurse through the new value to detect alive AttributeMutationNew.
-                if var.mutable_local in self.store_attr_mutations:
-                    VariableTracker.visit(
-                        visit, self.store_attr_mutations[var.mutable_local]
-                    )
+            mutable_local = var.mutable_local
+            if mutable_local is None:
+                return
+            if mutable_local in visited:
+                return
+            visited.add(mutable_local)
+            # Object may have been mutated, store this mutation.
+            if isinstance(mutable_local, AttributeMutationNew):
+                live_new_objects.add(mutable_local)
+            # It's possible that we have mutated the value of this variable
+            # to be another one. The new value is in store_attr_mutations.
+            # Also recurse through the new value to detect alive AttributeMutationNew.
+            if var.mutable_local in self.store_attr_mutations:
+                VariableTracker.visit(
+                    visit, self.store_attr_mutations[var.mutable_local]
+                )
 
         def is_live(var: Union[MutableLocalBase, VariableTracker]):
             if isinstance(var, AttributeMutationNew):
