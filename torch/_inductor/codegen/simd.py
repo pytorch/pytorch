@@ -1189,7 +1189,7 @@ class SIMDScheduling(BaseScheduling):
             if not isinstance(node, scheduler.BaseSchedulerNode):
                 continue
 
-            buffer_names.update(node.get_names())
+            buffer_names.update(node.get_buffer_names())
             buffer_names.update(node.used_buffer_names())
 
         # Get buffers objects

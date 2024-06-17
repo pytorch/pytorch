@@ -289,8 +289,15 @@ class IRNode:
         self.origins = set(self._current_origins)
         self.traceback = traceback.format_stack() if config.debug_ir_traceback else None
 
+    @cache_on_self
+    def get_read_names(self):
+        raise NotImplementedError(f"NYI on {type(self)}")
+
     def get_traceback(self):
         return self.traceback
+
+    def get_defining_op(self):
+        raise NotImplementedError
 
     def common_repr(self, shorten=True):
         origins = f"origins={getattr(self, 'origins', '')}"
@@ -307,13 +314,6 @@ class IRNode:
             return f"{type(self).__name__}(\n{new_lines}\n)"
         else:
             return f"{type(self).__name__}({lines})"
-
-    def is_user_of(self, name):
-        return name in self.get_read_names()
-
-    @cache_on_self
-    def get_read_names(self):
-        return {dep.name for dep in self.get_reads()}
 
     def get_dtype(self):
         return self.dtype
@@ -373,7 +373,68 @@ class IRNode:
 
 
 @dataclasses.dataclass
-class Loops(IRNode):
+class Operation:
+    def __post_init__(self):
+        self.operation_name: Optional[str] = None
+
+    def get_device(self):
+        raise NotImplementedError
+
+    def get_origin_node(self):
+        return self.origin_node
+
+    def is_extern(self):
+        return False
+
+    def is_no_op(self):
+        return False
+
+    def get_read_writes(self):
+        raise NotImplementedError
+
+    def is_user_of(self, name):
+        return name in self.get_read_names()
+
+    @cache_on_self
+    def get_read_names(self):
+        return {dep.name for dep in self.get_reads()}
+
+    def get_reads(self):
+        return self.get_read_writes().reads
+
+    def get_outputs(self) -> List[Buffer]:
+        raise NotImplementedError
+
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
+        return set()
+
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
+        """
+        Returns the unbacked symbols which are required to be in scope in
+        order to successfully perform codegen for this buffer.  For example,
+        a buffer that corresponds to an extern kernel call that takes i0 as
+        an argument would return {i0} here.  This is used to generate necessary
+        dependencies that ensure we actually bind i0 in codegen before you
+        try to use it.
+
+        Note that this is NOT transitive; in particular, if this buffer takes
+        in as input another buffer with dynamic shape (e.g., (i0,)), we will
+        not report it here, because you will already have a dependency
+        on that buffer, which will eventually have a dependency on i0 if
+        necessary.
+        """
+        return set()
+
+    def get_workspace_size(self):
+        """
+        Gets extra global memory size needed by this buffer.
+        Some algorithms (e.g. group gemm) may require extra global memory in the generated code.
+        """
+        return 0
+
+
+@dataclasses.dataclass
+class Loops(IRNode, Operation):
     device: torch.device
     dtype: torch.dtype
     inner_fn: Callable[..., Any]
@@ -473,6 +534,9 @@ class Loops(IRNode):
                     self.make_loader(),
                     self.get_size(),
                 ).reads
+
+    def get_read_names(self):
+        return {dep.name for dep in self.get_reads()}
 
     def get_reduction_size(self):
         raise NotImplementedError(
@@ -1667,7 +1731,7 @@ class Scan(Loops):
         combine_fn: Callable[[Tuple[Any, ...], Tuple[Any, ...]], Tuple[Any, ...]],
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         **kwargs,
-    ) -> List[Optional["TensorBox"]]:
+    ) -> List[Optional[TensorBox]]:
         pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
         scan_ranges = [size[axis]]
 
@@ -1921,6 +1985,9 @@ class BaseView(IRNode):
 
     def is_module_buffer(self):
         return self.data.is_module_buffer()  # type: ignore[attr-defined]
+
+    def get_read_names(self):
+        return self.data.get_read_names()
 
     def get_reads(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
@@ -2295,7 +2362,7 @@ class View(GenericView):
 class ReinterpretView(BaseView):
     """Pretend our storage has a different layout"""
 
-    layout: "Layout"
+    layout: Layout
 
     def __post_init__(self):
         super().__post_init__()
@@ -2900,7 +2967,7 @@ class FlexibleLayout(Layout):
 class NonOwningLayout(Layout):
     """Is a view into the storage of another tensor"""
 
-    def __init__(self, view: Union[BaseView, "TensorBox"]):
+    def __init__(self, view: Union[BaseView, TensorBox]):
         layout = view.get_layout()
         super().__init__(
             layout.device,
@@ -2962,7 +3029,7 @@ class MutationLayoutSHOULDREMOVE(Layout):
     def storage_size(self) -> sympy.Expr:
         return self.real_layout().storage_size()
 
-    def get_buffer(self) -> "Buffer":
+    def get_buffer(self) -> Buffer:
         def unwrap_views(target):
             if isinstance(target, MutationLayoutSHOULDREMOVE):
                 return unwrap_views(target.target)
@@ -3050,6 +3117,9 @@ class Buffer(IRNode):
     def get_origin_node(self):
         return self.origin_node
 
+    def get_defining_op(self) -> Optional[Operation]:
+        return None
+
     @property
     def dtype(self):
         return getattr(self.layout, "dtype", None)
@@ -3102,9 +3172,6 @@ class Buffer(IRNode):
 
         return loader
 
-    def is_no_op(self):
-        return False
-
     def codegen_reference(self, writer=None):
         return self.get_name()
 
@@ -3121,49 +3188,30 @@ class Buffer(IRNode):
             return [self.layout.target.get_name()]
         return ()
 
-    def get_read_writes(self):
-        with patch.object(FlexibleLayout, "allow_indexing", True):
-            return extract_read_writes(
-                self.make_loader(),
-                self.get_size(),
-            )
-
-    def get_reads(self):
-        return self.get_read_writes().reads
+    def get_read_names(self):
+        return self.get_name()
 
     def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         return set()
 
     def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
-        """
-        Returns the unbacked symbols which are required to be in scope in
-        order to successfully perform codegen for this buffer.  For example,
-        a buffer that corresponds to an extern kernel call that takes i0 as
-        an argument would return {i0} here.  This is used to generate necessary
-        dependencies that ensure we actually bind i0 in codegen before you
-        try to use it.
-
-        Note that this is NOT transitive; in particular, if this buffer takes
-        in as input another buffer with dynamic shape (e.g., (i0,)), we will
-        not report it here, because you will already have a dependency
-        on that buffer, which will eventually have a dependency on i0 if
-        necessary.
-        """
         return set()
 
     def realize(self):
         pass
 
-    def get_workspace_size(self):
-        """
-        Gets extra global memory size needed by this buffer.
-        Some algorithms (e.g. group gemm) may require extra global memory in the generated code.
-        """
-        return 0
-
     def should_allocate(self):
         # Returns False by default.
         return False
+
+
+class OperationBuffer(Buffer, Operation):
+    # An operation that produces a single output buffer
+    def get_outputs(self) -> List[Buffer]:
+        return [self]
+
+    def get_defining_op(self) -> Operation:
+        return self
 
 
 class InputBuffer(Buffer):
@@ -3214,7 +3262,7 @@ class ShapeAsConstantBuffer(IRNode):
 
 
 @dataclasses.dataclass
-class ComputedBuffer(Buffer):
+class ComputedBuffer(OperationBuffer):
     data: Loops
 
     def get_computed_buffer_name(self):
@@ -3519,7 +3567,7 @@ class ComputedBuffer(Buffer):
         return self.data.constant_to_device(device)
 
 
-class TemplateBuffer(Buffer):
+class TemplateBuffer(OperationBuffer):
     """
     Represents a Triton (in the future other type) of template operator
     that we can fuse an epilogue onto.
@@ -3530,6 +3578,7 @@ class TemplateBuffer(Buffer):
         self.inputs = InputsKernel.unwrap_storage(inputs)
         self.make_kernel_render = make_kernel_render
         self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
 
     def get_read_writes(self):
         return self.normalized_read_writes()
@@ -3642,7 +3691,7 @@ class ChoiceCaller:
     def hash_key(self) -> str:
         raise NotImplementedError
 
-    def output_node(self) -> "TensorBox":
+    def output_node(self) -> TensorBox:
         raise NotImplementedError
 
     def info_dict(self) -> Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
@@ -3711,7 +3760,7 @@ class CUDATemplateBuffer(TemplateBuffer):
         inputs,
         make_kernel_render,
         workspace_size: int,
-        template: "CUDATemplate",  # type: ignore[name-defined]  # noqa: F821
+        template: CUDATemplate,  # type: ignore[name-defined]  # noqa: F821
     ):
         super().__init__(layout, inputs, make_kernel_render)
         # Global memory (in bytes) needed for this template.
@@ -3730,7 +3779,7 @@ class CppTemplateBuffer(TemplateBuffer):
 
 
 @dataclasses.dataclass
-class InputsKernel(Buffer):
+class InputsKernel(OperationBuffer):
     inputs: List[Buffer]
 
     def get_read_writes_input(self, x):
@@ -3887,6 +3936,7 @@ class ConcatKernel(NopKernel):
 
         concat_kernel.name = V.graph.register_buffer(concat_kernel)
         concat_kernel.inputs = cls.unwrap_storage(concat_kernel.inputs)
+        V.graph.register_operation(concat_kernel)
 
         return kernel
 
@@ -4588,6 +4638,7 @@ class ExternKernelOut(ExternKernel):
             op_overload,
         )
         self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
 
     def should_allocate(self):
         return True
@@ -4647,6 +4698,7 @@ class ExternKernelAlloc(ExternKernel):
             op_overload,
         )
         self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
 
     def should_allocate(self):
         return False
@@ -4745,6 +4797,7 @@ class UserDefinedTritonKernel(ExternKernel):
             kwargs,
         )
         self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
         self.kernel_idx = kernel_idx
         self.grid = grid
 
@@ -4844,6 +4897,7 @@ class InplaceBernoulliFallback(ExternKernel):
             op_overload=op_overload,
         )
         self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
         self.python_kernel_name = "aten.bernoulli_"
         if not config.abi_compatible:
             # TODO: this should be simplified once we switch to ABI-compatible only
@@ -4889,6 +4943,7 @@ class InplaceCopyFallback(ExternKernel):
             ),
         )
         self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
 
     @classmethod
     def create(cls, dst, src, non_blocking: bool = False):
@@ -4941,6 +4996,7 @@ class ResizeStorageBytes(MutatingFirstArgExternKernel):
         )
         V.graph.mark_buffer_mutated(variable.get_name())
         self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
         self.python_kernel_name = "inductor_ops.resize_storage_bytes_"
         self.cpp_kernel_name = "torch::inductor::resize_storage_bytes_"
         V.graph.never_reuse_buffers.add(variable.data.get_name())
@@ -5042,6 +5098,7 @@ class ScatterFallback(ExternKernel):
         )
         self.cpp_kernel_name = get_aten_cpp_kernel_name(op_overload)
         self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
         mark_node_as_mutating(self, x)
 
 
@@ -5090,6 +5147,7 @@ class IndexPutFallback(ExternKernel):
             op_overload=op_overload,
         )
         self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
         mark_node_as_mutating(self, x)
 
 
@@ -5098,10 +5156,7 @@ class DeviceCopy(ExternKernelOut):
     def create(cls, x, device):
         if (
             not x.is_extern()
-            and all(
-                (r.name in V.graph.constants and isinstance(r, dependencies.MemoryDep))
-                for r in x.get_reads()
-            )
+            and all(r in V.graph.constants for r in x.get_read_names())
             and not config.aot_inductor.use_runtime_constant_folding
         ):
             return x.constant_to_device(device)
@@ -5776,6 +5831,7 @@ class MultiOutput(ExternKernel):
     def __init__(self, layout, input, indices: List[Tuple[Any, ...]]):
         super().__init__(None, layout, [input], ())
         self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
         self.indices = indices
 
     def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
@@ -5795,9 +5851,9 @@ class MultiOutput(ExternKernel):
 
 def _prepare_convolution_fusion_create(
     cls,
-    x: "TensorBox",
-    weight: "TensorBox",
-    bias: "TensorBox",
+    x: TensorBox,
+    weight: TensorBox,
+    bias: TensorBox,
     padding: List[int],
     stride: List[int],
     dilation: List[int],
@@ -5951,9 +6007,9 @@ def _prepare_convolution_fusion_create(
 
 def _prepare_linear_fusion_create(
     cls,
-    x: "TensorBox",
-    weight: "TensorBox",
-    bias: "TensorBox",
+    x: TensorBox,
+    weight: TensorBox,
+    bias: TensorBox,
 ):
     """
     This function is a helper function to prepare inputs, layout and constant args
@@ -6037,9 +6093,9 @@ class ConvolutionUnary(ExternKernelAlloc):
     @classmethod
     def create(
         cls,
-        x: "TensorBox",
-        weight: "TensorBox",
-        bias: "TensorBox",
+        x: TensorBox,
+        weight: TensorBox,
+        bias: TensorBox,
         padding_: List[int],
         stride_: List[int],
         dilation_: List[int],
@@ -6114,10 +6170,10 @@ class ConvolutionBinary(ExternKernelAlloc):
     @classmethod
     def create(
         cls,
-        x: "TensorBox",
-        other: "TensorBox",
-        weight: "TensorBox",
-        bias: "TensorBox",
+        x: TensorBox,
+        other: TensorBox,
+        weight: TensorBox,
+        bias: TensorBox,
         padding_: List[int],
         stride_: List[int],
         dilation_: List[int],
@@ -6209,10 +6265,10 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
     @classmethod
     def create(
         cls,
-        x: "TensorBox",
-        other: "TensorBox",
-        weight: "TensorBox",
-        bias: "TensorBox",
+        x: TensorBox,
+        other: TensorBox,
+        weight: TensorBox,
+        bias: TensorBox,
         padding_: List[int],
         stride_: List[int],
         dilation_: List[int],
@@ -6487,9 +6543,9 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
     @classmethod
     def create(
         cls,
-        x: "TensorBox",
-        weight: "TensorBox",
-        bias: "TensorBox",
+        x: TensorBox,
+        weight: TensorBox,
+        bias: TensorBox,
         padding_: List[int],
         output_padding_: List[int],
         stride_: List[int],
@@ -6548,13 +6604,13 @@ class MkldnnRnnLayer(ExternKernelAlloc):
     @classmethod
     def create(
         cls,
-        x: "TensorBox",
-        w0: "TensorBox",
-        w1: "TensorBox",
-        w2: "TensorBox",
-        w3: "TensorBox",
-        hx: "TensorBox",
-        cx: "TensorBox",
+        x: TensorBox,
+        w0: TensorBox,
+        w1: TensorBox,
+        w2: TensorBox,
+        w3: TensorBox,
+        hx: TensorBox,
+        cx: TensorBox,
         reverse: bool,
         batch_sizes: List[int],
         mode: int,
@@ -6743,13 +6799,13 @@ class QConvPointWisePT2E(ExternKernelAlloc):
     @classmethod
     def create(
         cls,
-        x: "TensorBox",
+        x: TensorBox,
         x_scale: float,
         x_zp: int,
-        weight: "TensorBox",  # packed_weight
-        w_scale: "TensorBox",
-        w_zp: "TensorBox",
-        bias: "TensorBox",
+        weight: TensorBox,  # packed_weight
+        w_scale: TensorBox,
+        w_zp: TensorBox,
+        bias: TensorBox,
         stride_: List[int],
         padding_: List[int],
         dilation_: List[int],
@@ -6936,22 +6992,22 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
     @classmethod
     def create(
         cls,
-        x: "TensorBox",
+        x: TensorBox,
         x_scale,
         x_zp,
-        accum: "TensorBox",
+        accum: TensorBox,
         accum_scale,
         accum_zp,
-        weight: "TensorBox",  # packed_weight
+        weight: TensorBox,  # packed_weight
         w_scale,
         w_zp,
-        bias: "TensorBox",
+        bias: TensorBox,
         stride_: List[int],
         padding_: List[int],
         dilation_: List[int],
         groups: int,
-        o_inv_scale: "TensorBox",
-        output_zero_point: "TensorBox",
+        o_inv_scale: TensorBox,
+        output_zero_point: TensorBox,
         output_dtype,
         binary_attr,
         alpha,
@@ -7141,13 +7197,13 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
     @classmethod
     def create(
         cls,
-        x: "TensorBox",
+        x: TensorBox,
         x_scale: float,
         x_zp: int,
-        weight: "TensorBox",  # packed_weight
-        w_scale: "TensorBox",
-        w_zp: "TensorBox",
-        bias: "TensorBox",
+        weight: TensorBox,  # packed_weight
+        w_scale: TensorBox,
+        w_zp: TensorBox,
+        bias: TensorBox,
         o_inv_scale: float,
         output_zero_point: int,
         output_dtype,
@@ -7338,17 +7394,17 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
     @classmethod
     def create(
         cls,
-        x: "TensorBox",
+        x: TensorBox,
         x_scale: float,
         x_zp: int,
-        weight: "TensorBox",  # packed_weight
-        w_scale: "TensorBox",
-        w_zp: "TensorBox",
-        bias: "TensorBox",
+        weight: TensorBox,  # packed_weight
+        w_scale: TensorBox,
+        w_zp: TensorBox,
+        bias: TensorBox,
         o_inv_scale: float,
         output_zero_point: int,
         output_dtype,
-        other: "TensorBox",
+        other: TensorBox,
         other_scale,
         other_zp,
         binary_attr,
@@ -7444,6 +7500,9 @@ class MutableBox(IRNode):
     def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
         return self.data.get_unbacked_symbol_uses()
 
+    def get_read_names(self) -> Set[str]:
+        return self.data.get_read_names()
+
     def codegen_reference(self, writer=None):
         return self.data.codegen_reference(writer)
 
@@ -7524,6 +7583,7 @@ class StorageBox(MutableBox):
             data=self.data,
         )
         self.data.name = V.graph.register_buffer(self.data)
+        V.graph.register_operation(self.data)
         self.data.origins = self.origins
         self.data.origin_node = origin_node
         self.data.traceback = traceback
@@ -7609,7 +7669,7 @@ class StorageBox(MutableBox):
 class Subgraph(IRNode):
     name: str
     graph_module: torch.fx.GraphModule
-    graph: Optional["GraphLowering"] = None
+    graph: Optional[GraphLowering] = None
 
 
 def _has_aliased_buffers(buffers):
@@ -7654,6 +7714,7 @@ class Conditional(ExternKernel):
         )
 
         self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
 
     @classmethod
     def create(
@@ -7769,6 +7830,7 @@ class WhileLoop(ExternKernel):
         )
 
         self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
 
     @classmethod
     def create(

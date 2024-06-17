@@ -1613,8 +1613,11 @@ def fallback_handler(kernel, add_to_fallback_set=True):
         fallbacks.add(kernel)
 
     def handler(*args, **kwargs):
+        def wrap_tensors(x):
+            return TensorBox.create(x) if x is not None else x
+
         return pytree.tree_map(
-            TensorBox.create, ir.FallbackKernel.create(kernel, *args, **kwargs)
+            wrap_tensors, ir.FallbackKernel.create(kernel, *args, **kwargs)
         )
 
     return handler
@@ -2575,6 +2578,7 @@ def _local_scalar_dense(data):
     binding_sym, keypath = next(iter(unbacked_bindings.items()))
     buffer = ir.DynamicScalar(binding_sym, keypath, data)
     buffer.name = V.graph.register_buffer(buffer)
+    V.graph.register_operation(buffer)
     # NB: the replaced expr is OK to use directly downstream, we want
     # simplifications in this case!
     val = V.graph.current_node.meta["val"]
@@ -3143,6 +3147,7 @@ def index_put_impl_(self, indices, values, accumulate, check):
         scatter,
     )
     buffer.name = V.graph.register_buffer(buffer)
+    V.graph.register_operation(buffer)
 
     if x_ndim == 0:
         self = view(self, [])
@@ -3347,6 +3352,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
             zero_out,
         )
         buffer.name = V.graph.register_buffer(buffer)
+        V.graph.register_operation(buffer)
 
     # self[index[i][j][k]][j][k] += src[i][j][k]  # if dim == 0
     # self[i][index[i][j][k]][k] += src[i][j][k]  # if dim == 1
@@ -3365,6 +3371,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
         scatter,
     )
     buffer.name = V.graph.register_buffer(buffer)
+    V.graph.register_operation(buffer)
 
     if ndim == 0:
         self = view(self, [])
