@@ -32,6 +32,7 @@ def benchmark_torch_function_in_microseconds(func: Callable, *args, **kwargs) ->
 class ExperimentConfig:
     shape: Tuple[int]
     score_mod: Callable
+    mask: Callable
     dtype: torch.dtype
     calculate_bwd_time: bool
 
@@ -120,28 +121,32 @@ def run_single_experiment(config: ExperimentConfig, dynamic=False) -> Experiment
         requires_grad=config.calculate_bwd_time,
     )
 
-    def eager_sdpa(query, key, value, _):
-        return F.scaled_dot_product_attention(query, key, value)
+    def eager_sdpa(query, key, value, score_mod, mask):
+        return F.scaled_dot_product_attention(query, key, value, is_causal=True)
 
-    compiled_sdpa = torch.compile(_flex_attention, dynamic=dynamic)
+    def compiled_sdpa(query, key, value, score_mod, mask):
+        return torch.compile(_flex_attention, dynamic=dynamic)(
+            query, key, value, score_mod, mask
+        )
 
     score_mod = config.score_mod
+    mask = config.mask
 
     forward_eager_time = benchmark_torch_function_in_microseconds(
-        eager_sdpa, query, key, value, score_mod
+        eager_sdpa, query, key, value, score_mod, mask
     )
     forward_compiled_time = benchmark_torch_function_in_microseconds(
-        compiled_sdpa, query, key, value, score_mod
+        compiled_sdpa, query, key, value, score_mod, mask
     )
 
     if config.calculate_bwd_time:
-        out_eager = eager_sdpa(query, key, value, score_mod)
+        out_eager = eager_sdpa(query, key, value, score_mod, mask)
         dOut = torch.randn_like(out_eager)
         backward_eager_time = benchmark_torch_function_in_microseconds(
             out_eager.backward, dOut, retain_graph=True
         )
 
-        out_compile = compiled_sdpa(query, key, value, score_mod)
+        out_compile = compiled_sdpa(query, key, value, score_mod, mask)
         dOut = torch.randn_like(out_eager)
         backward_compile_time = benchmark_torch_function_in_microseconds(
             out_compile.backward, dOut, retain_graph=True
@@ -244,20 +249,20 @@ def print_results(results: List[Experiment]):
         print(tabulate(average_data, headers="keys", tablefmt="github", floatfmt=".3f"))
 
 
-def generate_score_mods() -> List[Callable]:
-    def noop(score, b, h, m, n):
-        return score
+# def generate_score_mods() -> List[Callable]:
+#     def noop(score, b, h, m, n):
+#         return score
 
-    def causal_mask(score, b, h, token_q, token_kv):
-        return torch.where(token_q >= token_kv, score, float("-inf"))
+#     def causal_mask(score, b, h, token_q, token_kv):
+#         return torch.where(token_q >= token_kv, score, float("-inf"))
 
-    def relative_bias(score, b, h, m, n):
-        return score + (m - n)
+#     def relative_bias(score, b, h, m, n):
+#         return score + (m - n)
 
-    def head_bias(score, b, h, m, n):
-        return score + 2 * h
+#     def head_bias(score, b, h, m, n):
+#         return score + 2 * h
 
-    return [noop, causal_mask, relative_bias, head_bias]
+#     return [noop, causal_mask, relative_bias, head_bias]
 
 
 def generate_experiment_configs(calculate_bwd: bool) -> List[ExperimentConfig]:
@@ -268,7 +273,16 @@ def generate_experiment_configs(calculate_bwd: bool) -> List[ExperimentConfig]:
     dtypes = [
         torch.bfloat16,
     ]
-    score_mods = generate_score_mods()
+
+    def noop(score, b, h, m, n):
+        return score
+
+    def mask_fn(batch, head, token_q, token_kv):
+        return token_q >= token_kv
+
+    # score_mods = generate_score_mods()
+    score_mods = [noop]
+    masks = [mask_fn]
     all_configs = []
     for (
         bsz,
@@ -276,15 +290,17 @@ def generate_experiment_configs(calculate_bwd: bool) -> List[ExperimentConfig]:
         (q_seq_len, kv_seq_len),
         head_dim,
         score_mod,
+        mask,
         dtype,
     ) in itertools.product(
-        batch_sizes, num_heads, q_kv_seq_lens, head_dims, score_mods, dtypes
+        batch_sizes, num_heads, q_kv_seq_lens, head_dims, score_mods, masks, dtypes
     ):
         assert q_seq_len == kv_seq_len, "Only equal length inputs supported for now."
         all_configs.append(
             ExperimentConfig(
                 shape=(bsz, n_heads, q_seq_len, head_dim),
                 score_mod=score_mod,
+                mask=mask,
                 dtype=dtype,
                 calculate_bwd_time=calculate_bwd,
             )
