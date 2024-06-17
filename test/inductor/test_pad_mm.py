@@ -424,6 +424,26 @@ class PadMMTest(TestCase):
             repr(local_cache)
         )
 
+    @fresh_inductor_cache()
+    @inductor_config.patch(max_pointwise_cat_inputs=1, force_shape_pad=True)
+    def test_exclude_cat_padding(self):
+        @torch.compile()
+        def mm(a0, a1, b):
+            return torch.cat((a0, a1)) @ b
+
+        inp = torch.rand([22, 22], device="cuda")
+        inp_0 = inp[:11, :]
+        inp_1 = inp[11:, :]
+
+        inp2 = torch.rand([22, 22], device="cuda")
+
+        mm(inp_0, inp_1, inp2)
+
+        local_cache = get_pad_cache().get_local_cache()
+        FileCheck().check_count("exclude_pad:False", 2, exactly=True).run(
+            repr(local_cache)
+        )
+
 
 if __name__ == "__main__":
     if HAS_CUDA:
