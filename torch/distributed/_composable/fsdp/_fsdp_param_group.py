@@ -8,6 +8,7 @@ import torch._dynamo.compiled_autograd as ca
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
+from torch.profiler import record_function
 from torch.utils._pytree import tree_flatten, tree_unflatten
 from torch.utils.hooks import RemovableHandle
 from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy
@@ -200,13 +201,14 @@ class FSDPParamGroup:
             # used in the all-gather streams
             self._wait_all_gather_streams_on_event(self._reshard_after_forward_event)
             self._reshard_after_forward_event = None
-        self._all_gather_result = foreach_all_gather(
-            self.fsdp_params,
-            self._all_gather_process_group,
-            async_op,
-            *self.comm_ctx.get_all_gather_streams(self._training_state),
-            self.device,
-        )
+        with record_function(self._with_fqn("FSDP::all_gather")):
+            self._all_gather_result = foreach_all_gather(
+                self.fsdp_params,
+                self._all_gather_process_group,
+                async_op,
+                *self.comm_ctx.get_all_gather_streams(self._training_state),
+                self.device,
+            )
 
     def wait_for_unshard(self):
         """
@@ -223,9 +225,12 @@ class FSDPParamGroup:
             if prev_all_gather_state := self.comm_ctx.all_gather_state:
                 self._wait_all_gather_streams_on_event(prev_all_gather_state.event)
                 self.comm_ctx.all_gather_state = None  # free the all-gather result
-        foreach_all_gather_copy_out(
-            self._all_gather_result, self.fsdp_params, self._all_gather_process_group
-        )
+        with record_function(self._with_fqn("FSDP::all_gather_copy_out")):
+            foreach_all_gather_copy_out(
+                self._all_gather_result,
+                self.fsdp_params,
+                self._all_gather_process_group,
+            )
         for fsdp_param in self.fsdp_params:
             fsdp_param.init_unsharded_param()
         self._to_unsharded()
@@ -257,7 +262,7 @@ class FSDPParamGroup:
     def pre_forward(
         self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
-        with torch.profiler.record_function("FSDP::pre_forward"):
+        with record_function(self._with_fqn("FSDP::pre_forward")):
             self._training_state = TrainingState.FORWARD
             self.unshard()
             self.wait_for_unshard()
@@ -265,7 +270,7 @@ class FSDPParamGroup:
             return args, kwargs
 
     def post_forward(self, module: nn.Module, input: Any, output: Any):
-        with torch.profiler.record_function("FSDP::post_forward"):
+        with record_function(self._with_fqn("FSDP::post_forward")):
             self.reshard()
             self._record_post_forward()
             self._training_state = TrainingState.IDLE
@@ -281,7 +286,7 @@ class FSDPParamGroup:
     def pre_backward(self, *unused: Any):
         if self._training_state == TrainingState.PRE_BACKWARD:
             return
-        with torch.profiler.record_function("FSDP::pre_backward"):
+        with record_function(self._with_fqn("FSDP::pre_backward")):
             self._training_state = TrainingState.PRE_BACKWARD
             self.unshard()  # no-op if prefetched
             self.wait_for_unshard()
@@ -289,10 +294,10 @@ class FSDPParamGroup:
 
     def post_backward(self, *unused: Any):
         self._training_state = TrainingState.POST_BACKWARD
-        with torch.profiler.record_function("FSDP::post_backward_accumulate"):
+        with record_function(self._with_fqn("FSDP::post_backward_accumulate")):
             for fsdp_param in self.fsdp_params:
                 fsdp_param.accumulate_unsharded_grad_if_needed()
-        with torch.profiler.record_function("FSDP::post_backward_reshard"):
+        with record_function(self._with_fqn("FSDP::post_backward_reshard")):
             if not self.reduce_grads:
                 if self.reshard_after_backward:
                     self.reshard()
@@ -318,7 +323,7 @@ class FSDPParamGroup:
                 self.reshard()
         if len(fsdp_params_with_grad) == 0:
             return
-        with torch.profiler.record_function("FSDP::post_backward_reduce"):
+        with record_function(self._with_fqn("FSDP::post_backward_reduce")):
             self._post_reduce_event, self._partial_reduce_output = foreach_reduce(
                 fsdp_params_with_grad,
                 unsharded_grads,
@@ -355,8 +360,9 @@ class FSDPParamGroup:
             # have mistargeted prefetches if not all modules used in forward
             # are used in this backward
             target_fsdp_param_group = self.comm_ctx.post_forward_order[target_index]
-            with torch.profiler.record_function(
-                "FSDP::backward_prefetch"
+            target_fqn = target_fsdp_param_group._module_fqn
+            with record_function(
+                self._with_fqn(f"FSDP::backward_prefetch for {target_fqn}")
             ), target_fsdp_param_group.use_training_state(TrainingState.PRE_BACKWARD):
                 target_fsdp_param_group.unshard()
 
@@ -404,7 +410,8 @@ class FSDPParamGroup:
     def _register_post_backward_hook(
         self, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
-        # Compile relies on `root_post_backward_callback` to call each `FSDPParamGroup.post_backward`
+        # Compile relies on `root_post_backward_callback` to call each
+        # `FSDPParamGroup.post_backward`
         if ca.compiled_autograd_enabled:
             return args, kwargs
         if not torch.is_grad_enabled():
@@ -487,6 +494,11 @@ class FSDPParamGroup:
     def _all_reduce_process_group(self) -> dist.ProcessGroup:
         assert isinstance(self.mesh_info, HSDPMeshInfo)
         return self.mesh_info.replicate_process_group
+
+    def _with_fqn(self, label: str) -> str:
+        if self._module_fqn:
+            return f"{label} ({self._module_fqn})"
+        return label
 
 
 def _get_param_module_infos(

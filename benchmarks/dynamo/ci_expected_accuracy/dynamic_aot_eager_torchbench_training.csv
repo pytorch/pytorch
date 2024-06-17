@@ -30,7 +30,7 @@ alexnet,pass,6
 
 
 
-basic_gnn_edgecnn,pass,22
+basic_gnn_edgecnn,pass,20
 
 
 
@@ -66,7 +66,7 @@ dlrm,pass,6
 
 
 
-drq,pass,6
+drq,pass,7
 
 
 
@@ -98,7 +98,7 @@ hf_Bert_large,pass,6
 
 
 
-hf_BigBird,pass,49
+hf_BigBird,pass,19
 
 
 
@@ -114,7 +114,7 @@ hf_GPT2_large,pass_due_to_skip,0
 
 
 
-hf_Reformer,pass,26
+hf_Reformer,pass,25
 
 
 
@@ -278,8 +278,8 @@ vgg16,pass,6
 
 
 
-vision_maskrcnn,pass,34
+vision_maskrcnn,pass,33
 
 
 
-yolov3,pass,9
+yolov3,pass,8
