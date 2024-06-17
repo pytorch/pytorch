@@ -1,1 +1,1 @@
-pin_yolo_dep
+51eca7b7d52b29373af3d4cc6261798410efba27
