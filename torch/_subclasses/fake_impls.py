@@ -820,7 +820,8 @@ def meta__scaled_dot_product_cudnn(fake_mode, func, *args, **kwargs):
         max_seqlen_batch_k,
         seed,
         offset,
-        None)
+        None,
+    )
 
 
 @register_op_impl(aten._scaled_dot_product_efficient_attention.default)
@@ -875,7 +876,6 @@ def meta__scaled_dot_product_efficient(fake_mode, func, *args, **kwargs):
     )
 
     return res, logsum_exp, seed, offset
-
 
 
 @register_op_impl(aten._flash_attention_forward.default)

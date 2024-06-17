@@ -2502,7 +2502,7 @@ class TestSDPACudaOnly(NNTestCase):
         major, minor = torch.cuda.get_device_capability(device)
         is_sm90_or_newer = major >= 9
 
-        if type != "nested" and PLATFORM_SUPPORTS_CUDNN_ATTENTION:  #TODO(eqy) REVERT before merging is_sm90_or_newer:
+        if type != "nested" and PLATFORM_SUPPORTS_CUDNN_ATTENTION:  # TODO(eqy) REVERT before merging is_sm90_or_newer:
             assert torch._fused_sdp_choice(query, key, value) == SDPBackend.CUDNN_ATTENTION.value
         elif PLATFORM_SUPPORTS_FLASH_ATTENTION:
             assert torch._fused_sdp_choice(query, key, value) == SDPBackend.FLASH_ATTENTION.value

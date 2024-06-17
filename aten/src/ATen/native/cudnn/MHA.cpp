@@ -254,7 +254,7 @@ thread_local MHAGraphCache<graph_and_tensors_backward, MHACacheKeyWrapper>
 namespace {
 inline bool cudnn_sdpa_check_debug() {
   static bool sdpa_debug =
-    c10::utils::check_env("TORCH_CUDNN_SDPA_DEBUG") == true;
+      c10::utils::check_env("TORCH_CUDNN_SDPA_DEBUG") == true;
   return sdpa_debug;
 }
 
@@ -310,30 +310,33 @@ auto build_graph_and_tensors(
   auto Q = mha_graph->tensor(
       fe::graph::Tensor_attributes()
           .set_name("Q")
-          .set_dim(
-              std::vector<int64_t>(
-                q.sizes().data(), q.sizes().data() + q.sizes().size()))
+          .set_dim(std::vector<int64_t>(
+              q.sizes().data(), q.sizes().data() + q.sizes().size()))
           .set_stride(fixSizeOneDimStrideSDPA(
-                q.sizes(), std::vector<int64_t>(
-                  q.strides().data(), q.strides().data() + q.strides().size()))));
+              q.sizes(),
+              std::vector<int64_t>(
+                  q.strides().data(),
+                  q.strides().data() + q.strides().size()))));
   auto K = mha_graph->tensor(
       fe::graph::Tensor_attributes()
           .set_name("K")
-          .set_dim(
-              std::vector<int64_t>(
-                k.sizes().data(), k.sizes().data() + k.sizes().size()))
+          .set_dim(std::vector<int64_t>(
+              k.sizes().data(), k.sizes().data() + k.sizes().size()))
           .set_stride(fixSizeOneDimStrideSDPA(
-                k.sizes(), std::vector<int64_t>(
-                  k.strides().data(), k.strides().data() + k.strides().size()))));
+              k.sizes(),
+              std::vector<int64_t>(
+                  k.strides().data(),
+                  k.strides().data() + k.strides().size()))));
   auto V = mha_graph->tensor(
       fe::graph::Tensor_attributes()
           .set_name("V")
-          .set_dim(
-              std::vector<int64_t>(
-                v.sizes().data(), v.sizes().data() + v.sizes().size()))
+          .set_dim(std::vector<int64_t>(
+              v.sizes().data(), v.sizes().data() + v.sizes().size()))
           .set_stride(fixSizeOneDimStrideSDPA(
-                v.sizes(), std::vector<int64_t>(
-                  v.strides().data(), v.strides().data() + v.strides().size()))));
+              v.sizes(),
+              std::vector<int64_t>(
+                  v.strides().data(),
+                  v.strides().data() + v.strides().size()))));
   auto attn_scale =
       mha_graph->tensor(fe::graph::Tensor_attributes()
                             .set_name("Attn_scale")
@@ -672,7 +675,7 @@ void run_cudnn_SDP_bprop(
     dO_ = dO.contiguous();
   }
   if (!std::equal(
-      o.strides().begin(), o.strides().end(), dO.strides().begin())) {
+          o.strides().begin(), o.strides().end(), dO.strides().begin())) {
     TORCH_WARN(
         "cuDNN SDPA backward got grad_output.strides() != output.strides(), "
         "attempting to materialize a grad_output with matching strides...");
@@ -683,7 +686,8 @@ void run_cudnn_SDP_bprop(
     }
   }
   TORCH_INTERNAL_ASSERT(
-      std::equal(dO_.strides().begin(), dO_.strides().end(), o.strides().begin()),
+      std::equal(
+          dO_.strides().begin(), dO_.strides().end(), o.strides().begin()),
       "cuDNN SDPA expected grad_output.strides() == output.strides(), "
       "the previous step probably failed to materialize a grad_output "
       "with matching strides...");
