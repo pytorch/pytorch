@@ -36,7 +36,7 @@ if "%~1" == "c10_intrusive_ptr_benchmark" (
   call "%~2"
   goto :eof
 )
-
+pip show torch
 python test\run_test.py --cpp --verbose -i "cpp/%~1"
 if errorlevel 1 (
   echo %1 failed with exit code %errorlevel%
