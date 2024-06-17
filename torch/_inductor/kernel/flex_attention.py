@@ -3,6 +3,9 @@
 import logging
 from enum import auto, Enum
 from typing import Any, List, Tuple
+from torch._inductor.virtualized import V
+import sympy
+from ..runtime.runtime_utils import next_power_of_2
 
 import torch
 from .. import config
@@ -307,10 +310,47 @@ flex_attention_template = TritonTemplate(
 
 def _use_flex_decoding(query):
     # Decide which kernel to use, return true if use flex decoding kernel. 
-    if query.get_size()[-2] <= 32:
-        return True
-    else: 
-        return False
+    return V.graph.sizevars.evaluate_expr(sympy.Lt(query.get_size()[-2], 32+1))
+    
+
+def filtered_configs(
+    b: int, 
+    h: int, 
+    m: int, 
+    d: int, 
+    n: int, 
+    configs: List[Tuple[int, int, int, int]],
+):
+    """ Filter out configs that are too large for input size"""
+    min_block_size = 32
+    m = max(
+        next_power_of_2(
+            V.graph.sizevars.size_hint(
+                m, fallback=torch._inductor.config.unbacked_symint_fallback  # type: ignore[arg-type]
+            )
+        ),
+        min_block_size,
+    )
+
+    n = max(
+        next_power_of_2(
+            V.graph.sizevars.size_hint(
+                n, fallback=torch._inductor.config.unbacked_symint_fallback  # type: ignore[arg-type]
+            )
+        ),
+        min_block_size,
+    )
+
+    filtered_configs = []
+
+    for BLOCK_M, BLOCK_N, num_warps, num_stages  in configs:
+        # shrink configs for small inputs 
+        BLOCK_M = max(min(BLOCK_M, m), min_block_size)
+        BLOCK_N = max(min(BLOCK_N, n), min_block_size)
+        if (BLOCK_M, BLOCK_N, num_warps, num_stages) not in filtered_configs:
+            filtered_configs.append((BLOCK_M, BLOCK_N, num_warps, num_stages))
+
+    return filtered_configs
 
 
 _h100_default_config = {
@@ -355,13 +395,6 @@ def _get_default_config_fwd(query) -> Tuple[int, int, int, int]:
             default_config = (32, 16, 4, 3)
         else:
             default_config = (64, 32, 4, 3)
-
-    # For short query, chose a config with BLOCK_M <= query_len
-    assert query_len >= 32, "Query length must be at least 32 to use FlexAttention kernel. Use FlexDecoding for shorter queries. "
-    if (query_len <= 32) and default_config[0] > 32:
-        default_config = (32, int(default_config[0]*default_config[1]/32), default_config[2], default_config[3])
-    elif (query_len <= 64) and default_config[0] > 64:
-        default_config = (64, int(default_config[0]*default_config[1]/64), default_config[2], default_config[3])
 
     return default_config
 
@@ -432,7 +465,14 @@ def flex_attention(*args, **kwargs):
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function
     # We do need to explicitly pass it in for autotuning though.
-    for BLOCK_M, BLOCK_N, num_warps, num_stages in configs:
+    for BLOCK_M, BLOCK_N, num_warps, num_stages in filtered_configs(
+            b=query.get_size()[0], 
+            h=query.get_size()[1], 
+            m=query.get_size()[-2], 
+            d=query.get_size()[-1], 
+            n=key.get_size()[-2], 
+            configs=configs,
+    ):
         flex_attention_template.maybe_append_choice(
             choices=choices,
             input_nodes=[query, key, value, logsumexp],
