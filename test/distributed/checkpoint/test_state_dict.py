@@ -33,7 +33,11 @@ from torch.distributed.checkpoint.state_dict import (
     set_optimizer_state_dict,
     StateDictOptions,
 )
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, StateDictType, ShardingStrategy
+from torch.distributed.fsdp import (
+    FullyShardedDataParallel as FSDP,
+    ShardingStrategy,
+    StateDictType,
+)
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.distributed.optim import _apply_optimizer_in_backward
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -616,17 +620,13 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         set_model_state_dict(
             fsdp_model,
             model_state_dict=load_states,
-            options=StateDictOptions(
-                broadcast_from_rank0=True, full_state_dict=True
-            ),
+            options=StateDictOptions(broadcast_from_rank0=True, full_state_dict=True),
         )
         set_optimizer_state_dict(
             fsdp_model,
             fsdp_optim,
             optim_state_dict=load_optim_states,
-            options=StateDictOptions(
-                broadcast_from_rank0=True, full_state_dict=True
-            ),
+            options=StateDictOptions(broadcast_from_rank0=True, full_state_dict=True),
         )
 
         check(equal=True)
@@ -668,7 +668,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
                     functools.partial(
                         FSDP,
                         device_mesh=device_mesh,
-                        sharding_strategy=ShardingStrategy.HYBRID_SHARD
+                        sharding_strategy=ShardingStrategy.HYBRID_SHARD,
                     ),
                 ]
             },
