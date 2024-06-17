@@ -24,7 +24,7 @@ from ._fsdp_state import _get_module_fsdp_state, FSDPState
 
 # The decorator adds a state object to `module` that can be accessed via
 # `fully_shard.state(module)`. The state object and module are 1:1.
-@contract(state_cls=FSDPState)
+@contract(state_cls=FSDPState)  # type: ignore[operator]
 def fully_shard(
     module: nn.Module,
     *,
@@ -276,6 +276,11 @@ class FSDPModule:
         prefetch all-gathers in forward. The prefetching runs after this
         module's all-gather copy-out.
 
+        Passing a singleton list containing the next FSDP module gives the same
+        all-gather overlap behavior as the default overlap behavior, except the
+        prefetched all-gather is issued earlier from the CPU. Passing a list
+        with at least length two is required for more aggressive overlap.
+
         Args:
             modules (List[FSDPModule]): FSDP modules to prefetch.
         """
@@ -290,6 +295,11 @@ class FSDPModule:
         prefetch all-gathers in backward. This overrides the default backward
         pretching implementation that prefetches the next FSDP module based on
         the reverse post-forward order.
+
+        Passing a singleton list containing the previous FSDP module gives the
+        same all-gather overlap behavior as the default overlap behavior.
+        Passing a list with at least length two is required for more aggressive
+        overlap.
 
         Args:
             modules (List[FSDPModule]): FSDP modules to prefetch.
@@ -374,6 +384,11 @@ def register_fsdp_forward_method(module: nn.Module, method_name: str) -> None:
         return fsdp_state._post_forward(self, args, out)
 
     # Use `__get__` to make `wrapped_method` an instance method
+    setattr(
+        module,
+        method_name,
+        wrapped_method.__get__(module, type(module)),  # type:ignore[attr-defined]
+    )
     setattr(module, method_name, wrapped_method.__get__(module, type(module)))
 
 
