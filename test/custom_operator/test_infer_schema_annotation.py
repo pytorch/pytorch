@@ -1,4 +1,4 @@
-# Owner(s): ["module: unknown"]
+# Owner(s): ["module: pt2-dispatcher"]
 from __future__ import annotations
 
 import typing
