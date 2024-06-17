@@ -188,7 +188,7 @@ def get_block_to_lifted_attrs(graph: torch._C.Graph) -> Dict[torch._C.Block, Set
 
 def get_op_overload(node: torch._C.Node):
     schema_str = node.schema()
-    schema = torch._C.parse_schema(schema_str)
+    schema: torch._C.FunctionSchema = torch._C.parse_schema(schema_str)
     ns, op_name = str(schema.name).split("::")
     override = schema.overload_name
 
