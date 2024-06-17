@@ -66,7 +66,7 @@ inline void _scale_attn_mask_fusion_kernel_stride0(
   auto vec_scale = at::vec::VectorizedN<T1, T1_n>(val);
   int64_t i = 0;
   auto b_first_val = (T1)b[0];
-  auto b_first_vec = at::vec::Vectorized<T2>(b_first_val);
+  auto b_first_vec = at::vec::VectorizedN<T2, T2_n>(b_first_val);
   for (; i < size - (size % vec_size2); i += vec_size2) {
     auto a_n = at::vec::VectorizedN<T1, T1_n>::loadu(a + i);
     auto b_n = b_first_vec;
