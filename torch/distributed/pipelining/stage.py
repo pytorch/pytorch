@@ -159,6 +159,7 @@ class _PipelineStageBase(ABC):
 
         # To be populated later
         self.chunks: Optional[int] = None
+        self._buffers_initialized: bool = False
 
     @property
     def has_backward(self) -> bool:
@@ -184,6 +185,13 @@ class _PipelineStageBase(ABC):
         Returns true if this stage is the last stage in the pipeline.
         """
         return self.stage_index == self.num_stages - 1
+
+    @property
+    def buffers_initialized(self):
+        """
+        Returns true if the buffers used in send/recv are initialized
+        """
+        return self._buffers_initialized
 
     def _check_chunk_id(self, chunk_id: int):
         if self.chunks is None:
@@ -242,7 +250,7 @@ class _PipelineStageBase(ABC):
         return grad_send_info
 
     @abstractmethod
-    def _prepare_forward_infra(self, num_microbatches: int):
+    def _prepare_forward_infra(self, num_microbatches: int, args, kwargs):
         raise NotImplementedError
 
     def _prepare_backward_infra(self, num_microbatches: int):
@@ -261,6 +269,16 @@ class _PipelineStageBase(ABC):
         act_send_info: Dict,
     ) -> Tuple[_RecvInfo, ...]:
         raise NotImplementedError
+
+    def init_buffers(self, num_microbatches: int, args, kwargs):
+        # foward
+        self._prepare_forward_infra(num_microbatches, args, kwargs)
+
+        # backward
+        if self.has_backward:
+            self._prepare_backward_infra(num_microbatches)
+
+        self._buffers_initialized = True
 
     def _get_recv_ops(
         self,
@@ -704,9 +722,11 @@ class _PipelineStage(_PipelineStageBase):
         else:
             self.submod.to(self.device)
 
-    def _prepare_forward_infra(self, num_microbatches: int):
+    def _prepare_forward_infra(self, num_microbatches: int, _args, _kwargs):
         """
         Create send/recv infrastructures for activations (during forward)
+        Note: _args and _kwargs are placeholders to match the abstract method signature
+            and are not used in this implementation.
         """
         # Flag per chunk to keep track of whether we have set `requires_grad`
         # for receive buffers. Format: {chunk : Boolean}
@@ -1111,28 +1131,12 @@ class PipelineStage(_PipelineStageBase):
         stage_index: int,
         num_stages: int,
         device: torch.device,
-        input_args: Union[torch.Tensor, Tuple[torch.Tensor, ...]],
+        input_args: Optional[Union[torch.Tensor, Tuple[torch.Tensor, ...]]] = None,
         output_args: Optional[Union[torch.Tensor, Tuple[torch.Tensor, ...]]] = None,
         group: Optional[dist.ProcessGroup] = None,
     ):
         super().__init__(submodule, stage_index, num_stages, device, group)
         self.submod.to(self.device)
-        # When we materialize the model partition on cuda, we call reset_parameters() if it is available
-        self.inputs: List[torch.Tensor] = []
-        self.outputs: List[torch.Tensor] = []
-
-        self.inputs = _create_empty_tensors(input_args, device)
-
-        if output_args is None:
-            logger.info("output_args not provided, performing forward using input_args")
-            self.outputs = self.submod(*self.inputs)
-            # create buffers for the output so that the data is in the correct
-            # shape in order to use in p2p op (send)
-            self.outputs = _create_empty_tensors(self.outputs, device)
-        else:
-            self.outputs = _create_empty_tensors(output_args, device)
-
-        self._configure_outputs_meta(tuple(self.outputs))
 
         # these are the buffers used in backwards send/recv, they are allocated later
         self.outputs_grad: List[torch.Tensor] = []
@@ -1147,14 +1151,56 @@ class PipelineStage(_PipelineStageBase):
         self.prev_stage = stage_global_rank((self.group_rank - 1) % self.group_size)
         self.next_stage = stage_global_rank((self.group_rank + 1) % self.group_size)
 
+        self.inputs = None
+
         logger.debug(
             f"finished pipeline stage init, {self.stage_index=}, {self.is_first=}, "  # noqa: G004
             f"{self.is_last=}, {self.num_stages=}, "
-            f"inputs: {[inp.shape for inp in self.inputs]}, "
-            f"output: {[output.shape for output in self.outputs]}"
         )
 
-    def _prepare_forward_infra(self, num_microbatches: int) -> None:
+    def _initial_model_run_for_input_outputs(self, args, kwargs):
+        if self.is_first:
+            input_args, input_kwargs = args, kwargs
+        else:
+            objects = [None]
+            logger.debug(f"{self.stage_index} receiving from stage {self.prev_stage}")
+            dist.recv_object_list(
+                objects, src=self.prev_stage, group=self.group, device=self.device
+            )
+            logger.debug(
+                f"{self.stage_index} received {objects} from stage {self.prev_stage}"
+            )
+            recv_args, input_kwargs = objects[0], {}
+            input_args = [
+                x.to(self.device) if isinstance(x, torch.Tensor) else x
+                for x in recv_args
+            ]
+
+        # set attributes needed for forward
+        inputs = input_args
+        with torch.no_grad():
+            logger.debug(
+                f"{self.stage_index} running with {input_args=}, {input_kwargs=}"
+            )
+            outputs = self.submod(*input_args, **input_kwargs)
+            logger.debug(f"{self.stage_index} finished fwd")
+        # if single tensor, convert so it is always a list
+        if isinstance(outputs, torch.Tensor):
+            outputs = [outputs]
+
+        if not self.is_last:
+            dist.send_object_list(
+                [outputs], dst=self.next_stage, group=self.group, device=self.device
+            )
+            logger.debug(
+                f"{self.stage_index} sending {outputs} to stage {self.next_stage}"
+            )
+        dist.barrier()
+        return inputs, outputs
+
+    def _prepare_forward_infra(self, num_microbatches: int, args, kwargs) -> None:
+        inputs, self.outputs = self._initial_model_run_for_input_outputs(args, kwargs)
+
         # Receive info during forward
         # TODO: create args_recv_info lazily? (same needed for PipelineStage)
         for chunk_id in range(num_microbatches):
@@ -1168,14 +1214,14 @@ class PipelineStage(_PipelineStageBase):
                             self.stage_index - 1,
                             _make_tensor_from_meta(inp, self.device),
                         )
-                        for inp in self.inputs
+                        for inp in inputs
                     ]
                 )
 
                 self.args_recv_info[chunk_id] = recv_infos
             else:
                 self.args_recv_info[chunk_id] = tuple(
-                    [_RootArgPlaceholder(i) for i in self.inputs]
+                    [_RootArgPlaceholder(i) for i in inputs]
                 )
 
         # Send info during forward for each activation
@@ -1187,6 +1233,7 @@ class PipelineStage(_PipelineStageBase):
                 self.act_send_info[idx] = [self.stage_index + 1]
             else:
                 self.act_send_info[idx] = []
+        self._configure_outputs_meta(tuple(self.outputs))
 
     def _create_grad_recv_info(
         self,

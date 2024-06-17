@@ -266,18 +266,17 @@ class ScheduleTest(MultiProcContinousTest):
         # Get a submodule, e.g. `layers.0` or `layers.1`
         submod_name = f"layers.{self.rank}"
         stage_module = full_mod.get_submodule(submod_name)
-        chunks = 4
+        num_microbatches = 4
         # Create a pipeline stage to wrap that submodule
         stage = PipelineStage(
             stage_module,
             self.rank,
             self.world_size,
             self.device,
-            input_args=x.chunk(chunks)[0],
         )
 
         # Attach to a schedule
-        schedule = ScheduleClass(stage, chunks, loss_fn=loss_fn)
+        schedule = ScheduleClass(stage, num_microbatches, loss_fn=loss_fn)
 
         # Run
         for _ in range(2):
@@ -348,21 +347,19 @@ class ScheduleTest(MultiProcContinousTest):
             full_mod.get_submodule(submod_name) for submod_name in submod_names
         ]
         # Create a pipeline stage to wrap that submodule
-        chunks = 8
-        input_args = x.chunk(chunks)[0]
+        num_microbatches = 8
         stages = [
             PipelineStage(
                 stage_module,
                 stage_idx,
                 n_stages,
                 self.device,
-                input_args=input_args,
             )
             for stage_module, stage_idx in zip(stage_modules, stage_indices)
         ]
 
         # Attach to a schedule
-        schedule = ScheduleClass(stages, chunks, loss_fn=loss_fn)
+        schedule = ScheduleClass(stages, num_microbatches, loss_fn=loss_fn)
 
         # Run
         for _ in range(2):

@@ -133,7 +133,6 @@ class ComposabilityTest(MultiProcContinousTest):
                 num_stages,
                 self.device,
                 group=pp_group,
-                input_args=input_mb[0],
             )
             return stage, offset
 
