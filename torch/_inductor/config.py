@@ -909,6 +909,11 @@ class trace:
 _save_config_ignore = [
     # workaround: "Can't pickle <function ...>"
     "trace.upload_tar",
+    "post_grad_custom_post_pass",
+    "post_grad_custom_pre_pass",
+    "joint_custom_pre_pass",
+    "joint_custom_post_pass",
+    "pre_grad_custom_pass",
 ]
 
 _cache_config_ignore_prefix = [

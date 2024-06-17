@@ -1422,7 +1422,6 @@ def cat(inputs, dim=0):
         (len(inputs) <= config.max_pointwise_cat_inputs)
         and all(op_count(t) <= MAX_SIMPLE_OP_COUNT for t in inputs)
     ):
-        # add aten.constant_pad_nd
         pointwise_uses = all(
             is_pointwise_use(use, additional_pointwise_ops)
             for use in V.current_node.users

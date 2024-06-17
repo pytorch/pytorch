@@ -319,7 +319,7 @@ def is_pointwise_use(
     """
     Do all uses of this op have torch.Tag.pointwise or return True for optional `is_pointwise_fn`
 
-    Uses in views will follow the views uses
+    Uses in views ops will follow the views uses
     """
 
     if not use.op == "call_function":
