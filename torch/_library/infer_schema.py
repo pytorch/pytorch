@@ -25,14 +25,7 @@ def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
 
     def convert_type_string(annotation_type: str) -> type:
         try:
-            actual_type = eval(annotation_type)
-            if isinstance(actual_type, type):
-                return actual_type
-            else:
-                error_fn(
-                    f"Parameter {name} has unsupported type annotation "
-                    f"{param.annotation}. It is not a type."
-                )
+            return eval(annotation_type)
         except Exception as e:
             error_fn(
                     f"Parameter {name} has unsupported type annotation "
