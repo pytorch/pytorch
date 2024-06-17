@@ -35,6 +35,7 @@ class ExperimentConfig:
     dtype: torch.dtype
     backend: SDPBackend
     device: torch.device = torch.device("cuda")
+    packed_layout: bool = False
 
     @property
     def head_dim(self) -> int:
@@ -69,6 +70,30 @@ class Experiment:
 def get_input(
     config: ExperimentConfig,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    if config.packed_layout:
+        assert (
+            config.q_seq_len == config.kv_seq_len
+        ), "Q and KV seq len must be equal for the packed layout"
+        q, k, v = torch.randn(
+            config.batch_size,
+            config.q_seq_len,
+            config.num_heads * config.head_dim * 3,
+            dtype=config.dtype,
+            device=config.device,
+            requires_grad=True,
+        ).chunk(3, dim=-1)
+
+        q = q.view(config.batch_size, -1, config.num_heads, config.head_dim).transpose(
+            1, 2
+        )
+        k = k.view(config.batch_size, -1, config.num_heads, config.head_dim).transpose(
+            1, 2
+        )
+        v = v.view(config.batch_size, -1, config.num_heads, config.head_dim).transpose(
+            1, 2
+        )
+        return q, k, v
+
     q = torch.randn(
         (config.batch_size, config.num_heads, config.q_seq_len, config.head_dim),
         dtype=config.dtype,
@@ -127,11 +152,12 @@ def generate_experiment_configs() -> List[ExperimentConfig]:
     num_heads = [16]
     q_kv_seq_lens = [(128, 128), (256, 256), (512, 512), (1024, 1024)]
     embed_dims = [2048]
-    backends = [None]  # If set to None, all backends are enabled
+    backends = [SDPBackend.CUDNN_ATTENTION]  # If set to None, all backends are enabled
     dtypes = [
         torch.bfloat16,
     ]
     is_causal = [True, False]
+    packed_layout = [True]
     all_configs = []
     for (
         bsz,
@@ -141,8 +167,16 @@ def generate_experiment_configs() -> List[ExperimentConfig]:
         causal,
         dtype,
         backend,
+        packed,
     ) in itertools.product(
-        batch_sizes, num_heads, q_kv_seq_lens, embed_dims, is_causal, dtypes, backends
+        batch_sizes,
+        num_heads,
+        q_kv_seq_lens,
+        embed_dims,
+        is_causal,
+        dtypes,
+        backends,
+        packed_layout,
     ):
         all_configs.append(
             ExperimentConfig(
@@ -154,6 +188,7 @@ def generate_experiment_configs() -> List[ExperimentConfig]:
                 is_causal=causal,
                 dtype=dtype,
                 backend=backend,
+                packed_layout=packed,
             )
         )
 
