@@ -49,7 +49,12 @@ from torch._dynamo.testing import (
     unsupported,
     xfailIfPy312,
 )
-from torch._dynamo.utils import CompileProfiler, counters, ifdynstaticdefault
+from torch._dynamo.utils import (
+    CompileProfiler,
+    counters,
+    ifdynstaticdefault,
+    strip_color_from_string,
+)
 from torch._inductor.utils import run_and_get_code
 from torch.ao.quantization import MinMaxObserver
 from torch.ao.quantization.fake_quantize import FakeQuantize
@@ -569,6 +574,23 @@ class MiscTests(torch._inductor.test_case.TestCase):
         cleanup_op("mylib::foo")
         del lib
 
+    def test_auto_functionalize_can_with_none_return(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("foo(Tensor x, Tensor(a!) out) -> None")
+
+            def foo_impl(x, out):
+                out.copy_(x)
+
+            lib.impl("foo", foo_impl, "CompositeExplicitAutograd")
+            x = torch.randn(3)
+            out = torch.zeros(3)
+
+            @torch.compile
+            def f(x, out):
+                torch.ops.mylib.foo(x, out)
+
+            f(x, out)
+
     def test_user_defined_setattr1(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(obj):
@@ -726,6 +748,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
             post_grad_graphs = "\n".join(
                 log_stream.getvalue().strip().split("\n")[3:]
             ).strip()
+            post_grad_graphs = strip_color_from_string(post_grad_graphs)
 
             # Check the graph under static shapes
             if torch._dynamo.config.assume_static_by_default:
@@ -788,6 +811,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
                 post_grad_graphs = "\n".join(
                     log_stream.getvalue().strip().split("\n")[3:]
                 ).strip()
+                post_grad_graphs = strip_color_from_string(post_grad_graphs)
                 self.assertExpectedInline(
                     post_grad_graphs,
                     """\
@@ -880,6 +904,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
                 post_grad_graphs = "\n".join(
                     log_stream.getvalue().strip().split("\n")[3:]
                 ).strip()
+                post_grad_graphs = strip_color_from_string(post_grad_graphs)
                 self.assertExpectedInline(
                     post_grad_graphs,
                     """\
