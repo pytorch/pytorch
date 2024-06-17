@@ -1571,8 +1571,12 @@ def _export(
         else nullcontext()
     )
     with override_decomp as patched_ops:
-        should_patch_ops = patch('torch._ops.OPS_THAT_SHOULDNT_GET_DECOMPOSED', patched_ops) if patched_ops is not None else nullcontext()
-        with should_patch_ops:
+        should_patch_ops = (
+            patch("torch._ops.OPS_THAT_SHOULDNT_GET_DECOMPOSED", patched_ops)  # type: ignore[attr-defined]
+            if patched_ops is not None
+            else nullcontext()
+        )
+        with should_patch_ops:  # type: ignore[attr-defined]
             aten_export_artifact = export_func(
                 mod,
                 args,

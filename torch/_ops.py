@@ -35,7 +35,9 @@ def dl_open_guard():
         sys.setdlopenflags(old_flags)
 
 
-OPS_THAT_SHOULDNT_GET_DECOMPOSED = []
+# export monkey-patches this list while exporting to
+# customize op.decompose function
+OPS_THAT_SHOULDNT_GET_DECOMPOSED: List["OpOverload"] = []
 
 
 class OperatorBase:
