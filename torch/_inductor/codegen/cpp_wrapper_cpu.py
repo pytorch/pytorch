@@ -2421,7 +2421,16 @@ if (py_{buf_name}.get() == NULL) {{
                     # type_ is Optional[Tensor]
                     # Similar to other data type, use pointer to denote optional tensor arg in v2 C shim
                     base_handle = self.val_to_arg_str(val, element_type)
-                    if "wrap_with_raii_handle_if_needed" in base_handle:
+                    if config.use_minimal_arrayref_interface:
+                        base_handle = (
+                            f"convert_arrayref_tensor_to_tensor({base_handle})"
+                        )
+                    if base_handle.startswith(
+                        (
+                            "convert_arrayref_tensor_to_tensor",
+                            "wrap_with_raii_handle_if_needed",
+                        )
+                    ):
                         # wrap_with_raii_handle_if_needed creates a temp RAIIAtenTensorHandle, so we need to
                         # explicitly store it. Otherwise, it will be destroyed before the fallback kernel call.
                         tmp_var_name = f"var_{next(self.arg_var_id)}"
