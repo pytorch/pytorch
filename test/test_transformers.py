@@ -3049,6 +3049,7 @@ class TestSDPACudaOnly(NNTestCase):
             kwargs['return_debug_mask'] = dropout_p > 0.0
         if fused_kernel == SDPBackend.CUDNN_ATTENTION:
             kwargs["compute_log_sumexp"] = True
+            kwargs["attn_bias"] = None
             if "return_debug_mask" in kwargs:
                 kwargs.pop("return_debug_mask")
         with torch.cuda.stream(s):

@@ -748,10 +748,11 @@ __global__ void unpack_cudnn(at::PhiloxCudaState arg, int64_t* seed_ptr, int64_t
   }
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_cuda(
+std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_cuda(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
+    const std::optional<Tensor>& attn_bias,
     bool compute_logsumexp,
     double dropout_p,
     bool is_causal,
@@ -820,7 +821,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_c
                       cudnn_seed/*Tensor dropoutseed*/,
                       cudnn_offset/*Tensor dropoutoffset*/);
 
-  return std::make_tuple(attention, log_sumexp, cudnn_seed, cudnn_offset);
+  // TODO(eqy): support debug_attn_mask
+  return std::make_tuple(attention, log_sumexp, Tensor(), Tensor(), max_seqlen_batch_q, max_seqlen_batch_k, cudnn_seed, cudnn_offset, Tensor());
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attention_cuda(

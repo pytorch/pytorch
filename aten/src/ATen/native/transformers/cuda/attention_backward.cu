@@ -173,10 +173,11 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_backward_
     const Tensor& logsumexp,
     const Tensor& philox_seed,
     const Tensor& philox_offset,
-//    const Tensor& cumulative_sequence_length_q,
-//    const Tensor& cumulative_sequence_length_k,
-//    const int64_t max_seqlen_batch_q,
-//    const int64_t max_seqlen_batch_k,
+    const Tensor& attn_bias,
+    const Tensor& cumulative_sequence_length_q,
+    const Tensor& cumulative_sequence_length_k,
+    const int64_t max_seqlen_batch_q,
+    const int64_t max_seqlen_batch_k,
     double dropout_p,
     bool is_causal,
     c10::optional<double> scale) {
@@ -194,8 +195,6 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_backward_
     const int64_t num_heads = query.size(1);
     const int64_t head_dim_qk = query.size(3);
     const int64_t head_dim_v = value.size(3);
-    const int64_t max_seqlen_batch_q = query.size(1);
-    const int64_t max_seqlen_batch_k = key.size(1);
     const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
     auto dq = at::empty_like(query);
     auto dk = at::empty_like(key);

@@ -774,7 +774,7 @@ def meta__scaled_dot_product_cudnn(fake_mode, func, *args, **kwargs):
     key = kwargs["key"]
     value = kwargs["value"]
     compute_log_sumexp = kwargs["compute_log_sumexp"]
-    # unused:dropout_p, is_causal, scale
+    # unused:attn_bias, dropout_p, is_causal, scale
 
     def convert_tensor(t, device):
         return FakeTensor(fake_mode, t, device)
@@ -808,7 +808,19 @@ def meta__scaled_dot_product_cudnn(fake_mode, func, *args, **kwargs):
         torch.empty((), dtype=torch.long, device="meta"), query.device
     )
 
-    return res, logsum_exp, seed, offset
+    max_seqlen_batch_q = query.size(2)
+    max_seqlen_batch_k = key.size(2)
+
+    return (
+        res,
+        logsum_exp,
+        None,
+        None,
+        max_seqlen_batch_q,
+        max_seqlen_batch_k,
+        seed,
+        offset,
+        None)
 
 
 @register_op_impl(aten._scaled_dot_product_efficient_attention.default)
