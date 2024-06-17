@@ -295,10 +295,11 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         ]
         return self.redistribute(device_mesh=self.device_mesh, placements=placements)
 
-    def __coerce_same_metadata_as_tangent__(self, metadata_tensor):
+    def __coerce_same_metadata_as_tangent__(self, flatten_spec):
+        (spec, _) = flatten_spec  # Result of tensor_flatten()
         return self.redistribute(
             device_mesh=self.device_mesh,
-            placements=metadata_tensor.placements,
+            placements=spec.placements,
         )
 
     @classmethod
