@@ -1330,19 +1330,21 @@ def triton_config_reduction(size_hints, x, r, num_stages=1, num_warps=None) -> C
     default_num_warps = 4 if torch.version.hip else 8
     min_num_warps = 1 if torch.version.hip else 2
     num_warps = next_power_of_2(min(max(num_warps, min_num_warps), default_num_warps))
-    
-    # Check if maxGridSize is exceeded - if so then must scale XBLOCK further 
+
+    # Check if maxGridSize is exceeded - if so then must scale XBLOCK further
     max_grid_x = 4294967295 if torch.version.hip else 2147483647
     warp_size = 64 if torch.version.hip else 32
     num_blocks = int((size_hints[0] + x - 1) // x)
-    while(num_blocks * num_warps * warp_size) > max_grid_x:
-        if (x >= TRITON_MAX_BLOCK["X"]):
+    while (num_blocks * num_warps * warp_size) > max_grid_x:
+        if x >= TRITON_MAX_BLOCK["X"]:
             if num_warps == 1:
                 break  # If no more scaling possible then break
-            num_warps = int(num_warps / 2)  # If max XBLOCK then scale down warps as last resort
+            num_warps = int(
+                num_warps / 2
+            )  # If max XBLOCK then scale down warps as last resort
         x *= 2  # Scale up XBLOCK if grid exceeds limits
         num_blocks = int(num_blocks / 2)
-    while conditional_product(x, r) > target: 
+    while conditional_product(x, r) > target:
         if r == 1:
             break
         r = int(r / 2)
