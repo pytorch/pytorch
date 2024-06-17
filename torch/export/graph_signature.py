@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import dataclasses
 from enum import auto, Enum
 from typing import Collection, Dict, List, Mapping, Optional, Set, Tuple, Union

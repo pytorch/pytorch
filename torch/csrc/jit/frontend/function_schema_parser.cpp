@@ -3,7 +3,6 @@
 #include <ATen/core/Reduction.h>
 #include <ATen/core/type_factory.h>
 #include <c10/util/Optional.h>
-#include <c10/util/string_utils.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
 #include <torch/csrc/jit/frontend/schema_type_parser.h>
@@ -157,7 +156,7 @@ struct SchemaParser {
       // note: an array with a size hint can only occur at the Argument level
       fake_type = ListType::create(std::move(fake_type));
       real_type = ListType::create(std::move(real_type));
-      N = c10::stoll(L.expect(TK_NUMBER).text());
+      N = std::stoll(L.expect(TK_NUMBER).text());
       L.expect(']');
       auto container = type_parser.parseAliasAnnotation();
       if (alias_info) {
@@ -244,14 +243,14 @@ struct SchemaParser {
           n = L.expect(TK_NUMBER).text();
 
         if (kind == TypeKind::ComplexType || n.find('j') != std::string::npos) {
-          auto imag = c10::stod(n.substr(0, n.size() - 1));
+          auto imag = std::stod(n.substr(0, n.size() - 1));
           return c10::complex<double>(0, imag);
         } else if (
             kind == TypeKind::FloatType || n.find('.') != std::string::npos ||
             n.find('e') != std::string::npos) {
-          return c10::stod(n);
+          return std::stod(n);
         } else {
-          int64_t v = c10::stoll(n);
+          int64_t v = std::stoll(n);
           return v;
         }
     }

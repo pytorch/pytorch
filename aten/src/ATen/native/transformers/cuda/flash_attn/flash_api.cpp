@@ -602,7 +602,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
         cu_seqlens_q_d = nullptr;
     }
 
-    const int total_q = q.sizes()[0];
+    const int total_q = temp_q.sizes()[0];
 
     TORCH_CHECK(batch_size > 0, "batch size must be positive");
     TORCH_CHECK(head_size_og <= 256, "FlashAttention forward only supports head dimension at most 256");

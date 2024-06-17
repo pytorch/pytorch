@@ -121,6 +121,15 @@ static PyObject* MPSModule_driverAllocatedMemory(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* MPSModule_recommendedMaxMemory(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return THPUtils_packUInt64(
+      at::detail::getMPSHooks().getRecommendedMaxMemory());
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* MPSModule_profilerStartTrace(
     PyObject* _unused,
     PyObject* args) {
@@ -242,6 +251,10 @@ static struct PyMethodDef _MPSModule_methods[] = {
      nullptr},
     {"_mps_driverAllocatedMemory",
      MPSModule_driverAllocatedMemory,
+     METH_NOARGS,
+     nullptr},
+    {"_mps_recommendedMaxMemory",
+     MPSModule_recommendedMaxMemory,
      METH_NOARGS,
      nullptr},
     {"_mps_profilerStartTrace",
