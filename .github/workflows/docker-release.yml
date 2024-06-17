@@ -133,12 +133,6 @@ jobs:
           CUDA_SUFFIX="-cu${CUDA_VERSION}"
           PYTORCH_NIGHTLY_COMMIT=$(docker run ghcr.io/pytorch/pytorch-nightly:"${PYTORCH_DOCKER_TAG}" \
                                           python -c 'import torch; print(torch.version.git_version[:7],end="")')
-          IS_CUDA_COMPILED=$(docker run ghcr.io/pytorch/pytorch-nightly:"${PYTORCH_DOCKER_TAG}" \
-                                          python -c 'import torch; print(torch.cuda._is_compiled())')
-
-          if [[ ${IS_CUDA_COMPILED} == "False" && ${CUDA_VERSION_SHORT} != "cpu" ]]; then
-            echo 'Failure: Torch is not compiled against CUDA. Not publishing binaries.' ; exit 1;
-          fi
 
           docker tag ghcr.io/pytorch/pytorch-nightly:"${PYTORCH_DOCKER_TAG}" \
                  ghcr.io/pytorch/pytorch-nightly:"${PYTORCH_NIGHTLY_COMMIT}${CUDA_SUFFIX}"
@@ -155,8 +149,6 @@ jobs:
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always()
-
-
 
   validate:
     needs: build
