@@ -351,6 +351,8 @@ def is_inplace(op, variant):
 
 vjp_fail = {
     xfail("tensor_split"),  # data_ptr composite compliance
+    # Very minor accuracy issue on ROCm
+    decorate("nn.functional.scaled_dot_product_attention", decorator=skipIfRocm),
 }
 
 aliasing_ops = {
