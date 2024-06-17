@@ -22,9 +22,10 @@ from weakref import ReferenceType
 import torch
 import torch.fx.traceback as fx_traceback
 from torch._functorch._aot_autograd.functional_utils import is_fun
-from torch.utils._pytree import tree_map
 from torch.testing._internal.logging_tensor import capture_logs, LoggingTensorMode
 from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils._pytree import tree_map
+
 
 __all__ = [
     "checkpoint",

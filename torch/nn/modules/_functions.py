@@ -17,8 +17,6 @@ class SyncBatchNorm(Function):
         process_group,
         world_size,
     ):
-        import torch.distributed as dist
-
         if not (
             input.is_contiguous(memory_format=torch.channels_last)
             or input.is_contiguous(memory_format=torch.channels_last_3d)
@@ -71,7 +69,7 @@ class SyncBatchNorm(Function):
                 dtype=combined.dtype,
                 device=combined.device,
             )
-            dist.all_gather_into_tensor(
+            torch.distributed.all_gather_into_tensor(
                 combined_flat, combined, process_group, async_op=False
             )
             combined = torch.reshape(combined_flat, (world_size, combined_size))
@@ -80,7 +78,9 @@ class SyncBatchNorm(Function):
         else:
             # world_size * (2C + 1)
             combined_list = [torch.empty_like(combined) for _ in range(world_size)]
-            dist.all_gather(combined_list, combined, process_group, async_op=False)
+            torch.distributed.all_gather(
+                combined_list, combined, process_group, async_op=False
+            )
             combined = torch.stack(combined_list, dim=0)
             # world_size * (2C + 1) -> world_size * C, world_size * C, world_size * 1
             mean_all, invstd_all, count_all = torch.split(combined, num_channels, dim=1)
