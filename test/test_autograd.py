@@ -8247,11 +8247,11 @@ for shape in [(1,), ()]:
 
         # Transition from null to non-null AutogradMeta is probably monotonic today
         b.requires_grad_(True)
-        self.assertFalse(torch._C._has_null_autograd_meta(a))
+        self.assertFalse(torch._C._has_null_autograd_meta(b))
         b.requires_grad_(False)
-        self.assertFalse(torch._C._has_null_autograd_meta(a))
+        self.assertFalse(torch._C._has_null_autograd_meta(b))
         b.detach_()
-        self.assertFalse(torch._C._has_null_autograd_meta(a))
+        self.assertFalse(torch._C._has_null_autograd_meta(b))
 
     def test_custom_function_return_view_in_nograd(self):
         class Alias(Function):
