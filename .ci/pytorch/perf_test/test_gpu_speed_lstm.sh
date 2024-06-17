@@ -9,7 +9,7 @@ test_gpu_speed_lstm () {
   export OMP_NUM_THREADS=4
   export MKL_NUM_THREADS=4
 
-  git clone https://github.com/pytorch/benchmark.git
+  git clone https://github.com/eellison/benchmark.git
 
   cd benchmark/
 
