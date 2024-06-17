@@ -11,8 +11,8 @@ from torch._utils import (
     _get_device_index,
     _get_devices_properties,
 )
+from torch.nn.modules import Module
 
-from ..modules import Module
 from .parallel_apply import parallel_apply
 from .replicate import replicate
 from .scatter_gather import gather, scatter_kwargs
