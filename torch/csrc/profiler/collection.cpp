@@ -24,9 +24,7 @@
 #include <torch/csrc/profiler/data_flow.h>
 #include <torch/csrc/profiler/kineto_shim.h>
 
-namespace torch {
-namespace profiler {
-namespace impl {
+namespace torch::profiler::impl {
 using result_ptr_t = std::shared_ptr<Result>;
 using trace_ptr_t =
     std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>;
@@ -202,7 +200,7 @@ auto InputOutputEncoder::getIValueGenerator(const IOType& io_type) {
       if (io_type == tagToIOType(tag)) {
         out.emplace_back(std::move(input));
       } else {
-        out.emplace_back(c10::nullopt);
+        out.emplace_back(std::nullopt);
       }
     };
 
@@ -225,7 +223,7 @@ auto InputOutputEncoder::getIValueGenerator(const IOType& io_type) {
             arg.emplace_back(decode_tensor());
           }
           if (found_undefined) {
-            push_value(*tag_it, c10::nullopt);
+            push_value(*tag_it, std::nullopt);
           } else {
             push_value(Tag::TensorListBegin, std::move(arg));
           }
@@ -238,7 +236,7 @@ auto InputOutputEncoder::getIValueGenerator(const IOType& io_type) {
 
         case Tag::UndefinedTensor:
         case Tag::Other:
-          push_value(*tag_it, c10::nullopt);
+          push_value(*tag_it, std::nullopt);
           break;
 
         case Tag::TERMINATOR:
@@ -1512,6 +1510,4 @@ void set_cuda_sync_enabled_val(bool val) {
   cuda_sync_enabled_fn() = [val]() { return val; };
 }
 
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl

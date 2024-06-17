@@ -5,15 +5,13 @@ import re
 import unittest
 import functools
 from subprocess import CalledProcessError
-
+import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._inductor.codecache import CppCodeCache
 from torch.utils._triton import has_triton
 from torch.testing._internal.common_utils import (
     LazyVal,
     IS_FBCODE,
 )
-from torch._dynamo.backends.registry import register_backend
-from torch._inductor.compile_fx import compile_fx, count_bytes_inner
 from torch.testing._internal.common_utils import TestCase
 
 def test_cpu():
@@ -47,10 +45,6 @@ tmp_gpus = [x for x in GPUS if getattr(torch, x).is_available()]
 assert len(tmp_gpus) <= 1
 GPU_TYPE = "cuda" if len(tmp_gpus) == 0 else tmp_gpus.pop()
 del tmp_gpus
-
-@register_backend
-def count_bytes_inductor(gm, example_inputs):
-    return compile_fx(gm, example_inputs, inner_compile=count_bytes_inner)
 
 def _check_has_dynamic_shape(
     self: TestCase,

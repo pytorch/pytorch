@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import os
 from dataclasses import dataclass, field
 from enum import Enum
@@ -13,6 +14,7 @@ __all__ = [
     "Metadata",
     "MetadataIndex",
     "TensorProperties",
+    "StorageMeta",
 ]
 
 

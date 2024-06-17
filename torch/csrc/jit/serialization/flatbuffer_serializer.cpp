@@ -61,7 +61,7 @@ static TypePtr realType(TypePtr type) {
   }
 }
 
-auto print_type(const c10::Type& t) -> c10::optional<std::string> {
+auto print_type(const c10::Type& t) -> std::optional<std::string> {
   auto namedType = t.cast<c10::NamedType>();
   if (namedType && namedType->name()) {
     return namedType->name().value().qualifiedName();
@@ -69,7 +69,7 @@ auto print_type(const c10::Type& t) -> c10::optional<std::string> {
   if (auto dyn = t.castRaw<c10::DynamicType>()) {
     return dyn->fallback()->annotation_str();
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 class FlatbufferSerializer {
@@ -298,7 +298,7 @@ flatbuffers::Offset<mobile::serialization::Function> FlatbufferSerializer::
   auto register_size = static_cast<int>(code.register_size_);
 
   // schema
-  auto type_printer = [&](const c10::Type& t) -> c10::optional<std::string> {
+  auto type_printer = [&](const c10::Type& t) -> std::optional<std::string> {
     auto namedType = t.cast<c10::NamedType>();
     if (namedType && namedType->name()) {
       return namedType->name().value().qualifiedName();
@@ -306,7 +306,7 @@ flatbuffers::Offset<mobile::serialization::Function> FlatbufferSerializer::
     if (auto dyn = t.castRaw<c10::DynamicType>()) {
       return dyn->fallback()->annotation_str();
     }
-    return c10::nullopt;
+    return std::nullopt;
   };
 
   flatbuffers::Offset<mobile::serialization::Schema> schema_offset = 0;

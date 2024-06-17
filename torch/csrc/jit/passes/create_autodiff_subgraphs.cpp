@@ -281,13 +281,13 @@ class SubgraphSlicer {
 
   // Try to merge `producer` into `consumer`. If successful, this destroys
   // `producer` and returns the `consumer` group.
-  c10::optional<Node*> tryMerge(Node* consumer, Node* producer) {
+  std::optional<Node*> tryMerge(Node* consumer, Node* producer) {
     AT_ASSERT(consumer->kind() == prim::DifferentiableGraph);
     bool canMerge = shouldConsiderForMerge(producer) &&
         aliasDb_.moveBeforeTopologicallyValid(producer, consumer);
 
     if (!canMerge) {
-      return c10::nullopt;
+      return std::nullopt;
     }
 
     SubgraphUtils::mergeNodeIntoSubgraphAndUpdateAliasing(
@@ -302,14 +302,14 @@ class SubgraphSlicer {
   std::vector<Node*>& diff_nodes_;
 };
 
-c10::optional<bool> getProfileNodeRequiresGrad(Node* n) {
+std::optional<bool> getProfileNodeRequiresGrad(Node* n) {
   TORCH_INTERNAL_ASSERT(n->kind() == prim::profile);
   if (!n->hasAttribute(attr::profiled_type)) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   auto& type = n->ty(attr::profiled_type);
   if (type->castRaw<TensorType>() == nullptr) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return type->expectRef<TensorType>().requiresGrad();
 }
@@ -359,7 +359,7 @@ struct ContextMapping {
   }
 };
 
-c10::optional<bool> findRequiresGradForOutput(
+std::optional<bool> findRequiresGradForOutput(
     Node* diff_graph,
     Value* output,
     const ContextMapping& ctx_mapping) {
@@ -374,7 +374,7 @@ c10::optional<bool> findRequiresGradForOutput(
     }
 
     if (use.user->kind() == prim::profile) {
-      c10::optional<bool> req_grad_use;
+      std::optional<bool> req_grad_use;
       if ((req_grad_use = getProfileNodeRequiresGrad(use.user)).has_value()) {
         return req_grad_use.value();
       }
@@ -393,7 +393,7 @@ c10::optional<bool> findRequiresGradForOutput(
         }
 
         if (dg_use.user->kind() == prim::profile) {
-          c10::optional<bool> req_grad_use;
+          std::optional<bool> req_grad_use;
           if ((req_grad_use = getProfileNodeRequiresGrad(dg_use.user))
                   .has_value()) {
             return req_grad_use.value();
@@ -403,7 +403,7 @@ c10::optional<bool> findRequiresGradForOutput(
     }
   }
 
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 void AddRequiresGradToDifferentiableGraph(

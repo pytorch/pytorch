@@ -610,7 +610,8 @@ size_t ostream_write_func(
 
   // Get the CRC32 of uncompressed data from the data descriptor, if the written
   // data is identified as the data descriptor block.
-  if (n >= 8 && MZ_READ_LE32(pBuf) == MZ_ZIP_DATA_DESCRIPTOR_ID) {
+  // See [Note: write_record_metadata] for why we check for non-null pBuf here
+  if (pBuf && n >= 8 && MZ_READ_LE32(pBuf) == MZ_ZIP_DATA_DESCRIPTOR_ID) {
     const int8_t* pInt8Buf = (const int8_t*)pBuf;
     const uint32_t uncomp_crc32 = MZ_READ_LE32(pInt8Buf + 4);
     self->combined_uncomp_crc32_ =
@@ -654,7 +655,12 @@ void PyTorchStreamWriter::setup(const string& file_name) {
     }
     TORCH_CHECK(file_stream_, "File ", file_name, " cannot be opened.");
     writer_func_ = [this](const void* buf, size_t nbytes) -> size_t {
-      file_stream_.write(static_cast<const char*>(buf), nbytes);
+      if (!buf) {
+        // See [Note: write_record_metadata]
+        file_stream_.seekp(nbytes, std::ios_base::cur);
+      } else {
+        file_stream_.write(static_cast<const char*>(buf), nbytes);
+      }
       return !file_stream_ ? 0 : nbytes;
     };
   }
@@ -690,20 +696,20 @@ void PyTorchStreamWriter::writeRecord(
       detail::getPadding(ar_->m_archive_size, full_name.size(), size, padding_);
   uint32_t flags = compress ? MZ_BEST_COMPRESSION : 0;
   mz_zip_writer_add_mem_ex_v2(
-      ar_.get(),
-      full_name.c_str(),
-      data,
-      size,
-      nullptr,
-      0,
-      flags,
-      0,
-      0,
-      nullptr,
-      padding_.c_str(),
-      padding_size,
-      nullptr,
-      0);
+      /*pZip=*/ar_.get(),
+      /*pArchive_name=*/full_name.c_str(),
+      /*pBuf=*/data,
+      /*buf_size=*/size,
+      /*pComment=*/nullptr,
+      /*comment_size=*/0,
+      /*level_and_flags=*/flags,
+      /*uncomp_size=*/0,
+      /*uncomp_crc32=*/0,
+      /*last_modified=*/nullptr,
+      /*user_extra_data=*/padding_.c_str(),
+      /*user_extra_data_len=*/padding_size,
+      /*user_extra_data_central=*/nullptr,
+      /*user_extra_data_central_len=*/0);
   valid("writing file ", name.c_str());
   files_written_.insert(name);
 }

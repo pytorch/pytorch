@@ -3,10 +3,10 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/rref_interface.h>
 #include <c10/core/Event.h>
-#include <c10/util/Optional.h>
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/types.h>
+#include <optional>
 
 #include <atomic>
 
@@ -366,7 +366,7 @@ class TORCH_API OwnerRRef final : public RRef {
       worker_id_t ownerId,
       const RRefId& rrefId,
       TypePtr type,
-      c10::optional<IValue> value,
+      std::optional<IValue> value,
       std::vector<c10::Device> devices);
 
   inline bool isOwner() const override {

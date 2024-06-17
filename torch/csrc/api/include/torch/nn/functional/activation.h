@@ -233,10 +233,10 @@ namespace detail {
 inline Tensor softmax(
     const Tensor& input,
     int64_t dim,
-    c10::optional<torch::Dtype> dtype) {
+    std::optional<torch::Dtype> dtype) {
   Tensor ret;
 
-  if (dtype == c10::nullopt) {
+  if (dtype == std::nullopt) {
     ret = input.softmax(dim);
   } else {
     ret = input.softmax(dim, dtype);
@@ -270,10 +270,10 @@ namespace detail {
 inline Tensor softmin(
     const Tensor& input,
     int64_t dim,
-    c10::optional<torch::Dtype> dtype) {
+    std::optional<torch::Dtype> dtype) {
   Tensor ret;
 
-  if (dtype == c10::nullopt) {
+  if (dtype == std::nullopt) {
     ret = (-input).softmax(dim);
   } else {
     ret = (-input).softmax(dim, dtype);
@@ -307,10 +307,10 @@ namespace detail {
 inline Tensor log_softmax(
     const Tensor& input,
     int64_t dim,
-    c10::optional<torch::Dtype> dtype) {
+    std::optional<torch::Dtype> dtype) {
   Tensor ret;
 
-  if (dtype == c10::nullopt) {
+  if (dtype == std::nullopt) {
     ret = input.log_softmax(dim);
   } else {
     ret = input.log_softmax(dim, dtype);

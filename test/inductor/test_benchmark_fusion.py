@@ -10,7 +10,6 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
-    skipIfRocm,
     slowTest,
     TEST_WITH_ASAN,
 )
@@ -68,7 +67,6 @@ class BenchmarkFusionTestTemplate:
         self.common(f, (torch.rand(2, 8192),))
 
     @slowTest
-    @skipIfRocm  # fail accuracy check on ROCm
     def test_resnet18(self):
         import torchvision
 
@@ -203,7 +201,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     {
                         "benchmark_kernel": True,
                         "benchmark_fusion": True,
-                        "benchmark_multi_templates": True,
+                        "benchmark_epilogue_fusion": True,
                     }
                 )
             )
@@ -231,7 +229,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             torch._dynamo.reset()
             with unittest.mock.patch.object(
-                torch._inductor.config, "benchmark_multi_templates", False
+                torch._inductor.config, "benchmark_epilogue_fusion", False
             ):
                 foo_c = torch.compile(mode="max-autotune-no-cudagraphs")(foo)
                 with torch.no_grad():

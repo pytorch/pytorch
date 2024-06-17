@@ -314,8 +314,8 @@ static void set_default_storage_type(Backend backend, ScalarType dtype) {
 }
 
 static void set_default_tensor_type(
-    c10::optional<Backend> backend,
-    c10::optional<ScalarType> dtype) {
+    std::optional<Backend> backend,
+    std::optional<ScalarType> dtype) {
   if (backend.has_value()) {
     TORCH_CHECK_TYPE(
         *backend != Backend::Undefined, "default type cannot be undefined");
@@ -449,7 +449,7 @@ void py_set_default_dtype(PyObject* obj) {
       THPDtype_Check(obj),
       "invalid dtype object: only floating-point types are supported as the default type");
   auto scalar_type = ((THPDtype*)obj)->scalar_type;
-  set_default_tensor_type(/*backend=*/c10::nullopt, scalar_type);
+  set_default_tensor_type(/*backend=*/std::nullopt, scalar_type);
 }
 
 c10::DispatchKey get_default_dispatch_key() {
