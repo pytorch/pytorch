@@ -1,4 +1,4 @@
-# This yaml is used only for testing the XPU codegen functionality. 
+# This yaml is used only for testing the XPU codegen functionality.
 # The real one would reside in torch-xpu-ops
 - func: as_strided_copy(Tensor self, SymInt[] size, SymInt[] stride, SymInt? storage_offset=None) -> Tensor
   variants: function
