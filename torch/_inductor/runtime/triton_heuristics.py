@@ -1343,9 +1343,9 @@ def triton_config_reduction(size_hints, x, r, num_stages=1, num_warps=None) -> C
         x *= 2  # Scale up XBLOCK if grid exceeds limits
         num_blocks = int(num_blocks / 2)
     while conditional_product(x, r) > target: 
-        r = int(r / 2)
         if r == 1:
             break
+        r = int(r / 2)
 
     cfg = {"XBLOCK": x, "RBLOCK": r}
     check_config(cfg, xnumel=size_hints[0])
