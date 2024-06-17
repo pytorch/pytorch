@@ -80,6 +80,43 @@ class WorkerServerTest(TestCase):
             resp = pool.request("POST", "/handler/dump_nccl_trace_pickle")
             self.assertEqual(resp.status, 200)
             out = pickle.loads(resp.data)
+            self.assertIsInstance(out, dict)
+            self.assertIn("version", out)
+
+    @requires_cuda
+    def test_dump_nccl_trace_pickle_with_params(self) -> None:
+        with local_worker_server() as pool:
+            # bad key - not lower case
+            resp = pool.request(
+                "POST", "/handler/dump_nccl_trace_pickle?includeCollectives=true"
+            )
+            self.assertEqual(resp.status, 400)
+            # unknown key
+            resp = pool.request(
+                "POST", "/handler/dump_nccl_trace_pickle?unknownkey=true"
+            )
+            self.assertEqual(resp.status, 400)
+            # bad value - not a bool
+            resp = pool.request(
+                "POST", "/handler/dump_nccl_trace_pickle?includecollectives=notabool"
+            )
+            self.assertEqual(resp.status, 400)
+            # bad value - value not lowercase
+            resp = pool.request(
+                "POST", "/handler/dump_nccl_trace_pickle?includecollectives=True"
+            )
+            self.assertEqual(resp.status, 400)
+            # good key and value
+            resp = pool.request(
+                "POST", "/handler/dump_nccl_trace_pickle?includecollectives=true"
+            )
+            self.assertEqual(resp.status, 200)
+            # multiple good keys and values
+            resp = pool.request(
+                "POST",
+                "/handler/dump_nccl_trace_pickle?includecollectives=true&includestacktraces=false&onlyactive=true",
+            )
+            self.assertEqual(resp.status, 200)
 
     def test_tcp(self) -> None:
         import requests
