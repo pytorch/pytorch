@@ -560,6 +560,7 @@ if(USE_CUDA)
       append_filelist("libtorch_cuda_distributed_extra_sources" Caffe2_GPU_SRCS)
       set_source_files_properties(
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/intra_node_comm.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/CUDASymmetricMemory.cu
         PROPERTIES COMPILE_FLAGS "-DPYTORCH_C10_DRIVER_API_SUPPORTED=1"
       )
     endif()
@@ -1320,6 +1321,9 @@ if(USE_ROCM)
     )
   if(USE_FLASH_ATTENTION)
     target_compile_definitions(torch_hip PRIVATE USE_FLASH_ATTENTION)
+  endif()
+  if(USE_MEM_EFF_ATTENTION)
+    target_compile_definitions(torch_hip PRIVATE USE_MEM_EFF_ATTENTION)
   endif()
 endif()
 

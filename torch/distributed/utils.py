@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import dataclasses
 import traceback
 from typing import (
@@ -280,7 +281,7 @@ def _to_kwargs(
 def _verify_param_shape_across_processes(
     process_group: dist.ProcessGroup,
     tensors: List[torch.Tensor],
-    logger: Optional[dist.Logger] = None,
+    logger: Optional["dist.Logger"] = None,
 ):
     return dist._verify_params_across_processes(process_group, tensors, logger)
 
