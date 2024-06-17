@@ -294,6 +294,10 @@ def jagged_torch_function(func, *args, **kwargs):
     if func is torch._C._nn.scaled_dot_product_attention:
         return jagged_scaled_dot_product_attention(*args, **kwargs)
 
+    if func.__name__ == "apply_":
+        func(args[0]._values, *args[1:], **kwargs)
+        return args[0]
+
     # Handle flatten() here because it's CompositeImplicit.
     if func.__name__ == "flatten":
 
@@ -468,9 +472,19 @@ register_jagged_func(
 )(jagged_unary_pointwise)
 
 
-register_jagged_func(
+@register_jagged_func(
     torch.ops.aten._softmax.default, "self: jt, dim: any, half_to_float: any"
-)(jagged_unary_pointwise)
+)
+def _softmax_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+    dim = new_kwargs["dim"]
+    new_kwargs["dim"] = _wrap_jagged_dim(len(inp._size), dim, "softmax")
+
+    return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
 
 
 @register_jagged_func(
