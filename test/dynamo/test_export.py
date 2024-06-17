@@ -3473,7 +3473,6 @@ class GraphModule(torch.nn.Module):
         ]
         false_guard_code = [
             "Ne(cast_symbool_to_symint_guardless(L['pred']), 1)",
-            "-9223372036854775808 <= cast_symbool_to_symint_guardless(L['pred'])",
         ]
         test_symbool_guards(
             f,
