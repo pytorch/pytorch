@@ -713,6 +713,20 @@ class BuiltinVariable(VariableTracker):
                 tx, [v.realize() for v in args], kwargs
             )
 
+        if inspect.isclass(fn) and issubclass(fn, Exception):
+
+            def create_exception_class_object(tx, args, kwargs):
+                if fn is AssertionError and not all(
+                    isinstance(x, variables.ConstantVariable)
+                    and isinstance(x.value, str)
+                    for x in args
+                ):
+                    unimplemented("assert with non-string message")
+
+                return variables.ExceptionVariable(fn, args, **kwargs)
+
+            return create_exception_class_object
+
         if obj.can_insert_in_graph() and not (
             fn is operator.getitem
             and not issubclass(arg_types[0], variables.TensorVariable)
@@ -1447,6 +1461,8 @@ class BuiltinVariable(VariableTracker):
     def call_hasattr(self, tx, obj, attr):
         if attr.is_python_constant():
             name = attr.as_python_constant()
+            if isinstance(obj, variables.BuiltinVariable):
+                return variables.ConstantVariable(hasattr(obj.fn, name))
             return obj.call_hasattr(tx, name)
 
     def call_map(self, tx, fn, seq):
@@ -1623,7 +1639,6 @@ class BuiltinVariable(VariableTracker):
         if isinstance(
             obj,
             (
-                variables.DataClassVariable,
                 variables.CustomizedDictVariable,
                 variables.PlacementVariable,
                 variables.UserDefinedObjectVariable,
@@ -1692,6 +1707,9 @@ class BuiltinVariable(VariableTracker):
                     return out
 
             tx.output.side_effects.store_attr(obj, name, val)
+            if name == "_grad":
+                tx.output.side_effects.store_attr(obj, "grad", val)
+
             return val
         elif isinstance(obj, variables.UserDefinedObjectVariable):
             unimplemented(

@@ -3827,6 +3827,7 @@ def upsample(input, size=None, scale_factor=None, mode="nearest", align_corners=
     warnings.warn(
         "`nn.functional.upsample` is deprecated. "
         "Use `nn.functional.interpolate` instead.",
+        stacklevel=2,
     )
     return interpolate(input, size, scale_factor, mode, align_corners)
 
@@ -4150,6 +4151,7 @@ def upsample_nearest(input, size=None, scale_factor=None):  # noqa: F811
     warnings.warn(
         "`nn.functional.upsample_nearest` is deprecated. "
         "Use `nn.functional.interpolate` instead.",
+        stacklevel=2,
     )
     return interpolate(input, size, scale_factor, mode="nearest")
 
@@ -4209,6 +4211,7 @@ def upsample_bilinear(input, size=None, scale_factor=None):  # noqa: F811
     warnings.warn(
         "`nn.functional.upsample_bilinear` is deprecated. "
         "Use `nn.functional.interpolate` instead.",
+        stacklevel=2,
     )
     return interpolate(input, size, scale_factor, mode="bilinear", align_corners=True)
 

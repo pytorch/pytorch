@@ -48,6 +48,33 @@ banned_attrs = [
 ]
 
 
+def _get_all_args(args, kwargs):
+    return _flatten_vts(pytree.arg_tree_leaves(*args, **kwargs))
+
+
+def _flatten_vts(vts):
+    from collections import deque
+
+    from .dicts import ConstDictVariable
+    from .lazy import LazyVariableTracker
+    from .lists import ListVariable
+
+    vts = deque(vts)
+    output = []
+
+    while vts:
+        vt = vts.pop()
+        LazyVariableTracker.realize_all(vt)
+        if isinstance(vt, ListVariable):
+            vts.extend(vt.items)
+        elif isinstance(vt, ConstDictVariable):
+            vts.extend(vt.items.values())
+        else:
+            output.append(vt)
+
+    return output
+
+
 def _get_subclass_type(var):
     assert isinstance(var, (TensorWithTFOverrideVariable, UserDefinedObjectVariable))
     return var.python_type()
@@ -109,17 +136,15 @@ def build_torch_function_fn(tx, value, source):
 
 
 def can_dispatch_torch_function(tx, args, kwargs):
-    if tx.output.torch_function_enabled:
-        all_args = pytree.arg_tree_leaves(*args, **kwargs)
-        return any(has_torch_function(arg) for arg in all_args)
-    else:
-        return False
+    return tx.output.torch_function_enabled and any(
+        has_torch_function(arg) for arg in _get_all_args(args, kwargs)
+    )
 
 
 def dispatch_torch_function(tx, fn, args, kwargs):
     """Gathers all args that are TensorWithTFOverrideVariable and dispatches based on the ordering in _get_overloaded_args"""
 
-    all_args = pytree.arg_tree_leaves(*args, **kwargs)
+    all_args = _get_all_args(args, kwargs)
     overloaded_args = _get_overloaded_args(
         [arg for arg in all_args if has_torch_function(arg)],
         _get_subclass_type,

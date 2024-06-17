@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import warnings
 from enum import auto, Enum
 from functools import partial
@@ -234,7 +235,7 @@ def checkpoint_wrapper(
             f"{CheckpointImpl.REENTRANT} will soon be removed as "
             "the default and eventually deprecated.",
             FutureWarning,
-            stacklevel=1,
+            stacklevel=2,
         )
     return CheckpointWrapper(
         module,

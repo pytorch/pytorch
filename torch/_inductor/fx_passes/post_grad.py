@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import itertools
 import logging
@@ -16,6 +17,7 @@ from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_d
 
 from torch._utils_internal import upload_graph
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
+from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 
 from .. import config, ir, pattern_matcher
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
@@ -43,6 +45,7 @@ from ..utils import decode_device, is_pointwise_use
 from ..virtualized import V
 from .ddp_fusion import fuse_ddp_communication
 from .group_batch_fusion import group_batch_fusion_passes, POST_GRAD_FUSIONS
+from .micro_pipeline_tp import patterns as micro_pipeline_tp_patterns
 from .pre_grad import is_same_dict, save_inductor_dict
 from .reinplace import reinplace_inplaceable_ops
 from .split_cat import POST_GRAD_PATTERNS
@@ -80,7 +83,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     fake_tensor_updater = FakeTensorUpdater(gm.graph)
 
     if config.post_grad_custom_pre_pass is not None:
-        config.post_grad_custom_pre_pass(gm.graph)
+        with GraphTransformObserver(
+            gm, "post_grad_custom_pre_pass", config.trace.log_url_for_graph_xform
+        ):
+            config.post_grad_custom_pre_pass(gm.graph)
 
     if config.pattern_matcher:
         lazy_init()
@@ -103,6 +109,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                     f"{pattern_matcher_pass.pass_name}_post_grad"
                 ] = upload_graph(gm.graph)
 
+    if config._micro_pipeline_tp:
+        micro_pipeline_tp_patterns.apply(gm)
+
     if config._fuse_ddp_communication:
         fuse_ddp_communication(
             gm.graph,
@@ -111,7 +120,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         )
 
     if config.post_grad_custom_post_pass is not None:
-        config.post_grad_custom_post_pass(gm.graph)
+        with GraphTransformObserver(
+            gm, "post_grad_custom_post_pass", config.trace.log_url_for_graph_xform
+        ):
+            config.post_grad_custom_post_pass(gm.graph)
 
     stable_topological_sort(gm.graph)
 
@@ -217,7 +229,7 @@ def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
 
 
 def cuda_and_enabled_mixed_mm(match):
-    return (config.use_mixed_mm or config.force_mixed_mm) and getattr(
+    return (config.use_mixed_mm or config.mixed_mm_choice != "default") and getattr(
         match.kwargs["mat1"].meta.get("val"), "is_cuda", False
     )
 
@@ -268,11 +280,12 @@ def cuda_and_enabled_mixed_mm_and_not_int8(match):
                                 KeywordArg("mat2"),
                                 0xF,
                             ),
-                            CallFunction(
-                                aten.__rshift__.Scalar,
-                                KeywordArg("mat2"),
-                                4,
-                            ),
+                            # CallFunction(
+                            #    aten.__rshift__.Scalar,
+                            #    KeywordArg("mat2"),
+                            #    4,
+                            # ),
+                            True,
                         ),
                         1,
                     ),

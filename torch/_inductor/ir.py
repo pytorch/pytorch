@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import collections
 import contextlib
 import dataclasses
@@ -44,7 +45,6 @@ from torch._prims_common import (
     is_boolean_dtype,
     is_float_dtype,
     make_channels_last_strides_for,
-    make_contiguous_strides_for,
     StrideType,
 )
 from torch._subclasses.fake_tensor import get_schema_info
@@ -61,7 +61,7 @@ from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import SymT
 
 from . import config, dependencies
-from .codegen.common import index_prevent_reordering
+from .codegen.common import BackendFeature, index_prevent_reordering
 from .dependencies import (
     extract_free_unbacked_symbols,
     extract_input_node_reduction_ranges,
@@ -236,7 +236,7 @@ def ir_node_to_tensor(x, guard_shape=True):
     if is_storage_and_layout(x):
         stride = [shape_fn(s) for s in x.get_layout().stride]  # type: ignore[misc]
     else:
-        stride = make_contiguous_strides_for(size)  # type: ignore[arg-type]
+        stride = FlexibleLayout.contiguous_strides(size)  # type: ignore[arg-type]
     dtype = x.get_dtype()
     device = x.get_device()
     size = convert_shape_to_symint(size)
@@ -291,17 +291,21 @@ class IRNode:
     def get_traceback(self):
         return self.traceback
 
-    def common_repr(self):
+    def common_repr(self, shorten=True):
         origins = f"origins={getattr(self, 'origins', '')}"
-        if len(origins) > 64:
+        if shorten and len(origins) > 64:
             # this can get *very* long
             origins = f"{origins[:61]}..."
         return [origins]
 
-    def str_helper(self, lines):
-        lines = lines + self.common_repr()
-        lines = indent(",\n".join(map(str, lines)))
-        return f"{type(self).__name__}(\n{lines}\n)"
+    def str_helper(self, lines, shorten=True, multiline=True):
+        lines = lines + self.common_repr(shorten)
+        lines = list(map(str, lines))
+        if multiline:
+            new_lines = indent(",\n".join(lines))
+            return f"{type(self).__name__}(\n{new_lines}\n)"
+        else:
+            return f"{type(self).__name__}({lines})"
 
     def is_user_of(self, name):
         return name in self.get_read_names()
@@ -318,6 +322,10 @@ class IRNode:
 
     def get_size(self):
         raise NotImplementedError(f"get_size() is not implemented by {type(self)}!")
+
+    @property
+    def shape(self):
+        return self.get_size()
 
     def get_numel(self):
         return sympy_product(self.get_size())
@@ -1662,12 +1670,12 @@ class Scan(Loops):
         pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
         scan_ranges = [size[axis]]
 
-        if not is_gpu(device.type):
-            # TODO: CPU support
+        if not V.graph.has_feature(device, BackendFeature.SCAN):
             return [None] * len(dtypes)
 
-        if torch.version.hip is not None and len(dtypes) > 1:
-            # TODO: Remove this when ROCm triton adds support for multiple inputs
+        if len(dtypes) > 1 and not V.graph.has_feature(
+            device, BackendFeature.TUPLE_REDUCTION
+        ):
             return [None] * len(dtypes)
 
         sizevars = V.graph.sizevars
@@ -2391,7 +2399,7 @@ class SliceView(View):
     @classmethod
     def create(cls, x, dim, start, end, step=1, clamp=True):
         step = sympy.expand(step)
-        assert step > 0
+        assert isinstance(step, sympy.Expr) or step > 0
         try:
             if start == 0 and end >= 2**63 - 1 and step == 1:
                 return x
@@ -2565,7 +2573,7 @@ class Layout(IRNode):
     def is_transposed(self):
         for left, right, size in zip(
             self.stride,
-            reversed(FlexibleLayout.contiguous_strides(self.size)),
+            reversed(FlexibleLayout.contiguous_strides(list(reversed(self.size)))),
             self.size,
         ):
             if size != 1 and left != right:
@@ -2766,6 +2774,7 @@ class FlexibleLayout(Layout):
 
     allow_indexing = False
 
+    # WARNING!  This doesn't handle zero size tensors correctly
     @staticmethod
     def contiguous_strides(sizes):
         if len(sizes) == 0:
@@ -3190,7 +3199,11 @@ class NoneAsConstantBuffer(IRNode):
 class ShapeAsConstantBuffer(IRNode):
     def __init__(self, shape):
         super().__init__()
-        self.shape = shape
+        self._shape = shape
+
+    @property
+    def shape(self):
+        return self._shape
 
     def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
         return free_unbacked_symbols(self.shape)
@@ -3866,7 +3879,9 @@ class ConcatKernel(NopKernel):
             ):
                 buffer_names.append(input_buffer.get_name())
 
-        if len(buffer_names) > 1:
+        if len(buffer_names) > 1 and V.graph.has_feature(
+            device, BackendFeature.FOREACH
+        ):
             V.graph.register_list(buffer_names)
 
         concat_kernel.name = V.graph.register_buffer(concat_kernel)
@@ -3992,13 +4007,6 @@ class ExternKernel(InputsKernel):
     def collect_arg_kwarg_properties(self):
         # if self.op_overload is torch._ops.OpOverload, we can use its schema to collect additional
         # information for args and kwargs, e.g. type and default value, to help with the cpp wrapper codegen
-        if (
-            isinstance(self.op_overload, torch._ops.OpOverload)
-            and not self.ordered_kwargs_for_cpp_kernel
-        ):
-            self.ordered_kwargs_for_cpp_kernel = [
-                x.name for x in self.op_overload._schema.arguments if x.kwarg_only
-            ]
         self.arg_properties = (
             [
                 {
@@ -4012,15 +4020,23 @@ class ExternKernel(InputsKernel):
             if isinstance(self.op_overload, torch._ops.OpOverload)
             else [{} for i in range(len(self.inputs))]
         )
-        self.kwarg_properties = (
+        self.allarg_properties = (
             {
                 x.name: {"type": x.real_type, "default_value": x.default_value}
                 for x in self.op_overload._schema.arguments
-                if x.kwarg_only
             }
             if isinstance(self.op_overload, torch._ops.OpOverload)
             else {}
         )
+        # FIXME: self.kwargs does not always match kwargs defined in schema, so sometimes
+        # ordered_kwargs_for_cpp_kernel is explicilty passed in.
+        if (
+            isinstance(self.op_overload, torch._ops.OpOverload)
+            and not self.ordered_kwargs_for_cpp_kernel
+        ):
+            self.ordered_kwargs_for_cpp_kernel = [
+                x.name for x in self.op_overload._schema.arguments if x.kwarg_only
+            ]
 
     def fill_non_provided_args(self, args, kwargs, convert_val_to_str=False):
         # Previously, we want to maintain forward-compatibility by skipping
@@ -4382,7 +4398,21 @@ class ExternKernel(InputsKernel):
         pass
 
     def codegen_const_args(self):
-        return map(V.graph.wrapper_code.val_to_arg_str, self.constant_args)
+        if V.graph.cpp_wrapper:
+            result = []
+            for i, x in enumerate(self.constant_args):
+                idx = len(self.inputs) + i
+                type_ = (
+                    self.arg_properties[i].get("type")
+                    if self.arg_properties and idx < len(self.arg_properties)
+                    else None
+                )
+                result.append(
+                    V.graph.wrapper_code.val_to_arg_str(x, type_)  # type: ignore[arg-type]
+                )
+            return result
+        else:
+            return map(V.graph.wrapper_code.val_to_arg_str, self.constant_args)
 
     def codegen_args(self):
         args = []
@@ -4395,10 +4425,10 @@ class ExternKernel(InputsKernel):
                 if V.graph.cpp_wrapper:
                     assert self.arg_properties and i < len(
                         self.arg_properties
-                    ), "Invalid arg_properties accessing"
+                    ), "Invalid access to ExternKernel.arg_properties"
                     type_ = self.arg_properties[i].get("type")
                     args.append(
-                        V.graph.wrapper_code.val_to_cpp_arg_str(  # type: ignore[arg-type]
+                        V.graph.wrapper_code.val_to_arg_str(  # type: ignore[arg-type]
                             x, type_
                         )
                     )
@@ -4410,10 +4440,10 @@ class ExternKernel(InputsKernel):
     def get_kwargs_value(self, arg_name):
         if arg_name in self.kwargs:
             return self.kwargs.get(arg_name)
-        if self.kwarg_properties and self.kwarg_properties.get(arg_name):
-            return self.kwarg_properties.get(arg_name).get("default_value")  # type: ignore[union-attr]
+        if self.allarg_properties and self.allarg_properties.get(arg_name):
+            return self.allarg_properties.get(arg_name).get("default_value")  # type: ignore[union-attr]
         else:
-            raise AssertionError(f"{arg_name} not in self.kwarg_properties")
+            raise AssertionError(f"{arg_name} not in self.allarg_properties")
 
     def codegen_kwargs(self, skip_out=False):
         if V.graph.cpp_wrapper:
@@ -4428,12 +4458,12 @@ class ExternKernel(InputsKernel):
                     kwargs.append(v)
                 else:
                     type_ = (
-                        self.kwarg_properties.get(arg_name).get("type")  # type: ignore[union-attr]
-                        if self.kwarg_properties and arg_name in self.kwarg_properties
+                        self.allarg_properties.get(arg_name).get("type")  # type: ignore[union-attr]
+                        if self.allarg_properties and arg_name in self.allarg_properties
                         else None
                     )
                     kwargs.append(
-                        V.graph.wrapper_code.val_to_cpp_arg_str(  # type: ignore[arg-type]
+                        V.graph.wrapper_code.val_to_arg_str(  # type: ignore[arg-type]
                             v, type_
                         )
                     )
@@ -4759,14 +4789,9 @@ class MutationOutput(ExternKernel):
 
     def __init__(self, layout, mutated_node, node_doing_mutating):
         # NB: Do not directly construct this - use `mark_node_as_mutating`
-        super().__init__(None, layout, [mutated_node], ())
+        super().__init__(None, layout, [mutated_node, node_doing_mutating], ())
         self.node_doing_mutating = node_doing_mutating
         self.name = V.graph.register_buffer(self)
-
-    def get_read_writes(self):
-        read_writes = super().get_read_writes()
-        read_writes.reads.add(dependencies.WeakDep(self.node_doing_mutating.get_name()))
-        return read_writes
 
     def should_allocate(self):
         return False
@@ -5416,7 +5441,7 @@ class FallbackKernel(ExternKernelAlloc):
         if V.graph.cpp_wrapper and isinstance(self.op_overload, torch._ops.OpOverload):
             args = self.fill_non_provided_args(args, kwargs)
             args = [
-                V.graph.wrapper_code.val_to_cpp_arg_str(x, param.real_type)
+                V.graph.wrapper_code.val_to_arg_str(x, param.real_type)
                 for param, x in zip(self.op_overload._schema.arguments, args)
             ]
         else:
@@ -5470,6 +5495,9 @@ class FallbackKernel(ExternKernelAlloc):
         ordered_kwargs = [
             kwargs.get(key, None) for key in self.ordered_kwargs_for_cpp_kernel
         ]
+        if not V.graph.aot_mode:
+            # No need to serialize in the cpp wrapper JIT mode
+            return [*args, *ordered_kwargs]
 
         serializer = GraphModuleSerializer(None, None)  # type: ignore[arg-type]
         named_arguments = serializer.serialize_inputs(self.op_overload, args, kwargs)  # type: ignore[arg-type]
@@ -5620,9 +5648,10 @@ class FallbackKernel(ExternKernelAlloc):
                 unbacked_bindings,
             ) = cls.process_kernel(kernel, *args, **kwargs)
 
+        device = cls.find_device(tensor_args, example_output)
         if example_output is None:
             packed = cls(
-                NoneLayout(None),
+                NoneLayout(device),
                 kernel,
                 tensor_args,
                 non_tensor_args,
@@ -5631,9 +5660,7 @@ class FallbackKernel(ExternKernelAlloc):
             )
 
         else:
-            device = cls.find_device(tensor_args, example_output)
             assert device, "Not sure where to find device info"
-
             packed = cls(
                 MultiOutputLayout(device),
                 kernel,
@@ -5897,7 +5924,7 @@ def _prepare_convolution_fusion_create(
     # To align the behavior of the Conv kernel, we set the output_stride in such case to be contiguous instead of channels last.
     dynamic_shapes = not all(isinstance(i, int) for i in (output_size))
     if dynamic_shapes and is_contiguous_storage_and_layout(x):
-        output_stride = make_contiguous_strides_for(output_size)
+        output_stride = FlexibleLayout.contiguous_strides(output_size)
     else:
         output_stride = make_channels_last_strides_for(output_size)
 
@@ -5949,7 +5976,7 @@ def _prepare_linear_fusion_create(
     assert x.get_device().type == "cpu" and weight.get_device().type == "cpu"
     inputs = [x, weight]
 
-    output_stride = make_contiguous_strides_for(output_size)
+    output_stride = FlexibleLayout.contiguous_strides(output_size)
     kernel_layout = FixedLayout(
         x.get_device(),
         x.get_dtype(),
@@ -6265,7 +6292,7 @@ class MKLPackedLinear(ExternKernelAlloc):
         *m, _ = x.get_size()
         oc, _ = orig_w.get_size()
         output_size = list(m) + [oc]
-        output_stride = make_contiguous_strides_for(output_size)
+        output_stride = FlexibleLayout.contiguous_strides(output_size)
         inputs = [x, packed_w, orig_w]
         constant_args = [batch_size]
         if B is not None:
@@ -6583,13 +6610,13 @@ class MkldnnRnnLayer(ExternKernelAlloc):
 
         def get_strides_of_lstm_output(output_shape, batch_first):
             assert len(output_shape) == 3, "Expect output_shape to be 3D"
-            return make_contiguous_strides_for(output_shape)
+            return FlexibleLayout.contiguous_strides(output_shape)
 
         output_sizes = [output_shape, hy_shape, cy_shape]
         output_strides = [
             get_strides_of_lstm_output(output_shape, batch_first),
-            make_contiguous_strides_for(hy_shape),
-            make_contiguous_strides_for(cy_shape),
+            FlexibleLayout.contiguous_strides(hy_shape),
+            FlexibleLayout.contiguous_strides(cy_shape),
         ]
         output_ir = [
             MultiOutput(
@@ -7528,7 +7555,7 @@ class StorageBox(MutableBox):
             """
             The heuristic for realizing reused result of heavy ops on cpu
             """
-            heavy_ops = ["exp"]  # a list of heavy ops
+            heavy_ops = ["exp", "sigmoid"]  # a list of heavy ops
             fn_str = loops.inner_fn_str()
             return any((op + "(") in fn_str for op in heavy_ops)
 

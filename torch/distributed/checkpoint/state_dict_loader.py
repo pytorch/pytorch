@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import os
 import warnings
 from typing import Any, cast, Dict, Optional, Set, Union
@@ -177,6 +178,7 @@ def load(
             elem = state_dict[key]
             if isinstance(elem, Stateful):
                 elem.load_state_dict(statetful_sd[key])
+            state_dict[key] = statetful_sd[key]
 
 
 def _load_state_dict(
