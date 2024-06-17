@@ -1507,7 +1507,7 @@ def main():
             f"Programming Language :: Python :: 3.{i}"
             for i in range(python_min_version[1], version_range_max)
         ],
-        license="BSD-3",
+        license="BSD-3-Clause",
         keywords="pytorch, machine learning",
     )
     if EMIT_BUILD_WARNING:
