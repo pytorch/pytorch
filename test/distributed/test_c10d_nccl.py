@@ -4051,9 +4051,9 @@ class PipelineParallelDumpOnTimeout(NCCLTraceTestDumpOnTimeoutBase):
                 t = pickle.load(f)
                 t = t["entries"]
                 self.assertEqual(len(t), 2)
-                self.assertEqual(t[0]["collective_seq_id"], 0)
+                self.assertEqual(t[0]["p2p_seq_id"], 1)
                 self.assertEqual(t[0]["state"], "completed")
-                self.assertEqual(t[1]["collective_seq_id"], 0)
+                self.assertEqual(t[1]["p2p_seq_id"], 2)
                 self.assertEqual(
                     t[1]["state"], "scheduled"
                 )
