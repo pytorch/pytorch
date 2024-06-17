@@ -133,6 +133,7 @@ __all__ = [
     "write_file_on_exit",
     "write_file",
     "read_file",
+    "tune_gemm_in_file",
 ]
 
 
@@ -240,3 +241,54 @@ def read_file(filename: Optional[str] = None) -> bool:
     if filename is None:
         filename = get_filename()
     return torch._C._cuda_tunableop_read_file(filename)  # type: ignore[attr-defined]
+
+def tune_gemm_in_file(filename: str) -> None:
+    r"""tune GEMM in file."""
+
+    assert is_enabled()
+    assert tuning_is_enabled()
+
+    with open(filename, 'r') as file:
+        for line in file:
+            if line.startswith("Untuned"):
+                untuned_gemm = line.strip().split(',')[1:]
+                [op_sig,data_type, layout] = untuned_gemm[0].split('_')
+
+                transA = True if layout[0] == 'T'  else False
+                transB = True if layout[1] == 'T'  else False
+
+                if data_type == "float":
+                    dtype = torch.float32
+                elif data_type == "double":
+                    dtype = torch.float64
+                elif data_type == "BFloat16":
+                    dtype = torch.bfloat16
+                elif data_type == "Half":
+                    dtype = torch.half
+                elif data_type == "Float8_e4m3fn":
+                    dtype = torch.float8_e4m3fn
+                elif data_type == "Float8_e5m2":
+                    dtype = torch.float8_e5m2
+                elif data_type == "Float8_e4m3fnuz":
+                    dtype = torch.float8_e4m3fnuz
+                elif data_type == "Float8_e5m2fnuz":
+                    dtype = torch.float8_e5m2fnuz
+                elif data_type == "c10::complex<double>":
+                    dtype = torch.complex128
+                elif data_type == "c10::complex<float>":
+                    dtype = torch.complex64
+
+                if op_sig == "GemmTunableOp":
+                    [n,m,k] = [int(g) for g in untuned_gemm[1].split('_')[1:]]
+                    matA = torch.rand(k,m, dtype=dtype, device='cuda').t() if transB else torch.rand(m,k, dtype=dtype, device='cuda')
+                    matB = torch.rand(n,k, dtype=dtype, device='cuda').t() if transA else torch.rand(k,n, dtype=dtype, device='cuda')
+                    torch.mm(matA, matB)
+                elif op_sig == "GemmStridedBatchedTunableOp":
+                    [n,m,k,_,b] = untuned_gemm[1].split('_')[1:]
+                    matA = torch.rand(int(b),int(m),int(k), dtype=dtype, device='cuda')
+                    matB = torch.rand(int(b),int(k),int(n), dtype=dtype, device='cuda')
+                    matA = matA.transpose(1,2) if transB else matA
+                    matB = matB.transpose(1,2) if transA else matB
+                    torch.bmm(matA, matB)
+                else:
+                    print(f'error: unkown op')
