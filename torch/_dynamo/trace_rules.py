@@ -3262,31 +3262,6 @@ SKIP_DIRS.extend(filter(None, (_module_dir(m) for m in BUILTIN_SKIPLIST)))
 
 SKIP_DIRS_RE = re.compile(r"match nothing^")
 
-is_fbcode = importlib.import_module("torch._inductor.config").is_fbcode()
-# Skip fbcode paths(including torch.package paths) containing
-# one of the following strings.
-FBCODE_SKIP_DIRS = {
-    "torchrec/distributed",
-    "torchrec/fb/distributed",
-    "caffe2/torch/fb/sparsenn/pooled_embeddings_modules.py",
-}
-FBCODE_SKIP_DIRS_RE = re.compile(f".*({'|'.join(map(re.escape, FBCODE_SKIP_DIRS))})")
-
-
-# TODO(yanboliang, anijain2305) - There are a few concerns that we should
-# resolve
-# 1) Audit if torchrec/distributed is even required in FBCODE_SKIPS_DIR
-# 2) To inline just one file but skip others in a directory, we could use
-# manual_torch_name_rule_map but this one is hard because FBCODE can add unusual
-# names like torch_package.
-# So, this is a stop gap solution till then.
-FBCODE_INLINE_FILES_IN_SKIPPED_DIRS = {
-    "torchrec/distributed/types.py",
-}
-FBCODE_INLINE_FILES_IN_SKIPPED_DIRS_RE = re.compile(
-    f".*({'|'.join(map(re.escape, FBCODE_INLINE_FILES_IN_SKIPPED_DIRS))})"
-)
-
 # torch.optim is a special case,
 # we usually want to inline it, but the directory
 # structure does not match the module structure
@@ -3337,15 +3312,6 @@ def check_file(filename, is_inlined_call=False):
         return SkipResult(
             False,
             "MOD_INLINELIST",
-        )
-    if (
-        is_fbcode
-        and bool(FBCODE_SKIP_DIRS_RE.match(filename))
-        and not bool(FBCODE_INLINE_FILES_IN_SKIPPED_DIRS_RE.match(filename))
-    ):
-        return SkipResult(
-            True,
-            "FBCODE_SKIP_DIRS",
         )
     if bool(SKIP_DIRS_RE.match(filename)):
         return SkipResult(True, "SKIP_DIRS")
