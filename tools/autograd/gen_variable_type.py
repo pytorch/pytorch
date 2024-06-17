@@ -226,6 +226,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "select",
     "where",
     "as_strided",
+    "as_strided_copy",
     "as_strided_scatter",
     "slice",
     "constant_pad_nd",

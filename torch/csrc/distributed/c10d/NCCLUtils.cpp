@@ -78,7 +78,7 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
           source->ncclComm_, color_id, rank, &(comm->ncclComm_), &config),
       c10::nullopt);
   ++source->ncclCommSplitCounter_;
-  ncclCommUserRank(comm->ncclComm_, &comm->rank_);
+  comm->rank_ = rank;
   return comm;
 }
 #endif
