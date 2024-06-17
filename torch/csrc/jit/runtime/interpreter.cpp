@@ -169,7 +169,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
   void enterFrame(const Code& code, size_t base_pointer) {
-    frames.emplace_back(Frame{code.pImpl, 0, base_pointer, c10::nullopt});
+    frames.emplace_back(Frame{code.pImpl, 0, base_pointer, std::nullopt});
     registers.resize(registers.size() + code.pImpl->register_size_);
   }
 
@@ -181,7 +181,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   void callFunction(
       Function& f,
       Stack& stack,
-      std::optional<size_t> bailOut = c10::nullopt,
+      std::optional<size_t> bailOut = std::nullopt,
       bool next = true) {
     bool newFrame = f.call(stack, bailOut, [&](const Code& code) {
       enterFrame(code, stack.size() - code.num_inputs());
@@ -1244,7 +1244,7 @@ void InterpreterContinuation::operator()() {
   auto prev_dist_id = DistAutogradContainer::currentContextId();
   DistAutogradContainer::forceCurrentContextId(dist_autograd_context_id_);
 #endif
-  if (tls_state_ != c10::nullopt) {
+  if (tls_state_ != std::nullopt) {
     at::ThreadLocalStateGuard g(*tls_state_);
     state.runAsync(stack);
   } else {
