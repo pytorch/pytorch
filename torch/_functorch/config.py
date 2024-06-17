@@ -173,6 +173,9 @@ fake_tensor_propagate_real_tensors = False
 # Supported formats are defined here https://graphviz.org/docs/outputs/
 torch_compile_graph_format = os.environ.get("TORCH_COMPILE_GRAPH_FORMAT", "svg")
 
+enable_autograd_cache = os.environ.get("ENABLE_AOT_AUTOGRAD_CACHE", "0") == "1"
+
+
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 

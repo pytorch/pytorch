@@ -392,15 +392,15 @@ def fake_tensor_prop(
 
 
 def should_use_remote_fx_graph_cache():
-    if config.fx_graph_remote_cache:
-        return True
+    if config.fx_graph_remote_cache is not None:
+        return config.fx_graph_remote_cache
     if not config.is_fbcode():
         return False
     if torch.version.hip is not None:
         return False
 
     try:
-        from triton.runtime.fb_memcache import MEMCACHE_VERSION
+        from triton.fb.fb_memcache import MEMCACHE_VERSION
     except ModuleNotFoundError:
         return False
 
@@ -756,7 +756,11 @@ def fx_codegen_and_compile(
         post_grad_graphs_log.debug(
             "%s",
             lazy_format_graph_code(
-                "AFTER POST GRAD", gm, include_stride=True, include_device=True
+                "AFTER POST GRAD",
+                gm,
+                include_stride=True,
+                include_device=True,
+                colored=True,
             ),
         )
         trace_structured(

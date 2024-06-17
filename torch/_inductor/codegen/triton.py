@@ -13,6 +13,7 @@ from typing import (
     Callable,
     cast,
     Dict,
+    Iterable,
     List,
     Optional,
     Set,
@@ -29,8 +30,9 @@ from torch._dynamo.utils import preserve_rng_state
 
 from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties
 from torch._prims_common import is_integer_dtype
+from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from torch.utils._triton import has_triton_package
-from ...utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
+from ...utils._sympy.symbol import free_symbol_is_type, prefix_str, symbol_is_type, SymT
 from ...utils._sympy.value_ranges import ValueRanges
 
 from .. import config, ir
@@ -51,6 +53,7 @@ from ..utils import (
 from ..virtualized import _ops as ops, OpsHandler, ReductionType, StoreMode, V
 from ..wrapper_benchmark import get_kernel_category_by_source_code
 from .common import (
+    BackendFeature,
     CSE,
     CSEVariable,
     DeferredLine,
@@ -60,7 +63,14 @@ from .common import (
     SizeArg,
     TensorArg,
 )
-from .simd import constant_repr, IterationRangesEntry, pexpr, SIMDKernel, SIMDScheduling
+from .simd import (
+    constant_repr,
+    IterationRangesEntry,
+    IterationRangesRoot,
+    pexpr,
+    SIMDKernel,
+    SIMDScheduling,
+)
 from .triton_utils import config_of, signature_of, signature_to_meta
 
 if TYPE_CHECKING:
@@ -111,10 +121,21 @@ def gen_common_triton_imports():
     return imports.getvalue()
 
 
+block_offsets = {
+    symt: sympy.Symbol(f"{prefix_str[symt]}offset", integer=True)
+    for symt in [SymT.XBLOCK, SymT.YBLOCK, SymT.RINDEX]
+}
+
+block_sizes = {
+    symt: sympy.Symbol(f"{prefix_str[symt].upper()}BLOCK", integer=True, nonzero=True)
+    for symt in [SymT.XBLOCK, SymT.YBLOCK, SymT.RINDEX]
+}
+
+
 @dataclasses.dataclass
 class IndexingOptions:
     index_str: str
-    mask_vars: Set[sympy.Symbol]
+    mask_vars: Set[str]
     mask_str: str
     expand_str: Optional[str]
     _has_rindex: bool
@@ -138,29 +159,46 @@ class IndexingOptions:
 
 @dataclasses.dataclass
 class BlockPtrOptions:
+    params: BlockParameters
     constant_offset: sympy.Expr
-    shape: List[sympy.Expr]
-    strides: List[sympy.Expr]
-    block_shape: List[str]
     order: List[int]
-    offsets: List[str]
-    mask_vars: Set[sympy.Symbol]
+    mask_vars: Set[str]
     reshape_suffix: List[str]
+
+    @property
+    def shape(self) -> List[sympy.Expr]:
+        return self.params.shape
+
+    @property
+    def block_shape(self) -> List[sympy.Expr]:
+        return self.params.block_shape
+
+    @property
+    def strides(self) -> List[sympy.Expr]:
+        return self.params.strides
+
+    @property
+    def offsets(self) -> List[sympy.Expr]:
+        return self.params.offsets
 
     @staticmethod
     def create(
-        strides: List[sympy.Expr],
+        *,
+        params: BlockParameters,
         constant_offset: sympy.Expr,
         range_trees: List[IterationRangesEntry],
-        mask_vars: Set[sympy.Symbol],
+        mask_vars: Set[str],
     ) -> BlockPtrOptions:
         """Helper to create a  BlockPtrOptions instance"""
-        block_shape = [f"{t.prefix.upper()}BLOCK" for t in range_trees]
-        reshape_suffix = [*block_shape]
+        reshape_suffix = [f"{t.prefix.upper()}BLOCK" for t in range_trees]
 
-        broadcasting_dim = [s == 0 for s in strides]
+        # Only drop broadcast dims if the output has the same
+        # rank as the block. Otherwise, we will get shape errors.
+        drop_broadcasts = len(reshape_suffix) == len(params.strides)
+
+        broadcasting_dim = [s == 0 for s in params.strides]
         for i, is_broadcasting in enumerate(broadcasting_dim):
-            if is_broadcasting:
+            if is_broadcasting and drop_broadcasts:
                 # drop any stride==0 dimensions for performance
                 reshape_suffix[i] = "1"
 
@@ -170,7 +208,7 @@ class BlockPtrOptions:
 
         if (
             not V.kernel.inside_reduction
-            and len(strides) == len(V.kernel.numels) - 1
+            and len(params.strides) == len(V.kernel.numels) - 1
             and V.kernel.numels[-1] != 1
         ):
             # Need to expand rank by 1 to match rank when self.inside_reduction=True
@@ -182,22 +220,35 @@ class BlockPtrOptions:
             return [
                 item
                 for item, is_broadcasting in zip(it, broadcasting_dim)
-                if not is_broadcasting
+                if not is_broadcasting or not drop_broadcasts
             ]
 
+        # Drop broadcasting dimensions from the input.
+        params = BlockParameters(
+            **{key: filter(val) for key, val in dataclasses.asdict(params).items()}
+        )
+
+        def lookup_size(exprs: Iterable[sympy.Expr]) -> List[sympy.Expr]:
+            return [V.graph.sizevars.lookup_precomputed_size(expr) for expr in exprs]
+
+        # Look up precomputed sizes
+        params.shape = lookup_size(params.shape)
+        params.strides = lookup_size(params.strides)
+
         return BlockPtrOptions(
+            params=params,
             constant_offset=V.graph.sizevars.lookup_precomputed_size(constant_offset),
-            shape=[
-                V.graph.sizevars.lookup_precomputed_size(t.numel)
-                for t in filter(range_trees)
-            ],
-            strides=[*map(V.graph.sizevars.lookup_precomputed_size, filter(strides))],
-            block_shape=filter(block_shape),
-            order=V.graph.sizevars.guarded_order(filter(strides)),
-            offsets=filter([f"{t.prefix}offset" for t in range_trees]),
+            order=list(reversed(range(len(params.shape)))),
             mask_vars=mask_vars,
             reshape_suffix=reshape_suffix,
         )
+
+    def replace_roffset(self, expr: sympy.Expr, replacement: sympy.Expr) -> sympy.Expr:
+        """
+        Replaces instances of roffset with the new expression.
+        """
+        roffset = block_offsets[SymT.RINDEX]
+        return sympy_subs(expr, {roffset: replacement})
 
     def format(self, name: str, roffset=True) -> str:
         """
@@ -213,7 +264,9 @@ class BlockPtrOptions:
         f = V.kernel.index_to_str
         offsets = [*self.offsets]
         if not roffset:
-            offsets[offsets.index("roffset")] = "0"
+            offsets = [
+                self.replace_roffset(offset, sympy.Integer(0)) for offset in offsets
+            ]
         args = [
             f"{name} + ({f(self.constant_offset)})"
             if self.constant_offset != 0
@@ -229,31 +282,59 @@ class BlockPtrOptions:
     @cache_on_self
     def boundary_check(self) -> List[int]:
         """List of indices to pass to tl.load(boundary_check=...)"""
-        check = []
-        for i in range(len(self.shape)):
+        sizevars = V.graph.sizevars
+
+        # Substitute maximum block sizes in shape expressions.
+        # This works in multiple_of checks because block sizes are powers of 2.
+        block_to_max: Dict[sympy.Expr, Any] = {
+            block_size: TRITON_MAX_BLOCK[prefix_str[symt].upper()]
+            for symt, block_size in block_sizes.items()
+        }
+
+        return [
+            idx
+            for idx in range(len(self.shape))
             if (
-                self.block_shape[i] != "1"
-                and not V.graph.sizevars.statically_known_equals(self.strides[i], 0)  # type: ignore[arg-type]
-                and not V.graph.sizevars.statically_known_multiple_of(
-                    self.shape[i],
-                    TRITON_MAX_BLOCK[self.block_shape[i][0]],  # type: ignore[arg-type]
+                not sizevars.statically_known_equals(
+                    self.strides[idx], sympy.Integer(0)
                 )
-                and not (V.kernel.no_x_dim and self.block_shape[i] == "XBLOCK")
-            ):
-                check.append(i)
-        return check
+                and not sizevars.statically_known_multiple_of(
+                    self.shape[idx], self.block_shape[idx]
+                )
+                and not sizevars.statically_known_multiple_of(
+                    self.shape[idx], sympy_subs(self.block_shape[idx], block_to_max)
+                )
+                and not (
+                    V.kernel.no_x_dim
+                    and self.block_shape[idx] == block_sizes[SymT.XBLOCK]
+                )
+            )
+        ]
 
     def advance_roffset(self):
-        """Codegen string to pass to tl.advance(name, ...)"""
-        advance = ["0"] * len(self.shape)
-        advance[self.offsets.index("roffset")] = "RBLOCK"
+        """
+        Codegen string to pass to tl.advance(name, ...).
+
+        Advance is the difference between offsets in each loop iteration.
+        To compute it, we replace roffset with multiples of RBLOCK.
+        Since we expect roffset to vary in range(0, rnumel, RBLOCK), the first
+        iteration has roffset=0, while the second has roffset=RBLOCK.
+        """
+        rblock = block_sizes[SymT.RINDEX]
+        advance = [
+            (
+                self.replace_roffset(offset, rblock)
+                - self.replace_roffset(offset, sympy.Integer(0))
+            )
+            for offset in self.offsets
+        ]
         return V.kernel.index_to_str(advance)
 
     def has_indirect(self):
         return False  # block_ptr can't do indirect indexing
 
-    def has_rindex(self):
-        return "RBLOCK" in self.block_shape
+    def has_rindex(self) -> bool:
+        return any(free_symbol_is_type(expr, SymT.RINDEX) for expr in self.block_shape)
 
     def has_rmask(self):
         return self.has_rindex()
@@ -357,26 +438,31 @@ class TritonPrinter(PythonPrinter):
         q = self.doprint(expr.args[2])
         return f"tl.where({c}, {p}, {q})"
 
-    def _print_Min(self, expr):
+    def _print_min_max_helper(self, expr: sympy.Expr, cmp: str) -> str:
+        """
+        Helper for max/min code genereration.
+        cmp: > or <
+        """
         nargs = len(expr.args)
         if len(expr.args) == 1:
             return self._print(expr.args[0])
 
         mid = len(expr.args) // 2
-        a = self._print(sympy.Min(*expr.args[:mid]))
-        b = self._print(sympy.Min(*expr.args[mid:]))
-        return f"tl.minimum({a}, {b})"
+        cls = type(expr)
+        a = self._print(cls(*expr.args[:mid]))
+        b = self._print(cls(*expr.args[mid:]))
+
+        # Use a macro so we can propagate constexprs.
+        # https://github.com/triton-lang/triton/issues/3815
+        a, b = tuple(f"({x})" for x in (a, b))
+        assert cmp in {">", "<"}, f"Unexpected comparator: '{cmp}'"
+        return f"({a} * ({a} {cmp}= {b}) + {b} * ({b} {cmp} {a}))"
+
+    def _print_Min(self, expr):
+        return self._print_min_max_helper(expr, "<")
 
     def _print_Max(self, expr):
-        nargs = len(expr.args)
-        if len(expr.args) == 1:
-            return self._print(expr.args[0])
-
-        mid = len(expr.args) // 2
-        a = self._print(sympy.Max(*expr.args[:mid]))
-        b = self._print(sympy.Max(*expr.args[mid:]))
-
-        return f"tl.maximum({a}, {b})"
+        return self._print_min_max_helper(expr, ">")
 
     def _print_Abs(self, expr):
         assert len(expr.args) == 1
@@ -919,19 +1005,33 @@ class TritonKernelOverrides(TritonOverrides):
 
     @staticmethod
     def masked(mask, body, other):
-        with V.kernel.mask_loads(mask) as new_mask:
+        nodes = body.graph.find_nodes(op="output")
+        assert nodes, "graph for body does not contain an output"
+
+        need_where = False
+        for node in nodes:
+            for arg in node.args:
+                if arg.target != "load" or V.graph.is_unspec_arg(arg.args[0]):
+                    need_where = True
+
+        value = None if need_where else other
+        with V.kernel.mask_loads(mask, value=value) as new_mask:
             result = body()
 
-        # Remove once CSEVariables track the dtype
-        if result.bounds.is_bool:
-            other = bool(other)
-        # Take dtype from result to prevent accidental promotion
-        other = V.kernel.cse.generate(
-            V.kernel.compute,
-            f"tl.full({result}.shape, {constant_repr(other)}, {result}.dtype)",
-            bounds=ValueRanges.wrap(other),
-        )
-        ret = ops.where(new_mask, result, other)
+        if need_where:
+            # Remove once CSEVariables track the dtype
+            if result.bounds.is_bool:
+                other = bool(other)
+            # Take dtype from result to prevent accidental promotion
+            other = V.kernel.cse.generate(
+                V.kernel.compute,
+                f"tl.full({result}.shape, {constant_repr(other)}, {result}.dtype)",
+                bounds=ValueRanges.wrap(other),
+            )
+            ret = ops.where(new_mask, result, other)
+        else:
+            ret = result
+
         ret.mask_vars.discard(new_mask)
         return ret
 
@@ -1001,6 +1101,26 @@ class HelperFunctions:
         return self.finalized_helpers[idx]
 
 
+@dataclasses.dataclass
+class BlockParameters:
+    """
+    Class representing ND block dimensions, for block pointer analysis.
+    """
+
+    shape: List[sympy.Expr] = dataclasses.field(default_factory=list)
+    block_shape: List[sympy.Expr] = dataclasses.field(default_factory=list)
+    strides: List[sympy.Expr] = dataclasses.field(default_factory=list)
+    offsets: List[sympy.Expr] = dataclasses.field(default_factory=list)
+
+    def __add__(self, other: BlockParameters) -> BlockParameters:
+        """
+        Concatenates block parameters.
+        """
+        cls = type(self)
+        a, b = tuple(dataclasses.asdict(x) for x in (self, other))
+        return cls(**{key: a[key] + b[key] for key in a})
+
+
 class TritonKernel(SIMDKernel):
     overrides = TritonKernelOverrides  # type: ignore[assignment]
     helper_functions: HelperFunctions
@@ -1036,6 +1156,19 @@ class TritonKernel(SIMDKernel):
         self.triton_meta: Optional[Dict[str, object]] = None
 
         self.codegen_range_tree()
+
+    def _get_symt(self, tree: IterationRangesEntry) -> SymT:
+        prefix_to_symt = {prefix: symt for symt, prefix in prefix_str.items()}
+        return prefix_to_symt[tree.prefix]
+
+    def _get_block_size(self, tree: IterationRangesEntry) -> sympy.Symbol:
+        return block_sizes[self._get_symt(tree)]
+
+    def _get_block_offset(self, tree: IterationRangesEntry) -> sympy.Symbol:
+        return block_offsets[self._get_symt(tree)]
+
+    def _max_block_size(self, tree: IterationRangesEntry) -> int:
+        return TRITON_MAX_BLOCK[tree.prefix.upper()]
 
     def codegen_range_tree(self):
         for tree in self.range_trees:
@@ -1165,26 +1298,240 @@ class TritonKernel(SIMDKernel):
             # workaround https://github.com/openai/triton/issues/2821
             and self.index_dtype == "tl.int32"
         ):
-            index_relative_to_xyr_index = sympy_subs(
-                index, {v: t.expr for v, t in self.range_tree_nodes.items()}
-            )
-            range_trees = self.active_range_trees(reorder=True)
-            symbols = [t.symbol() for t in range_trees]
-            strides = [sympy.Wild(f"stride_{s}", exclude=symbols) for s in symbols]
-            offset = sympy.Wild("_offset", exclude=symbols)
-            m = index_relative_to_xyr_index.match(sympy_dot(symbols, strides) + offset)
-            # TODO(jansel): it is sometimes possible to do higher dimensional block_ptrs with
-            #               a tl.reshape the correct block.  We will miss these cases today.
-            if m:
-                self.filter_masks(mask_vars)
-                from .triton import BlockPtrOptions
 
-                return BlockPtrOptions.create(
-                    [m[s] for s in strides],
-                    m[offset],
-                    range_trees,
-                    mask_vars,  # type: ignore[arg-type]
+            def match_strided_block(
+                index: sympy.Expr, range_tree: IterationRangesEntry
+            ) -> Optional[BlockParameters]:
+                """
+                Matches expressions of the form:
+                    idx = s * xindex
+
+                This implies stride (s,), and shape (XBLOCK,).
+                """
+                symbol = range_tree.symbol()
+                stride = sympy.Wild("stride", exclude=[symbol])
+                m = index.match(symbol * stride)
+                if m is None:
+                    return None
+
+                return BlockParameters(
+                    shape=[range_tree.numel],
+                    block_shape=[self._get_block_size(range_tree)],
+                    strides=[m[stride]],
+                    offsets=[self._get_block_offset(range_tree)],
                 )
+
+            def match_mod_div_block(
+                index: sympy.Expr, range_tree: IterationRangesEntry
+            ) -> Optional[BlockParameters]:
+                """
+                Matches higher-dimensional blocks coming from FloorDiv and ModularIndexing.
+
+                Example expression to match:
+                   sN * ((rindex//(d1 * ... * d(N-1))))
+                       + s1 * ModularIndexing(rindex, 1, d1)
+                       + ...
+                       + s(N-1) * ModularIndexing(rindex, d1 * ... * d(N-2), d(N-1))
+
+                This iterates over a block of shape (dN, ..., d1) and stride
+                (sN, ..., s1). (d1,...,d(N-1)) and (s1,...,sN) are
+                wildcards that we match.
+
+                Note that dN does not appear in the expression, but we solve for it
+                using range tree numels and the other dims.
+                """
+                # Bound the possible number of dims. We use the following heuristics:
+                # - At least one dim for each range tree node.
+                # - At least one dim for every FloorDiv or ModularIndexing op.
+                # - At least 2 dims to pattern match.
+                num_dims = max(
+                    2,
+                    len(self.range_tree_nodes),
+                    (index.count(FloorDiv) + index.count(ModularIndexing)),
+                )
+
+                # Pattern match to find the strides and offset.
+                index_var = range_tree.symbol()
+                wild = functools.partial(sympy.Wild, exclude=[index_var])
+                dims: List[sympy.Expr] = [
+                    wild(f"dim_mod{idx}") for idx in range(num_dims)
+                ]
+                strides: List[sympy.Expr] = [
+                    wild(f"stride_mod{idx}") for idx in range(num_dims)
+                ]
+
+                def get_slice_numels(dims: List[Any]) -> List[Any]:
+                    """
+                    Compute the cumulative size of each dimension's slice.
+                    This proceeds from the last dim up to the second.
+                    """
+                    numels = [sympy.Integer(1)]
+                    for dim in dims[:0:-1]:
+                        numel = dim * numels[0]
+                        numels.insert(0, numel)
+                    return numels
+
+                # The first dimension's index is computed by division.
+                # The remaining are computed by modulo.
+                slice_numels = get_slice_numels(dims[:num_dims])
+                block_index_exprs = [FloorDiv(index_var, slice_numels[0])] + [
+                    ModularIndexing(index_var, numel, dim)
+                    for dim, numel in zip(dims[1:], slice_numels[1:])
+                ]
+
+                # Calculate a linear index from block indices.
+                match_expr = sympy_dot(strides, block_index_exprs)
+
+                # Pattern match.
+                match = index.match(match_expr)
+                if match is None:
+                    return None
+
+                # Provide default values for unmatched dims and strides.
+                for dim in dims[1:]:
+                    if dim not in match:
+                        match[dim] = sympy.Integer(1)
+                for stride in strides[1:]:
+                    if stride not in match:
+                        match[stride] = sympy.Integer(0)
+
+                sizevars = V.graph.sizevars
+
+                def get_match(expr: sympy.Expr) -> sympy.Expr:
+                    return sizevars.lookup_precomputed_size(match[expr])
+
+                # Replace wildcards with matched expressions.
+                dims = [dims[0]] + [get_match(dim) for dim in dims[1:]]
+                strides = [get_match(stride) for stride in strides]
+                slice_numels = get_slice_numels(dims)
+                block_index_exprs = [
+                    sympy_subs(expr, match) for expr in block_index_exprs
+                ]
+
+                # The leading dimension is not directly matched in our expression.
+                # We solve for it by dividing the range tree numel by the product of
+                # all other dimensions. We quit if they are not known to be divisible.
+                assert (
+                    dims[0] not in match
+                ), "Expected not to match the leading dimension!"
+                if not sizevars.statically_known_multiple_of(
+                    range_tree.numel, slice_numels[0]
+                ):
+                    return None
+                dims[0] = range_tree.numel / slice_numels[0]
+
+                # Check for applicable iteration range sizes.
+                # When mapping a 1D block into an ND one, we need to know that
+                # the number of elements is not changed. This means the slice numels of
+                # the ND iteration range must evenly divide the length of the 1D block.
+                # There are two cases where we can guarantee this:
+                #  1. Numels are powers of 2. If numel == 2 ** n, and we know XBLOCK == 2 ** m,
+                #     with n and m integers, then either numel is a multiple of XBLOCK, or numel
+                #     is less than XBLOCK. (If numel is less than XBLOCK, we round up to 1 below.)
+                #  2. Numels are multiples of the maximum possible block size.
+                max_block = self._max_block_size(range_tree)
+                if any(
+                    not sizevars.statically_known_multiple_of(numel, max_block)
+                    and not sizevars.statically_known_power_of_2(numel)
+                    for numel in slice_numels
+                ):
+                    return None
+
+                def identity(expr: sympy.Expr) -> sympy.Expr:
+                    return expr
+
+                # Compute the ND block shape from the linear block size.
+                # Use CielDiv to round leading dimensions up to 1.
+                # Non-leading dimensions are clamped to the size of the iteration range,
+                # while the leading dimension can exceed this to accomodate a larger
+                # block size.
+                linear_block_size = self._get_block_size(range_tree)
+                block_shape: List[sympy.Expr] = [
+                    CeilDiv(linear_block_size, slice_numels[0])
+                ] + [
+                    sympy.Min(CeilDiv(linear_block_size, numel), dim)
+                    for numel, dim in zip(slice_numels[1:], dims[1:])
+                ]
+
+                # Compute block offsets from {xyzr}offset and the matched expressions.
+                block_offsets: List[sympy.Expr] = [
+                    sympy_subs(expr, {index_var: self._get_block_offset(range_tree)})
+                    for expr in block_index_exprs
+                ]
+
+                return BlockParameters(
+                    shape=dims,
+                    block_shape=block_shape,
+                    strides=strides,
+                    offsets=block_offsets,
+                )
+
+            def match_block_pointer_subexpr(
+                expr: sympy.Expr, range_tree: IterationRangesEntry
+            ) -> Optional[BlockParameters]:
+                """
+                Match a block indexing subexpression involving a single range tree.
+                """
+                for match_func in (
+                    match_strided_block,
+                    match_mod_div_block,
+                ):
+                    match = match_func(expr, range_tree)
+                    if match is not None:
+                        return match
+
+                return None
+
+            def match_block_pointer() -> Optional[BlockPtrOptions]:
+                index_relative_to_xyr_index = sympy_subs(
+                    index, {v: t.expr for v, t in self.range_tree_nodes.items()}
+                )
+                range_trees = self.active_range_trees(reorder=True)
+
+                # Match each range tree separately.
+                range_symbols = {tree.symbol() for tree in range_trees}
+                index_terms = sympy.Add.make_args(index_relative_to_xyr_index)
+                block_params = BlockParameters()
+                for tree in range_trees:
+                    # Partition the index into subexpressions pertaining to each range tree.
+                    # For example xindex * 5 + rindex * 3 is partitioned to
+                    # (xindex * 5, rindex * 3).
+                    symbol = tree.symbol()
+                    subexpr = sympy.Integer(0) + sum(
+                        expr for expr in index_terms if symbol in expr.free_symbols
+                    )
+
+                    # Reject mixed terms, e.g. xindex * rindex.
+                    # NB: the zero expression is allowed, for broadcasting.
+                    if len(range_symbols.intersection(subexpr.free_symbols)) > 1:
+                        return None
+
+                    # Match the subexpression for this range tree.
+                    params = match_block_pointer_subexpr(subexpr, tree)
+                    if params is None:
+                        return None
+                    block_params += params
+
+                # Collect leftover terms as a constant offset.
+                offset = sum(
+                    expr
+                    for expr in index_terms
+                    if not range_symbols.intersection(expr.free_symbols)
+                )
+
+                # Form the block pointer.
+                self.filter_masks(mask_vars)
+                return BlockPtrOptions.create(
+                    params=block_params,
+                    constant_offset=offset,
+                    range_trees=range_trees,
+                    mask_vars=mask_vars,
+                )
+
+            # Return a block pointer, if indexing matches the pattern.
+            options = match_block_pointer()
+            if options is not None:
+                return options
 
         expand_str = None
         index_str = self.index_to_str(index)
@@ -1252,7 +1599,8 @@ class TritonKernel(SIMDKernel):
             f"tl.broadcast_to({value}, {self.index_to_str(indexing.reshape_suffix)})"
         )
         # drop any extra size=1 dimensions
-        value = triton_reshape(value, indexing.reshape_suffix, indexing.block_shape)
+        block_shape = [V.kernel.index_to_str(expr) for expr in indexing.block_shape]
+        value = triton_reshape(value, indexing.reshape_suffix, block_shape)
         # workaround https://github.com/openai/triton/issues/2814
         value = f"{value}.to({triton_store_type(V.graph.get_dtype(name))})"
         return f"tl.store({block_ptr}, {value}{other})"
@@ -1339,8 +1687,12 @@ class TritonKernel(SIMDKernel):
                 ep = ", eviction_policy='evict_first'"
         else:
             ep = ""
+
         if (has_tmpmask or has_rindex) and indexing.has_mask():
-            other = ", other=0.0"
+            if self._load_other:
+                other = f", other={constant_repr(self._load_other)}"
+            else:
+                other = ", other=0.0"
         else:
             other = ""
 
@@ -1355,9 +1707,8 @@ class TritonKernel(SIMDKernel):
                 )
                 line = f"tl.load({block_ptr}{other}{ep})"
                 # add needed size=1 dimensions
-                line = triton_reshape(
-                    line, indexing.block_shape, indexing.reshape_suffix
-                )
+                block_shape = [str(dim) for dim in indexing.block_shape]
+                line = triton_reshape(line, block_shape, indexing.reshape_suffix)
             elif isinstance(original_index, sympy.Integer):
                 line = f"tl.load({var} + ({original_index}))"
                 append_broadcast = indexing.expand_str
@@ -2247,6 +2598,18 @@ class TritonKernel(SIMDKernel):
 
         return code.getvalue()
 
+    def _get_persistent_RBLOCK(self, rnumel):
+        rnumel = V.graph.sizevars.simplify(rnumel)
+        if isinstance(rnumel, (sympy.Integer, int)):
+            val = int(rnumel)
+            val = next_power_of_2(val)
+        else:
+            val = 128
+            while not V.graph.sizevars.statically_known_leq(rnumel, val):
+                assert val <= 16 * 1024, f"Failed to find static RBLOCK for {rnumel}"
+                val *= 2
+        return val
+
     def codegen_static_numels(self, code):
         """
         We get a small speedup from hard coding numels if they are static.
@@ -2271,19 +2634,7 @@ class TritonKernel(SIMDKernel):
                     code.writeline(f"{tree.prefix}numel = {int(simplified_tree_numel)}")
 
             if tree.prefix == "r" and self.persistent_reduction:
-                simplified_tree_numel = V.graph.sizevars.simplify(tree.numel)
-                if isinstance(simplified_tree_numel, (sympy.Integer, int)):
-                    val = int(simplified_tree_numel)
-                    val = next_power_of_2(val)
-                else:
-                    val = 128
-                    while not V.graph.sizevars.statically_known_leq(
-                        simplified_tree_numel, val
-                    ):
-                        assert (
-                            val <= 16 * 1024
-                        ), f"Failed to find static RBLOCK for {simplified_tree_numel}"
-                        val *= 2
+                val = self._get_persistent_RBLOCK(tree.numel)
                 code.writeline(f"RBLOCK: tl.constexpr = {val}")
 
             if tree.prefix == "x" and self.no_x_dim:
@@ -2406,6 +2757,31 @@ class TritonKernel(SIMDKernel):
             return f"{pid}.to({self.index_dtype})"
         return pid
 
+    def _has_constant_mask(self, tree: IterationRangesRoot):
+        if V.graph.sizevars.statically_known_equals(tree.numel, 1):  # type: ignore[arg-type]
+            return True
+        # Masks are superfluous if numel is a multiple of BLOCK
+        # (We use the fact that BLOCK is required by triton to be a power of 2)
+        if tree.prefix == "r" and self.persistent_reduction:
+            max_block = self._get_persistent_RBLOCK(tree.numel)
+        elif tree.prefix == "x" and self.no_x_dim:
+            max_block = 1
+        else:
+            if tree.prefix.upper() not in TRITON_MAX_BLOCK:
+                return False
+            max_block = TRITON_MAX_BLOCK[tree.prefix.upper()]
+
+        # Optional optimization: if block divides numel exactly, we will
+        # never need to do a masked load to handle stragglers at the end.
+        # It's faster to avoid masking at all.  But it is sound to always
+        # mask.
+        return V.graph.sizevars.statically_known_multiple_of(tree.numel, max_block)
+
+    def filter_masks(self, mask_vars):
+        for tree in self.range_trees:
+            if self._has_constant_mask(tree):
+                mask_vars.discard(f"{tree.prefix}mask")
+
     def iteration_ranges_codegen_header(self, entry, code):
         x = entry.prefix
         if entry.is_loop:
@@ -2425,13 +2801,40 @@ class TritonKernel(SIMDKernel):
                     f"{entry.name} = {line}",
                 ]
             )
-        code.writeline(f"{x}mask = {entry.name} < {x}numel")
+
+        if self._has_constant_mask(entry):
+            sizes = self.dense_size_str()
+            code.writeline(f"{x}mask = tl.full({sizes}, True, tl.int1)")
+        else:
+            code.writeline(f"{x}mask = {entry.name} < {x}numel")
 
 
 class TritonScheduling(SIMDScheduling):
     int32_type = "tl.int32"
     int64_type = "tl.int64"
     kernel_type = TritonKernel
+    backend_features = dict.fromkeys(  # dict for deterministic order
+        [
+            BackendFeature.FOREACH,
+            BackendFeature.BUCKETIZE,
+            BackendFeature.INPLACE_BUFFERS,
+            BackendFeature.MASKED_SCATTER_WITH_INDEX,
+            BackendFeature.SCAN,
+        ]
+    )
+    if torch.version.hip is None:
+        backend_features.update(
+            dict.fromkeys(
+                [
+                    # TODO: Move this above when ROCm triton adds support for multiple inputs
+                    BackendFeature.TUPLE_REDUCTION,
+                ]
+            )
+        )
+
+    @classmethod
+    def get_backend_features(cls, device: torch.device):
+        return cls.backend_features
 
     def codegen_comment(self, node_schedule):
         wrapper = V.graph.wrapper_code

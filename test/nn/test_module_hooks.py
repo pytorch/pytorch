@@ -588,28 +588,21 @@ class TestStateDictHooks(TestCase):
             hook_called += 1
 
         hook_called = 0
-        # Test private API since this sets with_module=False which diverges from public API
         m_load._register_load_state_dict_pre_hook(hook_without_module)
         m_load.load_state_dict(m_state_dict)
         self.assertEqual(1, hook_called)
 
         hook_called = 0
-        m_load.register_load_state_dict_pre_hook(hook_with_module)
-        m_load.load_state_dict(m_state_dict)
-        self.assertEqual(2, hook_called)
-
-        # Test private API with with_module=True
-        hook_called = 0
         m_load._register_load_state_dict_pre_hook(hook_with_module, True)
         m_load.load_state_dict(m_state_dict)
-        self.assertEqual(3, hook_called)
+        self.assertEqual(2, hook_called)
 
     def test_no_extra_ref_to_module(self):
         try:
             gc.disable()
             m = nn.Linear(10, 10)
 
-            m.register_load_state_dict_pre_hook(_hook_to_pickle)
+            m._register_load_state_dict_pre_hook(_hook_to_pickle, True)
             weak_m = weakref.ref(m)
             del m
 
@@ -619,7 +612,7 @@ class TestStateDictHooks(TestCase):
 
     def test_pickled_hook(self):
         m = nn.Linear(10, 10)
-        m.register_load_state_dict_pre_hook(_hook_to_pickle)
+        m._register_load_state_dict_pre_hook(_hook_to_pickle, True)
         pickle.loads(pickle.dumps(m))
 
     @swap([True, False])
@@ -685,13 +678,14 @@ class TestStateDictHooks(TestCase):
                 mod = m
 
             hook_called = 0
-            # Test private API since this sets with_module=False which diverges from public API
             mod._register_load_state_dict_pre_hook(mod.my_pre_load_hook)
             m.load_state_dict(state_dict)
             self.assertEqual(1, hook_called)
 
             hook_called = 0
-            mod.register_load_state_dict_pre_hook(mod.my_pre_load_hook_with_module)
+            mod._register_load_state_dict_pre_hook(
+                mod.my_pre_load_hook_with_module, True
+            )
             m.load_state_dict(state_dict)
             self.assertEqual(2, hook_called)
 
@@ -864,30 +858,6 @@ class TestStateDictHooks(TestCase):
         m.register_state_dict_pre_hook(my_state_dict_pre_hook)
         _ = m.state_dict()
         self.assertTrue(called)
-
-    def test_register_state_dict_post_hook(self):
-        def state_dict_post_hook(module, state_dict, prefix, local_metadata):
-            for name, param in module.named_parameters(recurse=False):
-                state_dict[prefix + name] = torch.nn.Parameter(
-                    state_dict[prefix + name]
-                )
-
-        def register_linear_hook(module):
-            if isinstance(module, nn.Linear):
-                module.register_state_dict_post_hook(state_dict_post_hook)
-
-        m = nn.Transformer(
-            d_model=4, nhead=2, num_encoder_layers=2, num_decoder_layers=2
-        )
-        m.apply(register_linear_hook)
-
-        sd = m.state_dict()
-
-        for k, v in m.state_dict().items():
-            if "linear" in k or "out_proj" in k:
-                self.assertTrue(isinstance(v, torch.nn.Parameter))
-            else:
-                self.assertFalse(isinstance(v, torch.nn.Parameter))
 
 
 class TestModuleGlobalHooks(TestCase):
