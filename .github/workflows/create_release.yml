@@ -49,11 +49,15 @@ jobs:
             # Create archive
             tar -czf "$PT_RELEASE_FILE" "$PT_RELEASE_NAME"
             echo "Created source archive $PT_RELEASE_FILE with content: $(ls -a "$PT_RELEASE_NAME")"
-      - name: Upload source distribution
+      - name: Upload source distribution for release
         if: ${{ github.event_name == 'release' }}
         uses: softprops/action-gh-release@v1
         with:
           files: ${{env.PT_RELEASE_FILE}}
+      - name: Upload source distribution to GHA artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: ${{env.PT_RELEASE_FILE}}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name }}
