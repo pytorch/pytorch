@@ -11,7 +11,6 @@ from torchgen.model import FunctionSchema, OperatorName, SchemaKind, BaseType, L
 import torch
 import torch._C as _C
 import torch.library as library
-from torch._library.abstract_impl import AbstractImplCtx
 from torch.library import get_ctx
 
 from .autograd import autograd_kernel_indirection, construct_autograd_kernel
@@ -25,7 +24,7 @@ https://docs.google.com/document/d/1aGWtgxV3HppuxQAdddyPrs74_aEntpkYt9MalnCKnhk
 This file includes pieces of the implementation of our custom operator API.
 """
 
-__all__ = ["custom_op", "CustomOp", "get_ctx", "AbstractImplCtx"]
+__all__ = ["custom_op", "CustomOp", "get_ctx"]
 
 
 SUPPORTED_DEVICE_TYPE_TO_KEY = {
@@ -433,7 +432,7 @@ class CustomOp:
                         f"at {location}"
                     )
 
-                with torch._library.abstract_impl.set_ctx_getter(error_on_ctx):
+                with torch._library.fake_impl.set_ctx_getter(error_on_ctx):
                     return f(*args, **kwargs)
 
             self._lib.impl(self._opname, f_with_ctx, "Meta")
