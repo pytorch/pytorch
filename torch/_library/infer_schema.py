@@ -2,8 +2,9 @@
 import inspect
 import typing
 
+import torch  # noqa: F401. Used to evaluate the type when converting types from string.
+
 from .. import device, dtype, Tensor, types
-import torch
 
 
 def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
@@ -23,13 +24,13 @@ def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
             f"infer_schema(func): {what} " f"Got func with signature {sig})"
         )
 
-    def convert_type_string(annotation_type: str) -> type:
+    def convert_type_string(annotation_type: str):
         try:
             return eval(annotation_type)
         except Exception as e:
             error_fn(
-                    f"Parameter {name} has unsupported type annotation "
-                    f"{param.annotation}. It is not a type."
+                f"Parameter {name} has unsupported type annotation "
+                f"{param.annotation}. It is not a type."
             )
 
     params = []
@@ -47,8 +48,8 @@ def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
 
         if param.annotation is inspect.Parameter.empty:
             error_fn(f"Parameter {name} must have a type annotation.")
-        
-        # The annotation might be converted to a string by annotation, 
+
+        # The annotation might be converted to a string by annotation,
         # we convert it to the actual type.
         annotation_type = param.annotation
         if type(annotation_type) == str:
@@ -90,7 +91,7 @@ def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
         )
     return_annotation = sig.return_annotation
     if type(return_annotation) == str:
-            return_annotation = convert_type_string(return_annotation)
+        return_annotation = convert_type_string(return_annotation)
     ret = parse_return(return_annotation, error_fn)
     return f"({', '.join(params)}) -> {ret}"
 
