@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import contextlib
 import functools
 from typing import Dict, List, Optional, TYPE_CHECKING
@@ -285,15 +286,10 @@ class AutogradCompilerInstance:
         )
 
         def runtime_wrapper(compiled_fn, inputs, sizes, hooks):
-            prior = torch._inductor.config.triton.cudagraph_static_input_params
-            torch._inductor.config.triton.cudagraph_static_input_params = True
-            try:
-                for i in runtime_inputs_to_move:
-                    inputs[i] = inputs[i].cuda()
+            for i in runtime_inputs_to_move:
+                inputs[i] = inputs[i].cuda()
 
-                return compiled_fn(inputs, sizes, hooks)
-            finally:
-                torch._inductor.config.triton.cudagraph_static_input_params = prior
+            return compiled_fn(inputs, sizes, hooks)
 
         return runtime_wrapper, self.compiler_fn(graph)
 

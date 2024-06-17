@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from contextlib import contextmanager, nullcontext
 from typing import Any, Tuple
 

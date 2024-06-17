@@ -110,6 +110,23 @@ float fp16_dot_with_fp32_arith(
     const float16_t* vec1,
     const float16_t* vec2,
     int64_t len);
+
+void bf16_gemv_trans(
+    const int m,
+    const int n,
+    const at::BFloat16 alpha,
+    const at::BFloat16* a,
+    const int lda,
+    const at::BFloat16* x,
+    const int incx,
+    const at::BFloat16 beta,
+    at::BFloat16* y,
+    const int incy);
+
+float bf16_dot_with_fp32_arith(
+    const at::BFloat16* vec1,
+    const at::BFloat16* vec2,
+    int64_t len);
 #endif
 
 template <typename scalar_t>

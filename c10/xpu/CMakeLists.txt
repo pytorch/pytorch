@@ -8,6 +8,12 @@ if(NOT BUILD_LIBTORCHLESS)
   find_library(C10_XPU_LIB c10_xpu PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
 endif()
 
+# ---[ Configure macro file.
+set(C10_XPU_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS}) # used in xpu_cmake_macros.h.in
+configure_file(
+    ${CMAKE_CURRENT_LIST_DIR}/impl/xpu_cmake_macros.h.in
+    ${CMAKE_BINARY_DIR}/c10/xpu/impl/xpu_cmake_macros.h)
+
 set(C10_XPU_SRCS
     XPUCachingAllocator.cpp
     XPUFunctions.cpp
@@ -50,3 +56,7 @@ foreach(file ${C10_XPU_HEADERS})
   get_filename_component(dir ${file} DIRECTORY)
   install(FILES ${file} DESTINATION include/c10/xpu/${dir})
 endforeach()
+
+if(MSVC AND C10_XPU_BUILD_SHARED_LIBS)
+  install(FILES $<TARGET_PDB_FILE:c10_xpu> DESTINATION lib OPTIONAL)
+endif()

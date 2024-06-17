@@ -1,8 +1,10 @@
+# mypy: allow-untyped-defs
 import contextlib
 
 from typing import Any, cast, Dict, List, NamedTuple, Optional, Set, Tuple
 
 import torch
+import torch._dynamo.compiled_autograd as ca
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
@@ -402,6 +404,9 @@ class FSDPParamGroup:
     def _register_post_backward_hook(
         self, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+        # Compile relies on `root_post_backward_callback` to call each `FSDPParamGroup.post_backward`
+        if ca.compiled_autograd_enabled:
+            return args, kwargs
         if not torch.is_grad_enabled():
             return args, kwargs
         args_list, args_spec = tree_flatten(args)

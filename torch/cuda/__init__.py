@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 r"""
 This package adds support for CUDA tensor types.
 
@@ -629,6 +630,8 @@ def _parse_visible_devices() -> Union[List[int], List[str]]:
 
 
 def _raw_device_count_amdsmi() -> int:
+    if not _HAS_PYNVML:  # If amdsmi is not available
+        return -1
     try:
         amdsmi.amdsmi_init()
     except amdsmi.AmdSmiException as e:
@@ -659,6 +662,8 @@ def _raw_device_count_nvml() -> int:
 def _raw_device_uuid_amdsmi() -> Optional[List[str]]:
     from ctypes import byref, c_int, c_void_p, CDLL, create_string_buffer
 
+    if not _HAS_PYNVML:  # If amdsmi is not available
+        return None
     try:
         amdsmi.amdsmi_init()
     except amdsmi.AmdSmiException:
