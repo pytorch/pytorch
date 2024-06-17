@@ -292,7 +292,6 @@ class PipelineScheduleSingle(_PipelineSchedule):
         # Set the same has_backward flag for stage object
         self._stage.has_backward = self._has_backward
 
-
     def step(self, *args, target=None, losses: Optional[List] = None, **kwargs):
         """
         Run one iteration of the pipeline schedule with *whole-batch* input.
@@ -313,7 +312,9 @@ class PipelineScheduleSingle(_PipelineSchedule):
 
         # Check if buffers initialized for communication
         if not self._stage.buffers_initialized:
-            self._stage.init_buffers(self._n_microbatches, args_split[0], kwargs_split[0])
+            self._stage.init_buffers(
+                self._n_microbatches, args_split[0], kwargs_split[0]
+            )
 
         # Split target into microbatches
         if target is not None:
@@ -593,7 +594,6 @@ class PipelineScheduleMulti(_PipelineSchedule):
         # This will be set during init of derived schedules
         self.pipeline_order: Dict[int, List[Optional[_Action]]] = {}
 
-
     def step(self, *args, target=None, losses: Optional[List] = None, **kwargs):
         """
         Run one iteration of the pipeline schedule with *whole-batch* input.
@@ -616,6 +616,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
         # Check if buffers initialized for communication
         for stage in self._stages:
             if not stage.buffers_initialized:
+                logger.debug(f"init_buffers for {stage.stage_index}")
                 stage.init_buffers(self._n_microbatches, args_split[0], kwargs_split[0])
 
         # Split target into microbatches

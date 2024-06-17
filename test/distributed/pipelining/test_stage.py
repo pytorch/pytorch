@@ -3,7 +3,6 @@
 import os
 import sys
 import tempfile
-from datetime import timedelta
 
 from model_registry import ExampleCode, ModelWithKwargs, MultiMLP
 
@@ -276,6 +275,7 @@ class StageTest(MultiProcContinousTest):
         stage.init_buffers(num_microbatches, args, kwargs)
         dist.barrier()
         print(f"Rank {self.rank} completed")
+
 
 instantiate_parametrized_tests(StageTest)
 

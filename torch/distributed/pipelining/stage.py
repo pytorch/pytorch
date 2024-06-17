@@ -1131,7 +1131,7 @@ class PipelineStage(_PipelineStageBase):
         stage_index: int,
         num_stages: int,
         device: torch.device,
-        input_args: Union[torch.Tensor, Tuple[torch.Tensor, ...]] = None,
+        input_args: Optional[Union[torch.Tensor, Tuple[torch.Tensor, ...]]] = None,
         output_args: Optional[Union[torch.Tensor, Tuple[torch.Tensor, ...]]] = None,
         group: Optional[dist.ProcessGroup] = None,
     ):
@@ -1151,6 +1151,8 @@ class PipelineStage(_PipelineStageBase):
         self.prev_stage = stage_global_rank((self.group_rank - 1) % self.group_size)
         self.next_stage = stage_global_rank((self.group_rank + 1) % self.group_size)
 
+        self.inputs = None
+
         logger.debug(
             f"finished pipeline stage init, {self.stage_index=}, {self.is_first=}, "  # noqa: G004
             f"{self.is_last=}, {self.num_stages=}, "
@@ -1161,25 +1163,44 @@ class PipelineStage(_PipelineStageBase):
             input_args, input_kwargs = args, kwargs
         else:
             objects = [None]
-            dist.recv_object_list(objects, src=self.prev_stage, group=self.group, device=self.device)
+            logger.debug(f"{self.stage_index} receiving from stage {self.prev_stage}")
+            dist.recv_object_list(
+                objects, src=self.prev_stage, group=self.group, device=self.device
+            )
+            logger.debug(
+                f"{self.stage_index} received {objects} from stage {self.prev_stage}"
+            )
             recv_args, input_kwargs = objects[0], {}
-            input_args = [x.to(self.device) if isinstance(x, torch.Tensor) else x for x in recv_args]
+            input_args = [
+                x.to(self.device) if isinstance(x, torch.Tensor) else x
+                for x in recv_args
+            ]
 
         # set attributes needed for forward
         inputs = input_args
-        outputs = self.submod(*input_args, **input_kwargs)
+        with torch.no_grad():
+            logger.debug(
+                f"{self.stage_index} running with {input_args=}, {input_kwargs=}"
+            )
+            outputs = self.submod(*input_args, **input_kwargs)
+            logger.debug(f"{self.stage_index} finished fwd")
         # if single tensor, convert so it is always a list
         if isinstance(outputs, torch.Tensor):
             outputs = [outputs]
 
         if not self.is_last:
-            dist.send_object_list([outputs], dst=self.next_stage, group=self.group, device=self.device)
-      
+            dist.send_object_list(
+                [outputs], dst=self.next_stage, group=self.group, device=self.device
+            )
+            logger.debug(
+                f"{self.stage_index} sending {outputs} to stage {self.next_stage}"
+            )
+        dist.barrier()
         return inputs, outputs
 
     def _prepare_forward_infra(self, num_microbatches: int, args, kwargs) -> None:
         inputs, self.outputs = self._initial_model_run_for_input_outputs(args, kwargs)
-      
+
         # Receive info during forward
         # TODO: create args_recv_info lazily? (same needed for PipelineStage)
         for chunk_id in range(num_microbatches):
