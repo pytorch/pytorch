@@ -10,7 +10,6 @@ import copy
 import queue
 
 import torch
-import torch.multiprocessing
 from torch._utils import ExceptionWrapper
 
 from . import MP_STATUS_CHECK_INTERVAL
