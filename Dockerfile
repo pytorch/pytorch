@@ -79,7 +79,7 @@ RUN case ${TARGETPLATFORM} in \
 RUN /opt/conda/bin/pip install torchelastic
 RUN IS_CUDA=$(python -c 'import torch ; print(torch.cuda._is_compiled())'); \
     echo "Is torch compiled with cuda: ${IS_CUDA}"; \
-    if test "${IS_CUDA}" != "True" -a "${TARGETPLATFORM}" != "linux/arm64"; then \
+    if test "${IS_CUDA}" != "True" -a ! -z "${CUDA_VERSION}"; then \
         exit 1; \
     fi
 
