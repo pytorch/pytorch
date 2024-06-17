@@ -54,10 +54,12 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: ${{env.PT_RELEASE_FILE}}
-      - name: Upload source distribution to GHA artifacts
+      - name: Upload source distribution to GHA artifacts for release branch
+        # if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/') }}
         uses: actions/upload-artifact@v2
         with:
           name: ${{env.PT_RELEASE_FILE}}
+          path: ${{env.PT_RELEASE_FILE}}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name }}
