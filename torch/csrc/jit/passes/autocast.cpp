@@ -4,10 +4,10 @@
 #include <ATen/autocast_mode.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/quantization/helper.h>
+#include <optional>
 
 #include <stack>
 #include <unordered_set>
@@ -60,18 +60,18 @@ bool isAutocastNode(Value* value) {
 //  2. `prim::SetAttr` must follow `prim::CreateObject()` in the same block,
 //    but there might be other nodes in between
 //
-c10::optional<AutocastScope> parseAutocast(
+std::optional<AutocastScope> parseAutocast(
     Value* value,
     const AutocastContext& context) {
   if (!isAutocastNode(value)) {
     // Not an autocast...
-    return c10::nullopt;
+    return std::nullopt;
   }
   if (value->node()->kind() == prim::CreateObject) {
     AutocastScope scope;
     scope.instance = value;
     scope.context = context;
-    c10::optional<bool> enabled;
+    std::optional<bool> enabled;
     std::string device;
     c10::ScalarType dtype = c10::ScalarType::Undefined;
     for (Use use : value->uses()) {
@@ -135,7 +135,7 @@ c10::optional<AutocastScope> parseAutocast(
     AT_ERROR("Unsupported autocast syntax");
   }
 
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 void castTensorInputs(
@@ -269,7 +269,7 @@ void updateAutocastEnabledCheck(Node* node, bool is_jit_enabled) {
 void handleBlock(Block* block, AutocastContext initial_state) {
   std::stack<AutocastScope> autocast_stack;
 
-  c10::optional<bool> incompatible_amp = c10::nullopt;
+  std::optional<bool> incompatible_amp = std::nullopt;
 
   // The current autocast enabled/disabled state
   auto current_state = [&] {

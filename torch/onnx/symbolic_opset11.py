@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """This file exports ONNX ops for opset 11."""
 from __future__ import annotations
 
@@ -1037,6 +1038,7 @@ def index_copy(g: jit_utils.GraphContext, self, dim, index, source):
     return scatter(g, self, dim, expanded_index, source)
 
 
+@_onnx_symbolic("aten::bitwise_right_shift")
 @_onnx_symbolic("aten::__rshift_")
 @_beartype.beartype
 def __rshift_(g: jit_utils.GraphContext, self, other):
@@ -1071,6 +1073,7 @@ def __rshift_(g: jit_utils.GraphContext, self, other):
     return rshift
 
 
+@_onnx_symbolic("aten::bitwise_left_shift")
 @_onnx_symbolic("aten::__lshift_")
 @_beartype.beartype
 def __lshift_(g: jit_utils.GraphContext, self, other):

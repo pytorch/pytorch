@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 This file contains utilities related to functionalization in AOTAutograd:
 1. converting to/from functional tensors
@@ -5,13 +6,16 @@ This file contains utilities related to functionalization in AOTAutograd:
 3. regenerating/replaying views from their base
 4. checking if a graph is functional i.e. whether it contains any mutation ops
 """
+from __future__ import annotations
 
+from typing import Optional
 
 import torch
 from torch import Tensor
 from torch._logging import getArtifactLogger
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._subclasses.functional_tensor import FunctionalTensor
+from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental.symbolic_shapes import definitely_true, sym_eq
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import (
@@ -181,9 +185,13 @@ def has_metadata_mutation(f_arg, arg, *, check_only_storage_mutation: bool):
         # it experiences an data mutation, we pessimistically think that the set_()
         # call is necessary here. We could in theory fix this, but this will
         # hopefully never happen in user code, and is not needed for fsdp.
-        same_storages = StorageWeakRef(arg.untyped_storage()) == StorageWeakRef(
-            arg_after.untyped_storage()
-        )
+        if is_sparse_any(arg):
+            # TODO:add sparse tensors support to functionalization
+            same_storages = False
+        else:
+            same_storages = StorageWeakRef(arg.untyped_storage()) == StorageWeakRef(
+                arg_after.untyped_storage()
+            )
         has_storage_metadata_mutation = maybe_storage_changed and not same_storages
         if check_only_storage_mutation:
             return has_storage_metadata_mutation
@@ -214,10 +222,7 @@ def gen_alias_from_base(
     aliased_base_tensor,
     target_meta_tensor,
     target_requires_grad,
-    # Actual type: Optional[FunctionalTensorMetadataEq]
-    # Can't use it here because it lives inside schemas.py. Importing that class would lead
-    # to an error due to an import cycle.
-    target_functional_tensor=None,
+    target_functional_tensor: Optional[FunctionalTensorMetadataEq] = None,
 ):
     # Patch the correct requires_grad field of the output tensor, depending on whether:
     # (i) the reconstructed output (out) was came from a tensor that requires grad or not;
@@ -234,39 +239,24 @@ def gen_alias_from_base(
     # In summary, we use the fact that FunctionalTensorWrapper saves the view
     # functions applied to itself (collected during functionalization) so as
     # to replay them (view functions) on the aliased_base_tensor.
-    if config.view_replay_for_aliased_outputs and target_functional_tensor is not None:
-        from .schemas import FunctionalTensorMetadataEq
-
-        assert isinstance(target_functional_tensor, FunctionalTensorMetadataEq)
+    if (
+        config.view_replay_for_aliased_outputs
+        and target_functional_tensor is not None
+        and not torch._functionalize_is_symbolic(target_functional_tensor.tensor)
+    ):
         functional_tensor = target_functional_tensor.tensor
 
-        try:
-            out = torch._functionalize_apply_view_metas(
-                functional_tensor, aliased_base_tensor
-            )
-        except RuntimeError as e:
-            # NYI for dynamic shapes.
-            #
-            # On functionalization, the ViewMeta lambdas will have symbolic shapes.
-            # When trying to apply those lambdas on concrete tensors, it will fail.
-            #
-            # In order for this to work, we should have a way to replace those
-            # symbolic shapes with concrete numbers.
-            aot_joint_log.info(
-                "could not reconstruct view by re-applying a ViewMeta sequence. "
-                "Fallbacking to reconstruction using as_strided. "
-                "Reason: %s",
-                str(e),
-            )
-        else:
-            # If re-applying the ViewMeta sequence succeeded, there should be no more
-            # problems going forward. We just check we got to the target shape and
-            # patch requires_grad flag.
-            assert out.shape == target_meta_tensor.shape, (
-                "incorrect out shape after application of ViewMeta sequence: "
-                f"{tuple(out.shape)} (actual) vs {tuple(target_meta_tensor.shape)} (expected)"
-            )
-            return patch_requires_grad(out)
+        out = torch._functionalize_apply_view_metas(
+            functional_tensor, aliased_base_tensor
+        )
+        # If re-applying the ViewMeta sequence succeeded, there should be no more
+        # problems going forward. We just check we got to the target shape and
+        # patch requires_grad flag.
+        assert out.shape == target_meta_tensor.shape, (
+            "incorrect out shape after application of ViewMeta sequence: "
+            f"{tuple(out.shape)} (actual) vs {tuple(target_meta_tensor.shape)} (expected)"
+        )
+        return patch_requires_grad(out)
 
     # Try to do view-replay if possible.
     # fall back to .as_strided() if we can't.
@@ -326,6 +316,27 @@ def has_same_metadata(t1, t2):
         and t1.is_conj() == t2.is_conj()
         and t1.is_neg() == t2.is_neg()
     )
+
+
+# Wrapper around a FunctionalTensorWrapper for comparing only the resulting metadata
+# after applying all the ViewMeta operations.
+class FunctionalTensorMetadataEq:
+    def __init__(self, tensor: torch.Tensor) -> None:
+        assert torch._is_functional_tensor(tensor)
+        self.tensor = tensor
+
+    def __eq__(self, other: object) -> bool:
+        # If other is None, then it probably means that we weren't able to recreate
+        # the FunctionalTensorMetadataEq. One of this cases is when we update the
+        # view metadata by calling: create_synthetic_base_metadata.
+        if other is None:
+            return True
+
+        # Comparison agains any other type is not implemented.
+        if not isinstance(other, FunctionalTensorMetadataEq):
+            return NotImplemented
+
+        return has_same_metadata(self.tensor, other.tensor)
 
 
 # new_arg and arg here are either:

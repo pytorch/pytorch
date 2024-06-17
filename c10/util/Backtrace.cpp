@@ -1,7 +1,7 @@
 #include <c10/util/Backtrace.h>
-#include <c10/util/Optional.h>
 #include <c10/util/Type.h>
 #include <c10/util/irange.h>
+#include <optional>
 
 #include <functional>
 #include <memory>
@@ -76,9 +76,9 @@ class GetBacktraceImpl {
   C10_ALWAYS_INLINE GetBacktraceImpl(
       size_t /* frames_to_skip */,
       size_t /* maximum_number_of_frames */,
-      bool /* skip_python_frames */)
-      : st_(/* skipFrames */ frames_to_skip);
-  { _Unwind_Backtrace(android_unwind_callback, &state_); }
+      bool /* skip_python_frames */) {
+    _Unwind_Backtrace(android_unwind_callback, &state_);
+  }
 
   std::string symbolize() const {
     std::ostringstream os;
@@ -134,7 +134,7 @@ bool is_python_frame(const FrameInformation& frame) {
       (frame.object_file.find("libpython") != std::string::npos);
 }
 
-c10::optional<FrameInformation> parse_frame_information(
+std::optional<FrameInformation> parse_frame_information(
     const std::string& frame_string) {
   FrameInformation frame;
 
@@ -150,19 +150,19 @@ c10::optional<FrameInformation> parse_frame_information(
 
   auto function_name_start = frame_string.find('(');
   if (function_name_start == std::string::npos) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   function_name_start += 1;
 
   auto offset_start = frame_string.find('+', function_name_start);
   if (offset_start == std::string::npos) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   offset_start += 1;
 
   const auto offset_end = frame_string.find(')', offset_start);
   if (offset_end == std::string::npos) {
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   frame.object_file = frame_string.substr(0, function_name_start - 1);
@@ -186,7 +186,7 @@ c10::optional<FrameInformation> parse_frame_information(
       skip >> frame.offset_into_function;
 #else
 #warning Unknown standard library, backtraces may have incomplete debug information
-  return c10::nullopt;
+  return std::nullopt;
 #endif // defined(__GLIBCXX__)
 
   // Some system-level functions don't have sufficient debug information, so

@@ -10,11 +10,11 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
-from torch.testing._internal.common_utils import skipIfRocm
 from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
 
 if HAS_CUDA:
     import triton
+
     from torch.testing._internal.triton_utils import add_kernel
 
 
@@ -446,13 +446,13 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
         class MyMM(torch.autograd.Function):
             @staticmethod
-            @torch.cuda.amp.custom_fwd
+            @torch.amp.custom_fwd(device_type="cuda")
             def forward(ctx, a, b):
                 ctx.save_for_backward(a, b)
                 return a.mm(b)
 
             @staticmethod
-            @torch.cuda.amp.custom_bwd
+            @torch.amp.custom_bwd(device_type="cuda")
             def backward(ctx, grad):
                 a, b = ctx.saved_tensors
                 return grad.mm(b.t()), a.t().mm(grad)
@@ -525,14 +525,14 @@ class GraphModule(torch.nn.Module):
         autograd_function_apply: "f32[]" = torch._functorch.autograd_function.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, l_z_, l_weird_b, l_weird_c, args_tensor_mask = [True, False, True]);  fwd_body_0 = bwd_body_0 = l_x_ = l_z_ = l_weird_b = l_weird_c = None
         return (autograd_function_apply,)
 
-    class GraphModule(torch.nn.Module):
+    class fwd_body_0(torch.nn.Module):
         def forward(self, function_ctx, l_x_: "f32[]", l_z_: "f32[]", l_weird_b: "f32[]", l_weird_c: "f32[]"):
             mul: "f32[]" = l_weird_b * l_weird_c
             clone: "f32[]" = l_x_.clone();  l_x_ = None
             mul_1: "f32[]" = mul * clone;  mul = clone = None
             return (mul_1, [l_weird_b, l_weird_c])
 
-    class GraphModule(torch.nn.Module):
+    class bwd_body_0(torch.nn.Module):
         def forward(self, function_ctx, mul_1: "f32[]", l_weird_b: "f32[]", l_weird_c: "f32[]"):
             _set_grad_enabled = torch._C._set_grad_enabled(False)
 
@@ -1104,7 +1104,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(cnt.op_count, 2)
 
     @requires_cuda
-    @skipIfRocm
     def test_triton_kernel_basic(self):
         class Add(torch.autograd.Function):
             @staticmethod
@@ -1136,7 +1135,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(x + y, z)
 
     @requires_cuda
-    @skipIfRocm
     def test_triton_kernel_multiple_out(self):
         class Add(torch.autograd.Function):
             @staticmethod

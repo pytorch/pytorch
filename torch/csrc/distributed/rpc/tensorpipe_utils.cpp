@@ -38,7 +38,7 @@ inline c10::Device indexToDevice(c10::DeviceIndex index) {
 
 class TensorpipeCpuConverter : public TensorpipeDeviceTypeConverter {
  public:
-  c10::optional<std::vector<char>> prepareTensorForSending(
+  std::optional<std::vector<char>> prepareTensorForSending(
       const c10::Storage& storage,
       const std::vector<c10::Stream>& /* streams */,
       tensorpipe::Message& message) const override {
@@ -59,7 +59,7 @@ class TensorpipeCpuConverter : public TensorpipeDeviceTypeConverter {
 
       message.tensors.push_back(std::move(tensor));
 
-      return c10::make_optional(std::move(storageData));
+      return std::make_optional(std::move(storageData));
     } else {
       tensorpipe::CpuBuffer buffer;
       buffer.ptr = static_cast<char*>(storage.mutable_data());
@@ -70,7 +70,7 @@ class TensorpipeCpuConverter : public TensorpipeDeviceTypeConverter {
 
       message.tensors.push_back(std::move(tensor));
 
-      return c10::nullopt;
+      return std::nullopt;
     }
   }
 
@@ -192,7 +192,7 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
         tensor.device());
 
     TORCH_INTERNAL_ASSERT(tpMessage.tensors.size() == i);
-    c10::optional<std::vector<char>> maybeCopiedTensor =
+    std::optional<std::vector<char>> maybeCopiedTensor =
         converter->prepareTensorForSending(
             tensor.storage(), streams, tpMessage);
     TORCH_INTERNAL_ASSERT(tpMessage.tensors.size() == i + 1);

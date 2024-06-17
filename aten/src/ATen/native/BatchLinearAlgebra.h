@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/util/Optional.h>
+#include <optional>
 #include <c10/util/string_view.h>
 #include <ATen/Config.h>
 #include <ATen/native/DispatchStub.h>
@@ -304,7 +304,7 @@ using svd_fn = void (*)(
     const Tensor& /*A*/,
     const bool /*full_matrices*/,
     const bool /*compute_uv*/,
-    const c10::optional<c10::string_view>& /*driver*/,
+    const std::optional<c10::string_view>& /*driver*/,
     const Tensor& /*U*/,
     const Tensor& /*S*/,
     const Tensor& /*Vh*/,

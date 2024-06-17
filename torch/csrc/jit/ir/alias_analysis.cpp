@@ -54,7 +54,7 @@ class MutableTypePtrHelper {
   //     of dimension 4 would map to the same type as a Tensor of
   //     dimension 1. This allows us to treat all subclasses of Tensor
   //     as a single, homogenous "Tensor" type.
-  c10::optional<AliasTypeSet> mapTypeToAliasTypeSet(const TypePtr& type) {
+  std::optional<AliasTypeSet> mapTypeToAliasTypeSet(const TypePtr& type) {
     if (mutable_type_cache_) {
       const AliasTypeSet* result = mapTypeToBorrowedAliasTypeSet(type);
       if (result) {
@@ -82,7 +82,7 @@ class MutableTypePtrHelper {
   }
 
  private:
-  c10::optional<AliasTypeSet> mapTypeToAliasTypeSetImpl(const TypePtr& type) {
+  std::optional<AliasTypeSet> mapTypeToAliasTypeSetImpl(const TypePtr& type) {
     switch (type->kind()) {
       case TypeKind::ListType:
       case TypeKind::DictType:
@@ -105,7 +105,7 @@ class MutableTypePtrHelper {
           }
         }
         if (mutable_types.empty()) {
-          return c10::nullopt;
+          return std::nullopt;
         }
         return mutable_types;
       }
@@ -121,7 +121,7 @@ class MutableTypePtrHelper {
           return {AliasTypeSet{
               FutureType::create(*toSingleType(*maybe_mut_types))}};
         }
-        return c10::nullopt;
+        return std::nullopt;
       }
       case TypeKind::AwaitType: {
         if (auto maybe_mut_types = mapTypeToAliasTypeSet(
@@ -129,7 +129,7 @@ class MutableTypePtrHelper {
           return {
               AliasTypeSet{AwaitType::create(*toSingleType(*maybe_mut_types))}};
         }
-        return c10::nullopt;
+        return std::nullopt;
       }
       case TypeKind::TupleType: {
         std::vector<TypePtr> mutable_types;
@@ -142,12 +142,12 @@ class MutableTypePtrHelper {
           }
         }
         if (mutable_types.empty()) {
-          return c10::nullopt;
+          return std::nullopt;
         }
         return {AliasTypeSet{TupleType::create(mutable_types)}};
       }
       default:
-        return c10::nullopt;
+        return std::nullopt;
     }
   }
   ska::flat_hash_map<TypePtr, AliasTypeSet>* mutable_type_cache_;
@@ -1097,7 +1097,7 @@ void AliasDb::analyzeRpcAsync(Node* node) {
 }
 
 namespace {
-c10::optional<bool> getConstantBooleanInput(
+std::optional<bool> getConstantBooleanInput(
     Node* node,
     const std::string& inputName) {
   TORCH_INTERNAL_ASSERT(
@@ -1893,10 +1893,10 @@ bool AliasDb::mayAliasWildcard(const at::ArrayRef<Value*> vs) const {
       vs.begin(), vs.end(), [&](Value* v) { return mayAliasWildcard(v); });
 }
 
-c10::optional<Element*> AliasDb::tryGetOrCreateWildcard(const TypePtr& type) {
+std::optional<Element*> AliasDb::tryGetOrCreateWildcard(const TypePtr& type) {
   auto maybe_mut_types = mapTypeToAliasTypeSetPtr(type);
   if (!maybe_mut_types) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   auto mut_type = toSingleType(*maybe_mut_types);
   auto existing_wildcard = wildcardIndex_.find(*mut_type);
@@ -1966,11 +1966,11 @@ Element* AliasDb::getWildcard(const TypePtr& type) const {
 }
 
 // Register `v` as a wildcard value.
-c10::optional<Element*> AliasDb::setWildcard(const Value* v) {
-  c10::optional<Element*> maybe_wildcardElement =
+std::optional<Element*> AliasDb::setWildcard(const Value* v) {
+  std::optional<Element*> maybe_wildcardElement =
       tryGetOrCreateWildcard(v->type());
   if (!maybe_wildcardElement) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   // Ensure that we create a corresponding Element for `v` still, as it is an
   // invariant that all mutable values have an Element

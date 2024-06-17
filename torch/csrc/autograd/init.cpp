@@ -373,6 +373,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   m.def("_saved_tensors_hooks_enable", at::SavedTensorDefaultHooks::enable);
   m.def("_saved_tensors_hooks_disable", at::SavedTensorDefaultHooks::disable);
   m.def(
+      "_saved_tensors_hooks_set_tracing",
+      at::SavedTensorDefaultHooks::set_tracing);
+  m.def(
       "_saved_tensors_hooks_get_disabled_error_message",
       at::SavedTensorDefaultHooks::get_disabled_error_message);
   m.def(
@@ -1081,7 +1084,7 @@ static PyObject* push_on_torch_dispatch_stack(
     using c10::impl::TorchDispatchModeKey;
     // When we push a mode onto the mode stack, we need to
     // check if it's an "infra" mode, by checking its _mode_key attribute.
-    c10::optional<c10::impl::TorchDispatchModeKey> mode_key = c10::nullopt;
+    std::optional<c10::impl::TorchDispatchModeKey> mode_key = std::nullopt;
     py::object maybe_mode_key_obj =
         PyObject_FastGetAttrString(arg, "_mode_key");
     if (maybe_mode_key_obj) {
@@ -1105,7 +1108,7 @@ static PyObject* pop_torch_dispatch_stack(
     PyObject* _unused,
     PyObject* maybe_mode_key) {
   HANDLE_TH_ERRORS
-  c10::optional<c10::impl::TorchDispatchModeKey> mode_key = c10::nullopt;
+  std::optional<c10::impl::TorchDispatchModeKey> mode_key = std::nullopt;
   PyObject* r = nullptr;
   if (maybe_mode_key != Py_None) {
     mode_key = py::cast<c10::impl::TorchDispatchModeKey>(maybe_mode_key);
@@ -1171,7 +1174,7 @@ static PyObject* get_dispatch_mode(PyObject* _unused, PyObject* arg) {
   auto mode_key = py::cast<c10::impl::TorchDispatchModeKey>(arg);
 
   auto maybe_mode = c10::impl::TorchDispatchModeTLS::get_mode(mode_key);
-  if (maybe_mode == c10::nullopt) {
+  if (maybe_mode == std::nullopt) {
     Py_RETURN_NONE;
   }
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
@@ -1187,7 +1190,7 @@ static PyObject* unset_dispatch_mode(PyObject* _unused, PyObject* arg) {
   auto mode_key = py::cast<c10::impl::TorchDispatchModeKey>(arg);
 
   const auto maybe_mode = c10::impl::TorchDispatchModeTLS::unset_mode(mode_key);
-  if (maybe_mode == c10::nullopt) {
+  if (maybe_mode == std::nullopt) {
     Py_RETURN_NONE;
   }
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)

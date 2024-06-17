@@ -4329,7 +4329,7 @@ def foo(x):
             return torch.blargh(xyz)
 
         _, lineno = inspect.getsourcelines(foobar)
-        with self.assertRaisesRegex(RuntimeError, f"test_jit.py\", line {lineno + 1}"):
+        with self.assertRaisesRegex(RuntimeError, f'test_jit.py", line {lineno + 1}'):
             scripted = torch.jit.script(foobar)
 
     def test_file_line_error_class_defn(self):
@@ -4338,7 +4338,7 @@ def foo(x):
                 return torch.blargh(xyz)
 
         _, lineno = inspect.getsourcelines(FooBar)
-        with self.assertRaisesRegex(RuntimeError, f"test_jit.py\", line {lineno + 2}"):
+        with self.assertRaisesRegex(RuntimeError, f'test_jit.py", line {lineno + 2}'):
             torch.jit.script(FooBar)
 
     def test_file_line_graph(self):
@@ -4405,7 +4405,7 @@ def foo(xyz):
         loaded = self.getExportImportCopy(ft)
         _, lineno = inspect.getsourcelines(FooTest)
 
-        with self.assertRaisesRegex(RuntimeError, f'test_jit.py\", line {lineno + 3}'):
+        with self.assertRaisesRegex(RuntimeError, f'test_jit.py", line {lineno + 3}'):
             loaded(torch.rand(3, 4), torch.rand(30, 40))
 
     def test_serialized_source_ranges_graph(self):
@@ -4431,7 +4431,7 @@ def foo(xyz):
 
         _, lineno = inspect.getsourcelines(FooTest2)
 
-        with self.assertRaisesRegex(torch.jit.Error, f'test_jit.py\", line {lineno + 3}'):
+        with self.assertRaisesRegex(torch.jit.Error, f'test_jit.py", line {lineno + 3}'):
             ft = FooTest2()
             loaded = self.getExportImportCopy(ft)
             loaded()
@@ -4967,6 +4967,7 @@ a")
                     test(backward=True)
                     test(backward=True)
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_index(self):
         def consec(size, start=0):
             numel = torch.tensor(size).prod().item()
@@ -6431,6 +6432,7 @@ a")
             cu = torch.jit.CompilationUnit(dedent(inspect.getsource(func_float_int)))
             cu.func_float_int(5.3, 0)
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_math_ops(self):
         def checkMathWrap(func_name, num_args=1, is_float=True, **args):
             if is_float:
@@ -6959,6 +6961,7 @@ a")
         self.assertFalse(test_all_float_list([3.14, 0, 8.9]))
 
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_number_math(self):
         ops_template = dedent('''
         def func():
@@ -7207,6 +7210,7 @@ a")
 
             test(op, tensor, const, swap_args)
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_tensor_number_math(self):
         self._test_tensor_number_math()
 
@@ -7643,6 +7647,7 @@ dedent """
         with self.assertRaises(Exception):
             foo(2)
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_isinstance(self):
         # test isinstance operator for static type checking
         template = dedent('''
@@ -10260,7 +10265,7 @@ dedent """
         n = next(graph.inputs())
         self.assertTrue(n.type() == torch._C.TensorType.getInferred())
 
-        with self.assertRaisesRegex(RuntimeError, "Inferred \'x\' to be of type \'Tensor"):
+        with self.assertRaisesRegex(RuntimeError, "Inferred 'x' to be of type 'Tensor"):
             fn("1")
 
     def test_script_define_order(self):
@@ -12309,7 +12314,7 @@ dedent """
         tm = torch.jit.trace(TracedModule(), torch.rand(3, 4))
 
         FileCheck().check_not("value=<Tensor>").check("aten::mm")\
-            .check("prim::CallMethod[name=\"forward\"]").check("aten::add") \
+            .check('prim::CallMethod[name="forward"]').check("aten::add") \
             .run(str(tm.graph))
         FileCheck().check("aten::mm").run(str(tm.mod.graph))
 
@@ -14743,7 +14748,7 @@ dedent """
                 return self.hello("hi"), self.hello(.5)
 
         w = CompileOverloadError()
-        with self.assertRaisesRegex(Exception, "but instead found type \'str\'"):
+        with self.assertRaisesRegex(Exception, "but instead found type 'str'"):
             torch.jit.script(w)
 
         # testing overload declared first, then non-overload

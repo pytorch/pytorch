@@ -1,8 +1,8 @@
 #include <ATen/DeviceAccelerator.h>
-#include <c10/util/Optional.h>
 #include <fmt/core.h>
 #include <sys/types.h>
 #include <torch/csrc/python_headers.h>
+#include <optional>
 
 #ifndef _MSC_VER
 #include <sys/socket.h>
@@ -67,6 +67,7 @@
 #include <torch/csrc/cpu/Module.h>
 #include <torch/csrc/dynamo/init.h>
 #include <torch/csrc/functorch/init.h>
+#include <torch/csrc/fx/node.h>
 #include <torch/csrc/inductor/aoti_runner/pybind.h>
 #include <torch/csrc/jit/python/init.h>
 #include <torch/csrc/jit/python/python_ir.h>
@@ -168,12 +169,14 @@ static PyObject* THPModule_initExtension(
     PyObject* shm_manager_path) {
   HANDLE_TH_ERRORS
 #if !defined(FBCODE_CAFFE2)
-  if (torch::get_cpp_stacktraces_enabled() && !torch::get_disable_addr2line()) {
+  if (torch::get_cpp_stacktraces_enabled()) {
     c10::SetStackTraceFetcher([]() -> std::string {
       auto tb = torch::CapturedTraceback::gather(false, false, true);
-      LOG(WARNING)
-          << "symbolizing C++ stack trace for exception; if this hangs, rerun with TORCH_DISABLE_ADDR2LINE=1..."
-          << std::endl;
+      if (torch::get_symbolize_mode() == torch::unwind::Mode::addr2line) {
+        LOG(WARNING)
+            << "symbolizing C++ stack trace for exception; if this hangs, rerun with TORCH_DISABLE_ADDR2LINE=1..."
+            << std::endl;
+      }
       auto s_tbs = torch::symbolize({tb.get()});
       std::stringstream oss;
       oss << "C++ CapturedTraceback:" << std::endl;
@@ -373,22 +376,14 @@ PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
   THPVariable* a = reinterpret_cast<THPVariable*>(a_);
   THPVariable* b = reinterpret_cast<THPVariable*>(b_);
 
-  TORCH_CHECK(
-      a->cdata->use_count() == 1,
-      "Expected single reference to a's Tensor object but got ",
-      a->cdata->use_count());
-  TORCH_CHECK(
-      b->cdata->use_count() == 1,
-      "Expected single reference to b's Tensor object but got ",
-      b->cdata->use_count());
   // weak_use_count() adds 1 if use_count is non-zero
   TORCH_CHECK(
       a->cdata->weak_use_count() == 1,
-      "Expected no weakrefs to a's Tensor object but got  ",
+      "Expected no weakrefs to t1's Tensor object but got  ",
       a->cdata->weak_use_count() - 1);
   TORCH_CHECK(
       b->cdata->weak_use_count() == 1,
-      "Expected no weakrefs to b's Tensor object but got  ",
+      "Expected no weakrefs to t2's Tensor object but got  ",
       b->cdata->weak_use_count() - 1);
 
   // Swap the Tensor Impl
@@ -396,10 +391,10 @@ PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
 
   // The TensorImpls contain PyObjectSlots that have a reference to the PyObject
   // associated with the TensorImpl. Swap this field as well.
-  c10::optional<PyObject*> mb_obj_a =
+  std::optional<PyObject*> mb_obj_a =
       a->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
           getPyInterpreter(), /*ignore_hermetic_tls=*/false);
-  c10::optional<PyObject*> mb_obj_b =
+  std::optional<PyObject*> mb_obj_b =
       b->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
           getPyInterpreter(), /*ignore_hermetic_tls=*/false);
   TORCH_INTERNAL_ASSERT(
@@ -1608,6 +1603,8 @@ PyObject* initModule() {
   THPDevice_init(module);
   THPStream_init(module);
   THPEvent_init(module);
+  NodeBase_init(module);
+  NodeIter_init(module);
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));
   ASSERT_TRUE(THPEngine_initModule(module));
@@ -1803,7 +1800,7 @@ Call this whenever a new thread is created in order to propagate values from
       "_select_conv_backend",
       [](const at::Tensor& input,
          const at::Tensor& weight,
-         const c10::optional<at::Tensor>& bias_opt,
+         const std::optional<at::Tensor>& bias_opt,
          at::SymIntArrayRef stride_,
          at::SymIntArrayRef padding_,
          at::SymIntArrayRef dilation_,
@@ -1820,7 +1817,7 @@ Call this whenever a new thread is created in order to propagate values from
             transposed_,
             output_padding_,
             std::move(groups_),
-            c10::nullopt);
+            std::nullopt);
       },
       py::arg("input"),
       py::arg("weight"),
@@ -1837,15 +1834,15 @@ Call this whenever a new thread is created in order to propagate values from
       "_select_conv_backend",
       [](const at::Tensor& input,
          const at::Tensor& weight,
-         const c10::optional<at::Tensor>& bias,
+         const std::optional<at::Tensor>& bias,
          at::SymIntArrayRef stride_,
          at::SymIntArrayRef padding_,
          at::SymIntArrayRef dilation_,
          bool transposed_,
          at::SymIntArrayRef output_padding_,
          c10::SymInt groups_,
-         c10::optional<std::vector<c10::SymInt>> bias_sizes_opt) {
-        c10::OptionalArrayRef<c10::SymInt> ref = c10::nullopt;
+         std::optional<std::vector<c10::SymInt>> bias_sizes_opt) {
+        c10::OptionalArrayRef<c10::SymInt> ref = std::nullopt;
         if (bias_sizes_opt) {
           ref = (*bias_sizes_opt);
         }
@@ -1883,7 +1880,7 @@ Call this whenever a new thread is created in order to propagate values from
       .def(py::init([](at::Tensor const& query,
                        at::Tensor const& key,
                        at::Tensor const& value,
-                       c10::optional<at::Tensor> attn_mask,
+                       std::optional<at::Tensor> attn_mask,
                        double dropout,
                        bool is_causal) {
         return sdp::sdp_params{
@@ -2034,7 +2031,7 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def(
       "_get_accelerator",
-      [](c10::optional<bool> check = c10::nullopt) {
+      [](std::optional<bool> check = std::nullopt) {
         return c10::Device(
             at::getAccelerator(check.value_or(false))
                 .value_or(c10::DeviceType::CPU),
@@ -2143,50 +2140,13 @@ Call this whenever a new thread is created in order to propagate values from
         return torch::should_allow_numbers_as_tensors(name);
       });
 
-  // FIXME(crcrpar): Better to have `at::ScalarType` get mapped to `torch.dtype`
-  // Currently I see the second item of the key is displayed as
-  // e.g. `torch._C._te.ScalarType at 0x7fcf318adab0`
-  // I thought adding an appropriate type_caster of `at::ScalarType` to
-  // torch/csrc/pybind.h` would solve this but it caused segmentation fault in
-  // my environment.
-  using _DeviceDtypeKey = std::pair<at::Device, std::string>;
-  // Custom hasher is necessary to make unordered_map compilable for Windows
-  // debug targets. As `at::native::ParamsHash` only works on structs with
-  // standard layout, but std::string isn't one in Visual C++ debug builds,
-  // which one can easily verify by running something like:
-  //   #define _DEBUG
-  //   #include <type_traits>
-  //   #include <string>
-  //   static_assert(std::is_standard_layout_v<std::string>, "Oh noes");
-  // If above condition is not met, VC++ raises a very cryptic compilation
-  // error. See
-  // https://github.com/pytorch/pytorch/pull/100007#discussion_r1227116292 for
-  // more detail
-  struct _DeviceDtypeHasher {
-    std::size_t operator()(const _DeviceDtypeKey& k) const noexcept {
-      static at::native::ParamsHash<at::Device> device_hasher;
-      static std::hash<std::string> string_hasher;
-      return device_hasher(k.first) ^ string_hasher(k.second);
-    }
-  };
-  using _FlatMap = std::unordered_map<
-      _DeviceDtypeKey,
-      at::native::TensorsAndIndicesT,
-      _DeviceDtypeHasher>;
   py_module.def(
       "_group_tensors_by_device_and_dtype",
-      [](const std::vector<std::vector<c10::optional<at::Tensor>>>&
+      [](const std::vector<std::vector<std::optional<at::Tensor>>>&
              nested_tensorlist,
          const bool with_indices) {
-        _FlatMap map;
-        for (const auto& iter :
-             at::native::_group_tensors_by_first_tensors_device_and_dtype(
-                 nested_tensorlist, with_indices)) {
-          const auto scalar_type_name =
-              torch::utils::getDtypeNames(iter.first.second).first;
-          map.insert({{iter.first.first, scalar_type_name}, iter.second});
-        }
-        return map;
+        return at::native::_group_tensors_by_first_tensors_device_and_dtype(
+            nested_tensorlist, with_indices);
       });
 
   py_module.def(
