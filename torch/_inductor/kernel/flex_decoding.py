@@ -216,7 +216,7 @@ flex_decoding_template = TritonTemplate(
     idx_h = off_hz % H
     idx_t = off_t
     idx_m = offs_m[:, None]
-    idx_d = offs_d
+    idx_d = offs_d[None, :]
     # TODO generalize and add proper mask support
     mask = (idx_m < Q_CTX) & (idx_d != -1)
     {{store_output(("idx_z", "idx_h", "idx_t", "idx_m", "idx_d"), "acc", "mask")}} 
@@ -352,7 +352,7 @@ flex_decoding_reduction_template = TritonTemplate(
     idx_z = off_hz // H
     idx_h = off_hz % H
     idx_m = offs_m[:, None]
-    idx_d = offs_d
+    idx_d = offs_d[None, :]
     # TODO generalize and add proper mask support
     mask = (idx_m != -1) & (idx_d != -1)
     {{store_output(("idx_z", "idx_h", "idx_m", "idx_d"), "g_acc", "mask")}} 
@@ -399,7 +399,6 @@ def get_split_k(B: int, H: int, Mk: int, G = 1) -> int:
     split_k = min(split_k, split_k_upper_bound)
     split_k = max(split_k, 1)
 
-    # return 1
 
     return split_k
 

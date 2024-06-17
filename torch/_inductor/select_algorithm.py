@@ -406,10 +406,10 @@ class TritonTemplateKernel(TritonKernel):
             ).set_name("xindex")
             self.template_mask = mask  # type: ignore[assignment]
             self.template_indices = indices
-            # output_index = self.output_node.get_layout().make_indexer()(index_symbols)
-            # output_index = self.rename_indexing(output_index)
-            # if output_index == contiguous_index:
-            output_index = sympy.Symbol("xindex", integer=True)
+            output_index = self.output_node.get_layout().make_indexer()(index_symbols)
+            output_index = self.rename_indexing(output_index)
+            if output_index == contiguous_index:
+                output_index = sympy.Symbol("xindex", integer=True)
 
             epilogue_args = [val]
             for input_node in itertools.chain(
