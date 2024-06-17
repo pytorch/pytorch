@@ -279,7 +279,8 @@ class FSDPModule:
         Passing a singleton list containing the next FSDP module gives the same
         all-gather overlap behavior as the default overlap behavior, except the
         prefetched all-gather is issued earlier from the CPU. Passing a list
-        with at least length two is required for more aggressive overlap.
+        with at least length two is required for more aggressive overlap and
+        will use more reserved memory.
 
         Args:
             modules (List[FSDPModule]): FSDP modules to prefetch.
@@ -299,7 +300,7 @@ class FSDPModule:
         Passing a singleton list containing the previous FSDP module gives the
         same all-gather overlap behavior as the default overlap behavior.
         Passing a list with at least length two is required for more aggressive
-        overlap.
+        overlap and will use more reserved memory.
 
         Args:
             modules (List[FSDPModule]): FSDP modules to prefetch.
