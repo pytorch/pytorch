@@ -491,15 +491,6 @@ def _register_quantized_linear_binary_lowering(
                 x2
             ), "QLinear Binary Inplace Fusion requires accum is not an alias or mutation."
 
-        # if the binary post op is sum but output dtype is not the same as accum,
-        # use accum's dtype as output dtype
-        if (
-            output_dtype != torch.uint8
-            and binary_unary_attr.binary_op_name == "sum"
-            and output_dtype != x2.dtype
-        ):
-            output_dtype = x2.dtype
-
         computation_args = (
             x,
             x_scale,
@@ -1192,8 +1183,6 @@ def _register_quantization_binary_fusion():
                 patterns,
                 2,  # pass_number
                 qlinear_binary_op,  # computation_op
-                # Output dtype should be the same as accum's dtype but we don't know
-                # its dtype. So, leave it to be determined in the lowering function
                 binary_unary_attr,
             )
         # Priority 3.2: QLinear Binary pattern with fp32/bfloat16 output
