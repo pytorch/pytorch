@@ -411,7 +411,6 @@ inductor_one_sample = {
     "_segment_reduce.lengths": {f16},
     "_segment_reduce.offsets": {f16},
     "addmv": {f16},
-    "argsort": {b8, f16, f32, f64, i32, i64},
     "as_strided.partial_views": {f16},
     "clamp_max": {b8},
     "clamp_min": {b8},
