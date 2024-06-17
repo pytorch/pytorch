@@ -7113,7 +7113,8 @@ def sample_inputs_segment_reduce(op_info, device, dtype, requires_grad, *, mode=
 def sample_inputs__weight_norm(op_info, device, dtype, requires_grad, **kwargs):
     def _tensor(shape, dtype=dtype):
         return make_tensor(shape, dtype=dtype, device=device, requires_grad=requires_grad)
-    yield SampleInput(_tensor((S ,S)), args=(_tensor((S, S)),))
+    yield SampleInput(_tensor((S ,S)), args=(_tensor((S, 1)),), kwargs={"dim": 0})
+    yield SampleInput(_tensor((S ,S, S)), args=(_tensor((1, 1, S)),), kwargs={"dim": 2})
     yield SampleInput(_tensor((M, 0)), args=(_tensor((M, 0)),))
 
 
