@@ -1876,7 +1876,6 @@ class TestSDPA(NNTestCase):
     @parametrize("kv_seq_len", [514, 1179])
     @parametrize("n_head", [1, 3])
     @parametrize("head_dim", [8, 16])
-    @parametrize("mask_dim", [2, 4])
     @parametrize("bool_mask", [0, 1])
     @parametrize("train", [True, False])
     def test_scaled_dot_product_fused_attention_mask_vs_math_cpu(
@@ -1889,7 +1888,6 @@ class TestSDPA(NNTestCase):
         kv_seq_len,
         n_head,
         head_dim,
-        mask_dim,
         bool_mask,
         train,
     ):
@@ -1898,65 +1896,68 @@ class TestSDPA(NNTestCase):
             tol = Tolerances(5e-2, 5e-2)
         if dtype is torch.float16:
             tol = Tolerances(1e-2, 1e-2)
+        for mask_shape in [
+            (1, 1),
+            (q_seq_len, kv_seq_len),
+            (batch_size, 1, q_seq_len, 1),
+            (batch_size, 1, 1, kv_seq_len),
+            (1, 1, q_seq_len, kv_seq_len),
+            (batch_size, n_head, q_seq_len, kv_seq_len),
+        ]:
+            make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype, requires_grad=False)
+            q_shape = SdpaShape(batch_size, n_head, q_seq_len, head_dim)
+            kv_shape = SdpaShape(batch_size, n_head, kv_seq_len, head_dim)
+            q = make_tensor(q_shape)
+            k = make_tensor(kv_shape)
+            v = make_tensor(kv_shape)
+            q2, k2, v2 = q.clone(), k.clone(), v.clone()
 
-        make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype, requires_grad=False)
-        q_shape = SdpaShape(batch_size, n_head, q_seq_len, head_dim)
-        kv_shape = SdpaShape(batch_size, n_head, kv_seq_len, head_dim)
-        q = make_tensor(q_shape)
-        k = make_tensor(kv_shape)
-        v = make_tensor(kv_shape)
-        q2, k2, v2 = q.clone(), k.clone(), v.clone()
+            if train:
+                q.requires_grad_(True)
+                k.requires_grad_(True)
+                v.requires_grad_(True)
+                q2.requires_grad_(True)
+                k2.requires_grad_(True)
+                v2.requires_grad_(True)
 
-        if train:
-            q.requires_grad_(True)
-            k.requires_grad_(True)
-            v.requires_grad_(True)
-            q2.requires_grad_(True)
-            k2.requires_grad_(True)
-            v2.requires_grad_(True)
+            if dtype in [torch.bfloat16, torch.float16]:
+                q2, k2, v2 = q2.float(), k2.float(), v2.float()
+            # (B, nh, T, hs)
+            q = q.view(batch_size, q_seq_len, n_head, head_dim).transpose(1, 2)
+            k = k.view(batch_size, kv_seq_len, n_head, head_dim).transpose(1, 2)
+            v = v.view(batch_size, kv_seq_len, n_head, head_dim).transpose(1, 2)
+            if bool_mask:
+                attn_mask = torch.randint(0, 2, size=mask_shape, dtype=torch.bool, device=device)
+            else:
+                attn_mask = torch.randn(mask_shape, dtype=dtype, device=device)
+            q2 = q2.view(batch_size, q_seq_len, n_head, head_dim).transpose(1, 2)
+            k2 = k2.view(batch_size, kv_seq_len, n_head, head_dim).transpose(1, 2)
+            v2 = v2.view(batch_size, kv_seq_len, n_head, head_dim).transpose(1, 2)
 
-        if dtype in [torch.bfloat16, torch.float16]:
-            q2, k2, v2 = q2.float(), k2.float(), v2.float()
-        # (B, nh, T, hs)
-        q = q.view(batch_size, q_seq_len, n_head, head_dim).transpose(1, 2)
-        k = k.view(batch_size, kv_seq_len, n_head, head_dim).transpose(1, 2)
-        v = v.view(batch_size, kv_seq_len, n_head, head_dim).transpose(1, 2)
-        if mask_dim == 4:
-            mask_shape = (batch_size, n_head, q_seq_len, kv_seq_len)
-        else:
-            mask_shape = (q_seq_len, kv_seq_len)
-        if bool_mask:
-            attn_mask = torch.randint(0, 2, size=mask_shape, dtype=torch.bool, device=device)
-        else:
-            attn_mask = torch.randn(mask_shape, dtype=dtype, device=device)
-        q2 = q2.view(batch_size, q_seq_len, n_head, head_dim).transpose(1, 2)
-        k2 = k2.view(batch_size, kv_seq_len, n_head, head_dim).transpose(1, 2)
-        v2 = v2.view(batch_size, kv_seq_len, n_head, head_dim).transpose(1, 2)
+            with sdpa_kernel(backends=[fused_kernel]):
+                actual = torch.nn.functional.scaled_dot_product_attention(
+                    q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
+            with sdpa_kernel(backends=[SDPBackend.MATH]):
+                if not bool_mask and dtype in [torch.bfloat16, torch.float16]:
+                    attn_mask = attn_mask.float()
+                math_ref = torch.nn.functional.scaled_dot_product_attention(
+                    q2, k2, v2, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
 
-        with sdpa_kernel(backends=[fused_kernel]):
-            actual = torch.nn.functional.scaled_dot_product_attention(
-                q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
-        with sdpa_kernel(backends=[SDPBackend.MATH]):
-            if not bool_mask and dtype in [torch.bfloat16, torch.float16]:
-                attn_mask = attn_mask.float()
-            math_ref = torch.nn.functional.scaled_dot_product_attention(
-                q2, k2, v2, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
+            if dtype in [torch.bfloat16, torch.float16]:
+                math_ref = math_ref.to(dtype)
 
-        if dtype in [torch.bfloat16, torch.float16]:
-            math_ref = math_ref.to(dtype)
+            self.assertEqual(actual, math_ref, atol=tol.atol, rtol=tol.rtol)
 
-        self.assertEqual(actual, math_ref, atol=tol.atol, rtol=tol.rtol)
+            if train:
+                actual.sum().backward()
+                math_ref.sum().backward()
 
-        if train:
-            actual.sum().backward()
-            math_ref.sum().backward()
+                grad_q_actual, grad_k_actual, grad_v_actual = q.grad, k.grad, v.grad
+                grad_q_ref, grad_k_ref, grad_v_ref = q2.grad, k2.grad, v2.grad
 
-            grad_q_actual, grad_k_actual, grad_v_actual = q.grad, k.grad, v.grad
-            grad_q_ref, grad_k_ref, grad_v_ref = q2.grad, k2.grad, v2.grad
-
-            self.assertEqual(grad_q_actual, grad_q_ref, atol=tol.atol, rtol=tol.rtol)
-            self.assertEqual(grad_k_actual, grad_k_ref, atol=tol.atol, rtol=tol.rtol)
-            self.assertEqual(grad_v_actual, grad_v_ref, atol=tol.atol, rtol=tol.rtol)
+                self.assertEqual(grad_q_actual, grad_q_ref, atol=tol.atol, rtol=tol.rtol)
+                self.assertEqual(grad_k_actual, grad_k_ref, atol=tol.atol, rtol=tol.rtol)
+                self.assertEqual(grad_v_actual, grad_v_ref, atol=tol.atol, rtol=tol.rtol)
 
     @parametrize("kernel", [SDPBackend.MATH])
     def test_scaled_dot_product_attention_math_with_negative_scale(self, device, kernel: SDPBackend):

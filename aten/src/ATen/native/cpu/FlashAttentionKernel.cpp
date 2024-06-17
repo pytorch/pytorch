@@ -21,7 +21,7 @@ namespace at::native {
 
 namespace {
 
-// out = val * a + b
+// out = val * a + b for b_stride=1
 template <typename T1, typename T2>
 inline void _scale_attn_mask_fusion_kernel(
     T1* a,
@@ -31,7 +31,8 @@ inline void _scale_attn_mask_fusion_kernel(
     T1& val) {
   const auto vec_size1 = at::vec::Vectorized<T1>::size();
   const auto vec_size2 = at::vec::Vectorized<T2>::size();
-  constexpr int64_t T1_n = (vec_size2 == vec_size1 * 2 && is_reduced_floating_point_v<T2>) ? 2 : 1;
+  constexpr int64_t T1_n =
+      (vec_size2 == vec_size1 * 2 && is_reduced_floating_point_v<T2>) ? 2 : 1;
   constexpr int64_t T2_n = 1;
   auto vec_scale = at::vec::VectorizedN<T1, T1_n>(val);
   int64_t i = 0;
@@ -44,7 +45,38 @@ inline void _scale_attn_mask_fusion_kernel(
   }
   for (; i < size; i++) {
     auto tmp0 = a[i];
-    auto tmp1 = (T1) b[i];
+    auto tmp1 = (T1)b[i];
+    out[i] = tmp0 * val + tmp1;
+  }
+}
+
+// out = val * a + b for b_stride=0
+template <typename T1, typename T2>
+inline void _scale_attn_mask_fusion_kernel_stride0(
+    T1* a,
+    T2* b,
+    const int& size,
+    T1* out,
+    T1& val) {
+  const auto vec_size1 = at::vec::Vectorized<T1>::size();
+  const auto vec_size2 = at::vec::Vectorized<T2>::size();
+  constexpr int64_t T1_n =
+      (vec_size2 == vec_size1 * 2 && is_reduced_floating_point_v<T2>) ? 2 : 1;
+  constexpr int64_t T2_n = 1;
+  auto vec_scale = at::vec::VectorizedN<T1, T1_n>(val);
+  int64_t i = 0;
+  auto b_first_val = (T1)b[0];
+  auto b_first_vec = at::vec::Vectorized<T2>(b_first_val);
+  for (; i < size - (size % vec_size2); i += vec_size2) {
+    auto a_n = at::vec::VectorizedN<T1, T1_n>::loadu(a + i);
+    auto b_n = b_first_vec;
+    auto b_n_convert = at::vec::convert<T1, T1_n, T2, T2_n, true>(b_n);
+    auto res = a_n * vec_scale + b_n_convert;
+    res.store(out + i);
+  }
+  for (; i < size; i++) {
+    auto tmp0 = a[i];
+    auto tmp1 = b_first_val;
     out[i] = tmp0 * val + tmp1;
   }
 }
@@ -237,6 +269,8 @@ void cpu_flash_attention(
       : 0;
   int64_t mStrideM =
       has_attn_mask ? attn_mask.value().stride(2) : 0;
+  int64_t mStrideN =
+      has_attn_mask ? attn_mask.value().stride(3) : 0;
 
   int64_t qSplitSize = q_split_size > qSize ? qSize : q_split_size;
   int64_t kvSplitSize = kv_split_size > kvSize ? kvSize : kv_split_size;
@@ -323,13 +357,23 @@ void cpu_flash_attention(
         // qk <- qk * scaling + attn_mask
         if (has_attn_mask) {
           for (int64_t row = 0; row < qBlockSize; ++row) {
-            _scale_attn_mask_fusion_kernel(
-                qk_data + row * kvBlockSize,
-                mask_data + i * mStrideB + j * mStrideH +
-                        (m + row) * mStrideM + n,
-                kvBlockSize,
-                qk_data + row * kvBlockSize,
-                scaling_factor);
+            if (mStrideN == 0) {
+              _scale_attn_mask_fusion_kernel_stride0(
+                  qk_data + row * kvBlockSize,
+                  mask_data + i * mStrideB + j * mStrideH +
+                      (m + row) * mStrideM,
+                  kvBlockSize,
+                  qk_data + row * kvBlockSize,
+                  scaling_factor);
+            } else {
+              _scale_attn_mask_fusion_kernel(
+                  qk_data + row * kvBlockSize,
+                  mask_data + i * mStrideB + j * mStrideH +
+                      (m + row) * mStrideM + n,
+                  kvBlockSize,
+                  qk_data + row * kvBlockSize,
+                  scaling_factor);
+            }
           }
         }
         // Update coefficients with Softmax
@@ -474,6 +518,8 @@ void cpu_flash_attention_backward(
       : 0;
   int64_t mStrideM =
       has_attn_mask ? attn_mask.value().stride(2) : 0;
+  int64_t mStrideN =
+      has_attn_mask ? attn_mask.value().stride(3) : 0;
 
   int64_t grad_qStrideB = grad_q.stride(0);
   int64_t grad_qStrideM = grad_q.stride(1);
@@ -576,13 +622,23 @@ void cpu_flash_attention_backward(
           if (has_attn_mask) {
             accum_t one = accum_t(1);
             for (const auto row : c10::irange(qBlockSize)) {
-              _scale_attn_mask_fusion_kernel(
-                  attn_data + row * kvBlockSize,
-                  mask_data + i * mStrideB + j * mStrideH +
-                      (m + row) * mStrideM + n,
-                  kvBlockSize,
-                  attn_data + row * kvBlockSize,
-                  one);
+              if (mStrideN == 0) {
+                _scale_attn_mask_fusion_kernel_stride0(
+                    attn_data + row * kvBlockSize,
+                    mask_data + i * mStrideB + j * mStrideH +
+                        (m + row) * mStrideM,
+                    kvBlockSize,
+                    attn_data + row * kvBlockSize,
+                    one);
+              } else {
+                _scale_attn_mask_fusion_kernel(
+                    attn_data + row * kvBlockSize,
+                    mask_data + i * mStrideB + j * mStrideH +
+                        (m + row) * mStrideM + n,
+                    kvBlockSize,
+                    attn_data + row * kvBlockSize,
+                    one);
+              }
             }
           }
           // restore self attention after softmax from logsumexp
