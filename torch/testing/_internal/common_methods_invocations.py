@@ -12274,13 +12274,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_addcmul_addcdiv,
            reference_inputs_func=partial(
                reference_inputs_elementwise_ternary, sample_inputs_func=reference_inputs_addcmul_addcdiv)),
-    UnaryUfuncInfo('alias_copy',
-                   dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
-                   supports_forward_ad=True,
-                   supports_fwgrad_bwgrad=True,
-                   sample_inputs_func=sample_inputs_alias_copy,
-                   supports_out=True),
     UnaryUfuncInfo('asin',
                    aliases=('arcsin', ),
                    ref=np.arcsin,
@@ -13115,6 +13108,12 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_diagonal_scatter),
+    OpInfo('alias_copy',
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
+           sample_inputs_func=sample_inputs_alias_copy,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           supports_out=True),
     BinaryUfuncInfo('eq',
                     ref=np.equal,
                     dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
@@ -16755,6 +16754,19 @@ op_db: List[OpInfo] = [
            ref=np.transpose,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            supports_out=False,
+           assert_autodiffed=True,
+           autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
+           autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
+           assert_jit_shape_analysis=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           supports_varargs=True,
+           sample_inputs_func=sample_inputs_permute,
+           reference_inputs_func=reference_inputs_permute),
+    OpInfo('permute_copy',
+           ref=np.transpose,
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
+           supports_out=True,
            assert_autodiffed=True,
            autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
            autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
@@ -23502,6 +23514,10 @@ python_ref_db = [
     ),
     PythonRefInfo(
         "_refs.permute",
+        torch_opinfo_name="permute",
+    ),
+    PythonRefInfo(
+        "_refs.permute_copy",
         torch_opinfo_name="permute",
     ),
     ElementwiseUnaryPythonRefInfo(

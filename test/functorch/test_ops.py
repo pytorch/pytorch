@@ -1190,8 +1190,8 @@ class TestOperators(TestCase):
         vmapvjp_fail.union(
             {
                 xfail("as_strided"),
-                xfail("as_strided", "partial_views"),
                 xfail("as_strided_copy"),
+                xfail("as_strided", "partial_views"),
             }
         ),
     )
