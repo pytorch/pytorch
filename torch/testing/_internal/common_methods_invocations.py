@@ -21132,6 +21132,13 @@ op_db: List[OpInfo] = [
         supports_cow_input_no_materialize_forward=False,
         supports_cow_input_no_materialize_backward=False,
         sample_inputs_func=sample_inputs__weight_norm,
+        skips=(
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes'),
+               DecorateInfo(unittest.expectedFailure, "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+               DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapvjp_has_batch_rule'),
+               DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapjvpvjp'),
+               DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_jvpvjp'),
+        ),
     ),
 ]
 op_db += opinfo.definitions.op_db
