@@ -598,17 +598,6 @@ at::Tensor post_process_flash_output(
   return out;
 }
 
-int64_t handle_private_use(const Tensor& query_, const Tensor& key, const Tensor& value,
-    const std::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, std::optional<double> scale){
-  int64_t choice_int = static_cast<int64_t>(sdp::SDPBackend::math);
-  try {
-    choice_int = _fused_sdp_choice_stub(query_.device().type(),
-        query_, key, value, attn_mask_, dropout_p, is_causal, scale);
-  } catch(const ::c10::Error& e){
-  }
-  return choice_int;
-}
-
 bool should_compute_logsumexp(const Tensor& query, const Tensor& key, const Tensor& value) {
   const bool any_inputs_require_grad = query.requires_grad() || key.requires_grad() || value.requires_grad();
   const bool gradmode_enabled = at::GradMode::is_enabled();
@@ -666,7 +655,7 @@ Tensor scaled_dot_product_attention(
     case sdp::SDPBackend::cudnn_attention: {
       bool compute_logsumexp = should_compute_logsumexp(query_, key, value);
       auto out_lse_softmax = at::_scaled_dot_product_cudnn_attention(
-          query_, key, value, compute_logsumexp, dropout_p, is_causal, scale);
+          query_, key, value, dropout_p, is_causal, compute_logsumexp, scale);
       return std::get<0>(out_lse_softmax);
     }
     case sdp::SDPBackend::flash_attention: {

@@ -913,6 +913,19 @@ if not TYPE_CHECKING:
 
 
 def typename(o):
+    """
+    String representation of the type of an object.
+
+    This function returns a fully qualified string representation of an object's type.
+    Args:
+        o (Object): The object whose type to represent
+    Returns:
+        str: the type of the object `o`
+    Example:
+        >>> x = torch.tensor([1,2,3])
+        >>> torch.typename(x)
+        'torch.LongTensor'
+    """
     if isinstance(o, torch.Tensor):
         return o.type()
 
@@ -1943,7 +1956,7 @@ from torch._compile import _disable_dynamo  # usort: skip
 ################################################################################
 
 # needs to be after the above ATen bindings so we can overwrite from Python side
-from torch import functional as functional  # usort: skip
+from torch import _VF as _VF, functional as functional  # usort: skip
 from torch.functional import *  # usort: skip # noqa: F403
 
 ################################################################################
@@ -1986,8 +1999,6 @@ from torch.autograd import (  # usort: skip
     set_grad_enabled as set_grad_enabled,
 )
 
-import torch.utils.backcompat
-import torch.utils.data
 from torch import (
     __config__ as __config__,
     __future__ as __future__,
@@ -1996,6 +2007,7 @@ from torch import (
     backends as backends,
     cpu as cpu,
     cuda as cuda,
+    distributed as distributed,
     distributions as distributions,
     fft as fft,
     futures as futures,
@@ -2014,6 +2026,7 @@ from torch import (
     special as special,
     testing as testing,
     types as types,
+    utils as utils,
     xpu as xpu,
 )
 from torch.signal import windows as windows
@@ -2041,7 +2054,7 @@ def compiled_with_cxx11_abi() -> builtins.bool:
     return _C._GLIBCXX_USE_CXX11_ABI
 
 
-import torch._library
+from torch import _library as _library, _ops as _ops
 
 # Import the ops "namespace"
 from torch._classes import classes as classes
@@ -2346,7 +2359,7 @@ def compile(
 
 from torch import export as export
 
-from torch._higher_order_ops import cond as cond
+from torch._higher_order_ops import cond, while_loop
 
 
 def _register_device_module(device_type, module):
