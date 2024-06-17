@@ -455,6 +455,54 @@ class TestFlexAttention(InductorTestCase):
             S,
             D,
         )
+    
+        
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes)
+    @common_utils.parametrize("score_mod", [_identity, _causal])
+    def test_strided_inputs(self, dtype: torch.dtype, score_mod: Callable):
+        q_shape = (B, S, H*D)
+        kv_shape = (B, S, H*D)
+        
+        make_q = functools.partial(
+            torch.rand, q_shape, device="cuda", dtype=dtype, requires_grad=False
+        )
+        make_kv = functools.partial(
+            torch.rand, kv_shape, device="cuda", dtype=dtype, requires_grad=False
+        )
+        
+        q = (
+            make_q()
+            .view(B, S, H, D)
+            .transpose(1, 2)
+        )
+        k = (
+            make_kv()
+            .view(B, S, H, D)
+            .transpose(1, 2)
+        )
+        v = (
+            make_kv()
+            .view(B, S, H, D)
+            .transpose(1, 2)
+        )
+
+        sdpa_partial = create_attention(score_mod)
+        compiled_sdpa = torch.compile(sdpa_partial)
+        golden_out = sdpa_partial(
+            q.to(torch.float64), k.to(torch.float64), v.to(torch.float64)
+        )
+        ref_out = sdpa_partial(q, k, v)
+        compiled_out = compiled_sdpa(q, k, v)
+
+        compiled_error = (golden_out - compiled_out).abs().mean()
+        ref_error = (golden_out - ref_out).abs().mean()
+        # Note, it seems like we really are less accurate
+        # likely due to the online softmax 
+        fudge_factor = 10.0
+        if compiled_error > ref_error * fudge_factor:
+            msg = f"Compiled error {compiled_error} is greater than ref error {ref_error} by more than {fudge_factor}X."
+            self.assertTrue(False, msg)
 
     test_input_strides = [
         ((H * S * D, S * D, D, 1), 997),  # offset
