@@ -58,6 +58,7 @@ post_grad_pass_names = [
     "normalization_aten_pass",
     "decompose_mm_pass",
     "unbind_stack_aten_pass",
+    "shape_padding_multiplier",
 ]
 
 for pass_name in pre_grad_pass_names:
@@ -81,7 +82,7 @@ for pass_name in post_grad_pass_names:
     )
 
 
-def construct_pattern_matcher_pass(pass_name: str) -> PatternMatcherPass:
+def construct_pattern_matcher_pass(pass_name: str):
     """
     Return the specific pattern_matcher_pass given the pass name.
     """

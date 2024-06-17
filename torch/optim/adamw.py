@@ -355,7 +355,7 @@ def _single_tensor_adamw(
         step_t = state_steps[i]
 
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-        if not torch.compiler.is_compiling() and capturable:
+        if not torch._utils.is_compiling() and capturable:
             capturable_supported_devices = _get_capturable_supported_devices()
             assert (
                 param.device.type == step_t.device.type
@@ -468,7 +468,7 @@ def _multi_tensor_adamw(
         )
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-    if not torch.compiler.is_compiling() and capturable:
+    if not torch._utils.is_compiling() and capturable:
         capturable_supported_devices = _get_capturable_supported_devices(
             supports_xla=False
         )
@@ -729,7 +729,7 @@ def adamw(
 
     See :class:`~torch.optim.AdamW` for details.
     """
-    if not torch.compiler.is_compiling() and not all(
+    if not torch._utils.is_compiling() and not all(
         isinstance(t, torch.Tensor) for t in state_steps
     ):
         raise RuntimeError(

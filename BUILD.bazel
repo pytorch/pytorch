@@ -461,15 +461,7 @@ filegroup(
 filegroup(
     name = "caffe2_perfkernels_srcs",
     srcs = [
-        "caffe2/perfkernels/adagrad.cc",
-        "caffe2/perfkernels/embedding_lookup.cc",
         "caffe2/perfkernels/embedding_lookup_idx.cc",
-        "caffe2/perfkernels/fused_8bit_rowwise_embedding_lookup.cc",
-        "caffe2/perfkernels/fused_8bit_rowwise_embedding_lookup_idx.cc",
-        "caffe2/perfkernels/fused_nbit_rowwise_conversion.cc",
-        "caffe2/perfkernels/lstm_unit_cpu_common.cc",
-        "caffe2/perfkernels/math_cpu_base.cc",
-        "caffe2/perfkernels/typed_axpy.cc",
     ],
 )
 
@@ -506,7 +498,6 @@ cc_library(
     hdrs = [
         "caffe2/core/common.h",
         "caffe2/perfkernels/common.h",
-        "caffe2/perfkernels/embedding_lookup.h",
         "caffe2/perfkernels/embedding_lookup_idx.h",
         "caffe2/utils/fixed_divisor.h",
     ] + glob([

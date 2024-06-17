@@ -430,7 +430,7 @@ def _multi_tensor_sgd(
 
         if not device_has_sparse_grad:
             # handle internal item() call if lr is a tensor
-            if isinstance(lr, torch.Tensor) and torch.compiler.is_compiling():
+            if isinstance(lr, torch.Tensor) and torch._utils.is_compiling():
                 grads_x_lr = torch._foreach_mul(device_grads, -lr)
                 torch._foreach_add_(device_params, grads_x_lr)
             else:

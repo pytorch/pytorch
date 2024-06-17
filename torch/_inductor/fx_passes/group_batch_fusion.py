@@ -19,6 +19,7 @@ from typing import (
 import torch
 from torch._dynamo.utils import counters, optimus_scuba_log
 from torch._utils_internal import upload_graph
+from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 
 from .. import config
 from ..pattern_matcher import (
@@ -1242,5 +1243,10 @@ def group_batch_fusion_passes(graph: torch.fx.Graph, pre_grad=True):
         if has_fbgemm:
             fusions += generate_fusion_from_config(fbgemm_fusions, pre_grad=False)
 
-    for rule in fusions:
-        apply_group_batch_fusion(graph, rule)  # type: ignore[arg-type]
+    for i, rule in enumerate(fusions):
+        with GraphTransformObserver(
+            graph.owning_module,
+            f"group_batch_fusion_{i}",
+            config.trace.log_url_for_graph_xform,
+        ):
+            apply_group_batch_fusion(graph, rule)  # type: ignore[arg-type]
