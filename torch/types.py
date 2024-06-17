@@ -37,7 +37,7 @@ _layout = torch.layout
 _dispatchkey = Union[str, torch._C.DispatchKey]
 
 # Meta-type for "numeric" things; matches our docs
-Number = Union[builtins.int, builtins.float, builtins.bool]
+Number = Union[_int, _float, _bool]
 
 # Meta-type for "device-like" things.  Not to be confused with 'device' (a
 # literal device object).  This nomenclature is consistent with PythonArgParser.
@@ -49,42 +49,51 @@ del Optional
 
 
 class Storage:
-    _cdata: int
+    _cdata: _int
     device: torch.device
     dtype: torch.dtype
-    _torch_load_uninitialized: bool
+    _torch_load_uninitialized: _bool
 
-    def __deepcopy__(self, memo) -> "Storage":  # type: ignore[empty-body]
-        ...
+    def __deepcopy__(self, memo) -> "Storage":
+        raise NotImplementedError
 
-    def _new_shared(self, int) -> "Storage":  # type: ignore[empty-body]
-        ...
+    def _new_shared(self, int) -> "Storage":
+        raise NotImplementedError
 
     def _write_file(
-        self, f: Any, is_real_file: _bool, save_size: _bool, element_size: int
+        self,
+        f: Any,
+        is_real_file: _bool,
+        save_size: _bool,
+        element_size: _int,
     ) -> None:
-        ...
+        raise NotImplementedError
 
-    def element_size(self) -> int:  # type: ignore[empty-body]
-        ...
+    def element_size(self) -> _int:
+        raise NotImplementedError
 
-    def is_shared(self) -> bool:  # type: ignore[empty-body]
-        ...
+    def is_shared(self) -> _bool:
+        raise NotImplementedError
 
-    def share_memory_(self) -> "Storage":  # type: ignore[empty-body]
-        ...
+    def share_memory_(self) -> "Storage":
+        raise NotImplementedError
 
-    def nbytes(self) -> int:  # type: ignore[empty-body]
-        ...
+    def nbytes(self) -> _int:
+        raise NotImplementedError
 
-    def cpu(self) -> "Storage":  # type: ignore[empty-body]
-        ...
+    def cpu(self) -> "Storage":
+        raise NotImplementedError
 
-    def data_ptr(self) -> int:  # type: ignore[empty-body]
-        ...
+    def data_ptr(self) -> _int:
+        raise NotImplementedError
 
-    def from_file(self, filename: str, shared: bool = False, nbytes: int = 0) -> "Storage":  # type: ignore[empty-body]
-        ...
+    def from_file(
+        self,
+        filename: str,
+        shared: _bool = False,
+        nbytes: _int = 0,
+    ) -> "Storage":
+        raise NotImplementedError
 
-    def _new_with_file(self, f: Any, element_size: int) -> "Storage":  # type: ignore[empty-body]
-        ...
+    def _new_with_file(self, f: Any, element_size: _int) -> "Storage":
+        raise NotImplementedError
