@@ -188,6 +188,7 @@ class CaptureA(CaptureF):
 class CaptureLikeMock:
     def __init__(self, name):
         import unittest.mock as mock
+
         # TODO(VitalyFedyunin): Do not use provate function here, copy own implementation instead.
         get_target, attribute = mock._get_target(name)  # type: ignore[attr-defined]
         self.get_target = get_target

@@ -243,6 +243,7 @@ def collate_str_fn(batch, *, collate_fn_map: Optional[Dict[Union[Type, Tuple[Typ
 default_collate_fn_map: Dict[Union[Type, Tuple[Type, ...]], Callable] = {torch.Tensor: collate_tensor_fn}
 with contextlib.suppress(ImportError):
     import numpy as np
+
     # For both ndarray and memmap (subclass of ndarray)
     default_collate_fn_map[np.ndarray] = collate_numpy_array_fn
     # See scalars hierarchy: https://numpy.org/doc/stable/reference/arrays.scalars.html
