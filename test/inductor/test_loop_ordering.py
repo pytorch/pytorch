@@ -277,6 +277,18 @@ class LoopOrderingTest(TestCase):
         # some buffer is used before being defined.
         f(input_ids, labels, position_ids)
 
+    def test_different_broadcast_shapes(self):
+        def f(x, y, c):
+            return x + c, y + c
+
+        x = torch.randn(4, 256, 1024)
+        y = torch.randn(2, 512, 1024)
+        c = torch.randn(1024)
+        self.do_acc_test(f, x, y, c)
+
+        # The two kernels are not fused due to c is broadcasted
+        self.assertEqual(2, metrics.generated_kernel_count)
+
 
 if __name__ == "__main__":
     if HAS_CUDA:

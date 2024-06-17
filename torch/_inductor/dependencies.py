@@ -75,6 +75,13 @@ class MemoryDep(Dep):
         """
         assert self.num_vars == other.num_vars
 
+        # ignore broadcast for now since broadcast causes extra 0 strides
+        # which makes it hard to decide the correct loop orders.
+        if self.num_vars != len(self.index.free_symbols):
+            return None
+        if other.num_vars != len(other.index.free_symbols):
+            return None
+
         # bail out if any size is 0 or 1
         # For size == 0, it's an empty tensor, any strides for that dimension
         # are equivalent. Skip for simplicity and it may not matter that much.
@@ -89,8 +96,8 @@ class MemoryDep(Dep):
         # Extract strides for both expression
         self_strides = V.graph.sizevars.stride_hints(self.index, self.var_names)
         other_strides = V.graph.sizevars.stride_hints(other.index, other.var_names)
-        assert len(set(self_strides)) == len(self_strides)
-        assert len(set(other_strides)) == len(other_strides)
+        assert len(set(self_strides)) == len(self_strides), f"{self_strides=}"
+        assert len(set(other_strides)) == len(other_strides), f"{other_strides=}"
 
         # May hanppen if self and other are as follows
         # MemoryDep('addmm_6', 393216*d0 + 768*d1 + d2, {d0: 16, d1: 512, d2: 768}, None)

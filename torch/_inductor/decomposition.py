@@ -28,6 +28,7 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     type_to_dtype,
 )
+from torch.fx.experimental.symbolic_shapes import definitely_true, guard_size_oblivious
 
 from . import config, inductor_prims
 from .utils import (
@@ -202,11 +203,15 @@ def round_dec(x, decimals=0):
 @pw_cast_for_opmath
 def bmm(self, batch2):
     if config.coordinate_descent_tuning:
-        if self.shape[1] == 1 or batch2.shape[2] == 1:
+        if guard_size_oblivious(self.shape[1] == 1) or guard_size_oblivious(
+            batch2.shape[2] == 1
+        ):
             out = (self.unsqueeze(-1) * batch2.unsqueeze(1)).sum(dim=2)
             return out
     if self.device.type == "cpu":
-        if self.size(1) == 1 and batch2.size(-1) == 1:
+        if guard_size_oblivious(self.size(1) == 1) and guard_size_oblivious(
+            batch2.size(-1) == 1
+        ):
             counters["inductor"]["decompose_bmm"] += 1
             return torch.sum(
                 self.squeeze(1) * batch2.squeeze(-1), dim=1, keepdim=True
@@ -218,13 +223,19 @@ def bmm(self, batch2):
 @pw_cast_for_opmath
 def addmm(self, mat1, mat2, beta=1, alpha=1):
     if self.device.type == "cpu":
-        if mat1.size(0) == 1 and mat2.size(-1) == 1:
+        if guard_size_oblivious(mat1.size(0) == 1) and guard_size_oblivious(
+            mat2.size(-1) == 1
+        ):
             counters["inductor"]["decompose_addmm"] += 1
             out = torch.sum(
                 mat1.squeeze(0) * mat2.squeeze(-1), dim=0, keepdim=True
             ).unsqueeze(0)
             return alpha * out + beta * self
-        if mat1.size(0) == 1 and mat2.size(0) <= 16 and mat2.size(1) <= 16:
+        if (
+            guard_size_oblivious(mat1.size(0) == 1)
+            and definitely_true(mat2.size(0) <= 16)
+            and definitely_true(mat2.size(1) <= 16)
+        ):
             counters["inductor"]["decompose_addmm"] += 1
             out = (mat1.T * mat2).sum(dim=0, keepdim=True)
             return alpha * out + beta * self
@@ -234,15 +245,12 @@ def addmm(self, mat1, mat2, beta=1, alpha=1):
 @register_decomposition([aten.mm])
 @pw_cast_for_opmath
 def mm(self, input2):
-    from torch.fx.experimental.symbolic_shapes import (
-        definitely_true,
-        guard_size_oblivious,
-    )
-
     # Our matrix vector multiplies only achieve peak bandwidth with coordinate descent tuning.
     # todo: Look into why and fix it (hopefully)
     if config.coordinate_descent_tuning:
-        if self.shape[0] == 1 or input2.shape[1] == 1:
+        if guard_size_oblivious(self.shape[0] == 1) or guard_size_oblivious(
+            input2.shape[1] == 1
+        ):
             return (self.unsqueeze(2) * input2.unsqueeze(0)).sum(dim=1)
     if self.device.type == "cpu":
         if (
@@ -604,7 +612,9 @@ def select_decomp_table():
 
 @register_decomposition(aten.masked_scatter)
 def masked_scatter(self, mask, source):
-    if is_gpu(self.device.type):
+    from .codegen.common import BackendFeature, has_backend_feature
+
+    if has_backend_feature(self.device, BackendFeature.MASKED_SCATTER_WITH_INDEX):
         # This two-step algorithm is the same as eager CUDA, for eager CPU we
         # use a 1-shot serial iteration.
         self, mask = aten.broadcast_tensors([self, mask])

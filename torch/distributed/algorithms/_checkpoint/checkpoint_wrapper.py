@@ -34,8 +34,8 @@ class ActivationWrapper(torch.nn.Module):
         self._register_state_dict_hook(self._post_state_dict_hook)
         # load_state_dict pre-hook to allow loading back into
         # checkpoint-wrapped module.
-        self.register_load_state_dict_pre_hook(
-            self._pre_load_state_dict_hook
+        self._register_load_state_dict_pre_hook(
+            self._pre_load_state_dict_hook, with_module=True
         )
 
     def forward(self, *args, **kwargs):

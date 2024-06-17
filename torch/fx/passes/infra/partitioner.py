@@ -18,16 +18,16 @@ logger.setLevel(logging.WARNING)
 class Partition:
     def __init__(self, id: Optional[int] = None, nodes: Optional[Iterable[Node]] = None):
         self.id = id
-        self.nodes: Set[Node] = set(nodes) if nodes is not None else set()
+        self.nodes = {node: None for node in nodes} if nodes is not None else dict()
 
     def __repr__(self) -> str:
         return str(self.nodes)
 
     def add_node(self, node: Node):
-        self.nodes.add(node)
+        self.nodes.update({node: None})
 
     def remove_node(self, node: Node):
-        self.nodes.remove(node)
+        del self.nodes[node]
 
     def size(self):
         return len(self.nodes)
@@ -321,12 +321,13 @@ class CapabilityBasedPartitioner:
             remove_node: Set[Node] = set()
             for node in partition.nodes:
                 if is_non_compute_node(node) and \
-                    (is_transparent_input_node(node, partition.nodes, remove_node) or
-                     is_transparent_output_node(node, partition.nodes, remove_node)):
+                    (is_transparent_input_node(node, set(partition.nodes), remove_node) or
+                     is_transparent_output_node(node, set(partition.nodes), remove_node)):
                     remove_node.add(node)
 
             if len(remove_node) != 0:
-                partition.nodes = partition.nodes - remove_node
+                for node in remove_node:
+                    partition.nodes.pop(node, None)
 
     def partition_and_fuse(self, prefix: str = "fused_") -> GraphModule:
         partitions = self.propose_partitions()
