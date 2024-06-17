@@ -562,6 +562,7 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
       check_runtime_disabled_flash,
       check_all_tensors_on_device,
       check_tensor_shapes,
+      check_batch_size_and_num_heads_dense<true>, // supports_grouped_query_attention = true,
       check_for_attn_mask,
       check_head_dim_size_flash,
       check_flash_attention_hardware_support,
@@ -587,7 +588,7 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
   }
   if (has_only_dense_inputs(params)) {
     constexpr auto dense_constraints = array_of<bool (*)(sdp_params const&, bool)>(
-        check_batch_size_and_num_heads_dense,
+        check_batch_size_and_num_heads_dense<false>, // supports_grouped_query_attention = false,
         check_nonzero_sequence_lengths_dense,
         check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim=*/>);
     for (auto& constraint : dense_constraints) {
@@ -644,7 +645,7 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
   }
   if (has_only_dense_inputs(params)) {
     constexpr auto dense_constraints = array_of<bool (*)(sdp_params const&, bool)>(
-        check_batch_size_and_num_heads_dense,
+        check_batch_size_and_num_heads_dense<false>, // supports_grouped_query_attention = false,
         check_nonzero_sequence_lengths_dense,
         check_last_dim_stride_equals_1_dense<false /*ignore_singleton_dim=*/>);
     for (auto& constraint : dense_constraints) {
