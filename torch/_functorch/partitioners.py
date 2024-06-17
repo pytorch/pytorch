@@ -203,7 +203,7 @@ def _extract_graph_with_inputs_outputs(
             output_values.append(x)
     new_graph.output(output_values)
 
-    # new_graph.eliminate_dead_code()
+    new_graph.eliminate_dead_code()
     new_graph.lint()
     return new_graph
 
@@ -1689,7 +1689,7 @@ def min_cut_rematerialization_partition(
         Returns the generated forward and backward Fx graph modules.
     """
 
-    # joint_module.graph.eliminate_dead_code()
+    joint_module.graph.eliminate_dead_code()
     joint_module.recompile()
 
     fx_g = joint_module.graph
