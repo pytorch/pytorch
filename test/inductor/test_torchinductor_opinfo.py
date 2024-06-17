@@ -460,6 +460,7 @@ inductor_one_sample = {
     ("__rmod__", "cuda"): {f16, i64},
     ("__rmul__", "cuda"): {f16},
     ("__rpow__", "cuda"): {f16},
+    ("_unsafe_masked_index", "cuda"): {f16},
     ("addcdiv", "cuda"): {f16},
     ("addcmul", "cuda"): {f16},
     ("atan2", "cuda"): {f16},
