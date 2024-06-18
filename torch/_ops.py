@@ -382,6 +382,9 @@ class HigherOrderOperator(OperatorBase):
     def __str__(self):
         return f"{self.name()}"
 
+    # def __repr__(self):
+    #     return f"torch.ops._higher_order_ops.{self._name}"
+
     def name(self):
         return self._name
 
