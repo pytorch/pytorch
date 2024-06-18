@@ -521,7 +521,7 @@ class NNModuleSource(ChainedSource):
 
 
 @dataclasses.dataclass(frozen=True)
-class NotNNModuleSource(NNModuleSource):
+class UnspecializedNNModuleSource(NNModuleSource):
     def guard_source(self):
         return _GUARD_SOURCE_NOT_NN_MODULE[self.base.guard_source()]
 
