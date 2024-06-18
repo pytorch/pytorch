@@ -310,6 +310,25 @@ class FSDPModule:
             module._get_fsdp_state() for module in modules
         ]
 
+    def set_post_optim_event(self, event: torch.cuda.Event) -> None:
+        """
+        Sets a post-optimizer-step event for the root FSDP module to wait the
+        all-gather streams on.
+
+        By default, the root FSDP module waits the all-gather streams on the
+        current stream to ensure that the optimizer step has finished before
+        all-gathering. However, this may introduce false dependencies if
+        there is unrelated computation after the optimizer step. This API
+        allows the user to provide their own event to wait on. After the root
+        waits on the event, the event is discarded, so this API should be
+        called with a new event each iteration.
+
+        Args:
+            event (torch.cuda.Event): Event recorded after the optimizer step
+                to wait all-gather streams on.
+        """
+        self._get_fsdp_state()._state_ctx.post_optim_event = event
+
     def _get_fsdp_state(self) -> FSDPState:
         if (state := _get_module_fsdp_state(cast(nn.Module, self))) is None:
             raise AssertionError(f"No FSDP state found on {self}")
