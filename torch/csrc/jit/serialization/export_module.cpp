@@ -259,7 +259,7 @@ std::pair<IValue, IValue> getFunctionTuple(
     if (namedType && namedType->name()) {
       return type_name_uniquer_.getUniqueName(namedType).qualifiedName();
     }
-    return c10::nullopt;
+    return std::nullopt;
   };
 
   auto makeArgTuple = [&](const std::vector<Argument>& args) {
@@ -765,7 +765,7 @@ std::optional<std::string> type_printer(
   if (namedType && namedType->name()) {
     return type_name_uniquer.getUniqueName(namedType).qualifiedName();
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 } // namespace

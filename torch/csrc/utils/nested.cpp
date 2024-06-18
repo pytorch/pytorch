@@ -9,7 +9,8 @@
 #include <stdexcept>
 #include <vector>
 
-namespace torch::utils {
+namespace torch {
+namespace utils {
 
 // NB: device_idx here is NOT a DeviceIndex, but index into PythonArgs
 static c10::TensorOptions typeIdWithDefault(
@@ -81,9 +82,10 @@ at::Tensor nested_tensor_ctor(
     final_device = new_list[0].device();
   }
   auto out = at::_nested_tensor_from_tensor_list(
-      new_list, final_dtype, c10::nullopt, final_device, pin_memory);
+      new_list, final_dtype, std::nullopt, final_device, pin_memory);
   out.requires_grad_(args_requires_grad);
   return out;
 }
 
-} // namespace torch::utils
+} // namespace utils
+} // namespace torch
