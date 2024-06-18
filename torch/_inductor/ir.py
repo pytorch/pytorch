@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
+
 import collections
 import contextlib
 import dataclasses
@@ -1667,7 +1668,7 @@ class Scan(Loops):
         combine_fn: Callable[[Tuple[Any, ...], Tuple[Any, ...]], Tuple[Any, ...]],
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         **kwargs,
-    ) -> List[Optional["TensorBox"]]:
+    ) -> List[Optional[TensorBox]]:
         pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
         scan_ranges = [size[axis]]
 
@@ -2295,7 +2296,7 @@ class View(GenericView):
 class ReinterpretView(BaseView):
     """Pretend our storage has a different layout"""
 
-    layout: "Layout"
+    layout: Layout
 
     def __post_init__(self):
         super().__post_init__()
@@ -2900,7 +2901,7 @@ class FlexibleLayout(Layout):
 class NonOwningLayout(Layout):
     """Is a view into the storage of another tensor"""
 
-    def __init__(self, view: Union[BaseView, "TensorBox"]):
+    def __init__(self, view: Union[BaseView, TensorBox]):
         layout = view.get_layout()
         super().__init__(
             layout.device,
@@ -2962,7 +2963,7 @@ class MutationLayoutSHOULDREMOVE(Layout):
     def storage_size(self) -> sympy.Expr:
         return self.real_layout().storage_size()
 
-    def get_buffer(self) -> "Buffer":
+    def get_buffer(self) -> Buffer:
         def unwrap_views(target):
             if isinstance(target, MutationLayoutSHOULDREMOVE):
                 return unwrap_views(target.target)
@@ -3642,7 +3643,7 @@ class ChoiceCaller:
     def hash_key(self) -> str:
         raise NotImplementedError
 
-    def output_node(self) -> "TensorBox":
+    def output_node(self) -> TensorBox:
         raise NotImplementedError
 
     def info_dict(self) -> Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
@@ -3711,7 +3712,7 @@ class CUDATemplateBuffer(TemplateBuffer):
         inputs,
         make_kernel_render,
         workspace_size: int,
-        template: "CUDATemplate",  # type: ignore[name-defined]  # noqa: F821
+        template: CUDATemplate,  # type: ignore[name-defined]  # noqa: F821
     ):
         super().__init__(layout, inputs, make_kernel_render)
         # Global memory (in bytes) needed for this template.
@@ -5795,9 +5796,9 @@ class MultiOutput(ExternKernel):
 
 def _prepare_convolution_fusion_create(
     cls,
-    x: "TensorBox",
-    weight: "TensorBox",
-    bias: "TensorBox",
+    x: TensorBox,
+    weight: TensorBox,
+    bias: TensorBox,
     padding: List[int],
     stride: List[int],
     dilation: List[int],
@@ -5951,9 +5952,9 @@ def _prepare_convolution_fusion_create(
 
 def _prepare_linear_fusion_create(
     cls,
-    x: "TensorBox",
-    weight: "TensorBox",
-    bias: "TensorBox",
+    x: TensorBox,
+    weight: TensorBox,
+    bias: TensorBox,
 ):
     """
     This function is a helper function to prepare inputs, layout and constant args
@@ -6037,9 +6038,9 @@ class ConvolutionUnary(ExternKernelAlloc):
     @classmethod
     def create(
         cls,
-        x: "TensorBox",
-        weight: "TensorBox",
-        bias: "TensorBox",
+        x: TensorBox,
+        weight: TensorBox,
+        bias: TensorBox,
         padding_: List[int],
         stride_: List[int],
         dilation_: List[int],
@@ -6114,10 +6115,10 @@ class ConvolutionBinary(ExternKernelAlloc):
     @classmethod
     def create(
         cls,
-        x: "TensorBox",
-        other: "TensorBox",
-        weight: "TensorBox",
-        bias: "TensorBox",
+        x: TensorBox,
+        other: TensorBox,
+        weight: TensorBox,
+        bias: TensorBox,
         padding_: List[int],
         stride_: List[int],
         dilation_: List[int],
@@ -6209,10 +6210,10 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
     @classmethod
     def create(
         cls,
-        x: "TensorBox",
-        other: "TensorBox",
-        weight: "TensorBox",
-        bias: "TensorBox",
+        x: TensorBox,
+        other: TensorBox,
+        weight: TensorBox,
+        bias: TensorBox,
         padding_: List[int],
         stride_: List[int],
         dilation_: List[int],
@@ -6487,9 +6488,9 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
     @classmethod
     def create(
         cls,
-        x: "TensorBox",
-        weight: "TensorBox",
-        bias: "TensorBox",
+        x: TensorBox,
+        weight: TensorBox,
+        bias: TensorBox,
         padding_: List[int],
         output_padding_: List[int],
         stride_: List[int],
@@ -6548,13 +6549,13 @@ class MkldnnRnnLayer(ExternKernelAlloc):
     @classmethod
     def create(
         cls,
-        x: "TensorBox",
-        w0: "TensorBox",
-        w1: "TensorBox",
-        w2: "TensorBox",
-        w3: "TensorBox",
-        hx: "TensorBox",
-        cx: "TensorBox",
+        x: TensorBox,
+        w0: TensorBox,
+        w1: TensorBox,
+        w2: TensorBox,
+        w3: TensorBox,
+        hx: TensorBox,
+        cx: TensorBox,
         reverse: bool,
         batch_sizes: List[int],
         mode: int,
@@ -6743,13 +6744,13 @@ class QConvPointWisePT2E(ExternKernelAlloc):
     @classmethod
     def create(
         cls,
-        x: "TensorBox",
+        x: TensorBox,
         x_scale: float,
         x_zp: int,
-        weight: "TensorBox",  # packed_weight
-        w_scale: "TensorBox",
-        w_zp: "TensorBox",
-        bias: "TensorBox",
+        weight: TensorBox,  # packed_weight
+        w_scale: TensorBox,
+        w_zp: TensorBox,
+        bias: TensorBox,
         stride_: List[int],
         padding_: List[int],
         dilation_: List[int],
@@ -6936,22 +6937,22 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
     @classmethod
     def create(
         cls,
-        x: "TensorBox",
+        x: TensorBox,
         x_scale,
         x_zp,
-        accum: "TensorBox",
+        accum: TensorBox,
         accum_scale,
         accum_zp,
-        weight: "TensorBox",  # packed_weight
+        weight: TensorBox,  # packed_weight
         w_scale,
         w_zp,
-        bias: "TensorBox",
+        bias: TensorBox,
         stride_: List[int],
         padding_: List[int],
         dilation_: List[int],
         groups: int,
-        o_inv_scale: "TensorBox",
-        output_zero_point: "TensorBox",
+        o_inv_scale: TensorBox,
+        output_zero_point: TensorBox,
         output_dtype,
         binary_attr,
         alpha,
@@ -7141,13 +7142,13 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
     @classmethod
     def create(
         cls,
-        x: "TensorBox",
+        x: TensorBox,
         x_scale: float,
         x_zp: int,
-        weight: "TensorBox",  # packed_weight
-        w_scale: "TensorBox",
-        w_zp: "TensorBox",
-        bias: "TensorBox",
+        weight: TensorBox,  # packed_weight
+        w_scale: TensorBox,
+        w_zp: TensorBox,
+        bias: TensorBox,
         o_inv_scale: float,
         output_zero_point: int,
         output_dtype,
@@ -7338,17 +7339,17 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
     @classmethod
     def create(
         cls,
-        x: "TensorBox",
+        x: TensorBox,
         x_scale: float,
         x_zp: int,
-        weight: "TensorBox",  # packed_weight
-        w_scale: "TensorBox",
-        w_zp: "TensorBox",
-        bias: "TensorBox",
+        weight: TensorBox,  # packed_weight
+        w_scale: TensorBox,
+        w_zp: TensorBox,
+        bias: TensorBox,
         o_inv_scale: float,
         output_zero_point: int,
         output_dtype,
-        other: "TensorBox",
+        other: TensorBox,
         other_scale,
         other_zp,
         binary_attr,
@@ -7609,7 +7610,7 @@ class StorageBox(MutableBox):
 class Subgraph(IRNode):
     name: str
     graph_module: torch.fx.GraphModule
-    graph: Optional["GraphLowering"] = None
+    graph: Optional[GraphLowering] = None
 
 
 def _has_aliased_buffers(buffers):

@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import collections
 import contextlib
 import dataclasses
@@ -148,9 +150,9 @@ TritonGrid = Union[
 
 def user_defined_kernel_grid_fn_code(
     name: str,
-    configs: List["triton.Config"],
+    configs: List[triton.Config],
     grids: List[TritonGrid],
-    wrapper: Optional["WrapperCodeGen"] = None,
+    wrapper: Optional[WrapperCodeGen] = None,
 ) -> Tuple[str, str]:
     output = IndentedBuffer()
 
@@ -217,12 +219,12 @@ class MemoryPlanningState:
     def __contains__(self, key: ReuseKey) -> bool:
         return bool(self.reuse_pool.get(key, None))
 
-    def pop(self, key: ReuseKey) -> "FreeIfNotReusedLine":
+    def pop(self, key: ReuseKey) -> FreeIfNotReusedLine:
         item = self.reuse_pool[key].pop()
         assert not item.is_reused
         return item
 
-    def push(self, key: ReuseKey, item: "FreeIfNotReusedLine") -> None:
+    def push(self, key: ReuseKey, item: FreeIfNotReusedLine) -> None:
         assert not item.is_reused
         self.reuse_pool[key].append(item)
 
@@ -233,8 +235,8 @@ class WrapperLine:
 
 @dataclasses.dataclass
 class EnterSubgraphLine(WrapperLine):
-    wrapper: "WrapperCodeGen"
-    graph: "GraphLowering"
+    wrapper: WrapperCodeGen
+    graph: GraphLowering
 
     def codegen(self, code: IndentedBuffer) -> None:
         self.wrapper.push_codegened_graph(self.graph)
@@ -243,7 +245,7 @@ class EnterSubgraphLine(WrapperLine):
 
 @dataclasses.dataclass
 class ExitSubgraphLine(WrapperLine):
-    wrapper: "WrapperCodeGen"
+    wrapper: WrapperCodeGen
 
     def codegen(self, code: IndentedBuffer) -> None:
         self.wrapper.pop_codegened_graph()
@@ -305,9 +307,9 @@ class ExitDeviceContextManagerLine(WrapperLine):
 
 @dataclasses.dataclass
 class MemoryPlanningLine(WrapperLine):
-    wrapper: "WrapperCodeGen"
+    wrapper: WrapperCodeGen
 
-    def plan(self, state: MemoryPlanningState) -> "MemoryPlanningLine":
+    def plan(self, state: MemoryPlanningState) -> MemoryPlanningLine:
         """First pass to find reuse"""
         return self
 
