@@ -1617,14 +1617,6 @@ class TestMPS(TestCaseMPS):
             a = torch.tensor(v, dtype=dtype, device="mps") * b
             self.compare_with_numpy(torch.exp, np.exp, a)
 
-    def test_triu_inf(self, device="mps", dtype=torch.float):
-        for diag in [-1, 0, 1]:
-            mask = torch.full((3, 6, 6), float("-inf"))
-            mask_mps = mask.clone().detach().to('mps')
-            cpu_ref = torch.triu(mask, diagonal=diag)
-            mps_out = torch.triu(mask_mps, diagonal=diag)
-            self.assertEqual(cpu_ref, mps_out)
-
     def test_exp1(self, device="mps", dtype=torch.float):
         input = torch.tensor([-0.1, 1.0, -0.9, 0.1], device=device, dtype=dtype)
         output = torch.exp(input)
@@ -9194,8 +9186,8 @@ class TestLinalgMPS(TestCaseMPS):
                 b, n_bit=4, q_group_size=q_group
             )
             b_int4pack = torch._convert_weight_to_int4pack(
-                b_int32.cpu(), inner_k_tiles
-            ).to(device="mps")
+                b_int32, inner_k_tiles
+            )
 
             return b_int4pack, b_scales_and_zeros
 

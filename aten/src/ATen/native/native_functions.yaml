@@ -4121,6 +4121,7 @@
   dispatch:
     CPU: _convert_weight_to_int4pack_cpu
     CUDA: _convert_weight_to_int4pack_cuda
+    MPS: _convert_weight_to_int4pack_mps
 
 - func: _weight_int4pack_mm(Tensor self, Tensor mat2, int qGroupSize, Tensor qScaleAndZeros) -> Tensor
   dispatch:
