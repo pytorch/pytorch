@@ -1555,7 +1555,7 @@ class GraphLowering(torch.fx.Interpreter):
             if tracing_context is not None and not isinstance(
                 V.real_inputs, NullHandler
             ):
-                if tracing_context.output_stride_exprs:
+                if tracing_context.output_strides:
                     tracing_context.output_strides.clear()
 
                 params_flat = [

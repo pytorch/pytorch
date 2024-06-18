@@ -564,15 +564,15 @@ def compile_fx_inner(
 
     # Return the output strides to the caller via TracingContext
     context = torch._guards.TracingContext.try_get()
-    if context is not None and context.output_stride_exprs is not None:
-        assert len(context.output_stride_exprs) == 0
+    if context is not None and context.output_strides is not None:
+        assert len(context.output_strides) == 0
         shape_env = _shape_env_from_inputs(example_inputs)
         V.graph.sizevars = SizeVarAllocator(shape_env)
-        for exprs in compiled_graph.output_stride_exprs:
+        for exprs in compiled_graph.output_strides:
             if exprs is None:
-                context.output_stride_exprs.append(None)
+                context.output_strides.append(None)
             else:
-                context.output_stride_exprs.append(
+                context.output_strides.append(
                     V.graph.sizevars.size_hint(s) for s in exprs
                 )
 
@@ -840,7 +840,7 @@ def fx_codegen_and_compile(
         metrics_helper = metrics.CachedMetricsHelper()
         with V.set_graph_handler(graph):
             graph.run(*example_inputs)
-            output_stride_exprs: List[Optional[Tuple[sympy.Expr, ...]]] = []
+            output_strides: List[Optional[Tuple[sympy.Expr, ...]]] = []
             if graph.graph_outputs is not None:
                 # We'll put the output strides in the compiled graph so we
                 # can later return them to the caller via TracingContext
@@ -849,9 +849,9 @@ def fx_codegen_and_compile(
                         hasattr(out, "layout")
                         and len(free_unbacked_symbols(out.layout.stride)) == 0
                     ):
-                        output_stride_exprs.append(out.layout.stride)
+                        output_strides.append(out.layout.stride)
                     else:
-                        output_stride_exprs.append(None)
+                        output_strides.append(None)
 
             compiled_fn = graph.compile_to_fn()
             num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
@@ -899,7 +899,7 @@ def fx_codegen_and_compile(
             compiled_graph = CompiledFxGraph(
                 compiled_fn,
                 graph,
-                output_stride_exprs,
+                output_strides,
                 V.graph.disable_cudagraphs_reason,
                 metrics_helper.get_deltas(),
             )
