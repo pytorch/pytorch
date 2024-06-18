@@ -29,7 +29,6 @@
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
-#include <torch/csrc/distributed/c10d/control_plane/Handlers.hpp>
 #include <torch/csrc/distributed/c10d/logger.hpp>
 #include <torch/torch.h>
 
@@ -379,15 +378,6 @@ std::string dump_nccl_trace(
       c10::nullopt, includeCollectives, includeStackTraces, onlyActive);
 }
 #endif
-
-// TODO(c-p-i-o): add a JSON endpoint.
-control_plane::RegisterHandler dumpHandler{
-    "dump_nccl_trace_pickle",
-    [](const control_plane::Request& req, control_plane::Response& res) {
-      // TODO: c-p-i-o: params from the request need to go to dump_nccl_trace.
-      res.setContent(
-          dump_nccl_trace(true, true, false), "application/octet-stream");
-    }};
 
 std::optional<std::function<void(std::function<void(const std::string&)>)>>&
 get_cpp_trace_dumper() {
@@ -2118,7 +2108,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
     // Find a valid, healthy communicator to split from if possible.
     std::lock_guard<std::mutex> lock(options_->split_from->mutex_);
     auto& other_comms = options_->split_from->devNCCLCommMap_;
-    auto dit = other_comms.find(deviceKey);
+    auto dit = other_comms.find(getKeyFromDevice(device));
     if (dit != other_comms.end()) {
       auto& parentComm = dit->second;
       if (parentComm != nullptr && !parentComm->isAborted()) {
