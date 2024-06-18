@@ -12,6 +12,7 @@ from torch.testing._internal.opinfo.core import (
 from torch.testing._internal.common_dtype import all_types_and, custom_types
 from torch.testing._internal.opinfo.core import DecorateInfo
 from torch.nn.attention._flex_attention import _flex_attention
+from torch.nn.attention._flex_decoder import _flex_decoder
 
 def sample_inputs_map(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(
@@ -121,6 +122,22 @@ def sample_inputs_flex_attention(opinfo, device, dtype, requires_grad, **kwargs)
         make_arg(2, 2, 128, 8, low=0.1, high=2),
         make_arg(2, 2, 128, 8, low=0.1, high=2),
         make_arg(2, 2, 128, 8, low=0.1, high=2),
+        score_mod,
+    )
+
+
+def sample_inputs_flex_decoder(opinfo, device, dtype, requires_grad, **kwargs):
+    make_arg = functools.partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+    )
+
+    def score_mod(score, b, h, m, n):
+        return score + h
+
+    yield SampleInput(
+        make_arg(2, 2, 4, 8, low=0.1, high=2),      # query
+        make_arg(2, 2, 1024, 8, low=0.1, high=2),   # key
+        make_arg(2, 2, 1024, 8, low=0.1, high=2),   # value
         score_mod,
     )
 
@@ -242,6 +259,24 @@ hop_db = [
         variant_test_name="simple",
         op=_flex_attention,
         sample_inputs_func=sample_inputs_flex_attention,
+        dtypes=custom_types(torch.float16, torch.float32),
+        supports_out=False,
+        check_batched_grad=False,
+        check_batched_gradgrad=False,
+        check_batched_forward_grad=False,
+        check_inplace_batched_forward_grad=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_aot_export"),
+            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_pre_dispatch_export"),
+            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_serialize_export"),
+            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_retrace_export"),
+        )
+    ),
+    OpInfo(
+        name="flex_decoder",
+        variant_test_name="simple",
+        op=_flex_decoder,
+        sample_inputs_func=sample_inputs_flex_decoder,
         dtypes=custom_types(torch.float16, torch.float32),
         supports_out=False,
         check_batched_grad=False,
