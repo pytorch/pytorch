@@ -14,8 +14,8 @@ from typing import (
 
 import torch
 from torch._utils import _get_device_index
-from torch.nn.modules import Module
 
+from ..modules import Module
 from . import comm
 
 
