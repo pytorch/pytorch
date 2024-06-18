@@ -774,7 +774,7 @@ def meta__scaled_dot_product_cudnn(fake_mode, func, *args, **kwargs):
     key = kwargs["key"]
     value = kwargs["value"]
     compute_log_sumexp = kwargs["compute_log_sumexp"]
-    # unused:attn_bias, dropout_p, is_causal, scale
+    # unused: attn_bias, dropout_p, is_causal, scale
 
     def convert_tensor(t, device):
         return FakeTensor(fake_mode, t, device)
@@ -807,20 +807,28 @@ def meta__scaled_dot_product_cudnn(fake_mode, func, *args, **kwargs):
     offset = convert_tensor(
         torch.empty((), dtype=torch.long, device="meta"), query.device
     )
-
-    max_seqlen_batch_q = query.size(2)
-    max_seqlen_batch_k = key.size(2)
-
+    # Why does it cause a segfault if we replace these with None
+    # as is done in the SDPA Flash case above?
+    cum_seq_q = convert_tensor(
+        torch.empty((), dtype=torch.long, device="meta"), query.device
+    )
+    cum_seq_kv = convert_tensor(
+        torch.empty((), dtype=torch.long, device="meta"), query.device
+    )
+    debug_mask = convert_tensor(
+            torch.empty(0, dtype=query.dtype, device="meta"),
+            query.device,
+    )
     return (
         res,
         logsum_exp,
-        None,
-        None,
-        max_seqlen_batch_q,
-        max_seqlen_batch_k,
+        cum_seq_q,
+        cum_seq_kv,
+        S_Q,
+        S_KV,
         seed,
         offset,
-        None,
+        debug_mask,
     )
 
 

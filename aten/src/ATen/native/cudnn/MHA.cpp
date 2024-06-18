@@ -252,12 +252,6 @@ thread_local MHAGraphCache<graph_and_tensors_backward, MHACacheKeyWrapper>
     mhagraphbackwardcache;
 
 namespace {
-inline bool cudnn_sdpa_check_debug() {
-  static bool sdpa_debug =
-      c10::utils::check_env("TORCH_CUDNN_SDPA_DEBUG") == true;
-  return sdpa_debug;
-}
-
 // analogous to the same function in Descriptors.h for cuDNN Convolutions...
 auto fixSizeOneDimStrideSDPA(
     const IntArrayRef sizes,
@@ -569,9 +563,6 @@ void run_cudnn_SDP_fprop(
     Tensor& o,
     Tensor& dropoutseed,
     Tensor& dropoutoffset) {
-  if (cudnn_sdpa_check_debug()) {
-    TORCH_WARN("Calling into cuDNN SDPA FPROP");
-  }
   cudnnHandle_t handle = getCudnnHandle();
   if (!o.defined()) {
     o = at::empty({b, h, s_q, d_v}, q.options());
@@ -664,9 +655,6 @@ void run_cudnn_SDP_bprop(
     Tensor& dV,
     const Tensor& dropoutseed,
     const Tensor& dropoutoffset) {
-  if (cudnn_sdpa_check_debug()) {
-    TORCH_WARN("Calling into cuDNN SDPA BPROP");
-  }
   Tensor dO_ = dO;
   if (!dO.strides()[dO.strides().size() - 1]) {
     TORCH_WARN(
