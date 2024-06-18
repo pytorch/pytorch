@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import collections
 import typing
 from dataclasses import fields

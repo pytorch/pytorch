@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import collections
 import itertools
 import os
@@ -166,8 +167,7 @@ def _init_process_group_state_for_hybrid_shard(
             state.process_group = device_mesh.get_group(mesh_dim=1)
         else:
             raise ValueError(
-                "Expected device_mesh to have ndim=2 "
-                f"but got {len(device_mesh.get_group())}"
+                f"Expected device_mesh to have ndim=2 but got {device_mesh.ndim}"
             )
     elif process_group is None:
         default_group = _get_default_group()

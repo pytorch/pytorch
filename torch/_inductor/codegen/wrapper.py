@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import collections
 import contextlib
 import dataclasses
@@ -511,8 +512,8 @@ class WrapperCodeGen(CodeGen):
                 assert_size_stride = torch._C._dynamo.guards.assert_size_stride
                 empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
                 empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
+                reinterpret_tensor = torch._C._dynamo.guards._reinterpret_tensor
                 alloc_from_pool = torch.ops.inductor._alloc_from_pool
-                reinterpret_tensor = torch.ops.inductor._reinterpret_tensor
                 async_compile = AsyncCompile()
 
             """
@@ -724,10 +725,6 @@ class WrapperCodeGen(CodeGen):
         outputs=None,
     ):
         self.writeline(f"{buf_name} = {python_kernel_name}({', '.join(codegen_args)})")
-
-    def generate_inf_and_nan_checker(self, node):
-        # TODO: Add check for python too.
-        pass
 
     @dynamo_timed
     def generate(self, is_inference):
@@ -1207,7 +1204,9 @@ class WrapperCodeGen(CodeGen):
 
         # Also include any possible kernel being called indirectly
         from triton import JITFunction
+        from triton.language import constexpr
 
+        # global constexpr vars handled above
         symbols_included = {original_name}
 
         def traverse(cur_kernel):
@@ -1220,6 +1219,7 @@ class WrapperCodeGen(CodeGen):
                 for inst in dis.Bytecode(cur_kernel.fn)
                 if inst.opname == "LOAD_GLOBAL"
             }
+            global_annotations = cur_kernel.fn.__globals__.get("__annotations__", {})
             for symbol_name in cur_kernel.fn.__code__.co_names:
                 if symbol_name in symbols_included:
                     continue
@@ -1231,9 +1231,25 @@ class WrapperCodeGen(CodeGen):
                         compile_wrapper.splice(symbol.src, strip=True)
                         symbols_included.add(symbol_name)
                         traverse(symbol)
-                    elif isinstance(symbol, (int, str, bool)):
+                    elif isinstance(symbol, (int, str, bool, constexpr)):
                         compile_wrapper.newline()
-                        compile_wrapper.writeline(f"{symbol_name} = {symbol!r}")
+                        if isinstance(symbol, constexpr):
+                            symbol_str = f"tl.constexpr({symbol.value!r})"
+                        else:
+                            symbol_str = f"{symbol!r}"
+                        if annotation := global_annotations.get(symbol_name):
+                            annotion_code = ""
+                            if isinstance(annotation, type):
+                                annotation_code = (
+                                    f": {annotation.__module__}.{annotation.__name__}"
+                                )
+                            else:
+                                annotation_code = f": {annotation!r}"
+                            compile_wrapper.writeline(
+                                f"{symbol_name}{annotation_code} = {symbol_str}"
+                            )
+                        else:
+                            compile_wrapper.writeline(f"{symbol_name} = {symbol!r}")
                         symbols_included.add(symbol_name)
                     elif (
                         symbol_name in unqualified_loads
