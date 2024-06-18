@@ -2209,9 +2209,6 @@ def _make_copy_from_view(fn):
     """
     Given a view function (e.g. torch.diagonal) generates its copy variant (e.g. torch.diagonal_copy)
     """
-    name = fn.__name__
-    copy_name = f"{name}_copy"
-    op_copy = getattr(aten, copy_name)
 
     @wraps(fn)
     def _fn(*args, out=None, **kwargs):
@@ -2225,8 +2222,10 @@ def _make_copy_from_view(fn):
         )
 
     _fn = out_wrapper()(_fn)
+
+    copy_name = f"{fn.__name__}_copy"
     _fn.__name__ = copy_name
-    _fn = register_decomposition(op_copy)(_fn)
+    _fn = register_decomposition(getattr(aten, copy_name))(_fn)
     return _fn
 
 
