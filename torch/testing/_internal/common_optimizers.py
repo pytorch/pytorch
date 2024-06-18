@@ -1324,11 +1324,6 @@ optim_db: List[OptimizerInfo] = [
                 active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
             ),
             DecorateInfo(
-                skipIfTorchDynamo("Mismatched _foreach_addcdiv_ types, see #118159"),
-                "TestOptimRenewed",
-                "test_complex",
-            ),
-            DecorateInfo(
                 skipIfTorchDynamo("See #116028"),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",

@@ -47,6 +47,9 @@ jobs:
     timeout-minutes: 240
     outputs:
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
+    defaults:
+      run:
+        shell: bash
     steps:
       # Duplicated in win-test because this MUST go before a checkout
       - name: Enable git symlinks on Windows and disable fsmonitor daemon
@@ -60,10 +63,10 @@ jobs:
           git config --global core.fsmonitor false
 
       - name: Clean up leftover processes on non-ephemeral Windows runner
-        uses: pytorch/test-infra/.github/actions/cleanup-runner@release/2.4
+        uses: pytorch/test-infra/.github/actions/cleanup-runner@main
 
       - name: Setup SSH (Click me for login details)
-        uses: pytorch/test-infra/.github/actions/setup-ssh@release/2.4
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
           instructions: |
@@ -78,7 +81,7 @@ jobs:
 
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.4
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           no-sudo: true
 
@@ -89,6 +92,7 @@ jobs:
 
       - name: Parse ref
         id: parse-ref
+        shell: bash
         run: python3 .github/scripts/parse_ref.py
 
       - name: Get workflow job id
