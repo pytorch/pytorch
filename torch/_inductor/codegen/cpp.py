@@ -64,7 +64,14 @@ from .common import (
     OptimizationContext,
 )
 
-from .cpp_utils import cexpr, cexpr_index, DTYPE_TO_CPP, INDEX_TYPE, value_to_cpp
+from .cpp_utils import (
+    cexpr,
+    cexpr_index,
+    DTYPE_TO_CPP,
+    INDEX_TYPE,
+    unify_mask_base_type,
+    value_to_cpp,
+)
 
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 
@@ -1107,8 +1114,13 @@ class CppVecOverrides(CppOverrides):
     def ne(x, y):
         assert isinstance(V.kernel, CppVecKernel)
         assert isinstance(x, CppCSEVariable)
-        assert x.dtype is not None
-        return f"{V.kernel._get_mask_type(x.dtype)}({x} != {y})"
+        if x.dtype == torch.bool:
+            assert y.dtype == torch.bool
+            x_cast, y_cast = unify_mask_base_type(V.kernel.compute, (x, y))
+            return f"{x_cast} != {y_cast}"
+        else:
+            assert x.dtype is not None
+            return f"{V.kernel._get_mask_type(x.dtype)}({x} != {y})"
 
     @staticmethod
     def lt(x, y):
@@ -1311,11 +1323,21 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def minimum(a, b):
-        return f"at::vec::minimum({a}, {b})"
+        if a.dtype == torch.bool:
+            assert b.dtype == torch.bool
+            a_cast, b_cast = unify_mask_base_type(V.kernel.compute, (a, b))
+            return f"{a_cast} & {b_cast}"
+        else:
+            return f"at::vec::minimum({a}, {b})"
 
     @staticmethod
     def maximum(a, b):
-        return f"at::vec::maximum({a}, {b})"
+        if a.dtype == torch.bool:
+            assert b.dtype == torch.bool
+            a_cast, b_cast = unify_mask_base_type(V.kernel.compute, (a, b))
+            return f"{a_cast} | {b_cast}"
+        else:
+            return f"at::vec::maximum({a}, {b})"
 
     @staticmethod
     def square(a):
@@ -1326,10 +1348,10 @@ class CppVecOverrides(CppOverrides):
         assert isinstance(V.kernel, CppVecKernel)
         if b.dtype == torch.bool:
             assert c.dtype == torch.bool
-            blendv_a = f"{V.kernel._get_mask_cast(a, torch.float)}"
-            blendv_b = f"{V.kernel._get_mask_cast(b, torch.float)}"
-            blendv_c = f"{V.kernel._get_mask_cast(c, torch.float)}"
-            return f"decltype({b})::blendv({blendv_c}, {blendv_b}, {blendv_a})"
+            blendv_a, blendv_b, blendv_c = unify_mask_base_type(
+                V.kernel.compute, (a, b, c)
+            )
+            return f"decltype({blendv_b})::blendv({blendv_c}, {blendv_b}, {blendv_a})"
         else:
             return f"decltype({b})::blendv({c}, {b}, {V.kernel._get_mask_cast(a, b.dtype)})"
 
