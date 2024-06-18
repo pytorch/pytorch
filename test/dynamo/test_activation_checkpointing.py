@@ -1213,7 +1213,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         else:
             op = torch.ops.aten._scaled_dot_product_flash_attention.default
 
-
         fwd_graph = aot_graphs[0]
         self.assertTrue(
             count_ops(
