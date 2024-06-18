@@ -139,7 +139,7 @@ class lazy_property:
 
     def __init__(self, wrapped):
         self.wrapped = wrapped
-        update_wrapper(self, wrapped)
+        update_wrapper(self, wrapped)  # type:ignore[arg-type]
 
     def __get__(self, instance, obj_type=None):
         if instance is None:

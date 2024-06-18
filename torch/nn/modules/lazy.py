@@ -1,11 +1,13 @@
 # mypy: allow-untyped-defs
 import itertools
-from typing import Protocol, Optional, Type, Any
+from typing import Any, Optional, Protocol, Type
 
 import torch
-from ..parameter import is_lazy
+from torch.nn.parameter import is_lazy
 
-__all__ = ['LazyModuleMixin']
+
+__all__ = ["LazyModuleMixin"]
+
 
 class _LazyProtocol(Protocol):
     """This class is used to avoid errors with mypy checks for the attributes in a mixin.
@@ -20,8 +22,15 @@ class _LazyProtocol(Protocol):
         ...
 
     def _lazy_load_hook(
-            self, state_dict, prefix, local_metadata, strict,
-            missing_keys, unexpected_keys, error_msgs):
+        self,
+        state_dict,
+        prefix,
+        local_metadata,
+        strict,
+        missing_keys,
+        unexpected_keys,
+        error_msgs,
+    ):
         ...
 
     def _get_name(self):
@@ -177,7 +186,9 @@ class LazyModuleMixin:
         # Mypy doesnt like this super call in a mixin
         super().__init__(*args, **kwargs)  # type: ignore[misc]
         self._load_hook = self._register_load_state_dict_pre_hook(self._lazy_load_hook)
-        self._initialize_hook = self.register_forward_pre_hook(self._infer_parameters, with_kwargs=True)
+        self._initialize_hook = self.register_forward_pre_hook(
+            self._infer_parameters, with_kwargs=True
+        )
 
     def _save_to_state_dict(self: _LazyProtocol, destination, prefix, keep_vars):
         # This should be ideally implemented as a hook,
@@ -195,8 +206,15 @@ class LazyModuleMixin:
                 destination[prefix + name] = buf
 
     def _lazy_load_hook(
-            self: _LazyProtocol, state_dict, prefix, local_metadata, strict,
-            missing_keys, unexpected_keys, error_msgs):
+        self: _LazyProtocol,
+        state_dict,
+        prefix,
+        local_metadata,
+        strict,
+        missing_keys,
+        unexpected_keys,
+        error_msgs,
+    ):
         """load_state_dict pre-hook function for lazy buffers and parameters.
 
         The purpose of this hook is to adjust the current state and/or
@@ -206,7 +224,9 @@ class LazyModuleMixin:
         See comment in ``torch.nn.Module._register_load_state_dict_pre_hook``
         for the details of the hook specification.
         """
-        for name, param in itertools.chain(self._parameters.items(), self._buffers.items()):
+        for name, param in itertools.chain(
+            self._parameters.items(), self._buffers.items()
+        ):
             key = prefix + name
             if key in state_dict and param is not None:
                 input_param = state_dict[key]
@@ -223,7 +243,9 @@ class LazyModuleMixin:
         This adds an interface to isolate parameter initialization from the
         forward pass when doing parameter shape inference.
         """
-        raise NotImplementedError(f'initialize_parameters is not implemented for {self.__class__.__name__}')
+        raise NotImplementedError(
+            f"initialize_parameters is not implemented for {self.__class__.__name__}"
+        )
 
     def has_uninitialized_params(self: _LazyProtocol):
         r"""Check if a module has parameters that are not initialized."""
@@ -249,15 +271,18 @@ class LazyModuleMixin:
         kwargs = kwargs if kwargs else {}
         module.initialize_parameters(*args, **kwargs)
         if module.has_uninitialized_params():
-            raise RuntimeError(f'module {self._get_name()} has not been fully initialized')
+            raise RuntimeError(
+                f"module {self._get_name()} has not been fully initialized"
+            )
         module._initialize_hook.remove()
         module._load_hook.remove()
-        delattr(module, '_initialize_hook')
-        delattr(module, '_load_hook')
+        delattr(module, "_initialize_hook")
+        delattr(module, "_load_hook")
         if module.cls_to_become is not None:
             module.__class__ = module.cls_to_become
 
-
     def _replicate_for_data_parallel(self: _LazyProtocol):
-        raise RuntimeError('Modules with uninitialized parameters can\'t be used with `DataParallel`. '
-                           'Run a dummy forward pass to correctly initialize the modules')
+        raise RuntimeError(
+            "Modules with uninitialized parameters can't be used with `DataParallel`. "
+            "Run a dummy forward pass to correctly initialize the modules"
+        )
