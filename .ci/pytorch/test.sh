@@ -9,22 +9,6 @@ set -ex
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-
-if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
-    # rocm builds fail when WERROR=1
-    # XLA test build fails when WERROR=1
-    # set only when building other architectures
-    # or building non-XLA tests.
-    if [[ "$BUILD_ENVIRONMENT" != *rocm*  &&
-          "$BUILD_ENVIRONMENT" != *xla* ]]; then
-      if [[ "$BUILD_ENVIRONMENT" != *py3.8* ]]; then
-        # Install numpy-2.0 release candidate for builds
-        # Which should be backward compatible with Numpy-1.X
-        python -mpip install --pre numpy==2.0.0rc1
-      fi
-    fi
-fi
-
 # Do not change workspace permissions for ROCm CI jobs
 # as it can leave workspace with bad permissions for cancelled jobs
 if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
@@ -1273,6 +1257,21 @@ elif [[ "${TEST_CONFIG}" == *timm* ]]; then
   id=$((SHARD_NUMBER-1))
   test_dynamo_benchmark timm_models "$id"
 elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
+  # Torchbench requires a newer version of numpy
+  if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
+      # rocm builds fail when WERROR=1
+      # XLA test build fails when WERROR=1
+      # set only when building other architectures
+      # or building non-XLA tests.
+      if [[ "$BUILD_ENVIRONMENT" != *rocm*  &&
+            "$BUILD_ENVIRONMENT" != *xla* ]]; then
+        if [[ "$BUILD_ENVIRONMENT" != *py3.8* ]]; then
+          # Install numpy-2.0 release candidate for builds
+          # Which should be backward compatible with Numpy-1.X
+          python -mpip install --pre numpy==2.0.0rc1
+        fi
+      fi
+  fi
   if [[ "${TEST_CONFIG}" == *cpu_inductor* ]]; then
     install_torchaudio cpu
   else
