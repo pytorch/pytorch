@@ -516,7 +516,7 @@ struct NCCLTraceBuffer {
       std::chrono::milliseconds timeout_ms,
       bool isP2P) {
     if (!enabled_) {
-      return c10::nullopt;
+      return std::nullopt;
     }
     auto traceback =
         torch::CapturedTraceback::gather(true, true, capture_cpp_stack_);
@@ -621,7 +621,7 @@ struct NCCLTraceBuffer {
     bool can_compute_duration = false;
     Event* startEvent = nullptr;
     Event* endEvent = nullptr;
-    std::optional<float> duration = c10::nullopt;
+    std::optional<float> duration = std::nullopt;
 
     std::unique_lock<std::mutex> guard(mutex_);
 

@@ -1,8 +1,8 @@
 #pragma once
-#include <c10/util/Optional.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/distributed/rpc/types.h>
 #include <mutex>
+#include <optional>
 #include <unordered_map>
 
 namespace torch {

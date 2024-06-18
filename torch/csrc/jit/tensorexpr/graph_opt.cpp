@@ -351,7 +351,7 @@ static std::optional<at::ScalarType> inferScalarType(Node* n) {
       if (tt->scalarType() && *tt->scalarType() != scalar_type) {
         GRAPH_DEBUG(
             "Inputs of ", n, " have different scalar types, cannot fixup!");
-        return c10::nullopt;
+        return std::nullopt;
       }
     }
   }
@@ -369,7 +369,7 @@ static std::optional<at::Device> inferDevice(Node* n) {
       }
       if (tt->device() && *tt->device() != device) {
         GRAPH_DEBUG("Inputs of ", n, " have different devices, cannot fixup!");
-        return c10::nullopt;
+        return std::nullopt;
       }
     }
   }

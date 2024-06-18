@@ -18,7 +18,6 @@
 #include <c10/util/ApproximateClock.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
-#include <c10/util/Optional.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/python_variable.h>
@@ -29,6 +28,7 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <optional>
 
 namespace py = pybind11;
 
@@ -349,7 +349,7 @@ TensorMetadata toTensorMetadata(PyObject* self) {
 std::optional<TensorMetadata> ValueCache::recordIfTensor(py::handle p) {
   return THPVariable_CheckExact(p.ptr())
       ? std::optional<TensorMetadata>{toTensorMetadata(p.ptr())}
-      : c10::nullopt;
+      : std::nullopt;
 }
 
 std::vector<std::pair<std::string, TensorMetadata>> ValueCache::unpackTensorMap(
@@ -379,7 +379,7 @@ void ValueCache::store<CallType::PyCall>(const PyCallKey& key, no_ephemeral_t) {
 template <>
 ExtraFields<EventType::PyCall>::args_t ValueCache::load<CallType::PyCall>(
     const PyCallKey& key) const {
-  return {std::get<CallType::PyCall>(state_).at(key), c10::nullopt};
+  return {std::get<CallType::PyCall>(state_).at(key), std::nullopt};
 }
 
 template <>
@@ -419,7 +419,7 @@ ExtraFields<EventType::PyCall>::args_t ValueCache::load<CallType::PyModuleCall>(
   return {
       /*frame_state_=*/std::get<CallType::PyCall>(state_).at(*cache.location_),
       /*module_info_=*/std::move(info),
-      /*optimizer_info_=*/c10::nullopt};
+      /*optimizer_info_=*/std::nullopt};
 }
 
 template <>
@@ -465,7 +465,7 @@ ExtraFields<EventType::PyCall>::args_t ValueCache::load<
   return {
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       /*frame_state_=*/std::get<CallType::PyCall>(state_).at(*cache.location_),
-      /*module_info_=*/c10::nullopt,
+      /*module_info_=*/std::nullopt,
       /*optimizer_info_=*/std::move(info)};
 }
 

@@ -2,7 +2,7 @@
 
 #include <ATen/ATen.h>
 
-#include <c10/util/Optional.h>
+#include <optional>
 
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/variable.h>
@@ -38,7 +38,7 @@ namespace torch {
 // the `func()` function defined in `at::` namespace is always hidden.
 using namespace at; // NOLINT
 
-using c10::nullopt;
+using std::nullopt;
 using std::optional;
 
 using Dtype = at::ScalarType;

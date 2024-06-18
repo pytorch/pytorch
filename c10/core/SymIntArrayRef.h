@@ -3,8 +3,8 @@
 #include <c10/core/SymInt.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 #include <cstdint>
+#include <optional>
 
 namespace c10 {
 using SymIntArrayRef = ArrayRef<SymInt>;
@@ -23,7 +23,7 @@ inline std::optional<at::IntArrayRef> asIntArrayRefSlowOpt(
     c10::SymIntArrayRef ar) {
   for (const c10::SymInt& sci : ar) {
     if (sci.is_heap_allocated()) {
-      return c10::nullopt;
+      return std::nullopt;
     }
   }
 

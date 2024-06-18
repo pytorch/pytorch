@@ -658,7 +658,7 @@ void IterableTree::addChild(
       // iterables run for the minimum length of all its leaves
       unroll_length_ = std::min(*child_len, *unroll_length_);
     } else {
-      unroll_length_ = c10::nullopt;
+      unroll_length_ = std::nullopt;
     }
   }
   children_.push_back(iter_value);

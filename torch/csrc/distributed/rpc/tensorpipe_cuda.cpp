@@ -94,7 +94,7 @@ class TensorpipeCudaConverter : public TensorpipeDeviceTypeConverter {
 
     message.tensors.push_back(std::move(tensor));
 
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   at::DataPtr allocateTensorForReceiving(

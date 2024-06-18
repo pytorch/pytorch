@@ -2,12 +2,12 @@
 #include <ATen/core/jit_type.h>
 #include <c10/core/Device.h>
 #include <c10/util/ArrayRef.h>
-#include <c10/util/Optional.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/device_type_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <memory>
+#include <optional>
 #include <utility>
 
 namespace torch {
@@ -88,7 +88,7 @@ bool propWithNoDevice(Node* n) {
   }
   if (input_num == n->inputs().size()) {
     // No tensor found
-    return setReturnsToDevice(n, c10::nullopt);
+    return setReturnsToDevice(n, std::nullopt);
   }
 
   auto tensor_type = n->inputs()[input_num]->type()->expect<TensorType>();
@@ -108,7 +108,7 @@ bool propWithNoDevice(Node* n) {
         only_seen_cpu_zerodim = false;
       } else {
         // Bail on the type not match case
-        return setReturnsToDevice(n, c10::nullopt);
+        return setReturnsToDevice(n, std::nullopt);
       }
     }
   }

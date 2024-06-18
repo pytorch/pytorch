@@ -105,7 +105,7 @@ class MutableTypePtrHelper {
           }
         }
         if (mutable_types.empty()) {
-          return c10::nullopt;
+          return std::nullopt;
         }
         return mutable_types;
       }
@@ -121,7 +121,7 @@ class MutableTypePtrHelper {
           return {AliasTypeSet{
               FutureType::create(*toSingleType(*maybe_mut_types))}};
         }
-        return c10::nullopt;
+        return std::nullopt;
       }
       case TypeKind::AwaitType: {
         if (auto maybe_mut_types = mapTypeToAliasTypeSet(
@@ -129,7 +129,7 @@ class MutableTypePtrHelper {
           return {
               AliasTypeSet{AwaitType::create(*toSingleType(*maybe_mut_types))}};
         }
-        return c10::nullopt;
+        return std::nullopt;
       }
       case TypeKind::TupleType: {
         std::vector<TypePtr> mutable_types;
@@ -142,12 +142,12 @@ class MutableTypePtrHelper {
           }
         }
         if (mutable_types.empty()) {
-          return c10::nullopt;
+          return std::nullopt;
         }
         return {AliasTypeSet{TupleType::create(mutable_types)}};
       }
       default:
-        return c10::nullopt;
+        return std::nullopt;
     }
   }
   ska::flat_hash_map<TypePtr, AliasTypeSet>* mutable_type_cache_;
@@ -1896,7 +1896,7 @@ bool AliasDb::mayAliasWildcard(const at::ArrayRef<Value*> vs) const {
 std::optional<Element*> AliasDb::tryGetOrCreateWildcard(const TypePtr& type) {
   auto maybe_mut_types = mapTypeToAliasTypeSetPtr(type);
   if (!maybe_mut_types) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   auto mut_type = toSingleType(*maybe_mut_types);
   auto existing_wildcard = wildcardIndex_.find(*mut_type);
@@ -1970,7 +1970,7 @@ std::optional<Element*> AliasDb::setWildcard(const Value* v) {
   std::optional<Element*> maybe_wildcardElement =
       tryGetOrCreateWildcard(v->type());
   if (!maybe_wildcardElement) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   // Ensure that we create a corresponding Element for `v` still, as it is an
   // invariant that all mutable values have an Element

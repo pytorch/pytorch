@@ -224,7 +224,7 @@ struct TORCH_API AccumulateGrad : public Node {
         //   variable_grad += new_grad;
         // } else {
         //   result = at::empty_strided(variable.sizes(), variable.strides(),
-        //                              variable.options().memory_format(c10::nullopt));
+        //                              variable.options().memory_format(std::nullopt));
         //   update_grad(at::native::add_out(result, variable_grad,
         //   new_grad, 1.0);
         // }

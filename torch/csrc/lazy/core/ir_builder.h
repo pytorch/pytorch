@@ -1,12 +1,12 @@
 #pragma once
 
 #include <c10/core/ScalarType.h>
-#include <c10/util/Optional.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
 #include <torch/csrc/lazy/core/config.h>
 #include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/core/tensor.h>
 #include <torch/csrc/lazy/core/trie.h>
+#include <optional>
 #include <vector>
 
 // This file is part of the backend interface. So, ops shouldn't be added or
@@ -61,7 +61,7 @@ struct IrBuilder {
   virtual NodePtr MakeCast(
       const Value& input0,
       const at::ScalarType& dtype,
-      const std::optional<at::ScalarType>& stype = c10::nullopt) const = 0;
+      const std::optional<at::ScalarType>& stype = std::nullopt) const = 0;
   virtual NodePtr MakeTensorList(const OpList& inputs) const = 0;
   virtual NodePtr MakeGeneric(
       const OpKind& op,
@@ -96,7 +96,7 @@ static inline NodePtr MakeExpand(
 static inline NodePtr MakeCast(
     const Value& input0,
     const at::ScalarType& dtype,
-    const std::optional<at::ScalarType>& stype = c10::nullopt) {
+    const std::optional<at::ScalarType>& stype = std::nullopt) {
   return getIrBuilder()->MakeCast(input0, dtype, stype);
 }
 static inline NodePtr MakeTensorList(const OpList& inputs) {

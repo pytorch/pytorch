@@ -5,8 +5,8 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/TensorBody.h>
 #include <c10/core/SymInt.h>
-#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
+#include <optional>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>

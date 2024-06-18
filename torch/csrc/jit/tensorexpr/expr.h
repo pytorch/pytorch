@@ -6,11 +6,11 @@
 #pragma once
 
 #include <c10/core/MemoryFormat.h>
-#include <c10/util/Optional.h>
 #include <torch/csrc/jit/tensorexpr/fwd_decls.h>
 #include <torch/csrc/jit/tensorexpr/ir_mutator.h>
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
+#include <optional>
 
 #include <utility>
 
@@ -207,10 +207,10 @@ class TORCH_API Buf : public ExprNode<Buf> {
       const std::string& name_hint,
       const std::vector<ExprHandle>& dims,
       Dtype dtype,
-      std::optional<ExprHandle> initializer = c10::nullopt,
-      std::optional<std::vector<ExprHandle>> strides = c10::nullopt,
-      std::optional<ExprHandle> qscale = c10::nullopt,
-      std::optional<ExprHandle> qzero = c10::nullopt);
+      std::optional<ExprHandle> initializer = std::nullopt,
+      std::optional<std::vector<ExprHandle>> strides = std::nullopt,
+      std::optional<ExprHandle> qscale = std::nullopt,
+      std::optional<ExprHandle> qzero = std::nullopt);
 
   // TODO: unique_name
   VarPtr base_handle() const {
@@ -232,7 +232,7 @@ class TORCH_API Buf : public ExprNode<Buf> {
       const std::vector<ExprPtr>& dims,
       Dtype dtype,
       ExprPtr initializer = nullptr,
-      std::optional<std::vector<ExprPtr>> strides = c10::nullopt,
+      std::optional<std::vector<ExprPtr>> strides = std::nullopt,
       ExprPtr qscale = nullptr,
       ExprPtr qzero = nullptr)
       : Buf(alloc<Var>(name_hint, kHandle),
@@ -248,7 +248,7 @@ class TORCH_API Buf : public ExprNode<Buf> {
       std::vector<ExprPtr> dims,
       Dtype dtype,
       ExprPtr initializer = nullptr,
-      std::optional<std::vector<ExprPtr>> strides = c10::nullopt,
+      std::optional<std::vector<ExprPtr>> strides = std::nullopt,
       ExprPtr qscale = nullptr,
       ExprPtr qzero = nullptr);
 

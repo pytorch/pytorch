@@ -60,7 +60,7 @@ static std::vector<std::optional<at::cuda::CUDAStream>> unpack_streams(
     PyObject* obj,
     size_t size) {
   if (obj == Py_None) {
-    return std::vector<std::optional<at::cuda::CUDAStream>>(size, c10::nullopt);
+    return std::vector<std::optional<at::cuda::CUDAStream>>(size, std::nullopt);
   }
   auto streams = THPUtils_PySequence_to_CUDAStreamList(obj);
   if (streams.size() != size) {

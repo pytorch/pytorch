@@ -157,7 +157,7 @@ std::optional<IValue> toTypeInferredIValueOptional(py::handle input) {
   try {
     return toTypeInferredIValue(input);
   } catch (const c10::Error& e) {
-    return c10::nullopt;
+    return std::nullopt;
   }
 }
 } // anonymous namespace
@@ -219,7 +219,7 @@ void initJITBindings(PyObject* module) {
           "_jit_shape_compute_graph_for_node",
           [](Node* n) -> std::optional<std::shared_ptr<Graph>> {
             if (!n->maybeSchema()) {
-              return c10::nullopt;
+              return std::nullopt;
             }
             return shapeComputeGraphForSchema(n->schema());
           })
@@ -227,7 +227,7 @@ void initJITBindings(PyObject* module) {
           "_jit_decomposition_graph_for_node",
           [](Node* n) -> std::optional<std::shared_ptr<Graph>> {
             if (!n->maybeSchema()) {
-              return c10::nullopt;
+              return std::nullopt;
             }
             return GetDecomposition(n->schema());
           })
@@ -1165,7 +1165,7 @@ void initJITBindings(PyObject* module) {
                     c10::kCPU,
                     std::vector<int64_t>{1},
                     std::vector<int64_t>{1},
-                    c10::nullopt));
+                    std::nullopt));
               }
             }
           })
@@ -1680,7 +1680,7 @@ void initJITBindings(PyObject* module) {
                   [op, symbol, allow_numbers_as_tensors](
                       c10::DispatchKey dk_, py::args args, py::kwargs kwargs) {
                     std::optional<c10::DispatchKey> dk =
-                        c10::make_optional(dk_);
+                        std::make_optional(dk_);
                     ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
                     return _get_operation_for_overload_or_packet(
                         {op}, symbol, args, kwargs, /*is_overload*/ true, dk);

@@ -21,7 +21,7 @@ namespace c10d {
 ncclComm_t NCCLComm::getNcclComm() {
   std::unique_lock<std::mutex> lock(mutex_);
   if (aborted_) {
-    auto commFailureMsg = commFailureReason_ != c10::nullopt
+    auto commFailureMsg = commFailureReason_ != std::nullopt
         ? c10::str(" Original reason for failure was: ", *commFailureReason_)
         : "";
     TORCH_CHECK_WITH(
@@ -79,7 +79,7 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
   C10D_NCCL_CHECK(
       ncclCommSplit(
           source->ncclComm_, color_id, rank, &(comm->ncclComm_), &config),
-      c10::nullopt);
+      std::nullopt);
   ++source->ncclCommSplitCounter_;
   comm->rank_ = rank;
   return comm;
@@ -189,11 +189,11 @@ std::string ncclGetErrorWithVersion(ncclResult_t error) {
 // thrown in the NCCL codebase.
 std::string getNcclErrorDetailStr(
     ncclResult_t error,
-    std::optional<std::string> processGroupFailureReason /* = c10::nullopt */
+    std::optional<std::string> processGroupFailureReason /* = std::nullopt */
 ) {
   // Prioritize failure reason provided by PG NCCL first, as it can abort
   // communicators when it encounters collective timeouts, etc.
-  if (processGroupFailureReason != c10::nullopt) {
+  if (processGroupFailureReason != std::nullopt) {
     return *processGroupFailureReason;
   }
   std::string interpret;

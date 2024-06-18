@@ -21,7 +21,7 @@ static std::optional<size_t> normalizeIndex(int64_t index, size_t len) {
   if (index >= 0 && index < static_cast<int64_t>(len)) {
     return index;
   } else {
-    return c10::nullopt;
+    return std::nullopt;
   }
 }
 
@@ -136,7 +136,7 @@ struct ListLenRefiner {
         return maybe_refinement->second;
       }
     }
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   std::shared_ptr<Graph> graph_;
@@ -199,8 +199,8 @@ struct PeepholeOptimizeListIdiomsImpl {
     auto step_val = toIValue(slice_node->input(3));
 
     // All args must be constant to apply this optimization.
-    if (start_val == c10::nullopt || end_val == c10::nullopt ||
-        step_val == c10::nullopt) {
+    if (start_val == std::nullopt || end_val == std::nullopt ||
+        step_val == std::nullopt) {
       return false;
     }
 

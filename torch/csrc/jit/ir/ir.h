@@ -20,7 +20,7 @@
 #include <ATen/core/jit_type.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
+#include <optional>
 
 #include <functional>
 #include <iosfwd>
@@ -348,7 +348,7 @@ struct TORCH_API Node {
   // is changed, we need to rely on this name
   // to retrieve old schemas to successfully apply upgraders
   // for this operator.
-  std::optional<std::string> historic_schema_name_ = c10::nullopt;
+  std::optional<std::string> historic_schema_name_ = std::nullopt;
 
  protected:
   Node(Graph* graph_, NodeKind kind_); // defined after graph
@@ -534,7 +534,7 @@ struct TORCH_API Node {
     if (auto v = get(name)) {
       return v->template to<T>();
     }
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   // Returns true if the value of input name is statically known
@@ -1368,8 +1368,8 @@ struct Graph : std::enable_shared_from_this<Graph> {
   // Insert constant IValue into the graph.
   TORCH_API Value* insertConstant(
       const IValue& val,
-      std::optional<SourceRange> loc = c10::nullopt,
-      std::optional<ScopePtr> scope = c10::nullopt);
+      std::optional<SourceRange> loc = std::nullopt,
+      std::optional<ScopePtr> scope = std::nullopt);
 
   // Schema-driven insert:
   // This inserts a node into the graph with inputs determined from args and
@@ -1733,14 +1733,14 @@ struct OperatorMap {
   std::optional<T> find(const Operator& op) {
     const auto it = map.find(Symbol::fromQualString(op.schema().name()));
     if (it == map.end()) {
-      return c10::nullopt;
+      return std::nullopt;
     }
     for (auto vit = it->second.begin(); vit != it->second.end(); ++vit) {
       if (vit->first->schema() == op.schema()) {
         return vit->second;
       }
     }
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   // TODO: return iterator
@@ -1809,14 +1809,14 @@ struct FunctionSchemaMap {
   std::optional<T> find(const FunctionSchema& schema) const {
     const auto it = map.find(Symbol::fromQualString(schema.name()));
     if (it == map.end()) {
-      return c10::nullopt;
+      return std::nullopt;
     }
     for (auto vit = it->second.begin(); vit != it->second.end(); ++vit) {
       if (vit->first == schema) {
         return vit->second;
       }
     }
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   // TODO: return iterator

@@ -59,7 +59,7 @@ class TensorpipeCpuConverter : public TensorpipeDeviceTypeConverter {
 
       message.tensors.push_back(std::move(tensor));
 
-      return c10::make_optional(std::move(storageData));
+      return std::make_optional(std::move(storageData));
     } else {
       tensorpipe::CpuBuffer buffer;
       buffer.ptr = static_cast<char*>(storage.mutable_data());
@@ -70,7 +70,7 @@ class TensorpipeCpuConverter : public TensorpipeDeviceTypeConverter {
 
       message.tensors.push_back(std::move(tensor));
 
-      return c10::nullopt;
+      return std::nullopt;
     }
   }
 

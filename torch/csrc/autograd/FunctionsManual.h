@@ -39,7 +39,7 @@ TORCH_API inline std::optional<Tensor> wrap_opt_if(
     const Tensor& t,
     const bool cond) {
   using OptTensor = std::optional<Tensor>;
-  return cond ? OptTensor(t) : static_cast<OptTensor>(c10::nullopt);
+  return cond ? OptTensor(t) : static_cast<OptTensor>(std::nullopt);
 }
 
 TORCH_API Tensor

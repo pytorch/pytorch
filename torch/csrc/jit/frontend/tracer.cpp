@@ -818,8 +818,8 @@ void addInputs(Node* n, const char* name, std::optional<c10::SymInt> value) {
       n,
       name,
       value.has_value()
-          ? c10::make_optional(value->guard_int(__FILE__, __LINE__))
-          : c10::nullopt);
+          ? std::make_optional(value->guard_int(__FILE__, __LINE__))
+          : std::nullopt);
 }
 
 void addInputs(

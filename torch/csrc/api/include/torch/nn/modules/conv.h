@@ -350,7 +350,7 @@ class TORCH_API ConvTranspose1dImpl
   explicit ConvTranspose1dImpl(ConvTranspose1dOptions options_);
   Tensor forward(
       const Tensor& input,
-      const std::optional<at::IntArrayRef>& output_size = c10::nullopt);
+      const std::optional<at::IntArrayRef>& output_size = std::nullopt);
 
  protected:
   FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(std::optional<at::IntArrayRef>())})
@@ -392,7 +392,7 @@ class TORCH_API ConvTranspose2dImpl
   explicit ConvTranspose2dImpl(ConvTranspose2dOptions options_);
   Tensor forward(
       const Tensor& input,
-      const std::optional<at::IntArrayRef>& output_size = c10::nullopt);
+      const std::optional<at::IntArrayRef>& output_size = std::nullopt);
 
  protected:
   FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(std::optional<at::IntArrayRef>())})
@@ -434,7 +434,7 @@ class TORCH_API ConvTranspose3dImpl
   explicit ConvTranspose3dImpl(ConvTranspose3dOptions options_);
   Tensor forward(
       const Tensor& input,
-      const std::optional<at::IntArrayRef>& output_size = c10::nullopt);
+      const std::optional<at::IntArrayRef>& output_size = std::nullopt);
 
  protected:
   FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(std::optional<at::IntArrayRef>())})

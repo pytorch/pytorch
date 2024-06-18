@@ -290,12 +290,12 @@ std::vector<void*> unwind() {
 
 std::optional<std::pair<std::string, uint64_t>> libraryFor(void* addr) {
   if (!addr) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   std::shared_lock lock(cache_mutex_);
   const LibraryInfo* library_info = unwind_cache.findLibraryFor((uint64_t)addr);
   if (!library_info) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return std::make_pair(
       library_info->name(), (uint64_t)addr - library_info->load_bias());

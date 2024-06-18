@@ -695,7 +695,7 @@ std::vector<torch::lazy::BackendDataPtr> LazyGraphExecutor::SetTensorData(
       // resets the ir_value. We have already done the resetting as part
       // of ExtractIRAndPrepareTensorData to overlap with previous execution.
       tensor->data()->handle = handle;
-      tensor->data()->tensor_data = c10::nullopt;
+      tensor->data()->tensor_data = std::nullopt;
     }
     tensors_data.emplace_back(std::move(handle));
   }

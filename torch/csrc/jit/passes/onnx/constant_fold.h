@@ -2,8 +2,8 @@
 
 #include <memory>
 
-#include <c10/util/Optional.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <optional>
 
 namespace torch {
 namespace jit {

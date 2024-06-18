@@ -430,13 +430,13 @@ at::Tensor interpolate(
     std::optional<bool> align_corners,
     std::optional<bool> recompute_scale_factor) {
   if ((mode == "nearest" || mode == "area")) {
-    if (align_corners != c10::nullopt) {
+    if (align_corners != std::nullopt) {
       throw std::runtime_error(
           "align_corners option can only be set with the "
           "interpolating modes: linear | bilinear | bicubic | trilinear");
     }
   } else {
-    if (align_corners == c10::nullopt) {
+    if (align_corners == std::nullopt) {
       TORCH_WARN(
           "Default upsampling behavior when mode=",
           mode,
@@ -451,7 +451,7 @@ at::Tensor interpolate(
   double scale_factors_2 = -1.0;
   double scale_factors_3 = -1.0;
 
-  if (!scale_factors.isNone() && recompute_scale_factor == c10::nullopt) {
+  if (!scale_factors.isNone() && recompute_scale_factor == std::nullopt) {
     recompute_scale_factor = true;
     bool warn_recompute_scale_factor = false;
 
@@ -510,7 +510,7 @@ at::Tensor interpolate(
     return at::upsample_nearest1d(
         input,
         _output_size(input, 1, size, scale_factors),
-        c10::make_optional(scale_factors_1));
+        std::make_optional(scale_factors_1));
   if (input_dim == dim2d && mode == "nearest")
     return at::upsample_nearest2d(
         input,
@@ -538,7 +538,7 @@ at::Tensor interpolate(
         input,
         _output_size(input, 1, size, scale_factors),
         *align_corners,
-        c10::make_optional(scale_factors_1));
+        std::make_optional(scale_factors_1));
   if (input_dim == dim1d && mode == "bilinear")
     throw std::runtime_error("Got 3D input, but bilinear mode needs 4D input");
   if (input_dim == dim1d && mode == "bicubic")
@@ -646,7 +646,7 @@ void upsample_nearest_op(Stack& stack) {
   pop(stack, input, size, scale_factor_int);
   IValue scale_factor_double = convert_scale_factor_to_double(scale_factor_int);
   at::Tensor res = interpolate(
-      input, size, scale_factor_double, "nearest", c10::nullopt, c10::nullopt);
+      input, size, scale_factor_double, "nearest", std::nullopt, std::nullopt);
   push(stack, std::move(res));
 }
 
@@ -664,7 +664,7 @@ void upsample_op(Stack& stack) {
       scale_factor_double,
       mode,
       align_corners.toOptional<bool>(),
-      c10::nullopt);
+      std::nullopt);
   push(stack, std::move(res));
 }
 
@@ -675,7 +675,7 @@ void upsample_bilinear_op(Stack& stack) {
   pop(stack, input, size, scale_factor_int);
   IValue scale_factor_double = convert_scale_factor_to_double(scale_factor_int);
   at::Tensor res = interpolate(
-      input, size, scale_factor_double, "bilinear", true, c10::nullopt);
+      input, size, scale_factor_double, "bilinear", true, std::nullopt);
   push(stack, std::move(res));
 }
 

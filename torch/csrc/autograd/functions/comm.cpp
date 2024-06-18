@@ -105,7 +105,7 @@ variable_list Gather::apply(variable_list&& inputs) {
         std::move(source_devices),
         std::move(input_sizes),
         dim_,
-        /*streams=*/c10::nullopt,
+        /*streams=*/std::nullopt,
         /*unsqueeze_scalars=*/unsqueeze_scalars);
     grad_fn->set_next_edges(collect_next_edges(inputs));
   }

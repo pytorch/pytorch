@@ -68,7 +68,7 @@ graph_node_list::iterator scanNode(Node* node, size_t threshold) {
   // so the profiles will have outdated requires_grad=False.
   // conservatively update them to maybe requiring grad, bc we might create
   // autodiff graphs when the tensors maybe require grad
-  UpdateDifferentiableGraphRequiresGrad(subgraph, c10::nullopt);
+  UpdateDifferentiableGraphRequiresGrad(subgraph, std::nullopt);
   SubgraphUtils::unmergeSubgraph(node);
   return next_node;
 }

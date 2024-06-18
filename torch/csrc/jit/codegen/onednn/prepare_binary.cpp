@@ -69,7 +69,7 @@ static void handleBinaryOpInputs(Node* node) {
       auto second_input_typeptr = node->input(1)->type()->expect<TensorType>();
       std::optional<at::ScalarType> second_input_type =
           second_input_typeptr->scalarType();
-      if (second_input_type != c10::nullopt) {
+      if (second_input_type != std::nullopt) {
         // dtype of the second tensor might not be available in the IR
         auto dtypeOfSecondInput = second_input_type.value();
         if (dtypeOfFirstInput != dtypeOfSecondInput) {

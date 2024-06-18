@@ -1,8 +1,8 @@
 #pragma once
 
 #include <c10/macros/Export.h>
-#include <c10/util/Optional.h>
 #include <c10/util/python_stub.h>
+#include <optional>
 #include <stack>
 #include <string>
 

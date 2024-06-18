@@ -176,7 +176,7 @@ std::vector<int64_t> ConvTransposeNdImpl<D, Derived>::_output_padding(
   std::vector<int64_t> ret;
   std::optional<at::IntArrayRef> output_size_ = output_size;
 
-  if (output_size_ == c10::nullopt) {
+  if (output_size_ == std::nullopt) {
     ret = at::IntArrayRef(this->options.output_padding()).vec();
   } else {
     auto k = input.dim() - 2;

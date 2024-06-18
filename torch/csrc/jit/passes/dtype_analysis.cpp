@@ -3,13 +3,13 @@
 #include <ATen/core/symbol.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/ArrayRef.h>
-#include <c10/util/Optional.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dtype_analysis.h>
 #include <torch/csrc/jit/passes/utils/op_registry.h>
 #include <torch/library.h>
+#include <optional>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -102,7 +102,7 @@ static bool canBeInferredWithMetaTensor(Node* n) {
 std::optional<Tensor> inferWithMetaTensor(Node* n) {
   GRAPH_DEBUG("inferWithMetaTensor", getHeader(n));
   if (!canBeInferredWithMetaTensor(n)) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   Operation op = n->getOperation();
   try {
@@ -116,7 +116,7 @@ std::optional<Tensor> inferWithMetaTensor(Node* n) {
   } catch (...) {
     GRAPH_DEBUG("caught exception with Metatensor run!");
   };
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 bool setDtype(

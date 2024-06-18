@@ -31,7 +31,7 @@ parse_to_conversion(PythonArgs& r, bool allow_copy) {
     if (!allow_copy && !r.isNone(2))
       throw std::runtime_error(".to() does not accept copy argument");
     return std::make_tuple(
-        c10::nullopt,
+        std::nullopt,
         r.scalartype(0),
         r.toBool(1),
         r.toBool(2),

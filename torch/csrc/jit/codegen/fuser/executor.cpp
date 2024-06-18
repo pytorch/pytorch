@@ -4,7 +4,6 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/core/functional.h>
 #include <ATen/core/stack.h>
-#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/fuser/compiler.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
@@ -12,6 +11,7 @@
 #include <torch/csrc/jit/codegen/fuser/kernel_spec.h>
 #include <torch/csrc/jit/codegen/fuser/tensor_info.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
+#include <optional>
 
 #include <algorithm>
 #include <iostream> // TODO: remove, debugging only
@@ -44,7 +44,7 @@ static std::optional<std::vector<int64_t>> getMapSize(
       try {
         map_size = at::infer_size(map_size, arg.sizes());
       } catch (...) {
-        return c10::nullopt;
+        return std::nullopt;
       }
     } else {
       auto tensor_sizes = arg.sizes().vec();
@@ -52,13 +52,13 @@ static std::optional<std::vector<int64_t>> getMapSize(
       const auto dim =
           at::maybe_wrap_dim(chunk_desc.dim(), tensor_sizes.size());
       if (tensor_sizes[dim] % num_chunks != 0) {
-        return c10::nullopt;
+        return std::nullopt;
       }
       tensor_sizes[dim] /= num_chunks;
       try {
         map_size = at::infer_size(map_size, tensor_sizes);
       } catch (...) {
-        return c10::nullopt;
+        return std::nullopt;
       }
     }
   }
@@ -83,12 +83,12 @@ static std::optional<std::vector<int64_t>> canRunKernel(
     if (!map_size) {
       map_size = getMapSize(spec, args, broadcast_group);
       if (!map_size)
-        return c10::nullopt;
+        return std::nullopt;
     } else {
       const auto group_map_size = getMapSize(spec, args, broadcast_group);
       // Note: this checks that group_map_size is defined AND equal to map_size
       if (map_size != group_map_size)
-        return c10::nullopt;
+        return std::nullopt;
     }
   }
 

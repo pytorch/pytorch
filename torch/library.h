@@ -215,7 +215,7 @@ class TORCH_API CppFunction final {
   static CppFunction makeFromBoxedKernel(c10::BoxedKernel kernel) {
     return CppFunction(
         c10::KernelFunction::makeFromBoxedKernel(std::move(kernel)),
-        /* cpp_signature */ c10::nullopt, // not known for boxed functions
+        /* cpp_signature */ std::nullopt, // not known for boxed functions
         /* schema */ nullptr);
   }
 
@@ -337,7 +337,7 @@ template <typename Func>
 inline CppFunction dispatch(c10::DispatchKey k, Func&& raw_f) {
   CppFunction f(std::forward<Func>(raw_f));
   if (k == c10::DispatchKey::CatchAll) {
-    f.dispatch_key_ = c10::nullopt;
+    f.dispatch_key_ = std::nullopt;
   } else {
     f.dispatch_key_ = k;
   }
@@ -930,7 +930,7 @@ class TorchLibraryInit final {
       torch::Library::DEF,                                                     \
       &TORCH_LIBRARY_init_##ns,                                                \
       #ns,                                                                     \
-      c10::nullopt,                                                            \
+      std::nullopt,                                                            \
       __FILE__,                                                                \
       __LINE__);                                                               \
   void TORCH_LIBRARY_init_##ns(torch::Library& m)
@@ -960,7 +960,7 @@ class TorchLibraryInit final {
       torch::Library::FRAGMENT,                                   \
       &C10_CONCATENATE(TORCH_LIBRARY_FRAGMENT_init_##ns##_, uid), \
       #ns,                                                        \
-      c10::nullopt,                                               \
+      std::nullopt,                                               \
       __FILE__,                                                   \
       __LINE__);                                                  \
   void C10_CONCATENATE(                                           \
@@ -1024,7 +1024,7 @@ class TorchLibraryInit final {
            ? &C10_CONCATENATE(TORCH_LIBRARY_IMPL_init_##ns##_##k##_, uid) \
            : [](torch::Library&) -> void {}),                             \
       #ns,                                                                \
-      c10::make_optional(c10::DispatchKey::k),                            \
+      std::make_optional(c10::DispatchKey::k),                            \
       __FILE__,                                                           \
       __LINE__);                                                          \
   void C10_CONCATENATE(                                                   \
@@ -1039,13 +1039,13 @@ class TorchLibraryInit final {
 
 /// \private
 #define MAKE_TORCH_LIBRARY(ns) \
-  torch::Library(torch::Library::DEF, #ns, c10::nullopt, __FILE__, __LINE__)
+  torch::Library(torch::Library::DEF, #ns, std::nullopt, __FILE__, __LINE__)
 /// \private
 #define MAKE_TORCH_LIBRARY_IMPL(ns, k)         \
   torch::Library(                              \
       torch::Library::IMPL,                    \
       #ns,                                     \
-      c10::make_optional(c10::DispatchKey::k), \
+      std::make_optional(c10::DispatchKey::k), \
       __FILE__,                                \
       __LINE__)
 

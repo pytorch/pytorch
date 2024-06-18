@@ -367,7 +367,7 @@ inline std::optional<int64_t> intValue(const ExprPtr& e) {
   }
   AT_FORALL_INT_TYPES(TYPE_CASE);
 #undef TYPE_CASE
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 inline std::optional<int64_t> intValue(const ExprHandle& e) {

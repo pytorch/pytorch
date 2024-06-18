@@ -81,7 +81,7 @@ at::Tensor nested_tensor_ctor(
     final_device = new_list[0].device();
   }
   auto out = at::_nested_tensor_from_tensor_list(
-      new_list, final_dtype, c10::nullopt, final_device, pin_memory);
+      new_list, final_dtype, std::nullopt, final_device, pin_memory);
   out.requires_grad_(args_requires_grad);
   return out;
 }

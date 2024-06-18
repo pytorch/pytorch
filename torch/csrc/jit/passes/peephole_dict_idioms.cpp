@@ -34,7 +34,7 @@ class DictNodeImpl : public DictNodeImplBase {
       auto key_opt = toIValue(dict_creation_node->input(i));
 
       // Key is not constant if we cannot convert to IValue
-      if (key_opt == c10::nullopt) {
+      if (key_opt == std::nullopt) {
         has_non_const_key_ = true;
         continue;
       }
@@ -129,7 +129,7 @@ class DictNode {
     if (impl_ && impl_->contains(key)) {
       return impl_->get(key);
     }
-    return c10::nullopt;
+    return std::nullopt;
   }
 
  private:
@@ -185,14 +185,14 @@ class PeepholeOptimizeDictIdiomsImpl {
     const DictNode& dict_node = getDictNode(dict_creation_node);
     auto key_opt = toIValue(key);
     // Key is not constant if we cannot convert to IValue
-    if (key_opt == c10::nullopt) {
-      return c10::nullopt;
+    if (key_opt == std::nullopt) {
+      return std::nullopt;
     }
     IValue key_ival = *key_opt;
     if (dict_node.canOptimize()) {
       return dict_node.getOrNullopt(key_ival);
     }
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   std::optional<int64_t> computeLen(Node* dict_creation_node) {
@@ -200,13 +200,13 @@ class PeepholeOptimizeDictIdiomsImpl {
     if (dict_node.canOptimize()) {
       return static_cast<int64_t>(dict_node.size());
     }
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   bool optimizeLen(Node* len_node, Node* creation_node) {
     if (creation_node->kind() == prim::DictConstruct) {
       auto len = computeLen(creation_node);
-      if (len != c10::nullopt) {
+      if (len != std::nullopt) {
         WithInsertPoint guard(len_node);
         len_node->output()->replaceAllUsesWith(graph_->insertConstant(len));
         return true;
@@ -219,7 +219,7 @@ class PeepholeOptimizeDictIdiomsImpl {
     if (creation_node->kind() == prim::DictConstruct) {
       auto key = getitem_node->input(1);
       auto value = getValueFromDict(creation_node, key);
-      if (value != c10::nullopt) {
+      if (value != std::nullopt) {
         getitem_node->output()->replaceAllUsesWith(*value);
         return true;
       }

@@ -98,7 +98,7 @@ c10::ShapeSymbol ONNXDimToShapeSymbol(
   if (dim.has_dim_value()) {
     return c10::ShapeSymbol::fromStaticSize(dim.dim_value());
   }
-  std::optional<c10::ShapeSymbol> sym = c10::nullopt;
+  std::optional<c10::ShapeSymbol> sym = std::nullopt;
   if (dim.has_dim_param()) {
     // If this param is already known, assign the same Symbol.
     GRAPH_UPDATE("Got dim_param:", dim.dim_param());
@@ -267,7 +267,7 @@ Value* CloneValueFromListConstruct(
   // is preserved. If the elemtype is Int, insert a onnx::Concat node into
   // the graph.
   TypePtr elem = v->type()->castRaw<ListType>()->getElementType();
-  std::optional<at::ScalarType> scalar_type = c10::nullopt;
+  std::optional<at::ScalarType> scalar_type = std::nullopt;
   if (elem->cast<IntType>()) {
     scalar_type = at::kLong;
     if (isValidToTransformToONNXConcatNode(v->node())) {
@@ -332,7 +332,7 @@ Node* CloneNodeToGraph(
             // Try to lookup input value and insert it into the graph.
             // If the input value is unknown, set it to graph input in the new
             // graph, and copy over metadata, such as datatype and shape.
-            ::std::optional<at::Tensor> val = ::c10::nullopt;
+            ::std::optional<at::Tensor> val = ::std::nullopt;
             auto v0 = params_dict.find(v->debugName());
             if (v0 != params_dict.end()) {
               val = v0->second.toTensor();
@@ -420,13 +420,13 @@ void ConvertGraphToONNXProto(
 
 std::optional<at::Tensor> ComputeConstantFolding(Node* n, int opset_version) {
   if (n->inputs().empty()) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   std::vector<at::Tensor> inputTensorValues;
   for (auto i : c10::irange(n->inputs().size())) {
     if (TensorTypePtr input_type = n->input(i)->type()->cast<TensorType>()) {
       if (!ConstantValueMap::HasValue(n->input(i)->debugName())) {
-        return c10::nullopt;
+        return std::nullopt;
       }
       auto tensor_value =
           ConstantValueMap::GetValue(n->input(i)->debugName()).value();
@@ -434,7 +434,7 @@ std::optional<at::Tensor> ComputeConstantFolding(Node* n, int opset_version) {
     }
   }
   if (inputTensorValues.size() < n->inputs().size()) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   try {
     return onnx_constant_fold::runTorchBackendForOnnx(
@@ -443,7 +443,7 @@ std::optional<at::Tensor> ComputeConstantFolding(Node* n, int opset_version) {
     auto ex_str = std::string(ex.what());
     ex_str = ex_str.substr(0, ex_str.find('\n'));
     TORCH_WARN("Constant folding in symbolic shape inference fails: ", ex_str);
-    return c10::nullopt;
+    return std::nullopt;
   }
 }
 
@@ -500,7 +500,7 @@ std::optional<::c10::SymbolicShape> ComputeShapeFromReshape(
           std::numeric_limits<uint64_t>::max() / input_shape.static_size()) {
         TORCH_WARN(
             "ComputeShapeFromReshape(), shape_ratio overflows, skip shape inference.");
-        return c10::nullopt;
+        return std::nullopt;
       } else {
         shape_ratio *= static_cast<uint64_t>(input_shape.static_size());
       }
@@ -523,7 +523,7 @@ std::optional<::c10::SymbolicShape> ComputeShapeFromReshape(
     } else {
       auto value = target_shape.value();
       if (sym_map.find(value) == sym_map.end()) {
-        return c10::nullopt;
+        return std::nullopt;
       }
       sym_map[value]--;
       if (sym_map[value] == 0) {
@@ -535,7 +535,7 @@ std::optional<::c10::SymbolicShape> ComputeShapeFromReshape(
   // sym_map is used to match shape symbols between the input and shape.
   // If there is a mismatch, the output shape cannot be estimated.
   if (!sym_map.empty()) {
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   TORCH_INTERNAL_ASSERT(
@@ -565,7 +565,7 @@ std::optional<::c10::SymbolicShape> ComputeShapeFromExpand(
     const std::vector<int64_t>& reshape) {
   for (const auto& it : reshape) {
     if (it < 0) {
-      return c10::nullopt;
+      return std::nullopt;
     }
   }
   std::vector<::c10::ShapeSymbol> final_shape;
@@ -607,7 +607,7 @@ std::optional<::c10::SymbolicShape> ComputeShapeFromTile(
       "ONNX Tile input shapes do not match.");
   for (const auto& it : reshape) {
     if (it < 0) {
-      return c10::nullopt;
+      return std::nullopt;
     }
   }
   std::vector<::c10::ShapeSymbol> final_shape;
@@ -688,7 +688,7 @@ std::optional<std::vector<int64_t>> GetValueFromListConstructNode(
   }
   return lc_node->inputs().size() == shape_size.size()
       ? std::optional<std::vector<int64_t>>(shape_size)
-      : c10::nullopt;
+      : std::nullopt;
 }
 
 void SetShapeValueFromListConstructNode(Node* lc_node) {

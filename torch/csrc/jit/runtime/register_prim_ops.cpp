@@ -1,6 +1,5 @@
 #include <ATen/autocast_mode.h>
 #include <ATen/core/Generator.h>
-#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/mobile/promoted_prim_ops.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
@@ -8,6 +7,7 @@
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 #include <torch/csrc/jit/runtime/slice_indices_adjust.h>
 #include <torch/library.h>
+#include <optional>
 
 #include <algorithm>
 #include <bitset>
@@ -1807,7 +1807,7 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
           std::string::size_type prev_pos = 0;
           std::string::size_type pos = 0;
           c10::List<std::string> splits;
-          if (ivalue == c10::nullopt) {
+          if (ivalue == std::nullopt) {
             // if separator is not specified,
             // a different splitting algorithm is applied as Python
             splits = splitNoneSeparator(string);
@@ -2463,8 +2463,8 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           bool copy;
           pop(stack, self, non_blocking, copy);
-          std::optional<c10::Device> device = c10::nullopt;
-          std::optional<at::ScalarType> scalarType = c10::nullopt;
+          std::optional<c10::Device> device = std::nullopt;
+          std::optional<at::ScalarType> scalarType = std::nullopt;
           push(
               stack, to_dispatch(self, device, scalarType, non_blocking, copy));
         },

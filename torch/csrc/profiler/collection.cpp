@@ -200,7 +200,7 @@ auto InputOutputEncoder::getIValueGenerator(const IOType& io_type) {
       if (io_type == tagToIOType(tag)) {
         out.emplace_back(std::move(input));
       } else {
-        out.emplace_back(c10::nullopt);
+        out.emplace_back(std::nullopt);
       }
     };
 
@@ -223,7 +223,7 @@ auto InputOutputEncoder::getIValueGenerator(const IOType& io_type) {
             arg.emplace_back(decode_tensor());
           }
           if (found_undefined) {
-            push_value(*tag_it, c10::nullopt);
+            push_value(*tag_it, std::nullopt);
           } else {
             push_value(Tag::TensorListBegin, std::move(arg));
           }
@@ -236,7 +236,7 @@ auto InputOutputEncoder::getIValueGenerator(const IOType& io_type) {
 
         case Tag::UndefinedTensor:
         case Tag::Other:
-          push_value(*tag_it, c10::nullopt);
+          push_value(*tag_it, std::nullopt);
           break;
 
         case Tag::TERMINATOR:
