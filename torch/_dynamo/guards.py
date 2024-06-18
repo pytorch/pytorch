@@ -91,6 +91,7 @@ from .source import (
     ShapeEnvSource,
     TupleIteratorGetItemSource,
     TypeSource,
+    WeakRefCallSource,
 )
 from .types import CacheEntry, ExtraState, GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
@@ -1006,6 +1007,13 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
+        elif isinstance(source, WeakRefCallSource):
+            assert base_guard_manager  # to make mypy happy
+            out = base_guard_manager.weakref_call_manager(
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         else:
             raise AssertionError(
                 f"missing guard manager builder {source} - {source.name()}"
@@ -1653,6 +1661,9 @@ class GuardBuilder(GuardBuilderBase):
         pass  # we always guard on this via GlobalStateGuard()
 
     def TORCH_FUNCTION_STATE(self, guard: Guard):
+        pass  # we always guard on this via GlobalStateGuard()
+
+    def FSDP_TRAINING_STATE(self, guard: Guard):
         pass  # we always guard on this via GlobalStateGuard()
 
     def DEFAULT_DEVICE(self, guard: Guard):
