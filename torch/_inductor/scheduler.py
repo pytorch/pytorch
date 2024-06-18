@@ -2405,7 +2405,7 @@ class Scheduler:
 
     def fusable_weak_dep(
         self, weak_dep: WeakDep, node1: BaseSchedulerNode, node2: BaseSchedulerNode
-    ):
+    ) -> bool:
         # A weak dep can be fused if and only if the fused operation acts inplace
         # on the buffer being mutated. i.e. the same index is being read then mutated
         mutating_writes = [
@@ -2416,6 +2416,7 @@ class Scheduler:
         if len(mutating_writes) != 1:
             return False
         write = mutating_writes[0]
+        assert isinstance(write, MemoryDep)
 
         if free_symbol_is_type(write.index, SymT.TMP):
             return False
@@ -2426,7 +2427,8 @@ class Scheduler:
             if self.mutation_renames.get(read.name, read.name) == weak_dep.mutating_buf
         )
         return all(
-            not free_symbol_is_type(read.index, SymT.TMP)
+            isinstance(read, MemoryDep)
+            and not free_symbol_is_type(read.index, SymT.TMP)
             and read.index == write.index
             and read.size == write.size
             for read in relevant_reads

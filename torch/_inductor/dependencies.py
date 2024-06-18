@@ -249,11 +249,11 @@ class WeakDep(Dep):
 
     def rename(self, renames: Dict[str, str]) -> "WeakDep":
         if self.name in renames:
-            return WeakDep(renames[self.name])
+            return WeakDep(renames[self.name], self.mutating_buf)
         return self
 
     def numbytes_hint(self):
-        return 1  # Purely inserted for ordering, not an actual dep
+        return 0  # Purely inserted for ordering, not an actual dep
 
     def has_unbacked_symbols(self):
         return False
