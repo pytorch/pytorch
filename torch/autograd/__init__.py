@@ -44,6 +44,13 @@ def _calculate_shape(
     # circular import
     from torch.nested._internal.nested_tensor import NestedTensor
 
+    if isinstance(output, graph.GradientEdge):
+        # We have already checked that we are not a C++ NestedTensor
+        if is_grads_batched:
+            raise RuntimeError("Batched grads are not supported with GradientEdge")
+        out_metadata = output.node._input_metadata(output.output_nr)
+        return torch.Size(out_metadata.shape()), grad.shape
+
     if output.is_nested and not isinstance(output, NestedTensor):
         if is_grads_batched:
             raise RuntimeError("Batched grads are not supported with Nested Tensor.")
@@ -68,19 +75,32 @@ def _make_grads(
             from torch.fx.experimental.symbolic_shapes import expect_true, sym_eq
 
             first_grad = grad if not is_grads_batched else grad[0]
+
+            if isinstance(out, graph.GradientEdge):
+                out_metadata = out.node._input_metadata(out.output_nr)
+                out_size = torch.Size(out_metadata.shape())
+                out_dtype = out_metadata.dtype()
+                out_is_nested = out_metadata.is_nested_tensor()
+                if out_metadata.is_cpp_nested_tensor():
+                    raise RuntimeError(
+                        "Cpp NestedTensor are not supported with GradientEdge"
+                    )
+            else:
+                out_size = out.size()
+                out_dtype = out.dtype
+                out_is_nested = out.is_nested_tensor()
+
             # TODO: We can remove this conditional once we uniformly use
             # singleton int to represent jagged dimension, so that size() call
-            # on nested tensor works
-            if isinstance(out, graph.GradientEdge):
-                new_grads.append(grad)
-                continue
-            if out.is_nested or first_grad.is_nested:
+            # on nested tensor works.
+            if out_is_nested or first_grad.is_nested:
                 shape_matches = torch.is_same_size(out, first_grad)
             else:
                 # We need to do a regular size check, without going through
                 # the operator, to be able to handle unbacked symints
                 # (expect_true ensures we can deal with unbacked)
-                shape_matches = expect_true(sym_eq(out.size(), first_grad.size()))
+                shape_matches = expect_true(sym_eq(out_size, first_grad.size()))
+
             if not shape_matches:
                 out_shape, grad_shape = _calculate_shape(
                     out, first_grad, is_grads_batched
@@ -115,7 +135,7 @@ def _make_grads(
                         + str(out_shape)
                         + "."
                     )
-            if out.dtype.is_complex != grad.dtype.is_complex:
+            if out_dtype.is_complex != grad.dtype.is_complex:
                 raise RuntimeError(
                     "For complex Tensors, both grad_output and output"
                     " are required to have the same dtype."
@@ -126,7 +146,7 @@ def _make_grads(
                     + " and output["
                     + str(outputs.index(out))
                     + "] has a dtype of "
-                    + str(out.dtype)
+                    + str(out_dtype)
                     + "."
                 )
             new_grads.append(grad)
