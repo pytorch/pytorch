@@ -1835,22 +1835,24 @@ class CUDAGraphTreeManager:
         # mod2(mod1(x)).sum().backward()
 
         self.running_forwards_with_pending_backwards = False
+        self.mode: Optional[CompilationMode] = None
 
     def run(self, new_inputs: List[Tensor], function_id: FunctionID):
         assert self.graph is not None, "Running CUDAGraph after shutdown"
+        self.mode = self.id_to_mode[function_id]
         out = self._run(new_inputs, function_id)
 
         # The forwards are only pending following invocation, not before
-        mode = self.id_to_mode[function_id]
-        if mode == CompilationMode.FORWARD:
+        if self.mode == CompilationMode.FORWARD:
             self.running_forwards_with_pending_backwards = True
-        elif mode == CompilationMode.BACKWARD:
+        elif self.mode == CompilationMode.BACKWARD:
             self.running_forwards_with_pending_backwards = False
 
         return out
 
     def set_to_running_backward(self):
         self.running_forwards_with_pending_backwards = False
+        self.mode = CompilationMode.BACKWARD
 
     def _get_cuda_graph_recorded_tensor_checker(self) -> Callable[[Tensor], bool]:
         return (
@@ -2223,10 +2225,7 @@ class CUDAGraphTreeManager:
     def dealloc_current_path_weakrefs(self):
         # TODO: we could also allow the these weak refs to continue to be allocated,
         # but that adds some complications.
-
-        run_type = (
-            "forward" if self.running_forwards_with_pending_backwards else "backward"
-        )
+        run_type = "backward" if self.mode == CompilationMode.BACKWARD else "forward"
 
         stack_map = {}
         for node in self.current_node._path_from_root:
