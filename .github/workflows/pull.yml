@@ -77,7 +77,7 @@ jobs:
     name: linux-jammy-py3.8-gcc11-no-ops
     uses: ./.github/workflows/_linux-build-label.yml
     with:
-      runner: lf.c.linux.2xlarge
+      runner:  lf.c.linux.2xlarge
       build-environment: linux-jammy-py3.8-gcc11-no-ops
       docker-image-name: pytorch-linux-jammy-py3.8-gcc11
       test-matrix: |
