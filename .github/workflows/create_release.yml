@@ -71,6 +71,8 @@ jobs:
     runs-on: linux.2xlarge
     environment: sourcecode-upload
     name: Upload source code to S3 for release cuts
+    permissions:
+      id-token: write
     needs: release
     steps:
       - uses: actions/download-artifact@v2
