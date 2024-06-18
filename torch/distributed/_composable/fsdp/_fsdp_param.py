@@ -530,19 +530,14 @@ class FSDPParam:
             # Under compile, `self.all_gather_outputs` and `self._unsharded_inner_tensors` are emptied
             # right after every AllGather. So we need to free `self.unsharded_param` memory by
             # looking into its own tensor storage instead.
-            unsharded_param_data = (
-                self.unsharded_param.data
-            )  # Unpack nn.Parameter to get underlying tensor data
-            is_subclass = (
-                isinstance(unsharded_param_data, torch.Tensor)
-                and type(unsharded_param_data) != torch.Tensor
-            )
-            if is_subclass:
+            if torch.utils._python_dispatch.is_traceable_wrapper_subclass(self.unsharded_param.data):
+                # Unpack nn.Parameter to get underlying tensor data
+                unsharded_param_data = self.unsharded_param.data
                 attrs, ctx = unsharded_param_data.__tensor_flatten__()  # type: ignore[attr-defined]
                 for attr in attrs:
                     free_storage(getattr(unsharded_param_data, attr))
             else:
-                free_storage(unsharded_param_data)
+                free_storage(self.unsharded_param)
 
     @property
     def all_gather_inputs(self) -> List[torch.Tensor]:  # 1D
