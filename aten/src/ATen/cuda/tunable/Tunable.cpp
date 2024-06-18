@@ -124,12 +124,14 @@ void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std
       it = untuned_results_.insert({op_signature, {}}).first;
       isNew = true;
     }
+
     auto it_kernel_map = it->second.find(params_signature);
     if (it_kernel_map == it->second.end())
     {
       it->second.insert(params_signature);
       isNew = true;
     }
+
     if (isNew){
       untuned_file << "Untuned," << op_signature << "," << params_signature << std::endl;
       TUNABLE_LOG3("Untuned,", op_signature, ",", params_signature);
@@ -471,7 +473,7 @@ bool TuningContext::IsRecordUntunedEnabled() const {
 }
 
 std::ofstream& TuningContext::GetUntunedFile(){
-  if (!untuned_file_.good())
+  if (!untuned_file_.is_open())
   {
     const char *env = std::getenv("PYTORCH_TUNABLEOP_UNTUNED_FILENAME");
     std::string filename = (env == nullptr) ? "untuned.csv" : env;

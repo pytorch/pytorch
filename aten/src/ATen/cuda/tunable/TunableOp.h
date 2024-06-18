@@ -58,7 +58,7 @@ class TunableOp {
           result = FindFastest(params);
           mgr.Add(op_sig, params_sig, result);
         }
-        else if (result == ResultEntry::Null() && ctx->IsRecordUntunedEnabled()){
+        else if (result == ResultEntry::Null() && ctx->IsRecordUntunedEnabled()) {
           mgr.RecordUntuned(ctx->GetUntunedFile(), op_sig, params_sig);
         }
       }
