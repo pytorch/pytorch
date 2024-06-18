@@ -7,9 +7,9 @@ import sys
 
 import torch
 
-from torch.testing._internal.common_cuda import IS_JETSON
+from torch.testing._internal.common_cuda import IS_JETSON, IS_WINDOWS
 
-if torch.cuda.is_available() and not IS_JETSON:
+if torch.cuda.is_available() and not IS_JETSON and not IS_WINDOWS:
     env = os.environ.copy()
     env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
