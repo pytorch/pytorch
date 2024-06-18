@@ -1137,47 +1137,6 @@ class BracesBuffer(IndentedBuffer):
 
         return ctx()
 
-    def rethrow_exception(self):
-        @contextlib.contextmanager
-        def ctx():
-            self.writelines(
-                [
-                    "std::atomic_flag err_flag = ATOMIC_FLAG_INIT;",
-                    "std::exception_ptr eptr;",
-                ]
-            )
-            yield
-            self.writelines(
-                [
-                    "if (eptr) {",
-                    "  std::rethrow_exception(eptr);",
-                    "}",
-                ]
-            )
-
-        return ctx()
-
-    def catch_inside_parallel(self):
-        @contextlib.contextmanager
-        def ctx():
-            self.writelines(
-                [
-                    "try {",
-                ]
-            )
-            yield
-            self.writelines(
-                [
-                    "} catch (...) {",
-                    "  if (!err_flag.test_and_set()) {",
-                    "    eptr = std::current_exception();",
-                    "  }",
-                    "}",
-                ]
-            )
-
-        return ctx()
-
 
 class InplacedBuffer(NamedTuple):
     inner_name: str

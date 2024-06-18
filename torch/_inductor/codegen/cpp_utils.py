@@ -421,3 +421,46 @@ class LocalBufferScope:
             return inner
 
         return [wrap_inner_fn_for_node(node, inner_fn_wrapper) for node in nodes]
+
+
+def rethrow_exception(code):
+    @contextlib.contextmanager
+    def ctx():
+        code.writelines(
+            [
+                "std::atomic_flag err_flag = ATOMIC_FLAG_INIT;",
+                "std::exception_ptr eptr;",
+            ]
+        )
+        yield
+        code.writelines(
+            [
+                "if (eptr) {",
+                "  std::rethrow_exception(eptr);",
+                "}",
+            ]
+        )
+
+    return ctx()
+
+
+def catch_inside_parallel(code):
+    @contextlib.contextmanager
+    def ctx():
+        code.writelines(
+            [
+                "try {",
+            ]
+        )
+        yield
+        code.writelines(
+            [
+                "} catch (...) {",
+                "  if (!err_flag.test_and_set()) {",
+                "    eptr = std::current_exception();",
+                "  }",
+                "}",
+            ]
+        )
+
+    return ctx()

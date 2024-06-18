@@ -2607,7 +2607,6 @@ class CppPythonBindingsCodeCache(CppCodeCache):
                 %s
             } catch(std::exception const& e) {
                 torch::translate_exception_to_python(std::current_exception());
-                PyErr_SetString(PyExc_RuntimeError, e.what());
                 return nullptr;
             } catch(...) {
                 PyErr_SetString(PyExc_RuntimeError, "unhandled error");

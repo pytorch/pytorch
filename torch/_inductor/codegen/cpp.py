@@ -64,7 +64,15 @@ from .common import (
     OptimizationContext,
 )
 
-from .cpp_utils import cexpr, cexpr_index, DTYPE_TO_CPP, INDEX_TYPE, value_to_cpp
+from .cpp_utils import (
+    catch_inside_parallel,
+    cexpr,
+    cexpr_index,
+    DTYPE_TO_CPP,
+    INDEX_TYPE,
+    rethrow_exception,
+    value_to_cpp,
+)
 
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 
@@ -1992,7 +2000,7 @@ class CppKernel(Kernel):
                     stack.enter_context(code.indent())
                     # generate inner loops or loop body
                     if loop.catch_exception:
-                        stack.enter_context(code.catch_inside_parallel())
+                        stack.enter_context(catch_inside_parallel(code))
                     if loop.inner:
                         gen_loops(loop.inner, loop.is_reduction)
                     else:
@@ -3985,7 +3993,7 @@ class WorkSharing:
             self.num_threads = threads
             self.in_parallel = True
             self.stack.enter_context(self.code.indent())
-            self.stack.enter_context(self.code.rethrow_exception())
+            self.stack.enter_context(rethrow_exception(self.code))
             if config.cpp.dynamic_threads:
                 self.code.writeline("#pragma omp parallel")
             else:
