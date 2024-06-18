@@ -980,8 +980,9 @@ class TestAutograd(TestCase):
         x = torch.rand(2, requires_grad=True, dtype=torch.float32)
         y = torch.rand(2, requires_grad=True, dtype=torch.float32)
         z = x * y
-        self.assertEqual(z.grad_fn._input_metadata(0).shape(), (2,))
-        self.assertEqual(nt_metadata.dtype(), torch.float32)
+        z_metadata = z.grad_fn._input_metadata(0)
+        self.assertEqual(z_metadata.shape(), (2,))
+        self.assertEqual(z_metadata.dtype(), torch.float32)
 
         # Multiple outputs
         b = torch.rand(3, 3, requires_grad=True)
@@ -1015,6 +1016,20 @@ class TestAutograd(TestCase):
         self.assertFalse(nt_metadata.is_cpp_nested_tensor())
         self.assertEqual(nt_metadata.dtype(), nt.dtype)
 
+        class Test(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output
+
+        x = torch.randn(3, 3, requires_grad=True)
+        x = Test.apply(x)
+        metadata = x.grad_fn._input_metadata(0)
+        self.assertEqual(metadata.shape(), (3, 3))
+
     def test_gradient_edge_output(self):
         x = torch.tensor(1.0, requires_grad=True)
 
@@ -1027,7 +1042,7 @@ class TestAutograd(TestCase):
         # Compute fn backward in two steps
         out, tmp_edge = fn(x)
         (tmp_grad,) = torch.autograd.grad(out, (tmp_edge,))
-        print(tmp_edge)
+
         (x_grad,) = torch.autograd.grad(tmp_edge, (x,), grad_outputs=(tmp_grad,))
 
         # Compare with as if we did it in one go.
