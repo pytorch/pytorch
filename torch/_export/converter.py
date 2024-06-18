@@ -18,8 +18,6 @@ from torch.export.graph_signature import (
 from torch.fx import subgraph_rewriter
 from torch.onnx.utils import _create_jit_graph
 
-from torchgen.model import FunctionSchema
-
 
 def inplace_optimize_sym_size_div(gm: torch.fx.GraphModule):
     def pattern(im, dim, scale):
@@ -189,9 +187,9 @@ def get_block_to_lifted_attrs(graph: torch._C.Graph) -> Dict[torch._C.Block, Set
 
 def get_op_overload(node: torch._C.Node):
     schema_str = node.schema()
-    schema = FunctionSchema.parse(schema_str)
-    ns, op_name = str(schema.name.name).split("::")
-    override = schema.name.overload_name
+    schema = torch._C.parse_schema(schema_str)
+    ns, op_name = str(schema.name).split("::")
+    override = schema.overload_name
 
     try:
         op_overload_mod = getattr(torch.ops, ns)
@@ -292,7 +290,12 @@ class TS2FXGraphConverter:
 
         # Pass parameter and buffer to the root for lookup.
         gm = torch.fx.GraphModule(
-            {**self.subgraphs, **self.name_to_param_map, **self.name_to_buffer_map},
+            {
+                **self.subgraphs,
+                **self.name_to_param_map,
+                **self.name_to_buffer_map,
+                **self.tensor_constants,
+            },
             self.fx_graph,
         )
 
@@ -342,6 +345,20 @@ class TS2FXGraphConverter:
 
             self.name_to_node[name] = fx_node
 
+    def convert_aten_tensor(self, node: torch._C.Node):
+        """aten::tensor creates a constant tensor ad-hoc --> GetAttr"""
+        args, kwargs = self.get_args_kwargs(node, torch.ops.aten.tensor.default._schema)
+        for k in kwargs:
+            if k == "requires_grad":
+                kwargs[k] = bool(kwargs[k])  # 0 -> False, 1 -> True
+        tensor = torch.tensor(*args, **kwargs)
+
+        output_name = node.output().debugName()
+        alias_name = f"lifted_tensor_{output_name}"
+        fx_node = self.fx_graph.get_attr(alias_name)
+        self.name_to_node[output_name] = fx_node
+        self.tensor_constants[alias_name] = tensor
+
     def convert_prim_Constant(self, node: torch._C.Node):
         name = node.output().debugName()
 
@@ -355,20 +372,11 @@ class TS2FXGraphConverter:
             elif constant_kind == "s":
                 value = node.s("value")
             elif constant_kind == "t":
-                # lift tensor constant as a placeholder
-                placeholder_name = f"constant_{name}"
-                fx_node = self.fx_graph.placeholder(placeholder_name)
-                self.name_to_node[name] = fx_node
-                self.tensor_constants[placeholder_name] = node.t("value")
-
-                self.input_specs.append(
-                    InputSpec(
-                        InputKind.CONSTANT_TENSOR,
-                        arg=TensorArgument(name=placeholder_name),
-                        target=placeholder_name,
-                    )
+                alias_name = (
+                    f"lifted_tensor_{name}"  # Follow naming convention from EP tracing.
                 )
-
+                fx_node = self.fx_graph.get_attr(alias_name)
+                self.tensor_constants[alias_name] = node.t("value")
                 value = fx_node
             elif constant_kind == "ival":
                 value = node.ival("value")
@@ -730,7 +738,9 @@ class TS2EPConverter:
         ep = self.retrace_as_exported_program(gm, graph_converter.tensor_constants)
         return ep
 
-    def retrace_as_exported_program(self, gm: torch.fx.GraphModule, tensor_constants):
+    def retrace_as_exported_program(
+        self, gm: torch.fx.GraphModule, tensor_constants: Dict[str, torch.Tensor]
+    ):
         # TODO: adjust input orders to match GraphSignature convention
         ep = torch.export._trace._export(
             gm,
@@ -738,4 +748,18 @@ class TS2EPConverter:
             strict=False,
             pre_dispatch=True,
         )
+
+        # Post-processing to make sure the ExportedProgram states are correct.
+        # Because during conversion, we set tensor constants as GetAttr,
+        # retracing cannot recognize them as tensor constants but instead
+        # treat them as buffers. We need to set them again here.
+        ep._constants = tensor_constants
+        for k in tensor_constants:
+            ep.state_dict.pop(k, None)
+        for spec in ep.graph_signature.input_specs:
+            # Mark as constant tensors for erroneously traced buffers.
+            if spec.kind == InputKind.BUFFER and spec.target in tensor_constants:
+                spec.kind = InputKind.CONSTANT_TENSOR
+        ep.verifier().check(ep)
+
         return ep
