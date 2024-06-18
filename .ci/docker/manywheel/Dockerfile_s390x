@@ -1,17 +1,19 @@
-FROM --platform=linux/s390x docker.io/ubuntu:24.04 as base
+FROM quay.io/pypa/manylinux_2_28_s390x as base
 
 # Language variables
 ENV LC_ALL=C.UTF-8
 ENV LANG=C.UTF-8
 ENV LANGUAGE=C.UTF-8
 
+ARG DEVTOOLSET_VERSION=13
 # Installed needed OS packages. This is to support all
 # the binary builds (torch, vision, audio, text, data)
-RUN apt update ; apt upgrade -y
-RUN apt install -y \
-  build-essential \
+RUN yum -y install epel-release
+RUN yum -y update
+RUN yum install -y \
   autoconf \
   automake \
+  bison \
   bzip2 \
   curl \
   diffutils \
@@ -24,19 +26,30 @@ RUN apt install -y \
   util-linux \
   wget \
   which \
-  xz-utils \
+  xz \
+  yasm \
   less \
   zstd \
-  cmake \
-  python3 \
-  python3-dev \
+  libgomp \
+  gcc-toolset-${DEVTOOLSET_VERSION}-gcc \
+  gcc-toolset-${DEVTOOLSET_VERSION}-gcc-c++ \
+  gcc-toolset-${DEVTOOLSET_VERSION}-binutils \
+  rust \
+  cargo \
+  llvm-devel \
+  libzstd-devel \
+  python3-devel \
   python3-setuptools \
-  python3-yaml \
-  python3-typing-extensions \
-  libblas-dev \
-  libopenblas-dev \
-  liblapack-dev \
-  libatlas-base-dev
+  python3-pip \
+  python3-virtualenv \
+  python3-pyyaml \
+  blas-devel \
+  openblas-devel \
+  lapack-devel \
+  atlas-devel
+
+ENV PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
+ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib64:/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib:$LD_LIBRARY_PATH
 
 # git236+ would refuse to run git commands in repos owned by other users
 # Which causes version check to fail, as pytorch repo is bind-mounted into the image
@@ -44,30 +57,4 @@ RUN apt install -y \
 # For more details see https://github.com/pytorch/pytorch/issues/78659#issuecomment-1144107327
 RUN git config --global --add safe.directory "*"
 
-FROM base as openssl
-# Install openssl (this must precede `build python` step)
-# (In order to have a proper SSL module, Python is compiled
-# against a recent openssl [see env vars above], which is linked
-# statically. We delete openssl afterwards.)
-ADD ./common/install_openssl.sh install_openssl.sh
-RUN bash ./install_openssl.sh && rm install_openssl.sh
-ENV SSL_CERT_FILE=/opt/_internal/certs.pem
-
-# EPEL for cmake
-FROM base as patchelf
-# Install patchelf
-ADD ./common/install_patchelf.sh install_patchelf.sh
-RUN bash ./install_patchelf.sh && rm install_patchelf.sh
-RUN cp $(which patchelf) /patchelf
-
-FROM patchelf as python
-# build python
-COPY manywheel/build_scripts /build_scripts
-ADD ./common/install_cpython.sh /build_scripts/install_cpython.sh
-RUN bash build_scripts/build.sh && rm -r build_scripts
-
-FROM openssl as final
-COPY --from=python             /opt/python                           /opt/python
-COPY --from=python             /opt/_internal                        /opt/_internal
-COPY --from=python             /opt/python/cp39-cp39/bin/auditwheel /usr/local/bin/auditwheel
-COPY --from=patchelf           /usr/local/bin/patchelf               /usr/local/bin/patchelf
+FROM base as final
