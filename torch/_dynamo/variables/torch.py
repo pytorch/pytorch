@@ -18,11 +18,7 @@ from torch._streambase import _StreamBase
 from ..._guards import TracingContext
 from .. import config, polyfill, variables
 from ..codegen import PyCodegen
-from ..create_parameter_op import (
-    can_convert_to_tracable_parameter,
-    new_parameter_placeholder,
-    tracable_create_parameter,
-)
+from ..create_parameter_op import new_parameter_placeholder, tracable_create_parameter
 from ..device_interface import get_registered_device_interfaces
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
@@ -842,6 +838,27 @@ Either create the tensor outside the compiled region, or do not set the tensor t
                     name = tx.find_symbolic_locals_name(kwargs["out"])
                     if name in tx.symbolic_locals:
                         tx.symbolic_locals[name] = tensor_variable
+                elif isinstance(tensor_variable, ConstantVariable) and tensor_variable.value is None:
+                    # Handle out-variant custom ops that return None.
+                    if isinstance(kwargs["out"], TensorVariable):
+                        assert "example_value" in kwargs["out"].proxy.node.meta
+                        fake_out = kwargs["out"].proxy.node.meta["example_value"]
+                        if not torch._prims_common.is_contiguous(fake_out):
+                            # It's difficult to handle strides correctly in functionalization
+                            # when calling an out= op with a non-contiguous out argument
+                            unimplemented(
+                                "out= op was called where output tensor was non-contiguous"
+                            )
+                    elif isinstance(kwargs["out"], ListVariable):
+                        for idx, x in enumerate(kwargs["out"].items):
+                            assert "example_value" in x.proxy.node.meta
+                            fake_out = x.proxy.node.meta["example_value"]
+                            if not torch._prims_common.is_contiguous(fake_out):
+                                # It's difficult to handle strides correctly in functionalization
+                                # when calling an out= op with a non-contiguous out argument
+                                unimplemented(
+                                    "out= op was called where output tensor was non-contiguous"
+                                )
                 else:
                     unimplemented(f"out variant of {type(kwargs['out'])}")
 
@@ -892,9 +909,6 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         # this results in cleaner graphs, but only works for inputs
         if data.source:
             return cls._nn_param_via_prefix_insert(tx, data, requires_grad)
-
-        if not can_convert_to_tracable_parameter():
-            unimplemented("Workaround for issues with nn_parameter construction")
 
         try:
             shape = tuple(data.var_getattr(tx, "shape").as_python_constant())
