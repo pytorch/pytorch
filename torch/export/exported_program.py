@@ -19,6 +19,8 @@ from typing import (
     Union,
 )
 
+from torch._library.fake_class_registry import FakeScriptObject
+
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 
 if TYPE_CHECKING:
@@ -217,7 +219,7 @@ class ExportedProgram:
             Dict[str, torch.Tensor]
         ] = None,  # TODO: deprecate this
         constants: Optional[
-            Dict[str, Union[torch.Tensor, torch._C.ScriptObject]]
+            Dict[str, Union[torch.Tensor, FakeScriptObject, torch._C.ScriptObject]]
         ] = None,
     ):
         # Remove codegen related things from the graph. It should just be a flat graph.
@@ -339,6 +341,7 @@ class ExportedProgram:
     @property
     @compatibility(is_backward_compatible=False)
     def dialect(self) -> str:
+        assert self._verifier is not None
         return self._verifier.dialect
 
     @property
