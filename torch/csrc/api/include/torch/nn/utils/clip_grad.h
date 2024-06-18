@@ -64,7 +64,7 @@ inline double clip_grad_norm_(
   // synchronizing the CPU and the gradients' device until the very end to
   // preserve async execution on the device. When checking for finite-ness, this
   // optional ensures we only sync once.
-  std::optional<double> total_norm = std::nullopt;
+  std::optional<double> total_norm = c10::nullopt;
   if (error_if_nonfinite) {
     total_norm = total_norm_tensor.item().toDouble();
     TORCH_CHECK(
@@ -79,7 +79,7 @@ inline double clip_grad_norm_(
 
   auto clip_coef = max_norm / (total_norm_tensor + 1e-6);
   auto clip_coef_clamped =
-      torch::clamp(clip_coef, std::nullopt /* min */, 1.0 /* max */);
+      torch::clamp(clip_coef, c10::nullopt /* min */, 1.0 /* max */);
   for (auto& param : params_with_grad) {
     param.grad().data().mul_(clip_coef_clamped);
   }

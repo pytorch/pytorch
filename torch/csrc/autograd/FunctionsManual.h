@@ -39,7 +39,7 @@ TORCH_API inline std::optional<Tensor> wrap_opt_if(
     const Tensor& t,
     const bool cond) {
   using OptTensor = std::optional<Tensor>;
-  return cond ? OptTensor(t) : static_cast<OptTensor>(std::nullopt);
+  return cond ? OptTensor(t) : static_cast<OptTensor>(c10::nullopt);
 }
 
 TORCH_API Tensor
@@ -244,6 +244,10 @@ at::Tensor unbind_backward_nested(
     const Tensor& nt_sizes,
     int64_t dim,
     const at::TensorOptions& options);
+at::Tensor unbind_backward_nested_jagged(
+    const variable_list& grads,
+    const Tensor& self,
+    int64_t dim);
 at::Tensor unsqueeze_to(const at::Tensor& self, c10::SymIntArrayRef sym_sizes);
 at::Tensor unsqueeze_to(
     const at::Tensor& self,
