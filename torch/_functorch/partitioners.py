@@ -28,7 +28,6 @@ from torch.fx.passes import graph_drawer
 from . import config
 from ._aot_autograd.logging_utils import get_aot_graph_name
 from .compile_utils import fx_graph_cse, get_aten_target
-from ._aot_autograd import dist_fx_passes
 
 if TYPE_CHECKING:
     import sympy
