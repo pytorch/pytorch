@@ -2570,7 +2570,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 return torch.nn.functional.linear(x, weight.to(dtype=x.dtype)) * scales
 
         mod = M().eval()
-        x_shape = (2, 1, 256)
+        x_shape = (1, 1, 256)
         w_shape = (12, 256)
         s_shape = 12
         x_strides = [

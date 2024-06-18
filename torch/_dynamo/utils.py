@@ -1400,8 +1400,6 @@ def same(
             return t if isinstance(t, torch.Tensor) else torch.tensor(t)
 
         ref, res, fp64_ref = (to_tensor(val) for val in (ref, res, fp64_ref))
-        if res.numel() == 1:
-            print(res, ref)
 
         if ref.is_sparse:
             assert res.is_sparse
