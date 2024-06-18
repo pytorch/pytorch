@@ -2447,7 +2447,13 @@ class Scheduler:
                 lhs_dep.normalize_with_stride_order()
                 == rhs_dep.normalize_with_stride_order()
             ):
-                candidates.append((lhs_dep.get_numel(), lhs_dep, rhs_dep))
+                candidates.append(
+                    (
+                        V.graph.sizevars.size_hint(lhs_dep.get_numel(), fallback=0),
+                        lhs_dep,
+                        rhs_dep,
+                    )
+                )
 
         if len(candidates) == 0:
             return False
