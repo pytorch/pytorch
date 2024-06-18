@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # We are exposing all subpackages to the end-user.
 # Because of possible inter-dependency, we want to avoid
 # the cyclic imports, thus implementing lazy version

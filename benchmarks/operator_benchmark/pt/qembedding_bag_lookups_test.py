@@ -1,11 +1,11 @@
 from typing import Optional
 
 import numpy as np
+
+import operator_benchmark as op_bench
 import torch
 
 from torch.testing._internal.common_quantization import lengths_to_offsets
-
-import operator_benchmark as op_bench
 
 torch.ops.load_library("//caffe2/torch/fb/sparsenn:sparsenn_operators")
 

@@ -78,17 +78,11 @@ for test in tests:
 del test
 
 if TEST_Z3:
-    # this only fails when z3 is available
-    unittest.expectedFailure(
-        # SymPy is incorrectly transforming 's0 / 6 == 0.5' into 'False'.
-        # Ref: https://github.com/sympy/sympy/issues/25146
-        DynamicShapesReproTests.test_dynamic_shapes_float_guard_dynamic_shapes  # noqa: F821
-    )
-
-    # TODO model is somehow not being freed when z3 is available
-    unittest.expectedFailure(
-        DynamicShapesMiscTests.test_parameter_free_dynamic_shapes  # noqa: F821
-    )
+    if not config.inline_inbuilt_nn_modules:
+        # TODO model is somehow not being freed when z3 is available
+        unittest.expectedFailure(
+            DynamicShapesMiscTests.test_parameter_free_dynamic_shapes  # noqa: F821
+        )
 
 unittest.expectedFailure(
     # Test is only valid without dynamic shapes
@@ -98,6 +92,13 @@ unittest.expectedFailure(
 # Test takes too long ~700s as of 414a1fd29f04d06e41b7f895368dd1f83a4be29d
 DynamicShapesExportTests.test_retracibility_dynamic_shapes = slowTest(  # noqa: F821
     DynamicShapesExportTests.test_retracibility_dynamic_shapes  # noqa: F821
+)
+# Also take more than 30m as of 15cc9f2e7e7b2b175f24755925dc38d4d430905d
+DynamicShapesExportTests.test_retracibility_dict_container_inp_out_dynamic_shapes = slowTest(  # noqa: F821
+    DynamicShapesExportTests.test_retracibility_dict_container_inp_out_dynamic_shapes  # noqa: F821
+)
+DynamicShapesExportTests.test_retracibility_nested_list_out_dynamic_shapes = slowTest(  # noqa: F821
+    DynamicShapesExportTests.test_retracibility_nested_list_out_dynamic_shapes  # noqa: F821
 )
 
 if __name__ == "__main__":
