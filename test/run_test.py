@@ -1618,6 +1618,9 @@ def run_tests(
             ):
                 raise RuntimeError(failure.message + keep_going_message)
 
+        for i in range(6):
+            selected_tests_parallel.extend(selected_tests_parallel)
+
         os.environ["NUM_PARALLEL_PROCS"] = str(NUM_PROCS)
         for test in selected_tests_parallel:
             options_clone = copy.deepcopy(options)
@@ -1667,6 +1670,7 @@ def main():
 
     test_directory = str(REPO_ROOT / "test")
     selected_tests = get_selected_tests(options)
+    selected_tests = ["test_foreach"]
 
     test_prioritizations = import_results()
     test_prioritizations.amend_tests(selected_tests)
