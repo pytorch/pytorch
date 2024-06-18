@@ -1545,7 +1545,11 @@ def _export(
     flags = set()
     flags.add("strict" if strict else "non_strict")
     flags.add("pre_dispatch" if pre_dispatch else "aot_dispatch")
-    log_export_usage(event="export.enter", flags=flags)
+    log_export_usage(
+        event="export.enter",
+        preserved_ops=_preserve_ops if _preserve_ops else [],
+        flags=flags,
+    )
     _EXPORT_FLAGS = flags
 
     kwargs = kwargs or {}
