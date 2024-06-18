@@ -808,10 +808,6 @@ def meta__scaled_dot_product_cudnn(fake_mode, func, *args, **kwargs):
     offset = convert_tensor(
         torch.empty((), dtype=torch.long, device="meta"), query.device
     )
-    debug_mask = convert_tensor(
-        torch.empty(0, dtype=query.dtype, device="meta"),
-        query.device,
-    )
     return (
         res,
         logsum_exp,
@@ -821,7 +817,7 @@ def meta__scaled_dot_product_cudnn(fake_mode, func, *args, **kwargs):
         S_KV,
         seed,
         offset,
-        debug_mask,
+        None,
     )
 
 
