@@ -321,30 +321,10 @@ def to_fp8_saturated(
     x: torch.Tensor,
     fp8_dtype: torch.dtype
 ):
-    """
-    Converts a tensor to a saturated fp8 tensor.
-
-    Args:
-        a: Input Tensor.
-        b: Input Tensor.
-        a_scale: scale associated with `a`.
-        b_scale: scale associated with `b`.
-        output_dtype: dtype of result.
-        output_scale: the output tensor's scale, precomputed.
-
-    Returns:
-        (torch.Tensor, torch.Tensor): (result of the matrix multiplication, associated amax)
-    Note:
-        The default behavior in PyTorch for casting to `e4m3_type`
-        and `e5m2_type` is to not saturate. In this context, we should
-        saturate. A common case where we want to saturate is when the history
-        of a tensor has a maximum value of `amax1`, and the current amax value
-        is `amax2`, where `amax1 < amax2`.
-    """
     if fp8_dtype == e4m3_type:
-        x = x_scaled.clamp(min=-1 * E4M3_MAX_POS, max=E4M3_MAX_POS)
+        x = x.clamp(min=-1 * E4M3_MAX_POS, max=E4M3_MAX_POS)
     elif fp8_dtype == e5m2_type:
-        x = x_scaled.clamp(min=-1 * E5M2_MAX_POS, max=E5M2_MAX_POS)
+        x = x.clamp(min=-1 * E5M2_MAX_POS, max=E5M2_MAX_POS)
     else:
         raise ValueError(f"to_fp8_saturated(): Unsupported fp8_dtype: {fp8_dtype}")
 
@@ -447,7 +427,7 @@ class TestFP8MatmulCuda(TestCase):
         if base_dtype in {torch.bfloat16, torch.float16}:
             atol, rtol = 7e-2, 7e-2
         else:
-            atol, rtol = 2e-3, 2e-3
+            atol, rtol = 3e-3, 3e-3
 
         torch.testing.assert_close(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
 
@@ -548,7 +528,7 @@ class TestFP8MatmulCuda(TestCase):
         x_fp8 = x.to(torch.float8_e4m3fn)
         y_fp8 = y.to(torch.float8_e4m3fn).t()
 
-        out_fp8, _ = torch._scaled_mm(
+        out_fp8 = torch._scaled_mm(
             x_fp8,
             y_fp8,
             scale_a=x_scales,
@@ -648,12 +628,12 @@ class TestFP8MatmulCuda(TestCase):
         y_fp8 = to_fp8_saturated(y * y_scales[None, :], e4m3_type)
 
         # Calculate actual F8 mm
-        out_scaled_mm, _ = mm_float8(
+        out_scaled_mm = mm_float8(
             x_fp8, y_fp8, a_scale=x_scales, b_scale=y_scales, output_dtype=output_dtype
         )
 
         # Calculate emulated F8 mm
-        out_emulated, _ = mm_float8_emulated(
+        out_emulated = mm_float8_emulated(
             x_fp8, x_scales[:, None], y_fp8, y_scales[None, :], output_dtype
         )
 

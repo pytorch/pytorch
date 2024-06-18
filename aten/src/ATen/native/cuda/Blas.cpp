@@ -831,65 +831,75 @@ enum class ScalingType {
   RowWise,
   Error
 };
+/*
+ * Scaling Type Determination:
+ * ---------------------------
+ * Conditions and corresponding Scaling Types:
+ *
+ * - If scale_a.numel() == 1 && scale_b.numel() == 1:
+ *   - Returns TensorWise.
+ *
+ * - Else if scale_a.dim() == 1 && scale_a.size(0) == dim_m && scale_b.size(0) == dim_n:
+ *   - Returns RowWise.
+ *
+ * - Otherwise:
+ *   - Returns Error.
+ */
 
 // Validates the scale tensors to scaled_mm
 // And returns the type of scaling/which kernel to use
 ScalingType get_scaling_type(
-    const c10::optional<at::Tensor>& scale_a,
-    const c10::optional<at::Tensor>& scale_b,
+    const at::Tensor& scale_a,
+    const at::Tensor& scale_b,
     int64_t dim_m,
     int64_t dim_n) {
+  // Both Per-Tensor and Row-wise scaling expect fp32 tensors
   TORCH_CHECK(
-      scale_a.has_value() == scale_b.has_value(),
-      "Both scale_a and scale_b must be present or absent.");
+      scale_a.scalar_type() == kFloat && scale_b.scalar_type() == kFloat,
+      "Both scale_a and scale_b must be float (fp32) tensors.");
 
-  if (scale_a.has_value()) {
-    // Both Per-Tensor and Row-wise scaling expect fp32 tensors
-    TORCH_CHECK(
-        scale_a->scalar_type() == kFloat && scale_b->scalar_type() == kFloat,
-        "Both scale_a and scale_b must be float (fp32) tensors.");
 
-    // Check the singluar scale case for per-tensor scaling
-    if (scale_a->numel() == 1 && scale_b->numel() == 1) {
-      return ScalingType::TensorWise;
-    } else if (scale_a->dim() == 1 && scale_a->size(0) == dim_m) {
+  // Check the singluar scale case for per-tensor scaling
+  if (scale_a.numel() == 1 && scale_b.numel() == 1) {
+    return ScalingType::TensorWise;
+  } else if (scale_a.dim() == 1 && scale_a.size(0) == dim_m) {
 // Check the per-row scaling case
 #if !defined(USE_ROCM) && !defined(_MSC_VER) || \
     (defined(USE_ROCM) && ROCM_VERSION >= 60000)
-      TORCH_CHECK(
-          scale_a->dim() == 1 && scale_b->dim() == 1,
-          "Both scale_a and scale_b must be 1-dimensional tensors");
-      TORCH_CHECK(
-          scale_b->size(0) == dim_n,
-          "For row-wise scaling, scale_b must have size ",
-          dim_n,
-          " but got ",
-          scale_b->size(0),
-          ".");
-      TORCH_CHECK(
-          scale_a->is_contiguous() && scale_b->is_contiguous(),
-          "Both scale_a and scale_b must be contiguous.");
-       return ScalingType::RowWise;
+    TORCH_CHECK(
+        scale_a.dim() == 1 && scale_b.dim() == 1,
+        "Both scale_a and scale_b must be 1-dimensional tensors");
+    TORCH_CHECK(
+        scale_b.size(0) == dim_n,
+        "For row-wise scaling, scale_b must have size ",
+        dim_n,
+        " but got ",
+        scale_b.size(0),
+        ".");
+    TORCH_CHECK(
+        scale_a.is_contiguous() && scale_b.is_contiguous(),
+        "Both scale_a and scale_b must be contiguous.");
+    return ScalingType::RowWise;
 #else
-      TORCH_CHECK(false, "Per-row scaling is not supported for this platform!");
-      return ScalingType::Error;
+    TORCH_CHECK(false, "Per-row scaling is not supported for this platform!");
+    return ScalingType::Error;
 #endif // !defined(USE_ROCM) && !defined(_MSC_VER) || (defined(USE_ROCM) &&
        // ROCM_VERSION >= 60000)
-    } else {
-      TORCH_CHECK(
-          false,
-          "For row-wise scaling, scale_a must be size ",
-          dim_m,
-          " but got ",
-          scale_a->numel(),
-          " and scale_b must be size ",
-          dim_n,
-          " but got ",
-          scale_b->numel(),
-          ".");
-      // Unreachable
-      return ScalingType::RowWise;
-    }
+  } else {
+    // Prettier Error Case messaging
+    TORCH_CHECK(
+        false,
+        "For row-wise scaling, scale_a must be size ",
+        dim_m,
+        " but got ",
+        scale_a.numel(),
+        " and scale_b must be size ",
+        dim_n,
+        " but got ",
+        scale_b.numel(),
+        ".");
+    // Unreachable
+    return ScalingType::RowWise;
   }
   return ScalingType::Error;
 }
@@ -914,7 +924,6 @@ ScalingType get_scaling_type(
 //    - `scale_result`: a scalar tensor with the scale of the output, only utilized if the output is a float8 type
 //    - `use_fast_accum`: if true, enables fast float8 accumulation
 //    - `out`: a reference to the output tensor
-//    - `amax`: a reference to the amax tensor of the output, only mutated if the output is a float8 type and will be updated inplace
 
 Tensor&
 _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
@@ -989,12 +998,12 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
     at::cuda::detail::f8f8bf16_rowwise(
         mat1,
         mat2,
-        scale_a.value(),
-        scale_b.value(),
+        scale_a,
+        scale_b,
         bias,
         use_fast_accum,
         out);
-    return {out, amax};
+    return out;
   }
 
   cublasCommonArgs args(mat1, mat2, out);
