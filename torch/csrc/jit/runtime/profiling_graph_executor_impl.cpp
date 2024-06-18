@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
 
+#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/add_if_then_else.h>
@@ -36,7 +37,6 @@
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <chrono>
 #include <mutex>
-#include <optional>
 
 C10_DEFINE_bool(
     torch_jit_enable_new_executor,
@@ -118,11 +118,11 @@ static FusionStrategy getInitialStrategy() {
 }
 
 // defer initial value so that we can load in gflags
-static std::optional<FusionStrategy> fusion_strategy = std::nullopt;
+static std::optional<FusionStrategy> fusion_strategy = c10::nullopt;
 
 FusionStrategy getFusionStrategy() {
   std::lock_guard<std::mutex> guard(fusion_strategy_lock);
-  if (fusion_strategy == std::nullopt) {
+  if (fusion_strategy == c10::nullopt) {
     fusion_strategy = getInitialStrategy();
   }
   return *fusion_strategy;
@@ -130,7 +130,7 @@ FusionStrategy getFusionStrategy() {
 
 FusionStrategy setFusionStrategy(FusionStrategy& strategy) {
   std::lock_guard<std::mutex> guard(fusion_strategy_lock);
-  if (fusion_strategy == std::nullopt) {
+  if (fusion_strategy == c10::nullopt) {
     fusion_strategy = getInitialStrategy();
   }
   FusionStrategy old_strategy = *fusion_strategy;
@@ -320,7 +320,7 @@ static bool guardDifferentiableGraph(Node* dnode) {
     // we inline the differentiable graph as a fallback
     // ideally we would set this up for re-profiling
     UpdateDifferentiableGraphRequiresGrad(
-        dnode->g(attr::Subgraph), std::nullopt);
+        dnode->g(attr::Subgraph), c10::nullopt);
     SubgraphUtils::unmergeSubgraph(dnode);
     return false;
   }
