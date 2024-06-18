@@ -8,6 +8,7 @@ import warnings
 from functools import reduce
 
 import numpy as np
+
 import torch
 from torch import tensor
 
@@ -28,6 +29,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TEST_CUDA,
     TestCase,
+    xfailIfTorchDynamo,
 )
 
 
@@ -1784,6 +1786,8 @@ class NumpyTests(TestCase):
         a[b] = 1.0
         self.assertEqual(a, tensor([[1.0, 1.0, 1.0]], device=device))
 
+    # https://github.com/pytorch/pytorch/issues/127003
+    @xfailIfTorchDynamo
     def test_boolean_assignment_value_mismatch(self, device):
         # A boolean assignment should fail when the shape of the values
         # cannot be broadcast to the subscription. (see also gh-3458)

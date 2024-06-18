@@ -170,7 +170,11 @@ class SimpleElasticAgentTest(unittest.TestCase):
     ):
         run_id = str(uuid.uuid4().int)
         port = get_free_port()
-        endpoint = f"127.0.0.1:{port}"
+        if local_addr is None:
+            endpoint = f"127.0.0.1:{port}"
+        else:
+            endpoint = f"{local_addr}:{port}"
+
         rdzv_params = RendezvousParameters(
             backend="static",
             endpoint=endpoint,
@@ -298,7 +302,8 @@ class SimpleElasticAgentTest(unittest.TestCase):
         return calls
 
     def test_rendezvous(self):
-        spec = self._get_worker_spec(max_restarts=1)
+        hostname = _get_fq_hostname()
+        spec = self._get_worker_spec(max_restarts=1, local_addr=hostname)
         agent = TestAgent(spec)
         worker_group = agent.get_worker_group()
         agent._rendezvous(worker_group)
@@ -307,10 +312,8 @@ class SimpleElasticAgentTest(unittest.TestCase):
         self.assertEqual(1, worker_group.group_world_size)
         self.assertEqual(0, worker_group.group_rank)
 
-        master_addr, master_port = agent._get_master_addr_port(worker_group.store)
-
-        self.assertEqual(_get_fq_hostname(), master_addr)
-        self.assertTrue(master_port > 0)
+        self.assertEqual(hostname, worker_group.master_addr)
+        self.assertTrue(worker_group.master_port > 0)
 
         rank_set = {w.global_rank for w in worker_group.workers}
         for w in worker_group.workers:
@@ -326,28 +329,25 @@ class SimpleElasticAgentTest(unittest.TestCase):
             self.assertSetEqual(set(range(w.world_size)), rank_set)
 
     def test_rendezvous_default_master_addr(self):
-        spec = self._get_worker_spec(max_restarts=1)
+        hostname = _get_fq_hostname()
+        spec = self._get_worker_spec(max_restarts=1, local_addr=hostname)
         agent = TestAgent(spec)
         worker_group = agent.get_worker_group()
         agent._rendezvous(worker_group)
 
-        master_addr, master_port = agent._get_master_addr_port(worker_group.store)
-
-        self.assertEqual(_get_fq_hostname(), master_addr)
-        self.assertGreater(master_port, 0)
+        self.assertEqual(_get_fq_hostname(), worker_group.master_addr)
+        self.assertGreater(worker_group.master_port, 0)
 
     def test_rendezvous_master_addr_with_local_addr(self):
-        spec_local_addr = "1.2.3.4"
+        spec_local_addr = "127.0.0.1"
         spec = self._get_worker_spec(max_restarts=1, local_addr=spec_local_addr)
         agent = TestAgent(spec)
         worker_group = agent.get_worker_group()
         agent._rendezvous(worker_group)
 
-        master_addr, master_port = agent._get_master_addr_port(worker_group.store)
-
-        self.assertNotEqual(_get_fq_hostname(), master_addr)
-        self.assertEqual(spec_local_addr, master_addr)
-        self.assertGreater(master_port, 0)
+        self.assertNotEqual(_get_fq_hostname(), worker_group.master_addr)
+        self.assertEqual(spec_local_addr, worker_group.master_addr)
+        self.assertGreater(worker_group.master_port, 0)
 
     def test_initialize_workers(self):
         spec = self._get_worker_spec(max_restarts=1)
