@@ -240,10 +240,11 @@ PyObject* THPEngine_run_backward(
   for (const auto i : c10::irange(num_tensors)) {
     PyObject* _tensor = PyTuple_GET_ITEM(tensors, i);
     Edge gradient_edge; // Temporary variable to hold the gradient edge
+    c10::optional<at::Tensor> mb_output;
     if (THPVariable_Check(_tensor)) {
-        const auto& variable = THPVariable_Unpack(_tensor);
+        mb_output = THPVariable_Unpack(_tensor);
         TORCH_CHECK(
-            !isBatchedTensor(variable),
+            !isBatchedTensor(mb_output.value()),
             "torch.autograd.grad(outputs, inputs, grad_outputs) called inside ",
             "torch.vmap. We do not support the case where any outputs are ",
             "vmapped tensors (output ",
@@ -251,7 +252,7 @@ PyObject* THPEngine_run_backward(
             " is being vmapped over). Please "
             "call autograd.grad() outside torch.vmap or file a bug report "
             "with your use case.");
-        gradient_edge = torch::autograd::impl::gradient_edge(variable);
+        gradient_edge = torch::autograd::impl::gradient_edge(mb_output.value());
     } else if (PyObject_IsInstance(_tensor, THPGradientEdgeClass)) {
         // TODO: deduplicate parsing of the GradientEdge
         PyObject* grad_fn = PyTuple_GetItem(_tensor, 0);
@@ -288,17 +289,21 @@ PyObject* THPEngine_run_backward(
       }
       grads.push_back(grad_var);
     } else {
-      // TODO, restore this check
-      // TORCH_CHECK(
-      //     grad == Py_None,
-      //     "element ",
-      //     i,
-      //     " of gradients tuple is not a Tensor or None");
-      // TORCH_CHECK(
-      //     !variable.requires_grad(),
-      //     "element ",
-      //     i,
-      //     " of gradients tuple is None, but the corresponding Tensor requires grad");
+      TORCH_CHECK(
+          grad == Py_None,
+          "element ",
+          i,
+          " of gradients tuple is not a Tensor or None");
+      TORCH_CHECK(mb_output.has_value(),
+          "element ",
+          i,
+          " of gradients tuple is None, but the corresponding output is a GradientEdge."
+          "This is not supported.");
+      TORCH_CHECK(
+          !mb_output.value().requires_grad(),
+          "element ",
+          i,
+          " of gradients tuple is None, but the corresponding Tensor requires grad");
     }
   }
 
