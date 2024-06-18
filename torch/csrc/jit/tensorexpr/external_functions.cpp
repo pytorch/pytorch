@@ -123,7 +123,7 @@ std::vector<at::Tensor> constructTensors(
     }
   } else {
     // handle quantized
-    std::vector<std::optional<QIData>> qdata(bufs_num, std::nullopt);
+    std::vector<std::optional<QIData>> qdata(bufs_num, c10::nullopt);
     for (const auto& qd : *qdataArg) {
       qdata[qd.first] = qd.second;
     }
@@ -233,7 +233,7 @@ std::vector<at::Tensor> constructTensors2(
     }
   } else {
     // handle quantized
-    std::vector<std::optional<QIData>> qdata(bufs_in_num, std::nullopt);
+    std::vector<std::optional<QIData>> qdata(bufs_in_num, c10::nullopt);
     for (const auto& qd : *qdataArg) {
       qdata[qd.first - bufs_out_num] = qd.second;
     }
@@ -993,10 +993,10 @@ void nnc_aten_upsample_nearest2d(
       x,
       (output_size_h != -1)
           ? std::optional<at::IntArrayRef>({output_size_h, output_size_w})
-          : std::nullopt,
+          : c10::nullopt,
       (scale_factor_h != -1.f) ? std::optional<at::ArrayRef<double>>(
                                      {scale_factor_h, scale_factor_w})
-                               : std::nullopt);
+                               : c10::nullopt);
   memcpy(buf_data[0], r.const_data_ptr(), r.element_size() * r.numel());
 }
 
@@ -1043,10 +1043,10 @@ void nnc_aten_upsample_nearest2d_out(
       x,
       (output_size_h != -1)
           ? std::optional<at::IntArrayRef>({output_size_h, output_size_w})
-          : std::nullopt,
+          : c10::nullopt,
       (scale_factor_h != -1.f) ? std::optional<at::ArrayRef<double>>(
                                      {scale_factor_h, scale_factor_w})
-                               : std::nullopt);
+                               : c10::nullopt);
   buf_data[0] = r.data_ptr();
   c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
   buf_data[bufs_in_num + bufs_out_num] = r.getIntrusivePtr().get();
@@ -1089,7 +1089,7 @@ void nnc_aten_quantize_per_tensor_out(
       buf_dims,
       buf_strides,
       buf_dtypes,
-      std::nullopt,
+      c10::nullopt,
       bufs_out_num);
   // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
   at::Tensor x = tensors[1];
@@ -1214,7 +1214,7 @@ void nnc_aten_conv1d_out(
       buf_dims,
       buf_strides,
       buf_dtypes,
-      std::nullopt,
+      c10::nullopt,
       bufs_out_num);
 
   at::Tensor r;

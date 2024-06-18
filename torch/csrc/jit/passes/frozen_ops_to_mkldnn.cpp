@@ -1105,7 +1105,7 @@ class MKLDNNSubgraphSlicer {
         aliasDb_.moveAfterTopologicallyValid(consumer, producer);
 
     if (!canMerge) {
-      return std::nullopt;
+      return c10::nullopt;
     }
 
     SubgraphUtils::mergeNodeIntoSubgraphAndUpdateAliasing(

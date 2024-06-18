@@ -31,7 +31,7 @@ inline Tensor embedding(
     bool sparse) {
   auto input_ = input;
 
-  if (padding_idx != std::nullopt) {
+  if (padding_idx != c10::nullopt) {
     if (*padding_idx > 0) {
       TORCH_CHECK(
           *padding_idx < weight.size(0),
@@ -46,7 +46,7 @@ inline Tensor embedding(
     padding_idx = -1;
   }
 
-  if (max_norm != std::nullopt) {
+  if (max_norm != c10::nullopt) {
     input_ = input_.contiguous();
     // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     _no_grad_embedding_renorm_(weight, input_, *max_norm, norm_type);
@@ -149,7 +149,7 @@ inline Tensor embedding_bag(
     TORCH_CHECK(false, "mode has to be one of sum, mean or max");
   }
 
-  if (max_norm != std::nullopt) {
+  if (max_norm != c10::nullopt) {
     // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     _no_grad_embedding_renorm_(weight, input_, *max_norm, norm_type);
   }
