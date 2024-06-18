@@ -413,6 +413,14 @@ class TS2FXGraphConverter:
             f"{root_attr_name}.{attr_name}" if root_attr_name else attr_name
         )
 
+    def convert_prim_SetAttr(self, node: torch._C.Node):
+        attr_name = node.s("name")
+        fx_attr_node = self.fx_graph.get_attr(attr_name)
+        
+        ts_graph_tensor_input = self.get_fx_value(tuple(node.inputs())[1])
+
+        self.fx_graph.call_function(torch.Tensor.copy_, (fx_attr_node, ts_graph_tensor_input))
+
     def convert_call_function_op(self, node: torch._C.Node):
         target = get_op_overload(node)
 
@@ -650,6 +658,14 @@ class TS2FXGraphConverter:
         target = torch.ops.profiler._record_function_exit
         args = tuple(self.get_fx_value(input) for input in node.inputs())
         self.fx_graph.call_function(target, args)
+
+    # def convert_prim_Enter(self, node: torch._C.Node):
+    #     # export treats prim::Enter as noop
+    #     return
+
+    # def convert_prim_Exit(self, node: torch._C.Node):
+    #     # export treats prim::Exit as noop
+    #     return
 
     def _convert_standard_operators(self, node: torch._C.Node):
         target = kind_to_standard_operators[node.kind()]
