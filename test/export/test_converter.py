@@ -728,8 +728,7 @@ class TestConverter(TestCase):
     #         inp = (torch.randn(3, 2), 1)
     #         self._check_equal_ts_ep_converter(Module(), inp)
 
-    # TODO: Did not call prim::GetAttr
-    def test_prim_GetAttr(self):
+    def test_get_tensor_constants(self):
         # Since self.data is only read but not written, it is lifted as
         # constant tensors.
         class Foo(torch.nn.Module):
@@ -801,28 +800,16 @@ class TestConverter(TestCase):
             Module(), inp, ["script"], lifted_tensor_buffer, check_persistent=True
         )
 
-        # class Module(torch.nn.Module):
-        #     def __init__(self):
-        #         super().__init__()
-        #         self.count = 0
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.count = 0
 
-        #     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        #         self.count += 1
-        #         return x + self.count
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return x + self.count
 
-        # inp = (torch.randn(3, 2),)
-        # ep = torch.export._trace._export(Module(), inp, strict=False, pre_dispatch=True)
-        # print(ep.graph)
-        # for _ in range(3):
-        #     print("export out:", ep.module()(*inp))
-
-        # scripted = torch.jit.script(Module())
-        # print("scripted:", scripted.graph)
-        # for _ in range(3):
-        #     print("scripted out:", scripted(*inp))
-
-        # inp = (torch.ones(3,2),)
-        # self._check_equal_ts_ep_converter(Module(), inp, ["script"])
+        inp = (torch.ones(3, 2),)
+        self._check_equal_ts_ep_converter(Module(), inp, ["script"])
 
 
 if __name__ == "__main__":

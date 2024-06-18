@@ -212,6 +212,7 @@ class TS2FXGraphConverter:
         ts_graph: Union[torch._C.Graph, torch._C.Block],
         name_to_param_map: Dict[str, torch.Tensor],
         name_to_buffer_map: Dict[str, torch.Tensor],
+        name_to_non_tensor_attr_map: Dict[str, Any],
         blocks_to_lifted_attrs: Dict[torch._C.Block, Set[str]],
     ):
         self.ts_graph = ts_graph
@@ -228,6 +229,7 @@ class TS2FXGraphConverter:
         ] = {}
         self.constant_map: Dict[str, Any] = {}
         self.attribute_map: Dict[str, Any] = {}
+        self.name_to_non_tensor_attr_map = name_to_non_tensor_attr_map
 
         self.subgraphs: Dict[str, torch.fx.GraphModule] = {}
 
@@ -406,20 +408,30 @@ class TS2FXGraphConverter:
         output_name = node.output().debugName()
 
         attr_name = node.s("name")
-        input_name = node.input().debugName()
+        if attr_name in self.name_to_non_tensor_attr_map:
+            constant = self.name_to_non_tensor_attr_map[attr_name]
+            self.constant_map[output_name] = constant
+        else:
+            input_name = node.input().debugName()
 
-        root_attr_name = get_attr(input_name)
-        fx_node_name = f"{root_attr_name}.{attr_name}" if root_attr_name else attr_name
-        self.attribute_map[output_name] = fx_node_name
+            root_attr_name = get_attr(input_name)
+            fx_node_name = (
+                f"{root_attr_name}.{attr_name}" if root_attr_name else attr_name
+            )
+            self.attribute_map[output_name] = fx_node_name
 
-        # ts graph does not lift attributes as input nodes. So attribute may
-        # be ignored by name may have not been converted by convert_graph_inputs().
-        # If so, we manually insert get_attr fx node.
-        if fx_node_name not in self.name_to_node:
-            self.name_to_node[fx_node_name] = self.fx_graph.get_attr(fx_node_name)
+            # ts graph does not lift attributes as input nodes. So attribute may
+            # be ignored by name may have not been converted by convert_graph_inputs().
+            # If so, we manually insert get_attr fx node.
+            if fx_node_name not in self.name_to_node:
+                self.name_to_node[fx_node_name] = self.fx_graph.get_attr(fx_node_name)
 
     def convert_prim_SetAttr(self, node: torch._C.Node):
         attr_name = node.s("name")
+        # Export specializes on non-tensor constants so we skip SetAttr
+        if attr_name in self.name_to_non_tensor_attr_map:
+            return
+
         fx_attr_node = self.fx_graph.get_attr(attr_name)
 
         ts_graph_tensor_input = self.get_fx_value(tuple(node.inputs())[1])
@@ -606,7 +618,11 @@ class TS2FXGraphConverter:
         subgraph_nodes = []
         for block in node.blocks():
             subgraph_converter = TS2FXGraphConverter(
-                block, dict(), dict(), self.blocks_to_lifted_attrs
+                block,
+                dict(),
+                dict(),
+                self.name_to_non_tensor_attr_map,
+                self.blocks_to_lifted_attrs,
             )
             subgraph_converter.constant_map = self.constant_map
             subgraph_converter.attribute_map = self.attribute_map
@@ -747,7 +763,8 @@ class TS2EPConverter:
             if isinstance(ts_model, torch.jit.ScriptModule)
             else dict()
         )
-        self.getattr_tensor_to_buffer()
+        self.name_to_non_tensor_attr_map: Dict[str, Any] = {}
+        self.get_attributes()
 
     def convert(self) -> ExportedProgram:
         blocks_to_lifted_attrs = get_block_to_lifted_attrs(self.ts_graph)
@@ -756,6 +773,7 @@ class TS2EPConverter:
             self.ts_graph,
             self.name_to_param_map,
             self.name_to_buffer_map,
+            self.name_to_non_tensor_attr_map,
             blocks_to_lifted_attrs,
         )
         gm = graph_converter.convert()
@@ -790,9 +808,12 @@ class TS2EPConverter:
 
         return ep
 
-    def getattr_tensor_to_buffer(self):
+    def get_attributes(self):
         for node in self.ts_graph.nodes():
             if node.kind() == "prim::GetAttr":
                 attr_name = node.s("name")
-                tensor_constant = getattr(self.ts_model, attr_name)
-                self.name_to_buffer_map[attr_name] = tensor_constant
+                constant = getattr(self.ts_model, attr_name)
+                if isinstance(constant, torch.Tensor):
+                    self.name_to_buffer_map[attr_name] = constant
+                else:
+                    self.name_to_non_tensor_attr_map[attr_name] = constant
