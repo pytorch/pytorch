@@ -18,7 +18,7 @@ from ..source import (
     FSDPNNModuleSource,
     GetItemSource,
     NNModuleSource,
-    UnspecializedNNModuleSource,
+    NotNNModuleSource,
 )
 from ..utils import (
     get_custom_getattr,
@@ -983,12 +983,12 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
 
     @staticmethod
     def _wrap_source(source):
-        if not isinstance(source, (FSDPNNModuleSource, UnspecializedNNModuleSource)):
+        if not isinstance(source, (FSDPNNModuleSource, NotNNModuleSource)):
             if torch._dynamo.config.skip_fsdp_guards:
                 return FSDPNNModuleSource(source)
             else:
                 # this makes us behave like a usual UnspecializedNNModuleVariable for guarding purposes
-                return UnspecializedNNModuleSource(source)
+                return NotNNModuleSource(source)
         else:
             return source
 
