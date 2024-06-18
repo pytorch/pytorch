@@ -96,7 +96,7 @@ import torch.nn.functional as F
 from torch.testing._internal import jit_utils
 from torch.testing._internal.common_jit import check_against_reference
 from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
-    suppress_warnings, BUILD_WITH_CAFFE2, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, TestCase, \
+    suppress_warnings, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, TestCase, \
     freeze_rng_state, slowTest, TemporaryFileName, \
     enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype, num_profiled_runs, \
     skipIfCrossRef, skipIfTorchDynamo
@@ -4967,6 +4967,7 @@ a")
                     test(backward=True)
                     test(backward=True)
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_index(self):
         def consec(size, start=0):
             numel = torch.tensor(size).prod().item()
@@ -6431,6 +6432,7 @@ a")
             cu = torch.jit.CompilationUnit(dedent(inspect.getsource(func_float_int)))
             cu.func_float_int(5.3, 0)
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_math_ops(self):
         def checkMathWrap(func_name, num_args=1, is_float=True, **args):
             if is_float:
@@ -6959,6 +6961,7 @@ a")
         self.assertFalse(test_all_float_list([3.14, 0, 8.9]))
 
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_number_math(self):
         ops_template = dedent('''
         def func():
@@ -7207,6 +7210,7 @@ a")
 
             test(op, tensor, const, swap_args)
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_tensor_number_math(self):
         self._test_tensor_number_math()
 
@@ -7643,6 +7647,7 @@ dedent """
         with self.assertRaises(Exception):
             foo(2)
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_isinstance(self):
         # test isinstance operator for static type checking
         template = dedent('''
@@ -15294,56 +15299,6 @@ dedent """
                     continue
                 self.assertEqual(value, getattr(loaded, "_" + name))
 
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
-    @unittest.skipIf(not BUILD_WITH_CAFFE2, "PyTorch is build without Caffe2 support")
-    def test_old_models_bc(self):
-        model = {
-            'archive/version': b'1',
-            'archive/code/archive.py':
-                b'''
-                op_version_set = 0
-                def forward(self,
-                    _0: Tensor) -> Tensor:
-                  _1 = torch.zeros([10], dtype=6, layout=0, device=torch.device("cpu"))
-                  result = torch.to(torch.fill_(_1, 5), dtype=6, layout=0, device=torch.device("cpu"),
-                                    non_blocking=False, copy=False)
-                  result2 = torch.rand([10], dtype=6, layout=0, device=torch.device("cpu"))
-                  result3 = torch.rand_like(result2, dtype=6, layout=0, device=torch.device("cpu"))
-                  _2 = torch.add(torch.add(result, result2, alpha=1), result3, alpha=1)
-                  return _2
-                ''',
-            'archive/attributes.pkl': b'\x80\x02](e.',
-            'archive/libs.py': b'op_version_set = 0\n',
-            'archive/model.json':
-                b'''
-                {
-                   "protoVersion":"2",
-                   "mainModule":{
-                      "torchscriptArena":{
-                         "key":"code/archive.py"
-                      },
-                      "name":"archive",
-                      "optimize":true
-                   },
-                   "producerName":"pytorch",
-                   "producerVersion":"1.0",
-                   "libs":{
-                      "torchscriptArena":{
-                         "key":"libs.py"
-                      }
-                   }
-                }'''}
-        with TemporaryFileName() as fname:
-            archive_name = os.path.basename(os.path.normpath(fname))
-            with zipfile.ZipFile(fname, 'w') as archive:
-                for k, v in model.items():
-                    archive.writestr(k, v)
-
-            with open(fname, "rb") as f:
-                fn = torch.jit.load(f)
-
-        x = torch.zeros(10)
-        fn(x)
 
     def test_submodule_attribute_serialization(self):
         class S(torch.jit.ScriptModule):
