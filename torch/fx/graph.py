@@ -476,7 +476,7 @@ class CodeGen:
                 qualified_name = _get_qualified_name(type(arg))
                 global_name = add_global(qualified_name, type(arg))
                 return f"{global_name}{repr(tuple(arg))}"
-            elif isinstance(arg, torch._ops.OpOverload):
+            elif isinstance(arg, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)):
                 qualified_name = _get_qualified_name(arg)
                 global_name = add_global(qualified_name, arg)
                 return f"{global_name}"

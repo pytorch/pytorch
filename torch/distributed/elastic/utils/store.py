@@ -7,14 +7,16 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+from contextlib import contextmanager
 from datetime import timedelta
 from typing import List
-from contextlib import contextmanager
+
 
 _NUM_MEMBERS = "/num_members"
 _LAST_MEMBER_CHECKIN = "/last_member"
 
 __all__ = ["store_timeout", "get_all", "synchronize", "barrier"]
+
 
 @contextmanager
 def store_timeout(store, timeout: float):
@@ -52,9 +54,7 @@ def get_all(store, rank: int, prefix: str, world_size: int):
      value3 = values[2] # retrieves the data for key torchelastic/data2
 
     """
-    data_arr = store.multi_get(
-        [f"{prefix}{idx}" for idx in range(world_size)]
-    )
+    data_arr = store.multi_get([f"{prefix}{idx}" for idx in range(world_size)])
 
     barrier_key = _barrier_nonblocking(
         store=store,
@@ -101,7 +101,6 @@ def _barrier_nonblocking(store, world_size: int, key_prefix: str) -> str:
     num_members_key = key_prefix + _NUM_MEMBERS
     last_member_key = key_prefix + _LAST_MEMBER_CHECKIN
 
-
     idx = store.add(num_members_key, 1)
     if idx == world_size:
         store.set(last_member_key, "<val_ignored>")
@@ -126,5 +125,7 @@ def barrier(
     """
 
     with store_timeout(store, barrier_timeout):
-        last_member_key = _barrier_nonblocking(store=store, world_size=world_size, key_prefix=key_prefix)
+        last_member_key = _barrier_nonblocking(
+            store=store, world_size=world_size, key_prefix=key_prefix
+        )
         store.get(last_member_key)
