@@ -877,6 +877,9 @@ Either create the tensor outside the compiled region, or do not set the tensor t
     @classmethod
     def call_nn_parameter(cls, tx, data=None, requires_grad=True):
         """A call to torch.nn.Parameter() gets lifted to before the graph"""
+        if tx.export:
+            unimplemented("nn parameter construction not supported with export")
+
         if isinstance(requires_grad, variables.VariableTracker):
             try:
                 requires_grad = requires_grad.as_python_constant()
