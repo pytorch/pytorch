@@ -119,6 +119,18 @@ class MemoryDep(Dep):
         """
         return sympy_subs(self.index, {v: 0 for v in self.var_names})
 
+    def normalize(self) -> "MemoryDep":
+        """
+        Normalize by merging loops. The different to normalize_with_stride_order is,
+        this method does not reorder loops while normalize_with_stride_order reorder
+        loops based on stride order.
+        """
+        return MemoryDep(
+            self.name,
+            *_RecordLoadStoreInner._normalize(self.index, self.ranges),  # type: ignore[arg-type]
+            self.mode,
+        )
+
     def normalize_with_stride_order(self, prefix="t"):
         r"""
         Used to decide if two MemoryDep does not equal due to different loop orders.
@@ -403,43 +415,30 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         self._writes: Set[MemoryDep] = set()
         self._index_exprs: Set[IndexExprDep] = set()
         self._var_ranges: VarRanges = var_ranges
-        self._normalize: bool = normalize
+        self._should_normalize: bool = normalize
 
-    def canonicalize(
-        self, index: sympy.Expr
+    @staticmethod
+    def drop_unused_symbols(index, var_names, sizes):
+        """
+        Reduction has last (reduced) dim in its sizes, but
+        downstream users won't.  Normalize this away.
+        """
+        if not isinstance(index, sympy.Expr):
+            # index can be an int
+            return
+        free_symbols = index.free_symbols
+        while var_names and var_names[-1] not in free_symbols:
+            var_names.pop()
+            sizes.pop()
+
+    @classmethod
+    def _normalize(
+        cls, index: sympy.Expr, var_ranges: VarRanges
     ) -> Tuple[sympy.Expr, Tuple[sympy.Symbol, ...], Tuple[sympy.Expr, ...]]:
-        def drop_unused_symbols(index, var_names, sizes):
-            """
-            Reduction has last (reduced) dim in its sizes, but
-            downstream users won't.  Normalize this away.
-            """
-            if not isinstance(index, sympy.Expr):
-                # index can be an int
-                return
-            free_symbols = index.free_symbols
-            while var_names and var_names[-1] not in free_symbols:
-                var_names.pop()
-                sizes.pop()
-
-        if not self._normalize:
-            sizes = [V.graph.sizevars.simplify(x) for x in self._var_ranges.values()]
-            var_names = [k for k, v in zip(self._var_ranges.keys(), sizes) if v != 1]
-            sizes = [v for v in sizes if v != 1]
-
-            drop_unused_symbols(index, var_names, sizes)
-
-            return index, tuple(var_names), tuple(sizes)  # type: ignore[return-value, arg-type]
-
         # Try to further simplify the indexes even if simplify_loops didn't
         # convert it to the simplest form because of the interference from
         # different indexing formulas.
         free_symbols = index.free_symbols
-        var_ranges = {
-            k: V.graph.sizevars.simplify(v)
-            for k, v in self._var_ranges.items()
-            # TODO(jansel): explore this further normalization
-            # if k in free_symbols
-        }
         index_vars = [*var_ranges.keys()]
         sizes = tuple(var_ranges.values())  # type: ignore[assignment]
         new_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
@@ -456,8 +455,27 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
 
         new_vars = [*new_vars.keys()]
         new_sizes = [*new_sizes]
-        drop_unused_symbols(index, new_vars, new_sizes)
+        cls.drop_unused_symbols(index, new_vars, new_sizes)
         return index, tuple(new_vars), tuple(new_sizes)  # type: ignore[arg-type]
+
+    def canonicalize(
+        self, index: sympy.Expr
+    ) -> Tuple[sympy.Expr, Tuple[sympy.Symbol, ...], Tuple[sympy.Expr, ...]]:
+        if not self._should_normalize:
+            sizes = [V.graph.sizevars.simplify(x) for x in self._var_ranges.values()]
+            var_names = [k for k, v in zip(self._var_ranges.keys(), sizes) if v != 1]
+            sizes = [v for v in sizes if v != 1]
+
+            self.drop_unused_symbols(index, var_names, sizes)
+
+            return index, tuple(var_names), tuple(sizes)  # type: ignore[return-value, arg-type]
+        var_ranges = {
+            k: V.graph.sizevars.simplify(v)
+            for k, v in self._var_ranges.items()
+            # TODO(jansel): explore this further normalization
+            # if k in free_symbols
+        }
+        return self._normalize(index, var_ranges)
 
     def load(self, name: str, index: sympy.Expr) -> str:
         self._reads.add(MemoryDep(name, *self.canonicalize(index)))

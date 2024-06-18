@@ -787,12 +787,7 @@ class SchedulerNode(BaseSchedulerNode):
     ) -> None:
         self._compute_attrs(extra_indexing_constraints=extra_indexing_constraints)
 
-    def apply_new_loop_order(self, new_order: Sequence[int]) -> None:
-        self._body = self._body.reorder_iter_loops(
-            new_order,
-        )
-        self._sizes = self._body.sizes
-
+    def refresh_dependencies(self, normalize: bool) -> None:
         # Fake dependencies are added manually. They can not be analyzed from
         # extract_read_writes. Find them out and apply manually.
         fake_deps = {
@@ -803,9 +798,17 @@ class SchedulerNode(BaseSchedulerNode):
         # later
         self.set_read_writes(
             dependencies.extract_read_writes(
-                self._body, *self._sizes, normalize=False
+                self._body, *self._sizes, normalize=normalize
             ).with_read(fake_deps)
         )
+
+    def apply_new_loop_order(self, new_order: Sequence[int]) -> None:
+        self._body = self._body.reorder_iter_loops(
+            new_order,
+        )
+        self._sizes = self._body.sizes
+
+        self.refresh_dependencies(normalize=False)
 
     def reorder_loops_by_dep_pair(
         self, self_dep: MemoryDep, other_dep: MemoryDep
@@ -1943,11 +1946,10 @@ class Scheduler:
                 snode._body = snode._body.merge_loops()
                 snode._sizes = snode._body.sizes
 
-                snode.set_read_writes(
-                    dependencies.extract_read_writes(
-                        snode._body, *snode._sizes, normalize=True
-                    )
-                )
+                # merge_loops is called after loop reordering.
+                # We still need retain fake dependencies since codegen the
+                # estimated amount of memory access rely on them.
+                snode.refresh_dependencies(normalize=True)
 
                 # Note that for CPU backend, merging loops will change
                 # snode.group. It's fine for Triton backend.
@@ -2455,6 +2457,13 @@ class Scheduler:
             0
         ]
 
+        if lhs_dep.num_vars != rhs_dep.num_vars:
+            # this can happen due to we don't merge loops.
+            # We can not do loop reordering in this case right now
+            # Simply returning true if the two Deps are the same after
+            # normalization (merging loops)
+            return lhs_dep.normalize() == rhs_dep.normalize()
+
         # Only reorder loops for pointwise for now
         if not node1.is_reduction():
             node1.reorder_loops_by_dep_pair(lhs_dep, rhs_dep)
@@ -2522,6 +2531,12 @@ class Scheduler:
                 node1, node2
             )
 
+        loop_ordering_log.debug(
+            "%s and %s has%s shared data",
+            node1.get_name(),
+            node2.get_name(),
+            " no" if no_shared_data else "",
+        )
         if no_shared_data and (
             not config.aggressive_fusion or node1.is_reduction() or node2.is_reduction()
         ):
@@ -2633,6 +2648,12 @@ class Scheduler:
             read_name = read.name
             if read_name in self.mutation_renames:
                 read_name = self.mutation_renames[read_name]
+
+            if read.num_vars != write.num_vars:
+                # merge loops
+                read = read.normalize()
+                write = write.normalize()
+
             return (
                 read_name == write.name
                 and not free_symbol_is_type(read.index, SymT.TMP)

@@ -289,6 +289,25 @@ class LoopOrderingTest(TestCase):
         # The two kernels are not fused due to c is broadcasted
         self.assertEqual(2, metrics.generated_kernel_count)
 
+    def test_view(self):
+        """
+        Passing this test relies that we compare normalized MemoryDep.
+        Normlaization here means merging contiguous loops.
+
+        To make loop reordering work, we don't merge loops when creating
+        SchedulerNode. Thus we need explicitly normalize MemoryDep when
+        we check if two MemeoryDep matches.
+        """
+
+        def f(x):
+            y = x.sin()
+            x = realize(x.view(10, 10))
+            return x, y
+
+        x = torch.randn(100)
+        self.do_acc_test(f, x)
+        self.assertEqual(1, metrics.generated_kernel_count)
+
 
 if __name__ == "__main__":
     if HAS_CUDA:
