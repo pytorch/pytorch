@@ -750,7 +750,6 @@ class GraphLowering(torch.fx.Interpreter):
                 for x in value:
                     register(x)
             if isinstance(value, ir.TensorBox):
-                assert value.data.data is not None
                 for read_name in value.get_read_names():
                     self.name_to_users[read_name].append(value)
 

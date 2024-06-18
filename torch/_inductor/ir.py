@@ -290,8 +290,7 @@ class IRNode:
         self.origins = set(self._current_origins)
         self.traceback = traceback.format_stack() if config.debug_ir_traceback else None
 
-    @cache_on_self
-    def get_read_names(self):
+    def get_read_names(self) -> Set[str]:
         raise NotImplementedError(f"NYI on {type(self)}")
 
     def get_traceback(self):
@@ -382,7 +381,16 @@ class Operation:
         raise NotImplementedError
 
     def get_origin_node(self):
+        assert hasattr(self, "origin_node")
         return self.origin_node
+
+    def get_origins(self):
+        assert hasattr(self, "origins")
+        return self.origins
+
+    def get_operation_name(self) -> str:
+        assert self.operation_name is not None
+        return self.operation_name
 
     def is_extern(self):
         return False
@@ -396,8 +404,7 @@ class Operation:
     def is_user_of(self, name):
         return name in self.get_read_names()
 
-    @cache_on_self
-    def get_read_names(self):
+    def get_read_names(self) -> Set[str]:
         return {dep.name for dep in self.get_reads()}
 
     def get_reads(self):
@@ -536,7 +543,7 @@ class Loops(IRNode, Operation):
                     self.get_size(),
                 ).reads
 
-    def get_read_names(self):
+    def get_read_names(self) -> Set[str]:
         return {dep.name for dep in self.get_reads()}
 
     def get_reduction_size(self):
@@ -1987,7 +1994,7 @@ class BaseView(IRNode):
     def is_module_buffer(self):
         return self.data.is_module_buffer()  # type: ignore[attr-defined]
 
-    def get_read_names(self):
+    def get_read_names(self) -> Set[str]:
         return self.data.get_read_names()
 
     def get_reads(self):
@@ -3189,8 +3196,8 @@ class Buffer(IRNode):
             return [self.layout.target.get_name()]
         return ()
 
-    def get_read_names(self):
-        return self.get_name()
+    def get_read_names(self) -> Set[str]:
+        return {self.get_name()}
 
     def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         return set()

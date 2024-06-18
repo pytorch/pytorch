@@ -56,8 +56,6 @@ if TYPE_CHECKING:
     import triton
 
     from ..graph import GraphLowering
-    from ..scheduler import SchedulerBuffer
-    from .. import ir
 
 
 pexpr = PythonPrinter().doprint
@@ -1509,7 +1507,7 @@ class WrapperCodeGen(CodeGen):
             )
         )
 
-    def codegen_allocation(self, buffer: ir.Buffer):
+    def codegen_allocation(self, buffer: ir.IRNode):
         name = buffer.get_name()
 
         if name in V.graph.removed_buffers or name in self.allocated:
