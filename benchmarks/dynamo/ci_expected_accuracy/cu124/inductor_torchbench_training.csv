@@ -66,7 +66,7 @@ dlrm,pass,6
 
 
 
-drq,pass,6
+drq,pass,7
 
 
 
@@ -98,7 +98,7 @@ hf_Bert_large,pass,6
 
 
 
-hf_BigBird,pass,52
+hf_BigBird,pass,49
 
 
 
