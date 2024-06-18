@@ -775,7 +775,7 @@ def meta__scaled_dot_product_cudnn(fake_mode, func, *args, **kwargs):
     key = kwargs["key"]
     value = kwargs["value"]
     compute_log_sumexp = kwargs["compute_log_sumexp"]
-    # unused: attn_bias, dropout_p, is_causal, scale
+    # unused: attn_bias, dropout_p, is_causal, return_debug_mask, scale
 
     def convert_tensor(t, device):
         return FakeTensor(fake_mode, t, device)

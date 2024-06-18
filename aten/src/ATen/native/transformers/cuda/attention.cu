@@ -756,9 +756,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
     bool compute_logsumexp,
     double dropout_p,
     bool is_causal,
+    bool return_debug_mask,
     c10::optional<double> scale) {
   // Used for tracking usage statistics
   C10_LOG_API_USAGE_ONCE("torch.sdpa.flash_attention_cudnn");
+  // TODO(eqy): debug mask support
   // Query (Batch x Num_heads x Q_seq_len  x Dim_per_head)
   // Key   (Batch x Num_heads x KV_seq_len x Dim_per_head)
   // Value (Batch x Num_heads x KV_seq_len x Dim_per_head)
