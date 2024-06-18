@@ -164,7 +164,7 @@ horizontally and fused implementations as fusing vertically on top of that.
 In general, the performance ordering of the 3 implementations is fused > foreach > for-loop.
 So when applicable, we default to foreach over for-loop. Applicable means the foreach
 implementation is available, the user has not specified any implementation-specific kwargs
-(e.g., fused, foreach, differentiable), and all tensors are native. Note that while fused 
+(e.g., fused, foreach, differentiable), and all tensors are native. Note that while fused
 should be even faster than foreach, the implementations are newer and we would like to give
 them more bake-in time before flipping the switch everywhere. We summarize the stability status
 for each implementation on the second table below, you are welcome to try them out though!
