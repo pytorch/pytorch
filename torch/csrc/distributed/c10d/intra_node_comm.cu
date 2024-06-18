@@ -132,8 +132,6 @@ struct P2pState {
   uint32_t signals1[kMaxAllReduceBlocks][kMaxDevices];
 };
 
-static_assert(sizeof(P2pState) <= kP2pStateSize);
-
 template <uint32_t kWorldSize, bool kAligned>
 static __global__ void oneShotAllReduceKernel(
     at::BFloat16* input,
@@ -524,7 +522,7 @@ at::Tensor IntraNodeComm::oneShotAllReduce(
   const bool fuseInputCopy = isAligned && blocks.x < kMaxAllReduceBlocks;
   if (!fuseInputCopy) {
     AT_CUDA_CHECK(cudaMemcpyAsync(
-        symmetricMemory_->get_buffer_ptrs_dev()[rank_],
+        buffers_[rank_],
         input.data_ptr(),
         input.numel() * input.element_size(),
         cudaMemcpyDeviceToDevice,
@@ -584,7 +582,7 @@ at::Tensor IntraNodeComm::twoShotAllReduce(
 
   at::cuda::OptionalCUDAGuard guard(input.get_device());
   AT_CUDA_CHECK(cudaMemcpyAsync(
-      symmetricMemory_->get_buffer_ptrs_dev()[rank_],
+      buffers_[rank_],
       input.data_ptr(),
       input.numel() * input.element_size(),
       cudaMemcpyDeviceToDevice,
@@ -634,7 +632,7 @@ at::Tensor IntraNodeComm::hybridCubeMeshAllReduce(
 
   at::cuda::OptionalCUDAGuard guard(input.get_device());
   AT_CUDA_CHECK(cudaMemcpyAsync(
-      symmetricMemory_->get_buffer_ptrs_dev()[rank_],
+      buffers_[rank_],
       input.data_ptr(),
       input.numel() * input.element_size(),
       cudaMemcpyDeviceToDevice,
@@ -757,7 +755,15 @@ at::Tensor IntraNodeComm::getBuffer(
     const std::vector<int64_t>& sizes,
     c10::ScalarType dtype,
     int64_t storageOffset) {
-  return symmetricMemory_->get_buffer(rank, sizes, dtype, storageOffset);
+  const auto numel = std::accumulate(sizes.begin(), sizes.end(), 0);
+  const auto elementSize = c10::elementSize(dtype);
+  TORCH_CHECK((numel + storageOffset) * elementSize <= bufferSize_);
+  auto options = at::TensorOptions().dtype(dtype).device(
+      at::kCUDA, at::cuda::current_device());
+  return at::for_blob(buffers_[rank], sizes)
+      .storage_offset(storageOffset)
+      .options(options)
+      .make_tensor();
 }
 
 } // namespace intra_node_comm
