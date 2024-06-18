@@ -214,6 +214,7 @@ class FSDPState(_State):
         return grad
 
     def _root_post_backward_final_callback(self) -> None:
+        logger.debug("FSDP::root_post_backward")
         with torch.profiler.record_function("FSDP::root_post_backward_callback"):
             for state in self._state_ctx.all_states:
                 if state._fsdp_param_group and state._fsdp_param_group.is_unsharded:
@@ -228,7 +229,6 @@ class FSDPState(_State):
             if self._state_ctx.is_last_backward:
                 self._comm_ctx.post_forward_order.clear()
             self._state_ctx.post_backward_final_callback_queued = False
-            logger.debug("FSDP::root_post_backward")
 
     def _finalize_backward(self) -> None:
         if self._fsdp_param_group:
