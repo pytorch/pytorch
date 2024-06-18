@@ -5463,7 +5463,6 @@ class TestNestedTensorSubclass(TestCase):
                     padded, [offsets_wrong], total_L
                 )
 
-<<<<<<< HEAD
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
     @unittest.skipIf(
