@@ -127,6 +127,18 @@ class SymNode:
             self._expr, shape_env, self.pytype, self._hint, self.constant, self.fx_node
         )
 
+    def __eq__(self, other: object) -> bool:
+        return (
+            isinstance(other, SymNode)
+            and self._expr == other._expr
+            and id(self.shape_env) == id(other.shape_env)
+            and self.pytype == other.pytype
+            and self._hint == other._hint
+            and self.constant == other.constant)
+
+    def __hash__(self) -> int:
+        return hash((self._expr, self.pytype, self._hint, self.constant))
+
     @property
     def expr(self):
         return self.shape_env.replace(self._expr)
