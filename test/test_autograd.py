@@ -13383,7 +13383,8 @@ class TestSelectiveActivationCheckpoint(TestCase):
             #
             # Views save the shape of their input, so we expect the second
             # view to save 12, but because during AC packing during forward
-            # saves the shapes of the input for metadata checks later.
+            # saves the shapes of the input for metadata checks later,
+            # we would save the wrong shape during the recompute.
             view_out = (x * x.sum()).view(-1).view(4, 3)
             self.assertEqual(view_out.grad_fn._saved_self_sym_sizes, [12])
             return view_out.exp()
