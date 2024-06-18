@@ -4967,6 +4967,7 @@ a")
                     test(backward=True)
                     test(backward=True)
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_index(self):
         def consec(size, start=0):
             numel = torch.tensor(size).prod().item()
@@ -6431,6 +6432,7 @@ a")
             cu = torch.jit.CompilationUnit(dedent(inspect.getsource(func_float_int)))
             cu.func_float_int(5.3, 0)
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_math_ops(self):
         def checkMathWrap(func_name, num_args=1, is_float=True, **args):
             if is_float:
@@ -6959,6 +6961,7 @@ a")
         self.assertFalse(test_all_float_list([3.14, 0, 8.9]))
 
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_number_math(self):
         ops_template = dedent('''
         def func():
@@ -7207,6 +7210,7 @@ a")
 
             test(op, tensor, const, swap_args)
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_tensor_number_math(self):
         self._test_tensor_number_math()
 
@@ -7643,6 +7647,7 @@ dedent """
         with self.assertRaises(Exception):
             foo(2)
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_isinstance(self):
         # test isinstance operator for static type checking
         template = dedent('''
