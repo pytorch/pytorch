@@ -141,16 +141,16 @@ KERNEL_COUNT_OVERRIDES = {
     "test_sgd_cuda": 4,
     "test_sgd_cpu": 4,
     "test_rmsprop_tensor_lr_capturable_foreach_cuda": 4,
-    "test_adagrad_initial_accumulator_value_weight_decay_foreach_cuda": 3,
-    "test_adagrad_lr_decay_weight_decay_foreach_cuda": 3,
-    "test_adagrad_weight_decay_foreach_cuda": 3,
-    "test_adagrad_weight_decay_maximize_foreach_cuda": 3,
+    "test_adagrad_initial_accumulator_value_weight_decay_foreach_cuda": 2,
+    "test_adagrad_lr_decay_weight_decay_foreach_cuda": 2,
+    "test_adagrad_weight_decay_foreach_cuda": 2,
+    "test_adagrad_weight_decay_maximize_foreach_cuda": 2,
     "test_adagrad_tensor_lr_cpu": 6,
     "test_adagrad_tensor_lr_cuda": 6,
     "test_adamax_tensor_lr_weight_decay_capturable_cuda": 6,
-    "test_asgd_tensor_lr_weight_decay_maximize_capturable_cuda": 8,
+    "test_asgd_tensor_lr_weight_decay_maximize_capturable_cuda": 5,
     "test_asgd_tensor_lr_weight_decay_maximize_capturable_foreach_cuda": 4,
-    "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_cuda": 9,
+    "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_cuda": 6,
     "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_foreach_cuda": 3,
     "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_cuda": 6,
     "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_foreach_cuda": 3,
@@ -163,13 +163,13 @@ KERNEL_COUNT_OVERRIDES = {
 KERNEL_COUNTS = {
     Adam: KernelCounts(multitensor=2, singletensor=8),
     AdamW: KernelCounts(multitensor=2, singletensor=8),
-    NAdam: KernelCounts(multitensor=2, singletensor=11),
+    NAdam: KernelCounts(multitensor=2, singletensor=8),
     Rprop: KernelCounts(multitensor=2, singletensor=8),
     RMSprop: KernelCounts(multitensor=2, singletensor=8),
     Adadelta: KernelCounts(multitensor=2, singletensor=8),
     Adagrad: KernelCounts(multitensor=2, singletensor=8),
     SGD: KernelCounts(multitensor=1, singletensor=8),
-    ASGD: KernelCounts(multitensor=2, singletensor=11),
+    ASGD: KernelCounts(multitensor=2, singletensor=8),
     RAdam: KernelCounts(multitensor=2, singletensor=8),
     Adamax: KernelCounts(multitensor=2, singletensor=8),
 }
@@ -586,7 +586,7 @@ class CompiledOptimizerTests(TestCase):
     test_adagrad_recompile = make_recompile_test(Adagrad, lr=0.01)
     test_asgd_recompile_default = make_recompile_test(ASGD, lr=0.01)
     test_asgd_recompile_single = make_recompile_test(
-        ASGD, kernel_count=11, lr=0.01, foreach=False
+        ASGD, kernel_count=8, lr=0.01, foreach=False
     )
     test_asgd_recompile_foreach = make_recompile_test(ASGD, lr=0.01, foreach=True)
     test_sgd_recompile_single = make_recompile_test(
