@@ -4,7 +4,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/util/DimVector.h>
-#include <optional>
+#include <c10/util/Optional.h>
 #include <sstream>
 #include <vector>
 
