@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
+
 import collections
 import contextlib
 import dataclasses
@@ -7502,6 +7503,9 @@ class MutableBox(IRNode):
 
     def get_read_names(self) -> Set[str]:
         return self.data.get_read_names()
+
+    def get_defining_op(self):
+        return self.data.get_defining_op()
 
     def codegen_reference(self, writer=None):
         return self.data.codegen_reference(writer)

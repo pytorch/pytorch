@@ -235,7 +235,10 @@ class StarDep(Dep):
 # materialize that buffer
 @dataclasses.dataclass(frozen=True)
 class WeakDep(Dep):
+    # Fake dependency on unused buffer
     name: str
+    # Buffer that is doing the mutation
+    mutating_buf: str
 
     @property
     def index(self):
