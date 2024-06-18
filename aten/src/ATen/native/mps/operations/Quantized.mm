@@ -716,12 +716,12 @@ INSTANTIATE_MV(bfloat);
 )METAL_QUANTIZED");
 
 Tensor _convert_weight_to_int4pack_mps(const Tensor& in, int64_t innerKTiles) {
-  TORCH_CHECK(in.dim() == 2,
-      __func__, " : expect weight to be 2D tensor.");
-  TORCH_CHECK(in.dtype() == at::kInt,
-      __func__, " : expect weight to be kInt.");
+  TORCH_CHECK(in.dim() == 2, __func__, " : expect weight to be 2D tensor.");
+  TORCH_CHECK(in.dtype() == at::kInt, __func__, " : expect weight to be kInt.");
   TORCH_CHECK(innerKTiles == 2 || innerKTiles == 4 || innerKTiles == 8,
-      __func__, " : innerKTiles need to be 2, 4, or 8, got ", innerKTiles);
+              __func__,
+              " : innerKTiles need to be 2, 4, or 8, got ",
+              innerKTiles);
 
   auto weight = in.contiguous();
   auto N = weight.size(0);
@@ -730,9 +730,8 @@ Tensor _convert_weight_to_int4pack_mps(const Tensor& in, int64_t innerKTiles) {
   // Create fake shapes for cpu. The meta registration in dynamo requires
   // operator has the same output shape for each device. So creating a fake
   // shape {N / 8, K / (16 * innerKTiles), 32, innerKTiles / 2}
-  auto weight_packed = at::empty(
-      {N / 8, K / (16 * innerKTiles), 32, innerKTiles / 2},
-      at::TensorOptions().dtype(at::kInt).device(at::kMPS));
+  auto weight_packed = at::empty({N / 8, K / (16 * innerKTiles), 32, innerKTiles / 2},
+                                 at::TensorOptions().dtype(at::kInt).device(at::kMPS));
 
   MPSStream* mpsStream = getCurrentMPSStream();
   std::array<uint32_t, 4> sizes = {static_cast<uint32_t>(N), static_cast<uint32_t>(K), 0, 0};
