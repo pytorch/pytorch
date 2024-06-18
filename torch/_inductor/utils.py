@@ -1051,12 +1051,12 @@ def _rocm_native_device_arch_name(device):
 @functools.lru_cache(None)
 def try_import_ck_lib():
     try:
-        import ck4inductor  # type: ignore[import-untyped]
-        from ck4inductor.universal_gemm.gen_instances import (  # type: ignore[import-untyped]
+        import ck4inductor  # type: ignore[import]
+        from ck4inductor.universal_gemm.gen_instances import (  # type: ignore[import]
             gen_ops_library,
             gen_ops_preselected,
         )
-        from ck4inductor.universal_gemm.op import (  # type: ignore[import-untyped]
+        from ck4inductor.universal_gemm.op import (  # type: ignore[import]
             CKGemmOperation,
         )
 
