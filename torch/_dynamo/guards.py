@@ -83,6 +83,7 @@ from .source import (
     GradSource,
     LocalSource,
     NNModuleSource,
+    NotNNModuleSource,
     NumpyTensorSource,
     ODictGetItemSource,
     OptimizerSource,
@@ -90,7 +91,6 @@ from .source import (
     ShapeEnvSource,
     TupleIteratorGetItemSource,
     TypeSource,
-    UnspecializedNNModuleSource,
     WeakRefCallSource,
 )
 from .types import CacheEntry, ExtraState, GuardedCode, GuardFail, GuardFn  # noqa: F401
@@ -830,12 +830,7 @@ class GuardBuilder(GuardBuilderBase):
             )
         elif istype(
             source,
-            (
-                OptimizerSource,
-                NNModuleSource,
-                UnspecializedNNModuleSource,
-                FSDPNNModuleSource,
-            ),
+            (OptimizerSource, NNModuleSource, NotNNModuleSource, FSDPNNModuleSource),
         ):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager
