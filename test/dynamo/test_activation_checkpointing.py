@@ -19,7 +19,11 @@ from torch._higher_order_ops.wrap import tag_activation_checkpoint
 from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.two_tensor import TwoTensor
-from torch.utils.checkpoint import _pt2_selective_checkpoint_context_fn_gen, checkpoint
+from torch.utils.checkpoint import (
+    checkpoint,
+    CheckpointPolicy,
+    create_selective_checkpoint_contexts,
+)
 
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 requires_distributed = functools.partial(
@@ -105,8 +109,11 @@ def op_count(gm):
 
 
 def _get_custom_policy(no_recompute_list=None):
-    def _custom_policy(mode, func, *args, **kwargs):
-        return func in no_recompute_list
+    def _custom_policy(ctx, func, *args, **kwargs):
+        if func in no_recompute_list:
+            return CheckpointPolicy.MUST_SAVE
+        else:
+            return CheckpointPolicy.PREFER_RECOMPUTE
 
     return _custom_policy
 
@@ -530,7 +537,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             no_recompute_list = [
                 torch.ops.aten.mm.default,
             ]
-            return _pt2_selective_checkpoint_context_fn_gen(
+            return create_selective_checkpoint_contexts(
                 _get_custom_policy(no_recompute_list=no_recompute_list)
             )
 
@@ -580,7 +587,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             no_recompute_list = [
                 torch.ops.aten.mm.default,
             ]
-            return _pt2_selective_checkpoint_context_fn_gen(
+            return create_selective_checkpoint_contexts(
                 _get_custom_policy(no_recompute_list=no_recompute_list)
             )
 
@@ -650,7 +657,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
         def selective_checkpointing_context_fn():
             meta = {}
-            return _pt2_selective_checkpoint_context_fn_gen(_get_custom_policy(meta))
+            return create_selective_checkpoint_contexts(_get_custom_policy(meta))
 
         def gn(x, y):
             return torch.sigmoid(
@@ -698,7 +705,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
     )
     def test_compile_selective_checkpoint_partial_ctx_fn(self):
         def selective_checkpointing_context_fn(no_recompute_list):
-            return _pt2_selective_checkpoint_context_fn_gen(
+            return create_selective_checkpoint_contexts(
                 _get_custom_policy(no_recompute_list=no_recompute_list)
             )
 
@@ -751,7 +758,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 torch.ops.aten.mm.default,
                 torch.ops.aten.sigmoid.default,
             ]
-            return _pt2_selective_checkpoint_context_fn_gen(
+            return create_selective_checkpoint_contexts(
                 _get_custom_policy(no_recompute_list=no_recompute_list),
             )
 
@@ -803,7 +810,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 torch.ops.aten.mm.default,
                 torch.ops.aten.sigmoid.default,
             ]
-            return _pt2_selective_checkpoint_context_fn_gen(
+            return create_selective_checkpoint_contexts(
                 _get_custom_policy(no_recompute_list=no_recompute_list)
             )
 
@@ -854,7 +861,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 no_recompute_list = [
                     torch.ops.aten.sigmoid.default,
                 ]
-                return _pt2_selective_checkpoint_context_fn_gen(
+                return create_selective_checkpoint_contexts(
                     _get_custom_policy(no_recompute_list=no_recompute_list)
                 )
 
