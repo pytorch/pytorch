@@ -11,15 +11,14 @@ from torch.distributed._tensor.ops.utils import (
     expand_to_full_mesh_op_strategy,
     register_op_strategy,
 )
-
 from torch.distributed._tensor.placement_types import (
     Partial,
     Placement,
     Replicate,
     Shard,
 )
-
 from torch.distributed.device_mesh import DeviceMesh
+
 
 aten = torch.ops.aten
 
