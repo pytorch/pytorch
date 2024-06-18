@@ -31,23 +31,23 @@ This is the place to look if you are trying to find low-level communication APIs
 #### Distributed Data Parallel (DDP)
 
 - API layer: [torch/nn/parallel/distributed.py](https://github.com/pytorch/pytorch/blob/main/torch/nn/parallel/distributed.py)
-- Reducer (backend component that issues allreduces per-bucket) [torch/csrc/distributed/c10d/reducer.cpp)](https://github.com/pytorch/pytorch/blob/main/torch/csrc/distributed/c10d/reducer.cpp)
-- Mixed Precision Hooks [torch/distributed/algorithms/ddp_comm_hooks/default_hooks.py)](https://github.com/pytorch/pytorch/blob/main/torch/distributed/algorithms/ddp_comm_hooks/default_hooks.py)
+- Reducer (backend that schedules allreduces): [torch/csrc/distributed/c10d/reducer.cpp](https://github.com/pytorch/pytorch/blob/main/torch/csrc/distributed/c10d/reducer.cpp)
+- Mixed Precision Hooks: [torch/distributed/algorithms/ddp_comm_hooks/default_hooks.py](https://github.com/pytorch/pytorch/blob/main/torch/distributed/algorithms/ddp_comm_hooks/default_hooks.py)
 #### Fully Sharded Data Parallel (FSDP)
 
-- FSDP [torch/distributed/fsdp/api.py](https://github.com/pytorch/pytorch/blob/main/torch/distributed/fsdp/api.py)
-- FSDP2 [torch/distributed/_composable/fsdp/fully_shard.py](https://github.com/pytorch/pytorch/blob/main/torch/distributed/_composable/fsdp/fully_shard.py)
+- FSDP: [torch/distributed/fsdp/api.py](https://github.com/pytorch/pytorch/blob/main/torch/distributed/fsdp/api.py)
+- FSDP2: [torch/distributed/_composable/fsdp/fully_shard.py](https://github.com/pytorch/pytorch/blob/main/torch/distributed/_composable/fsdp/fully_shard.py)
 - Implementations are contained in other files in the same folder as the API for each variant
 
 #### Tensor Parallel (TP)
 
-- API layer ([torch/distributed/tensor/parallel/api.py](https://github.com/pytorch/pytorch/blob/main/torch/distributed/tensor/parallel/api.py))
+- API layer: [torch/distributed/tensor/parallel/api.py](https://github.com/pytorch/pytorch/blob/main/torch/distributed/tensor/parallel/api.py)
 - Implementation: see other files in the same folder
 
 #### Pipeline Parallel (PP)
 
-- Pipeline Schedules [torch/distributed/pipelining/schedules.py](https://github.com/pytorch/pytorch/blob/main/torch/distributed/pipelining/schedules.py)
-- Pipeline Stage [torch/distributed/pipelining/stage.py](https://github.com/pytorch/pytorch/blob/main/torch/distributed/pipelining/stage.py)
+- Pipeline Schedules: [torch/distributed/pipelining/schedules.py](https://github.com/pytorch/pytorch/blob/main/torch/distributed/pipelining/schedules.py)
+- Pipeline Stage: [torch/distributed/pipelining/stage.py](https://github.com/pytorch/pytorch/blob/main/torch/distributed/pipelining/stage.py)
 
 
 ## Adding Tests
