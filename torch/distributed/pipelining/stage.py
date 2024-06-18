@@ -150,7 +150,9 @@ class _PipelineStageBase(ABC):
 
         # To be populated later by the Schedule
         self.chunks: Optional[int] = None
-        self.stage_index_to_group_rank: Dict[int, int] = {}
+        self.stage_index_to_group_rank: Dict[int, int] = {
+            i: i % self.group_size for i in range(self.num_stages)
+        }
 
     @property
     def has_backward(self) -> bool:

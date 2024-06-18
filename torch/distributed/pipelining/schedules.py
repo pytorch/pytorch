@@ -584,15 +584,11 @@ class PipelineScheduleMulti(_PipelineSchedule):
         self._num_stages = stages[0].num_stages
         self.pp_group_size = stages[0].group_size
         self.rank = stages[0].group_rank
-        if stage_index_to_group_rank is None:
-            # Assume that each rank has stage_ids = range(rank, total_stages, local_stages)
-            stage_index_to_group_rank = {
-                i: i % self.pp_group_size for i in range(self._num_stages)
-            }
-        self.stage_index_to_group_rank = stage_index_to_group_rank
         # Set the pipeline stage states
-        for stage in self._stages:
-            stage.stage_index_to_group_rank = stage_index_to_group_rank
+        if stage_index_to_group_rank is not None:
+            for stage in self._stages:
+                stage.stage_index_to_group_rank = stage_index_to_group_rank
+        self.stage_index_to_group_rank = stages[0].stage_index_to_group_rank
 
         # Set the same has_backward flag for stage object
         for stage in self._stages:
