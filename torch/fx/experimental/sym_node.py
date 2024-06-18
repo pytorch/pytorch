@@ -134,7 +134,8 @@ class SymNode:
             and id(self.shape_env) == id(other.shape_env)
             and self.pytype == other.pytype
             and self._hint == other._hint
-            and self.constant == other.constant)
+            and self.constant == other.constant
+        )
 
     def __hash__(self) -> int:
         return hash((self._expr, self.pytype, self._hint, self.constant))
