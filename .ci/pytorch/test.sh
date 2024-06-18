@@ -1186,7 +1186,7 @@ test_executorch() {
   echo "Run ExecuTorch unit tests"
   pytest -v -n auto
   # shellcheck disable=SC1091
-  LLVM_PROFDATA=llvm-profdata-12 LLVM_COV=llvm-cov-12 source test/run_oss_cpp_tests.sh
+  LLVM_PROFDATA=llvm-profdata-12 LLVM_COV=llvm-cov-12 bash test/run_oss_cpp_tests.sh
 
   echo "Run ExecuTorch regression tests for some models"
   # TODO(huydhn): Add more coverage here using ExecuTorch's gather models script
