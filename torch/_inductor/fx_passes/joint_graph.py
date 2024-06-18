@@ -7,6 +7,7 @@ from typing import Dict, List, Set, Union
 
 import torch
 import torch._guards
+import torch.utils._pytree as pytree
 from torch._inductor.constant_folding import ConstantFolder
 from torch.fx.experimental.symbolic_shapes import statically_known_true
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
@@ -201,6 +202,15 @@ class UniformValueConstantFolder(ConstantFolder):
         # see: [constant folding refining of symints]
         self.node_replacements_shapes: Dict[torch.fx.Node, List[int]] = {}
 
+        self.allowed_deduce_ops = [
+            aten.full.default,
+            aten.unsqueeze.default,
+            aten.squeeze.default,
+        ]
+
+    def _support_dynamic_shape(self):
+        return config.enable_dynamic_constant_fold_uniform_value
+
     def insertable_tensor_check(self, t: torch.Tensor) -> bool:
         # TODO - we could also Tensors which get replaced with arange here
         return (
@@ -213,9 +223,60 @@ class UniformValueConstantFolder(ConstantFolder):
     def add_node_replacement(self, node: torch.fx.Node, tensor: torch.Tensor) -> None:
         self.node_replacements[node] = tensor.flatten()[0].item()
         self.constant_data_ptrs[node] = StorageWeakRef(tensor.untyped_storage())
-        shape = list(tensor.shape)
-        assert all(type(dim) is int for dim in shape)
+        if node in self.dynamic_node_substitute_values.keys():
+            shape = list(node.meta["val"].shape)
+        else:
+            shape = list(tensor.shape)
+            assert all(type(dim) is int for dim in shape)
         self.node_replacements_shapes[node] = shape
+
+    def _deduce_value(self, node: torch.fx.Node):
+        # deduce value if it is a dynamic shape node
+
+        flat_node_args, tree_spec = pytree.tree_flatten((node.args, node.kwargs))
+
+        if any(arg in self.dynamic_node_substitute_values for arg in flat_node_args):
+            # dynamic shape node in current node's args
+
+            if "val" in node.meta and isinstance(node.meta["val"], torch.SymInt):
+                # symbolic int node
+                # deduce int value by hint and record it
+                s = node.meta["val"]
+                val = s.node.shape_env.size_hint(s.node.expr)
+                self.symint_nodes[str(s)] = node
+                self.dynamic_node_substitute_values[node] = val
+                return val
+
+            if (
+                node.op == "call_function" and node.target in self.allowed_deduce_ops
+            ) or (
+                hasattr(node.target, "tags") and torch.Tag.pointwise in node.target.tags
+            ):
+                # deduce allowed_deduce_ops or pointwise ops
+                args, kwargs = self.fetch_args_kwargs_from_env(node)
+                flat_args, tree_spec = pytree.tree_flatten((args, kwargs))
+                new_flat_args = []
+                for arg in flat_args:
+                    if isinstance(arg, torch.SymInt):
+                        new_flat_args.append(
+                            arg.node.shape_env.size_hint(arg.node.expr)
+                        )
+                    else:
+                        new_flat_args.append(arg)
+
+                args, kwargs = pytree.tree_unflatten(new_flat_args, tree_spec)
+
+                out = getattr(self, node.op)(node.target, args, kwargs)
+
+                # save substitute value from dynamic shape
+                self.dynamic_node_substitute_values[node] = out
+            else:
+                out = self.unknown_value
+        else:
+            # the node is static in dynamic shape graph, following the previous static processing
+            out = super(ConstantFolder, self).run_node(node)
+
+        return out
 
 
 @torch.utils._python_dispatch._disable_current_modes()
@@ -279,6 +340,16 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
                 node_replacements_shapes[node], fake_tensor.shape
             ):
                 torch._check(runtime_size == compile_time_size)
+
+            if node in cf.dynamic_node_substitute_values:
+                # Replace SymInt as Node before creating a new full node
+                # e.g. (1, s0) -> (1, arg0_1)
+                shape = list(node.meta["val"].shape)
+                shape = [
+                    cf.symint_nodes[str(s)] if str(s) in cf.symint_nodes.keys() else s
+                    for s in shape
+                ]
+                node_replacements_shapes[node] = shape
 
             # zeros and ones just get traced into full, so we insert those
             new_node = graph.call_function(
