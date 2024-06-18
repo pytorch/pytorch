@@ -57,7 +57,7 @@ jobs:
         with:
           files: ${{env.PT_RELEASE_FILE}}
       - name: Upload source distribution to GHA artifacts for release cuts
-        # if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && contains(github.ref, 'rc') }}
+        if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && contains(github.ref, 'rc') }}
         uses: actions/upload-artifact@v2
         with:
           name: ${{ env.PT_RELEASE_FILE }}
@@ -67,7 +67,7 @@ jobs:
         run: echo "::set-output name=pt_release_name::${{ env.PT_RELEASE_NAME }}.tar.gz"
 
   upload_source_code_to_s3:
-    # if: ${{ github.repository == 'pytorch/pytorch' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && contains(github.ref, 'rc') }}
+    if: ${{ github.repository == 'pytorch/pytorch' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && contains(github.ref, 'rc') }}
     runs-on: linux.2xlarge
     environment: sourcecode-upload
     name: Upload source code to S3 for release cuts
