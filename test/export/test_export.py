@@ -2750,10 +2750,7 @@ def forward(self, x):
         ep = export(M(), (torch.tensor(1), torch.ones(4, 5)))
 
         # This is because we insert sym_constrain_range in the graph now
-        if is_non_strict_test(self._testMethodName):
-            error_msg = r"Invalid value range for -1 between"
-        else:
-            error_msg = "is outside of inline constraint"
+        error_msg = r"Invalid value range for -1 between"
         with self.assertRaisesRegex(RuntimeError, error_msg):
             _ = ep.module()(torch.tensor(-1), torch.randn(4, 5))
 
@@ -5131,14 +5128,12 @@ def forward(self, x):
     item = torch.ops.aten.item.default(x);  x = None
     sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(item)
     sym_constrain_range_default = torch.ops.aten.sym_constrain_range.default(item, min = 3, max = 5)
-    mul = -1 * item
-    le = mul <= 0;  mul = None
-    _assert_scalar_default = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression -u1 <= 0 on node 'le'");  le = None
-    mul_1 = -1 * item
-    lt = mul_1 < -2;  mul_1 = None
-    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression -u1 < -2 on node 'lt'");  lt = None
-    lt_1 = item < 6
-    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(lt_1, "Runtime assertion failed for expression u1 < 6 on node 'lt_1'");  lt_1 = None
+    ge = item >= 0
+    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression 0 <= u1 on node 'ge'");  ge = None
+    gt = item > 2
+    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(gt, "Runtime assertion failed for expression 2 < u1 on node 'gt'");  gt = None
+    lt = item < 6
+    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression u1 < 6 on node 'lt'");  lt = None
     foo_unbacked = torch.ops.testlib.foo_unbacked.default(item);  item = None
     return foo_unbacked""",
         )
@@ -5152,14 +5147,12 @@ def forward(self, x, y):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x);  x = None
     sym_constrain_range_for_size = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense)
     sym_constrain_range = torch.ops.aten.sym_constrain_range.default(_local_scalar_dense, min = 3, max = 5)
-    mul = -1 * _local_scalar_dense
-    le = mul <= 0;  mul = None
-    _assert_scalar = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression -u1 <= 0 on node 'le'");  le = None
-    mul_1 = -1 * _local_scalar_dense
-    lt = mul_1 < -2;  mul_1 = None
-    _assert_scalar_1 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression -u1 < -2 on node 'lt'");  lt = None
-    lt_1 = _local_scalar_dense < 6;  _local_scalar_dense = None
-    _assert_scalar_2 = torch.ops.aten._assert_scalar.default(lt_1, "Runtime assertion failed for expression u1 < 6 on node 'lt_1'");  lt_1 = None
+    ge = _local_scalar_dense >= 0
+    _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression 0 <= u1 on node 'ge'");  ge = None
+    gt = _local_scalar_dense > 2
+    _assert_scalar_1 = torch.ops.aten._assert_scalar.default(gt, "Runtime assertion failed for expression 2 < u1 on node 'gt'");  gt = None
+    lt = _local_scalar_dense < 6;  _local_scalar_dense = None
+    _assert_scalar_2 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression u1 < 6 on node 'lt'");  lt = None
     full = torch.ops.aten.full.default([4, 4], 1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
     add = torch.ops.aten.add.Tensor(y, sum_1);  y = sum_1 = None
     sum_2 = torch.ops.aten.sum.dim_IntList(full, []);  full = None
@@ -5288,7 +5281,7 @@ def forward(self, x, y):
         self.assertEqual(out2.shape, torch.ones(40).shape)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Eq\(s0\*s1 \- s2\*s3, 0\) on node 'eq.*'",
+            r"Runtime assertion failed for expression Eq\(s0\*s1, s2\*s3\) on node 'eq.*'",
         ):  # fail only at runtime
             ep.module()(torch.randn(5, 8), torch.randn(4, 5), torch.randn(30))  # fail
 
@@ -5337,7 +5330,7 @@ def forward(self, x, y):
         self.assertEqual(out1.shape, torch.ones(126).shape)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Eq\(s0\*s1\*s2 \- s3, 0\) on node 'eq.*'",
+            r"Runtime assertion failed for expression Eq\(s0\*s1\*s2, s3\) on node 'eq.*'",
         ):  # fail only at runtime
             ep.module()(torch.randn(4, 3, 2), torch.randn(10))  # fail
 
@@ -5388,6 +5381,26 @@ def forward(self, x, y):
                 strict=False,
                 _disable_forced_specializations=True,
             )
+
+    # TODO requires_grad doesn't seem to work with serialization.
+    @testing.expectedFailureSerDer
+    def test_preserve_requires_grad_placeholders(self):
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p = torch.nn.Parameter(torch.randn(3, 3))
+
+            def forward(self, x, y):
+                return self.p + x + y
+
+        m = Module()
+        ep = export(m, (torch.randn(3, 3), torch.randn(3, 3, requires_grad=True)))
+        placeholders = [
+            node for node in ep.graph_module.graph.nodes if node.op == "placeholder"
+        ]
+        self.assertTrue(placeholders[0].meta["val"].requires_grad)
+        self.assertFalse(placeholders[1].meta["val"].requires_grad)
+        self.assertTrue(placeholders[2].meta["val"].requires_grad)
 
     def test_reshape_view_helper(self):
         # see: https://github.com/pytorch/pytorch/issues/126607
@@ -5453,17 +5466,17 @@ def forward(self, x, y):
         self.assertEqual(out1.shape, torch.ones(27).shape)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Ne\(s0 \- s1, 0\)",
+            r"Runtime assertion failed for expression Ne\(s0, s1\)",
         ):  # fail only at runtime
             ep.module()(torch.randn(4), torch.randn(4))  # fail
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Ne\(s0 \- s1\**3, 0\)",
+            r"Runtime assertion failed for expression Ne\(s0, s1\**3\)",
         ):
             ep.module()(torch.randn(64), torch.randn(4))  # fail
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Eq\(s0\**2 \- 3\*s1, 0\)",
+            r"Runtime assertion failed for expression Eq\(s0\**2, 3\*s1\)",
         ):
             ep.module()(torch.randn(10), torch.randn(9))  # fail
 

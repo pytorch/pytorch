@@ -245,7 +245,7 @@ class ForeachKernel(Kernel):
         else:
             # TODO: refactor generate_kernel_call
             call_args_str = ", ".join(call_args)
-            stream_name = code.write_get_raw_stream(current_device.index)
+            stream_name = code.write_get_raw_stream(current_device.index, V.graph)
             code.writeline(
                 f"{name}.run({call_args_str}, grid=({self.grid()}), stream={stream_name})"
             )
