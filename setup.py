@@ -1178,7 +1178,6 @@ def main():
     mirror_files_into_torchgen()
     if RUN_BUILD_DEPS:
         build_deps()
-        # return
 
     (
         extensions,
@@ -1187,7 +1186,6 @@ def main():
         entry_points,
         extra_install_requires,
     ) = configure_extension_build()
-    # return
     install_requires += extra_install_requires
 
     extras_require = {
