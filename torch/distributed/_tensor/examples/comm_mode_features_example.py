@@ -5,6 +5,8 @@ from typing import Callable, Dict
 import torch
 from torch.distributed._tensor import DeviceMesh
 from torch.distributed._tensor.debug import CommDebugMode
+from torch.distributed._tensor.examples.comm_mode_features_example_argparser import args
+
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
