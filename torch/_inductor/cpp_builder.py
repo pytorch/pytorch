@@ -345,7 +345,11 @@ def _get_optimization_cflags() -> List[str]:
 
 def _get_shared_cflag(compile_only: bool) -> List[str]:
     if _IS_WINDOWS:
-        SHARED_FLAG = ["DLL"]
+        """
+        MSVC `/MD` using python `ucrtbase.dll` lib as runtime.
+        https://learn.microsoft.com/en-us/cpp/c-runtime-library/crt-library-features?view=msvc-170
+        """
+        SHARED_FLAG = ["DLL", "MD"]
     else:
         if compile_only:
             return ["fPIC"]
@@ -567,7 +571,7 @@ def _get_torch_related_args(include_pytorch: bool, aot_mode: bool):
     ]
     libraries_dirs = [TORCH_LIB_PATH]
     libraries = []
-    if sys.platform == "linux" and not config.is_fbcode():
+    if sys.platform != "darwin" and not config.is_fbcode():
         libraries = ["torch", "torch_cpu"]
         if not aot_mode:
             libraries.append("torch_python")
@@ -663,6 +667,7 @@ def _get_openmp_args(cpp_compiler):
         # msvc openmp: https://learn.microsoft.com/zh-cn/cpp/build/reference/openmp-enable-openmp-2-0-support?view=msvc-170
 
         cflags.append("openmp")
+        cflags.append("openmp:experimental")  # MSVC CL
         libs = []
     else:
         if config.is_fbcode():
