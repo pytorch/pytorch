@@ -274,6 +274,7 @@ def mps_ops_modifier(ops):
         'exp',
         'expand',
         'expand_as',
+        'expand_copy',
         'flatten',
         'fill',
         'full',
@@ -314,6 +315,7 @@ def mps_ops_modifier(ops):
         'ones',
         'outer',
         'permute',
+        'permute_copy',
         'positive',
         'randn',
         'ravel',
@@ -332,14 +334,18 @@ def mps_ops_modifier(ops):
         'split_with_sizes_copy',
         'splitlist_args',
         'squeeze',
+        'squeeze_copy',
         'squeezemultiple',
         'sub',
         'svd',
         't',
+        't_copy',
         'tanh',
         'tensor_split',
         'transpose',
+        'transpose_copy',
         'T',
+        'unbind_copy',
         'unbind',
         'unflatten',
         'unfold',
@@ -347,9 +353,11 @@ def mps_ops_modifier(ops):
         'unsafe_chunk',
         'unsafe_split',
         'unsqueeze',
+        'unsqueeze_copy',
         'view_as',
         'view_as_real',
         'view',
+        'view_copy',
         'vsplit',
         'zero_',
         'zeros',
@@ -1616,6 +1624,14 @@ class TestMPS(TestCaseMPS):
             b = torch.arange(18, dtype=dtype, device=device) / 3 * math.pi
             a = torch.tensor(v, dtype=dtype, device="mps") * b
             self.compare_with_numpy(torch.exp, np.exp, a)
+
+    def test_triu_inf(self, device="mps", dtype=torch.float):
+        for diag in [-1, 0, 1]:
+            mask = torch.full((3, 6, 6), float("-inf"))
+            mask_mps = mask.clone().detach().to('mps')
+            cpu_ref = torch.triu(mask, diagonal=diag)
+            mps_out = torch.triu(mask_mps, diagonal=diag)
+            self.assertEqual(cpu_ref, mps_out)
 
     def test_exp1(self, device="mps", dtype=torch.float):
         input = torch.tensor([-0.1, 1.0, -0.9, 0.1], device=device, dtype=dtype)
