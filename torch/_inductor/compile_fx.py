@@ -567,14 +567,12 @@ def compile_fx_inner(
     if context is not None and context.output_strides is not None:
         assert len(context.output_strides) == 0
         shape_env = _shape_env_from_inputs(example_inputs)
-        V.graph.sizevars = SizeVarAllocator(shape_env)
+        sizevars = SizeVarAllocator(shape_env)
         for exprs in compiled_graph.output_strides:
             if exprs is None:
                 context.output_strides.append(None)
             else:
-                context.output_strides.append(
-                    tuple(V.graph.sizevars.size_hint(s) for s in exprs)
-                )
+                context.output_strides.append([sizevars.size_hint(s) for s in exprs])
 
     if aot_mode:
         return compiled_graph
