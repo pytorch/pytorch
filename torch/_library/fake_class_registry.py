@@ -288,6 +288,6 @@ def _fake_obj_from_real(fake_mode, x) -> Any:
         )
 
     # from_real defined by user need the ctx to fakify the tensor states.
-    ctx = torch._library.abstract_impl.AbstractImplCtx(fake_mode, None)
-    with torch._library.abstract_impl.set_ctx_getter(lambda: ctx):
+    ctx = torch._library.fake_impl.FakeImplCtx(fake_mode, None)
+    with torch._library.fake_impl.set_ctx_getter(lambda: ctx):
         return fake_class.from_real(x)

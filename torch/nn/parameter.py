@@ -1,13 +1,16 @@
+from collections import OrderedDict
+
 import torch
 from torch._C import _disabled_torch_function_impl
-from collections import OrderedDict
+
 
 # Metaclass to combine _TensorMeta and the instance check override for Parameter.
 class _ParameterMeta(torch._C._TensorMeta):
     # Make `isinstance(t, Parameter)` return True for custom tensor instances that have the _is_param flag.
     def __instancecheck__(self, instance):
         return super().__instancecheck__(instance) or (
-            isinstance(instance, torch.Tensor) and getattr(instance, '_is_param', False))
+            isinstance(instance, torch.Tensor) and getattr(instance, "_is_param", False)
+        )
 
 
 class Parameter(torch.Tensor, metaclass=_ParameterMeta):
@@ -42,11 +45,13 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
         # Path for custom tensors: set a flag on the instance to indicate parameter-ness.
         t = data.detach().requires_grad_(requires_grad)
         if type(t) is not type(data):
-            raise RuntimeError(f"Creating a Parameter from an instance of type {type(data).__name__} "
-                               "requires that detach() returns an instance of the same type, but return "
-                               f"type {type(t).__name__} was found instead. To use the type as a "
-                               "Parameter, please correct the detach() semantics defined by "
-                               "its __torch_dispatch__() implementation.")
+            raise RuntimeError(
+                f"Creating a Parameter from an instance of type {type(data).__name__} "
+                "requires that detach() returns an instance of the same type, but return "
+                f"type {type(t).__name__} was found instead. To use the type as a "
+                "Parameter, please correct the detach() semantics defined by "
+                "its __torch_dispatch__() implementation."
+            )
         t._is_param = True
         return t
 
@@ -56,12 +61,14 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
         if id(self) in memo:
             return memo[id(self)]
         else:
-            result = type(self)(self.data.clone(memory_format=torch.preserve_format), self.requires_grad)
+            result = type(self)(
+                self.data.clone(memory_format=torch.preserve_format), self.requires_grad
+            )
             memo[id(self)] = result
             return result
 
     def __repr__(self):
-        return 'Parameter containing:\n' + super().__repr__()
+        return "Parameter containing:\n" + super().__repr__()
 
     def __reduce_ex__(self, proto):
         state = torch._utils._get_obj_state(self)
@@ -71,12 +78,12 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
         if not state:
             return (
                 torch._utils._rebuild_parameter,
-                (self.data, self.requires_grad, hooks)
+                (self.data, self.requires_grad, hooks),
             )
 
         return (
             torch._utils._rebuild_parameter_with_state,
-            (self.data, self.requires_grad, hooks, state)
+            (self.data, self.requires_grad, hooks, state),
         )
 
     __torch_function__ = _disabled_torch_function_impl
@@ -127,41 +134,41 @@ class UninitializedTensorMixin:
     @property
     def shape(self):
         raise RuntimeError(
-            'Can\'t access the shape of an uninitialized parameter or buffer. '
-            'This error usually happens in `load_state_dict` when trying to load '
-            'an uninitialized parameter into an initialized one. '
-            'Call `forward` to initialize the parameters before accessing their attributes.')
+            "Can't access the shape of an uninitialized parameter or buffer. "
+            "This error usually happens in `load_state_dict` when trying to load "
+            "an uninitialized parameter into an initialized one. "
+            "Call `forward` to initialize the parameters before accessing their attributes."
+        )
 
     def share_memory_(self):
         raise RuntimeError(
-            'Can\'t share memory on an uninitialized parameter or buffer. '
-            'Call `forward` to initialize the parameters before calling '
-            '`module.share_memory()`.')
+            "Can't share memory on an uninitialized parameter or buffer. "
+            "Call `forward` to initialize the parameters before calling "
+            "`module.share_memory()`."
+        )
 
     def __repr__(self):
-        return f'<{self.__class__.__name__}>'
+        return f"<{self.__class__.__name__}>"
 
     def __reduce_ex__(self, proto):
         # See Note [Don't serialize hooks]
-        return (
-            self.__class__,
-            (self.requires_grad,)
-        )
+        return (self.__class__, (self.requires_grad,))
 
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
         # method-wrapper is to detect access to Tensor properties that are
         # wrapped in descriptors
-        if func in cls._allowed_methods or func.__class__.__name__ == 'method-wrapper':
+        if func in cls._allowed_methods or func.__class__.__name__ == "method-wrapper":
             if kwargs is None:
                 kwargs = {}
             return super().__torch_function__(func, types, args, kwargs)
         raise ValueError(
-            f'Attempted to use an uninitialized parameter in {func}. '
-            'This error happens when you are using a `LazyModule` or '
-            f'explicitly manipulating `torch.nn.parameter.{cls.__name__}` '
-            'objects. When using LazyModules Call `forward` with a dummy batch '
-            'to initialize the parameters before calling torch functions')
+            f"Attempted to use an uninitialized parameter in {func}. "
+            "This error happens when you are using a `LazyModule` or "
+            f"explicitly manipulating `torch.nn.parameter.{cls.__name__}` "
+            "objects. When using LazyModules Call `forward` with a dummy batch "
+            "to initialize the parameters before calling torch functions"
+        )
 
 
 def is_lazy(param):
@@ -187,7 +194,7 @@ class UninitializedParameter(UninitializedTensorMixin, Parameter):
     cls_to_become = Parameter
 
     def __new__(cls, requires_grad=True, device=None, dtype=None) -> None:
-        factory_kwargs = {'device': device, 'dtype': dtype}
+        factory_kwargs = {"device": device, "dtype": dtype}
         data = torch.empty(0, **factory_kwargs)
         return torch.Tensor._make_subclass(cls, data, requires_grad)
 
@@ -198,6 +205,7 @@ class UninitializedParameter(UninitializedTensorMixin, Parameter):
             result = type(self)(self.requires_grad, self.data.device, self.data.dtype)
             memo[id(self)] = result
             return result
+
 
 class UninitializedBuffer(UninitializedTensorMixin, torch.Tensor):
     r"""A buffer that is not initialized.
@@ -218,6 +226,6 @@ class UninitializedBuffer(UninitializedTensorMixin, torch.Tensor):
     cls_to_become = torch.Tensor
 
     def __new__(cls, requires_grad=False, device=None, dtype=None) -> None:
-        factory_kwargs = {'device': device, 'dtype': dtype}
+        factory_kwargs = {"device": device, "dtype": dtype}
         data = torch.empty(0, **factory_kwargs)
         return torch.Tensor._make_subclass(cls, data, requires_grad)

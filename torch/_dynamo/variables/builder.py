@@ -14,6 +14,7 @@ import operator
 import re
 import sys
 import types
+import weakref
 from typing import Any, List, NamedTuple, Optional, Union
 
 from torch.utils._sympy.value_ranges import ValueRanges
@@ -128,6 +129,7 @@ from .functions import (
     CollectiveFunctionRewriteVariable,
     FunctoolsPartialVariable,
     TritonKernelVariable,
+    UserFunctionVariable,
     UserMethodVariable,
 )
 from .higher_order_ops import TorchHigherOrderOperatorVariable
@@ -145,6 +147,7 @@ from .lists import (
     TupleVariable,
 )
 from .misc import (
+    AutogradEngineVariable,
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
     ComptimeVariable,
@@ -184,6 +187,7 @@ from .user_defined import (
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
+    WeakRefVariable,
 )
 
 
@@ -313,7 +317,10 @@ class VariableBuilder:
 
         vt = self._wrap(value)
         vt.source = self.source
-        if self._can_lift_attrs_to_inputs(vt):
+        if (
+            self._can_lift_attrs_to_inputs(vt)
+            and value not in self.tx.output.side_effects
+        ):
             vt = self.tx.output.side_effects.track_object_existing(value, vt)
 
         self.tx.output.variable_tracker_cache.add(value, self.source, vt)
@@ -383,6 +390,8 @@ class VariableBuilder:
             ((slice, range), cls.wrap_slice_range),
             (tuple(common_constant_types), cls.wrap_literal),
             (re.Pattern, cls.wrap_regex_pattern),
+            (weakref.ReferenceType, cls.wrap_weakref),
+            (torch.utils.hooks.RemovableHandle, cls.wrap_removable_handle),
         ]
 
         if config.trace_numpy and np:
@@ -400,6 +409,17 @@ class VariableBuilder:
         # TODO(jansel): something like a REPR_MATCH might be more robust here
         self.install_guards(GuardBuilder.ID_MATCH)
         return RegexPatternVariable(value)
+
+    def wrap_weakref(self, value: weakref.ReferenceType):
+        self.install_guards(GuardBuilder.TYPE_MATCH)
+        return WeakRefVariable(value, source=self.source)
+
+    def wrap_removable_handle(self, value):
+        # This means that the removable handle was created in some other frame.
+        # Our current infra requires the hook to be registered and removed in
+        # the same frame. So graph break.
+        # Related test - PYTORCH_TEST_WITH_DYNAMO=1 python test/test_autograd.py -k TestAutograd.test_hooks
+        unimplemented("unregistered hook removable handle")
 
     @classmethod
     @functools.lru_cache(None)
@@ -707,6 +727,23 @@ class VariableBuilder:
                     value.__self__, source=AttrSource(self.source, member="__self__")
                 ),
                 "apply",
+            )
+        elif isinstance(value, torch._C._ImperativeEngine):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return AutogradEngineVariable(value, source=self.source)
+        elif (
+            value
+            is torch._dynamo.external_utils.FakeCompiledAutogradEngine._exec_final_callbacks_stub
+        ):
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            return LambdaVariable(
+                lambda: UserFunctionVariable(
+                    torch._dynamo.external_utils.FakeCompiledAutogradEngine.exec_final_callbacks,
+                ).call_function(
+                    self.tx,
+                    (self.tx.output.side_effects.get_ca_final_callbacks_var(),),
+                    {},
+                )
             )
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if is_callable_allowed(value):
@@ -1819,40 +1856,47 @@ def wrap_fx_proxy_cls(
 
         return value
 
-    # with preserve_rng_state():
-    if example_value is None:
-        # only allow_non_graph_fake in this instance because we handle the non-fake
-        # cases properly below.
-        example_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
+    # See NOTE: [Deferring tensor pack/unpack hooks until runtime]
+    with torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
+        # with preserve_rng_state():
+        if example_value is None:
+            # only allow_non_graph_fake in this instance because we handle the non-fake
+            # cases properly below.
+            example_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
 
-    # Handle recursive calls here
-    elif maybe_get_fake_mode(example_value) is tx.fake_mode:
-        pass
+        # Handle recursive calls here
+        elif maybe_get_fake_mode(example_value) is tx.fake_mode:
+            pass
 
-    elif isinstance(example_value, torch.Tensor):
-        if tx.export:
-            # The legacy behavior for real value cache with subclasses was
-            # to perform a clone WITHOUT preserving the subclass.  It's
-            # not entirely clear this is what you actually want though.
-            with torch._C.DisableTorchFunctionSubclass():
-                proxy.tracer.real_value_cache[proxy.node] = _clone_input(example_value)
-        # NB: If we're ignoring subclass, then the expectation is you will
-        # take the returned TensorVariable and wrap it into a more
-        # accurate TensorVariable that is able to track subclass-ness;
-        # otherwise this is wrong!
-        kwargs = {
-            "is_tensor": target_cls in (TensorVariable, TensorWithTFOverrideVariable),
-        }
-        assert "source" in options and options["source"] is not None
-        kwargs["source"] = options["source"]
-        example_value = wrap_to_fake_tensor_and_record(example_value, tx=tx, **kwargs)
-    if isinstance(example_value, torch.Tensor) and (
-        maybe_get_fake_mode(example_value) is not tx.fake_mode
-    ):
-        raise InternalTorchDynamoError(
-            "`example_value` needs to be a `FakeTensor`"
-            f"wrapped by this instance of Dynamo. Found: {example_value}"
-        )
+        elif isinstance(example_value, torch.Tensor):
+            if tx.export:
+                # The legacy behavior for real value cache with subclasses was
+                # to perform a clone WITHOUT preserving the subclass.  It's
+                # not entirely clear this is what you actually want though.
+                with torch._C.DisableTorchFunctionSubclass():
+                    proxy.tracer.real_value_cache[proxy.node] = _clone_input(
+                        example_value
+                    )
+            # NB: If we're ignoring subclass, then the expectation is you will
+            # take the returned TensorVariable and wrap it into a more
+            # accurate TensorVariable that is able to track subclass-ness;
+            # otherwise this is wrong!
+            kwargs = {
+                "is_tensor": target_cls
+                in (TensorVariable, TensorWithTFOverrideVariable),
+            }
+            assert "source" in options and options["source"] is not None
+            kwargs["source"] = options["source"]
+            example_value = wrap_to_fake_tensor_and_record(
+                example_value, tx=tx, **kwargs
+            )
+        if isinstance(example_value, torch.Tensor) and (
+            maybe_get_fake_mode(example_value) is not tx.fake_mode
+        ):
+            raise InternalTorchDynamoError(
+                "`example_value` needs to be a `FakeTensor`"
+                f"wrapped by this instance of Dynamo. Found: {example_value}"
+            )
 
     if isinstance(example_value, torch.Tensor):
         is_parameter = isinstance(example_value, torch.nn.Parameter)
@@ -2186,6 +2230,7 @@ def _automatic_dynamic(
     constraint_dims = []
     for i in range(e.dim()):
         # NB: mark dynamic has precedence over static
+        marked_unbacked = i in getattr(e, "_dynamo_unbacked_indices", set())
         marked_dynamic = i in getattr(e, "_dynamo_dynamic_indices", set())
         marked_weak_dynamic = i in getattr(e, "_dynamo_weak_dynamic_indices", set())
         marked_static = i in getattr(e, "_dynamo_static_indices", set())
@@ -2237,7 +2282,9 @@ def _automatic_dynamic(
         constraint_dims.append(constraint_dim)
 
         # Now, figure out if the dim is dynamic/duck/static
-        if (
+        if marked_unbacked:
+            dynamic = DimDynamic.SIZE_LIKE_UNBACKED
+        elif (
             constraint_dim is not None
             or marked_dynamic
             or marked_weak_dynamic
