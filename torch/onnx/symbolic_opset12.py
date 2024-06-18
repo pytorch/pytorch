@@ -330,8 +330,6 @@ def unfold(g: jit_utils.GraphContext, input, dimension, size, step):
         const_step
     ):
         return opset9.unfold(g, input, dimension, const_size, const_step)
-    if symbolic_helper.is_caffe2_aten_fallback():
-        return g.at("unfold", input, dimension_i=dimension, size_i=size, step_i=step)
 
     sizedim = symbolic_helper._get_tensor_dim_size(input, dimension)
     if sizedim is not None:
