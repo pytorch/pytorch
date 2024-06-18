@@ -1017,6 +1017,8 @@ class DimDynamic(Enum):
     DUCK = 1
     # Treat the dimension statically based on its hint
     STATIC = 2
+    # Treat the dimension as a size-like unbacked
+    SIZE_LIKE_UNBACKED = 3
 
 
 # NB: These constraints affect both clients and backends: given some
@@ -3433,6 +3435,12 @@ class ShapeEnv:
     ) -> "sympy.Expr":
         """Create a new symbol which is tracked by this ShapeEnv
         """
+        if dynamic_dim is DimDynamic.SIZE_LIKE_UNBACKED:
+            r = self.create_unbacked_symint().node.expr
+            self._constrain_range_for_size(r)
+            # TODO: maybe put the hint somewhere
+            return r
+
         # check if constraint_dim is actually static integer
         if isinstance(constraint_dim, StrictMinMaxConstraint) and constraint_dim.vr.lower == constraint_dim.vr.upper:
             dynamic_dim = DimDynamic.STATIC
