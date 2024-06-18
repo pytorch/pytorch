@@ -43,8 +43,7 @@ from torch.testing._internal.common_cuda import (
     IS_JETSON, SM80OrLater, PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
-    PLATFORM_SUPPORTS_CUDNN_ATTENTION,
-    tf32_on_and_off
+    PLATFORM_SUPPORTS_CUDNN_ATTENTION
 )
 
 if TEST_FAIRSEQ:
@@ -316,7 +315,6 @@ class TestTransformers(NNTestCase):
         with torch.no_grad():
             model(src, src_mask=src_mask)
 
-    @tf32_on_and_off(0.001)
     @parametrize("use_torchscript", [False])
     @parametrize("enable_nested_tensor", [True, False])
     @parametrize("use_autocast", [True, False])
@@ -407,9 +405,8 @@ class TestTransformers(NNTestCase):
                 # no garauntees on output corresponding to masked tokens, so they may vary between slow/fast path. set all to 0.
                 fastpath_output_expanded = fastpath_output_expanded.masked_fill(src_key_padding_mask.unsqueeze(-1), 0)
                 slowpath_output = slowpath_output.masked_fill(src_key_padding_mask.unsqueeze(-1), 0)
-                self.assertEqual(fastpath_output_expanded, slowpath_output)
+                torch.testing.assert_close(fastpath_output_expanded, slowpath_output, rtol=1e-7, atol=1e-5)
 
-    @tf32_on_and_off(0.001)
     @parametrize("with_no_grad", [True, False])
     @parametrize("training", [True, False])
     @parametrize("enable_nested_tensor", [False])
@@ -453,7 +450,7 @@ class TestTransformers(NNTestCase):
                                     [2.419836044311523, 0.017548924311996, -0.608187675476074, -0.085347734391689]]]
                                   ).to(device)
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        self.assertEqual(result, ref_output)
+        torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
 
     @parametrize("batch_first", [True, False])
     @parametrize("training", [True, False])
@@ -1400,7 +1397,7 @@ class TestSDPAFailureModes(NNTestCase):
             q = torch.randn(size, device=device, dtype=dtype)
             k = torch.randn(size, device=device, dtype=dtype)
             v = torch.randn(size, device=device, dtype=dtype)
-            with self.assertWarnsRegex(UserWarning, "All fused kernels requires query, key and value to be 4 dimensional"):
+            with self.assertWarnsRegex(UserWarning, "Both fused kernels requires query, key and value to be 4 dimensional"):
                 self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, None, 0.0, False))
 
@@ -1432,7 +1429,7 @@ class TestSDPAFailureModes(NNTestCase):
             make_tensor = partial(torch.rand, device=device, dtype=dtype)
             size = SdpaShape(2, 2, 0, 8)
             q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
-            with self.assertWarnsRegex(UserWarning, "All fused kernels do not support zero seq_len_q or seq_len_kv."):
+            with self.assertWarnsRegex(UserWarning, "Both fused kernels do not support zero seq_len_q or seq_len_kv."):
                 self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, None, 0.0, False))
 
@@ -1447,7 +1444,7 @@ class TestSDPAFailureModes(NNTestCase):
             size = SdpaShape(2, 2, 8, 8)
             q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
             q.as_strided_(size, [2, 2, 2, 2])
-            with self.assertWarnsRegex(UserWarning, "All fused kernels require the last dimension of the input to have stride 1."):
+            with self.assertWarnsRegex(UserWarning, "Both fused kernels require the last dimension of the input to have stride 1."):
                 self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, None, 0.0, False))
 
@@ -1980,7 +1977,7 @@ class TestSDPA(NNTestCase):
 class TestSDPACudaOnly(NNTestCase):
     """ Used to test CUDA only functionality of scaled_dot_product_attention
     Quarks:
-        There is some trickiness with this function. Its runtime behavior
+        There is some trickiness with this function. It's runtime behavior
         is dependent on the CUDA architecture you are testing it on. See
         `PLATFORM_SUPPORTS_FUSED_ATTENTION` at the top of the file.
         Summary:
@@ -2147,34 +2144,9 @@ class TestSDPACudaOnly(NNTestCase):
         S_converted = F.pad(S_converted, (0, seqlen_k_og - seqlen_k_rounded))
         return S_converted[:, :, :seqlen_q, :seqlen_k]
 
-    @skipIfRocm  # No cuDNN Attention
-    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
-    def test_cudnn_attention_different_dk_dv(self, device):
-        dtype = torch.bfloat16
-        make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=True)
-        batch, num_heads, head_dim_k, head_dim_v = 32, 16, 128, 64
-        seq_len = 640
-        q_shape = SdpaShape(batch, num_heads, seq_len, head_dim_k)
-        k_shape = SdpaShape(batch, num_heads, seq_len, head_dim_k)
-        v_shape = SdpaShape(batch, num_heads, seq_len, head_dim_v)
-        query, key, value = make_tensor(q_shape), make_tensor(k_shape), make_tensor(v_shape)
-
-        with sdpa_kernel(backends=[SDPBackend.CUDNN_ATTENTION]):
-            actual = torch.nn.functional.scaled_dot_product_attention(
-                query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
-        with sdpa_kernel(backends=[SDPBackend.MATH]):
-            math_ref = torch.nn.functional.scaled_dot_product_attention(
-                query.contiguous().to(torch.float32),
-                key.contiguous().to(torch.float32),
-                value.contiguous().to(torch.float32),
-                attn_mask=None, dropout_p=0.0, is_causal=False)
-
-        self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
-
-
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("mask_dim", [1, 2, 3, 4])
-    def test_mem_efficient_attention_mask_variants(self, device, mask_dim: List[int]):
+    def test_mem_efficient_attetntion_mask_variants(self, device, mask_dim: List[int]):
         dtype = torch.float16
         make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=True)
         batch, num_heads, head_dim = 8, 8, 64
@@ -2381,7 +2353,7 @@ class TestSDPACudaOnly(NNTestCase):
         math_ref_lp_test = math_ref_lp_test.to(dtype=torch.float32).contiguous()
 
         self.assertEqual(math_ref_test, math_ref_lp_test, atol=7e-3, rtol=7e-3)
-        self.assertEqual(actual_test, math_ref_test, atol=7e-3, rtol=7e-3)
+        self.assertEqual(actual_test, math_ref_test, atol=5e-3, rtol=5e-3)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Efficient Attention was not built for this system")
     @parametrize("contiguous_inputs", [True, False])
@@ -2499,12 +2471,7 @@ class TestSDPACudaOnly(NNTestCase):
         value = value.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
         key = key.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
 
-        major, minor = torch.cuda.get_device_capability(device)
-        is_sm90_or_newer = major >= 9
-
-        if type != "nested" and PLATFORM_SUPPORTS_CUDNN_ATTENTION and is_sm90_or_newer:
-            assert torch._fused_sdp_choice(query, key, value) == SDPBackend.CUDNN_ATTENTION.value
-        elif PLATFORM_SUPPORTS_FLASH_ATTENTION:
+        if PLATFORM_SUPPORTS_FLASH_ATTENTION:
             assert torch._fused_sdp_choice(query, key, value) == SDPBackend.FLASH_ATTENTION.value
         else:
             assert torch._fused_sdp_choice(query, key, value) == SDPBackend.EFFICIENT_ATTENTION.value
@@ -2544,8 +2511,7 @@ class TestSDPACudaOnly(NNTestCase):
         make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=torch.float16, packed=False, requires_grad=True)
         query, key, value = make_tensor(shape), make_tensor(shape), make_tensor(shape)
 
-        kernel_name = "Memory Efficient attention" if fused_kernel == SDPBackend.EFFICIENT_ATTENTION else \
-            "Flash Attention" if fused_kernel == SDPBackend.FLASH_ATTENTION else "cuDNN Attention"
+        kernel_name = "Memory Efficient attention" if fused_kernel == SDPBackend.EFFICIENT_ATTENTION else "Flash Attention"
         warning_context = (
             self.assertWarnsRegex(
                 UserWarning,
@@ -2557,12 +2523,7 @@ class TestSDPACudaOnly(NNTestCase):
         with use_deterministic_algorithims(True, warn_only=warn_only):
             with sdpa_kernel(backends=[fused_kernel]):
                 with warning_context:
-                    if warn_only or fused_kernel != SDPBackend.CUDNN_ATTENTION:
-                        torch.nn.functional.scaled_dot_product_attention(query, key, value).sum().backward()
-                    else:
-                        # cuDNN attention has no deterministic fallback
-                        self.assertRaises(RuntimeError, lambda:
-                                          torch.nn.functional.scaled_dot_product_attention(query, key, value).sum().backward())
+                    torch.nn.functional.scaled_dot_product_attention(query, key, value).sum().backward()
 
     @unittest.skip("This test is not behaving deterministaclly non-deterministaclly on CI/CD")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Platform does not support fused SDPA")
@@ -2702,7 +2663,7 @@ class TestSDPACudaOnly(NNTestCase):
         output_ref_atol, output_ref_rtol = get_tolerances(out_ref, out_lp_ref)
 
         # Fudge Factor when dropout is enabled
-        dropout_fudge_factor = 1.5 if dropout_p == 0.0 else 2.0
+        dropout_fudge_factor = 1.0 if dropout_p == 0.0 else 2.0
 
         query_fudge_factor = dropout_fudge_factor
         grad_q_ref_atol, grad_q_ref_rtol = get_tolerances(query_ref.grad, query_ref_lp.grad, query_fudge_factor)
@@ -2825,8 +2786,8 @@ class TestSDPACudaOnly(NNTestCase):
         # Fudge Factor when dropout is enabled
         dropout_fudge_factor = 1.0 if dropout_p == 0.0 else 1.75
         mask_fudge_factor = 1.0 if attn_mask is None else 1.5
-        query_fudge_factor = 2.0
 
+        query_fudge_factor = dropout_fudge_factor
         grad_q_ref_atol, grad_q_ref_rtol = get_tolerances(query_ref.grad, query_ref_lp.grad, query_fudge_factor)
 
         # TODO: Investigate why grad_k needs larger tolerances
@@ -3028,8 +2989,7 @@ class TestSDPACudaOnly(NNTestCase):
                            device=device, dtype=dtype, requires_grad=True)
 
         fused_op = (torch.ops.aten._scaled_dot_product_efficient_attention
-                    if fused_kernel == SDPBackend.EFFICIENT_ATTENTION else torch.ops.aten._scaled_dot_product_flash_attention
-                    if fused_kernel == SDPBackend.FLASH_ATTENTION else torch.ops.aten._scaled_dot_product_cudnn_attention)
+                    if fused_kernel == SDPBackend.EFFICIENT_ATTENTION else torch.ops.aten._scaled_dot_product_flash_attention)
         # Run the math kernel on low precision references
         query_ref_lp, key_ref_lp, value_ref_lp = query_key_value_clones(query, key, value, dtype=dtype)
 
@@ -3047,10 +3007,6 @@ class TestSDPACudaOnly(NNTestCase):
             kwargs["attn_bias"] = None
         if fused_kernel == SDPBackend.FLASH_ATTENTION:
             kwargs['return_debug_mask'] = dropout_p > 0.0
-        if fused_kernel == SDPBackend.CUDNN_ATTENTION:
-            kwargs["compute_log_sumexp"] = True
-            if "return_debug_mask" in kwargs:
-                kwargs.pop("return_debug_mask")
         with torch.cuda.stream(s):
             # Create real output
             output_tuple = fused_op(query, key, value, **kwargs)
@@ -3088,8 +3044,7 @@ class TestSDPACudaOnly(NNTestCase):
                 # Low Precision Math Reference
                 out_lp_ref = F.scaled_dot_product_attention(query_ref_lp, key_ref_lp, value_ref_lp,
                                                             dropout_p=dropout_p, is_causal=is_causal, scale=scale)
-            # cuDNN attention doesn't support returning dropout mask
-            elif fused_kernel != SDPBackend.CUDNN_ATTENTION:
+            else:
                 # Create the dropout_mask
                 dropout_mask = get_dropout_mask(output_tuple, fused_kernel, batch_size,
                                                 n_heads, seq_len_q, seq_len_k, dropout_p, device)
@@ -3107,38 +3062,37 @@ class TestSDPACudaOnly(NNTestCase):
         with torch.cuda.graph(g1):
             out.backward(upstream_grad)
         g1.replay()
-        if fused_kernel != SDPBackend.CUDNN_ATTENTION or dropout_p == 0.0:
-            out_ref.backward(upstream_grad.to(out_ref.dtype))
-            out_lp_ref.backward(upstream_grad.to(out_lp_ref.dtype))
+        out_ref.backward(upstream_grad.to(out_ref.dtype))
+        out_lp_ref.backward(upstream_grad.to(out_lp_ref.dtype))
 
-            # [Note] Fused Tolerances
-            # Establish the numerical error between the "true" high precision math output
-            # and the low precision math reference. We use this reference for the atol
-            # And we use the default rtol for the low precision type.
-            # We then provide a fudge factor for gradients respectively to account
-            # for the use of the fused kernel rather than the eager implemntation.
-            output_ref_atol, output_ref_rtol = get_tolerances(out_ref, out_lp_ref)
+        # [Note] Fused Tolerances
+        # Establish the numerical error between the "true" high precision math output
+        # and the low precision math reference. We use this reference for the atol
+        # And we use the default rtol for the low precision type.
+        # We then provide a fudge factor for gradients respectively to account
+        # for the use of the fused kernel rather than the eager implemntation.
+        output_ref_atol, output_ref_rtol = get_tolerances(out_ref, out_lp_ref)
 
-            # Fudge Factor when dropout is enabled
-            dropout_fudge_factor = 1.0 if dropout_p == 0.0 else 1.5
+        # Fudge Factor when dropout is enabled
+        dropout_fudge_factor = 1.0 if dropout_p == 0.0 else 1.5
 
-            query_fudge_factor = dropout_fudge_factor
-            grad_q_ref_atol, grad_q_ref_rtol = get_tolerances(query_ref.grad, query_ref_lp.grad, query_fudge_factor)
+        query_fudge_factor = dropout_fudge_factor
+        grad_q_ref_atol, grad_q_ref_rtol = get_tolerances(query_ref.grad, query_ref_lp.grad, query_fudge_factor)
 
-            # TODO: Investigate why grad_k needs larger tolerances
-            key_fudge_factor = 8 * dropout_fudge_factor
-            grad_k_ref_atol, grad_k_ref_rtol = get_tolerances(key_ref.grad, key_ref_lp.grad, key_fudge_factor)
+        # TODO: Investigate why grad_k needs larger tolerances
+        key_fudge_factor = 8 * dropout_fudge_factor
+        grad_k_ref_atol, grad_k_ref_rtol = get_tolerances(key_ref.grad, key_ref_lp.grad, key_fudge_factor)
 
-            value_fudge_factor = 7 if not SM80OrLater and dtype == torch.float16 else 1.0
-            grad_v_ref_atol, grad_v_ref_rtol = get_tolerances(value_ref.grad, value_ref_lp.grad, value_fudge_factor)
+        value_fudge_factor = 7 if not SM80OrLater and dtype == torch.float16 else 1.0
+        grad_v_ref_atol, grad_v_ref_rtol = get_tolerances(value_ref.grad, value_ref_lp.grad, value_fudge_factor)
 
-            self.assertEqual(out, out_ref.to(out.dtype), atol=output_ref_atol, rtol=output_ref_rtol)
-            self.assertEqual(query.grad, query_ref.grad.to(query.grad.dtype),
-                             atol=grad_q_ref_atol, rtol=grad_q_ref_rtol)
-            self.assertEqual(key.grad, key_ref.grad.to(key.grad.dtype),
-                             atol=grad_k_ref_atol, rtol=grad_k_ref_rtol)
-            self.assertEqual(value.grad, value_ref.grad.to(value.grad.dtype),
-                             atol=grad_v_ref_atol, rtol=grad_v_ref_rtol)
+        self.assertEqual(out, out_ref.to(out.dtype), atol=output_ref_atol, rtol=output_ref_rtol)
+        self.assertEqual(query.grad, query_ref.grad.to(query.grad.dtype),
+                         atol=grad_q_ref_atol, rtol=grad_q_ref_rtol)
+        self.assertEqual(key.grad, key_ref.grad.to(key.grad.dtype),
+                         atol=grad_k_ref_atol, rtol=grad_k_ref_rtol)
+        self.assertEqual(value.grad, value_ref.grad.to(value.grad.dtype),
+                         atol=grad_v_ref_atol, rtol=grad_v_ref_rtol)
 
     @skipIfRocm  # Nested Tensor
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
@@ -3262,7 +3216,7 @@ class TestSDPACudaOnly(NNTestCase):
                 query_expanded.contiguous(), key_expanded.contiguous(), value_expanded.contiguous(),
                 attn_mask=None, dropout_p=0.0, is_causal=False)
 
-        self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1.5e-3, rtol=1e-2)
+        self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
 
     @skipIfRocm  # Nested tensor
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
@@ -3425,7 +3379,6 @@ class TestAttnBias(NNTestCase):
         forw_tolerances: Optional[Tolerances] = None,
         grad_tolerances: Optional[Tolerances] = None,
         backend=None,
-        causal_variant=None,
     ):
         if backend is not None:
             torch._dynamo.reset()
@@ -3493,11 +3446,9 @@ class TestAttnBias(NNTestCase):
         if causal_variant == CausalVariant.UPPER_LEFT:
             attn_bias = causal_upper_left(seq_len_q, seq_len_kv)
         else:
-            print(seq_len_q, seq_len_kv)
             attn_bias = causal_lower_right(seq_len_q, seq_len_kv)
 
-        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION, SDPBackend.FLASH_ATTENTION, SDPBackend.MATH]):
-            self.run_test(device, make_q_tensor, make_kv_tensor, attn_bias, forw_tol, grad_tol, backend=None)
+        self.run_test(device, make_q_tensor, make_kv_tensor, attn_bias, forw_tol, grad_tol, backend=None)
 
     @skipIfRocm  # CausalVariant
     @parametrize("causal_variant", [CausalVariant.UPPER_LEFT, CausalVariant.LOWER_RIGHT])
@@ -3528,8 +3479,7 @@ class TestAttnBias(NNTestCase):
         else:
             attn_bias = causal_lower_right(seq_len_q, seq_len_kv)
 
-        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION, SDPBackend.FLASH_ATTENTION, SDPBackend.MATH]):
-            self.run_test(device, make_q_tensor, make_kv_tensor, attn_bias, forw_tol, grad_tol, backend=cnts)
+        self.run_test(device, make_q_tensor, make_kv_tensor, attn_bias, forw_tol, grad_tol, backend=cnts)
         self.assertEqual(cnts.frame_count, 1, "Compiled graph should have 1 frame!")
 
     @parametrize("shape", [(16, 16, 128, 128, 16), (16, 16, 128, 256, 32), (16, 16, 256, 128, 32), (1, 1, 23, 56, 15)])

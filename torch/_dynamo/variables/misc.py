@@ -170,6 +170,12 @@ class SuperVariable(VariableTracker):
             return super(variables.CustomizedDictVariable, self.objvar).call_method(
                 tx, "__setitem__", args, kwargs
             )
+        elif inner_fn is collections.OrderedDict.__getitem__ and isinstance(
+            self.objvar, variables.CustomizedDictVariable
+        ):
+            return super(variables.CustomizedDictVariable, self.objvar).call_method(
+                tx, "__getitem__", args, kwargs
+            )
         elif is_standard_setattr(inner_fn) and isinstance(
             self.objvar, UserDefinedObjectVariable
         ):
@@ -635,6 +641,47 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
                     self.value.needs_input_grad
                 )
         return super().var_getattr(tx, name)
+
+
+class AutogradEngineVariable(UserDefinedObjectVariable):
+    """
+    Represents a torch._C._ImperativeEngine instance.
+    """
+
+    def __init__(
+        self,
+        value,
+        value_type=None,
+        **kwargs,
+    ):
+        super().__init__(value=value, value_type=value_type, **kwargs)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if name == "queue_callback":
+            if torch._dynamo.compiled_autograd.compiled_autograd_enabled:
+                assert (
+                    tx.one_graph
+                ), "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True"
+                return variables.UserFunctionVariable(
+                    torch._dynamo.external_utils.FakeCompiledAutogradEngine.queue_callback,
+                    source=self.source,
+                ).call_function(
+                    tx,
+                    (tx.output.side_effects.get_ca_final_callbacks_var(), *args),
+                    kwargs,
+                )
+            else:
+                unimplemented(
+                    "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True"
+                )
+        else:
+            unimplemented(f"torch._C._ImperativeEngine method: {name}")
 
 
 class LambdaVariable(VariableTracker):
