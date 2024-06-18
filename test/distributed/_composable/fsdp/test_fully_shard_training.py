@@ -3,6 +3,7 @@
 import contextlib
 import copy
 import functools
+import itertools
 import unittest
 from typing import Iterable, List, Tuple, Type, Union
 
@@ -337,7 +338,6 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             return
         assert device_type in ("cuda", "cpu"), f"{device_type}"
         torch.manual_seed(42)
-        lin_dim = 32
         vocab_size = 1024
         model_args = ModelArgs(
             n_layers=3,
@@ -489,6 +489,44 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             losses: List[torch.Tensor] = []
             for _model, _optim in ((ref_model, ref_optim), (model, optim)):
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+                losses.append(_model(inp).sum())
+                losses[-1].backward()
+                _optim.step()
+            self.assertEqual(losses[0], losses[1])
+
+    @skip_if_lt_x_gpu(2)
+    def test_explicit_prefetching(self):
+        torch.manual_seed(42)
+        model_args = ModelArgs(n_layers=8, dropout_p=0.0)
+        model = Transformer(model_args)
+        ref_model = replicate(copy.deepcopy(model).cuda())
+        ref_optim = torch.optim.AdamW(ref_model.parameters(), lr=1e-2)
+        for layer in itertools.chain(model.layers, [model]):
+            fully_shard(layer)
+        optim = torch.optim.AdamW(model.parameters(), lr=1e-2)
+
+        num_to_forward_prefetch = num_to_backward_prefetch = 2
+        for i, layer in enumerate(model.layers):
+            if i >= len(model.layers) - num_to_forward_prefetch:
+                break
+            layers_to_prefetch = [
+                model.layers[i + j] for j in range(1, num_to_forward_prefetch + 1)
+            ]
+            layer.set_modules_to_forward_prefetch(layers_to_prefetch)
+        for i, layer in enumerate(model.layers):
+            if i < num_to_backward_prefetch:
+                continue
+            layers_to_prefetch = [
+                model.layers[i - j] for j in range(1, num_to_backward_prefetch + 1)
+            ]
+            layer.set_modules_to_backward_prefetch(layers_to_prefetch)
+
+        torch.manual_seed(42 + self.rank)
+        inp = torch.randint(0, model_args.vocab_size, (2, 8), device="cuda")
+        for iter_idx in range(10):
+            losses: List[torch.Tensor] = []
+            for _model, _optim in ((ref_model, ref_optim), (model, optim)):
+                _optim.zero_grad()
                 losses.append(_model(inp).sum())
                 losses[-1].backward()
                 _optim.step()
