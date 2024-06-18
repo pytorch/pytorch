@@ -65,8 +65,8 @@ class verbose:
         return False
 
 
-def set_flags(_enabled,_deterministic=None):
-    orig_flags = (torch._C._get_mkldnn_enabled(),torch._C._get_mkldnn_deterministic())
+def set_flags(_enabled, _deterministic=None):
+    orig_flags = (torch._C._get_mkldnn_enabled(), torch._C._get_mkldnn_deterministic())
     torch._C._set_mkldnn_enabled(_enabled)
     if _deterministic is not None:
         torch._C._set_mkldnn_deterministic(_deterministic)
@@ -74,7 +74,7 @@ def set_flags(_enabled,_deterministic=None):
 
 
 @contextmanager
-def flags(enabled=False,deterministic=False):
+def flags(enabled=False, deterministic=False):
     with __allow_nonbracketed_mutation():
         orig_flags = set_flags(enabled, deterministic)
     try:
