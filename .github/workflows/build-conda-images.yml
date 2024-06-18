@@ -36,8 +36,6 @@ jobs:
     env:
       CUDA_VERSION: ${{ matrix.cuda_version }}
     steps:
-      - name: Checkout PyTorch builder
-        uses: actions/checkout@v3
       - name: Build Docker Image
         run: |
-          scripts/docker/build_docker.sh
+          ./ci/docker/build_docker_conda.sh
