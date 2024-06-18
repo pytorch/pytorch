@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 
-from typing import Any, cast, NoReturn, Optional, Union
+from typing import Any, cast, Iterable, List, NoReturn, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -270,6 +270,46 @@ class FSDPModule:
                 if fsdp_param_group := state._fsdp_param_group:
                     fsdp_param_group.reshard_after_backward = reshard_after_backward
 
+    def set_modules_to_forward_prefetch(self, modules: List["FSDPModule"]) -> None:
+        """
+        Sets the FSDP modules for which this FSDP module should explicitly
+        prefetch all-gathers in forward. The prefetching runs after this
+        module's all-gather copy-out.
+
+        Passing a singleton list containing the next FSDP module gives the same
+        all-gather overlap behavior as the default overlap behavior, except the
+        prefetched all-gather is issued earlier from the CPU. Passing a list
+        with at least length two is required for more aggressive overlap and
+        will use more reserved memory.
+
+        Args:
+            modules (List[FSDPModule]): FSDP modules to prefetch.
+        """
+        _assert_all_fsdp_modules(modules)
+        self._get_fsdp_state()._states_to_forward_prefetch = [
+            module._get_fsdp_state() for module in modules
+        ]
+
+    def set_modules_to_backward_prefetch(self, modules: List["FSDPModule"]) -> None:
+        """
+        Sets the FSDP modules for which this FSDP module should explicitly
+        prefetch all-gathers in backward. This overrides the default backward
+        pretching implementation that prefetches the next FSDP module based on
+        the reverse post-forward order.
+
+        Passing a singleton list containing the previous FSDP module gives the
+        same all-gather overlap behavior as the default overlap behavior.
+        Passing a list with at least length two is required for more aggressive
+        overlap and will use more reserved memory.
+
+        Args:
+            modules (List[FSDPModule]): FSDP modules to prefetch.
+        """
+        _assert_all_fsdp_modules(modules)
+        self._get_fsdp_state()._states_to_backward_prefetch = [
+            module._get_fsdp_state() for module in modules
+        ]
+
     def _get_fsdp_state(self) -> FSDPState:
         if (state := _get_module_fsdp_state(cast(nn.Module, self))) is None:
             raise AssertionError(f"No FSDP state found on {self}")
@@ -350,3 +390,9 @@ def register_fsdp_forward_method(module: nn.Module, method_name: str) -> None:
         method_name,
         wrapped_method.__get__(module, type(module)),  # type:ignore[attr-defined]
     )
+
+
+def _assert_all_fsdp_modules(modules: Iterable[Any]) -> None:
+    for module in modules:
+        if not isinstance(module, FSDPModule):
+            raise ValueError(f"Expects FSDPModule but got {type(module)}: {module}")
