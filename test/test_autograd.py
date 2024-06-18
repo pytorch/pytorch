@@ -13333,6 +13333,7 @@ class TestSelectiveActivationCheckpoint(TestCase):
         self.assertEqual(act_mem_sac2, 1.0)
         self.assertEqual(bw_flops_sac2, 2.0)
 
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
     def test_output_already_has_autograd_meta(self):
         # View of tensor of non-differentiable dtype still has AutogradMeta
         def fn(x, y):
