@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import itertools
 from dataclasses import dataclass, field
 from enum import auto, Enum
@@ -9,9 +10,9 @@ import torch.nn as nn
 
 from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
-from torch.distributed._tensor import DTensor, Placement, Replicate, Shard
+from torch.distributed._tensor import DTensor, Replicate, Shard
 from torch.distributed._tensor.device_mesh import _mesh_resources
-from torch.distributed._tensor.placement_types import DTensorSpec
+from torch.distributed._tensor.placement_types import DTensorSpec, Placement, TensorMeta
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_common import (
     _chunk_with_empty,
@@ -128,12 +129,10 @@ class FSDPParam:
     _sharded_post_forward_param: Optional[nn.Parameter]  # ND
     _unsharded_param: nn.Parameter  # ND
     unsharded_accumulated_grad: Optional[torch.Tensor]  # ND
-    _spmd_placements: Tuple[Placement, ...]
-    _global_size: torch.Size
-    _global_stride: Tuple[int, ...]
-    all_gather_outputs: List[torch.Tensor]  # 1D
+    _sharding_spec: DTensorSpec
     # DTensor attributes (only defined for DTensor `param`):
     _tp_spec: DTensorSpec
+    all_gather_outputs: List[torch.Tensor]  # 1D
     # All-gather extension attributes
     _extensions_data: ExtensionsData
     _unsharded_inner_tensors: List[torch.Tensor]
@@ -213,13 +212,16 @@ class FSDPParam:
                 )
 
             # TODO: Hard code FSDP + TP; need to support HSDP + TP
-            self._spmd_placements = (
+            self._spmd_placements: Tuple[Placement, ...] = (
                 Shard(0),
                 self._tp_spec.placements[0],
             )
 
-            self._global_size = param.size()
-            self._global_stride = param.stride()
+            self._sharding_spec = DTensorSpec(
+                self._spmd_mesh,
+                self._spmd_placements,
+                tensor_meta=self._tp_spec.tensor_meta,
+            )
             param_data = cast(DTensor, param)._local_tensor
         else:
             self._spmd_mesh = self.mesh_info.mesh
@@ -227,10 +229,18 @@ class FSDPParam:
                 self._spmd_placements = (Replicate(), Shard(0))
             else:
                 self._spmd_placements = (Shard(0),)
-            self._global_size = param.size()
-            self._global_stride = param.stride()
+            self._sharding_spec = DTensorSpec(
+                self._spmd_mesh,
+                self._spmd_placements,
+                tensor_meta=TensorMeta(
+                    param.size(),
+                    param.stride(),
+                    param.dtype,
+                ),
+            )
             param_data = param
         self._orig_size = param_data.size()
+        self._contiguous_orig_stride = make_contiguous_strides_for(self._orig_size)
         shard_rank = self.mesh_info.shard_mesh_rank
         shard_world_size = self.mesh_info.shard_mesh_size
         chunks = _chunk_with_empty(param_data, shard_world_size, dim=0)
@@ -302,8 +312,9 @@ class FSDPParam:
         all_gather_input_dtypes: List[torch.dtype],
         world_size: int,
         device: torch.device,
+        force_recreate: bool = False,
     ):
-        if self.all_gather_outputs:
+        if not force_recreate and len(self.all_gather_outputs) > 0:
             return  # already initialized
         self.all_gather_outputs = [
             torch.empty(torch.Size([numel * world_size]), dtype=dtype, device=device)
@@ -311,7 +322,24 @@ class FSDPParam:
         ]
 
     def init_unsharded_param(self):
-        if hasattr(self, "_unsharded_param"):  # after the 1st all-gather
+        """
+        [Note: Invariants for torch.compile Traceable FSDP2]
+        1. Under compile, we always re-populate the content of `self._unsharded_param`
+           per AllGather using the slow path.
+        2. Under compile, we always recreate `self.all_gather_outputs` per AllGather.
+           This is to ensure the buffer creation is internal to the graph and
+           avoid `self.all_gather_outputs` being captured as a graph input.
+        3. Under compile, at the end of `free_unsharded_param()`, we always clean up
+           `self.all_gather_outputs` and `self._unsharded_inner_tensors`,
+           to avoid them being captured as graph output.
+
+        With these invariants, only these tensors will be inputs to the graph:
+        - Sharded parameters
+        - Placeholders for the `self._unsharded_param` nn.Parameter
+        """
+        if not ca.compiled_autograd_enabled and hasattr(
+            self, "_unsharded_param"
+        ):  # after the 1st all-gather
             inner_tensor = self._sharded_local_tensor
             if not hasattr(inner_tensor, "fsdp_post_all_gather"):
                 return  # already initialized
@@ -348,19 +376,20 @@ class FSDPParam:
         unsharded_param = torch.as_strided(
             unsharded_tensor,
             self._orig_size,
-            make_contiguous_strides_for(self._orig_size),
+            self._contiguous_orig_stride,
             storage_offset=0,
         )
         if self.is_dtensor:
-            unsharded_param = _from_local_no_grad(
-                unsharded_param,
-                self._tp_spec.mesh,
-                self._tp_spec.placements,
-                self._global_size,
-                self._global_stride,
+            unsharded_param = _from_local_no_grad(unsharded_param, self._tp_spec)
+        if hasattr(self, "_unsharded_param"):
+            assert ca.compiled_autograd_enabled
+            with torch.no_grad():
+                alloc_storage(self._unsharded_param)
+                self._unsharded_param.copy_(unsharded_param)
+        else:
+            self._unsharded_param = nn.Parameter(
+                unsharded_param, requires_grad=self.sharded_param.requires_grad
             )
-        self._unsharded_param = nn.Parameter(unsharded_param)
-        self._unsharded_param.requires_grad_(self.sharded_param.requires_grad)
 
     def _unflatten_all_gather_outputs(self) -> Tuple[torch.Tensor, ...]:
         return tuple(
@@ -442,10 +471,7 @@ class FSDPParam:
             )
         return _from_local_no_grad(
             tensor,
-            self._spmd_mesh,
-            self._spmd_placements,
-            self._global_size,
-            self._global_stride,
+            self._sharding_spec,
         )
 
     def to_sharded_post_forward_dtensor(self, tensor: torch.Tensor) -> DTensor:
@@ -456,13 +482,12 @@ class FSDPParam:
         assert isinstance(self.post_forward_mesh_info, HSDPMeshInfo)
         # TODO: Prefer this DTensor to be read-only and generalize the
         # placement once we support TP.
-        return _from_local_no_grad(
-            tensor,
+        post_forward_sharding_spec = DTensorSpec(
             self.post_forward_mesh_info.mesh,
             (Replicate(), Shard(0)),
-            self._global_size,
-            self._global_stride,
+            tensor_meta=self._sharding_spec.tensor_meta,
         )
+        return _from_local_no_grad(tensor, post_forward_sharding_spec)
 
     def to_accumulated_grad_if_needed(self) -> None:
         # Access `_unsharded_param` to bypass the sharded state check since we
@@ -494,6 +519,9 @@ class FSDPParam:
             self.all_gather_outputs, self._unsharded_inner_tensors
         ):
             free_storage(tensor)
+        if ca.compiled_autograd_enabled:
+            self.all_gather_outputs = []
+            self._unsharded_inner_tensors = []
 
     @property
     def all_gather_inputs(self) -> List[torch.Tensor]:  # 1D

@@ -134,6 +134,8 @@ bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output)
 static void linalg_lu_factor_out_mps_impl(const Tensor& A, bool pivot, Tensor& LU, Tensor& pivots) {
   using namespace mps;
 
+  TORCH_CHECK(!c10::isComplexType(A.scalar_type()) && !c10::isComplexType(LU.scalar_type()),
+              "linalg.lu_factor(): MPS doesn't support complex types.");
   TORCH_CHECK(pivot, "linalg.lu_factor(): MPS doesn't allow pivot == False.");
 
   Tensor A_t = A;
@@ -149,7 +151,7 @@ static void linalg_lu_factor_out_mps_impl(const Tensor& A, bool pivot, Tensor& L
     return;
   }
 
-  Tensor A_ = A_t.dim() > 3 ? A_t.flatten(0, -3) : A_t;
+  Tensor A_ = A_t.dim() > 3 ? A_t.view({-1, A_t.size(-2), A_t.size(-1)}) : A_t;
 
   uint64_t batchSize = A_.dim() > 2 ? A_.size(0) : 1;
   std::vector<Tensor> status_tensors;
@@ -341,8 +343,8 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
 
   @autoreleasepool {
     string key = (opType == ADDBMM_OP_TYPE) ? ("addbmm_out_mps_impl") : ("baddbmm_out_mps_impl");
-    key += getTensorsStringKey({batch1, batch2, input}) + ":" + to_string(beta.toDouble()) + ":" +
-        to_string(alpha.toDouble());
+    key += getTensorsStringKey({batch1, batch2, input}) + ":" + std::to_string(beta.toDouble()) + ":" +
+        std::to_string(alpha.toDouble());
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, input);
@@ -443,8 +445,8 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
   };
 
   @autoreleasepool {
-    string key = "addmm_out_mps_impl" + getTensorsStringKey({self, other, *bias_}) + ":" + to_string(beta.toDouble()) +
-        ":" + to_string(alpha.toDouble());
+    string key = "addmm_out_mps_impl" + getTensorsStringKey({self, other, *bias_}) + ":" +
+        std::to_string(beta.toDouble()) + ":" + std::to_string(alpha.toDouble());
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* selfTensor = nil;
       MPSGraphTensor* otherTensor = nil;
@@ -727,8 +729,8 @@ Tensor& addr_out_mps(const Tensor& self,
   };
 
   @autoreleasepool {
-    string key = "addr_out_mps_impl" + getTensorsStringKey({vec1, vec2, *self_}) + ":" + to_string(beta.toDouble()) +
-        ":" + to_string(alpha.toDouble());
+    string key = "addr_out_mps_impl" + getTensorsStringKey({vec1, vec2, *self_}) + ":" +
+        std::to_string(beta.toDouble()) + ":" + std::to_string(alpha.toDouble());
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* t1 = mps::mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(vec1), inputShape);
       MPSGraphTensor* t2 = mps::mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(vec2), otherShape);

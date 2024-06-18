@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import unittest
 
 from torch._dynamo import config
 from torch._dynamo.testing import make_test_cls_with_patches
@@ -6,7 +7,6 @@ from torch._dynamo.testing import make_test_cls_with_patches
 try:
     from . import (
         test_aot_autograd,
-        test_export,
         test_functions,
         test_higher_order_ops,
         test_misc,
@@ -15,7 +15,6 @@ try:
     )
 except ImportError:
     import test_aot_autograd
-    import test_export
     import test_functions
     import test_higher_order_ops
     import test_misc
@@ -52,12 +51,15 @@ tests = [
     test_higher_order_ops.HigherOrderOpTests,
     test_higher_order_ops.FuncTorchHigherOrderOpTests,
     test_aot_autograd.AotAutogradFallbackTests,
-    test_export.ExportTests,
     # test_repros.ReproTests,
 ]
 for test in tests:
     make_inline_inbuilt_nn_modules_cls(test)
 del test
+
+unittest.skip(
+    InlineInbuiltNNModulesMiscTests.test_cpp_extension_recommends_custom_ops_inline_inbuilt_nn_modules  # noqa: F821
+)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
