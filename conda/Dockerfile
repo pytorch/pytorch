@@ -79,7 +79,7 @@ FROM ${BASE_TARGET} as final
 COPY --from=openssl            /opt/openssl           /opt/openssl
 COPY --from=patchelf           /patchelf              /usr/local/bin/patchelf
 COPY --from=conda              /opt/conda             /opt/conda
-ADD  ./java/jni.h /usr/local/include/jni.h
+ADD  ./ci/docker/java/jni.h /usr/local/include/jni.h
 ENV  PATH /opt/conda/bin:$PATH
 COPY --from=mnist  /usr/local/mnist /usr/local/mnist
 RUN rm -rf /usr/local/cuda
