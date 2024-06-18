@@ -10,7 +10,7 @@ Background_Matting,pass_due_to_skip,0
 
 
 
-DALLE2_pytorch,eager_fail_to_run,0
+DALLE2_pytorch,model_fail_to_load,0
 
 
 

@@ -10,7 +10,7 @@ clone-deps:
 		&& (test -e detectron2 || git clone --recursive https://github.com/facebookresearch/detectron2) \
 		&& (test -e FBGEMM || git clone --recursive https://github.com/pytorch/FBGEMM) \
 		&& (test -e torchrec || git clone --recursive https://github.com/pytorch/torchrec) \
-		&& (test -e torchbenchmark || git clone --recursive https://github.com/pytorch/benchmark torchbenchmark) \
+		&& (test -e torchbenchmark || git clone --recursive https://github.com/eellison/benchmark torchbenchmark) \
 	)
 
 pull-deps: clone-deps
