@@ -174,7 +174,11 @@ class ConstDictVariable(VariableTracker):
     def __contains__(self, vt):
         assert isinstance(vt, VariableTracker)
         Hashable = ConstDictVariable._HashableTracker
-        return is_hashable(vt) and Hashable(vt) in self.items
+        return (
+            is_hashable(vt)
+            and Hashable(vt) in self.items
+            and not isinstance(self.items[Hashable(vt)], variables.DeletedVariable)
+        )
 
     def reconstruct(self, codegen):
         # instructions to load collections.OrderedDict if necessary
@@ -545,6 +549,8 @@ class DictValues(DictView):
 
 def _is_matching_transformers_cls(cls) -> bool:
     mod = sys.modules.get("transformers.file_utils")
+    if mod is None:
+        mod = sys.modules.get("transformers.utils.generic")
     return mod is not None and issubclass(cls, mod.ModelOutput)
 
 
@@ -555,12 +561,20 @@ def _is_matching_diffusers_cls(cls) -> bool:
 
 def _call_hasattr_customobj(self, tx, name: str) -> "VariableTracker":
     """Shared method between DataClassVariable and CustomizedDictVariable where items are attrs"""
+    if tx.output.side_effects.is_attribute_mutation(self):
+        try:
+            result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
+            return variables.ConstantVariable.create(
+                not isinstance(result, variables.DeletedVariable)
+            )
+        except KeyError:
+            pass
     if name in self.items or hasattr(self.user_cls, name):
         return ConstantVariable(True)
     elif istype(self.mutable_local, MutableLocal) and self.source is None:
         # Something created locally can't have any extra fields on it
         return ConstantVariable(False)
-    elif self.mutable_local is None and self.source:
+    elif self.source:
         # Maybe add a guard
         try:
             example = tx.output.root_tx.get_example_value(self.source)
@@ -577,152 +591,27 @@ def _call_hasattr_customobj(self, tx, name: str) -> "VariableTracker":
 
 class DataClassVariable(ConstDictVariable):
     """
-    This is a bit of a hack to deal with
-    transformers.file_utils.ModelOutput() from huggingface.
+    This class doesn't appear to be used anywhere.
+    It used to be used to deal with transformers.file_utils.ModelOutput
+    from huggingface.
 
-    ModelOutput causes trouble because it a a mix of a dataclass and a
-    OrderedDict and it calls super() methods implemented in C.
+    Keeping since we wish to support dataclasses in general in the future
     """
 
-    # ModelOutput() excludes None, though generic datclasses don't
-    include_none = False
-
-    @staticmethod
-    @functools.lru_cache(None)
-    def _patch_once():
-        try:
-            from transformers.file_utils import ModelOutput
-
-            for obj in ModelOutput.__dict__.values():
-                if callable(obj):
-                    skip_code(obj.__code__)
-        except ImportError:
-            pass
-
-        try:
-            from diffusers.utils import BaseOutput
-
-            for obj in BaseOutput.__dict__.values():
-                if callable(obj):
-                    skip_code(obj.__code__)
-        except ImportError:
-            pass
-
-    @staticmethod
-    def is_matching_cls(cls):
-        return _is_matching_transformers_cls(cls) or _is_matching_diffusers_cls(cls)
-
-    @classmethod
-    def is_matching_object(cls, obj):
-        return cls.is_matching_cls(type(obj))
-
-    @classmethod
-    def create(cls, user_cls, args, kwargs, options):
-        DataClassVariable._patch_once()
-
-        skip_code(user_cls.__init__.__code__)
-        keys = [f.name for f in dataclasses.fields(user_cls)]
-        bound = inspect.signature(user_cls).bind(*args, **kwargs)
-        bound.apply_defaults()
-        assert set(bound.arguments.keys()) == set(keys)
-        items = {}
-        for key in keys:
-            val = bound.arguments[key]
-            key = ConstantVariable.create(key)
-            if isinstance(val, VariableTracker):
-                items[key] = val
-            else:
-                if cls.include_none:
-                    assert variables.ConstantVariable.is_literal(val)
-                    items[key] = variables.ConstantVariable.create(val)
-                else:
-                    assert val is None, f"unexpected {val}"
-
-        if len(items) == 1 and not isinstance(items[keys[0]], variables.TensorVariable):
-            unimplemented("DataClassVariable iterator constructor")
-            # TODO(jansel): implement unpacking logic in ModelOutput.__post_init__
-
-        return cls(items, user_cls, **options)
-
-    @classmethod
-    def wrap(cls, builder, obj):
-        user_cls = type(obj)
-        keys = [f.name for f in dataclasses.fields(user_cls)]
-
-        excluded = []
-        items = {}
-        for key in keys:
-            # __init__ function of a dataclass might not have yet defined the key
-            if hasattr(obj, key):
-                val = getattr(obj, key)
-                var = builder.__class__(
-                    tx=builder.tx, source=AttrSource(builder.source, key)
-                )(val)
-                if val is not None or cls.include_none:
-                    key = ConstantVariable.create(key)
-                    items[key] = var
-                else:
-                    excluded.append(var)
-        return cls(items, user_cls)
-
-    def __init__(self, items, user_cls, **options):
-        super().__init__(items, user_cls, **options)
-        assert self.is_matching_cls(user_cls)
-
-    def as_proxy(self):
-        raise NotImplementedError
-
-    def reconstruct(self, codegen):
-        codegen.extend_output([codegen._create_load_const(self.user_cls)])
-        # All the keys are just wrapped strings
-        d = self.keys_as_python_constant()
-        codegen.foreach(d.values())
-        keys = tuple(d.keys())
-        codegen.extend_output(codegen.create_call_function_kw(len(keys), keys, True))
-
-    def call_method(
-        self,
-        tx,
-        name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
-    ) -> "VariableTracker":
-        if name == "__getitem__":
-            assert not kwargs and len(args) == 1
-            val = args[0]
-            if val.python_type() == str:
-                return self.getitem_const(val)
-            else:
-                return self.call_method(tx, "to_tuple", [], {}).call_method(
-                    tx, "__getitem__", args, kwargs
-                )
-        elif name == "to_tuple":
-            assert not (args or kwargs)
-            return variables.TupleVariable(list(self.items.values()))
-        elif name == "__setattr__":
-            name = "__setitem__"
-        return super().call_method(tx, name, args, kwargs)
-
-    def var_getattr(self, tx, name: str) -> "VariableTracker":
-        name_vt = ConstantVariable.create(name)
-        if name_vt in self:
-            return self.call_method(tx, "__getitem__", [name_vt], {})
-        elif not self.include_none:
-            defaults = {f.name: f.default for f in dataclasses.fields(self.user_cls)}
-            if name in defaults:
-                assert variables.ConstantVariable.is_literal(defaults[name])
-                return variables.ConstantVariable.create(defaults[name])
-        super().var_getattr(tx, name)
-
-    call_hasattr = _call_hasattr_customobj
+    pass
 
 
 class CustomizedDictVariable(ConstDictVariable):
+    @staticmethod
+    def is_matching_cls_hf(cls):
+        return _is_matching_transformers_cls(cls) or _is_matching_diffusers_cls(cls)
+
     @staticmethod
     def is_matching_cls(cls):
         # True if using default OrderedDict.__init__ and did not implement __post_init__
         if (
             issubclass(cls, collections.OrderedDict)
+            and cls is not collections.OrderedDict
             and cls.__init__ is collections.OrderedDict.__init__
             and not hasattr(cls, "__post_init__")
         ):
@@ -730,7 +619,7 @@ class CustomizedDictVariable(ConstDictVariable):
         # hack for HF usecase:
         #   assume dataclass annotation for ModelOutput subclass
         #   assume self.create is AA to ModelOutput.__post_init__
-        return _is_matching_transformers_cls(cls) or _is_matching_diffusers_cls(cls)
+        return CustomizedDictVariable.is_matching_cls_hf(cls)
 
     @classmethod
     def is_matching_object(cls, obj):
@@ -764,9 +653,7 @@ class CustomizedDictVariable(ConstDictVariable):
                     )
 
             bound_args = {}
-            if _is_matching_transformers_cls(user_cls) or _is_matching_diffusers_cls(
-                user_cls
-            ):
+            if cls.is_matching_cls_hf(user_cls):
                 # Skip none
                 for k, v in bound.arguments.items():
                     if isinstance(v, ConstantVariable) and v.value is None or v is None:
@@ -792,7 +679,27 @@ class CustomizedDictVariable(ConstDictVariable):
     # called from builder.py
     @classmethod
     def wrap(cls, builder, obj):
-        raise NotImplementedError
+        user_cls = type(obj)
+
+        if not cls.is_matching_cls_hf(user_cls):
+            unimplemented("custom non-hf dict subclass wrap unimplemented")
+
+        items = builder.__class__(tx=builder.tx, source=builder.source)(
+            collections.OrderedDict(obj)
+        ).items
+
+        keys = [f.name for f in dataclasses.fields(user_cls)]
+        for key in keys:
+            # __init__ function of a dataclass might not have yet defined the key
+            if hasattr(obj, key):
+                val = getattr(obj, key)
+                var = builder.__class__(
+                    tx=builder.tx, source=AttrSource(builder.source, key)
+                )(val)
+                if val is not None:
+                    key = ConstantVariable.create(key)
+                    items[key] = var
+        return cls(items, user_cls)
 
     def __init__(self, items, user_cls, **options):
         super().__init__(items, user_cls, **options)
@@ -804,9 +711,7 @@ class CustomizedDictVariable(ConstDictVariable):
     # 'RETURN_VALUE triggered compile'
     # called from torch/_dynamo/codegen.py
     def reconstruct(self, codegen):
-        is_hf_model_output = _is_matching_transformers_cls(
-            self.user_cls
-        ) or _is_matching_diffusers_cls(self.user_cls)
+        is_hf_model_output = self.is_matching_cls_hf(self.user_cls)
 
         # If the user class is a ModelOutput, then wrap the instance creation in
         # torch._dynamo.disable(). Even though we mark the __post_init__ as skip
@@ -848,21 +753,34 @@ class CustomizedDictVariable(ConstDictVariable):
         ):
             # for python dict method without overridden
             return super().call_method(tx, name, args, kwargs)
-        elif name in ("__getitem__", "to_tuple", "__setitem__", "__setattr__"):
+        elif name in (
+            "__getitem__",
+            "to_tuple",
+            "__setitem__",
+            "__setattr__",
+            "__post_init__",
+        ):
             # for user overridden method
             return tx.inline_user_function_return(
                 variables.UserFunctionVariable(fn, source=source),
                 [self] + list(args),
                 kwargs,
             )
+        elif fn is getattr(collections.OrderedDict, name, None):
+            return super().call_method(tx, name, args, kwargs)
 
-        unimplemented("custom dict: call_method unimplemented name=%s", name)
+        unimplemented(f"custom dict: call_method unimplemented name={name}")
 
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         name_vt = ConstantVariable.create(name)
         if name_vt in self:
             return self.call_method(tx, "__getitem__", [name_vt], {})
-        super().var_getattr(tx, name)
+        if dataclasses.is_dataclass(self.user_cls):
+            defaults = {f.name: f.default for f in dataclasses.fields(self.user_cls)}
+            if name in defaults:
+                assert variables.ConstantVariable.is_literal(defaults[name])
+                return variables.ConstantVariable.create(defaults[name])
+        return super().var_getattr(tx, name)
 
     call_hasattr = _call_hasattr_customobj
 

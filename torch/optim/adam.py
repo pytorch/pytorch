@@ -354,7 +354,7 @@ def _single_tensor_adam(
         step_t = state_steps[i]
 
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-        if not torch.compiler.is_compiling() and capturable:
+        if not torch._utils.is_compiling() and capturable:
             capturable_supported_devices = _get_capturable_supported_devices()
             assert (
                 param.device.type == step_t.device.type
@@ -467,7 +467,7 @@ def _multi_tensor_adam(
         )
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-    if not torch.compiler.is_compiling() and capturable:
+    if not torch._utils.is_compiling() and capturable:
         capturable_supported_devices = _get_capturable_supported_devices(
             supports_xla=False
         )
@@ -744,7 +744,7 @@ def adam(
 
     # this check is slow during compilation, so we skip it
     # if it's strictly needed we can add this check back in dynamo
-    if not torch.compiler.is_compiling() and not all(
+    if not torch._utils.is_compiling() and not all(
         isinstance(t, torch.Tensor) for t in state_steps
     ):
         raise RuntimeError(

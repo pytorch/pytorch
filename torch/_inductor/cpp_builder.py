@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # This CPP JIT builder is designed to support both Windows and Linux OS.
 # The design document please check this RFC: https://github.com/pytorch/pytorch/issues/124245
 
@@ -570,6 +571,9 @@ def _get_torch_related_args(include_pytorch: bool, aot_mode: bool):
         libraries = ["torch", "torch_cpu"]
         if not aot_mode:
             libraries.append("torch_python")
+
+    if _IS_WINDOWS:
+        libraries.append("sleef")
 
     # Unconditionally import c10 for non-abi-compatible mode to use TORCH_CHECK - See PyTorch #108690
     if not config.abi_compatible:

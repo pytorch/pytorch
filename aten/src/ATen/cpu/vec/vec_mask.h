@@ -127,7 +127,9 @@ class VecMask {
   static VecMask<T, N> from(U* b) {
     using int_t = int_same_size_t<T>;
     __at_align__ T mask[size()];
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
     for (int i = 0; i < size(); i++) {
       *(int_t*)(mask + i) = b[i] ? ~(int_t)0 : (int_t)0;
     }
