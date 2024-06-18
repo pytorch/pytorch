@@ -89,6 +89,9 @@ class SideEffects:
         self.keepalive = keepalive or []
         self.save_for_backward = save_for_backward or []
         self.tensor_hooks = tensor_hooks or {}
+        # Track Compiled Autograd final callbacks that must be called at the end of Compiled Autograd backward graph.
+        # Only applicable if this graph is created from Dynamo tracing in Compiled Autograd.
+        self.ca_final_callbacks_var = None
 
     def __eq__(self, other: object) -> bool:
         assert isinstance(other, SideEffects)
@@ -219,6 +222,14 @@ class SideEffects:
     ):
         """Start tracking a new variable for mutation"""
         assert variable.source is not None
+
+        if id(item) in self.id_to_variable:
+            raise AssertionError(
+                "Variable is already tracked for mutation. This could be "
+                "because you are not using VariableBuilder to construct "
+                "the variable tracker."
+            )
+
         variable.mutable_local = mutable_cls(variable.source)
         self.id_to_variable[id(item)] = variable
         self.keepalive.append(item)
@@ -467,6 +478,15 @@ class SideEffects:
             # Adding the handle to the cache means RemovableHandleVariable().reconstruct() will
             # be associated with the return value of register_hook().  This consumes the top of stack.
             cg.add_cache(handle)
+
+    def get_ca_final_callbacks_var(self):
+        from .variables.base import MutableLocal
+
+        if self.ca_final_callbacks_var is None:
+            self.ca_final_callbacks_var = variables.ListVariable(
+                [], mutable_local=MutableLocal()
+            )
+        return self.ca_final_callbacks_var
 
     def codegen_update_mutated(self, cg: PyCodegen):
         suffixes = []

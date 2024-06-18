@@ -4,11 +4,7 @@ Utils for caching the outputs of AOTAutograd
 """
 from __future__ import annotations
 
-import contextlib
-import copyreg
-
 import functools
-import io
 import logging
 import os
 import pickle
@@ -16,12 +12,11 @@ import shutil
 
 from dataclasses import dataclass
 
-from typing import Any, Callable, List, Optional, TYPE_CHECKING
+from typing import Callable, List, Optional, TYPE_CHECKING
 
 import torch
 from torch._dynamo.utils import counters
 from torch._functorch import config
-from torch._guards import detect_fake_mode
 
 from torch._inductor.codecache import (
     _ident,
@@ -35,13 +30,7 @@ from torch._inductor.codecache import (
 )
 
 from torch._inductor.runtime.runtime_utils import cache_dir
-from torch._subclasses.fake_tensor import (
-    extract_tensor_metadata,
-    FakeTensor,
-    FakeTensorConverter,
-    in_kernel_invocation_manager,
-    TensorMetadata,
-)
+from torch._subclasses.fake_tensor import extract_tensor_metadata
 
 from .runtime_wrappers import (
     AOTDispatchAutograd,
@@ -382,81 +371,6 @@ class AOTAutogradCacheEntry:
         return compiled_function
 
 
-def _fake_tensor_from_meta(metadata: TensorMetadata):
-    """
-    Given a fake tensor metadata, reconstruct the fake tensor.
-    This should be used only on TensorMetadata that was serialized/unserialized by AOTAutogradCache.
-    """
-    # Synthesize a new FakeTensor with the cached metadata.
-    # Based around FakeTensor._output_from_cache_entry
-    assert not metadata.is_sparse
-    fake_mode = detect_fake_mode()
-    empty = torch.empty_strided(
-        metadata.shape,
-        metadata.stride,
-        dtype=metadata.dtype,
-        layout=metadata.layout,
-        device="meta",
-        requires_grad=metadata.requires_grad,
-    )
-
-    if metadata.is_conj:
-        torch._C._set_conj(empty, True)
-    if metadata.is_neg:
-        torch._C._set_neg(empty, True)
-
-    # TODO: can traced tangents ever have a storage offset or storage bytes?
-    maybe_suppress: Callable[[], Any] = contextlib.nullcontext
-    if fake_mode is not None and fake_mode.shape_env is not None:
-        maybe_suppress = fake_mode.shape_env.suppress_guards
-
-    if metadata.storage_offset != 0:
-        storage = empty.untyped_storage()
-        with in_kernel_invocation_manager(fake_mode), maybe_suppress():
-            empty.set_(
-                storage, metadata.storage_offset, metadata.shape, metadata.stride
-            )
-    if metadata.storage_bytes == 0:
-        empty.untyped_storage().resize_(0)
-
-    return FakeTensorConverter().from_meta_and_device(fake_mode, empty, metadata.device)
-
-
-def _reduce_fake_tensor(t):
-    """
-    Allows us to serialize and deserialize FakeTensors, which show up in various metadata in our cache entries
-    """
-    metadata = extract_tensor_metadata(t)
-    if metadata.is_sparse:
-        raise BypassAOTAutogradCache(
-            "Sparse tensors in the FW metadata are not yet supported"
-        )
-    return (_fake_tensor_from_meta, (metadata,))
-
-
-# TODO: We don't actually need to pickle FakeTensors in the cache. This is done for
-# traced_tangents in this PR, but once we handle traced_tangents properly in the PR above,
-# we can remove this.
-class AOTAutogradCacheEntryPickler(pickle.Pickler):
-    dispatch_table = copyreg.dispatch_table.copy()
-    dispatch_table[FakeTensor] = _reduce_fake_tensor
-
-    @staticmethod
-    def dumps(obj) -> bytes:
-        """
-        Pickle an object using the FxGraphCachePickler.
-        """
-        with io.BytesIO() as stream:
-            pickler = AOTAutogradCacheEntryPickler(stream)
-            pickler.dump(obj)
-            return stream.getvalue()
-
-
-class AOTAutogradCacheEntryUnpickler(pickle.Unpickler):
-    dispatch_table = copyreg.dispatch_table.copy()
-    dispatch_table[FakeTensor] = _reduce_fake_tensor
-
-
 class AOTAutogradCache:
     """
     Caches the results of running AOTAutograd. This class mostly handles the save and load logic, whereas
@@ -551,7 +465,7 @@ class AOTAutogradCache:
         path = os.path.join(subdir, "entry")
         try:
             with open(path, "rb") as f:
-                entry: AOTAutogradCacheEntry = AOTAutogradCacheEntryUnpickler(f).load()
+                entry: AOTAutogradCacheEntry = pickle.load(f)
             return entry
         except Exception as e:
             log.warning("AOTAutograd cache unable to load compiled graph: %s", e)
@@ -561,7 +475,7 @@ class AOTAutogradCache:
     def save(key: str, entry: AOTAutogradCacheEntry):
         """Save a single entry into the cache."""
         try:
-            content = AOTAutogradCacheEntryPickler.dumps(entry)
+            content = pickle.dumps(entry)
         except Exception as e:
             log.warning("AOTAutograd cache unable to serialize compiled graph: %s", e)
             raise e
