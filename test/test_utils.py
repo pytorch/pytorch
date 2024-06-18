@@ -146,6 +146,7 @@ class TestCheckpoint(TestCase):
                     self.assertEqual(m.counter, 1)
 
     def test_checkpoint_valid(self):
+        self.assertEqual(1, 2)
         model = nn.Sequential(
             nn.Linear(100, 50),
             nn.ReLU(),

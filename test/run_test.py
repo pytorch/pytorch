@@ -551,6 +551,20 @@ def run_test(
     return ret_code
 
 
+def try_set_cpp_stack_traces(env, command, set=True):
+    # Print full c++ stack traces during retries
+    # Don't do it for macos inductor tests as it makes them
+    # segfault for some reason
+    if not (
+        IS_MACOS
+        and len(command) >= 2
+        and command[2].startswith(INDUCTOR_TEST_PREFIX)
+    ):
+        env = env or {}
+        env["TORCH_SHOW_CPP_STACKTRACES"] = "1"
+    return env
+
+
 def run_test_retries(
     command,
     test_directory,
@@ -560,9 +574,8 @@ def run_test_retries(
     output,
     continue_through_error,
 ):
-    # Run the test with -x to stop at first failure. Try again, skipping the
-    # previously run tests, repeating this until there is a test that fails 3
-    # times (same number of rVetries we typically give).
+    # Run the test with -x to stop at first failure. Repeat this test at most 2
+    # more times.  If it succeeds, the next subprocess will
     #
     # If continue through error is not set, then we fail fast.
     #
@@ -590,12 +603,14 @@ def run_test_retries(
             retries=0,  # no retries here, we do it ourselves, this is because it handles timeout exceptions well
         )
         ret_code = 0 if ret_code == 5 else ret_code
-        if ret_code == 0:
+        if ret_code == 0 and not sc_command.startswith("--rs="):
             break  # Got to the end of the test suite successfully
         signal_name = f" ({SIGNALS_TO_NAMES_DICT[-ret_code]})" if ret_code < 0 else ""
         print_to_file(f"Got exit code {ret_code}{signal_name}")
+        if sc_command.startswith("--rs=") and ret_code == 0:
+            print_to_file("Test passed on retry, continuing to run rest of test suite")
 
-        # Read what just failed
+        # Read what just failed/ran
         try:
             with open(
                 REPO_ROOT / ".pytest_cache/v/cache/stepcurrent" / stepcurrent_key
@@ -608,25 +623,23 @@ def run_test_retries(
             )
             break
 
-        num_failures[current_failure] += 1
-        if num_failures[current_failure] >= 3:
+        env = try_set_cpp_stack_traces(env, command, set=False)
+        if ret_code != 0:
+            num_failures[current_failure] += 1
+
+        if ret_code == 0:
+            # Rerunning the previously failing test succeeded, so now we can
+            # skip it and move on
+            sc_command = f"--scs={stepcurrent_key}"
+        elif num_failures[current_failure] >= 3:
             if not continue_through_error:
                 print_to_file("Stopping at first consistent failure")
                 break
             sc_command = f"--scs={stepcurrent_key}"
         else:
-            sc_command = f"--sc={stepcurrent_key}"
+            env = try_set_cpp_stack_traces(env, command, set=True)
+            sc_command = f"--rs={stepcurrent_key}"
         print_to_file("Retrying...")
-        # Print full c++ stack traces during retries
-        # Don't do it for macos inductor tests as it makes them
-        # segfault for some reason
-        if not (
-            IS_MACOS
-            and len(command) >= 2
-            and command[2].startswith(INDUCTOR_TEST_PREFIX)
-        ):
-            env = env or {}
-            env["TORCH_SHOW_CPP_STACKTRACES"] = "1"
         print_items = []  # do not continue printing them, massive waste of space
 
     consistent_failures = [x[1:-1] for x in num_failures.keys() if num_failures[x] >= 3]
@@ -1667,6 +1680,7 @@ def main():
 
     test_directory = str(REPO_ROOT / "test")
     selected_tests = get_selected_tests(options)
+    selected_tests = [x for x in selected_tests if x == "test_utils"]
 
     test_prioritizations = import_results()
     test_prioritizations.amend_tests(selected_tests)
