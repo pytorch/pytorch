@@ -23,6 +23,9 @@ from torch.export.exported_program import (
 from torch.fx._symbolic_trace import is_fx_tracing
 from torch.utils._pytree import GetAttrKey, SequenceKey
 
+from ._remove_effect_tokens_pass import _remove_effect_tokens
+
+
 __all__ = ["InterpreterModule", "UnflattenedModule", "unflatten", "FlatArgsAdapter"]
 
 
@@ -485,6 +488,7 @@ def unflatten(
         An instance of :class:`UnflattenedModule`, which has the same module
         hierarchy as the original eager module pre-export.
     """
+    module = _remove_effect_tokens(module)
     return UnflattenedModule(module, flat_args_adapter)
 
 
