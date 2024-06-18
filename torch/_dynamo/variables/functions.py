@@ -6,7 +6,6 @@ import functools
 import inspect
 import itertools
 import types
-import warnings
 from typing import Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
@@ -22,6 +21,11 @@ from .constant import ConstantVariable
 
 if TYPE_CHECKING:
     from torch._guards import Source
+
+try:
+    from torch.distributed._composable.fsdp import _fsdp_param_group
+except ModuleNotFoundError:
+    _fsdp_param_group = None
 
 
 def wrap_bound_arg(tx, val, source=None):
@@ -339,6 +343,13 @@ class UserMethodVariable(UserFunctionVariable):
                 return self.obj.call_method(
                     tx, self.fn.__name__, args, kwargs, constant=self.is_constant
                 )
+        elif (
+            _fsdp_param_group is not None
+            and self.fn is _fsdp_param_group.FSDPParamGroup.use_training_state
+        ):
+            return variables.TorchCtxManagerClassVariable(self.fn).call_function(
+                tx, (self.obj, *args), kwargs
+            )
         if self.is_constant:
             fn = getattr(self.obj.value, self.fn.__name__)
             return invoke_and_store_as_constant(tx, fn, self.get_name(), args, kwargs)
@@ -661,7 +672,7 @@ class SkipFunctionVariable(VariableTracker):
                         f"torch.compiler.allow_in_graph."
                     )
                     # also warn on it because most users won't see the graph break message
-                    warnings.warn(msg)
+                    torch._dynamo.utils.warn_once(msg)
             msg += f"', {self.reason}'" if self.reason else ""
             unimplemented(msg)
 

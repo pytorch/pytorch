@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import inspect
 import logging
@@ -49,6 +50,11 @@ try:
     import numpy as np
 except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
+
+try:
+    from torch.distributed._composable.fsdp import _fsdp_param_group
+except ModuleNotFoundError:
+    _fsdp_param_group = None  # type: ignore[assignment]
 
 log = logging.getLogger(__name__)
 
@@ -125,6 +131,7 @@ tracing_state_functions = {
     torch._utils.is_compiling: True,
     torch.compiler.is_compiling: True,
     torch.compiler.is_dynamo_compiling: True,
+    torch.nn.modules.activation._is_make_fx_tracing: False,
 }
 
 bin_ops = dict.fromkeys(["add", "sub", "mul", "div", "sqrt"])
@@ -202,6 +209,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         from . import (
             DisabledSavedTensorsHooksVariable,
             DualLevelContextManager,
+            FSDPParamGroupUseTrainingStateVariable,
             GradIncrementNestingCtxManagerVariable,
             GradInplaceRequiresGradCtxManagerVariable,
             GradModeVariable,
@@ -298,6 +306,14 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             assert len(args) == 1
             return DisabledSavedTensorsHooksVariable.create(
                 tx, args[0].as_python_constant()
+            )
+        elif (
+            _fsdp_param_group is not None
+            and self.value is _fsdp_param_group.FSDPParamGroup.use_training_state
+        ):
+            assert len(args) == 2
+            return FSDPParamGroupUseTrainingStateVariable.create(
+                tx, args[0], args[1].as_python_constant()
             )
 
         return super().call_function(tx, args, kwargs)

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import copy
 from queue import SimpleQueue
 from typing import List, Dict, Tuple

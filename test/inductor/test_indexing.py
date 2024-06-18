@@ -18,8 +18,13 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
-from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Round, RoundDecimal
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
+from torch.utils._sympy.functions import (
+    FloorDiv,
+    ModularIndexing,
+    RoundDecimal,
+    RoundToInt,
+)
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 
@@ -215,7 +220,7 @@ class TestIndexingSimplification(InductorTestCase):
         expected = FloorDiv(x * 15 + y, 3)
         self.assertEqual(expected, FloorDiv(actual, denominator))
 
-    @unittest.skipUnless(HAS_CUDA, "Need GPU for this test")
+    @unittest.skipUnless(HAS_GPU, "Need GPU for this test")
     def test_int8_unpack(self):
         @torch.compile
         def f(x):
@@ -226,7 +231,7 @@ class TestIndexingSimplification(InductorTestCase):
             )
             return unpacked * 2
 
-        x = torch.randint(0, 255, (2, 4096, 5504), dtype=torch.uint8, device="cuda")
+        x = torch.randint(0, 255, (2, 4096, 5504), dtype=torch.uint8, device=GPU_TYPE)
 
         triton_code = run_and_get_triton_code(f, x)
         # Make sure the 2 load uses simpified indexing rather than something like
@@ -245,21 +250,11 @@ class ExprPrinterTests(InductorTestCase):
 
         common_cases = [
             # expr, result
-            # Test exprs.
-            (
-                s1 / (2 * s1 - 1) - 1 / (2 * s1 - 1),
-                lambda c, L: f"((-1{L})*({c}/((-1{L}) + (2{L}*foo)))) + (foo*({c}/((-1{L}) + (2{L}*foo))))",
-            ),
-            (s1 / (s2 - s3), lambda c, L: f"foo*({c}/(bar + ((-1{L})*baz)))"),
             # Test Pow directly.
             (
                 sympy.Pow(s1 + s2, 0),
                 lambda _, L: f"1{L}",
             ),  # note: simplified before _print_Pow
-            (
-                sympy.Pow(s1 + s2, -3),
-                lambda c, _: f"{c}/((bar + foo)*(bar + foo)*(bar + foo))",
-            ),
         ]
 
         gpu_cases = common_cases + [
@@ -308,12 +303,10 @@ class ExprPrinterTests(InductorTestCase):
                 self.assertExpectedInline(cexpr(expr), """std::ceil((1.0/2.0)*s1)""")
 
     def test_print_round(self):
-        expr = Round(sympy.Symbol("x", integer=True) / 2)
+        expr = RoundToInt(sympy.Symbol("x", integer=True) / 2)
         self.assertExpectedInline(pexpr(expr), """round((1/2)*x)""")
         self.assertExpectedInline(cexpr(expr), """std::lrint((1.0/2.0)*x)""")
-        self.assertExpectedInline(
-            texpr(expr), """libdevice.llrint((1/2)*x).to(tl.int64)"""
-        )
+        self.assertExpectedInline(texpr(expr), """libdevice.llrint((1/2)*x)""")
 
     @parametrize("ndigits", [-1, 0, 1])
     def test_print_round_decimal(self, ndigits):
@@ -328,61 +321,36 @@ class ExprPrinterTests(InductorTestCase):
             f"libdevice.nearbyint(1e{ndigits} * ((1/2)*x)) * 1e{-ndigits}",
         )
 
-        expr = RoundDecimal(sympy.Symbol("x", integer=True), ndigits)
-        if ndigits >= 0:
-            for do_print in [pexpr, cexpr, texpr]:
-                self.assertEqual(do_print(expr), "x")
-        else:
-            self.assertEqual(pexpr(expr), f"round(x, {ndigits})")
-            for do_print in [cexpr, texpr]:
-                with self.assertRaisesRegex(
-                    ValueError, "only non-negative ndigits are currently supported"
-                ):
-                    do_print(expr)
-
     def test_print_floor_div(self):
-        for integer in [True, False]:
-            s1 = sympy.Symbol("s1", integer=integer)
-            s2 = sympy.Symbol("s2", integer=integer)
-            expr = FloorDiv(s1, s2)
-            self.assertEqual(pexpr(expr), "(s1 // s2)")
-            if integer:
-                self.assertEqual(cexpr(expr), "c10::div_floor_integer(s1, s2)")
-            else:
-                self.assertEqual(
-                    cexpr(expr),
-                    "c10::div_floor_floating(static_cast<double>(s1), static_cast<double>(s2))",
-                )
+        s1 = sympy.Symbol("s1", integer=True)
+        s2 = sympy.Symbol("s2", integer=True)
+        expr = FloorDiv(s1, s2)
+        self.assertEqual(pexpr(expr), "(s1 // s2)")
+        self.assertEqual(cexpr(expr), "c10::div_floor_integer(s1, s2)")
 
-        for integer in [True, False]:
-            s1 = sympy.Symbol("s1", integer=integer)
-            s2 = sympy.S(-1)
-            expr = FloorDiv(s1, s2)
-            if integer:
-                self.assertEqual(pexpr(expr), "(-1)*s1")
-                self.assertEqual(cexpr(expr), "(-1L)*s1")
-            else:
-                self.assertEqual(pexpr(expr), "(s1 // (-1))")
-                self.assertEqual(
-                    cexpr(expr),
-                    "c10::div_floor_floating(static_cast<double>(s1), static_cast<double>((-1L)))",
-                )
+        s1 = sympy.Symbol("s1", integer=True)
+        s2 = sympy.S(-1)
+        expr = FloorDiv(s1, s2)
+        self.assertEqual(pexpr(expr), "(-1)*s1")
+        self.assertEqual(cexpr(expr), "(-1L)*s1")
 
     def test_print_Min_Max(self):
         cases = (
-            (sympy.Min, "min"),
-            (sympy.Max, "max"),
+            (sympy.Min, "min", "<"),
+            (sympy.Max, "max", ">"),
         )
-        for f, s in cases:
+        for f, s, cmp in cases:
             x = sympy.Symbol("x", integer=True)
             expr = f(-2, x)
-            self.assertEqual(texpr(expr), f"tl.{s}imum(-2, x)")
+            self.assertEqual(
+                texpr(expr), f"((-2) * ((-2) {cmp}= (x)) + (x) * ((x) {cmp} (-2)))"
+            )
             self.assertEqual(cexpr(expr), f"std::{s}(-2L, x)")
 
             expr = f(x, 2 * x, 3 * x)
             self.assertEqual(
                 texpr(expr),
-                f"tl.{s}imum(x, tl.{s}imum(2*x, 3*x))",
+                f"((x) * ((x) {cmp}= (((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x))))) + (((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x)))) * ((((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x)))) {cmp} (x)))",  # noqa: B950 line too long
             )
             self.assertEqual(cexpr(expr), f"std::{s}({{x, 2L*x, 3L*x}})")
 
@@ -393,5 +361,5 @@ instantiate_parametrized_tests(ExprPrinterTests)
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_CUDA:
+    if HAS_CPU or HAS_GPU:
         run_tests("sympy")

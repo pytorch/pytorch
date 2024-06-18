@@ -2610,23 +2610,6 @@
     "pipe_split",
     "pipeline"
   ],
-  "torch.distributed.pipelining.PipelineSchedule": [
-    "ABC",
-    "Any",
-    "Callable",
-    "Dict",
-    "List",
-    "Optional",
-    "Pipe",
-    "PipelineStageBase",
-    "Tuple",
-    "Union",
-    "abstractmethod",
-    "defaultdict",
-    "merge_chunks",
-    "record_function",
-    "split_args_kwargs_into_chunks"
-  ],
   "torch.distributed.pipelining.microbatch": [
     "Any",
     "Dict",

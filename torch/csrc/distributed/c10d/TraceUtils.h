@@ -8,6 +8,7 @@
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/profiler/combined_traceback.h>
+#include <chrono>
 
 #ifdef USE_C10D_NCCL
 #include <ATen/cuda/CUDAEvent.h>
@@ -28,7 +29,7 @@ static c10::IValue nccl_comm_key = "nccl_comm_state";
 static c10::IValue version_key = "version";
 // Update whenever changing contents or formatting of the dump
 // (minor when adding fields, major when changing existing fields)
-static c10::IValue version_val = "2.1";
+static c10::IValue version_val = "2.2";
 static c10::IValue pg_config_key = "pg_config";
 static c10::IValue record_id_key = "record_id";
 static c10::IValue pg_id_key = "pg_id";
@@ -44,6 +45,7 @@ static c10::IValue output_sizes_key = "output_sizes";
 static c10::IValue output_dtypes_key = "output_dtypes";
 static c10::IValue time_created_key = "time_created_ns";
 static c10::IValue duration_key = "duration_ms";
+static c10::IValue timeout_key = "timeout_ms";
 
 static c10::IValue frames_key = "frames";
 static c10::IValue state_key = "state";
@@ -461,6 +463,9 @@ struct NCCLTraceBuffer {
     // was 'enqueued'- not necessarily started
     c10::time_t time_created_;
 
+    // configured timeout for this entry
+    c10::time_t timeout_ms_;
+
     // Is this a P2P event?
     bool isP2P_;
 
@@ -508,6 +513,7 @@ struct NCCLTraceBuffer {
       const std::vector<at::Tensor>& outputs,
       Event* start,
       Event* end,
+      std::chrono::milliseconds timeout_ms,
       bool isP2P) {
     if (!enabled_) {
       return c10::nullopt;
@@ -528,6 +534,7 @@ struct NCCLTraceBuffer {
         std::move(start),
         std::move(end),
         c10::getTime(),
+        timeout_ms.count(),
         isP2P};
 
     for (const auto& input : inputs) {
@@ -752,6 +759,7 @@ struct NCCLTraceBuffer {
               ? int64_t(*e.time_discovered_completed_)
               : c10::IValue());
       dict.insert(retired_key, e.retired_);
+      dict.insert(timeout_key, e.timeout_ms_);
       dict.insert(is_p2p_key, e.isP2P_);
 
       entries.push_back(dict);

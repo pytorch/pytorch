@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 This module defines runtime wrappers, which, based on previous analysis attempts to:
 1. process the inputs and outputs
@@ -204,19 +205,21 @@ def _create_runtime_wrapper(
                     compiled_fn, args_, disable_amp=disable_amp, steal_args=True
                 )
         else:
-            # When we have an inference graph, we run with torch.no_grad.
+            # When we have an inference graph, we run with grad disabled.
             # It's possible to get an inference graph with inputs that require grad,
             # in which case we want to make sure autograd is disabled
             # (since e.g., inductor will generate aten.addmm.out calls which autograd will complain on)
-            if torch.is_grad_enabled():
-                with torch.no_grad():
-                    all_outs = call_func_at_runtime_with_args(
-                        compiled_fn, args, disable_amp=disable_amp, steal_args=True
-                    )
-            else:
+            # NOTE: We use _set_grad_enabled directly to reduce runtime overhead
+            grad_enabled = torch.is_grad_enabled()
+            try:
+                if grad_enabled:
+                    torch._C._set_grad_enabled(False)
                 all_outs = call_func_at_runtime_with_args(
                     compiled_fn, args, disable_amp=disable_amp, steal_args=True
                 )
+            finally:
+                if grad_enabled:
+                    torch._C._set_grad_enabled(True)
         del args
 
         num_mutated_runtime_inps = runtime_metadata.num_mutated_inp_runtime_indices
@@ -389,7 +392,7 @@ def _create_runtime_wrapper(
                 else:
                     t._dynamo_weak_dynamic_indices = o.dynamic_dims.copy()
         if runtime_metadata.grad_enabled_mutation is not None:
-            torch.set_grad_enabled(runtime_metadata.grad_enabled_mutation)
+            torch._C._set_grad_enabled(runtime_metadata.grad_enabled_mutation)
         return ret_outs
 
     return runtime_wrapper
@@ -1373,14 +1376,14 @@ class AOTDispatchAutograd:
 
     # See Note [Tangents must be contiguous, Part 2]
     @staticmethod
-    def coerce_runtime_tangent(x, metadata_tensor):
+    def coerce_runtime_tangent(x, metadata):
         if not isinstance(x, torch.Tensor):
             return x
         if not is_traceable_wrapper_subclass(x):
             return x
-        assert is_traceable_wrapper_subclass(metadata_tensor)
+        assert metadata is not None
+        (_, expected_tangent_metadata) = metadata
         _, runtime_tangent_metadata = x.__tensor_flatten__()  # type: ignore[attr-defined]
-        _, expected_tangent_metadata = metadata_tensor.__tensor_flatten__()
         if runtime_tangent_metadata == expected_tangent_metadata:
             return x
         if not hasattr(x, "__coerce_same_metadata_as_tangent__"):
@@ -1397,7 +1400,7 @@ shape: {str(x.shape)}
 To fix this, your tensor subclass must implement the dunder method __force_to_same_metadata__.
 """
             )
-        return x.__coerce_same_metadata_as_tangent__(metadata_tensor)  # type: ignore[attr-defined]
+        return x.__coerce_same_metadata_as_tangent__(expected_tangent_metadata)  # type: ignore[attr-defined]
 
     @staticmethod
     def post_compile(
@@ -1412,6 +1415,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,  # runtime metadata
+        try_save_cache_entry: Optional[Callable],  # Save cache entry after compilation
     ):
         class CompiledFunction(torch.autograd.Function):
             compiled_fw = compiled_fw_func
@@ -1733,10 +1737,11 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                             is_joint_structure=False,
                         )
                     )
+                    assert CompiledFunction.metadata.traced_tangent_metas is not None
                     all_args = [
                         AOTDispatchAutograd.coerce_runtime_tangent(
                             t,
-                            CompiledFunction.metadata.traced_tangents[
+                            CompiledFunction.metadata.traced_tangent_metas[
                                 i - tangents_start_idx
                             ],
                         )
@@ -1761,7 +1766,11 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
                 def call_compiled_backward():
                     if ctx._is_compiled_autograd_tracing():
-                        assert lazy_backward_info is not None
+                        if lazy_backward_info is None:
+                            raise RuntimeError(
+                                """This compiled backward function was saved by AOTAutogradCache, which does not support
+                            compiled autograd. Please turn off AOTAutogradCache using `ENABLE_AOT_AUTOGRAD_CACHE=0` to continue."""
+                            )
                         bw_module = lazy_backward_info.bw_module
                         # For compiled autograd, run raw FX graph so that it can be inlined into the larger graph
                         symints = ctx._get_compiled_autograd_symints()
@@ -1802,6 +1811,9 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                             CompiledFunction.compiled_bw = aot_config.bw_compiler(
                                 bw_module, placeholder_list
                             )
+                            # Maybe save cache entry
+                            if try_save_cache_entry is not None:
+                                try_save_cache_entry(CompiledFunction.compiled_bw)
 
                     out = call_func_at_runtime_with_args(
                         CompiledFunction.compiled_bw,
@@ -1814,6 +1826,15 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         CompiledFunction.metadata, out, offset_index=len(out) - 1
                     )
                     return tuple(out)
+
+                # Backward with forward inputs mutations is not supported in double backward.
+                if (
+                    torch.is_grad_enabled()
+                    and CompiledFunction.metadata.indices_of_inputs_that_requires_grad_with_mutations_in_bw
+                ):
+                    raise RuntimeError(
+                        "aot_autograd does not support input mutations with requires_grad in backward for create_graph=True"
+                    )
 
                 if torch.is_grad_enabled() and any(
                     t.requires_grad for t in all_args if isinstance(t, torch.Tensor)
@@ -1954,3 +1975,17 @@ def post_compile(
             compiled_fn, aot_config, runtime_metadata=runtime_metadata
         )
     return compiled_fn, runtime_metadata
+
+
+def make_runtime_safe(
+    fw_metadata: ViewAndMutationMeta,
+    maybe_subclass_meta: Optional[SubclassMeta],
+):
+    """
+    Calls make_runtime_safe on all ViewAndMutationMetas.
+    Modifies both arguments. Allows ViewAndMutationMetas to
+    be safely cached in AOTAutogradCache.
+    """
+    fw_metadata.make_runtime_safe()
+    if maybe_subclass_meta is not None:
+        maybe_subclass_meta.fw_metadata.make_runtime_safe()
