@@ -99,7 +99,7 @@ static void upsample_out_template(const Tensor& input,
 
   @autoreleasepool {
     string key = "upsample_" + std::string(resize_mode_str) + (align_corners ? "_aligned_corners" : "") +
-        getTensorsStringKey({input}) + ":[" + to_string(scale_h) + "," + to_string(scale_w) + "]:[" +
+        getTensorsStringKey({input}) + ":[" + std::to_string(scale_h) + "," + std::to_string(scale_w) + "]:[" +
         (is_backward_pass ? getArrayRefString(input_size) : "Undefined") + "]";
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {

@@ -230,7 +230,7 @@ if os.getenv("SLOW_TESTS_FILE", ""):
 if os.getenv("DISABLED_TESTS_FILE", ""):
     disabled_tests_dict = maybe_load_json(os.getenv("DISABLED_TESTS_FILE", ""))
 
-NATIVE_DEVICES = ('cpu', 'cuda', 'meta', torch._C._get_privateuse1_backend_name())
+NATIVE_DEVICES = ('cpu', 'cuda', 'xpu', 'meta', torch._C._get_privateuse1_backend_name())
 
 check_names = ['orin', 'concord', 'galen', 'xavier', 'nano', 'jetson', 'tegra']
 IS_JETSON = any(name in platform.platform() for name in check_names)
@@ -1252,8 +1252,6 @@ TEST_OPT_EINSUM = _check_module_exists('opt_einsum')
 
 TEST_Z3 = _check_module_exists('z3')
 
-BUILD_WITH_CAFFE2 = torch.onnx._CAFFE2_ATEN_FALLBACK
-
 def split_if_not_empty(x: str):
     return x.split(",") if len(x) != 0 else []
 
@@ -1885,19 +1883,6 @@ def skipIfNotRegistered(op_name, message):
             This will check if 'MyOp' is in the caffe2.python.core
     """
     return unittest.skip("Pytorch is compiled without Caffe2")
-
-def _decide_skip_caffe2(expect_caffe2, reason):
-    def skip_dec(func):
-        @wraps(func)
-        def wrapper(self):
-            if torch.onnx._CAFFE2_ATEN_FALLBACK != expect_caffe2:
-                raise unittest.SkipTest(reason)
-            return func(self)
-        return wrapper
-    return skip_dec
-
-skipIfCaffe2 = _decide_skip_caffe2(False, "Not compatible with Caffe2")
-skipIfNoCaffe2 = _decide_skip_caffe2(True, "Caffe2 is not available")
 
 def skipIfNoSciPy(fn):
     @wraps(fn)
@@ -5023,7 +5008,6 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
         return m.group(0)
 
     s = re.sub(r'  File "([^"]+)", line \d+, in (.+)\n    .+\n( +[~^]+ *\n)?', repl_frame, s)
-    s = re.sub(r'(<function [^ ]+ at )0x[0-9a-fA-F]+', r'\1 0xN', s)
     s = re.sub(r"line \d+", "line N", s)
     s = re.sub(r".py:\d+", ".py:N", s)
     s = re.sub(file, os.path.basename(file), s)
