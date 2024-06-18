@@ -4,6 +4,7 @@ import os
 import unittest.mock
 
 import torch.distributed as dist
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.logging_utils import LoggingTestCase
 
@@ -13,6 +14,7 @@ requires_distributed = functools.partial(
 )
 
 
+@skip_if_lt_x_gpu(2)
 class LoggingTests(LoggingTestCase):
     @requires_distributed()
     def test_fsdp_logging(self):
@@ -42,7 +44,6 @@ model(x).sum().backward()
 """,
             env=env,
         )
-        self.assertIn("FSDP::lazy_init", stderr.decode("utf-8"))
         self.assertIn("FSDP::root_pre_forward", stderr.decode("utf-8"))
         self.assertIn("FSDP::pre_forward", stderr.decode("utf-8"))
         self.assertIn("FSDP::post_forward", stderr.decode("utf-8"))

@@ -131,13 +131,6 @@ class FSDPState(_State):
         for state in self._state_ctx.all_states:
             if state._fsdp_param_group:
                 state._fsdp_param_group.lazy_init()
-                for param in state._fsdp_param_group.fsdp_params:
-                    logger.debug(
-                        "FSDP::lazy_init, fqn=%s, dtype=%s, shape=%s",
-                        param._param_fqn,  # noqa: W291
-                        param.sharded_param.dtype,  # noqa: W291
-                        param._orig_size,
-                    )
 
     def _init_shared_state(self) -> None:
         self._comm_ctx.init()
