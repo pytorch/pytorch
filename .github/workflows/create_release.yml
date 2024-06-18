@@ -86,7 +86,7 @@ jobs:
       - uses: seemethere/upload-artifact-s3@v5
         with:
           s3-bucket: pytorch
-          s3-prefix: source_code/${{ needs.release.outputs.release_name }}
+          s3-prefix: source_code/test/${{ needs.release.outputs.pt_release_name }}
           if-no-files-found: warn
           path: ${{ needs.release.outputs.pt_release_name }}
 
