@@ -43,12 +43,12 @@ nn/qat/ @jerryzh168
 /torch/csrc/distributed/rpc/tensorpipe_agent.h @jiayisuse @osalpekar @lw
 
 # ONNX Export
-/torch/_dynamo/backends/onnxrt.py @bowenbao @thiagocrepaldi @wschin
-/torch/csrc/jit/passes/onnx.h @bowenbao @thiagocrepaldi
-/torch/csrc/jit/passes/onnx.cpp @bowenbao @thiagocrepaldi
-/torch/csrc/jit/passes/onnx/ @bowenbao @thiagocrepaldi
-/torch/onnx/ @bowenbao @thiagocrepaldi @wschin
-/test/onnx/ @bowenbao @thiagocrepaldi @wschin
+/torch/_dynamo/backends/onnxrt.py @wschin @xadupre
+/torch/csrc/jit/passes/onnx.h @titaiwangms @shubhambhokare1 @xadupre
+/torch/csrc/jit/passes/onnx.cpp @titaiwangms @shubhambhokare1 @xadupre
+/torch/csrc/jit/passes/onnx/ @titaiwangms @shubhambhokare1 @xadupre
+/torch/onnx/ @titaiwangms @shubhambhokare1 @justinchuby @wschin @xadupre
+/test/onnx/  @titaiwangms @shubhambhokare1 @justinchuby @wschin @xadupre
 
 # CI
 /.ci  @pytorch/pytorch-dev-infra
@@ -57,6 +57,7 @@ nn/qat/ @jerryzh168
 /.ci/docker/ @jeffdaily
 /.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @shunting314 @bertmaher @jeffdaily @jataylo @jithunnair-amd @pruthvistony
 /.ci/docker/ci_commit_pins/triton-rocm.txt @jeffdaily @jataylo @jithunnair-amd @pruthvistony
+/.ci/docker/ci_commit_pins/triton-xpu.txt @EikanWang @gujinghui
 
 # Github Actions
 # This list is for people wanting to be notified every time there's a change
@@ -131,6 +132,15 @@ caffe2/core/hip @jeffdaily @jithunnair-amd
 caffe2/operators/hip @jeffdaily @jithunnair-amd
 caffe2/operators/rnn/hip @jeffdaily @jithunnair-amd
 caffe2/utils/hip @jeffdaily @jithunnair-amd
+
+# XPU-specific files
+/aten/src/ATen/xpu/ @EikanWang @gujinghui
+/c10/xpu/ @EikanWang @gujinghui
+/torch/csrc/xpu/ @EikanWang @gujinghui
+/torch/xpu/ @EikanWang @gujinghui
+/test/xpu/ @EikanWang @gujinghui
+/test/test_xpu.py @EikanWang @gujinghui
+/third_party/xpu.txt @EikanWang @gujinghui
 
 # torch.export
 /torch/export/ @avikchaudhuri @gmagogsfm @tugsbayasgalan @zhxchen17

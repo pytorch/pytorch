@@ -14,8 +14,10 @@ import torch._numpy as tnp
 import torch.utils._pytree as pytree
 from .. import config, variables
 from ..bytecode_transformation import create_call_function, create_instruction
+from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
+from ..mutation_guard import unpatched_nn_module_init
 from ..source import AttrSource, GetItemSource, ODictGetItemSource, TypeSource
 from ..utils import (
     check_unspec_or_constant_args,
@@ -121,7 +123,6 @@ class SuperVariable(VariableTracker):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         inner_fn, source = self._resolved_getattr_and_source(self, name)
-
         if inner_fn is object.__init__:
             return LambdaVariable(identity)
         elif inner_fn is torch.nn.Module.__init__:
@@ -133,12 +134,10 @@ class SuperVariable(VariableTracker):
                 and isinstance(objvar.mutable_local, AttributeMutationNew)
                 and not (args or kwargs)
             ):
-                tx.output.side_effects.store_attr(
-                    objvar,
-                    "__call_nn_module_init",
-                    variables.ConstantVariable.create(True),
-                )
-                return variables.ConstantVariable.create(None)
+                with do_not_convert_to_tracable_parameter():
+                    return variables.UserFunctionVariable(
+                        unpatched_nn_module_init, source=source
+                    ).call_function(tx, [self.objvar] + args, kwargs)
             else:
                 unimplemented("super() nn.Module.__init__")
         elif isinstance(inner_fn, types.FunctionType):
@@ -171,10 +170,29 @@ class SuperVariable(VariableTracker):
             return super(variables.CustomizedDictVariable, self.objvar).call_method(
                 tx, "__setitem__", args, kwargs
             )
+        elif inner_fn is collections.OrderedDict.__getitem__ and isinstance(
+            self.objvar, variables.CustomizedDictVariable
+        ):
+            return super(variables.CustomizedDictVariable, self.objvar).call_method(
+                tx, "__getitem__", args, kwargs
+            )
         elif is_standard_setattr(inner_fn) and isinstance(
             self.objvar, UserDefinedObjectVariable
         ):
             return self.objvar.method_setattr_standard(tx, *args, **kwargs)
+        elif inner_fn is object.__delattr__:
+            attr = args[0]
+            try:
+                attr = attr.as_python_constant()
+            except NotImplementedError:
+                unimplemented(f"non-const delattr attr: {attr}")
+            if not tx.output.side_effects.is_attribute_mutation(self.objvar):
+                unimplemented(f"delattr({self.objvar}, {attr}, ...)")
+
+            tx.output.side_effects.store_attr(
+                self.objvar, attr, variables.DeletedVariable()
+            )
+            return variables.ConstantVariable(None)
 
         unimplemented(f"non-function or method super: {inner_fn}")
 

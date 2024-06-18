@@ -1723,9 +1723,12 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
             gpu_value = traceEvent.get("args", {}).get("labels", None)
             if gpu_value and "GPU" in gpu_value:
                 gpu_dict[gpu_value] += 1
+                # Max PID offset is 5M, based from pytorch/kineto include header:
+                # https://github.com/pytorch/kineto/blob/8681ff11e1fa54da39023076c5c43eddd87b7a8a/libkineto/include/output_base.h#L35
+                kExceedMaxPid = 5000000
                 self.assertTrue(
                     traceEvents[i + 1]["args"]["sort_index"]
-                    == 0x1000000 + int(gpu_value.split()[1])
+                    == kExceedMaxPid + int(gpu_value.split()[1])
                 )
 
         # TODO add checking gpu count if cpuOnly_ is true or not
@@ -2408,6 +2411,7 @@ aten::mm""",
             num_matched.append(len(pattern.matched_events()))
         self.assertEqual(num_matched, [i for i, _ in cases])
 
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_profiler_pattern_matcher_json_report(self):
         x = torch.ones((100, 100))
         model = nn.Sequential(
