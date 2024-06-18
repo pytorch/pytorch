@@ -1,7 +1,8 @@
 # Owner(s): ["oncall: export"]
 
 import unittest
-from typing import Any, Dict, List, Tuple, Union
+from collections import OrderedDict
+from typing import Dict, List, Optional, Tuple, Union
 
 import torch
 
@@ -17,7 +18,12 @@ requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
 
 class TestConverter(TestCase):
     def _check_equal_ts_ep_converter(
-        self, mod, inp, option: Union[List[str]] = None, check_persistent=False,
+        self,
+        mod,
+        inp,
+        option: Union[List[str]] = None,
+        lifted_tensor_buffer: Optional[OrderedDict[str, torch.Tensor]] = None,
+        check_persistent=False,
     ) -> ExportedProgram:
         # By default, it tests both jit.trace and jit.script.
         if option is None:
@@ -49,23 +55,29 @@ class TestConverter(TestCase):
 
                 # Check module.
                 if isinstance(mod, torch.nn.Module):
+                    lifted_tensor_buffer_keys = (
+                        list(lifted_tensor_buffer.keys())
+                        if lifted_tensor_buffer
+                        else []
+                    )
                     self.assertEqual(
-                        ep.state_dict.keys(),
-                        original_ts_model.state_dict().keys(),
+                        list(ep.state_dict.keys()),
+                        list(original_ts_model.state_dict().keys())
+                        + lifted_tensor_buffer_keys,
                     )
                 # Check results
                 self._check_tensor_list_equal(ep_out, orig_out)
         return ep_list
 
     def _check_tensor_list_equal(self, xs: List[torch.Tensor], ys: List[torch.Tensor]):
-            self.assertEqual(len(xs), len(ys))
-            for x, y in zip(xs, ys):
-                if isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
-                    self.assertEqual(x.shape, y.shape)
-                    self.assertTrue(torch.allclose(x, y))
-                else:
-                    self.assertEqual(type(x), type(y))
-                    self.assertEqual(x, y)
+        self.assertEqual(len(xs), len(ys))
+        for x, y in zip(xs, ys):
+            if isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
+                self.assertEqual(x.shape, y.shape)
+                self.assertTrue(torch.allclose(x, y))
+            else:
+                self.assertEqual(type(x), type(y))
+                self.assertEqual(x, y)
 
     def test_ts2ep_converter_basic(self):
         class MSingle(torch.nn.Module):
@@ -711,7 +723,7 @@ class TestConverter(TestCase):
     #     # ep = torch.export.export(Module(), inp, strict=False)
 
     #     # match non-strict export behavior that errors when the given input leads to
-    #     # RaiseException. 
+    #     # RaiseException.
     #     with self.assertRaisesRegex(torch._dynamo.exc.TorchRuntimeError, "builtins.RuntimeError"):
     #         inp = (torch.randn(3, 2), 1)
     #         self._check_equal_ts_ep_converter(Module(), inp)
@@ -751,9 +763,10 @@ class TestConverter(TestCase):
                 self.data = self.data + x
                 return x + x
 
-        inp = (torch.ones(3,2),)
-        self._check_equal_ts_ep_converter(Module(), inp, ["script"], check_persistent=True)
-
+        inp = (torch.ones(3, 2),)
+        self._check_equal_ts_ep_converter(
+            Module(), inp, ["script"], check_persistent=True
+        )
 
         class Module(torch.nn.Module):
             def __init__(self):
@@ -764,22 +777,29 @@ class TestConverter(TestCase):
                 self.data = self.data + x
                 return x + self.data
 
-        inp = (torch.ones(3,2),)
-        self._check_equal_ts_ep_converter(Module(), inp, ["script"], check_persistent=True)
+        inp = (torch.ones(3, 2),)
+        self._check_equal_ts_ep_converter(
+            Module(), inp, ["script"], check_persistent=True
+        )
 
-        # # TODO: self.data is not supported yet
-        # class Module(torch.nn.Module):
-        #     def __init__(self):
-        #         super().__init__()
-        #         self.data = torch.ones(3, 2)
+        # export lifts a tensor constant (self.data) as an input if it is not assigned.
+        # If it is assigned, export will error and ask users to register it as a buffer.
+        # In converter, we change tensor constants that are assigned as a buffer automatically,
+        # since it might be hard to manually register them as buffers.
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.data = torch.ones(3, 2)
 
-        #     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        #         self.data = self.data + x
-        #         return x + self.data
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                self.data = self.data + x
+                return x + self.data
 
-        # inp = (torch.ones(3,2),)
-        # self._check_equal_ts_ep_converter(Module(), inp, ["script"], check_persistent=True)
-
+        inp = (torch.ones(3, 2),)
+        lifted_tensor_buffer = OrderedDict([("data", torch.ones(3, 2))])
+        self._check_equal_ts_ep_converter(
+            Module(), inp, ["script"], lifted_tensor_buffer, check_persistent=True
+        )
 
         # class Module(torch.nn.Module):
         #     def __init__(self):
