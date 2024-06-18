@@ -41,7 +41,7 @@ jobs:
     with:
       build-environment: linux-jammy-py3.8-gcc11
       docker-image-name: pytorch-linux-jammy-py3.8-gcc11
-      runner: lf.linux.2xlarge
+      runner: lf.c.linux.2xlarge
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 3, runner: "linux.2xlarge" },
@@ -154,7 +154,7 @@ jobs:
     name: linux-focal-py3.8-clang10
     uses: ./.github/workflows/_linux-build-label.yml
     with:
-      runner: lf.linux.2xlarge
+      runner: lf.c.linux.2xlarge
       build-environment: linux-focal-py3.8-clang10
       docker-image-name: pytorch-linux-focal-py3.8-clang10
       test-matrix: |
