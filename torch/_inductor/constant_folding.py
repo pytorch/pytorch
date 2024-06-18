@@ -60,6 +60,15 @@ class ConstantFolder(torch.fx.Interpreter):
         # is the output
         self.user_to_last_uses = self.node_to_last_non_output_use()
 
+        self.dynamic_node_substitute_values: Dict[torch.fx.Node, Any] = {}
+        self.symint_nodes: Dict[str, torch.fx.Node] = {}
+
+    def _support_dynamic_shape(self):
+        return False
+
+    def _deduce_value(self, node):
+        return self.unknown_value
+
     def is_impure(self, node: torch.fx.node.Node):
         if (
             node.target == torch.ops.prims.convert_element_type.default
@@ -159,7 +168,12 @@ class ConstantFolder(torch.fx.Interpreter):
         ):
             return self.unknown_value
 
-        out = super().run_node(node)
+        if self._support_dynamic_shape():
+            out = self._deduce_value(node)
+            if out == self.unknown_value:
+                return self.unknown_value
+        else:
+            out = super().run_node(node)
 
         if node.op != "get_attr" and isinstance(out, torch.Tensor):
             if out.device.type == "meta":
@@ -184,6 +198,7 @@ class ConstantFolder(torch.fx.Interpreter):
             for to_delete in self.user_to_last_uses.get(node, []):
                 if self.replaced_uses[to_delete] == len(to_delete.users):
                     self.node_replacements.pop(to_delete, None)
+                    self.dynamic_node_substitute_values.pop(to_delete, None)
 
         return out
 
@@ -196,7 +211,19 @@ class ConstantFolder(torch.fx.Interpreter):
     def run(self):
         env = {}
         for n in self.module.graph.find_nodes(op="placeholder"):
-            env[n] = self.unknown_value
+            if (
+                self._support_dynamic_shape()
+                and "val" in n.meta
+                and isinstance(n.meta["val"], torch.SymInt)
+            ):
+                s = n.meta["val"]
+                env[n] = s
+                self.dynamic_node_substitute_values[n] = s.node.shape_env.size_hint(
+                    s.node.expr
+                )
+                self.symint_nodes[str(s)] = n
+            else:
+                env[n] = self.unknown_value
         return super().run(initial_env=env)
 
 

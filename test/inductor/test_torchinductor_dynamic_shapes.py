@@ -18,7 +18,9 @@ from torch._inductor.codegen.common import device_codegens, register_backend_for
 from torch._inductor.codegen.cpp import CppScheduling
 from torch._inductor.codegen.wrapper import WrapperCodeGen
 from torch._inductor.test_case import TestCase
+from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
+from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
@@ -139,6 +141,27 @@ class TestInductorDynamic(TestCase):
         self._stack.close()
         TestCase.tearDown(self)
         torch._dynamo.reset()
+
+    @torch._inductor.config.patch({"enable_dynamic_constant_fold_uniform_value": True})
+    def test_constant_fold_uniform_value_dynamic(self, device):
+        def fn(x: torch.Tensor):
+            _, length = x.shape
+            mask = torch.ones((1, length), device=x.device, dtype=x.dtype)
+            mask = 1 - mask
+            return x + mask
+
+        x = torch.randn((2, 4), device=device)
+
+        ref = fn(x)
+        actual, source_codes = run_and_get_code(self.compile_fn(fn), x)
+
+        # due to constant folding, fn returns x directly.
+        if device == "cpu":
+            FileCheck().check_not("cpp_fused").run(source_codes[0])
+        else:
+            FileCheck().check_not("triton.jit").run(source_codes[0])
+
+        self.assertEqual(ref, actual)
 
     def test_arange_dynamic(self, device):
         def fn(a):
