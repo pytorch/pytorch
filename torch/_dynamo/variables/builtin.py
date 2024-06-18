@@ -1711,7 +1711,7 @@ class BuiltinVariable(VariableTracker):
             return val
         elif isinstance(obj, variables.UserDefinedObjectVariable):
             unimplemented(
-                f"setattr(UserDefinedObjectVariable) {type(obj.value).__setattr__}"
+                f"setattr(UserDefinedObjectVariable) {obj.source} {type(obj.value).__setattr__}"
             )
         elif isinstance(obj, variables.NNModuleVariable):
             if not tx.output.is_root_tracer():

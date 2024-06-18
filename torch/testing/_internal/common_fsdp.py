@@ -1436,7 +1436,7 @@ class FSDPTest(MultiProcessTestCase):
             )
 
 
-def test_compiled_fsdp(compile_compute_on_module: Optional[type] = None):
+def test_graph_break_fsdp(compile_compute_on_module: Optional[type] = None):
     def fully_shard_with_compiled_compute(*args, **kwargs):
         torch.distributed._composable.fsdp.fully_shard(*args, **kwargs)  # type: ignore[operator]
         if compile_compute_on_module is None or isinstance(

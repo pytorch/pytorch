@@ -332,6 +332,7 @@ class VariableBuilder:
             TensorWithTFOverrideVariable,
             UserDefinedObjectVariable,
             NumpyNdarrayVariable,
+            FSDPManagedNNModuleVariable,
         ]:
             return True
         return False
@@ -1225,8 +1226,19 @@ class VariableBuilder:
             #
             # ID_MATCH is required to disambiguate cases as simple as a unit test that constructs 2 models and wraps
             # them differently with different FSDP configs.  (test_dynamo_distributed.py -k test_fsdp_aot_eager)
+            base = self.name
+            name = self.name
+            for i in itertools.count():
+                if name not in self.tx.output.nn_modules:
+                    self.tx.output.nn_modules[name] = value
+                    break
+                name = f"{base}_{i}"
             self.install_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.ID_MATCH)
-            return FSDPManagedNNModuleVariable(value, source=self.get_source())
+            return FSDPManagedNNModuleVariable(
+                value,
+                name,
+                source=self.get_source(),
+            )
         else:
             return self.tx.output.register_attr_or_module(
                 value,
@@ -2056,7 +2068,7 @@ def wrap_fx_proxy_cls(
     else:
         unimplemented(
             "torch.* op returned non-Tensor "
-            + f"{typestr(example_value)} {proxy.node.op} {proxy.node.target}"
+            + f"{typestr(example_value)} example_value: {example_value}, {proxy.node.op} {proxy.node.target}"
         )
 
 

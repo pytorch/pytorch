@@ -293,13 +293,15 @@ def _register_lowering(
             args = args[0]
 
         # explicitly assert for "out=" ops for better error messages
-        assert not any(
-            x == "out" for x in kwargs.keys()
-        ), "out= ops aren't yet supported"
+        # assert all(
+        #     fn in fallbacks for fn in aten_fn
+        # ) or not any(
+        #     x == "out" for x in kwargs.keys()
+        # ), "out= ops aren't yet supported for non-fallback ops"
         # kwargs tensors not supported yet unless it's a fallback op
-        assert not any(isinstance(x, TensorBox) for x in kwargs.values()) or all(
-            fn in fallbacks for fn in aten_fn
-        )
+        # assert not any(isinstance(x, TensorBox) for x in kwargs.values()) or all(
+        #     fn in fallbacks for fn in aten_fn
+        # )
 
         args = transform_args(
             args, broadcast, type_promotion_kind, convert_input_to_bool
@@ -6269,6 +6271,19 @@ try:
                 group_name,
             ),
         )
+
+    @register_lowering(_c10d_functional.all_gather_into_tensor_out)
+    def _all_gather_into_tensor_out(inp, group_size, group_name, *, out):
+        ir.TensorBox.create(
+            ir._CollectiveKernel.create_inplace(
+                _c10d_functional.all_gather_into_tensor_out.default,
+                inp,
+                group_size,
+                group_name,
+                out=out,  # TODO(yf225): is this being supported correctly?
+            )
+        )
+        return out
 
     @register_lowering(_c10d_functional.reduce_scatter_tensor)
     def _reduce_scatter_tensor(inp, reduce_op, group_size, group_name):

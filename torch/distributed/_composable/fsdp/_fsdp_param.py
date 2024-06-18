@@ -23,7 +23,6 @@ from ._fsdp_common import (
     FSDPMeshInfo,
     HSDPMeshInfo,
 )
-from torch._dynamo import create_parameter_op
 
 """
 [Note: FSDP tensors]

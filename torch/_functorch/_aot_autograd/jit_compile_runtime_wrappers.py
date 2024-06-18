@@ -129,6 +129,7 @@ def aot_dispatch_base(
     Handles functions that don't need autograd. Runs wrappers and compiles with fw_compiler.
     """
     wrappers = _create_wrappers_for_dispatch(needs_autograd=False)
+    print("here5")
     flat_fn, flat_args, fw_metadata = pre_compile(
         wrappers, flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
     )
@@ -312,6 +313,7 @@ def aot_dispatch_autograd(
                 + inner_meta.num_outputs_rng_offset
                 + num_tokens  # See Note [Side-Effectful Tokens in AOTAutograd]
             )
+            # NOTE(yf225): this is AOTAutograd fwd-bwd code path
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
             )

@@ -2691,9 +2691,14 @@ def nn_module_proxy(mod):
     if isinstance(mod, torch.fx.GraphModule):
         # Dynamo-generated GM's shouldn't contain user-created GM's
         return mod
-    proxy = mod.__class__.__new__(mod.__class__)
-    proxy.__dict__ = mod.__dict__
-    return proxy
+    from torch.distributed._composable.fsdp.fully_shard import FSDPModule
+    if isinstance(mod, FSDPModule):
+        # TODO(yf225): this is a hacky workaround and is not the right thing to do. Need to think about how to work around FSDP.__new__()
+        return mod
+    else:
+        proxy = mod.__class__.__new__(mod.__class__)
+        proxy.__dict__ = mod.__dict__
+        return proxy
 
 
 class GmWrapper(torch.nn.Module):

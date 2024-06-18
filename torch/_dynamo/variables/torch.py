@@ -185,6 +185,15 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
 
     @staticmethod
     def is_matching_cls(value):
+        # Update supported_ctx_manager_classes here to avoid circular import
+        import torch.distributed._composable.fsdp
+        supported_ctx_manager_classes.update(
+            dict.fromkeys(
+                [
+                    torch.distributed._composable.fsdp._fsdp_param_group.FSDPParamGroup.use_training_state,
+                ]
+            )
+        )
         # Unwrap if it's a functools.lru_cache wrapper
         value = unwrap_if_wrapper(value)
         # We can't do isinstance(value, type) check because some ctx managers
