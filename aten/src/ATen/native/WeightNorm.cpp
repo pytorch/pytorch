@@ -57,7 +57,9 @@ std::tuple<Tensor,Tensor> weight_norm_cpu(
   const auto dtype = g.scalar_type() == at::ScalarType::BFloat16 ?
       at::ScalarType::Float : g.scalar_type();
   auto norm = at::empty_strided(g.sizes(), g.strides(), g.options().dtype(dtype));
-  weight_norm_stub(kCPU, w, norm, v, g, dim);
+  if (v.numel() && g.numel()) {
+    weight_norm_stub(kCPU, w, norm, v, g, dim);
+  }
 
   return std::tuple<Tensor, Tensor>{w, norm};
 }
@@ -74,7 +76,9 @@ std::tuple<Tensor, Tensor> weight_norm_backward_cpu(
 
   auto grad_v = at::empty_like(saved_v, at::MemoryFormat::Contiguous);
   auto grad_g = at::empty_like(saved_g, at::MemoryFormat::Contiguous);
-  weight_norm_backward_stub(kCPU, grad_v, grad_g, grad_w, saved_v, saved_g, saved_norm, dim);
+  if (grad_v.numel() && grad_g.numel()) {
+    weight_norm_backward_stub(kCPU, grad_v, grad_g, grad_w, saved_v, saved_g, saved_norm, dim);
+  }
 
   return std::tuple<Tensor, Tensor>{grad_v, grad_g};
 }
