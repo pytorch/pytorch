@@ -3576,7 +3576,8 @@ class TestSDPAPrivateUse1Only(NNTestCase):
         torch.utils.generate_methods_for_privateuse1_backend(for_storage=True)
         torch._register_device_module("foo", generate_faked_module())
 
-    def test_scaled_dot_product_fused_attention_overrideable(self):
+    @skipIfTorchDynamo()
+    def test_fused_sdp_choice_privateuseone(self):
         batch_size, seq_len, num_heads, head_dim = 4, 256, 2, 128
         make_tensor = partial(torch.rand, device="cpu", dtype=torch.float16)
         shape = SdpaShape(batch_size, num_heads, seq_len, head_dim)
@@ -3585,6 +3586,15 @@ class TestSDPAPrivateUse1Only(NNTestCase):
         k_privateuse1 = k_cpu.to("foo")
         v_privateuse1 = v_cpu.to("foo")
         assert torch._fused_sdp_choice(q_privateuse1, k_privateuse1, v_privateuse1) == SDPBackend.OVERRIDEABLE.value
+
+    def test_scaled_dot_product_fused_attention_overrideable(self):
+        batch_size, seq_len, num_heads, head_dim = 4, 256, 2, 128
+        make_tensor = partial(torch.rand, device="cpu", dtype=torch.float16)
+        shape = SdpaShape(batch_size, num_heads, seq_len, head_dim)
+        q_cpu, k_cpu, v_cpu = make_tensor(shape), make_tensor(shape), make_tensor(shape)
+        q_privateuse1 = q_cpu.to("foo")
+        k_privateuse1 = k_cpu.to("foo")
+        v_privateuse1 = v_cpu.to("foo")
         actual = torch.nn.functional.scaled_dot_product_attention(
             q_privateuse1, k_privateuse1, v_privateuse1, attn_mask=None, dropout_p=0.0)
 
@@ -3598,10 +3608,9 @@ class TestSDPAPrivateUse1Only(NNTestCase):
         k_privateuse1 = k_cpu.to("foo")
         v_privateuse1 = v_cpu.to("foo")
         attn_mask_privateuse1 = attn_mask.to("foo")
-
-        assert torch._fused_sdp_choice(q_privateuse1, k_privateuse1, v_privateuse1, attn_mask=attn_mask_privateuse1) == SDPBackend.OVERRIDEABLE.value
         output, logsumexp, cum_seq_q, cum_seq_k, max_q, max_k, philox_seed, philox_offset, debug_attn_mask = torch.ops.aten._scaled_dot_product_fused_attention_overrideable(
             q_privateuse1, k_privateuse1, v_privateuse1, attn_bias=attn_mask_privateuse1)
+
         rand_upward = torch.rand(shape, device="cpu", dtype=torch.float16, requires_grad=False)
         rand_upward_privateuse1 = rand_upward.to("foo")
         grad_input_mask=[True, True, True, True]

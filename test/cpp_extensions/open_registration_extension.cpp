@@ -482,7 +482,7 @@ custom_scaled_dot_product_fused_attention_overrideable(
   const int64_t head_dim_v = value.size(3);
   const int64_t max_seqlen_q = query.size(2);
   const int64_t max_seqlen_kv = key.size(2);
-  
+
   auto opts = query.options();
   auto output = at::empty({batch_size, num_heads, max_seqlen_q, head_dim_v}, opts);
   auto logsumexp = at::empty({batch_size, num_heads, max_seqlen_q}, opts.dtype(at::kFloat));
