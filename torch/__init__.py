@@ -1948,10 +1948,7 @@ __all__.extend(
 # Import TorchDynamo's lazy APIs to avoid circular dependenices
 ################################################################################
 
-# need to ensure this is set before triton is imported.
-# See: https://github.com/triton-lang/triton/issues/4129
-os.environ['TRITON_DISABLE_PYTHON_STACKTRACE'] = "1"
-# needs to be before from .functional import * to avoid circular dependencies
+# needs to be before from torch.functional import * to avoid circular dependencies
 from torch._compile import _disable_dynamo  # usort: skip
 
 ################################################################################
@@ -2361,7 +2358,7 @@ def compile(
 
 from torch import export as export
 
-from torch._higher_order_ops import cond as cond
+from torch._higher_order_ops import cond, while_loop
 
 
 def _register_device_module(device_type, module):
