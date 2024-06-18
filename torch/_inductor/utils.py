@@ -1051,12 +1051,14 @@ def _rocm_native_device_arch_name(device):
 @functools.lru_cache(None)
 def try_import_ck_lib():
     try:
-        import ck4inductor
-        from ck4inductor.universal_gemm.gen_instances import (
+        import ck4inductor  # type: ignore[import-untyped]
+        from ck4inductor.universal_gemm.gen_instances import (  # type: ignore[import-untyped]
             gen_ops_library,
             gen_ops_preselected,
         )
-        from ck4inductor.universal_gemm.op import CKGemmOperation
+        from ck4inductor.universal_gemm.op import (  # type: ignore[import-untyped]
+            CKGemmOperation,
+        )
 
         package_dirname = os.path.dirname(ck4inductor.__file__)
     except ImportError:
@@ -1067,7 +1069,7 @@ def try_import_ck_lib():
         def gen_ops_preselected():
             return []
 
-        class CKGemmOperation:
+        class CKGemmOperation:  # type: ignore[no-redef]
             pass
 
         package_dirname = None

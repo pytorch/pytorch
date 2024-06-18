@@ -1,8 +1,12 @@
+# mypy: allow-untyped-defs
+import logging
 import os
 from typing import List, Optional
 
 from torch._inductor import config
 from torch._inductor.utils import is_linux
+
+log = logging.getLogger(__name__)
 
 
 def _rocm_include_paths() -> List[str]:
@@ -11,9 +15,14 @@ def _rocm_include_paths() -> List[str]:
     rocm_include = (
         os.path.join(config.rocm.rocm_home, "include")
         if config.rocm.rocm_home
-        else f"{cpp_extension._join_rocm_home('include')}"
+        else cpp_extension._join_rocm_home("include")
     )
-    ck_include = os.path.join(config.rocm.ck_dir, "include")
+    if not config.rocm.ck_dir:
+        log.warning("Unspecified Composable Kernel include dir")
+    ck_include = os.path.join(
+        config.rocm.ck_dir or cpp_extension._join_rocm_home("composable_kernel"),
+        "include",
+    )
     return [os.path.realpath(rocm_include), os.path.realpath(ck_include)]
 
 
@@ -39,12 +48,14 @@ def _rocm_lib_options() -> List[str]:
 
 
 def _rocm_compiler_options() -> List[str]:
+    arch_list = config.rocm.arch or ["native"]
+    gpu_arch_flags = [f"--offload-arch={arch}" for arch in arch_list]
     opts = [
         config.rocm.compile_opt_level,
         "-x",
         "hip",
         "-std=c++17",
-        f"--offload-arch={';'.join(config.rocm.arch) or 'native'}",
+        *gpu_arch_flags,
         "-fno-gpu-rdc",
         "-fPIC",
         "-mllvm",

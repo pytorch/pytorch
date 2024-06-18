@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs, disable-error-code="attr-defined, valid-type"
 import logging
 import random
 from typing import List, Optional
@@ -127,7 +128,7 @@ class CKGemmTemplate(CKTemplate):
         )
         return res
 
-    def filter_op(self, op: CKGemmOperation) -> Optional[CKGemmOperation]:
+    def filter_op(self, op: "CKGemmOperation"):
         """
         Determines whether a given op definition is suitable for the current
         input / output of the operation that this template implements.
@@ -214,7 +215,7 @@ class CKGemmTemplate(CKTemplate):
 
         return op
 
-    def emit_ck_instance(self, op: CKGemmOperation):
+    def emit_ck_instance(self, op: "CKGemmOperation"):
         # The Jinja template for generating a C++ type alias *definition* for a Universal GEMM instance
         template_definition = r"""
     // Gemm operator {{operation_name}}
@@ -241,7 +242,7 @@ class CKGemmTemplate(CKTemplate):
             template_params=(",\n" + 12 * " ").join(template_params),
         ), self._template_from_string(template_type).render(operation_name=op.name())
 
-    def render(self, kernel: ROCmTemplateKernel, op: CKGemmOperation, **kwargs) -> str:  # type: ignore[override]
+    def render(self, kernel: ROCmTemplateKernel, op: "CKGemmOperation", **kwargs) -> str:  # type: ignore[override]
         """
         The primary entry point for the code rendering process used in this template.
         """
@@ -314,7 +315,7 @@ class CKGemmTemplate(CKTemplate):
             and Y_layout == "Row"
         )
 
-    def gen_ops(self) -> List[CKGemmOperation]:
+    def gen_ops(self):
         """
         Creates a list of `CKGemmOperation` instances that match the GEMM operation this template represents.
         The instances are guaranteed to have the correct layout, dtype and dimension padding for the GEMM input arguments.

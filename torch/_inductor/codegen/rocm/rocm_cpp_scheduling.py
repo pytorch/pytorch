@@ -1,5 +1,6 @@
+# mypy: allow-untyped-defs
 import logging
-from typing import cast, List
+from typing import cast, Sequence
 
 from ... import config
 from ...codecache import code_hash, get_path
@@ -71,7 +72,9 @@ class ROCmCPPScheduling(BaseScheduling):
         return kernel_name
 
     def codegen_template(
-        self, template_node: BaseSchedulerNode, epilogue_nodes: List[SchedulerNode]
+        self,
+        template_node: BaseSchedulerNode,
+        epilogue_nodes: Sequence[BaseSchedulerNode],
     ):
         """
         Codegen a ROCm template, possibly with fused epilogues
