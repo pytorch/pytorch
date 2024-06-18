@@ -64,7 +64,14 @@ from .common import (
     OptimizationContext,
 )
 
-from .cpp_utils import cexpr, cexpr_index, DTYPE_TO_CPP, INDEX_TYPE, value_to_cpp
+from .cpp_utils import (
+    cexpr,
+    cexpr_index,
+    DTYPE_TO_CPP,
+    INDEX_TYPE,
+    unify_mask_base_type,
+    value_to_cpp,
+)
 
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 
@@ -188,12 +195,12 @@ def is_to_lowp_dtype(expr):
     return any(to_expr in expr for to_expr in to_exprs)
 
 
-def get_lowp_to_fp32_expr(lowp_var, kernel):
+def get_lowp_to_high_prec_expr(lowp_var, dtype, kernel):
     if isinstance(kernel, CppVecKernel):
-        return f"at::vec::convert<float>({lowp_var})"
+        return f"at::vec::convert<{DTYPE_TO_CPP[dtype]}>({lowp_var})"
     else:
         assert isinstance(kernel, CppKernel)
-        return f"c10::convert<float>({lowp_var})"
+        return f"c10::convert<{DTYPE_TO_CPP[dtype]}>({lowp_var})"
 
 
 index_value_name_counter = 1
@@ -1107,8 +1114,13 @@ class CppVecOverrides(CppOverrides):
     def ne(x, y):
         assert isinstance(V.kernel, CppVecKernel)
         assert isinstance(x, CppCSEVariable)
-        assert x.dtype is not None
-        return f"{V.kernel._get_mask_type(x.dtype)}({x} != {y})"
+        if x.dtype == torch.bool:
+            assert y.dtype == torch.bool
+            x_cast, y_cast = unify_mask_base_type(V.kernel.compute, (x, y))
+            return f"{x_cast} != {y_cast}"
+        else:
+            assert x.dtype is not None
+            return f"{V.kernel._get_mask_type(x.dtype)}({x} != {y})"
 
     @staticmethod
     def lt(x, y):
@@ -1311,11 +1323,21 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def minimum(a, b):
-        return f"at::vec::minimum({a}, {b})"
+        if a.dtype == torch.bool:
+            assert b.dtype == torch.bool
+            a_cast, b_cast = unify_mask_base_type(V.kernel.compute, (a, b))
+            return f"{a_cast} & {b_cast}"
+        else:
+            return f"at::vec::minimum({a}, {b})"
 
     @staticmethod
     def maximum(a, b):
-        return f"at::vec::maximum({a}, {b})"
+        if a.dtype == torch.bool:
+            assert b.dtype == torch.bool
+            a_cast, b_cast = unify_mask_base_type(V.kernel.compute, (a, b))
+            return f"{a_cast} | {b_cast}"
+        else:
+            return f"at::vec::maximum({a}, {b})"
 
     @staticmethod
     def square(a):
@@ -1326,10 +1348,10 @@ class CppVecOverrides(CppOverrides):
         assert isinstance(V.kernel, CppVecKernel)
         if b.dtype == torch.bool:
             assert c.dtype == torch.bool
-            blendv_a = f"{V.kernel._get_mask_cast(a, torch.float)}"
-            blendv_b = f"{V.kernel._get_mask_cast(b, torch.float)}"
-            blendv_c = f"{V.kernel._get_mask_cast(c, torch.float)}"
-            return f"decltype({b})::blendv({blendv_c}, {blendv_b}, {blendv_a})"
+            blendv_a, blendv_b, blendv_c = unify_mask_base_type(
+                V.kernel.compute, (a, b, c)
+            )
+            return f"decltype({blendv_b})::blendv({blendv_c}, {blendv_b}, {blendv_a})"
         else:
             return f"decltype({b})::blendv({c}, {b}, {V.kernel._get_mask_cast(a, b.dtype)})"
 
@@ -1614,7 +1636,7 @@ class CppKernel(Kernel):
         finally:
             self._load_mask = prior
 
-    def cache_fp32_cse_var_before_lowp_store(self, var_to_store):
+    def cache_high_prec_cse_var_before_lowp_store(self, var_to_store):
         """
         https://github.com/pytorch/pytorch/issues/115260
         For FusedSchedulerNode[node1, node2], the node2 loads what node1 stores and the buffer is
@@ -1651,26 +1673,29 @@ class CppKernel(Kernel):
             # only need to cache fp32 cse var while var_to_store is lowp data
             return
 
-        def find_fp32_var(var, cache):
-            fp32_cse_var = None
-            fp32_cse_var_name = None
+        def find_high_prec_var(var, cache):
+            high_prec_cse_var = None
+            high_prec_cse_var_name = None
             for expr, cse_var in cache.items():
                 if cse_var == var:
                     if is_to_lowp_dtype(expr):
                         m = re.search(r"tmp\d+", expr)
                         if m is not None:
-                            fp32_cse_var_name = m.group()
-            if fp32_cse_var_name:
+                            high_prec_cse_var_name = m.group()
+            if high_prec_cse_var_name:
                 for cse_var in cache.values():
-                    if cse_var.name == fp32_cse_var_name:
-                        fp32_cse_var = cse_var
+                    if cse_var.name == high_prec_cse_var_name:
+                        high_prec_cse_var = cse_var
                         break
-                assert fp32_cse_var is not None
-            return fp32_cse_var
+                assert high_prec_cse_var is not None
+            return high_prec_cse_var
 
-        fp32_var = find_fp32_var(var_to_store, self.cse.cache)
-        if fp32_var:
-            self.cse.cache[get_lowp_to_fp32_expr(var_to_store, self)] = fp32_var
+        high_prec_var = find_high_prec_var(var_to_store, self.cse.cache)
+        if high_prec_var and high_prec_var.dtype in DTYPE_TO_CPP:
+            cache_key = get_lowp_to_high_prec_expr(
+                var_to_store, high_prec_var.dtype, self
+            )
+            self.cse.cache[cache_key] = high_prec_var
 
     def scale_index_with_offset(
         self, index: sympy.Expr, scale=1, itervar_idx=-1, offset=0
@@ -1749,7 +1774,7 @@ class CppKernel(Kernel):
     def store(self, name, index, value, mode=None):
         assert "buf" in name
         var = self.args.output(name)
-        self.cache_fp32_cse_var_before_lowp_store(value)
+        self.cache_high_prec_cse_var_before_lowp_store(value)
         index = self.rename_indexing(index)
         if mode is None:
             line = f"{var}[{cexpr_index(index)}] = {value};"
@@ -2344,7 +2369,7 @@ class CppVecKernel(CppKernel):
             value = self.broadcast(value)
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         var = self.args.output(name)
-        self.cache_fp32_cse_var_before_lowp_store(value)
+        self.cache_high_prec_cse_var_before_lowp_store(value)
         index = self.rename_indexing(index)
         code = self._get_store_line(value, var, index, V.graph.get_dtype(name))
         self.stores.splice(code.map(lambda x: DeferredLine(name, x)))
