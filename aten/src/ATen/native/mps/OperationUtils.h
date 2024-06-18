@@ -336,25 +336,34 @@ inline bool is_dense_in_storage(const at::Tensor& t) {
 
 class MetalShaderLibrary {
 public:
-  MetalShaderLibrary(const std::string& src, unsigned nparams_ = 0): shaderSource(src), nparams(nparams_) {}
+  MetalShaderLibrary(const std::string& src): shaderSource(src), nparams(0), compile_options(nullptr){}
+  MetalShaderLibrary(const std::string& src, unsigned nparams_): shaderSource(src), nparams(nparams_), compile_options(nullptr){}
+  MetalShaderLibrary(const std::string& src, unsigned nparams_, MTLCompileOptions* compile_options_): shaderSource(src), nparams(nparams_), compile_options(compile_options_) {}
   MetalShaderLibrary(const MetalShaderLibrary&) = delete;
   inline id<MTLComputePipelineState> getPipelineStateForFunc(const std::string& fname) {
-    return getLibraryPipelineState(getLibrary(), fname);
+    return getLibraryPipelineState(getLibrary(), fname).first;
   }
   id<MTLComputePipelineState> getPipelineStateForFunc(const std::string& fname, const std::initializer_list<std::string>& params) {
-    return getLibraryPipelineState(getLibrary(params), fname);
+    return getLibraryPipelineState(getLibrary(params), fname).first;
+  }
+  inline id<MTLFunction> getMTLFunction(const std::string& fname) {
+    return getLibraryPipelineState(getLibrary(), fname).second;
+  }
+  id<MTLFunction> getMTLFunction(const std::string& fname, const std::initializer_list<std::string>& params) {
+    return getLibraryPipelineState(getLibrary(params), fname).second;
   }
 private:
-  id<MTLComputePipelineState> getLibraryPipelineState(id<MTLLibrary> lib, const std::string& fname);
+  std::pair<id<MTLComputePipelineState>, id<MTLFunction>> getLibraryPipelineState(id<MTLLibrary> lib, const std::string& fname);
   id<MTLLibrary> getLibrary();
   id<MTLLibrary> getLibrary(const std::initializer_list<std::string>& params);
 
   id<MTLLibrary> compileLibrary(const std::string& src);
   std::string shaderSource;
   unsigned nparams;
+  MTLCompileOptions* compile_options;
   id<MTLLibrary> library = nil;
   std::unordered_map<std::string, id<MTLLibrary>> libMap;
-  std::unordered_map<std::string, id<MTLComputePipelineState>> cplMap;
+  std::unordered_map<std::string, std::pair<id<MTLComputePipelineState>, id<MTLFunction>>> cplMap;
 };
 
 static inline void mtl_setBuffer(id<MTLComputeCommandEncoder> encoder, const Tensor& t, unsigned idx) {
