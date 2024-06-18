@@ -2358,7 +2358,7 @@ def compile(
 
 from torch import export as export
 
-from torch._higher_order_ops import cond as cond
+from torch._higher_order_ops import cond, while_loop
 
 
 def _register_device_module(device_type, module):
