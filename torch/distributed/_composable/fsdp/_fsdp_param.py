@@ -529,10 +529,15 @@ class FSDPParam:
         if ca.compiled_autograd_enabled:
             # Under compile, `self.all_gather_outputs` and `self._unsharded_inner_tensors` are emptied right after every AllGather.
             # So we need to free `self.unsharded_param` memory by looking into its own tensor storage instead.
-            unsharded_param_data = self.unsharded_param.data  # Unpack nn.Parameter to get underlying tensor data
-            is_subclass = isinstance(unsharded_param_data, torch.Tensor) and type(unsharded_param_data) != torch.Tensor
+            unsharded_param_data = (
+                self.unsharded_param.data
+            )  # Unpack nn.Parameter to get underlying tensor data
+            is_subclass = (
+                isinstance(unsharded_param_data, torch.Tensor)
+                and type(unsharded_param_data) != torch.Tensor
+            )
             if is_subclass:
-                attrs, ctx = unsharded_param_data.__tensor_flatten__()
+                attrs, ctx = unsharded_param_data.__tensor_flatten__()  # type: ignore[attr-defined]
                 for attr in attrs:
                     free_storage(getattr(unsharded_param_data, attr))
             else:
