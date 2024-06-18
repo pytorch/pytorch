@@ -5470,6 +5470,7 @@ class TestNestedTensorSubclass(TestCase):
     )
     @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @skipCUDAIfRocm
     def test_compile_preserves_metadata_cache(self, device, dtype):
         # shape (B, *, D)
         nt = random_nt_from_dims(
@@ -5500,6 +5501,7 @@ class TestNestedTensorSubclass(TestCase):
     )
     @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @skipCUDAIfRocm
     def test_compile_with_dynamic_max_seq_len(self, device, dtype):
         # shape (B, *, D)
         # max seq len: 18
@@ -5536,6 +5538,7 @@ class TestNestedTensorSubclass(TestCase):
     )
     @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @skipCUDAIfRocm
     def test_compile_with_dynamic_min_seq_len(self, device, dtype):
         # shape (B, *, D)
         # min seq len: 7
@@ -5572,6 +5575,7 @@ class TestNestedTensorSubclass(TestCase):
     )
     @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @skipCUDAIfRocm
     def test_compile_with_propagated_dynamic_max_seq_len(self, device, dtype):
         # shape (B, *, D)
         # max seq len: 18
@@ -5605,6 +5609,25 @@ class TestNestedTensorSubclass(TestCase):
 
         for dynamic in [False, True, None]:
             self.assertFalse(_recompiles_for_inputs(f, (nt,), (nt2,), dynamic=dynamic))
+
+    @dtypes(torch.float32, torch.double, torch.half)
+    def test_unbind_backward(self, device, dtype):
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(2, 4, device=device),
+                torch.randn(5, 4, device=device),
+                torch.randn(3, 4, device=device),
+            ],
+            layout=torch.jagged,
+            requires_grad=True,
+        )
+
+        a, b, c = nt.unbind()
+        b.sum().backward()
+
+        expected_grad = torch.zeros_like(nt)
+        expected_grad.unbind()[1].add_(1.0)
+        torch._dynamo.disable(self.assertEqual)(nt.grad, expected_grad)
 
 
 instantiate_parametrized_tests(TestNestedTensor)
