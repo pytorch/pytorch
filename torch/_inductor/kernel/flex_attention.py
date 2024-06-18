@@ -361,7 +361,7 @@ def _get_default_config_bwd(query) -> Tuple[int, int, int, int]:
             return (64, 64, 4, 1)
         return (128, 128, 4, 3)
     elif head_dim <= 256 and torch.cuda.get_device_capability() >= (8, 0):  # A100
-        return (32, 32, 4, 1)
+        return (64, 64, 4, 1)
     else:  # modest hardware or extremely large head_dim
         return (16, 16, 4, 1)
 
@@ -763,14 +763,13 @@ def flex_attention_backward(*args, **kwargs):
     configs: List[Tuple[int, int, int, int]] = []
     configs.append(_get_default_config_bwd(query))
     if config.max_autotune:
-        configs += [
-            (128, 128, 4, 3),
-            (128, 128, 8, 1),
-            (64, 64, 4, 3),
-            (64, 64, 8, 1),
-        ]
+        for BLOCK1 in [32, 64]:
+            for BLOCK2 in [32, 64]:
+                for w in [4, 8]:
+                    for s in [1, 3]:
+                        configs.append((BLOCK1, BLOCK2, w, s))
 
-    for BLOCK_M, BLOCK_N, num_warps, num_stages in configs:
+    for BLOCK1, BLOCK2, num_warps, num_stages in configs:
         flex_attention_backward_template.maybe_append_choice(
             choices=choices,
             input_nodes=[
@@ -790,10 +789,10 @@ def flex_attention_backward(*args, **kwargs):
             call_sizes=query.get_size() + [key.get_size()[2]],
             num_stages=num_stages,
             num_warps=num_warps,
-            BLOCK_M1=BLOCK_M,
-            BLOCK_N1=BLOCK_N,
-            BLOCK_M2=BLOCK_N,
-            BLOCK_N2=BLOCK_M,
+            BLOCK_M1=BLOCK1,
+            BLOCK_N1=BLOCK1,
+            BLOCK_M2=BLOCK2,
+            BLOCK_N2=BLOCK2,
             BLOCK_DMODEL=query.get_size()[-1],
             # For now, we always assume the "sound" option
             SCORE_MOD_IS_LINEAR=False,
