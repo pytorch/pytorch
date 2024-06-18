@@ -334,7 +334,7 @@ class GraphModule(torch.nn.Module):
         getitem: "f32[]" = wrap[0];  wrap = None
         return (getitem,)
 
-    class wrap_body_0(torch.nn.Module):
+    class GraphModule(torch.nn.Module):
         def forward(self, l_d_x_: "f32[]", l_d_y_0_: "f32[]", l_d_y_1_2_: "f32[]"):
             sin: "f32[]" = l_d_x_.sin();  l_d_x_ = None
             cos: "f32[]" = l_d_y_0_.cos();  l_d_y_0_ = None
@@ -372,7 +372,7 @@ class GraphModule(torch.nn.Module):
         getitem: "f32[3]" = wrap[0];  wrap = None
         return (getitem,)
 
-    class wrap_body_0(torch.nn.Module):
+    class GraphModule(torch.nn.Module):
         def forward(self, l_x_: "f32[3, 1]"):
             view: "f32[3]" = l_x_.view(3);  l_x_ = None
             add: "f32[3]" = view + 0.5;  view = None
@@ -394,7 +394,7 @@ class GraphModule(torch.nn.Module):
         getitem: "f32[s0]" = wrap[0];  wrap = None
         return (getitem,)
 
-    class wrap_body_0(torch.nn.Module):
+    class GraphModule(torch.nn.Module):
         def forward(self, l_x_: "f32[s0, 1]", size: "Sym(s0)"):
             view: "f32[s0]" = l_x_.view(size);  l_x_ = size = None
             add: "f32[s0]" = view + 0.5;  view = None
@@ -1791,7 +1791,7 @@ class GraphModule(torch.nn.Module):
         getitem_1: "f32[3]" = wrap[1];  wrap = None
         return (getitem, getitem_1)
 
-    class wrap_body_0(torch.nn.Module):
+    class GraphModule(torch.nn.Module):
         def forward(self, l_arg1_0_: "f32[3]", l_arg2_0_: "f32[3]"):
             add: "f32[3]" = l_arg1_0_ + 1;  l_arg1_0_ = None
 
@@ -1990,7 +1990,7 @@ class GraphModule(torch.nn.Module):
         add: "f32[2, 3]" = a + b;  a = b = None
         return (add,)
 
-    class wrap_body_0(torch.nn.Module):
+    class GraphModule(torch.nn.Module):
         def forward(self, l_x_: "f32[2, 3]"):
             sin: "f32[2, 3]" = l_x_.sin()
             cos: "f32[2, 3]" = l_x_.cos();  l_x_ = None
@@ -2025,7 +2025,7 @@ class GraphModule(torch.nn.Module):
         getitem: "f32[3]" = wrap[0];  wrap = None
         return (getitem,)
 
-    class wrap_body_0(torch.nn.Module):
+    class GraphModule(torch.nn.Module):
         def forward(self, l_x_: "f32[3]"):
             neg: "f32[3]" = -l_x_;  l_x_ = None
             return (neg,)
@@ -2746,26 +2746,6 @@ class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
         wrapped_gm = backend.graphs[graph_idx]
         return wrapped_gm
 
-    def test_hessian_graph_break(self):
-        counters.clear()
-
-        def wrapper_fn(x):
-            return torch.func.hessian(torch.sin)(x)
-
-        x = torch.randn(4, 3)
-        expected = wrapper_fn(x)
-        got = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x)
-        self.assertEqual(expected, got)
-        self.assertEqual(len(counters["graph_break"]), 2)
-        self.assertEqual(
-            {
-                "'skip function disable in file _dynamo/decorators.py'": 1,
-                "call torch._dynamo.disable() wrapped function <function jacfwd.<locals>.wrapper_fn at  0xN>": 1,
-            },
-            {munge_exc(k): v for k, v in counters["graph_break"].items()},
-        )
-
-    @unittest.expectedFailure
     def test_hessian(self):
         counters.clear()
 
@@ -2900,7 +2880,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @unittest.expectedFailure
     def test_hessian_argnums(self):
         counters.clear()
 
@@ -3046,7 +3025,6 @@ class GraphModule(torch.nn.Module):
             """        return (unflatten,)""",
         )
 
-    @unittest.expectedFailure
     def test_hessian_disable_capture(self):
         counters.clear()
 
@@ -3073,26 +3051,6 @@ class GraphModule(torch.nn.Module):
             )
             self.assertEqual(actual, expected)
 
-    def test_jacrev_graph_break(self):
-        counters.clear()
-
-        def wrapper_fn(x):
-            return torch.func.jacrev(torch.sin)(x)
-
-        x = torch.randn(4, 3)
-        expected = wrapper_fn(x)
-        got = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x)
-        self.assertEqual(expected, got)
-        self.assertEqual(len(counters["graph_break"]), 2)
-        self.assertEqual(
-            {
-                "'skip function disable in file _dynamo/decorators.py'": 1,
-                "call torch._dynamo.disable() wrapped function <function jacrev.<locals>.wrapper_fn at  0xN>": 1,
-            },
-            {munge_exc(k): v for k, v in counters["graph_break"].items()},
-        )
-
-    @unittest.expectedFailure
     def test_jacrev(self):
         counters.clear()
 
@@ -3169,7 +3127,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @unittest.expectedFailure
     def test_jacrev_two_tensors_argnums(self):
         counters.clear()
 
@@ -3252,7 +3209,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @unittest.expectedFailure
     def test_jacrev_has_aux(self):
         counters.clear()
 
@@ -3337,7 +3293,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @unittest.expectedFailure
     def test_jacrev_disable_capture(self):
         counters.clear()
 
@@ -4284,26 +4239,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(counters["graph_break"]), 0)
         self.assertEqual(actual, expected)
 
-    def test_jacfwd_graph_break(self):
-        counters.clear()
-
-        def wrapper_fn(x):
-            return torch.func.jacfwd(torch.sin)(x)
-
-        x = torch.randn(4, 3)
-        expected = wrapper_fn(x)
-        got = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x)
-        self.assertEqual(expected, got)
-        self.assertEqual(len(counters["graph_break"]), 2)
-        self.assertEqual(
-            {
-                "'skip function disable in file _dynamo/decorators.py'": 1,
-                "call torch._dynamo.disable() wrapped function <function jacfwd.<locals>.wrapper_fn at  0xN>": 1,
-            },
-            {munge_exc(k): v for k, v in counters["graph_break"].items()},
-        )
-
-    @unittest.expectedFailure
     def test_jacfwd(self):
         counters.clear()
 
@@ -4387,7 +4322,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @unittest.expectedFailure
     def test_jacfwd_two_tensors_argnums(self):
         counters.clear()
 
@@ -4477,7 +4411,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @unittest.expectedFailure
     def test_jacfwd_has_aux(self):
         counters.clear()
 
@@ -4572,7 +4505,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @unittest.expectedFailure
     def test_jacfwd_randomness(self):
         counters.clear()
 
@@ -4676,7 +4608,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @unittest.expectedFailure
     def test_jacfwd_disable_capture(self):
         counters.clear()
 

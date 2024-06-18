@@ -173,7 +173,7 @@ std::optional<ModuleInstanceInfo> InlinedCallStackDeserializer::
         const c10::IValue& iv,
         const std::shared_ptr<CompilationUnit>& cu) {
   if (iv.isNone()) {
-    return std::nullopt;
+    return c10::nullopt;
   }
   auto tup = iv.toTuple();
   auto it = cached_module_instance_info_.find(tup);

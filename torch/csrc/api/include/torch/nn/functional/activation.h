@@ -236,7 +236,7 @@ inline Tensor softmax(
     std::optional<torch::Dtype> dtype) {
   Tensor ret;
 
-  if (dtype == std::nullopt) {
+  if (dtype == c10::nullopt) {
     ret = input.softmax(dim);
   } else {
     ret = input.softmax(dim, dtype);
@@ -273,7 +273,7 @@ inline Tensor softmin(
     std::optional<torch::Dtype> dtype) {
   Tensor ret;
 
-  if (dtype == std::nullopt) {
+  if (dtype == c10::nullopt) {
     ret = (-input).softmax(dim);
   } else {
     ret = (-input).softmax(dim, dtype);
@@ -310,7 +310,7 @@ inline Tensor log_softmax(
     std::optional<torch::Dtype> dtype) {
   Tensor ret;
 
-  if (dtype == std::nullopt) {
+  if (dtype == c10::nullopt) {
     ret = input.log_softmax(dim);
   } else {
     ret = input.log_softmax(dim, dtype);
