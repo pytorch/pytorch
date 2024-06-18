@@ -147,6 +147,9 @@ std::vector<ParameterMetadata> unpack_input_parameters(
       }
     } else if (stack[idx].isTensor()) {
       inputs_metadata.push_back(ParameterMetadata(stack[idx].toTensor(), idx));
+    } else if (stack[idx].isString()) {
+      inputs_metadata.push_back(
+          ParameterMetadata(stack[idx].toStringRef(), idx));
     } else {
       TORCH_CHECK_NOT_IMPLEMENTED(
           false,
@@ -309,6 +312,7 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
       uint64_t arg_idx = metadata["arg_order"].cast<uint64_t>();
       bool is_scalar = metadata.contains("scalar_value");
       bool is_tensor_list = metadata.contains("tensor_list");
+      bool is_string = metadata.contains("string_value");
 
       if (is_tensor_list) {
         // Tensor List
@@ -332,6 +336,12 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
         auto scalar_value = metadata["scalar_value"].cast<double>();
         parameter_metadata_list.push_back(
             ParameterMetadata(c10::Scalar(scalar_value), arg_idx));
+      } else if (is_string) {
+        // String
+        auto metadata = item_metadata.cast<py::dict>();
+        auto str_value = metadata["string_value"].cast<std::string>();
+        parameter_metadata_list.push_back(
+            ParameterMetadata(str_value, arg_idx));
       } else {
         // Tensor
         auto metadata = item_metadata.cast<py::dict>();
