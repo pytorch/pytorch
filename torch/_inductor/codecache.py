@@ -2062,6 +2062,9 @@ class AotCodeCompiler:
             extra=cpp_command,
             specified_dir=specified_output_path,
         )
+        if config.aot_inductor.produce_cpp:
+            return input_path
+
         output_code_log.info("Output code written to: %s", input_path)
         trace_structured(
             "graph_dump",

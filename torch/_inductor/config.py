@@ -768,6 +768,8 @@ class aot_inductor:
         os.environ.get("AOT_INDUCTOR_DEBUG_DUMP_CONSTS_BIN", "0") == "1"
     )
 
+    produce_cpp = os.environ.get("AOT_INDUCTOR_PRODUCE_CPP", "0") == "1"
+
     # Serialized tree spec for flattening inputs
     serialized_in_spec = ""
 
