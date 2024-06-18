@@ -22,7 +22,7 @@ from ._fsdp_param_group import FSDPCommContext, FSDPParamGroup
 if TYPE_CHECKING:
     from ._fsdp_param import FSDPParam
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("torch.distributed._composable.fsdp")
 
 
 class FSDPStateContext:

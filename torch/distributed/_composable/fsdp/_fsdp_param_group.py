@@ -23,7 +23,7 @@ from ._fsdp_collectives import (
 from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo, TrainingState
 from ._fsdp_param import FSDPParam, ParamModuleInfo, ShardedState
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("torch.distributed._composable.fsdp")
 
 _ModuleToHandleDict = Dict[nn.Module, RemovableHandle]  # for state dict
 
@@ -271,15 +271,11 @@ class FSDPParamGroup:
             self.unshard()
             self.wait_for_unshard()
             args, kwargs = self._register_post_backward_hook(args, kwargs)
-            logger.debug(
-                "%s", self._with_fqn('FSDP::pre_forward')
-            )
+            logger.debug("%s", self._with_fqn("FSDP::pre_forward"))
             return args, kwargs
 
     def post_forward(self, module: nn.Module, input: Any, output: Any):
-        logger.debug(
-            "%s", self._with_fqn('FSDP::post_forward')
-        )
+        logger.debug("%s", self._with_fqn("FSDP::post_forward"))
         with record_function(self._with_fqn("FSDP::post_forward")):
             self.reshard()
             self._record_post_forward()
@@ -301,9 +297,7 @@ class FSDPParamGroup:
             self.unshard()  # no-op if prefetched
             self.wait_for_unshard()
             self._prefetch_unshard()
-            logger.debug(
-                "%s", self._with_fqn('FSDP::pre_backward')
-            )
+            logger.debug("%s", self._with_fqn("FSDP::pre_backward"))
 
     def post_backward(self, *unused: Any):
         self._training_state = TrainingState.POST_BACKWARD
@@ -350,9 +344,7 @@ class FSDPParamGroup:
                 self.all_reduce_grads,
                 self._partial_reduce_output,
             )
-            logger.debug(
-                "%s", self._with_fqn('FSDP::post_backward')
-            )
+            logger.debug("%s", self._with_fqn("FSDP::post_backward"))
 
     def finalize_backward(self):
         if self._post_reduce_event is not None:
