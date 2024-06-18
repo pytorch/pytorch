@@ -194,14 +194,6 @@ if RUN_CUDA:
             "test_cat_slice_cat",
             tests=test_pattern_matcher.TestPatternMatcher(),
         ),
-        BaseTest(
-            "test_addmm",
-            tests=test_select_algorithm.TestSelectAlgorithm(),
-        ),
-        BaseTest(
-            "test_linear_relu",
-            tests=test_select_algorithm.TestSelectAlgorithm(),
-        ),
         # TODO: Re-enable this test after fixing cuda wrapper for conv Triton templates with dynamic shapes.
         # This test is unstable: it succeeds when an ATEN kernel is used, and fails when a Triton kernel is used.
         # Currently it passes on CI (an ATEN kernel is chosen) and fails locally (a Triton kernel is chosen).
@@ -225,6 +217,21 @@ if RUN_CUDA:
         BaseTest("test_fft_real_input_real_output"),
     ]:
         make_test_case(item.name, item.device, item.tests)
+
+    from torch._inductor.utils import is_big_gpu
+
+    if is_big_gpu(0):
+        for item in [
+            BaseTest(
+                "test_addmm",
+                tests=test_select_algorithm.TestSelectAlgorithm(),
+            ),
+            BaseTest(
+                "test_linear_relu",
+                tests=test_select_algorithm.TestSelectAlgorithm(),
+            ),
+        ]:
+            make_test_case(item.name, item.device, item.tests)
 
     test_torchinductor.copy_tests(
         CudaWrapperTemplate, TestCudaWrapper, "cuda_wrapper", test_failures_cuda_wrapper

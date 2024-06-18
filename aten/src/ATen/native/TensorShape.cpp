@@ -1619,7 +1619,7 @@ Tensor alias_with_sizes_and_strides(
 
 Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
   if (self.is_sparse()) {
-    AT_ERROR("reshape is not implemented for sparse tensors");
+    TORCH_CHECK(false, "reshape is not implemented for sparse tensors");
   }
 
   if (self.is_contiguous() && !self.is_mkldnn()) {
@@ -1682,7 +1682,7 @@ Tensor _reshape_copy_symint(const Tensor& self, c10::SymIntArrayRef proposed_sha
 // minimize breakages.
 Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
   if (self.is_sparse()) {
-    AT_ERROR("reshape is not implemented for sparse tensors");
+    TORCH_CHECK(false, "reshape is not implemented for sparse tensors");
   }
   DimVector shape = infer_size_dv(proposed_shape, self.numel());
 

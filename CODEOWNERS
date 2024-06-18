@@ -43,12 +43,12 @@ nn/qat/ @jerryzh168
 /torch/csrc/distributed/rpc/tensorpipe_agent.h @jiayisuse @osalpekar @lw
 
 # ONNX Export
-/torch/_dynamo/backends/onnxrt.py @bowenbao @thiagocrepaldi @wschin
-/torch/csrc/jit/passes/onnx.h @bowenbao @thiagocrepaldi
-/torch/csrc/jit/passes/onnx.cpp @bowenbao @thiagocrepaldi
-/torch/csrc/jit/passes/onnx/ @bowenbao @thiagocrepaldi
-/torch/onnx/ @bowenbao @thiagocrepaldi @wschin
-/test/onnx/ @bowenbao @thiagocrepaldi @wschin
+/torch/_dynamo/backends/onnxrt.py @wschin @xadupre
+/torch/csrc/jit/passes/onnx.h @titaiwangms @shubhambhokare1 @xadupre
+/torch/csrc/jit/passes/onnx.cpp @titaiwangms @shubhambhokare1 @xadupre
+/torch/csrc/jit/passes/onnx/ @titaiwangms @shubhambhokare1 @xadupre
+/torch/onnx/ @titaiwangms @shubhambhokare1 @justinchuby @wschin @xadupre
+/test/onnx/  @titaiwangms @shubhambhokare1 @justinchuby @wschin @xadupre
 
 # CI
 /.ci  @pytorch/pytorch-dev-infra

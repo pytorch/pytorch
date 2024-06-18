@@ -16,9 +16,14 @@ from typing import Any, Callable, List, Optional, Tuple, Type, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
+from torch._utils import _get_device_index
 from torch.autograd import Function, Variable
 from torch.distributed.algorithms.join import Join, Joinable, JoinHook
 from torch.utils._pytree import tree_flatten, tree_unflatten
+
+from ..modules import Module
+from .scatter_gather import gather, scatter_kwargs
+
 
 RPC_AVAILABLE = False
 if dist.is_available():
@@ -35,14 +40,9 @@ if dist.is_available():
         _to_kwargs,
         _verify_param_shape_across_processes,
     )
-if torch.distributed.rpc.is_available():
+if dist.rpc.is_available():
     RPC_AVAILABLE = True
     from torch.distributed.rpc import RRef
-
-from torch._utils import _get_device_index
-
-from ..modules import Module
-from .scatter_gather import gather, scatter_kwargs  # noqa: F401
 
 if TYPE_CHECKING:
     from torch.utils.hooks import RemovableHandle

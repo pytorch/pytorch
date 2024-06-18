@@ -392,8 +392,8 @@ def fake_tensor_prop(
 
 
 def should_use_remote_fx_graph_cache():
-    if config.fx_graph_remote_cache:
-        return True
+    if config.fx_graph_remote_cache is not None:
+        return config.fx_graph_remote_cache
     if not config.is_fbcode():
         return False
     if torch.version.hip is not None:

@@ -621,17 +621,16 @@ AOTITorchError aoti_torch__scaled_mm(
     at::Tensor* scale_b_tensor = tensor_handle_to_tensor_pointer(scale_b);
     at::Tensor* scale_result_tensor =
         tensor_handle_to_tensor_pointer(scale_result);
-    auto [r0, r1] = at::_scaled_mm(
+    auto r0 = at::_scaled_mm(
         *self_tensor,
         *mat2_tensor,
+        *scale_a_tensor,
+        *scale_b_tensor,
         pointer_to_optional(bias_tensor),
-        pointer_to_optional<c10::ScalarType>(out_dtype),
-        pointer_to_optional(scale_a_tensor),
-        pointer_to_optional(scale_b_tensor),
         pointer_to_optional(scale_result_tensor),
+        pointer_to_optional<c10::ScalarType>(out_dtype),
         use_fast_accum);
     *ret0 = new_tensor_handle(std::move(r0));
-    *ret1 = new_tensor_handle(std::move(r1));
   });
 }
 

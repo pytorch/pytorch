@@ -1,7 +1,9 @@
 # mypy: allow-untyped-defs
 import inspect
 import typing
+from typing import List, Optional, Sequence, Union  # noqa: F401
 
+import torch  # noqa: F401
 from .. import device, dtype, Tensor, types
 
 
@@ -12,6 +14,9 @@ def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
     write custom ops in real life:
     - none of the outputs alias any of the inputs or each other.
     - only the args listed in mutates_args are being mutated.
+    - string type annotations "device, dtype, Tensor, types" without library specification
+      are assumed to be torch.*. Similarly, string type annotations "Optional, List, Sequence, Union"
+      without library specification are assumed to be typing.*.
 
     Callers (e.g. the custom ops API) are responsible for checking these assumptions.
     """
@@ -21,6 +26,14 @@ def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
         raise ValueError(
             f"infer_schema(func): {what} " f"Got func with signature {sig})"
         )
+
+    def convert_type_string(annotation_type: str):
+        try:
+            return eval(annotation_type)
+        except Exception as e:
+            error_fn(
+                f"Unsupported type annotation {annotation_type}. It is not a type."
+            )
 
     params = []
     seen_args = set()
@@ -38,13 +51,19 @@ def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
         if param.annotation is inspect.Parameter.empty:
             error_fn(f"Parameter {name} must have a type annotation.")
 
-        if param.annotation not in SUPPORTED_PARAM_TYPES.keys():
+        # The annotation might be converted to a string by annotation,
+        # we convert it to the actual type.
+        annotation_type = param.annotation
+        if type(annotation_type) == str:
+            annotation_type = convert_type_string(annotation_type)
+
+        if annotation_type not in SUPPORTED_PARAM_TYPES.keys():
             error_fn(
                 f"Parameter {name} has unsupported type {param.annotation}. "
                 f"The valid types are: {SUPPORTED_PARAM_TYPES.keys()}."
             )
 
-        schema_type = SUPPORTED_PARAM_TYPES[param.annotation]
+        schema_type = SUPPORTED_PARAM_TYPES[annotation_type]
         if name in mutates_args:
             if not schema_type.startswith("Tensor"):
                 error_fn(
@@ -72,7 +91,10 @@ def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
             f"mutates_args should contain the names of all args that the "
             f"custom op mutates."
         )
-    ret = parse_return(sig.return_annotation, error_fn)
+    return_annotation = sig.return_annotation
+    if type(return_annotation) == str:
+        return_annotation = convert_type_string(return_annotation)
+    ret = parse_return(return_annotation, error_fn)
     return f"({', '.join(params)}) -> {ret}"
 
 

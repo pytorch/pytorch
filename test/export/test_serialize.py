@@ -253,7 +253,6 @@ class TestSerialize(TestCase):
                 return torch.split(x, 2)
 
         input = torch.arange(10.0).reshape(5, 2)
-        input.requires_grad = True
         exported_module = export(MyModule(), (input,)).run_decompositions()
 
         serialized = ExportedProgramSerializer().serialize(exported_module)

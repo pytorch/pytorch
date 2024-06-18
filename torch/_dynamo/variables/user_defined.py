@@ -941,8 +941,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
         ):
             if source:
-                install_guard(source.make_guard(GuardBuilder.HASATTR))
-                return VariableBuilder(tx, source)(subobj)
+                return variables.LazyVariableTracker.create(subobj, source)
             elif ConstantVariable.is_literal(subobj):
                 return ConstantVariable.create(subobj)
             elif (

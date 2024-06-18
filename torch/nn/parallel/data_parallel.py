@@ -1,21 +1,25 @@
 # mypy: allow-untyped-defs
 import operator
-import torch
 import warnings
 from itertools import chain
 from typing import Any, Dict, Generic, List, Optional, Sequence, Tuple, TypeVar, Union
-from ..modules import Module
-from .scatter_gather import scatter_kwargs, gather
-from .replicate import replicate
-from .parallel_apply import parallel_apply
+
+import torch
 from torch._utils import (
     _get_all_device_indices,
     _get_available_device_type,
     _get_device_index,
-    _get_devices_properties
+    _get_devices_properties,
 )
 
-__all__ = ['DataParallel', 'data_parallel']
+from ..modules import Module
+from .parallel_apply import parallel_apply
+from .replicate import replicate
+from .scatter_gather import gather, scatter_kwargs
+
+
+__all__ = ["DataParallel", "data_parallel"]
+
 
 def _check_balance(device_ids: Sequence[Union[int, torch.device]]) -> None:
     imbalance_warn = """
@@ -31,7 +35,9 @@ def _check_balance(device_ids: Sequence[Union[int, torch.device]]) -> None:
         min_pos, min_val = min(enumerate(values), key=operator.itemgetter(1))
         max_pos, max_val = max(enumerate(values), key=operator.itemgetter(1))
         if min_val / max_val < 0.75:
-            warnings.warn(imbalance_warn.format(device_ids[min_pos], device_ids[max_pos]))
+            warnings.warn(
+                imbalance_warn.format(device_ids[min_pos], device_ids[max_pos])
+            )
             return True
         return False
 
@@ -169,9 +175,11 @@ class DataParallel(Module, Generic[T]):
 
             for t in chain(self.module.parameters(), self.module.buffers()):
                 if t.device != self.src_device_obj:
-                    raise RuntimeError("module must have its parameters and buffers "
-                                       f"on device {self.src_device_obj} (device_ids[0]) but found one of "
-                                       f"them on device: {t.device}")
+                    raise RuntimeError(
+                        "module must have its parameters and buffers "
+                        f"on device {self.src_device_obj} (device_ids[0]) but found one of "
+                        f"them on device: {t.device}"
+                    )
 
             inputs, module_kwargs = self.scatter(inputs, kwargs, self.device_ids)
             # for forward function without any inputs, empty list and dict will be created
@@ -182,11 +190,13 @@ class DataParallel(Module, Generic[T]):
 
             if len(self.device_ids) == 1:
                 return self.module(*inputs[0], **module_kwargs[0])
-            replicas = self.replicate(self.module, self.device_ids[:len(inputs)])
+            replicas = self.replicate(self.module, self.device_ids[: len(inputs)])
             outputs = self.parallel_apply(replicas, inputs, module_kwargs)
             return self.gather(outputs, self.output_device)
 
-    def replicate(self, module: T, device_ids: Sequence[Union[int, torch.device]]) -> List[T]:
+    def replicate(
+        self, module: T, device_ids: Sequence[Union[int, torch.device]]
+    ) -> List[T]:
         return replicate(module, device_ids, not torch.is_grad_enabled())
 
     def scatter(
@@ -197,8 +207,12 @@ class DataParallel(Module, Generic[T]):
     ) -> Any:
         return scatter_kwargs(inputs, kwargs, device_ids, dim=self.dim)
 
-    def parallel_apply(self, replicas: Sequence[T], inputs: Sequence[Any], kwargs: Any) -> List[Any]:
-        return parallel_apply(replicas, inputs, kwargs, self.device_ids[:len(replicas)])
+    def parallel_apply(
+        self, replicas: Sequence[T], inputs: Sequence[Any], kwargs: Any
+    ) -> List[Any]:
+        return parallel_apply(
+            replicas, inputs, kwargs, self.device_ids[: len(replicas)]
+        )
 
     def gather(self, outputs: Any, output_device: Union[int, torch.device]) -> Any:
         return gather(outputs, output_device, dim=self.dim)
@@ -249,9 +263,11 @@ def data_parallel(
 
     for t in chain(module.parameters(), module.buffers()):
         if t.device != src_device_obj:
-            raise RuntimeError("module must have its parameters and buffers "
-                               f"on device {src_device_obj} (device_ids[0]) but found one of "
-                               f"them on device: {t.device}")
+            raise RuntimeError(
+                "module must have its parameters and buffers "
+                f"on device {src_device_obj} (device_ids[0]) but found one of "
+                f"them on device: {t.device}"
+            )
 
     inputs, module_kwargs = scatter_kwargs(inputs, module_kwargs, device_ids, dim)
     # for module without any inputs, empty list and dict will be created
@@ -264,7 +280,7 @@ def data_parallel(
 
     if len(device_ids) == 1:
         return module(*inputs[0], **module_kwargs[0])
-    used_device_ids = device_ids[:len(inputs)]
+    used_device_ids = device_ids[: len(inputs)]
     replicas = replicate(module, used_device_ids)
     outputs = parallel_apply(replicas, inputs, module_kwargs, used_device_ids)
     return gather(outputs, output_device, dim)

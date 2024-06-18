@@ -24,7 +24,7 @@ from ._fsdp_state import _get_module_fsdp_state, FSDPState
 
 # The decorator adds a state object to `module` that can be accessed via
 # `fully_shard.state(module)`. The state object and module are 1:1.
-@contract(state_cls=FSDPState)
+@contract(state_cls=FSDPState)  # type: ignore[operator]
 def fully_shard(
     module: nn.Module,
     *,

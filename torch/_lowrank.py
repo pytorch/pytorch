@@ -11,7 +11,10 @@ from torch.overrides import handle_torch_function, has_torch_function
 
 
 def get_approximate_basis(
-    A: Tensor, q: int, niter: Optional[int] = 2, M: Optional[Tensor] = None
+    A: Tensor,
+    q: int,
+    niter: Optional[int] = 2,
+    M: Optional[Tensor] = None,
 ) -> Tensor:
     """Return tensor :math:`Q` with :math:`q` orthonormal columns such
     that :math:`Q Q^H A` approximates :math:`A`. If :math:`M` is
@@ -180,7 +183,10 @@ def _svd_lowrank(
 
 
 def pca_lowrank(
-    A: Tensor, q: Optional[int] = None, center: bool = True, niter: int = 2
+    A: Tensor,
+    q: Optional[int] = None,
+    center: bool = True,
+    niter: int = 2,
 ) -> Tuple[Tensor, Tensor, Tensor]:
     r"""Performs linear Principal Component Analysis (PCA) on a low-rank
     matrix, batches of such matrices, or sparse matrix.

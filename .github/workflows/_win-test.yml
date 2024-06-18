@@ -41,6 +41,9 @@ jobs:
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
+    defaults:
+      run:
+        shell: bash
     steps:
       # Duplicated in win-build because this MUST go before a checkout
       - name: Enable git symlinks on Windows and disable fsmonitor daemon
@@ -224,6 +227,7 @@ jobs:
 
       - name: Parse ref
         id: parse-ref
+        shell: bash
         run: python3 .github/scripts/parse_ref.py
 
       - name: Uninstall PyTorch

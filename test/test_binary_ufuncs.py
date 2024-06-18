@@ -3694,8 +3694,6 @@ class TestBinaryUfuncs(TestCase):
             actual = op(x, y, alpha=alpha)
             self.assertTrue(not (actual.isnan() or actual.isinf()))
 
-    # https://github.com/pytorch/pytorch/issues/127003
-    @xfailIfTorchDynamo
     def test_sub_typing(self, device):
         m1 = torch.tensor(
             [True, False, False, True, False, False], dtype=torch.bool, device=device

@@ -315,7 +315,10 @@ class VariableBuilder:
 
         vt = self._wrap(value)
         vt.source = self.source
-        if self._can_lift_attrs_to_inputs(vt):
+        if (
+            self._can_lift_attrs_to_inputs(vt)
+            and value not in self.tx.output.side_effects
+        ):
             vt = self.tx.output.side_effects.track_object_existing(value, vt)
 
         self.tx.output.variable_tracker_cache.add(value, self.source, vt)
@@ -2208,6 +2211,7 @@ def _automatic_dynamic(
     constraint_dims = []
     for i in range(e.dim()):
         # NB: mark dynamic has precedence over static
+        marked_unbacked = i in getattr(e, "_dynamo_unbacked_indices", set())
         marked_dynamic = i in getattr(e, "_dynamo_dynamic_indices", set())
         marked_weak_dynamic = i in getattr(e, "_dynamo_weak_dynamic_indices", set())
         marked_static = i in getattr(e, "_dynamo_static_indices", set())
@@ -2259,7 +2263,9 @@ def _automatic_dynamic(
         constraint_dims.append(constraint_dim)
 
         # Now, figure out if the dim is dynamic/duck/static
-        if (
+        if marked_unbacked:
+            dynamic = DimDynamic.SIZE_LIKE_UNBACKED
+        elif (
             constraint_dim is not None
             or marked_dynamic
             or marked_weak_dynamic

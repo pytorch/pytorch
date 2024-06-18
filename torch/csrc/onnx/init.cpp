@@ -292,7 +292,5 @@ void initONNXBindings(PyObject* module) {
       .value("TRAINING", TrainingMode::TRAINING);
 
   onnx.attr("PRODUCER_VERSION") = py::str(TORCH_VERSION);
-
-  onnx.attr("_CAFFE2_ATEN_FALLBACK") = false;
 }
 } // namespace torch::onnx

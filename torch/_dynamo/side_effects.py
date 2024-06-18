@@ -219,6 +219,14 @@ class SideEffects:
     ):
         """Start tracking a new variable for mutation"""
         assert variable.source is not None
+
+        if id(item) in self.id_to_variable:
+            raise AssertionError(
+                "Variable is already tracked for mutation. This could be "
+                "because you are not using VariableBuilder to construct "
+                "the variable tracker."
+            )
+
         variable.mutable_local = mutable_cls(variable.source)
         self.id_to_variable[id(item)] = variable
         self.keepalive.append(item)

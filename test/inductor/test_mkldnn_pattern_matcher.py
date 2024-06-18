@@ -2526,6 +2526,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             om(*example_inputs)
             om(*example_inputs)
 
+    @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
     def test_reproduce_121253_issue(self):
         class Mod(torch.nn.Module):
             def __init__(self, weight, bias, beta, alpha):
@@ -2550,8 +2551,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 else "mkldnn._linear_pointwise"
             )
             for beta, alpha in zip([1.0, 0.1, 0.0], [1.0, 0.1, 1.0]):
-                weight = torch.randn(64, 64, dtype=dtype)
-                bias = torch.randn(64, dtype=dtype)
+                weight = torch.nn.Parameter(torch.randn(64, 64, dtype=dtype))
+                bias = torch.nn.Parameter(torch.randn(64, dtype=dtype))
                 mod = Mod(weight, bias, beta, alpha).to(dtype).eval()
                 with torch.no_grad():
                     x = torch.randn(1, 64, dtype=dtype)

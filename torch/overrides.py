@@ -59,7 +59,9 @@ __all__ = [
 
 
 def _disable_user_warnings(
-    func: Callable, regex: str = ".*is deprecated, please use.*", module: str = "torch"
+    func: Callable,
+    regex: str = ".*is deprecated, please use.*",
+    module: str = "torch",
 ) -> Callable:
     """
     Decorator that temporarily disables ``UserWarning``s for the given ``module`` if the warning message matches the
@@ -1582,7 +1584,8 @@ def wrap_torch_function(dispatcher: Callable):
 
 
 def _get_overloaded_args(
-    relevant_args: Iterable[Any], get_type_fn: Callable[[Any], Type] = None
+    relevant_args: Iterable[Any],
+    get_type_fn: Callable[[Any], Type] = None,
 ) -> List[Any]:
     """Returns a list of arguments on which to call __torch_function__.
 
@@ -1659,7 +1662,10 @@ def _get_overloaded_args(
 
 
 def handle_torch_function(
-    public_api: Callable, relevant_args: Iterable[Any], *args, **kwargs
+    public_api: Callable,
+    relevant_args: Iterable[Any],
+    *args,
+    **kwargs,
 ) -> Any:
     """Implement a function with checks for ``__torch_function__`` overrides.
 
@@ -1794,7 +1800,7 @@ has_torch_function_variadic = _add_docstr(
 
 @functools.lru_cache(None)
 def _get_overridable_functions() -> (
-    Tuple[Dict[Any, List[Callable]], Dict[Callable, str]]
+    Tuple[Dict[Any, List[Callable]], Dict[Callable, str]],
 ):
     overridable_funcs = collections.defaultdict(list)
     index = {}

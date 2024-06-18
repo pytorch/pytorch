@@ -2118,7 +2118,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
     // Find a valid, healthy communicator to split from if possible.
     std::lock_guard<std::mutex> lock(options_->split_from->mutex_);
     auto& other_comms = options_->split_from->devNCCLCommMap_;
-    auto dit = other_comms.find(deviceKey);
+    auto dit = other_comms.find(getKeyFromDevice(device));
     if (dit != other_comms.end()) {
       auto& parentComm = dit->second;
       if (parentComm != nullptr && !parentComm->isAborted()) {

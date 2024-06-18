@@ -141,6 +141,8 @@ ALLOW_LIST = [
     ("onednn::qconv2d_pointwise", datetime.date(2024, 12, 31)),
     ("onednn::qconv3d_pointwise", datetime.date(2024, 12, 31)),
     ("onednn::qconv2d_pointwise.binary", datetime.date(2024, 12, 31)),
+    ("aten::_scaled_mm.out", datetime.date(2024, 12, 31)),
+    ("aten::_scaled_mm", datetime.date(2024, 12, 31)),
     # BC-breaking change in can_cast signature: 'from' -> 'from_'
     ("aten::can_cast", datetime.date(2024, 5, 31)),
 ]

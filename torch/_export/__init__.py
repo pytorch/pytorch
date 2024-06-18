@@ -73,9 +73,6 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.utils._sympy.value_ranges import ValueRangeError, ValueRanges
 
-from .passes.add_runtime_assertions_for_constraints_pass import (
-    _AddRuntimeAssertionsForInlineConstraintsPass,
-)
 from .wrappers import _wrap_submodules
 
 log = logging.getLogger(__name__)

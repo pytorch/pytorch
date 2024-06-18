@@ -3,7 +3,7 @@
 # This backend is maintained by ONNX team. To direct issues
 # to the right people, please tag related GitHub issues with `module: onnx`.
 #
-# Maintainers' Github IDs: wschin, thiagocrepaldi, BowenBao
+# Maintainers' Github IDs: wschin, xadupre
 from torch.onnx._internal.onnxruntime import (
     is_onnxrt_backend_supported,
     torch_compile_backend,

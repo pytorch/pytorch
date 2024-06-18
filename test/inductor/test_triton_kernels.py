@@ -16,20 +16,27 @@ from torch._higher_order_ops.triton_kernel_wrap import (
 from torch._inductor import metrics
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import skipIfRocm, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import skipIfRocm, skipIfXpu, TEST_WITH_ROCM
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA, HAS_GPU, HAS_XPU
 
-if HAS_CUDA:
+if HAS_GPU:
     import triton
     from triton import language as tl
 
     if not TEST_WITH_ROCM:
-        from triton.language.extra.cuda.libdevice import (
-            fast_dividef,
-            fast_dividef as my_fast_dividef,
-        )
+        if HAS_CUDA:
+            from triton.language.extra.cuda.libdevice import (
+                fast_dividef,
+                fast_dividef as my_fast_dividef,
+            )
+        elif HAS_XPU:
+            from triton.language.extra.intel.libdevice import (
+                fast_dividef,
+                fast_dividef as my_fast_dividef,
+            )
 
     # Define shared triton constants here.
     CONSTANT_C: tl.constexpr = 4
@@ -38,7 +45,7 @@ if HAS_CUDA:
 
 
 class KernelTests(torch._inductor.test_case.TestCase):
-    @requires_cuda
+    @requires_gpu
     def test_triton_kernel_with_kernel_param(self):
         @triton.jit
         def pass_kernel(kernel):
@@ -49,19 +56,19 @@ class KernelTests(torch._inductor.test_case.TestCase):
             grid = (x.numel(),)
             pass_kernel[grid](kernel=x)
 
-        t1 = torch.rand(5, device="cuda")
+        t1 = torch.rand(5, device=GPU_TYPE)
         f(t1)
         # No need to assert anything, the goal is to make sure dynamo does
         # not crash
 
-    @requires_cuda
+    @requires_gpu
     def test_triton_kernel_higher_order_func(self):
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 
         add_kernel_id = kernel_side_table.add_kernel(add_kernel)
 
-        t1 = torch.rand(5, device="cuda")
-        t2 = torch.rand(5, device="cuda")
+        t1 = torch.rand(5, device=GPU_TYPE)
+        t2 = torch.rand(5, device=GPU_TYPE)
 
         torch_add = t1 + t2
 
@@ -103,7 +110,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
         # Make sure it is NOT modified
         self.assertEqual(output, torch.zeros_like(t1))
 
-    @requires_cuda
+    @requires_gpu
     def test_triton_kernel_functionalize(self):
         from functorch import make_fx
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
@@ -130,8 +137,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
             )
             return out["out_ptr"]
 
-        t1 = torch.rand(5, device="cuda")
-        t2 = torch.rand(5, device="cuda")
+        t1 = torch.rand(5, device=GPU_TYPE)
+        t2 = torch.rand(5, device=GPU_TYPE)
         with FunctionalTensorMode():
             gm = make_fx(PythonFunctionalizeAPI().functionalize(f))(t1, t2)
         # Make sure t2 was not modified
@@ -156,7 +163,7 @@ def forward(self, x_1, output_1):
     return getitem_1""",
         )
 
-    @requires_cuda
+    @requires_gpu
     def test_triton_kernel_mutation_type(self):
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
         from torch._subclasses.fake_tensor import FakeTensorMode
@@ -166,7 +173,7 @@ def forward(self, x_1, output_1):
         )
 
         def prep():
-            x = torch.ones(4, device="cuda", requires_grad=True)
+            x = torch.ones(4, device=GPU_TYPE, requires_grad=True)
             with FunctionalTensorMode():
                 x_func = FunctionalTensor.to_functional(x)
             self.assertTrue(torch._is_functional_tensor(x_func.elem))
@@ -224,7 +231,7 @@ def forward(self, x_1, output_1):
                 torch._functionalize_are_all_mutations_hidden_from_autograd(x_func.elem)
             )
 
-    @requires_cuda
+    @requires_gpu
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_kernel_with_views(self, dynamic, backend):
@@ -242,7 +249,7 @@ def forward(self, x_1, output_1):
             mul2_kernel[grid](x, output, n_elements, BLOCK_SIZE=16)
             return output.view(4, 4)
 
-        t = torch.rand(4, 4, device="cuda")
+        t = torch.rand(4, 4, device=GPU_TYPE)
         t_view = t.view(16)
 
         compiled_func = torch.compile(
@@ -257,7 +264,7 @@ def forward(self, x_1, output_1):
         self.assertEqual(2 * t_view, compiled_func(t).view(16))
         self.assertEqual(2 * t, compiled_func(t))
 
-    @requires_cuda
+    @requires_gpu
     @common_utils.parametrize("grad_fn", [torch.no_grad, torch.enable_grad])
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_kernel_with_grad_option(self, grad_fn, backend):
@@ -269,11 +276,11 @@ def forward(self, x_1, output_1):
                 mul2_kernel[grid](x, output, n_elements, BLOCK_SIZE=16)
                 return output
 
-        t = torch.rand(5, device="cuda")
+        t = torch.rand(5, device=GPU_TYPE)
         compiled_func = torch.compile(call_triton, backend=backend, fullgraph=True)
         self.assertEqual(2 * t, compiled_func(t))
 
-    @requires_cuda
+    @requires_gpu
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_kernel_inner_triton_function(self, backend):
         def f(x: torch.Tensor):
@@ -298,13 +305,13 @@ def forward(self, x_1, output_1):
             pow2_kernel[grid](x, output, n_elements, BLOCK_SIZE=16)
             return output
 
-        t = torch.rand(5, device="cuda")
+        t = torch.rand(5, device=GPU_TYPE)
 
         compiled_func = torch.compile(f, backend=backend, fullgraph=True)
         # TODO(oulgen): NYI - Support this
         # self.assertEqual(t * t, compiled_func(t))
 
-    @requires_cuda
+    @requires_gpu
     @common_utils.parametrize("grad", [False, True])
     @common_utils.parametrize("dynamic", [False, True])
     @patch.object(torch._inductor.config, "implicit_fallbacks", False)
@@ -322,8 +329,8 @@ def forward(self, x_1, output_1):
 
             return output, tmp
 
-        t1 = torch.rand(5, device="cuda", requires_grad=grad)
-        t2 = torch.rand(5, device="cuda", requires_grad=grad)
+        t1 = torch.rand(5, device=GPU_TYPE, requires_grad=grad)
+        t2 = torch.rand(5, device=GPU_TYPE, requires_grad=grad)
         o1 = torch.zeros_like(t1, requires_grad=grad)
 
         torch_add = call_triton(t1, t2, o1)
@@ -346,7 +353,7 @@ def forward(self, x_1, output_1):
         else:
             self.assertTrue("return (buf0, )" in codes[0])
 
-    @requires_cuda
+    @requires_gpu
     def test_triton_kernel_caching(self):
         from torch._inductor.utils import run_and_get_code
 
@@ -368,14 +375,14 @@ def forward(self, x_1, output_1):
                 x = add_in_loop(x, y)
             return x
 
-        t1 = torch.ones(5, device="cuda")
-        t2 = torch.ones(5, device="cuda")
+        t1 = torch.ones(5, device=GPU_TYPE)
+        t2 = torch.ones(5, device=GPU_TYPE)
 
         test, (code,) = run_and_get_code(torch.compile(call_triton_add), t1, t2)
-        self.assertEqual(test, 5 * torch.ones(5, device="cuda"))
+        self.assertEqual(test, 5 * torch.ones(5, device=GPU_TYPE))
         self.assertTrue("add_kernel_autotuned_1.run" not in code)
 
-    @requires_cuda
+    @requires_gpu
     def test_triton_kernel_caching_duplicate(self):
         from torch._inductor.utils import run_and_get_code
 
@@ -418,13 +425,13 @@ def forward(self, x_1, output_1):
             D.pass_kernel[grid](x, output2, n_elements, BLOCK_SIZE=16)
             return output1 + output2
 
-        t = torch.ones(5, device="cuda")
+        t = torch.ones(5, device=GPU_TYPE)
         test, (code,) = run_and_get_code(torch.compile(call_triton), t)
         # Make sure we emitted two kernels here
         self.assertTrue("pass_kernel_0.run" in code)
         self.assertTrue("pass_kernel_1.run" in code)
 
-    @requires_cuda
+    @requires_gpu
     def test_triton_kernel_various_args(self):
         @triton.autotune(
             configs=[triton.Config({"BLOCK_SIZE": 128})],
@@ -456,11 +463,11 @@ def forward(self, x_1, output_1):
             )
             return output
 
-        output = torch.randn(5, device="cuda")
+        output = torch.randn(5, device=GPU_TYPE)
         # Make sure this does not crash
         call_triton(output)
 
-    @requires_cuda
+    @requires_gpu
     @skipIfRocm
     def test_triton_kernel_dependancies(self):
         def call_triton(
@@ -476,13 +483,13 @@ def forward(self, x_1, output_1):
             output3 = torch.add(output2, 1)
             return output3
 
-        t1 = torch.rand(5, device="cuda")
-        t2 = torch.rand(5, device="cuda")
+        t1 = torch.rand(5, device=GPU_TYPE)
+        t2 = torch.rand(5, device=GPU_TYPE)
         torch_result = call_triton(t1, t2)
         compiled_result = torch.compile(call_triton)(t1, t2)
         self.assertEqual(torch_result, compiled_result)
 
-    @requires_cuda
+    @requires_gpu
     def test_triton_kernel_reinplace_inplaceable_pass(self):
         def call_triton(
             x: torch.Tensor,
@@ -495,13 +502,13 @@ def forward(self, x_1, output_1):
             add_kernel_autotuned[grid](output, x, output, n_elements)
             return output
 
-        t1 = torch.rand(5, device="cuda")
-        t2 = torch.rand(5, device="cuda")
+        t1 = torch.rand(5, device=GPU_TYPE)
+        t2 = torch.rand(5, device=GPU_TYPE)
         torch_result = call_triton(t1, t2)
         compiled_result = torch.compile(call_triton)(t1, t2)
         self.assertEqual(torch_result, compiled_result)
 
-    @requires_cuda
+    @requires_gpu
     @common_utils.parametrize("grad", [False, True])
     def test_triton_kernel_multi_kernel(self, grad):
         @triton.jit
@@ -560,16 +567,16 @@ def forward(self, x_1, output_1):
             return (output, outputi)
 
         t1 = torch.tensor(
-            [-2.0, -1.0, 0.0, 1.0, 2.0], device="cuda", requires_grad=grad
+            [-2.0, -1.0, 0.0, 1.0, 2.0], device=GPU_TYPE, requires_grad=grad
         )
         t2 = torch.tensor(
-            [-2.0, -1.0, 0.0, 1.0, 2.0], device="cuda", requires_grad=grad
+            [-2.0, -1.0, 0.0, 1.0, 2.0], device=GPU_TYPE, requires_grad=grad
         )
         float_result = 2 * t1 + 2 * t2
         float_result = float_result.where(float_result >= 0, 0.0)
 
-        t1i = torch.randint(-2, 2, (5,), device="cuda")
-        t2i = torch.randint(-2, 2, (5,), device="cuda")
+        t1i = torch.randint(-2, 2, (5,), device=GPU_TYPE)
+        t2i = torch.randint(-2, 2, (5,), device=GPU_TYPE)
         o = torch.zeros_like(t1, requires_grad=grad)
         oi = torch.zeros_like(t1i)
         int_result = 2 * t1i + 2 * t2i
@@ -578,7 +585,8 @@ def forward(self, x_1, output_1):
         self.assertEqual(float_result, result)
         self.assertEqual(int_result, resulti)
 
-    @requires_cuda
+    @requires_gpu
+    @skipIfXpu
     @skipIfRocm
     def test_triton_kernel_constants(self):
         @triton.jit
@@ -620,7 +628,7 @@ def forward(self, x_1, output_1):
         CONSTANT_C = 10
         assert CONSTANT_C != prev_c
 
-        t = torch.randn(5, device="cuda")
+        t = torch.randn(5, device=GPU_TYPE)
         torch_result = call_triton(t)
         compiled_result = torch.compile(call_triton)(t)
 
@@ -629,7 +637,7 @@ def forward(self, x_1, output_1):
         # reset back
         CONSTANT_C = prev_c
 
-    @requires_cuda
+    @requires_gpu
     @common_utils.parametrize("grad", [False, True])
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
@@ -651,8 +659,8 @@ def forward(self, x_1, output_1):
             add_kernel_autotuned[grid](x, y, output, n_elements)
             return output
 
-        t1 = torch.rand(256, device="cuda", requires_grad=grad)
-        t2 = torch.rand(256, device="cuda", requires_grad=grad)
+        t1 = torch.rand(256, device=GPU_TYPE, requires_grad=grad)
+        t2 = torch.rand(256, device=GPU_TYPE, requires_grad=grad)
         output = torch.zeros_like(t1, requires_grad=grad)
 
         torch_add = call_triton(t1, t2, output)
@@ -663,7 +671,7 @@ def forward(self, x_1, output_1):
         output2 = torch.zeros_like(t1, requires_grad=grad)
         self.assertEqual(compiled_func(t1, t2, output2), torch_add)
 
-    @requires_cuda
+    @requires_gpu
     @common_utils.parametrize("grad", [False, True])
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
@@ -692,8 +700,8 @@ def forward(self, x_1, output_1):
             add_kernel_2d_autotuned[grid](x, y, output, x_elements, y_elements)
             return output
 
-        t1 = torch.rand((512, 256), device="cuda", requires_grad=grad)
-        t2 = torch.rand((512, 256), device="cuda", requires_grad=grad)
+        t1 = torch.rand((512, 256), device=GPU_TYPE, requires_grad=grad)
+        t2 = torch.rand((512, 256), device=GPU_TYPE, requires_grad=grad)
         output = torch.zeros_like(t1, requires_grad=grad)
 
         torch_result = call_triton(t1, t2, output)
@@ -703,7 +711,7 @@ def forward(self, x_1, output_1):
         output2 = torch.zeros_like(t1, requires_grad=grad)
         self.assertEqual(compiled_func(t1, t2, output2), torch_result)
 
-    @requires_cuda
+    @requires_gpu
     @common_utils.parametrize("grad", [False, True])
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
@@ -736,8 +744,8 @@ def forward(self, x_1, output_1):
 
             return output
 
-        t1 = torch.rand(5, device="cuda", requires_grad=grad)
-        t2 = torch.rand(5, device="cuda", requires_grad=grad)
+        t1 = torch.rand(5, device=GPU_TYPE, requires_grad=grad)
+        t2 = torch.rand(5, device=GPU_TYPE, requires_grad=grad)
         o1 = torch.zeros_like(t1, requires_grad=grad)
 
         torch_add = t1 + t2
@@ -765,7 +773,7 @@ def forward(self, x_1, output_1):
         o6 = torch.zeros_like(t1, requires_grad=grad)
         self.assertEqual(compiled_func(t1, t2, o6, 2, 200), torch_add)
 
-    @requires_cuda
+    @requires_gpu
     def test_triton_kernel_mutation_not_mark_dirty(self):
         @torch.compile
         def f(x):
@@ -773,7 +781,7 @@ def forward(self, x_1, output_1):
             add_kernel[(n_elements,)](x, x, x, n_elements, 16)
             return x
 
-        x = torch.randn(5, device="cuda", requires_grad=True)
+        x = torch.randn(5, device=GPU_TYPE, requires_grad=True)
         x_cloned = x.clone()
         out = x_cloned.sin()
         f(x_cloned)
@@ -815,7 +823,7 @@ def forward(self, x_1, output_1):
         num_bufs_reused = code.count("# reuse")
         self.assertEqual(num_bufs_reused, 3)
 
-    @requires_cuda
+    @requires_gpu
     def test_triton_kernel_matmul_tracking(self):
         @triton.jit
         def ones_kernel(x_ptr, n_elements, BLOCK_SIZE: "tl.constexpr"):
@@ -832,12 +840,12 @@ def forward(self, x_1, output_1):
             ones_kernel[(4,)](out, 16, BLOCK_SIZE=16)
             return torch.mm(out, x) + 10
 
-        x = torch.randn(4, 4, device="cuda")
+        x = torch.randn(4, 4, device=GPU_TYPE)
         torch_out = f(x)
-        python_out = torch.mm(torch.ones(4, 4, device="cuda"), x) + 10
+        python_out = torch.mm(torch.ones(4, 4, device=GPU_TYPE), x) + 10
         self.assertEqual(torch_out, python_out)
 
-    @requires_cuda
+    @requires_gpu
     def test_triton_kernel_strided_input(self):
         def f(inp):
             # left has strides [256, 1]
@@ -855,13 +863,13 @@ def forward(self, x_1, output_1):
             )
             return out
 
-        inp = torch.randn(64, 256, device="cuda")
+        inp = torch.randn(64, 256, device=GPU_TYPE)
 
         eager_out = f(inp)
         compiled_out = torch.compile(f)(inp)
         self.assertEqual(compiled_out, eager_out)
 
-    @requires_cuda
+    @requires_gpu
     def test_triton_kernel_strided_input_nonzero_offset(self):
         def f(inp):
             # right has strides [256, 1] and storage offset 128
@@ -879,13 +887,13 @@ def forward(self, x_1, output_1):
             )
             return out
 
-        inp = torch.randn(64, 256, device="cuda")
+        inp = torch.randn(64, 256, device=GPU_TYPE)
 
         eager_out = f(inp)
         compiled_out = torch.compile(f)(inp)
         self.assertEqual(compiled_out, eager_out)
 
-    @requires_cuda
+    @requires_gpu
     def test_triton_kernel_slice_and_view_input(self):
         def f(inp):
             # left has strides [256, 1]
@@ -907,13 +915,13 @@ def forward(self, x_1, output_1):
             )
             return out + left
 
-        inp = torch.randn(64, 256, device="cuda")
+        inp = torch.randn(64, 256, device=GPU_TYPE)
 
         eager_out = f(inp)
         compiled_out = torch.compile(f)(inp)
         self.assertEqual(compiled_out, eager_out)
 
-    @requires_cuda
+    @requires_gpu
     def test_triton_kernel_fallback(self):
         def f(x, y):
             out = torch.zeros_like(x)
@@ -924,13 +932,13 @@ def forward(self, x_1, output_1):
             add_kernel[(4,)](x, torch.sort(y).values, out, 4, 16)
             return out, out2
 
-        x = torch.randn(4, 4, device="cuda")
-        y = torch.randn(4, 4, device="cuda")
+        x = torch.randn(4, 4, device=GPU_TYPE)
+        y = torch.randn(4, 4, device=GPU_TYPE)
         eager_out = f(x, y)
         compiled_out = torch.compile(f)(x, y)
         self.assertEqual(compiled_out, eager_out)
 
-    @requires_cuda
+    @requires_gpu
     def test_triton_kernel_out_of_order(self):
         @triton.jit
         def add_kernel(
@@ -955,13 +963,13 @@ def forward(self, x_1, output_1):
             add_kernel[(n_elements,)](x, y, 4, out, n_elements)
             return out
 
-        x = torch.randn(4, device="cuda")
-        y = torch.randn(4, device="cuda")
+        x = torch.randn(4, device=GPU_TYPE)
+        y = torch.randn(4, device=GPU_TYPE)
         eager_out = f(x, y)
         compiled_out = torch.compile(f)(x, y)
         self.assertEqual(compiled_out, eager_out)
 
-    @requires_cuda
+    @requires_gpu
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
@@ -989,12 +997,12 @@ def forward(self, x_1, output_1):
             square[grid](x, output, n_elements, BLOCK_SIZE=16)
             return output
 
-        x = torch.randn(4, device="cuda")
+        x = torch.randn(4, device=GPU_TYPE)
         eager_out = f(x)
         compiled_out = torch.compile(f, fullgraph=True, backend=backend)(x)
         self.assertEqual(compiled_out, eager_out)
 
-    @requires_cuda
+    @requires_gpu
     @common_utils.parametrize("dynamic", [False, True])
     def test_triton_kernel_equal_to_1_arg(self, dynamic):
         @triton.jit
@@ -1022,8 +1030,8 @@ def forward(self, x_1, output_1):
             )
             return out
 
-        x = torch.randn(2, device="cuda")
-        y = torch.randn(2, device="cuda")
+        x = torch.randn(2, device=GPU_TYPE)
+        y = torch.randn(2, device=GPU_TYPE)
         eager_out = f(x, y)
         compiled_out, sources = run_and_get_code(
             torch.compile(f, dynamic=dynamic), x, y
@@ -1037,7 +1045,7 @@ def forward(self, x_1, output_1):
             self.assertTrue("equal_to_1=(3,)" in sources[0])
         self.assertEqual(compiled_out, eager_out)
 
-    @requires_cuda
+    @requires_gpu
     @common_utils.parametrize("dynamic", [False, True])
     def test_triton_kernel_equal_to_1_float_arg(self, dynamic):
         def f(x, y):
@@ -1054,8 +1062,8 @@ def forward(self, x_1, output_1):
             )
             return out
 
-        x = torch.randn(2, device="cuda")
-        y = torch.randn(2, device="cuda")
+        x = torch.randn(2, device=GPU_TYPE)
+        y = torch.randn(2, device=GPU_TYPE)
         eager_out = f(x, y)
         compiled_out, sources = run_and_get_code(
             torch.compile(f, dynamic=dynamic), x, y
@@ -1066,7 +1074,7 @@ def forward(self, x_1, output_1):
         self.assertTrue("equal_to_1=()" in sources[0])
         self.assertEqual(compiled_out, eager_out)
 
-    @requires_cuda
+    @requires_gpu
     @skipIfRocm
     def test_triton_kernel_with_imported_symbol(self):
         @triton.jit
@@ -1092,13 +1100,13 @@ def forward(self, x_1, output_1):
             )
             return out
 
-        x = torch.randn(4, device="cuda")
+        x = torch.randn(4, device=GPU_TYPE)
         eager_out = f(x)
         compiled_out = torch.compile(f)(x)
 
         self.assertEqual(compiled_out, eager_out)
 
-    @requires_cuda
+    @requires_gpu
     @skipIfRocm
     def test_triton_kernel_with_imported_symbol_with_custom_name(self):
         @triton.jit
@@ -1124,13 +1132,13 @@ def forward(self, x_1, output_1):
             )
             return out
 
-        x = torch.randn(4, device="cuda")
+        x = torch.randn(4, device=GPU_TYPE)
         eager_out = f(x)
         compiled_out = torch.compile(f)(x)
 
         self.assertEqual(compiled_out, eager_out)
 
-    @requires_cuda
+    @requires_gpu
     @common_utils.parametrize("size", [4, 16])
     @common_utils.parametrize("dynamic", [False, True])
     def test_triton_kernel_different_shapes(self, size, dynamic):
@@ -1149,10 +1157,10 @@ def forward(self, x_1, output_1):
 
             return output_1, output_2
 
-        x = torch.rand(size, device="cuda")
-        y = torch.rand(size, device="cuda")
-        xx = torch.rand(size, size, device="cuda")
-        yy = torch.rand(size, size, device="cuda")
+        x = torch.rand(size, device=GPU_TYPE)
+        y = torch.rand(size, device=GPU_TYPE)
+        xx = torch.rand(size, size, device=GPU_TYPE)
+        yy = torch.rand(size, size, device=GPU_TYPE)
         args = [x, y, xx, yy]
 
         eager_out = f(*args)
@@ -1171,7 +1179,7 @@ def forward(self, x_1, output_1):
 
         self.assertEqual(compiled_out, eager_out)
 
-    @requires_cuda
+    @requires_gpu
     def test_triton_kernel_reset_to_zero(self):
         @triton.autotune(
             configs=[
@@ -1206,12 +1214,12 @@ def forward(self, x_1, output_1):
             add_kernel_autotuned_reset[grid](x, y, output, n_elements)
             return output
 
-        x = torch.randn(4, device="cuda")
+        x = torch.randn(4, device=GPU_TYPE)
         msg = "Only configs and keys are supported for triton.autotune"
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
             f(x, x)
 
-    @requires_cuda
+    @requires_gpu
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_kernel_triton_dtype(self, dynamic, backend):
@@ -1242,8 +1250,8 @@ def forward(self, x_1, output_1):
             )
             return output
 
-        x = torch.randn(4, device="cuda")
-        y = torch.randn(4, device="cuda")
+        x = torch.randn(4, device=GPU_TYPE)
+        y = torch.randn(4, device=GPU_TYPE)
         args_list = (
             [x, y, torch.float32, tl.float32],
             [x, y, torch.bfloat16, tl.bfloat16],
@@ -1255,7 +1263,7 @@ def forward(self, x_1, output_1):
             )(*args)
             self.assertEqual(compiled_out, eager_out)
 
-    @requires_cuda
+    @requires_gpu
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_kernel_special_kwargs_with_autotune(self, backend):
         @triton.autotune(
@@ -1297,10 +1305,10 @@ def forward(self, x_1, output_1):
             )
             return output
 
-        x = torch.randn(4, device="cuda")
+        x = torch.randn(4, device=GPU_TYPE)
         f(x, x)
 
-    @requires_cuda
+    @requires_gpu
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_kernel_num_ctas(self, backend):
         @triton.jit
@@ -1313,10 +1321,10 @@ def forward(self, x_1, output_1):
             kernel.run(x, num_ctas=1, grid=(1,), warmup=False)
             return x
 
-        x = torch.randn(4, device="cuda")
+        x = torch.randn(4, device=GPU_TYPE)
         f(x)
 
-    @requires_cuda
+    @requires_gpu
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_kernel_special_kwargs_without_autotune(self, backend):
         @triton.jit
@@ -1352,12 +1360,12 @@ def forward(self, x_1, output_1):
             )
             return output
 
-        x = torch.randn(4, device="cuda")
+        x = torch.randn(4, device=GPU_TYPE)
         f(x, x)
 
 
 def make_mutation_test(fn):
-    @requires_cuda
+    @requires_gpu
     def test_fn(self):
         from torch._higher_order_ops.triton_kernel_wrap import identify_mutated_tensors
 
@@ -1372,7 +1380,7 @@ def make_mutation_test(fn):
 
 # Triton codegen suffers from scoping issues.
 # Define helpers here
-if HAS_CUDA:
+if HAS_GPU:
 
     @triton.jit
     def helper_id(p):
@@ -2044,7 +2052,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
         )
 
 
-if HAS_CUDA:
+if HAS_GPU:
     t = torch.randn(4)
     tt = torch.randn(4, 1)
     tests = [

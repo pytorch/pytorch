@@ -27,11 +27,9 @@
   - third_party/onnx
   - caffe2/python/onnx/**
   approved_by:
-  - BowenBao
   - justinchuby
   - liqunfu
   - shubhambhokare1
-  - thiagocrepaldi
   - titaiwangms
   - wschin
   - xadupre

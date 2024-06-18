@@ -82,10 +82,11 @@ def make_symbol(prefix: SymT, idx: int, **kwargs) -> sympy.Symbol:
 # that it contains Basic, rather than Symbol
 def symbol_is_type(sym: sympy.Basic, prefix: Union[SymT, Sequence[SymT]]) -> bool:
     assert isinstance(sym, sympy.Symbol)
+    name_str = sym.name.lower()  # Match capitalized names like XBLOCK, RBLOCK
     if isinstance(prefix, SymT):
-        return sym.name.startswith(prefix_str[prefix])
+        return name_str.startswith(prefix_str[prefix])
     else:
-        return sym.name.startswith(tuple(prefix_str[p] for p in prefix))
+        return name_str.startswith(tuple(prefix_str[p] for p in prefix))
 
 
 def free_symbol_is_type(e: sympy.Expr, prefix: SymT) -> bool:

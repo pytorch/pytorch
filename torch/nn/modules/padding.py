@@ -1,22 +1,37 @@
 # mypy: allow-untyped-defs
-from .module import Module
-from .utils import _pair, _quadruple, _ntuple
-from .. import functional as F
-
-from torch import Tensor
-from ..common_types import _size_2_t, _size_4_t, _size_6_t
 from typing import Sequence, Tuple
+
+import torch.nn.functional as F
+from torch import Tensor
+from torch.nn.common_types import _size_2_t, _size_4_t, _size_6_t
+
+from .module import Module
+from .utils import _ntuple, _pair, _quadruple
 
 
 # TODO: grad_output size asserts in THNN
 
-__all__ = ['CircularPad1d', 'CircularPad2d', 'CircularPad3d', 'ConstantPad1d', 'ConstantPad2d',
-           'ConstantPad3d', 'ReflectionPad1d', 'ReflectionPad2d', 'ReflectionPad3d',
-           'ReplicationPad1d', 'ReplicationPad2d', 'ReplicationPad3d', 'ZeroPad1d', 'ZeroPad2d', 'ZeroPad3d']
+__all__ = [
+    "CircularPad1d",
+    "CircularPad2d",
+    "CircularPad3d",
+    "ConstantPad1d",
+    "ConstantPad2d",
+    "ConstantPad3d",
+    "ReflectionPad1d",
+    "ReflectionPad2d",
+    "ReflectionPad3d",
+    "ReplicationPad1d",
+    "ReplicationPad2d",
+    "ReplicationPad3d",
+    "ZeroPad1d",
+    "ZeroPad2d",
+    "ZeroPad3d",
+]
 
 
 class _CircularPadNd(Module):
-    __constants__ = ['padding']
+    __constants__ = ["padding"]
     padding: Sequence[int]
 
     def _check_input_dim(self, input):
@@ -24,10 +39,10 @@ class _CircularPadNd(Module):
 
     def forward(self, input: Tensor) -> Tensor:
         self._check_input_dim(input)
-        return F.pad(input, self.padding, 'circular')
+        return F.pad(input, self.padding, "circular")
 
     def extra_repr(self) -> str:
-        return f'{self.padding}'
+        return f"{self.padding}"
 
 
 class CircularPad1d(_CircularPadNd):
@@ -76,9 +91,7 @@ class CircularPad1d(_CircularPadNd):
 
     def _check_input_dim(self, input):
         if input.dim() != 2 and input.dim() != 3:
-            raise ValueError(
-                f"expected 2D or 3D input (got {input.dim()}D input)"
-            )
+            raise ValueError(f"expected 2D or 3D input (got {input.dim()}D input)")
 
 
 class CircularPad2d(_CircularPadNd):
@@ -137,9 +150,7 @@ class CircularPad2d(_CircularPadNd):
 
     def _check_input_dim(self, input):
         if input.dim() != 3 and input.dim() != 4:
-            raise ValueError(
-                f"expected 3D or 4D input (got {input.dim()}D input)"
-            )
+            raise ValueError(f"expected 3D or 4D input (got {input.dim()}D input)")
 
 
 class CircularPad3d(_CircularPadNd):
@@ -188,13 +199,11 @@ class CircularPad3d(_CircularPadNd):
 
     def _check_input_dim(self, input):
         if input.dim() != 4 and input.dim() != 5:
-            raise ValueError(
-                f"expected 4D or 5D input (got {input.dim()}D input)"
-            )
+            raise ValueError(f"expected 4D or 5D input (got {input.dim()}D input)")
 
 
 class _ConstantPadNd(Module):
-    __constants__ = ['padding', 'value']
+    __constants__ = ["padding", "value"]
     value: float
     padding: Sequence[int]
 
@@ -203,10 +212,10 @@ class _ConstantPadNd(Module):
         self.value = value
 
     def forward(self, input: Tensor) -> Tensor:
-        return F.pad(input, self.padding, 'constant', self.value)
+        return F.pad(input, self.padding, "constant", self.value)
 
     def extra_repr(self) -> str:
-        return f'padding={self.padding}, value={self.value}'
+        return f"padding={self.padding}, value={self.value}"
 
 
 class ConstantPad1d(_ConstantPadNd):
@@ -303,7 +312,7 @@ class ConstantPad2d(_ConstantPadNd):
                  [ 3.5000,  3.5000,  3.5000,  3.5000,  3.5000]]])
     """
 
-    __constants__ = ['padding', 'value']
+    __constants__ = ["padding", "value"]
     padding: Tuple[int, int, int, int]
 
     def __init__(self, padding: _size_4_t, value: float) -> None:
@@ -352,14 +361,14 @@ class ConstantPad3d(_ConstantPadNd):
 
 
 class _ReflectionPadNd(Module):
-    __constants__ = ['padding']
+    __constants__ = ["padding"]
     padding: Sequence[int]
 
     def forward(self, input: Tensor) -> Tensor:
-        return F.pad(input, self.padding, 'reflect')
+        return F.pad(input, self.padding, "reflect")
 
     def extra_repr(self) -> str:
-        return f'{self.padding}'
+        return f"{self.padding}"
 
 
 class ReflectionPad1d(_ReflectionPadNd):
@@ -511,14 +520,14 @@ class ReflectionPad3d(_ReflectionPadNd):
 
 
 class _ReplicationPadNd(Module):
-    __constants__ = ['padding']
+    __constants__ = ["padding"]
     padding: Sequence[int]
 
     def forward(self, input: Tensor) -> Tensor:
-        return F.pad(input, self.padding, 'replicate')
+        return F.pad(input, self.padding, "replicate")
 
     def extra_repr(self) -> str:
-        return f'{self.padding}'
+        return f"{self.padding}"
 
 
 class ReplicationPad1d(_ReplicationPadNd):
@@ -702,10 +711,11 @@ class ZeroPad1d(ConstantPad1d):
     padding: Tuple[int, int]
 
     def __init__(self, padding: _size_2_t) -> None:
-        super().__init__(padding, 0.)
+        super().__init__(padding, 0.0)
 
     def extra_repr(self) -> str:
-        return f'{self.padding}'
+        return f"{self.padding}"
+
 
 class ZeroPad2d(ConstantPad2d):
     r"""Pads the input tensor boundaries with zero.
@@ -755,10 +765,11 @@ class ZeroPad2d(ConstantPad2d):
     padding: Tuple[int, int, int, int]
 
     def __init__(self, padding: _size_4_t) -> None:
-        super().__init__(padding, 0.)
+        super().__init__(padding, 0.0)
 
     def extra_repr(self) -> str:
-        return f'{self.padding}'
+        return f"{self.padding}"
+
 
 class ZeroPad3d(ConstantPad3d):
     r"""Pads the input tensor boundaries with zero.
@@ -796,7 +807,7 @@ class ZeroPad3d(ConstantPad3d):
     padding: Tuple[int, int, int, int, int, int]
 
     def __init__(self, padding: _size_6_t) -> None:
-        super().__init__(padding, 0.)
+        super().__init__(padding, 0.0)
 
     def extra_repr(self) -> str:
-        return f'{self.padding}'
+        return f"{self.padding}"

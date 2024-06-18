@@ -49,12 +49,7 @@ from torch._dynamo.testing import (
     unsupported,
     xfailIfPy312,
 )
-from torch._dynamo.utils import (
-    CompileProfiler,
-    counters,
-    ifdynstaticdefault,
-    strip_color_from_string,
-)
+from torch._dynamo.utils import CompileProfiler, counters, ifdynstaticdefault
 from torch._inductor.utils import run_and_get_code
 from torch.ao.quantization import MinMaxObserver
 from torch.ao.quantization.fake_quantize import FakeQuantize
@@ -748,7 +743,6 @@ class MiscTests(torch._inductor.test_case.TestCase):
             post_grad_graphs = "\n".join(
                 log_stream.getvalue().strip().split("\n")[3:]
             ).strip()
-            post_grad_graphs = strip_color_from_string(post_grad_graphs)
 
             # Check the graph under static shapes
             if torch._dynamo.config.assume_static_by_default:
@@ -811,7 +805,6 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
                 post_grad_graphs = "\n".join(
                     log_stream.getvalue().strip().split("\n")[3:]
                 ).strip()
-                post_grad_graphs = strip_color_from_string(post_grad_graphs)
                 self.assertExpectedInline(
                     post_grad_graphs,
                     """\
@@ -904,7 +897,6 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
                 post_grad_graphs = "\n".join(
                     log_stream.getvalue().strip().split("\n")[3:]
                 ).strip()
-                post_grad_graphs = strip_color_from_string(post_grad_graphs)
                 self.assertExpectedInline(
                     post_grad_graphs,
                     """\
@@ -10462,6 +10454,14 @@ fn
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+    def test_assert_size_stride(self):
+        x = torch.randn(2, 3, 4)
+        with self.assertRaisesRegex(
+            AssertionError,
+            "expected size 2==5, stride 12==9 at dim=0; expected size 3==6, stride 4==9 at dim=1; expected size 4==7, stride 1==10 at dim=2",
+        ):
+            torch._C._dynamo.guards.assert_size_stride(x, (5, 6, 7), (9, 9, 10))
 
     def test_module_dunder_dict(self):
         class MyModule(torch.nn.Module):

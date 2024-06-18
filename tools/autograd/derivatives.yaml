@@ -2794,14 +2794,14 @@
   nested_size: non_differentiable
   nested_strides: non_differentiable
 
-- name: _nested_view_from_jagged(Tensor(a) self, Tensor offsets, Tensor dummy, Tensor? lengths=None, int ragged_idx=1) -> Tensor(a)
+- name: _nested_view_from_jagged(Tensor(a) self, Tensor offsets, Tensor dummy, Tensor? lengths=None, int ragged_idx=1, Tensor? min_seqlen=None, Tensor? max_seqlen=None) -> Tensor(a)
   self: grad.values()
   offsets: non_differentiable
   lengths: non_differentiable
   dummy: non_differentiable
 
 - name: _nested_get_values(Tensor(a) self) -> Tensor(a)
-  self: _nested_view_from_jagged(grad, at::_nested_get_offsets(self), at::_nested_get_jagged_dummy(self), at::_nested_get_lengths(self), at::_nested_get_ragged_idx(self))
+  self: "_nested_view_from_jagged(grad, at::_nested_get_offsets(self), at::_nested_get_jagged_dummy(self), at::_nested_get_lengths(self), at::_nested_get_ragged_idx(self), at::_nested_get_min_seqlen(self).defined() ? c10::optional<Tensor>(at::_nested_get_min_seqlen(self)) : c10::nullopt, at::_nested_get_max_seqlen(self).defined() ? c10::optional<Tensor>(at::_nested_get_max_seqlen(self)) : c10::nullopt)"
 
 # Transformers
 - name: _scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_bias, bool compute_log_sumexp, float dropout_p=0.0, bool is_causal=False, *, float? scale=None) -> (Tensor output, Tensor log_sumexp, Tensor philox_seed, Tensor philox_offset)
