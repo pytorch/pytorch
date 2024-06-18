@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import mpmath.libmp as mlib  # type: ignore[import-untyped]
 import sympy
 from sympy import Expr

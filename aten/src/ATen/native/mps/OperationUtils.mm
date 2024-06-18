@@ -659,6 +659,7 @@ id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
   MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
   [options setLanguageVersion:is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS) ? MTLLanguageVersion3_1
                                                                                       : MTLLanguageVersion2_3];
+  // [options setFastMathEnabled: NO];
   auto str = [NSString stringWithCString:src.c_str() encoding:NSASCIIStringEncoding];
   auto device = MPSDevice::getInstance()->device();
   library = [device newLibraryWithSource:str options:options error:&error];
