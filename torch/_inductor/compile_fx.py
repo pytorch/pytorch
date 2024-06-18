@@ -9,7 +9,17 @@ import time
 import warnings
 from itertools import count
 
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    TYPE_CHECKING,
+    Union,
+)
 from unittest import mock
 
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
@@ -40,6 +50,7 @@ from torch._inductor.cudagraph_utils import (
 )
 
 from torch._inductor.debug import save_args_for_compile_fx_inner
+from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.utils import (
     BoxedBool,
     count_tangents,
@@ -72,6 +83,9 @@ from .utils import (
     output_node,
 )
 from .virtualized import V
+
+if TYPE_CHECKING:
+    import sympy
 
 if config.is_fbcode():
     from torch._inductor.fb.utils import log_optimus_to_scuba, time_and_log
@@ -550,9 +564,17 @@ def compile_fx_inner(
 
     # Return the output strides to the caller via TracingContext
     context = torch._guards.TracingContext.try_get()
-    if context is not None and context.output_strides is not None:
-        assert len(context.output_strides) == 0
-        context.output_strides.extend(compiled_graph.output_strides)
+    if context is not None and context.output_stride_exprs is not None:
+        assert len(context.output_stride_exprs) == 0
+        shape_env = _shape_env_from_inputs(example_inputs)
+        V.graph.sizevars = SizeVarAllocator(shape_env)
+        for exprs in compiled_graph.output_stride_exprs:
+            if exprs is None:
+                context.output_stride_exprs.append(None)
+            else:
+                context.output_stride_exprs.append(
+                    V.graph.sizevars.size_hint(s) for s in exprs
+                )
 
     if aot_mode:
         return compiled_graph
@@ -818,7 +840,7 @@ def fx_codegen_and_compile(
         metrics_helper = metrics.CachedMetricsHelper()
         with V.set_graph_handler(graph):
             graph.run(*example_inputs)
-            output_strides: List[Optional[Tuple[int, ...]]] = []
+            output_stride_exprs: List[Optional[Tuple[sympy.Expr, ...]]] = []
             if graph.graph_outputs is not None:
                 # We'll put the output strides in the compiled graph so we
                 # can later return them to the caller via TracingContext
@@ -827,13 +849,9 @@ def fx_codegen_and_compile(
                         hasattr(out, "layout")
                         and len(free_unbacked_symbols(out.layout.stride)) == 0
                     ):
-                        output_strides.append(
-                            tuple(
-                                V.graph.sizevars.size_hint(s) for s in out.layout.stride
-                            )
-                        )
+                        output_stride_exprs.append(out.layout.stride)
                     else:
-                        output_strides.append(None)
+                        output_stride_exprs.append(None)
 
             compiled_fn = graph.compile_to_fn()
             num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
@@ -881,7 +899,7 @@ def fx_codegen_and_compile(
             compiled_graph = CompiledFxGraph(
                 compiled_fn,
                 graph,
-                output_strides,
+                output_stride_exprs,
                 V.graph.disable_cudagraphs_reason,
                 metrics_helper.get_deltas(),
             )

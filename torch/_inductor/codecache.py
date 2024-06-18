@@ -70,6 +70,8 @@ from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
 if TYPE_CHECKING:
     from concurrent.futures import Future
 
+    import sympy
+
     from torch._inductor.graph import GraphLowering
     from torch._inductor.ir import ChoiceCaller
     from torch._inductor.runtime.hints import HalideMeta
@@ -1115,7 +1117,7 @@ class CompiledFxGraph:
     mutated_input_idxs: Set[int]
     constants: Dict[str, torch.Tensor]
     torchbind_constants: Dict[str, torch._C.ScriptObject]
-    output_strides: Optional[List[Optional[Tuple[int, ...]]]]
+    output_stride_exprs: Optional[List[Optional[Tuple[sympy.Expr, ...]]]]
     disabled_cudagraphs_reason: Optional[str]
     metrics_deltas: metrics.CachedMetricsDeltas
     # This is a string representation of an expression we serialize
@@ -1132,7 +1134,7 @@ class CompiledFxGraph:
         self,
         current_callable: Optional[Callable[..., Any]],
         graph: GraphLowering,
-        output_strides: List[Optional[Tuple[int, ...]]],
+        output_stride_exprs: List[Optional[Tuple[sympy.Expr, ...]]],
         disabled_cudagraphs_reason: Optional[str],
         metrics_deltas: metrics.CachedMetricsDeltas,
     ):
@@ -1148,7 +1150,7 @@ class CompiledFxGraph:
         self.mutated_input_idxs = set(graph.mutated_input_idxs)
         self.constants = graph.constants
         self.torchbind_constants = graph.torchbind_constants
-        self.output_strides = output_strides
+        self.output_stride_exprs = output_stride_exprs
         self.disabled_cudagraphs_reason = disabled_cudagraphs_reason
         self.metrics_deltas = metrics_deltas
         self.guards_expr = None
