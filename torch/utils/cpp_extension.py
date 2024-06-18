@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import copy
 import glob
 import importlib
@@ -960,6 +961,9 @@ def CppExtension(name, sources, *args, **kwargs):
     libraries.append('torch')
     libraries.append('torch_cpu')
     libraries.append('torch_python')
+    if IS_WINDOWS:
+        libraries.append("sleef")
+
     kwargs['libraries'] = libraries
 
     kwargs['language'] = 'c++'

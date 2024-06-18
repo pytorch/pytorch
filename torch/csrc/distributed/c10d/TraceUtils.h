@@ -8,6 +8,7 @@
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/profiler/combined_traceback.h>
+#include <chrono>
 
 #ifdef USE_C10D_NCCL
 #include <ATen/cuda/CUDAEvent.h>
@@ -28,7 +29,7 @@ static c10::IValue nccl_comm_key = "nccl_comm_state";
 static c10::IValue version_key = "version";
 // Update whenever changing contents or formatting of the dump
 // (minor when adding fields, major when changing existing fields)
-static c10::IValue version_val = "2.1";
+static c10::IValue version_val = "2.2";
 static c10::IValue pg_config_key = "pg_config";
 static c10::IValue record_id_key = "record_id";
 static c10::IValue pg_id_key = "pg_id";
@@ -44,6 +45,7 @@ static c10::IValue output_sizes_key = "output_sizes";
 static c10::IValue output_dtypes_key = "output_dtypes";
 static c10::IValue time_created_key = "time_created_ns";
 static c10::IValue duration_key = "duration_ms";
+static c10::IValue timeout_key = "timeout_ms";
 
 static c10::IValue frames_key = "frames";
 static c10::IValue state_key = "state";
@@ -461,6 +463,9 @@ struct NCCLTraceBuffer {
     // was 'enqueued'- not necessarily started
     c10::time_t time_created_;
 
+    // configured timeout for this entry
+    c10::time_t timeout_ms_;
+
     // Is this a P2P event?
     bool isP2P_;
 
@@ -508,6 +513,7 @@ struct NCCLTraceBuffer {
       const std::vector<at::Tensor>& outputs,
       Event* start,
       Event* end,
+      std::chrono::milliseconds timeout_ms,
       bool isP2P) {
     if (!enabled_) {
       return c10::nullopt;
@@ -528,6 +534,7 @@ struct NCCLTraceBuffer {
         std::move(start),
         std::move(end),
         c10::getTime(),
+        timeout_ms.count(),
         isP2P};
 
     for (const auto& input : inputs) {
@@ -655,31 +662,44 @@ struct NCCLTraceBuffer {
     entry->start_ = entry->end_ = nullptr;
   }
 
-  std::string dump(
-      const std::optional<std::unordered_map<
-          std::string,
-          std::unordered_map<std::string, std::string>>>& ncclDumpMap) {
-    auto result = dump_entries();
+  const c10::List<c10::IValue> getCollectiveTrace(
+      bool includeStacktraces,
+      bool onlyActive) {
     auto entries = new_list();
-
+    auto result = dump_entries();
     std::vector<torch::CapturedTraceback*> tracebacks;
-    for (auto& e : result) {
-      tracebacks.push_back(e.traceback_.get());
-    }
-    torch::SymbolizedTracebacks stracebacks = torch::symbolize(tracebacks);
+    torch::SymbolizedTracebacks stracebacks;
     std::vector<c10::IValue> all_frames;
-    for (const auto& f : stracebacks.all_frames) {
-      auto d = new_dict();
-      d.insert(name_key, f.funcname);
-      d.insert(filename_key, f.filename);
-      d.insert(line_key, int64_t(f.lineno));
-      all_frames.emplace_back(std::move(d));
+    if (includeStacktraces) {
+      for (auto& e : result) {
+        tracebacks.push_back(e.traceback_.get());
+      }
+      stracebacks = torch::symbolize(tracebacks);
+      for (const auto& f : stracebacks.all_frames) {
+        auto d = new_dict();
+        d.insert(name_key, f.funcname);
+        d.insert(filename_key, f.filename);
+        d.insert(line_key, int64_t(f.lineno));
+        all_frames.emplace_back(std::move(d));
+      }
     }
-
     for (auto i : c10::irange(result.size())) {
-      auto& e = result.at(i);
-      auto& tb = stracebacks.tracebacks.at(i);
       auto dict = new_dict();
+      auto& e = result.at(i);
+      // Skip completed events
+      if (onlyActive && e.time_discovered_completed_.has_value()) {
+        continue;
+      }
+
+      if (includeStacktraces) {
+        auto& tb = stracebacks.tracebacks.at(i);
+        auto frames = new_list();
+        for (int64_t frame : tb) {
+          frames.push_back(all_frames.at(frame));
+        }
+        dict.insert(frames_key, frames);
+      }
+
       dict.insert(record_id_key, int64_t(e.id_));
       dict.insert(pg_id_key, int64_t(e.pg_id_));
       dict.insert(pg_name_key, e.pg_name_);
@@ -739,15 +759,16 @@ struct NCCLTraceBuffer {
               ? int64_t(*e.time_discovered_completed_)
               : c10::IValue());
       dict.insert(retired_key, e.retired_);
+      dict.insert(timeout_key, e.timeout_ms_);
       dict.insert(is_p2p_key, e.isP2P_);
 
-      auto frames = new_list();
-      for (int64_t frame : tb) {
-        frames.push_back(all_frames.at(frame));
-      }
-      dict.insert(frames_key, frames);
       entries.push_back(dict);
     }
+    return entries;
+  }
+
+  // dump pg_entries
+  const c10::Dict<c10::IValue, c10::IValue> getPgConfig() {
     auto pg_config = new_dict();
     for (const auto& [pg_name, ranks] : pg_name_to_ranks_) {
       auto pg_info = new_dict();
@@ -755,6 +776,27 @@ struct NCCLTraceBuffer {
       pg_info.insert("desc", std::get<1>(pg_name));
       pg_info.insert("ranks", ranks_str(ranks));
       pg_config.insert(std::get<0>(pg_name), pg_info);
+    }
+    return pg_config;
+  }
+
+  // dump all collectives + ncclDumpMap
+  std::string dump(
+      const std::optional<std::unordered_map<
+          std::string,
+          std::unordered_map<std::string, std::string>>>& ncclDumpMap,
+      bool includeCollectives,
+      bool includeStackTraces,
+      bool onlyActive) {
+    auto result = new_dict();
+    // common values
+    result.insert(version_key, version_val);
+    result.insert(pg_config_key, getPgConfig());
+
+    // collective trace
+    if (includeCollectives) {
+      result.insert(
+          entries_key, getCollectiveTrace(includeStackTraces, onlyActive));
     }
 
     // convert ncclDumpMap into a dictionary
@@ -768,16 +810,10 @@ struct NCCLTraceBuffer {
         per_comm_dict.insert(ncclId, inner_dict);
       }
     }
-
-    auto dict = new_dict();
-    dict.insert(entries_key, entries);
-    dict.insert(version_key, version_val);
     if (per_comm_dict.size() > 0) {
-      dict.insert(nccl_comm_key, per_comm_dict);
+      result.insert(nccl_comm_key, per_comm_dict);
     }
-    dict.insert(pg_config_key, pg_config);
-
-    return pickle_str(dict);
+    return pickle_str(result);
   }
 };
 
