@@ -1392,7 +1392,7 @@ class BuiltinVariable(VariableTracker):
             def _tensor_isinstance(tensor_var, tensor_type):
                 def check_type(ty):
                     if ty not in tensortype_to_dtype:
-                        example_val = arg.as_proxy().node.meta['example_value']
+                        example_val = arg.as_proxy().node.meta["example_value"]
                         # N.B: we are calling isinstance directly on the example value.
                         # torch.nn.Parameter has a meta-class that overrides __isinstance__,
                         # the isinstance check here allows us to invoke that logic.
