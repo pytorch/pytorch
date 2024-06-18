@@ -21,8 +21,8 @@ namespace at::native {
 
 namespace {
 
-// out = val * a + b for b_stride=1
-template <typename T1, typename T2>
+// out = val * a + b
+template <bool is_b_stride_0, typename T1, typename T2>
 inline void _scale_attn_mask_fusion_kernel(
     T1* a,
     T2* b,
@@ -36,48 +36,34 @@ inline void _scale_attn_mask_fusion_kernel(
   constexpr int64_t T2_n = 1;
   auto vec_scale = at::vec::VectorizedN<T1, T1_n>(val);
   int64_t i = 0;
-  for (; i < size - (size % vec_size2); i += vec_size2) {
-    auto a_n = at::vec::VectorizedN<T1, T1_n>::loadu(a + i);
-    auto b_n = at::vec::VectorizedN<T2, T2_n>::loadu(b + i);
-    auto b_n_convert = at::vec::convert<T1, T1_n, T2, T2_n, true>(b_n);
-    auto res = a_n * vec_scale + b_n_convert;
-    res.store(out + i);
-  }
-  for (; i < size; i++) {
-    auto tmp0 = a[i];
-    auto tmp1 = (T1)b[i];
-    out[i] = tmp0 * val + tmp1;
-  }
-}
-
-// out = val * a + b for b_stride=0
-template <typename T1, typename T2>
-inline void _scale_attn_mask_fusion_kernel_stride0(
-    T1* a,
-    T2* b,
-    const int& size,
-    T1* out,
-    T1& val) {
-  const auto vec_size1 = at::vec::Vectorized<T1>::size();
-  const auto vec_size2 = at::vec::Vectorized<T2>::size();
-  constexpr int64_t T1_n =
-      (vec_size2 == vec_size1 * 2 && is_reduced_floating_point_v<T2>) ? 2 : 1;
-  constexpr int64_t T2_n = 1;
-  auto vec_scale = at::vec::VectorizedN<T1, T1_n>(val);
-  int64_t i = 0;
-  auto b_first_val = (T1)b[0];
-  auto b_first_vec = at::vec::VectorizedN<T2, T2_n>(b_first_val);
-  for (; i < size - (size % vec_size2); i += vec_size2) {
-    auto a_n = at::vec::VectorizedN<T1, T1_n>::loadu(a + i);
-    auto b_n = b_first_vec;
-    auto b_n_convert = at::vec::convert<T1, T1_n, T2, T2_n, true>(b_n);
-    auto res = a_n * vec_scale + b_n_convert;
-    res.store(out + i);
-  }
-  for (; i < size; i++) {
-    auto tmp0 = a[i];
-    auto tmp1 = b_first_val;
-    out[i] = tmp0 * val + tmp1;
+  if (is_b_stride_0) {
+    auto b_first_val = (T1)b[0];
+    auto b_first_vec = at::vec::VectorizedN<T2, T2_n>(b_first_val);
+    for (; i < size - (size % vec_size2); i += vec_size2) {
+      auto a_n = at::vec::VectorizedN<T1, T1_n>::loadu(a + i);
+      auto b_n = b_first_vec;
+      auto b_n_convert = at::vec::convert<T1, T1_n, T2, T2_n, true>(b_n);
+      auto res = a_n * vec_scale + b_n_convert;
+      res.store(out + i);
+    }
+    for (; i < size; i++) {
+      auto tmp0 = a[i];
+      auto tmp1 = b_first_val;
+      out[i] = tmp0 * val + tmp1;
+    }
+  } else {
+    for (; i < size - (size % vec_size2); i += vec_size2) {
+      auto a_n = at::vec::VectorizedN<T1, T1_n>::loadu(a + i);
+      auto b_n = at::vec::VectorizedN<T2, T2_n>::loadu(b + i);
+      auto b_n_convert = at::vec::convert<T1, T1_n, T2, T2_n, true>(b_n);
+      auto res = a_n * vec_scale + b_n_convert;
+      res.store(out + i);
+    }
+    for (; i < size; i++) {
+      auto tmp0 = a[i];
+      auto tmp1 = (T1)b[i];
+      out[i] = tmp0 * val + tmp1;
+    }
   }
 }
 
@@ -268,9 +254,13 @@ void cpu_flash_attention(
       ? attn_mask.value().stride(1)
       : 0;
   int64_t mStrideM =
-      has_attn_mask ? attn_mask.value().stride(2) : 0;
+      (has_attn_mask && attn_mask.value().size(2) > 1)
+      ? attn_mask.value().stride(2)
+      : 0;
   int64_t mStrideN =
-      has_attn_mask ? attn_mask.value().stride(3) : 0;
+      (has_attn_mask && attn_mask.value().size(3) > 1)
+      ? attn_mask.value().stride(3)
+      : 0;
 
   int64_t qSplitSize = q_split_size > qSize ? qSize : q_split_size;
   int64_t kvSplitSize = kv_split_size > kvSize ? kvSize : kv_split_size;
@@ -358,21 +348,21 @@ void cpu_flash_attention(
         if (has_attn_mask) {
           for (int64_t row = 0; row < qBlockSize; ++row) {
             if (mStrideN == 0) {
-              _scale_attn_mask_fusion_kernel_stride0(
-                  qk_data + row * kvBlockSize,
-                  mask_data + i * mStrideB + j * mStrideH +
-                      (m + row) * mStrideM,
-                  kvBlockSize,
-                  qk_data + row * kvBlockSize,
-                  scaling_factor);
+              _scale_attn_mask_fusion_kernel</*is_stride_0*/ true>(
+                qk_data + row * kvBlockSize,
+                mask_data + i * mStrideB + j * mStrideH +
+                    (m + row) * mStrideM,
+                kvBlockSize,
+                qk_data + row * kvBlockSize,
+                scaling_factor);
             } else {
-              _scale_attn_mask_fusion_kernel(
-                  qk_data + row * kvBlockSize,
-                  mask_data + i * mStrideB + j * mStrideH +
-                      (m + row) * mStrideM + n,
-                  kvBlockSize,
-                  qk_data + row * kvBlockSize,
-                  scaling_factor);
+              _scale_attn_mask_fusion_kernel</*is_stride_0*/ false>(
+                qk_data + row * kvBlockSize,
+                mask_data + i * mStrideB + j * mStrideH +
+                    (m + row) * mStrideM + n,
+                kvBlockSize,
+                qk_data + row * kvBlockSize,
+                scaling_factor);
             }
           }
         }
@@ -517,9 +507,13 @@ void cpu_flash_attention_backward(
       ? attn_mask.value().stride(1)
       : 0;
   int64_t mStrideM =
-      has_attn_mask ? attn_mask.value().stride(2) : 0;
+      (has_attn_mask && attn_mask.value().size(2) > 1)
+      ? attn_mask.value().stride(2)
+      : 0;
   int64_t mStrideN =
-      has_attn_mask ? attn_mask.value().stride(3) : 0;
+      (has_attn_mask && attn_mask.value().size(3) > 1)
+      ? attn_mask.value().stride(3)
+      : 0;
 
   int64_t grad_qStrideB = grad_q.stride(0);
   int64_t grad_qStrideM = grad_q.stride(1);
@@ -623,21 +617,21 @@ void cpu_flash_attention_backward(
             accum_t one = accum_t(1);
             for (const auto row : c10::irange(qBlockSize)) {
               if (mStrideN == 0) {
-                _scale_attn_mask_fusion_kernel_stride0(
-                    attn_data + row * kvBlockSize,
-                    mask_data + i * mStrideB + j * mStrideH +
-                        (m + row) * mStrideM,
-                    kvBlockSize,
-                    attn_data + row * kvBlockSize,
-                    one);
+                _scale_attn_mask_fusion_kernel</*is_stride_0*/ true>(
+                  attn_data + row * kvBlockSize,
+                  mask_data + i * mStrideB + j * mStrideH +
+                      (m + row) * mStrideM,
+                  kvBlockSize,
+                  attn_data + row * kvBlockSize,
+                  one);
               } else {
-                _scale_attn_mask_fusion_kernel(
-                    attn_data + row * kvBlockSize,
-                    mask_data + i * mStrideB + j * mStrideH +
-                        (m + row) * mStrideM + n,
-                    kvBlockSize,
-                    attn_data + row * kvBlockSize,
-                    one);
+                _scale_attn_mask_fusion_kernel</*is_stride_0*/ false>(
+                  attn_data + row * kvBlockSize,
+                  mask_data + i * mStrideB + j * mStrideH +
+                      (m + row) * mStrideM + n,
+                  kvBlockSize,
+                  attn_data + row * kvBlockSize,
+                  one);
               }
             }
           }
