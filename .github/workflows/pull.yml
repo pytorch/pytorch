@@ -488,7 +488,7 @@ jobs:
       docker-image: ${{ needs.linux-jammy-py3-clang12-executorch-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3-clang12-executorch-build.outputs.test-matrix }}
 
-  linux-focal-cuda12.1-py3.10-gcc9-experimental-split-build:
+  linux-focal-cuda12_1-py3_10-gcc9-experimental-split-build:
     name: linux-focal-cuda12.1-py3.10-gcc9-experimental-split-build
     uses: ./.github/workflows/_linux-build-label.yml
     with:
@@ -508,10 +508,10 @@ jobs:
     name: linux-focal-cuda12.1-py3.10-gcc9-experimental-split-build
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-focal-cuda12.1-py3.10-gcc9-experimental-split-build
+      - linux-focal-cuda12_1-py3_10-gcc9-experimental-split-build
       - target-determination
     with:
       timeout-minutes: 360
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-experimental-split-build
-      docker-image: ${{ needs.linux-focal-cuda12.1-py3.10-gcc9-experimental-split-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-cuda12.1-py3.10-gcc9-experimental-split-build.outputs.test-matrix }}
+      docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-experimental-split-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-experimental-split-build.outputs.test-matrix }}
