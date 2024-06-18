@@ -2205,10 +2205,14 @@ def _make_copy_from_view(fn):
     op_copy = getattr(aten, copy_name)
 
     @wraps(fn)
-    def _fn(*args, **kwargs):
+    def _fn(*args, out=None, **kwargs):
+        result = fn(*args, out=out, **kwargs)
+        if out is not None:
+            return result
+
         return pytree.tree_map(
             lambda x: x.clone(memory_format=torch.contiguous_format),
-            fn(*args, **kwargs),
+            result,
         )
 
     if "out" in op_copy.overloads():
