@@ -1,6 +1,5 @@
 import argparse
 
-from C2Module import C2SimpleNet
 from pt_wrapper_module import WrapperModule
 
 from SimpleAddModule import add_tensors_loop, SimpleAddModule
@@ -19,9 +18,6 @@ buck run @mode/opt <path-to-framework_overhead_benchmark>:framework_overhead_ben
  --add-op --graph-mode --eager-mode (Runs both graph mode and eager mode)
 buck run @mode/opt <path-to-framework_overhead_benchmark>:framework_overhead_benchmark --
  --add-op --graph-mode (Runs only graph mode)
-To run C2 benchmark:
-buck run @mode/opt <path-to-framework_overhead_benchmark>:framework_overhead_benchmark --
- --add-op --benchmark-c2-net
 """
 
 SUPPORTED_OPS = {"add_op"}
@@ -49,39 +45,22 @@ def benchmark_simple_fn(args, config, module_config, module_type, result):
         module_type:    Type of the module to be wrapped. e.g. SimpleAddModule for add op.
         result:         dictionary instance to be populated with the benchmark result (latency per iter).
     """
-    benchmark_c2_net = args.benchmark_c2_net
     print(f"Benchmarking {module_type.__name__}")
-    if benchmark_c2_net:
-        op_name = module_config.c2_op
-        num_inputs = module_config.num_params
-        module = C2SimpleNet(op_name, num_inputs=num_inputs, debug=args.debug)
-        latency_per_iter_ms = benchmark_module(config, module)
-        result[op_name] = latency_per_iter_ms
-    else:
-        f_name = (
-            module_config.pt_fn.__name__
-            + ":Num Operands="
-            + str(module_config.num_params)
-        )
-        graph_mode_str = "Graph mode" + ":" + str(module_config.graph_mode)
-        result_key = ",".join((f_name, graph_mode_str))
-        module = WrapperModule(module_type, module_config, args.debug, args.save)
-        latency_per_iter_ms = benchmark_module(
-            config, module, args.use_throughput_benchmark
-        )
-        result[result_key] = latency_per_iter_ms
+    f_name = (
+        module_config.pt_fn.__name__ + ":Num Operands=" + str(module_config.num_params)
+    )
+    graph_mode_str = "Graph mode" + ":" + str(module_config.graph_mode)
+    result_key = ",".join((f_name, graph_mode_str))
+    module = WrapperModule(module_type, module_config, args.debug, args.save)
+    latency_per_iter_ms = benchmark_module(
+        config, module, args.use_throughput_benchmark
+    )
+    result[result_key] = latency_per_iter_ms
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--op", default="add_op", dest="op", type=str)
-    parser.add_argument(
-        "--benchmark-c2-net",
-        "--benchmark_c2_net",
-        default=False,
-        dest="benchmark_c2_net",
-        action="store_true",
-    )
     parser.add_argument(
         "--use-throughput-benchmark",
         "--use_throughput_benchmark",
@@ -107,10 +86,6 @@ def main():
     if args.op not in SUPPORTED_OPS:
         print(f"Op {args.op} is not supported: Supported ops are:{SUPPORTED_OPS}")
         return
-    assert not (
-        args.benchmark_c2_net and args.use_throughput_benchmark
-    ), "Benchmarking of C2 net via throughput benchmarking is not yet supported"
-
     num_warmup_iters = args.num_warmup_iters
     num_iters = args.num_iters
     config = BenchmarkConfig(num_warmup_iters, num_iters)
@@ -120,10 +95,7 @@ def main():
     result = {}
     if args.op == "add_op":
         num_params = 2
-        if args.benchmark_c2_net:
-            module_config = ModuleConfig(None, "Sum", num_params, None)
-        else:
-            module_config = ModuleConfig(add_tensors_loop, None, num_params, graph_mode)
+        module_config = ModuleConfig(add_tensors_loop, None, num_params, graph_mode)
         benchmark_simple_fn(args, config, module_config, SimpleAddModule, result)
     print_results(result)
 

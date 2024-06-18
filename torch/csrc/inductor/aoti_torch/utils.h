@@ -48,6 +48,21 @@ inline AtenTensorHandle new_tensor_handle(at::Tensor&& tensor) {
   return tensor_pointer_to_tensor_handle(new_tensor);
 }
 
+inline void assert_inf_and_nan(
+    const std::string& tensor_name,
+    at::Tensor& check_tensor) {
+  auto flattened = check_tensor.view({-1});
+
+  for (int64_t i = 0; i < flattened.numel(); i++) {
+    auto value = flattened[i].item<float>();
+    if (std::isinf(value)) {
+      throw std::runtime_error("At least one INF in " + tensor_name);
+    } else if (std::isnan(value)) {
+      throw std::runtime_error("At least one NaN in " + tensor_name);
+    }
+  }
+}
+
 // utility functions to convert a pointer to an optional value
 template <class T>
 inline std::optional<T> pointer_to_optional(T* ptr) {

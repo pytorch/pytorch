@@ -4,6 +4,7 @@ import sys
 import time
 
 import click
+
 import torch
 
 torch.set_num_threads(1)

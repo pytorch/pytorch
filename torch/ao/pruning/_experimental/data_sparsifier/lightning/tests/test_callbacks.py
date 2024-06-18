@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from torch.ao.pruning._experimental.data_sparsifier.data_norm_sparsifier import DataNormSparsifier
 from torch.ao.pruning._experimental.data_scheduler.base_data_scheduler import BaseDataScheduler
 import torch
