@@ -5,8 +5,11 @@ import dataclasses
 import dis
 import functools
 import inspect
+import logging
 import operator
 import re
+
+import tempfile
 from itertools import count
 from typing import (
     Any,
@@ -29,6 +32,7 @@ import torch._ops
 from torch import dtype as torch_dtype
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.codegen.multi_kernel import MultiKernelState
+from torch._inductor.runtime.runtime_utils import cache_dir
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
 from torch.fx.node import _get_qualified_name
 from torch.utils._sympy.singleton_int import SingletonInt
@@ -548,12 +552,10 @@ class WrapperCodeGen(CodeGen):
         self.kernel_autotune_defs.splice(
             f"""
                 import torch
-                from torch._C import _cuda_getCurrentRawStream as get_raw_stream
                 from torch._dynamo.testing import rand_strided
                 from torch._dynamo.utils import preserve_rng_state
                 from torch._inductor.select_algorithm import AlgorithmSelectorCache
                 from {async_compile.__name__} import AsyncCompile
-                from {triton_heuristics.__name__} import grid, split_scan_grid
 
                 async_compile = AsyncCompile()
                 generate_example_value = AlgorithmSelectorCache.generate_example_value
@@ -562,17 +564,18 @@ class WrapperCodeGen(CodeGen):
 
     @cache_on_self
     def write_triton_header_once(self) -> None:
-        self.header.splice(
-            """
+        import_str = """
             import triton
             import triton.language as tl
             from {} import grid, split_scan_grid, start_graph, end_graph
             {}
             """.format(
-                triton_heuristics.__name__,
-                V.graph.device_ops.import_get_raw_stream_as("get_raw_stream"),
-            )
+            triton_heuristics.__name__,
+            V.graph.device_ops.import_get_raw_stream_as("get_raw_stream"),
         )
+        self.header.splice(import_str)
+        if config.triton.autotune_at_compile_time:
+            self.kernel_autotune_defs.splice(import_str)
 
     def add_meta_once(self, meta: TritonMetaParams) -> str:
         meta = repr(meta)
@@ -830,22 +833,7 @@ class WrapperCodeGen(CodeGen):
                 self.generate_save_uncompiled_kernels()
 
             if config.triton.autotune_at_compile_time:
-                self.kernel_autotune_defs.splice(
-                    """
-                    async_compile.wait(globals())
-                    del async_compile
-
-                """
-                )
-                scope = dict()  # type: ignore[var-annotated]
-                tuning_code = (
-                    self.kernel_autotune_defs.getvalue()
-                    + self.kernel_autotune_calls.getvalue()
-                )
-                output_code_log.debug(
-                    "Compile-time auto-tuning code: \n%s", tuning_code
-                )
-                exec(tuning_code, scope)
+                self.generate_autotune_block()
 
             self.generate_return(output_refs)
 
@@ -863,6 +851,34 @@ class WrapperCodeGen(CodeGen):
         self.add_benchmark_harness(result)
 
         return result.getvaluewithlinemap()
+
+    def generate_autotune_block(self):
+        self.kernel_autotune_defs.splice(
+            """
+            async_compile.wait(globals())
+            del async_compile
+
+        """
+        )
+        scope = dict()  # type: ignore[var-annotated]
+        tuning_code = (
+            self.kernel_autotune_defs.getvalue() + self.kernel_autotune_calls.getvalue()
+        )
+        if output_code_log.level == logging.DEBUG:
+            # Save the autotuning code block into a file
+            # Create a temporary file
+            with tempfile.NamedTemporaryFile(
+                dir=cache_dir(), suffix=".py", delete=False
+            ) as f:
+                f.write(tuning_code.encode("utf-8"))
+                file_path = f.name
+            output_code_log.debug(
+                "Compile-time auto-tuning code: \n%s\nAuto-tuning code written to %s",
+                tuning_code,
+                file_path,
+            )
+        # Execute the code to auto-tune kernels
+        exec(tuning_code, scope)
 
     def memory_plan(self):
         from .memory_planning import MemoryPlanner

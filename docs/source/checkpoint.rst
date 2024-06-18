@@ -35,6 +35,3 @@ torch.utils.checkpoint
 .. autofunction:: checkpoint
 .. autofunction:: checkpoint_sequential
 .. autofunction:: set_checkpoint_debug_enabled
-.. autoclass:: CheckpointPolicy
-.. autoclass:: SelectiveCheckpointContext
-.. autofunction:: create_selective_checkpoint_contexts
