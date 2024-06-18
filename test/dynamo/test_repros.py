@@ -8,7 +8,6 @@ import collections
 import contextlib
 import copy
 import functools
-import gc
 import inspect
 import itertools
 import random
@@ -4721,66 +4720,6 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(type(actual), type(expected))
         self.assertEqual(actual.__dict__, expected.__dict__)
 
-    def test_weakref(self):
-        def fn(x_weak, weight, y):
-            if x_weak is not None and x_weak() is not weight:
-                return torch.sin(y)
-            return torch.cos(y)
-
-        weight = torch.randn(4)
-        y = torch.randn(4)
-        x_weak = weakref.ref(weight)
-
-        ref = fn(x_weak, weight, y)
-
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        res = opt_fn(x_weak, weight, y)
-        self.assertEqual(ref, res)
-
-    def test_weakref_reconstruct(self):
-        def fn(x_weak, weight, y):
-            y = torch.sin(y)
-            referent = x_weak()
-            torch._dynamo.graph_break()
-            if referent is not weight:
-                return torch.sin(y)
-            return torch.cos(y)
-
-        weight = torch.randn(4)
-        y = torch.randn(4)
-        x_weak = weakref.ref(weight)
-
-        ref = fn(x_weak, weight, y)
-
-        cnt = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnt)
-        res = opt_fn(x_weak, weight, y)
-        self.assertEqual(ref, res)
-        self.assertEqual(cnt.frame_count, 2)
-
-    def test_weakref_del(self):
-        def fn(x_weak, y):
-            x = x_weak()
-            if x is not None:
-                return torch.sin(y)
-            return torch.cos(y)
-
-        weight = torch.randn(4)
-        x_weak = weakref.ref(weight)
-        y = torch.randn(4)
-
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-
-        ref = fn(x_weak, y)
-        res = opt_fn(x_weak, y)
-        self.assertEqual(ref, res)
-
-        del weight
-        gc.collect()
-        ref = fn(x_weak, y)
-        res = opt_fn(x_weak, y)
-        self.assertEqual(ref, res)
-
     def test_storage_resize_forward_full_graph(self):
         class TestModule(torch.nn.Module):
             def __init__(self):
@@ -5223,14 +5162,6 @@ def forward(self, primals_1, primals_2):
         mod = Mod()
         opt_mod = torch.compile(mod, backend=compiler)
         opt_mod(torch.randn(2, 2))
-
-    def test_is_make_fx_tracing(self):
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(x):
-            torch.nn.modules.activation._is_make_fx_tracing()
-            return torch.sin(x)
-
-        fn(torch.rand(4))
 
 
 instantiate_parametrized_tests(ReproTests)

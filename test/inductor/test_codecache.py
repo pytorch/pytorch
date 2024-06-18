@@ -36,7 +36,6 @@ from torch.testing._internal.inductor_utils import (
     HAS_CUDA,
     HAS_GPU,
     HAS_MULTIGPU,
-    requires_gpu,
 )
 from torch.utils._triton import has_triton
 
@@ -47,6 +46,7 @@ if HAS_TRITON:
 
     from torch.testing._internal.triton_utils import add_kernel
 
+requires_gpu = functools.partial(unittest.skipIf, not HAS_GPU, "requires gpu")
 requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
 
 torch._dynamo.config.fake_tensor_cache_enabled = True
@@ -109,7 +109,6 @@ class TestFxGraphCache(TestCase):
 
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
-    @config.patch({"fx_graph_remote_cache": False})
     @parametrize("device", (GPU_TYPE, "cpu"))
     @parametrize("dtype", (torch.float32, torch.bfloat16))
     @parametrize("dynamic", (False, True))
@@ -217,7 +216,6 @@ class TestFxGraphCache(TestCase):
 
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
-    @config.patch({"fx_graph_remote_cache": False})
     @parametrize("device", (GPU_TYPE, "cpu"))
     @parametrize("dtype", (torch.float32, torch.float64))
     @parametrize("dynamic", (False, True))
@@ -257,7 +255,6 @@ class TestFxGraphCache(TestCase):
 
     @largeTensorTest("64GB", device=GPU_TYPE)
     @config.patch({"fx_graph_cache": True})
-    @config.patch({"fx_graph_remote_cache": False})
     @parametrize("device", (GPU_TYPE,))
     @parametrize("dtype", (torch.float16, torch.bfloat16))
     def test_cache_load_with_guards_int32_bounds(self, device, dtype):
@@ -306,7 +303,6 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(res1, res2)
 
     @config.patch({"fx_graph_cache": True})
-    @config.patch({"fx_graph_remote_cache": False})
     @parametrize("device", (GPU_TYPE, "cpu"))
     @parametrize("dtype", (torch.float32, torch.bfloat16))
     def test_cache_load_with_guards_static_bounds(self, device, dtype):
@@ -350,7 +346,6 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(res1, res2)
 
     @config.patch({"fx_graph_cache": True})
-    @config.patch({"fx_graph_remote_cache": False})
     @parametrize("device", (GPU_TYPE, "cpu"))
     def test_constant_handling(self, device):
         """
@@ -383,7 +378,6 @@ class TestFxGraphCache(TestCase):
     @requires_gpu()
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
-    @config.patch({"fx_graph_remote_cache": False})
     def test_higher_order_op_bypass(self):
         """
         Verify that we bypass the cache when we have higher order ops.
@@ -409,7 +403,6 @@ class TestFxGraphCache(TestCase):
         self.assertGreater(counters["inductor"]["fxgraph_cache_bypass"], 0)
 
     @config.patch({"fx_graph_cache": True})
-    @config.patch({"fx_graph_remote_cache": False})
     def test_generated_kernel_count(self):
         """
         Test that we bump the generated_kernel_count metric on a cache hit.
@@ -438,7 +431,6 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(metrics.generated_kernel_count, 2)
 
     @config.patch({"fx_graph_cache": True})
-    @config.patch({"fx_graph_remote_cache": False})
     def test_cache_clear(self):
         """
         Test clearing the cache.
@@ -473,7 +465,6 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
     @config.patch({"fx_graph_cache": True})
-    @config.patch({"fx_graph_remote_cache": False})
     def test_cache_with_nt(self):
         def gen_nt(r):
             values = torch.randn(r, 16)
@@ -502,7 +493,6 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
     @config.patch({"fx_graph_cache": True})
-    @config.patch({"fx_graph_remote_cache": False})
     def test_cache_with_symint_non_arg_guard(self):
         def fn(x, ref_id):
             self_id = 22
@@ -526,7 +516,6 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
     @config.patch({"fx_graph_cache": True})
-    @config.patch({"fx_graph_remote_cache": False})
     def test_cache_guard(self):
         def f(x, val):
             if val > 5:
@@ -751,7 +740,6 @@ class TestFxGraphCacheHashing(TestCase):
 
 
 class TestUtils(TestCase):
-    @config.patch({"fx_graph_remote_cache": False})
     def test_fresh_inductor_cache(self):
         def fn(x, y):
             return x + y

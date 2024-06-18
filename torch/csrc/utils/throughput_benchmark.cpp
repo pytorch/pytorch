@@ -4,7 +4,8 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
 
-namespace torch::throughput_benchmark {
+namespace torch {
+namespace throughput_benchmark {
 
 std::ostream& operator<<(
     std::ostream& os,
@@ -136,4 +137,5 @@ ScriptModuleInput cloneInput<ScriptModuleInput>(
 
 } // namespace detail
 
-} // namespace torch::throughput_benchmark
+} // namespace throughput_benchmark
+} // namespace torch

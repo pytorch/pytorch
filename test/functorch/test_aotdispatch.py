@@ -746,6 +746,7 @@ def forward(self, primals_1):
         self.assertEqual(x_ref.grad, x_test.grad)
         self.assertEqual(x_ref_view.grad, x_test_view.grad)
 
+    @skipIfTorchDynamo("This test suite already uses dynamo")
     def test_composite_impl_compile(self):
         class Foo(torch.nn.Module):
             def __init__(self):

@@ -39,7 +39,7 @@ from torch.onnx.symbolic_helper import (
     parse_args,
 )
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import skipIfNoLapack
+from torch.testing._internal.common_utils import skipIfCaffe2, skipIfNoLapack
 
 unittest.TestCase.maxDiff = None
 
@@ -414,6 +414,7 @@ class TestOperators(common_utils.TestCase):
         x = torch.randn(20, 16, 50)
         self.assertONNX(nn.MaxPool1d(3, stride=2, return_indices=True), x)
 
+    @skipIfCaffe2
     def test_at_op(self):
         x = torch.randn(3, 4)
 
@@ -693,6 +694,7 @@ class TestOperators(common_utils.TestCase):
             keep_initializers_as_inputs=True,
         )
 
+    @skipIfCaffe2
     def test_embedding_bags(self):
         emb_bag = nn.EmbeddingBag(10, 8)
         input = torch.tensor([1, 2, 3, 4]).long()
@@ -947,6 +949,7 @@ class TestOperators(common_utils.TestCase):
         other = torch.randint(-50, 50, (2, 3, 4), dtype=torch.int8)
         self.assertONNX(BiwiseAndModel(), (input, other), opset_version=18)
 
+    @skipIfCaffe2
     def test_layer_norm_aten(self):
         model = torch.nn.LayerNorm([10, 10])
         x = torch.randn(20, 5, 10, 10)
@@ -1200,6 +1203,7 @@ class TestOperators(common_utils.TestCase):
         torch.onnx.unregister_custom_op_symbolic("::embedding", _onnx_opset_version)
 
     # This is test_aten_embedding_1 with shape inference on custom symbolic aten::embedding.
+    @skipIfCaffe2
     def test_aten_embedding_2(self):
         _onnx_opset_version = 12
 

@@ -927,7 +927,7 @@ class GraphModule(torch.nn.Module):
         getitem: "f32[3, 4]" = wrap[0];  wrap = None
         return (getitem,)
 
-    class GraphModule(torch.nn.Module):
+    class wrap_body_0(torch.nn.Module):
         def forward(self, l_x_: "f32[3, 4]"):
             add_: "f32[3, 4]" = l_x_.add_(1.0);  l_x_ = None
             return (add_,)
@@ -951,7 +951,7 @@ class GraphModule(torch.nn.Module):
         getitem = wrap[0];  wrap = None
         return (getitem,)
 
-    class GraphModule(torch.nn.Module):
+    class wrap_body_0(torch.nn.Module):
         def forward(self, l_x_):
             add_ = l_x_.add_(1.0);  l_x_ = None
             return (add_,)
@@ -981,7 +981,7 @@ class GraphModule(torch.nn.Module):
         getitem = wrap[0];  wrap = None
         return (getitem,)
 
-    class GraphModule(torch.nn.Module):
+    class wrap_body_0(torch.nn.Module):
         def forward(self, l_x_):
             add_ = l_x_.add_(1.0);  l_x_ = None
             return (add_,)
@@ -1392,7 +1392,6 @@ class GraphModule(torch.nn.Module):
             yield t.select(-1, 6), False
             # https://github.com/pytorch/pytorch/issues/128649
             yield t[2:3, 5:9], dynamic
-            yield t.view(-1, 15), False
 
         def f(x):
             return x * 2
@@ -1616,15 +1615,15 @@ Eq(s10, s8)""",
                     guard_str,
                     """\
 Eq(s3 - 1, s0)
-Eq(zf1, zf6)""",
+Eq(zf1, zf4)""",
                 )
             else:
                 self.assertExpectedInline(
                     guard_str,
                     """\
 Eq(s4 - 1, s1)
-Eq(s12 - 1, s7)
-Eq(s11, s9)""",
+Eq(s10 - 1, s5)
+Eq(s9, s7)""",
                 )
             return gm
 

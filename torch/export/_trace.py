@@ -248,6 +248,13 @@ def _convert_input_to_fake(gm, args, kwargs):
     return fake_args, fake_kwargs, fake_params_buffers, fake_mode
 
 
+def _skip_autograd_kernel(*args, **kwargs):
+    kernel = kwargs["kernel"]
+    del kwargs["kernel"]
+    with torch._C._AutoDispatchBelowAutograd():
+        return kernel(*args, **kwargs)
+
+
 @contextmanager
 def override_composite_implicit_decomp(ops_to_preserve):
     # This function overrides CompositeImplicitAutograd decomp for
@@ -288,7 +295,7 @@ def override_composite_implicit_decomp(ops_to_preserve):
 
         if not can_preserve(op_overload):
             warnings.warn(
-                f"We can't preserve {op_overload} in export because this op is not functional"
+                f"We can't preserve {op_overload} in export because this op is unsafe to keep"
             )
             continue
 
@@ -301,31 +308,9 @@ def override_composite_implicit_decomp(ops_to_preserve):
         ]:
             if override_dispatch_key not in op_overload.py_kernels:
                 # conv1d, conv2d, conv3d don't work with default Autograd key
-                if op_overload == torch.ops.aten.conv1d.default:
-
-                    def fn(*args, **kwargs):
-                        with torch._C._AutoDispatchBelowAutograd():
-                            return torch.ops.aten.conv1d.default(*args, **kwargs)
-
-                    op_overload.py_impl(override_dispatch_key)(fn)
-                elif op_overload == torch.ops.aten.conv2d.default:
-
-                    def fn(*args, **kwargs):
-                        with torch._C._AutoDispatchBelowAutograd():
-                            return torch.ops.aten.conv2d.default(*args, **kwargs)
-
-                    op_overload.py_impl(override_dispatch_key)(fn)
-                elif op_overload == torch.ops.aten.conv3d.default:
-
-                    def fn(*args, **kwargs):
-                        with torch._C._AutoDispatchBelowAutograd():
-                            return torch.ops.aten.conv3d.default(*args, **kwargs)
-
-                    op_overload.py_impl(override_dispatch_key)(fn)
-                else:
-                    op_overload.py_impl(override_dispatch_key)(
-                        torch._C.DispatchKey.Autograd
-                    )
+                op_overload.py_impl(override_dispatch_key)(
+                    functools.partial(_skip_autograd_kernel, kernel=op_overload)
+                )
     try:
         yield patched_ops
     finally:
@@ -452,41 +437,6 @@ def _get_param_buffer_mapping(
             param_buffer_table[dynamo_name] = buffer_lookup[id(dynamo_buffer)].pop()
 
     return param_buffer_table
-
-
-def _preserve_requires_grad_pass(
-    gm: torch.fx.GraphModule,
-    sig: ExportGraphSignature,
-    fake_params_buffers: Dict[str, torch.Tensor],
-    constants: Dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]],
-    flat_fake_args: List[Any],
-):
-    placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
-    assert len(sig.input_specs) == len(placeholders)
-    i = 0
-    for node, spec in zip(placeholders, sig.input_specs):
-        if spec.kind in (
-            InputKind.PARAMETER,
-            InputKind.BUFFER,
-        ):
-            assert spec.target is not None
-            node.meta["val"].requires_grad = fake_params_buffers[
-                spec.target
-            ].requires_grad
-        elif spec.kind == InputKind.USER_INPUT:
-            fake_arg = flat_fake_args[i]
-            if isinstance(fake_arg, torch.Tensor):
-                node.meta["val"].requires_grad = fake_arg.requires_grad
-            i += 1
-        elif spec.kind == InputKind.CONSTANT_TENSOR:
-            assert spec.target is not None
-            constant = constants[spec.target]
-            if isinstance(constant, torch.Tensor):
-                node.meta["val"].requires_grad = constant.requires_grad
-        elif spec.kind in (InputKind.CUSTOM_OBJ, InputKind.TOKEN):
-            continue
-        else:
-            raise AssertionError(spec.kind)
 
 
 def _remap_constants(
@@ -777,7 +727,7 @@ def _export_to_aten_ir(
 
     # NOTE: aot_export adds symint metadata for placeholders with int values;
     # since these become specialized, we replace such metadata with the original values
-    flat_fake_args = pytree.tree_leaves((fake_args, fake_kwargs))
+    flat_args = pytree.tree_leaves((fake_args, fake_kwargs))
     index = 0
     total_non_user_inputs = (
         len(graph_signature.parameters)
@@ -787,7 +737,7 @@ def _export_to_aten_ir(
     for node in gm.graph.nodes:
         if node.op == "placeholder":
             if index >= total_non_user_inputs:
-                user_arg = flat_fake_args[index - total_non_user_inputs]
+                user_arg = flat_args[index - total_non_user_inputs]
                 if not isinstance(user_arg, torch.Tensor):
                     node.meta["val"] = user_arg
             index += 1
@@ -822,7 +772,7 @@ def _export_to_aten_ir(
 
     from torch._guards import detect_fake_mode
 
-    fake_mode = detect_fake_mode(flat_fake_args)
+    fake_mode = detect_fake_mode(flat_args)
 
     from torch._dynamo import config as _dynamo_config
 
@@ -869,10 +819,6 @@ def _export_to_aten_ir(
         fake_kwargs,
         fake_params_buffers,
         constants,
-    )
-
-    _preserve_requires_grad_pass(
-        gm, export_graph_signature, fake_params_buffers, constants, flat_fake_args
     )
 
     return ATenExportArtifact(
@@ -1642,7 +1588,6 @@ def _export(
                 _disable_forced_specializations,
                 _is_torch_jit_trace,
             )
-            
     # Decompose here for readability.
     gm = export_artifact.aten.gm
     export_graph_signature = export_artifact.aten.sig
