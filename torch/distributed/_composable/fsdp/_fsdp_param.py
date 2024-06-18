@@ -348,9 +348,14 @@ class FSDPParam:
         2. Under compile, we always recreate `self.all_gather_outputs` per AllGather.
            This is to ensure the buffer creation is internal to the graph and
            avoid `self.all_gather_outputs` being captured as a graph input.
-        3. Under compile, at the end of `free_unsharded_param()`, we always clean up
-           `self.all_gather_outputs` and `self._unsharded_inner_tensors`,
+        3. Under compile, at the end of `init_unsharded_param()`, we always set
+           `self.all_gather_outputs` and `self._unsharded_inner_tensors` to empty list,
            to avoid them being captured as graph output.
+        4. Under compile, we free up `self.unsharded_param` memory by looking into its
+           tensor storage and resizing it to 0, instead of relying on access to `self.all_gather_outputs`
+           and `self._unsharded_inner_tensors` (which are already emptied at the end of
+           `init_unsharded_param()` and thus can't be used as references to the underlying
+           storage tensors).
 
         With these invariants, only these tensors will be inputs to the graph:
         - Sharded parameters
@@ -408,6 +413,8 @@ class FSDPParam:
                 torch.ops.fsdp.set_(self._unsharded_param, unsharded_param)
                 #set_fn(self._unsharded_param, unsharded_param)
                 #self._unsharded_param.set_(unsharded_param)
+            self.all_gather_outputs = []
+            self._unsharded_inner_tensors = []
         else:
             self._unsharded_param = nn.Parameter(
                 unsharded_param, requires_grad=self.sharded_param.requires_grad
@@ -542,8 +549,16 @@ class FSDPParam:
         ):
             free_storage(tensor)
         if ca.compiled_autograd_enabled:
-            self.all_gather_outputs = []
-            self._unsharded_inner_tensors = []
+            # Under compile, `self.all_gather_outputs` and `self._unsharded_inner_tensors` are emptied right after every AllGather.
+            # So we need to free `self.unsharded_param` memory by looking into its own tensor storage instead.
+            unsharded_param_data = self.unsharded_param.data  # Unpack nn.Parameter to get underlying tensor data
+            is_subclass = isinstance(unsharded_param_data, torch.Tensor) and type(unsharded_param_data) != torch.Tensor
+            if is_subclass:
+                attrs, ctx = unsharded_param_data.__tensor_flatten__()
+                for attr in attrs:
+                    free_storage(getattr(unsharded_param_data, attr))
+            else:
+                free_storage(unsharded_param_data)
 
     @property
     def all_gather_inputs(self) -> List[torch.Tensor]:  # 1D
