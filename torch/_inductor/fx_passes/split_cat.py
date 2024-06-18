@@ -59,6 +59,7 @@ post_grad_pass_names = [
     "decompose_mm_pass",
     "unbind_stack_aten_pass",
     "shape_padding_multiplier",
+    "b2b_gemm_pass",
 ]
 
 for pass_name in pre_grad_pass_names:

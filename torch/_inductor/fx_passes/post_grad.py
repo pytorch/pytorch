@@ -144,6 +144,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 @init_once_fakemode
 def lazy_init():
     if torch._C._has_mkldnn:
+        from . import b2b_gemm
         from . import decompose_mem_bound_mm  # noqa: F401
         from .mkldnn_fusion import _mkldnn_fusion_init
 
