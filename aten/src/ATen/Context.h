@@ -384,14 +384,15 @@ class TORCH_API Context {
       c10::utils::check_env("TORCH_LINALG_PREFER_CUSOLVER") == true
       ? at::LinalgBackend::Cusolver
       : at::LinalgBackend::Default;
+  static at::BlasBackend getBlasAcceptableBackend(at::BlasBackend b);
   at::BlasBackend blas_preferred_backend =
 #ifdef USE_ROCM
       (c10::utils::check_env("TORCH_BLAS_PREFER_HIPBLASLT") != false)
 #else
       (c10::utils::check_env("TORCH_BLAS_PREFER_CUBLASLT") == true)
 #endif
-      ? at::BlasBackend::Cublaslt
-      : at::BlasBackend::Cublas;
+      ? getBlasAcceptableBackend(at::BlasBackend::Cublaslt)
+      : getBlasAcceptableBackend(at::BlasBackend::Cublas);
 #ifdef C10_MOBILE
   bool release_original_weights = true;
 #else

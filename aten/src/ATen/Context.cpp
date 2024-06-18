@@ -263,17 +263,7 @@ void Context::setLinalgPreferredBackend(at::LinalgBackend b) {
   }
 }
 
-at::BlasBackend Context::blasPreferredBackend() const {
-  return blas_preferred_backend;
-}
-
-void Context::setBlasPreferredBackend(at::BlasBackend b) {
-#ifdef _MSC_VER
-  TORCH_WARN_ONCE(
-    "torch.backends.cuda.preferred_blas_library is an experimental feature. "
-    "It is not supported on Windows."
-  );
-#else
+at::BlasBackend Context::getBlasAcceptableBackend(at::BlasBackend b) {
   TORCH_CHECK((b != at::BlasBackend::Cublaslt) || hasCuBLASLt(),
       "Cannot set preferred backend to cuBLASLt if PyTorch has not been compiled with cuBLASLt.");
   if (b != at::BlasBackend::Cublas) {
@@ -291,14 +281,26 @@ void Context::setBlasPreferredBackend(at::BlasBackend b) {
         TORCH_WARN_ONCE(
           "Attempting to use hipBLASLt on an unsupported architecture! "
           "Overriding blas backend to hipblas");
-        b = at::BlasBackend::Cublas;
-        break;
+        return at::BlasBackend::Cublas;
       }
     }
   }
 #endif
+  return b;
+}
 
-  blas_preferred_backend = b;
+at::BlasBackend Context::blasPreferredBackend() const {
+  return blas_preferred_backend;
+}
+
+void Context::setBlasPreferredBackend(at::BlasBackend b) {
+#ifdef _MSC_VER
+  TORCH_WARN_ONCE(
+    "torch.backends.cuda.preferred_blas_library is an experimental feature. "
+    "It is not supported on Windows."
+  );
+#else
+  blas_preferred_backend = getBlasAcceptableBackend(b);
 #endif
 }
 
