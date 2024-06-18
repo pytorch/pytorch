@@ -527,8 +527,9 @@ class FSDPParam:
         ):
             free_storage(tensor)
         if ca.compiled_autograd_enabled:
-            # Under compile, `self.all_gather_outputs` and `self._unsharded_inner_tensors` are emptied right after every AllGather.
-            # So we need to free `self.unsharded_param` memory by looking into its own tensor storage instead.
+            # Under compile, `self.all_gather_outputs` and `self._unsharded_inner_tensors` are emptied
+            # right after every AllGather. So we need to free `self.unsharded_param` memory by
+            # looking into its own tensor storage instead.
             unsharded_param_data = (
                 self.unsharded_param.data
             )  # Unpack nn.Parameter to get underlying tensor data
