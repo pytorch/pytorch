@@ -1123,8 +1123,6 @@ def main():
         raise RuntimeError(
             "Conflict: 'BUILD_LIBTORCH_WHL' and 'BUILD_PYTHON_ONLY' can't both be 1. Set one to 0 and rerun."
         )
-    # print(f'blah {os.environ["LIBTORCH_LIB_PATH"]}')
-    # return
     install_requires = [
         "filelock",
         "typing-extensions>=4.8.0",
@@ -1139,7 +1137,7 @@ def main():
         install_requires.append("setuptools")
 
     if BUILD_PYTHON_ONLY:
-        install_requires.append(LIBTORCH_PKG_NAME)
+        install_requires.append(f"{LIBTORCH_PKG_NAME}=={get_torch_version()}")
 
     use_prioritized_text = str(os.getenv("USE_PRIORITIZED_TEXT_FOR_LD", ""))
     if (
