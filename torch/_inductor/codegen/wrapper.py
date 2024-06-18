@@ -5,6 +5,7 @@ import dataclasses
 import dis
 import functools
 import inspect
+import keyword
 import operator
 import re
 from itertools import count
@@ -209,9 +210,9 @@ MAX_STACK_ALLOCATION_SIZE = 1024 * 100
 class MemoryPlanningState:
     def __init__(self):
         super().__init__()
-        self.reuse_pool: Dict[
-            ReuseKey, List[FreeIfNotReusedLine]
-        ] = collections.defaultdict(list)
+        self.reuse_pool: Dict[ReuseKey, List[FreeIfNotReusedLine]] = (
+            collections.defaultdict(list)
+        )
         self.total_allocated_buffer_size: int = 0
 
     def __contains__(self, key: ReuseKey) -> bool:
@@ -651,6 +652,13 @@ class WrapperCodeGen(CodeGen):
             # view operation fallbacks cause issues since inductor
             # doesn't know the memory is still needed and might reuse it.
             ending = f".clone(){ending}"
+
+        # Note: kernel_name might contains python keyword. e.g. 'aten.random(_).from'
+        #       Having keyword in generated code would cause SyntaxError.
+        words = kernel_name.split(".")
+        if len(words) > 0 and keyword.iskeyword(words[-1]):
+            kernel_name = f"getattr({'.'.join(words[:-1])}, '{words[-1]}')"
+
         self.writeline(
             f"{self.declare}{output_name} = {kernel_name}({', '.join(args)}){ending}"
         )

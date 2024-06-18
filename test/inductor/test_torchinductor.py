@@ -1195,6 +1195,21 @@ class CommonTemplate:
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "Generator"):
             self.common(fn, (torch.linspace(-10, 10, 41), torch.Generator(self.device)))
 
+    def test_random(self):
+        # https://github.com/pytorch/pytorch/issues/121621
+        def fn(x, y, z):
+            # random_.from
+            x.random_(-10, 10)
+            # random_.to
+            y.random_(20)
+            # random_.default
+            z.random_()
+
+            return x, y, z
+
+        x, y, z = torch.randn([4]), torch.randn([4]), torch.randn([4])
+        self.common(fn, (x, y, z))
+
     def test_sgn_extremal(self):
         def fn(a):
             return (torch.sgn(a),)
