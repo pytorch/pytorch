@@ -39,7 +39,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     TestCase,
     run_tests,
-    TEST_WITH_ASAN,
     TEST_WITH_CROSSREF,
     IS_WINDOWS,
     IS_MACOS,
