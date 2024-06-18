@@ -16,6 +16,7 @@ import torch.distributed as dist
 from torch.distributed.elastic.utils.logging import get_logger
 from torch.distributed.elastic.utils.store import barrier
 
+
 __all__ = ["create_c10d_store", "get_free_port", "get_socket_with_port"]
 
 logger = get_logger(__name__)
@@ -58,7 +59,12 @@ def create_c10d_store(
             "  is_server   : %s\n"
             "  timeout(sec): %s\n"
             "  use_libuv   : %s\n",
-            server_addr, port, world_size, is_server, timeout, use_libuv,
+            server_addr,
+            port,
+            world_size,
+            is_server,
+            timeout,
+            use_libuv,
         )
 
         try:
@@ -90,7 +96,10 @@ def create_c10d_store(
             if str(e) == _ADDRESS_IN_USE:  # this will only happen on the server
                 if attempt < retries:
                     logger.warning(
-                        "port: %s already in use, attempt: [%s/%s]", port, attempt, retries
+                        "port: %s already in use, attempt: [%s/%s]",
+                        port,
+                        attempt,
+                        retries,
                     )
                     attempt += 1
                 else:
