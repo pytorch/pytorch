@@ -1865,7 +1865,9 @@ def suggest_memory_format(x: TensorLikeType) -> torch.memory_format:
     if x.layout != torch.strided:
         return torch.contiguous_format
 
-    if not is_symbolic(x.shape) and are_strides_like_channels_last(x.shape, x.stride()):
+    # TODO: this is needed for *some* test (but I don't remember which one)
+    # if not is_symbolic(x.shape) and are_strides_like_channels_last(x.shape, x.stride()):
+    if are_strides_like_channels_last(x.shape, x.stride()):
         return torch.channels_last if x.ndim == 4 else torch.channels_last_3d
 
     return torch.contiguous_format

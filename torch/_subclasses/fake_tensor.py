@@ -1529,7 +1529,7 @@ class FakeTensorMode(TorchDispatchMode):
                 with in_kernel_invocation_manager(self), maybe_suppress():
                     empty.set_(storage, storage_offset, shape, stride)
 
-        if storage_offset != 0:
+        if torch.fx.experimental.symbolic_shapes.guard_size_oblivious(storage_offset != 0):
             storage = empty.untyped_storage()
             with in_kernel_invocation_manager(self), maybe_suppress():
                 empty.set_(storage, storage_offset, shape, stride)
