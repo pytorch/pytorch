@@ -1794,8 +1794,6 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
                 b = MyFunc.apply(a)
                 b.sum().backward()
 
-    # TODO(yf225): add a new test for memory check for tensors involved in the callback
-
     @unittest.skipIf(not HAS_CUDA, "requires cuda")
     def test_cudagraphs_cpu_division(self):
         from torch._dynamo.testing import reduce_to_scalar_loss
