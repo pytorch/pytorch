@@ -288,8 +288,8 @@ else
       WERROR=1 python setup.py clean
 
       if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
-        WERROR=1 BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py bdist_wheel
-        WERROR=1 BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 python setup.py bdist_wheel --cmake
+        echo "USE_SPLIT_BUILD cannot be used with xla or rocm"
+        exit(1)
       else
         WERROR=1 python setup.py bdist_wheel
       fi
