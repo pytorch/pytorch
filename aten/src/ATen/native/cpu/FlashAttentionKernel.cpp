@@ -22,6 +22,8 @@ namespace at::native {
 namespace {
 
 // out = val * a + b
+// is_b_stride_0: If the stride of b is 0 (mask broadcasting case),
+//                take b as a scalar pointer.
 template <bool is_b_stride_0, typename T1, typename T2>
 inline void _scale_attn_mask_fusion_kernel(
     T1* a,
