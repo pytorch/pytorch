@@ -245,33 +245,13 @@ def addmm(self, mat1, mat2, beta=1, alpha=1):
 @register_decomposition([aten.mm])
 @pw_cast_for_opmath
 def mm(self, input2):
-    from torch.fx.experimental.symbolic_shapes import (
-        definitely_true,
-        guard_size_oblivious,
-    )
-
-    def mul_sum_decomp(self, input2):
-        assert self.dtype == input2.dtype
-        out = (self.unsqueeze(2) * input2.unsqueeze(0)).sum(dim=1).to(self.dtype)
-        return out
-
-    def coordesc_or(cond):
-        return config.coordinate_descent_tuning or cond
-
-    if config.decompose_mm_to_mv:
-        gso = guard_size_oblivious
-        # Corresponds to BS=1 cases morally. If it's contiguous we can decompose it
-        # and generate efficient kernels without autotuning. Otherwise we need coordinate descent tuning
-        if definitely_true(self.shape[0] == 1) and coordesc_or(
-            definitely_true(input2.stride(0) == 1)
+    # Our matrix vector multiplies only achieve peak bandwidth with coordinate descent tuning.
+    # todo: Look into why and fix it (hopefully)
+    if config.coordinate_descent_tuning:
+        if guard_size_oblivious(self.shape[0] == 1) or guard_size_oblivious(
+            input2.shape[1] == 1
         ):
-            return mul_sum_decomp(self, input2)
-
-        if definitely_true(input2.shape[1] == 1) and coordesc_or(
-            definitely_true(self.stride(1) == 1)
-        ):
-            return mul_sum_decomp(self, input2)
-
+            return (self.unsqueeze(2) * input2.unsqueeze(0)).sum(dim=1)
     if self.device.type == "cpu":
         if (
             guard_size_oblivious(self.size(-1) == 1)
