@@ -84,7 +84,6 @@ def gh_fetch_json(
         url += "?" + "&".join(
             f"{name}={quote(str(val))}" for name, val in params.items()
         )
-    print(f"==== {url}")
     return cast(
         List[Dict[str, Any]],
         gh_fetch_url(url, headers=headers, data=data, reader=json.load, method=method),
