@@ -86,9 +86,10 @@ def _make_grads(
                         "Cpp NestedTensor are not supported with GradientEdge"
                     )
             else:
-                out_size = out.size()
                 out_dtype = out.dtype
-                out_is_nested = out.is_nested_tensor()
+                out_is_nested = out.is_nested
+                if not out_is_nested:
+                    out_size = out.size()
 
             # TODO: We can remove this conditional once we uniformly use
             # singleton int to represent jagged dimension, so that size() call
