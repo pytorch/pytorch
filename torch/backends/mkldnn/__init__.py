@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import torch
 from torch.backends import __allow_nonbracketed_mutation, ContextProp, PropModule
 
+
 def is_available():
     r"""Return whether PyTorch is built with MKL-DNN support."""
     return torch._C._has_mkldnn
@@ -64,24 +65,16 @@ class verbose:
         return False
 
 
-def set_flags(
-        _enabled,
-        _deterministic=None
-        ):
-    orig_flags = (
-            torch._C._get_mkldnn_enabled(),
-            torch._C._get_mkldnn_deterministic()
-            )
+def set_flags(_enabled,_deterministic=None):
+    orig_flags = (torch._C._get_mkldnn_enabled(),torch._C._get_mkldnn_deterministic())
     torch._C._set_mkldnn_enabled(_enabled)
     if _deterministic is not None:
         torch._C._set_mkldnn_deterministic(_deterministic)
     return orig_flags
 
+
 @contextmanager
-def flags(
-        enabled=False,
-        deterministic=False
-        ):
+def flags(enabled=False,deterministic=False):
     with __allow_nonbracketed_mutation():
         orig_flags = set_flags(enabled, deterministic)
     try:
@@ -89,6 +82,7 @@ def flags(
     finally:
         with __allow_nonbracketed_mutation():
             set_flags(*orig_flags)
+
 
 class MkldnnModule(PropModule):
     def __init__(self, m, name):
