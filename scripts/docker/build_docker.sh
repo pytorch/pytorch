@@ -26,6 +26,7 @@ esac
   set -x
   docker build \
     --target final \
+    --progress plain \
     --build-arg "BASE_TARGET=${BASE_TARGET}" \
     --build-arg "CUDA_VERSION=${CUDA_VERSION}" \
     --build-arg "DEVTOOLSET_VERSION=9" \
