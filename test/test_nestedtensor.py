@@ -5608,17 +5608,21 @@ class TestNestedTensorSubclass(TestCase):
 
     @dtypes(torch.float32, torch.double, torch.half)
     def test_unbind_backward(self, device, dtype):
-        nt = torch.nested.nested_tensor([
-            torch.randn(2, 4, device=device),
-            torch.randn(5, 4, device=device),
-            torch.randn(3, 4, device=device),
-        ], layout=torch.jagged, requires_grad=True)
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(2, 4, device=device),
+                torch.randn(5, 4, device=device),
+                torch.randn(3, 4, device=device),
+            ],
+            layout=torch.jagged,
+            requires_grad=True,
+        )
 
         a, b, c = nt.unbind()
         b.sum().backward()
 
         expected_grad = torch.zeros_like(nt)
-        expected_grad.unbind()[1].add_(1.)
+        expected_grad.unbind()[1].add_(1.0)
         self.assertEqual(nt.grad, expected_grad)
 
     @dtypes(torch.float32, torch.double, torch.half)
