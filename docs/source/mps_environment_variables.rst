@@ -22,7 +22,7 @@ MPS Environment Variables
     - If set to ``1``, force using metal kernels instead of using MPS Graph APIs. For now this is only used for matmul op.
   * - ``PYTORCH_ENABLE_MPS_FALLBACK``
     - If set to ``1``, full back operations to CPU when MPS does not support them.
-  
+
 .. note::
   **high watermark ratio** is a hard limit for the total allowed allocations
     - 0. : disables high watermark limit (may cause system failure if system-wide OOM occurs)
