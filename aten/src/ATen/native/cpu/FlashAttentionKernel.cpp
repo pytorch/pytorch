@@ -22,9 +22,9 @@ namespace at::native {
 namespace {
 
 // out = val * a + b
-// is_b_stride_0: If the stride of b is 0 (mask broadcasting case),
+// is_b_stride_zero: If the stride of b is 0 (mask broadcasting case),
 //                take b as a scalar pointer.
-template <bool is_b_stride_0, typename T1, typename T2>
+template <bool is_b_stride_zero, typename T1, typename T2>
 inline void _scale_attn_mask_fusion_kernel(
     T1* a,
     T2* b,
@@ -38,7 +38,7 @@ inline void _scale_attn_mask_fusion_kernel(
   constexpr int64_t T2_n = 1;
   auto vec_scale = at::vec::VectorizedN<T1, T1_n>(val);
   int64_t i = 0;
-  if (is_b_stride_0) {
+  if (is_b_stride_zero) {
     auto b_first_val = (T1)b[0];
     auto b_first_vec = at::vec::VectorizedN<T2, T2_n>(b_first_val);
     for (; i < size - (size % vec_size2); i += vec_size2) {

@@ -14,6 +14,7 @@ from torch.nn.parameter import Parameter
 import unittest
 from unittest.mock import patch, MagicMock, ANY
 import math
+import itertools
 import torch.optim as optim
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCUDA, onlyCPU
 from typing import List, Tuple, Optional
@@ -1876,6 +1877,7 @@ class TestSDPA(NNTestCase):
     @parametrize("kv_seq_len", [514, 1179])
     @parametrize("n_head", [1, 3])
     @parametrize("head_dim", [8, 16])
+    @parametrize("mask_dim", [2, 4])
     @parametrize("bool_mask", [0, 1])
     @parametrize("train", [True, False])
     def test_scaled_dot_product_fused_attention_mask_vs_math_cpu(
@@ -1888,6 +1890,7 @@ class TestSDPA(NNTestCase):
         kv_seq_len,
         n_head,
         head_dim,
+        mask_dim,
         bool_mask,
         train,
     ):
@@ -1896,14 +1899,11 @@ class TestSDPA(NNTestCase):
             tol = Tolerances(5e-2, 5e-2)
         if dtype is torch.float16:
             tol = Tolerances(1e-2, 1e-2)
-        for mask_shape in [
-            (1, 1),
-            (q_seq_len, kv_seq_len),
-            (batch_size, 1, q_seq_len, 1),
-            (batch_size, 1, 1, kv_seq_len),
-            (1, 1, q_seq_len, kv_seq_len),
-            (batch_size, n_head, q_seq_len, kv_seq_len),
-        ]:
+        for mask_shape in itertools.product(
+            [q_seq_len, 1], [kv_seq_len, 1]
+        ) if mask_dim == 2 else itertools.product(
+            [batch_size, 1], [n_head, 1], [q_seq_len, 1], [kv_seq_len, 1]
+        ):
             make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype, requires_grad=False)
             q_shape = SdpaShape(batch_size, n_head, q_seq_len, head_dim)
             kv_shape = SdpaShape(batch_size, n_head, kv_seq_len, head_dim)
