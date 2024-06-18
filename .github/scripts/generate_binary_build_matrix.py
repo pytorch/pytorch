@@ -390,6 +390,31 @@ def generate_wheels_matrix(
                         ),
                     }
                 )
+                if arch_version != "cuda-aarch64":
+                    ret.append(
+                        {
+                            "python_version": python_version,
+                            "gpu_arch_type": gpu_arch_type,
+                            "gpu_arch_version": gpu_arch_version,
+                            "desired_cuda": translate_desired_cuda(
+                                gpu_arch_type, gpu_arch_version
+                            ),
+                            "use_split_build": "True",
+                            "devtoolset": (
+                                "cxx11-abi" if arch_version == "cuda-aarch64" else ""
+                            ),
+                            "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
+                            "package_type": package_type,
+                            "pytorch_extra_install_requirements": (
+                                PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version]  # fmt: skip
+                                if os != "linux-aarch64"
+                                else ""
+                            ),
+                            "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}-split".replace(  # noqa: B950
+                                ".", "_"
+                            ),
+                        }
+                    )
             else:
                 ret.append(
                     {
