@@ -289,7 +289,7 @@ else
 
       if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
         echo "USE_SPLIT_BUILD cannot be used with xla or rocm"
-        exit(1)
+        exit 1
       else
         WERROR=1 python setup.py bdist_wheel
       fi
