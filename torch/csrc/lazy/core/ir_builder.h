@@ -61,7 +61,7 @@ struct IrBuilder {
   virtual NodePtr MakeCast(
       const Value& input0,
       const at::ScalarType& dtype,
-      const c10::optional<at::ScalarType>& stype = c10::nullopt) const = 0;
+      const std::optional<at::ScalarType>& stype = c10::nullopt) const = 0;
   virtual NodePtr MakeTensorList(const OpList& inputs) const = 0;
   virtual NodePtr MakeGeneric(
       const OpKind& op,
@@ -96,7 +96,7 @@ static inline NodePtr MakeExpand(
 static inline NodePtr MakeCast(
     const Value& input0,
     const at::ScalarType& dtype,
-    const c10::optional<at::ScalarType>& stype = c10::nullopt) {
+    const std::optional<at::ScalarType>& stype = c10::nullopt) {
   return getIrBuilder()->MakeCast(input0, dtype, stype);
 }
 static inline NodePtr MakeTensorList(const OpList& inputs) {
@@ -141,7 +141,7 @@ inline Value GetSymIntValue(c10::SymInt a) {
 inline std::vector<int64_t> GetSymIntArrayRefValue(c10::SymIntArrayRef arr) {
   std::vector<int64_t> r;
   for (const auto& a : arr) {
-    r.emplace_back(a.expect_int());
+    r.emplace_back(a.guard_int(__FILE__, __LINE__));
   }
   return r;
 }

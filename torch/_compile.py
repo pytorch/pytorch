@@ -19,9 +19,15 @@ def _disable_dynamo(fn=None, recursive=True):
 
         @functools.wraps(fn)
         def inner(*args, **kwargs):
-            import torch._dynamo
+            # cache this on the first invocation to avoid adding too much overhead.
+            disable_fn = getattr(fn, "__dynamo_disable", None)
+            if disable_fn is None:
+                import torch._dynamo
 
-            return torch._dynamo.disable(fn, recursive)(*args, **kwargs)
+                disable_fn = torch._dynamo.disable(fn, recursive)
+                fn.__dynamo_disable = disable_fn
+
+            return disable_fn(*args, **kwargs)
 
         return inner
     else:

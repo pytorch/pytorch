@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import concurrent.futures
 import contextlib
 import json
@@ -53,6 +55,7 @@ from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
 from torch.testing._internal.common_utils import TemporaryFileName
 
 from torch.autograd.profiler_legacy import profile as _profile
+import operator
 
 
 def foo_add():
@@ -234,11 +237,11 @@ def build_complex_tensors():
 
 def non_cont_test(t_view, t_cont):
     if t_view.is_contiguous():
-        raise Exception('t_view is contiguous!')
+        raise Exception('t_view is contiguous!')  # noqa: TRY002
     if not t_cont.is_contiguous():
-        raise Exception('t_cont is not contiguous!')
+        raise Exception('t_cont is not contiguous!')  # noqa: TRY002
     if not torch.equal(t_view, t_cont):
-        raise Exception('t_view is not equal to t_cont!')
+        raise Exception('t_view is not equal to t_cont!')  # noqa: TRY002
     return t_view
 
 def my_function(a, b, c):
@@ -1058,7 +1061,7 @@ class RpcTestCommon:
         for i in range(10):
             outputs = m(torch.rand(10, 10).long())
             loss_fn(outputs, torch.rand(10, 10)).backward()
-            gradient = list(m.parameters())[0].grad
+            gradient = next(iter(m.parameters())).grad
             fut = rref.rpc_async().average(rref, i, gradient)
             gradient = fut.wait()
             if gradient.is_sparse:
@@ -1229,7 +1232,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
     def test_rref_proxy_non_exist(self):
         dst = worker_name((self.rank + 1) % self.world_size)
         rref = rpc.remote(dst, my_function, args=(torch.ones(2, 2), 1, 3))
-        msg = "has no attribute \'non_exist\'"
+        msg = "has no attribute 'non_exist'"
         with self.assertRaisesRegex(AttributeError, msg):
             rref.rpc_sync().non_exist()
 
@@ -1777,18 +1780,18 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
 
         function_events = prof.function_events
         remote_events = [event for event in function_events if event.is_remote]
-        remote_add_event = [
+        remote_add_event = next(
             event for event in remote_events if "aten::add" in event.name
-        ][0]
+        )
         remote_add_input_shapes = remote_add_event.input_shapes
         # Run profiler on equivalent local op and validate shapes are the same.
         with _profile(record_shapes=True) as prof:
             torch.add(t1, t2)
 
         local_function_events = prof.function_events
-        local_add_event = [
+        local_add_event = next(
             event for event in local_function_events if "aten::add" in event.name
-        ][0]
+        )
         local_add_input_shapes = local_add_event.input_shapes
         self.assertEqual(remote_add_input_shapes, local_add_input_shapes)
 
@@ -2081,9 +2084,9 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
                 udf_with_torch_ops(-1, True)
 
             local_function_events = prof.function_events
-            local_record_function_event = [
+            local_record_function_event = next(
                 evt for evt in local_function_events if "##forward##" in evt.name
-            ][0]
+            )
             local_children = get_cpu_children(local_record_function_event)
             local_children_names = [
                 evt.name for evt in local_children
@@ -3160,9 +3163,8 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         )
         self.assertEqual(
             rref2.__str__(),
-            "UserRRef(RRefId = {0}(created_on={1}, local_id=1), ForkId = {0}(created_on={1}, local_id=2))".format(
-                id_class, self.rank
-            ),
+            f"UserRRef(RRefId = {id_class}(created_on={self.rank}, local_id=1), "
+            f"ForkId = {id_class}(created_on={self.rank}, local_id=2))",
         )
 
     @dist_init
@@ -4604,22 +4606,22 @@ class CudaRpcTest(RpcAgentTestFixture):
         function_events = p.function_events
         for event in function_events:
             if event.is_async:
-                self.assertEqual(0, event.cuda_time_total)
+                self.assertEqual(0, event.device_time_total)
                 self.assertEqual([], event.kernels)
-                self.assertEqual(0, event.cuda_time)
+                self.assertEqual(0, event.device_time)
             else:
                 if event.node_id == 1:
                     continue
                 self.assertTrue(event.node_id in [dst_cuda_0, dst_cuda_1])
                 if get_name(event) in EXPECTED_REMOTE_EVENTS:
-                    self.assertGreater(event.cuda_time_total, 0)
+                    self.assertGreater(event.device_time_total, 0)
                     self.assertEqual(1, len(event.kernels))
                     kernel = event.kernels[0]
                     if event.node_id == dst_cuda_0:
                         self.assertEqual(kernel.device, 0)
                     if event.node_id == dst_cuda_1:
                         self.assertEqual(kernel.device, 1)
-                    self.assertGreater(event.cuda_time, 0)
+                    self.assertGreater(event.device_time, 0)
 
         # Validate that EXPECTED_REMOTE_EVENTS is a subset of remotely profiled
         # events.
@@ -4754,7 +4756,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture, RpcTestCommon):
     def test_op_with_invalid_args(self):
         dst = worker_name((self.rank + 1) % self.world_size)
         with self.assertRaisesRegex(
-            RuntimeError, "Overloaded torch operator invoked from Python failed to many any schema"
+            RuntimeError, "Overloaded torch operator invoked from Python failed to match any schema"
         ):
             rpc.rpc_sync(dst, torch.add, args=())
 
@@ -6308,13 +6310,13 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_can_extract_list_with_cuda_tensor(self):
         self._test_cuda_future_extraction(
-            wrapper=lambda t: [t], unwrapper=lambda v: v[0], sparse_tensor=False
+            wrapper=lambda t: [t], unwrapper=operator.itemgetter(0), sparse_tensor=False
         )
 
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_can_extract_custom_class_with_cuda_tensor(self):
         self._test_cuda_future_extraction(
-            wrapper=lambda t: TensorWrapper(t), unwrapper=lambda v: v.tensor, sparse_tensor=False
+            wrapper=TensorWrapper, unwrapper=lambda v: v.tensor, sparse_tensor=False
         )
 
     @skip_if_lt_x_gpu(2)
@@ -6483,11 +6485,11 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_can_extract_list_with_cuda_sparse_tensor(self):
         self._test_cuda_future_extraction(
-            wrapper=lambda t: [t], unwrapper=lambda v: v[0], sparse_tensor=True
+            wrapper=lambda t: [t], unwrapper=operator.itemgetter(0), sparse_tensor=True
         )
 
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_can_extract_custom_class_with_cuda_sparse_tensor(self):
         self._test_cuda_future_extraction(
-            wrapper=lambda t: TensorWrapper(t), unwrapper=lambda v: v.tensor, sparse_tensor=True
+            wrapper=TensorWrapper, unwrapper=lambda v: v.tensor, sparse_tensor=True
         )

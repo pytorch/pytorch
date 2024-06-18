@@ -7,6 +7,7 @@ import torch
 from .core import is_masked_tensor
 from .creation import as_masked_tensor, masked_tensor
 
+
 __all__ = []  # type: ignore[var-annotated]
 
 
@@ -158,6 +159,7 @@ TENSOR_REDUCE_MAP = {
 NATIVE_REDUCE_FNS = list(NATIVE_REDUCE_MAP.keys())
 TORCH_REDUCE_FNS = list(TORCH_REDUCE_MAP.keys())
 TENSOR_REDUCE_FNS = list(TENSOR_REDUCE_MAP.keys())
+
 
 def _is_reduction(fn):
     return fn in NATIVE_REDUCE_MAP or fn in TORCH_REDUCE_MAP or fn in TENSOR_REDUCE_MAP

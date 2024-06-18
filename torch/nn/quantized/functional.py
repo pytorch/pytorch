@@ -1,4 +1,4 @@
-r"""nn.quantized.functional
+r"""nn.quantized.functional.
 
 Quantized equivalents of the `nn.functional`.
 

@@ -9,7 +9,7 @@
 #include <ATen/functorch/BatchedFallback.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 template <typename Func>
 std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>>
@@ -72,4 +72,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   ALL_TENSORS_HAVE_OPTIONAL_BDIM_BOXED_CONTIG1(4, max_pool3d_with_indices_backward, 2);
 }
 
-}}
+} // namespace at::functorch

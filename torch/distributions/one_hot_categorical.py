@@ -119,7 +119,7 @@ class OneHotCategoricalStraightThrough(OneHotCategorical):
     through gradient estimator from [1].
 
     [1] Estimating or Propagating Gradients Through Stochastic Neurons for Conditional Computation
-    (Bengio et al, 2013)
+    (Bengio et al., 2013)
     """
     has_rsample = True
 

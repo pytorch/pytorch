@@ -7,11 +7,8 @@
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
-#include <array>
 #include <cmath>
 #include <cstdint>
-#include <functional>
-#include <memory>
 #include <regex>
 #include <string>
 #include <tuple>
@@ -157,13 +154,11 @@ void RNNImplBase<Derived>::reset() {
       }
 
       for (const auto i : c10::irange(param_names.size())) {
-        auto name = param_names[i];
-        auto param = layer_params[i];
-        this->register_parameter(name, param);
+        this->register_parameter(param_names[i], std::move(layer_params[i]));
       }
       flat_weights_names_.insert(
           flat_weights_names_.end(), param_names.begin(), param_names.end());
-      all_weights_.emplace_back(param_names);
+      all_weights_.emplace_back(std::move(param_names));
     }
   }
 
@@ -526,8 +521,7 @@ std::tuple<Tensor, Tensor> RNNImpl::forward(const Tensor& input, Tensor hx) {
   auto sorted_indices = torch::Tensor();
   auto unsorted_indices = torch::Tensor();
 
-  Tensor output, hidden;
-  std::tie(output, hidden) = this->forward_helper(
+  auto [output, hidden] = this->forward_helper(
       input, batch_sizes, sorted_indices, max_batch_size, std::move(hx));
 
   return std::make_tuple(
@@ -543,8 +537,7 @@ std::tuple<PackedSequence, Tensor> RNNImpl::forward_with_packed_input(
   const auto& unsorted_indices = packed_input.unsorted_indices();
   auto max_batch_size = batch_sizes[0].item<int64_t>();
 
-  Tensor output, hidden;
-  std::tie(output, hidden) = this->forward_helper(
+  auto [output, hidden] = this->forward_helper(
       input, batch_sizes, sorted_indices, max_batch_size, std::move(hx));
 
   auto output_packed =
@@ -678,9 +671,7 @@ std::tuple<Tensor, std::tuple<Tensor, Tensor>> LSTMImpl::forward(
   auto sorted_indices = torch::Tensor();
   auto unsorted_indices = torch::Tensor();
 
-  Tensor output;
-  std::tuple<Tensor, Tensor> hidden;
-  std::tie(output, hidden) = this->forward_helper(
+  auto [output, hidden] = this->forward_helper(
       input, batch_sizes, sorted_indices, max_batch_size, std::move(hx_opt));
 
   return std::make_tuple(
@@ -697,9 +688,7 @@ std::tuple<PackedSequence, std::tuple<Tensor, Tensor>> LSTMImpl::
   const auto& unsorted_indices = packed_input.unsorted_indices();
   auto max_batch_size = batch_sizes[0].item<int64_t>();
 
-  Tensor output;
-  std::tuple<Tensor, Tensor> hidden;
-  std::tie(output, hidden) = this->forward_helper(
+  auto [output, hidden] = this->forward_helper(
       input, batch_sizes, sorted_indices, max_batch_size, std::move(hx_opt));
 
   auto output_packed =
@@ -779,8 +768,7 @@ std::tuple<Tensor, Tensor> GRUImpl::forward(const Tensor& input, Tensor hx) {
   auto sorted_indices = torch::Tensor();
   auto unsorted_indices = torch::Tensor();
 
-  Tensor output, hidden;
-  std::tie(output, hidden) = this->forward_helper(
+  auto [output, hidden] = this->forward_helper(
       input, batch_sizes, sorted_indices, max_batch_size, std::move(hx));
 
   return std::make_tuple(
@@ -796,8 +784,7 @@ std::tuple<PackedSequence, Tensor> GRUImpl::forward_with_packed_input(
   const auto& unsorted_indices = packed_input.unsorted_indices();
   auto max_batch_size = batch_sizes[0].item<int64_t>();
 
-  Tensor output, hidden;
-  std::tie(output, hidden) = this->forward_helper(
+  auto [output, hidden] = this->forward_helper(
       input, batch_sizes, sorted_indices, max_batch_size, std::move(hx));
 
   auto output_packed =
@@ -874,7 +861,7 @@ void RNNCellImplBase<Derived>::pretty_print(std::ostream& stream) const {
 template <typename Derived>
 void RNNCellImplBase<Derived>::check_forward_input(
     const Tensor& input,
-    const string name) const {
+    const string& name) const {
   TORCH_CHECK(
       input.dim() == 1 || input.dim() == 2,
       "Expected ",

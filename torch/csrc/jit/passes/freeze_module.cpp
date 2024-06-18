@@ -10,7 +10,6 @@
 #include <torch/csrc/jit/passes/eliminate_no_ops.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
-#include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/runtime/graph_executor_impl.h>
 
 #include <stack>
@@ -168,7 +167,7 @@ class AttributePropagator {
   // Examples:
   // submodule1.submodule2.foo -> {submodule2, "foo"}
   // submodule1.non_existent_module.foo -> nullopt
-  c10::optional<ResolvedName> resolveName(const std::string& name) {
+  std::optional<ResolvedName> resolveName(const std::string& name) {
     auto sub_names = splitName(name);
     if (sub_names.empty()) {
       return c10::nullopt;
@@ -226,7 +225,7 @@ class AttributePropagator {
     return true;
   }
 
-  c10::optional<std::deque<std::string>> getModulePath(
+  std::optional<std::deque<std::string>> getModulePath(
       Value* input,
       std::shared_ptr<Graph>& graph) {
     bool success = _loadModulePath(input, graph);

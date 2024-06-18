@@ -5,15 +5,15 @@
 // This source code is licensed under the BSD-style license found in the
 // LICENSE file in the root directory of this source tree.
 
-#include <ATen/Operators.h>
 #include <ATen/FunctionalTensorWrapper.h>
+#include <ATen/Operators.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/functorch/BatchRulesHelper.h>
 #include <ATen/functorch/BatchedFallback.h>
 #include <ATen/functorch/DynamicLayer.h>
 #include <ATen/functorch/PlumbingHelper.h>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 #define OP_DECOMPOSE(op)  m.impl(#op, static_cast<decltype(&ATEN_FN(op))>(native::op));
 #define OP_DECOMPOSE2(op, overload)  m.impl(#op"."#overload, static_cast<decltype(&ATEN_FN2(op, overload))>(native::op));
@@ -46,6 +46,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(absolute);
   OP_DECOMPOSE(absolute_);
   OP_DECOMPOSE(arctan2);
+  OP_DECOMPOSE(arctan2_);
   OP_DECOMPOSE(argsort);
   OP_DECOMPOSE(avg_pool1d);
   OP_DECOMPOSE(adaptive_max_pool1d);
@@ -225,6 +226,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   m.impl("reshape", native::reshape_symint);
   OP_DECOMPOSE(resolve_conj);
   OP_DECOMPOSE(resolve_neg);
+  OP_DECOMPOSE(rms_norm);
   OP_DECOMPOSE(row_stack);
   OP_DECOMPOSE(rrelu);
   OP_DECOMPOSE(rrelu_);
@@ -294,6 +296,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(trapezoid, dx);
   OP_DECOMPOSE2(trapz, x);
   OP_DECOMPOSE2(trapz, dx);
+  OP_DECOMPOSE(unsafe_chunk);
   m.impl("value_selecting_reduction_backward", native::value_selecting_reduction_backward_symint);
   OP_DECOMPOSE(var);
   OP_DECOMPOSE2(var, dim);
@@ -381,4 +384,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(to, other);
 }
 
-}}
+} // namespace at::functorch

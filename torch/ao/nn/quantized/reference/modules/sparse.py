@@ -76,7 +76,7 @@ class EmbeddingBag(nn.EmbeddingBag, ReferenceQuantizedModule):
                                self.padding_idx)
 
     @classmethod
-    def from_float(cls, mod, weight_qparams):
+    def from_float(cls, mod, weight_qparams, use_precomputed_fake_quant=False):
         return cls(
             mod.num_embeddings,
             mod.embedding_dim,

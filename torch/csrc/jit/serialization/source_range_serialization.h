@@ -37,7 +37,7 @@ class SourceRangePickler {
 class SourceRangeDeserializer {
  public:
   SourceRangeDeserializer() = default;
-  explicit SourceRangeDeserializer(c10::IValue text_table) {
+  explicit SourceRangeDeserializer(const c10::IValue& text_table) {
     for (const auto& x : text_table.toTuple()->elements()) {
       text_table_.emplace_back(std::make_shared<std::string>(x.toStringRef()));
     }
@@ -55,7 +55,7 @@ class SourceRangeDeserializer {
 
 class SourceRangeUnpickler {
  public:
-  virtual c10::optional<SourceRange> findSourceRangeThatGenerated(
+  virtual std::optional<SourceRange> findSourceRangeThatGenerated(
       const SourceRange& range) = 0;
 
   virtual ~SourceRangeUnpickler() = default;

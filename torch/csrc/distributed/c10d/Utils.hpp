@@ -21,19 +21,15 @@ typedef SSIZE_T ssize_t;
 
 #include <sys/types.h>
 
-#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <functional>
-#include <limits>
 #include <string>
-#include <system_error>
-#include <tuple>
 #include <vector>
 
 namespace c10d {
 
-TORCH_API std::string parse_env(const char* env_var_name);
+TORCH_API size_t getTensorsNumel(const std::vector<at::Tensor>& tensors);
 
 // Retrieve tensor shapes from a given tensor.
 TORCH_API std::vector<at::Tensor> getTensorShapes(
@@ -41,6 +37,11 @@ TORCH_API std::vector<at::Tensor> getTensorShapes(
 
 // Use -2 to represent unset state of env vars
 #define C10D_ENV_NOT_SET -2
+
+#define WARN_ENV_VAR_ONCE(deprecated_env, new_env)                        \
+  TORCH_WARN_ONCE(                                                        \
+      "Environment variable " + deprecated_env + " is deprecated; use " + \
+      new_env + " instead");
 
 // Turns at::IntArrayRef into "(1, 2, 3, 4)".
 inline std::string toString(at::IntArrayRef l) {
@@ -70,6 +71,7 @@ inline void assertSameType(
       const std::string expected = type.toString();
       const std::string actual = tensors[i].toString();
       throw std::invalid_argument(
+          // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
           "mixed types (" + expected + " and " + actual + ")");
     }
   }
@@ -87,50 +89,101 @@ inline std::vector<std::string> split(
   return pieces;
 }
 
-inline int parseEnvVarInt(const char* envVarName) {
-  char* stringValue = std::getenv(envVarName);
-  if (stringValue != nullptr) {
-    int val;
-    try {
-      val = std::stoi(stringValue);
-    } catch (std::exception& e) {
-      TORCH_CHECK(
-          false,
-          "Invalid value for environment variable: " + std::string(envVarName));
+inline std::string getCvarString(
+    const std::vector<std::string>& env,
+    const char* def) {
+  const char* ret = def;
+
+  if (env.empty()) {
+    TORCH_CHECK(false, "No environment variables passed");
+    return ret;
+  }
+
+  /* parse environment variable in reverse order, so the early
+   * versions of a variable get higher priority than the latter
+   * versions of the same variable */
+  for (ssize_t i = static_cast<ssize_t>(env.size()) - 1; i >= 0; i--) {
+    const char* val = std::getenv(env[i].c_str());
+    if (val == nullptr) {
+      continue;
+    } else if (i) {
+      WARN_ENV_VAR_ONCE(env[i], env[0]);
     }
-    return val;
+
+    ret = val;
   }
-  return C10D_ENV_NOT_SET;
+
+  return ret;
 }
 
-inline const char* parseEnvVarString(
-    const char* envVarName,
-    const char* default_val) {
-  const char* val = std::getenv(envVarName);
-  if (val == nullptr) {
-    val = default_val;
+inline int getCvarInt(const std::vector<std::string>& env, int def) {
+  int ret = def;
+
+  if (env.empty()) {
+    TORCH_CHECK(false, "No environment variables passed");
+    return ret;
   }
-  return val;
+
+  /* parse environment variable in reverse order, so the early
+   * versions of a variable get higher priority than the latter
+   * versions of the same variable */
+  for (ssize_t i = static_cast<ssize_t>(env.size()) - 1; i >= 0; i--) {
+    char* val = std::getenv(env[i].c_str());
+    if (val == nullptr) {
+      continue;
+    } else if (i) {
+      WARN_ENV_VAR_ONCE(env[i], env[0]);
+    }
+
+    try {
+      ret = std::stoi(val);
+    } catch (std::exception&) {
+      TORCH_CHECK(false, "Invalid value for environment variable: " + env[i]);
+    }
+  }
+
+  return ret;
 }
 
-inline int parseEnvVarIntDefault(const char* envVarName, int defaultVal) {
-  int val = parseEnvVarInt(envVarName);
-  if (val == C10D_ENV_NOT_SET)
-    return defaultVal;
-  return val;
-}
+inline bool getCvarBool(const std::vector<std::string>& env, bool def) {
+  bool ret = def;
 
-inline bool parseEnvVarFlag(const char* envVarName) {
-  int val = parseEnvVarInt(envVarName);
-  if (val == 1) {
-    return true;
-  } else if (val == 0 || val == C10D_ENV_NOT_SET) {
-    return false;
+  if (env.empty()) {
+    TORCH_CHECK(false, "No environment variables passed");
+    return ret;
   }
-  TORCH_CHECK(
-      false,
-      "Invalid value for environment variable: " + std::string(envVarName));
-  return false;
+
+  /* parse environment variable in reverse order, so the early
+   * versions of a variable get higher priority than the latter
+   * versions of the same variable */
+  for (ssize_t i = static_cast<ssize_t>(env.size()) - 1; i >= 0; i--) {
+    char* val_ = std::getenv(env[i].c_str());
+    if (val_ == nullptr) {
+      continue;
+    } else if (i) {
+      WARN_ENV_VAR_ONCE(env[i], env[0]);
+    }
+
+    std::string val = std::string(val_);
+    for (auto& x : val) {
+      // NOLINTNEXTLINE(*-narrowing-conversions)
+      x = std::tolower(x);
+    }
+
+    if (val == "y" || val == "yes" || val == "1" || val == "t" ||
+        val == "true") {
+      ret = true;
+    } else if (
+        val == "n" || val == "no" || val == "0" || val == "f" ||
+        val == "false") {
+      ret = false;
+    } else {
+      TORCH_CHECK(false, "Invalid value for environment variable: " + env[i]);
+      return ret;
+    }
+  }
+
+  return ret;
 }
 
 inline void assertSameSizes(
@@ -141,6 +194,7 @@ inline void assertSameSizes(
       const auto expected = toString(sizes);
       const auto actual = toString(tensors[i].sizes());
       throw std::invalid_argument(
+          // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
           "mixed sizes (" + expected + " and " + actual + ")");
     }
   }
@@ -160,6 +214,7 @@ inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
       const auto expected = toString(options);
       const auto actual = toString(tensors[i].options());
       throw std::invalid_argument(
+          // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
           "argument contains mixed types (" + expected + " and " + actual +
           ")");
     }
@@ -167,14 +222,15 @@ inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
       const auto expected = toString(sizes);
       const auto actual = toString(tensors[i].sizes());
       throw std::invalid_argument(
-          "argument contains mixed sizes (" + expected + " and " + actual +
+          // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
+          "argument contains mixed types (" + expected + " and " + actual +
           ")");
     }
   }
 }
 
 inline void assertTypeMatch(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::DeprecatedTypeProperties& type,
     const at::ArrayRef<at::Tensor> tensors,
     size_t index) {
@@ -185,7 +241,7 @@ inline void assertTypeMatch(
 }
 
 inline void assertTypeMatch(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::TensorOptions& options,
     const at::ArrayRef<at::Tensor> tensors,
     size_t index) {
@@ -196,7 +252,7 @@ inline void assertTypeMatch(
 }
 
 inline void assertSizesMatch(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::IntArrayRef& sizes,
     const at::ArrayRef<at::Tensor> tensors,
     size_t index) {
@@ -207,7 +263,7 @@ inline void assertSizesMatch(
 }
 
 inline void assertLayoutMatch(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const c10::Layout& expected,
     const at::ArrayRef<at::Tensor> tensors,
     size_t index) {
@@ -219,7 +275,7 @@ inline void assertLayoutMatch(
 }
 
 inline void assertLayoutMatch(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors) {
   const auto& layout = tensors[0].layout();
   for (const auto i : c10::irange(1, tensors.size())) {
@@ -228,7 +284,7 @@ inline void assertLayoutMatch(
 }
 
 inline void assertNonEmpty(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors) {
   if (tensors.empty()) {
     fn("requires non-empty tensor list");
@@ -236,7 +292,7 @@ inline void assertNonEmpty(
 }
 
 inline void assertSingleElement(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors) {
   if (tensors.size() != 1) {
     fn("requires a single-element tensor list");
@@ -244,7 +300,7 @@ inline void assertSingleElement(
 }
 
 inline void assertSingleElementInput(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors) {
   if (tensors.size() != 1) {
     fn("requires a single-element input tensor list");
@@ -252,7 +308,7 @@ inline void assertSingleElementInput(
 }
 
 inline void assertSingleElementOutput(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors) {
   if (tensors.size() != 1) {
     fn("requires a single-element output tensor list");
@@ -260,25 +316,25 @@ inline void assertSingleElementOutput(
 }
 
 inline void assertRootRank(
-    std::function<void(const std::string&)> fn,
-    int rank,
-    int size) {
+    const std::function<void(const std::string&)>& fn,
+    int64_t rank,
+    int64_t size) {
   if (rank < 0 || rank >= size) {
     fn("invalid root rank: " + std::to_string(rank));
   }
 }
 
 inline void assertRootTensor(
-    std::function<void(const std::string&)> fn,
-    int rank,
-    int size) {
+    const std::function<void(const std::string&)>& fn,
+    int64_t rank,
+    int64_t size) {
   if (rank < 0 || rank >= size) {
     fn("invalid root tensor: " + std::to_string(rank));
   }
 }
 
 inline void assertDense(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors) {
   const auto& layout = tensors[0].layout();
   if (layout != at::kStrided) {
@@ -287,7 +343,7 @@ inline void assertDense(
 }
 
 inline void assertCPU(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors) {
   const auto& device = tensors[0].device();
   if (device.type() != at::kCPU) {
@@ -296,7 +352,7 @@ inline void assertCPU(
 }
 
 inline void assertSameDevice(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors) {
   if (tensors.size() < 2) {
     return;
@@ -310,7 +366,7 @@ inline void assertSameDevice(
 }
 
 inline void assertTypeAndSizesMatch(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors,
     const at::DeprecatedTypeProperties& type,
     const at::IntArrayRef& sizes) {
@@ -321,7 +377,7 @@ inline void assertTypeAndSizesMatch(
 }
 
 inline void assertTypeAndSizesMatch(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors,
     const at::TensorOptions& options,
     const at::IntArrayRef& sizes) {
@@ -332,7 +388,7 @@ inline void assertTypeAndSizesMatch(
 }
 
 inline void assertTypeAndSizesMatch(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors) {
   const auto& options = tensors[0].options();
   const auto sizes = tensors[0].sizes();
@@ -411,6 +467,7 @@ inline std::vector<int> getDevices(const std::vector<at::Tensor>& tensors) {
   std::vector<int> devices(tensors.size(), -1);
   if (tensors[0].device().is_cuda()) {
     for (const auto i : c10::irange(tensors.size())) {
+      // NOLINTNEXTLINE(bugprone-signed-char-misuse)
       devices[i] = tensors[i].storage().device().index();
     }
   }
@@ -554,6 +611,8 @@ using SizeType = uint64_t;
 // Since SOCKET_ERROR = -1 in MSVC, so also leverage SYSCHECK_ERR_RETURN_NEG1
 #define SYSCHECK_ERR_RETURN_NEG1(expr) SYSCHECK(expr, __output != -1)
 
+void checkForNan(const at::Tensor& tensor);
+
 namespace tcputil {
 
 // Send and receive
@@ -568,8 +627,7 @@ void sendBytes(
     return;
   }
 
-  auto bytes = reinterpret_cast<const uint8_t*>(buffer);
-  uint8_t* currentBytes = const_cast<uint8_t*>(bytes);
+  auto currentBytes = reinterpret_cast<const char*>(buffer);
 
   int flags = 0;
 
@@ -585,10 +643,9 @@ void sendBytes(
 #endif
 
   while (bytesToSend > 0) {
-    ssize_t bytesSent;
+    ssize_t bytesSent = 0;
     SYSCHECK_ERR_RETURN_NEG1(
-        bytesSent =
-            ::send(socket, (const char*)currentBytes, bytesToSend, flags))
+        bytesSent = ::send(socket, currentBytes, bytesToSend, flags))
     if (bytesSent == 0) {
       C10_THROW_ERROR(DistNetworkError, std::strerror(ECONNRESET));
     }
@@ -605,13 +662,12 @@ void recvBytes(int socket, T* buffer, size_t length) {
     return;
   }
 
-  auto bytes = reinterpret_cast<uint8_t*>(buffer);
-  uint8_t* currentBytes = bytes;
+  auto currentBytes = reinterpret_cast<char*>(buffer);
 
   while (bytesToReceive > 0) {
-    ssize_t bytesReceived;
+    ssize_t bytesReceived = 0;
     SYSCHECK_ERR_RETURN_NEG1(
-        bytesReceived = recv(socket, (char*)currentBytes, bytesToReceive, 0))
+        bytesReceived = recv(socket, currentBytes, bytesToReceive, 0))
     if (bytesReceived == 0) {
       C10_THROW_ERROR(DistNetworkError, std::strerror(ECONNRESET));
     }
@@ -632,7 +688,7 @@ void sendVector(int socket, const std::vector<T>& vec, bool moreData = false) {
 // receive a vector as sent in sendVector
 template <typename T>
 std::vector<T> recvVector(int socket) {
-  SizeType valueSize;
+  SizeType valueSize = 0;
   recvBytes<SizeType>(socket, &valueSize, 1);
   std::vector<T> value(valueSize);
   recvBytes<T>(socket, value.data(), value.size());
@@ -664,7 +720,7 @@ inline void sendString(
 
 // receive a string as sent in sendString
 inline std::string recvString(int socket) {
-  SizeType valueSize;
+  SizeType valueSize = 0;
   recvBytes<SizeType>(socket, &valueSize, 1);
   std::vector<char> value(valueSize);
   recvBytes<char>(socket, value.data(), value.size());

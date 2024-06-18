@@ -77,8 +77,6 @@
 #include <c10/core/DispatchKeySet.h>
 #include <array>
 #include <cstddef>
-#include <memory>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -224,6 +222,7 @@ struct PythonArgs {
 
   int idx;
   bool traceable;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const FunctionSignature& signature;
   PyObject** args;
   std::vector<PyObject*> overloaded_args; // NOTE: borrowed references
@@ -231,12 +230,12 @@ struct PythonArgs {
   inline bool has_torch_function();
   inline std::string get_func_name();
   inline at::Tensor tensor(int i);
-  inline c10::optional<at::Tensor> optionalTensor(int i);
+  inline std::optional<at::Tensor> optionalTensor(int i);
   inline at::Scalar scalar(int i);
   inline at::Scalar scalarWithDefault(int i, const at::Scalar& default_scalar);
   inline std::vector<at::Scalar> scalarlist(int i);
   inline std::vector<at::Tensor> tensorlist(int i);
-  inline torch::List<c10::optional<at::Tensor>> list_of_optional_tensors(int i);
+  inline torch::List<std::optional<at::Tensor>> list_of_optional_tensors(int i);
   template <int N>
   inline std::array<at::Tensor, N> tensorlist_n(int i);
   inline std::vector<int64_t> intlist(int i);
@@ -246,7 +245,7 @@ struct PythonArgs {
   inline std::vector<int64_t> intlistWithDefault(
       int i,
       std::vector<int64_t> default_intlist);
-  inline c10::optional<at::Generator> generator(int i);
+  inline std::optional<at::Generator> generator(int i);
   inline at::Storage storage(int i);
   inline at::Storage storage(
       int i,
@@ -257,35 +256,35 @@ struct PythonArgs {
   inline at::ScalarType scalartypeWithDefault(
       int i,
       at::ScalarType default_scalartype);
-  inline c10::optional<at::ScalarType> scalartypeOptional(int i);
-  inline c10::optional<at::Scalar> scalarOptional(int i);
-  inline c10::optional<int64_t> toInt64Optional(int i);
-  inline c10::optional<c10::SymInt> toSymIntOptional(int i);
-  inline c10::optional<bool> toBoolOptional(int i);
-  inline c10::optional<double> toDoubleOptional(int i);
+  inline std::optional<at::ScalarType> scalartypeOptional(int i);
+  inline std::optional<at::Scalar> scalarOptional(int i);
+  inline std::optional<int64_t> toInt64Optional(int i);
+  inline std::optional<c10::SymInt> toSymIntOptional(int i);
+  inline std::optional<bool> toBoolOptional(int i);
+  inline std::optional<double> toDoubleOptional(int i);
   inline c10::OptionalArray<double> doublelistOptional(int i);
   inline std::vector<double> doublelist(int i);
   inline std::vector<double> getDoublelist(int i);
   inline at::Layout layout(int i);
   inline at::Layout layoutWithDefault(int i, at::Layout default_layout);
-  inline c10::optional<at::Layout> layoutOptional(int i);
+  inline std::optional<at::Layout> layoutOptional(int i);
   inline at::Device device(int i);
   inline at::Device deviceWithDefault(int i, const at::Device& default_device);
-  inline c10::optional<at::Device> deviceOptional(int i);
+  inline std::optional<at::Device> deviceOptional(int i);
   inline at::Dimname dimname(int i);
   inline std::vector<at::Dimname> dimnamelist(int i);
-  inline c10::optional<std::vector<at::Dimname>> toDimnameListOptional(int i);
+  inline std::optional<std::vector<at::Dimname>> toDimnameListOptional(int i);
   inline at::MemoryFormat memoryformat(int i);
-  inline c10::optional<at::MemoryFormat> memoryformatOptional(int i);
+  inline std::optional<at::MemoryFormat> memoryformatOptional(int i);
   inline at::QScheme toQScheme(int i);
   inline std::string string(int i);
   inline std::string stringWithDefault(int i, const std::string& default_str);
-  inline c10::optional<std::string> stringOptional(int i);
+  inline std::optional<std::string> stringOptional(int i);
   inline c10::string_view stringView(int i);
   inline c10::string_view stringViewWithDefault(
       int i,
       const c10::string_view default_str);
-  inline c10::optional<c10::string_view> stringViewOptional(int i);
+  inline std::optional<c10::string_view> stringViewOptional(int i);
   inline PyObject* pyobject(int i);
   inline int64_t toInt64(int i);
   inline c10::SymInt toSymInt(int i);
@@ -300,7 +299,7 @@ struct PythonArgs {
   inline bool toBool(int i);
   inline bool toBoolWithDefault(int i, bool default_bool);
   inline bool isNone(int i);
-  inline c10::optional<c10::DispatchKeySet> toDispatchKeySetOptional(int i);
+  inline std::optional<c10::DispatchKeySet> toDispatchKeySetOptional(int i);
 
  private:
   at::Tensor tensor_slow(int i);
@@ -347,6 +346,7 @@ struct FunctionParameter {
     at::ScalarType default_scalartype;
     at::Layout default_layout;
   };
+  std::string default_value;
 };
 
 template <int N>
@@ -355,12 +355,13 @@ inline PythonArgs PythonArgParser::parse(
     PyObject* args,
     PyObject* kwargs,
     ParsedArgs<N>& dst) {
-  if (N < max_args) {
-    throw ValueError(
-        "PythonArgParser: dst ParsedArgs buffer does not have enough capacity, expected %d (got %d)",
-        (int)max_args,
-        N);
-  }
+  TORCH_CHECK_VALUE(
+      N >= max_args,
+      "PythonArgParser: dst ParsedArgs buffer does not have enough capacity, expected ",
+      max_args,
+      " (got ",
+      N,
+      ")");
   return raw_parse(self, args, kwargs, dst.args);
 }
 
@@ -392,7 +393,7 @@ inline at::Tensor PythonArgs::tensor(int i) {
   return tensor_slow(i);
 }
 
-inline c10::optional<at::Tensor> PythonArgs::optionalTensor(int i) {
+inline std::optional<at::Tensor> PythonArgs::optionalTensor(int i) {
   at::Tensor t = tensor(i);
   // NOLINTNEXTLINE(bugprone-branch-clone)
   if (t.defined()) {
@@ -432,7 +433,7 @@ inline at::Scalar PythonArgs::scalarWithDefault(
   return scalar_slow(i);
 }
 
-inline c10::optional<at::Scalar> PythonArgs::scalarOptional(int i) {
+inline std::optional<at::Scalar> PythonArgs::scalarOptional(int i) {
   if (!args[i])
     return c10::nullopt;
   return scalar_slow(i);
@@ -456,15 +457,15 @@ inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
   return res;
 }
 
-inline torch::List<c10::optional<at::Tensor>> PythonArgs::
+inline torch::List<std::optional<at::Tensor>> PythonArgs::
     list_of_optional_tensors(int i) {
   if (!args[i])
-    return torch::List<c10::optional<at::Tensor>>();
+    return torch::List<std::optional<at::Tensor>>();
   auto tuple = six::isTuple(args[i]);
   THPObjectPtr arg = six::maybeAsTuple(args[i]);
   // NOLINTNEXTLINE(bugprone-branch-clone)
   auto size = tuple ? PyTuple_GET_SIZE(arg.get()) : PyList_GET_SIZE(arg.get());
-  torch::List<c10::optional<at::Tensor>> res;
+  torch::List<std::optional<at::Tensor>> res;
   res.reserve(size);
   for (const auto idx : c10::irange(size)) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg.get(), idx)
@@ -502,7 +503,7 @@ inline std::vector<int64_t> PythonArgs::intlist(int i) {
   return intlistWithDefault(i, signature.params[i].default_intlist);
 }
 
-inline PyObject* toPyObject(c10::SymInt symint) {
+inline PyObject* toPyObject(const c10::SymInt& symint) {
   if (symint.is_symbolic()) {
     auto r = py::cast(symint).release().ptr();
     TORCH_INTERNAL_ASSERT(r);
@@ -547,16 +548,6 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
   if (size1 > 0 && torch::is_symint(py::handle(args[i]))) {
     auto si = py::handle(args[i]).cast<c10::SymInt>();
     return std::vector<c10::SymInt>(size1, si);
-  }
-
-  if (is_dynamo_compiling && size1 > 0 && THPVariable_Check(args[i])) {
-    auto& var = THPVariable_Unpack(args[i]);
-    if (size1 == 1 && var.numel() == 1 && var.sizes().empty() &&
-        at::isIntegralType(var.dtype().toScalarType(), /*include_bool*/ true)) {
-      auto scalar = var.item();
-      TORCH_CHECK(scalar.isIntegral(/*include bool*/ false));
-      return std::vector<c10::SymInt>(size1, scalar.toSymInt());
-    }
   }
 
   PyObject* arg = args[i];
@@ -711,7 +702,7 @@ inline std::vector<double> PythonArgs::getDoublelist(int i) {
         tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     try {
       res[idx] = THPUtils_unpackDouble(obj);
-    } catch (const std::exception& e) {
+    } catch (const std::exception&) {
       throw TypeError(
           "%s(): argument '%s' must be %s, but found element of type %s at pos %zu",
           signature.name.c_str(),
@@ -738,7 +729,7 @@ inline std::vector<double> PythonArgs::doublelist(int i) {
   return this->getDoublelist(i);
 }
 
-inline c10::optional<c10::DispatchKeySet> PythonArgs::toDispatchKeySetOptional(
+inline std::optional<c10::DispatchKeySet> PythonArgs::toDispatchKeySetOptional(
     int i) {
   if (!args[i]) {
     return {};
@@ -778,7 +769,7 @@ inline at::ScalarType PythonArgs::scalartype(int i) {
   return toScalarType(obj);
 }
 
-inline c10::optional<at::ScalarType> PythonArgs::scalartypeOptional(int i) {
+inline std::optional<at::ScalarType> PythonArgs::scalartypeOptional(int i) {
   if (!args[i])
     return c10::nullopt;
   return scalartype(i);
@@ -803,7 +794,7 @@ inline at::Layout PythonArgs::layoutWithDefault(
   return layout(i);
 }
 
-inline c10::optional<at::Layout> PythonArgs::layoutOptional(int i) {
+inline std::optional<at::Layout> PythonArgs::layoutOptional(int i) {
   if (!args[i])
     return c10::nullopt;
   return layout(i);
@@ -817,6 +808,11 @@ inline at::Device toDevice(PyObject* obj) {
   if (THPUtils_checkLong(obj)) {
     const auto device_index = THPUtils_unpackLong(obj);
     TORCH_CHECK(device_index >= 0, "Device index must not be negative");
+    if (c10::is_privateuse1_backend_registered()) {
+      return at::Device(
+          c10::DeviceType::PrivateUse1,
+          static_cast<c10::DeviceIndex>(device_index));
+    }
     return at::Device(
         c10::DeviceType::CUDA, static_cast<c10::DeviceIndex>(device_index));
   }
@@ -839,7 +835,7 @@ inline at::Device PythonArgs::deviceWithDefault(
   return device(i);
 }
 
-inline c10::optional<at::Device> PythonArgs::deviceOptional(int i) {
+inline std::optional<at::Device> PythonArgs::deviceOptional(int i) {
   if (!args[i])
     return c10::nullopt;
   return device(i);
@@ -864,7 +860,7 @@ inline std::vector<at::Dimname> parseDimnameList(PyObject* arg) {
   return res;
 }
 
-inline c10::optional<std::vector<at::Dimname>> PythonArgs::
+inline std::optional<std::vector<at::Dimname>> PythonArgs::
     toDimnameListOptional(int i) {
   if (!args[i])
     return c10::nullopt;
@@ -892,7 +888,7 @@ inline at::MemoryFormat PythonArgs::memoryformat(int i) {
   return memory_format->memory_format;
 }
 
-inline c10::optional<at::MemoryFormat> PythonArgs::memoryformatOptional(int i) {
+inline std::optional<at::MemoryFormat> PythonArgs::memoryformatOptional(int i) {
   if (!args[i])
     return c10::nullopt;
   return memoryformat(i);
@@ -920,7 +916,7 @@ inline std::string PythonArgs::stringWithDefault(
   return THPUtils_unpackString(args[i]);
 }
 
-inline c10::optional<std::string> PythonArgs::stringOptional(int i) {
+inline std::optional<std::string> PythonArgs::stringOptional(int i) {
   if (!args[i])
     return c10::nullopt;
   return THPUtils_unpackString(args[i]);
@@ -938,7 +934,7 @@ inline c10::string_view PythonArgs::stringViewWithDefault(
   return THPUtils_unpackStringView(args[i]);
 }
 
-inline c10::optional<c10::string_view> PythonArgs::stringViewOptional(int i) {
+inline std::optional<c10::string_view> PythonArgs::stringViewOptional(int i) {
   if (!args[i])
     return c10::nullopt;
   return THPUtils_unpackStringView(args[i]);
@@ -960,7 +956,6 @@ inline int64_t PythonArgs::toInt64(int i) {
 }
 
 inline c10::SymInt PythonArgs::toSymInt(int i) {
-  PyObject* obj = args[i];
   if (!args[i]) {
     return c10::SymInt(signature.params[i].default_int);
   }
@@ -969,28 +964,6 @@ inline c10::SymInt PythonArgs::toSymInt(int i) {
     auto& var = THPVariable_Unpack(args[i]);
     jit::tracer::ArgumentStash::stashValue(
         signature.params[i].name, idx, var, c10::IntType::get());
-  }
-
-  // convert FakeTensor to SymInt
-  // expect empty sizes, numel = 1
-  // and ScalarType::Int
-  if (is_dynamo_compiling && THPVariable_Check(obj)) {
-    auto& var = THPVariable_Unpack(obj);
-
-    if (var.numel() != 1 || !var.sizes().empty() ||
-        !at::isIntegralType(
-            var.dtype().toScalarType(), /*include_bool*/ true)) {
-      throw TypeError(
-          "%s(): argument '%s' must be %s, failed to convert %s with sizes.empty()=%d",
-          signature.name.c_str(),
-          signature.params[i].name.c_str(),
-          signature.params[i].type_name().c_str(),
-          Py_TYPE(obj)->tp_name,
-          var.sizes().empty());
-    }
-    auto scalar = var.item();
-    TORCH_CHECK(scalar.isIntegral(/*include bool*/ false));
-    return scalar.toSymInt();
   }
 
   return py::cast<c10::SymInt>(py::handle(args[i]));
@@ -1015,26 +988,26 @@ inline int64_t PythonArgs::toInt64WithDefault(int i, int64_t default_int) {
   return toInt64(i);
 }
 
-inline c10::optional<int64_t> PythonArgs::toInt64Optional(int i) {
+inline std::optional<int64_t> PythonArgs::toInt64Optional(int i) {
   if (!args[i])
     return c10::nullopt;
   return toInt64(i);
 }
 
-inline c10::optional<c10::SymInt> PythonArgs::toSymIntOptional(int i) {
+inline std::optional<c10::SymInt> PythonArgs::toSymIntOptional(int i) {
   if (!args[i])
     return c10::nullopt;
   return toSymInt(i);
 }
 
-inline c10::optional<bool> PythonArgs::toBoolOptional(int i) {
+inline std::optional<bool> PythonArgs::toBoolOptional(int i) {
   if (!args[i]) {
     return c10::nullopt;
   }
   return toBool(i);
 }
 
-inline c10::optional<double> PythonArgs::toDoubleOptional(int i) {
+inline std::optional<double> PythonArgs::toDoubleOptional(int i) {
   if (!args[i]) {
     return c10::nullopt;
   }
@@ -1096,7 +1069,7 @@ inline bool PythonArgs::isNone(int i) {
   return args[i] == nullptr;
 }
 
-inline c10::optional<at::Generator> PythonArgs::generator(int i) {
+inline std::optional<at::Generator> PythonArgs::generator(int i) {
   if (!args[i])
     return c10::nullopt;
   return reinterpret_cast<THPGenerator*>(args[i])->cdata;

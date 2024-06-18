@@ -10,7 +10,13 @@
 // Many APIs have changed/don't exist anymore
 #if IS_PYTHON_3_12_PLUS
 
+#include "dim.h"
+
 // Re-enable this some day
+PyObject* Dim_init() {
+    PyErr_SetString(PyExc_RuntimeError, "First class dim doesn't work with python 3.12");
+    return nullptr;
+}
 
 #else
 
@@ -1117,7 +1123,7 @@ int64_t _Tensor_ndim(mpy::handle h) {
 
 mpy::handle handle_from_tensor(Arena& A, TensorRef t) {
     // fast case: tensor is live in python
-    c10::optional<PyObject*> mb_obj =
+    std::optional<PyObject*> mb_obj =
         t->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(getPyInterpreter(), /*ignore_hermetic_tls=*/false);
     if (mb_obj.has_value() && !t->unsafeGetTensorImpl()->pyobj_slot()->owns_pyobj()) {
         return *mb_obj;
@@ -1512,14 +1518,14 @@ struct PyInstDecoder {
     // On Windows, _PyOpcode_Caches and _PyOpcode_Deopt are private symbols
     // See https://github.com/pytorch/pytorch/issues/93854
     void next() {
-    #if IS_PYTHON_3_11_PLUS && !defined(_WIN32)
+    #if IS_PYTHON_3_11_PLUS
         offset_ += _PyOpcode_Caches[opcode()];
     #endif
         offset_ += 1;
     }
     int opcode() {
         auto r = _Py_OPCODE(code_[offset_]);
-    #if IS_PYTHON_3_11_PLUS && !defined(_WIN32)
+    #if IS_PYTHON_3_11_PLUS
         r = _PyOpcode_Deopt[r];
     #endif
         return r;
@@ -1633,16 +1639,6 @@ static PyObject* _dims(PyObject *self,
     return result.release();
     PY_END(nullptr)
 }
-
-static int64_t dim_index(const std::vector<mpy::obj<Dim>>& dims, mpy::hdl<Dim> dim) {
-    for (int64_t i = 0, N  = dims.size(); i < N; ++i) {
-        if (dims[i].ptr() == dim.ptr()) {
-            return i;
-        }
-    }
-    return -1;
-}
-
 
 struct DotPart {
     Slice<DimEntry> dims;

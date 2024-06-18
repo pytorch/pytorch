@@ -1,3 +1,4 @@
+import argparse
 import bisect
 import itertools
 import os
@@ -86,7 +87,7 @@ def generate_configs(**configs):
                       ({'M': 2}, {'N' : 4}),
                       ({'M': 2}, {'N' : 5}))
     """
-    assert "sample_func" in configs, "Missing sample_func to generat configs"
+    assert "sample_func" in configs, "Missing sample_func to generate configs"
     result = []
     for key, values in configs.items():
         if key == "sample_func":
@@ -241,7 +242,7 @@ def random_sample_configs(**configs):
     """
     This function randomly sample <total_samples> values from the given inputs based on
     their weights.
-    Here is an example showing what are the expected inputs and outpus from this function:
+    Here is an example showing what are the expected inputs and outputs from this function:
     M = [1, 2],
     N = [4, 5],
     K = [7, 8],
@@ -318,14 +319,6 @@ def op_list(**configs):
     return generated_configs
 
 
-def is_caffe2_enabled(framework_arg):
-    return "Caffe2" in framework_arg
-
-
-def is_pytorch_enabled(framework_arg):
-    return "PyTorch" in framework_arg
-
-
 def get_operator_range(chars_range):
     """Generates the characters from chars_range inclusive."""
     if chars_range == "None" or chars_range is None:
@@ -344,8 +337,9 @@ def get_operator_range(chars_range):
             ops_start_chars_set.add(item.lower())
             continue
         start, end = item.split("-")
-        for c in range(ord(start), ord(end) + 1):
-            ops_start_chars_set.add(chr(c).lower())
+        ops_start_chars_set.update(
+            chr(c).lower() for c in range(ord(start), ord(end) + 1)
+        )
     return ops_start_chars_set
 
 

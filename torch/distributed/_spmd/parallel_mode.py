@@ -39,7 +39,7 @@ class ParallelMode(ABC):
         TODO(@wanchaol): some of these arguments are not necessary for
         partitioning, remove the unnecessary ones later.
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @abstractmethod
     def transform_and_compile(self, gm: GraphModule) -> GraphModule:
@@ -51,7 +51,7 @@ class ParallelMode(ABC):
         the distributed environment.
         """
         # TODO: add more necessary arguments to this interface.
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 class DataParallel(ParallelMode):
@@ -160,7 +160,7 @@ class DTensorExpandMode(ParallelMode):
         args: Tuple[Any, ...],
         kwargs: Dict[str, Any],
     ) -> GraphModule:
-        flat_args, _ = pytree.tree_flatten(list(args) + list(kwargs.values()))
+        flat_args = pytree.arg_tree_leaves(*args, **kwargs)
 
         mesh = DeviceMesh("cuda", torch.arange(dist.get_world_size()).cuda())
         shard_schema: Schema = Schema(mesh=mesh, placements=[Shard(0)])
@@ -169,12 +169,12 @@ class DTensorExpandMode(ParallelMode):
 
         inps, schemas = [], []
 
-        for p in pytree.tree_flatten(params_and_buffers)[0]:
+        for p in pytree.tree_leaves(params_and_buffers):
             assert isinstance(p, torch.Tensor), f"expecting Tensor but got {type(p)}"
             inps.append(p)
             schemas.append(replicate_schema)
 
-        for o in pytree.tree_flatten(named_states)[0]:
+        for o in pytree.tree_leaves(named_states):
             if isinstance(o, torch.Tensor):
                 inps.append(o)
                 schemas.append(replicate_schema)

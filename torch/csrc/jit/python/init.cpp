@@ -145,7 +145,13 @@ bool loadPythonClasses() {
   return true;
 }
 
-c10::optional<IValue> toTypeInferredIValueOptional(py::handle input) {
+static bool opAllowsNumbersAsTensors(c10::Symbol symbol) {
+  return symbol.is_prims() || symbol.is_nvprims() ||
+      (symbol.is_aten() &&
+       torch::should_allow_numbers_as_tensors(symbol.toUnqualString()));
+}
+
+std::optional<IValue> toTypeInferredIValueOptional(py::handle input) {
   // Errors need to be caught here because toTypeInferredIValue errors out
   // on various object types, but we want it to work with all types.
   try {
@@ -211,7 +217,7 @@ void initJITBindings(PyObject* module) {
           []() { return c10::ShapeSymbol::newSymbol().value(); })
       .def(
           "_jit_shape_compute_graph_for_node",
-          [](Node* n) -> c10::optional<std::shared_ptr<Graph>> {
+          [](Node* n) -> std::optional<std::shared_ptr<Graph>> {
             if (!n->maybeSchema()) {
               return c10::nullopt;
             }
@@ -219,7 +225,7 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_decomposition_graph_for_node",
-          [](Node* n) -> c10::optional<std::shared_ptr<Graph>> {
+          [](Node* n) -> std::optional<std::shared_ptr<Graph>> {
             if (!n->maybeSchema()) {
               return c10::nullopt;
             }
@@ -314,7 +320,7 @@ void initJITBindings(PyObject* module) {
              int quant_type_int) {
             auto dict = py::cast<std::unordered_map<
                 std::string,
-                c10::optional<std::tuple<Module, Module>>>>(qconfig_dict);
+                std::optional<std::tuple<Module, Module>>>>(qconfig_dict);
             auto quant_type = static_cast<QuantType>(quant_type_int);
             return InsertObservers(
                 module, method_name, dict, inplace, quant_type);
@@ -333,7 +339,7 @@ void initJITBindings(PyObject* module) {
              int quant_type_int) {
             auto dict = py::cast<std::unordered_map<
                 std::string,
-                c10::optional<std::tuple<Module, Module>>>>(qconfig_dict);
+                std::optional<std::tuple<Module, Module>>>>(qconfig_dict);
             auto quant_type = static_cast<QuantType>(quant_type_int);
             return InsertObserversForOnDevicePTQ(
                 module, method_name, dict, inplace, quant_type);
@@ -1243,6 +1249,11 @@ void initJITBindings(PyObject* module) {
             return a->expect_size(file, line);
           })
       .def(
+          "guard_size_oblivious",
+          [](c10::SymNode a, const char* file, int64_t line) {
+            return a->guard_size_oblivious(file, line);
+          })
+      .def(
           "has_hint",
           [](c10::SymNode a) {
             return a->has_hint();
@@ -1274,19 +1285,29 @@ void initJITBindings(PyObject* module) {
             return node->is_constant();
           })
       .def(
+          "is_nested_int",
+          [](const c10::SymNode& node) {
+            return node->is_nested_int();
+          })
+      .def(
           "is_symbolic",
           [](const c10::SymNode& node) {
             return node->is_symbolic();
           })
       .def(
-          "singleton_int",
+          "nested_int",
           [](const c10::SymNode& node) {
-            return node->singleton_int();
+            return node->nested_int();
           })
       .def(
-          "singleton_coeff",
+          "nested_int_coeff",
           [](const c10::SymNode& node) {
-            return node->singleton_coeff();
+            return node->nested_int_coeff();
+          })
+      .def(
+          "__deepcopy__",
+          [](const c10::SymNode& node, py::handle memo) {
+            return node->clone();
           });
 
   // clang-format on
@@ -1367,31 +1388,86 @@ void initJITBindings(PyObject* module) {
           if (size == 0) {
             return size;
           }
-          auto memory_view = py::memoryview::from_memory(
-              reinterpret_cast<const char*>(data), size);
-          buffer.attr("write")(std::move(memory_view));
+          py::gil_scoped_acquire acquire;
+          if (!data) {
+            // See [Note: write_record_metadata]
+            buffer.attr("seek")(
+                size, py::module::import("os").attr("SEEK_CUR"));
+          } else {
+            auto memory_view = py::memoryview::from_memory(
+                reinterpret_cast<const char*>(data), size);
+            buffer.attr("write")(std::move(memory_view));
+          }
           return size;
         };
         return std::make_unique<PyTorchStreamWriter>(std::move(writer_func));
       }))
       .def(py::init<const std::function<size_t(const void*, size_t)>&>())
+      // [Note: write_record_metadata]
+      // The write_record_metadata function is intended to write metadata (i.e.
+      // the zipfile header and end of central directory record) for a file
+      // while reserving nbytes of space for the file for the bytes of the
+      // actual file to be added in later. This functionality is achieved by
+      // defining `m_pWrite` to seek instead of write if the buffer passed is a
+      // nullptr. This has implications on CRC-32 which will not be written at
+      // write_record_metadata time, and will not be combined with the hash in
+      // combined_uncomp_crc32_. We define this in `m_pWrite` rather than
+      // extending the interface of miniz to have an `m_pSeek` since different
+      // versions of miniz are used in fbcode/oss.
+      .def(
+          "write_record_metadata",
+          [](PyTorchStreamWriter& self, const std::string& name, size_t size) {
+            return self.writeRecord(name, nullptr, size);
+          })
       .def(
           "write_record",
           [](PyTorchStreamWriter& self,
              const std::string& name,
              const char* data,
-             size_t size) { return self.writeRecord(name, data, size); })
-      .def("write_end_of_file", &PyTorchStreamWriter::writeEndOfFile)
-      .def("set_min_version", &PyTorchStreamWriter::setMinVersion)
+             size_t size) {
+            // Since we don't know where the data come from, we cannot
+            // release the GIL in this overload
+            return self.writeRecord(name, data, size);
+          })
+      .def(
+          "write_record",
+          [](PyTorchStreamWriter& self,
+             const std::string& name,
+             py::bytes data,
+             size_t size) {
+            // It is not clear from the doc but according to CPython own code,
+            // it is ok to use the result of PyBytes_AsString without the GIL
+            // being held
+            // https://github.com/python/cpython/blob/e2a3e4b7488aff6fdc704a0f258bc315e96c1d6e/Objects/stringlib/join.h#L67
+            const char* data_str = PyBytes_AsString(data.ptr());
+            py::gil_scoped_release release;
+            return self.writeRecord(name, data_str, size);
+          })
+      .def(
+          "write_record",
+          [](PyTorchStreamWriter& self,
+             const std::string& name,
+             c10::Storage data,
+             size_t size) {
+            // Reading Tensor data is always ok without the GIL held
+            py::gil_scoped_release release;
+            return self.writeRecord(
+                name, reinterpret_cast<const char*>(data.data()), size);
+          })
       .def(
           "write_record",
           [](PyTorchStreamWriter& self,
              const std::string& name,
              uintptr_t data,
              size_t size) {
+            TORCH_WARN_ONCE(
+                "write_record(): Passing Storage by data pointer is deprecated and will be an error in ",
+                "the future, please pass the Storage object instead.");
             return self.writeRecord(
                 name, reinterpret_cast<const char*>(data), size);
           })
+      .def("write_end_of_file", &PyTorchStreamWriter::writeEndOfFile)
+      .def("set_min_version", &PyTorchStreamWriter::setMinVersion)
       .def("archive_name", &PyTorchStreamWriter::archiveName)
       .def("serialization_id", &PyTorchStreamWriter::serializationId)
       .def(
@@ -1486,9 +1562,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "get_record",
           [](PyTorchStreamReader& self, const std::string& key) {
-            at::DataPtr data;
-            size_t size = 0;
-            std::tie(data, size) = self.getRecord(key);
+            auto [data, size] = self.getRecord(key);
             return py::bytes(reinterpret_cast<const char*>(data.get()), size);
           })
       .def(
@@ -1587,10 +1661,7 @@ void initJITBindings(PyObject* module) {
         try {
           auto symbol = Symbol::fromQualString(op_name);
           auto operations = getAllOperatorsFor(symbol);
-          bool allow_numbers_as_tensors = symbol.is_prims() ||
-              symbol.is_nvprims() ||
-              (symbol.is_aten() &&
-               torch::should_allow_numbers_as_tensors(symbol.toUnqualString()));
+          bool allow_numbers_as_tensors = opAllowsNumbersAsTensors(symbol);
           for (const auto& op : operations) {
             if (op->schema().overload_name() == overload_name) {
               auto func =
@@ -1603,7 +1674,7 @@ void initJITBindings(PyObject* module) {
               auto func_dk = py::cpp_function(
                   [op, symbol, allow_numbers_as_tensors](
                       c10::DispatchKey dk_, py::args args, py::kwargs kwargs) {
-                    c10::optional<c10::DispatchKey> dk =
+                    std::optional<c10::DispatchKey> dk =
                         c10::make_optional(dk_);
                     ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
                     return _get_operation_for_overload_or_packet(
@@ -1623,35 +1694,47 @@ void initJITBindings(PyObject* module) {
       });
 
   m.def(
+      "_check_schema_allow_fake_script_object",
+      [](const FunctionSchema& schema, py::args args, py::kwargs kwargs) {
+        // checkSchemaAllowFakeScriptObject will throw runtime error if there is
+        // a schema mismatch. Otherwise, it returns true.
+        return checkSchemaAllowFakeScriptObject(schema, args, kwargs);
+      });
+
+  m.def(
+      "_jit_resolve_packet",
+      [](const char* op_name, py::args args, py::kwargs kwargs) {
+        try {
+          auto symbol = Symbol::fromQualString(op_name);
+          bool allow_numbers_as_tensors = opAllowsNumbersAsTensors(symbol);
+          ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
+          const auto overloads = getAllSortedOperatorsFor(symbol);
+          auto opWithStack = getOpWithStack(overloads, args, kwargs);
+          std::shared_ptr<Operator> overload = std::get<0>(opWithStack);
+          auto result = overload->schema().overload_name();
+          if (result == "") {
+            result = "default";
+          }
+          return result;
+        } catch (const c10::Error& e) {
+          auto msg = torch::get_cpp_stacktraces_enabled()
+              ? e.what()
+              : e.what_without_backtrace();
+          throw std::runtime_error(msg);
+        }
+      });
+
+  m.def(
       "_jit_get_operation",
       [](const std::string& op_name) {
         try {
           auto symbol = Symbol::fromQualString(op_name);
-          const auto& unsortedOps = getAllOperatorsFor(symbol);
-          TORCH_CHECK(!unsortedOps.empty(), "No such operator ", op_name);
+          const auto sortedOps = getAllSortedOperatorsFor(symbol);
+          if (sortedOps.empty()) {
+            // No such operator
+            return py::make_tuple(py::none(), py::none());
+          }
 
-          // Depending on the order of registration, aten or jit ops may be
-          // registered first. This sorting is helpful in cases where
-          // deterministic (i.e. not dependent on build config) behavior is
-          // desired; e.g. torch.ops.aten.* uses this function, and tries to
-          // find the "first" op that matches input args. Without the sorting,
-          // the "first" op may change depending on registration order.
-          std::vector<std::shared_ptr<Operator>> sortedOps;
-          sortedOps.reserve(unsortedOps.size());
-          std::copy_if(
-              unsortedOps.begin(),
-              unsortedOps.end(),
-              std::back_inserter(sortedOps),
-              [](const std::shared_ptr<Operator>& op) {
-                return op->isC10Op();
-              });
-          std::copy_if(
-              unsortedOps.begin(),
-              unsortedOps.end(),
-              std::back_inserter(sortedOps),
-              [](const std::shared_ptr<Operator>& op) {
-                return !op->isC10Op();
-              });
           std::ostringstream docstring;
           docstring << "Automatically bound operator '" << op_name
                     << "' with schema(s):\n";
@@ -1665,10 +1748,7 @@ void initJITBindings(PyObject* module) {
             overload_names.append(py::str(op->schema().overload_name()));
           }
 
-          bool allow_numbers_as_tensors = symbol.is_prims() ||
-              symbol.is_nvprims() ||
-              (symbol.is_aten() &&
-               torch::should_allow_numbers_as_tensors(symbol.toUnqualString()));
+          bool allow_numbers_as_tensors = opAllowsNumbersAsTensors(symbol);
 
           auto func = py::cpp_function(
               [sortedOps, symbol, allow_numbers_as_tensors](
@@ -1690,6 +1770,20 @@ void initJITBindings(PyObject* module) {
       py::arg("qualified_name"));
 
   m.def(
+      "_maybe_call_torch_function_for_op_packet",
+      [](py::handle op_overload_packet, py::args args, py::kwargs kwargs) {
+        py::list ns_method =
+            op_overload_packet.attr("_qualified_op_name").attr("split")("::");
+        return _maybe_handle_torch_function(
+            py::cast<std::string>(ns_method[0]),
+            py::cast<std::string>(ns_method[1]),
+            "",
+            false,
+            args,
+            kwargs);
+      });
+
+  m.def(
       "parse_ir",
       [](const std::string& input, bool parse_tensor_constants) {
         auto graph = std::make_shared<Graph>();
@@ -1698,7 +1792,11 @@ void initJITBindings(PyObject* module) {
       },
       py::arg("input"),
       py::arg("parse_tensor_constants") = false);
-  m.def("parse_schema", parseSchema);
+  m.def(
+      "parse_schema",
+      &parseSchema,
+      py::arg("schema"),
+      py::arg("allow_typevars") = true);
   m.def("unify_type_list", [](const std::vector<TypePtr>& types) {
     std::ostringstream s;
     auto type = unifyTypeList(types, s);
@@ -1749,7 +1847,7 @@ void initJITBindings(PyObject* module) {
           [](SchemaInfo& self,
              const std::string& name,
              const py::object& value) {
-            c10::optional<IValue> i_value = toTypeInferredIValueOptional(value);
+            std::optional<IValue> i_value = toTypeInferredIValueOptional(value);
             if (i_value) {
               // For normalization purposes there is an inconsistency within
               // torch.fx that turns all arguments named "self" into "input".
@@ -1769,7 +1867,7 @@ void initJITBindings(PyObject* module) {
           TORCH_INTERNAL_ASSERT(
               key.isString(),
               "Add argument value keys types should be strings.");
-          c10::optional<IValue> value =
+          std::optional<IValue> value =
               toTypeInferredIValueOptional(key_pair.second);
           if (value) {
             // For normalization purposes there is an inconsistency within
@@ -1820,6 +1918,13 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "__str__",
+          [](FunctionSchema& self) {
+            std::stringstream ss;
+            ss << self;
+            return ss.str();
+          })
+      .def(
+          "__repr__",
           [](FunctionSchema& self) {
             std::stringstream ss;
             ss << self;
@@ -1998,8 +2103,8 @@ void initJITBindings(PyObject* module) {
           py::call_guard<py::gil_scoped_release>());
 
   m.def("_is_alias_of", [](const py::object& self, const py::object& other) {
-    c10::optional<IValue> self_value = toTypeInferredIValueOptional(self);
-    c10::optional<IValue> other_value = toTypeInferredIValueOptional(other);
+    std::optional<IValue> self_value = toTypeInferredIValueOptional(self);
+    std::optional<IValue> other_value = toTypeInferredIValueOptional(other);
 
     // Only return true if we are certain that self and other are aliasing.
     if (!self_value || !other_value) {
@@ -2008,8 +2113,8 @@ void initJITBindings(PyObject* module) {
     return self_value->isAliasOf(*other_value);
   });
   m.def("_overlaps", [](const py::object& self, const py::object& other) {
-    c10::optional<IValue> self_value = toTypeInferredIValueOptional(self);
-    c10::optional<IValue> other_value = toTypeInferredIValueOptional(other);
+    std::optional<IValue> self_value = toTypeInferredIValueOptional(self);
+    std::optional<IValue> other_value = toTypeInferredIValueOptional(other);
 
     // Only return true if we are certain that self and other are overlapping.
     if (!self_value || !other_value) {

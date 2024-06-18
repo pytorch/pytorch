@@ -3,6 +3,7 @@ import functools
 import warnings
 from itertools import product
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
+from typing_extensions import deprecated
 
 import torch
 import torch.testing
@@ -24,7 +25,8 @@ __all__ = [
 
 
 class GradcheckError(RuntimeError):
-    r"""Error raised by :func:`gradcheck` and :func:`gradgradcheck`"""
+    r"""Error raised by :func:`gradcheck` and :func:`gradgradcheck`."""
+
     pass
 
 
@@ -255,8 +257,9 @@ def _iter_tensor(x_tensor):
 def _get_numerical_jacobian(
     fn, inputs, outputs=None, target=None, eps=1e-3, is_forward_ad=False
 ) -> List[Tuple[torch.Tensor, ...]]:
-    """Computes the numerical Jacobian of `fn(inputs)` with respect to `target`. If
-    not specified, targets are the input. Returns M * N Jacobians where N is the
+    """Compute the numerical Jacobian of `fn(inputs)` with respect to `target`.
+
+    If not specified, targets are the input. Returns M * N Jacobians where N is the
     number of tensors in target that require grad and M is the number of non-integral
     outputs.
 
@@ -304,8 +307,18 @@ def _get_numerical_jacobian(
     return jacobians
 
 
+@deprecated(
+    "`get_numerical_jacobian` was part of PyTorch's private API and not "
+    "meant to be exposed. We are deprecating it and it will be removed "
+    "in a future version of PyTorch. If you have a specific use for "
+    "this or feature request for this to be a stable API, please file "
+    "us an issue at https://github.com/pytorch/pytorch/issues/new",
+    category=FutureWarning,
+)
 def get_numerical_jacobian(fn, inputs, target=None, eps=1e-3, grad_out=1.0):
-    """Deprecated API to compute the numerical Jacobian for a given fn and its inputs.
+    """Compute the numerical Jacobian for a given fn and its inputs.
+
+    This is a Deprecated API.
 
     Args:
         fn: the function to compute the Jacobian for (must take inputs as a tuple)
@@ -321,13 +334,6 @@ def get_numerical_jacobian(fn, inputs, target=None, eps=1e-3, grad_out=1.0):
     Note that `target` may not even be part of `input` to `fn`, so please be
     **very careful** in this to not clone `target`.
     """
-    warnings.warn(
-        "get_numerical_jacobian was part of PyTorch's private API and not "
-        "meant to be exposed. We are deprecating it and it will be removed "
-        "in a future version of PyTorch. If you have a specific use for "
-        "this or feature request for this to be a stable API, please file "
-        "us an issue at https://github.com/pytorch/pytorch/issues/new"
-    )
     if (
         grad_out != 1.0
     ):  # grad_out param is only kept for backward compatibility reasons
@@ -345,8 +351,8 @@ def get_numerical_jacobian(fn, inputs, target=None, eps=1e-3, grad_out=1.0):
 
 
 def _compute_numerical_gradient(fn, entry, v, norm_v, nbhd_checks_fn):
-    # Performs finite differencing by perturbing `entry` in-place by `v` and
-    # returns the gradient of each of the outputs wrt to x at idx.
+    # Computes numerical directional derivative as finite difference
+    # of function `fn` at input `entry`, perturbed by vector `v`.
     if _is_sparse_compressed_tensor(entry):
         # sparse compressed tensors don't implement sub/add/copy_
         # yet. However, in non-masked semantics context entry and v
@@ -369,7 +375,7 @@ def _compute_numerical_gradient(fn, entry, v, norm_v, nbhd_checks_fn):
 
     def compute(a, b):
         nbhd_checks_fn(a, b)
-        ret = (b - a) / (2 * norm_v)
+        ret = (b - a) / (2 * norm_v)  # use central difference approx
         return ret.detach().reshape(-1)
 
     return tuple(compute(a, b) for (a, b) in zip(outa, outb))
@@ -485,8 +491,9 @@ def get_numerical_jacobian_wrt_specific_input(
 def _get_analytical_jacobian_forward_ad(
     fn, inputs, outputs, *, check_grad_dtypes=False, all_u=None
 ) -> Tuple[Tuple[torch.Tensor, ...], ...]:
-    """Computes the analytical Jacobian using forward mode AD of `fn(inputs)` using forward mode AD with respect
-    to `target`. Returns N * M Jacobians where N is the number of tensors in target that require grad and
+    """Compute the analytical Jacobian using forward mode AD of `fn(inputs)` using forward mode AD with respect to `target`.
+
+    Return N * M Jacobians where N is the number of tensors in target that require grad and
     M is the number of non-integral outputs.
     Contrary to other functions here, this function requires "inputs" to actually be used by the function.
     The computed value is expected to be wrong if the function captures the inputs by side effect instead of
@@ -749,7 +756,7 @@ def _check_analytical_jacobian_attributes(
     inputs, output, nondet_tol, check_grad_dtypes, fast_mode=False, v=None
 ) -> Tuple[torch.Tensor, ...]:
     # This is used by both fast and slow mode:
-    #  - For slow mode, vjps[i][j] is the jth row the Jacobian wrt the ith
+    #  - For slow mode, vjps[i][j] is the jth row of the Jacobian wrt the ith
     #    input.
     #  - For fast mode, vjps[i][0] is a linear combination of the rows
     #    of the Jacobian wrt the ith input
@@ -813,16 +820,17 @@ def _get_analytical_vJu_backward_mode(
     return reduced_jacobians
 
 
+@deprecated(
+    "`get_analytical_jacobian` was part of PyTorch's private API and not "
+    "meant to be exposed. We are deprecating it and it will be removed "
+    "in a future version of PyTorch. If you have a specific use for "
+    "this or feature request for this to be a stable API, please file "
+    "us an issue at https://github.com/pytorch/pytorch/issues/new",
+    category=FutureWarning,
+)
 def get_analytical_jacobian(inputs, output, nondet_tol=0.0, grad_out=1.0):
     # Replicates the behavior of the old get_analytical_jacobian before the refactor
     # This shares much of its code with _check_analytical_jacobian_attributes
-    warnings.warn(
-        "get_analytical_jacobian was part of PyTorch's private API and not "
-        "meant to be exposed. We are deprecating it and it will be removed "
-        "in a future version of PyTorch. If you have a specific use for "
-        "this or feature request for this to be a stable API, please file "
-        "us an issue at https://github.com/pytorch/pytorch/issues/new"
-    )
     if (
         grad_out != 1.0
     ):  # grad_out param is only kept for backward compatibility reasons
@@ -868,7 +876,8 @@ def _get_analytical_jacobian(inputs, outputs, input_idx, output_idx):
 def _compute_analytical_jacobian_rows(
     vjp_fn, sample_output
 ) -> List[List[Optional[torch.Tensor]]]:
-    # Computes Jacobian row-by-row using backward function `vjp_fn` = v^T J
+    # Computes Jacobian row-by-row by projecting `vjp_fn` = v^T J on standard basis
+    # vectors: vjp_fn(e) = e^T J is a corresponding row of the Jacobian.
     # NB: this function does not assume vjp_fn(v) to return tensors with the same
     # number of elements for different v. This is checked when we later combine the
     # rows into a single tensor.
@@ -876,11 +885,11 @@ def _compute_analytical_jacobian_rows(
         sample_output, memory_format=torch.legacy_contiguous_format
     )
     flat_grad_out = grad_out_base.view(-1)
-    # jacobians_rows[i][j] represents the jth row of the ith input
+    # jacobians_rows[i][j] is the Jacobian jth row for the ith input
     jacobians_rows: List[List[Optional[torch.Tensor]]] = []
     for j in range(flat_grad_out.numel()):
         flat_grad_out.zero_()
-        flat_grad_out[j] = 1.0
+        flat_grad_out[j] = 1.0  # projection for jth row of Jacobian
         grad_inputs = vjp_fn(grad_out_base)
         for i, d_x in enumerate(grad_inputs):
             if j == 0:
@@ -1663,7 +1672,7 @@ def _vec_from_tensor(x, generator, downcast_complex=False):
             .view(x_values.shape)
         )
         values /= values.norm()
-        vec = torch.sparse_coo_tensor(x._indices(), values, x.size())
+        vec = torch.sparse_coo_tensor(x._indices(), values, x.size(), device=x.device)
     elif _is_sparse_compressed_tensor(x):
         if x.layout in {torch.sparse_csr, torch.sparse_bsr}:
             compressed_indices, plain_indices = x.crow_indices(), x.col_indices()
@@ -1678,7 +1687,12 @@ def _vec_from_tensor(x, generator, downcast_complex=False):
         )
         values /= values.norm()
         vec = torch.sparse_compressed_tensor(
-            compressed_indices, plain_indices, values, x.size(), layout=x.layout
+            compressed_indices,
+            plain_indices,
+            values,
+            x.size(),
+            layout=x.layout,
+            device=x.device,
         )
     else:
         dtype = _to_real_dtype(x.dtype) if downcast_complex else x.dtype
@@ -1731,11 +1745,11 @@ If the test
 
 
 def _run_slow_mode_and_get_error(
-    func, tupled_inputs, outputs, input_idx, output_idx, rtol, atol, is_forward_ad
+    func, tupled_inputs, outputs, input_idx, output_idx, rtol, atol, eps, is_forward_ad
 ):
     # Compute jacobians in slow mode for better error message
     slow_numerical = _get_numerical_jacobian(
-        func, tupled_inputs, outputs, is_forward_ad=is_forward_ad
+        func, tupled_inputs, outputs, eps=eps, is_forward_ad=is_forward_ad
     )[input_idx][output_idx]
     if is_forward_ad:
 
@@ -1780,13 +1794,20 @@ def _to_flat_dense_if_sparse(tensor):
 def _make_vectors(inp_tensors, outputs, *, use_forward_ad):
     # Use our own generator to avoid messing with the user's RNG state
     g_cpu = torch.Generator()
+
+    def _vec_from_tensor_cpu(*args):
+        # Default allocate all tensors on CPU, so they are on the same device as the generator
+        # even if the user specified a default device
+        with torch.device("cpu"):
+            return _vec_from_tensor(*args)
+
     all_u = []
     all_u_dense = []
     for inp in inp_tensors:
-        ur = _vec_from_tensor(inp, g_cpu, True)
+        ur = _vec_from_tensor_cpu(inp, g_cpu, True)
         ur_dense = _to_flat_dense_if_sparse(ur)
         if inp.is_complex():
-            ui = _vec_from_tensor(inp, g_cpu, True)
+            ui = _vec_from_tensor_cpu(inp, g_cpu, True)
             all_u.append((ur, ui))
             ui_dense = _to_flat_dense_if_sparse(ui)
             all_u_dense.append((ur_dense, ui_dense))
@@ -1794,7 +1815,9 @@ def _make_vectors(inp_tensors, outputs, *, use_forward_ad):
             all_u.append(ur)
             all_u_dense.append(ur_dense)
     all_v = (
-        None if use_forward_ad else [_vec_from_tensor(out, g_cpu) for out in outputs]
+        None
+        if use_forward_ad
+        else [_vec_from_tensor_cpu(out, g_cpu) for out in outputs]
     )
     return all_v, all_u, all_u_dense
 
@@ -1810,6 +1833,7 @@ def _check_analytical_numerical_equal(
     all_u,
     rtol,
     atol,
+    eps,
     test_imag,
     *,
     is_forward_ad=False,
@@ -1825,7 +1849,7 @@ def _check_analytical_numerical_equal(
             updated_atol = _adjusted_atol(atol, all_u[i], all_v[j] if all_v else None)
             if not _allclose_with_type_promotion(a, n.to(a.device), rtol, updated_atol):
                 jacobians_str = _run_slow_mode_and_get_error(
-                    func, tupled_inputs, outputs, i, j, rtol, atol, is_forward_ad
+                    func, tupled_inputs, outputs, i, j, rtol, atol, eps, is_forward_ad
                 )
                 raise GradcheckError(
                     _get_notallclose_msg(
@@ -1909,6 +1933,7 @@ def _fast_gradcheck(
         all_u,
         rtol,
         atol,
+        eps,
         test_imag,
         is_forward_ad=use_forward_ad,
     )
@@ -1930,7 +1955,6 @@ def gradcheck(
     atol: float = 1e-5,
     rtol: float = 1e-3,
     raise_exception: bool = True,
-    check_sparse_nnz: Optional[bool] = None,
     nondet_tol: float = 0.0,
     check_undefined_grad: bool = True,
     check_grad_dtypes: bool = False,
@@ -1940,7 +1964,7 @@ def gradcheck(
     check_backward_ad: bool = True,
     fast_mode: bool = False,
     masked: Optional[bool] = None,
-) -> bool:
+) -> bool:  # noqa: D400,D205
     r"""Check gradients computed via small finite differences against analytical
     gradients wrt tensors in :attr:`inputs` that are of floating point or complex type
     and with ``requires_grad=True``.
@@ -1985,12 +2009,6 @@ def gradcheck(
         raise_exception (bool, optional): indicating whether to raise an exception if
             the check fails. The exception gives more information about the
             exact nature of the failure. This is helpful when debugging gradchecks.
-        check_sparse_nnz (bool, optional): if ``True``, gradcheck allows
-            for SparseTensor input, and for any SparseTensor inputs,
-            gradcheck will perform its check at ``nnz`` positions only.
-            The ``check_sparse_nnz`` argument is deprecated, use the
-            ``masked`` argument instead. If ``check_sparse_nnz != masked``, an
-            exception is raised.
         nondet_tol (float, optional): tolerance for non-determinism. When running
             identical inputs through the differentiation, the results must either match
             exactly (default, 0.0) or be within this tolerance.
@@ -2014,22 +2032,6 @@ def gradcheck(
         ``True`` if all differences satisfy allclose condition
 
     """
-    if check_sparse_nnz is None:
-        if masked is None:
-            check_sparse_nnz = masked = False
-        else:
-            check_sparse_nnz = masked
-    else:
-        warnings.warn(
-            "Backwards compatibility: check_sparse_nnz is deprecated, it will be removed in a future version of PyTorch."
-            f" Use masked={check_sparse_nnz} instead."
-        )
-        if masked is None:
-            masked = check_sparse_nnz
-        elif check_sparse_nnz != masked:
-            raise ValueError(
-                f"Expected specified check_sparse_nnz (={check_sparse_nnz}) to be equal to masked (={masked})."
-            )
     assert (
         check_forward_ad or check_backward_ad
     ), "Expected at least one of check_forward_ad or check_backward_ad to be True"
@@ -2041,7 +2043,6 @@ def gradcheck(
     ), "Setting check_batched_forward_grad=True requires check_forward_ad to be True"
     args = locals().copy()
     args.pop("raise_exception")
-    args.pop("check_sparse_nnz")
     if not raise_exception:
         try:
             return _gradcheck_helper(**args)
@@ -2129,7 +2130,7 @@ def gradgradcheck(
     check_rev_over_rev: bool = True,
     fast_mode: bool = False,
     masked: bool = False,
-) -> bool:
+) -> bool:  # noqa: D400,D205
     r"""Check gradients of gradients computed via small finite differences
     against analytical gradients wrt tensors in :attr:`inputs` and
     :attr:`grad_outputs` that are of floating point or complex type and with

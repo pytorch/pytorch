@@ -14,7 +14,7 @@ class _BatchNorm(torch.nn.modules.batchnorm._BatchNorm):
         self.register_buffer('zero_point', torch.tensor(0, **factory_kwargs))
 
     @staticmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         activation_post_process = mod.activation_post_process
         if type(mod) == cls._NNI_BN_RELU_MODULE:
             mod = mod[0]
@@ -72,8 +72,8 @@ class BatchNorm2d(_BatchNorm):
             self.running_var, self.eps, self.scale, self.zero_point)
 
     @classmethod
-    def from_float(cls, mod):
-        return _BatchNorm.from_float(cls, mod)
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
+        return _BatchNorm.from_float(cls, mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
 
 class BatchNorm3d(_BatchNorm):
     r"""This is the quantized version of :class:`~torch.nn.BatchNorm3d`.
@@ -102,5 +102,5 @@ class BatchNorm3d(_BatchNorm):
             self.running_var, self.eps, self.scale, self.zero_point)
 
     @classmethod
-    def from_float(cls, mod):
-        return _BatchNorm.from_float(cls, mod)
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
+        return _BatchNorm.from_float(cls, mod, use_precomputed_fake_quant=use_precomputed_fake_quant)

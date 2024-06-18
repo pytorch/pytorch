@@ -2,8 +2,6 @@
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
-#include <iostream>
-
 namespace py = pybind11;
 
 namespace torch {
@@ -25,6 +23,9 @@ static std::mutex to_free_frames_mutex;
 static std::vector<CapturedTraceback::PyFrame> to_free_frames;
 struct PythonTraceback : public CapturedTraceback::Python {
   std::vector<CapturedTraceback::PyFrame> gather() override {
+    if (!Py_IsInitialized()) {
+      return {};
+    }
     std::vector<CapturedTraceback::PyFrame> frames;
     py::gil_scoped_acquire acquire;
     {

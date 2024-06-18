@@ -42,6 +42,10 @@
   desc: |
           This tag indicates if an operator doesn't guarantee bitwise equivalence
           across different runs of an operator with identical inputs.
+- tag: needs_fixed_stride_order
+  desc: |
+          This tag indicates that the operator should be passed Tensors following
+          the same stride permutation as observed in eager when compiled in inductor.
 
 # NOTE [Core ATen Ops]
 - tag: core

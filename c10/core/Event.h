@@ -1,5 +1,9 @@
 #pragma once
 
+#include <c10/core/Device.h>
+#include <c10/core/DeviceType.h>
+#include <c10/core/Stream.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/core/impl/InlineEvent.h>
 #include <c10/core/impl/VirtualGuardImpl.h>
 
@@ -112,6 +116,18 @@ struct Event final {
    */
   bool query() const {
     return impl_.query();
+  }
+
+  double elapsedTime(const Event& event) const {
+    return impl_.elapsedTime(event.impl_);
+  }
+
+  void* eventId() const {
+    return impl_.eventId();
+  }
+
+  void synchronize() const {
+    return impl_.synchronize();
   }
 
  private:

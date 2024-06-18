@@ -2,18 +2,20 @@ import functools
 import itertools
 import logging
 import operator
-from collections import defaultdict, namedtuple
-from typing import Any, Dict, List, Optional, Union
-
-from sympy import Expr
+from collections import Counter, defaultdict
+from typing import Any, Dict, List, Optional, Set, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor as inductor
+import torch.utils._pytree as pytree
+from torch import fx
 from torch._decomp import register_decomposition
+from torch._dynamo.utils import counters, optimus_scuba_log
 
-from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_functional
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
-from torch.fx.immutable_collections import immutable_dict
+
+from torch._utils_internal import upload_graph
+from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 
 from .. import config, ir, pattern_matcher
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
@@ -23,8 +25,10 @@ from ..pattern_matcher import (
     _return_true,
     Arg,
     CallFunction,
+    CallFunctionVarArgs,
     filter_nodes,
     get_arg_value,
+    get_mutation_region_id,
     Ignored,
     init_once_fakemode,
     KeywordArg,
@@ -37,7 +41,15 @@ from ..pattern_matcher import (
 )
 from ..utils import decode_device, is_pointwise_use
 from ..virtualized import V
-from .group_batch_fusion import group_batch_fusion_post_grad_passes
+from .ddp_fusion import fuse_ddp_communication
+from .group_batch_fusion import group_batch_fusion_passes, POST_GRAD_FUSIONS
+from .micro_pipeline_tp import patterns as micro_pipeline_tp_patterns
+from .pre_grad import is_same_dict, save_inductor_dict
+from .reinplace import reinplace_inplaceable_ops
+from .split_cat import POST_GRAD_PATTERNS
+
+if TYPE_CHECKING:
+    from sympy import Expr
 
 
 log = logging.getLogger(__name__)
@@ -50,8 +62,6 @@ pass_patterns = [
     PatternMatcherPass(),
     PatternMatcherPass(),
 ]
-# patterns applied only in inference
-inference_patterns = PatternMatcherPass()
 
 
 def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
@@ -75,39 +85,58 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     if config.pattern_matcher:
         lazy_init()
-
-        group_batch_fusion_post_grad_passes(gm.graph)
+        optimus_scuba_log["before_recompile_post_grad"] = upload_graph(gm.graph)
+        group_batch_fusion_passes(gm.graph, pre_grad=False)
         remove_noop_ops(gm.graph)
-
         for patterns in pass_patterns:
-            patterns.apply(gm.graph)
-        if is_inference:
-            inference_patterns.apply(gm.graph)
+            patterns.apply(gm.graph)  # type: ignore[arg-type]
+        for pass_name in config.post_grad_fusion_options:
+            # skip all patterns for group batch fusions
+            if pass_name in POST_GRAD_FUSIONS:
+                continue
+            pattern_matcher_pass = POST_GRAD_PATTERNS[pass_name]
+            inductor_before_change = save_inductor_dict(
+                [pattern_matcher_pass.pass_name]
+            )
+            pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
+            if not is_same_dict(counters["inductor"], inductor_before_change):
+                optimus_scuba_log[
+                    f"{pattern_matcher_pass.pass_name}_post_grad"
+                ] = upload_graph(gm.graph)
+
+    if config._micro_pipeline_tp:
+        micro_pipeline_tp_patterns.apply(gm)
+
+    if config._fuse_ddp_communication:
+        fuse_ddp_communication(
+            gm.graph,
+            config._fuse_ddp_communication_passes,
+            config._fuse_ddp_bucket_size,
+        )
 
     if config.post_grad_custom_post_pass is not None:
         config.post_grad_custom_post_pass(gm.graph)
 
     stable_topological_sort(gm.graph)
 
+    move_constructors_to_cuda(gm.graph)
+
     fake_tensor_updater.incremental_update()
-    # Keep this last, since it introduces mutation. Look at
+
+    # Keep these last, since they introduces mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
-    reinplace_scatters(gm.graph)
+    reinplace_inplaceable_ops(gm.graph)
+    decompose_auto_functionalized(gm.graph)
+
     gm.recompile()
+    optimus_scuba_log["after_recompile_post_grad"] = upload_graph(gm.graph)
     gm.graph.lint()
-
-    if config.is_fbcode():
-        from torch._inductor.fb.utils import get_everpaste_url  # type: ignore[import]
-
-        log.info(
-            "Print graph after recompile in post grad passes: %s",
-            get_everpaste_url(str(gm.graph)),
-        )
 
 
 @init_once_fakemode
 def lazy_init():
     if torch._C._has_mkldnn:
+        from . import decompose_mem_bound_mm  # noqa: F401
         from .mkldnn_fusion import _mkldnn_fusion_init
 
         _mkldnn_fusion_init()
@@ -119,6 +148,8 @@ def reorder_for_locality(graph: torch.fx.Graph):
             other_node.op == "call_function"
             and other_node.target != operator.getitem
             and all((n in seen_nodes) for n in other_node.users)
+            and get_mutation_region_id(graph, node)
+            == get_mutation_region_id(graph, other_node)
         ):
             # move node's producers right before it
             node.prepend(other_node)
@@ -129,12 +160,7 @@ def reorder_for_locality(graph: torch.fx.Graph):
     # copy_ will appear at the end of functionalized graphs when there is mutation on inputs,
     # and this reordering doesnt work well with mutation
     first_copy = next(
-        (
-            node
-            for node in graph.nodes
-            if node.op == "call_function"
-            and node.target == torch.ops.aten.copy_.default
-        ),
+        iter(graph.find_nodes(op="call_function", target=torch.ops.aten.copy_.default)),
         None,
     )
     past_mutating_epilogue = True if first_copy is None else False
@@ -165,15 +191,33 @@ def register_lowering_pattern(pattern, extra_check=_return_true, pass_number=1):
 ################################################################################
 
 
+def is_valid_mm_plus_mm(match: Match):
+    *b1, m1, k1 = match.kwargs["mat1"].meta.get("tensor_meta").shape
+    *b2, k2, n1 = match.kwargs["mat2"].meta.get("tensor_meta").shape
+    if k1 != k2:
+        return False
+
+    *b1, m2, k3 = match.kwargs["mat3"].meta.get("tensor_meta").shape
+    *b2, k4, n2 = match.kwargs["mat4"].meta.get("tensor_meta").shape
+    if k3 != k4:
+        return False
+
+    if m1 != m2 or n1 != n2:
+        return False
+
+    return True
+
+
 @register_lowering_pattern(
     CallFunction(
         aten.add,
-        CallFunction(aten.mm, Arg(), Arg()),
-        CallFunction(aten.mm, Arg(), Arg()),
-    )
+        CallFunction(aten.mm, KeywordArg("mat1"), KeywordArg("mat2")),
+        CallFunction(aten.mm, KeywordArg("mat3"), KeywordArg("mat4")),
+    ),
+    extra_check=is_valid_mm_plus_mm,
 )
 def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
-    return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)  # type: ignore[attr-defined]
+    return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)
 
 
 def cuda_and_enabled_mixed_mm(match):
@@ -228,11 +272,12 @@ def cuda_and_enabled_mixed_mm_and_not_int8(match):
                                 KeywordArg("mat2"),
                                 0xF,
                             ),
-                            CallFunction(
-                                aten.__rshift__.Scalar,
-                                KeywordArg("mat2"),
-                                4,
-                            ),
+                            # CallFunction(
+                            #    aten.__rshift__.Scalar,
+                            #    KeywordArg("mat2"),
+                            #    4,
+                            # ),
+                            True,
                         ),
                         1,
                     ),
@@ -246,7 +291,7 @@ def cuda_and_enabled_mixed_mm_and_not_int8(match):
     extra_check=cuda_and_enabled_mixed_mm_and_not_int8,
 )
 def uint4x2_mixed_mm(match: Match, mat1, mat2, mat2_mm_shape, mat2_dtype):
-    return inductor.kernel.unpack_mixed_mm.tuned_uint4x2_mixed_mm(  # type: ignore[attr-defined]
+    return inductor.kernel.unpack_mixed_mm.tuned_uint4x2_mixed_mm(
         mat1, mat2, mat2_mm_shape, mat2_dtype
     )
 
@@ -269,7 +314,7 @@ def uint4x2_mixed_mm(match: Match, mat1, mat2, mat2_mm_shape, mat2_dtype):
     extra_check=cuda_and_enabled_mixed_mm,
 )
 def mixed_mm(match: Match, mat1, mat2, mat2_dtype):
-    return inductor.kernel.mm.tuned_mixed_mm(mat1, mat2, mat2_dtype)  # type: ignore[attr-defined]
+    return inductor.kernel.mm.tuned_mixed_mm(mat1, mat2, mat2_dtype)
 
 
 @register_graph_pattern(
@@ -307,8 +352,7 @@ def pointless_cumsum_replacement(match: Match, shape, fill_value, device, dtype,
 
     # only replace the output node, not all nodes
     match.nodes = [match.output_node()]
-    with V.fake_mode:
-        match.replace_by_example(repl, list(shape))
+    match.replace_by_example(repl, list(shape))
 
 
 def shape_of_mm(a, b):
@@ -362,7 +406,7 @@ def cat_tuned_op(match, inputs, dim, *, op, shape_of):
         if new_size is None:
             new_size = shape
         else:
-            new_size[notdim] = V.graph.sizevars.guard_equals(
+            new_size[notdim] = V.graph.sizevars.guard_equals(  # type: ignore[call-overload]
                 shape[notdim], new_size[notdim]
             )
             new_size[dim] += shape[dim]
@@ -371,7 +415,8 @@ def cat_tuned_op(match, inputs, dim, *, op, shape_of):
 
     assert new_size is not None
     dtype = functools.reduce(
-        torch.promote_types, [x.get_dtype() for x in itertools.chain(*inputs)]
+        torch.promote_types,
+        [x.get_dtype() for x in itertools.chain.from_iterable(inputs)],
     )
     device = inputs[0][0].get_device()
     kernel = ir.ConcatKernel(
@@ -385,7 +430,7 @@ def cat_tuned_op(match, inputs, dim, *, op, shape_of):
         dst = ir.SliceView.create(kernel_tensor, dim, offsets_start[i], offsets_end[i])
         src = op(*inputs[i], layout=dst.get_layout()).data.data
         assert isinstance(src, (ir.ExternKernelOut, ir.TemplateBuffer))
-        src.layout = ir.AliasedLayout(dst)
+        src.layout = ir.NonOwningLayout(dst)
         kernel.inputs.append(src)
 
     kernel.name = V.graph.register_buffer(kernel)
@@ -491,10 +536,14 @@ def same_meta(node1: torch.fx.Node, node2: torch.fx.Node):
     return (
         val1 is not None
         and val2 is not None
-        and val1.size() == val2.size()
+        and statically_known_true(sym_eq(val1.size(), val2.size()))
         and val1.layout == val2.layout
+        and val1.dtype == val2.dtype
         and val1.device == val2.device
-        and (val1.layout != torch.strided or val1.stride() == val2.stride())
+        and (
+            val1.layout != torch.strided
+            or statically_known_true(sym_eq(val1.stride(), val2.stride()))
+        )
     )
 
 
@@ -566,6 +615,11 @@ def cat_noop(inputs, dim=0):
     return len(inputs) == 1
 
 
+@register_noop_decomp(aten.view)
+def view_noop(arg, size):
+    return arg.shape == size
+
+
 # Note, we also always have a check for identical metadata, which is why these
 # are safe
 @register_noop_decomp([aten.copy], nop_arg=1)
@@ -576,20 +630,23 @@ def true_noop(*args, **kwargs):
 
 def remove_noop_ops(graph: torch.fx.Graph):
     """
-    Removes aten.clone and aten.alias ops from the graph when it's safe.
-
-    Other no-ops should be done as decompositions that selectively turn into aten.clone or aten.alias
+    Removes both operations that are essentially aten.clone and operations that are essentially aten.alias from the graph.
     """
+    inputs = set()
     input_storages = set()
     output_storages = set()
 
-    for node in graph.nodes:
-        if node.op == "placeholder":
-            input_storages.add(get_node_storage(node))
-        else:
-            break
+    for node in graph.find_nodes(op="placeholder"):
+        inputs.add(node)
+        input_storages.add(get_node_storage(node))
 
-    for out in tuple(graph.nodes)[-1].args[0]:
+    output_node = next(iter(reversed(graph.nodes)))
+    assert output_node.op == "output"
+    outputs = output_node.args[0]
+    if not isinstance(outputs, (list, tuple)):
+        # nested subgraphs can have singleton outputs
+        outputs = (outputs,)
+    for out in outputs:
         if isinstance(out, torch.fx.Node):
             output_storages.add(get_node_storage(out))
 
@@ -602,13 +659,28 @@ def remove_noop_ops(graph: torch.fx.Graph):
                 src = src_index(node.args)
             if not isinstance(src, torch.fx.Node):
                 continue
+            # Don't introduce new aliasing between inputs and outputs.
             # See fx_passes/README.md for a discussion of why this is
             # necessary.
-            if get_node_storage(node) in output_storages and (
-                get_node_storage(src) in input_storages
-                or get_node_storage(src) in output_storages
+            node_storage = get_node_storage(node)
+            src_storage = get_node_storage(src)
+            node_is_view = node_storage == src_storage
+            if (
+                not node_is_view
+                and node_storage in output_storages
+                and (src_storage in input_storages or src_storage in output_storages)
             ):
                 continue
+
+            # Even if input and outputs are expected to alias,
+            # don't make "node is src" True
+            if (
+                node_is_view
+                and node in output_node.args
+                and (src in inputs or src in output_node.args)
+            ):
+                continue
+
             is_valid, args, kwargs = get_fake_args_kwargs(node)
             if not is_valid:
                 continue
@@ -617,88 +689,36 @@ def remove_noop_ops(graph: torch.fx.Graph):
                 graph.erase_node(node)
 
 
-InplaceableOp = namedtuple("InplaceableOp", ["inplace_op", "mutated_arg"])
+def decompose_auto_functionalized(graph):
+    graph_pass = PatternMatcherPass()
 
+    @register_graph_pattern(
+        CallFunctionVarArgs(torch.ops.higher_order.auto_functionalized),
+        pass_dict=graph_pass,
+    )
+    def replacement(match: Match, *args, **kwargs):
+        from torch._higher_order_ops.auto_functionalize import auto_functionalized_dense
 
-def reinplace_scatters(graph):
-    """
-    Reinplaces scatter operations in easy cases where the node being mutated
-    is only used by the scatter (users == 1), and the node being mutated
-    shares storage with no other nodes.
+        only_clone_these_tensors = tuple(
+            match.nodes[0].meta.get("only_clone_these_tensors", [])
+        )
 
-    Also handles input mutations when there is a corresponding copy node.
-    """
+        flat_args, spec = pytree.tree_flatten((args, kwargs))
 
-    copy_args_to_copy_nodes = {}
-    mutated_inputs = set()
-    storage_to_nodes = defaultdict(list)
-    for node in reversed(graph.nodes):
-        storage_to_nodes[get_node_storage(node)].append(node)
-        if node.target == aten.copy_.default:
-            dst = node.args[0]
-            src = node.args[1]
-            # If the target is a getitem and it indexes a possible clone,
-            # then skip over it
-            if (
-                src.target == operator.getitem
-                and src.args[0].target == triton_kernel_wrapper_functional
-                and src.args[0].kwargs["kwargs"][src.args[1]] == node.args[0]
-            ):
-                src = src.args[0]
-            copy_args_to_copy_nodes[(dst, src)] = node
-            assert node.args[0].op == "placeholder"
-            mutated_inputs.add(node.args[0])
+        # NB: we combine (args, kwargs) into flat args for replacing.
+        # This is replace_by_example uses make_fx which does not support
+        # tracing a function with kwargs.
+        def decomp(*flat_args):
+            args, kwargs = pytree.tree_unflatten(flat_args, spec)
+            return auto_functionalized_dense(*args, only_clone_these_tensors, **kwargs)
 
-    def can_replace(node, mutated_arg):
-        if get_node_storage(mutated_arg) is None:
-            return False
-        shared_view_nodes = storage_to_nodes[get_node_storage(mutated_arg)]
-        if mutated_arg.op == "placeholder":
-            if not (
-                copy_node := copy_args_to_copy_nodes.get((mutated_arg, node), False)
-            ):
-                return False
+        match.replace_by_example(decomp, flat_args, run_dce=False)
 
-            if len(shared_view_nodes) > 2:  # Arg aliases another node other than copy_
-                return False
-
-            # Check for any uses other than current node and copy_ epilogue
-            if len(mutated_arg.users) > 2:
-                return False
-
-            graph.erase_node(copy_node)
-            return True
-        else:
-            # NB: This condition could be relaxed if none of the aliases
-            # are used after this mutation op. But that's trickier.
-            if len(shared_view_nodes) > 1:  # Arg aliases another node
-                return False
-            if len(mutated_arg.users) > 1:  # Arg used somewhere else
-                return False
-            return True
-
-    inplaceable_ops = {
-        aten.index_put.default: InplaceableOp(aten.index_put_.default, 0),
-    }
-    inplaceable_triton_ops = {triton_kernel_wrapper_functional}
-
-    for node in graph.nodes:
-        if (inplaceable_op := inplaceable_ops.get(node.target, None)) is not None:
-            if can_replace(node, node.args[inplaceable_op.mutated_arg]):
-                node.target = inplaceable_op.inplace_op
-        elif node.target in inplaceable_triton_ops:
-            # inplaceable_triton_ops take an additional argument called
-            # tensors_to_clone which contain a list of tensors to clone
-            # This pass iterates over them and sees which ones are safe
-            # to eliminate (i.e. no longer need the clones)
-            tensors_to_clone = []
-            for arg in node.kwargs["tensors_to_clone"]:
-                assert arg in node.kwargs["kwargs"]
-                if not can_replace(node, node.kwargs["kwargs"][arg]):
-                    tensors_to_clone.append(arg)
-            kwargs = dict(node.kwargs)
-            kwargs["tensors_to_clone"] = tensors_to_clone
-            node.kwargs = immutable_dict(kwargs)
+    graph_pass.apply(graph)
+    for node in graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.auto_functionalized
+    ):
+        raise AssertionError("auto_functionalized was not removed")
 
 
 @register_lowering_pattern(
@@ -784,9 +804,10 @@ def view_to_reshape(gm):
     """
     Replace view ops in the GraphModule to reshape ops.
     """
-    for nd in gm.graph.nodes:
-        if nd.target == torch.ops.aten.view.default:
-            nd.target = torch.ops.aten.reshape.default
+    for nd in gm.graph.find_nodes(
+        op="call_function", target=torch.ops.aten.view.default
+    ):
+        nd.target = torch.ops.aten.reshape.default
 
 
 def should_prefer_unfused_addmm(match):
@@ -807,8 +828,7 @@ def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp):
     def repl(inp, x1, x2):
         return x1 @ x2 + inp
 
-    with V.fake_mode:
-        match.replace_by_example(repl, [inp, mat1, mat2])
+    match.replace_by_example(repl, [inp, mat1, mat2])
 
 
 def is_valid_addmm_fusion(match):
@@ -851,8 +871,7 @@ def addmm(match, mat1, mat2, *, inp):
     def repl(inp, mat1, mat2):
         return aten.addmm(inp, mat1, mat2)
 
-    with V.fake_mode:
-        match.replace_by_example(repl, [inp, mat1, mat2])
+    match.replace_by_example(repl, [inp, mat1, mat2])
 
 
 def check_shape_cuda_and_fused_int_mm_mul_enabled(match):
@@ -893,3 +912,205 @@ def check_shape_cuda_and_fused_int_mm_mul_enabled(match):
 )
 def fused_int_mm_mul(match: Match, mat1, mat2, mat3, out_dtype=None):
     return inductor.kernel.mm.tuned_fused_int_mm_mul(mat1, mat2, mat3, out_dtype)
+
+
+class ConstructorMoverPass:
+    def __init__(self, target: str, allow_outputs: bool = False) -> None:
+        """
+        Move constructors from cpu to the target_device.
+
+        Sweeps through the module, looking for constructor nodes that can be moved
+        to the target_device.
+
+        A constructor node can be moved to the target_device iff all of its users
+        can also be moved (tested by cannot_be_moved). Otherwise, all dependent
+        constructor nodes won't be moved.
+
+        - target: target device type
+        - allow_outputs: allow outputs to be moved
+        """
+
+        self.target = target
+        self.allow_outputs = allow_outputs
+
+        assert isinstance(target, str), (
+            "target should be a string representing the device type. "
+            f"Got: {type(target).__name__}"
+        )
+
+    def allow_cpu_device(self, node: fx.Node) -> bool:
+        """
+        Returns whether a node that returns a tensor on the target device may have
+        cpu tensors as input.
+        """
+        return node.target in (
+            torch.ops.aten.index.Tensor,
+            torch.ops.aten.index_put.default,
+            torch.ops.aten.index_put_.default,
+            torch.ops.aten.copy.default,
+            torch.ops.aten.copy_.default,
+            torch.ops.aten.slice_scatter.default,
+        )
+
+    def cannot_be_moved(self, node: fx.Node) -> bool:
+        """
+        Returns whether a node can be moved to the target device.
+
+        If this function returns False, it means that this node and all of its users
+        won't be moved into the target device.
+        """
+        if node.target == "output":
+            return not self.allow_outputs
+
+        if not (
+            isinstance(node.target, torch._ops.OpOverload)
+            and node.target.namespace in ("prims", "aten")
+        ):
+            return True
+
+        return False
+
+    def get_node_device(self, node: fx.Node) -> Optional[torch.device]:
+        """
+        Get the device of a node.
+        """
+        ten = node.meta.get("val")
+        return None if not isinstance(ten, torch.Tensor) else ten.device
+
+    def get_cpu_indeg_count(self, graph: fx.Graph) -> Dict[fx.Node, int]:
+        """
+        Get the number of cpu inputs to a node
+        """
+        cpu_indeg: Dict[fx.Node, int] = Counter()
+
+        for node in graph.nodes:
+            cpu_count = 0
+
+            def add_cpu_inp(node):
+                nonlocal cpu_count
+                device = self.get_node_device(node)
+                cpu_count += device is not None and device.type == "cpu"
+
+            pytree.tree_map_only(fx.Node, add_cpu_inp, (node.args, node.kwargs))
+
+            if cpu_count:
+                cpu_indeg[node] = cpu_count
+
+        return cpu_indeg
+
+    def __call__(self, graph: fx.Graph) -> None:
+        target_devices = set()
+        constructors = []
+
+        for node in graph.nodes:
+            device = self.get_node_device(node)
+            if device and device.type == self.target:
+                target_devices.add(device)
+
+            if not (
+                isinstance(node.target, torch._ops.OpOverload)
+                and node.target.namespace in ("prims", "aten")
+            ):
+                continue
+
+            if not torch._subclasses.fake_tensor._is_tensor_constructor(node.target):
+                continue
+
+            if not node.kwargs.get("device") == torch.device("cpu"):
+                continue
+
+            constructors.append(node)
+
+        # not handling multiple target devices initially
+        if not constructors or len(target_devices) != 1:
+            return
+
+        movable_constructors = self.find_movable_constructors(graph, constructors)
+
+        for node in movable_constructors:
+            kwargs = node.kwargs.copy()
+            kwargs["device"] = next(iter(target_devices))
+            node.kwargs = kwargs
+
+    def find_movable_constructors(
+        self, graph: fx.Graph, constructors: List[fx.Node]
+    ) -> Set[fx.Node]:
+        """
+        Starting from the cpu constructors, iterate through the graph and test that all of their
+        downstream uses can safely be moved to cpu.
+        """
+        cpu_indeg: Dict[fx.Node, int] = self.get_cpu_indeg_count(graph)
+
+        # which constructors cannot be moved to cuda
+        cannot_move_to_cuda: Set[fx.Node] = set()
+
+        # For any node in the graph, which constructors does it have a dependency on
+        constructor_dependencies: Dict[fx.Node, Set[fx.Node]] = defaultdict(set)
+
+        # if a cpu node has a dependency on two different cpu constructors,
+        # then if either constructor cannot be moved to cuda, the other cannot as well.
+        # In this case any node with a dependency on one will have a dependency on the other
+        equal_constructor_sets: Dict[fx.Node, Set[fx.Node]] = {
+            c: {c} for c in constructors
+        }
+
+        def make_dependencies_equivalent(
+            set1: Set[fx.Node], set2: Set[fx.Node]
+        ) -> Set[fx.Node]:
+            # could use union find but not worth complexity here
+            set1.update(set2)
+            for obj in set1:
+                equal_constructor_sets[obj] = set1
+            return set1
+
+        queue: List[fx.Node] = list(constructors)
+
+        for c in queue:
+            constructor_dependencies[c].add(c)
+
+        while queue:
+            node = queue.pop()
+            dependencies = constructor_dependencies[node]
+
+            for user in node.users:
+                if self.cannot_be_moved(user):
+                    cannot_move_to_cuda.update(dependencies)
+                    break
+
+                # this node was used on a op which takes in multiple devices and output a cuda
+                # tensor. we can convert its cpu input to cuda without making further changes
+                node_device = self.get_node_device(user)
+                if (
+                    self.allow_cpu_device(user)
+                    and node_device
+                    and node_device.type == self.target
+                ):
+                    del cpu_indeg[user]
+                else:
+                    # otherwise, we should continue look at its downstream uses
+                    cpu_indeg[user] -= 1
+                    if cpu_indeg[user] == 0:
+                        del cpu_indeg[user]
+                        queue.append(user)
+
+                unioned_set = make_dependencies_equivalent(
+                    dependencies, constructor_dependencies[user]
+                )
+                constructor_dependencies[user] = unioned_set
+
+        for node in cpu_indeg:
+            if constructor_dependencies[node]:
+                cannot_move_to_cuda.update(constructor_dependencies[node])
+
+        all_cannot_move_to_cuda = cannot_move_to_cuda.copy()
+        for constructor in cannot_move_to_cuda:
+            all_cannot_move_to_cuda.update(equal_constructor_sets[constructor])
+
+        return set(constructors) - all_cannot_move_to_cuda
+
+
+def move_constructors_to_cuda(graph: fx.Graph) -> None:
+    """
+    Moves intermediary tensors which are constructed on the cpu to cuda when safe
+    """
+    ConstructorMoverPass("cuda")(graph)

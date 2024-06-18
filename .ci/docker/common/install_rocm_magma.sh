@@ -7,7 +7,7 @@ git clone https://bitbucket.org/icl/magma.git
 pushd magma
 
 # Version 2.7.2 + ROCm related updates
-git checkout 823531632140d0edcb7e77c3edc0e837421471c5
+git checkout a1625ff4d9bc362906bd01f805dbbe12612953f6
 
 cp make.inc-examples/make.inc.hip-gcc-mkl make.inc
 echo 'LIBDIR += -L$(MKLROOT)/lib' >> make.inc

@@ -36,9 +36,9 @@ from .transformed_distribution import TransformedDistribution
 from .uniform import Uniform
 from .utils import _sum_rightmost, euler_constant as _euler_gamma
 
-_KL_REGISTRY = (
-    {}
-)  # Source of truth mapping a few general (type, type) pairs to functions.
+_KL_REGISTRY: Dict[
+    Tuple[Type, Type], Callable
+] = {}  # Source of truth mapping a few general (type, type) pairs to functions.
 _KL_MEMOIZE: Dict[
     Tuple[Type, Type], Callable
 ] = {}  # Memoized version mapping many specific (type, type) pairs to functions.
@@ -128,9 +128,8 @@ def _dispatch_kl(type_p, type_q):
     right_fun = _KL_REGISTRY[right_p, right_q]
     if left_fun is not right_fun:
         warnings.warn(
-            "Ambiguous kl_divergence({}, {}). Please register_kl({}, {})".format(
-                type_p.__name__, type_q.__name__, left_p.__name__, right_q.__name__
-            ),
+            f"Ambiguous kl_divergence({type_p.__name__}, {type_q.__name__}). "
+            f"Please register_kl({left_p.__name__}, {right_q.__name__})",
             RuntimeWarning,
         )
     return left_fun

@@ -258,7 +258,6 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
     case Tag::Capsule:
       TORCH_CHECK_TYPE(
           false, "Cannot inspect value of type ", this->tagKind());
-      [[fallthrough]];
     default:
       // don't record scalars.
       break;
@@ -472,7 +471,7 @@ bool IValue::isOptionalTensorList() const {
     return false;
   }
   const auto& ty = static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType;
-  const auto& expected_ty = c10::getTypePtr<c10::optional<at::Tensor>>();
+  const auto& expected_ty = c10::getTypePtr<std::optional<at::Tensor>>();
   return expected_ty == ty;
 }
 
@@ -643,6 +642,13 @@ std::ostream& IValue::repr(
       out << "torch.device(";
       c10::printQuotedString(out, device_stream.str());
       return out << ")";
+    }
+    case IValue::Tag::Generator: {
+      auto generator = v.toGenerator();
+      out << "torch.Generator(device=";
+      c10::printQuotedString(out, generator.device().str());
+      out << ", seed=" << generator.current_seed() << ")";
+      return out;
     }
     case IValue::Tag::GenericDict:
       return printMaybeAnnotatedDict(out, v, formatter);
@@ -861,7 +867,7 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
     }
 
   }
-  AT_ERROR("Tag not found: ", v.tagKind());
+  return out << "<Invalid IValue tag=" << std::to_string(static_cast<uint32_t>(v.tag)) << ">";
 }
 
 #undef TORCH_FORALL_TAGS
@@ -880,14 +886,14 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::create(
       StrongTypePtr(nullptr, std::move(classType)), numSlots);
 }
 
-IValue IValue::deepcopy(c10::optional<at::Device> device) const {
-  IValue::HashAliasedIValueMap memo;
+IValue IValue::deepcopy(std::optional<at::Device> device) const {
+  IValue::HashIdentityIValueMap memo;
   return deepcopy(memo, device);
 }
 
 IValue IValue::deepcopy(
-    IValue::HashAliasedIValueMap& memo,
-    c10::optional<at::Device> device) const {
+    IValue::HashIdentityIValueMap& memo,
+    std::optional<at::Device> device) const {
   if (memo.count(*this)) {
     return memo.at(*this);
   }
@@ -956,6 +962,7 @@ IValue IValue::deepcopy(
     case IValue::Tag::SymBool:
     case IValue::Tag::Bool:
     case IValue::Tag::Device:
+    case IValue::Tag::Generator:
     case IValue::Tag::Uninitialized: {
       copy = *this;
     } break;
@@ -977,6 +984,7 @@ void IValue::reportToTensorTypeError() const {
 }
 
 std::string ivalue::Object::name() const {
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   return type()->name()->qualifiedName();
 }
 
@@ -1019,14 +1027,14 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::copy_to_weak_compilation_ref(
 }
 
 c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(
-    c10::optional<at::Device> device) const {
-  IValue::HashAliasedIValueMap memo;
+    std::optional<at::Device> device) const {
+  IValue::HashIdentityIValueMap memo;
   return deepcopy(memo, device);
 }
 
 c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(
-    IValue::HashAliasedIValueMap& memo,
-    c10::optional<at::Device> device) const {
+    IValue::HashIdentityIValueMap& memo,
+    std::optional<at::Device> device) const {
   auto cu = type_.cu_;
   auto object = ivalue::Object::create(WeakOrStrongTypePtr(type_.cu_, type_.type_), type()->numAttributes());
   for (const auto i : c10::irange(slots_.size())) {

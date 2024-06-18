@@ -34,6 +34,11 @@ using ::c10::Symbol;
 
 using OperationCreator = Operation (*)(const Node*);
 
+namespace {
+const std::array<at::Tag, 1> kJitOnlyOperatorTags = {
+    at::Tag::pt2_compliant_tag};
+}
+
 /*
  * Note: JIT relies on Operator instances having static lifetime, because
  * it for example stores a non-owning FunctionSchema* pointer in the Node class,
@@ -62,7 +67,7 @@ struct TORCH_API Operator {
   };
   struct UnparsedFunctionSchema final {
     std::string schema_string_;
-    mutable c10::optional<c10::AliasAnalysisKind> alias_analysis_;
+    mutable std::optional<c10::AliasAnalysisKind> alias_analysis_;
   };
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   struct JitOnlyOperator final {
@@ -75,8 +80,7 @@ struct TORCH_API Operator {
 
  public:
   Operator(c10::OperatorHandle opHandle, Operation operation)
-      : op_(C10Operator(
-            C10Operator{std::move(opHandle), std::move(operation)})) {}
+      : op_(C10Operator{std::move(opHandle), std::move(operation)}) {}
 
   Operator(
       std::string schema,
@@ -187,9 +191,11 @@ struct TORCH_API Operator {
         c10::overloaded(
             [](const C10Operator& op) { return op.handle_.getTags(); },
             [](const JitOnlyOperator& op) {
-              // Returns empty list of tags for JitOnlyOperators since it
-              // doesn't save c10::OperatorHandle
-              return c10::ArrayRef<at::Tag>();
+              // JitOnlyOperators don't have an c10::OperatorHandle or a way to
+              // specify tags. We're grandfathering them all into
+              // pt2_compliant_tag, but for anything else, please just stop
+              // using JitOnlyOperator.
+              return c10::ArrayRef<at::Tag>(kJitOnlyOperatorTags);
             }),
         op_);
   }
@@ -259,6 +265,9 @@ TORCH_API std::string canonicalSchemaString(const FunctionSchema& schema);
 TORCH_API const std::vector<std::shared_ptr<Operator>> getAllOperators();
 TORCH_API const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(
     Symbol name);
+// Returns operators in the order which OpOverloadPacket resolves them.
+TORCH_API std::vector<std::shared_ptr<Operator>> getAllSortedOperatorsFor(
+    Symbol name);
 
 // given a operator with an overload name, find the specific operator related to
 // it, may return nullptr if no operator exists.
@@ -289,16 +298,16 @@ TORCH_API bool aliasAnalysisHasSpecialCaseFor(c10::Symbol sym);
 // compile-time function for the selective op registration based on schema
 // string.
 template <typename Func>
-c10::optional<Operator> OperatorGenerator(
+std::optional<Operator> OperatorGenerator(
     const char* schema_str,
     Func&& op,
     AliasAnalysisKind alias_analysis) {
-  return c10::optional<Operator>(Operator(
+  return std::optional<Operator>(Operator(
       std::string(schema_str), std::forward<Func>(op), alias_analysis));
 }
 
 template <typename Func>
-c10::optional<Operator> OperatorGenerator(
+std::optional<Operator> OperatorGenerator(
     torch::detail::SelectiveStr<true> schema_str,
     Func&& op,
     AliasAnalysisKind alias_analysis) {
@@ -309,7 +318,7 @@ c10::optional<Operator> OperatorGenerator(
 }
 
 template <typename Func>
-c10::optional<Operator> OperatorGenerator(
+std::optional<Operator> OperatorGenerator(
     torch::detail::SelectiveStr<false> schema_str,
     Func&& op,
     AliasAnalysisKind alias_analysis) {
@@ -317,14 +326,14 @@ c10::optional<Operator> OperatorGenerator(
 }
 
 template <typename Func>
-c10::optional<Operator> OperatorGenerator(
+std::optional<Operator> OperatorGenerator(
     const std::string name,
     const std::string overload_name,
     const std::vector<c10::Argument> arguments,
     const std::vector<c10::Argument> returns,
     Func&& op,
     AliasAnalysisKind alias_analysis) {
-  return c10::optional<Operator>(Operator(
+  return std::optional<Operator>(Operator(
       name,
       overload_name,
       arguments,

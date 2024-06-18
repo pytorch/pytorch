@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import contextlib
 
 import torch
@@ -70,7 +72,7 @@ def autograd_registration_check(op, args, kwargs):
     # constructing true in-place or out variants), but we defer that
     # responsibility to a different test (schema_check).
 
-    flat_args = pytree.tree_leaves((args, kwargs))
+    flat_args = pytree.arg_tree_leaves(*args, **kwargs)
     all_tensors = [arg for arg in flat_args if isinstance(arg, torch.Tensor)]
     if not any(t.requires_grad for t in all_tensors):
         raise RuntimeError(

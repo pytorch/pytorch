@@ -1,6 +1,7 @@
 #include <torch/csrc/profiler/python/init.h>
 
 #include <ATen/record_function.h>
+#include <c10/core/impl/PyInterpreter.h>
 #include <c10/util/overloaded.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
@@ -56,6 +57,7 @@ PyTypeObject THPCapturedTracebackType = {
     nullptr, /* tp_getattro */
     nullptr, /* tp_setattro */
     nullptr, /* tp_as_buffer */
+    // NOLINTNEXTLINE(misc-redundant-expression)
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC, /* tp_flags */
     nullptr, /* tp_doc */
     (traverseproc)THPCapturedTraceback_traverse, /* tp_traverse */
@@ -77,13 +79,11 @@ PyTypeObject THPCapturedTracebackType = {
     nullptr, /* tp_new */
 };
 
-namespace pybind11 {
-namespace detail {
+namespace pybind11::detail {
 
 template <>
 struct type_caster<std::shared_ptr<torch::CapturedTraceback>> {
  public:
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   PYBIND11_TYPE_CASTER(
       std::shared_ptr<torch::CapturedTraceback>,
       _("torch._C._profiler.CapturedTraceback"));
@@ -106,11 +106,9 @@ struct type_caster<std::shared_ptr<torch::CapturedTraceback>> {
   }
 };
 
-} // namespace detail
-} // namespace pybind11
+} // namespace pybind11::detail
 
-namespace torch {
-namespace profiler {
+namespace torch::profiler {
 
 /* [NOTE: RecordFunctionFast]
  * This is an alternate way to call record_function from python.
@@ -139,6 +137,8 @@ namespace profiler {
 namespace {
 struct RecordFunctionFast {
   PyObject_HEAD PyObject* name;
+  PyObject* input_values;
+  PyObject* keyword_values;
   std::unique_ptr<at::RecordFunction> guard;
 };
 
@@ -149,6 +149,8 @@ PyObject* RecordFunctionFast_new(
   RecordFunctionFast* self = (RecordFunctionFast*)subtype->tp_alloc(subtype, 0);
   if (self != nullptr) {
     self->name = nullptr;
+    self->input_values = nullptr;
+    self->keyword_values = nullptr;
     self->guard.reset();
   }
   return (PyObject*)self;
@@ -159,15 +161,22 @@ int RecordFunctionFast_init(
     PyObject* args,
     PyObject* kwargs) {
   auto self = (RecordFunctionFast*)selfGeneric;
-  constexpr const char* kwlist[] = {"name", nullptr};
+  // NOLINTNEXTLINE(*-c-arrays*)
+  constexpr const char* kwlist[] = {
+      "name", "input_values", "keyword_values", nullptr};
   PyObject* name = nullptr;
+  PyObject* input_values = nullptr;
+  PyObject* keyword_values = nullptr;
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
-          "O",
+          "O|OO", // name is required PyObject, args and kwargs are optional
+                  // PyObjects
           // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
           const_cast<char**>(kwlist),
-          &name)) {
+          &name,
+          &input_values,
+          &keyword_values)) {
     return -1;
   }
   if (name) {
@@ -177,12 +186,26 @@ int RecordFunctionFast_init(
     Py_INCREF(name);
     self->name = name;
   }
+  if (input_values) {
+    TORCH_CHECK(
+        PyList_Check(input_values) || PyTuple_Check(input_values),
+        "input_values must be a list or tuple");
+    Py_INCREF(input_values);
+    self->input_values = input_values;
+  }
+  if (keyword_values) {
+    TORCH_CHECK(PyDict_Check(keyword_values), "keyword_values must be dict");
+    Py_INCREF(keyword_values);
+    self->keyword_values = keyword_values;
+  }
   return 0;
 }
 
 void RecordFunctionFast_dealloc(PyObject* selfGeneric) {
   auto self = (RecordFunctionFast*)selfGeneric;
   Py_CLEAR(self->name);
+  Py_CLEAR(self->input_values);
+  Py_CLEAR(self->keyword_values);
   if (self->guard) {
     self->guard.reset();
   }
@@ -198,7 +221,47 @@ PyObject* RecordFunctionFast_enter(PyObject* selfGeneric, PyObject* unused) {
         "Trying to enter a new record_function_fast context but the guard is unexpectedly already set");
     self->guard =
         std::make_unique<at::RecordFunction>(at::RecordScope::FUNCTION);
-    self->guard->before(THPUtils_unpackString(self->name));
+    std::vector<at::IValue> args;
+    std::unordered_map<std::string, at::IValue> kwargs;
+    bool profiler_need_input = torch::autograd::profiler::profilerEnabled() &&
+        torch::autograd::profiler::getProfilerConfig().report_input_shapes;
+    // parse through args if they exist
+    if (self->input_values != NULL && profiler_need_input) {
+      THPObjectPtr input_fast(
+          PySequence_Fast(self->input_values, "input must be a sequence"));
+      PyObject** input_items = PySequence_Fast_ITEMS(input_fast.get());
+      for (int i = 0; i < PySequence_Fast_GET_SIZE(input_fast.get()); i++) {
+        PyObject* item = input_items[i];
+        auto match = torch::jit::tryToInferType(item);
+        if (match.success()) {
+          args.push_back(torch::jit::toIValue(item, match.type()));
+        }
+      }
+    }
+
+    // parse through kwargs if they exist
+    if (self->keyword_values != NULL && profiler_need_input) {
+      Py_ssize_t pos = 0;
+      PyObject *key, *value;
+      while (PyDict_Next(self->keyword_values, &pos, &key, &value)) {
+        // Get the string representation of the key and value
+        std::string key_str = THPUtils_unpackString(key);
+        at::IValue ivalue;
+        if (THPUtils_checkString(value)) {
+          ivalue = at::IValue(THPUtils_unpackString(value));
+        } else {
+          auto match = torch::jit::tryToInferPrimitiveType(value);
+          if (match.success()) {
+            ivalue = torch::jit::toIValue(value, match.type());
+          } else {
+            TORCH_WARN("Unable to infer type of value for keyword: ", key_str);
+            ivalue = at::IValue("NULL");
+          }
+        }
+        kwargs[key_str] = ivalue;
+      }
+    }
+    self->guard->before(THPUtils_unpackString(self->name), &args, &kwargs);
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -242,6 +305,7 @@ void initPythonBindings(PyObject* module) {
       .value("CUDA", ProfilerState::CUDA)
       .value("NVTX", ProfilerState::NVTX)
       .value("ITT", ProfilerState::ITT)
+      .value("PRIVATEUSE1", ProfilerState::PRIVATEUSE1)
       .value("KINETO", ProfilerState::KINETO)
       .value("KINETO_GPU_FALLBACK", ProfilerState::KINETO_GPU_FALLBACK)
       .value(
@@ -253,13 +317,15 @@ void initPythonBindings(PyObject* module) {
       .value("LEGACY", ActiveProfilerType::LEGACY)
       .value("KINETO", ActiveProfilerType::KINETO)
       .value("NVTX", ActiveProfilerType::NVTX)
-      .value("ITT", ActiveProfilerType::ITT);
+      .value("ITT", ActiveProfilerType::ITT)
+      .value("PRIVATEUSE1", ActiveProfilerType::PRIVATEUSE1);
 
   py::enum_<ActivityType>(m, "ProfilerActivity")
       .value("CPU", ActivityType::CPU)
       .value("XPU", ActivityType::XPU)
       .value("MTIA", ActivityType::MTIA)
-      .value("CUDA", ActivityType::CUDA);
+      .value("CUDA", ActivityType::CUDA)
+      .value("PrivateUse1", ActivityType::PrivateUse1);
 
   py::class_<ExperimentalConfig>(m, "_ExperimentalConfig")
       .def(
@@ -307,7 +373,7 @@ void initPythonBindings(PyObject* module) {
                 p.enable_cuda_sync_events,
                 p.performance_events);
           },
-          [](py::tuple t) { // __setstate__
+          [](const py::tuple& t) { // __setstate__
             if (t.size() >= 4) {
               throw std::runtime_error("Expected atleast 4 values in state");
             }
@@ -373,8 +439,7 @@ void initPythonBindings(PyObject* module) {
           "dtype",
           [](const TensorMetadata& metadata) {
             return py::reinterpret_borrow<py::object>(
-                torch::autograd::utils::wrap(
-                    torch::getTHPDtype(metadata.dtype_)));
+                torch::autograd::utils::wrap(metadata.dtype_));
           })
       .def_readonly("dim", &TensorMetadata::dim_)
       .def_readonly("sizes", &TensorMetadata::sizes_)
@@ -403,7 +468,9 @@ void initPythonBindings(PyObject* module) {
       .def_readonly("sequence_number", &torch_op_t::sequence_number_)
       .def_readonly("allow_tf32_cublas", &torch_op_t::allow_tf32_cublas_);
 
+  // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<ExtraFields<EventType::Backend>>(m, "_ExtraFields_Backend");
+  // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<ExtraFields<EventType::Vulkan>>(m, "_ExtraFields_Vulkan");
 
   using allocation_t = ExtraFields<EventType::Allocation>;
@@ -463,9 +530,11 @@ void initPythonBindings(PyObject* module) {
   py::class_<ExtraFields<EventType::PyCCall>>(m, "_ExtraFields_PyCCall")
       .def_readonly("caller", &ExtraFields<EventType::PyCall>::caller_);
 
+  // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<ExtraFields<EventType::OutOfMemory>>(
       m, "_ExtraFields_OutOfMemory");
 
+  // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<ExtraFields<EventType::Kineto>>(m, "_ExtraFields_Kineto");
 
   py::class_<Result, std::shared_ptr<Result>>(m, "_ProfilerEvent")
@@ -528,7 +597,7 @@ void initPythonBindings(PyObject* module) {
       py::arg("python") = true,
       py::arg("script") = true,
       py::arg("cpp") = true);
-  m.def("symbolize_tracebacks", [](py::list tbs) {
+  m.def("symbolize_tracebacks", [](const py::list& tbs) {
     std::vector<CapturedTraceback*> tb_ptrs;
     tb_ptrs.reserve(tbs.size());
     for (py::handle tb : tbs) {
@@ -536,8 +605,36 @@ void initPythonBindings(PyObject* module) {
     }
     return py_symbolize(tb_ptrs);
   });
+  // directly convert address pointers to frames, used for testing symbolize
+  m.def(
+      "symbolize_addresses",
+      [](const std::vector<uint64_t>& frames, const std::string& mode_s) {
+        std::vector<std::tuple<std::string, int64_t, std::string>> frames_out;
+        torch::unwind::Mode mode = torch::unwind::Mode::addr2line;
+        if (mode_s == "fast") {
+          mode = torch::unwind::Mode::fast;
+        } else if (mode_s == "addr2line") {
+          mode = torch::unwind::Mode::addr2line;
+        } else if (mode_s == "dladdr") {
+          mode = torch::unwind::Mode::dladdr;
+        } else {
+          TORCH_CHECK(false, "unexpected mode ", mode_s);
+        }
+        std::vector<void*> frames_p;
+        frames_p.reserve(frames.size());
+        for (auto f : frames) {
+          frames_p.push_back((void*)f); // NOLINT
+        }
+        auto frame_objects = unwind::symbolize(frames_p, mode);
+        frames_out.reserve(frame_objects.size());
+        for (auto& frame : frame_objects) {
+          frames_out.emplace_back(frame.filename, frame.lineno, frame.funcname);
+        }
+        return frames_out;
+      });
   installCapturedTracebackPython();
 
+  // NOLINTNEXTLINE(*-c-arrays*)
   static PyMethodDef RecordFunctionFast_methods[] = {
       {"__enter__", RecordFunctionFast_enter, METH_NOARGS, nullptr},
       {"__exit__", RecordFunctionFast_exit, METH_VARARGS, nullptr},
@@ -568,5 +665,4 @@ void initPythonBindings(PyObject* module) {
     throw python_error();
   }
 }
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler

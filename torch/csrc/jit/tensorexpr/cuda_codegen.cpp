@@ -16,6 +16,14 @@
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/registerizer.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty_strided_native.h>
+#endif
+
+#include <unordered_map>
+
 namespace torch::jit::tensorexpr {
 
 // A RAII wrapper to manage a variable and name pair in the look-up table.
@@ -889,14 +897,6 @@ void CudaCodeGen::Initialize() {
   HalfChecker halfChecker(buffer_args());
   stmt_v->accept(&halfChecker);
 
-#if defined(USE_ROCM)
-#if ROCM_VERSION < 40200
-  os() << "#include <hip/hip_runtime.h>" << std::endl;
-  if (halfChecker.hasHalf()) {
-    os() << "#include <hip/hip_fp16.h>" << std::endl;
-  }
-#endif
-#endif
   os() << device_resource_string << shared_resource_string;
 
   if (has_random_) {
@@ -1275,10 +1275,10 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
 at::Tensor CudaCodeGen::empty_strided(
     c10::IntArrayRef size,
     c10::IntArrayRef stride,
-    c10::optional<c10::ScalarType> dtype_opt,
-    c10::optional<c10::Layout> layout_opt,
-    c10::optional<c10::Device> device_opt,
-    c10::optional<bool> pin_memory_opt) {
+    std::optional<c10::ScalarType> dtype_opt,
+    std::optional<c10::Layout> layout_opt,
+    std::optional<c10::Device> device_opt,
+    std::optional<bool> pin_memory_opt) {
   c10::DeviceGuard device_guard(device_opt.value());
   return at::native::empty_strided_cuda(
       size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
@@ -1311,9 +1311,7 @@ void CudaCodeGen::CompileToNVRTC(
 
 #if defined(USE_ROCM)
   std::vector<const char*> args = {"--std=c++17"};
-#if ROCM_VERSION >= 40200
   args.push_back("-hip-pch");
-#endif
 #else
   const std::string compute = std::string("--gpu-architecture=") +
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11010

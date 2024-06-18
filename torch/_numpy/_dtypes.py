@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 """ Define analogs of numpy dtypes supported by pytorch.
 Define the scalar types and supported dtypes and numpy <--> torch dtype mappings.
 """
@@ -12,9 +14,7 @@ from . import _dtypes_impl
 
 
 class generic:
-    @property
-    def name(self):
-        return self.__class__.__name__
+    name = "generic"
 
     def __new__(cls, value):
         # NumPy scalars are modelled as 0-D arrays
@@ -37,32 +37,43 @@ class generic:
 
 
 class number(generic):
-    pass
+    name = "number"
 
 
 class integer(number):
-    pass
+    name = "integer"
 
 
 class inexact(number):
-    pass
+    name = "inexact"
 
 
 class signedinteger(integer):
-    pass
+    name = "signedinteger"
 
 
 class unsignedinteger(integer):
-    pass
+    name = "unsignedinteger"
 
 
 class floating(inexact):
-    pass
+    name = "floating"
 
 
 class complexfloating(inexact):
-    pass
+    name = "complexfloating"
 
+
+_abstract_dtypes = [
+    "generic",
+    "number",
+    "integer",
+    "signedinteger",
+    "unsignedinteger",
+    "inexact",
+    "floating",
+    "complexfloating",
+]
 
 # ##### concrete types
 
@@ -100,6 +111,24 @@ class uint8(unsignedinteger):
     name = "uint8"
     typecode = "B"
     torch_dtype = torch.uint8
+
+
+class uint16(unsignedinteger):
+    name = "uint16"
+    typecode = "H"
+    torch_dtype = torch.uint16
+
+
+class uint32(signedinteger):
+    name = "uint32"
+    typecode = "I"
+    torch_dtype = torch.uint32
+
+
+class uint64(signedinteger):
+    name = "uint64"
+    typecode = "L"
+    torch_dtype = torch.uint64
 
 
 # floating point
@@ -149,6 +178,7 @@ _name_aliases = {
     "byte": int8,
     "short": int16,
     "longlong": int64,  # XXX: is this correct?
+    "ulonglong": uint64,
     "ubyte": uint8,
     "half": float16,
     "single": float32,
@@ -169,7 +199,7 @@ for name, obj in _name_aliases.items():
 # cf tests/core/test_scalar_methods.py
 sctypes = {
     "int": [int8, int16, int32, int64],
-    "uint": [uint8],
+    "uint": [uint8, uint16, uint32, uint64],
     "float": [float16, float32, float64],
     "complex": [complex64, complex128],
     "others": [bool_],
@@ -399,6 +429,17 @@ def issubclass_(arg, klass):
 
 def issubdtype(arg1, arg2):
     # cf https://github.com/numpy/numpy/blob/v1.24.0/numpy/core/numerictypes.py#L356-L420
+
+    # We also accept strings even if NumPy doesn't as dtypes are serialized as their
+    # string representation in dynamo's graph
+    def str_to_abstract(t):
+        if isinstance(t, str) and t in _abstract_dtypes:
+            return globals()[t]
+        return t
+
+    arg1 = str_to_abstract(arg1)
+    arg2 = str_to_abstract(arg2)
+
     if not issubclass_(arg1, generic):
         arg1 = dtype(arg1).type
     if not issubclass_(arg2, generic):
@@ -406,17 +447,7 @@ def issubdtype(arg1, arg2):
     return issubclass(arg1, arg2)
 
 
-__all__ = ["dtype", "DType", "typecodes", "issubdtype", "set_default_dtype"]
+__all__ = ["dtype", "DType", "typecodes", "issubdtype", "set_default_dtype", "sctypes"]
 __all__ += list(_names.keys())  # noqa: PLE0605
 __all__ += list(_name_aliases.keys())  # noqa: PLE0605
-__all__ += [  # noqa: PLE0605
-    "sctypes",
-    "generic",
-    "number",
-    "integer",
-    "signedinteger",
-    "unsignedinteger",
-    "inexact",
-    "floating",
-    "complexfloating",
-]
+__all__ += _abstract_dtypes  # noqa: PLE0605

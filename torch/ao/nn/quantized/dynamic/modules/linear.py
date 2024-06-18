@@ -64,9 +64,7 @@ class Linear(nnq.Linear):
         return 'DynamicQuantizedLinear'
 
     def extra_repr(self):
-        extra_repr_str = 'in_features={}, out_features={}, dtype={}'.format(
-            self.in_features, self.out_features, self._packed_params.dtype
-        )
+        extra_repr_str = f'in_features={self.in_features}, out_features={self.out_features}, dtype={self._packed_params.dtype}'
         if self._packed_params.dtype == torch.qint8:
             extra_repr_str += f', qscheme={self.weight().qscheme()}'
         return extra_repr_str
@@ -79,7 +77,7 @@ class Linear(nnq.Linear):
                                       missing_keys, unexpected_keys, error_msgs)
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         r"""Create a dynamic quantized module from a float module or qparams_dict
 
         Args:

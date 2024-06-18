@@ -3,8 +3,11 @@
 #include <torch/csrc/profiler/unwind/action.h>
 #include <torch/csrc/profiler/unwind/lexer.h>
 #include <array>
+#include <iostream>
 #include <sstream>
 #include <vector>
+
+namespace torch::unwind {
 
 struct TableState {
   Action cfa;
@@ -397,3 +400,5 @@ struct FDE {
     return strstr(augmentation_string_, s) != nullptr;
   }
 };
+
+} // namespace torch::unwind

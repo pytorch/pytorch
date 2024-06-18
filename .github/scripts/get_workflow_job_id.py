@@ -4,6 +4,7 @@
 
 import argparse
 import json
+import operator
 import os
 import re
 import sys
@@ -126,7 +127,7 @@ def find_job_id_name(args: Any) -> Tuple[str, str]:
 
     # Sort the jobs list by start time, in descending order. We want to get the most
     # recently scheduled job on the runner.
-    jobs.sort(key=lambda job: job["started_at"], reverse=True)
+    jobs.sort(key=operator.itemgetter("started_at"), reverse=True)
 
     for job in jobs:
         if job["runner_name"] == args.runner_name:
@@ -139,6 +140,7 @@ def set_output(name: str, val: Any) -> None:
     if os.getenv("GITHUB_OUTPUT"):
         with open(str(os.getenv("GITHUB_OUTPUT")), "a") as env:
             print(f"{name}={val}", file=env)
+        print(f"setting {name}={val}")
     else:
         print(f"::set-output name={name}::{val}")
 

@@ -100,6 +100,7 @@ enum xnn_status xnnp_create_convolution2d_nhwc(
         op_max,         /* int8_t output_max                    */
         flags,          /* uint32_t flags                       */
         nullptr,        /* xnn_caches_t caches                  */
+        nullptr,        /* xnn_weights_cache_t weights_cache    */
         op);            /* xnn_operator_t* deconvolution_op_out */
 
   }
@@ -132,9 +133,10 @@ enum xnn_status xnnp_create_convolution2d_nhwc(
         op_max,         /* int8_t output_max                  */
         flags,          /* uint32_t flags                     */
         nullptr,        /* xnn_caches_t caches                */
+        nullptr,        /* xnn_weights_cache_t weights_cache    */
         op);            /* xnn_operator_t* convolution_op_out */
   } else { /* per_channel */
-    return xnn_create_convolution2d_nhwc_qc8(
+    return xnn_create_convolution2d_nhwc_qs8_qc8w(
         pad_top,        /* uint32_t input_padding_top         */
         pad_right,      /* uint32_t input_padding_right       */
         pad_bottom,     /* uint32_t input_padding_bottom      */
@@ -161,21 +163,20 @@ enum xnn_status xnnp_create_convolution2d_nhwc(
         op_max,         /* int8_t output_max                  */
         flags,          /* uint32_t flags                     */
         nullptr,        /* xnn_caches_t caches                */
+        nullptr,        /* xnn_weights_cache_t weights_cache    */
         op);            /* xnn_operator_t* convolution_op_out */
   }
 }
 
 /*
- * Series of setup wrapper functions to call xnn_setup_[de]conv* functions.
+ * Series of reshape wrapper functions to call xnn_reshape_[de]conv* functions.
  */
 C10_ALWAYS_INLINE
-enum xnn_status xnnp_setup_convolution2d_nhwc(
+enum xnn_status xnnp_reshape_convolution2d_nhwc(
     xnn_operator_t op,
     size_t batch,
     size_t in_h,
     size_t in_w,
-    const int8_t* inp,
-    int8_t* outp,
     pthreadpool_t pt_pool,
     bool per_channel = false,
     bool transpose = false,
@@ -183,36 +184,78 @@ enum xnn_status xnnp_setup_convolution2d_nhwc(
     uint32_t adj_w = 0) {
   if(transpose) {
     TORCH_CHECK(!per_channel, "XNNPACK Q[SC]8 does not have a per channel deconvolution!");
-    return xnn_setup_deconvolution2d_nhwc_qs8(
+    return xnn_reshape_deconvolution2d_nhwc_qs8(
         op,       /* xnn_operator_t deconvolution_op */
         batch,    /* size_t batch_size               */
         in_h,     /* size_t input_height             */
         in_w,     /* size_t input_width              */
         adj_h,    /* uint32_t adjustment_height      */
         adj_w,    /* uint32_t adjustment_width       */
-        inp,      /* const int8_t* input             */
-        outp,     /* int8_t* output                  */
+        nullptr,  /* size_t* output_height_out       */
+        nullptr,  /* size_t* output_width_out        */
         pt_pool); /* pthreadpool_t threadpool        */
+  }
+
+  size_t workspace_size = SIZE_MAX;
+  size_t workspace_alignment = SIZE_MAX;
+
+  if (!per_channel) {
+    return xnn_reshape_convolution2d_nhwc_qs8(
+        op,       /* xnn_operator_t convolution_op */
+        batch,    /* size_t batch_size             */
+        in_h,     /* size_t input_height           */
+        in_w,     /* size_t input_width            */
+        &workspace_size, /* size_t* workspace_size */
+        &workspace_alignment, /* size_t* workspace_alignment */
+        nullptr,  /* size_t* output_height_out     */
+        nullptr,  /* size_t* output_width_out      */
+        pt_pool); /* pthreadpool_t threadpool      */
+  } else { /* per_channel */
+    return xnn_reshape_convolution2d_nhwc_qs8_qc8w(
+        op,       /* xnn_operator_t convolution_op */
+        batch,    /* size_t batch_size             */
+        in_h,     /* size_t input_height           */
+        in_w,     /* size_t input_width            */
+        &workspace_size, /* size_t* workspace_size */
+        &workspace_alignment, /* size_t* workspace_alignment */
+        nullptr,  /* size_t* output_height_out     */
+        nullptr,  /* size_t* output_width_out      */
+        pt_pool); /* pthreadpool_t threadpool      */
+  }
+}
+
+
+/*
+ * Series of setup wrapper functions to call xnn_setup_[de]conv* functions.
+ */
+C10_ALWAYS_INLINE
+enum xnn_status xnnp_setup_convolution2d_nhwc(
+    xnn_operator_t op,
+    const int8_t* inp,
+    int8_t* outp,
+    bool per_channel = false,
+    bool transpose = false) {
+  if(transpose) {
+    TORCH_CHECK(!per_channel, "XNNPACK Q[SC]8 does not have a per channel deconvolution!");
+
+    return xnn_setup_deconvolution2d_nhwc_qs8(
+        op,       /* xnn_operator_t deconvolution_op */
+        inp,      /* const int8_t* input             */
+        outp);    /* int8_t* output                  */
   }
 
   if (!per_channel) {
     return xnn_setup_convolution2d_nhwc_qs8(
-        op,       /* xnn_operator_t convolution_op */
-        batch,    /* size_t batch_size             */
-        in_h,     /* size_t input_height           */
-        in_w,     /* size_t input_width            */
-        inp,      /* const int8_t* input           */
-        outp,     /* int8_t* output                */
-        pt_pool); /* pthreadpool_t threadpool      */
+        op,       /* xnn_operator_t deconvolution_op */
+        nullptr,  /* void workspace                  */
+        inp,      /* const int8_t* input             */
+        outp);    /* int8_t* output                  */
   } else { /* per_channel */
-    return xnn_setup_convolution2d_nhwc_qc8(
-        op,       /* xnn_operator_t convolution_op */
-        batch,    /* size_t batch_size             */
-        in_h,     /* size_t input_height           */
-        in_w,     /* size_t input_width            */
-        inp,      /* const int8_t* input           */
-        outp,     /* int8_t* output                */
-        pt_pool); /* pthreadpool_t threadpool      */
+    return xnn_setup_convolution2d_nhwc_qs8_qc8w(
+        op,       /* xnn_operator_t deconvolution_op */
+        nullptr,  /* void workspace                  */
+        inp,      /* const int8_t* input             */
+        outp);    /* int8_t* output                  */
   }
 }
 
@@ -258,22 +301,31 @@ enum xnn_status xnnp_create_fully_connected_nc(
       output_max,              /* int8_t output_max                      */
       flags,                   /* uint32_t flags                         */
       nullptr,                 /* xnn_caches_t caches                    */
+      nullptr,                 /* xnn_weights_cache_t                    */
       fully_connected_op_out); /* xnn_operator_t* fully_connected_op_out */
+}
+
+C10_ALWAYS_INLINE
+enum xnn_status xnnp_reshape_fully_connected_nc(
+    xnn_operator_t fully_connected_op,
+    size_t batch_size,
+    pthreadpool_t threadpool) {
+  return xnn_reshape_fully_connected_nc_qs8(
+      fully_connected_op, /* xnn_operator_t fully_connected_op */
+      batch_size,         /* size_t batch_size                 */
+      threadpool);        /* pthreadpool_t threadpool          */
 }
 
 C10_ALWAYS_INLINE
 enum xnn_status xnnp_setup_fully_connected_nc(
     xnn_operator_t fully_connected_op,
-    size_t batch_size,
     const int8_t* input,
-    int8_t* output,
-    pthreadpool_t threadpool) {
+    int8_t* output) {
   return xnn_setup_fully_connected_nc_qs8(
       fully_connected_op, /* xnn_operator_t fully_connected_op */
-      batch_size,         /* size_t batch_size                 */
       input,              /* const int8_t* input               */
-      output,             /* int8_t* output                    */
-      threadpool);        /* pthreadpool_t threadpool          */
+      output              /* int8_t* output                    */
+    );
 }
 
 } // namespace xnnp_utils

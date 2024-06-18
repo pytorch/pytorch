@@ -1,19 +1,31 @@
 #pragma once
-#include <stdint.h>
-#include <string.h>
+#include <cstdint>
+#include <cstring>
+#include <utility>
 
 #include <torch/csrc/profiler/unwind/dwarf_enums.h>
 #include <torch/csrc/profiler/unwind/unwind_error.h>
 
-struct Lexer {
-  Lexer(void* data, void* base = nullptr)
-      : next_((const char*)data), base_((int64_t)base) {}
+namespace torch::unwind {
+
+template <bool checked>
+struct LexerImpl {
+  LexerImpl(void* data, void* base = nullptr, void* end = nullptr)
+      : next_((const char*)data),
+        base_((int64_t)base),
+        end_((const char*)end) {}
 
   template <typename T>
   T read() {
     T result;
+    auto end = next_ + sizeof(T);
+    UNWIND_CHECK(
+        !checked || end <= end_,
+        "read out of bounds {} >= {}",
+        (void*)end,
+        (void*)end_);
     memcpy(&result, next_, sizeof(T));
-    next_ += sizeof(T);
+    next_ = end;
     return result;
   }
 
@@ -21,7 +33,7 @@ struct Lexer {
   int64_t readSLEB128() {
     int64_t Value = 0;
     unsigned Shift = 0;
-    uint8_t Byte;
+    uint8_t Byte = 0;
     do {
       Byte = read<uint8_t>();
       uint64_t Slice = Byte & 0x7f;
@@ -29,12 +41,12 @@ struct Lexer {
           (Shift == 63 && Slice != 0 && Slice != 0x7f)) {
         throw UnwindError("sleb128 too big for int64");
       }
-      Value |= Slice << Shift;
+      Value |= int64_t(Slice << Shift);
       Shift += 7;
     } while (Byte >= 128);
     // Sign extend negative numbers if needed.
     if (Shift < 64 && (Byte & 0x40)) {
-      Value |= (-1ULL) << Shift;
+      Value |= int64_t((-1ULL) << Shift);
     }
     return Value;
   }
@@ -42,7 +54,7 @@ struct Lexer {
   uint64_t readULEB128() {
     uint64_t Value = 0;
     unsigned Shift = 0;
-    uint8_t p;
+    uint8_t p = 0;
     do {
       p = read<uint8_t>();
       uint64_t Slice = p & 0x7f;
@@ -56,8 +68,17 @@ struct Lexer {
   }
   const char* readCString() {
     auto result = next_;
-    next_ += strlen(next_) + 1;
-    return result;
+    if (!checked) {
+      next_ += strlen(next_) + 1;
+      return result;
+    }
+    while (next_ < end_) {
+      if (*next_++ == '\0') {
+        return result;
+      }
+    }
+    UNWIND_CHECK(
+        false, "string is out of bounds {} >= {}", (void*)next_, (void*)end_);
   }
   int64_t readEncoded(uint8_t enc) {
     int64_t r = 0;
@@ -81,20 +102,27 @@ struct Lexer {
     }
     return readEncoded(enc);
   }
+
   int64_t read4or8Length() {
+    return readSectionLength().first;
+  }
+
+  std::pair<int64_t, bool> readSectionLength() {
     int64_t length = read<uint32_t>();
     if (length == 0xFFFFFFFF) {
-      length = read<int64_t>();
+      return std::make_pair(read<int64_t>(), true);
     }
-    return length;
+    return std::make_pair(length, false);
   }
+
   void* loc() const {
     return (void*)next_;
   }
-  Lexer& skip(int64_t bytes) {
+  LexerImpl& skip(int64_t bytes) {
     next_ += bytes;
     return *this;
   }
+
   int64_t readEncodedValue(uint8_t enc) {
     switch (enc & 0xF) {
       case DW_EH_PE_udata2:
@@ -121,4 +149,11 @@ struct Lexer {
  private:
   const char* next_;
   int64_t base_;
+  const char* end_;
 };
+
+// using Lexer = LexerImpl<false>;
+using CheckedLexer = LexerImpl<true>;
+using Lexer = LexerImpl<false>;
+
+} // namespace torch::unwind

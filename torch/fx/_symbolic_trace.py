@@ -24,10 +24,12 @@ from typing import (
 import torch
 import torch.utils._pytree as pytree
 from torch._C import ScriptObject  # type: ignore[attr-defined]
+from torch._library.fake_class_registry import FakeScriptObject
 
 from ._compatibility import compatibility
 from .graph import _PyTreeCodeGen, _PyTreeInfo, Graph
 from .graph_module import GraphModule
+from ._lazy_graph_module import _make_graph_module
 from .node import Argument, base_types, map_aggregate
 from .proxy import ParameterProxy, Proxy, TracerBase, Scope, ScopeContextManager
 
@@ -97,6 +99,10 @@ class ProxyableClassMeta(type):
 
     def __call__(cls, *args, **kwargs):
         instance = cls.__new__(cls)  # type: ignore[call-overload]
+
+        if not is_fx_tracing():
+            cls.__init__(instance, *args, **kwargs)  # type: ignore[misc]
+            return instance
 
         found_proxies = []
 
@@ -213,6 +219,17 @@ class PHWithMeta(PHBase):
         self.ph_key = ph_key
 
 
+def _transfer_attrs(fr, to):
+    for attr_name in dir(fr):
+        attr_val = getattr(fr, attr_name)
+        if (
+            not callable(attr_val)
+            and not attr_name.startswith("__")
+            and not hasattr(to, attr_name)
+        ):
+            setattr(to, attr_name, attr_val)
+
+
 @compatibility(is_backward_compatible=True)
 class Tracer(TracerBase):
     # Reference: https://github.com/pytorch/pytorch/issues/54354
@@ -292,6 +309,34 @@ class Tracer(TracerBase):
         # Mapping of node name to module scope
         self.node_name_to_scope: Dict[str, Tuple[str, type]] = {}
 
+    _qualname_counter: Dict[str, int] = collections.defaultdict(int)
+
+    @compatibility(is_backward_compatible=True)
+    def get_fresh_qualname(self, prefix: str) -> str:
+        """
+        Gets a fresh name for a prefix and returns it. This function ensures
+        that it will not clash with an existing attribute on the graph.
+        """
+        # The idea here is that if the module doesn't have this prefix at all we
+        # should reset the counter to start from the beginning
+        # It's a ... little bit hacky (doesn't cover all cases) but the precise
+        # naming of the prefixes isn't a correctness issue, just a niceness
+        # issue
+        qualname = f"{prefix}0"
+        if not hasattr(self.root, qualname):
+            self._qualname_counter[prefix] = 0
+            return qualname
+
+        i = self._qualname_counter[prefix]
+        while True:
+            qualname = f"{prefix}{i}"
+            i += 1
+            if not hasattr(self.root, qualname):
+                break
+        self._qualname_counter[prefix] = i
+
+        return qualname
+
     @compatibility(is_backward_compatible=True)
     def create_arg(self, a: Any) -> "Argument":
         """
@@ -350,18 +395,15 @@ class Tracer(TracerBase):
         # a get_attr to retrieve that tensor. Otherwise, we'll store away the
         # tensor value into a special attribute on the Module s.t. we can
         # retrieve it with a get_attr.
-        if isinstance(a, (torch.Tensor, ScriptObject)):
+        if isinstance(a, (torch.Tensor, ScriptObject, FakeScriptObject)):
             qualname: Optional[str] = self.tensor_attrs.get(a)
 
             # Tensor was not found in the Module hierarchy, stow it away in a
             # special attribute and set the qualname to refer to that
             if not qualname:
-                i = 0
-                while True:
-                    qualname = f"_tensor_constant{i}"
-                    if not hasattr(self.root, qualname):
-                        break
-                    i += 1
+                base_name = "_tensor_constant" if isinstance(a, torch.Tensor) else "_torchbind_obj"
+                qualname = self.get_fresh_qualname(base_name)
+                assert isinstance(qualname, str)
                 self.tensor_attrs[a] = qualname
                 setattr(self.root, qualname, a)
 
@@ -372,12 +414,8 @@ class Tracer(TracerBase):
             # witness its construction. Intern this as a constant attribute
 
             # TODO: binary search
-            i = 0
-            while True:
-                qualname = f"_{a.__class__.__name__}_constant_{i}"
-                if not hasattr(self.root, qualname):
-                    break
-                i += 1
+            qualname = self.get_fresh_qualname(f"_{a.__class__.__name__}_constant_")
+            assert isinstance(qualname, str)
             setattr(self.root, qualname, a)
 
             return self.create_node("get_attr", qualname, (), {})
@@ -474,7 +512,7 @@ class Tracer(TracerBase):
         with ScopeContextManager(self.scope, Scope(module_qualified_name, type(m))) as _scope:
             # module_stack is an ordered dict so writing then deleting the
             # entry is equivalent to push/pop on a list
-            self.module_stack[_scope.module_path] = _scope.module_type
+            self.module_stack[_scope.module_path] = (module_qualified_name, _scope.module_type)
             if not self.is_leaf_module(m, module_qualified_name):
                 ret_val = forward(*args, **kwargs)
             else:
@@ -576,82 +614,30 @@ class Tracer(TracerBase):
 
         sig = inspect.signature(fn_for_analysis)
 
-        def proxy_placeholder(name: str):
-            if concrete_args is not None and name in concrete_args:
-                cnt = 0
 
-                def replace_ph(x):
-                    nonlocal cnt
-                    cnt += 1
-                    param = sig.parameters[name]
-                    default = (
-                        ()
-                        if param.default is inspect.Parameter.empty
-                        else (param.default,)
-                    )
-                    out = self.create_proxy(
-                        "placeholder", f"{name}_{str(cnt)}", default, {}
-                    )
-                    if isinstance(x, PHBase):
-                        def transfer_attrs(fr, to):
-                            for attr_name in dir(fr):
-                                attr_val = getattr(fr, attr_name)
-                                if (
-                                    not callable(attr_val)
-                                    and not attr_name.startswith("__")
-                                    and not hasattr(to, attr_name)
-                                ):
-                                    setattr(to, attr_name, attr_val)
-
-                        if x != PH:
-                            # Transfer attrs in the case where you're using a placeholder other
-                            # than the singleton PH (PH has no attributes to transfer).
-                            # Proxies were created out of the placeholders.
-                            # Transfer any metadata (put on the placeholders in the form of
-                            # attributes set by the user) from the placeholder to the
-                            # underlying nodes (the proxy is unwrapped by the user, but
-                            # the metadata should hold).
-                            transfer_attrs(fr=x, to=out.node)
-
-                        return out
-                    # Union[int, bool] == bool in Python <= 3.6
-                    if (
-                        type(x) == bool
-                        or type(x) in base_types
-                        and type(x) != torch.Tensor
-                    ):
-                        torch._assert(
-                            out == x,
-                            f"{name} has been specialized to have value {x} but got another value",
-                        )
-                    elif type(x) == type(None):
-                        args = (
-                            out,
-                            f"{name} has been specialized to have value None but got another value",
-                        )
-                        self.create_proxy("call_function", _assert_is_none, args, {})
-                    else:
-                        warnings.warn(
-                            f"Was not able to add assertion to guarantee correct input {name} to "
-                            f"specialized function. It is up to the user to make sure that your inputs match the "
-                            f"inputs you specialized the function with."
-                        )
-
-                    return x
-
-                return pytree.tree_map(replace_ph, concrete_args[name])
-            if name[0] == "*":
-                default = ()
-            else:
-                param = sig.parameters[name]
-                default = () if param.default is inspect.Parameter.empty else (param.default,)  # type: ignore[assignment]
-            return self.create_proxy(
-                "placeholder",
-                name,
-                default,
-                {},
-                type_expr=fn_for_analysis.__annotations__.get(name, None)
-            )
+        # This covers the very specific case where we are passing in flat
+        # concrete_args as a tuple, but our traced fn takes (*args, **kwargs).
+        # In this case, just take the concrete_args and pass them through.
+        name_idx = 0
+        if isinstance(concrete_args, tuple) and \
+                len(concrete_args) > 0 and \
+                (co.co_flags & HAS_VARSTUFF) and \
+                total_args == 1:
+            for concrete_arg in concrete_args:
+                out = self.create_proxy("placeholder", f"input_{name_idx}", (), {})
+                if isinstance(concrete_arg, PHBase):
+                    if concrete_arg != PH:
+                        # Transfer attrs in the case where you're using a placeholder other
+                        # than the singleton PH (PH has no attributes to transfer).
+                        # Proxies were created out of the placeholders.
+                        # Transfer any metadata (put on the placeholders in the form of
+                        # attributes set by the user) from the placeholder to the
+                        # underlying nodes (the proxy is unwrapped by the user, but
+                        # the metadata should hold).
+                        _transfer_attrs(fr=concrete_arg, to=out.node)
+                args.append(out)
+                name_idx += 1
+            return root_fn, args
 
         arg_names = [next(names_iter) for idx in range(skip_arg_idx, total_args)]
         if isinstance(concrete_args, tuple):
@@ -660,6 +646,10 @@ class Tracer(TracerBase):
                     f"Tracing expected {len(arg_names)} arguments but got {len(concrete_args)} concrete arguments"
                 )
             concrete_args = dict(zip(arg_names, concrete_args))
+
+        def proxy_placeholder(name):
+            return self._proxy_placeholder(name, concrete_args, sig, fn_for_analysis)
+
         args.extend(proxy_placeholder(names) for names in arg_names)
 
         if co.co_kwonlyargcount > 0 or co.co_flags & HAS_VARSTUFF:
@@ -671,7 +661,7 @@ class Tracer(TracerBase):
             root_fn = _patch_function(root_fn, len(args))
 
         flat_args, in_spec = pytree.tree_flatten(tuple(args))
-        if any(not isinstance(i, pytree.LeafSpec) for i in in_spec.children_specs):
+        if not all(child.is_leaf() for child in in_spec.children_specs):
             # In the case that we have pytree-flattened inputs in
             # `concrete_args`, generate a flattening wrapper around the
             # original root function and return that.
@@ -726,6 +716,14 @@ class Tracer(TracerBase):
         _is_fx_tracing_flag = True
         try:
             if isinstance(root, torch.nn.Module):
+
+                # do real recompilation for _LazyGraphModule before retracing since the trace
+                # method can not trace the _lazy_forward method. Got error:
+                #   https://gist.github.com/shunting314/75549c2e82ae07ac1139c94a3583d259
+                # without this.
+                from torch.fx._lazy_graph_module import _LazyGraphModule
+                _LazyGraphModule.force_recompile(root)
+
                 self.root = root
 
                 assert hasattr(
@@ -753,11 +751,17 @@ class Tracer(TracerBase):
             # is some other attribute on the model. Construct a dict mapping Tensor
             # values to the qualified name here for efficiency. This is used downstream
             # in create_arg
-            self.tensor_attrs: Dict[Union[torch.Tensor, ScriptObject], str] = {}
+            self.tensor_attrs: Dict[
+                Union[
+                    torch.Tensor,
+                    ScriptObject,
+                    FakeScriptObject
+                ], str
+            ] = {}
 
             def collect_tensor_attrs(m: torch.nn.Module, prefix_atoms: List[str]):
                 for k, v in m.__dict__.items():
-                    if isinstance(v, (torch.Tensor, ScriptObject)):
+                    if isinstance(v, (torch.Tensor, ScriptObject, FakeScriptObject)):
                         self.tensor_attrs[v] = ".".join(prefix_atoms + [k])
                 for k, v in m.named_children():
                     collect_tensor_attrs(v, prefix_atoms + [k])
@@ -837,6 +841,73 @@ class Tracer(TracerBase):
             new_tracer.__dict__[k] = new_obj
 
         return new_tracer
+
+    def _proxy_placeholder(self, name, concrete_args, sig, fn_for_analysis):
+        if concrete_args is not None and name in concrete_args:
+            cnt = 0
+
+            def replace_ph(x):
+                nonlocal cnt
+                cnt += 1
+                param = sig.parameters[name]
+                default = (
+                    ()
+                    if param.default is inspect.Parameter.empty
+                    else (param.default,)
+                )
+                out = self.create_proxy(
+                    "placeholder", f"{name}_{str(cnt)}", default, {}
+                )
+                if isinstance(x, PHBase):
+                    if x != PH:
+                        # Transfer attrs in the case where you're using a placeholder other
+                        # than the singleton PH (PH has no attributes to transfer).
+                        # Proxies were created out of the placeholders.
+                        # Transfer any metadata (put on the placeholders in the form of
+                        # attributes set by the user) from the placeholder to the
+                        # underlying nodes (the proxy is unwrapped by the user, but
+                        # the metadata should hold).
+                        _transfer_attrs(fr=x, to=out.node)
+
+                    return out
+                # Union[int, bool] == bool in Python <= 3.6
+                if (
+                    type(x) == bool
+                    or type(x) in base_types
+                    and type(x) != torch.Tensor
+                ):
+                    torch._assert(
+                        out == x,
+                        f"{name} has been specialized to have value {x} but got another value",
+                    )
+                elif x is None:
+                    args = (
+                        out,
+                        f"{name} has been specialized to have value None but got another value",
+                    )
+                    self.create_proxy("call_function", _assert_is_none, args, {})
+                else:
+                    warnings.warn(
+                        f"Was not able to add assertion to guarantee correct input {name} to "
+                        f"specialized function. It is up to the user to make sure that your inputs match the "
+                        f"inputs you specialized the function with."
+                    )
+
+                return x
+
+            return pytree.tree_map(replace_ph, concrete_args[name])
+        if name[0] == "*":
+            default = ()
+        else:
+            param = sig.parameters[name]
+            default = () if param.default is inspect.Parameter.empty else (param.default,)  # type: ignore[assignment]
+        return self.create_proxy(
+            "placeholder",
+            name,
+            default,
+            {},
+            type_expr=fn_for_analysis.__annotations__.get(name, None)
+        )
 
 
 # Dictionary of (id(globals dict), function name) => globals_dict to patch for
@@ -920,7 +991,7 @@ class _PatchedFn(NamedTuple):
     orig_fn: Any
 
     def revert(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 class _PatchedFnSetItem(_PatchedFn):
@@ -1151,7 +1222,7 @@ def symbolic_trace(
     name = (
         root.__class__.__name__ if isinstance(root, torch.nn.Module) else root.__name__
     )
-    return GraphModule(tracer.root, graph, name)
+    return _make_graph_module(tracer.root, graph, name)
 
 
 @wrap

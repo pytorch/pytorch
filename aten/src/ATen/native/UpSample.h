@@ -4,9 +4,12 @@
 
 #include <ATen/OpMathType.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/OpMathType.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/DispatchStub.h>
+#include <ATen/native/cpu/utils.h>
 
 /**
  * Note [compute_scales_value]
@@ -52,9 +55,9 @@ namespace upsample {
 TORCH_API c10::SmallVector<int64_t, 3> compute_output_size(
     c10::IntArrayRef input_size,  // Full input tensor size.
     at::OptionalIntArrayRef output_size,
-    c10::optional<c10::ArrayRef<double>> scale_factors);
+    std::optional<c10::ArrayRef<double>> scale_factors);
 
-inline c10::optional<double> get_scale_value(c10::optional<c10::ArrayRef<double>> scales, int idx) {
+inline std::optional<double> get_scale_value(std::optional<c10::ArrayRef<double>> scales, int idx) {
   if (!scales) {
     return c10::nullopt;
   }
@@ -63,7 +66,7 @@ inline c10::optional<double> get_scale_value(c10::optional<c10::ArrayRef<double>
 
 } // namespace upsample
 
-using scale_t = c10::optional<double>;
+using scale_t = std::optional<double>;
 using upsampling_nearest1d = void(*)(const Tensor& output, const Tensor& input, scale_t scales_w);
 using _upsampling_nearest_exact1d = void(*)(const Tensor& output, const Tensor& input, scale_t scales_w);
 using upsampling_nearest2d = void(*)(const Tensor& output, const Tensor& input, scale_t scales_h, scale_t scales_w);
@@ -249,7 +252,7 @@ static inline void upsample_2d_shape_check(
 
 template <typename scalar_t>
 static inline scalar_t compute_scales_value(
-    const c10::optional<double> scale,
+    const std::optional<double> scale,
     int64_t input_size,
     int64_t output_size) {
       // see Note [compute_scales_value]
@@ -264,7 +267,7 @@ static inline scalar_t area_pixel_compute_scale(
     int64_t input_size,
     int64_t output_size,
     bool align_corners,
-    const c10::optional<double> scale) {
+    const std::optional<double> scale) {
   // see Note [area_pixel_compute_scale]
   if(align_corners) {
     if(output_size > 1) {
@@ -332,7 +335,7 @@ static inline int64_t nearest_idx(
     int64_t output_index,
     int64_t input_size,
     int64_t output_size,
-    c10::optional<double> scales) {
+    std::optional<double> scales) {
   // This method specificly treats cases: output_size == input_size or
   // output_size == 2 * input_size, that we would like to get rid of
   // We keep this method for BC and consider as deprecated.
@@ -353,13 +356,13 @@ static inline int64_t nearest_exact_idx(
     int64_t output_index,
     int64_t input_size,
     int64_t output_size,
-    c10::optional<double> scales) {
+    std::optional<double> scales) {
   float scale = compute_scales_value<float>(scales, input_size, output_size);
     return nearest_neighbor_exact_compute_source_index(scale, output_index, input_size);
 }
 
 // Define a typedef to dispatch to nearest_idx or nearest_exact_idx
-typedef int64_t (*nearest_idx_fn_t)(int64_t, int64_t, int64_t, c10::optional<double>);
+typedef int64_t (*nearest_idx_fn_t)(int64_t, int64_t, int64_t, std::optional<double>);
 
 template <typename scalar_t>
 static scalar_t upsample_get_value_bounded(
@@ -467,30 +470,32 @@ static inline void compute_source_index_and_lambda(
   }
 }
 
-// It will not be used by data types other than BFloat16.
-template <typename scalar_in, typename scalar_out>
+// It will not be used by data types other than BFloat16 and Half.
+template <typename scalar_in, typename scalar_out,
+          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_out> || !std::is_same<scalar_in, float>::value, int> = 0>
 void inline apply_grad_input(scalar_in* buffer_ptr, scalar_out* gin, int64_t size) {
-  TORCH_CHECK((std::is_same<scalar_out, BFloat16>::value),
-              "Upsample backward only support BFloat16 in the lower percision data types on CPU.")
+  TORCH_CHECK((is_reduced_floating_point_v<scalar_out>),
+              "Upsample backward only support BFloat16 and Half in the lower precision data types on CPU.")
   TORCH_CHECK((std::is_same<scalar_in, float>::value),
-              "Upsample backward should use float as acc buffer for BFloat16 grad input on CPU.")
+              "Upsample backward should use float as acc buffer for BFloat16 and Half grad input on CPU.")
   return;
 }
 
-template <>
-void inline apply_grad_input(float* buffer_ptr, BFloat16* gin, int64_t size) {
-  using bVec = vec::Vectorized<BFloat16>;
-  using fVec = vec::Vectorized<float>;
+template <typename scalar_in, typename scalar_out,
+          typename std::enable_if_t<is_reduced_floating_point_v<scalar_out> && std::is_same<scalar_in, float>::value, int> = 0>
+void inline apply_grad_input(scalar_in* buffer_ptr, scalar_out* gin, int64_t size) {
+  using bVec = Vectorized<scalar_out>;
+  using fVec = Vectorized<float>;
   int64_t d = 0;
   for (; d < size - (size % bVec::size()); d += bVec::size()) {
     bVec gin_bvec = bVec::loadu(gin + d);
     fVec gin_fvec0, gin_fvec1;
-    std::tie(gin_fvec0, gin_fvec1) = convert_bfloat16_float(gin_bvec);
+    std::tie(gin_fvec0, gin_fvec1) = convert_to_float<scalar_out>(gin_bvec);
     gin_fvec0 += fVec::loadu(buffer_ptr + d);
     gin_fvec1 += fVec::loadu(buffer_ptr + d + fVec::size());
     fVec(0).store(buffer_ptr + d);
     fVec(0).store(buffer_ptr + d + fVec::size());
-    convert_float_bfloat16(gin_fvec0, gin_fvec1).store(gin + d);
+    convert_from_float<scalar_out>(gin_fvec0, gin_fvec1).store(gin + d);
   }
   for (; d < size; d++) {
     gin[d] += buffer_ptr[d];

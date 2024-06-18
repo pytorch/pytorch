@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import os
 import re
 import sys

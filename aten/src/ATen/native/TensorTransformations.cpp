@@ -31,8 +31,7 @@
 #include <utility>
 #include <vector>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor flip(const Tensor& self, IntArrayRef dims) {
   const int64_t total_dims = self.dim();
@@ -64,8 +63,8 @@ Tensor flip(const Tensor& self, IntArrayRef dims) {
     .check_all_same_dtype(false)
     .declare_static_dtype_and_device(self.scalar_type(), self.device())
     .add_output(out_tensor)
-    .add_input(self)
-    .add_input(restrided_self)
+    .add_const_input(self)
+    .add_const_input(restrided_self)
     .build();
 
   auto* data = reinterpret_cast<char*>(iter.data_ptr(0));
@@ -231,10 +230,10 @@ std::vector<Tensor> atleast_3d(TensorList tensors) {
   return result;
 }
 
-Tensor chalf(const Tensor& self, c10::optional<MemoryFormat> memory_format) {
+Tensor chalf(const Tensor& self, std::optional<MemoryFormat> memory_format) {
   return self.to(kComplexHalf, false, false, memory_format);
 }
 
 DEFINE_DISPATCH(flip_stub);
 
-}} // namespace at::native
+} // namespace at::native

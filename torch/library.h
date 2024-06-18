@@ -87,11 +87,15 @@ namespace torch {
 struct NoInferSchemaTag {};
 #endif
 
+#define HAS_PT2_COMPLIANT_TAG
+
 // For multipy/torchdeploy use case
 enum class _RegisterOrVerify { REGISTER, VERIFY };
 
 template <class CurClass>
 class class_;
+
+#define HAS_IMPL_ABSTRACT_PYSTUB
 
 /// Represents a C++ function that implements an operator.  Most users won't
 /// interact directly with this class, except via error messages: the
@@ -295,9 +299,9 @@ class TORCH_API CppFunction final {
   }
 
  private:
-  c10::optional<c10::DispatchKey> dispatch_key_;
+  std::optional<c10::DispatchKey> dispatch_key_;
   c10::KernelFunction func_;
-  c10::optional<c10::impl::CppSignature> cpp_signature_;
+  std::optional<c10::impl::CppSignature> cpp_signature_;
   std::unique_ptr<c10::FunctionSchema> schema_;
   std::string debug_;
 
@@ -312,7 +316,7 @@ class TORCH_API CppFunction final {
 
   CppFunction(
       c10::KernelFunction func,
-      c10::optional<c10::impl::CppSignature> cpp_signature,
+      std::optional<c10::impl::CppSignature> cpp_signature,
       std::unique_ptr<c10::FunctionSchema> schema);
 };
 
@@ -366,8 +370,8 @@ inline CppFunction dispatch(c10::DeviceType type, Func&& raw_f) {
         return c10::DispatchKey::Meta;
       case c10::DeviceType::HIP:
         return c10::DispatchKey::HIP;
-      case c10::DeviceType::ORT:
-        return c10::DispatchKey::ORT;
+      case c10::DeviceType::MAIA:
+        return c10::DispatchKey::MAIA;
       case c10::DeviceType::HPU:
         return c10::DispatchKey::HPU;
       case c10::DeviceType::MTIA:
@@ -402,8 +406,8 @@ inline CppFunction dispatch(c10::DeviceType type, Func&& raw_f) {
 /// ```
 ///
 /// \ingroup torch-schema-overloads
-inline c10::FunctionSchema schema(const char* str, c10::AliasAnalysisKind k) {
-  c10::FunctionSchema s = torch::jit::parseSchema(str);
+inline c10::FunctionSchema schema(const char* str, c10::AliasAnalysisKind k, bool allow_typevars=false) {
+  c10::FunctionSchema s = torch::jit::parseSchema(str, /*allow_typevars*/allow_typevars);
   s.setAliasAnalysis(k);
   return s;
 }
@@ -411,8 +415,8 @@ inline c10::FunctionSchema schema(const char* str, c10::AliasAnalysisKind k) {
 /// Function schemas can be directly constructed from string literals.
 ///
 /// \ingroup torch-schema-overloads
-inline c10::FunctionSchema schema(const char* s) {
-  return schema(s, c10::AliasAnalysisKind::FROM_SCHEMA);
+inline c10::FunctionSchema schema(const char* s, bool allow_typevars=false) {
+  return schema(s, c10::AliasAnalysisKind::FROM_SCHEMA, allow_typevars);
 }
 
 /// \private
@@ -551,7 +555,7 @@ class TORCH_API Library final {
   Library(
       Kind kind,
       std::string ns,
-      c10::optional<c10::DispatchKey> k,
+      std::optional<c10::DispatchKey> k,
       const char* file,
       uint32_t line);
 
@@ -606,20 +610,22 @@ class TORCH_API Library final {
     return _def(std::move(s), nullptr, tags, rv);
   }
 
-  /// Declares that an operator (given by name) has an abstract impl in a
-  /// Python module (pymodule). If the abstract impl was not yet imported,
-  /// we will warn about it.
+  /// Declares that for all operators that are subsequently def'ed, their
+  /// fake impls may be found in the given Python module (pymodule).
+  /// This registers some help text that is used if the fake impl
+  /// cannot be found.
   ///
   /// Args:
-  /// - name: the name of the operator
   /// - pymodule: the python module
   /// - context: We may include this in the error message.
-  Library& impl_abstract_pystub(const char* name, const char* pymodule, const char* context = "") {
-    at::OperatorName opname = _parseNameForLib(name);
-    registrars_.emplace_back(
-      c10::Dispatcher::singleton().registerAbstractImplPyStub(opname, pymodule, context)
-      );
+  Library& set_python_module(const char* pymodule, const char* context = "") {
+    python_module_ = {pymodule, context};
     return *this;
+  }
+
+  /// Deprecated; use set_python_module instead
+  Library& impl_abstract_pystub(const char* pymodule, const char* context = "") {
+    return set_python_module(pymodule, context);
   }
 
   /// Define an operator for a schema and then register an implementation for
@@ -644,12 +650,13 @@ class TORCH_API Library final {
   /// }
   /// ```
   template <typename NameOrSchema, typename Func>
-  Library& def(NameOrSchema&& raw_name_or_schema, Func&& raw_f) & {
+  Library& def(NameOrSchema&& raw_name_or_schema, Func&& raw_f,
+      const std::vector<at::Tag>& tags = {}) & {
     CppFunction f(std::forward<Func>(raw_f));
     return _def(
         detail::constructSchemaOrName(
             ::std::forward<NameOrSchema>(raw_name_or_schema)),
-        ::std::move(f));
+        ::std::move(f), tags);
   }
 
   /// Register an implementation for an operator.  You may register multiple
@@ -730,20 +737,20 @@ class TORCH_API Library final {
   // These overloads cover cases when a SelectiveStr (see Note [Selective
   // build]) has been disabled at compile time.  In that case, don't generate
   // any code referencing the passed in functions at all.
-  Library& def(detail::SelectiveStr<false>) & {
+  Library& def(detail::SelectiveStr<false>, const std::vector<at::Tag>& tags = {}) & {
     return *this;
   }
-  Library& def(detail::SelectiveStr<true> raw_schema) & {
-    return def(raw_schema.operator const char*());
+  Library& def(detail::SelectiveStr<true> raw_schema, const std::vector<at::Tag>& tags = {}) & {
+    return def(raw_schema.operator const char*(), tags);
   }
   template <typename Func>
-  Library& def(detail::SelectiveStr<false>, Func&& /*raw_f*/) & {
+  Library& def(detail::SelectiveStr<false>, Func&& /*raw_f*/, const std::vector<at::Tag>& tags = {}) & {
     return *this;
   }
   template <typename Func>
-  Library& def(detail::SelectiveStr<true> raw_name_or_schema, Func&& raw_f) & {
+  Library& def(detail::SelectiveStr<true> raw_name_or_schema, Func&& raw_f, const std::vector<at::Tag>& tags = {}) & {
     return def(
-        raw_name_or_schema.operator const char*(), std::forward<Func>(raw_f));
+        raw_name_or_schema.operator const char*(), std::forward<Func>(raw_f), tags);
   }
 
   template <typename Func>
@@ -835,10 +842,14 @@ class TORCH_API Library final {
   template <class CurClass>
   inline detail::ClassNotSelected class_(detail::SelectiveStr<false> className);
 
+  // De-registers all registrations created with this Library
+  void reset();
+
  private:
   Kind kind_;
-  c10::optional<std::string> ns_;
-  c10::optional<c10::DispatchKey> dispatch_key_;
+  std::optional<std::string> ns_;
+  std::optional<c10::DispatchKey> dispatch_key_;
+  std::optional<std::pair<const char*, const char*>> python_module_;
   const char* file_;
   uint32_t line_;
 
@@ -855,7 +866,8 @@ class TORCH_API Library final {
       _RegisterOrVerify rv = _RegisterOrVerify::REGISTER) &;
   Library& _def(
       std::variant<c10::OperatorName, c10::FunctionSchema>&&,
-      CppFunction&& f) &;
+      CppFunction&& f,
+      const std::vector<at::Tag>& tags = {}) &;
   Library& _impl(
       const char* name,
       CppFunction&& f,
@@ -877,7 +889,7 @@ class TorchLibraryInit final {
       Library::Kind kind,
       InitFn* fn,
       const char* ns,
-      c10::optional<c10::DispatchKey> k,
+      std::optional<c10::DispatchKey> k,
       const char* file,
       uint32_t line)
       : lib_(kind, ns, k, file, line) {

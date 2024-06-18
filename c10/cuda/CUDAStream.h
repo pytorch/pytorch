@@ -1,8 +1,5 @@
 #pragma once
 
-#include <cstdint>
-#include <utility>
-
 #include <cuda_runtime_api.h>
 
 #include <c10/core/DeviceGuard.h>
@@ -52,8 +49,7 @@
  * a kernel on the same stream from two different threads.
  */
 
-namespace c10 {
-namespace cuda {
+namespace c10::cuda {
 
 static constexpr int max_compile_time_stream_priorities = 4;
 
@@ -177,7 +173,7 @@ class C10_CUDA_API CUDAStream {
     // Note: this returns the range of priority **supported by PyTorch**, not
     // the range of priority **supported by CUDA**. The former is a subset of
     // the latter.
-    int least_priority, greatest_priority;
+    int least_priority = 0, greatest_priority = 0;
     C10_CUDA_CHECK(
         cudaDeviceGetStreamPriorityRange(&least_priority, &greatest_priority));
 #ifdef USE_ROCM
@@ -260,8 +256,7 @@ C10_API void setCurrentCUDAStream(CUDAStream stream);
 
 C10_API std::ostream& operator<<(std::ostream& stream, const CUDAStream& s);
 
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda
 
 namespace std {
 template <>

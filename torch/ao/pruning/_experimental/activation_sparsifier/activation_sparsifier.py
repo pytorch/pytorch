@@ -402,7 +402,7 @@ class ActivationSparsifier:
                 hook = layer.register_forward_pre_hook(self._sparsify_hook(name))
 
             config['layer'] = layer
-            config['hook'] = hook
+            config['hook'] = hook  # type: ignore[possibly-undefined]
 
     def __repr__(self):
         format_string = self.__class__.__name__ + ' ('

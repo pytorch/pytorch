@@ -433,7 +433,7 @@ def enable_wrap(
             instances inside the context
     """
     kwargs = {
-        **{"wrapper_cls": wrapper_cls},
+        "wrapper_cls": wrapper_cls,
         **wrapper_kwargs,
     }
     with _ConfigAutoWrap(**kwargs):

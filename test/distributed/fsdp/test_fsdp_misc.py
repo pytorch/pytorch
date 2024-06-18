@@ -29,6 +29,7 @@ from torch.distributed.fsdp.wrap import (
 )
 from torch.distributed.optim import _apply_optimizer_in_backward
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
+from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     _assert_module_states,
@@ -36,6 +37,7 @@ from torch.testing._internal.common_fsdp import (
     FSDPInitMode,
     FSDPTest,
     FSDPTestMultiThread,
+    MLP,
     NestedWrappedModule,
     TransformerWithSharedParams,
 )
@@ -503,11 +505,45 @@ class TestFSDPMiscMultiProcess(FSDPTest):
                     ]
 
     @skip_if_lt_x_gpu(2)
+    def test_fsdp_cpu_training(self):
+        """Tests FSDP training on CPU."""
+        gloo_pg = dist.new_group(backend="gloo")
+        for ss in [
+            ShardingStrategy.NO_SHARD,
+            ShardingStrategy.FULL_SHARD,
+            ShardingStrategy.SHARD_GRAD_OP,
+            ShardingStrategy.HYBRID_SHARD,
+            ShardingStrategy._HYBRID_SHARD_ZERO2,
+        ]:
+            torch.manual_seed(42)
+            model = MyModel()
+            ref_model = DDP(deepcopy(model), process_group=gloo_pg)
+            model = FSDP(
+                model,
+                auto_wrap_policy=always_wrap_policy,
+                process_group=gloo_pg,
+                device_id=torch.device("cpu"),
+            )
+            ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+            optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+            torch.manual_seed(42 + self.rank)
+            inp = torch.randn(2, 2)
+            for _ in range(10):
+                losses = []
+                for _model, _optim in ((ref_model, ref_optim), (model, optim)):
+                    loss = _model(inp, inp).sum()
+                    losses.append(loss)
+                    loss.backward()
+                    _optim.step()
+                    _optim.zero_grad()
+                self.assertEqual(losses[0], losses[1])
+
+    @skip_if_lt_x_gpu(2)
     def test_fsdp_cpu_init_stays_on_cpu(self):
         # Move me to MT test once warning logging and backward collective issue
         # is resolved.
         """Tests that passing a CPU module to FSDP preserves that the wrapped
-        module is on CPU after FSDP initialization, albeit after loging a
+        module is on CPU after FSDP initialization, albeit after logging a
         warning, and that FSDP moves CPU input to GPU before the forward."""
         torch.cuda.set_device(self.rank)
         regex = "passed-in `module` is on CPU"
@@ -933,6 +969,18 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
         ):
             inp = fsdp_model.module.get_input(torch.device("cuda"))
             fsdp_model(*inp)
+
+    @skip_if_lt_x_gpu(2)
+    def test_fsdp_unsupported_module_cls(self):
+        regex = r"FSDP will not all-gather parameters for containers that do not implement forward"
+        model = nn.ModuleList([MLP(8, torch.device("cpu")) for _ in range(3)])
+        with self.assertWarnsRegex(UserWarning, regex):
+            FSDP(model, device_id="cuda")
+        model = nn.ModuleDict(
+            {"1": MLP(8, torch.device("cpu")), "2": MLP(8, torch.device("cpu"))}
+        )
+        with self.assertWarnsRegex(UserWarning, regex):
+            FSDP(model)
 
 
 class TestFSDPMiscWorldSize1(FSDPTestMultiThread):

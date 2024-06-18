@@ -21,13 +21,14 @@ static Tensor& fill_scalar_mps_impl(Tensor& self, const Scalar& value) {
   }
   Tensor output = self;
   bool needsCopyToOutput = false;
-  if (!self.is_contiguous() || self.storage_offset()) {
+  if (needsGather(self)) {
     output = at::empty(self.sizes(), self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
     needsCopyToOutput = true;
   }
 
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor* inputTensor_ = nil;
     MPSGraphTensor* outputTensor_ = nil;
   };
 
@@ -35,28 +36,15 @@ static Tensor& fill_scalar_mps_impl(Tensor& self, const Scalar& value) {
     string key = "fill_scalar_mps_impl" + getTensorsStringKey(self) + ":" + to_string(value.toDouble());
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      auto isBool = self.scalar_type() == c10::ScalarType::Bool;
-      auto isUInt8 = self.scalar_type() == c10::ScalarType::Byte;
-      auto dataType = !isUInt8 ? !isBool ? getMPSScalarType(self.scalar_type()) : MPSDataTypeInt8 : MPSDataTypeUInt32;
-      // constantWithScalar does not work for boolTypes on MacOS-12.[34]
-      // workaround by filing it as int8 tensor and than casting to bool
-      // See https://github.com/pytorch/pytorch/issues/82427
-      // constantWithScalar does not work for UInt8 Types on MacOS-12.[34]/Ventura preview
-      // workaround by filing it as uint32 tensor and than casting to uint8
-      // See https://github.com/pytorch/pytorch/issues/83692
-      MPSGraphTensor* inputTensor = [mpsGraph constantWithScalar:value.toDouble()
-                                                           shape:getMPSShape(self)
-                                                        dataType:dataType];
+      MPSGraphTensor* inputTensor = mpsGraphScalarPlaceHolder(mpsGraph, getMPSDataType(self.scalar_type()));
       MPSGraphTensor* outputTensor = [mpsGraph identityWithTensor:inputTensor name:nil];
-      if (isBool) {
-        outputTensor = [mpsGraph castTensor:outputTensor toType:MPSDataTypeBool name:@"constWithBool-workaround"];
-      }
-      if (isUInt8) {
-        outputTensor = [mpsGraph castTensor:outputTensor toType:MPSDataTypeUInt8 name:@"constWithUInt8-workaround"];
-      }
-
+      newCachedGraph->inputTensor_ = inputTensor;
       newCachedGraph->outputTensor_ = outputTensor;
     });
+
+    auto mpsScalar = getMPSScalar(value, self.scalar_type());
+    auto mpsScalarData = getMPSGraphTensorFromScalar(getCurrentMPSStream(), mpsScalar);
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{cachedGraph->inputTensor_ : mpsScalarData};
 
     Placeholder outputPlaceholder =
         Placeholder(cachedGraph->outputTensor_, needsCopyToOutput ? output : self, nullptr, !needsCopyToOutput);
@@ -64,7 +52,7 @@ static Tensor& fill_scalar_mps_impl(Tensor& self, const Scalar& value) {
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
         @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
 
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), /*feeds*/ nil, results);
+    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
 
     if (needsCopyToOutput) {
       self.copy_(output);
@@ -79,17 +67,13 @@ static bool fill_mps_tensor_(Tensor& self, uint8_t value) {
   if (self.is_contiguous()) {
     MPSStream* stream = getCurrentMPSStream();
     auto storage_byte_offset = self.storage_offset() * self.itemsize();
-    stream->fill(mps::getMTLBufferStorage(self), 0, self.storage().nbytes(), storage_byte_offset);
+    stream->fill(mps::getMTLBufferStorage(self), value, self.nbytes(), storage_byte_offset);
     return true;
   }
   return false;
 }
 
 Tensor& fill_scalar_mps(Tensor& self, const Scalar& value) {
-  // check if it's possible to use fillBuffer() to fill the Tensor's storage
-  if (value.toDouble() == 0.0 && fill_mps_tensor_(self, 0) == true)
-    return self;
-
   if (isComplexType(self.scalar_type())) {
     auto self_as_real = at::view_as_real(self);
     auto self_as_real_real = self_as_real.select(self.dim(), 0);
@@ -104,6 +88,10 @@ Tensor& fill_scalar_mps(Tensor& self, const Scalar& value) {
     fill_scalar_mps_impl(self_as_real_imag, 0.0f);
     return self;
   }
+  // check if it's possible to use fillBuffer() to fill the Tensor's storage
+  if (value.toDouble() == 0.0 && fill_mps_tensor_(self, 0) == true)
+    return self;
+
   return fill_scalar_mps_impl(self, value);
 }
 

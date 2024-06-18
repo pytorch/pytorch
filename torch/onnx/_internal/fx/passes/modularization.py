@@ -24,7 +24,7 @@ import torch
 import torch.fx
 from torch.onnx._internal import _beartype
 
-from torch.onnx._internal.fx import _pass
+from torch.onnx._internal.fx import _pass, diagnostics
 from torch.utils import _pytree as pytree
 
 _FX_TRACER_NN_MODULE_META_TYPE = Tuple[str, type]
@@ -54,13 +54,16 @@ class _ModuleMeta:
         _raw_meta: The raw meta '(module_name, node.meta["nn_module_stack"][module_name])'.
     """
 
-    _module_class: Final[Optional[type]]
-    _module_name: Final[str]
-    _raw_meta: Final[Tuple[Any, Any]]
+    _module_class: Final[Optional[Union[type, str]]]  # type: ignore[misc]
+    _module_name: Final[str]  # type: ignore[misc]
+    _raw_meta: Final[Tuple[Any, Any]]  # type: ignore[misc]
 
     @_beartype.beartype
     def __init__(
-        self, module_name: str, module_class: Optional[type], raw_meta: Tuple[Any, Any]
+        self,
+        module_name: str,
+        module_class: Optional[Union[type, str]],
+        raw_meta: Tuple[Any, Any],
     ):
         self._module_name = module_name
         self._module_class = module_class
@@ -86,9 +89,10 @@ class _ModuleMeta:
         """
         if self._module_class is None:
             return ""
-        return (
-            self._module_class.__module__ + "_" + self._module_class.__name__
-        ).replace(".", "_")
+        mod_cls = self._module_class
+        if isinstance(mod_cls, type):
+            mod_cls = mod_cls.__module__ + "." + mod_cls.__qualname__
+        return mod_cls.replace(".", "_")
 
     @property
     def module_class_name(self) -> str:
@@ -98,7 +102,9 @@ class _ModuleMeta:
         """
         if self._module_class is None:
             return ""
-        return self._module_class.__name__
+        if isinstance(self._module_class, type):
+            return self._module_class.__name__
+        return self._module_class
 
     @property
     def module_name(self) -> str:
@@ -204,7 +210,7 @@ class _ModuleStackMeta:
             }
     """
 
-    _module_stack: Final[List[_ModuleMeta]]
+    _module_stack: Final[List[_ModuleMeta]]  # type: ignore[misc]
 
     @_beartype.beartype
     def __init__(
@@ -214,12 +220,18 @@ class _ModuleStackMeta:
                 _FX_TRACER_NN_MODULE_STACK_META_TYPE, _DYNAMO_NN_MODULE_STACK_META_TYPE
             ]
         ],
+        is_exported_program: bool = True,
     ):
         self._module_stack = []
         if nn_module_stack_meta is None:
             return
         raw_meta = copy.copy(nn_module_stack_meta)
         for item in raw_meta.items():
+            # If produced by torch.export.export, there is another call stack layer
+            # that we need to skip
+            if is_exported_program:
+                is_exported_program = False
+                continue
             self.push(_ModuleMeta.from_raw_meta(item))
 
     def __len__(self) -> int:
@@ -321,13 +333,17 @@ class _ModuleStackMeta:
         return self.top().qualified_module_class_name
 
     @property
-    def module_class(self) -> Optional[type]:
+    def module_class(self) -> Optional[Union[type, str]]:
         """Returns the module class of the top module."""
         return self.top()._module_class
 
 
-def _module_stack_meta_from_node(node: torch.fx.Node) -> _ModuleStackMeta:
-    return _ModuleStackMeta(node.meta.get("nn_module_stack"))
+def _module_stack_meta_from_node(
+    node: torch.fx.Node, is_exported_program: bool = False
+) -> _ModuleStackMeta:
+    return _ModuleStackMeta(
+        node.meta.get("nn_module_stack"), is_exported_program=is_exported_program
+    )
 
 
 def _get_unique_module_name(module_names: Dict[str, int], module_name: str) -> str:
@@ -494,6 +510,11 @@ class _ModuleNode(_IRNode):
         construct _ModuleNode instance based on the stack_meta information of the leaf node.
         """
         if self.is_same_module_as(leaf_node) or leaf_node.fx_op == "call_module":
+            self._nodes.append(leaf_node)
+        elif leaf_node.fx_op == "placeholder":
+            # Although the original placeholder has empty nn_module_stack, the placeholder lifted
+            # from get_attr nodes by exported program has their original nn_module_stack. Here
+            # we need to avoid them building submodule.
             self._nodes.append(leaf_node)
         elif self.is_parent_module_of(leaf_node):
             # This node belongs in a submodule.
@@ -696,9 +717,11 @@ class _ModuleNode(_IRNode):
 class _LeafNode(_IRNode):
     """Representing a single fx.Node."""
 
-    def __init__(self, node: torch.fx.Node):
+    def __init__(self, node: torch.fx.Node, is_exported_program: bool = False):
         self._node = node
-        self._stack_meta = _module_stack_meta_from_node(node)
+        self._stack_meta = _module_stack_meta_from_node(
+            node, is_exported_program=is_exported_program
+        )
 
     @property
     def fx_op(self) -> str:
@@ -729,7 +752,8 @@ class Modularize(_pass.Transform):
 
     In the flattened `fx.GraphModule`, each `nn.Module` forward call has been traced as
     a sequence of `fx.Node`s. All these `fx.Node`s are flattened and reside in the same
-    `fx.GraphModule`.
+    `fx.GraphModule`. `fx.GraphModule` could be from `torch.export.ExportedProgram` or
+    directly generated by `torch._dynamo.export` with torch.nn.Module.
 
     This pass generates a new `fx.GraphModule`. It groups the flattened `fx.Node`s that belong
     to the same `nn.Module` forward call into a sub `fx.GraphModule`. It then replaces the
@@ -819,6 +843,17 @@ class Modularize(_pass.Transform):
     """
 
     @_beartype.beartype
+    def __init__(
+        self,
+        diagnostic_context: diagnostics.DiagnosticContext,
+        module: torch.fx.GraphModule,
+        is_exported_program: bool = False,
+    ):
+        super().__init__(diagnostic_context, module)
+        self.module = module
+        self.is_exported_program = is_exported_program
+
+    @_beartype.beartype
     def _run(self) -> torch.fx.GraphModule:
         # DCE to remove unused nodes.
         # If a submodule is unused, it is hard to analyze which nodes constitutes the submodule
@@ -826,7 +861,14 @@ class Modularize(_pass.Transform):
         self.module.graph.eliminate_dead_code()
 
         reference_module = torch.fx.GraphModule(self.module, self.module.graph)
-        root_module_node = _ModuleNode(reference_module, _ModuleStackMeta(None))
+        root_module_node = _ModuleNode(
+            reference_module,
+            _ModuleStackMeta(
+                nn_module_stack_meta=None, is_exported_program=self.is_exported_program
+            ),
+        )
         for fx_node in self.module.graph.nodes:
-            root_module_node.add_leaf_node(_LeafNode(fx_node))
+            root_module_node.add_leaf_node(
+                _LeafNode(fx_node, is_exported_program=self.is_exported_program)
+            )
         return root_module_node.build_module({})

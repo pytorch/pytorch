@@ -2,13 +2,13 @@
 from typing import cast, Dict, List, Optional, Tuple
 
 import torch
-from torch.distributed._tensor._utils import compute_local_shape
-from torch.distributed._tensor.op_schema import (
+from torch.distributed._tensor._op_schema import (
     _is_inplace_op,
     _is_out_variant_op,
     OpSchema,
     OutputSharding,
 )
+from torch.distributed._tensor._utils import compute_local_shape
 from torch.distributed._tensor.ops.utils import prod
 from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
 
@@ -39,8 +39,7 @@ def _gen_reshard_suggestions(
     suggested_schema._inplace_rewrap_schema_suggestion(op_schema)
     return OutputSharding(
         None,
-        schema_suggestions=[suggested_schema],
-        failed_reason="Input placements op sharding propagation failed, need to reshard!",
+        redistribute_schema=suggested_schema,
     )
 
 
@@ -52,9 +51,9 @@ def einop_rule(
     enforce_sharding: Optional[Dict[str, int]] = None,
 ) -> OutputSharding:
     """
-    Propagate the sharding of inputs to output for ops whose data
-    moves according to einsum notation. This is mostly borrowed
-    from @zdevito's sharding simulator. Examples:
+    Propagate the sharding of inputs to output for ops whose data moves according to einsum notation.
+
+    This is mostly borrowed from @zdevito's sharding simulator. Examples:
         mk,kn->mn - einsum
         ij,ij->ij - addition
         ij,j->ij - broadcasted addition
@@ -229,7 +228,9 @@ def einop_rule(
 
 def pointwise_rule(op_schema: OpSchema, linearity: bool = False) -> OutputSharding:
     """
-    Propagate the sharding for pointwise operations. Examples:
+    Propagate the sharding for pointwise operations.
+
+    Examples:
         ij,ij->ij - addition/mul
         ij,j->ij - broadcasted addition
     """
@@ -285,12 +286,3 @@ def pointwise_rule(op_schema: OpSchema, linearity: bool = False) -> OutputShardi
         linearity=linearity,
         enforce_sharding=enforce_sharding,
     )
-
-
-def linear_pointwise_rule(op_schema: OpSchema) -> OutputSharding:
-    """
-    Linear pointwise operators can propagate pending reductions.
-    For example, c = add(a, b); if a is pending sum, then c will be
-    pending sum as well without any communication overhead.
-    """
-    return pointwise_rule(op_schema, linearity=True)

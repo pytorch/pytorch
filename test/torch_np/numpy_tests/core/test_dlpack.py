@@ -2,30 +2,44 @@
 
 import functools
 import sys
+import unittest
 
-from unittest import expectedFailure as xfail, skipIf as skipif
+from unittest import skipIf as skipif
+
+import numpy
 
 import pytest
 
 import torch
 
-import torch._numpy as np
-from torch._numpy.testing import assert_array_equal
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfTorchDynamo,
+    TEST_WITH_TORCHDYNAMO,
     TestCase,
+    xpassIfTorchDynamo,
 )
 
+if TEST_WITH_TORCHDYNAMO:
+    import numpy as np
+    from numpy.testing import assert_array_equal
+else:
+    import torch._numpy as np
+    from torch._numpy.testing import assert_array_equal
+
+
 skip = functools.partial(skipif, True)
+
 
 IS_PYPY = False
 
 
+@skipif(numpy.__version__ < "1.24", reason="numpy.dlpack is new in numpy 1.23")
 @instantiate_parametrized_tests
 class TestDLPack(TestCase):
-    @xfail  # (reason="pytorch seems to handle refcounts differently")
+    @xpassIfTorchDynamo  # (reason="pytorch seems to handle refcounts differently")
     @skipif(IS_PYPY, reason="PyPy can't get refcounts.")
     def test_dunder_dlpack_refcount(self):
         x = np.arange(5)
@@ -34,7 +48,8 @@ class TestDLPack(TestCase):
         del y
         assert sys.getrefcount(x) == 2
 
-    @xfail  # (reason="pytorch does not raise")
+    @unittest.expectedFailure
+    @skipIfTorchDynamo("I can't figure out how to get __dlpack__ into trace_rules.py")
     def test_dunder_dlpack_stream(self):
         x = np.arange(5)
         x.__dlpack__(stream=None)
@@ -42,7 +57,7 @@ class TestDLPack(TestCase):
         with pytest.raises(RuntimeError):
             x.__dlpack__(stream=1)
 
-    @xfail  # (reason="pytorch seems to handle refcounts differently")
+    @xpassIfTorchDynamo  # (reason="pytorch seems to handle refcounts differently")
     @skipif(IS_PYPY, reason="PyPy can't get refcounts.")
     def test_from_dlpack_refcount(self):
         x = np.arange(5)

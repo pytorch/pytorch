@@ -138,7 +138,9 @@ _OBS_DTYPE_LIST = [
     torch.uint8,
     torch.int8,
     torch.int16,
-    torch.int32
+    torch.int32,
+    torch.float8_e5m2,
+    torch.float8_e4m3fn,
 ]
 
 _DEFAULT_FP32_OBS_OR_FQ_CTR = PlaceholderObserver.with_args(dtype=torch.float)
@@ -207,7 +209,7 @@ def _create_obs_or_fq_from_qspec(
         kwargs = _get_observer_kwargs(quantization_spec)
         observer_ctr = FixedQParamsObserver.with_args(**kwargs)
         if is_qat:
-            return FixedQParamsFakeQuantize.with_args(observer=observer_ctr)
+            return FixedQParamsFakeQuantize.with_args(observer=observer_ctr)()
         else:
             return observer_ctr()
 
@@ -220,8 +222,6 @@ def _create_obs_or_fq_from_qspec(
     obs_or_fq_class = observer_or_fake_quant_ctr
     if isinstance(observer_or_fake_quant_ctr, _PartialWrapper):
         obs_or_fq_class = observer_or_fake_quant_ctr.p.func  # type: ignore[union-attr, assignment]
-    if obs_or_fq_class != torch.ao.quantization.observer.PlaceholderObserver:
-        kwargs.pop("is_dynamic")
     if "PerChannel" not in obs_or_fq_class.__name__:  # type: ignore[operator, union-attr]
         kwargs.pop("ch_axis")
     return observer_or_fake_quant_ctr.with_args(**kwargs)()
@@ -837,7 +837,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
                 maybe_obs_mod = named_modules[maybe_obs_node.target]  # type: ignore[index]
                 if (
                     type(maybe_obs_mod) == type(arg_as_input_act_obs_or_fq) and
-                    maybe_obs_mod.dtype == arg_as_input_target_dtype
+                    maybe_obs_mod.dtype == arg_as_input_target_dtype  # type: ignore[possibly-undefined]
                 ):
                     arg_as_input_act_obs_or_fq = maybe_obs_mod  # type: ignore[assignment]
                     existing_obs_node = maybe_obs_node
@@ -1101,7 +1101,7 @@ def _maybe_insert_observers_before_graph_output(
         elif maybe_node is None:
             return None
         else:
-            raise Exception("Unhandled type for returned node:", maybe_node)
+            raise Exception("Unhandled type for returned node:", maybe_node)  # noqa: TRY002
 
     new_args = []
     for old_arg in graph_output_node.args:
@@ -1587,7 +1587,7 @@ def insert_observers_for_model(
                             # should resolve this inconsistency by inserting DeQuantStubs for all custom
                             # modules, not just for LSTM.
                             _insert_dequant_stubs_for_custom_module_lstm_output(node, model, named_modules, model.graph)
-                            if(node.target not in custom_module_names_already_swapped):
+                            if node.target not in custom_module_names_already_swapped:
                                 custom_module_names_already_swapped.add(node.target)
                                 _swap_custom_module_to_observed(node, qconfig, named_modules, prepare_custom_config)
                         else:
@@ -1629,7 +1629,7 @@ def insert_observers_for_model(
                                         _remove_output_observer(node, model, named_modules)
 
                                 if qhandler is not None and qhandler.is_custom_module():
-                                    if(node.target not in custom_module_names_already_swapped):
+                                    if node.target not in custom_module_names_already_swapped:
                                         custom_module_names_already_swapped.add(node.target)
                                         _swap_custom_module_to_observed(node, qconfig, named_modules, prepare_custom_config)
 
@@ -1749,32 +1749,44 @@ def prepare(
     if _equalization_config is None:
         _equalization_config = QConfigMapping()
 
-    if isinstance(qconfig_mapping, Dict):
+    if isinstance(qconfig_mapping, dict):
         warnings.warn(
             "Passing a QConfig dictionary to prepare is deprecated and will not be supported "
-            "in a future version. Please pass in a QConfigMapping instead.")
+            "in a future version. Please pass in a QConfigMapping instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
         qconfig_mapping = QConfigMapping.from_dict(qconfig_mapping)
 
-    if isinstance(_equalization_config, Dict):
+    if isinstance(_equalization_config, dict):
         warnings.warn(
             "Passing a QConfig dictionary to prepare for equalization is deprecated and will not "
-            "be supported in a future version. Please pass in a QConfigMapping instead.")
+            "be supported in a future version. Please pass in a QConfigMapping instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
         _equalization_config = QConfigMapping.from_dict(_equalization_config)
 
-    if isinstance(prepare_custom_config, Dict):
+    if isinstance(prepare_custom_config, dict):
         warnings.warn(
             "Passing a prepare_custom_config_dict to prepare is deprecated and will not be supported "
-            "in a future version. Please pass in a PrepareCustomConfig instead.")
+            "in a future version. Please pass in a PrepareCustomConfig instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
         prepare_custom_config = PrepareCustomConfig.from_dict(prepare_custom_config)
 
-    if isinstance(backend_config, Dict):
+    if isinstance(backend_config, dict):
         warnings.warn(
             "Passing a backend_config_dict to prepare is deprecated and will not be supported "
-            "in a future version. Please pass in a BackendConfig instead.")
+            "in a future version. Please pass in a BackendConfig instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
         backend_config = BackendConfig.from_dict(backend_config)
 
-    assert(isinstance(qconfig_mapping, QConfigMapping))
-    assert(isinstance(_equalization_config, QConfigMapping))
+    assert isinstance(qconfig_mapping, QConfigMapping)
+    assert isinstance(_equalization_config, QConfigMapping)
     qconfig_mapping = copy.deepcopy(qconfig_mapping)
     _equalization_config = copy.deepcopy(_equalization_config)
 

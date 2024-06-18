@@ -2,6 +2,7 @@ import os
 import sys
 import warnings
 from contextlib import contextmanager
+from typing import Optional
 
 import torch
 from torch.backends import __allow_nonbracketed_mutation, ContextProp, PropModule
@@ -17,7 +18,7 @@ except ImportError:
 #
 # to globally disable CuDNN/MIOpen
 
-__cudnn_version = None
+__cudnn_version: Optional[int] = None
 
 if _cudnn is not None:
 
@@ -78,7 +79,7 @@ else:
 
 
 def version():
-    """Returns the version of cuDNN"""
+    """Return the version of cuDNN."""
     if not _init():
         return None
     return __cudnn_version
@@ -92,7 +93,7 @@ CUDNN_TENSOR_DTYPES = {
 
 
 def is_available():
-    r"""Returns a bool indicating if CUDNN is currently available."""
+    r"""Return a bool indicating if CUDNN is currently available."""
     return torch._C._has_cudnn
 
 

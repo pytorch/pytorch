@@ -1,26 +1,27 @@
 # Owner(s): ["oncall: distributed"]
 
+import re
 import sys
-import torch
-import torch.cuda.nccl as nccl
-import torch.cuda
-import torch.distributed as c10d
 
-from torch.testing._internal.common_utils import (
-    TestCase,
-    run_tests,
-    IS_WINDOWS,
-    load_tests,
-    TEST_WITH_ROCM,
-    skip_but_pass_in_sandcastle_if,
-    NoTest,
-)
+import torch
+import torch.cuda
+import torch.cuda.nccl as nccl
+import torch.distributed as c10d
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
     dtypes,
+    instantiate_device_type_tests,
 )
-import re
+
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    load_tests,
+    NoTest,
+    run_tests,
+    skip_but_pass_in_sandcastle_if,
+    TEST_WITH_ROCM,
+    TestCase,
+)
 
 HIP_VERSION = (
     0.0
@@ -105,7 +106,7 @@ class TestNCCL(TestCase):
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "only one GPU detected")
     @skip_but_pass_in_sandcastle_if(
-        TEST_WITH_ROCM and HIP_VERSION < 3.5 and dtype == torch.bfloat16,
+        TEST_WITH_ROCM and HIP_VERSION < 3.5 and dtype == torch.bfloat16,  # noqa: F821
         "Skip bfloat16 test for ROCm < 3.5",
     )
     @dtypes(*datatypes)

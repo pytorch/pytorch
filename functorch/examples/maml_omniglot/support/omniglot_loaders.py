@@ -22,11 +22,11 @@ import os
 import os.path
 
 import numpy as np
+import torchvision.transforms as transforms
+from PIL import Image
 
 import torch
 import torch.utils.data as data
-import torchvision.transforms as transforms
-from PIL import Image
 
 
 class Omniglot(data.Dataset):
@@ -187,7 +187,7 @@ class OmniglotNShot:
 
             # as different class may have different number of imgs
             self.x = np.array(self.x).astype(
-                np.float
+                np.float64
             )  # [[20 imgs],..., 1623 classes in total]
             # each character contains 20 imgs
             print("data shape:", self.x.shape)  # [1623, 20, 84, 84, 1]

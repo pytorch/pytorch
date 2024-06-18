@@ -1,12 +1,14 @@
 import sys
 from contextlib import contextmanager
 
+from typing import TYPE_CHECKING
+
 import torch
 from torch.backends import __allow_nonbracketed_mutation, ContextProp, PropModule
 
 
 def is_available():
-    r"""Returns whether PyTorch is built with MKL-DNN support."""
+    r"""Return whether PyTorch is built with MKL-DNN support."""
     return torch._C._has_mkldnn
 
 
@@ -17,7 +19,8 @@ VERBOSE_ON_CREATION = 2
 
 class verbose:
     """
-    On-demand oneDNN (former MKL-DNN) verbosing functionality
+    On-demand oneDNN (former MKL-DNN) verbosing functionality.
+
     To make it easier to debug performance issues, oneDNN can dump verbose
     messages containing information like kernel size, input data size and
     execution duration while executing the kernel. The verbosing functionality
@@ -83,6 +86,10 @@ class MkldnnModule(PropModule):
         super().__init__(m, name)
 
     enabled = ContextProp(torch._C._get_mkldnn_enabled, torch._C._set_mkldnn_enabled)
+
+
+if TYPE_CHECKING:
+    enabled: ContextProp
 
 
 # Cool stuff from torch/backends/cudnn/__init__.py and

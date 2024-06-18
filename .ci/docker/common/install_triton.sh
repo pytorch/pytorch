@@ -13,8 +13,11 @@ conda_reinstall() {
 }
 
 if [ -n "${ROCM_VERSION}" ]; then
-  TRITON_REPO="https://github.com/ROCmSoftwarePlatform/triton"
+  TRITON_REPO="https://github.com/openai/triton"
   TRITON_TEXT_FILE="triton-rocm"
+elif [ -n "${XPU_VERSION}" ]; then
+  TRITON_REPO="https://github.com/intel/intel-xpu-backend-for-triton"
+  TRITON_TEXT_FILE="triton-xpu"
 else
   TRITON_REPO="https://github.com/openai/triton"
   TRITON_TEXT_FILE="triton"
@@ -23,8 +26,10 @@ fi
 # The logic here is copied from .ci/pytorch/common_utils.sh
 TRITON_PINNED_COMMIT=$(get_pinned_commit ${TRITON_TEXT_FILE})
 
-apt update
-apt-get install -y gpg-agent
+if [ -n "${UBUNTU_VERSION}" ];then
+    apt update
+    apt-get install -y gpg-agent
+fi
 
 if [ -n "${CONDA_CMAKE}" ]; then
   # Keep the current cmake and numpy version here, so we can reinstall them later
@@ -36,12 +41,12 @@ if [ -z "${MAX_JOBS}" ]; then
     export MAX_JOBS=$(nproc)
 fi
 
-if [ -n "${GCC_VERSION}" ] && [[ "${GCC_VERSION}" == "7" ]]; then
+if [ -n "${UBUNTU_VERSION}" ] && [ -n "${GCC_VERSION}" ] && [[ "${GCC_VERSION}" == "7" ]]; then
   # Triton needs at least gcc-9 to build
   apt-get install -y g++-9
 
   CXX=g++-9 pip_install "git+${TRITON_REPO}@${TRITON_PINNED_COMMIT}#subdirectory=python"
-elif [ -n "${CLANG_VERSION}" ]; then
+elif [ -n "${UBUNTU_VERSION}" ] && [ -n "${CLANG_VERSION}" ]; then
   # Triton needs <filesystem> which surprisingly is not available with clang-9 toolchain
   add-apt-repository -y ppa:ubuntu-toolchain-r/test
   apt-get install -y g++-9
@@ -62,5 +67,6 @@ if [ -n "${CONDA_CMAKE}" ]; then
   # latest numpy version, which fails ASAN tests with the following import error: Numba
   # needs NumPy 1.20 or less.
   conda_reinstall cmake="${CMAKE_VERSION}"
-  conda_reinstall numpy="${NUMPY_VERSION}"
+  # Note that we install numpy with pip as conda might not have the version we want
+  pip_install --force-reinstall numpy=="${NUMPY_VERSION}"
 fi

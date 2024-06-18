@@ -21,7 +21,7 @@ Generator createMPSGenerator(uint64_t seed_val) {
 } // namespace mps::detail
 
 MPSGeneratorImpl::MPSGeneratorImpl(uint64_t seed_in)
-    : c10::GeneratorImpl{Device(DeviceType::MPS), DispatchKeySet(c10::DispatchKey::MPS)},
+    : c10::GeneratorImpl{Device(DeviceType::MPS, 0), DispatchKeySet(c10::DispatchKey::MPS)},
       data_({.seed = seed_in}),
       engine_(seed_in, 0, 0) {}
 

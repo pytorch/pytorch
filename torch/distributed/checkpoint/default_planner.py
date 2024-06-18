@@ -6,50 +6,44 @@ import logging
 import operator
 from collections import ChainMap
 from functools import reduce
-from typing import List, Tuple, Dict, Any, Union, cast
+from typing import Any, cast, Dict, List, Optional, Tuple, Union
 
 import torch
-
 from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch.distributed._tensor import DTensor
-
-
-from torch.distributed.checkpoint.planner import (
-    SavePlanner,
-    LoadPlanner,
-    SavePlan,
-    LoadPlan,
-    ReadItem,
-    WriteItem,
-    WriteItemType,
-)
-
-from torch.distributed.checkpoint.metadata import (
-    BytesStorageMetadata,
-    ChunkStorageMetadata,
-    TensorStorageMetadata,
-    MetadataIndex,
-    Metadata,
-    STATE_DICT_TYPE,
-    STORAGE_TYPES,
-)
-
-from torch.distributed.checkpoint.planner_helpers import (
-    _create_read_items,
-    _create_write_items,
-    _create_default_metadata_only_plan,
-)
-
+from torch.distributed.checkpoint._dedup_save_plans import dedup_save_plans
 from torch.distributed.checkpoint._nested_dict import (
     FLATTEN_MAPPING,
     flatten_state_dict,
 )
-from torch.distributed.checkpoint._sharded_tensor_utils import (
-    _flatten_sharded_tensors,
-)
-from torch.distributed.checkpoint._dedup_tensors import dedup_tensors
-from torch.distributed.checkpoint.utils import find_state_dict_object
+from torch.distributed.checkpoint._sharded_tensor_utils import _flatten_sharded_tensors
 from torch.distributed.checkpoint._traverse import set_element
+from torch.distributed.checkpoint.metadata import (
+    BytesStorageMetadata,
+    ChunkStorageMetadata,
+    Metadata,
+    MetadataIndex,
+    STATE_DICT_TYPE,
+    STORAGE_TYPES,
+    StorageMeta,
+    TensorStorageMetadata,
+)
+from torch.distributed.checkpoint.planner import (
+    LoadPlan,
+    LoadPlanner,
+    ReadItem,
+    SavePlan,
+    SavePlanner,
+    WriteItem,
+    WriteItemType,
+)
+from torch.distributed.checkpoint.planner_helpers import (
+    _create_default_metadata_only_plan,
+    _create_read_items,
+    _create_write_items,
+    _init_state_dict,
+)
+from torch.distributed.checkpoint.utils import find_state_dict_object
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -72,15 +66,25 @@ class DefaultSavePlanner(SavePlanner):
         self,
         flatten_state_dict: bool = True,
         flatten_sharded_tensors: bool = True,
-        dedup_replicated_tensors: bool = True,
+        dedup_replicated_tensors: Optional[bool] = None,
+        dedup_save_to_lowest_rank: bool = False,
     ) -> None:
         self.flatten_state_dict = flatten_state_dict
         self.flatten_sharded_tensors = flatten_sharded_tensors
-        self.dedup_replicated_tensors = dedup_replicated_tensors
         self.mappings = {}
+        self.dedup_save_to_lowest_rank = dedup_save_to_lowest_rank
+        if dedup_replicated_tensors is not None:
+            logger.warning(
+                "DefaultSavePlanner's `dedup_replicated_tensors` argument is being "
+                "deprecated, and no longer has any effect. Please remove this argument "
+                "from your call."
+            )
 
     def set_up_planner(
-        self, state_dict: STATE_DICT_TYPE, is_coordinator: bool
+        self,
+        state_dict: STATE_DICT_TYPE,
+        storage_meta: Optional[StorageMeta] = None,
+        is_coordinator: bool = False,
     ) -> None:
         if self.flatten_state_dict:
             state_dict, self.mappings = flatten_state_dict(state_dict)
@@ -90,9 +94,7 @@ class DefaultSavePlanner(SavePlanner):
         self.is_coordinator = is_coordinator
 
     def create_local_plan(self) -> SavePlan:
-        plan = create_default_local_save_plan(
-            self.state_dict, self.is_coordinator
-        )
+        plan = create_default_local_save_plan(self.state_dict, self.is_coordinator)
         if self.flatten_state_dict:
             plan = dataclasses.replace(plan, planner_data=self.mappings)
         self.plan = plan
@@ -102,8 +104,7 @@ class DefaultSavePlanner(SavePlanner):
     def create_global_plan(
         self, all_plans: List[SavePlan]
     ) -> Tuple[List[SavePlan], Metadata]:
-        if self.dedup_replicated_tensors:
-            all_plans = dedup_tensors(all_plans)
+        all_plans = dedup_save_plans(all_plans, self.dedup_save_to_lowest_rank)
 
         global_plan, metadata = create_default_global_save_plan(all_plans)
 
@@ -114,9 +115,7 @@ class DefaultSavePlanner(SavePlanner):
             # )
             planner_data_dict = [p.planner_data for p in global_plan]
             merged_mappings = dict(ChainMap(*planner_data_dict))
-            metadata = dataclasses.replace(
-                metadata, planner_data=merged_mappings
-            )
+            metadata = dataclasses.replace(metadata, planner_data=merged_mappings)
 
         if not _validate_global_plan(global_plan, metadata):
             raise ValueError("Failed to validate global plan")
@@ -130,22 +129,16 @@ class DefaultSavePlanner(SavePlanner):
         self.plan = new_plan
         return new_plan
 
-    def resolve_data(
-        self, write_item: WriteItem
-    ) -> Union[torch.Tensor, io.BytesIO]:
+    def resolve_data(self, write_item: WriteItem) -> Union[torch.Tensor, io.BytesIO]:
         object = self.lookup_object(write_item.index)
         return self.transform_object(write_item, object)
 
     def lookup_object(self, index: MetadataIndex) -> Any:
-        """
-        This is an extension from the planner interface to make it easy to extend the default planner
-        """
+        """Extension from the planner interface to make it easy to extend the default planner."""
         return find_state_dict_object(self.state_dict, index)
 
     def transform_object(self, write_item: WriteItem, object: Any):
-        """
-        This is an extension from the planner interface to make it easy to extend the default planner
-        """
+        """Extension from the planner interface to make it easy to extend the default planner."""
         if write_item.type == WriteItemType.BYTE_IO:
             bytes = io.BytesIO()
             torch.save(object, bytes)
@@ -161,6 +154,7 @@ class DefaultLoadPlanner(LoadPlanner):
 
     flatten_state_dict: Handle state_dict with nested dicts
     flatten_sharded_tensors: For FSDP in 2D parallel mode
+    allow_partial_load: If False, will raise a runtime error if a key is present in state_dict, but not in the checkpoint.
     """
 
     original_state_dict: STATE_DICT_TYPE
@@ -170,18 +164,21 @@ class DefaultLoadPlanner(LoadPlanner):
         self,
         flatten_state_dict: bool = True,
         flatten_sharded_tensors: bool = True,
+        allow_partial_load: bool = False,
     ) -> None:
         self.flatten_state_dict = flatten_state_dict
         self.flatten_sharded_tensors = flatten_sharded_tensors
         self.original_state_dict = {}
         self.mappings = {}
+        self.allow_partial_load = allow_partial_load
 
     def set_up_planner(
         self,
         state_dict: STATE_DICT_TYPE,
-        metadata: Metadata,
-        is_coordinator: bool,
+        metadata: Optional[Metadata] = None,
+        is_coordinator: bool = False,
     ) -> None:
+        _init_state_dict(state_dict)
         self.original_state_dict = state_dict
 
         if self.flatten_sharded_tensors:
@@ -195,7 +192,10 @@ class DefaultLoadPlanner(LoadPlanner):
         self.is_coordinator = is_coordinator
 
     def create_local_plan(self) -> LoadPlan:
-        return create_default_local_load_plan(self.state_dict, self.metadata)
+        assert self.metadata is not None
+        return create_default_local_load_plan(
+            self.state_dict, self.metadata, not self.allow_partial_load
+        )
 
     def create_global_plan(self, global_plan: List[LoadPlan]) -> List[LoadPlan]:
         return create_default_global_load_plan(global_plan)
@@ -221,23 +221,81 @@ class DefaultLoadPlanner(LoadPlanner):
         pass
 
     def lookup_tensor(self, index: MetadataIndex) -> torch.Tensor:
-        """
-        This is an extension from the planner interface to make it easy to extend the default planner
-        """
+        """Extension from the planner interface to make it easy to extend the default planner."""
         return find_state_dict_object(self.state_dict, index)
 
     def transform_tensor(self, read_item: ReadItem, tensor: torch.Tensor):
-        """
-        This is an extension from the planner interface to make it easy to extend the default planner
-        """
-        return narrow_tensor_by_index(
-            tensor, read_item.dest_offsets, read_item.lengths
-        )
+        """Extension from the planner interface to make it easy to extend the default planner."""
+        return narrow_tensor_by_index(tensor, read_item.dest_offsets, read_item.lengths)
+
+
+class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
+    """
+    Extension of DefaultLoadPlanner, which rebuilds state_dict from the saved metadata.
+    Useful for loading in state_dict without first initializing a model, such as
+    when converting a DCP checkpoint into a Torch save file.
+
+    . N.B. `state_dict` must be an empty dictionary when used with this LoadPlanner
+
+    .. warning::
+        Because the entire state dict is initialized, It's recommended to only utilize
+        this LoadPlanner on a single rank or process to avoid OOM.
+
+    """
+
+    def __init__(self, keys=None, *args, **kwargs):
+        self.keys = keys
+        super().__init__(*args, **kwargs)
+
+    def _should_include_key(self, key: str, metadata: Metadata) -> bool:
+        if self.keys is None:
+            return True
+
+        if key in self.keys:
+            True
+
+        unflattened_keys: List[str] = []
+        planner_data = metadata.planner_data.get(key)
+        for unflattened_key in planner_data:
+            if unflattened_keys:
+                unflattened_keys.append(
+                    ".".join([unflattened_keys[-1], str(unflattened_key)])
+                )
+
+            else:
+                unflattened_keys.append(unflattened_key)
+
+        if any(unflattened_key in self.keys for unflattened_key in unflattened_keys):
+            return True
+
+        return False
+
+    def set_up_planner(
+        self,
+        state_dict: STATE_DICT_TYPE,
+        metadata: Optional[Metadata] = None,
+        is_coordinator: bool = False,
+    ) -> None:
+        assert not state_dict
+        assert metadata is not None
+
+        # rebuild the state dict from the metadata
+        for k, v in metadata.state_dict_metadata.items():
+            if not self._should_include_key(k, metadata):
+                continue
+
+            if isinstance(v, TensorStorageMetadata):
+                v = torch.empty(v.size, dtype=v.properties.dtype)  # type: ignore[assignment]
+            if k in metadata.planner_data:
+                set_element(state_dict, metadata.planner_data[k], v)
+            else:
+                state_dict[k] = v
+
+        super().set_up_planner(state_dict, metadata, is_coordinator)
 
 
 def create_default_local_load_plan(
-    state_dict: Dict[str, Any],
-    metadata: Metadata,
+    state_dict: Dict[str, Any], metadata: Metadata, strict: bool = True
 ) -> LoadPlan:
     requests = []
     """
@@ -251,6 +309,13 @@ def create_default_local_load_plan(
     """
 
     for fqn, obj in state_dict.items():
+        # ignore state_dict keys which do not exist in `state_dict` if strict=False
+        if fqn not in metadata.state_dict_metadata:
+            if strict:
+                raise RuntimeError(f"Missing key in checkpoint state_dict: {fqn}.")
+            else:
+                continue
+
         md = metadata.state_dict_metadata[fqn]
         # Since DTensor supports submesh, adding extra check to ensure _create_read_items()
         # gets called only when the current rank is part of the mesh for the corresponding DTensor.
@@ -293,7 +358,10 @@ def create_default_local_save_plan(
         if isinstance(obj, DTensor):
             if obj.device_mesh.get_coordinate() is not None:
                 requests += _create_write_items(fqn, obj)
-        elif isinstance(obj, (torch.Tensor)) or is_coordinator:
+        else:
+            # For the plain tensor and non-tensor values, add the request for all
+            # the ranks. Coordinator will decides whether to deduplicate the
+            # values based on the keys.
             requests += _create_write_items(fqn, obj)
 
     return SavePlan(requests)
@@ -355,21 +423,14 @@ def create_default_global_save_plan(
 
 
 def _create_default_local_metadata(state_dict: STATE_DICT_TYPE) -> Metadata:
-    """
-    Return the ``Metadata`` if DefaultSavePlanner was used to checkpoint ``state_dict``.
-    """
+    """Return the ``Metadata`` if DefaultSavePlanner was used to checkpoint ``state_dict``."""
     plan = _create_default_metadata_only_plan(state_dict)
     _, md = create_default_global_save_plan([plan])
     return md
 
 
-def _check_box_overlap(
-    box0: ChunkStorageMetadata, box1: ChunkStorageMetadata
-) -> bool:
-    """
-    Checks if two boxes overlap. Tuples are (offset, lengths)
-    """
-
+def _check_box_overlap(box0: ChunkStorageMetadata, box1: ChunkStorageMetadata) -> bool:
+    """Check if two boxes overlap. Tuples are (offset, lengths)."""
     # For each dim of each shard, check if one shard resides on the other
     # end of second shard with respect to that dim. As an example for a 2D
     # shard, we would check if one shard is above or on the left of the
@@ -398,9 +459,7 @@ def _check_box_bounds(
     return True
 
 
-def _validate_global_plan(
-    global_plan: List[SavePlan], metadata: Metadata
-) -> bool:
+def _validate_global_plan(global_plan: List[SavePlan], metadata: Metadata) -> bool:
     all_good = True
     for key, value in metadata.state_dict_metadata.items():
         if isinstance(value, BytesStorageMetadata):
@@ -415,7 +474,10 @@ def _validate_global_plan(
                     """
                         key:%s has out of bounds chunk:
                         tensor-size:%s chunk: %s
-                    """, key, value.size, chunk0
+                    """,
+                    key,
+                    value.size,
+                    chunk0,
                 )
                 all_good = False
             chunks_volume += reduce(operator.mul, chunk0.sizes, 1)
@@ -435,7 +497,10 @@ def _validate_global_plan(
                 """
                     key:%s invalid fill tensor-volume:
                     %s chunks-volume: %s
-                """, key, tensor_volume, chunks_volume
+                """,
+                key,
+                tensor_volume,
+                chunks_volume,
             )
             all_good = False
 

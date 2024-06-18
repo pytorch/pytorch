@@ -2,8 +2,7 @@
 #include <torch/csrc/itt_wrapper.h>
 #include <torch/csrc/profiler/stubs/base.h>
 
-namespace torch {
-namespace profiler {
+namespace torch::profiler {
 __itt_domain* _itt_domain = __itt_domain_create("PyTorch");
 
 bool itt_is_available() {
@@ -24,5 +23,4 @@ void itt_mark(const char* msg) {
   __itt_task_begin(_itt_domain, __itt_null, __itt_null, hsMsg);
   __itt_task_end(_itt_domain);
 }
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler

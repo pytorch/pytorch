@@ -13,15 +13,13 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-namespace at {
-
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(flatten_indices_stub);
 
-}
+} // namespace at::native
 
-namespace sparse {
+namespace at::sparse {
 
 // NOTE [ Flatten Sparse Indices ]
 // This helper function flattens a sparse indices tensor (a Tensor) into a 1D
@@ -127,4 +125,21 @@ Tensor zeros_like_with_indices(const Tensor& t) {
       t.is_coalesced());
 }
 
-}} // namespace at::sparse
+Tensor full_coo_indices(IntArrayRef sizes, TensorOptions options) {
+  const auto max_size = *std::max_element(sizes.begin(), sizes.end());
+  const auto max_size_arange = at::arange(max_size, options);
+  std::vector<Tensor> stack;
+  stack.reserve(sizes.size());
+  for (size_t i=0; i < sizes.size(); i++) {
+    Tensor a = max_size_arange.narrow(-1, 0, sizes[i]);
+    for (size_t j=0; j < sizes.size(); j++) {
+      if (i != j) {
+        a.unsqueeze_(j);
+      }
+    }
+    stack.push_back(a.expand(sizes));
+  }
+  return at::stack(stack).flatten(1, -1);
+}
+
+} // namespace at::sparse

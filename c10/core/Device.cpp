@@ -26,7 +26,7 @@ DeviceType parse_type(const std::string& device_string) {
           {"hip", DeviceType::HIP},
           {"ve", DeviceType::VE},
           {"fpga", DeviceType::FPGA},
-          {"ort", DeviceType::ORT},
+          {"maia", DeviceType::MAIA},
           {"xla", DeviceType::XLA},
           {"lazy", DeviceType::Lazy},
           {"vulkan", DeviceType::Vulkan},
@@ -146,7 +146,7 @@ std::string Device::str() const {
   std::string str = DeviceTypeName(type(), /* lower case */ true);
   if (has_index()) {
     str.push_back(':');
-    str.append(to_string(index()));
+    str.append(std::to_string(index()));
   }
   return str;
 }

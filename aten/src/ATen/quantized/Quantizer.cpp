@@ -7,14 +7,12 @@
 #include <ATen/native/quantized/AffineQuantizer.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/Parallel.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/quantized/Quantizer.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/util/accumulate.h>
 
 #include <cmath>
-#include <typeinfo>
 #include <utility>
 
 namespace at {
@@ -121,6 +119,8 @@ inline Tensor new_qtensor(
     allocator = at::getCPUAllocator();
   } else if (device.is_meta()) {
     allocator = GetAllocator(kMeta);
+  } else if (device.is_privateuseone()) {
+    allocator = GetAllocator(kPrivateUse1);
   } else {
     TORCH_INTERNAL_ASSERT(0, "unrecognized device for new_qtensor: ", device);
   }
@@ -146,12 +146,13 @@ inline Tensor new_qtensor(
   auto scalar_type = typeMetaToScalarType(dtype);
   int64_t size_bytes = get_sub_byte_tensor_size(sizes, dtype.itemsize(), scalar_type);
 
-  auto storage = c10::make_intrusive<StorageImpl>(
+  auto storage = make_storage_impl(
       StorageImpl::use_byte_size_t(),
       size_bytes,
       allocator->allocate(size_bytes),
       allocator,
-      /*resizable=*/true);
+      /*resizable=*/true,
+      device);
   auto tensor = detail::make_tensor<QTensorImpl>(
       storage, at::DispatchKeySet(tensorDispatchKey), dtype, quantizer);
   get_qtensorimpl(tensor)->set_sizes_contiguous(sizes);

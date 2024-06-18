@@ -19,14 +19,13 @@
 #include <ATen/ops/true_divide.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor cov(
     const Tensor& self,
     int64_t correction,
-    const c10::optional<Tensor>& fweights,
-    const c10::optional<Tensor>& aweights) {
+    const std::optional<Tensor>& fweights,
+    const std::optional<Tensor>& aweights) {
   constexpr int64_t OBSERVATIONS_DIM = 1;
 
   TORCH_CHECK(
@@ -151,5 +150,4 @@ Tensor corrcoef(const Tensor& self) {
       : c.clip(-1, 1);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

@@ -1,16 +1,26 @@
 #pragma once
 
+#include <c10/core/Allocator.h>
+#include <c10/core/Device.h>
+#include <c10/core/DeviceType.h>
+#include <c10/core/DispatchKey.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/InferenceMode.h>
+#include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
+#include <c10/core/ScalarType.h>
 #include <c10/core/ScalarTypeToTypeMeta.h>
 #include <c10/core/Storage.h>
 #include <c10/core/SymBool.h>
+#include <c10/core/SymInt.h>
 #include <c10/core/SymIntArrayRef.h>
+#include <c10/core/SymbolicShapeMeta.h>
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/core/impl/PyObjectSlot.h>
 #include <c10/core/impl/SizesAndStrides.h>
+#include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/ArrayRef.h>
 #include <c10/util/DimVector.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Flags.h>
@@ -23,10 +33,14 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <memory>
+#include <string>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 // A global boolean variable to control whether we free memory when a Tensor
 // is shrunk to a smaller size. As a result, a Tensor is always going to
@@ -42,11 +56,6 @@ C10_DECLARE_bool(caffe2_keep_on_shrink);
 // is larger than this flag in bytes.  This only applies to functions which
 // respect caffe2_keep_on_shrink.
 C10_DECLARE_int64(caffe2_max_keep_on_shrink_memory);
-
-C10_CLANG_DIAGNOSTIC_PUSH()
-#if C10_CLANG_HAS_WARNING("-Wimplicit-int-float-conversion")
-C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
-#endif
 
 namespace at {
 class Tensor;
@@ -220,25 +229,12 @@ struct C10_API BackendMeta : intrusive_ptr_target {
   }
 };
 
-struct C10_API SymbolicShapeMeta {
-  SymDimVector sizes_ = {0};
-  SymDimVector strides_ = {1};
-  SymInt numel_ = 1;
-  SymInt storage_offset_ = 0;
-  SymBool is_contiguous_{true};
-  SymBool is_channels_last_contiguous_{false};
-  SymBool is_channels_last_3d_contiguous_{false};
-  SymBool is_channels_last_{false};
-  SymBool is_channels_last_3d_{false};
-  SymBool is_non_overlapping_and_dense_{true};
-};
-
 struct C10_API ExtraMeta {
   std::unique_ptr<c10::SymbolicShapeMeta> symbolic_shape_meta_ = nullptr;
   std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
   intrusive_ptr<c10::BackendMeta> backend_meta_ = nullptr;
-  c10::optional<std::string> custom_data_ptr_error_msg_ = c10::nullopt;
-  c10::optional<std::string> custom_storage_error_msg_ = c10::nullopt;
+  std::optional<std::string> custom_data_ptr_error_msg_ = c10::nullopt;
+  std::optional<std::string> custom_storage_error_msg_ = c10::nullopt;
 
   ExtraMeta() = default;
   ExtraMeta(const ExtraMeta& other) {
@@ -264,11 +260,12 @@ struct C10_API ExtraMeta {
       std::unique_ptr<c10::SymbolicShapeMeta> symbolic_shape_meta,
       std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta,
       intrusive_ptr<c10::BackendMeta> backend_meta,
-      c10::optional<std::string> custom_data_ptr_error_msg = c10::nullopt,
-      c10::optional<std::string> custom_storage_access_error_msg = c10::nullopt)
+      std::optional<std::string> custom_data_ptr_error_msg = c10::nullopt,
+      std::optional<std::string> custom_storage_access_error_msg = c10::nullopt)
       : symbolic_shape_meta_(std::move(symbolic_shape_meta)),
         named_tensor_meta_(std::move(named_tensor_meta)),
         backend_meta_(std::move(backend_meta)),
+        custom_data_ptr_error_msg_(std::move(custom_data_ptr_error_msg)),
         custom_storage_error_msg_(std::move(custom_storage_access_error_msg)) {}
 
   std::unique_ptr<ExtraMeta> clone() const {
@@ -531,7 +528,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl(
       DispatchKeySet,
       const caffe2::TypeMeta data_type,
-      c10::optional<c10::Device> device_opt);
+      std::optional<c10::Device> device_opt);
 
   // Legacy constructors so I don't have to go update call sites.
   // TODO: When Variable is added, delete these constructors
@@ -546,7 +543,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl(
       DispatchKey dispatch_key,
       const caffe2::TypeMeta data_type,
-      c10::optional<c10::Device> device_opt)
+      std::optional<c10::Device> device_opt)
       : TensorImpl(DispatchKeySet(dispatch_key), data_type, device_opt) {}
 
  private:
@@ -558,7 +555,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       Storage&& storage,
       DispatchKeySet,
       const caffe2::TypeMeta data_type,
-      c10::optional<c10::Device>);
+      std::optional<c10::Device>);
 
  public:
   TensorImpl(const TensorImpl&) = delete;
@@ -710,7 +707,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   c10::SymInt sym_numel_default() const {
     if (has_symbolic_sizes_strides_) {
-      return symbolic_shape_meta().numel_;
+      return symbolic_shape_meta().numel();
     } else {
       return c10::SymInt(SymInt::UNCHECKED, numel_);
     }
@@ -724,14 +721,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomSizes))) {
       return dim_custom();
     }
-    return sizes_and_strides_.size();
+    return static_cast<int64_t>(sizes_and_strides_.size());
   }
 
   int64_t dim_default() const {
     if (has_symbolic_sizes_strides_) {
-      return symbolic_shape_meta().sizes_.size();
+      return static_cast<int64_t>(symbolic_shape_meta().sizes_.size());
     } else {
-      return sizes_and_strides_.size();
+      return static_cast<int64_t>(sizes_and_strides_.size());
     }
   }
 
@@ -825,13 +822,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_contiguous_default(at::MemoryFormat memory_format) const {
     if (has_symbolic_sizes_strides_) {
       if (memory_format == at::MemoryFormat::ChannelsLast) {
-        return symbolic_shape_meta().is_channels_last_contiguous_.guard_bool(
+        return symbolic_shape_meta().is_channels_last_contiguous().guard_bool(
             __FILE__, __LINE__);
       } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
-        return symbolic_shape_meta().is_channels_last_3d_contiguous_.guard_bool(
-            __FILE__, __LINE__);
+        return symbolic_shape_meta()
+            .is_channels_last_3d_contiguous()
+            .guard_bool(__FILE__, __LINE__);
       }
-      return symbolic_shape_meta().is_contiguous_.guard_bool(
+      return symbolic_shape_meta().is_contiguous().guard_bool(
           __FILE__, __LINE__);
     }
 
@@ -846,10 +844,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_strides_like_default(at::MemoryFormat memory_format) const {
     if (has_symbolic_sizes_strides_) {
       if (memory_format == at::MemoryFormat::ChannelsLast) {
-        return symbolic_shape_meta().is_channels_last_.guard_bool(
+        return symbolic_shape_meta().is_channels_last().guard_bool(
             __FILE__, __LINE__);
       } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
-        return symbolic_shape_meta().is_channels_last_3d_.guard_bool(
+        return symbolic_shape_meta().is_channels_last_3d().guard_bool(
             __FILE__, __LINE__);
       } else {
         return false;
@@ -867,7 +865,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_non_overlapping_and_dense_default() const {
     if (has_symbolic_sizes_strides_) {
-      return symbolic_shape_meta().is_non_overlapping_and_dense_.guard_bool(
+      return symbolic_shape_meta().is_non_overlapping_and_dense().guard_bool(
           __FILE__, __LINE__);
     } else {
       return is_non_overlapping_and_dense_;
@@ -1068,6 +1066,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return layout() == kSparseCsr;
   }
 
+  // Whether a tensor is sparse CSR/CSC/BSR/BSC or not.
+  bool is_sparse_compressed() const {
+    return key_set_.has_all(c10::sparse_csr_ks);
+  }
+
   bool is_quantized() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
@@ -1167,6 +1170,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return device_opt_.has_value() && device_opt_->type() == kVE;
   }
 
+  bool is_privateuseone() const {
+    // NB: This method is not virtual and avoid dispatches for performance
+    // reasons.
+    if (C10_UNLIKELY(device_policy_)) {
+      return device_custom().is_privateuseone();
+    }
+    return device_opt_.has_value() && device_opt_->type() == kPrivateUse1;
+  }
+
   bool is_mkldnn() const {
     return key_set_.has_all(c10::mkldnn_ks);
   }
@@ -1192,11 +1204,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return device_opt_.has_value() && device_opt_->type() == kMPS;
   }
 
-  bool is_ort() const {
+  bool is_maia() const {
     if (C10_UNLIKELY(device_policy_)) {
-      return device_custom().is_ort();
+      return device_custom().is_maia();
     }
-    return device_opt_.has_value() && device_opt_->type() == kORT;
+    return device_opt_.has_value() && device_opt_->type() == kMAIA;
   }
 
   bool is_nested() const {
@@ -1224,7 +1236,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return no_ADInplaceOrView && no_Autograd;
   }
 
-  int64_t get_device() const {
+  DeviceIndex get_device() const {
     if (C10_UNLIKELY(device_policy_)) {
       return device_custom().index();
     }
@@ -1241,7 +1253,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
  protected:
   c10::Device device_default() const {
     TORCH_CHECK(device_opt_.has_value(), "tensor does not have a device");
-    // See NOTE [c10::optional operator usage in CUDA]
+    // See NOTE [std::optional operator usage in CUDA]
     return *device_opt_;
   }
 
@@ -1262,7 +1274,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return kStrided;
     } else if (is_sparse()) {
       return kSparse;
-    } else if (key_set_.has_any(c10::sparse_csr_ks)) {
+    } else if (is_sparse_compressed()) {
       // Typically, the tensor dispatch keys define the tensor layout
       // uniquely. This allows using non-virtual layout method for
       // better performance. However, when tensor's layout depends,
@@ -1564,8 +1576,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     }
     TORCH_CHECK(
         storage_initialized(),
-        "The tensor has a non-zero number of elements, but its data is not allocated yet. "
-        "Caffe2 uses a lazy allocation, so you will need to call "
+        "The tensor has a non-zero number of elements, but its data is not allocated yet.\n"
+        "If you're using torch.compile/export/fx, it is likely that we are erroneously "
+        "tracing into a custom kernel. To fix this, please wrap the custom kernel into "
+        "an opaque custom op. Please see the following for details: "
+        "https://pytorch.org/docs/main/notes/custom_operators.html\n"
+        "If you're using Caffe2, Caffe2 uses a lazy allocation, so you will need to call "
         "mutable_data() or raw_mutable_data() to actually allocate memory.");
     // Caller does the type check.
     // Note: storage_offset_ can be non-null even for zero-elements tensors
@@ -1671,11 +1687,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   void release_storage_and_set_meta_custom_data_ptr_error_msg_(
-      c10::optional<std::string> s) {
+      std::optional<std::string> s) {
     storage_ = {};
     set_storage_access_should_throw();
     get_extra_meta().custom_data_ptr_error_msg_ = s;
-    get_extra_meta().custom_storage_error_msg_ = s;
+    get_extra_meta().custom_storage_error_msg_ = std::move(s);
   }
 
  protected:
@@ -1721,7 +1737,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   void set_sizes_and_strides(
       c10::SymIntArrayRef sizes,
       c10::SymIntArrayRef strides,
-      c10::optional<c10::SymInt> storage_offset = c10::nullopt);
+      std::optional<c10::SymInt> storage_offset = c10::nullopt);
   // This is renamed to avoid breaking overload BC
   void generic_set_sizes_contiguous(c10::SymIntArrayRef sizes);
   void generic_set_sizes_contiguous(c10::IntArrayRef sizes) {
@@ -1818,7 +1834,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   void set_sizes_and_strides(
       IntArrayRef new_size,
       IntArrayRef new_stride,
-      c10::optional<int64_t> storage_offset = c10::nullopt) {
+      std::optional<int64_t> storage_offset = c10::nullopt) {
     TORCH_CHECK(
         allow_tensor_metadata_change(),
         "set_sizes_and_strides ",
@@ -2028,8 +2044,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       constexpr auto sparse_k = DispatchKeySet(DispatchKey::Sparse);
       return ts.has_any(sparse_k) && ts.has_any(sparse_backends);
     };
+    auto is_sparse_compressed = [](DispatchKeySet ts) {
+      constexpr auto sparse_compressed_k =
+          DispatchKeySet(DispatchKey::SparseCsr);
+      return ts.has_any(sparse_compressed_k);
+    };
     return (key_set_ == from) || (is_dense(key_set_) && is_dense(from)) ||
-        (is_sparse(key_set_) && is_sparse(from));
+        (is_sparse(key_set_) && is_sparse(from)) ||
+        (is_sparse_compressed(key_set_) && is_sparse_compressed(from));
+    ;
   }
 
  private:
@@ -2071,8 +2094,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         /*dest_impl=*/this,
         /*version_counter=*/version_counter(),
         /*allow_tensor_metadata_change=*/allow_tensor_metadata_change());
-    refresh_numel();
-    refresh_contiguous();
   }
 
   // Inference tensor doesn't have version counter,
@@ -2108,10 +2129,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
  private:
-  // See NOTE [c10::optional operator usage in CUDA]
+  // See NOTE [std::optional operator usage in CUDA]
   // We probably don't want to expose this publicly until
   // the note is addressed.
-  c10::optional<c10::Device> device_opt() const {
+  std::optional<c10::Device> device_opt() const {
     return device_opt_;
   }
 
@@ -2125,7 +2146,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     TORCH_CHECK(
         device_opt_.has_value(),
         "device_type cannot be run on undefined Tensor");
-    // See NOTE [c10::optional operator usage in CUDA]
+    // See NOTE [std::optional operator usage in CUDA]
     return (*device_opt_).type();
   }
 
@@ -2245,7 +2266,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
             storage_offset_ == 0); // because we just reallocated
         return storage_.mutable_data();
       }
-      const Allocator* allocator = storage_.allocator();
+      Allocator* allocator = storage_.allocator();
       // Storage might have nullptr allocator in rare cases, for example, if
       // an external memory segment has been wrapped with Tensor and we don't
       // know how to reallocate it. However, in order to preserve legacy C2
@@ -2418,6 +2439,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return is_non_overlapping_and_dense_default();
   }
 
+  // if this returns true, then it is guaranteed that this tensor has symbolic
+  // sizes/strides
   bool has_symbolic_sizes_strides() const {
     return has_symbolic_sizes_strides_;
   }
@@ -2436,7 +2459,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   template <
       typename T,
-      typename = typename std::enable_if<std::is_integral<T>::value>::type>
+      typename = typename std::enable_if_t<std::is_integral_v<T>>>
   bool SetDimsTemplate(ArrayRef<T> src) {
     TORCH_CHECK(
         !has_symbolic_sizes_strides_,
@@ -2525,16 +2548,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return static_cast<int64_t>(n);
   }
 
-  SymInt compute_sym_numel() const {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(has_symbolic_sizes_strides_);
-    auto& sym_shape_meta{symbolic_shape_meta()};
-    SymInt numel = 1;
-    for (const auto& s : sym_shape_meta.sizes_) {
-      numel *= s;
-    }
-    return numel;
-  }
-
   /**
    * Compute whether or not a tensor is contiguous based on the sizes and
    * strides of a tensor.
@@ -2550,18 +2563,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool compute_strides_like_channels_last_3d(identity<bool>) const;
 
   bool compute_non_overlapping_and_dense(identity<bool>) const;
-
-  SymBool compute_contiguous(identity<SymBool>) const;
-
-  SymBool compute_channels_last_contiguous_2d(identity<SymBool>) const;
-
-  SymBool compute_channels_last_contiguous_3d(identity<SymBool>) const;
-
-  SymBool compute_strides_like_channels_last_2d(identity<SymBool>) const;
-
-  SymBool compute_strides_like_channels_last_3d(identity<SymBool>) const;
-
-  SymBool compute_non_overlapping_and_dense(identity<SymBool>) const;
 
  protected:
   /**
@@ -2581,7 +2582,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   void refresh_numel() {
     if (has_symbolic_sizes_strides_) {
-      symbolic_shape_meta().numel_ = compute_sym_numel();
+      symbolic_shape_meta().refresh_numel();
     } else {
       numel_ = compute_numel();
     }
@@ -2597,7 +2598,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (has_symbolic_sizes_strides_) {
       // NB: sym numel is done with symbolic integers, which handle overflow
       // checking
-      symbolic_shape_meta().numel_ = compute_sym_numel();
+      symbolic_shape_meta().refresh_numel();
     } else {
       numel_ = safe_compute_numel();
     }
@@ -2611,84 +2612,47 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     is_contiguous_ = b;
   }
 
-  void _set_is_contiguous(identity<SymBool>, SymBool b) {
-    symbolic_shape_meta().is_contiguous_ = std::move(b);
-  }
-
   void _set_is_channels_last_contiguous(identity<bool>, bool b) {
     is_channels_last_contiguous_ = b;
-  }
-
-  void _set_is_channels_last_contiguous(identity<SymBool>, SymBool b) {
-    symbolic_shape_meta().is_channels_last_contiguous_ = std::move(b);
   }
 
   void _set_is_channels_last_3d_contiguous(identity<bool>, bool b) {
     is_channels_last_3d_contiguous_ = b;
   }
 
-  void _set_is_channels_last_3d_contiguous(identity<SymBool>, SymBool b) {
-    symbolic_shape_meta().is_channels_last_3d_contiguous_ = std::move(b);
-  }
-
   void _set_is_channels_last(identity<bool>, bool b) {
     is_channels_last_ = b;
-  }
-
-  void _set_is_channels_last(identity<SymBool>, SymBool b) {
-    symbolic_shape_meta().is_channels_last_ = std::move(b);
   }
 
   void _set_is_channels_last_3d(identity<bool>, bool b) {
     is_channels_last_3d_ = b;
   }
 
-  void _set_is_channels_last_3d(identity<SymBool>, SymBool b) {
-    symbolic_shape_meta().is_channels_last_3d_ = std::move(b);
-  }
-
   void _set_is_non_overlapping_and_dense(identity<bool>, bool b) {
     is_non_overlapping_and_dense_ = b;
   }
 
-  void _set_is_non_overlapping_and_dense(identity<SymBool>, SymBool b) {
-    symbolic_shape_meta().is_non_overlapping_and_dense_ = std::move(b);
-  }
-
   // These are little wrappers over the real compute_ functions that
   // can make use of other contiguity fields to short circuit.
-  // They need to be implemented separately for SymBool, as SymBool does
-  // not short circuit.
-  // TODO: should the SymBool cases avoid the short circuit?  Need to reason
-  // if its correct, and reason if the simpler expressions are better for
-  // analysis (maybe not!)
 
   bool compute_is_non_overlapping_and_dense_dim4(identity<bool> type_id) {
     return is_contiguous_ || is_channels_last_contiguous_ ||
         compute_non_overlapping_and_dense(type_id);
   }
 
-  SymBool compute_is_non_overlapping_and_dense_dim4(identity<SymBool> type_id);
-
   bool compute_channels_last_contiguous_3d_dim5(identity<bool> type_id) {
     return !is_channels_last_contiguous_ &&
         compute_channels_last_contiguous_3d(type_id);
   }
-
-  SymBool compute_channels_last_contiguous_3d_dim5(identity<SymBool> type_id);
 
   bool compute_channels_last_2d_dim5(identity<bool> type_id) {
     return !is_channels_last_3d_contiguous_ &&
         compute_strides_like_channels_last_2d(type_id);
   }
 
-  SymBool compute_channels_last_2d_dim5(identity<SymBool> type_id);
-
   bool compute_channels_last_3d_dim5(identity<bool> type_id) {
     return !is_channels_last_ && compute_strides_like_channels_last_3d(type_id);
   }
-
-  SymBool compute_channels_last_3d_dim5(identity<SymBool> type_id);
 
   bool compute_is_non_overlapping_and_dense_dim5(identity<bool> type_id) {
     return is_contiguous_ || is_channels_last_contiguous_ ||
@@ -2696,14 +2660,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         compute_non_overlapping_and_dense(type_id);
   }
 
-  SymBool compute_is_non_overlapping_and_dense_dim5(identity<SymBool> type_id);
-
   bool compute_is_non_overlapping_and_dense_anydim(identity<bool> type_id) {
     return is_contiguous_ || compute_non_overlapping_and_dense(type_id);
   }
-
-  SymBool compute_is_non_overlapping_and_dense_anydim(
-      identity<SymBool> type_id);
 
   template <typename T>
   void _refresh_contiguous() {
@@ -2763,7 +2722,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   void refresh_contiguous() {
     if (has_symbolic_sizes_strides_) {
-      _refresh_contiguous<SymBool>();
+      symbolic_shape_meta().refresh_contiguous();
     } else {
       _refresh_contiguous<bool>();
     }
@@ -2916,7 +2875,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // agree with the type meta in storage
   caffe2::TypeMeta data_type_;
 
-  // NOTE [c10::optional operator usage in CUDA]
+  // NOTE [std::optional operator usage in CUDA]
   // Our optional definition doesn't compile in .cu file if `value()` or
   // `operator->` are used.  Instead, we always use `operator*`.
   // See https://github.com/pytorch/pytorch/issues/18496 for more info.
@@ -2928,7 +2887,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   //
   // INVARIANT: device_opt_ is only nullopt for undefined tensors
   // (which do not have a device.)
-  c10::optional<c10::Device> device_opt_;
+  std::optional<c10::Device> device_opt_;
 
   // default member initializers for bit-fields only available with -std=c++2a
   // or -std=gnu++2a
@@ -3294,5 +3253,3 @@ static_assert(
 #undef C10_GCC_VERSION_MINOR
 
 } // namespace c10
-
-C10_CLANG_DIAGNOSTIC_POP()

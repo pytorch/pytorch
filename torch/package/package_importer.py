@@ -4,11 +4,21 @@ import importlib.machinery
 import inspect
 import io
 import linecache
-import os.path
+import os
 import types
 from contextlib import contextmanager
-from pathlib import Path
-from typing import Any, BinaryIO, Callable, cast, Dict, Iterable, List, Optional, Union
+from typing import (
+    Any,
+    BinaryIO,
+    Callable,
+    cast,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    TYPE_CHECKING,
+    Union,
+)
 from weakref import WeakValueDictionary
 
 import torch
@@ -25,8 +35,10 @@ from ._importlib import (
 from ._mangling import demangle, PackageMangler
 from ._package_unpickler import PackageUnpickler
 from .file_structure_representation import _create_directory_from_file_list, Directory
-from .glob_group import GlobPattern
 from .importer import Importer
+
+if TYPE_CHECKING:
+    from .glob_group import GlobPattern
 
 __all__ = ["PackageImporter"]
 
@@ -67,7 +79,7 @@ class PackageImporter(Importer):
 
     def __init__(
         self,
-        file_or_buffer: Union[str, torch._C.PyTorchFileReader, Path, BinaryIO],
+        file_or_buffer: Union[str, torch._C.PyTorchFileReader, os.PathLike, BinaryIO],
         module_allowed: Callable[[str], bool] = lambda module_name: True,
     ):
         """Open ``file_or_buffer`` for importing. This checks that the imported package only requires modules
@@ -89,8 +101,8 @@ class PackageImporter(Importer):
         if isinstance(file_or_buffer, torch._C.PyTorchFileReader):
             self.filename = "<pytorch_file_reader>"
             self.zip_reader = file_or_buffer
-        elif isinstance(file_or_buffer, (Path, str)):
-            self.filename = str(file_or_buffer)
+        elif isinstance(file_or_buffer, (os.PathLike, str)):
+            self.filename = os.fspath(file_or_buffer)
             if not os.path.isdir(self.filename):
                 self.zip_reader = torch._C.PyTorchFileReader(self.filename)
             else:
@@ -101,7 +113,10 @@ class PackageImporter(Importer):
 
         torch._C._log_api_usage_metadata(
             "torch.package.PackageImporter.metadata",
-            {"serialization_id": self.zip_reader.serialization_id()},
+            {
+                "serialization_id": self.zip_reader.serialization_id(),
+                "file_name": self.filename,
+            },
         )
 
         self.root = _PackageNode(None)

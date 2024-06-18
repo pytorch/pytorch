@@ -61,7 +61,7 @@ def custom_op(qualname, func_or_schema=None):
         >>> # we will infer the types of the inputs and outputs.
         >>> @torch._custom_ops.custom_op("mylibrary::numpy_sin")
         >>> def numpy_sin(x: Tensor) -> Tensor:
-        >>>     raise NotImplementedError()
+        >>>     raise NotImplementedError
         >>>
         >>> # The custom op is now accessible via the torch.ops module:
         >>> torch.ops.mylibrary.numpy_sin
@@ -143,7 +143,7 @@ def impl(qualname, *, device_types=("cpu", "cuda"), func=None):
         >>> # we will infer the types of the inputs and outputs.
         >>> @torch._custom_ops.custom_op("mylibrary::numpy_cos")
         >>> def numpy_cos(x: Tensor) -> Tensor:
-        >>>     raise NotImplementedError()
+        >>>     raise NotImplementedError
         >>>
         >>> # The custom op is now accessible via the torch.ops module:
         >>> torch.ops.mylibrary.numpy_cos
@@ -207,7 +207,7 @@ def impl_abstract(qualname, *, func=None):
         >>> # Example 1: an operator without data-dependent output shape
         >>> @torch._custom_ops.custom_op("mylibrary::custom_linear")
         >>> def custom_linear(x: Tensor, weight: Tensor, bias: Tensor) -> Tensor:
-        >>>     raise NotImplementedError()
+        >>>     raise NotImplementedError
         >>>
         >>> @torch._custom_ops.impl_abstract("mylibrary::custom_linear")
         >>> def custom_linear_abstract(x, weight):
@@ -250,7 +250,7 @@ def impl_abstract(qualname, *, func=None):
     """
     import torch.library
 
-    return torch.library.impl_abstract(qualname, func, _stacklevel=2)
+    return torch.library.register_fake(qualname, func, _stacklevel=2)
 
 
 def impl_save_for_backward(qualname, *, func=None):

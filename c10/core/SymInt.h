@@ -2,11 +2,15 @@
 
 #include <c10/core/SymBool.h>
 #include <c10/core/SymNodeImpl.h>
+#include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 
+#include <cstdint>
+#include <iterator>
 #include <numeric>
+#include <ostream>
 #include <type_traits>
 
 namespace c10 {
@@ -88,6 +92,7 @@ class C10_API SymInt {
     // https://stackoverflow.com/questions/42534749/signed-extension-from-24-bit-to-32-bit-in-c
     uint64_t extended_bits = (unextended_bits ^ sign_bit_mask) - sign_bit_mask;
     return static_cast<SymNodeImpl*>(
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
         reinterpret_cast<void*>(static_cast<uintptr_t>(extended_bits)));
   }
 
@@ -126,7 +131,8 @@ class C10_API SymInt {
     if (auto r = maybe_as_int()) {
       return *r;
     }
-    TORCH_CHECK(false, "expected int but got ", *this);
+    TORCH_CHECK_ALWAYS_SHOW_CPP_STACKTRACE(
+        false, "when unpacking SymInt, expected int but got ", *this);
   }
 
   // Test if we have a hint for this int (e.g., guard_int would work).
@@ -223,7 +229,7 @@ class C10_API SymInt {
     return data_;
   }
 
-  c10::optional<int64_t> maybe_as_int() const {
+  std::optional<int64_t> maybe_as_int() const {
     if (!is_heap_allocated()) {
       return c10::make_optional(data_);
     }
@@ -286,9 +292,9 @@ class C10_API SymInt {
 /// Sum of a list of SymInt; accumulates into the c10::SymInt expression
 template <
     typename C,
-    typename std::enable_if<
-        std::is_same<typename C::value_type, c10::SymInt>::value,
-        int>::type = 0>
+    typename std::enable_if_t<
+        std::is_same_v<typename C::value_type, c10::SymInt>,
+        int> = 0>
 inline c10::SymInt multiply_integers(const C& container) {
   return std::accumulate(
       container.begin(),
@@ -299,9 +305,9 @@ inline c10::SymInt multiply_integers(const C& container) {
 
 template <
     typename Iter,
-    typename = std::enable_if_t<std::is_same<
+    typename = std::enable_if_t<std::is_same_v<
         typename std::iterator_traits<Iter>::value_type,
-        c10::SymInt>::value>>
+        c10::SymInt>>>
 inline c10::SymInt multiply_integers(Iter begin, Iter end) {
   return std::accumulate(
       begin,
@@ -358,4 +364,60 @@ DECLARE_SYMINT_OP(size_t, SymInt)
 
 C10_API std::ostream& operator<<(std::ostream& os, const SymInt& s);
 C10_API SymInt operator-(const SymInt& s);
+
+inline bool sym_eq(int64_t a, int64_t b) {
+  return a == b;
+}
+
+inline SymBool sym_eq(const SymInt& a, const SymInt& b) {
+  return a.sym_eq(b);
+}
+
+inline bool sym_ne(int64_t a, int64_t b) {
+  return a != b;
+}
+
+inline SymBool sym_ne(const SymInt& a, const SymInt& b) {
+  return a.sym_ne(b);
+}
+
+inline bool sym_lt(int64_t a, int64_t b) {
+  return a < b;
+}
+
+inline SymBool sym_lt(const SymInt& a, const SymInt& b) {
+  return a.sym_lt(b);
+}
+
+inline bool sym_le(int64_t a, int64_t b) {
+  return a <= b;
+}
+
+inline SymBool sym_le(const SymInt& a, const SymInt& b) {
+  return a.sym_le(b);
+}
+
+inline bool sym_gt(int64_t a, int64_t b) {
+  return a > b;
+}
+
+inline SymBool sym_gt(const SymInt& a, const SymInt& b) {
+  return a.sym_gt(b);
+}
+
+inline bool sym_ge(int64_t a, int64_t b) {
+  return a >= b;
+}
+
+inline SymBool sym_ge(const SymInt& a, const SymInt& b) {
+  return a.sym_ge(b);
+}
+
+inline bool definitely_true(
+    const c10::SymBool& b,
+    const char* file,
+    int64_t line) {
+  return b.has_hint() && b.guard_bool(file, line);
+}
+
 } // namespace c10

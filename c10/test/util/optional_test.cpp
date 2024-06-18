@@ -7,6 +7,8 @@
 #include <cstdint>
 #include <string>
 
+#include <c10/util/ArrayRef.h>
+
 namespace {
 
 using testing::Eq;
@@ -20,7 +22,7 @@ using testing::Not;
 template <typename T>
 class OptionalTest : public ::testing::Test {
  public:
-  using optional = c10::optional<T>;
+  using optional = std::optional<T>;
 };
 
 template <typename T>
@@ -56,13 +58,6 @@ using OptionalTypes = ::testing::Types<
     // Non-trivial destructor.
     std::string>;
 
-// This assert is also in Optional.cpp; including here too to make it
-// more likely that we'll remember to port this optimization over when
-// we move to std::optional.
-static_assert(
-    sizeof(c10::optional<c10::IntArrayRef>) == sizeof(c10::IntArrayRef),
-    "c10::optional<IntArrayRef> should be size-optimized");
-
 TYPED_TEST_SUITE(OptionalTest, OptionalTypes);
 
 TYPED_TEST(OptionalTest, Empty) {
@@ -71,7 +66,7 @@ TYPED_TEST(OptionalTest, Empty) {
   EXPECT_FALSE((bool)empty);
   EXPECT_FALSE(empty.has_value());
 
-  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access,hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   EXPECT_THROW(empty.value(), c10::bad_optional_access);
 }
 
@@ -94,15 +89,17 @@ TYPED_TEST(OptionalTest, Initialized) {
     EXPECT_TRUE((bool)opt);
     EXPECT_TRUE(opt.has_value());
 
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     EXPECT_EQ(opt.value(), val);
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     EXPECT_EQ(*opt, val);
   }
 }
 
-class SelfCompareTest : public testing::TestWithParam<c10::optional<int>> {};
+class SelfCompareTest : public testing::TestWithParam<std::optional<int>> {};
 
 TEST_P(SelfCompareTest, SelfCompare) {
-  c10::optional<int> x = GetParam();
+  std::optional<int> x = GetParam();
   EXPECT_THAT(x, Eq(x));
   EXPECT_THAT(x, Le(x));
   EXPECT_THAT(x, Ge(x));
@@ -121,7 +118,7 @@ INSTANTIATE_TEST_SUITE_P(
     testing::Values(c10::make_optional(2)));
 
 TEST(OptionalTest, Nullopt) {
-  c10::optional<int> x = 2;
+  std::optional<int> x = 2;
 
   EXPECT_THAT(c10::nullopt, Not(Eq(x)));
   EXPECT_THAT(x, Not(Eq(c10::nullopt)));
@@ -145,17 +142,17 @@ TEST(OptionalTest, Nullopt) {
 // Ensure comparisons work...
 using CmpTestTypes = testing::Types<
     // between two optionals
-    std::pair<c10::optional<int>, c10::optional<int>>,
+    std::pair<std::optional<int>, std::optional<int>>,
 
     // between an optional and a value
-    std::pair<c10::optional<int>, int>,
+    std::pair<std::optional<int>, int>,
     // between a value and an optional
-    std::pair<int, c10::optional<int>>,
+    std::pair<int, std::optional<int>>,
 
     // between an optional and a differently typed value
-    std::pair<c10::optional<int>, long>,
+    std::pair<std::optional<int>, long>,
     // between a differently typed value and an optional
-    std::pair<long, c10::optional<int>>>;
+    std::pair<long, std::optional<int>>>;
 template <typename T>
 class CmpTest : public testing::Test {};
 TYPED_TEST_SUITE(CmpTest, CmpTestTypes);

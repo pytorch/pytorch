@@ -56,7 +56,7 @@ the following:
 
 .. code-block:: python
 
-   @pointwise(size_hints=[16384], filename=__file__, meta={'signature': {0: '*fp32', 1: '*fp32', 2: 'i32'}, 'device': 0, 'constants': {}, 'mutated_arg_names': [], 'configs': [instance_descriptor(divisible_by_16=(0, 1, 2), equal_to_1=())]})
+   @pointwise(size_hints=[16384], filename=__file__, triton_meta={'signature': {0: '*fp32', 1: '*fp32', 2: 'i32'}, 'device': 0, 'constants': {}, 'mutated_arg_names': [], 'configs': [instance_descriptor(divisible_by_16=(0, 1, 2), equal_to_1=())]})
    @triton.jit
    def triton_(in_ptr0, out_ptr0, xnumel, XBLOCK : tl.constexpr):
       xnumel = 10000
@@ -64,7 +64,7 @@ the following:
       xindex = xoffset + tl.arange(0, XBLOCK)[:]
       xmask = xindex < xnumel
       x0 = xindex
-      tmp0 = tl.load(in_ptr0 + (x0), xmask)
+      tmp0 = tl.load(in_ptr0 + (x0), xmask, other=0.0)
       tmp1 = tl.cos(tmp0)
       tmp2 = tl.sin(tmp1)
       tl.store(out_ptr0 + (x0 + tl.zeros([XBLOCK], tl.int32)), tmp2, xmask)

@@ -41,9 +41,8 @@ class ContextProp:
             self.setter(val)
         else:
             raise RuntimeError(
-                "not allowed to set %s flags "
+                f"not allowed to set {obj.__name__} flags "
                 "after disable_global_flags; please use flags() context manager instead"
-                % obj.__name__
             )
 
 
@@ -60,9 +59,11 @@ from torch.backends import (
     cpu as cpu,
     cuda as cuda,
     cudnn as cudnn,
+    mha as mha,
     mkl as mkl,
     mkldnn as mkldnn,
     mps as mps,
+    nnpack as nnpack,
     openmp as openmp,
     quantized as quantized,
 )

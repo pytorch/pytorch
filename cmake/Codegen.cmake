@@ -114,7 +114,7 @@ if(INTERN_BUILD_ATEN_OPS)
     file(GLOB_RECURSE all_unboxing_script "${CMAKE_CURRENT_LIST_DIR}/../tools/jit/*.py")
     list(APPEND CUSTOM_BUILD_FLAGS --skip_dispatcher_op_registration)
     set(GEN_UNBOXING_COMMAND
-        "${PYTHON_EXECUTABLE}" -m tools.jit.gen_unboxing
+        "${Python_EXECUTABLE}" -m tools.jit.gen_unboxing
         --source-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen
         --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
         )
@@ -158,7 +158,7 @@ if(INTERN_BUILD_ATEN_OPS)
   endif()
 
   set(GEN_COMMAND
-      "${PYTHON_EXECUTABLE}" -m torchgen.gen
+      "${Python_EXECUTABLE}" -m torchgen.gen
       --source-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen
       --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
       ${GEN_PER_OPERATOR_FLAG}
@@ -325,7 +325,7 @@ if(INTERN_BUILD_ATEN_OPS)
         set(EXTRA_FLAGS "-DCPU_CAPABILITY=${CPU_CAPABILITY} -DCPU_CAPABILITY_${CPU_CAPABILITY}")
       endif(MSVC)
       # Disable certain warnings for GCC-9.X
-      if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
+      if(CMAKE_COMPILER_IS_GNUCXX)
         if(("${NAME}" STREQUAL "native/cpu/GridSamplerKernel.cpp") AND ("${CPU_CAPABILITY}" STREQUAL "DEFAULT"))
           # See https://github.com/pytorch/pytorch/issues/38855
           set(EXTRA_FLAGS "${EXTRA_FLAGS} -Wno-uninitialized")
@@ -356,7 +356,7 @@ function(append_filelist name outputvar)
       ${PROJECT_SOURCE_DIR}/build_variables.bzl
       ${PROJECT_BINARY_DIR}/caffe2/build_variables.bzl)
   execute_process(
-    COMMAND "${PYTHON_EXECUTABLE}" -c
+    COMMAND "${Python_EXECUTABLE}" -c
             "exec(open('${PROJECT_SOURCE_DIR}/build_variables.bzl').read());print(';'.join(['${_rootdir}' + x for x in ${name}]))"
     WORKING_DIRECTORY "${_rootdir}"
     RESULT_VARIABLE _retval

@@ -28,8 +28,9 @@ class _ShardingIterDataPipe(IterDataPipe):
 @functional_datapipe('sharding_filter')
 class ShardingFilterIterDataPipe(_ShardingIterDataPipe):
     r"""
-    Wrapper that allows DataPipe to be sharded (functional name: ``sharding_filter``). After ``apply_sharding`` is
-    called, each instance of the DataPipe (on different workers) will have every `n`-th element of the
+    Wrapper that allows DataPipe to be sharded (functional name: ``sharding_filter``).
+
+    After ``apply_sharding`` is called, each instance of the DataPipe (on different workers) will have every `n`-th element of the
     original DataPipe, where `n` equals to the number of instances.
 
     Args:
@@ -49,10 +50,10 @@ class ShardingFilterIterDataPipe(_ShardingIterDataPipe):
             raise ValueError(f"instance_id({instance_id}) should be smaller than num_of_instances({num_of_instances})")
         if sharding_group == SHARDING_PRIORITIES.DEFAULT:
             if len(self.groups) and SHARDING_PRIORITIES.DEFAULT not in self.groups:
-                raise Exception('ShardingFilter cannot mix DEFAULT and non DEFAULT groups')
+                raise Exception('ShardingFilter cannot mix DEFAULT and non DEFAULT groups')  # noqa: TRY002
         else:
             if SHARDING_PRIORITIES.DEFAULT in self.groups:
-                raise Exception('ShardingFilter cannot mix DEFAULT and non DEFAULT groups')
+                raise Exception('ShardingFilter cannot mix DEFAULT and non DEFAULT groups')  # noqa: TRY002
         self.groups[sharding_group] = (num_of_instances, instance_id)
         self._update_num_of_instances()
 

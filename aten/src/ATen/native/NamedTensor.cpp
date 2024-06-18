@@ -29,7 +29,7 @@
 
 #include <bitset>
 
-namespace at { namespace native {
+namespace at::native {
 
 Tensor& rename_(Tensor& self, optional<DimnameList> names) {
   at::internal_set_names_inplace(self, names);
@@ -387,13 +387,13 @@ Tensor scatter_add(const Tensor& self, Dimname dim, const Tensor& index, const T
 static Tensor& scatter_add_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
   reportNYIDimnameOverload("scatter_add");
 }
-std::tuple<Tensor&, Tensor&> sort_out(const Tensor& self, c10::optional<bool> stable, Dimname dim, bool keepdim, Tensor& values, Tensor& indices) {
+std::tuple<Tensor&, Tensor&> sort_out(const Tensor& self, std::optional<bool> stable, Dimname dim, bool keepdim, Tensor& values, Tensor& indices) {
   reportNYIDimnameOverload("sort");
 }
 std::tuple<Tensor&, Tensor&> sort_out(const Tensor& self, Dimname dim, bool keepdim, Tensor& values, Tensor& indices) {
   reportNYIDimnameOverload("sort");
 }
-std::tuple<Tensor, Tensor> sort(const Tensor& self, c10::optional<bool> stable, Dimname dim, bool keepdim) {
+std::tuple<Tensor, Tensor> sort(const Tensor& self, std::optional<bool> stable, Dimname dim, bool keepdim) {
   reportNYIDimnameOverload("sort");
 }
 std::tuple<Tensor, Tensor> sort(const Tensor& self, Dimname dim, bool keepdim) {
@@ -407,4 +407,4 @@ Tensor squeeze(const Tensor& self, Dimname dim) {
 }
 
 
-}}  // namespace at::native
+}  // namespace at::native

@@ -24,6 +24,8 @@ from . import (  # usort:skip. Keep the order instead of sorting lexicographical
     symbolic_opset16,
     symbolic_opset17,
     symbolic_opset18,
+    symbolic_opset19,
+    symbolic_opset20,
     utils,
 )
 
@@ -46,8 +48,9 @@ from .utils import (
 from ._internal.exporter import (  # usort:skip. needs to be last to avoid circular import
     DiagnosticOptions,
     ExportOptions,
-    ExportOutput,
-    ExportOutputSerializer,
+    ONNXProgram,
+    ONNXProgramSerializer,
+    ONNXRuntimeOptions,
     InvalidExportOptionsError,
     OnnxExporterError,
     OnnxRegistry,
@@ -81,6 +84,8 @@ __all__ = [
     "symbolic_opset16",
     "symbolic_opset17",
     "symbolic_opset18",
+    "symbolic_opset19",
+    "symbolic_opset20",
     # Enums
     "ExportTypes",
     "OperatorExportTypes",
@@ -101,8 +106,9 @@ __all__ = [
     # Dynamo Exporter
     "DiagnosticOptions",
     "ExportOptions",
-    "ExportOutput",
-    "ExportOutputSerializer",
+    "ONNXProgram",
+    "ONNXProgramSerializer",
+    "ONNXRuntimeOptions",
     "InvalidExportOptionsError",
     "OnnxExporterError",
     "OnnxRegistry",
@@ -116,8 +122,9 @@ __all__ = [
 ExportTypes.__module__ = "torch.onnx"
 JitScalarType.__module__ = "torch.onnx"
 ExportOptions.__module__ = "torch.onnx"
-ExportOutput.__module__ = "torch.onnx"
-ExportOutputSerializer.__module__ = "torch.onnx"
+ONNXProgram.__module__ = "torch.onnx"
+ONNXProgramSerializer.__module__ = "torch.onnx"
+ONNXRuntimeOptions.__module__ = "torch.onnx"
 dynamo_export.__module__ = "torch.onnx"
 InvalidExportOptionsError.__module__ = "torch.onnx"
 OnnxExporterError.__module__ = "torch.onnx"
