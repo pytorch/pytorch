@@ -75,10 +75,13 @@ COPY --from=cuda11.8  /usr/local/cuda-11.8 /usr/local/cuda-11.8
 COPY --from=cuda12.1  /usr/local/cuda-12.1 /usr/local/cuda-12.1
 COPY --from=cuda12.4  /usr/local/cuda-12.4 /usr/local/cuda-12.4
 
+# Final step
 FROM ${BASE_TARGET} as final
 COPY --from=openssl            /opt/openssl           /opt/openssl
 COPY --from=patchelf           /patchelf              /usr/local/bin/patchelf
 COPY --from=conda              /opt/conda             /opt/conda
+RUN ls
+RUN ls ./ci/docker/java
 ADD  ./ci/docker/java/jni.h /usr/local/include/jni.h
 ENV  PATH /opt/conda/bin:$PATH
 COPY --from=mnist  /usr/local/mnist /usr/local/mnist
