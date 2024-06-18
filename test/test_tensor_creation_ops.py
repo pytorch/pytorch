@@ -26,7 +26,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_dtype import (
     all_types_and_complex, all_types_and_complex_and, all_types_and, floating_and_complex_types, complex_types,
     floating_types, floating_and_complex_types_and, integral_types, integral_types_and, get_all_dtypes,
-    float_to_corresponding_complex_type_map
+    float_to_corresponding_complex_type_map, all_types_complex_float8_and
 )
 
 from torch.utils.dlpack import to_dlpack
@@ -158,9 +158,7 @@ class TestTensorCreation(TestCase):
             self.assertEqual(torch.cat((x, x), 1), expected2)
 
     def test_fill_all_dtypes_and_devices(self, device):
-        for dt in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16, torch.chalf,
-                                            torch.float8_e4m3fn, torch.float8_e4m3fnuz, torch.float8_e5m2,
-                                            torch.float8_e5m2fnuz):
+        for dt in all_types_complex_float8_and(torch.half, torch.bool, torch.bfloat16, torch.chalf):
             for x in [torch.tensor((10, 10), dtype=dt, device=device),
                       torch.empty(10000, dtype=dt, device=device)]:  # large tensor
                 numel = x.numel()

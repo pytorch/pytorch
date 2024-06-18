@@ -120,6 +120,28 @@ def all_types_and_half():
     return _all_types_and_half
 
 
+_float8_types = _dispatch_dtypes(
+    (
+        torch.float8_e4m3fn,
+        torch.float8_e4m3fnuz,
+        torch.float8_e5m2,
+        torch.float8_e5m2fnuz,
+    )
+)
+
+
+def float8_types():
+    return _float8_types
+
+
+def float8_types_and(*dtypes):
+    return _float8_types + _validate_dtypes(*dtypes)
+
+
+def all_types_complex_float8_and(*dtypes):
+    return _all_types + _complex_types + _float8_types + _validate_dtypes(*dtypes)
+
+
 def custom_types(*dtypes):
     """Create a list of arbitrary dtypes"""
     return _empty_types + _validate_dtypes(*dtypes)
