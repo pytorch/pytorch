@@ -80,6 +80,7 @@ from torch.testing._internal.common_utils import (
     freeze_rng_state,
     IS_FBCODE,
     set_default_dtype,
+    skipIfNNModuleInlined,
     wrapDeterministicFlagAPITest,
 )
 from torch.testing._internal.jit_utils import JitTestCase
@@ -224,6 +225,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
         with self.assertRaises(TypeError):
             fn(torch.randn(16))
 
+    @skipIfNNModuleInlined("fails internal CI")
     def test_cpp_extension_recommends_custom_ops(self):
         cpp_source = """
         #include <torch/extension.h>
@@ -255,6 +257,38 @@ class MiscTests(torch._inductor.test_case.TestCase):
             first_graph_break,
             """Graph break due to unsupported builtin mylib.PyCapsule.foobar. This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind). If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround. If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/docs/main/notes/custom_operators.html for more details) or, if it is traceable, use torch.compiler.allow_in_graph.""",
         )
+
+        cpp_source = """
+        #include <torch/extension.h>
+        at::Tensor baz(const at::Tensor& x) {
+            return x.clone();
+        }
+        """
+        module2 = torch.utils.cpp_extension.load_inline(
+            name="mylib2",
+            cpp_sources=cpp_source,
+            functions="baz",
+            verbose=True,
+        )
+
+        torch._dynamo.reset()
+
+        # Test that each warning only happens once
+        @torch.compile(backend="eager")
+        def f(x):
+            module2.baz(x)
+            module.foobar(x)
+            module.foobar(x)
+            module2.baz(x)
+            module.foobar(x)
+            module2.baz(x)
+            return x.clone()
+
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")
+            f(x)
+            f(x)
+        self.assertEqual(len(ws), 2)
 
     def test_callpacked(self):
         def call_packed(args):
@@ -534,6 +568,23 @@ class MiscTests(torch._inductor.test_case.TestCase):
 
         cleanup_op("mylib::foo")
         del lib
+
+    def test_auto_functionalize_can_with_none_return(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("foo(Tensor x, Tensor(a!) out) -> None")
+
+            def foo_impl(x, out):
+                out.copy_(x)
+
+            lib.impl("foo", foo_impl, "CompositeExplicitAutograd")
+            x = torch.randn(3)
+            out = torch.zeros(3)
+
+            @torch.compile
+            def f(x, out):
+                torch.ops.mylib.foo(x, out)
+
+            f(x, out)
 
     def test_user_defined_setattr1(self):
         @torch.compile(backend="eager", fullgraph=True)
@@ -10403,6 +10454,14 @@ fn
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+    def test_assert_size_stride(self):
+        x = torch.randn(2, 3, 4)
+        with self.assertRaisesRegex(
+            AssertionError,
+            "expected size 2==5, stride 12==9 at dim=0; expected size 3==6, stride 4==9 at dim=1; expected size 4==7, stride 1==10 at dim=2",
+        ):
+            torch._C._dynamo.guards.assert_size_stride(x, (5, 6, 7), (9, 9, 10))
 
     def test_module_dunder_dict(self):
         class MyModule(torch.nn.Module):

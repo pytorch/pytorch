@@ -233,10 +233,12 @@ __all__ = [
     # View & Shape Ops
     #
     "alias",
+    "alias_copy",
     "atleast_1d",
     "atleast_2d",
     "atleast_3d",
     "as_strided",
+    "as_strided_copy",
     "as_strided_scatter",
     "block_diag",
     "broadcast_shapes",
@@ -1710,6 +1712,15 @@ def sub(
 
     a, b = _maybe_broadcast(a, b)
 
+    if isinstance(a, TensorLike) and isinstance(b, TensorLike):
+        torch._check(
+            not utils.is_boolean_dtype(a.dtype) and not utils.is_boolean_dtype(b.dtype),
+            lambda: (
+                "Subtraction, the `-` operator, with two bool tensors is not supported. "
+                "Use the `^` or `logical_xor()` operator instead."
+            ),
+        )
+
     if alpha != 1:
         dtype = a.dtype if isinstance(a, TensorLike) else b.dtype  # type: ignore[union-attr]
         python_type = utils.dtype_to_type(dtype)
@@ -2652,6 +2663,9 @@ def as_strided(
         storage_offset if storage_offset is not None else a.storage_offset()
     )
     return prims.as_strided(a, size, stride, storage_offset_int)
+
+
+as_strided_copy = _make_copy_from_view(as_strided)
 
 
 @register_decomposition(aten.as_strided_scatter)
@@ -4460,6 +4474,9 @@ def T(a: TensorLikeType) -> TensorLikeType:
 @register_decomposition(aten.alias)
 def alias(a: TensorLikeType) -> TensorLikeType:
     return prims.view_of(a)
+
+
+alias_copy = _make_copy_from_view(alias)
 
 
 @register_decomposition(aten.transpose)
