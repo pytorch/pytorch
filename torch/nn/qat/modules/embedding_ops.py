@@ -8,7 +8,7 @@ appropriate file under the `torch/ao/nn/qat/modules`,
 while adding an import statement here.
 """
 
-from torch.ao.nn.qat.modules.embedding_ops import Embedding, EmbeddingBag
+__all__ = ['Embedding', 'EmbeddingBag']
 
-
-__all__ = ["Embedding", "EmbeddingBag"]
+from torch.ao.nn.qat.modules.embedding_ops import Embedding
+from torch.ao.nn.qat.modules.embedding_ops import EmbeddingBag
