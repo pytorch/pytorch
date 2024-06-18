@@ -1232,7 +1232,7 @@ optim_db: List[OptimizerInfo] = [
         ),
         optim_error_inputs_func=optim_error_inputs_func_adam,
         supported_impls=("foreach", "differentiable", "fused"),
-        supports_fused_on=("cpu", "cuda"),
+        supports_fused_on=("cpu", "cuda", "mps"),
         decorators=(
             # Expected floating point error between fused and compiled forloop
             DecorateInfo(
@@ -1354,7 +1354,7 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_adamw,
         optim_error_inputs_func=optim_error_inputs_func_adamw,
         supported_impls=("foreach", "differentiable", "fused"),
-        supports_fused_on=("cpu", "cuda"),
+        supports_fused_on=("cpu", "cuda", "mps"),
         decorators=(
             # Expected error between compiled forloop and fused optimizers
             DecorateInfo(
