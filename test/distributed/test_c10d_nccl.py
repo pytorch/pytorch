@@ -4040,7 +4040,6 @@ class PipelineParallelDumpOnTimeout(NCCLTraceTestDumpOnTimeoutBase):
     def test_pp_hello_world_timeout(self):
         os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = "1000"
         os.environ["TORCH_NCCL_DUMP_ON_TIMEOUT"] = "1"
-        
 
         if self.rank == self.MAIN_PROCESS_RANK:
             # wait for rank0 to crash before looking for its output file
@@ -4054,9 +4053,7 @@ class PipelineParallelDumpOnTimeout(NCCLTraceTestDumpOnTimeoutBase):
                 self.assertEqual(t[0]["p2p_seq_id"], 1)
                 self.assertEqual(t[0]["state"], "completed")
                 self.assertEqual(t[1]["p2p_seq_id"], 2)
-                self.assertEqual(
-                    t[1]["state"], "scheduled"
-                )
+                self.assertEqual(t[1]["state"], "scheduled")
 
             self.assertFalse(os.path.exists(self._trace_name(rank=0)))
             return
@@ -4074,7 +4071,7 @@ class PipelineParallelDumpOnTimeout(NCCLTraceTestDumpOnTimeoutBase):
                 pg.recv([b], 0, 0).wait()
 
             torch.cuda.synchronize(device=device)
-            
+
             if self.rank == 1:
                 pg.recv([b], 0, 0).wait()
 
