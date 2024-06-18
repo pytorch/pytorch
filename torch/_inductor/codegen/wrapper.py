@@ -670,6 +670,7 @@ class WrapperCodeGen(CodeGen):
             EnterDeviceContextManagerLine(device_idx, self.last_seen_device_guard_index)
         )
         if config.triton.autotune_at_compile_time:
+            self.write_triton_header_once()
             self.kernel_autotune_calls.writeline(
                 f"with {V.graph.device_ops.device_guard(device_idx)}:"
             )
@@ -857,7 +858,6 @@ class WrapperCodeGen(CodeGen):
             """
             async_compile.wait(globals())
             del async_compile
-
         """
         )
         scope = dict()  # type: ignore[var-annotated]
@@ -873,7 +873,7 @@ class WrapperCodeGen(CodeGen):
                 f.write(tuning_code.encode("utf-8"))
                 file_path = f.name
             output_code_log.debug(
-                "Compile-time auto-tuning code: \n%s\nAuto-tuning code written to %s",
+                "\nCompile-time auto-tuning code: \n%s\nAuto-tuning code written to %s",
                 tuning_code,
                 file_path,
             )
