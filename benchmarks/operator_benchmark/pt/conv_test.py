@@ -37,7 +37,9 @@ op_bench.generate_pt_test(
     configs.conv_1d_configs_short + configs.conv_1d_configs_long, Conv1dBenchmark
 )
 op_bench.generate_pt_test(
-    configs.conv_1d_configs_short + configs.conv_1d_configs_long,
+    configs.convtranspose_1d_configs_short
+    + configs.conv_1d_configs_short
+    + configs.conv_1d_configs_long,
     ConvTranspose1dBenchmark,
 )
 

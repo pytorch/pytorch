@@ -58,9 +58,9 @@ class TestGraphTransformObserver(TestCase):
         found_output_svg = False
         for filepath_object in glob.glob(log_url + "/*"):
             if os.path.isfile(filepath_object):
-                if filepath_object.endswith("input_graph.svg"):
+                if filepath_object.endswith("input_graph.dot"):
                     found_input_svg = True
-                elif filepath_object.endswith("output_graph.svg"):
+                elif filepath_object.endswith("output_graph.dot"):
                     found_output_svg = True
 
         self.assertTrue(found_input_svg)
