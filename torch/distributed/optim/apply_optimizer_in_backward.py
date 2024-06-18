@@ -2,6 +2,7 @@ from typing import Any, Dict, Iterable, List, no_type_check, Type
 
 import torch
 
+
 __all__: List[str] = []
 
 # WeakTensorKeyDictionary to store relevant meta-data for the Tensor/Parameter
@@ -10,6 +11,7 @@ __all__: List[str] = []
 #       but that will serialize the meta-data if Tensor is serialized.
 param_to_optim_hook_handle_map = torch.utils.weak.WeakTensorKeyDictionary()
 param_to_acc_grad_map = torch.utils.weak.WeakTensorKeyDictionary()
+
 
 @no_type_check
 def _apply_optimizer_in_backward(
@@ -48,9 +50,7 @@ def _apply_optimizer_in_backward(
         # have their registered optimizer(s) applied.
 
     """
-    torch._C._log_api_usage_once(
-        "torch.distributed.optim.apply_optimizer_in_backward"
-    )
+    torch._C._log_api_usage_once("torch.distributed.optim.apply_optimizer_in_backward")
 
     @no_type_check
     def _apply_optimizer_in_backward_to_param(param: torch.nn.Parameter) -> None:
@@ -62,7 +62,9 @@ def _apply_optimizer_in_backward(
         # Don't create a new acc_grad if we already have one
         # i.e. for shared parameters or attaching multiple optimizers to a param.
         if param not in param_to_acc_grad_map:
-            param_to_acc_grad_map[param] = param.view_as(param).grad_fn.next_functions[0][0]
+            param_to_acc_grad_map[param] = param.view_as(param).grad_fn.next_functions[
+                0
+            ][0]
 
         optimizer = optimizer_class([param], **optimizer_kwargs)
 
