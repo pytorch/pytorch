@@ -1166,12 +1166,13 @@ class _VersionWrapper:
 
 def _maybe_detach(x, any_ret_has_alias_info):
     # We detach for two separate reasons:
-    # - For view ops, detach clears the autograd meta so that when the
-    #   tensor is returned from CachedDispatchMode, as_view does not
-    #   complain about autograd meta already existing.
-    # - For ops that have grad_fn, we want to detach from the graph to
-    #   avoid reference cycles.
-    if isinstance(x, torch.Tensor) and (x.requires_grad or any_ret_has_alias_info):
+    # - For view ops, we need to ensure that when the tensor is returned from
+    #   CachedDispatchMode, as_view sees that the AutogradMeta is nullptr
+    # - Avoid reference cycles
+    # For case 1, it is not enough to check whether x has differentiable dtype
+    # because non-differentiable dtype can have non-nullptr AutogradMeta, e.g.
+    # when the tensor is a view.
+    if isinstance(x, torch.Tensor) and (x.is_floating_point() or x.is_complex() or any_ret_has_alias_info):
         # NB: Ensure the original tensor object is saved when x does not require grad
         with torch._C._SetExcludeDispatchKeyGuard(torch._C.DispatchKey.ADInplaceOrView, False):
             # Ensure that view performed beneath autograd properly propagates
@@ -1241,8 +1242,9 @@ class CheckpointPolicy(enum.Enum):
 SAC_IGNORED_OPS = {
     # AC inserts different number of detach during forward and recompute.
     torch.ops.aten.detach.default,
-    # During torch.compile, metadata ops are invoked a different number of
-    # times between forward and recompute.
+    # AC's determinism check invokes additional metadata ops during forward.
+    # With subclasses involved, these metadata ops become dispatchable, this
+    # can result in incorrectness if these ops are selected cached.
     torch.ops.prim.device.default,
 } | set(torch._subclasses.functional_tensor.FunctionalTensor.metadata_fns)
 
