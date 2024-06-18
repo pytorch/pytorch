@@ -2445,24 +2445,22 @@ class InstructionTranslator(InstructionTranslatorBase):
             torch._C._functorch.TransformType.Grad,
             torch._C._functorch.TransformType.Jvp,
         )
-        match_graph_break_log = False
-        if len(self.speculation_log.entries):
-            log = self.speculation_log.entries[self.speculation_log.index]
-            match_graph_break_log = (
-                log.failed
-                and log.filename == self.f_code.co_filename
-                and log.lineno == self.f_code.co_firstlineno
-            )
 
-        if (
-            ci is not None
-            and ci.key() in forbidden_keys
-            and compiler_fn is not eager
-            and match_graph_break_log
-        ):
-            # if it reaches here, it means Dynamo failed to inline a functorch function
+        # Is there a better way to detect this?
+        from_eager = counters.get("graph_break", None) is None
+
+        if ci is not None and ci.key() in forbidden_keys and compiler_fn is not eager:
             name = ci.key().name.lower()
-            msg = f"torch.func.{name}(fn) requires the function to be inlined by dynamo"
+            if from_eager:
+                # calling from eager
+                msg = (
+                    f"Calling torch.func.{name}(compiled_fn) function from eager mode is not supported. "
+                    f"Ensure that torch.func.{name} is also wrapped within a torch.compile function. "
+                    "For more information, see PyTorch issue #128711."
+                )
+            else:
+                # if it reaches here, it means Dynamo failed to inline a functorch function
+                msg = f"torch.func.{name}(fn) requires the function to be inlined by dynamo"
             unimplemented(msg)
 
     def get_example_value(self, source: Source):
