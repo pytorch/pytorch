@@ -19,9 +19,9 @@ import torch.distributed as dist
 from torch._utils import _get_device_index
 from torch.autograd import Function, Variable
 from torch.distributed.algorithms.join import Join, Joinable, JoinHook
-from torch.nn.modules import Module
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
+from ..modules import Module
 from .scatter_gather import gather, scatter_kwargs
 
 
@@ -46,7 +46,6 @@ if dist.rpc.is_available():
 
 if TYPE_CHECKING:
     from torch.utils.hooks import RemovableHandle
-
 
 __all__ = ["DistributedDataParallel"]
 
