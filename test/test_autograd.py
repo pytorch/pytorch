@@ -976,8 +976,47 @@ class TestAutograd(TestCase):
         torch.autograd.backward(out.sum(), inputs=(x, edge_y))
         torch.autograd.backward(out.sum(), inputs=(edge_x, edge_y))
 
+    def test_grad_fn_input_metadata(self):
+        x = torch.rand(2, requires_grad=True, dtype=torch.float32)
+        y = torch.rand(2, requires_grad=True, dtype=torch.float32)
+        z = x * y
+        self.assertEqual(z.grad_fn._input_metadata(0).shape(), (2,))
+        self.assertEqual(nt_metadata.dtype(), torch.float32)
+
+        # Multiple outputs
+        b = torch.rand(3, 3, requires_grad=True)
+        var, _ = torch.var_mean(b, dim=0)
+
+        metadata_0 = var.grad_fn._input_metadata(0)
+        metadata_1 = var.grad_fn._input_metadata(1)
+        self.assertEqual(metadata_0.shape(), (3,))
+        self.assertEqual(metadata_1.shape(), (3,))
+
+        # Preserves symints
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(
+                    3,
+                    2,
+                ),
+                torch.randn(
+                    2,
+                    2,
+                ),
+            ],
+            layout=torch.jagged,
+            requires_grad=True,
+        )
+        nt_metadata = nt.clone().grad_fn._input_metadata(0)
+
+        self.assertIsInstance(nt_metadata.shape()[1], torch.SymInt)
+        self.assertEqual(nt_metadata.shape(), nt.shape)
+        self.assertTrue(nt_metadata.is_nested_tensor())
+        self.assertFalse(nt_metadata.is_cpp_nested_tensor())
+        self.assertEqual(nt_metadata.dtype(), nt.dtype)
+
     def test_gradient_edge_output(self):
-        x = torch.tensor(1., requires_grad=True)
+        x = torch.tensor(1.0, requires_grad=True)
 
         def fn(x):
             tmp = x.sin().cos()
@@ -987,30 +1026,41 @@ class TestAutograd(TestCase):
 
         # Compute fn backward in two steps
         out, tmp_edge = fn(x)
-        tmp_grad, = torch.autograd.grad(out, (tmp_edge,))
+        (tmp_grad,) = torch.autograd.grad(out, (tmp_edge,))
         print(tmp_edge)
-        x_grad, = torch.autograd.grad(tmp_edge, (x,), grad_outputs=(tmp_grad,))
+        (x_grad,) = torch.autograd.grad(tmp_edge, (x,), grad_outputs=(tmp_grad,))
 
         # Compare with as if we did it in one go.
         out, _ = fn(x)
-        x_grad_ref, = torch.autograd.grad(out, (x,))
+        (x_grad_ref,) = torch.autograd.grad(out, (x,))
         self.assertEqual(x_grad, x_grad_ref)
 
         # Incorrect case: grad_outputs not passed/implicitly None
         out, tmp_edge = fn(x)
-        tmp_grad, = torch.autograd.grad(out, (tmp_edge,))
+        (tmp_grad,) = torch.autograd.grad(out, (tmp_edge,))
         with self.assertRaisesRegex(
             RuntimeError,
-            "grad cannot be implicitly created when output is a GradientEdge"
+            "grad cannot be implicitly created when output is a GradientEdge",
         ):
             torch.autograd.grad(tmp_edge, (x,))
 
-        # FIXME: We aren't catching size mismatch here!
-        # # Incorrect case: grad_outputs wrong size
-        # out, tmp_edge = fn(x)
-        # tmp_grad, = torch.autograd.grad(out, (tmp_edge,))
-        # with self.assertRaisesRegex(RuntimeError, "Mismatch in shape"):
-        #     torch.autograd.grad(tmp_edge, (x,), grad_outputs=torch.tensor([1., 2., 3., 4.]))
+        # Incorrect case: grad_outputs wrong size
+        out, tmp_edge = fn(x)
+        (tmp_grad,) = torch.autograd.grad(out, (tmp_edge,))
+        with self.assertRaisesRegex(RuntimeError, "Mismatch in shape"):
+            torch.autograd.grad(
+                tmp_edge, (x,), grad_outputs=torch.tensor([1.0, 2.0, 3.0, 4.0])
+            )
+
+        # Incorrect case: wrong dtype
+        out, tmp_edge = fn(x)
+        (tmp_grad,) = torch.autograd.grad(out, (tmp_edge,))
+        with self.assertRaisesRegex(RuntimeError, "required to have the same dtype"):
+            torch.autograd.grad(
+                tmp_edge,
+                (x,),
+                grad_outputs=torch.rand_like(tmp_grad, dtype=torch.complex64),
+            )
 
     def test_grad_nonleaf(self):
         x_init = torch.randn(2, 2, requires_grad=True)
@@ -8251,6 +8301,11 @@ for shape in [(1,), ()]:
         b.requires_grad_(False)
         self.assertFalse(torch._C._has_null_autograd_meta(b))
         b.detach_()
+        self.assertFalse(torch._C._has_null_autograd_meta(b))
+
+        # AutogradMeta is still needed to record view-ness
+        a = torch.ones(2, dtype=torch.int64)
+        b = a.view(-1)
         self.assertFalse(torch._C._has_null_autograd_meta(b))
 
     def test_custom_function_return_view_in_nograd(self):

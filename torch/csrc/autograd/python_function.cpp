@@ -1183,6 +1183,14 @@ PyObject* THPFunction_set_sequence_nr(PyObject* self, PyObject* sequence_nr) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPFunction_input_metadata(PyObject* self, PyObject* idx) {
+  HANDLE_TH_ERRORS;
+  auto cdata = ((THPFunction*)self)->cdata.lock();
+  const auto& metadata = cdata->input_metadata(THPUtils_unpackUInt64(idx));
+  return py::cast(metadata).release().ptr();
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPFunction_maybe_clear_saved_tensors(
     PyObject* self,
     PyObject* noargs) {
@@ -1747,6 +1755,7 @@ static struct PyMethodDef THPFunction_methods[] = {
     {(char*)"name", THPFunction_name, METH_NOARGS, nullptr},
     {(char*)"_sequence_nr", THPFunction_sequence_nr, METH_NOARGS, nullptr},
     {(char*)"_set_sequence_nr", THPFunction_set_sequence_nr, METH_O, nullptr},
+    {(char*)"_input_metadata", THPFunction_input_metadata, METH_O, nullptr},
     {(char*)"maybe_clear_saved_tensors",
      THPFunction_maybe_clear_saved_tensors,
      METH_NOARGS,
