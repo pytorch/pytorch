@@ -350,9 +350,9 @@ jobs:
       sync-tag: win-cpu-build
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 3, runner: "windows.4xlarge.nonephemeral" },
-          { config: "default", shard: 2, num_shards: 3, runner: "windows.4xlarge.nonephemeral" },
-          { config: "default", shard: 3, num_shards: 3, runner: "windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 1, num_shards: 3, runner: "lf.c.windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 2, num_shards: 3, runner: "lf.c.windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 3, num_shards: 3, runner: "lf.c.windows.4xlarge.nonephemeral" },
         ]}
 
   linux-focal-cpu-py3_10-gcc9-bazel-test:
