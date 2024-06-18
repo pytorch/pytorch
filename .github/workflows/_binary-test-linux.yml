@@ -171,9 +171,9 @@ jobs:
       - name: Checkout pytorch/builder to builder dir
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: "palic/split_build"
           submodules: recursive
-          repository: pytorch/builder
+          repository: PaliC/builder
           path: builder
 
       - name: Clean pytorch/builder checkout
