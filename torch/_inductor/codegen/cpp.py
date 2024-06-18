@@ -70,7 +70,7 @@ from .cpp_utils import (
     cexpr_index,
     DTYPE_TO_CPP,
     INDEX_TYPE,
-    LocalBufferScope,
+    LocalBufferContext,
     value_to_cpp,
 )
 
@@ -2006,11 +2006,11 @@ class CppKernel(Kernel):
             if loop_nest.root:
                 if (
                     has_outer_loop_kernel
-                    and isinstance(V.local_buffer_scope, LocalBufferScope)
-                    and V.local_buffer_scope.local_buffers
+                    and isinstance(V.local_buffer_context, LocalBufferContext)
+                    and V.local_buffer_context.local_buffers
                 ):
                     # Allocate local buffer
-                    local_buffers = V.local_buffer_scope.local_buffers
+                    local_buffers = V.local_buffer_context.local_buffers
                     assert len(local_buffers.items()) == 1
                     local_buffer = next(iter(local_buffers.items()))[1]
                     # For dynamic size, rename s to ks
@@ -3488,8 +3488,8 @@ class CppKernelProxy(CppKernel):
         fn_list = [functools.partial(fn, node) for node in nodes]
 
         if (
-            isinstance(V.local_buffer_scope, LocalBufferScope)
-            and V.local_buffer_scope.local_buffers
+            isinstance(V.local_buffer_context, LocalBufferContext)
+            and V.local_buffer_context.local_buffers
         ):
 
             def rewrite_index(self, index):
@@ -3515,7 +3515,12 @@ class CppKernelProxy(CppKernel):
                 return index
 
             fn_list = [
-                V.local_buffer_scope.localize_buffer_for_function(fn, rewrite_index)
+                V.local_buffer_context.localize_buffer_for_function(
+                    fn,
+                    rewrite_index,
+                    next(iter(V.local_buffer_context.local_nodes.items()))[1].node,
+                    next(iter(V.local_buffer_context.local_buffers.items()))[1],
+                )
                 for fn in fn_list
             ]
 
@@ -3906,41 +3911,32 @@ class CppScheduling(BaseScheduling):
                 # No local buffer found
                 return False
             assert len(local_buffers) == 1
-            for _node in node.get_outer_nodes():
-                assert isinstance(_node, (FusedSchedulerNode, SchedulerNode))
-                cpp_kernel_proxy = CppKernelProxy(kernel_group)
 
-                with LocalBufferScope(cpp_kernel_proxy) as scope:
-                    assert len(local_buffers) == 1
-                    scope.add_local_buffer(
-                        local_buffers[0].local_buf, local_buffers[0].global_snode
-                    )
-                    cpp_kernel_proxy.codegen_nodes(_node.get_nodes())  # type: ignore[arg-type]
-                cpp_kernel_proxy_list.append(cpp_kernel_proxy)
-                nodes_list.append(_node.get_nodes())  # type: ignore[arg-type]
-
-            if not node.check_outer_fusion_loop_level_attr(
-                cpp_kernel_proxy_list, node.outer_loop_fusion_depth
-            ):
-                return False
-            metrics.cpp_outer_loop_fused_inner_counts.append(
-                metrics.CppOuterLoopFusedCount(
-                    len(cpp_kernel_proxy_list),
-                    local_buffer_number=len(local_buffers),
+            with LocalBufferContext(kernel_group.args) as scope:
+                assert len(local_buffers) == 1
+                scope.add_local_buffer(
+                    local_buffers[0].local_buf, local_buffers[0].global_snode
                 )
-            )
-            outer_fusion_cpp_kernel_proxy = node.merge_outer_fusion_kernels(
-                cpp_kernel_proxy_list,
-            )
+                for _node in node.get_outer_nodes():
+                    assert isinstance(_node, (FusedSchedulerNode, SchedulerNode))
+                    cpp_kernel_proxy = CppKernelProxy(kernel_group)
+                    cpp_kernel_proxy.codegen_nodes(_node.get_nodes())  # type: ignore[arg-type]
+                    cpp_kernel_proxy_list.append(cpp_kernel_proxy)
+                    nodes_list.append(_node.get_nodes())  # type: ignore[arg-type]
 
-            with LocalBufferScope(outer_fusion_cpp_kernel_proxy) as scope:
-                # Also need the local buffer inform in codegen loop
-                # which is used to allocate the local buffer.
-                if local_buffers:
-                    assert len(local_buffers) == 1
-                    scope.add_local_buffer(
-                        local_buffers[0].local_buf, local_buffers[0].global_snode
+                if not node.check_outer_fusion_loop_level_attr(
+                    cpp_kernel_proxy_list, node.outer_loop_fusion_depth
+                ):
+                    return False
+                metrics.cpp_outer_loop_fused_inner_counts.append(
+                    metrics.CppOuterLoopFusedCount(
+                        len(cpp_kernel_proxy_list),
+                        local_buffer_number=len(local_buffers),
                     )
+                )
+                outer_fusion_cpp_kernel_proxy = node.merge_outer_fusion_kernels(
+                    cpp_kernel_proxy_list,
+                )
                 kernel_group.finalize_kernel(
                     outer_fusion_cpp_kernel_proxy,
                     [_node for _nodes in nodes_list for _node in _nodes],

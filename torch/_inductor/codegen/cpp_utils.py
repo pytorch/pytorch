@@ -15,7 +15,7 @@ from .. import ir
 from ..scheduler import BaseSchedulerNode
 from ..virtualized import V
 
-from .common import ExprPrinter, Kernel
+from .common import ExprPrinter, Kernel, KernelArgs
 
 DTYPE_TO_CPP = {
     torch.float32: "float",
@@ -347,7 +347,7 @@ class LocalizeBufferHandler(V.WrapperHandler):  # type: ignore[name-defined]
         return self._inner.store_reduction(*self.localize(name, index), value)
 
 
-class LocalBufferScope:
+class LocalBufferContext:
     """
     This class creates a context that helps to generate code involving Inductor IR with
     function local buffers. These buffers are constructed during the codegen process and
@@ -357,8 +357,8 @@ class LocalBufferScope:
     these buffers without exposure to the outside world.
     """
 
-    def __init__(self, kernel: Kernel):
-        self.kernel = kernel
+    def __init__(self, kernel_args: KernelArgs):
+        self.kernel_args = kernel_args
         self.exit_stack = contextlib.ExitStack()
         self.local_buffers: Dict[str, ir.Buffer] = {}
         self.local_nodes: Dict[str, BaseSchedulerNode] = {}
@@ -374,26 +374,26 @@ class LocalBufferScope:
 
         self.exit_stack.enter_context(patch.object(V.graph, "get_dtype", get_dtype))
 
-        original_input = self.kernel.args.input
+        original_input = self.kernel_args.input
 
         def input(name):
             if name in self.local_buffers:
                 return name
             return original_input(name)
 
-        self.exit_stack.enter_context(patch.object(self.kernel.args, "input", input))
+        self.exit_stack.enter_context(patch.object(self.kernel_args, "input", input))
 
-        original_output = self.kernel.args.output
+        original_output = self.kernel_args.output
 
         def output(name):
             if name in self.local_buffers:
                 return name
             return original_output(name)
 
-        self.exit_stack.enter_context(patch.object(self.kernel.args, "output", output))
+        self.exit_stack.enter_context(patch.object(self.kernel_args, "output", output))
 
-        # Set current LocalBufferScope into V
-        self.exit_stack.enter_context(V.set_local_buffer_scope(self))
+        # Set current LocalBufferContext into V
+        self.exit_stack.enter_context(V.set_local_buffer_context(self))
 
         return self
 
@@ -428,23 +428,15 @@ class LocalBufferScope:
         self,
         fn: Callable[..., Any],
         rewrite_index: Callable[["LocalizeBufferHandler", sympy.Expr], sympy.Expr],
-        global_buf: Optional[ir.Buffer] = None,
-        local_buf: Optional[ir.Buffer] = None,
+        global_buf: Optional[ir.Buffer],
+        local_buf: Optional[ir.Buffer],
     ):
         def inner(node, *index_vars):
             with V.set_ops_handler(
                 LocalizeBufferHandler(
                     V.get_ops_handler(),
-                    global_buf=(
-                        global_buf
-                        if global_buf
-                        else next(iter(self.local_nodes.items()))[1].node
-                    ),
-                    local_buf=(
-                        local_buf
-                        if local_buf
-                        else next(iter(self.local_buffers.items()))[1]
-                    ),
+                    global_buf=global_buf,
+                    local_buf=local_buf,
                     rewrite_index=rewrite_index,
                 )
             ):
