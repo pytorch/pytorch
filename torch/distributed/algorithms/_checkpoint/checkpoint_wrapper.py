@@ -10,6 +10,7 @@ from torch.autograd.graph import save_on_cpu
 from torch.distributed.utils import _pack_kwargs, _replace_by_prefix, _unpack_kwargs
 from torch.utils.checkpoint import checkpoint as torch_utils_checkpoint
 
+
 _CHECKPOINT_WRAPPED_MODULE = "_checkpoint_wrapped_module"
 _CHECKPOINT_PREFIX = _CHECKPOINT_WRAPPED_MODULE + "."
 
@@ -286,8 +287,12 @@ def apply_activation_checkpointing(
     """
     # TODO: Importing inside function to avoid circular import issue between FSDP and
     # checkpoint_wrapper. This can be resolved once wrap() APIs are decoupled from FSDP code.
-    from torch.distributed.fsdp.wrap import _recursive_wrap, lambda_auto_wrap_policy, _Policy
     from torch.distributed.fsdp._wrap_utils import _construct_wrap_fn, _post_order_apply
+    from torch.distributed.fsdp.wrap import (
+        _Policy,
+        _recursive_wrap,
+        lambda_auto_wrap_policy,
+    )
 
     policy = (
         auto_wrap_policy
@@ -302,7 +307,9 @@ def apply_activation_checkpointing(
         target_module_to_kwargs = policy._run_policy(
             model, ignored_modules=set(), root_kwargs={}
         )
-        wrap_fn = _construct_wrap_fn(model, target_module_to_kwargs, checkpoint_wrapper_fn)
+        wrap_fn = _construct_wrap_fn(
+            model, target_module_to_kwargs, checkpoint_wrapper_fn
+        )
         _post_order_apply(model, wrap_fn)
         return
 

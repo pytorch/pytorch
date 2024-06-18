@@ -17,6 +17,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #else
+#include <arpa/inet.h>
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/tcp.h>
@@ -36,6 +37,7 @@ C10_DIAGNOSTIC_POP()
 #include <torch/csrc/distributed/c10d/logging.h>
 
 #include <c10/util/CallOnce.h>
+#include <c10/util/Optional.h>
 
 namespace c10d::detail {
 namespace {
@@ -136,7 +138,10 @@ class SocketImpl {
   static constexpr Handle invalid_socket = -1;
 #endif
 
-  explicit SocketImpl(Handle hnd) noexcept : hnd_{hnd} {}
+  explicit SocketImpl(
+      Handle hnd,
+      c10::optional<::addrinfo> remote = c10::nullopt) noexcept
+      : hnd_{hnd}, remote_(remote) {}
 
   SocketImpl(const SocketImpl& other) = delete;
 
@@ -174,12 +179,17 @@ class SocketImpl {
     return hnd_;
   }
 
+  const c10::optional<::addrinfo>& remote() const noexcept {
+    return remote_;
+  }
+
   bool waitForInput(std::chrono::milliseconds timeout);
 
  private:
   bool setSocketFlag(int level, int optname, bool value) noexcept;
 
   Handle hnd_;
+  const c10::optional<::addrinfo> remote_;
 };
 } // namespace c10d::detail
 
@@ -207,7 +217,27 @@ struct formatter<::addrinfo> {
         NI_MAXSERV,
         NI_NUMERICSERV);
     if (r != 0) {
-      return fmt::format_to(ctx.out(), "?UNKNOWN?");
+      // if we can't resolve the hostname, display the IP address
+      if (addr.ai_family == AF_INET) {
+        struct sockaddr_in* psai = (struct sockaddr_in*)addr.ai_addr;
+        char ip[INET_ADDRSTRLEN];
+        if (inet_ntop(addr.ai_family, &(psai->sin_addr), ip, INET_ADDRSTRLEN) !=
+            NULL) {
+          return fmt::format_to(ctx.out(), "{}:{}", ip, psai->sin_port);
+        }
+      } else if (addr.ai_family == AF_INET6) {
+        struct sockaddr_in6* psai = (struct sockaddr_in6*)addr.ai_addr;
+        char ip[INET6_ADDRSTRLEN];
+        if (inet_ntop(
+                addr.ai_family, &(psai->sin6_addr), ip, INET6_ADDRSTRLEN) !=
+            NULL) {
+          return fmt::format_to(ctx.out(), "[{}]:{}", ip, psai->sin6_port);
+        }
+      }
+      C10_THROW_ERROR(
+          DistNetworkError,
+          fmt::format(
+              "failed to format addr, unknown family={}", addr.ai_family));
     }
 
     if (addr.ai_addr->sa_family == AF_INET) {
@@ -234,7 +264,9 @@ struct formatter<c10d::detail::SocketImpl> {
 
     ::socklen_t addr_len = sizeof(addr_s);
 
-    if (::getsockname(socket.handle(), addr_ptr, &addr_len) != 0) {
+    auto fd = socket.handle();
+
+    if (::getsockname(fd, addr_ptr, &addr_len) != 0) {
       return fmt::format_to(ctx.out(), "?UNKNOWN?");
     }
 
@@ -242,7 +274,15 @@ struct formatter<c10d::detail::SocketImpl> {
     addr.ai_addr = addr_ptr;
     addr.ai_addrlen = addr_len;
 
-    return fmt::format_to(ctx.out(), "{}", addr);
+    auto remote = socket.remote();
+    std::string remoteStr = remote ? fmt::format("{}", *remote) : "none";
+
+    return fmt::format_to(
+        ctx.out(),
+        "SocketImpl(fd={}, addr={}, remote={})",
+        fd,
+        addr,
+        remoteStr);
   }
 };
 
@@ -297,7 +337,7 @@ std::unique_ptr<SocketImpl> SocketImpl::accept() const {
       *this,
       addr);
 
-  auto impl = std::make_unique<SocketImpl>(hnd);
+  auto impl = std::make_unique<SocketImpl>(hnd, addr);
 
   // Make sure that we do not "leak" our file descriptors to child processes.
   impl->closeOnExec();
@@ -413,22 +453,34 @@ bool SocketImpl::waitForInput(std::chrono::milliseconds timeout) {
     int res = pollFd(&pfd, 1, static_cast<int>(timeout.count()));
     if (res > 0) {
       return true;
+    } else if (res == 0) {
+      C10D_WARNING(
+          "waitForInput: poll for socket {} returned 0, likely a timeout",
+          *this);
+      continue;
     }
-    std::error_code err = getSocketError();
 
+    std::error_code err = getSocketError();
     if (err == std::errc::operation_in_progress) {
       bool timedout = Clock::now() >= deadline;
       if (timedout) {
         return false;
       }
       C10D_WARNING(
-          "pollFB for socket {} returned operation_in_progress before a timeout",
-          hnd_);
+          "waitForInput: poll for socket {} returned operation_in_progress before a timeout",
+          *this);
     } else if (err != std::errc::interrupted) {
-      C10D_WARNING("While waitForInput, poolFD failed with {}.", err);
+      C10D_WARNING(
+          "waitForInput: poll for socket {} failed with res={}, err={}.",
+          *this,
+          res,
+          err);
       return false;
     }
   } while (Clock::now() < deadline);
+
+  C10D_WARNING(
+      "waitForInput: socket {} timed out after {}ms", *this, timeout.count());
   return false;
 }
 
@@ -848,7 +900,7 @@ SocketConnectOp::ConnectResult SocketConnectOp::tryConnect(
     return ConnectResult::Error;
   }
 
-  socket_ = std::make_unique<SocketImpl>(hnd);
+  socket_ = std::make_unique<SocketImpl>(hnd, addr);
 
   socket_->enableNonBlocking();
 
@@ -1031,6 +1083,13 @@ Socket::Socket(std::unique_ptr<SocketImpl>&& impl) noexcept
 
 bool Socket::waitForInput(std::chrono::milliseconds timeout) {
   return impl_->waitForInput(timeout);
+}
+
+std::string Socket::repr() const {
+  if (impl_) {
+    return fmt::format("{}", *impl_);
+  }
+  return "Socket(no-impl)";
 }
 
 } // namespace c10d::detail
