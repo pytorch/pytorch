@@ -258,8 +258,8 @@ are safe to autocast.
 
 .. _autocast-xpu-op-reference:
 
-XPU Op-Specific Behavior
-------------------------
+XPU Op-Specific Behavior (Experimental)
+---------------------------------------
 The following lists describe the behavior of eligible ops in autocast-enabled regions.
 These ops always go through autocasting whether they are invoked as part of a :class:`torch.nn.Module`,
 as a function, or as a :class:`torch.Tensor` method. If functions are exposed in multiple namespaces,
