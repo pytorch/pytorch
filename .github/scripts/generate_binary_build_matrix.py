@@ -367,29 +367,6 @@ def generate_wheels_matrix(
                 and os == "linux"
                 or arch_version == "cuda-aarch64"
             ):
-                # ret.append(
-                #     {
-                #         "python_version": python_version,
-                #         "gpu_arch_type": gpu_arch_type,
-                #         "gpu_arch_version": gpu_arch_version,
-                #         "desired_cuda": translate_desired_cuda(
-                #             gpu_arch_type, gpu_arch_version
-                #         ),
-                #         "devtoolset": (
-                #             "cxx11-abi" if arch_version == "cuda-aarch64" else ""
-                #         ),
-                #         "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
-                #         "package_type": package_type,
-                #         "pytorch_extra_install_requirements": (
-                #             PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version]  # fmt: skip
-                #             if os != "linux-aarch64"
-                #             else ""
-                #         ),
-                #         "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(  # noqa: B950
-                #             ".", "_"
-                #         ),
-                #     }
-                # )
                 if arch_version != "cuda-aarch64":
                     ret.append(
                         {
@@ -415,30 +392,6 @@ def generate_wheels_matrix(
                             ),
                         }
                     )
-            else:
-                ret.append(
-                    {
-                        "python_version": python_version,
-                        "gpu_arch_type": gpu_arch_type,
-                        "gpu_arch_version": gpu_arch_version,
-                        "desired_cuda": translate_desired_cuda(
-                            gpu_arch_type, gpu_arch_version
-                        ),
-                        "devtoolset": (
-                            "cxx11-abi" if arch_version == "cpu-cxx11-abi" else ""
-                        ),
-                        "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
-                        "package_type": package_type,
-                        "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
-                            ".", "_"
-                        ),
-                        "pytorch_extra_install_requirements": (
-                            PYTORCH_EXTRA_INSTALL_REQUIREMENTS["12.1"]  # fmt: skip
-                            if os != "linux"
-                            else ""
-                        ),
-                    }
-                )
     return ret
 
 
