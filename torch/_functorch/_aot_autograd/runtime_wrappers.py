@@ -1376,14 +1376,14 @@ class AOTDispatchAutograd:
 
     # See Note [Tangents must be contiguous, Part 2]
     @staticmethod
-    def coerce_runtime_tangent(x, metadata_tensor):
+    def coerce_runtime_tangent(x, metadata):
         if not isinstance(x, torch.Tensor):
             return x
         if not is_traceable_wrapper_subclass(x):
             return x
-        assert is_traceable_wrapper_subclass(metadata_tensor)
+        assert metadata is not None
+        (_, expected_tangent_metadata) = metadata
         _, runtime_tangent_metadata = x.__tensor_flatten__()  # type: ignore[attr-defined]
-        _, expected_tangent_metadata = metadata_tensor.__tensor_flatten__()
         if runtime_tangent_metadata == expected_tangent_metadata:
             return x
         if not hasattr(x, "__coerce_same_metadata_as_tangent__"):
@@ -1400,7 +1400,7 @@ shape: {str(x.shape)}
 To fix this, your tensor subclass must implement the dunder method __force_to_same_metadata__.
 """
             )
-        return x.__coerce_same_metadata_as_tangent__(metadata_tensor)  # type: ignore[attr-defined]
+        return x.__coerce_same_metadata_as_tangent__(expected_tangent_metadata)  # type: ignore[attr-defined]
 
     @staticmethod
     def post_compile(
@@ -1737,10 +1737,11 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                             is_joint_structure=False,
                         )
                     )
+                    assert CompiledFunction.metadata.traced_tangent_metas is not None
                     all_args = [
                         AOTDispatchAutograd.coerce_runtime_tangent(
                             t,
-                            CompiledFunction.metadata.traced_tangents[
+                            CompiledFunction.metadata.traced_tangent_metas[
                                 i - tangents_start_idx
                             ],
                         )
@@ -1974,3 +1975,17 @@ def post_compile(
             compiled_fn, aot_config, runtime_metadata=runtime_metadata
         )
     return compiled_fn, runtime_metadata
+
+
+def make_runtime_safe(
+    fw_metadata: ViewAndMutationMeta,
+    maybe_subclass_meta: Optional[SubclassMeta],
+):
+    """
+    Calls make_runtime_safe on all ViewAndMutationMetas.
+    Modifies both arguments. Allows ViewAndMutationMetas to
+    be safely cached in AOTAutogradCache.
+    """
+    fw_metadata.make_runtime_safe()
+    if maybe_subclass_meta is not None:
+        maybe_subclass_meta.fw_metadata.make_runtime_safe()
