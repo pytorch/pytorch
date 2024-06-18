@@ -1,8 +1,7 @@
 # to ensure customers can use the module below
 # without importing it directly
-import torch.nn.intrinsic.quantized.dynamic
-
-from .modules import *  # noqa: F403
+from torch.nn.intrinsic.quantized import dynamic, modules  # noqa: F401
+from torch.nn.intrinsic.quantized.modules import *  # noqa: F403
 
 
 __all__ = [

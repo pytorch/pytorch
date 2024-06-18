@@ -7,8 +7,7 @@ Please, use `torch.ao.nn.qat.modules` instead.
 from torch.ao.nn.qat.modules.conv import Conv1d, Conv2d, Conv3d
 from torch.ao.nn.qat.modules.embedding_ops import Embedding, EmbeddingBag
 from torch.ao.nn.qat.modules.linear import Linear
-
-from . import conv, embedding_ops, linear
+from torch.nn.qat.modules import conv, embedding_ops, linear
 
 
 __all__ = [
