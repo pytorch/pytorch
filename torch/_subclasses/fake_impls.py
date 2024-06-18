@@ -807,14 +807,6 @@ def meta__scaled_dot_product_cudnn(fake_mode, func, *args, **kwargs):
     offset = convert_tensor(
         torch.empty((), dtype=torch.long, device="meta"), query.device
     )
-    # Why does it cause a segfault if we replace these with None
-    # as is done in the SDPA Flash case above?
-    cum_seq_q = convert_tensor(
-        torch.empty((), dtype=torch.long, device="meta"), query.device
-    )
-    cum_seq_kv = convert_tensor(
-        torch.empty((), dtype=torch.long, device="meta"), query.device
-    )
     debug_mask = convert_tensor(
         torch.empty(0, dtype=query.dtype, device="meta"),
         query.device,
@@ -822,8 +814,8 @@ def meta__scaled_dot_product_cudnn(fake_mode, func, *args, **kwargs):
     return (
         res,
         logsum_exp,
-        cum_seq_q,
-        cum_seq_kv,
+        None,
+        None,
         S_Q,
         S_KV,
         seed,
