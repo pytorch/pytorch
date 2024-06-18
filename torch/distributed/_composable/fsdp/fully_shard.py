@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import functools
-
 from typing import Any, cast, NoReturn, Optional, Union
 
 import torch
