@@ -92,6 +92,12 @@ class WorkerServerTest(TestCase):
 
         server.shutdown()
 
+    def test_dump_traceback(self) -> None:
+        with local_worker_server() as pool:
+            resp = pool.request("POST", "/handler/dump_traceback")
+            self.assertEqual(resp.status, 200)
+            self.assertIn(b"in test_dump_traceback\n", resp.data)
+
 
 if __name__ == "__main__":
     run_tests()
