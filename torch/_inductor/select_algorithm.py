@@ -103,6 +103,8 @@ class PartialRender:
         return self.code
 
 
+# This is used to store info needed for lowering each subgraph in triton
+# templates
 SubgraphInfo = namedtuple(
     "SubgraphInfo",
     [
