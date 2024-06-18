@@ -2766,6 +2766,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.nn.grad.conv2d_weight",
         "torch.nn.grad.conv3d_input",
         "torch.nn.grad.conv3d_weight",
+        "torch.nn.modules.activation._is_make_fx_tracing",
         "torch.nn.modules.utils._list_with_default",
         "torch.nn.modules.utils._ntuple",
         "torch.nn.modules.utils._quadruple",
