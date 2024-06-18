@@ -682,14 +682,6 @@ class TS2FXGraphConverter:
         args = tuple(self.get_fx_value(input) for input in node.inputs())
         self.fx_graph.call_function(target, args)
 
-    # def convert_prim_Enter(self, node: torch._C.Node):
-    #     # export treats prim::Enter as noop
-    #     return
-
-    # def convert_prim_Exit(self, node: torch._C.Node):
-    #     # export treats prim::Exit as noop
-    #     return
-
     def _convert_standard_operators(self, node: torch._C.Node):
         target = kind_to_standard_operators[node.kind()]
         args = tuple(self.get_fx_value(input) for input in node.inputs())

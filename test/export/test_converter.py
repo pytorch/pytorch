@@ -682,52 +682,6 @@ class TestConverter(TestCase):
         # inp = (torch.randn([2, 3, 4]),)
         # self._check_equal_ts_ep_converter(func6, inp)
 
-    # def test_context_manager(self):
-    #     class ContextManager:
-    #         def __init__(self):
-    #             # TODO: enable this once we supporot prim::SetAttr
-    #             # self.count = 0
-    #             return
-
-    #         def __enter__(self):
-    #             # self.count += 1
-    #             return
-
-    #         def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
-    #             # self.count -= 1
-    #             return
-
-    #     class M(torch.nn.Module):
-    #         def forward(self, x, y):
-    #             with ContextManager():
-    #                 res = x + y
-    #             return res
-
-    #     inp = (torch.ones(3, 3), torch.ones(3, 3))
-    #     self._check_equal_ts_ep_converter(M(), inp)
-
-    # def test_raise_exception(self):
-    #     class Module(torch.nn.Module):
-    #         def forward(self, x: torch.Tensor, y: int) -> torch.Tensor:
-    #             if y > 0:
-    #                 raise RuntimeError("test")
-    #             return x + y
-
-    #     # TODO: Need control flow op update to support this case.
-    #     # Currently, control flow op always run both branches, leading to a RuntimeError
-    #     # even if y <= 0.
-    #     # By contrary, non-strict export only execute 1 branch according to the given input.
-    #     # inp = (torch.randn(3, 2), -1)
-    #     # self._check_equal_ts_ep_converter(Module(), inp)
-
-    #     # ep = torch.export.export(Module(), inp, strict=False)
-
-    #     # match non-strict export behavior that errors when the given input leads to
-    #     # RaiseException.
-    #     with self.assertRaisesRegex(torch._dynamo.exc.TorchRuntimeError, "builtins.RuntimeError"):
-    #         inp = (torch.randn(3, 2), 1)
-    #         self._check_equal_ts_ep_converter(Module(), inp)
-
     def test_get_tensor_constants(self):
         # Since self.data is only read but not written, it is lifted as
         # constant tensors.
