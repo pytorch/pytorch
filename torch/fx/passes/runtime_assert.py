@@ -98,7 +98,9 @@ def insert_deferred_runtime_asserts(
 
     graph_code_log.debug(
         "%s",
-        lazy_format_graph_code(f"pre insert_deferred_runtime_asserts {name}", gm),
+        lazy_format_graph_code(
+            f"pre insert_deferred_runtime_asserts {name}", gm, colored=True
+        ),
     )
 
     # deduplicate unassociated runtime assertions

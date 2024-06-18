@@ -143,6 +143,19 @@ class GlobalWeakRefSource(Source):
 
 
 @dataclasses.dataclass(frozen=True)
+class WeakRefCallSource(ChainedSource):
+    def reconstruct(self, codegen):
+        self.base.reconstruct(codegen)
+        codegen.extend_output(create_call_function(0, True))
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"{self.base.name()}()"
+
+
+@dataclasses.dataclass(frozen=True)
 class AttrSource(ChainedSource):
     member: str
 
