@@ -706,7 +706,6 @@ struct ReductionMulOp {
   __forceinline__ scalar_t identity_cpu() const { return 1; }
 };
 
-template <typename scalar_t>
 void _apply_sparse_csr_linear_solve(
   const Tensor& A,
   const Tensor& b,
@@ -723,23 +722,24 @@ void _apply_sparse_csr_linear_solve(
   TORCH_CHECK(A.dtype() == b.dtype(), "A and b must have the same dtype");
 
   // Device pointers and scalar shape parameters, matrix properties
-  
-  torch::Tensor crow = A.crow_indices();
-  torch::Tensor col = A.col_indices();
-  if (crow.dtype() != torch::kInt32) {
-      crow = crow.to(torch::kInt32);
-      col = col.to(torch::kInt32);
+
+  Tensor crow = A.crow_indices();
+  Tensor col = A.col_indices();
+  if (crow.scalar_type() != ScalarType::Int) {
+      crow = crow.to(crow.options().dtype(ScalarType::Int));
+      col = col.to(col.options().dtype(ScalarType::Int));
   }
   int*    rowOffsets = crow.data<int>();
   int*    colIndices = col.data<int>();
-  torch::Tensor values     = A.values();
+  Tensor values     = A.values();
   //---------------------------------------------------------------------------------
   // cuDSS data structures and handle initialization
   cudssConfig_t             config;
   cudssMatrix_t             b_mt;
   cudssMatrix_t             A_mt;
   cudssMatrix_t             x_mt;
-  cudssHandle_t             handle = getCurrentCudssHandle();
+  cudssData_t cudss_data;
+  cudssHandle_t             handle = at::cuda::getCurrentCudssHandle();
 
   cudssConfigCreate(&config);
   // cudssAlgType_t reorder_alg = CUDSS_ALG_3;
@@ -750,8 +750,8 @@ void _apply_sparse_csr_linear_solve(
   AT_DISPATCH_FLOATING_TYPES(values.type(), "create_matrix", ([&] {
     scalar_t* values_ptr = values.data<scalar_t>();
     scalar_t* b_ptr = b.data<scalar_t>();
-    scalar_t* x_ptr = x.data<scalar_t>();
-    auto CUDA_R_TYP = (values.type().scalarType() == torch::ScalarType::Double ? CUDA_R_64F : CUDA_R_32F);
+    scalar_t* x_ptr = x.data<scalar_t>(); 
+    auto CUDA_R_TYP = std::is_same<scalar_t, double>::value ? CUDA_R_64F : CUDA_R_32F;  // TODO: better conversion
     cudssMatrixCreateDn(&b_mt, b.size(0), 1, b.size(0), b_ptr, CUDA_R_TYP, CUDSS_LAYOUT_COL_MAJOR);
     cudssMatrixCreateDn(&x_mt, x.size(0), 1, x.size(0), x_ptr, CUDA_R_TYP, CUDSS_LAYOUT_COL_MAJOR);
     cudssMatrixCreateCsr(&A_mt, A.size(0), A.size(1),  A._nnz(), rowOffsets, rowOffsets + crow.size(0), colIndices, values_ptr, CUDA_R_32I, CUDA_R_TYP, CUDSS_MTYPE_GENERAL, CUDSS_MVIEW_FULL, CUDSS_BASE_ZERO);
@@ -813,14 +813,6 @@ Tensor _sparse_csr_prod_cuda(const Tensor& input, IntArrayRef dims_to_reduce, bo
   return result;
 }
 
-void linalg_solve_sparse_csr_kernel(
-  const Tensor& input,
-  const Tensor& other,
-  const Tensor& result,
-  int& singularity) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "sparse_csr_solve", [&] {
-    _apply_sparse_csr_linear_solve<scalar_t>(input, other, result, singularity);
-  });
-}
+
 
 } // namespace at::native
