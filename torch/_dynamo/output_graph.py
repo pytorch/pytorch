@@ -752,13 +752,9 @@ class OutputGraph:
         **options,
     ):
         if is_dynamic_nn_module(target, self.root_tx.export):
-            result = variables.UnspecializedNNModuleVariable(target, **options)
-            if not SideEffects.cls_supports_mutation_side_effects(type(target)):
-                # don't allow STORE_ATTR mutation with custom __setattr__
-                return result
-            return self.root_tx.output.side_effects.track_object_existing(
-                target, result
-            )
+            # Instead of returning UnspecializedNNModuleVariable, call
+            # VariableBuilder so that it is tracked for mutation.
+            return VariableBuilder(self.current_tx, **options)(target)
 
         options = dict(options)
         assert "source" in options
@@ -1296,7 +1292,9 @@ class OutputGraph:
 
         graph_code_log.debug(
             "%s",
-            lazy_format_graph_code(name, gm, include_stride=True, include_device=True),
+            lazy_format_graph_code(
+                name, gm, include_stride=True, include_device=True, colored=True
+            ),
         )
         torch._logging.trace_structured(
             "dynamo_output_graph",
