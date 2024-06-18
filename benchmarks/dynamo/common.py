@@ -714,7 +714,9 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             maybe_mark_step(args)
 
             with maybe_mark_profile(p=p, mark="actual"), maybe_enable_compiled_autograd(
-                args.compiled_autograd
+                args.compiled_autograd,
+                fullgraph=args.nopython,
+                dynamic=args.dynamic_shapes,
             ):
                 timings[rep, 1], actual_output = timed(
                     model,
@@ -2586,7 +2588,11 @@ class BenchmarkRunner:
                         new_result = optimized_model_iter_fn(model_copy, example_inputs)
                 else:
                     optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
-                    with maybe_enable_compiled_autograd(self.args.compiled_autograd):
+                    with maybe_enable_compiled_autograd(
+                        self.args.compiled_autograd,
+                        fullgraph=self.args.nopython,
+                        dynamic=self.args.dynamic_shapes,
+                    ):
                         new_result = optimized_model_iter_fn(model_copy, example_inputs)
             except Exception as e:
                 log.exception("")
@@ -2804,7 +2810,9 @@ class BenchmarkRunner:
                 aot_compilation_time = 0
 
             with maybe_enable_compiled_autograd(
-                self.args.compiled_autograd
+                self.args.compiled_autograd,
+                fullgraph=self.args.nopython,
+                dynamic=self.args.dynamic_shapes,
             ), maybe_snapshot_memory(
                 self.args.snapshot_memory, f"compiled_{self.args.only}"
             ):
@@ -2824,7 +2832,11 @@ class BenchmarkRunner:
                 with torch.profiler.profile(
                     activities=[torch.profiler.ProfilerActivity.CPU]
                 ) as prof:
-                    with maybe_enable_compiled_autograd(self.args.compiled_autograd):
+                    with maybe_enable_compiled_autograd(
+                        self.args.compiled_autograd,
+                        fullgraph=self.args.nopython,
+                        dynamic=self.args.dynamic_shapes,
+                    ):
                         warmup(optimized_model_iter_fn, model, example_inputs, "dynamo")
 
                 events = list(
