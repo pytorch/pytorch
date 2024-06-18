@@ -7110,6 +7110,14 @@ def sample_inputs_segment_reduce(op_info, device, dtype, requires_grad, *, mode=
                           args=(reduce,),
                           kwargs=sample_input_kwargs)
 
+def sample_inputs__weight_norm(op_info, device, dtype, requires_grad, **kwargs):
+    def _tensor(shape, dtype=dtype):
+        return make_tensor(shape, dtype=dtype, device=device, requires_grad=requires_grad)
+    # TODO: Enabe testing for non-empty tensors as well
+    # yield SampleInput(_tensor((S ,S)), args=(_tensor((S, 1)),), kwargs={"dim": 0})
+    # yield SampleInput(_tensor((S ,S, S)), args=(_tensor((1, 1, S)),), kwargs={"dim": 2})
+    yield SampleInput(_tensor((M, 0)), args=(_tensor((M, 0)),))
+
 
 def sample_inputs_ravel(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device,
@@ -21114,6 +21122,23 @@ op_db: List[OpInfo] = [
                 "test_variant_consistency_jit",
                 device_type="cuda",
             ),
+        ),
+    ),
+    OpInfo(
+        '_weight_norm',
+        aten_name='_weight_norm',
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        supports_out=False,
+        supports_cow_input_no_materialize_forward=False,
+        supports_cow_input_no_materialize_backward=False,
+        sample_inputs_func=sample_inputs__weight_norm,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes'),
+            DecorateInfo(unittest.expectedFailure, 'TestDTensorOps', 'test_dtensor_op_db'),
+            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapvjp_has_batch_rule'),
+            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapjvpvjp'),
+            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_jvpvjp'),
+            DecorateInfo(unittest.expectedFailure, "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
         ),
     ),
 ]
