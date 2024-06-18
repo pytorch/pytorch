@@ -22,7 +22,7 @@ jobs:
       runner: lf.linux.2xlarge
       docker-image: pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-linter
       # NB: A shallow checkout won't work here because calculate-docker-image requires a full checkout
-      # to run git rev-parse HEAD~:.ci/docker when a new image is needed
+      # to run git rev-parse HEAD~:.ci/docker when a new image is needed.
       fetch-depth: 0
       submodules: true
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
