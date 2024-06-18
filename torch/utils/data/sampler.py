@@ -19,8 +19,8 @@ class Sampler(Generic[T_co]):
     r"""Base class for all Samplers.
 
     Every Sampler subclass has to provide an :meth:`__iter__` method, providing a
-    way to iterate over indices or lists of indices (batches) of dataset elements, and a :meth:`__len__` method
-    that returns the length of the returned iterators.
+    way to iterate over indices or lists of indices (batches) of dataset elements,
+    and may provide a :meth:`__len__` method that returns the length of the returned iterators.
 
     Args:
         data_source (Dataset): This argument is not used and will be removed in 2.2.0.
@@ -79,7 +79,7 @@ class Sampler(Generic[T_co]):
     #     Calling `len(subclass_instance)` raises:
     #       TypeError: 'NotImplementedType' object cannot be interpreted as an integer
     #
-    #   + `raise NotImplementedError()`:
+    #   + `raise NotImplementedError`:
     #     This prevents triggering some fallback behavior. E.g., the built-in
     #     `list(X)` tries to call `len(X)` first, and executes a different code
     #     path if the method is not found or `NotImplemented` is returned, while
@@ -101,6 +101,7 @@ class SequentialSampler(Sampler[int]):
     Args:
         data_source (Dataset): dataset to sample from
     """
+
     data_source: Sized
 
     def __init__(self, data_source: Sized) -> None:
@@ -115,6 +116,7 @@ class SequentialSampler(Sampler[int]):
 
 class RandomSampler(Sampler[int]):
     r"""Samples elements randomly. If without replacement, then sample from a shuffled dataset.
+
     If with replacement, then user can specify :attr:`num_samples` to draw.
 
     Args:
@@ -123,6 +125,7 @@ class RandomSampler(Sampler[int]):
         num_samples (int): number of samples to draw, default=`len(dataset)`.
         generator (Generator): Generator used in sampling.
     """
+
     data_source: Sized
     replacement: bool
 
@@ -175,6 +178,7 @@ class SubsetRandomSampler(Sampler[int]):
         indices (sequence): a sequence of indices
         generator (Generator): Generator used in sampling.
     """
+
     indices: Sequence[int]
 
     def __init__(self, indices: Sequence[int], generator=None) -> None:
@@ -207,6 +211,7 @@ class WeightedRandomSampler(Sampler[int]):
         >>> list(WeightedRandomSampler([0.9, 0.4, 0.05, 0.2, 0.3, 0.1], 5, replacement=False))
         [0, 1, 4, 3, 2]
     """
+
     weights: Tensor
     num_samples: int
     replacement: bool

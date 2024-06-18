@@ -1,4 +1,5 @@
 import functools
+import itertools
 import logging
 from typing import cast, List, Tuple
 
@@ -8,7 +9,9 @@ import torch
 from torch._inductor.select_algorithm import realize_inputs
 from torch._inductor.virtualized import V
 
-from ..utils import ceildiv as cdiv, next_power_of_2
+from .. import config as inductor_config
+from ..runtime.runtime_utils import next_power_of_2
+from ..utils import ceildiv as cdiv
 
 log = logging.getLogger(__name__)
 
@@ -35,7 +38,7 @@ def filtered_configs(
     m = max(
         next_power_of_2(
             V.graph.sizevars.size_hint(
-                m, fallback=torch._inductor.config.unbacked_symint_fallback
+                m, fallback=torch._inductor.config.unbacked_symint_fallback  # type: ignore[arg-type]
             )
         ),
         min_block_size,
@@ -43,7 +46,7 @@ def filtered_configs(
     n = max(
         next_power_of_2(
             V.graph.sizevars.size_hint(
-                n, fallback=torch._inductor.config.unbacked_symint_fallback
+                n, fallback=torch._inductor.config.unbacked_symint_fallback  # type: ignore[arg-type]
             )
         ),
         min_block_size,
@@ -51,7 +54,7 @@ def filtered_configs(
     k = max(
         next_power_of_2(
             V.graph.sizevars.size_hint(
-                k, fallback=torch._inductor.config.unbacked_symint_fallback
+                k, fallback=torch._inductor.config.unbacked_symint_fallback  # type: ignore[arg-type]
             )
         ),
         min_block_size,
@@ -64,34 +67,87 @@ def filtered_configs(
         block_k = max(min(block_k, k), min_block_size)
         # each warp computes 16x16 tile = 256
         num_warps = min(num_warps, block_m * block_n // 256)
-        if (block_m, block_n, block_k, num_stages, num_warps) not in used:
-            used.add((block_m, block_n, block_k, num_stages, num_warps))
-            yield triton_config(
-                BLOCK_M=block_m,
-                BLOCK_N=block_n,
-                BLOCK_K=block_k,
-                num_stages=num_stages,
-                num_warps=num_warps,
-            )
+        if torch.version.hip:
+            for matrix_instr_nonkdim in [0, 16]:
+                if matrix_instr_nonkdim != 0 and (
+                    block_m % matrix_instr_nonkdim != 0
+                    or block_n % matrix_instr_nonkdim != 0
+                ):
+                    #  block_m and block_n must be a multiple of matrix_instr_nonkdim
+                    continue
+                if (
+                    block_m,
+                    block_n,
+                    block_k,
+                    num_stages,
+                    num_warps,
+                    matrix_instr_nonkdim,
+                ) not in used:
+                    used.add(
+                        (
+                            block_m,
+                            block_n,
+                            block_k,
+                            num_stages,
+                            num_warps,
+                            matrix_instr_nonkdim,
+                        )
+                    )
+                    yield triton_config(
+                        BLOCK_M=block_m,
+                        BLOCK_N=block_n,
+                        BLOCK_K=block_k,
+                        num_stages=num_stages,
+                        num_warps=num_warps,
+                        matrix_instr_nonkdim=matrix_instr_nonkdim,
+                    )
+        else:
+            if (block_m, block_n, block_k, num_stages, num_warps, 0) not in used:
+                used.add((block_m, block_n, block_k, num_stages, num_warps, 0))
+                yield triton_config(
+                    BLOCK_M=block_m,
+                    BLOCK_N=block_n,
+                    BLOCK_K=block_k,
+                    num_stages=num_stages,
+                    num_warps=num_warps,
+                )
 
 
 # List of dictionaries to store the kernel configs. Configs that evaluate to true
-# will be utilised on the target platform
-mm_kernel_configs = [
-    # "BLOCK_M", "BLOCK_N", "BLOCK_K", "num_stages", "num_warps"
-    {"config": (64, 64, 32, 2, 4), "cond": True},
-    {"config": (64, 128, 32, 3, 4), "cond": True},
-    {"config": (128, 64, 32, 3, 4), "cond": True},
-    {"config": (64, 128, 32, 4, 8), "cond": True},
-    {"config": (128, 64, 32, 4, 8), "cond": True},
-    {"config": (64, 32, 32, 5, 8), "cond": True},
-    {"config": (32, 64, 32, 5, 8), "cond": True},
-    {"config": (128, 128, 32, 2, 8), "cond": True},
-    {"config": (64, 64, 64, 3, 8), "cond": True},
-    {"config": (32, 32, 128, 2, 4), "cond": torch.version.hip is None},
-    {"config": (64, 64, 16, 2, 4), "cond": True},
-    {"config": (32, 32, 16, 1, 2), "cond": True},
-]
+# will be utilised on the target platform. The configs are as follows:
+# (BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps)
+mm_kernel_configs = (
+    [
+        {"config": (32, 32, 16, 1, 2), "cond": True},
+        {"config": (32, 32, 128, 2, 4), "cond": torch.version.hip is None},
+        {"config": (32, 64, 32, 5, 8), "cond": True},
+        {"config": (64, 32, 32, 5, 8), "cond": True},
+        {"config": (64, 32, 128, 5, 4), "cond": True},
+        {"config": (64, 64, 16, 2, 4), "cond": True},
+        {"config": (64, 64, 32, 2, 4), "cond": True},
+        {"config": (64, 64, 64, 3, 8), "cond": True},
+        {"config": (64, 64, 128, 5, 4), "cond": True},
+        {"config": (64, 128, 32, 3, 4), "cond": True},
+        {"config": (64, 128, 32, 4, 8), "cond": True},
+        {"config": (64, 128, 64, 3, 4), "cond": True},
+        {"config": (64, 128, 128, 4, 4), "cond": True},
+        {"config": (128, 64, 32, 3, 4), "cond": True},
+        {"config": (128, 64, 32, 4, 8), "cond": True},
+        {"config": (128, 128, 32, 2, 8), "cond": True},
+        {"config": (128, 128, 32, 3, 4), "cond": True},
+        {"config": (128, 128, 64, 3, 4), "cond": True},
+        {"config": (128, 128, 64, 5, 8), "cond": True},
+    ]
+    if inductor_config.max_autotune_gemm_search_space != "EXHAUSTIVE"
+    else [
+        {"config": (BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps), "cond": True}
+        for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
+            [16, 32, 64, 128, 256], repeat=3
+        )
+        for num_stages in [1, 2, 3, 4, 5]
+        for num_warps in [2, 4, 8]
+    ]
+)
 
 int8_mm_kernel_configs = [
     {"config": (64, 64, 32, 2, 4), "cond": True},
@@ -124,14 +180,14 @@ int8_platform_configs = tuple(
     if config["cond"]
 )
 
-# On ROCm convert num_stages to 1 as pipelining provides no benefit
+# On ROCm convert num_stages to 0 to enable software pipelining
 if torch.version.hip:
     mm_platform_configs = tuple(
-        (config[0], config[1], config[2], 1, config[4])
+        (config[0], config[1], config[2], 0, config[4])
         for config in mm_platform_configs
     )
     int8_platform_configs = tuple(
-        (config[0], config[1], config[2], 1, config[4])
+        (config[0], config[1], config[2], 0, config[4])
         for config in mm_platform_configs
     )
 
@@ -159,7 +215,7 @@ def acc_type(dtype):
     return f"tl.{dtype}".replace("torch.", "")
 
 
-def mm_options(config, sym_k, layout, b_prologue_cast_type=None):
+def mm_options(config, sym_m, sym_n, sym_k, layout, b_prologue_cast_type=None):
     """
     Common options to matmul triton templates.
     """
@@ -168,10 +224,14 @@ def mm_options(config, sym_k, layout, b_prologue_cast_type=None):
         sympy.gcd(sym_k, config.kwargs["BLOCK_K"])
         == config.kwargs["BLOCK_K"]
     )
+    allow_tf32 = torch.backends.cuda.matmul.allow_tf32 and (
+        not inductor_config.force_same_precision
+        or ((sym_m % 16) == 0 and (sym_n % 16) == 0 and (sym_k % 8) == 0)
+    )
     return dict(
         GROUP_M=8,
         EVEN_K=even_k_symbolic,
-        ALLOW_TF32=torch.backends.cuda.matmul.allow_tf32,
+        ALLOW_TF32=allow_tf32,
         ACC_TYPE=acc_type(layout.dtype),
         B_PROLOGUE_CAST_TYPE=b_prologue_cast_type,
         num_stages=config.num_stages,
@@ -214,9 +274,9 @@ def mm_args(mat1, mat2, *others, layout=None, out_dtype=None, use_4x2_dim=False)
 def addmm_epilogue(dtype, alpha, beta):
     def epilogue(acc, bias):
         if alpha != 1:
-            acc = V.ops.mul(acc, V.ops.constant(alpha, dtype))  # type: ignore[attr-defined]
+            acc = V.ops.mul(acc, V.ops.constant(alpha, dtype))
         if beta != 1:
-            bias = V.ops.mul(bias, V.ops.constant(beta, dtype))  # type: ignore[attr-defined]
-        return V.ops.add(acc, bias)  # type: ignore[attr-defined]
+            bias = V.ops.mul(bias, V.ops.constant(beta, dtype))
+        return V.ops.add(acc, bias)
 
     return epilogue

@@ -125,9 +125,8 @@ class Embedding(torch.nn.Module):
         return _hide_packed_params_repr(self, EmbeddingPackedParams)
 
     def extra_repr(self):
-        extra_repr_str = 'num_embeddings={}, embedding_dim={}, dtype={}, qscheme={}'.format(
-            self.num_embeddings, self.embedding_dim, self._packed_params.dtype, self.weight().qscheme()
-        )
+        extra_repr_str = (f'num_embeddings={self.num_embeddings}, embedding_dim={self.embedding_dim}, '
+                          f'dtype={self._packed_params.dtype}, qscheme={self.weight().qscheme()}')
 
         return extra_repr_str
 
@@ -138,7 +137,7 @@ class Embedding(torch.nn.Module):
         return self._packed_params._weight()
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         r"""Create a quantized embedding module from a float module
 
         Args:
@@ -242,7 +241,7 @@ class EmbeddingBag(Embedding):
         return 'QuantizedEmbeddingBag'
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         r"""Create a quantized embedding_bag module from a float module
 
         Args:

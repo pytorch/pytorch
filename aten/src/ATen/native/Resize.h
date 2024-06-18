@@ -38,6 +38,7 @@ TORCH_API bool resize_output_check_symint(const Tensor& output, SymIntArrayRef s
 
 TORCH_API void resize_bytes_cpu(StorageImpl* storage, size_t size_bytes);
 TORCH_API void resize_bytes_meta(StorageImpl* storage, c10::SymInt size_bytes);
+TORCH_API void resize_bytes_nocuda(const Storage& storage, c10::SymInt size_bytes);
 
 static inline void maybe_resize_storage_cpu(TensorImpl* self, size_t new_size_bytes) {
   // It does not make sense to try to resize a storage
@@ -75,7 +76,7 @@ template <>
 inline c10::SymInt maybe_convert_symint(c10::SymInt x) { return x; }
 
 template <>
-inline int64_t maybe_convert_symint(c10::SymInt x) { return x.expect_int(); }
+inline int64_t maybe_convert_symint(c10::SymInt x) { return x.guard_int(__FILE__, __LINE__); }
 
 template <typename T>
 static inline void checkInBoundsForStorage(

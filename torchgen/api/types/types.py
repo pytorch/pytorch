@@ -34,7 +34,7 @@ from .types_base import (
 
 TENSOR_LIST_LIKE_CTYPES = [
     "at::TensorList",
-    "const c10::List<c10::optional<at::Tensor>> &",
+    "const c10::List<::std::optional<at::Tensor>> &",
     "const at::ITensorListRef &",
 ]
 
@@ -47,7 +47,9 @@ complexFloatT = BaseCppType("c10", "complex<float>")
 complexDoubleT = BaseCppType("c10", "complex<double>")
 bfloat16T = BaseCppType("at", "BFloat16")
 float8_e5m2T = BaseCppType("at", "Float8_e5m2")
+float8_e5m2fnuzT = BaseCppType("at", "Float8_e5m2fnuz")
 float8_e4m3fnT = BaseCppType("at", "Float8_e4m3fn")
+float8_e4m3fnuzT = BaseCppType("at", "Float8_e4m3fnuz")
 stringT = BaseCppType("c10", "string_view")
 generatorT = BaseCppType("at", "Generator")
 scalarTypeT = BaseCppType("at", "ScalarType")
@@ -96,7 +98,9 @@ ScalarTypeToCppMapping: Dict[ScalarType, BaseCppType] = {
     ScalarType.ComplexDouble: complexDoubleT,
     ScalarType.Bool: boolT,
     ScalarType.Float8_e5m2: float8_e5m2T,
+    ScalarType.Float8_e5m2fnuz: float8_e5m2fnuzT,
     ScalarType.Float8_e4m3fn: float8_e4m3fnT,
+    ScalarType.Float8_e4m3fnuz: float8_e4m3fnuzT,
 }
 
 BaseTypeToCppMapping: Dict[BaseTy, BaseCppType] = {
@@ -129,10 +133,10 @@ class OptionalCType(CType):
 
     def cpp_type(self, *, strip_ref: bool = False) -> str:
         # Do not pass `strip_ref` recursively.
-        return f"c10::optional<{self.elem.cpp_type()}>"
+        return f"::std::optional<{self.elem.cpp_type()}>"
 
     def cpp_type_registration_declarations(self) -> str:
-        return f"c10::optional<{self.elem.cpp_type_registration_declarations()}>"
+        return f"::std::optional<{self.elem.cpp_type_registration_declarations()}>"
 
     def remove_const_ref(self) -> "CType":
         return OptionalCType(self.elem.remove_const_ref())

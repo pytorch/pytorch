@@ -95,6 +95,11 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return getPyObj().attr("is_bool")().is(py::handle(Py_True));
   }
 
+  bool is_nested_int() const override {
+    py::gil_scoped_acquire acquire;
+    return getPyObj().attr("is_nested_int")().is(py::handle(Py_True));
+  }
+
   bool has_hint() override {
     py::gil_scoped_acquire acquire;
     return getPyObj().attr("has_hint")().is(py::handle(Py_True));
@@ -125,12 +130,17 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return getPyObj().attr("expect_size")(file, line).cast<bool>();
   }
 
+  bool guard_size_oblivious(const char* file, int64_t line) override {
+    py::gil_scoped_acquire acquire;
+    return getPyObj().attr("guard_size_oblivious")(file, line).cast<bool>();
+  }
+
   int64_t int_() override {
     py::gil_scoped_acquire acquire;
     return getPyObj().attr("int_")().cast<int64_t>();
   }
 
-  c10::optional<int64_t> maybe_as_int() override {
+  std::optional<int64_t> maybe_as_int() override {
     py::gil_scoped_acquire acquire;
     const auto& r = getPyObj().attr("maybe_as_int")();
     if (r.is_none()) {
@@ -268,8 +278,8 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return dispatch_common_(__func__);
   }
 
-  py::handle getPyObj() {
-    return py::handle(pyobj_.get()->ptr(getPyInterpreter()));
+  py::handle getPyObj() const {
+    return py::handle(pyobj_->ptr(getPyInterpreter()));
   }
   std::shared_ptr<c10::SafePyObject> pyobj_ = nullptr;
 };

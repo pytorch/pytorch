@@ -25,6 +25,8 @@ struct TORCH_API Object {
   Object() = default;
   Object(const Object&) = default;
   Object& operator=(const Object&) = default;
+  Object(Object&&) noexcept = default;
+  Object& operator=(Object&&) noexcept = default;
   Object(ObjectPtr _ivalue) : _ivalue_(std::move(_ivalue)) {}
   Object(std::shared_ptr<CompilationUnit> cu, const c10::ClassTypePtr& type);
   Object(
@@ -44,7 +46,7 @@ struct TORCH_API Object {
   struct Property {
     std::string name;
     Method getter_func;
-    c10::optional<Method> setter_func;
+    std::optional<Method> setter_func;
   };
 
   void setattr(const std::string& name, c10::IValue v) {
@@ -127,7 +129,7 @@ struct TORCH_API Object {
   const Property get_property(const std::string& name) const {
     for (const auto& prop : type()->properties()) {
       if (prop.name == name) {
-        c10::optional<Method> setter = c10::nullopt;
+        std::optional<Method> setter = c10::nullopt;
         if (prop.setter) {
           setter = Method(_ivalue(), prop.setter);
         }
@@ -140,7 +142,7 @@ struct TORCH_API Object {
 
   const std::vector<Property> get_properties() const {
     return c10::fmap(type()->properties(), [&](ClassType::Property prop) {
-      c10::optional<Method> setter = c10::nullopt;
+      std::optional<Method> setter = c10::nullopt;
       if (prop.setter) {
         setter = Method(_ivalue(), prop.setter);
       }
@@ -151,7 +153,7 @@ struct TORCH_API Object {
     });
   }
 
-  c10::optional<Method> find_method(const std::string& basename) const;
+  std::optional<Method> find_method(const std::string& basename) const;
 
   /// Run a method from this module.
   ///

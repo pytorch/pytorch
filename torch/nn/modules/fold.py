@@ -7,8 +7,7 @@ from ..common_types import _size_any_t
 __all__ = ['Fold', 'Unfold']
 
 class Fold(Module):
-    r"""Combines an array of sliding local blocks into a large containing
-    tensor.
+    r"""Combines an array of sliding local blocks into a large containing tensor.
 
     Consider a batched :attr:`input` tensor containing sliding local blocks,
     e.g., patches of images, of shape :math:`(N, C \times  \prod(\text{kernel\_size}), L)`,
@@ -42,7 +41,7 @@ class Fold(Module):
       sides for :attr:`padding` number of points for each dimension before
       reshaping.
 
-    * :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
+    * :attr:`dilation` controls the spacing between the kernel points; also known as the \u00e0 trous algorithm.
       It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
 
     Args:
@@ -118,6 +117,7 @@ class Fold(Module):
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
 
     """
+
     __constants__ = ['output_size', 'kernel_size', 'dilation', 'padding',
                      'stride']
     output_size: _size_any_t
@@ -186,7 +186,7 @@ class Unfold(Module):
       sides for :attr:`padding` number of points for each dimension before
       reshaping.
 
-    * :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
+    * :attr:`dilation` controls the spacing between the kernel points; also known as the \u00e0 trous algorithm.
       It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
 
     Args:
@@ -274,6 +274,7 @@ class Unfold(Module):
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
 
     """
+
     __constants__ = ['kernel_size', 'dilation', 'padding', 'stride']
     kernel_size: _size_any_t
     dilation: _size_any_t

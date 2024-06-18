@@ -110,6 +110,8 @@
 #include <c10/util/Flags.h>
 #include <c10/util/Float8_e4m3fn.h>
 #include <c10/util/Float8_e5m2.h>
+#include <c10/util/Float8_e4m3fnuz.h>
+#include <c10/util/Float8_e5m2fnuz.h>
 #include <c10/util/FunctionRef.h>
 #include <c10/util/Half.h>
 #include <c10/util/IdWrapper.h>
@@ -133,7 +135,6 @@
 #include <c10/util/bits.h>
 #include <c10/util/complex.h>
 #include <c10/util/floating_point_utils.h>
-#include <c10/util/in_place.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
 #include <c10/util/llvmMathExtras.h>
@@ -147,7 +148,6 @@
 #include <c10/util/string_utils.h>
 #include <c10/util/string_view.h>
 #include <c10/util/typeid.h>
-#include <c10/util/variant.h>
 
 #include <ATen/StorageUtils.h>
 #include <ATen/core/ATen_fwd.h>

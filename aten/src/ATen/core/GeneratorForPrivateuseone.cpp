@@ -5,8 +5,8 @@ namespace at {
 
 static std::mutex _generator_mutex_lock;
 
-c10::optional<GeneratorFuncType>& GetGeneratorPrivate() {
-  static c10::optional<GeneratorFuncType> generator_privateuse1 = c10::nullopt;
+std::optional<GeneratorFuncType>& GetGeneratorPrivate() {
+  static std::optional<GeneratorFuncType> generator_privateuse1 = c10::nullopt;
   return generator_privateuse1;
 }
 
@@ -26,6 +26,7 @@ at::Generator GetGeneratorForPrivateuse1(c10::DeviceIndex device_index) {
       "Please register a generator to the PrivateUse1 dispatch key, \
       using the REGISTER_GENERATOR_PRIVATEUSE1 macro.");
 
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   return GetGeneratorPrivate().value()(device_index);
 }
 

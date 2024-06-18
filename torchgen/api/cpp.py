@@ -254,6 +254,10 @@ def returntype_type(t: Type, *, mutable: bool, symint: bool = False) -> CType:
         elem = returntype_type(t.elem, mutable=False)
         assert t.size is None, f"fixed size list returns not supported: {t}"
         return VectorCType(elem)
+    elif isinstance(t, OptionalType):
+        elem = returntype_type(t.elem, mutable=mutable)
+        if str(t.elem) == "Tensor":
+            return OptionalCType(elem)
 
     raise AssertionError(f"unrecognized return type {t}")
 
@@ -308,7 +312,7 @@ def return_names(f: NativeFunction, *, fallback_name: str = "result") -> Sequenc
 JIT_TO_CPP_DEFAULT = {
     "False": "false",
     "True": "true",
-    "None": "c10::nullopt",  # UGH this one is type directed
+    "None": "::std::nullopt",  # UGH this one is type directed
     "Mean": "at::Reduction::Mean",
     "[]": "{}",
     "contiguous_format": "MemoryFormat::Contiguous",
@@ -343,7 +347,7 @@ def default_expr(d: str, t: Type, *, symint: bool) -> str:
 
     if isinstance(t, OptionalType):
         if d == "None":
-            return "c10::nullopt"
+            return "::std::nullopt"
 
         return default_expr(d, t.elem, symint=symint)
 

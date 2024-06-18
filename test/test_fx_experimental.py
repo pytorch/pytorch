@@ -1564,7 +1564,7 @@ class TestNormalizeOperators(JitTestCase):
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_normalize_operator_exhaustive(self, device, dtype, op):
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
-        fx_fail = {"cat", "stack", "hstack", "vstack", "dstack", "linalg.multi_dot", "_upsample_bilinear2d_aa"}
+        fx_fail = {"cat", "stack", "hstack", "vstack", "dstack", "linalg.multi_dot", "_upsample_bilinear2d_aa", "_chunk_cat"}
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
         if isinstance(op.op, torch._ops.OpOverload):
             self.skipTest("normalize operator doesn't work on torch.ops")

@@ -178,7 +178,7 @@ Rule 1: Implicit Batching
 -------------------------
 **Tensor operations (e.g. `input + bias`) are implicitly batched over the union of the first-class dimensions in their inputs.**
 
-If `input` has dimensions `batch, channel` and `bias` has dimension `channel`, the output will have the union of those dimensions (`batch, channel`), and the result will computed as if there was a loop over all the first-class dimensions.[^3]
+If `input` has dimensions `batch, channel` and `bias` has dimension `channel`, the output will have the union of those dimensions (`batch, channel`), and the result will be computed as if there was a loop over all the first-class dimensions.[^3]
 
 ```py
 input_positional = torch.rand(128, 32)
@@ -193,7 +193,7 @@ print(result.dims)
 > (batch, channel)
 ```
 
-It is helpful think of operators on tensors with first-class dimensions by analogy to code with explicit loops over dimensions, with the first-class dimensions of the inputs acting as implicit `for` loops, and the values in the tensor being scalars within the body of the loop:
+It is helpful to think of operators on tensors with first-class dimensions by analogy to code with explicit loops over dimensions, with the first-class dimensions of the inputs acting as implicit `for` loops, and the values in the tensor being scalars within the body of the loop:
 
 ```py
 # mental model: loop-level analogy

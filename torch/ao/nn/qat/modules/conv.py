@@ -44,7 +44,7 @@ class _ConvNd(nn.modules.conv._ConvNd):
         return self._conv_forward(input, self.weight_fake_quant(self.weight), self.bias)
 
     @staticmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         r"""Create a qat module from a float module
 
             Args:
@@ -150,8 +150,8 @@ class Conv1d(_ConvNd, nn.Conv1d):
             dtype=dtype)
 
     @classmethod
-    def from_float(cls, mod):
-        return super().from_float(cls, mod)
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
+        return super().from_float(cls, mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
 
 class Conv2d(_ConvNd, nn.Conv2d):
     r"""
@@ -208,8 +208,8 @@ class Conv2d(_ConvNd, nn.Conv2d):
         return self._conv_forward(input, self.weight_fake_quant(self.weight), self.bias)
 
     @classmethod
-    def from_float(cls, mod):
-        return super().from_float(cls, mod)
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
+        return super().from_float(cls, mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
 
 class Conv3d(_ConvNd, nn.Conv3d):
     r"""
@@ -266,5 +266,5 @@ class Conv3d(_ConvNd, nn.Conv3d):
         return self._conv_forward(input, self.weight_fake_quant(self.weight), self.bias)
 
     @classmethod
-    def from_float(cls, mod):
-        return super().from_float(cls, mod)
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
+        return super().from_float(cls, mod, use_precomputed_fake_quant=use_precomputed_fake_quant)

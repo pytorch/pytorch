@@ -75,5 +75,7 @@ C10_ALWAYS_INLINE std::pair<int64_t, int64_t> _check_nested_layer_norm_inputs(
   return std::make_pair(M, N);
 }
 
+Tensor reshape_nested(const Tensor& self, IntArrayRef proposed_shape);
+
 } // namespace native
 } // namespace at

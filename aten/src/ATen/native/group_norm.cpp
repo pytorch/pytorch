@@ -23,9 +23,7 @@
 #include <tuple>
 #include <vector>
 
-namespace at {
-
-namespace native {
+namespace at::native {
 
 template <typename T>
 void check_group_norm_inputs(
@@ -63,8 +61,8 @@ void check_group_norm_inputs(
 
 std::tuple<Tensor, Tensor, Tensor> native_group_norm(
     const Tensor& X,
-    const c10::optional<Tensor>& gamma_opt /* optional */,
-    const c10::optional<Tensor>& beta_opt /* optional */,
+    const std::optional<Tensor>& gamma_opt /* optional */,
+    const std::optional<Tensor>& beta_opt /* optional */,
     int64_t N,
     int64_t C,
     int64_t HxW,
@@ -109,7 +107,7 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
     const Tensor& X,
     const Tensor& mean,
     const Tensor& rstd,
-    const c10::optional<Tensor>& gamma_opt,
+    const std::optional<Tensor>& gamma_opt,
     int64_t N,
     int64_t C,
     int64_t HxW,
@@ -119,9 +117,6 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
   c10::MaybeOwned<Tensor> gamma_maybe_owned =
       at::borrow_from_optional_tensor(gamma_opt);
   const Tensor& gamma = *gamma_maybe_owned;
-  TORCH_CHECK(
-      X.suggest_memory_format() == dY.suggest_memory_format(),
-      "Expected memory formats of X and dY are same.");
   TORCH_CHECK(
       X.scalar_type() == dY.scalar_type(),
       "Expected scalar types of X and dY are same.");
@@ -182,8 +177,8 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
 Tensor group_norm(
     const Tensor& input,
     int64_t num_groups,
-    const c10::optional<Tensor>& weight_opt /* optional */,
-    const c10::optional<Tensor>& bias_opt /* optional */,
+    const std::optional<Tensor>& weight_opt /* optional */,
+    const std::optional<Tensor>& bias_opt /* optional */,
     double eps,
     bool /* cudnn_enabled, deprecated */) {
   // See [Note: hacky wrapper removal for optional tensor]
@@ -218,8 +213,8 @@ DEFINE_DISPATCH(GroupNormBackwardKernel);
 // Ported from pytorch/xla repo
 std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
     const Tensor& input,
-    const c10::optional<Tensor>& weight_opt,
-    const c10::optional<Tensor>& bias_opt,
+    const std::optional<Tensor>& weight_opt,
+    const std::optional<Tensor>& bias_opt,
     int64_t N,
     int64_t C,
     int64_t HxW,
@@ -260,5 +255,4 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
   at::Tensor rstd = std::get<2>(outputs).to(c10::TensorOptions().dtype(input.scalar_type())).view({N, group});
   return std::make_tuple(out, mean, rstd);
 }
-} // namespace native
-} // namespace at
+} // namespace at::native

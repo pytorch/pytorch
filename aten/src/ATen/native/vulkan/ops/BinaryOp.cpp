@@ -15,7 +15,7 @@ using namespace api::utils;
 Tensor binary_op_scalar(
     const Tensor& self_arg,
     const Scalar& other,
-    const c10::optional<Scalar>& alpha_arg,
+    const std::optional<Scalar>& alpha_arg,
     const api::ShaderInfo& shader_descriptor) {
   api::Context* const context = api::context();
 
@@ -25,7 +25,7 @@ Tensor binary_op_scalar(
   vTensor v_output{
       context,
       v_self.sizes(),
-      self_arg.scalar_type(),
+      v_self.dtype(),
   };
 
   const float other_val = alpha_arg ? other.to<float>() * alpha_arg->to<float>()
@@ -66,10 +66,43 @@ Tensor binary_op_scalar(
   return convert(v_output);
 }
 
+Tensor binary_op_preprocess_other_arg(const Tensor& other_arg) {
+  // Similar to binary_op_scalar where tensors is mapped to float, we
+  // also map known integer types (but not quant types) tensor to float.
+
+  // Such conversion can only to be done before moving to vulkan, since vulkan
+  // doesn't yet support integer types.
+  Tensor other = other_arg;
+  if (!other.is_vulkan()) {
+    switch (other.scalar_type()) {
+      case at::kByte:
+      case at::kChar:
+      case at::kShort:
+      case at::kInt:
+      case at::kLong:
+      case at::kDouble:
+        other = other.to(kFloat);
+        break;
+      case at::kFloat:
+        // No op for expected type.
+        break;
+      default:
+        TORCH_CHECK(
+            false,
+            "binary_op_tensor, doesn't support type %s",
+            other.scalar_type());
+        break;
+    }
+    other = other.vulkan();
+  }
+
+  return other;
+}
+
 Tensor& binary_op_scalar_(
     Tensor& self_arg,
     const Scalar& other,
-    const c10::optional<Scalar>& alpha_arg,
+    const std::optional<Scalar>& alpha_arg,
     const api::ShaderInfo& shader_descriptor) {
   TORCH_CHECK(
       self_arg.is_vulkan(),
@@ -119,7 +152,7 @@ Tensor& binary_op_scalar_(
 Tensor binary_op_tensor(
     const Tensor& self_arg,
     const Tensor& other_arg,
-    const c10::optional<Scalar>& alpha_arg,
+    const std::optional<Scalar>& alpha_arg,
     const api::ShaderInfo& shader_descriptor) {
   utils::is_broadcastable(self_arg, other_arg);
   api::Context* const context = api::context();
@@ -127,13 +160,14 @@ Tensor binary_op_tensor(
   const Tensor self = self_arg.is_vulkan() ? self_arg : self_arg.vulkan();
   const vTensor& v_self = convert(self);
 
-  const Tensor other = other_arg.is_vulkan() ? other_arg : other_arg.vulkan();
+  Tensor other = binary_op_preprocess_other_arg(other_arg);
+
   const vTensor& v_other = convert(other);
 
   vTensor v_output{
       context,
       utils::broadcast_size(self_arg, other_arg),
-      self_arg.scalar_type(),
+      v_self.dtype(),
   };
 
   const double alpha = alpha_arg ? alpha_arg->to<double>() : 1.0;
@@ -210,7 +244,7 @@ Tensor quantized_binary_op_tensor(
       utils::broadcast_size(self_arg, other_arg),
       scale,
       zero_point,
-      c10::kQUInt8,
+      api::kQUInt8,
   };
 
   const double scale1 = v_self.get_scale();
@@ -279,7 +313,7 @@ Tensor quantized_binary_op_tensor(
 Tensor& binary_op_tensor_(
     Tensor& self_arg,
     const Tensor& other_arg,
-    const c10::optional<Scalar>& alpha_arg,
+    const std::optional<Scalar>& alpha_arg,
     const api::ShaderInfo& shader_descriptor) {
   TORCH_CHECK(
       get_dim<Dim4D::Batch>(self_arg) >= get_dim<Dim4D::Batch>(other_arg) &&
@@ -301,7 +335,8 @@ Tensor& binary_op_tensor_(
 
   vTensor& v_self = convert(self_arg);
 
-  const Tensor other = other_arg.is_vulkan() ? other_arg : other_arg.vulkan();
+  Tensor other = binary_op_preprocess_other_arg(other_arg);
+
   const vTensor& v_other = convert(other);
 
   const double alpha = alpha_arg ? alpha_arg->to<double>() : 1.0;
@@ -354,12 +389,12 @@ Tensor add_scalar(
     const Scalar& other,
     const Scalar& alpha) {
   return binary_op_scalar(
-      self_arg, other, c10::optional<Scalar>(alpha), VK_KERNEL(add_scalar));
+      self_arg, other, std::optional<Scalar>(alpha), VK_KERNEL(add_scalar));
 }
 
 Tensor& add_scalar_(Tensor& self, const Scalar& other, const Scalar& alpha) {
   return binary_op_scalar_(
-      self, other, c10::optional<Scalar>(alpha), VK_KERNEL(add_scalar_));
+      self, other, std::optional<Scalar>(alpha), VK_KERNEL(add_scalar_inplace));
 }
 
 Tensor quantized_add(
@@ -403,7 +438,7 @@ Tensor add_tensor(
     const Tensor& other_arg,
     const Scalar& alpha) {
   return binary_op_tensor(
-      self_arg, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(add));
+      self_arg, other_arg, std::optional<Scalar>(alpha), VK_KERNEL(add));
 }
 
 Tensor& add_tensor_(
@@ -411,7 +446,7 @@ Tensor& add_tensor_(
     const Tensor& other_arg,
     const Scalar& alpha) {
   return binary_op_tensor_(
-      self, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(add_));
+      self, other_arg, std::optional<Scalar>(alpha), VK_KERNEL(add_inplace));
 }
 
 Tensor sub_scalar(
@@ -421,7 +456,7 @@ Tensor sub_scalar(
   return binary_op_scalar(
       self_arg,
       other,
-      c10::optional<Scalar>(-1 * alpha.to<float>()),
+      std::optional<Scalar>(-1 * alpha.to<float>()),
       VK_KERNEL(add_scalar));
 }
 
@@ -429,8 +464,8 @@ Tensor& sub_scalar_(Tensor& self, const Scalar& other, const Scalar& alpha) {
   return binary_op_scalar_(
       self,
       other,
-      c10::optional<Scalar>(-1 * alpha.to<float>()),
-      VK_KERNEL(add_scalar_));
+      std::optional<Scalar>(-1 * alpha.to<float>()),
+      VK_KERNEL(add_scalar_inplace));
 }
 
 Tensor sub_tensor(
@@ -438,7 +473,7 @@ Tensor sub_tensor(
     const Tensor& other_arg,
     const Scalar& alpha) {
   return binary_op_tensor(
-      self_arg, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(sub));
+      self_arg, other_arg, std::optional<Scalar>(alpha), VK_KERNEL(sub));
 }
 
 Tensor& sub_tensor_(
@@ -446,34 +481,34 @@ Tensor& sub_tensor_(
     const Tensor& other_arg,
     const Scalar& alpha) {
   return binary_op_tensor_(
-      self, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(sub_));
+      self, other_arg, std::optional<Scalar>(alpha), VK_KERNEL(sub_inplace));
 }
 
 Tensor mul_scalar(const Tensor& self_arg, const Scalar& other) {
   return binary_op_scalar(
-      self_arg, other, c10::optional<Scalar>(), VK_KERNEL(mul_scalar));
+      self_arg, other, std::optional<Scalar>(), VK_KERNEL(mul_scalar));
 }
 
 Tensor& mul_scalar_(Tensor& self, const Scalar& other) {
   return binary_op_scalar_(
-      self, other, c10::optional<Scalar>(), VK_KERNEL(mul_scalar_));
+      self, other, std::optional<Scalar>(), VK_KERNEL(mul_scalar_inplace));
 }
 
 Tensor mul_tensor(const Tensor& self_arg, const Tensor& other_arg) {
   return binary_op_tensor(
-      self_arg, other_arg, c10::optional<Scalar>(), VK_KERNEL(mul));
+      self_arg, other_arg, std::optional<Scalar>(), VK_KERNEL(mul));
 }
 
 Tensor& mul_tensor_(Tensor& self, const Tensor& other_arg) {
   return binary_op_tensor_(
-      self, other_arg, c10::optional<Scalar>(), VK_KERNEL(mul_));
+      self, other_arg, std::optional<Scalar>(), VK_KERNEL(mul_inplace));
 }
 
 Tensor div_scalar(const Tensor& self_arg, const Scalar& other) {
   return binary_op_scalar(
       self_arg,
       1.0 / other.to<float>(),
-      c10::optional<Scalar>(),
+      std::optional<Scalar>(),
       VK_KERNEL(mul_scalar));
 }
 
@@ -481,42 +516,45 @@ Tensor& div_scalar_(Tensor& self, const Scalar& other) {
   return binary_op_scalar_(
       self,
       1.0 / other.to<float>(),
-      c10::optional<Scalar>(),
-      VK_KERNEL(mul_scalar_));
+      std::optional<Scalar>(),
+      VK_KERNEL(mul_scalar_inplace));
 }
 
 Tensor div_tensor(const Tensor& self_arg, const Tensor& other_arg) {
   return binary_op_tensor(
-      self_arg, other_arg, c10::optional<Scalar>(), VK_KERNEL(div));
+      self_arg, other_arg, std::optional<Scalar>(), VK_KERNEL(div));
 }
 
 Tensor& div_tensor_(Tensor& self, const Tensor& other_arg) {
   return binary_op_tensor_(
-      self, other_arg, c10::optional<Scalar>(), VK_KERNEL(div_));
+      self, other_arg, std::optional<Scalar>(), VK_KERNEL(div_inplace));
 }
 
 Tensor pow(const Tensor& self, const Tensor& other) {
-  return binary_op_tensor(self, other, c10::optional<Scalar>(), VK_KERNEL(pow));
+  return binary_op_tensor(self, other, std::optional<Scalar>(), VK_KERNEL(pow));
 }
 
 Tensor& pow_(Tensor& self, const Tensor& other) {
   return binary_op_tensor_(
-      self, other, c10::optional<Scalar>(), VK_KERNEL(pow_));
+      self, other, std::optional<Scalar>(), VK_KERNEL(pow_inplace));
 }
 
 Tensor pow_tensor_scalar(const Tensor& self, const Scalar& other) {
   return binary_op_scalar(
-      self, other, c10::optional<Scalar>(), VK_KERNEL(pow_tensor_scalar));
+      self, other, std::optional<Scalar>(), VK_KERNEL(pow_tensor_scalar));
 }
 
 Tensor& pow_tensor_scalar_(Tensor& self, const Scalar& other) {
   return binary_op_scalar_(
-      self, other, c10::optional<Scalar>(), VK_KERNEL(pow_tensor_scalar_));
+      self,
+      other,
+      std::optional<Scalar>(),
+      VK_KERNEL(pow_tensor_scalar_inplace));
 }
 
 Tensor pow_scalar_tensor(const Scalar& self, const Tensor& other) {
   return binary_op_scalar(
-      other, self, c10::optional<Scalar>(), VK_KERNEL(pow_scalar_tensor));
+      other, self, std::optional<Scalar>(), VK_KERNEL(pow_scalar_tensor));
 }
 
 Tensor floor_divide_scalar(const Tensor& self, const Scalar& other) {
@@ -525,7 +563,7 @@ Tensor floor_divide_scalar(const Tensor& self, const Scalar& other) {
   return binary_op_scalar(
       self,
       1.0 / other.to<float>(),
-      c10::optional<Scalar>(),
+      std::optional<Scalar>(),
       VK_KERNEL(floor_mul_scalar));
 }
 
@@ -535,8 +573,21 @@ Tensor& floor_divide_scalar_(Tensor& self, const Scalar& other) {
   return binary_op_scalar_(
       self,
       1.0 / other.to<float>(),
-      c10::optional<Scalar>(),
-      VK_KERNEL(floor_mul_scalar_));
+      std::optional<Scalar>(),
+      VK_KERNEL(floor_mul_scalar_inplace));
+}
+
+Tensor floor_divide_tensor(const Tensor& self, const Tensor& other) {
+  return binary_op_tensor(
+      self, other, std::optional<Scalar>(), VK_KERNEL(floor_divide));
+}
+
+Tensor& floor_divide_tensor_(Tensor& self, const Tensor& other_arg) {
+  return binary_op_tensor_(
+      self,
+      other_arg,
+      std::optional<Scalar>(),
+      VK_KERNEL(floor_divide_inplace));
 }
 
 #ifdef USE_VULKAN_API
@@ -572,6 +623,12 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("aten::floor_divide_.Scalar"),
       TORCH_FN(floor_divide_scalar_));
+  m.impl(
+      TORCH_SELECTIVE_NAME("aten::floor_divide"),
+      TORCH_FN(floor_divide_tensor));
+  m.impl(
+      TORCH_SELECTIVE_NAME("aten::floor_divide_.Tensor"),
+      TORCH_FN(floor_divide_tensor_));
 }
 
 #endif /* USE_VULKAN_API */

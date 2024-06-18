@@ -4,8 +4,7 @@
 #include <memory>
 #include <string>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 // forward declaration of Node from function.h
 struct Node;
@@ -69,5 +68,4 @@ struct TORCH_API AnomalyMetadata {
   std::shared_ptr<Node> parent_;
 };
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

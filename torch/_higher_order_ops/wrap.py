@@ -30,6 +30,24 @@ class Wrap(HigherOrderOperator):
 
 wrap = Wrap()
 
+class WrapWithSetGradEnabled(HigherOrderOperator):
+    def __init__(self):
+        super().__init__("wrap_with_set_grad_enabled")
+
+    def __call__(self, enable_grad, wrapped_func, *args, **kwargs):
+        # Dynamo already traces the body of HigherOrderOp beforehand when it
+        # so no need to trace into it.
+        import torch._dynamo  # noqa: F401
+        from torch._dynamo import disable
+
+        @disable
+        def wrapper():
+            with torch.set_grad_enabled(enable_grad):
+                return wrapped_func(*args, **kwargs)
+        return wrapper()
+
+wrap_with_set_grad_enabled = WrapWithSetGradEnabled()
+
 class WrapActivationCheckpoint(HigherOrderOperator):
     """
     This operator is used to wrap torch.utils.checkpoint. This avoids
@@ -78,13 +96,13 @@ class TagActivationCheckpoint(HigherOrderOperator):
     3. Rely on the partitioners to actually duplicate the nodes.
     This sits well in the torch.compile stack, because by the time graph
     reaches partitioner, inductor has already run its functionalization of rng
-    ops. Therefore, the duplication of nodes, by design, respects the rng states
-    in the forward and recomputed forward in backward.
+    ops (by setting fixed seed for each random op, see `replace_random_passes`).
+    Therefore, the duplication of nodes, by design, respects the rng states in
+    the forward and recomputed forward in backward.
     """
 
     def __init__(self):
         super().__init__("tag_activation_checkpoint")
-        self.context_fn = None
 
     @staticmethod
     def divide_kwargs(kwargs):
@@ -129,7 +147,7 @@ class TagActivationCheckpoint(HigherOrderOperator):
     def __call__(self, gmod, *args, **kwargs):
         import torch.fx.traceback as fx_traceback
         from torch.fx import Interpreter
-        if self.context_fn is not None:
+        if "_checkpoint_context_fn" in gmod.meta:
             assert torch._dynamo.config._experimental_support_context_fn_in_torch_utils_checkpoint, \
                 "Passing context_fn to torch.utils.checkpoint is currently not supported under torch.compile"
             log.warning("""
@@ -140,9 +158,15 @@ Please make sure the checkpointed region does not contain in-place ops (e.g. tor
             # And we ensure that AOT Autograd traces through the non reentrant
             # version of checkpointing.
             kwargs["use_reentrant"] = False
-            kwargs["context_fn"] = self.context_fn
+            # preserve_rng_state is set to False because we want to prevent AOTAutograd from tracing through
+            # `torch.random.fork_rng` op (which is not supported yet under CUDA).
+            # This doesn't mean that we don't preserve RNG state. Instead, we will always preserve RNG state
+            # regardless of this flag (by doing RNG functionalization via `replace_random_passes` in Inductor
+            # instead of in AOTAutograd).
+            kwargs["preserve_rng_state"] = False
+            kwargs["context_fn"] = gmod.meta["_checkpoint_context_fn"]
             # We first tag all nodes as "recompute" in this graph, and then we undo the "recompute" tag
-            # for specific nodes in _CachedTorchDispatchMode.
+            # for specific nodes in _CachingTorchDispatchMode in torch/utils/checkpoint.py.
             gmod = self.tag_nodes(gmod)
             # Using interpreter allows preservation of metadata through torch.compile stack.
             with fx_traceback.preserve_node_meta():

@@ -8,7 +8,6 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/irange.h>
-#include <caffe2/core/scope_guard.h>
 #include <caffe2/core/timer.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -286,7 +285,7 @@ void PrepareGraphForStaticModule(
   ForceNonEmptyOutputs(*graph);
 }
 
-std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
+std::pair<std::shared_ptr<Graph>, std::optional<Module>> PrepareForStaticModule(
     const torch::jit::Module& m,
     bool is_frozen,
     const StaticModuleOptions& opts,
@@ -316,7 +315,7 @@ std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
   return std::make_pair(graph, module);
 }
 
-std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
+std::pair<std::shared_ptr<Graph>, std::optional<Module>> PrepareForStaticModule(
     std::shared_ptr<torch::jit::Graph> graph,
     const StaticModuleOptions& opts,
     std::vector<IValue> sample_inputs) {
@@ -544,7 +543,7 @@ StaticModule::StaticModule(
           opts) {}
 
 StaticModule::StaticModule(
-    std::pair<std::shared_ptr<torch::jit::Graph>, c10::optional<Module>>
+    std::pair<std::shared_ptr<torch::jit::Graph>, std::optional<Module>>
         graph_and_module,
     const StaticModuleOptions& opts)
     : opts_(opts),

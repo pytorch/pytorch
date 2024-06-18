@@ -15,7 +15,6 @@ import numpy as np
 import onnx
 import onnx_test_common
 import parameterized
-import torch
 import torchvision
 from model_defs import (
     lstm_flattening_result,
@@ -37,6 +36,8 @@ from pytorch_test_common import (
     skipShapeChecking,
     skipTraceTest,
 )
+
+import torch
 
 from torch import Tensor
 from torch.nn.utils import rnn as rnn_utils
@@ -483,7 +484,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def forward(self, x_in):
                 x_out = {}
                 x_out["test_key_out"] = torch.add(
-                    x_in[list(x_in.keys())[0]], list(x_in.keys())[0]
+                    x_in[list(x_in.keys())[0]], list(x_in.keys())[0]  # noqa: RUF015
                 )
                 return x_out
 
@@ -1454,6 +1455,33 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(20, 16, 50, 44, 31)
         self.run_test(model, x)
 
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_maxpool_dynamic(self):
+        class test(torch.nn.Module):
+            def __init__(self, in_channels, out_channels):
+                super().__init__()
+                norm_layer = functools.partial(torch.nn.BatchNorm2d, eps=0.0009)
+                self.avgpool = torch.nn.MaxPool2d((2, 2), stride=2, ceil_mode=True)
+                self.conv = torch.nn.Conv2d(
+                    in_channels, out_channels, kernel_size=1, stride=1, bias=False
+                )
+                self.norm = norm_layer(out_channels)
+
+            def forward(self, x):
+                return self.norm(self.conv(self.avgpool(x)))
+
+        model = test(8, 16)
+        inputs = torch.randn(2, 8, 64, 64)
+        self.run_test(
+            model,
+            inputs,
+            input_names=["input_0"],
+            dynamic_axes={"input_0": {3: "x", 2: "y"}, "output_0": {3: "x", 2: "y"}},
+            output_names=["output_0"],
+        )
+
+    # TODO: Enable maxpool-ceil family after ONNX 1.15.1+ is bumped
+    @skipIfUnsupportedMaxOpsetVersion(9)
     def test_maxpool_1d_ceil_corner(self):
         model = torch.nn.MaxPool1d(
             kernel_size=1, dilation=1, stride=2, ceil_mode=True, return_indices=False
@@ -1461,6 +1489,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(1, 3, 32)
         self.run_test(model, x)
 
+    @skipIfUnsupportedMaxOpsetVersion(9)
     def test_maxpool_2d_ceil_corner(self):
         model = torch.nn.MaxPool2d(
             kernel_size=[1, 1],
@@ -1472,6 +1501,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(1, 3, 32, 32)
         self.run_test(model, x)
 
+    @skipIfUnsupportedMaxOpsetVersion(9)
     def test_maxpool_3d_ceil_corner(self):
         model = torch.nn.MaxPool3d(
             kernel_size=[7, 8, 4],
@@ -1484,6 +1514,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(1, 3, 51, 52, 45)
         self.run_test(model, x)
 
+    @skipIfUnsupportedMaxOpsetVersion(9)
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_maxpool_1d_ceil_corner_with_indices(self):
         model = torch.nn.MaxPool1d(
@@ -1492,6 +1523,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(1, 3, 32)
         self.run_test(model, x)
 
+    @skipIfUnsupportedMaxOpsetVersion(9)
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_maxpool_2d_ceil_corner_with_indices(self):
         model = torch.nn.MaxPool2d(
@@ -1504,6 +1536,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(1, 3, 32, 32)
         self.run_test(model, x)
 
+    @skipIfUnsupportedMaxOpsetVersion(9)
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_maxpool_3d_ceil_corner_with_indices(self):
         model = torch.nn.MaxPool3d(
@@ -1572,7 +1605,9 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     # TODO: ceil_mode is not included in the test, because of
     # https://github.com/microsoft/onnxruntime/issues/16203
     # The ORT and PyTorch has different calculation for ceil_mode (the last value).
-    @skipIfUnsupportedMinOpsetVersion(19)
+    # the issue requires fix in onnx(21) (https://github.com/onnx/onnx/issues/5711)
+    # a fix in ORT is planned. After the fixes in place, we can add ceil_mode to the test.
+    @skipIfUnsupportedMinOpsetVersion(21)
     def test_avgpool_3d_ceil(self):
         model = torch.nn.AvgPool3d(3, 2, ceil_mode=True)
         x = torch.randn(20, 16, 50, 44, 31)
@@ -2550,6 +2585,9 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         update = torch.randn(4, 1, 3, 2)
         self.run_test(IndexPutModel2(), (x, update))
 
+    @unittest.skip(
+        "regression in 1.18: https://github.com/microsoft/onnxruntime/issues/20855"
+    )
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_loop(self):
         @torch.jit.script
@@ -3687,6 +3725,20 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         input = torch.arange(24, dtype=torch.int64).reshape(3, 4, 2)
         self.run_test(BitshiftModel(), input)
 
+    @skipIfUnsupportedMinOpsetVersion(18)
+    def test_bitwise_and(self):
+        class BitwiseAndModel(torch.nn.Module):
+            def forward(self, input, other):
+                return (
+                    input & 20,
+                    torch.bitwise_and(input, other),
+                    other & torch.tensor([1, 2], dtype=torch.int32),
+                )
+
+        input = torch.randint(0, 255, (3, 4, 2), dtype=torch.uint8)
+        other = torch.randint(-128, 127, (3, 4, 2), dtype=torch.int8)
+        self.run_test(BitwiseAndModel(), (input, other))
+
     # uint8 not implemented in ORT for Mul used in
     # exporting bitshift for opset_version < 10
     @skipIfUnsupportedMinOpsetVersion(11)
@@ -3734,13 +3786,18 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_index_copy(self):
         class IndexCopyModel(torch.nn.Module):
+            def __init__(self, dim):
+                super().__init__()
+                self.dim = dim
+
             def forward(self, input):
                 index = torch.tensor([2, 0])
                 source = torch.ones(3, 2, 5)
-                return input.index_copy(1, index, source)
+                return input.index_copy(self.dim, index, source)
 
         x = torch.randn(3, 4, 5, requires_grad=True)
-        self.run_test(IndexCopyModel(), x)
+        for dim in (1, -2):
+            self.run_test(IndexCopyModel(dim), x)
 
     def test_select(self):
         class Select(torch.nn.Module):
@@ -3940,9 +3997,13 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         # As layer_norm works on the last D dimension, please keep
         # this test case at least three dimension to prevent the
         # situation of axis=2 mapping to the same axis as axis=-2
-        model = torch.nn.LayerNorm([10, 10, 10])
-        x = torch.randn(20, 5, 10, 10, 10)
-        self.run_test(model, x)
+        for elementwise_affine in (True, False):
+            for bias in (True, False):
+                model = torch.nn.LayerNorm(
+                    [10, 10, 10], elementwise_affine=elementwise_affine, bias=bias
+                )
+                x = torch.randn(20, 5, 10, 10, 10)
+                self.run_test(model, x)
 
     def test_batchnorm1d(self):
         x = torch.randn(10, 10)
@@ -5352,8 +5413,9 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def forward(self, x):
                 return x.repeat_interleave(2)
 
-        x = torch.tensor([1, 2, 3])
-        self.run_test(FlattenModel(), (x,))
+        for shape in ([3], [3, 4], [2, 3, 4]):
+            x = torch.randn(shape)
+            self.run_test(FlattenModel(), (x,))
 
         class DimsModel(torch.nn.Module):
             def forward(self, x):
@@ -5856,7 +5918,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 split_list: List[Tensor] = input.split(split_sizes)
 
                 for ob in split_list:
-                    out.append(ob)
+                    out.append(ob)  # noqa: PERF402
                 return torch.cat(out, dim=0)
 
         x = torch.randn(6, 4, 3)
@@ -7102,6 +7164,59 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(CatModel(), (fp16, fp32))
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    def test_scalar_type_does_not_trigger_upcast_type_promotion(self):
+        class DoNotUpcastModel(torch.nn.Module):
+            def forward(self, x):
+                scale = x.size()[-1] ** -0.5
+                # 'scale' is exported as onnx float32 rank 0 tensor.
+                # The following 'Mul' should NOT be promoted to float32.
+                return x * scale
+
+        x = torch.ones(2, 3, dtype=torch.float16)
+        self.run_test(DoNotUpcastModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_scalar_type_promotion_onnx_where_two_prim_const(self):
+        class TwoPrimConstCastWhereModel(torch.nn.Module):
+            def forward(self, c):
+                return torch.where(c, 0, 1.0)
+
+        c = torch.ones(8, dtype=torch.bool)
+        self.run_test(TwoPrimConstCastWhereModel(), (c))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_scalar_type_promotion_onnx_where_one_prim_const(self):
+        class OnePrimConstCastWhereModel(torch.nn.Module):
+            def forward(self, c, x):
+                return torch.where(c, x, 1.0)
+
+        c = torch.ones(8, dtype=torch.bool)
+        x = torch.ones(8, dtype=torch.float16)
+        self.run_test(OnePrimConstCastWhereModel(), (c, x))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_scalar_type_promotion_onnx_where_one_tensor_const(self):
+        class OneTensorConstCastWhereModel(torch.nn.Module):
+            def forward(self, c, x):
+                return torch.where(c, x, torch.ones(size=(), dtype=torch.float64))
+
+        c = torch.ones(8, dtype=torch.bool)
+        x = torch.ones(8, dtype=torch.float16)
+        self.run_test(OneTensorConstCastWhereModel(), (c, x))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_scalar_type_upcast_type_promotion_onnx_where_no_const(self):
+        class OnnxWhereUpcastModel(torch.nn.Module):
+            def forward(self, c, x, y):
+                return torch.where(c, x, y)
+
+        c = torch.ones(8, dtype=torch.bool)
+        x = torch.ones(8, dtype=torch.float16)
+        y = torch.ones(8, dtype=torch.float32)
+
+        self.run_test(OnnxWhereUpcastModel(), (c, x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_full_like(self):
         class FullLikeModel(torch.nn.Module):
             def forward(self, x):
@@ -7561,6 +7676,14 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(model, (embedding_matrix, x, offset, w))
 
     @skipIfUnsupportedMinOpsetVersion(11)
+    @unittest.skip(
+        "This test is broken with ONNXRuntime(17): "
+        "when running with onnxruntime 1.17.0 this test fails with the following error:"
+        "FAIL : Non-zero status code returned while running If node. "
+        "Name:'/If' Status Message: if.cc:253 Compute "
+        "If nodes condition input must have exactly one element"
+        "https://github.com/pytorch/pytorch/issues/119442"
+    )
     def test_embedding_bag_2d_per_sample_weights(self):
         class EmbeddingModel(torch.nn.Module):
             def forward(self, embedding_matrix, input, weights):
@@ -12577,7 +12700,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class M(torch.nn.Module):
             def forward(self, t: Tensor) -> Tuple[Tensor, Tensor]:
                 if float(t) < 0:
-                    raise Exception("Negative input")
+                    raise Exception("Negative input")  # noqa: TRY002
                 else:
                     return torch.zeros(5), torch.zeros(5)
 
@@ -13290,6 +13413,113 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(Module(False), x, rtol=1e-3, atol=1e-6)
         self.run_test(Module(True), x, rtol=1e-3, atol=1e-6)
 
+    class AffineGridModule(torch.nn.Module):
+        def __init__(self, align_corners) -> None:
+            super().__init__()
+            self.align_corners = align_corners
+
+        def forward(self, theta, size):
+            return torch.nn.functional.affine_grid(theta, size, self.align_corners)
+
+    @skipIfUnsupportedMinOpsetVersion(20)
+    @skipScriptTest()
+    @common_utils.parametrize(
+        "align_corners",
+        (True, False),
+    )
+    @common_utils.parametrize(
+        "theta_params",
+        (
+            (
+                10,
+                np.array([0.3, -0.5]),
+                np.array([1.5, 0.5]),
+            ),
+            (
+                60,
+                np.array([-0.5, -0.5]),
+                np.array([3.0, 5.5]),
+            ),
+        ),
+    )
+    @common_utils.parametrize(
+        "size",
+        ([1, 1, 3, 2], [2, 10, 2, 3]),
+    )
+    def test_affine_grid_2d(self, align_corners, theta_params, size):
+        angle, translation, scale = theta_params
+        theta = np.array([], dtype=np.float32)
+        for _ in range(size[0]):
+            angle_radian = (angle / 180.0) * np.pi
+            theta = np.append(
+                theta,
+                [
+                    np.cos(angle_radian) * scale[0],
+                    -np.sin(angle_radian),
+                    translation[0],
+                    np.sin(angle_radian),
+                    np.cos(angle_radian) * scale[1],
+                    translation[1],
+                ],
+            )
+        theta = theta.reshape(size[0], 2, 3)
+        theta = torch.Tensor(theta)
+        self.run_test(TestONNXRuntime.AffineGridModule(align_corners), (theta, size))
+
+    @skipIfUnsupportedMinOpsetVersion(20)
+    @skipScriptTest()
+    @common_utils.parametrize(
+        "align_corners",
+        (True, False),
+    )
+    @common_utils.parametrize(
+        "theta_params",
+        (
+            (
+                [10, 20],
+                np.array([0.3, -0.5, 1.8]),
+                np.array([1.5, 2.0, 0.5]),
+            ),
+            (
+                [60, -30],
+                np.array([-0.5, -0.5, 0.3]),
+                np.array([0.3, 3.0, 5.5]),
+            ),
+        ),
+    )
+    @common_utils.parametrize(
+        "size",
+        ([1, 1, 3, 2, 2], [2, 10, 2, 2, 3]),
+    )
+    def test_affine_grid_3d(self, align_corners, theta_params, size):
+        angle, translation, scale = theta_params
+        theta = np.array([], dtype=np.float32)
+        for _ in range(size[0]):
+            angle_radian_x = (angle[0] / 180.0) * np.pi
+            angle_radian_y = (angle[1] / 180.0) * np.pi
+            rot_matrix_x = np.array(
+                [
+                    [1, 0, 0],
+                    [0, np.cos(angle_radian_x), -np.sin(angle_radian_x)],
+                    [0, np.sin(angle_radian_x), np.cos(angle_radian_x)],
+                ]
+            )
+            rot_matrix_y = np.array(
+                [
+                    [np.cos(angle_radian_y), 0, np.sin(angle_radian_y)],
+                    [0, 1, 0],
+                    [-np.sin(angle_radian_y), 0, np.cos(angle_radian_y)],
+                ]
+            )
+            rot_matrix = np.matmul(rot_matrix_x, rot_matrix_y)
+            rot_matrix = rot_matrix * scale.reshape(3, 1)
+            rot_matrix = np.append(rot_matrix, np.reshape(translation, (3, 1)), axis=1)
+            theta = np.append(theta, rot_matrix.flatten())
+
+        theta = theta.reshape(size[0], 3, 4)
+        theta = torch.Tensor(theta)
+        self.run_test(TestONNXRuntime.AffineGridModule(align_corners), (theta, size))
+
     @skipIfUnsupportedMinOpsetVersion(16)
     @common_utils.parametrize(
         "mode",
@@ -13305,7 +13535,15 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         name_fn=lambda align_corners: str(align_corners),
     )
     def test_grid_sample(self, mode, padding_mode, align_corners):
-        n, c, h_in, w_in, h_out, w_out = 1, 1, 3, 2, 2, 4
+        n, c, d_in, h_in, w_in, d_out, h_out, w_out = 1, 1, 2, 3, 2, 3, 2, 4
+
+        atol_rtol = {}
+        if (mode, padding_mode) == ("bicubic", "border"):
+            if align_corners:
+                atol_rtol.update({"atol": 0.3, "rtol": 0.4})
+            else:
+                atol_rtol.update({"atol": 0.02, "rtol": 0.02})
+        input, grid = torch.randn(n, c, h_in, w_in), torch.randn(n, h_out, w_out, 2)
 
         class GridSampleModule(torch.nn.Module):
             def __init__(self, mode, padding_mode, align_corners) -> None:
@@ -13321,13 +13559,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                     input, grid, self.mode, self.padding_mode, self.align_corners
                 )
 
-        atol_rtol = {}
-        if (mode, padding_mode) == ("bicubic", "border"):
-            if align_corners:
-                atol_rtol.update({"atol": 0.3, "rtol": 0.4})
-            else:
-                atol_rtol.update({"atol": 0.02, "rtol": 0.02})
-        input, grid = torch.randn(n, c, h_in, w_in), torch.randn(n, h_out, w_out, 2)
         self.run_test(
             GridSampleModule(mode, padding_mode, align_corners),
             (input, grid),
@@ -13335,8 +13566,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
 
         # ONNX Opset 16 GridSample with 5D volumetric input is not supported.
-        d_in = 2
-        d_out = 3
         volumetric_input_tensor = torch.randn(n, c, d_in, h_in, w_in)
         volumetric_grid_tensor = torch.randn(n, d_out, h_out, w_out, 3)
         for mode, padding_mode, align_corners in itertools.product(
@@ -13354,9 +13583,16 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 False,
             ),
         ):
-            with self.assertRaises(
-                torch.onnx.errors.OnnxExporterError,
-            ):
+            if self.opset_version < 20:
+                with self.assertRaises(
+                    torch.onnx.errors.OnnxExporterError,
+                ):
+                    self.run_test(
+                        GridSampleModule(mode, padding_mode, align_corners),
+                        (volumetric_input_tensor, volumetric_grid_tensor),
+                        **atol_rtol,
+                    )
+            else:
                 self.run_test(
                     GridSampleModule(mode, padding_mode, align_corners),
                     (volumetric_input_tensor, volumetric_grid_tensor),
@@ -13551,7 +13787,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 )
                 self.bano1 = torch_geometric_nn.BatchNorm(512)
                 self.relu = torch.nn.ReLU()
-                self.dense1 = torch.nn.Seq(Lin(512, 1))
+                self.dense1 = torch.nn.Seq(Lin(512, 1))  # noqa: F821
                 self.sigmoid = torch.nn.Sigmoid()
 
             def forward(self, coords0, coords1, edge_from, edge_to):

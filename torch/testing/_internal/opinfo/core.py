@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import collections
 import collections.abc
 import math
@@ -7,9 +9,7 @@ from dataclasses import asdict, dataclass
 from enum import Enum
 from functools import partial
 from itertools import product
-from typing import Any, Callable, Iterable, List, Optional, Tuple
-
-from torchgen.utils import dataclass_repr
+from typing import Any, Callable, Iterable, List, Optional, Tuple, Union
 
 import torch
 from torch.testing import make_tensor
@@ -23,14 +23,18 @@ from torch.testing._internal.common_dtype import (
     floating_and_complex_types,
     floating_and_complex_types_and,
     floating_types,
+    get_all_dtypes,
 )
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
     noncontiguous_like,
     TEST_WITH_ROCM,
     torch_to_numpy_dtype_dict,
+    TrackedInputIter,
 )
 from torch.testing._internal.opinfo import utils
+
+from torchgen.utils import dataclass_repr
 
 # Reasonable testing sizes for dimensions
 L = 20
@@ -207,7 +211,6 @@ cannot specify additional metadata in keyword arguments"""
             f"input={formatter(self.input)}",
             f"args={formatter(self.args)}",
             f"kwargs={formatter(self.kwargs)}",
-            f"output_process_fn_grad={self.output_process_fn_grad}",
             f"broadcasts_input={self.broadcasts_input}",
             f"name={repr(self.name)}",
         ]
@@ -227,8 +230,15 @@ cannot specify additional metadata in keyword arguments"""
             # by Tensor[TensorShape]
             # Eg. Tensor with shape (3, 4) is formatted as Tensor[3, 4]
             if isinstance(arg, torch.Tensor):
-                shape = str(tuple(arg.shape)).replace("(", "").replace(")", "")
-                return f"Tensor[{shape}]"
+                shape = str(tuple(arg.shape))
+                dtype = str(arg.dtype)
+                device = str(arg.device)
+                contiguity_suffix = ""
+                # NB: sparse CSR tensors annoyingly return is_sparse=False
+                is_sparse = arg.is_sparse or arg.layout == torch.sparse_csr
+                if not is_sparse and not arg.is_contiguous():
+                    contiguity_suffix = ", contiguous=False"
+                return f'Tensor[size={shape}, device="{device}", dtype={dtype}{contiguity_suffix}]'
             elif isinstance(arg, dict):
                 return {k: formatter(v) for k, v in arg.items()}
             elif is_iterable_of_tensors(arg):
@@ -441,7 +451,7 @@ class AliasInfo:
 #   the operator's output (when given the input, args, and kwargs) to the
 #   portion of the output to gradcheck. For example, consider an operator
 #   like torch.linalg.slogdet
-#   (https://pytorch.org/docs/master/generated/torch.linalg.slogdet.html).
+#   (https://pytorch.org/docs/main/generated/torch.linalg.slogdet.html).
 #   This operator returns a tuple of two tensors, but the first tensor
 #   cannot be backwarded through. Its "output_process_fn_grad" filters
 #   this output tuple to just the second argument, which we can call backward
@@ -764,6 +774,23 @@ class OpInfo:
     # Whether the operation has a varargs variant
     # (e.g. functions like ones, zeros, methods like view, permute)
     supports_varargs: bool = False
+
+    # Whether the forward operation avoids materializing COW tensor inputs
+    supports_cow_input_no_materialize_forward: bool = True
+
+    # Whether the backward operation avoids materializing COW tensor inputs
+    supports_cow_input_no_materialize_backward: bool = True
+
+    # Whether to skip the backward part of the COW tensor input test
+    skip_cow_input_backward: bool = False
+
+    # If `supports_cow_input_no_materialize_forward == True`, this list contains
+    # the arg indices or kwarg names of inputs that are expected to materialize
+    allow_cow_input_materialize_forward: List[Union[int, str]] = None
+
+    # If `supports_cow_input_no_materialize_backward == True`, this list contains
+    # the arg indices or kwarg names of inputs that are expected to materialize
+    allow_cow_input_materialize_backward: List[Union[int, str]] = None
 
     # wrapper function for gradcheck
     gradcheck_wrapper: Callable = lambda op, *args, **kwargs: op(*args, **kwargs)
@@ -1155,7 +1182,7 @@ class OpInfo:
             else:
                 sample.input[0] = conjugate(sample.input[0])
 
-        return tuple(conj_samples)
+        return TrackedInputIter(iter(conj_samples), "conjugate sample input")
 
     def sample_inputs(self, device, dtype, requires_grad=False, **kwargs):
         """
@@ -1174,7 +1201,7 @@ class OpInfo:
             samples_list.extend(conj_samples)
             samples = tuple(samples_list)
 
-        return samples
+        return TrackedInputIter(iter(samples), "sample input")
 
     def reference_inputs(self, device, dtype, requires_grad=False, **kwargs):
         """
@@ -1185,18 +1212,27 @@ class OpInfo:
         the sample inputs.
         """
         if self.reference_inputs_func is None:
-            return self.sample_inputs_func(self, device, dtype, requires_grad, **kwargs)
+            samples = self.sample_inputs_func(
+                self, device, dtype, requires_grad, **kwargs
+            )
+            return TrackedInputIter(iter(samples), "sample input")
 
         if kwargs.get("include_conjugated_inputs", False):
             raise NotImplementedError
 
-        return self.reference_inputs_func(self, device, dtype, requires_grad, **kwargs)
+        references = self.reference_inputs_func(
+            self, device, dtype, requires_grad, **kwargs
+        )
+        return TrackedInputIter(iter(references), "reference input")
 
     def error_inputs(self, device, **kwargs):
         """
         Returns an iterable of ErrorInputs.
         """
-        return self.error_inputs_func(self, device, **kwargs)
+        errs = self.error_inputs_func(self, device, **kwargs)
+        return TrackedInputIter(
+            iter(errs), "error input", callback=lambda e: e.sample_input
+        )
 
     def error_inputs_sparse(self, device, layout, **kwargs):
         """
@@ -1305,21 +1341,22 @@ class OpInfo:
         return result
 
     def supported_dtypes(self, device_type):
-        if device_type == "cpu":
-            return self.dtypes
+        if device_type == "privateuse1":
+            device_type = torch._C._get_privateuse1_backend_name()
+        device_type = torch.device(device_type).type
         if device_type == "cuda":
             return self.dtypesIfROCM if TEST_WITH_ROCM else self.dtypesIfCUDA
-        else:
-            return self.dtypes
+        return self.dtypes
 
     def supported_backward_dtypes(self, device_type):
         if not self.supports_autograd:
             return set()
 
+        if device_type == "privateuse1":
+            device_type = torch._C._get_privateuse1_backend_name()
+        device_type = torch.device(device_type).type
         backward_dtypes = None
-        if device_type == "cpu":
-            backward_dtypes = self.backward_dtypes
-        elif device_type == "cuda":
+        if device_type == "cuda":
             backward_dtypes = (
                 self.backward_dtypesIfROCM
                 if TEST_WITH_ROCM
@@ -1333,7 +1370,7 @@ class OpInfo:
         )
         return set(allowed_backward_dtypes).intersection(backward_dtypes)
 
-    def supports_dtype(self, dtype, device_type):
+    def supports_dtype(self, dtype, device_type) -> bool:
         return dtype in self.supported_dtypes(device_type)
 
     @property
@@ -2669,62 +2706,53 @@ def get_foreach_method_names(name):
     return op, inplace_op, ref, ref_inplace
 
 
+@dataclass
 class ForeachFuncInfo(OpInfo):
-    """Early version of a specialized OpInfo for foreach functions"""
+    """Early version of a specialized OpInfo for foreach functions
 
-    def __init__(
-        self,
-        name,
-        sample_inputs_func,
-        *,
-        dtypes=floating_and_complex_types(),
-        dtypesIfCUDA=floating_and_complex_types_and(torch.half),
-        dtypesIfROCM=None,
-        supports_alpha_param=False,
-        supports_autograd=True,
-        supports_inplace_autograd=True,
-        supports_scalar_self_arg=False,
-        supports_forward_ad=True,
-        backward_requires_result=False,
-        has_no_out_of_place=False,
-        **kwargs,
-    ):
+    The main differences from the parent class are (a) `dtypes`, `dtypesIfCUDA`, and `dtypesIfROCM`
+    are set to `get_all_dtypes(include_qint=False)`, and (b) the following arguments.
+
+    ``supports_alpha_param=True`` means that the function supports a python scalar (``numbers.Number``)
+    as the last keyword argument such as `_foreach_add`.
+    ``supports_scalar_self_arg=True`` means that the function can take a python scalar as its first argument.
+    Currently only `_foreach_pow` supports this.
+    ``backward_requires_result=True``, which could sound self-explanatory, means that the function uses
+    the forward result for its backward computation.
+    """
+
+    supports_alpha_param: bool = False
+    supports_scalar_self_arg: bool = False
+    backward_requires_result: bool = False
+
+    def __post_init__(self):
         (
             foreach_method,
             foreach_method_inplace,
             torch_ref_method,
             torch_ref_inplace,
-        ) = get_foreach_method_names(name)
-        if has_no_out_of_place:
+        ) = get_foreach_method_names(self.name)
+        if not self.supports_out:
             # note(crcrpar): `foreach_method` for `"zero"` is `None` but `None` would call
             # `_getattr_qual` in `OpInfo.__post_init__` which should fail since `_foreach_zero`
             # is not defined at the moment. Thus to skip the qualification, set a similar torch
             # function.
             assert foreach_method is None
-            foreach_method = getattr(torch.Tensor, f"{name}_")
-        super().__init__(
-            name="_foreach_" + name,
-            op=foreach_method,
-            ref=torch_ref_method,
-            method_variant=foreach_method,
-            inplace_variant=foreach_method_inplace,
-            dtypes=dtypes,
-            dtypesIfCUDA=dtypesIfCUDA,
-            dtypesIfROCM=dtypesIfROCM,
-            sample_inputs_func=sample_inputs_func,
-            supports_autograd=supports_autograd,
-            supports_forward_ad=supports_forward_ad,
-            **kwargs,
-        )
-        self.supports_scalar_self_arg = supports_scalar_self_arg
+            assert torch_ref_method is None
+            foreach_method = foreach_method_inplace
+            torch_ref_method = torch_ref_inplace
 
+        self.dtypes = _dispatch_dtypes(get_all_dtypes(include_qint=False))
+
+        self.op = foreach_method
+        self.method_variant = foreach_method
+        self.ref = torch_ref_method
+        self.inplace_variant = foreach_method_inplace
         self.ref_inplace = torch_ref_inplace
-        self.supports_alpha_param = supports_alpha_param
-        self.backward_requires_result = backward_requires_result
-        self.has_no_out_of_place = has_no_out_of_place
         self.has_no_in_place = self.inplace_variant is None
-        self.supports_inplace_autograd = supports_inplace_autograd
 
+        name = self.name
+        self.name = f"_foreach_{name}"
         if name == "norm":
             self.ref = torch.linalg.vector_norm
         elif name == "minimum":
@@ -2735,6 +2763,9 @@ class ForeachFuncInfo(OpInfo):
             # because maximum ref does not support inplace or scalar
             self.ref = torch.clamp_min
             self.ref_inplace = torch.Tensor.clamp_min_
+
+        # The following sets `dtypesIfCUDA` and `dtypesIfROCM` accordingly.
+        super().__post_init__()
 
     def sample_zero_size_inputs(self, device, dtype, requires_grad=False, **kwargs):
         if not hasattr(self.sample_inputs_func, "sample_zero_size_tensor_inputs"):

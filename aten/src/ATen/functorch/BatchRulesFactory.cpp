@@ -7,7 +7,7 @@
 #include <ATen/functorch/BatchRulesHelper.h>
 #include <c10/core/SymIntArrayRef.h>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 template <typename A, A a, typename C>
 struct NewBlahBatchRuleHelperSymInt;
@@ -107,11 +107,11 @@ static std::tuple<Tensor,optional<int64_t>> linspace_logspace_batch_rule_helper(
     const at::Tensor& start, optional<int64_t> start_bdim,
     const at::Tensor& end, optional<int64_t> end_bdim,
     int64_t steps,
-    c10::optional<double> base,
-    c10::optional<at::ScalarType> dtype,
-    c10::optional<at::Layout> layout,
-    c10::optional<at::Device> device,
-    c10::optional<bool> pin_memory)
+    std::optional<double> base,
+    std::optional<at::ScalarType> dtype,
+    std::optional<at::Layout> layout,
+    std::optional<at::Device> device,
+    std::optional<bool> pin_memory)
 {
   auto batch_size = get_bdim_size2(start, start_bdim, end, end_bdim);
   auto start_ = ensure_has_bdim(start, start_bdim.has_value(), batch_size);
@@ -145,10 +145,10 @@ static std::tuple<Tensor,optional<int64_t>> linspace_Tensor_Tensor_batch_rule(
     const at::Tensor& start, optional<int64_t> start_bdim,
     const at::Tensor& end, optional<int64_t> end_bdim,
     int64_t steps,
-    c10::optional<at::ScalarType> dtype,
-    c10::optional<at::Layout> layout,
-    c10::optional<at::Device> device,
-    c10::optional<bool> pin_memory){
+    std::optional<at::ScalarType> dtype,
+    std::optional<at::Layout> layout,
+    std::optional<at::Device> device,
+    std::optional<bool> pin_memory){
   return linspace_logspace_batch_rule_helper(start, start_bdim, end, end_bdim, steps, c10::nullopt, dtype, layout, device, pin_memory);
 }
 
@@ -156,10 +156,10 @@ static std::tuple<Tensor,optional<int64_t>> linspace_Tensor_Scalar_batch_rule(
     const at::Tensor& start, optional<int64_t> start_bdim,
     const at::Scalar& end,
     int64_t steps,
-    c10::optional<at::ScalarType> dtype,
-    c10::optional<at::Layout> layout,
-    c10::optional<at::Device> device,
-    c10::optional<bool> pin_memory){
+    std::optional<at::ScalarType> dtype,
+    std::optional<at::Layout> layout,
+    std::optional<at::Device> device,
+    std::optional<bool> pin_memory){
 
   auto end_t = at::native::wrapped_scalar_tensor(end, start.device());
   return linspace_logspace_batch_rule_helper(start, start_bdim, end_t, c10::nullopt, steps, c10::nullopt, dtype, layout, device, pin_memory);
@@ -169,10 +169,10 @@ static std::tuple<Tensor,optional<int64_t>> linspace_Scalar_Tensor_batch_rule(
     const at::Scalar& start,
     const at::Tensor& end, optional<int64_t> end_bdim,
     int64_t steps,
-    c10::optional<at::ScalarType> dtype,
-    c10::optional<at::Layout> layout,
-    c10::optional<at::Device> device,
-    c10::optional<bool> pin_memory){
+    std::optional<at::ScalarType> dtype,
+    std::optional<at::Layout> layout,
+    std::optional<at::Device> device,
+    std::optional<bool> pin_memory){
 
   auto start_t = at::native::wrapped_scalar_tensor(start, end.device());
   return linspace_logspace_batch_rule_helper(start_t, c10::nullopt, end, end_bdim, steps, c10::nullopt, dtype, layout, device, pin_memory);
@@ -183,10 +183,10 @@ static std::tuple<Tensor,optional<int64_t>> logspace_Tensor_Tensor_batch_rule(
     const at::Tensor& end, optional<int64_t> end_bdim,
     int64_t steps,
     double base,
-    c10::optional<at::ScalarType> dtype,
-    c10::optional<at::Layout> layout,
-    c10::optional<at::Device> device,
-    c10::optional<bool> pin_memory){
+    std::optional<at::ScalarType> dtype,
+    std::optional<at::Layout> layout,
+    std::optional<at::Device> device,
+    std::optional<bool> pin_memory){
   return linspace_logspace_batch_rule_helper(start, start_bdim, end, end_bdim, steps, c10::make_optional(base), dtype, layout, device, pin_memory);
 }
 
@@ -195,10 +195,10 @@ static std::tuple<Tensor,optional<int64_t>> logspace_Tensor_Scalar_batch_rule(
     const at::Scalar& end,
     int64_t steps,
     double base,
-    c10::optional<at::ScalarType> dtype,
-    c10::optional<at::Layout> layout,
-    c10::optional<at::Device> device,
-    c10::optional<bool> pin_memory){
+    std::optional<at::ScalarType> dtype,
+    std::optional<at::Layout> layout,
+    std::optional<at::Device> device,
+    std::optional<bool> pin_memory){
 
   auto end_t = at::native::wrapped_scalar_tensor(end, start.device());
   return linspace_logspace_batch_rule_helper(start, start_bdim, end_t, c10::nullopt, steps, c10::make_optional(base), dtype, layout, device, pin_memory);
@@ -209,10 +209,10 @@ static std::tuple<Tensor,optional<int64_t>> logspace_Scalar_Tensor_batch_rule(
     const at::Tensor& end, optional<int64_t> end_bdim,
     int64_t steps,
     double base,
-    c10::optional<at::ScalarType> dtype,
-    c10::optional<at::Layout> layout,
-    c10::optional<at::Device> device,
-    c10::optional<bool> pin_memory){
+    std::optional<at::ScalarType> dtype,
+    std::optional<at::Layout> layout,
+    std::optional<at::Device> device,
+    std::optional<bool> pin_memory){
 
   auto start_t = at::native::wrapped_scalar_tensor(start, end.device());
   return linspace_logspace_batch_rule_helper(start_t, c10::nullopt, end, end_bdim, steps, c10::make_optional(base), dtype, layout, device, pin_memory);
@@ -243,4 +243,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(_new_zeros_with_same_feature_meta, _new_zeros_with_same_feature_meta_batch_rule);
   // Not sure how to add the ones with irregular args to the mix cleanly (i.e. randint takes an extra int parameter)
 }
-}}
+} // namespace at::functorch

@@ -53,6 +53,11 @@
 #include <utility>
 #include <vector>
 
+C10_DEFINE_bool(
+    torch_jit_execution_plan_reuse_code_graph,
+    false,
+    "Directly reuse the preprocessed graph in the CodeImpl to reduce the memory consumption. This is aggressive memory saving, and please be cautious!");
+
 namespace torch::jit {
 
 EnableProfilingGuard::EnableProfilingGuard() {
@@ -631,7 +636,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
 
   const ExecutionPlan& getPlanFor(
       Stack& stack,
-      c10::optional<size_t> remaining_bailout_depth) override {
+      std::optional<size_t> remaining_bailout_depth) override {
     return getGraphExecutorOptimize() ? getOrCompile(stack)
                                       : getOrCompileFallback();
   }
@@ -833,7 +838,7 @@ c10::intrusive_ptr<Future> GraphExecutor::runAsync(
 
 const ExecutionPlan& GraphExecutor::getPlanFor(
     Stack& inputs,
-    c10::optional<size_t> remaining_bailout_depth) {
+    std::optional<size_t> remaining_bailout_depth) {
   return pImpl->getPlanFor(inputs, remaining_bailout_depth);
 }
 

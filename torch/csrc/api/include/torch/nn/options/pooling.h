@@ -32,7 +32,7 @@ struct AvgPoolOptions {
   /// if specified, it will be used as divisor, otherwise size of the pooling
   /// region will be used.
 
-  TORCH_ARG(c10::optional<int64_t>, divisor_override) = c10::nullopt;
+  TORCH_ARG(std::optional<int64_t>, divisor_override) = c10::nullopt;
 };
 
 /// `AvgPoolOptions` specialized for the `AvgPool1d` module.
@@ -401,7 +401,7 @@ struct MaxUnpoolFuncOptions {
   TORCH_ARG(ExpandingArray<D>, padding) = 0;
 
   /// the targeted output size
-  TORCH_ARG(c10::optional<std::vector<int64_t>>, output_size) = c10::nullopt;
+  TORCH_ARG(std::optional<std::vector<int64_t>>, output_size) = c10::nullopt;
 };
 
 /// `MaxUnpoolFuncOptions` specialized for
@@ -450,12 +450,12 @@ struct FractionalMaxPoolOptions {
   TORCH_ARG(ExpandingArray<D>, kernel_size);
 
   /// the target output size of the image
-  TORCH_ARG(c10::optional<ExpandingArray<D>>, output_size) = c10::nullopt;
+  TORCH_ARG(std::optional<ExpandingArray<D>>, output_size) = c10::nullopt;
 
   /// If one wants to have an output size as a ratio of the input size, this
   /// option can be given. This has to be a number or tuple in the range (0, 1)
   using ExpandingArrayDouble = torch::ExpandingArray<D, double>;
-  TORCH_ARG(c10::optional<ExpandingArrayDouble>, output_ratio) = c10::nullopt;
+  TORCH_ARG(std::optional<ExpandingArrayDouble>, output_ratio) = c10::nullopt;
 
   TORCH_ARG(torch::Tensor, _random_samples) = Tensor();
 };
@@ -541,6 +541,15 @@ using LPPool1dOptions = LPPoolOptions<1>;
 /// ```
 using LPPool2dOptions = LPPoolOptions<2>;
 
+/// `LPPoolOptions` specialized for the `LPPool3d` module.
+///
+/// Example:
+/// ```
+/// LPPool3d model(LPPool3dOptions(1, std::vector<int64_t>({3, 4, 5})).stride(
+/// {5, 6, 7}).ceil_mode(true));
+/// ```
+using LPPool3dOptions = LPPoolOptions<3>;
+
 namespace functional {
 /// Options for `torch::nn::functional::lp_pool1d`.
 ///
@@ -567,6 +576,20 @@ namespace functional {
 /// F::lp_pool2d(x, F::LPPool2dFuncOptions(2, {2, 3}).stride(2));
 /// ```
 using LPPool2dFuncOptions = LPPool2dOptions;
+} // namespace functional
+
+namespace functional {
+/// Options for `torch::nn::functional::lp_pool3d`.
+///
+/// See the documentation for `torch::nn::LPPool3dOptions` class to learn what
+/// arguments are supported.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::lp_pool3d(x, F::LPPool3dFuncOptions(2, {2, 3, 4}).stride(2));
+/// ```
+using LPPool3dFuncOptions = LPPool3dOptions;
 } // namespace functional
 
 } // namespace nn

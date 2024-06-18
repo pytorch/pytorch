@@ -36,8 +36,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
 
-namespace at {
-namespace meta {
+namespace at::meta {
 TORCH_META_FUNC(_softmax)
 (const Tensor& input, const int64_t dim, const bool half_to_float) {
   int64_t dim_ = maybe_wrap_dim(dim, input.dim());
@@ -145,9 +144,9 @@ TORCH_META_FUNC(_log_softmax_backward_data)
 
   set_output_raw_strided(0, grad.sizes(), {}, grad_input_options);
 }
-}
+} // namespace at::meta
 
-namespace native {
+namespace at::native {
 namespace {
 
 template <typename scalar_t, bool LogSoftMax, bool MaskedSoftMax = false>
@@ -156,7 +155,7 @@ void host_softmax(
     const Tensor& input,
     const int64_t dim,
     bool* mask = nullptr,
-    const c10::optional<int64_t> mask_type_ = {}) {
+    const std::optional<int64_t> mask_type_ = {}) {
 
   if (MaskedSoftMax) {
     TORCH_CHECK(mask_type_.has_value(), "Mask Type should be defined");
@@ -450,7 +449,7 @@ static Tensor softmax(const Tensor& input_, const int64_t dim_) {
   return result;
 }
 
-Tensor softmax(const Tensor& input_, const int64_t dim_, c10::optional<ScalarType> dtype) {
+Tensor softmax(const Tensor& input_, const int64_t dim_, std::optional<ScalarType> dtype) {
   auto result = [&]() {
     NoNamesGuard guard;
     if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float){
@@ -467,7 +466,7 @@ Tensor softmax(const Tensor& input_, const int64_t dim_, c10::optional<ScalarTyp
 Tensor& softmax_out(
     const Tensor& input_,
     const int64_t dim_,
-    c10::optional<ScalarType> dtype,
+    std::optional<ScalarType> dtype,
     Tensor& output_) {
   Tensor output_temp;
   if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half &&
@@ -502,7 +501,7 @@ Tensor& softmax_out(
 }
 
 // special_softmax, alias for softmax
-Tensor special_softmax(const Tensor& input_, const int64_t dim_, c10::optional<ScalarType> dtype) {
+Tensor special_softmax(const Tensor& input_, const int64_t dim_, std::optional<ScalarType> dtype) {
   return at::softmax(input_, dim_, dtype);
 }
 
@@ -515,7 +514,7 @@ static Tensor log_softmax(const Tensor& input_, const int64_t dim_) {
   return result;
 }
 
-Tensor log_softmax(const Tensor& input_, const int64_t dim_, c10::optional<ScalarType> dtype) {
+Tensor log_softmax(const Tensor& input_, const int64_t dim_, std::optional<ScalarType> dtype) {
   auto result = [&]() {
     NoNamesGuard guard;
     if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float){
@@ -532,7 +531,7 @@ Tensor log_softmax(const Tensor& input_, const int64_t dim_, c10::optional<Scala
 Tensor& log_softmax_out(
     const Tensor& input_,
     const int64_t dim_,
-    c10::optional<ScalarType> dtype,
+    std::optional<ScalarType> dtype,
     Tensor& output_) {
   Tensor output_temp;
   if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half &&
@@ -566,7 +565,7 @@ Tensor& log_softmax_out(
   return output_;
 }
 
-Tensor special_log_softmax(const Tensor& input, const int64_t dim, c10::optional<ScalarType> dtype) {
+Tensor special_log_softmax(const Tensor& input, const int64_t dim, std::optional<ScalarType> dtype) {
   return at::log_softmax(input, dim, dtype);
 }
 
@@ -588,7 +587,7 @@ Tensor log_softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) 
   return at::log_softmax(self, dimname_to_position(self, dim), dtype);
 }
 
-Tensor masked_softmax_cpu(const Tensor& input_, const Tensor& mask_, const c10::optional<int64_t> dim_, const c10::optional<int64_t> mask_type_) {
+Tensor masked_softmax_cpu(const Tensor& input_, const Tensor& mask_, const std::optional<int64_t> dim_, const std::optional<int64_t> mask_type_) {
 
   auto mask = mask_.contiguous();
   auto mask_type = mask_type_; // Mask type might get transformed below
@@ -638,8 +637,8 @@ Tensor masked_softmax_cpu(const Tensor& input_, const Tensor& mask_, const c10::
     input = input.view(1);
   }
 
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      at::ScalarType::BFloat16, input.scalar_type(), "masked_softmax", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::BFloat16, at::ScalarType::Half, input.scalar_type(), "masked_softmax", [&] {
         host_softmax<
             scalar_t,
             false /* LogSoftMax */,
@@ -653,7 +652,7 @@ Tensor masked_softmax_backward_cpu(
     const Tensor& grad_,
     const Tensor& output_,
     const Tensor& mask_,
-    const c10::optional<int64_t> dim_) {
+    const std::optional<int64_t> dim_) {
   TORCH_CHECK(
       grad_.sizes() == mask_.sizes(), "Mask shape should match grad shape");
   TORCH_CHECK(
@@ -671,8 +670,8 @@ Tensor masked_softmax_backward_cpu(
   mask = mask.dim() == 0 ? mask.view(1) : mask;
 
   Tensor grad_input = at::empty_like(grad, grad.options());
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      at::ScalarType::BFloat16, grad.scalar_type(), "masked_softmax_backward", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::BFloat16, at::ScalarType::Half, grad.scalar_type(), "masked_softmax_backward", [&] {
         host_softmax_backward<
             scalar_t,
             false /* LogSoftMax */,
@@ -680,5 +679,4 @@ Tensor masked_softmax_backward_cpu(
       });
   return grad_input;
 }
-}
-}
+} // namespace at::native

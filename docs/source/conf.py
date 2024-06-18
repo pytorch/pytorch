@@ -91,9 +91,6 @@ templates_path = ["_templates"]
 coverage_ignore_functions = [
     # torch
     "typename",
-    # torch.autograd
-    "register_py_tensor_class_for_device",
-    "variable",
     # torch.cuda
     "check_error",
     "cudart",
@@ -312,7 +309,6 @@ coverage_ignore_functions = [
     "reference_representation_rewrite",
     # torch.ao.quantization.pt2e.utils
     "fold_bn_weights_into_conv_node",
-    "get_aten_graph_module",
     "remove_tensor_overload_for_qdq_ops",
     # torch.ao.quantization.qconfig
     "get_default_qat_qconfig",
@@ -358,7 +354,6 @@ coverage_ignore_functions = [
     # torch.ao.quantization.quantizer.embedding_quantizer
     "get_embedding_operators_config",
     # torch.ao.quantization.quantizer.xnnpack_quantizer_utils
-    "convert_scalars_to_attrs",
     "get_bias_qspec",
     "get_input_act_qspec",
     "get_output_act_qspec",
@@ -391,20 +386,6 @@ coverage_ignore_functions = [
     "weight_dtype",
     "weight_is_quantized",
     "weight_is_statically_quantized",
-    # torch.autograd.forward_ad
-    "enter_dual_level",
-    "exit_dual_level",
-    # torch.autograd.function
-    "once_differentiable",
-    "traceable",
-    # torch.autograd.gradcheck
-    "get_analytical_jacobian",
-    "get_numerical_jacobian",
-    "get_numerical_jacobian_wrt_specific_input",
-    # torch.autograd.graph
-    "increment_version",
-    # torch.autograd.profiler
-    "parse_nvprof_trace",
     # torch.backends.cudnn.rnn
     "get_cudnn_mode",
     "init_dropout_state",
@@ -506,17 +487,14 @@ coverage_ignore_functions = [
     "all_gather",
     "all_gather_coalesced",
     "all_gather_into_tensor",
-    "all_gather_multigpu",
     "all_gather_object",
     "all_reduce",
     "all_reduce_coalesced",
-    "all_reduce_multigpu",
     "all_to_all",
     "all_to_all_single",
     "barrier",
     "batch_isend_irecv",
     "broadcast",
-    "broadcast_multigpu",
     "broadcast_object_list",
     "destroy_process_group",
     "gather",
@@ -544,9 +522,7 @@ coverage_ignore_functions = [
     "new_subgroups_by_enumeration",
     "recv",
     "reduce",
-    "reduce_multigpu",
     "reduce_scatter",
-    "reduce_scatter_multigpu",
     "reduce_scatter_tensor",
     "scatter",
     "scatter_object_list",
@@ -603,6 +579,7 @@ coverage_ignore_functions = [
     "barrier",
     "get_all",
     "synchronize",
+    "store_timeout",
     # torch.distributed.fsdp.wrap
     "always_wrap_policy",
     "enable_wrap",
@@ -629,45 +606,6 @@ coverage_ignore_functions = [
     # torch.distributed.optim.utils
     "as_functional_optim",
     "register_functional_optim",
-    # torch.distributed.pipeline.sync.checkpoint
-    "checkpoint",
-    "enable_checkpointing",
-    "enable_recomputing",
-    "is_checkpointing",
-    "is_recomputing",
-    "restore_rng_states",
-    "save_rng_states",
-    # torch.distributed.pipeline.sync.dependency
-    "fork",
-    "join",
-    # torch.distributed.pipeline.sync.microbatch
-    "check",
-    "gather",
-    "scatter",
-    # torch.distributed.pipeline.sync.phony
-    "get_phony",
-    # torch.distributed.pipeline.sync.skip.layout
-    "inspect_skip_layout",
-    # torch.distributed.pipeline.sync.skip.tracker
-    "current_skip_tracker",
-    "use_skip_tracker",
-    # torch.distributed.pipeline.sync.stream
-    "as_cuda",
-    "current_stream",
-    "default_stream",
-    "get_device",
-    "is_cuda",
-    "new_stream",
-    "record_stream",
-    "use_device",
-    "use_stream",
-    "wait_stream",
-    # torch.distributed.pipeline.sync.utils
-    "partition_model",
-    # torch.distributed.pipeline.sync.worker
-    "create_workers",
-    "spawn_workers",
-    "worker",
     # torch.distributed.rendezvous
     "register_rendezvous_handler",
     "rendezvous",
@@ -691,6 +629,8 @@ coverage_ignore_functions = [
     "parallelize_module",
     # torch.distributed.tensor.parallel.input_reshard
     "input_reshard",
+    # torch.distributed.tensor.parallel.loss
+    "loss_parallel",
     # torch.distributed.tensor.parallel.style
     "make_sharded_output_tensor",
     # torch.distributions.utils
@@ -902,7 +842,7 @@ coverage_ignore_functions = [
     "extract_val",
     "fake_signature",
     "fetch_sym_proxy",
-    "fetch_tensor_proxy",
+    "fetch_object_proxy",
     "get_innermost_proxy_mode",
     "get_isolated_graphmodule",
     "get_proxy_slot",
@@ -926,22 +866,31 @@ coverage_ignore_functions = [
     "record_shapeenv_event",
     "replay_shape_env_events",
     "shape_env_check_state_equal",
+    # torch.fx.experimental.sym_node
+    "ceil_impl",
+    "floor_ceil_helper",
+    "floor_impl",
+    "method_to_operator",
+    "sympy_is_channels_last_contiguous_2d",
+    "sympy_is_channels_last_contiguous_3d",
+    "sympy_is_channels_last_strides_2d",
+    "sympy_is_channels_last_strides_3d",
+    "sympy_is_channels_last_strides_generic",
+    "sympy_is_contiguous",
+    "sympy_is_contiguous_generic",
+    "to_node",
+    "wrap_node",
+    "sym_sqrt",
+    "sym_ite",
     # torch.fx.experimental.symbolic_shapes
     "bind_symbols",
     "cast_symbool_to_symint_guardless",
-    "ceil_impl",
-    "constrain_range",
-    "constrain_unify",
     "create_contiguous",
-    "definitely_false",
-    "definitely_true",
     "error",
     "eval_guards",
     "eval_is_non_overlapping_and_dense",
     "expect_true",
     "find_symbol_binding_fx_nodes",
-    "floor_ceil_helper",
-    "floor_impl",
     "free_symbols",
     "free_unbacked_symbols",
     "fx_placeholder_targets",
@@ -952,32 +901,15 @@ coverage_ignore_functions = [
     "guard_scalar",
     "has_hint",
     "has_symbolic_sizes_strides",
-    "hint_int",
     "is_channels_last_contiguous_2d",
     "is_channels_last_contiguous_3d",
     "is_channels_last_strides_2d",
     "is_channels_last_strides_3d",
-    "is_concrete_bool",
-    "is_concrete_int",
     "is_contiguous",
     "is_non_overlapping_and_dense_indicator",
+    "is_nested_int",
     "is_symbol_binding_fx_node",
     "is_symbolic",
-    "method_to_operator",
-    "parallel_and",
-    "parallel_or",
-    "sym_sqrt",
-    "sym_ite",
-    "sympy_is_channels_last_contiguous_2d",
-    "sympy_is_channels_last_contiguous_3d",
-    "sympy_is_channels_last_strides_2d",
-    "sympy_is_channels_last_strides_3d",
-    "sympy_is_channels_last_strides_generic",
-    "sympy_is_contiguous",
-    "sympy_is_contiguous_generic",
-    "tensor_has_hints",
-    "to_node",
-    "wrap_node",
     # torch.fx.experimental.unification.core
     "reify",
     # torch.fx.experimental.unification.match
@@ -1202,6 +1134,8 @@ coverage_ignore_functions = [
     "rebuild_cuda_tensor",
     "rebuild_event",
     "rebuild_nested_tensor",
+    "rebuild_sparse_coo_tensor",
+    "rebuild_sparse_compressed_tensor",
     "rebuild_storage_empty",
     "rebuild_storage_fd",
     "rebuild_storage_filename",
@@ -1927,7 +1861,6 @@ coverage_ignore_functions = [
     "bundle_randn",
     # torch.utils.checkpoint
     "check_backward_validity",
-    "context_fn_gen",
     "detach_variable",
     "get_device_states",
     "noop_context_fn",
@@ -2530,43 +2463,9 @@ coverage_ignore_classes = [
     "QuantWrapper",
     # torch.ao.quantization.utils
     "MatchAllNode",
-    # torch.autograd.forward_ad
-    "UnpackedDualTensor",
-    # torch.autograd.function
-    "BackwardCFunction",
-    "Function",
-    "FunctionCtx",
-    "FunctionMeta",
-    "InplaceFunction",
-    "NestedIOFunction",
-    # torch.autograd.grad_mode
-    "inference_mode",
-    "set_grad_enabled",
-    "set_multithreading_enabled",
-    # torch.autograd.gradcheck
-    "GradcheckError",
-    # torch.autograd.profiler
-    "EnforceUnique",
-    "KinetoStepTracker",
-    "profile",
-    "record_function",
-    # torch.autograd.profiler_legacy
-    "profile",
-    # torch.autograd.profiler_util
-    "EventList",
-    "FormattedTimesMixin",
-    "FunctionEvent",
-    "FunctionEventAvg",
-    "Interval",
-    "Kernel",
-    "MemRecordsAcc",
-    "StringTable",
-    # torch.autograd.variable
-    "Variable",
-    "VariableMeta",
     # torch.backends.cudnn.rnn
     "Unserializable",
-    # torch.cuda.amp.grad_scaler
+    # torch.amp.grad_scaler
     "GradScaler",
     "OptState",
     # torch.cuda.graphs
@@ -2710,52 +2609,6 @@ coverage_ignore_classes = [
     "PostLocalSGDOptimizer",
     # torch.distributed.optim.zero_redundancy_optimizer
     "ZeroRedundancyOptimizer",
-    # torch.distributed.pipeline.sync.batchnorm
-    "DeferredBatchNorm",
-    # torch.distributed.pipeline.sync.checkpoint
-    "Checkpoint",
-    "Checkpointing",
-    "Context",
-    "Function",
-    "Recompute",
-    "ThreadLocal",
-    # torch.distributed.pipeline.sync.copy
-    "Context",
-    "Copy",
-    "Wait",
-    # torch.distributed.pipeline.sync.dependency
-    "Fork",
-    "Join",
-    # torch.distributed.pipeline.sync.microbatch
-    "Batch",
-    "NoChunk",
-    # torch.distributed.pipeline.sync.pipe
-    "BalanceError",
-    "Pipe",
-    "PipeSequential",
-    "WithDevice",
-    # torch.distributed.pipeline.sync.pipeline
-    "Pipeline",
-    # torch.distributed.pipeline.sync.skip.layout
-    "SkipLayout",
-    # torch.distributed.pipeline.sync.skip.namespace
-    "Namespace",
-    # torch.distributed.pipeline.sync.skip.portal
-    "Context",
-    "Portal",
-    "PortalBlue",
-    "PortalCopy",
-    "PortalOrange",
-    # torch.distributed.pipeline.sync.skip.skippable
-    "Skippable",
-    # torch.distributed.pipeline.sync.skip.tracker
-    "SkipTracker",
-    "SkipTrackerThroughPotals",
-    "ThreadLocal",
-    # torch.distributed.pipeline.sync.stream
-    "CPUStreamType",
-    # torch.distributed.pipeline.sync.worker
-    "Task",
     # torch.distributed.rpc.api
     "AllGatherStates",
     "RRef",
@@ -2851,25 +2704,20 @@ coverage_ignore_classes = [
     "RewritingTracer",
     # torch.fx.experimental.schema_type_annotation
     "AnnotateTypesWithSchema",
+    # torch.fx.experimental.sym_node
+    "SymNode",
     # torch.fx.experimental.symbolic_shapes
     "Constraint",
     "ConstraintViolationError",
-    "DimConstraints",
-    "DimDynamic",
     "DynamicDimConstraintPrinter",
-    "EqualityConstraint",
     "GuardOnDataDependentSymNode",
-    "IsNonOverlappingAndDenseIndicator",
+    "PendingUnbackedSymbolNotFound",
     "LoggingShapeGuardPrinter",
-    "Pow",
     "RelaxedUnspecConstraint",
     "RuntimeAssert",
-    "ShapeEnv",
     "ShapeGuardPrinter",
-    "StrictMinMaxConstraint",
     "SymDispatchMode",
-    "SymNode",
-    "TrueDiv",
+    "SymbolicContext",
     # torch.fx.experimental.unification.match
     "Dispatcher",
     "VarDispatcher",
@@ -3115,6 +2963,7 @@ coverage_ignore_classes = [
     "FractionalMaxPool3d",
     "LPPool1d",
     "LPPool2d",
+    "LPPool3d",
     "MaxPool1d",
     "MaxPool2d",
     "MaxPool3d",
@@ -3625,6 +3474,15 @@ html_css_files = [
 
 from sphinx.ext.coverage import CoverageBuilder
 
+# NB: Due to some duplications of the following modules/functions, we keep
+# them as expected failures for the time being instead of return 1
+ignore_duplicated_modules = {
+    "torch.nn.utils.weight_norm",
+    "torch.nn.utils.spectral_norm",
+    "torch.nn.parallel.data_parallel",
+    "torch.ao.quantization.quantize",
+}
+
 
 def coverage_post_process(app, exception):
     if exception is not None:
@@ -3665,7 +3523,7 @@ def coverage_post_process(app, exception):
         path=torch.__path__, prefix=torch.__name__ + "."
     ):
         if is_not_internal(modname):
-            if modname not in modules:
+            if modname not in modules and modname not in ignore_duplicated_modules:
                 missing.add(modname)
 
     output = []

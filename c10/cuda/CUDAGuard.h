@@ -6,10 +6,7 @@
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/cuda/impl/CUDAGuardImpl.h>
 
-#include <cstddef>
-
-namespace c10 {
-namespace cuda {
+namespace c10::cuda {
 
 // This code is kind of boilerplatey.  See Note [Whither the DeviceGuard
 // boilerplate]
@@ -301,5 +298,4 @@ struct CUDAMultiStreamGuard {
   }
 };
 
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda

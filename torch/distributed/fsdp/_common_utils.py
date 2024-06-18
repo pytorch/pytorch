@@ -1,7 +1,6 @@
 """
 This file includes private common utilities for FSDP.
 """
-
 import logging
 import traceback
 import warnings
@@ -21,6 +20,7 @@ from typing import (
     Set,
     Tuple,
     Type,
+    TYPE_CHECKING,
 )
 
 import torch
@@ -28,7 +28,6 @@ import torch.distributed as dist
 import torch.distributed.fsdp._flat_param as flat_param_file
 import torch.nn as nn
 from torch.distributed._composable_state import _get_module_state, _State
-from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
 )
@@ -43,6 +42,11 @@ from .api import (
     StateDictConfig,
     StateDictType,
 )
+
+if TYPE_CHECKING:
+    from torch.distributed.device_mesh import DeviceMesh
+    from torch.distributed.fsdp._fsdp_extensions import FSDPExtensions
+    from ._flat_param import FlatParamHandle
 
 FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
 FSDP_PREFIX = FSDP_WRAPPED_MODULE + "."
@@ -135,6 +139,7 @@ class _FSDPState(_State):
         self._gradient_postdivide_factor: int = 0
         self._comm_hook: Optional[Callable] = None
         self._comm_hook_state: Optional[Any] = None
+        self._unshard_event: Optional[torch.cuda.Event] = None
         # Abstract device handle for fsdp compute device. For now,
         # the compute device must implement cuda semantics used by fsdp
         self._device_handle: _FSDPDeviceHandle = _UninitializedDeviceHandle()
@@ -142,7 +147,7 @@ class _FSDPState(_State):
         # Save these static lists to avoid the repeated tree traversals
         self._all_fsdp_states: List[_FSDPState] = []
         self._all_handles: List[flat_param_file.FlatParamHandle] = []
-        self._enable_extension: bool = False
+        self._fsdp_extension: Optional[FSDPExtensions] = None
 
 
 def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:
@@ -355,14 +360,14 @@ def _get_param_to_fqns(
 
 @no_type_check
 def _log_post_backward_hook(
-    state: _FSDPState, handle: "FlatParamHandle", log: logging.Logger
+    state: _FSDPState, handle: "FlatParamHandle", logger: logging.Logger
 ) -> None:
     # Under TORCH_DISTRIBUTED_DEBUG=INFO, log the module names this hook fires for.
     # Below logging of module names this post-bwd hook fires for can help debug certain
     # cases where hooks don't fire, such as under certain activation checkpoint configs.
     if state._use_orig_params and handle._debug_level == dist.DebugLevel.INFO:
         param_fqns = _get_handle_fqns_from_root(state, handle)
-        log.warning("FSDP firing post-backward hooks for parameters %s", param_fqns)
+        logger.warning("FSDP firing post-backward hooks for parameters %s", param_fqns)
 
 
 @no_type_check
@@ -416,29 +421,14 @@ def _apply_to_modules(
                     # ``named_children`` + `named_parameter(recurse=False)``.
                     # This hack is a must to make the traversal work.
                     # TODO: Remove this hack once DMP + FSDP is not supported.
+                    # It turns out that recursive wrapping may trigger this as
+                    # well.
                     if (
                         submodule_name == "_fsdp_wrapped_module"
                         or submodule_name == "_dmp_wrapped_module"
                     ):
-                        if (
-                            not torch.distributed._functional_collectives.is_torchdynamo_compiling()
-                        ):
-                            # TODO(voz): Don't graph break on this
-                            warnings.warn(
-                                "An unexpected prefix is detected. This case "
-                                " should only happen when using DMP with FSDP. "
-                                f"prefix = {prefix}, "
-                                f"submodule_name = {submodule_name}"
-                            )
                         new_prefix = prefix
                     elif submodule_name == "module":
-                        warnings.warn(
-                            "An unexpected prefix is detected. This case "
-                            " should only happen when DDP wraps the outer "
-                            " modules while FSDP wraps the inner ones."
-                            f"prefix = {prefix}, "
-                            f"submodule_name = {submodule_name}"
-                        )
                         new_prefix = prefix
             f(submodule, new_prefix, new_tree_level, *args, **kwargs)
 
@@ -544,11 +534,8 @@ def _no_dispatch_record_stream(tensor: torch.Tensor, stream: torch.Stream) -> No
     if tensor.device.type not in ["cuda", torch._C._get_privateuse1_backend_name()]:
         return
 
-    if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
-        # Don't no dispatch under torch compile like this
-        with no_dispatch():
-            tensor.record_stream(stream)
-    else:
+    if torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        return
         # from @ezyang:
         # The no_dispatch was added in https://github.com/pytorch/pytorch/pull/88014 cc @fegin
         # Looking over the PR, it looks like this is because we don't actually support Stream arguments
@@ -557,7 +544,6 @@ def _no_dispatch_record_stream(tensor: torch.Tensor, stream: torch.Stream) -> No
         # a better version of this would just be to check if there are any modes before disabling dispatch.
         # TODO(voz): Extend a dynamo util to answer the above, unify the codepaths here.
         tensor.record_stream(stream)
-
-
-def _same_storage_as_data_ptr(x: torch.Tensor, data_ptr: int) -> bool:
-    return x._typed_storage()._data_ptr() == data_ptr
+    else:
+        with no_dispatch():
+            tensor.record_stream(stream)

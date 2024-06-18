@@ -334,14 +334,15 @@ auto LazyGraphExecutor::DataCacheArena::GetDataCache(
   if (FLAGS_torch_lazy_enable_device_data_cache) {
     auto it = device_caches_.find(device);
     if (it == device_caches_.end()) {
-      std::unique_ptr<DataCache> cache(new DataCache(max_cache_size_));
-      it = device_caches_.emplace(device, std::move(cache)).first;
+      it = device_caches_
+               .emplace(device, std::make_unique<DataCache>(max_cache_size_))
+               .first;
     }
     return it->second.get();
   } else {
     // If cache is disabled then always return a zero size cache
-    static std::unique_ptr<DataCache> s_empty_cache(new DataCache(0));
-    return s_empty_cache.get();
+    static DataCache s_empty_cache(0);
+    return &s_empty_cache;
   }
 }
 
@@ -602,6 +603,7 @@ LazyGraphExecutor::SyncTensorCollection LazyGraphExecutor::CollectSyncTensors(
       Value ir_value = tensors[i]->CurrentIrValue();
       if (ir_value) {
         if (ShouldSyncTensor(tensors[i])) {
+          TORCH_LAZY_COUNTER("SyncedTensorsWithIR", 1);
           // Add only tensors which need to be synced.
           coll.hash = HashCombine(coll.hash, ir_value.hash());
           coll.indices.push_back(i);
@@ -609,7 +611,7 @@ LazyGraphExecutor::SyncTensorCollection LazyGraphExecutor::CollectSyncTensors(
       } else if (config.force_ltc_data) {
         // The tensor only has at::Tensor data. We need to queue it for a
         // device upload.
-        c10::optional<at::Tensor> tensor_data = tensors[i]->CurrentTensorData();
+        std::optional<at::Tensor> tensor_data = tensors[i]->CurrentTensorData();
         TORCH_CHECK(tensor_data);
         at_tensors.push_back(*tensor_data);
         devices.push_back(tensors[i]->GetDevice());
@@ -995,7 +997,7 @@ std::vector<at::Tensor> LazyGraphExecutor::FetchTensors(
       ++literals_index;
       ++sync_index;
     } else {
-      c10::optional<at::Tensor> tensor_data =
+      std::optional<at::Tensor> tensor_data =
           (*tensors)[i]->CurrentTensorData();
       if (tensor_data) {
         results.push_back(*tensor_data);

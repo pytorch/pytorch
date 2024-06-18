@@ -19,12 +19,25 @@ DECLARE_DISPATCH(max_pool2d_backward_fn, max_pool2d_backward_kernel);
 
 // averge pooling has same signature for forward and backward
 using avg_pool2d_fn = void(*)(const Tensor& output, const Tensor& input, int64_t kW, int64_t kH,
-    int64_t dW, int64_t dH, int64_t padW, int64_t padH, bool count_include_pad, c10::optional<int64_t> divisor_override);
+    int64_t dW, int64_t dH, int64_t padW, int64_t padH, bool count_include_pad, std::optional<int64_t> divisor_override);
 using avg_pool2d_backward_fn = void(*)(const Tensor& output, const Tensor& input, int kW, int kH,
-    int dW, int dH, int padW, int padH, bool count_include_pad, c10::optional<int64_t> divisor_override);
+    int dW, int dH, int padW, int padH, bool count_include_pad, std::optional<int64_t> divisor_override);
 
 DECLARE_DISPATCH(avg_pool2d_fn, avg_pool2d_kernel);
 DECLARE_DISPATCH(avg_pool2d_backward_fn, avg_pool2d_backward_kernel);
+
+// averge pooling has same signature for forward and backward
+using avg_pool3d_fn = void(*)(const Tensor& output, const Tensor& input,
+    int64_t kW, int64_t kH, int64_t kD, int64_t dW, int64_t dH, int64_t dD,
+    int64_t padW, int64_t padH, int64_t padD, bool count_include_pad,
+    std::optional<int64_t> divisor_override);
+using avg_pool3d_backward_fn = void(*)(const Tensor& output, const Tensor& input,
+    int kW, int kH, int kD, int dW, int dH, int dD,
+    int padW, int padH, int padD, bool count_include_pad,
+    std::optional<int64_t> divisor_override);
+
+DECLARE_DISPATCH(avg_pool3d_fn, avg_pool3d_kernel);
+DECLARE_DISPATCH(avg_pool3d_backward_fn, avg_pool3d_backward_kernel);
 
 using max_pool3d_fn = void(*)(Tensor& output, Tensor& indices, const Tensor& input,
     int kW, int kH, int kD, int dW, int dH, int dD, int pW, int pH, int pD, int dilationW, int dilationH, int dilationD);
@@ -67,9 +80,9 @@ static inline T pooling_output_shape(
     TORCH_CHECK(stride != 0, "stride should not be zero");
     TORCH_CHECK(pad >= 0,
                 "pad must be non-negative, but got pad: ", pad);
-    TORCH_CHECK(pad <= kernelSize / 2,
-                "pad should be at most half of kernel size, but got pad=",
-                pad, " and kernel_size=", kernelSize)
+    TORCH_CHECK(pad <= ((kernelSize - 1) * dilation + 1) / 2,
+                "pad should be at most half of effective kernel size, but got pad=",
+                pad, ", kernel_size=", kernelSize, " and dilation=", dilation)
     return pooling_output_shape_pad_lr(
         inputSize, kernelSize, pad, pad, stride, dilation, ceil_mode);
 }

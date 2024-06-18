@@ -1,9 +1,11 @@
+# mypy: ignore-errors
+
 import itertools
 import random
 import unittest
 from functools import partial
 from itertools import chain, product
-from typing import Iterable, List
+from typing import Iterable, List, Tuple
 
 import numpy as np
 from numpy import inf
@@ -1173,8 +1175,7 @@ op_db: List[OpInfo] = [
         "linalg.cross",
         ref=lambda x, y, dim=-1: np.cross(x, y, axis=dim),
         op=torch.linalg.cross,
-        dtypes=all_types_and_complex_and(torch.bfloat16),
-        dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
+        dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
         aten_name="linalg_cross",
         sample_inputs_func=sample_inputs_cross,
         error_inputs_func=error_inputs_cross,
@@ -1763,22 +1764,6 @@ op_db: List[OpInfo] = [
                 unittest.expectedFailure, "TestFwdGradients", "test_forward_mode_AD"
             ),
             DecorateInfo(unittest.expectedFailure, "TestBwdGradients", "test_fn_grad"),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestFakeTensor",
-                "test_fake_crossref_backward_amp",
-                device_type="cuda",
-                dtypes=[torch.float32],
-                active_if=TEST_WITH_ROCM,
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestFakeTensor",
-                "test_fake_crossref_backward_no_amp",
-                device_type="cuda",
-                dtypes=[torch.float32],
-                active_if=TEST_WITH_ROCM,
-            ),
         ),
     ),
     OpInfo(
@@ -2398,6 +2383,18 @@ python_ref_db: List[OpInfo] = [
     #
     # torch.linalg
     #
+    PythonRefInfo(
+        "_refs.linalg.cross",
+        torch_opinfo_name="linalg.cross",
+        supports_out=True,
+        op_db=op_db,
+        skips=(
+            # TODO: is this really needed?
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_python_ref_errors"
+            ),
+        ),
+    ),
     PythonRefInfo(
         "_refs.linalg.diagonal",
         torch_opinfo_name="linalg.diagonal",

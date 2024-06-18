@@ -16,9 +16,8 @@ TORCH_API inline void noopDelete(void*) {}
 ///
 ///     at::Tensor tensor = at::for_blob(data, sizes)
 ///             .strides(strides)
-///             .context(context, [](void *ctx) { delete static_cast<Ctx*>(ctx); })
-///             .options(...)
-///             .make_tensor();
+///             .context(context, [](void *ctx) { delete static_cast<Ctx*>(ctx);
+///             }) .options(...) .make_tensor();
 ///
 class TORCH_API TensorMaker {
   friend TensorMaker for_blob(void* data, IntArrayRef sizes) noexcept;
@@ -32,7 +31,7 @@ class TORCH_API TensorMaker {
     return *this;
   }
 
-  TensorMaker& storage_offset(c10::optional<int64_t> value) noexcept {
+  TensorMaker& storage_offset(std::optional<int64_t> value) noexcept {
     storage_offset_ = value;
 
     return *this;
@@ -51,7 +50,7 @@ class TORCH_API TensorMaker {
     return *this;
   }
 
-  TensorMaker& target_device(c10::optional<Device> value) noexcept {
+  TensorMaker& target_device(std::optional<Device> value) noexcept {
     device_ = value;
 
     return *this;
@@ -83,7 +82,7 @@ class TORCH_API TensorMaker {
 
   std::size_t computeStorageSize() const noexcept;
 
-  DataPtr makeDataPtrFromDeleter() const;
+  DataPtr makeDataPtrFromDeleter() noexcept;
 
   DataPtr makeDataPtrFromContext() noexcept;
 
@@ -92,10 +91,10 @@ class TORCH_API TensorMaker {
   void* data_;
   IntArrayRef sizes_;
   OptionalIntArrayRef strides_{};
-  c10::optional<int64_t> storage_offset_{};
+  std::optional<int64_t> storage_offset_{};
   std::function<void(void*)> deleter_{};
   std::unique_ptr<void, ContextDeleter> ctx_{nullptr, detail::noopDelete};
-  c10::optional<Device> device_{};
+  std::optional<Device> device_{};
   TensorOptions opts_{};
   bool resizeable_{};
   c10::Allocator* allocator_{};
@@ -111,7 +110,7 @@ inline Tensor from_blob(
     IntArrayRef strides,
     const std::function<void(void*)>& deleter,
     const TensorOptions& options = {},
-    const c10::optional<Device> target_device = c10::nullopt) {
+    const std::optional<Device> target_device = c10::nullopt) {
   return for_blob(data, sizes)
       .strides(strides)
       .deleter(deleter)
@@ -127,7 +126,7 @@ inline Tensor from_blob(
     int64_t storage_offset,
     const std::function<void(void*)>& deleter,
     const TensorOptions& options = {},
-    const c10::optional<Device> target_device = c10::nullopt) {
+    const std::optional<Device> target_device = c10::nullopt) {
   return for_blob(data, sizes)
       .strides(strides)
       .storage_offset(storage_offset)
@@ -140,11 +139,11 @@ inline Tensor from_blob(
 inline Tensor from_blob(
     void* data,
     IntArrayRef sizes,
-    const std::function<void(void*)>& deleter,
+    std::function<void(void*)> deleter,
     const TensorOptions& options = {},
-    const c10::optional<Device> target_device = c10::nullopt) {
+    const std::optional<Device> target_device = c10::nullopt) {
   return for_blob(data, sizes)
-      .deleter(deleter)
+      .deleter(std::move(deleter))
       .options(options)
       .target_device(target_device)
       .make_tensor();
@@ -155,10 +154,7 @@ inline Tensor from_blob(
     IntArrayRef sizes,
     IntArrayRef strides,
     const TensorOptions& options = {}) {
-  return for_blob(data, sizes)
-      .strides(strides)
-      .options(options)
-      .make_tensor();
+  return for_blob(data, sizes).strides(strides).options(options).make_tensor();
 }
 
 inline Tensor from_blob(
@@ -168,4 +164,4 @@ inline Tensor from_blob(
   return for_blob(data, sizes).options(options).make_tensor();
 }
 
-}  // namespace at
+} // namespace at

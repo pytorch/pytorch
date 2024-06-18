@@ -1,6 +1,7 @@
-from typing import List, Tuple, Union, Dict, Any, Set, Mapping
+from typing import List, Tuple, Union, Dict, Any, Set, Mapping, Optional
 import collections
 from dataclasses import dataclass
+import operator
 
 import torch
 import torch.fx
@@ -123,12 +124,19 @@ class FxNetAccFusionsFinder:
         self,
         fusion_group: "FxNetAccFusionsFinder.FusionGroup",
         inputs: Union[NodeSet, NodeList],
+        visited: Optional[NodeSet] = None,
     ):
         """
         Start from inputs and going reverse topological order. If any upstream node
         is in the fusion group, add all the nodes in this path to fusion group.
         """
         for arg in inputs:
+            # skip the node if already seen
+            if visited is not None:
+                if arg in visited:
+                    continue
+                visited.add(arg)
+
             # Skip placeholder and get_attr because they won't be in the fusion group.
             if arg.op not in CALLABLE_NODE_OPS:
                 continue
@@ -144,7 +152,7 @@ class FxNetAccFusionsFinder:
 
             # Check the upstream nodes of the node, if any of them is in the fusion group
             # we'll add this node to fusion group and return True.
-            if self.recursive_add_node(fusion_group, arg.all_input_nodes):
+            if self.recursive_add_node(fusion_group, arg.all_input_nodes, visited):
                 fusion_group.add_node(arg)
                 return True
 
@@ -172,7 +180,11 @@ class FxNetAccFusionsFinder:
             )
             while fusion_group.nodes_need_process:
                 node = fusion_group.nodes_need_process.pop()
-                self.recursive_add_node(fusion_group, fusion_group.inputs)
+                self.recursive_add_node(
+                    fusion_group,
+                    fusion_group.inputs,
+                    visited=set(),
+                )
 
                 # Optionally add downstream nodes
                 if "tensor_meta" not in node.meta:
@@ -183,7 +195,11 @@ class FxNetAccFusionsFinder:
                             continue
 
                         fusion_group.add_node(user)
-                        self.recursive_add_node(fusion_group, fusion_group.inputs)
+                        self.recursive_add_node(
+                            fusion_group,
+                            fusion_group.inputs,
+                            visited=set(),
+                        )
 
                 # Add some upstream nodes
                 for arg in node.all_input_nodes:
@@ -198,7 +214,11 @@ class FxNetAccFusionsFinder:
                     fusion_group.top_node_idx = min(
                         fusion_group.top_node_idx, self.nodes.index(arg)
                     )
-                    self.recursive_add_node(fusion_group, fusion_group.inputs)
+                    self.recursive_add_node(
+                        fusion_group,
+                        fusion_group.inputs,
+                        visited=set(),
+                    )
 
             if not (set(fusion_group.nodes) <= self.acc_nodes):
                 self.acc_nodes -= fusion_group.nodes
@@ -224,7 +244,32 @@ def legalize_graph(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     Returns:
         The graph module in-place sorted
     """
-    indeg = {node: 0 for node in gm.graph.nodes}
+
+    # These operators are used for making runtime assertions before any
+    # data-dependent operators occur. We want to prioritize sorting these to
+    # ensure that these assertions appear before any data-dependent operations
+    # in the graph.
+    PRIORITIZED_OPS = [
+        operator.add,
+        operator.mul,
+        operator.sub,
+        operator.floordiv,
+        operator.truediv,
+        operator.mod,
+        operator.le,
+        operator.lt,
+        operator.ge,
+        operator.gt,
+        operator.eq,
+        operator.ne,
+        torch.ops.aten.sym_constrain_range.default,
+        torch.ops.aten.sym_constrain_range_for_size.default,
+        torch.ops.aten._assert_async.msg,
+        torch.ops.aten.scalar_tensor.default,
+        torch.ops.aten._assert_scalar.default,
+    ]
+
+    indeg = dict.fromkeys(gm.graph.nodes, 0)
     new_graph = torch.fx.Graph()
     # Track how many unfulfilled dependencies each node has
     for node in gm.graph.nodes:
@@ -244,7 +289,10 @@ def legalize_graph(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
         for user in cur.users:
             indeg[user] -= 1
             if indeg[user] == 0:
-                queue.append(user)
+                if user.op == "call_function" and user.target in PRIORITIZED_OPS:
+                    queue.appendleft(user)
+                else:
+                    queue.append(user)
     # If the new graph's size is not as large as the old one, then there must be
     # a cycle (i.e. some node's dependencies were not satisfied.)
     if len(new_graph.nodes) < len(gm.graph.nodes):

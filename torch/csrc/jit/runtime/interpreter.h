@@ -68,6 +68,7 @@ struct TORCH_API Code {
   const std::vector<Node*>& instructions_source() const;
   void request_bailout(size_t index);
   size_t register_size() const;
+  std::shared_ptr<Graph> graph() const;
 
  private:
   std::shared_ptr<interpreter::CodeImpl> pImpl;
@@ -123,7 +124,7 @@ struct InterpreterContinuation {
       InterpreterState state_,
       Stack stack_,
       int64_t dist_autograd_context_id = 0,
-      c10::optional<at::ThreadLocalState> tls_state = c10::nullopt)
+      std::optional<at::ThreadLocalState> tls_state = c10::nullopt)
       : state(std::move(state_)),
         stack(std::move(stack_)),
         tls_state_(std::move(tls_state))
@@ -139,7 +140,7 @@ struct InterpreterContinuation {
  private:
   InterpreterState state;
   Stack stack;
-  c10::optional<at::ThreadLocalState> tls_state_ = c10::nullopt;
+  std::optional<at::ThreadLocalState> tls_state_ = c10::nullopt;
 #ifdef USE_DISTRIBUTED
   int64_t dist_autograd_context_id_;
 #endif

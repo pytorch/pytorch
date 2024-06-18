@@ -4,6 +4,7 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
+#include <cstdint>
 
 namespace c10 {
 using SymIntArrayRef = ArrayRef<SymInt>;
@@ -18,7 +19,7 @@ inline at::IntArrayRef asIntArrayRefUnchecked(c10::SymIntArrayRef ar) {
 // allocate another buffer and write the integers into it.  If you need it,
 // we can do it.  But I don't think you need it.
 
-inline c10::optional<at::IntArrayRef> asIntArrayRefSlowOpt(
+inline std::optional<at::IntArrayRef> asIntArrayRefSlowOpt(
     c10::SymIntArrayRef ar) {
   for (const c10::SymInt& sci : ar) {
     if (sci.is_heap_allocated()) {

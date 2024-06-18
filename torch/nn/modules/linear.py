@@ -38,6 +38,7 @@ class Identity(Module):
         torch.Size([128, 20])
 
     """
+
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__()
 
@@ -46,7 +47,7 @@ class Identity(Module):
 
 
 class Linear(Module):
-    r"""Applies a linear transformation to the incoming data: :math:`y = xA^T + b`
+    r"""Applies an affine linear transformation to the incoming data: :math:`y = xA^T + b`.
 
     This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
@@ -82,6 +83,7 @@ class Linear(Module):
         >>> print(output.size())
         torch.Size([128, 30])
     """
+
     __constants__ = ['in_features', 'out_features']
     in_features: int
     out_features: int
@@ -130,8 +132,7 @@ class NonDynamicallyQuantizableLinear(Linear):
 
 
 class Bilinear(Module):
-    r"""Applies a bilinear transformation to the incoming data:
-    :math:`y = x_1^T A x_2 + b`
+    r"""Applies a bilinear transformation to the incoming data: :math:`y = x_1^T A x_2 + b`.
 
     Args:
         in1_features: size of each first input sample
@@ -167,6 +168,7 @@ class Bilinear(Module):
         >>> print(output.size())
         torch.Size([128, 40])
     """
+
     __constants__ = ['in1_features', 'in2_features', 'out_features']
     in1_features: int
     in2_features: int
@@ -198,9 +200,8 @@ class Bilinear(Module):
         return F.bilinear(input1, input2, self.weight, self.bias)
 
     def extra_repr(self) -> str:
-        return 'in1_features={}, in2_features={}, out_features={}, bias={}'.format(
-            self.in1_features, self.in2_features, self.out_features, self.bias is not None
-        )
+        return (f'in1_features={self.in1_features}, in2_features={self.in2_features}, '
+                f'out_features={self.out_features}, bias={self.bias is not None}')
 
 
 class LazyLinear(LazyModuleMixin, Linear):

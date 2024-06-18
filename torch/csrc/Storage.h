@@ -1,6 +1,10 @@
 #ifndef THP_STORAGE_INC
 #define THP_STORAGE_INC
 
+#include <Python.h>
+#include <c10/core/Storage.h>
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/Types.h>
 
 #define THPStorageStr "torch.UntypedStorage"
@@ -19,11 +23,11 @@ TORCH_PYTHON_API PyObject* THPStorage_NewWithStorage(
     bool allow_preexisting_pyobj = false);
 extern PyTypeObject* THPStorageClass;
 
-static inline bool THPStorage_CheckTypeExact(PyTypeObject* tp) {
+inline bool THPStorage_CheckTypeExact(PyTypeObject* tp) {
   return tp == THPStorageClass;
 }
 
-static inline bool THPStorage_CheckExact(PyObject* obj) {
+inline bool THPStorage_CheckExact(PyObject* obj) {
   return THPStorage_CheckTypeExact(Py_TYPE(obj));
 }
 

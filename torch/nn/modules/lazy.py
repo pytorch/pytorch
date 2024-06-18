@@ -1,6 +1,5 @@
 import itertools
-import warnings
-from typing import Protocol
+from typing import Protocol, Optional, Type, Any
 
 import torch
 from ..parameter import is_lazy
@@ -8,10 +7,11 @@ from ..parameter import is_lazy
 __all__ = ['LazyModuleMixin']
 
 class _LazyProtocol(Protocol):
-    """This is to avoid errors with mypy checks for
-    The attributes in a mixin:
+    """This class is used to avoid errors with mypy checks for the attributes in a mixin.
+
     https://mypy.readthedocs.io/en/latest/more_types.html#mixin-classes
     """
+
     def _register_load_state_dict_pre_hook(self, hook):
         ...
 
@@ -51,7 +51,7 @@ class _LazyProtocol(Protocol):
 
 
 class LazyModuleMixin:
-    r"""A mixin for modules that lazily initialize parameters, also known as "lazy modules."
+    r"""A mixin for modules that lazily initialize parameters, also known as "lazy modules".
 
     .. warning:
         Lazy modules are an experimental new feature under active development,
@@ -170,15 +170,13 @@ class LazyModuleMixin:
 
     # modules inheriting from this will change their __class__ to the specified
     # one after they are fully initialized
-    cls_to_become = None
+    cls_to_become: Optional[Type[Any]] = None
 
     def __init__(self: _LazyProtocol, *args, **kwargs):
         # Mypy doesnt like this super call in a mixin
         super().__init__(*args, **kwargs)  # type: ignore[misc]
         self._load_hook = self._register_load_state_dict_pre_hook(self._lazy_load_hook)
         self._initialize_hook = self.register_forward_pre_hook(self._infer_parameters, with_kwargs=True)
-        warnings.warn('Lazy modules are a new feature under heavy development '
-                      'so changes to the API or functionality can happen at any moment.')
 
     def _save_to_state_dict(self: _LazyProtocol, destination, prefix, keep_vars):
         # This should be ideally implemented as a hook,
@@ -220,14 +218,14 @@ class LazyModuleMixin:
 
     def initialize_parameters(self: _LazyProtocol, *args, **kwargs):
         r"""Initialize parameters according to the input batch properties.
+
         This adds an interface to isolate parameter initialization from the
         forward pass when doing parameter shape inference.
         """
         raise NotImplementedError(f'initialize_parameters is not implemented for {self.__class__.__name__}')
 
     def has_uninitialized_params(self: _LazyProtocol):
-        r"""Check if a module has parameters that are not initialized
-        """
+        r"""Check if a module has parameters that are not initialized."""
         # This is to avoid the JIT to track this parameter and force
         # custom modules __setstate__ to add it
         params = self._parameters.values()
@@ -238,8 +236,8 @@ class LazyModuleMixin:
         return False
 
     def _infer_parameters(self: _LazyProtocol, module, args, kwargs=None):
-        r"""Infers the size and initializes the parameters according to the
-        provided input batch.
+        r"""Infers the size and initializes the parameters according to the provided input batch.
+
         Given a module that contains parameters that were declared inferrable
         using :class:`torch.nn.parameter.ParameterMode.Infer`, runs a forward pass
         in the complete module using the provided input to initialize all the parameters

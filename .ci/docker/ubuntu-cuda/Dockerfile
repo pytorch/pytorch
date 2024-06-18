@@ -56,7 +56,7 @@ RUN if [ -n "${DB}" ]; then bash ./install_db.sh; fi
 RUN rm install_db.sh
 ENV INSTALLED_DB ${DB}
 
-# (optional) Install vision packages like OpenCV and ffmpeg
+# (optional) Install vision packages like OpenCV
 ARG VISION
 COPY ./common/install_vision.sh ./common/cache_vision_models.sh ./common/common_utils.sh ./
 RUN if [ -n "${VISION}" ]; then bash ./install_vision.sh; fi
@@ -139,13 +139,20 @@ COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
 ARG CUDNN_VERSION
 ARG CUDA_VERSION
 COPY ./common/install_cudnn.sh install_cudnn.sh
-RUN if [ "${CUDNN_VERSION}" -eq 8 ]; then bash install_cudnn.sh; fi
+RUN if [ -n "${CUDNN_VERSION}" ]; then bash install_cudnn.sh; fi
 RUN rm install_cudnn.sh
+
+# Install CUSPARSELT
+ARG CUDA_VERSION
+COPY ./common/install_cusparselt.sh install_cusparselt.sh
+RUN bash install_cusparselt.sh
+RUN rm install_cusparselt.sh
 
 # Delete /usr/local/cuda-11.X/cuda-11.X symlinks
 RUN if [ -h /usr/local/cuda-11.6/cuda-11.6 ]; then rm /usr/local/cuda-11.6/cuda-11.6; fi
 RUN if [ -h /usr/local/cuda-11.7/cuda-11.7 ]; then rm /usr/local/cuda-11.7/cuda-11.7; fi
 RUN if [ -h /usr/local/cuda-12.1/cuda-12.1 ]; then rm /usr/local/cuda-12.1/cuda-12.1; fi
+RUN if [ -h /usr/local/cuda-12.4/cuda-12.4 ]; then rm /usr/local/cuda-12.4/cuda-12.4; fi
 
 USER jenkins
 CMD ["bash"]

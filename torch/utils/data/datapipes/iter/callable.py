@@ -22,6 +22,7 @@ T_co = TypeVar("T_co", covariant=True)
 class MapperIterDataPipe(IterDataPipe[T_co]):
     r"""
     Applies a function over each item from the source DataPipe (functional name: ``map``).
+
     The function can be any regular Python function or partial object. Lambda
     function is not recommended as it is not supported by pickle.
 
@@ -57,6 +58,7 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
         >>> list(map_dp_2)
         [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     """
+
     datapipe: IterDataPipe
     fn: Callable
 
@@ -134,7 +136,7 @@ def _collate_helper(conversion, item):
     # TODO(VitalyFedyunin): Verify that item is any sort of batch
     if len(item.items) > 1:
         # TODO(VitalyFedyunin): Compact all batch dataframes into one
-        raise Exception("Only supports one DataFrame per batch")
+        raise Exception("Only supports one DataFrame per batch")  # noqa: TRY002
     df = item[0]
     columns_name = df_wrapper.get_columns(df)
     tuple_names: List = []
@@ -142,12 +144,12 @@ def _collate_helper(conversion, item):
 
     for name in conversion.keys():
         if name not in columns_name:
-            raise Exception("Conversion keys missmatch")
+            raise Exception("Conversion keys missmatch")  # noqa: TRY002
 
     for name in columns_name:
         if name in conversion:
             if not callable(conversion[name]):
-                raise Exception('Collate (DF)DataPipe requires callable as dict values')
+                raise Exception('Collate (DF)DataPipe requires callable as dict values')  # noqa: TRY002
             collation_fn = conversion[name]
         else:
             # TODO(VitalyFedyunin): Add default collation into df_wrapper
@@ -155,7 +157,7 @@ def _collate_helper(conversion, item):
                 import torcharrow.pytorch as tap  # type: ignore[import]
                 collation_fn = tap.rec.Default()
             except Exception as e:
-                raise Exception("unable to import default collation function from the TorchArrow") from e
+                raise Exception("unable to import default collation function from the TorchArrow") from e  # noqa: TRY002
 
         tuple_names.append(str(name))
         value = collation_fn(df[name])
@@ -172,6 +174,7 @@ def _collate_helper(conversion, item):
 class CollatorIterDataPipe(MapperIterDataPipe):
     r"""
     Collates samples from DataPipe to Tensor(s) by a custom collate function (functional name: ``collate``).
+
     By default, it uses :func:`torch.utils.data.default_collate`.
 
     .. note::

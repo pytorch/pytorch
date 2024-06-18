@@ -42,7 +42,7 @@ Like Graph Callables, CUDA Graph Trees use a single memory pool across all graph
 
 .. code-block:: python
 
-    @torch.compile
+    @torch.compile(mode="reduce-overhead")
     def foo(x):
         # GRAPH 1
         y = x * x * x
@@ -57,12 +57,12 @@ Like Graph Callables, CUDA Graph Trees use a single memory pool across all graph
         # GRAPH 4
         return z * torch.rand_like(z)
 
-        # the first run warms up each graph, which does things like CuBlas or Triton benchmarking
-        foo(torch.arange(0, 10), device="cuda")
-        # The second run does a CUDA Graph recording, and replays it
-        foo(torch.arange(0, 10), device="cuda")
-        # Finally we hit the optimized, CUDA Graph replay path
-        foo(torch.arange(0, 10), device="cuda")
+    # the first run warms up each graph, which does things like CuBlas or Triton benchmarking
+    foo(torch.arange(0, 10, device="cuda"))
+    # The second run does a CUDA Graph recording, and replays it
+    foo(torch.arange(0, 10, device="cuda"))
+    # Finally we hit the optimized, CUDA Graph replay path
+    foo(torch.arange(0, 10, device="cuda"))
 
 
 In this example, there are two separate paths that we make through the function: 1 -> 2 -> 4, or 1 -> 3 -> 4.
@@ -80,7 +80,7 @@ Graph 1 gets replayed, and then we hit Graph 3, which we have not yet recorded. 
 
 First, we would hit the optimized, CUDAGraph.replay() path that we have already recorded in graph 1. Then we would hit Graph 3. Just as before, we will need to warm up the graph once before recording. On the warmup run, the memory addresses are not fixed, so graph 4 will also fallback to the inductor, non-cudagraph invocation.
 
-The second time we hit graph 3 we are warmed up and ready to record. We record graph 2 and then record graph 4 again since the input memory addresses have changed. This creates a tree of CUDA Graph recordings. A CUDA Graph Tree!
+The second time we hit graph 3 we are warmed up and ready to record. We record graph 3 and then record graph 4 again since the input memory addresses have changed. This creates a tree of CUDA Graph recordings. A CUDA Graph Tree!
 
 ::
 

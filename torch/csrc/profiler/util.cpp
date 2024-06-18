@@ -10,91 +10,16 @@
 #include <libkineto.h>
 #endif
 #ifdef USE_DISTRIBUTED
-#ifdef USE_C10D
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
-#endif // USE_C10D
 #endif // USE_DISTRIBUTED
 
-namespace torch {
-namespace profiler {
-namespace impl {
-
-ApproximateClockToUnixTimeConverter::ApproximateClockToUnixTimeConverter()
-    : start_times_(measurePairs()) {}
-
-ApproximateClockToUnixTimeConverter::UnixAndApproximateTimePair
-ApproximateClockToUnixTimeConverter::measurePair() {
-  // Take a measurement on either side to avoid an ordering bias.
-  auto fast_0 = getApproximateTime();
-  auto wall = std::chrono::system_clock::now();
-  auto fast_1 = getApproximateTime();
-
-  TORCH_INTERNAL_ASSERT(fast_1 >= fast_0, "getCount is non-monotonic.");
-  auto t = std::chrono::duration_cast<std::chrono::nanoseconds>(
-      wall.time_since_epoch());
-
-  // `x + (y - x) / 2` is a more numerically stable average than `(x + y) / 2`.
-  return {t.count(), fast_0 + (fast_1 - fast_0) / 2};
-}
-
-ApproximateClockToUnixTimeConverter::time_pairs
-ApproximateClockToUnixTimeConverter::measurePairs() {
-  static constexpr auto n_warmup = 5;
-  for (C10_UNUSED const auto _ : c10::irange(n_warmup)) {
-    getApproximateTime();
-    steady_clock_t::now();
-  }
-
-  time_pairs out;
-  for (const auto i : c10::irange(out.size())) {
-    out[i] = measurePair();
-  }
-  return out;
-}
-
-std::function<time_t(approx_time_t)> ApproximateClockToUnixTimeConverter::
-    makeConverter() {
-  auto end_times = measurePairs();
-
-  // Compute the real time that passes for each tick of the approximate clock.
-  std::array<long double, replicates> scale_factors{};
-  for (const auto i : c10::irange(replicates)) {
-    auto delta_ns = end_times[i].t_ - start_times_[i].t_;
-    auto delta_approx = end_times[i].approx_t_ - start_times_[i].approx_t_;
-    scale_factors[i] = (double)delta_ns / (double)delta_approx;
-  }
-  std::sort(scale_factors.begin(), scale_factors.end());
-  long double scale_factor = scale_factors[replicates / 2 + 1];
-
-  // We shift all times by `t0` for better numerics. Double precision only has
-  // 16 decimal digits of accuracy, so if we blindly multiply times by
-  // `scale_factor` we may suffer from precision loss. The choice of `t0` is
-  // mostly arbitrary; we just need a factor that is the correct order of
-  // magnitude to bring the intermediate values closer to zero. We are not,
-  // however, guaranteed that `t0_approx` is *exactly* the getApproximateTime
-  // equivilent of `t0`; it is only an estimate that we have to fine tune.
-  auto t0 = start_times_[0].t_;
-  auto t0_approx = start_times_[0].approx_t_;
-  std::array<double, replicates> t0_correction{};
-  for (const auto i : c10::irange(replicates)) {
-    auto dt = start_times_[i].t_ - t0;
-    auto dt_approx =
-        (double)(start_times_[i].approx_t_ - t0_approx) * scale_factor;
-    t0_correction[i] = dt - (time_t)dt_approx;
-  }
-  t0 += t0_correction[t0_correction.size() / 2 + 1];
-
-  return [=](approx_time_t t_approx) {
-    // See above for why this is more stable than `A * t_approx + B`.
-    return (time_t)((double)(t_approx - t0_approx) * scale_factor) + t0;
-  };
-}
+namespace torch::profiler::impl {
 
 namespace {
-c10::optional<bool> soft_assert_raises_;
+std::optional<bool> soft_assert_raises_;
 } // namespace
 
-void setSoftAssertRaises(c10::optional<bool> value) {
+void setSoftAssertRaises(std::optional<bool> value) {
   soft_assert_raises_ = value;
 }
 
@@ -196,6 +121,7 @@ std::vector<FileLineFunc> prepareCallstack(
         auto line =
             src->starting_line_no() + src->lineno_for_offset(range.start());
         entries.emplace_back(
+            // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
             FileLineFunc{*(src->filename()), line, entry.filename});
       }
     }
@@ -406,23 +332,24 @@ std::vector<std::string> inputTypes(const at::RecordFunction& fn) {
 // ----------------------------------------------------------------------------
 // -- NCCL Metadata -----------------------------------------------------------
 // ----------------------------------------------------------------------------
-#ifdef USE_DISTRIBUTED
-#ifdef USE_C10D
-static constexpr auto kCommuName = "Collective name";
-static constexpr auto kDtype = "dtype";
-static constexpr auto kInMsgSize = "In msg size";
-static constexpr auto kOutMsgSize = "Out msg size";
-static constexpr auto kInSplit = "In split size";
-static constexpr auto kOutSplit = "Out split size";
-static constexpr auto kGroupSize = "Group size";
-#endif // USE_C10D
-#endif // USE_DISTRIBUTED
+
+static constexpr int32_t kTruncatLength = 30;
+
+template <typename ListLikeType>
+inline std::string format_list(ListLikeType list, bool truncate) {
+  if (truncate && list.size() > kTruncatLength) {
+    return fmt::format(
+        "\"[{}, ...]\"",
+        fmt::join(list.begin(), list.begin() + kTruncatLength, ", "));
+  }
+  return fmt::format("\"[{}]\"", fmt::join(list.begin(), list.end(), ", "));
+}
 
 std::unordered_map<std::string, std::string> saveNcclMeta(
-    const at::RecordFunction& fn) {
+    const at::RecordFunction& fn,
+    bool truncate) {
   std::unordered_map<std::string, std::string> map;
 #ifdef USE_DISTRIBUTED
-#ifdef USE_C10D
   auto debugInfo = dynamic_cast<ParamCommsDebugInfo*>(
       c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PARAM_COMMS_INFO));
   if (debugInfo == nullptr) {
@@ -431,19 +358,38 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
     return map;
   }
 
-  map.emplace(kCommuName, fmt::format("\"{}\"", debugInfo->getColumnName()));
+  map.emplace(
+      kCommsName, fmt::format("\"{}\"", debugInfo->getCollectiveName()));
   map.emplace(
       kDtype, fmt::format("\"{}\"", c10::toString(debugInfo->getDType())));
-  map.emplace(kInMsgSize, std::to_string(debugInfo->getInMessageSize()));
-  map.emplace(kOutMsgSize, std::to_string(debugInfo->getOutMessageSize()));
-  map.emplace(
-      kInSplit,
-      fmt::format("[{}]", fmt::join(debugInfo->getInputSplitSizes(), ", ")));
-  map.emplace(
-      kOutSplit,
-      fmt::format("[{}]", fmt::join(debugInfo->getOutputSplitSizes(), ", ")));
+  map.emplace(kInMsgNelems, std::to_string(debugInfo->getInMessageNelems()));
+  map.emplace(kOutMsgNelems, std::to_string(debugInfo->getOutMessageNelems()));
+
+  auto& inSplitSizes = debugInfo->getInputSplitSizes();
+  map.emplace(kInSplit, format_list(inSplitSizes, truncate));
+
+  auto& outSplitSizes = debugInfo->getOutputSplitSizes();
+  map.emplace(kOutSplit, format_list(outSplitSizes, truncate));
+
+  auto globalRankStart = debugInfo->getGlobalRankStart();
+  if (globalRankStart >= 0) {
+    map.emplace(kGlobalRankStart, std::to_string(globalRankStart));
+  }
+  auto globalRankStride = debugInfo->getGlobalRankStride();
+  if (globalRankStride > 0) {
+    map.emplace(kGlobalRankStride, std::to_string(globalRankStride));
+  }
   map.emplace(kGroupSize, std::to_string(debugInfo->getWorldSize()));
-#endif // USE_C10D
+  auto& group_name = debugInfo->getProcessGroupName();
+  if (!group_name.empty()) {
+    map.emplace(kProcessGroupName, fmt::format("\"{}\"", group_name));
+  }
+  auto& group_desc = debugInfo->getProcessGroupDesc();
+  if (!group_desc.empty()) {
+    map.emplace(kProcessGroupDesc, fmt::format("\"{}\"", group_desc));
+  }
+  auto& groupRanks = debugInfo->getGroupRanks();
+  map.emplace(kGroupRanks, format_list(groupRanks, truncate));
 #endif // USE_DISTRIBUTED
   return map;
 }
@@ -475,7 +421,7 @@ static constexpr auto kMatSize = "mat_size";
 static constexpr auto kMat1Size = "mat1_size";
 static constexpr auto kMat2Size = "mat2_size";
 
-static bool validateInput(
+static std::vector<c10::IntArrayRef> getInputSizes(
     const std::string& op_name,
     size_t min_size,
     c10::ArrayRef<const c10::IValue> inputs,
@@ -486,17 +432,26 @@ static bool validateInput(
        << op_name << ", min size: " << min_size
        << ", actual size: " << inputs.size();
     TORCH_WARN(ss.str());
-    return false;
+    return {};
   }
+  std::vector<c10::IntArrayRef> inputSizes = {};
   for (auto index : should_be_tensor) {
     if (!inputs[index].isTensor()) {
       ss << "Failed to save extra arguments for flops computation of op "
          << op_name << ", input[" << index << "] must be a tensor.";
       TORCH_WARN(ss.str());
-      return false;
+      return {};
     }
+    at::Tensor t = inputs[index].toTensor();
+    if (t.is_nested()) {
+      ss << "Failed to save extra arguments for flops computation of op "
+         << op_name << " with input[" << index << "] as nested tensor.";
+      TORCH_WARN(ss.str());
+      return {};
+    }
+    inputSizes.emplace_back(t.sizes());
   }
-  return true;
+  return inputSizes;
 }
 
 std::unordered_map<std::string, c10::IValue> saveExtraArgs(
@@ -512,77 +467,64 @@ std::unordered_map<std::string, c10::IValue> saveExtraArgs(
   }
 
   if (fname == kConv2dOp) {
-    bool check = validateInput(fname, kConv2dGroups + 1, inputs, {0, 1});
-    if (!check) {
+    const auto inputSizes =
+        getInputSizes(fname, kConv2dGroups + 1, inputs, {0, 1});
+    if (inputSizes.empty()) {
       return map;
     }
-
-    at::Tensor input = inputs[0].toTensor();
-    at::Tensor weight = inputs[1].toTensor();
-    if (weight.sizes().size() != 4) {
+    if (inputSizes[1].size() != 4) {
       TORCH_WARN(
           "Failed to compute flops for op aten::conv2d because it requires a 4D kernel tensor.");
       return map;
     }
-    map[kInputSize] = at::IValue(input.sizes());
-    map[kWeightSize] = at::IValue(weight.sizes());
+    map[kInputSize] = at::IValue(inputSizes[0]);
+    map[kWeightSize] = at::IValue(inputSizes[1]);
     map[kStride] = inputs[kConv2dStride];
     map[kPadding] = inputs[kConv2dPadding];
     map[kDilation] = inputs[kConv2dDilation];
     map[kGroups] = inputs[kConv2dGroups];
   } else if (fname == kMMOp) {
-    bool check = validateInput(fname, 2, inputs, {0, 1});
-    if (!check) {
+    const auto inputSizes = getInputSizes(fname, 2, inputs, {0, 1});
+    if (inputSizes.empty()) {
       return map;
     }
 
-    at::Tensor left = inputs[0].toTensor();
-    at::Tensor right = inputs[1].toTensor();
-    map[kMat1Size] = at::IValue(left.sizes());
-    map[kMat2Size] = at::IValue(right.sizes());
+    map[kMat1Size] = at::IValue(inputSizes[0]);
+    map[kMat2Size] = at::IValue(inputSizes[1]);
   } else if (fname == kAddMMOp) {
-    bool check = validateInput(fname, 3, inputs, {0, 1, 2});
-    if (!check) {
+    const auto inputSizes = getInputSizes(fname, 3, inputs, {0, 1, 2});
+    if (inputSizes.empty()) {
       return map;
     }
-
     // Exact FLOP count depends on scaling factors alpha and beta but
     // just assume these are +=1.
     // (similar to http://www.netlib.org/lapack/lawnspdf/lawn41.pdf,
     // "Operations Count for the BLAS and LAPACK", Table 3, SGEMM)
-    at::Tensor left = inputs[1].toTensor();
-    at::Tensor right = inputs[2].toTensor();
-    map[kMat1Size] = at::IValue(left.sizes());
-    map[kMat2Size] = at::IValue(right.sizes());
+    map[kMat1Size] = at::IValue(inputSizes[1]);
+    map[kMat2Size] = at::IValue(inputSizes[2]);
   } else if (fname == kMulOp) {
-    bool check = validateInput(fname, 1, inputs, {0});
-    if (!check) {
+    const auto inputSizes = getInputSizes(fname, 1, inputs, {0});
+    if (inputSizes.empty()) {
       return map;
     }
-
-    at::Tensor mat = inputs[0].toTensor();
-    map[kMatSize] = at::IValue(mat.sizes());
+    map[kMatSize] = at::IValue(inputSizes[0]);
   } else if (fname == kAddOp) {
-    bool check = validateInput(fname, 1, inputs, {0});
-    if (!check) {
+    const auto inputSizes = getInputSizes(fname, 1, inputs, {0});
+    if (inputSizes.empty()) {
       return map;
     }
-
-    at::Tensor mat = inputs[0].toTensor();
-    map[kMatSize] = at::IValue(mat.sizes());
+    map[kMatSize] = at::IValue(inputSizes[0]);
   } else if (fname == kBMMOp) {
-    bool check = validateInput(fname, 2, inputs, {0, 1});
-    if (!check) {
+    const auto inputSizes = getInputSizes(fname, 2, inputs, {0, 1});
+    if (inputSizes.empty()) {
       return map;
     }
 
-    at::Tensor left = inputs[0].toTensor();
-    at::Tensor right = inputs[1].toTensor();
-    map[kMat1Size] = at::IValue(left.sizes());
-    map[kMat2Size] = at::IValue(right.sizes());
+    map[kMat1Size] = at::IValue(inputSizes[0]);
+    map[kMat2Size] = at::IValue(inputSizes[1]);
   } else if (fname == kBAddBMMOp) {
-    bool check = validateInput(fname, 3, inputs, {0, 1, 2});
-    if (!check) {
+    const auto inputSizes = getInputSizes(fname, 3, inputs, {0, 1, 2});
+    if (inputSizes.empty()) {
       return map;
     }
 
@@ -590,10 +532,8 @@ std::unordered_map<std::string, c10::IValue> saveExtraArgs(
     // just assume these are +=1.
     // (similar to http://www.netlib.org/lapack/lawnspdf/lawn41.pdf,
     // "Operations Count for the BLAS and LAPACK", Table 3, SGEMM)
-    at::Tensor left = inputs[1].toTensor();
-    at::Tensor right = inputs[2].toTensor();
-    map[kMat1Size] = at::IValue(left.sizes());
-    map[kMat2Size] = at::IValue(right.sizes());
+    map[kMat1Size] = at::IValue(inputSizes[1]);
+    map[kMat2Size] = at::IValue(inputSizes[2]);
   }
 
   return map;
@@ -659,12 +599,10 @@ uint64_t computeFlops(
     }
     // format of the input is defined in
     // torch.ao.nn.quantized.functional.conv2d()
-    uint64_t minibatch = 0, in_channels = 0, input_h = 0, input_w = 0;
-    uint64_t out_channels = 0, kernel_h = 0, kernel_w = 0;
     const uint64_t conv2d_multiply_factor = 2;
-    std::tie(minibatch, in_channels, input_h, input_w) = std::make_tuple(
+    auto [minibatch, in_channels, input_h, input_w] = std::make_tuple(
         input_sizes[0], input_sizes[1], input_sizes[2], input_sizes[3]);
-    std::tie(out_channels, std::ignore, kernel_h, kernel_w) = std::make_tuple(
+    auto [out_channels, _, kernel_h, kernel_w] = std::make_tuple(
         kernel_sizes[0], kernel_sizes[1], kernel_sizes[2], kernel_sizes[3]);
     uint64_t output_h =
         (input_h + 2 * padding[0] - dilation[0] * (kernel_h - 1) - 1) /
@@ -807,6 +745,4 @@ uint64_t computeFlops(
   return 0;
 }
 
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl

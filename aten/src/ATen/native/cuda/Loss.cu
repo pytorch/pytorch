@@ -62,7 +62,7 @@ void binary_cross_entropy_backward_out_kernel(Tensor& grad_input, const Tensor& 
 
 namespace at::native {
 
-Tensor binary_cross_entropy_cuda(const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, int64_t reduction) {
+Tensor binary_cross_entropy_cuda(const Tensor& input, const Tensor& target, const std::optional<Tensor>& weight_opt, int64_t reduction) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
@@ -72,7 +72,7 @@ Tensor binary_cross_entropy_cuda(const Tensor& input, const Tensor& target, cons
         input, target, weight, reduction, loss);
 }
 
-Tensor& binary_cross_entropy_out_cuda(const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, int64_t reduction, Tensor& loss) {
+Tensor& binary_cross_entropy_out_cuda(const Tensor& input, const Tensor& target, const std::optional<Tensor>& weight_opt, int64_t reduction, Tensor& loss) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
@@ -121,7 +121,7 @@ Tensor& binary_cross_entropy_out_cuda(const Tensor& input, const Tensor& target,
   return loss;
 }
 
-Tensor binary_cross_entropy_backward_cuda(const Tensor& grad, const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, int64_t reduction) {
+Tensor binary_cross_entropy_backward_cuda(const Tensor& grad, const Tensor& input, const Tensor& target, const std::optional<Tensor>& weight_opt, int64_t reduction) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
@@ -131,7 +131,7 @@ Tensor binary_cross_entropy_backward_cuda(const Tensor& grad, const Tensor& inpu
       grad, input, target, weight, reduction, grad_input);
 }
 
-Tensor& binary_cross_entropy_backward_out_cuda(const Tensor& grad, const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, int64_t reduction, Tensor& grad_input) {
+Tensor& binary_cross_entropy_backward_out_cuda(const Tensor& grad, const Tensor& input, const Tensor& target, const std::optional<Tensor>& weight_opt, int64_t reduction, Tensor& grad_input) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
@@ -219,7 +219,7 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_1d(
       *output = -cur_weight * input[t];
     }
   } else {
-    // If the only element was omited, we get 0. See the discussion in
+    // If the only element was omitted, we get 0. See the discussion in
     // https://github.com/pytorch/pytorch/pull/64572#issuecomment-926504162
     *output = scalar_t{0};
     *total_weight = scalar_t{0};
@@ -408,7 +408,7 @@ template <typename scalar_t, typename index_t>
 __global__ void nll_loss_backward_no_reduce_cuda_kernel(
   int batch_size,
   const index_t *target,
-  PackedTensorAccessor64<scalar_t, 1> grad_output,
+  PackedTensorAccessor64<const scalar_t, 1> grad_output,
   PackedTensorAccessor64<scalar_t, 2> grad_input,
   const scalar_t *weights,
   int64_t n_classes,
@@ -520,7 +520,7 @@ void nll_loss_backward_out_cuda_template(
                        at::cuda::getCurrentCUDAStream()>>>(
                         batch_size,
                         target.const_data_ptr<index_t>(),
-                        grad_output.packed_accessor64<scalar_t, 1>(),
+                        grad_output.packed_accessor64<const scalar_t, 1>(),
                         grad_input.packed_accessor64<scalar_t, 2>(),
                         weight.defined() ? weight_.const_data_ptr<scalar_t>() : nullptr,
                         n_classes,

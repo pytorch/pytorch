@@ -1,12 +1,14 @@
+# mypy: ignore-errors
+
 from collections import namedtuple
 from copy import deepcopy
 from itertools import combinations
 
 import torch
 from torch.fx.operator_schemas import normalize_function
-from torch.testing._internal.jit_utils import clone_inputs
+from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils._pytree import tree_flatten, tree_map
+from torch.utils._pytree import tree_map
 
 # Named Tuples used within SchemaCheckMode
 Mutation = namedtuple("Mutation", ["op_name", "arg_name"])
@@ -22,6 +24,38 @@ SchemaInfo = torch._C._SchemaInfo
 #  - Records the called ops
 #  - Checks for mutations on all inputs
 #  - Checks for aliasing on all inputs
+
+
+# move these 2 functions here to avoid numpy dependency in testing/_internal/common_utils.py
+
+
+def is_iterable_of_tensors(iterable):
+    # Tensor itself is iterable so we check this first
+    if isinstance(iterable, torch.Tensor):
+        return False
+    try:
+        if len(iterable) == 0:
+            return False
+        for t in iter(iterable):
+            if not isinstance(t, torch.Tensor):
+                return False
+    except TypeError as te:
+        return False
+    return True
+
+
+def clone_inputs(args):
+    inputs = []
+
+    for arg in args:
+        if isinstance(arg, torch.Tensor):
+            inputs.append(arg.detach().clone())
+        elif is_iterable_of_tensors(arg):
+            inputs.append([t.detach().clone() for t in arg])
+        else:
+            inputs.append(arg)
+
+    return inputs
 
 
 class SchemaCheckMode(TorchDispatchMode):
@@ -113,7 +147,9 @@ class SchemaCheckMode(TorchDispatchMode):
             name: tree_map(unwrap, c_p_args.get(name)) for name in c_p_args
         }
         cloned_metadata = {
-            name: tree_map(parse_metadata, tree_flatten(pre_arguments.get(name))[0])
+            name: [
+                parse_metadata(a) for a in pytree.tree_leaves(pre_arguments.get(name))
+            ]
             for name in pre_arguments
         }
 
@@ -169,7 +205,7 @@ However, we found that `outputs[{str(j)}] is {name}"""
                 if any(
                     has_mutated(a, b, c)
                     for a, b, c in zip(
-                        tree_flatten(before)[0], tree_flatten(after)[0], md
+                        pytree.tree_leaves(before), pytree.tree_leaves(after), md
                     )
                 ):
                     if not schema_info.is_mutable(

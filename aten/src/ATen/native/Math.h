@@ -6,7 +6,6 @@
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
 #include <c10/util/MathConstants.h>
-#include <c10/util/math_compat.h>
 #include <cfloat>
 #include <cmath>
 #include <cstdint>
@@ -509,7 +508,7 @@ static inline C10_HOST_DEVICE scalar_t calc_polygamma(scalar_t x, int n) {
 
 /* References
  * [igam1] "The Digital Library of Mathematical Functions", dlmf.nist.gov
- * [igam2] Maddock et. al., "Incomplete Gamma Functions",
+ * [igam2] Maddock et al., "Incomplete Gamma Functions",
  *     https://www.boost.org/doc/libs/1_61_0/libs/math/doc/html/math_toolkit/sf_gamma/igamma.html
  */
 

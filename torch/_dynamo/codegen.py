@@ -3,16 +3,19 @@ import dataclasses
 import re
 import sys
 import types
-from typing import Counter, List, Optional, OrderedDict
+from typing import Counter, Dict, List, Optional
 
 import torch.nn
 from . import utils
 
 from .bytecode_transformation import (
     create_call_function,
+    create_call_method,
     create_dup_top,
     create_instruction,
+    create_load_attr,
     create_load_global,
+    create_load_method,
     create_rot_n,
     Instruction,
 )
@@ -35,10 +38,6 @@ class GraphOutputEntry:
     index: int
     variable: VariableTracker
 
-    def merge(self, other: VariableTracker):
-        # merge in any extra guards
-        self.variable = self.variable.add_options(other)
-
 
 class PyCodegen:
     """
@@ -55,9 +54,7 @@ class PyCodegen:
         self.root = root
         self.top_of_stack: Optional[VariableTracker] = None
         self.uses: Counter[VariableTracker] = collections.Counter()
-        self.graph_outputs: OrderedDict[
-            int, GraphOutputEntry
-        ] = collections.OrderedDict()
+        self.graph_outputs: Dict[int, GraphOutputEntry] = {}
         self._output: List[Instruction] = []
         self.tempvars = tempvars or {}
         self.tx = tx
@@ -65,26 +62,52 @@ class PyCodegen:
         self.code_options = self.tx.output.code_options
         self.cell_and_freevars = self.tx.cell_and_freevars
         self.new_var = self.tx.output.new_var
+        self.mutable_side_effects_from_source = False
+        self.value_from_source: bool = True
+
+    def restore_stack(self, stack_values, *, value_from_source=True):
+        prior = self.mutable_side_effects_from_source
+        self.mutable_side_effects_from_source = True
+        prev = self.value_from_source
+        self.value_from_source &= value_from_source
+        try:
+            self.foreach(stack_values)
+        finally:
+            self.mutable_side_effects_from_source = prior
+            self.value_from_source = prev
 
     def graph_output_vars(self):
         return [x.variable for x in self.graph_outputs.values()]
 
+    def call_reconstruct(self, value):
+        res = value.reconstruct(self)
+        assert res is None, f"reconstruct!=None {value}"
+
     def __call__(self, value, allow_cache=True):
         """Generate code such that top-of-stack (TOS) is set to value"""
         if isinstance(value, Source):
-            self._output.extend(value.reconstruct(self))
+            self.call_reconstruct(value)
             self.clear_tos()
             return
-
-        self.tx.output.guards.update(value.guards)
 
         assert isinstance(value, VariableTracker)
         output = self._output
         graph_outputs = self.graph_outputs
 
-        if self.top_of_stack is value:
+        if self.top_of_stack is value and allow_cache:
             output.append(create_dup_top())
             return
+
+        if self.mutable_side_effects_from_source:
+            # this is needed to get aliasing relationships right
+            # value.mutable_local.source will get mutated to hold `value`
+            # mutable_side_effects_from_source=False is used to codegen the mutation
+            # mutable_side_effects_from_source=True is used to codegen a reference
+            from .side_effects import MutableSideEffects
+
+            if isinstance(value.mutable_local, MutableSideEffects):
+                self(value.mutable_local.source)
+                return
 
         if allow_cache:
             if value.mutable_local and value.mutable_local in self.tempvars:
@@ -96,21 +119,40 @@ class PyCodegen:
                 self.top_of_stack = value
                 return
 
-        if value.source is not None and allow_cache:
-            output.extend(value.source.reconstruct(self))
+        if value.source is not None and allow_cache and self.value_from_source:
+            self.call_reconstruct(value.source)
         elif value.is_python_constant() and is_safe_constant(
             value.as_python_constant()
         ):
             output.append(self.create_load_const(value.as_python_constant()))
         elif isinstance(value, TensorWithTFOverrideVariable):
             graph_outputs_key = self.add_graph_output(value)
+
+            self.load_import_from(utils.__name__, "to_subclass")
+            self.load_graph_output(graph_outputs[graph_outputs_key].index)
             output.append(
                 self.create_load_global(
-                    value.global_mangled_class_name(), True, add=True
+                    value.global_mangled_class_name(self.tx), False, add=True
                 )
             )
+            output.extend(create_call_function(2, True))
+        elif (
+            isinstance(value, SymNodeVariable)
+            and value.python_type() == float
+            and not self.tx.export
+        ):
+            # This is a little unusual; force the output convention to be a
+            # Tensor here.  Don't do this for export because this is
+            # apparently load bearing for export tests (but I am a bit
+            # doubtful it actually works in the real world)
+            # NB: It works to add_graph_output on a computed expression
+            # as_tensor here, because we memoize as_tensor calls on
+            # SymNodeVariable!
+            graph_outputs_key = self.add_graph_output(value.as_tensor(self.tx))
             self.load_graph_output(graph_outputs[graph_outputs_key].index)
-            output.extend(create_call_function(1, True))
+            output.extend(
+                [self.create_load_attr("item")] + create_call_function(0, True)
+            )
         elif isinstance(
             value,
             (
@@ -146,7 +188,7 @@ class PyCodegen:
         else:
             self.uses[value] += 1
             try:
-                output.extend(value.reconstruct(self))
+                self.call_reconstruct(value)
             except NotImplementedError:
                 unimplemented(f"reconstruct: {value}")
             if allow_cache and value in self.tempvars:
@@ -161,9 +203,6 @@ class PyCodegen:
             self.graph_outputs[graph_outputs_key] = GraphOutputEntry(
                 len(self.graph_outputs), value
             )
-        else:
-            self.graph_outputs[graph_outputs_key].merge(value)
-
         return graph_outputs_key
 
     def load_graph_output(self, index):
@@ -225,7 +264,7 @@ class PyCodegen:
         assert name in self.code_options["co_varnames"]
         return create_instruction("STORE_FAST", argval=name)
 
-    def create_load_global(self, name, push_null, add=False):
+    def create_load_global(self, name, push_null, add=False) -> Instruction:
         if add:
             self.tx.output.update_co_names(name)
         assert name in self.code_options["co_names"], f"{name} not in co_names"
@@ -240,13 +279,34 @@ class PyCodegen:
 
     create_load_output = _create_load_const
 
-    def create_load_attr(self, name) -> List[Instruction]:
+    def create_load_method(self, name):
+        self.tx.output.update_co_names(name)
+        return create_load_method(name)
+
+    def load_method(self, name):
+        self.append_output(self.create_load_method(name))
+
+    def call_method(self, nargs):
+        self.extend_output(create_call_method(nargs))
+
+    def create_load_attr(self, name) -> Instruction:
         if name not in self.code_options["co_names"]:
             self.code_options["co_names"] += (name,)
-        return create_instruction("LOAD_ATTR", argval=name)
+        return create_load_attr(name)
+
+    def load_attr(self, name):
+        self.append_output(self.create_load_attr(name))
 
     def create_load_attrs(self, names):
         return [self.create_load_attr(name) for name in names.split(".")]
+
+    def create_store_attr(self, name) -> Instruction:
+        if name not in self.code_options["co_names"]:
+            self.code_options["co_names"] += (name,)
+        return create_instruction("STORE_ATTR", argval=name)
+
+    def store_attr(self, name):
+        self.append_output(self.create_store_attr(name))
 
     def load_function_name(self, fn_name, push_null, num_on_stack=0):
         """Load the global fn_name on the stack num_on_stack down"""
@@ -286,6 +346,18 @@ class PyCodegen:
             create_instruction("POP_TOP"),
         ]
 
+    def pop_top(self):
+        self.append_output(create_instruction("POP_TOP"))
+
+    def call_function(self, nargs: int, push_null: bool):
+        self.extend_output(create_call_function(nargs, push_null=push_null))
+
+    def dup_top(self):
+        self.append_output(create_dup_top())
+
+    def store(self, varname):
+        self.append_output(self.create_store(varname))
+
     def make_function_with_closure(
         self, fn_name: str, code: types.CodeType, push_null: bool, num_on_stack=0
     ):
@@ -306,18 +378,18 @@ class PyCodegen:
         output.extend(self.rot_n(num_on_stack + 1))
         self.clear_tos()
 
-    def create_load_python_module(self, mod, push_null):
+    def create_load_python_module(self, mod, push_null) -> Instruction:
         """
         Generate a LOAD_GLOBAL instruction to fetch a given python module.
         """
-        global_scope = self.tx.output.global_scope
+        output = self.tx.output
+        global_scope = output.global_scope
         name = re.sub(r"^.*[.]", "", mod.__name__)
         if global_scope.get(name, None) is mod:
             return self.create_load_global(name, push_null, add=True)
-        mangled_name = f"___module_{name}_{id(mod)}"
-        if mangled_name not in global_scope:
-            self.tx.output.install_global(mangled_name, mod)
-        return self.create_load_global(mangled_name, push_null, add=True)
+        prefix = f"___module_{name}"
+        global_name = self.tx.output.install_global_by_id(prefix, mod)
+        return self.create_load_global(global_name, push_null, add=True)
 
     def make_call_generated_code(self, fn_name: str) -> None:
         """Call the generated code function stored in fn_name"""
@@ -325,35 +397,40 @@ class PyCodegen:
 
         graphargs = self.tx.output.graphargs
         for arg in graphargs:
-            if arg.is_unspecialized:
+            if arg.pass_arg_as_tensor:
                 self.extend_output(
                     [
                         self.create_load_python_module(torch, True),
                         self.create_load_attr("as_tensor"),
                     ]
                 )
-                self.extend_output(arg.load(self))
+                self.call_reconstruct(arg)
                 self.extend_output(create_call_function(1, False))
             else:
-                self.extend_output(arg.load(self))
+                self.call_reconstruct(arg)
 
         self.extend_output(create_call_function(len(graphargs), False))
 
     def load_import_from(self, module_name, object_name) -> None:
-        self.extend_output(
-            AttrSource(self.tx.import_source(module_name), object_name).reconstruct(
-                self
-            )
-        )
+        self(AttrSource(self.tx.import_source(module_name), object_name))
 
     def create_call_function_kw(self, nargs, kw_names, push_null) -> List[Instruction]:
         if sys.version_info >= (3, 11):
             output = create_call_function(nargs, push_null)
-            assert output[-2].opname == "PRECALL"
+            if sys.version_info >= (3, 12):
+                idx = -1
+                expected_inst = "CALL"
+            else:
+                idx = -2
+                expected_inst = "PRECALL"
+            assert output[idx].opname == expected_inst
             kw_names_inst = create_instruction("KW_NAMES", argval=kw_names)
-            output.insert(-2, kw_names_inst)
+            output.insert(idx, kw_names_inst)
             return output
         return [
             self.create_load_const(kw_names),
             create_instruction("CALL_FUNCTION_KW", arg=nargs),
         ]
+
+    def create_delete(self, value) -> Instruction:
+        return create_instruction("DELETE_FAST", argval=value)

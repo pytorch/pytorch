@@ -6,7 +6,9 @@ from torch import Tensor
 __all__ = ['PixelShuffle', 'PixelUnshuffle']
 
 class PixelShuffle(Module):
-    r"""Rearranges elements in a tensor of shape :math:`(*, C \times r^2, H, W)`
+    r"""Rearrange elements in a tensor according to an upscaling factor.
+
+    Rearranges elements in a tensor of shape :math:`(*, C \times r^2, H, W)`
     to a tensor of shape :math:`(*, C, H \times r, W \times r)`, where r is an upscale factor.
 
     This is useful for implementing efficient sub-pixel convolution
@@ -14,7 +16,7 @@ class PixelShuffle(Module):
 
     See the paper:
     `Real-Time Single Image and Video Super-Resolution Using an Efficient Sub-Pixel Convolutional Neural Network`_
-    by Shi et. al (2016) for more details.
+    by Shi et al. (2016) for more details.
 
     Args:
         upscale_factor (int): factor to increase spatial resolution by
@@ -43,6 +45,7 @@ class PixelShuffle(Module):
     .. _Real-Time Single Image and Video Super-Resolution Using an Efficient Sub-Pixel Convolutional Neural Network:
         https://arxiv.org/abs/1609.05158
     """
+
     __constants__ = ['upscale_factor']
     upscale_factor: int
 
@@ -58,13 +61,15 @@ class PixelShuffle(Module):
 
 
 class PixelUnshuffle(Module):
-    r"""Reverses the :class:`~torch.nn.PixelShuffle` operation by rearranging elements
+    r"""Reverse the PixelShuffle operation.
+
+    Reverses the :class:`~torch.nn.PixelShuffle` operation by rearranging elements
     in a tensor of shape :math:`(*, C, H \times r, W \times r)` to a tensor of shape
     :math:`(*, C \times r^2, H, W)`, where r is a downscale factor.
 
     See the paper:
     `Real-Time Single Image and Video Super-Resolution Using an Efficient Sub-Pixel Convolutional Neural Network`_
-    by Shi et. al (2016) for more details.
+    by Shi et al. (2016) for more details.
 
     Args:
         downscale_factor (int): factor to decrease spatial resolution by
@@ -93,6 +98,7 @@ class PixelUnshuffle(Module):
     .. _Real-Time Single Image and Video Super-Resolution Using an Efficient Sub-Pixel Convolutional Neural Network:
         https://arxiv.org/abs/1609.05158
     """
+
     __constants__ = ['downscale_factor']
     downscale_factor: int
 

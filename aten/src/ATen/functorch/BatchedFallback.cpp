@@ -17,8 +17,7 @@
 #include <c10/util/llvmMathExtras.h>
 #include <c10/util/irange.h>
 
-namespace at {
-namespace functorch {
+namespace at::functorch {
 
 bool kVmapFallbackWarningEnabled = true;
 
@@ -160,7 +159,7 @@ static void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, t
         "please file a bug report instead.");
     }
     batched_tensor_inputs.push_back(tensor);
-    batched_tensor_inputs_position.push_back(idx);
+    batched_tensor_inputs_position.push_back(static_cast<int64_t>(idx));
   }
   TORCH_INTERNAL_ASSERT(!batched_tensor_inputs.empty());
 
@@ -305,7 +304,7 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
       continue;
     }
     batched_tensor_inputs.push_back(tensor);
-    batched_tensor_inputs_position.push_back(idx);
+    batched_tensor_inputs_position.push_back(static_cast<int64_t>(idx));
   }
   TORCH_INTERNAL_ASSERT(!batched_tensor_inputs.empty());
 
@@ -446,18 +445,18 @@ void batchedNestedTensorForLoopFallback(const c10::OperatorHandle& op, torch::ji
       continue;
     }
     batched_tensor_inputs.push_back(tensor);
-    batched_tensor_inputs_position.push_back(idx);
+    batched_tensor_inputs_position.push_back(static_cast<int64_t>(idx));
   }
   TORCH_INTERNAL_ASSERT(!batched_tensor_inputs.empty());
 
   std::vector<std::vector<Tensor>> unbound;
-  for (auto iter = batched_tensor_inputs.begin(); iter != batched_tensor_inputs.end(); ++iter) {
-    auto *batched_impl = maybeGetBatchedImpl(*iter);
+  for (auto const &batched_tensor_input: batched_tensor_inputs) {
+    auto *batched_impl = maybeGetBatchedImpl(batched_tensor_input);
     TORCH_INTERNAL_ASSERT(batched_impl->value().is_nested() || batched_impl->bdim() == 0,
         "Fallback not supported for mixed nested / non-nested arguments without bdim=0");
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::BatchedNestedTensor);
     auto this_unbound = batched_impl->value().unbind();
-    if (unbound.size() > 0) {
+    if (!unbound.empty()) {
       TORCH_INTERNAL_ASSERT(unbound.front().size() == this_unbound.size(),
           "Fallback not supported for differently-sized nested arguments");
     }
@@ -514,5 +513,4 @@ void vmapErrorFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) 
   TORCH_CHECK(false, "Error: ", op.operator_name(), " requires special handling, and does not yet have a batching rule. Feel free to file a github issue!");
 }
 
-}
-} // namespace at
+} // namespace at::functorch

@@ -1,7 +1,13 @@
 import math
+import os
 import torch
+import weakref
 from functools import lru_cache
 from torch.utils._triton import has_triton
+from ._triton_ops_meta import get_meta
+from typing import Optional, Tuple
+
+TORCH_SPARSE_BSR_SCATTER_MM_LRU_CACHE_SIZE = int(os.getenv('TORCH_SPARSE_BSR_SCATTER_MM_LRU_CACHE_SIZE', 2))
 
 
 def check(cond, msg):
@@ -71,7 +77,19 @@ def check_blocksize(f_name, blocksize):
 
 
 def make_triton_contiguous(t):
-    if (t.stride(-2) > 1 or t.dtype is torch.float32) and t.stride(-1) > 1:
+    """Return input as a triton-contiguous tensor.
+
+    A triton-contiguous tensor is defined as a tensor that has strides
+    with minimal value equal to 1.
+
+    While triton kernels support triton-non-contiguous tensors (all
+    strides being greater than 1 or having 0 strides) arguments, a
+    considerable slow-down occurs because tensor data is copied
+    element-wise rather than chunk-wise.
+    """
+    if min(t.stride()) != 1:
+        # TODO: investigate if contiguity along other axes than the
+        # last one can be beneficial for performance
         return t.contiguous()
     else:
         return t
@@ -440,15 +458,18 @@ def scatter_mm(blocks, others, indices_data, *, accumulators=None):
 def scatter_mm_meta(M, K, N, Ms, Ks,
                     GROUP_SIZE=None, TILE_M=None, TILE_N=None, SPLIT_N=None, num_warps=None, num_stages=None, **extra):
     if {TILE_M, TILE_N, SPLIT_N, num_warps, num_stages, GROUP_SIZE} == {None}:
+        device_name = torch.cuda.get_device_name()
+        meta = get_meta('scatter_mm', (M, K, N, Ms, Ks), device_name,
+                        version=(0, torch.float16, 0.5))
+        if meta is not None:
+            meta.update(**extra)
+            return meta
         # The following parameters are optimized for the performance
         # equilibrium points of bsr-dense and dense-dense matrix
-        # multiplications when using GPU cards NVIDIA A100 and NVIDIA
-        # GeForce RTX 2060 SUPER. For points far from the performance
-        # equilibrium points as well as for other GPU cards, the
-        # optimal parameters are likely different from what specified
-        # below.
-        device_name = torch.cuda.get_device_name()
-        is_A100 = 'A100' in device_name
+        # multiplications when using GPU card NVIDIA GeForce RTX 2060
+        # SUPER. For points far from the performance equilibrium
+        # points as well as for other GPU cards, the optimal
+        # parameters are likely different from what specified below.
         if (M, K, N) == (256,) * 3:
             if (Ms, Ks) == (16, 16):
                 SPLIT_N=1;TILE_M=16;TILE_N=16;GROUP_SIZE=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
@@ -461,98 +482,41 @@ def scatter_mm_meta(M, K, N, Ms, Ks,
         elif (M, K, N) == (512,) * 3:
             if (Ms, Ks) == (16, 16):
                 SPLIT_N=8;TILE_M=16;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=2  # noqa: E225,E231,E702
-                if is_A100:
-                    SPLIT_N=1;TILE_M=16;TILE_N=32;GROUP_SIZE=2;num_stages=1;num_warps=1  # noqa: E225,E231,E702
             elif (Ms, Ks) == (32, 32):
                 SPLIT_N=8;TILE_M=32;TILE_N=64;GROUP_SIZE=4;num_stages=1;num_warps=2  # noqa: E225,E231,E702
-                if is_A100:
-                    SPLIT_N=4;TILE_M=16;TILE_N=32;GROUP_SIZE=2;num_stages=1;num_warps=1  # noqa: E225,E231,E702
             elif (Ms, Ks) == (64, 64):
                 SPLIT_N=4;TILE_M=32;TILE_N=128;GROUP_SIZE=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
-                if is_A100:
-                    SPLIT_N=1;TILE_M=16;TILE_N=32;GROUP_SIZE=2;num_stages=1;num_warps=1  # noqa: E225,E231,E702
             elif (Ms, Ks) == (128, 128):
                 SPLIT_N=8;TILE_M=64;TILE_N=64;GROUP_SIZE=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
         elif (M, K, N) == (1024,) * 3:
             if (Ms, Ks) == (16, 16):
                 SPLIT_N=4;TILE_M=16;TILE_N=128;GROUP_SIZE=2;num_stages=1;num_warps=1  # noqa: E225,E231,E702
-                if is_A100:
-                    SPLIT_N=1;TILE_M=16;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=2  # noqa: E225,E231,E702
             elif (Ms, Ks) == (32, 32):
                 SPLIT_N=8;TILE_M=32;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=1  # noqa: E225,E231,E702
-                if is_A100:
-                    SPLIT_N=2;TILE_M=32;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=2  # noqa: E225,E231,E702
             elif (Ms, Ks) == (64, 64):
                 SPLIT_N=16;TILE_M=64;TILE_N=64;GROUP_SIZE=4;num_stages=1;num_warps=2  # noqa: E225,E231,E702
-                if is_A100:
-                    SPLIT_N=2;TILE_M=32;TILE_N=128;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
             elif (Ms, Ks) == (128, 128):
                 SPLIT_N=16;TILE_M=64;TILE_N=64;GROUP_SIZE=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
-                if is_A100:
-                    SPLIT_N=8;TILE_M=64;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
             elif (Ms, Ks) == (256, 256):
                 SPLIT_N=16;TILE_M=64;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
         elif (M, K, N) == (2048,) * 3:
             if (Ms, Ks) == (16, 16):
                 SPLIT_N=4;TILE_M=16;TILE_N=128;GROUP_SIZE=8;num_stages=1;num_warps=1  # noqa: E225,E231,E702
-                if is_A100:
-                    SPLIT_N=8;TILE_M=16;TILE_N=64;GROUP_SIZE=1;num_stages=1;num_warps=2  # noqa: E225,E231,E702
             elif (Ms, Ks) == (32, 32):
                 SPLIT_N=4;TILE_M=32;TILE_N=64;GROUP_SIZE=4;num_stages=1;num_warps=1  # noqa: E225,E231,E702
-                if is_A100:
-                    SPLIT_N=16;TILE_M=32;TILE_N=64;GROUP_SIZE=1;num_stages=1;num_warps=2  # noqa: E225,E231,E702
             elif (Ms, Ks) == (64, 64):
                 SPLIT_N=4;TILE_M=64;TILE_N=128;GROUP_SIZE=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
-                if is_A100:
-                    SPLIT_N=8;TILE_M=64;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
             elif (Ms, Ks) == (128, 128):
                 SPLIT_N=8;TILE_M=64;TILE_N=64;GROUP_SIZE=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
-                if is_A100:
-                    SPLIT_N=32;TILE_M=64;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
             elif (Ms, Ks) == (256, 256):
                 SPLIT_N=4;TILE_M=64;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
         elif (M, K, N) == (4096,) * 3:
             if (Ms, Ks) == (16, 16):
                 SPLIT_N=2;TILE_M=16;TILE_N=256;GROUP_SIZE=2;num_stages=1;num_warps=2  # noqa: E225,E231,E702
-                if is_A100:
-                    SPLIT_N=4;TILE_M=16;TILE_N=128;GROUP_SIZE=2;num_stages=1;num_warps=2  # noqa: E225,E231,E702
             elif (Ms, Ks) == (32, 32):
                 SPLIT_N=2;TILE_M=32;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=1  # noqa: E225,E231,E702
-                if is_A100:
-                    SPLIT_N=4;TILE_M=32;TILE_N=64;GROUP_SIZE=4;num_stages=3;num_warps=2  # noqa: E225,E231,E702
             elif (Ms, Ks) == (64, 64):
                 SPLIT_N=2;TILE_M=64;TILE_N=128;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
-                if is_A100:
-                    SPLIT_N=4;TILE_M=64;TILE_N=64;GROUP_SIZE=2;num_stages=3;num_warps=2  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (128, 128):
-                if is_A100:
-                    SPLIT_N=2;TILE_M=128;TILE_N=128;GROUP_SIZE=1;num_stages=1;num_warps=8  # noqa: E225,E231,E702
-        elif (M, K, N) == (8192,) * 3:
-            if (Ms, Ks) == (16, 16):
-                if is_A100:
-                    SPLIT_N=1;TILE_M=16;TILE_N=128;GROUP_SIZE=2;num_stages=1;num_warps=2  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (32, 32):
-                if is_A100:
-                    SPLIT_N=1;TILE_M=32;TILE_N=128;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (64, 64):
-                if is_A100:
-                    SPLIT_N=4;TILE_M=64;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (128, 128):
-                if is_A100:
-                    SPLIT_N=4;TILE_M=128;TILE_N=128;GROUP_SIZE=2;num_stages=3;num_warps=8  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (256, 256):
-                if is_A100:
-                    SPLIT_N=8;TILE_M=256;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=16  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (512, 512):
-                if is_A100:
-                    SPLIT_N=1;TILE_M=128;TILE_N=32;GROUP_SIZE=2;num_stages=1;num_warps=8  # noqa: E225,E231,E702
-        elif (M, K, N) == (16384,) * 3:
-            if (Ms, Ks) == (16, 16):
-                if is_A100:
-                    SPLIT_N=1;TILE_M=16;TILE_N=256;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (32, 32):
-                if is_A100:
-                    SPLIT_N=2;TILE_M=32;TILE_N=128;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
 
     if SPLIT_N is None:
         # Assume NVIDIA GeForce RTX 2060 SUPER:
@@ -582,7 +546,7 @@ def scatter_mm_meta(M, K, N, Ms, Ks,
     GROUP_SIZE = GROUP_SIZE or 4
 
     assert TILE_M <= Ms, dict(TILE_M=TILE_M, Ms=Ms)
-    assert TILE_N <= Ns, dict(TILE_B=TILE_N, Ns=Ns)
+    assert TILE_N <= Ns, dict(TILE_N=TILE_N, Ns=Ns)
     assert Ms <= M, dict(M=M, Ms=Ms)
     assert Ns <= N, dict(N=N, Ns=Ns)
     assert Ks <= K, dict(K=K, Ks=Ks)
@@ -591,124 +555,112 @@ def scatter_mm_meta(M, K, N, Ms, Ks,
                 num_stages=num_stages, num_warps=num_warps, SPLIT_N=SPLIT_N, **extra)
 
 
-def bsr_dense_mm_meta(M, K, N, Ms, Ks,
-                      GROUP_SIZE_ROW=None, num_warps=None, num_stages=None, **extra):
-    if {num_warps, num_stages, GROUP_SIZE_ROW} == {None}:
-        # The following parameters are optimized for the performance
-        # equilibrium points of bsr-dense and dense-dense matrix
-        # multiplications when using GPU cards NVIDIA A100. For points
-        # far from the performance equilibrium points as well as for
-        # other GPU cards, the optimal parameters are likely different
-        # from what specified below.
+def bsr_dense_addmm_meta(M, K, N, Ms, Ks, beta, alpha,
+                         SPLIT_N=None, GROUP_SIZE_ROW=None, num_warps=None, num_stages=None, sparsity=None, dtype=None, **extra):
+    if dtype is None:
+        dtype = torch.float16
+    if sparsity is None:
+        sparsity = 0.5
+    if {SPLIT_N, num_warps, num_stages, GROUP_SIZE_ROW} == {None}:
         device_name = torch.cuda.get_device_name()
-        is_A100 = 'A100' in device_name
-        if (M, K, N) == (1024,) * 3:
-            if (Ms, Ks) == (16, 16):
-                if is_A100:
-                    GROUP_SIZE_ROW=4;num_stages=3;num_warps=1  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (32, 32):
-                if is_A100:
-                    GROUP_SIZE_ROW=1;num_stages=3;num_warps=1  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (64, 64):
-                if is_A100:
-                    GROUP_SIZE_ROW=1;num_stages=3;num_warps=2  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (128, 128):
-                if is_A100:
-                    GROUP_SIZE_ROW=1;num_stages=2;num_warps=8  # noqa: E225,E231,E702
-        elif (M, K, N) == (2048,) * 3:
-            if (Ms, Ks) == (16, 16):
-                if is_A100:
-                    GROUP_SIZE_ROW=1;num_stages=3;num_warps=1  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (32, 32):
-                if is_A100:
-                    GROUP_SIZE_ROW=1;num_stages=3;num_warps=1  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (64, 64):
-                if is_A100:
-                    GROUP_SIZE_ROW=3;num_stages=3;num_warps=2  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (128, 128):
-                if is_A100:
-                    GROUP_SIZE_ROW=4;num_stages=2;num_warps=8  # noqa: E225,E231,E702
-        elif (M, K, N) == (4096,) * 3:
-            if (Ms, Ks) == (16, 16):
-                if is_A100:
-                    GROUP_SIZE_ROW=1;num_stages=3;num_warps=1  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (32, 32):
-                if is_A100:
-                    GROUP_SIZE_ROW=3;num_stages=4;num_warps=2  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (64, 64):
-                if is_A100:
-                    GROUP_SIZE_ROW=2;num_stages=3;num_warps=2  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (128, 128):
-                if is_A100:
-                    GROUP_SIZE_ROW=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
-        elif (M, K, N) == (8192,) * 3:
-            if (Ms, Ks) == (16, 16):
-                if is_A100:
-                    GROUP_SIZE_ROW=4;num_stages=3;num_warps=1  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (32, 32):
-                if is_A100:
-                    GROUP_SIZE_ROW=4;num_stages=3;num_warps=1  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (64, 64):
-                if is_A100:
-                    GROUP_SIZE_ROW=4;num_stages=3;num_warps=2  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (128, 128):
-                if is_A100:
-                    GROUP_SIZE_ROW=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
-        elif (M, K, N) == (16384,) * 3:
-            if (Ms, Ks) == (16, 16):
-                if is_A100:
-                    GROUP_SIZE_ROW=4;num_stages=3;num_warps=1  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (32, 32):
-                if is_A100:
-                    GROUP_SIZE_ROW=4;num_stages=4;num_warps=1  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (64, 64):
-                if is_A100:
-                    GROUP_SIZE_ROW=4;num_stages=3;num_warps=2  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (128, 128):
-                if is_A100:
-                    GROUP_SIZE_ROW=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
+        key = (M, K, N, Ms, Ks, beta == 0, beta == 1, alpha == 1)
+        meta = get_meta('bsr_dense_addmm', key,
+                        device_name, version=(0, dtype, sparsity))
+        if meta is None and sparsity != 0.5:
+            meta = get_meta('bsr_dense_addmm', key,
+                            device_name, version=(0, dtype, 0.5))
+            if meta is None:
+                # find approximate meta such that N % SPLIT_N == 0.
+                matching_meta = get_meta(
+                    'bsr_dense_addmm',
+                    (*key[:2], '*', *key[3:]),
+                    device_name, version=(0, dtype, 0.5))
+                for mkey in sorted(matching_meta or {}):
+                    meta_ = matching_meta[mkey]
+                    if N % meta_['SPLIT_N'] == 0 and mkey[2] <= N:
+                        meta = meta_
+        if meta is not None:
+            meta.update(**extra)
+            return meta
+    SPLIT_N = SPLIT_N or max(N // Ms, 1)
     GROUP_SIZE_ROW = GROUP_SIZE_ROW or 4
     num_stages = num_stages or 1
     num_warps = num_warps or 4
-    return dict(GROUP_SIZE_ROW=GROUP_SIZE_ROW, num_stages=num_stages, num_warps=num_warps, **extra)
+    return dict(SPLIT_N=SPLIT_N, GROUP_SIZE_ROW=GROUP_SIZE_ROW, num_stages=num_stages, num_warps=num_warps, **extra)
 
 
 class TensorAsKey:
     """A light-weight wrapper of a tensor that enables storing tensors as
-    keys with efficient data-pointer/shape/strides based comparision
-    as an approximation to data equality based keys.
+    keys with efficient memory reference based comparision as an
+    approximation to data equality based keys.
 
-    Motivation: the hash value of a torch tensor is tensor-pointer
-    based that completely ignores data equality and makes the usage of
-    tensors as keys rather pointless. For instance, the result of
+    Motivation: the hash value of a torch tensor is tensor instance
+    based that does not use data equality and makes the usage of
+    tensors as keys less useful. For instance, the result of
     ``len({a.crow_indices(), a.crow_indices()})`` is `2`, although,
-    the results of `crow_indices` method hold the same data storage.
+    the tensor results from `crow_indices` method call are equal, in
+    fact, these share the same data storage.
     On the other hand, for efficient caching of tensors we want to
-    avoid calling torch.equal at the expense of having a possibly
-    larger cache as it may contain tensors that are element-wise equal
-    but that use different data storages.
+    avoid calling torch.equal that compares tensors item-wise.
+
+    TensorAsKey offers a compromise in that it guarantees key equality
+    of tensors that references data in the same storage in the same
+    manner and without accessing underlying data. However, this
+    approach does not always guarantee correctness. For instance, for
+    a complex tensor ``x``, we have ``TensorAsKey(x) ==
+    TensorAsKey(x.conj())`` while ``torch.equal(x, x.conj())`` would
+    return False.
     """
+
     def __init__(self, obj):
-        self.obj = obj
-        self.key = (obj.data_ptr(), obj.shape, obj.stride())
+
+        def get_tensor_key(obj):
+            # Warning: TensorAsKey does not track negative nor
+            # conjugate bits of its input object because in the use
+            # case of wrapping compressed/plain indices of compressed
+            # sparse tensors (that are always integer tensors with
+            # non-negative items) these bits are never set. However,
+            # when extending the use of TensorAsKey to float or
+            # complex tensors, the values of these bits (see is_neg
+            # and is_conj methods) must be included in the key as
+            # well.
+            assert not (obj.dtype.is_floating_point or obj.dtype.is_complex), obj.dtype
+            return (obj.data_ptr(), obj.storage_offset(), obj.shape, obj.stride(), obj.dtype)
+
+        self._obj_ref = weakref.ref(obj)
+        if obj.layout is torch.strided:
+            self.key = get_tensor_key(obj)
+        elif obj.layout in {torch.sparse_csr, torch.sparse_bsr}:
+            self.key = (get_tensor_key(obj.crow_indices()), get_tensor_key(obj.col_indices()))
+        elif obj.layout in {torch.sparse_csc, torch.sparse_bsc}:
+            self.key = (get_tensor_key(obj.ccol_indices()), get_tensor_key(obj.row_indices()))
+        else:
+            raise NotImplementedError(obj.layout)
         self._hash = hash(self.key)
 
     def __hash__(self):
         return self._hash
 
     def __eq__(self, other):
-        if self is other:
-            return True
         if not isinstance(other, TensorAsKey):
             return False
-        if self.obj is other.obj:
-            return True
+        if self.obj is None or other.obj is None:
+            # dead objects always compare unequal unless these are
+            # same objects
+            return self is other
         return self.key == other.key
 
+    @property
+    def obj(self):
+        """Return object if alive, otherwise None."""
+        return self._obj_ref()
 
-@lru_cache(maxsize=128)
-def _bsr_scatter_mm_indices_data(indices_format, M, K, N, Ms, Ks, nbatches, SPLIT_N, crow_indices_as_key, col_indices_as_key):
-    crow_indices, col_indices = crow_indices_as_key.obj, col_indices_as_key.obj
+
+@lru_cache(maxsize=TORCH_SPARSE_BSR_SCATTER_MM_LRU_CACHE_SIZE)
+def _bsr_scatter_mm_indices_data(indices_format, M, K, N, Ms, Ks, nbatches, SPLIT_N, compressed_sparse_tensor_as_key):
+    bsr = compressed_sparse_tensor_as_key.obj
+    assert bsr is not None
+    crow_indices, col_indices = bsr.crow_indices(), bsr.col_indices()
     device = crow_indices.device
     indices_dtype = torch.int32
 
@@ -800,8 +752,7 @@ def bsr_scatter_mm_indices_data(bsr, other, indices_format='bsr_strided_mm_compr
         meta.update(allow_tf32=bsr.dtype in {torch.float16, torch.bfloat16})
     SPLIT_N = meta['SPLIT_N']
     indices_data = _bsr_scatter_mm_indices_data(
-        indices_format, M, K, N, Ms, Ks, nbatches, SPLIT_N,
-        TensorAsKey(bsr.crow_indices()), TensorAsKey(bsr.col_indices()))
+        indices_format, M, K, N, Ms, Ks, nbatches, SPLIT_N, TensorAsKey(bsr))
 
     if indices_format == 'bsr_strided_mm_compressed':
         meta.update(is_compressed=True)
@@ -860,10 +811,110 @@ def bsr_scatter_mm(bsr, other, indices_data=None, out=None):
     return out.view(out_shape)
 
 
+def bsr_dense_addmm(
+        input: torch.Tensor,
+        bsr: torch.Tensor,
+        dense: torch.Tensor,
+        *,
+        beta=1,
+        alpha=1,
+        out: Optional[torch.Tensor] = None,
+        skip_checks: bool = False,
+        max_grid: Optional[Tuple[Optional[int], Optional[int], Optional[int]]] = None,
+        meta: Optional[dict] = None):
+    f_name = 'bsr_dense_addmm'
+    values = bsr.values()
+    crow_indices = bsr.crow_indices()
+    col_indices = bsr.col_indices()
+    batch_ndim = crow_indices.dim() - 1
+    M, K = bsr.shape[batch_ndim:batch_ndim + 2]
+    blocksize = values.shape[batch_ndim + 1:batch_ndim + 3]
+    N = dense.shape[-1]
+
+    # todo: implement checks
+
+    if out is None:
+        original_batch_dims_broadcasted = broadcast_batch_dims(f_name, bsr, dense)
+        out = dense.new_empty(original_batch_dims_broadcasted + (M, N))
+
+    if bsr._nnz() == 0 or alpha == 0 or N == 0 or M == 0 or K == 0:
+        if beta == 0:
+            out.zero_()
+        else:
+            out.copy_(input)
+            if beta != 1:
+                out.mul_(beta)
+        return out
+
+    if meta is None:
+        sparsity = round(1 - bsr._nnz() * blocksize[0] * blocksize[1] / (M * K), 2)
+        meta = bsr_dense_addmm_meta(M, K, N, blocksize[0], blocksize[1], beta, alpha, sparsity=sparsity, dtype=out.dtype)
+    out_backup = out
+
+    crow_indices, col_indices, values, input, dense, out = prepare_inputs(bsr, input, dense, out)
+
+    BM, BK = blocksize
+    SPLIT_N = meta.get('SPLIT_N', N // BM)
+    BN = N // SPLIT_N
+
+    out_untiled = out
+    out = tile_to_blocksize(out, (BM, BN))
+    dense = tile_to_blocksize(dense, (BK, BN))
+    input = tile_to_blocksize(input, (BM, BN))
+
+    dot_out_dtype = {torch.float16: tl.float32,
+                     torch.bfloat16: tl.float32,
+                     torch.float32: tl.float64,
+                     torch.float64: tl.float64}[out.dtype]
+
+    n_batches = dense.size(0)
+    n_block_rows = crow_indices.size(-1) - 1
+    n_block_cols = dense.size(-3)
+
+    full_grid = (n_batches, n_block_cols, n_block_rows)
+    if max_grid is not None:
+        grid_blocks = tuple(max_grid[:3][::-1]) + (None,) * (3 - len(max_grid[:3]))
+    else:
+        grid_blocks = None
+
+    tensor_dims_map = {
+        values: (0, None, None),
+        crow_indices: (0, None, -1),
+        col_indices: (0, None, None),
+        input: (0, -3, -4),
+        dense: (0, -3, None),
+        out: (0, -3, -4),
+    }
+
+    assert alpha != 0
+
+    def kernel(grid, *sliced_tensors):
+        _bsr_strided_addmm_kernel[grid](
+            *ptr_stride_extractor(*sliced_tensors),
+            beta, alpha,
+            beta_is_one=beta == 1,
+            beta_is_nonzero=beta != 0,
+            alpha_is_one=alpha == 1,
+            BLOCKSIZE_ROW=BM,
+            BLOCKSIZE_INNER=BK,
+            BLOCKSIZE_COL=BN,
+            allow_tf32=dot_out_dtype == tl.float32,
+            acc_dtype=dot_out_dtype,
+            **meta)
+
+    launch_kernel(kernel, tensor_dims_map, full_grid, grid_blocks)
+
+    if out.data_ptr() != out_backup.data_ptr():
+        # prepare_inputs has made a copy of out, copy its content back
+        # to out_backup:
+        out_backup.copy_(out_untiled.view(out_backup.shape))
+
+    return out_backup
+
+
 if has_triton():
     import triton
     import triton.language as tl
-    from typing import Optional, Tuple
 
     @triton.jit
     def _sampled_addmm_kernel(
@@ -990,8 +1041,6 @@ if has_triton():
 
     @triton.jit
     def _bsr_strided_dense_rowspace_kernel(
-        BLOCKSIZE_ROW: tl.constexpr,
-        BLOCKSIZE_COL: tl.constexpr,
         # values prologue
         values_ptr,
         values_batch_stride,
@@ -1025,6 +1074,13 @@ if has_triton():
         output_row_block_stride,
         output_col_block_stride,
         # output epilogue
+        #
+        # gh-113754: Always keep all constexpr arguments at the end of
+        # triton kernel arguments list because with triton 2.1 or
+        # earlier non-contiguous outputs will corrupt CUDA state due
+        # to a triton bug (fixed in openai/triton#2262).
+        BLOCKSIZE_ROW: tl.constexpr,
+        BLOCKSIZE_COL: tl.constexpr,
         acc_dtype: tl.constexpr,
         allow_tf32: tl.constexpr,
         GROUP_SIZE_ROW: tl.constexpr,
@@ -1092,7 +1148,7 @@ if has_triton():
             + col_indices_stride * nnz_offset
         )
 
-        output_acc_block = tl.zeros((BLOCKSIZE_ROW, BLOCKSIZE_ROW), dtype=acc_dtype)
+        output_acc_block = tl.zeros((BLOCKSIZE_ROW, BLOCKSIZE_COL), dtype=acc_dtype)
         for _ in range(row_nnz):
             values_block = tl.load(values_block_ptrs)
 
@@ -1110,43 +1166,6 @@ if has_triton():
 
         # write back the result
         tl.store(output_ptrs, output_acc_block.to(output_ptr.dtype.element_ty))
-
-
-    def _run_dense_rowspace_kernel(
-        blocksize, values, crow_indices, col_indices, dense, output, max_grid, meta
-    ):
-        n_batches = dense.size(0)
-        n_block_rows = crow_indices.size(-1) - 1
-        n_block_cols = dense.size(-3)
-
-        full_grid = (n_batches, n_block_cols, n_block_rows)
-        if max_grid is not None:
-            grid_blocks = tuple(max_grid[:3][::-1]) + (None,) * (3 - len(max_grid[:3]))
-        else:
-            grid_blocks = None
-        tensor_dims_map = {
-            values: (0, None, None),
-            crow_indices: (0, None, -1),
-            col_indices: (0, None, None),
-            dense: (0, -3, None),
-            output: (0, -3, -4)
-        }
-        if values.dtype in (torch.half, torch.bfloat16):
-            acc_dtype = tl.float32
-            allow_tf32 = True
-        else:
-            acc_dtype = tl.float64
-            allow_tf32 = False
-
-        def kernel(grid, *sliced_tensors):
-            _bsr_strided_dense_rowspace_kernel[grid](
-                *blocksize,
-                *ptr_stride_extractor(*sliced_tensors),
-                acc_dtype=acc_dtype,
-                allow_tf32=allow_tf32,
-                **meta)
-
-        launch_kernel(kernel, tensor_dims_map, full_grid, grid_blocks)
 
 
     def _run_sampled_addmm_kernel(
@@ -1295,12 +1314,11 @@ if has_triton():
 
             n = dense.size(-1)
             row_block, col_block = bsr.values().shape[-2:]
-            check(
-                not n % row_block,
-                f"bsr_dense_mm(): dense.size(-1) == {n} should be divisible by "
-                f"blocksize[0] == {row_block}.",
-            )
             check_blocksize(f_name, (row_block, col_block))
+            check(
+                not n % 16,
+                f"{f_name}(): dense.size(-1) == {n} should be divisible by 16"
+            )
         else:
             kr, n = dense.shape[-2:]
 
@@ -1328,41 +1346,9 @@ if has_triton():
         if bsr._nnz() == 0:
             return out.zero_()
 
-        blocksize = bsr.values().shape[-2:]
-
-        if max(blocksize) == 16 and bsr.dense_dim() == 0 and bsr.ndim == 2:
-            # bsr_scatter_mm is more efficient than bsr_dense_mm for
-            # 16x16 blocksizes:
-            return bsr_scatter_mm(bsr, dense, out=out)
-
-        if meta is None:
-            meta = bsr_dense_mm_meta(m, kl, n, blocksize[0], blocksize[1])
-        else:
-            meta = bsr_dense_mm_meta(m, kl, n, blocksize[0], blocksize[1], **meta)
-
-        # NOTE: out is contiguous, so prepare_inputs will create a view.
-        # out gets modified in-place, so we store a backup copy.
-        out_backup = out
-
-        # prepare inputs by reshaping them to be kernel-compatible.
-        crow_indices, col_indices, values, dense, out = prepare_inputs(bsr, dense, out)
-
-        # "Blockify" the row dimension of dense with blocksize[1]
-        # since dense is on the rhs of matmul
-        dense = tile_to_blocksize(dense, blocksize[::-1])
-        # "Blockify" the row dimension of out with blocksize[0]
-        # which is inherited from the bsr input.
-        # NOTE: tile_to_blocksize will create a view.
-        # NOTE: out.blocksize[-1] == dense.blocksize[-1],
-        # so it could be any value in [1, dense.shape[-1]).
-        # We need to probably use the largest possible blocksize
-        # so that it fits into SRAM.
-        out = tile_to_blocksize(out, (blocksize[0], blocksize[0]))
-
-        # Launch kernel
-        _run_dense_rowspace_kernel(blocksize, values, crow_indices, col_indices, dense, out, max_grid, meta)
-
-        return out_backup
+        # with beta==0, addmm ignores input content, so we can use out
+        # as a placeholder for input because their shapes match:
+        return bsr_dense_addmm(out, bsr, dense, alpha=1, beta=0, out=out)
 
 
     @triton.jit
@@ -1629,7 +1615,7 @@ if has_triton():
 
     @triton.jit
     def _scatter_mm6_kernel(
-            nbatches: tl.constexpr, Ms: tl.constexpr, Ks: tl.constexpr, N: tl.constexpr,
+            nbatches, Ms, Ks: tl.constexpr, N,
             blocks_ptr, blocks_stride_P, blocks_stride_M, blocks_stride_K,
             others_ptr, others_stride_B, others_stride_K, others_stride_N,
             accumulators_ptr, accumulators_stride_B, accumulators_stride_M, accumulators_stride_N,
@@ -1686,7 +1672,7 @@ if has_triton():
         acc_block = tl.zeros((TILE_M, TILE_N), dtype=dot_out_dtype)
 
         if is_compressed:
-            A_ptr += r0 * blocks_stride_P
+            A_ptr += r0 * blocks_stride_P  # type: ignore[possibly-undefined]
             for _ in range(nnz):
                 q = tl.load(q_ptr)
                 B = tl.load(B_ptr + q)
@@ -1717,7 +1703,8 @@ if has_triton():
             p_offsets: torch.Tensor,
             q_offsets: torch.Tensor,
             meta: dict,
-            accumulators: torch.Tensor
+            accumulators: torch.Tensor,
+            force_contiguous: bool = True,
     ):
         SPLIT_N = meta['SPLIT_N']
         P, Ms, Ks = blocks.shape
@@ -1742,11 +1729,34 @@ if has_triton():
         assert p_offsets.stride(0) == 1
         assert q_offsets.stride(0) == 1
 
+        # Re non-contiguous tensor arguments. Sometimes triton kernel
+        # launches may fail with
+        #
+        #   RuntimeError: Triton Error [CUDA]: an illegal memory access was encountered
+        #
+        # that appears to be case when the size of a non-contiguous
+        # tensor argument is larger than a certain threshold. Could
+        # this be related to shared memory or L1 cache size of a GPU
+        # card? In anycase, ensuring that tensor arguments are
+        # contiguous seems to avoid the above exception. So, in the
+        # following we'll always convert tensor arguments to
+        # C-contiguous tensors.
+
+        if force_contiguous:
+            blocks = blocks.contiguous()
+            others = others.contiguous()
+            if not accumulators.is_contiguous():
+                accumulators_ = accumulators.contiguous()
+            else:
+                accumulators_ = accumulators
+        else:
+            accumulators_ = accumulators
+
         _scatter_mm6_kernel[grid](
             B, Ms, Ks, N,
             blocks, blocks.stride(0), blocks.stride(1), blocks.stride(2),
             others, others.stride(0), others.stride(1), others.stride(2),
-            accumulators, accumulators.stride(0), accumulators.stride(1), accumulators.stride(2),
+            accumulators_, accumulators_.stride(0), accumulators_.stride(1), accumulators_.stride(2),
             c_indices,
             r_offsets,
             p_offsets,
@@ -1755,6 +1765,169 @@ if has_triton():
             **meta
         )
 
+        if force_contiguous and not accumulators.is_contiguous():
+            accumulators.copy_(accumulators_)
+
+    @triton.jit
+    def _bsr_strided_addmm_kernel(
+        # values prologue
+        values_ptr,
+        values_batch_stride,
+        values_nnz_stride,
+        values_row_block_stride,
+        values_col_block_stride,
+        # values epilogue
+        # crow_indices prologue
+        crow_indices_ptr,
+        crow_indices_batch_stride,
+        crow_indices_stride,
+        # crow_indices epilogue
+        # col_indices prologue
+        col_indices_ptr,
+        col_indices_batch_stride,
+        col_indices_stride,
+        # col_indices epilogue
+        # input prologue
+        input_ptr,
+        input_batch_stride,
+        input_tiled_row_stride,
+        input_tiled_col_stride,
+        input_row_block_stride,
+        input_col_block_stride,
+        # input epilogue
+        # dense prologue
+        dense_ptr,
+        dense_batch_stride,
+        dense_tiled_row_stride,
+        dense_tiled_col_stride,
+        dense_row_block_stride,
+        dense_col_block_stride,
+        # dense epilogue
+        # output prologue
+        output_ptr,
+        output_batch_stride,
+        output_tiled_row_stride,
+        output_tiled_col_stride,
+        output_row_block_stride,
+        output_col_block_stride,
+        # output epilogue
+        beta,
+        alpha,
+        beta_is_one: tl.constexpr,
+        beta_is_nonzero: tl.constexpr,
+        alpha_is_one: tl.constexpr,
+        BLOCKSIZE_ROW: tl.constexpr,
+        BLOCKSIZE_COL: tl.constexpr,
+        BLOCKSIZE_INNER: tl.constexpr,
+        acc_dtype: tl.constexpr,
+        allow_tf32: tl.constexpr,
+        GROUP_SIZE_ROW: tl.constexpr,
+        SPLIT_N: tl.constexpr
+    ):
+
+        batch_pid = tl.program_id(axis=2)
+        row_block_pid = tl.program_id(axis=0)
+        col_block_pid = tl.program_id(axis=1)
+        n_block_rows = tl.num_programs(axis=0)
+        n_block_cols = tl.num_programs(axis=1)
+
+        row_block_pid, col_block_pid = tl.swizzle2d(
+            row_block_pid, col_block_pid, n_block_rows, n_block_cols, GROUP_SIZE_ROW
+        )
+
+        crow_indices_offset_ptr = (
+            crow_indices_ptr
+            + crow_indices_batch_stride * batch_pid
+            + crow_indices_stride * row_block_pid
+        )
+        nnz_offset = tl.load(crow_indices_offset_ptr)
+        nnz_offset_next = tl.load(crow_indices_offset_ptr + crow_indices_stride)
+
+        # Compute nnz for the row with number row_block_pid.
+        row_nnz = nnz_offset_next - nnz_offset
+
+        row_block_arange = tl.arange(0, BLOCKSIZE_ROW)
+        inner_block_arange = tl.arange(0, BLOCKSIZE_INNER)
+        col_block_arange = tl.arange(0, BLOCKSIZE_COL)
+
+        if beta_is_nonzero:
+            # Pointers are set to exact write-to locations
+            input_ptrs = (
+                input_ptr
+                + input_batch_stride * batch_pid
+                + input_tiled_row_stride * row_block_pid
+                + input_tiled_col_stride * col_block_pid
+                + input_row_block_stride * row_block_arange[:, None]
+                + input_col_block_stride * col_block_arange[None, :]
+            )
+
+        # Pointers are set to the first block of the current row.
+        values_block_ptrs = (
+            values_ptr
+            + values_batch_stride * batch_pid
+            + values_nnz_stride * nnz_offset
+            + values_row_block_stride * row_block_arange[:, None]
+            + values_col_block_stride * inner_block_arange[None, :]
+        )
+
+        # NOTE: dense is advanced into all dimensions but the tiled row one.
+        # That will be advanced in the loop according to values in col_indices.
+        dense_block_ptrs = (
+            dense_ptr
+            + dense_batch_stride * batch_pid
+            + dense_tiled_col_stride * col_block_pid
+            + dense_row_block_stride * inner_block_arange[:, None]
+            + dense_col_block_stride * col_block_arange[None, :]
+        )
+
+        # Pointers are set to exact write-to locations
+        output_ptrs = (
+            output_ptr
+            + output_batch_stride * batch_pid
+            + output_tiled_row_stride * row_block_pid
+            + output_tiled_col_stride * col_block_pid
+            + output_row_block_stride * row_block_arange[:, None]
+            + output_col_block_stride * col_block_arange[None, :]
+        )
+
+        # Set pointer to the first nonzero element in the current row
+        col_index_nnz_ptr = (
+            col_indices_ptr
+            + col_indices_batch_stride * batch_pid
+            + col_indices_stride * nnz_offset
+        )
+
+        # alpha is never 0
+        if beta_is_nonzero:
+            output_acc_block = tl.load(input_ptrs).to(acc_dtype)  # type: ignore[possibly-undefined]
+            if not (beta_is_one and alpha_is_one):
+                beta_alpha = beta / alpha
+                output_acc_block *= beta_alpha
+        else:
+            output_acc_block = tl.zeros((BLOCKSIZE_ROW, BLOCKSIZE_COL), dtype=acc_dtype)
+
+        for _ in range(row_nnz):
+            values_block = tl.load(values_block_ptrs)
+
+            # find which row of dense needs to get loaded
+            # for multiplication with values_block.
+            dense_row_idx = tl.load(col_index_nnz_ptr)
+            dense_block = tl.load(dense_block_ptrs + dense_tiled_row_stride * dense_row_idx)
+
+            # do block mm
+            output_acc_block += tl.dot(values_block, dense_block, allow_tf32=allow_tf32, out_dtype=acc_dtype)
+
+            # move val/col_index ptrs to the next block in the row
+            values_block_ptrs += values_nnz_stride
+            col_index_nnz_ptr += col_indices_stride
+
+        if not alpha_is_one:
+            output_acc_block *= alpha
+
+        # write back the result
+        tl.store(output_ptrs, output_acc_block.to(output_ptr.dtype.element_ty))
+
+
 else:
     bsr_softmax = None  # type: ignore[assignment]
     bsr_dense_mm = None  # type: ignore[assignment]
@@ -1762,3 +1935,4 @@ else:
     _scaled_dot_product_attention = None  # type: ignore[assignment]
     _scatter_mm2 = None  # type: ignore[assignment]
     _scatter_mm6 = None  # type: ignore[assignment]
+    _bsr_strided_addmm_kernel = None  # type: ignore[assignment]

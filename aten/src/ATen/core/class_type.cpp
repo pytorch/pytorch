@@ -87,9 +87,11 @@ std::string ClassType::getForwardPreHookErrorMessage(int pre_hook_idx) const {
       pre_hook_name + "(self, input: Tuple[" + input_types + "])";
   std::string return_string =
       "This error occurred while scripting the forward pre-hook '" +
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       pre_hook_name + "' on module '" + name()->name() +
       "'. If you did not want to script this pre-hook remove it from the "
       "original NN module before scripting. Pre-hooks for module '" +
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       name()->name() + "' are expected to have the following signature: "
       + pre_hook_schema + " with a return type of either 'None'" +
       single_output + " or 'Tuple[" + input_types + "]'.";
@@ -112,6 +114,7 @@ std::string ClassType::getForwardHookErrorMessage(int hook_idx) const {
                             input_types + "], output: " + output_types + ")";
   std::string return_string =
       "This error occurred while scripting the forward hook '"
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       + hook_name + "' on module " + name()->name() +
       ". If you did not want to script this hook remove it from" +
       " the original NN module before scripting. This hook was" +
@@ -191,6 +194,7 @@ void ClassType::checkForwardPreHookSchema(
     const FunctionSchema& pre_hook_schema) const {
   const torch::jit::Function* pre_hook = forward_pre_hooks_[pre_hook_idx];
   std::string hook_id =
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       "Pre-hook '" + pre_hook->name() + "' on module '" + name()->name() + "' ";
   std::string pre_hook_err_msg = getForwardPreHookErrorMessage(pre_hook_idx) + "\n";
 
@@ -287,6 +291,7 @@ void ClassType::checkForwardHookSchema(
       const FunctionSchema& hook_schema) const {
   const torch::jit::Function* hook = forward_hooks_[hook_idx];
   std::string hook_id =
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       "Hook '" + hook->name() + "' on module '" + name()->name() + "' ";
   std::string hook_err_msg = getForwardHookErrorMessage(hook_idx) + "\n";
   // Hooks are expecting three inputs: self, a Tuple containing the non-self
@@ -464,7 +469,7 @@ bool ClassType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
 }
 
 ClassTypePtr ClassType::create(
-    c10::optional<QualifiedName> qualifiedName,
+    std::optional<QualifiedName> qualifiedName,
     std::weak_ptr<CompilationUnit> cu,
     bool is_module,
     std::string doc_string,
@@ -478,7 +483,7 @@ ClassTypePtr ClassType::create(
 }
 
 ClassType::ClassType(
-    c10::optional<QualifiedName> name,
+    std::optional<QualifiedName> name,
     std::weak_ptr<CompilationUnit> cu,
     bool is_module,
     std::string doc_string,
@@ -615,7 +620,7 @@ IValue ClassType::getConstant(size_t slot) const {
   return constantValues_[slot];
 }
 
-c10::optional<IValue> ClassType::findConstant(const std::string& name) const {
+std::optional<IValue> ClassType::findConstant(const std::string& name) const {
   TORCH_INTERNAL_ASSERT(constantNames_.size() == constantValues_.size());
   size_t pos = 0;
   for (const auto& c : constantNames_) {
@@ -647,7 +652,7 @@ std::shared_ptr<const CompilationUnit> ClassType::compilation_unit() const {
   return cu;
 }
 
-c10::optional<ClassType::Property> ClassType::getProperty(const std::string& name) {
+std::optional<ClassType::Property> ClassType::getProperty(const std::string& name) {
   for (auto& prop : properties_) {
     if (name == prop.name) {
       return prop;
@@ -662,7 +667,7 @@ void ClassType::addProperty(const std::string& name, torch::jit::Function* gette
   properties_.push_back({name, getter, setter});
 }
 
-c10::optional<size_t> ClassType::findConstantSlot(const std::string& name) const {
+std::optional<size_t> ClassType::findConstantSlot(const std::string& name) const {
   TORCH_CHECK(constantNames_.size() == constantValues_.size());
   size_t slot = 0;
   for (const auto& constant : constantNames_) {

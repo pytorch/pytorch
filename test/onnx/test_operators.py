@@ -10,17 +10,13 @@ import glob
 import inspect
 import io
 import itertools
+import operator
 import os
 import shutil
 import tempfile
 
 # Full diff for expect files
 import unittest
-
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import torch.onnx
 
 from pytorch_test_common import (
     BATCH_SIZE,
@@ -29,6 +25,11 @@ from pytorch_test_common import (
     RNN_INPUT_SIZE,
     RNN_SEQUENCE_LENGTH,
 )
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.onnx
 from torch.autograd import Function, Variable
 from torch.nn import functional, Module
 from torch.onnx._internal import diagnostics
@@ -48,7 +49,7 @@ _onnx_dep = True  # flag to import onnx package.
 
 def export_to_pbtxt(model, inputs, *args, **kwargs):
     return torch.onnx.export_to_pretty_string(
-        model, inputs, google_printer=True, *args, **kwargs
+        model, inputs, *args, google_printer=True, **kwargs
     )
 
 
@@ -172,27 +173,27 @@ class TestOperators(common_utils.TestCase):
     def test_add_broadcast(self):
         x = torch.randn(2, 3, requires_grad=True).double()
         y = torch.randn(3, requires_grad=True).double()
-        self.assertONNX(lambda x, y: x + y, (x, y))
+        self.assertONNX(operator.add, (x, y))
 
     def test_add_left_broadcast(self):
         x = torch.randn(3, requires_grad=True).double()
         y = torch.randn(2, 3, requires_grad=True).double()
-        self.assertONNX(lambda x, y: x + y, (x, y))
+        self.assertONNX(operator.add, (x, y))
 
     def test_add_size1_broadcast(self):
         x = torch.randn(2, 3, requires_grad=True).double()
         y = torch.randn(2, 1, requires_grad=True).double()
-        self.assertONNX(lambda x, y: x + y, (x, y))
+        self.assertONNX(operator.add, (x, y))
 
     def test_add_size1_right_broadcast(self):
         x = torch.randn(2, 3, requires_grad=True).double()
         y = torch.randn(3, requires_grad=True).double()
-        self.assertONNX(lambda x, y: x + y, (x, y))
+        self.assertONNX(operator.add, (x, y))
 
     def test_add_size1_singleton_broadcast(self):
         x = torch.randn(2, 3, requires_grad=True).double()
         y = torch.randn(1, 3, requires_grad=True).double()
-        self.assertONNX(lambda x, y: x + y, (x, y))
+        self.assertONNX(operator.add, (x, y))
 
     def test_rsub(self):
         x = torch.randn(2, 3, requires_grad=True).double()
@@ -282,7 +283,7 @@ class TestOperators(common_utils.TestCase):
             def symbolic(g, x):
                 # The inside of this function should never be invoked, because
                 # we will fail due to an argument mismatch first.
-                raise AssertionError()
+                raise AssertionError
 
             @staticmethod
             def forward(ctx, x, y):
@@ -541,27 +542,27 @@ class TestOperators(common_utils.TestCase):
     def test_equal(self):
         x = torch.randn(1, 2, 3, 1, requires_grad=False).int()
         y = torch.randn(1, 4, requires_grad=False).int()
-        self.assertONNX(lambda x, y: x == y, (x, y))
+        self.assertONNX(operator.eq, (x, y))
 
     def test_lt(self):
         x = torch.randn(1, 2, 3, 1, requires_grad=False).int()
         y = torch.randn(1, 4, requires_grad=False).int()
-        self.assertONNX(lambda x, y: x < y, (x, y))
+        self.assertONNX(operator.lt, (x, y))
 
     def test_gt(self):
         x = torch.randn(1, 2, 3, 1, requires_grad=False).int()
         y = torch.randn(1, 4, requires_grad=False).int()
-        self.assertONNX(lambda x, y: x > y, (x, y))
+        self.assertONNX(operator.gt, (x, y))
 
     def test_le(self):
         x = torch.randn(3, 4, requires_grad=False).int()
         y = torch.randn(3, 4, requires_grad=False).int()
-        self.assertONNX(lambda x, y: x <= y, (x, y))
+        self.assertONNX(operator.le, (x, y))
 
     def test_ge(self):
         x = torch.randn(3, 4, requires_grad=False).int()
         y = torch.randn(3, 4, requires_grad=False).int()
-        self.assertONNX(lambda x, y: x >= y, (x, y))
+        self.assertONNX(operator.ge, (x, y))
 
     def test_exp(self):
         x = torch.randn(3, 4, requires_grad=True)
@@ -862,7 +863,7 @@ class TestOperators(common_utils.TestCase):
     def test_master_opset(self):
         x = torch.randn(2, 3).float()
         y = torch.randn(2, 3).float()
-        self.assertONNX(lambda x, y: x + y, (x, y), opset_version=10)
+        self.assertONNX(operator.add, (x, y), opset_version=10)
 
     def test_std(self):
         x = torch.randn(2, 3, 4).float()
@@ -906,7 +907,7 @@ class TestOperators(common_utils.TestCase):
             def forward(self, x_in):
                 x_out = {}
                 x_out["test_key_out"] = torch.add(
-                    x_in[list(x_in.keys())[0]], list(x_in.keys())[0]
+                    x_in[list(x_in.keys())[0]], list(x_in.keys())[0]  # noqa: RUF015
                 )
                 return x_out
 
@@ -938,6 +939,15 @@ class TestOperators(common_utils.TestCase):
 
         input = torch.arange(24, dtype=torch.uint8).reshape(3, 4, 2)
         self.assertONNX(BitshiftModel(), input, opset_version=11)
+
+    def test_bitwise_and(self):
+        class BiwiseAndModel(torch.nn.Module):
+            def forward(self, input, other):
+                return torch.bitwise_and(input, other), input & 2
+
+        input = torch.randint(0, 100, (2, 3, 4), dtype=torch.uint8)
+        other = torch.randint(-50, 50, (2, 3, 4), dtype=torch.int8)
+        self.assertONNX(BiwiseAndModel(), (input, other), opset_version=18)
 
     @skipIfCaffe2
     def test_layer_norm_aten(self):

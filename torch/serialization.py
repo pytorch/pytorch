@@ -1,4 +1,5 @@
 import difflib
+import functools
 import os
 import io
 import shutil
@@ -14,11 +15,10 @@ from ._utils import _import_dotted_name
 from torch._sources import get_source_lines_and_file
 from torch.types import Storage
 from torch.storage import _get_dtype_from_pickle_storage_type
-from typing import Any, BinaryIO, Callable, cast, Dict, Optional, Type, Tuple, Union, IO
-from typing_extensions import TypeAlias  # Python 3.10+
+from typing import Any, BinaryIO, Callable, cast, Dict, Optional, Type, Tuple, Union, IO, List
+from typing_extensions import TypeAlias, TypeGuard  # Python 3.10+
 import copyreg
 import pickle
-import pathlib
 import torch._weights_only_unpickler as _weights_only_unpickler
 
 DEFAULT_PROTOCOL = 2
@@ -32,8 +32,15 @@ PROTOCOL_VERSION = 1001
 STORAGE_KEY_SEPARATOR = ','
 
 FILE_LIKE: TypeAlias = Union[str, os.PathLike, BinaryIO, IO[bytes]]
-MAP_LOCATION: TypeAlias = Optional[Union[Callable[[torch.Tensor, str], torch.Tensor], torch.device, str, Dict[str, str]]]
+MAP_LOCATION: TypeAlias = Optional[Union[Callable[[Storage, str], Storage], torch.device, str, Dict[str, str]]]
 STORAGE: TypeAlias = Union[Storage, torch.storage.TypedStorage, torch.UntypedStorage]
+
+IS_WINDOWS = sys.platform == "win32"
+
+if not IS_WINDOWS:
+    from mmap import MAP_SHARED, MAP_PRIVATE
+else:
+    MAP_SHARED, MAP_PRIVATE = None, None  # type: ignore[assignment]
 
 __all__ = [
     'SourceChangeWarning',
@@ -52,6 +59,9 @@ __all__ = [
     'LoadEndianness',
     'get_default_load_endianness',
     'set_default_load_endianness',
+    'clear_safe_globals',
+    'get_safe_globals',
+    'add_safe_globals',
 ]
 
 
@@ -68,7 +78,7 @@ def mkdtemp():
         shutil.rmtree(path)
 
 
-_package_registry = []
+_package_registry: List[Tuple[int, Callable[[STORAGE], Optional[str]], Callable[[STORAGE, str], Optional[STORAGE]]]] = []
 
 class LoadEndianness(Enum):
     NATIVE = 1
@@ -105,6 +115,62 @@ def set_default_load_endianness(endianness):
     if not isinstance(endianness, LoadEndianness) and endianness is not None:
         raise TypeError("Invalid argument type in function set_default_load_endianness")
     _default_load_endian = endianness
+
+_default_mmap_options: int = MAP_PRIVATE
+
+def get_default_mmap_options() -> int:
+    '''
+    Get default mmap options for :func:`torch.load` with ``mmap=True``.
+
+    Defaults to ``mmap.MAP_PRIVATE``.
+
+
+    Returns:
+        default_mmap_options: int
+    '''
+    return _default_mmap_options
+
+def set_default_mmap_options(flags: int):
+    '''
+    Set default mmap options for :func:`torch.load` with ``mmap=True`` to flags.
+
+    For now, only either ``mmap.MAP_PRIVATE`` or ``mmap.MAP_SHARED`` are supported.
+    Please open an issue if you need any other option to be added here.
+
+    .. note::
+        This feature is currently not supported for Windows.
+
+    Args:
+        flags: ``mmap.MAP_PRIVATE`` or ``mmap.MAP_SHARED``
+    '''
+    global _default_mmap_options
+    if IS_WINDOWS:
+        raise RuntimeError("Changing the default mmap options is currently not supported for Windows")
+    if (flags != MAP_PRIVATE and flags != MAP_SHARED):
+        raise ValueError("Invalid argument in function set_default_mmap_options, "
+                         f"expected mmap.MAP_PRIVATE or mmap.MAP_SHARED, but got {flags}")
+    _default_mmap_options = flags
+
+def clear_safe_globals() -> None:
+    '''
+    Clears the list of globals that are safe for ``weights_only`` load.
+    '''
+    _weights_only_unpickler._clear_safe_globals()
+
+def get_safe_globals() -> List[Any]:
+    '''
+    Returns the list of user-added globals that are safe for ``weights_only`` load.
+    '''
+    return _weights_only_unpickler._get_safe_globals()
+
+def add_safe_globals(safe_globals: List[Any]) -> None:
+    '''
+    Marks the given globals as safe for ``weights_only`` load.
+
+    Args:
+        safe_globals (List[Any]): list of globals to mark as safe
+    '''
+    _weights_only_unpickler._add_safe_globals(safe_globals)
 
 def _is_zipfile(f) -> bool:
     # This is a stricter implementation than zipfile.is_zipfile().
@@ -211,14 +277,6 @@ def _cpu_tag(obj):
         return 'cpu'
 
 
-def _cuda_tag(obj):
-    if obj.device.type == 'cuda':
-        return 'cuda:' + str(obj.device.index)
-
-def _hpu_tag(obj):
-    if obj.device.type == 'hpu':
-        return 'hpu:' + str(obj.device.index)
-
 def _mps_tag(obj):
     if obj.device.type == 'mps':
         return 'mps'
@@ -229,8 +287,9 @@ def _meta_tag(obj):
         return 'meta'
 
 
-def _privateuse1_tag(obj):
-    backend_name = torch._C._get_privateuse1_backend_name()
+def _backend_tag(backend_name, obj):
+    if backend_name == 'privateuse1':
+        backend_name = torch._C._get_privateuse1_backend_name()
     if obj.device.type == backend_name:
         if obj.device.index is None:
             return backend_name
@@ -243,66 +302,6 @@ def _cpu_deserialize(obj, location):
         return obj
 
 
-def validate_cuda_device(location):
-    device = torch.cuda._utils._get_device_index(location, True)
-
-    if not torch.cuda.is_available():
-        raise RuntimeError('Attempting to deserialize object on a CUDA '
-                           'device but torch.cuda.is_available() is False. '
-                           'If you are running on a CPU-only machine, '
-                           'please use torch.load with map_location=torch.device(\'cpu\') '
-                           'to map your storages to the CPU.')
-    device_count = torch.cuda.device_count()
-    if device >= device_count:
-        raise RuntimeError('Attempting to deserialize object on CUDA device '
-                           f'{device} but torch.cuda.device_count() is {device_count}. Please use '
-                           'torch.load with map_location to map your storages '
-                           'to an existing device.')
-    return device
-
-
-def _cuda_deserialize(obj, location):
-    if location.startswith('cuda'):
-        device = validate_cuda_device(location)
-        if getattr(obj, "_torch_load_uninitialized", False):
-            with torch.cuda.device(device):
-                return torch.UntypedStorage(obj.nbytes(), device=torch.device(location))
-        else:
-            return obj.cuda(device)
-
-
-def validate_hpu_device(location):
-    hpu = getattr(torch, "hpu", None)
-    assert hpu is not None, "HPU device module is not loaded"
-    device = hpu._utils._get_device_index(location, optional=True)
-
-    if not hpu.is_available():
-        raise RuntimeError('Attempting to deserialize object on a HPU '
-                           'device but torch.hpu.is_available() is False. '
-                           'If you are running on a CPU-only machine, '
-                           'please use torch.load with map_location=torch.device(\'cpu\') '
-                           'to map your storages to the CPU.')
-    device_count = hpu.device_count()
-    if device >= device_count:
-        raise RuntimeError('Attempting to deserialize object on HPU device '
-                           f'{device} but torch.hpu.device_count() is {device_count}. Please use '
-                           'torch.load with map_location to map your storages '
-                           'to an existing device.')
-    return device
-
-
-def _hpu_deserialize(obj, location):
-    if location.startswith('hpu'):
-        hpu = getattr(torch, "hpu", None)
-        assert hpu is not None, "HPU device module is not loaded"
-        device = validate_hpu_device(location)
-        if getattr(obj, "_torch_load_uninitialized", False):
-            with hpu.device(device):
-                return torch.UntypedStorage(obj.nbytes(), device=torch.device(location))
-        else:
-            return obj.hpu(device)
-
-
 def _mps_deserialize(obj, location):
     if location.startswith('mps'):
         return obj.mps()
@@ -313,18 +312,18 @@ def _meta_deserialize(obj, location):
         return torch.UntypedStorage(obj.nbytes(), device='meta')
 
 
-def _validate_privateuse1_device(location, backend_name):
+def _validate_device(location, backend_name):
     '''
-    Check whether the device index of privateuse1 is valid
+    Check whether the device index of specified backend is valid
 
-    Register a device_module of privateuse1 by torch._register_device_module.
-    Implement the following methods in device_module like cuda:
-    device_module._utils._get_device_index(location, True),
+    In case of privateuse1 backend, your must first register a device_module for
+    privateuse1 using torch._register_device_module. Implement the following
+    methods in device_module like cuda: device_module._utils._get_device_index(location, True),
     device_module.device_count().
 
     Args:
         location: string of device
-        backend_name: the name of privateuse1, which can be renamed
+        backend_name: the backend name or the name of privateuse1, which can be renamed
 
     Returns:
         device_index: int
@@ -337,6 +336,7 @@ def _validate_privateuse1_device(location, backend_name):
     device_module = getattr(torch, backend_name)
     if hasattr(device_module, '_utils') and hasattr(device_module._utils, '_get_device_index'):
         device_index = device_module._utils._get_device_index(location, True)
+        device = torch.device(backend_name, device_index)
     else:
         device = torch.device(location)
         device_index = device.index if device.index else 0
@@ -353,29 +353,32 @@ def _validate_privateuse1_device(location, backend_name):
                                f'{device_index} but torch.{backend_name}.device_count() is {device_count}. '
                                'Please use torch.load with map_location to map your storages '
                                'to an existing device.')
-    return device_index
+    return device
 
 
-def _privateuse1_deserialize(obj, location):
-    backend_name = torch._C._get_privateuse1_backend_name()
+def validate_cuda_device(location):
+    return _validate_device(location, 'cuda').index
+
+
+def validate_hpu_device(location):
+    return _validate_device(location, 'hpu').index
+
+
+def _deserialize(backend_name, obj, location):
+    if backend_name == 'privateuse1':
+        backend_name = torch._C._get_privateuse1_backend_name()
     if location.startswith(backend_name):
-        if not hasattr(obj, backend_name):
-            raise RuntimeError(f'Attempting to load the storages to the {backend_name.upper()} device '
-                               f'but torch.storage._StorageBase.{backend_name}() or '
-                               f'torch.storage.TypedStorage.{backend_name}() is not generated. '
-                               'Please use torch.utils.generate_methods_for_privateuse1_backend '
-                               f'to generate storage.{backend_name}() method first.')
-        device_index = _validate_privateuse1_device(location, backend_name)
-        return getattr(obj, backend_name)(device_index)
+        device = _validate_device(location, backend_name)
+        return obj.to(device=device)
 
 
 register_package(10, _cpu_tag, _cpu_deserialize)
-register_package(20, _cuda_tag, _cuda_deserialize)
+register_package(20, functools.partial(_backend_tag, 'cuda'), functools.partial(_deserialize, 'cuda'))
 register_package(21, _mps_tag, _mps_deserialize)
 register_package(22, _meta_tag, _meta_deserialize)
-register_package(23, _privateuse1_tag, _privateuse1_deserialize)
-register_package(24, _hpu_tag, _hpu_deserialize)
-
+register_package(23, functools.partial(_backend_tag, 'privateuse1'), functools.partial(_deserialize, 'privateuse1'))
+register_package(24, functools.partial(_backend_tag, 'hpu'), functools.partial(_deserialize, 'hpu'))
+register_package(25, functools.partial(_backend_tag, 'xpu'), functools.partial(_deserialize, 'xpu'))
 
 def location_tag(storage: Union[Storage, torch.storage.TypedStorage, torch.UntypedStorage]):
     for _, tagger, _ in _package_registry:
@@ -406,8 +409,8 @@ def storage_to_tensor_type(storage):
     return getattr(module, storage_type.__name__.replace('Storage', 'Tensor'))
 
 
-def _is_path(name_or_buffer):
-    return isinstance(name_or_buffer, (str, pathlib.Path))
+def _is_path(name_or_buffer) -> TypeGuard[Union[str, os.PathLike]]:
+    return isinstance(name_or_buffer, (str, os.PathLike))
 
 
 class _opener:
@@ -566,7 +569,7 @@ def _check_dill_version(pickle_module) -> None:
 
 
 def _check_save_filelike(f):
-    if not isinstance(f, (str, os.PathLike)) and not hasattr(f, 'write'):
+    if not _is_path(f) and not hasattr(f, 'write'):
         raise AttributeError(
             "expected 'f' to be string, path, or a file-like object with "
             "a 'write' attribute")
@@ -860,7 +863,7 @@ def _save(obj, zip_file, pickle_module, pickle_protocol, _disable_byteorder_reco
             storage = storage.cpu()
         # Now that it is on the CPU we can directly copy it into the zip file
         num_bytes = storage.nbytes()
-        zip_file.write_record(name, storage.data_ptr(), num_bytes)
+        zip_file.write_record(name, storage, num_bytes)
 
 
 def load(
@@ -918,7 +921,8 @@ def load(
         pickle_module: module used for unpickling metadata and objects (has to
             match the :attr:`pickle_module` used to serialize file)
         weights_only: Indicates whether unpickler should be restricted to
-            loading only tensors, primitive types and dictionaries
+            loading only tensors, primitive types, dictionaries
+            and any types added via :func:`torch.serialization.add_safe_globals`.
         mmap: Indicates whether the file should be mmaped rather than loading all the storages into memory.
             Typically, tensor storages in the file will first be moved from disk to CPU memory, after which they
             are moved to the location that they were tagged with when saving, or specified by ``map_location``. This
@@ -951,27 +955,31 @@ def load(
 
     Example:
         >>> # xdoctest: +SKIP("undefined filepaths")
-        >>> torch.load('tensors.pt')
+        >>> torch.load('tensors.pt', weights_only=True)
         # Load all tensors onto the CPU
-        >>> torch.load('tensors.pt', map_location=torch.device('cpu'))
+        >>> torch.load('tensors.pt', map_location=torch.device('cpu'), weights_only=True)
         # Load all tensors onto the CPU, using a function
-        >>> torch.load('tensors.pt', map_location=lambda storage, loc: storage)
+        >>> torch.load('tensors.pt', map_location=lambda storage, loc: storage, weights_only=True)
         # Load all tensors onto GPU 1
-        >>> torch.load('tensors.pt', map_location=lambda storage, loc: storage.cuda(1))
+        >>> torch.load('tensors.pt', map_location=lambda storage, loc: storage.cuda(1), weights_only=True)
         # Map tensors from GPU 1 to GPU 0
-        >>> torch.load('tensors.pt', map_location={'cuda:1': 'cuda:0'})
+        >>> torch.load('tensors.pt', map_location={'cuda:1': 'cuda:0'}, weights_only=True)
         # Load tensor from io.BytesIO object
+        # Loading from a buffer setting weights_only=False, warning this can be unsafe
         >>> with open('tensor.pt', 'rb') as f:
         ...     buffer = io.BytesIO(f.read())
-        >>> torch.load(buffer)
+        >>> torch.load(buffer, weights_only=False)
         # Load a module with 'ascii' encoding for unpickling
-        >>> torch.load('module.pt', encoding='ascii')
+        # Loading from a module setting weights_only=False, warning this can be unsafe
+        >>> torch.load('module.pt', encoding='ascii', weights_only=False)
     """
     torch._C._log_api_usage_once("torch.load")
     UNSAFE_MESSAGE = (
         "Weights only load failed. Re-running `torch.load` with `weights_only` set to `False`"
         " will likely succeed, but it can result in arbitrary code execution."
-        "Do it only if you get the file from a trusted source. WeightsUnpickler error: "
+        " Do it only if you get the file from a trusted source. Alternatively, to load"
+        " with `weights_only` please check the recommended steps in the following error message."
+        " WeightsUnpickler error: "
     )
     # Add ability to force safe only weight loads via environment variable
     if os.getenv("TORCH_FORCE_WEIGHTS_ONLY_LOAD", "0").lower() in ['1', 'y', 'yes', 'true']:
@@ -1008,10 +1016,14 @@ def load(
                     opened_file.seek(orig_position)
                     return torch.jit.load(opened_file, map_location=map_location)
                 if mmap:
-                    if not isinstance(f, str):
-                        raise ValueError("f must be a string filename in order to use mmap argument")
+                    if not _is_path(f):
+                        raise ValueError("f must be a file path in order to use the mmap argument")
                     size = os.path.getsize(f)
-                    overall_storage = torch.UntypedStorage.from_file(f, False, size)
+                    if not IS_WINDOWS:
+                        shared = get_default_mmap_options() == MAP_SHARED
+                    else:
+                        shared = False
+                    overall_storage = torch.UntypedStorage.from_file(os.fspath(f), shared, size)
                 if weights_only:
                     try:
                         return _load(opened_zipfile,
@@ -1027,8 +1039,9 @@ def load(
                              overall_storage=overall_storage,
                              **pickle_load_args)
         if mmap:
+            f_name = "" if not isinstance(f, str) else f"{f}, "
             raise RuntimeError("mmap can only be used with files saved with "
-                               "`torch.save(_use_new_zipfile_serialization=True), "
+                               f"`torch.save({f_name}_use_new_zipfile_serialization=True), "
                                "please torch.save your checkpoint with this option in order to use mmap.")
         if weights_only:
             try:
@@ -1165,7 +1178,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                     numel = struct.unpack(f'<{ndim}q', f.read(8 * ndim))
                     stride = struct.unpack(f'<{ndim}q', f.read(8 * ndim))
                     storage_offset, = struct.unpack('<q', f.read(8))
-                    tensor = torch.tensor([], dtype=storage.dtype).set_(
+                    tensor = torch.empty((0,), dtype=storage.dtype).set_(
                         storage._untyped_storage, storage_offset, numel, stride)
                     deserialized_objects[key] = tensor
 
@@ -1195,12 +1208,16 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
             nbytes = numel * torch._utils._element_size(dtype)
 
             if root_key not in deserialized_objects:
-                obj = cast(Storage, torch.UntypedStorage(nbytes))
-                obj._torch_load_uninitialized = True
+                if torch._guards.active_fake_mode() is not None:
+                    obj = cast(Storage, torch.UntypedStorage(nbytes, device='meta'))
+                else:
+                    obj = cast(Storage, torch.UntypedStorage(nbytes))
+                    obj._torch_load_uninitialized = True
+                    obj = restore_location(obj, location)
                 # TODO: Once we decide to break serialization FC, we can
                 # stop wrapping with TypedStorage
                 typed_storage = torch.storage.TypedStorage(
-                    wrap_storage=restore_location(obj, location),
+                    wrap_storage=obj,
                     dtype=dtype,
                     _internal=True)
                 deserialized_objects[root_key] = typed_storage
@@ -1250,7 +1267,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
     if not hasattr(f, 'readinto') and (3, 8, 0) <= sys.version_info < (3, 8, 2):
         raise RuntimeError(
             "torch.load does not work with file-like objects that do not implement readinto on Python 3.8.0 and 3.8.1. "
-            f"Received object of type \"{type(f)}\". Please update to Python 3.8.2 or newer to restore this "
+            f'Received object of type "{type(f)}". Please update to Python 3.8.2 or newer to restore this '
             "functionality.")
 
     magic_number = pickle_module.load(f, **pickle_load_args)
@@ -1267,15 +1284,16 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
 
     deserialized_storage_keys = pickle_module.load(f, **pickle_load_args)
 
-    offset = f.tell() if f_should_read_directly else None
-    for key in deserialized_storage_keys:
-        assert key in deserialized_objects
-        typed_storage = deserialized_objects[key]
-        typed_storage._untyped_storage._set_from_file(
-            f, offset, f_should_read_directly,
-            torch._utils._element_size(typed_storage.dtype))
-        if offset is not None:
-            offset = f.tell()
+    if torch._guards.active_fake_mode() is None:
+        offset = f.tell() if f_should_read_directly else None
+        for key in deserialized_storage_keys:
+            assert key in deserialized_objects
+            typed_storage = deserialized_objects[key]
+            typed_storage._untyped_storage._set_from_file(
+                f, offset, f_should_read_directly,
+                torch._utils._element_size(typed_storage.dtype))
+            if offset is not None:
+                offset = f.tell()
 
     torch._utils._validate_loaded_sparse_tensors()
 
@@ -1318,7 +1336,11 @@ def _get_restore_location(map_location):
 
 class StorageType:
     def __init__(self, name):
-        self.dtype = _get_dtype_from_pickle_storage_type(name)
+        self._dtype = _get_dtype_from_pickle_storage_type(name)
+
+    @property
+    def dtype(self):
+        return self._dtype
 
     def __str__(self):
         return f'StorageType(dtype={self.dtype})'
@@ -1360,7 +1382,10 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', overall
 
     def load_tensor(dtype, numel, key, location):
         name = f'data/{key}'
-        if overall_storage is not None:
+        if torch._guards.detect_fake_mode(None) is not None:
+            nbytes = numel * torch._utils._element_size(dtype)
+            storage = torch.UntypedStorage(nbytes, device='meta')
+        elif overall_storage is not None:
             storage_offset = zip_file.get_record_offset(name)
             storage = overall_storage[storage_offset:storage_offset + numel]
         else:
@@ -1429,7 +1454,11 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', overall
 
     unpickler = UnpicklerWrapper(data_file, **pickle_load_args)
     unpickler.persistent_load = persistent_load
+    # Needed for tensors where storage device and rebuild tensor device are
+    # not connected (wrapper subclasses and tensors rebuilt using numpy)
+    torch._utils._thread_local_state.map_location = map_location
     result = unpickler.load()
+    del torch._utils._thread_local_state.map_location
 
     torch._utils._validate_loaded_sparse_tensors()
     torch._C._log_api_usage_metadata(

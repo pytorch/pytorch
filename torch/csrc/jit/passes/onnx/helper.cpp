@@ -61,7 +61,7 @@ void buildParamsMapFromValueToParamsMap(
   }
 }
 
-c10::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type) {
+std::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type) {
   switch (onnx_type) {
     case ::ONNX_NAMESPACE::TensorProto_DataType_UNDEFINED:
       return at::ScalarType::Undefined;
@@ -91,8 +91,12 @@ c10::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type) {
       return at::kBFloat16;
     case ::torch::onnx::TensorProto_DataType_FLOAT8E5M2:
       return at::kFloat8_e5m2;
+    case ::torch::onnx::TensorProto_DataType_FLOAT8E5M2FNUZ:
+      return at::kFloat8_e5m2fnuz;
     case ::torch::onnx::TensorProto_DataType_FLOAT8E4M3FN:
       return at::kFloat8_e4m3fn;
+    case ::torch::onnx::TensorProto_DataType_FLOAT8E4M3FNUZ:
+      return at::kFloat8_e4m3fnuz;
     default:
       TORCH_CHECK(
           false,
@@ -100,7 +104,7 @@ c10::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type) {
           onnx_type,
           " is an unexpected tensor scalar type");
   }
-  return c10::optional<at::ScalarType>{};
+  return std::optional<at::ScalarType>{};
 }
 
 Node* addNodeToBlock(Block* block, Symbol kind, ArrayRef<Value*> inputs) {

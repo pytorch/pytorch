@@ -1,6 +1,6 @@
-r""""Contains definitions of the methods used by the _BaseDataLoaderIter to fetch
-data from an iterable-style or map-style dataset. This logic is shared in both
-single- and multi-processing data loading.
+r"""Contains definitions of the methods used by the _BaseDataLoaderIter to fetch data from an iterable-style or map-style dataset.
+
+This logic is shared in both single- and multi-processing data loading.
 """
 
 
@@ -12,7 +12,7 @@ class _BaseDatasetFetcher:
         self.drop_last = drop_last
 
     def fetch(self, possibly_batched_index):
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 class _IterableDatasetFetcher(_BaseDatasetFetcher):

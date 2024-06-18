@@ -24,12 +24,8 @@ from torch.testing._internal.common_utils import (
 
 @contextmanager
 def control_stream(use_numpy=False):
-    oldstate = config.use_numpy_random_stream
-    config.use_numpy_random_stream = use_numpy
-    try:
+    with config.patch(use_numpy_random_stream=use_numpy):
         yield
-    finally:
-        config.use_numpy_random_stream = oldstate
 
 
 @instantiate_parametrized_tests

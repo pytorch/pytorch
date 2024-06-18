@@ -4,7 +4,6 @@
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/mini_environment.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/ir/ir_views.h>
 
 namespace torch::jit {
 

@@ -43,10 +43,10 @@ Tensor& zero_(at::Tensor& self) {
 
 Tensor zeros(
     const IntArrayRef size,
-    c10::optional<ScalarType> dtype,
-    c10::optional<c10::Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
+    std::optional<ScalarType> dtype,
+    std::optional<c10::Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory) {
   TORCH_CHECK(size.size() <= 4, "Vulkan zeros supports up to 4d tensors");
 
   // Get the global Vulkan context
@@ -55,8 +55,8 @@ Tensor zeros(
   // Create the output texture
   vTensor v_output{
       context,
-      size,
-      ScalarType::Float,
+      size.vec(),
+      api::ScalarType::Float,
   };
 
   // Required to determine how to insert memory barriers in the command buffer

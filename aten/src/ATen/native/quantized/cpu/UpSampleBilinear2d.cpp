@@ -22,7 +22,7 @@ namespace at {
 namespace native {
 namespace {
 
-// pre calcuate interpolation params on width
+// pre calculate interpolation params on width
 struct UpsampleBilinearParamW {
   int64_t w1, w1p;
   float w0lambda, w1lambda;
@@ -46,16 +46,16 @@ static void upsample_bilinear2d_out_frame(
     int64_t nbatch,
     int64_t channels,
     bool align_corners,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
-  auto* idata = static_cast<scalar_t*>(input.data_ptr());
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
+  auto* idata = static_cast<const scalar_t*>(input.const_data_ptr());
   auto* odata = static_cast<scalar_t*>(output.data_ptr());
 
   channels = channels * nbatch;
   if (channels == 0 || output_height == 0 || output_width == 0) {
     return;
   }
-  auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(idata);
+  auto* i_p = reinterpret_cast<const typename scalar_t::underlying*>(idata);
   auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(odata);
 
   // special case: just copy
@@ -146,8 +146,8 @@ Tensor upsample_bilinear2d_quantized_cpu(
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
   TORCH_CHECK(
       output_size.size() == 2,
       "It is expected output_size equals to 2, but got size ",
@@ -223,7 +223,7 @@ static Tensor upsample_bilinear2d_quantized_cpu(
     const Tensor& input,
     at::OptionalIntArrayRef output_size,
       bool align_corners,
-    c10::optional<ArrayRef<double>> scale_factors) {
+    std::optional<ArrayRef<double>> scale_factors) {
   auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
   auto scale_h = get_scale_value(scale_factors, 0);
   auto scale_w = get_scale_value(scale_factors, 1);

@@ -5,7 +5,6 @@
 #include <ATen/Config.h>
 
 #include <c10/util/SmallBuffer.h>
-#include <c10/util/C++17.h>
 #include <c10/util/irange.h>
 
 #include <climits>
@@ -42,9 +41,7 @@ extern "C" void zaxpy_(int *n, void *a, const void *x, int *incx, void *y, int *
 #include <fbgemm/FbgemmI64.h>
 #endif  // USE_FBGEMM
 
-namespace at {
-namespace native {
-namespace cpublas {
+namespace at::native::cpublas {
 namespace internal {
 
 void normalize_last_dims(
@@ -167,6 +164,11 @@ void gemm(
     const float beta,
     float *c, int64_t ldc) {
   internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
+#if AT_MKLDNN_ENABLED()
+   if (mkldnn_bf32_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
+     return;
+   }
+#endif
 #if AT_BUILD_WITH_BLAS()
   if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
     int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
@@ -400,6 +402,42 @@ void gemm(
 void gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
+    const float alpha,
+    const at::Half *a, int64_t lda,
+    const at::Half *b, int64_t ldb,
+    const float beta,
+    float *c, int64_t ldc) {
+  internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
+#ifdef MKL_HAS_SHGEMM
+  if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
+    int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
+    mkl_gemm_f16f16f32(transa, transb, m_, n_, k_, alpha, a, lda_, b, ldb_, beta, c, ldc_);
+    return;
+  }
+#endif
+  // for the fallback path, first compute gemm with beta = 0,
+  // and then add c in full precision.
+  int64_t c_size = n * m;
+  std::vector<at::Half> float16_c(c_size, 0.f);
+  gemm_stub(
+      at::kCPU, at::kHalf,
+      transa, transb, m, n, k, alpha, a, lda, b, ldb, 0.f, float16_c.data(), m);
+  for (const auto j : c10::irange(n)) {
+    for (const auto i : c10::irange(m)) {
+      auto offset = j * ldc + i;
+      // beta == 0 won't propagate NaN from C
+      if (beta == 0.f) {
+        c[offset] = c10::convert<float>(float16_c[j * m + i]);
+      } else {
+        c[offset] = beta * c[offset] + c10::convert<float>(float16_c[j * m + i]);
+      }
+    }
+  }
+}
+
+void gemm(
+    TransposeType transa, TransposeType transb,
+    int64_t m, int64_t n, int64_t k,
     const int64_t alpha,
     const int64_t *a, int64_t lda,
     const int64_t *b, int64_t ldb,
@@ -581,7 +619,7 @@ void gemm_batched_with_stride(
       scalar_t beta,                                            \
       scalar_t *c, int64_t ldc, int64_t batch_stride_c);
 
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(INSTANTIATE_BATCHED_GEMM)
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF_F8NZ(INSTANTIATE_BATCHED_GEMM)
 
 DEFINE_DISPATCH(axpy_stub);
 
@@ -783,4 +821,4 @@ void copy(int64_t n, const c10::complex<float> *x, int64_t incx, c10::complex<fl
       n, x, incx, y, incy);
 }
 
-}}}  // namespace at::native::cpublas
+}  // namespace at::native::cpublas

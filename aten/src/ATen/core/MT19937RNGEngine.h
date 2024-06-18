@@ -110,6 +110,7 @@ struct mt19937_data_pod {
 class mt19937_engine {
 public:
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   inline explicit mt19937_engine(uint64_t seed = 5489) {
     init_with_uint32(seed);
   }
@@ -136,12 +137,10 @@ public:
   }
 
   inline uint32_t operator()() {
-    uint32_t y;
-
     if (--(data_.left_) == 0) {
         next_state();
     }
-    y = *(data_.state_.data() + data_.next_++);
+    uint32_t y = *(data_.state_.data() + data_.next_++);
     y ^= (y >> 11);
     y ^= (y << 7) & 0x9d2c5680;
     y ^= (y << 15) & 0xefc60000;

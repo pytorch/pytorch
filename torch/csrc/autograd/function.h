@@ -24,8 +24,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 struct Edge;
 struct FunctionPostHook;
@@ -64,7 +63,7 @@ TORCH_API std::shared_ptr<Node> get_current_node();
 // or more input `Variable`s and producing zero or more output `Variable`s. All
 // functions in PyTorch's autograd machinery derive from this class and
 // override its `apply` method. Instances of such subclasses will then be
-// invokeable via the call operator.
+// invokable via the call operator.
 //
 //                    Nodes in the Autograd Graph
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -240,9 +239,13 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
    * elements are on different devices (across multiple GPUs, for example)
    * they may have different streams.
    */
-  c10::optional<c10::Stream> stream(const c10::DeviceType device_type) {
+  std::optional<c10::Stream> stream() {
+    auto opt_device_type = at::getAccelerator();
+    if (!opt_device_type.has_value()) {
+      return c10::nullopt;
+    }
     for (const auto& metadata : input_metadata_) {
-      if (metadata.device().type() == device_type)
+      if (metadata.device().type() == opt_device_type.value())
         return metadata.stream();
     }
 
@@ -326,6 +329,10 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   ///    in a new thread
   uint64_t sequence_nr() const noexcept {
     return sequence_nr_;
+  }
+
+  void set_sequence_nr(uint64_t sequence_nr) {
+    sequence_nr_ = sequence_nr;
   }
 
   // NOTE [ Topological Number ]
@@ -590,7 +597,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   // Sequence number used to correlate backward nodes with forward ops in the
   // profiler and provide determinism in the engine.
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
-  const uint64_t sequence_nr_;
+  uint64_t sequence_nr_;
 
   // See NOTE [ Topological Number ]
   uint64_t topological_nr_ = 0;
@@ -696,7 +703,7 @@ struct MakeNextFunctionList : IterArgs<MakeNextFunctionList> {
   void operator()(const Variable* variable) {
     operator()(*variable);
   }
-  void operator()(const c10::optional<Variable>& variable) {
+  void operator()(const std::optional<Variable>& variable) {
     if (variable.has_value()) {
       operator()(*variable);
     } else {
@@ -747,13 +754,10 @@ struct TypeAndSize {
   TypeAndSize(const at::Tensor& t)
       : sym_sizes(t.sym_sizes().vec()), options(t.options()) {}
 
-  at::Tensor zeros() {
-    return at::zeros_symint(sym_sizes, options);
-  }
+  at::Tensor zeros();
 
   std::vector<c10::SymInt> sym_sizes;
   at::TensorOptions options;
 };
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

@@ -12,7 +12,7 @@ import re
 import subprocess
 import sys
 import unittest.mock
-from typing import Any, Callable, Iterator, List, Tuple, Generator
+from typing import Any, Callable, Iterator, List, Tuple
 
 import torch
 
@@ -22,13 +22,14 @@ from torch.testing._internal.common_utils import \
      parametrize, subtest, instantiate_parametrized_tests, dtype_name, TEST_WITH_ROCM, decorateIf)
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
-     get_device_type_test_bases, instantiate_device_type_tests, onlyCUDA, onlyNativeDeviceTypes,
+     get_device_type_test_bases, instantiate_device_type_tests, onlyCPU, onlyCUDA, onlyNativeDeviceTypes,
      deviceCountAtLeast, ops, expectedFailureMeta, OpDTypes)
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_dtype import all_types_and_complex_and, floating_types
 from torch.testing._internal.common_modules import modules, module_db, ModuleInfo
 from torch.testing._internal.opinfo.core import SampleInput, DecorateInfo, OpInfo
+import operator
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
@@ -412,6 +413,28 @@ if __name__ == '__main__':
 
             self.assertTrue(set(dtypes) == set(dynamic_dtypes))
             self.assertTrue(set(dtypes) == set(dynamic_dispatch.dispatch_fn()))
+
+    @onlyCPU
+    @ops(
+        [
+            op
+            for op in op_db
+            if len(
+                op.supported_dtypes("cpu").symmetric_difference(
+                    op.supported_dtypes("cuda")
+                )
+            )
+            > 0
+        ][:1],
+        dtypes=OpDTypes.none,
+    )
+    def test_supported_dtypes(self, device, op):
+        self.assertNotEqual(op.supported_dtypes("cpu"), op.supported_dtypes("cuda"))
+        self.assertEqual(op.supported_dtypes("cuda"), op.supported_dtypes("cuda:0"))
+        self.assertEqual(
+            op.supported_dtypes(torch.device("cuda")),
+            op.supported_dtypes(torch.device("cuda", index=1)),
+        )
 
 instantiate_device_type_tests(TestTesting, globals())
 
@@ -1405,7 +1428,7 @@ class TestMakeTensor(TestCase):
     @parametrize("noncontiguous", [False, True])
     @parametrize("shape", [tuple(), (0,), (1,), (1, 1), (2,), (2, 3), (8, 16, 32)])
     def test_noncontiguous(self, dtype, device, noncontiguous, shape):
-        numel = functools.reduce(lambda a, b: a * b, shape, 1)
+        numel = functools.reduce(operator.mul, shape, 1)
 
         t = torch.testing.make_tensor(shape, dtype=dtype, device=device, noncontiguous=noncontiguous)
         self.assertEqual(t.is_contiguous(), not noncontiguous or numel < 2)
@@ -1462,15 +1485,7 @@ class TestMakeTensor(TestCase):
         low_inclusive, high_exclusive = {
             torch.bool: (0, 2),
             torch.uint8: (0, 10),
-            **{
-                signed_integral_dtype: (-9, 10)
-                for signed_integral_dtype in [
-                    torch.int8,
-                    torch.int16,
-                    torch.int32,
-                    torch.int64,
-                ]
-            },
+            **dict.fromkeys([torch.int8, torch.int16, torch.int32, torch.int64], (-9, 10)),
         }.get(dtype, (-9, 9))
 
         t = torch.testing.make_tensor(10_000, dtype=dtype, device=device, low=low_inclusive, high=high_exclusive)
@@ -1848,6 +1863,33 @@ class TestTestParametrizationDeviceType(TestCase):
         test_names = _get_test_names_for_test_class(device_cls)
         self.assertEqual(expected_test_names, test_names)
 
+    def test_default_name_non_primitive(self, device):
+        device = self.device_type
+
+        class TestParametrized(TestCase):
+            @parametrize("x", [1, .5, "foo", object()])
+            def test_default_names(self, device, x):
+                pass
+
+            @parametrize("x,y", [(1, object()), (object(), .5), (object(), object())])
+            def test_two_things_default_names(self, device, x, y):
+                pass
+
+        instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+
+        device_cls = locals()[f'TestParametrized{device.upper()}']
+        expected_test_names = sorted(name.format(device_cls.__name__, device) for name in (
+            '{}.test_default_names_x_1_{}',
+            '{}.test_default_names_x_0_5_{}',
+            '{}.test_default_names_x_foo_{}',
+            '{}.test_default_names_x3_{}',
+            '{}.test_two_things_default_names_x_1_y0_{}',
+            '{}.test_two_things_default_names_x1_y_0_5_{}',
+            '{}.test_two_things_default_names_x2_y2_{}')
+        )
+        test_names = _get_test_names_for_test_class(device_cls)
+        self.assertEqual(expected_test_names, test_names)
+
     def test_name_fn(self, device):
         device = self.device_type
 
@@ -1931,8 +1973,7 @@ class TestTestParametrizationDeviceType(TestCase):
         for op in op_db:
             for dtype in op.supported_dtypes(torch.device(device).type):
                 for flag_part in ('flag_disabled', 'flag_enabled'):
-                    expected_name = '{}.test_op_parametrized_{}_{}_{}_{}'.format(
-                        device_cls.__name__, op.formatted_name, flag_part, device, dtype_name(dtype))
+                    expected_name = f'{device_cls.__name__}.test_op_parametrized_{op.formatted_name}_{flag_part}_{device}_{dtype_name(dtype)}'  # noqa: B950
                     expected_test_names.append(expected_name)
 
         test_names = _get_test_names_for_test_class(device_cls)
@@ -2013,7 +2054,7 @@ class TestTestParametrizationDeviceType(TestCase):
         for test_func, name in _get_test_funcs_for_test_class(device_cls):
             should_apply = (name == 'test_op_param_test_op_x_2_cpu_float64' or
                             ('test_other' in name and 'y_5' in name) or
-                            ('test_three' in name and name.endswith('int16')))
+                            ('test_three' in name and name.endswith('_int16')))
             self.assertEqual(hasattr(test_func, '_decorator_applied'), should_apply)
 
     def test_modules_decorator_applies_module_and_param_specific_decorators(self, device):
@@ -2204,7 +2245,6 @@ class TestImports(TestCase):
             else:
                 ignored_modules.append("torch.distributed.nn.api.")
                 ignored_modules.append("torch.distributed.optim.")
-                ignored_modules.append("torch.distributed.pipeline.")
                 ignored_modules.append("torch.distributed.rpc.")
             ignored_modules.append("torch.testing._internal.dist_utils")
             # And these both end up with transitive dependencies on distributed
@@ -2239,6 +2279,17 @@ class TestImports(TestCase):
     def test_no_warning_on_import(self) -> None:
         out = self._check_python_output("import torch")
         self.assertEqual(out, "")
+
+    def test_not_import_sympy(self) -> None:
+        out = self._check_python_output("import torch;import sys;print('sympy' not in sys.modules)")
+        self.assertEqual(out.strip(), "True",
+                         "PyTorch should not depend on SymPy at import time as importing SymPy is *very* slow.\n"
+                         "See the beginning of the following blog post for how to profile and find which file is importing sympy:\n"
+                         "https://dev-discuss.pytorch.org/t/delving-into-what-happens-when-you-import-torch/1589\n\n"
+                         "If you hit this error, you may want to:\n"
+                         "  - Refactor your code to avoid depending on sympy files you may not need to depend\n"
+                         "  - Use TYPE_CHECKING if you are using sympy + strings if you are using sympy on type annotations\n"
+                         "  - Import things that depend on SymPy locally")
 
     @unittest.skipIf(IS_WINDOWS, "importing torch+CUDA on CPU results in warning")
     @parametrize('path', ['torch', 'functorch'])
@@ -2328,19 +2379,19 @@ class TestOpInfoSampleFunctions(TestCase):
     def test_opinfo_sample_generators(self, device, dtype, op):
         # Test op.sample_inputs doesn't generate multiple samples when called
         samples = op.sample_inputs(device, dtype)
-        self.assertIsInstance(samples, Generator)
+        self.assertIsInstance(samples, Iterator)
 
     @ops([op for op in op_db if op.reference_inputs_func is not None], dtypes=OpDTypes.any_one)
     def test_opinfo_reference_generators(self, device, dtype, op):
         # Test op.reference_inputs doesn't generate multiple samples when called
         samples = op.reference_inputs(device, dtype)
-        self.assertIsInstance(samples, Generator)
+        self.assertIsInstance(samples, Iterator)
 
     @ops([op for op in op_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
     def test_opinfo_error_generators(self, device, op):
         # Test op.error_inputs doesn't generate multiple inputs when called
         samples = op.error_inputs(device)
-        self.assertIsInstance(samples, Generator)
+        self.assertIsInstance(samples, Iterator)
 
 
 instantiate_device_type_tests(TestOpInfoSampleFunctions, globals())

@@ -129,8 +129,9 @@ bool InterpreterState::run(Stack& stack) {
             }
           }
           if (inst.X < 0 ||
+              static_cast<size_t>(inst.X) >= code.op_names_.size() ||
               static_cast<size_t>(inst.X) >= code.operators_.size()) {
-            throw JITException("Invalid OP Instruction");
+            TORCH_CHECK(false, "Can't load op with index: ", inst.X);
           }
           RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS(
               code.op_names_[inst.X].name, debug_handle, stack);
@@ -138,6 +139,11 @@ bool InterpreterState::run(Stack& stack) {
           frame.step();
         } break;
         case OPN: {
+          if (inst.X < 0 ||
+              static_cast<size_t>(inst.X) >= code.op_names_.size() ||
+              static_cast<size_t>(inst.X) >= code.operators_.size()) {
+            TORCH_CHECK(false, "Can't load op with index: ", inst.X);
+          }
           stack.emplace_back(inst.N);
           RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS(
               code.op_names_[inst.X].name, debug_handle, stack);
@@ -149,6 +155,19 @@ bool InterpreterState::run(Stack& stack) {
           callFunction(function, stack);
         } break;
         case INTERFACE_CALL: {
+          if (inst.X < 0 ||
+              static_cast<size_t>(inst.X) >= code.constants_.size()) {
+            TORCH_CHECK(false, "Can't load constant with index: ", inst.X);
+          }
+          if (inst.N == 0 || inst.N > stack.size()) {
+            TORCH_CHECK(
+                false,
+                "INTERFACE_CALL N=",
+                inst.N,
+                " not in range [1, ",
+                stack.size(),
+                "]");
+          }
           torch::jit::Function& method =
               peek(stack, 0, inst.N)
                   .toObject()
@@ -185,6 +204,10 @@ bool InterpreterState::run(Stack& stack) {
           frame.step();
           break;
         case LOADC:
+          if (inst.X < 0 ||
+              static_cast<size_t>(inst.X) >= code.constants_.size()) {
+            TORCH_CHECK(false, "Can't load constant with index: ", inst.X);
+          }
           stack.emplace_back(code.constants_[inst.X]);
           frame.step();
           break;
@@ -372,6 +395,8 @@ bool InterpreterState::run(Stack& stack) {
 }
 
 IValue& InterpreterState::reg(size_t reg) {
+  TORCH_CHECK(
+      reg > 0 && reg <= registers_.size(), "Invalid register index: ", reg);
   return *(registers_.end() - reg);
 }
 

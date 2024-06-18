@@ -381,7 +381,7 @@ class TestArgmax(TestCase):
         (np.array(d[0], dtype=t), d[1])
         for d, t in (itertools.product(usg_data, (np.uint8,)))
     ]
-    darr = darr + [
+    darr += [
         (np.array(d[0], dtype=t), d[1])
         for d, t in (
             itertools.product(
@@ -389,7 +389,7 @@ class TestArgmax(TestCase):
             )
         )
     ]
-    darr = darr + [
+    darr += [
         (np.array(d[0], dtype=t), d[1])
         for d, t in (
             itertools.product(
@@ -466,14 +466,14 @@ class TestArgmax(TestCase):
         # add padding to test SIMD loops
         rarr = np.repeat(arr, 129)
         rpos = pos * 129
-        assert_equal(np.argmax(rarr), rpos, err_msg="%r" % rarr)
-        assert_equal(rarr[np.argmax(rarr)], val, err_msg="%r" % rarr)
+        assert_equal(np.argmax(rarr), rpos, err_msg=f"{rarr!r}")
+        assert_equal(rarr[np.argmax(rarr)], val, err_msg=f"{rarr!r}")
 
         padd = np.repeat(np.min(arr), 513)
         rarr = np.concatenate((arr, padd))
         rpos = pos
-        assert_equal(np.argmax(rarr), rpos, err_msg="%r" % rarr)
-        assert_equal(rarr[np.argmax(rarr)], val, err_msg="%r" % rarr)
+        assert_equal(np.argmax(rarr), rpos, err_msg=f"{rarr!r}")
+        assert_equal(rarr[np.argmax(rarr)], val, err_msg=f"{rarr!r}")
 
     def test_maximum_signed_integers(self):
         a = np.array([1, 2**7 - 1, -(2**7)], dtype=np.int8)
@@ -505,7 +505,7 @@ class TestArgmin(TestCase):
         (np.array(d[0], dtype=t), d[1])
         for d, t in (itertools.product(usg_data, (np.uint8,)))
     ]
-    darr = darr + [
+    darr += [
         (np.array(d[0], dtype=t), d[1])
         for d, t in (
             itertools.product(
@@ -513,7 +513,7 @@ class TestArgmin(TestCase):
             )
         )
     ]
-    darr = darr + [
+    darr += [
         (np.array(d[0], dtype=t), d[1])
         for d, t in (
             itertools.product(
@@ -573,20 +573,20 @@ class TestArgmin(TestCase):
         #            sup.filter(RuntimeWarning, "invalid value encountered in reduce")
         min_val = np.min(arr)
 
-        assert_equal(np.argmin(arr), pos, err_msg="%r" % arr)
-        assert_equal(arr[np.argmin(arr)], min_val, err_msg="%r" % arr)
+        assert_equal(np.argmin(arr), pos, err_msg=f"{arr!r}")
+        assert_equal(arr[np.argmin(arr)], min_val, err_msg=f"{arr!r}")
 
         # add padding to test SIMD loops
         rarr = np.repeat(arr, 129)
         rpos = pos * 129
-        assert_equal(np.argmin(rarr), rpos, err_msg="%r" % rarr)
-        assert_equal(rarr[np.argmin(rarr)], min_val, err_msg="%r" % rarr)
+        assert_equal(np.argmin(rarr), rpos, err_msg=f"{rarr!r}")
+        assert_equal(rarr[np.argmin(rarr)], min_val, err_msg=f"{rarr!r}")
 
         padd = np.repeat(np.max(arr), 513)
         rarr = np.concatenate((arr, padd))
         rpos = pos
-        assert_equal(np.argmin(rarr), rpos, err_msg="%r" % rarr)
-        assert_equal(rarr[np.argmin(rarr)], min_val, err_msg="%r" % rarr)
+        assert_equal(np.argmin(rarr), rpos, err_msg=f"{rarr!r}")
+        assert_equal(rarr[np.argmin(rarr)], min_val, err_msg=f"{rarr!r}")
 
     def test_minimum_signed_integers(self):
         a = np.array([1, -(2**7), -(2**7) + 1, 2**7 - 1], dtype=np.int8)
@@ -645,7 +645,7 @@ class TestNoExtraMethods(TestCase):
 
 
 class TestIter(TestCase):
-    @skipIfTorchDynamo
+    @skipIfTorchDynamo()
     def test_iter_1d(self):
         # numpy generates array scalars, we do 0D arrays
         a = np.arange(5)

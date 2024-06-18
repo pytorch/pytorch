@@ -10,7 +10,7 @@ import io
 import logging
 import sys
 
-from typing import Any, Callable, Optional, Tuple
+from typing import Any, Callable, Optional, Tuple, Union
 
 import torch
 import torch.fx
@@ -32,8 +32,10 @@ class PackageInfo:
         )
 
     @classmethod
-    def from_python_class(cls, python_class: type) -> PackageInfo:
-        package_name = python_class.__module__.split(".")[0]
+    def from_python_class(cls, python_class_name: Union[type, str]) -> PackageInfo:
+        if isinstance(python_class_name, type):
+            python_class_name = python_class_name.__module__
+        package_name = python_class_name.split(".")[0]
         package = __import__(package_name)
         version = getattr(package, "__version__", None)
         # TODO: Figure out how to retrieve commit hash.
@@ -157,11 +159,12 @@ def maybe_fx_graph_tabular(graph: torch.fx.Graph) -> Optional[str]:
 class Transform(abc.ABC):
     """Base class for FX graph transformations to be used by FX-ONNX exporter.
 
-    This class provides builtin support for transformation recording using the diagnostics system.
+    Similar to `FX Interpreter <https://pytorch.org/docs/stable/fx.html#torch.fx.Interpreter>`_,
+    specializations of this class execute the FX graph Node-by-Node.
+    Methods in the `Transform` class can be overridden to customize the behavior of the model.
+    This pattern can be useful for many things, including writing code transformations as well as analysis passes.
 
-    TODO(bowbao): Add more overrideable methods in call hierarchy
-    Methods in the Transform class can be overridden to customize the behavior of the
-    transform. The following methods can be overridden::
+    The following methods can be overridden::
 
         _run()
             +-- run_node()
@@ -172,13 +175,20 @@ class Transform(abc.ABC):
                 +-- call_module()
                 +-- output()
 
+    One important aspect to note is that if the transformation modifies the model input and/or output signature,
+    (e.g. additional inputs/outputs are added to the model), :class:`InputAdaptStep` and/or :class:`OutputAdaptStep`
+    are needed to reconcile :attr:`ONNXProgram.model_signature` and :attr:`ONNXProgram.model_proto`.
+    That is, the model signature and the model representation must match.
+
+    As an additional feature, this class provides builtin support for transformation recording using the diagnostics.
     The granularity of overriding is up to the user. And it affects the granularity of
     the diagnostics information. For example, if `_run()` is overridden, the
     diagnostics information will only contain graph level transformation. Instead,
     if `call_function()` is overridden, the diagnostics information will additionally
     contain the node level information of `call_function()`.
 
-    Example: TODO(bowbao): Fill example once more overrideable methods are added.
+    TODO(bowbao): Add more overridable methods in call hierarchy
+    TODO(bowbao): Create an example once more overridable methods are added.
     """
 
     diagnostic_context: diagnostics.DiagnosticContext

@@ -16,17 +16,20 @@ def is_batch_first(expanded_args_and_kwargs):
     return batch_first
 
 def standard_kwargs(kwarg_names, expanded_args):
-    r'''Most `__torch_function__`s standardize the kwargs that they give, so this will separate
-    the args and kwargs they pass. Functions that don't are linear and convND
-    '''
+    r"""Separate args and kwargs from `__torch_function__`s that standardize kwargs.
+
+    Most `__torch_function__`s standardize the kwargs that they give, so this will separate
+    the args and kwargs they pass. Functions that don't are linear and convND.
+    """
     kwarg_values = expanded_args[len(expanded_args) - len(kwarg_names):]
     expanded_args_without_kwargs = expanded_args[:len(expanded_args) - len(kwarg_names)]
     expanded_kwargs = dict(zip(kwarg_names, kwarg_values))
     return expanded_args_without_kwargs, expanded_kwargs
 
 def forward_helper(func, expanded_args, expanded_kwargs):
-    r'''Forward helper computes the forward pass for a function that has expanded weight(s)
-    passed to it. It will run the forward pass where all ExpandedWeights are their original
+    r"""Compute the forward pass for a function that has expanded weight(s) passed to it.
+
+    It will run the forward pass where all ExpandedWeights are their original
     weight. It runs checks on the given arguments and detaches the outputs.
 
     .. note:: First argument in :attr:`expanded_args` must be the input with the batch
@@ -40,7 +43,7 @@ def forward_helper(func, expanded_args, expanded_kwargs):
           that need to be unpacked because they are ExpandedWeights
         expanded_kwargs: Keyword arguments to be passed to :attr:`func`.
           Similar to :attr:`expanded_args`.
-    '''
+    """
     unexpanded_args, unexpanded_kwargs = _check_and_unexpand_args(func, expanded_args, expanded_kwargs)
     return func(*unexpanded_args, **unexpanded_kwargs)
 
@@ -121,8 +124,8 @@ def sum_over_all_but_batch_and_last_n(
     tensor: torch.Tensor, n_dims: int
 ) -> torch.Tensor:
     r"""
-    Calculates the sum over all dimensions, except the first
-    (batch dimension), and excluding the last n_dims.
+    Calculate the sum over all dimensions, except the first (batch dimension), and excluding the last n_dims.
+
     This function will ignore the first dimension and it will
     not aggregate over the last n_dims dimensions.
     Args:

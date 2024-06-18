@@ -311,14 +311,14 @@ inline std::unordered_set<c10::DeviceType>& GetBackendMetaAllowlist() {
 // Dynamically obtain serialization function pairs
 // that require the corresponding backend.
 inline std::array<
-    c10::optional<std::pair<BackendMetaPtr, BackendMetaPtr>>,
+    std::optional<std::pair<BackendMetaPtr, BackendMetaPtr>>,
     at::COMPILE_TIME_MAX_DEVICE_TYPES>&
 GetBackendMetaSerialization() {
   // The array to save function pointer for BackendMeta serialization.
   // key is the DeviceType, value is std::pair obj.
   // value.first represent get function and value.seconde represent set function
   static std::array<
-      c10::optional<std::pair<BackendMetaPtr, BackendMetaPtr>>,
+      std::optional<std::pair<BackendMetaPtr, BackendMetaPtr>>,
       at::COMPILE_TIME_MAX_DEVICE_TYPES>
       BackendMetaSerialization;
   return BackendMetaSerialization;
@@ -327,8 +327,8 @@ GetBackendMetaSerialization() {
 // Register function pointer of Tensor BackendMetadata for serialization.
 TORCH_API inline void TensorBackendMetaRegistry(
     c10::DeviceType t,
-    BackendMetaPtr get_fptr,
-    BackendMetaPtr set_fptr) {
+    const BackendMetaPtr& get_fptr,
+    const BackendMetaPtr& set_fptr) {
   // allowlist verification
   // Only if the devicetype is in the allowlist,
   // we allow the serialization extension to be registered for backendmeta data.
@@ -348,7 +348,7 @@ TORCH_API inline void TensorBackendMetaRegistry(
       t,
       " has been registered.");
   BackendMetaSerialization[device_type] =
-      c10::optional<std::pair<BackendMetaPtr, BackendMetaPtr>>(
+      std::optional<std::pair<BackendMetaPtr, BackendMetaPtr>>(
           std::make_pair(get_fptr, set_fptr));
 }
 
@@ -416,7 +416,7 @@ inline void setTensorMetadata(
 // NOTE: This overload is required by unpickler.cpp
 inline void setTensorMetadata(
     const at::Tensor& t,
-    c10::Dict<c10::IValue, c10::IValue> metadata_idict) {
+    const c10::Dict<c10::IValue, c10::IValue>& metadata_idict) {
   std::unordered_map<std::string, bool> metadata;
   for (auto& pair : metadata_idict) {
     auto key = *pair.key().toString();

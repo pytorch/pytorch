@@ -16,6 +16,7 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, TEST_WITH_ASAN
+from torch.testing._internal.inductor_utils import skipCUDAIf
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -37,7 +38,7 @@ aten = torch.ops.aten
 
 
 class BinaryFoldingTemplate(TestCase):
-    @unittest.skipIf(TEST_CUDNN, "CUDNN has accuracy issues for this test")
+    @skipCUDAIf(TEST_CUDNN, "CUDNN has accuracy issues for this test")
     def test_conv_binary_folding(self):
         @torch.no_grad()
         def test_conv_fusion(use_bias, module, op, scalar, add_tensor, expect_success):
@@ -251,7 +252,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 del BinaryFoldingTemplate
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     if HAS_CPU or HAS_CUDA:
         run_tests(needs="filelock")

@@ -1,7 +1,11 @@
+# mypy: ignore-errors
+
 """
 From https://docs.google.com/spreadsheets/d/12R3nCOLskxPYjjiNkdqy4OdQ65eQp_htebXGODsjSeA/edit#gid=0
 Try to keep this list in sync with that.
 """
+import operator
+
 top_torch = [
     ("t", 6837449),
     ("tensor", 585786),
@@ -525,7 +529,11 @@ top_nn_module = [
     ("nn.Container", 217, None),
     ("nn.Unflatten", 206, "nn.functional.unflatten"),
     ("nn.FeatureAlphaDropout", 136, "nn.functional.feature_alpha_dropout"),
-    ("nn.TripletMarginWithDistanceLoss", 107, "nn.functional.triplet_margin_with_distance_loss"),
+    (
+        "nn.TripletMarginWithDistanceLoss",
+        107,
+        "nn.functional.triplet_margin_with_distance_loss",
+    ),
     ("nn.ChannelShuffle", 90, "nn.functional.channel_shuffle"),
     ("nn.RNNCellBase", 88, None),
     ("nn.LazyLinear", 81, "nn.functional.linear"),
@@ -550,52 +558,52 @@ top_nn_module = [
 
 # No rankings because these are a little hard to get rankings for
 method_only_ops = [
-    'bfloat16',
-    'bool',
-    'byte',
-    'char',
-    'contiguous',
-    'cpu',
-    'cuda',
-    'detach',
-    'double',
-    'expand',
-    'expand_as',
-    'float',
-    'get_device',
-    'half',
-    'hardshrink',
-    'index_add',
-    'index_copy',
-    'index_fill',
-    'index_put',
-    'int',
-    'is_contiguous',
-    'is_pinned',
-    'is_set_to',
-    'is_shared',
-    'is_signed',
-    'item',
-    'long',
-    'masked_scatter',
-    'masked_fill',
-    'narrow_copy',
-    'numpy',
-    'pin_memory',
-    'repeat',
-    'reshape_as',
-    'select',
-    'short',
-    'storage_offset',
-    'sum_to_size',
-    'to',
-    'to_mkldnn',
-    'tolist',
-    'type',
-    'type_as',
-    'unfold',
-    'view',
-    'view_as',
+    "bfloat16",
+    "bool",
+    "byte",
+    "char",
+    "contiguous",
+    "cpu",
+    "cuda",
+    "detach",
+    "double",
+    "expand",
+    "expand_as",
+    "float",
+    "get_device",
+    "half",
+    "hardshrink",
+    "index_add",
+    "index_copy",
+    "index_fill",
+    "index_put",
+    "int",
+    "is_contiguous",
+    "is_pinned",
+    "is_set_to",
+    "is_shared",
+    "is_signed",
+    "item",
+    "long",
+    "masked_scatter",
+    "masked_fill",
+    "narrow_copy",
+    "numpy",
+    "pin_memory",
+    "repeat",
+    "reshape_as",
+    "select",
+    "short",
+    "storage_offset",
+    "sum_to_size",
+    "to",
+    "to_mkldnn",
+    "tolist",
+    "type",
+    "type_as",
+    "unfold",
+    "view",
+    "view_as",
 ]
 
 
@@ -604,7 +612,7 @@ def get_nn_functional_top_list():
     for _, count, functional_name in top_nn_module:
         if functional_name is None:
             continue
-        if functional_name == 'torch.flatten':
+        if functional_name == "torch.flatten":
             continue
         if functional_name not in top_nn_functional_:
             top_nn_functional_[functional_name] = count
@@ -612,7 +620,7 @@ def get_nn_functional_top_list():
             top_nn_functional_[functional_name] += count
 
     top_nn_functional_ = list(top_nn_functional_.items())
-    top_nn_functional_.sort(key=lambda x: x[1], reverse=True)
+    top_nn_functional_.sort(key=operator.itemgetter(1), reverse=True)
     return top_nn_functional_
 
 

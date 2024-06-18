@@ -1,6 +1,4 @@
-"""
-This module contains utility method for mobile model optimization and lint.
-"""
+"""This module contains utility method for mobile model optimization and lint."""
 
 import torch
 from enum import Enum
@@ -19,6 +17,8 @@ def optimize_for_mobile(
         preserved_methods: Optional[List[AnyStr]] = None,
         backend: str = 'CPU') -> torch.jit.RecursiveScriptModule:
     """
+    Optimize a torch script module for mobile deployment.
+
     Args:
         script_module: An instance of torch script module with type of ScriptModule.
         optimization_blocklist: A set with type of MobileOptimizerType. When set is not passed,
@@ -77,8 +77,10 @@ def optimize_for_mobile(
 
 def generate_mobile_module_lints(script_module: torch.jit.ScriptModule):
     """
+    Generate a list of lints for a given torch script module.
+
     Args:
-        script_module: An instance of torch script module with type of ScriptModule
+        script_module: An instance of torch script module with type of ScriptModule.
 
     Returns:
         lint_map: A list of dictionary that contains modules lints
@@ -102,13 +104,15 @@ def generate_mobile_module_lints(script_module: torch.jit.ScriptModule):
     op_names = torch.jit.export_opnames(script_module)
     for op_name in op_names:
         if "dropout" in op_name:
-            lint_list.append({"name": LintCode.DROPOUT.name, "message": "Operator {} exists, remember to call eval() before "
+            lint_list.append({"name": LintCode.DROPOUT.name,
+                              "message": f"Operator {op_name} exists, remember to call eval() before "
                               "saving the module.and call torch.utils.mobile_optimizer.optimize_for_mobile to drop dropout "
-                              "operator.".format(op_name)})
+                              "operator."})
         if "batch_norm" in op_name:
-            lint_list.append({"name": LintCode.BATCHNORM.name, "message": "Operator {} exists, remember to call eval() before "
+            lint_list.append({"name": LintCode.BATCHNORM.name,
+                              "message": f"Operator {op_name} exists, remember to call eval() before "
                               "saving the module and call torch.utils.mobile_optimizer.optimize_for_mobile to drop batch_norm "
-                              "operator.".format(op_name)})
+                              "operator."})
 
     return lint_list
 

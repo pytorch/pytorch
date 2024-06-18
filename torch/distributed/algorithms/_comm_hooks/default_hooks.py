@@ -6,8 +6,7 @@ from typing import Optional
 
 class DefaultState:
     r"""
-    Stores state needed to perform the default communication algorithm
-    within a communication hook.
+    Stores state needed to perform the default communication algorithm within a communication hook.
 
     Args:
         process_group (ProcessGroup): The process group to be used.
@@ -44,9 +43,10 @@ class DefaultState:
 
 class LowPrecisionState(DefaultState):
     r"""
-    Stores state needed to perform gradient communication in a lower precision
-    within a communication hook. Communication hook will cast gradients back
-    to the original parameter precision specified by ``parameter_type`` (default: torch.float32).
+    Stores state needed to perform gradient communication in a lower precision within a communication hook.
+
+    Communication hook will cast gradients back to the original
+    parameter precision specified by ``parameter_type`` (default: torch.float32).
     Builds on top of the :class:`DefaultState`.
 
     Args:
@@ -69,18 +69,27 @@ class LowPrecisionState(DefaultState):
 
 def _decompress(state: LowPrecisionState, grad: torch.Tensor):
     """
-    Casts gradients back to full parameter precision so that
-    further computation happens in full precision.
+    Casts gradients back to full parameter precision so that further computation happens in full precision.
     """
     orig_grad_data = grad.data
     grad.data = grad.data.to(state.parameter_type)
+    device_type = ""
+    try:
+        if grad.device.type == "privateuse1":
+            device_type = torch._C._get_privateuse1_backend_name()
+        else:
+            device_type = grad.device.type
+        backend = getattr(torch, device_type)
+    except AttributeError as e:
+        raise AttributeError(f"Device {grad.device}  does not have a \
+                corresponding backend registered as 'torch.device_type'.") from e
+
     # Don't let this memory get reused until after the transfer.
-    orig_grad_data.record_stream(torch.cuda.current_stream())  # type: ignore[arg-type]
+    orig_grad_data.record_stream(backend.current_stream())  # type: ignore[arg-type]
 
 def allreduce_hook(state: DefaultState, grad: torch.Tensor):
     r"""
-    This FSDP communication hook implements ``all_reduce`` algorithm
-    and a necessary pre- and post-division of gradients.
+    Implement the  FSDP communication hook for ``all_reduce`` algorithm and a necessary pre- and post-division of gradients.
 
     Args:
         state (DefaultState): State information, configures pre- and post-division factors.
@@ -98,8 +107,9 @@ def allreduce_hook(state: DefaultState, grad: torch.Tensor):
 
 def reduce_scatter_hook(state: DefaultState, grad: torch.Tensor, output: torch.Tensor):
     r"""
-    This FSDP communication hook implements ``reduce_scatter`` algorithm for
-    sharded FSDP strategies and a necessary pre- and post-division of gradients.
+    Implement the  FSDP communication hook for ``reduce_scatter`` algorithm.
+
+    For sharded FSDP strategies and a necessary pre- and post-division of gradients.
 
     Args:
         state (DefaultState): State information, configures pre- and post-division factors.
@@ -131,8 +141,9 @@ def _low_precision_hook(prec: torch.dtype, state: LowPrecisionState, grad: torch
 
 def fp16_compress_hook(state: LowPrecisionState, grad: torch.Tensor, output: Optional[torch.Tensor] = None):
     r"""
-    This FSDP communication hook implements a simple gradient compression
-    approach that casts ``grad`` to half-precision floating-point format (``torch.float16``).
+    Implement FSDP communication hook for a simple gradient compression approach.
+    Casts ``grad`` to half-precision floating-point format (``torch.float16``).
+
     It also averages gradients by ``world_size`` in two steps: first it pre-divides gradients by a
     ``state.gradient_predivide_factor``, and after a communication step (``all_reduce`` or ``reduce_scatter``)
     gradients are averaged by a ``state.gradient_postdivide_factor``.
@@ -148,8 +159,9 @@ def fp16_compress_hook(state: LowPrecisionState, grad: torch.Tensor, output: Opt
 
 def bf16_compress_hook(state: LowPrecisionState, grad: torch.Tensor, output: Optional[torch.Tensor] = None):
     r"""
-    This FSDP communication hook implements a simple gradient compression
-    approach that casts ``grad`` to half-precision floating-point format (``torch.float16``).
+    Implement FSDP communication hook for a simple gradient compression approach .
+    Casts ``grad`` to half-precision floating-point format.
+
     It also averages gradients by ``world_size`` in two steps: first it pre-divides gradients by a
     ``state.gradient_predivide_factor``, and after a communication step (``all_reduce`` or ``reduce_scatter``)
     gradients are averaged by a ``state.gradient_postdivide_factor``.

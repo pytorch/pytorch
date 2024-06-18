@@ -16,6 +16,7 @@ from torch._prims_common import (
     TensorLike,
     TensorLikeType,
 )
+from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
 
@@ -92,6 +93,9 @@ class elementwise_type_promotion_wrapper:
     type_promotion_kind must be one of the kinds specified by ELEMENTWISE_TYPE_PROMOTION_KIND.
     See its documentation for details.
 
+    The return_dtype will be coerced to the wrapped function's dtype arg if it is available and
+    not None.
+
     Other type promotion behavior, like validating the Python type of scalar arguments, must
     be handled separately.
     """
@@ -117,7 +121,7 @@ class elementwise_type_promotion_wrapper:
                 if x in bound.arguments.keys()
             )
 
-            flattened_type_promoting_args = tree_flatten(type_promoting_args)[0]
+            flattened_type_promoting_args = pytree.arg_tree_leaves(*type_promoting_args)
             compute_dtype, result_dtype = utils.elementwise_dtypes(
                 *flattened_type_promoting_args,
                 type_promotion_kind=self.type_promotion_kind,
@@ -131,6 +135,12 @@ class elementwise_type_promotion_wrapper:
             bound.arguments.update(promoted_args)
 
             result = fn(**bound.arguments)
+
+            # Override the return_dtype if a dtype arg is present and not None
+            if "dtype" in bound.arguments:
+                maybe_dtype = bound.arguments["dtype"]
+                if maybe_dtype:  # dtype cannot be None
+                    result_dtype = maybe_dtype
 
             if isinstance(result, TensorLike):
                 return _maybe_convert_to_dtype(result, result_dtype)
@@ -160,9 +170,13 @@ def _resize_output_check(out: TensorLikeType, shape: ShapeType):
 
 
 # TODO: handle tuples of tensors
-def _maybe_resize_out(out: TensorLikeType, shape: ShapeType):
+def _maybe_resize_out(
+    out: TensorLikeType,
+    shape: ShapeType,
+    memory_format: Optional[torch.memory_format] = None,
+):
     if _resize_output_check(out, shape):
-        return out.resize_(shape)
+        return out.resize_(shape, memory_format=memory_format)
     else:
         return out
 
@@ -172,8 +186,9 @@ def _safe_copy_out(
 ):
     # Checks same device
     if copy_from.device != copy_to.device:
-        msg = "Attempting to copy from device {} to device {}, but cross-device copies are not allowed!".format(
-            copy_from.device, copy_to.device
+        msg = (
+            f"Attempting to copy from device {copy_from.device} "
+            f"to device {copy_to.device}, but cross-device copies are not allowed!"
         )
         raise RuntimeError(msg)
 
@@ -194,11 +209,16 @@ def _safe_copy_out(
     return copy_to.copy_(copy_from)
 
 
-def out_wrapper(*out_names: str, exact_dtype: bool = False):
+def out_wrapper(
+    *out_names: str,
+    exact_dtype: bool = False,
+    pass_is_out: bool = False,
+    preserve_memory_format=False,
+):
     # The wrapped function needs to convert the output parameters to ensure
-    # compatability between the Python API (which always uses "out" as the
+    # compatibility between the Python API (which always uses "out" as the
     # parameter name and may be a tuple) and the Aten API (which may have
-    # multiple output parematers and use different parameter names such as
+    # multiple output parameters and use different parameter names such as
     # "grad_input", "indices" or "values".)
 
     default_out_names = ("out",)
@@ -207,6 +227,9 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
         out_names = default_out_names
 
     is_tensor = len(out_names) == 1
+
+    def maybe_compute_memory_format(t):
+        return utils.suggest_memory_format(t) if preserve_memory_format else None
 
     def _out_wrapper(fn: Callable) -> Callable:
         """
@@ -236,8 +259,10 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
                     out_attr = getattr(out, k)
                     if k not in kwargs:
                         kwargs[k] = out_attr
-
-            result = fn(*args, **kwargs)
+            if pass_is_out:
+                result = fn(*args, is_out=(out is not None), **kwargs)
+            else:
+                result = fn(*args, **kwargs)
             assert (
                 isinstance(result, TensorLike)
                 and is_tensor
@@ -264,7 +289,9 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
                 if is_tensor:
                     assert isinstance(out, TensorLike)
                     # These two operations are done in-place
-                    _maybe_resize_out(out, result.shape)
+                    _maybe_resize_out(
+                        out, result.shape, maybe_compute_memory_format(result)
+                    )
                     _safe_copy_out(copy_from=result, copy_to=out, exact_dtype=exact_dtype)  # type: ignore[arg-type]
                 else:
                     assert isinstance(out, Tuple)  # type: ignore[arg-type]
@@ -274,7 +301,7 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
                     )
                     for r, o in zip(result, out):
                         # These two operations are done in-place
-                        _maybe_resize_out(o, r.shape)
+                        _maybe_resize_out(o, r.shape, maybe_compute_memory_format(r))
                         _safe_copy_out(copy_from=r, copy_to=o, exact_dtype=exact_dtype)  # type: ignore[arg-type]
             else:
                 out = result
@@ -288,7 +315,10 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
             annotation=out_type,
         )
         # Mark that the function now returns a tuple
-        assert sig.return_annotation in (sig.empty, out_type)
+        assert isinstance(sig.return_annotation, str) or sig.return_annotation in (
+            sig.empty,
+            out_type,
+        )
         params = chain(sig.parameters.values(), (out_param,))
         _fn.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
             parameters=params, return_annotation=return_type  # type: ignore[arg-type]

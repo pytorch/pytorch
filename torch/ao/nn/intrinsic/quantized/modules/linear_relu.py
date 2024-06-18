@@ -27,7 +27,7 @@ class LinearReLU(nnq.Linear):
         >>> print(output.size())
         torch.Size([128, 30])
     """
-    _FLOAT_MODULE = nni.LinearReLU
+    _FLOAT_MODULE = nni.LinearReLU  # type: ignore[assignment]
 
     def __init__(self, in_features, out_features, bias=True, dtype=torch.qint8):
         super().__init__(in_features, out_features, bias, dtype)
@@ -40,8 +40,8 @@ class LinearReLU(nnq.Linear):
         return 'QuantizedLinearReLU'
 
     @classmethod
-    def from_float(cls, mod):
-        return super().from_float(mod)
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
+        return super().from_float(mod, use_precomputed_fake_quant)
 
     @classmethod
     def from_reference(cls, ref_linear_relu, output_scale, output_zero_point):
@@ -63,7 +63,7 @@ class LinearLeakyReLU(nnq.Linear):
         >>> print(output.size())
         torch.Size([128, 30])
     """
-    _FLOAT_MODULE = nni.LinearLeakyReLU
+    _FLOAT_MODULE = nni.LinearLeakyReLU  # type: ignore[assignment]
 
     def __init__(self, in_features, out_features, negative_slope, bias=True, dtype=torch.qint8):
         super().__init__(in_features, out_features, bias, dtype)
@@ -77,7 +77,7 @@ class LinearLeakyReLU(nnq.Linear):
         return 'QuantizedLinearLeakyReLU'
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         assert type(mod) == nni.LinearLeakyReLU, 'Input float module should be LinearLeakyReLU'
         assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
         activation_post_process = mod.activation_post_process
@@ -131,7 +131,7 @@ class LinearTanh(nnq.Linear):
         >>> print(output.size())
         torch.Size([128, 30])
     """
-    _FLOAT_MODULE = nni.LinearTanh
+    _FLOAT_MODULE = nni.LinearTanh  # type: ignore[assignment]
 
     def __init__(self, in_features, out_features, bias=True, dtype=torch.qint8):
         super().__init__(in_features, out_features, bias, dtype)
@@ -144,7 +144,7 @@ class LinearTanh(nnq.Linear):
         return 'QuantizedLinearTanh'
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         assert type(mod) == nni.LinearTanh, 'Input float module should be LinearTanh'
         assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
         activation_post_process = mod.activation_post_process

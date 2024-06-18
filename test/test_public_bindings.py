@@ -1,6 +1,8 @@
 # Owner(s): ["module: autograd"]
 
-from torch.testing._internal.common_utils import TestCase, run_tests, IS_JETSON, IS_WINDOWS
+from torch.testing._internal.common_utils import TestCase, run_tests, IS_JETSON, IS_WINDOWS, IS_MACOS, skipIfTorchDynamo
+from torch._utils_internal import get_file_path_2
+
 import pkgutil
 import torch
 import importlib
@@ -10,6 +12,47 @@ import json
 import os
 import unittest
 from importlib import import_module
+from itertools import chain
+from pathlib import Path
+
+def _find_all_importables(pkg):
+    """Find all importables in the project.
+
+    Return them in order.
+    """
+    return sorted(
+        set(
+            chain.from_iterable(
+                _discover_path_importables(Path(p), pkg.__name__)
+                for p in pkg.__path__
+            ),
+        ),
+    )
+
+
+def _discover_path_importables(pkg_pth, pkg_name):
+    """Yield all importables under a given path and package.
+
+    This is like pkgutil.walk_packages, but does *not* skip over namespace
+    packages. Taken from https://stackoverflow.com/questions/41203765/init-py-required-for-pkgutil-walk-packages-in-python3
+    """
+    for dir_path, _d, file_names in os.walk(pkg_pth):
+        pkg_dir_path = Path(dir_path)
+
+        if pkg_dir_path.parts[-1] == '__pycache__':
+            continue
+
+        if all(Path(_).suffix != '.py' for _ in file_names):
+            continue
+
+        rel_pt = pkg_dir_path.relative_to(pkg_pth)
+        pkg_pref = '.'.join((pkg_name, ) + rel_pt.parts)
+        yield from (
+            pkg_path
+            for _, pkg_path, _ in pkgutil.walk_packages(
+                (str(pkg_dir_path), ), prefix=f'{pkg_pref}.',
+            )
+        )
 
 
 class TestPublicBindings(TestCase):
@@ -94,7 +137,9 @@ class TestPublicBindings(TestCase):
             "Future",
             "FutureType",
             "Generator",
+            "GeneratorType",
             "get_autocast_cpu_dtype",
+            "get_autocast_dtype",
             "get_autocast_ipu_dtype",
             "get_default_dtype",
             "get_num_interop_threads",
@@ -144,6 +189,7 @@ class TestPublicBindings(TestCase):
             "NumberType",
             "OperatorInfo",
             "OptionalType",
+            "OutOfMemoryError",
             "ParameterDict",
             "parse_ir",
             "parse_schema",
@@ -171,6 +217,7 @@ class TestPublicBindings(TestCase):
             "set_anomaly_enabled",
             "set_autocast_cache_enabled",
             "set_autocast_cpu_dtype",
+            "set_autocast_dtype",
             "set_autocast_ipu_dtype",
             "set_autocast_cpu_enabled",
             "set_autocast_ipu_enabled",
@@ -183,6 +230,7 @@ class TestPublicBindings(TestCase):
             "StaticModule",
             "Stream",
             "StreamObjType",
+            "Event",
             "StringType",
             "SUM",
             "SymFloat",
@@ -230,9 +278,12 @@ class TestPublicBindings(TestCase):
                 return False
         return True
 
+
+    @unittest.skipIf(IS_WINDOWS or IS_MACOS, "Inductor/Distributed modules hard fail on windows and macos")
+    @skipIfTorchDynamo("Broken and not relevant for now")
     def test_modules_can_be_imported(self):
         failures = []
-        for _, modname, _ in pkgutil.walk_packages(path=torch.__path__, prefix=torch.__name__ + '.'):
+        for modname in _find_all_importables(torch):
             try:
                 # TODO: fix "torch/utils/model_dump/__main__.py"
                 # which calls sys.exit() when we try to import it
@@ -249,16 +300,26 @@ class TestPublicBindings(TestCase):
             "torch._inductor.codegen.cuda.cuda_kernel",
             "torch.onnx._internal.fx._pass",
             "torch.onnx._internal.fx.analysis",
+            "torch.onnx._internal.fx.analysis.unsupported_nodes",
+            "torch.onnx._internal.fx.decomposition_skip",
             "torch.onnx._internal.fx.diagnostics",
             "torch.onnx._internal.fx.fx_onnx_interpreter",
             "torch.onnx._internal.fx.fx_symbolic_graph_extractor",
             "torch.onnx._internal.fx.onnxfunction_dispatcher",
             "torch.onnx._internal.fx.op_validation",
             "torch.onnx._internal.fx.passes",
+            "torch.onnx._internal.fx.passes._utils",
+            "torch.onnx._internal.fx.passes.decomp",
+            "torch.onnx._internal.fx.passes.functionalization",
+            "torch.onnx._internal.fx.passes.modularization",
+            "torch.onnx._internal.fx.passes.readability",
+            "torch.onnx._internal.fx.passes.type_promotion",
+            "torch.onnx._internal.fx.passes.virtualization",
             "torch.onnx._internal.fx.type_utils",
             "torch.testing._internal.common_distributed",
             "torch.testing._internal.common_fsdp",
             "torch.testing._internal.dist_utils",
+            "torch.testing._internal.distributed.common_state_dict",
             "torch.testing._internal.distributed._shard.sharded_tensor",
             "torch.testing._internal.distributed._shard.test_common",
             "torch.testing._internal.distributed._tensor.common_dtensor",
@@ -268,7 +329,6 @@ class TestPublicBindings(TestCase):
             "torch.testing._internal.distributed.fake_pg",
             "torch.testing._internal.distributed.multi_threaded_pg",
             "torch.testing._internal.distributed.nn.api.remote_module_test",
-            "torch.testing._internal.distributed.pipe_with_ddp_test",
             "torch.testing._internal.distributed.rpc.dist_autograd_test",
             "torch.testing._internal.distributed.rpc.dist_optimizer_test",
             "torch.testing._internal.distributed.rpc.examples.parameter_server_test",
@@ -285,7 +345,7 @@ class TestPublicBindings(TestCase):
             "torch.utils.tensorboard._caffe2_graph",
             "torch._inductor.codegen.cuda.cuda_template",
             "torch._inductor.codegen.cuda.gemm_template",
-            "torch._inductor.triton_helpers",
+            "torch._inductor.runtime.triton_helpers",
             "torch.ao.pruning._experimental.data_sparsifier.lightning.callbacks.data_sparsity",
             "torch.backends._coreml.preprocess",
             "torch.contrib._tensorboard_vis",
@@ -307,6 +367,25 @@ class TestPublicBindings(TestCase):
             "torch.distributed.algorithms._optimizer_overlap",
             "torch.distributed.rpc._testing.faulty_agent_backend_registry",
             "torch.distributed.rpc._utils",
+            "torch.ao.pruning._experimental.data_sparsifier.benchmarks.dlrm_utils",
+            "torch.ao.pruning._experimental.data_sparsifier.benchmarks.evaluate_disk_savings",
+            "torch.ao.pruning._experimental.data_sparsifier.benchmarks.evaluate_forward_time",
+            "torch.ao.pruning._experimental.data_sparsifier.benchmarks.evaluate_model_metrics",
+            "torch.ao.pruning._experimental.data_sparsifier.lightning.tests.test_callbacks",
+            "torch.csrc.jit.tensorexpr.scripts.bisect",
+            "torch.csrc.lazy.test_mnist",
+            "torch.distributed._shard.checkpoint._fsspec_filesystem",
+            "torch.distributed._tensor.examples.visualize_sharding_example",
+            "torch.distributed.checkpoint._fsspec_filesystem",
+            "torch.distributed.examples.memory_tracker_example",
+            "torch.testing._internal.distributed.rpc.fb.thrift_rpc_agent_test_fixture",
+            "torch.utils._cxx_pytree",
+            "torch.utils.tensorboard._convert_np",
+            "torch.utils.tensorboard._embedding",
+            "torch.utils.tensorboard._onnx_graph",
+            "torch.utils.tensorboard._proto_graph",
+            "torch.utils.tensorboard._pytorch_graph",
+            "torch.utils.tensorboard._utils",
         }
 
         # No new entries should be added to this list.
@@ -328,7 +407,6 @@ class TestPublicBindings(TestCase):
             "torch.distributed.nn.api.remote_module",
             "torch.distributed.optim",
             "torch.distributed.optim.optimizer",
-            "torch.distributed.pipeline.sync",
             "torch.distributed.rendezvous",
             "torch.distributed.rpc.api",
             "torch.distributed.rpc.backend_registry",
@@ -343,6 +421,13 @@ class TestPublicBindings(TestCase):
             "torch.distributed.run",
             "torch.distributed.tensor.parallel",
             "torch.distributed.utils",
+            "torch.utils.tensorboard",
+            "torch.utils.tensorboard.summary",
+            "torch.utils.tensorboard.writer",
+            "torch.ao.quantization.experimental.fake_quantize",
+            "torch.ao.quantization.experimental.linear",
+            "torch.ao.quantization.experimental.observer",
+            "torch.ao.quantization.experimental.qconfig",
         }
 
         errors = []
@@ -359,11 +444,12 @@ class TestPublicBindings(TestCase):
         self.assertEqual("", "\n".join(errors))
 
     # AttributeError: module 'torch.distributed' has no attribute '_shard'
-    @unittest.skipIf(IS_WINDOWS or IS_JETSON, "Distributed Attribute Error")
+    @unittest.skipIf(IS_WINDOWS or IS_JETSON or IS_MACOS, "Distributed Attribute Error")
+    @skipIfTorchDynamo("Broken and not relevant for now")
     def test_correct_module_names(self):
         '''
         An API is considered public, if  its  `__module__` starts with `torch.`
-        and there is no name in `__module__` or the object itself that starts with “_”.
+        and there is no name in `__module__` or the object itself that starts with "_".
         Each public package should either:
         - (preferred) Define `__all__` and all callables and classes in there must have their
          `__module__` start with the current submodule's path. Things not in `__all__` should
@@ -372,7 +458,7 @@ class TestPublicBindings(TestCase):
           `__module__` that start with the current submodule.
         '''
         failure_list = []
-        with open(os.path.join(os.path.dirname(__file__), 'allowlist_for_publicAPI.json')) as json_file:
+        with open(get_file_path_2(os.path.dirname(__file__), 'allowlist_for_publicAPI.json')) as json_file:
             # no new entries should be added to this allow_dict.
             # New APIs must follow the public API guidelines.
             allow_dict = json.load(json_file)
@@ -399,7 +485,8 @@ class TestPublicBindings(TestCase):
             # verifies that each public API has the correct module name and naming semantics
             def check_one_element(elem, modname, mod, *, is_public, is_all):
                 obj = getattr(mod, elem)
-                if not (isinstance(obj, Callable) or inspect.isclass(obj)):
+                # torch.dtype is not a class nor callable, so we need to check for it separately
+                if not (isinstance(obj, (Callable, torch.dtype)) or inspect.isclass(obj)):
                     return
                 elem_module = getattr(obj, '__module__', None)
                 # Only used for nice error message below
@@ -470,7 +557,7 @@ class TestPublicBindings(TestCase):
                     if not elem.startswith('_'):
                         check_one_element(elem, modname, mod, is_public=True, is_all=False)
 
-        for _, modname, ispkg in pkgutil.walk_packages(path=torch.__path__, prefix=torch.__name__ + '.'):
+        for modname in _find_all_importables(torch):
             test_module(modname)
 
         test_module('torch')
@@ -480,6 +567,7 @@ class TestPublicBindings(TestCase):
         msg += "Make sure that everything that is public is expected (in particular that the module " \
             "has a properly populated `__all__` attribute) and that everything that is supposed to be public " \
             "does look public (it does not start with `_` and has a `__module__` that is properly populated)."
+
         msg += "\n\nFull list:\n"
         msg += "\n".join(map(str, failure_list))
 

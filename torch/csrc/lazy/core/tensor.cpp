@@ -197,7 +197,7 @@ Value LazyTensor::GetIrValue() const {
     AssignIrValue(CreateTensorNode(handle, /*read_only=*/false));
     return data()->ir_value;
   }
-  c10::optional<at::Tensor> tensor_data = CurrentTensorData();
+  std::optional<at::Tensor> tensor_data = CurrentTensorData();
   TORCH_CHECK(tensor_data);
   AssignIrValue(GetIrValueForTensor(*tensor_data, GetDevice()));
   return data()->ir_value;
@@ -211,7 +211,7 @@ void LazyTensor::SetTensorData(at::Tensor tensor_data) {
   data()->tensor_data = std::move(tensor_data);
 }
 
-c10::optional<at::Tensor> LazyTensor::CurrentTensorData() const {
+std::optional<at::Tensor> LazyTensor::CurrentTensorData() const {
   return data()->tensor_data;
 }
 
@@ -236,7 +236,7 @@ Value LazyTensor::GetIrValueForTensor(
 
 at::Tensor LazyTensor::ToTensor(bool detached) {
   at::Tensor tensor;
-  c10::optional<at::Tensor> tensor_data = CurrentTensorData();
+  std::optional<at::Tensor> tensor_data = CurrentTensorData();
   if (!tensor_data) {
     LazyGraphExecutor::Get()->DeviceBarrier(GetDevice());
     // The GetDataHandle() call will trigger an ApplyPendingGraph() if an IR
@@ -358,8 +358,8 @@ LazyTensorPtr TryGetLtcTensor(const at::Tensor& tensor) {
 
 LazyTensorPtr GetLtcTensor(const at::Tensor& tensor) {
   auto lazy_tensor = TryGetLtcTensor(tensor);
-  CHECK(lazy_tensor) << "Input tensor is not a lazy tensor: "
-                     << tensor.toString();
+  TORCH_CHECK(
+      lazy_tensor, "Input tensor is not a lazy tensor: ", tensor.toString());
   return lazy_tensor;
 }
 
@@ -373,7 +373,7 @@ std::vector<LazyTensorPtr> GetLtcTensors(c10::ArrayRef<at::Tensor> tensors) {
 }
 
 LazyTensorPtr GetOrCreateLtcTensor(
-    const c10::optional<at::Tensor>& tensor,
+    const std::optional<at::Tensor>& tensor,
     const BackendDevice& device) {
   return GetOrCreateLtcTensor(tensor.value_or(at::Tensor()), device);
 }

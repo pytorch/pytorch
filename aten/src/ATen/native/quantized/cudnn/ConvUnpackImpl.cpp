@@ -3,10 +3,6 @@
 
 #if AT_CUDNN_ENABLED()
 
-#include <ATen/native/cudnn/Macros.h>
-
-#if HAS_CUDNN_V8()
-
 #include <ATen/ATen.h>
 #include <ATen/native/quantized/cudnn/utils.h>
 #include <ATen/native/quantized/PackedParams.h>
@@ -15,14 +11,13 @@
 #include <tuple>
 
 template <int kSpatialDim>
-std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeightCudnn<
+std::tuple<at::Tensor, std::optional<at::Tensor>> PackedConvWeightCudnn<
     kSpatialDim>::unpack() {
-  return std::tuple<at::Tensor, c10::optional<at::Tensor>>{maybe_padded_weight_, bias_};
+  return std::tuple<at::Tensor, std::optional<at::Tensor>>{maybe_padded_weight_, bias_};
 }
 
-template std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeightCudnn<
+template std::tuple<at::Tensor, std::optional<at::Tensor>> PackedConvWeightCudnn<
     2>::unpack();
 
-#endif  // HAS_CUDNN_V8
 #endif  // AT_CUDNN_ENABLED
 #endif  // USE_CUDA

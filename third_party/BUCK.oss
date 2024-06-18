@@ -127,6 +127,7 @@ cxx_library(
         "cpuinfo/wrappers/linux/multiline.c",
         "cpuinfo/wrappers/linux/processors.c",
         "cpuinfo/wrappers/linux/smallfile.c",
+        "cpuinfo/wrappers/log.c",
         "cpuinfo/wrappers/mach/topology.c",
         "cpuinfo/wrappers/x86/cache/descriptor.c",
         "cpuinfo/wrappers/x86/cache/deterministic.c",
@@ -383,7 +384,6 @@ cxx_library(
     visibility = [
         "PUBLIC",
     ],
-    xcode_public_headers_symlinks = True,
     exported_deps = [
         ":gtest_headers",
     ],

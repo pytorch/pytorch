@@ -68,8 +68,8 @@ void cross_impl(const Tensor& result, const Tensor& x1, const Tensor& x2, int64_
 
   auto iter = TensorIteratorConfig()
       .add_output(result)
-      .add_input(x1)
-      .add_input(x2)
+      .add_const_input(x1)
+      .add_const_input(x2)
       .resize_outputs(false)
       .declare_static_shape(result.sizes(), /*squash_dims=*/dim)
       .build();

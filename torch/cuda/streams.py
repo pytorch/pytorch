@@ -2,7 +2,7 @@ import ctypes
 
 import torch
 from torch._streambase import _EventBase, _StreamBase
-from ._utils import _dummy_type
+from .._utils import _dummy_type
 
 
 if not hasattr(torch._C, "_CudaStreamBase"):
@@ -36,8 +36,8 @@ class Stream(torch._C._CudaStreamBase, _StreamBase):
             with torch.cuda.device(device):
                 return super().__new__(cls, priority=priority, **kwargs)
 
-    def wait_event(self, event):
-        r"""Makes all future work submitted to the stream wait for an event.
+    def wait_event(self, event) -> None:
+        r"""Make all future work submitted to the stream wait for an event.
 
         Args:
             event (torch.cuda.Event): an event to wait for.
@@ -53,8 +53,8 @@ class Stream(torch._C._CudaStreamBase, _StreamBase):
         """
         event.wait(self)
 
-    def wait_stream(self, stream):
-        r"""Synchronizes with another stream.
+    def wait_stream(self, stream) -> None:
+        r"""Synchronize with another stream.
 
         All future work submitted to this stream will wait until all kernels
         submitted to a given stream at the time of call complete.
@@ -68,7 +68,7 @@ class Stream(torch._C._CudaStreamBase, _StreamBase):
         self.wait_event(stream.record_event())
 
     def record_event(self, event=None):
-        r"""Records an event.
+        r"""Record an event.
 
         Args:
             event (torch.cuda.Event, optional): event to record. If not given, a new one
@@ -82,14 +82,15 @@ class Stream(torch._C._CudaStreamBase, _StreamBase):
         event.record(self)
         return event
 
-    def query(self):
-        r"""Checks if all the work submitted has been completed.
+    def query(self) -> bool:
+        r"""Check if all the work submitted has been completed.
 
         Returns:
-            A boolean indicating if all kernels in this stream are completed."""
+            A boolean indicating if all kernels in this stream are completed.
+        """
         return super().query()
 
-    def synchronize(self):
+    def synchronize(self) -> None:
         r"""Wait for all the kernels in this stream to complete.
 
         .. note:: This is a wrapper around ``cudaStreamSynchronize()``: see
@@ -101,7 +102,7 @@ class Stream(torch._C._CudaStreamBase, _StreamBase):
     def _as_parameter_(self):
         return ctypes.c_void_p(self.cuda_stream)
 
-    def __eq__(self, o):
+    def __eq__(self, o) -> bool:
         if isinstance(o, Stream):
             return super().__eq__(o)
         return False
@@ -127,7 +128,7 @@ class ExternalStream(Stream):
         stream_ptr(int): Integer representation of the `cudaStream_t` value.
             allocated externally.
         device(torch.device or int, optional): the device where the stream
-            was originally allocated. if device is specified incorrectly,
+            was originally allocated. If device is specified incorrectly,
             subsequent launches using this stream may fail.
     """
 
@@ -173,17 +174,17 @@ class Event(torch._C._CudaEventBase, _EventBase):
         return super().from_ipc_handle(device, handle)
 
     def record(self, stream=None):
-        r"""Records the event in a given stream.
+        r"""Record the event in a given stream.
 
         Uses ``torch.cuda.current_stream()`` if no stream is specified. The
-        stream's device must match the event's device."""
+        stream's device must match the event's device.
+        """
         if stream is None:
             stream = torch.cuda.current_stream()
         super().record(stream)
 
-    def wait(self, stream=None):
-        r"""Makes all future work submitted to the given stream wait for this
-        event.
+    def wait(self, stream=None) -> None:
+        r"""Make all future work submitted to the given stream wait for this event.
 
         Use ``torch.cuda.current_stream()`` if no stream is specified.
 
@@ -195,7 +196,7 @@ class Event(torch._C._CudaEventBase, _EventBase):
         super().wait(stream)
 
     def query(self):
-        r"""Checks if all work currently captured by event has completed.
+        r"""Check if all work currently captured by event has completed.
 
         Returns:
             A boolean indicating if all work currently captured by event has
@@ -204,13 +205,15 @@ class Event(torch._C._CudaEventBase, _EventBase):
         return super().query()
 
     def elapsed_time(self, end_event):
-        r"""Returns the time elapsed in milliseconds after the event was
-        recorded and before the end_event was recorded.
+        r"""Return the time elapsed.
+
+        Time reported in milliseconds after the event was recorded and
+        before the end_event was recorded.
         """
         return super().elapsed_time(end_event)
 
-    def synchronize(self):
-        r"""Waits for the event to complete.
+    def synchronize(self) -> None:
+        r"""Wait for the event to complete.
 
         Waits until the completion of all work currently captured in this event.
         This prevents the CPU thread from proceeding until the event completes.
@@ -221,15 +224,17 @@ class Event(torch._C._CudaEventBase, _EventBase):
         super().synchronize()
 
     def ipc_handle(self):
-        r"""Returns an IPC handle of this event. If not recorded yet, the event
-        will use the current device."""
+        r"""Return an IPC handle of this event.
+
+        If not recorded yet, the event will use the current device.
+        """
         return super().ipc_handle()
 
     @property
     def _as_parameter_(self):
         return ctypes.c_void_p(self.cuda_event)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         if self.cuda_event:
             return f"<torch.cuda.Event {self._as_parameter_.value:#x}>"
         else:

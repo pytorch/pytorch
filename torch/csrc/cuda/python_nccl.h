@@ -3,6 +3,7 @@
 #include <torch/csrc/python_headers.h>
 
 PyObject* THCPModule_nccl_version(PyObject* self, PyObject* args);
+PyObject* THCPModule_nccl_version_suffix(PyObject* self, PyObject* args);
 PyObject* THCPModule_nccl_unique_id(PyObject* self, PyObject* args);
 PyObject* THCPModule_nccl_init_rank(PyObject* self, PyObject* args);
 PyObject* THCPModule_nccl_reduce(PyObject* self, PyObject* args);
