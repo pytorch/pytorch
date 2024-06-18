@@ -111,11 +111,100 @@ class TestConverter(TestCase):
 
     def test_aten_len(self):
         class Module(torch.nn.Module):
-            def forward(self, x):
+            def forward(self, x: torch.Tensor):
                 length = len(x)
                 return torch.ones(length)
 
+        # aten::len.Tensor
         inp = (torch.ones(2, 3),)
+        self._check_equal_ts_ep_converter(Module(), inp)
+
+        class Module(torch.nn.Module):
+            def forward(self, x: List[int]):
+                length = len(x)
+                return torch.ones(length)
+
+        # aten::len.t
+        inp = ([1, 2, 3],)
+        self._check_equal_ts_ep_converter(Module(), inp, ["script"])
+
+        class Module(torch.nn.Module):
+            def forward(self, x: Dict[int, str]):
+                length = len(x)
+                return torch.ones(length)
+
+        # aten::len.Dict_int
+        inp = ({1: "a", 2: "b", 3: "c"},)
+        self._check_equal_ts_ep_converter(Module(), inp, ["script"])
+
+        class Module(torch.nn.Module):
+            def forward(self, x: Dict[bool, str]):
+                length = len(x)
+                return torch.ones(length)
+
+        # aten::len.Dict_bool
+        inp = ({True: "a", False: "b"},)
+        self._check_equal_ts_ep_converter(Module(), inp, ["script"])
+
+        class Module(torch.nn.Module):
+            def forward(self, x: Dict[float, str]):
+                length = len(x)
+                return torch.ones(length)
+
+        # aten::len.Dict_float
+        inp = ({1.2: "a", 3.4: "b"},)
+        self._check_equal_ts_ep_converter(Module(), inp, ["script"])
+
+        class Module(torch.nn.Module):
+            def forward(self, x: Dict[torch.Tensor, str]):
+                length = len(x)
+                return torch.ones(length)
+
+        # aten::len.Dict_Tensor
+        inp = ({torch.zeros(2, 3): "a", torch.ones(2, 3): "b"},)
+        self._check_equal_ts_ep_converter(Module(), inp, ["script"])
+
+        # aten::len.str and aten::len.Dict_str are not supported
+        # since torch._C._jit_flatten does not support str
+        # inp = ("abcdefg",)
+        # self._check_equal_ts_ep_converter(Module(), inp)
+        # inp = ({"a": 1, "b": 2},)
+        # self._check_equal_ts_ep_converter(Module(), inp)
+
+    def test_prim_min(self):
+        class Module(torch.nn.Module):
+            def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+                x_len = len(x)
+                y_len = len(y)
+
+                # prim::min.int
+                len_int = min(x_len, y_len)
+
+                # prim::min.float
+                len_float = int(min(x_len * 2.0, y_len * 2.0))
+
+                # prim::min.self_int
+                len_self_int = min([x_len, y_len])
+
+                # prim::min.self_float
+                len_self_float = int(min([x_len * 2.0, y_len * 2.0]))
+
+                # prim::min.float_int
+                len_float_int = int(min(x_len * 2.0, y_len))
+
+                # prim::min.int_float
+                len_int_float = int(min(x_len, y_len * 2.0))
+
+                return torch.ones(
+                    len_int
+                    + len_float
+                    + len_self_int
+                    + len_self_float
+                    + len_float_int
+                    + len_int_float
+                )
+
+        inp = (torch.randn(10, 2), torch.randn(5))
         self._check_equal_ts_ep_converter(Module(), inp)
 
     def test_aten___getitem___list(self):
@@ -658,6 +747,21 @@ class TestConverter(TestCase):
         # tensor, but it should always be Long.
         # inp = (torch.randn([2, 3, 4]),)
         # self._check_equal_ts_ep_converter(func6, inp)
+
+    def test_prim_tolist(self):
+        class Module(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> List[int]:
+                return x.tolist()
+
+        inp = (torch.tensor([1, 2, 3]),)
+        self._check_equal_ts_ep_converter(Module(), inp, ["script"])
+
+        class Module(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> List[List[int]]:
+                return x.tolist()
+
+        inp = (torch.tensor([[1, 2, 3], [4, 5, 6]]),)
+        self._check_equal_ts_ep_converter(Module(), inp, ["script"])
 
 
 if __name__ == "__main__":
