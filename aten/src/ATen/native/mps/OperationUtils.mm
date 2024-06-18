@@ -655,13 +655,14 @@ id<MTLLibrary> MetalShaderLibrary::getLibrary(const std::initializer_list<std::s
 }
 
 id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
+  static bool fast_math = std::getenv("PYTORCH_MPS_FAST_MATH") != nullptr;
   NSError* error = nil;
   MTLCompileOptions* options = compile_options;
   if (!options) {
     options = [[MTLCompileOptions new] autorelease];
     [options setLanguageVersion:is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS) ? MTLLanguageVersion3_1
                                                                                         : MTLLanguageVersion2_3];
-    [options setFastMathEnabled:NO];
+    [options setFastMathEnabled:fast_math ? YES : NO];
   }
 
   const auto str = [NSString stringWithCString:src.c_str() encoding:NSASCIIStringEncoding];
