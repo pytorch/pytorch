@@ -8294,8 +8294,8 @@ for shape in [(1,), ()]:
         self.assertEqual(z.grad, torch.view_as_real(expected))
 
     def test_nullptr_autograd_meta(self):
-        # AutogradMeta should ALWAYS be nullptr when tensor is not of
-        # differentiable dtype
+        # AutogradMeta should be nullptr when tensor not requiring grad
+        # is constructed
         a = torch.ones(2, dtype=torch.int64)
         self.assertTrue(torch._C._has_null_autograd_meta(a))
 
