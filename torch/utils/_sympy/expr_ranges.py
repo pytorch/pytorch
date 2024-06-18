@@ -108,6 +108,8 @@ class SymExprRange:
             if val < ne:
                 self._ne.remove(ne)
         if strict:
+            if val in self._ne:
+                self._ne.remove(val)
             if (
                 self._l is None
                 or val < self._l
@@ -142,6 +144,8 @@ class SymExprRange:
             if val > ne:
                 self._ne.remove(ne)
         if strict:
+            if val in self._ne:
+                self._ne.remove(val)
             if (
                 self._g is None
                 or val > self._g

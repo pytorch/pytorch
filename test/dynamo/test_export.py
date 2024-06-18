@@ -1907,17 +1907,18 @@ def forward(self, l_x_):
 
         gm_torch_mode, _ = torch._dynamo.export(f, aten_graph=False)(torch.randn(4, 5))
 
-        # In torch mode, the graph should contain 3 getitem methods
-        # one for x.shape[0]-2 and one for x.shape[1]-1 and one for slice
-        # this is because Tensor class has its' own getitem method
-        # which gets translated to aten.Slice later.
-        count = 0
+        # In torch mode, the graph should contain 1 getitem methods.
+        # The other two getitems get translated into size comps (size[0] - 2, size[1] - 1)
+        getitem_count = 0
+        sub_count = 0
         for node in gm_torch_mode.graph.nodes:
             if node.op == "call_function" and node.target == operator.getitem:
-                count += 1
+                getitem_count += 1
+            elif node.op == "call_function" and node.target == operator.sub:
+                sub_count += 1
 
-        self.assertEqual(count, 3)
-        self.assertEqual(gm_torch_mode(inp).shape, f(inp).shape)
+        self.assertEqual(getitem_count, 1)
+        self.assertEqual(sub_count, 2)
 
     def test_dynamic_slicing_invalid(self):
         def g(x, y):

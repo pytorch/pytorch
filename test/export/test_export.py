@@ -5457,6 +5457,7 @@ def forward(self, x, y):
         # test that setting this flag removes runtime asserts
         from torch._dynamo import config as _dynamo_config
 
+        orig_value = _dynamo_config.do_not_emit_runtime_asserts
         with _dynamo_config.patch(
             do_not_emit_runtime_asserts=True,
         ):
@@ -5466,6 +5467,7 @@ def forward(self, x, y):
                 dynamic_shapes=dynamic_shapes,
                 _allow_complex_guards_as_runtime_asserts=True,
             ).run_decompositions()
+        _dynamo_config.do_not_emit_runtime_asserts = orig_value
 
         self.assertEqual(
             [
