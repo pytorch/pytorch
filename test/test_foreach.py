@@ -205,6 +205,7 @@ class TestForeach(TestCase):
         "failing flakily on non sm86 cuda jobs",
     )
     def test_parity(self, device, dtype, op, noncontiguous, inplace):
+        torch.manual_seed(2024)
         if inplace:
             _, _, func, ref = self._get_funcs(op)
         else:
@@ -584,6 +585,7 @@ class TestForeach(TestCase):
         "failing flakily on non sm86 cuda jobs, ex https://github.com/pytorch/pytorch/issues/125035",
     )
     def test_binary_op_list_error_cases(self, device, dtype, op):
+        torch.manual_seed(202406)
         foreach_op, foreach_op_, ref, ref_ = (
             op.method_variant,
             op.inplace_variant,
@@ -678,6 +680,7 @@ class TestForeach(TestCase):
         "failing flakily on non sm86 cuda jobs, ex https://github.com/pytorch/pytorch/issues/125775",
     )
     def test_binary_op_list_slow_path(self, device, dtype, op):
+        torch.manual_seed(20240607)
         foreach_op, native_op, foreach_op_, native_op_ = self._get_funcs(op)
         # 0-strides
         tensor1 = make_tensor((10, 10), dtype=dtype, device=device)
@@ -796,6 +799,7 @@ class TestForeach(TestCase):
         "failing flakily on non sm86 cuda jobs",
     )
     def test_binary_op_float_inf_nan(self, device, dtype, op):
+        torch.manual_seed(2024)
         inputs = (
             [
                 torch.tensor([float("inf")], device=device, dtype=dtype),
@@ -865,6 +869,7 @@ class TestForeach(TestCase):
         "failing flakily on non sm86 cuda jobs",
     )
     def test_binary_op_tensors_on_different_devices(self, device, dtype, op):
+        torch.manual_seed(202406)
         # `tensors1`: ['cuda', 'cpu']
         # `tensors2`: ['cuda', 'cpu']
         _cuda_tensors = next(
