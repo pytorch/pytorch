@@ -573,7 +573,7 @@ def compile_fx_inner(
                 context.output_strides.append(None)
             else:
                 context.output_strides.append(
-                    V.graph.sizevars.size_hint(s) for s in exprs
+                    tuple(V.graph.sizevars.size_hint(s) for s in exprs)
                 )
 
     if aot_mode:
