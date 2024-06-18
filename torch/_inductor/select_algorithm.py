@@ -42,7 +42,6 @@ from .codegen.triton import (
 )
 
 from .codegen.triton_utils import config_of, signature_to_meta
-from .codegen.wrapper import pexpr
 from .exc import CUDACompileError
 from .ir import ChoiceCaller, PrimitiveInfoType
 from .runtime.hints import DeviceProperties
@@ -529,47 +528,30 @@ class TritonTemplateKernel(TritonKernel):
     def call_kernel(self, name: str, node: Optional[ir.IRNode] = None):
         wrapper = V.graph.wrapper_code
         _, call_args, _, arg_types = self.args.python_argdefs()
-        call_args = [str(a) for a in call_args]
-
-        for i in range(len(call_args)):
-            if V.graph.is_unspec_arg(call_args[i]):
-                call_args[i] = call_args[i] + ".item()"
-            if isinstance(call_args[i], sympy.Symbol):
-                call_args[i] = texpr(call_args[i])
-
-        current_device = V.graph.scheduler.get_current_device_or_throw()
-
         if V.graph.cpp_wrapper:
             # In the cpp_wrapper case, we have to compute CUDA launch grid at runtime
             # if any dynamic dimension is involved. We rely on the Python version
             # of the grid function to generate those grid configs, which may contain
             # symbolic values. The wrapper will use cexpr to print out C++ code
             # appropriately for the grid configs.
-            grid_args = [V.graph.sizevars.simplify(s) for s in self.call_sizes] + [
-                self.meta
-            ]
-            grid = self.grid_fn(*grid_args)
-
+            grid = self.call_sizes + [self.meta]
             wrapper.generate_kernel_call(
                 name,
                 call_args,
-                device_index=current_device.index,
+                grid=self.grid_fn(*grid),
                 arg_types=arg_types,
-                grid=grid,
                 triton_meta=self.triton_meta,
             )
         else:
-            stream_name = wrapper.write_get_raw_stream(current_device.index, V.graph)
-
             wrapper.add_import_once(f"import {self.grid_fn.__module__}")
             meta = wrapper.add_meta_once(self.meta)
-
-            grid_call = [
-                pexpr(V.graph.sizevars.simplify(s)) for s in self.call_sizes
-            ] + [meta]
-            grid_call = f"{self.grid_fn.__module__}.{self.grid_fn.__name__}({', '.join(grid_call)})"
-            wrapper.writeline(
-                f"{name}.run({', '.join(call_args)}, grid={grid_call}, stream={stream_name})"
+            grid = self.call_sizes + [meta]
+            wrapper.generate_kernel_call(
+                name,
+                call_args,
+                grid=grid,
+                grid_fn=f"{self.grid_fn.__module__}.{self.grid_fn.__name__}",
+                triton_meta=self.triton_meta,
             )
 
 
