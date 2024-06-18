@@ -23,7 +23,6 @@ from torch.utils._foreach_utils import (
     _foreach_supported_types as _util_foreach_supported_types,
 )
 
-
 # All public APIs from dtensor package
 __all__ = [
     "DTensor",
