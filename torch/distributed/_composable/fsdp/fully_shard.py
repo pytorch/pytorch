@@ -1,7 +1,7 @@
+# mypy: allow-untyped-defs
 import functools
-from typing import Any, cast, Optional, Union
 
-import typing_extensions
+from typing import Any, cast, NoReturn, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -24,7 +24,7 @@ from ._fsdp_state import _get_module_fsdp_state, FSDPState
 
 # The decorator adds a state object to `module` that can be accessed via
 # `fully_shard.state(module)`. The state object and module are 1:1.
-@contract(state_cls=FSDPState)
+@contract(state_cls=FSDPState)  # type: ignore[operator]
 def fully_shard(
     module: nn.Module,
     *,
@@ -129,10 +129,10 @@ def fully_shard(
             offload_policy,
         )
 
-    # for dynamo
-    for module in managed_modules:
-        module._is_fsdp_managed_module = True  # type: ignore[assignment]
-        module._fsdp_use_orig_params = True  # type: ignore[assignment]
+    # For Dynamo
+    for managed_module in managed_modules:
+        managed_module._is_fsdp_managed_module = True  # type: ignore[assignment]
+        managed_module._fsdp_use_orig_params = True  # type: ignore[assignment]
 
     # Place FSDP leftmost for highest priority in the method resolution order
     cls = module.__class__
@@ -142,7 +142,7 @@ def fully_shard(
     return module
 
 
-def unimplemented_deepcopy(*args: Any, **kwargs: Any) -> typing_extensions.Never:
+def unimplemented_deepcopy(*args: Any, **kwargs: Any) -> NoReturn:
     raise AssertionError(
         "FSDP does not support deepcopy. Please use state dict for serialization."
     )
@@ -181,6 +181,8 @@ class FSDPModule:
                 that has a :meth:`wait` method to wait on the unshard op. If
                 ``False``, then returns ``None`` and waits on the handle inside
                 this function.
+
+        .. warning:: This method is experimental and subject to change.
 
         .. note:: If ``async_op=True``, then the user does not have to call
             :meth:`wait` on the returned handle if waiting on the unshard op
@@ -343,4 +345,8 @@ def register_fsdp_forward_method(module: nn.Module, method_name: str) -> None:
         return fsdp_state._post_forward(self, args, out)
 
     # Use `__get__` to make `wrapped_method` an instance method
-    setattr(module, method_name, wrapped_method.__get__(module, type(module)))
+    setattr(
+        module,
+        method_name,
+        wrapped_method.__get__(module, type(module)),  # type:ignore[attr-defined]
+    )

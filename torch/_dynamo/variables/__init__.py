@@ -9,6 +9,7 @@ from .ctx_manager import (
     DeterministicAlgorithmsVariable,
     DisabledSavedTensorsHooksVariable,
     DualLevelContextManager,
+    FSDPParamGroupUseTrainingStateVariable,
     GradIncrementNestingCtxManagerVariable,
     GradInplaceRequiresGradCtxManagerVariable,
     GradModeVariable,
@@ -23,7 +24,6 @@ from .ctx_manager import (
 from .dicts import (
     ConstDictVariable,
     CustomizedDictVariable,
-    DataClassVariable,
     DefaultDictVariable,
     SetVariable,
 )
@@ -63,6 +63,7 @@ from .misc import (
     AutogradFunctionVariable,
     ClosureVariable,
     DeletedVariable,
+    ExceptionVariable,
     GetAttrVariable,
     InspectSignatureVariable,
     LambdaVariable,
@@ -96,6 +97,7 @@ from .user_defined import (
     RemovableHandleVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
+    WeakRefVariable,
 )
 
 __all__ = [
@@ -112,7 +114,6 @@ __all__ = [
     "CountIteratorVariable",
     "CustomizedDictVariable",
     "CycleIteratorVariable",
-    "DataClassVariable",
     "DefaultDictVariable",
     "DeletedVariable",
     "DeterministicAlgorithmsVariable",

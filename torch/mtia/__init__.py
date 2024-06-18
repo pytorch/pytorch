@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 r"""
 This package enables an interface for accessing MTIA backend in python
 """
@@ -106,9 +107,10 @@ def is_available() -> bool:
     return device_count() > 0
 
 
-def synchronize() -> None:
+def synchronize(device: Optional[_device_t] = None) -> None:
     r"""Waits for all jobs in all streams on a MTIA device to complete."""
-    return torch._C._mtia_deviceSynchronize()
+    with torch.mtia.device(device):
+        return torch._C._mtia_deviceSynchronize()
 
 
 def device_count() -> int:
@@ -157,6 +159,18 @@ def set_stream(stream: Stream):
     if stream is None:
         return
     torch._C._mtia_setCurrentStream(stream)
+
+
+def set_device(device: _device_t) -> None:
+    r"""Set the current device.
+
+    Args:
+        device (torch.device or int): selected device. This function is a no-op
+            if this argument is negative.
+    """
+    device = _get_device_index(device)
+    if device >= 0:
+        torch._C._accelerator_hooks_set_current_device(device)
 
 
 class device:
@@ -256,6 +270,7 @@ __all__ = [
     "current_device",
     "current_stream",
     "default_stream",
+    "set_device",
     "set_stream",
     "stream",
     "device",

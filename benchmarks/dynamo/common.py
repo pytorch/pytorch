@@ -36,23 +36,21 @@ from typing import (
     Type,
     TYPE_CHECKING,
 )
-from unittest.mock import MagicMock
-
 from typing_extensions import Self
-
-if TYPE_CHECKING:
-    from torch.onnx._internal.fx import diagnostics
+from unittest.mock import MagicMock
 
 import numpy as np
 import pandas as pd
 import psutil
+from scipy.stats import gmean, ttest_ind
+from tqdm.auto import tqdm, trange
+
 import torch
 import torch._dynamo
 import torch._dynamo.utils
 import torch._export
 import torch.distributed
 import torch.multiprocessing as mp
-from scipy.stats import gmean, ttest_ind
 from torch._C import _has_cuda as HAS_CUDA, _has_xpu as HAS_XPU
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import (
@@ -75,15 +73,13 @@ except ImportError:
         graph_break_reasons,
         maybe_enable_compiled_autograd,
     )
+
 import torch._functorch.config
 from torch._functorch.aot_autograd import set_model_name
 from torch._inductor import config as inductor_config, metrics
 from torch._subclasses.fake_tensor import FakeTensorMode
-
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map, tree_map_only
-
-from tqdm.auto import tqdm, trange
 
 try:
     import torch_xla
@@ -94,6 +90,11 @@ try:
 except ImportError:
     # ignore the error if torch_xla is not installed
     pass
+
+
+if TYPE_CHECKING:
+    from torch.onnx._internal.fx import diagnostics
+
 
 log = logging.getLogger(__name__)
 
@@ -142,6 +143,7 @@ CI_SKIP_DYNAMIC_BATCH_ONLY = {
     "pyhpc_equation_of_state",
     "pyhpc_turbulent_kinetic_energy",
     "detectron2_fcos_r_50_fpn",
+    "hf_T5_generate",
 }
 
 # These models currently fail accuracy with eager Adam optimizer
@@ -1182,12 +1184,14 @@ class AOTInductorModelCache:
             else:
                 _register_dataclass_output_as_pytree(example_outputs)
 
-            gm = torch.export._trace._export(
+            # TODO(angelayi): change this to predispatch
+            # https://github.com/pytorch/pytorch/issues/127513 needs to be fixed before changing
+            # to predispatch to avoid performance regressions
+            gm = torch.export._trace._export_to_torch_ir(
                 model,
                 example_args,
                 example_kwargs,
-                pre_dispatch=True,
-            ).module()
+            )
             with torch.no_grad():
                 so_path = torch._inductor.aot_compile(
                     gm, example_args, example_kwargs
@@ -2101,7 +2105,7 @@ class BenchmarkRunner:
             #  which is bad as Gradscaler has state and can adjust the scaling
             #  factor between eager and dynamo run, making accuracy check
             #  harder.
-            # self.grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
+            # self.grad_scaler = torch.amp.GradScaler(device="cuda", init_scale=2.0)
             self.autocast = functools.partial(
                 torch.amp.autocast, device_type=devices[0]
             )
@@ -2208,6 +2212,10 @@ class BenchmarkRunner:
 
     @property
     def guard_on_nn_module_models(self):
+        return set()
+
+    @property
+    def inline_inbuilt_nn_modules_models(self):
         return set()
 
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
@@ -2340,16 +2348,16 @@ class BenchmarkRunner:
 
     def get_fsdp_auto_wrap_policy(self, model_name: str):
         from diffusers.models.transformer_2d import Transformer2DModel
-
-        from torch.distributed.fsdp.wrap import (
-            ModuleWrapPolicy,
-            size_based_auto_wrap_policy,
-        )
         from torchbenchmark.models.nanogpt.model import Block
         from transformers.models.llama.modeling_llama import LlamaDecoderLayer
 
         from transformers.models.t5.modeling_t5 import T5Block
         from transformers.models.whisper.modeling_whisper import WhisperEncoderLayer
+
+        from torch.distributed.fsdp.wrap import (
+            ModuleWrapPolicy,
+            size_based_auto_wrap_policy,
+        )
 
         # handcrafted wrap policy
         MODEL_FSDP_WRAP = {
@@ -2413,9 +2421,6 @@ class BenchmarkRunner:
                 limit_all_gathers=True,
                 auto_wrap_policy=self.get_fsdp_auto_wrap_policy(self.args.only),
             )
-            if torch._inductor.config.triton.cudagraphs:
-                log.warning("Disabling cudagraphs for FSDP compatibility")
-                torch._inductor.config.triton.cudagraphs = False
         return model
 
     def check_accuracy(
@@ -3168,7 +3173,7 @@ def parse_args(args=None):
     parser.add_argument(
         "--fsdp",
         action="store_true",
-        help="""Wraps model in FSDP before running it. Disables cudagraphs by default.
+        help="""Wraps model in FSDP before running it.
         Doesn't recursively wrap, mainly useful for checking dynamo UnspecNNModule compatibility
     """,
     )
@@ -3975,7 +3980,13 @@ def run(runner, args, original_dir=None):
         elif args.backend == "torchao":
             assert "cuda" in args.devices, "Quantization requires CUDA device."
             assert args.bfloat16, "Quantization requires dtype bfloat16."
-            from .torchao import setup_baseline, torchao_optimize_ctx
+            try:
+                from torchao_backend import setup_baseline, torchao_optimize_ctx
+            except ImportError:
+                from userbenchmark.dynamo.dynamobench.torchao_backend import (
+                    setup_baseline,
+                    torchao_optimize_ctx,
+                )
 
             setup_baseline()
             baseline_ctx = functools.partial(
@@ -4211,16 +4222,21 @@ def run(runner, args, original_dir=None):
             if name in runner.guard_on_nn_module_models:
                 guard_ctx = torch._dynamo.config.patch(guard_nn_modules=True)
 
+            inline_ctx = contextlib.nullcontext()
+            if name in runner.inline_inbuilt_nn_modules_models:
+                inline_ctx = torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
+
             with guard_ctx:
-                runner.run_one_model(
-                    name,
-                    model,
-                    example_inputs,
-                    optimize_ctx,
-                    experiment,
-                    explain=args.explain,
-                    tag=args.tag,
-                )
+                with inline_ctx:
+                    runner.run_one_model(
+                        name,
+                        model,
+                        example_inputs,
+                        optimize_ctx,
+                        experiment,
+                        explain=args.explain,
+                        tag=args.tag,
+                    )
         if args.generate_aot_autograd_stats:
             stats_file = output_filename.split(".csv")[0] + "_stats.csv"
             output_csv(

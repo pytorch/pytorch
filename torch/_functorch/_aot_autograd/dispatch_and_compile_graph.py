@@ -1,10 +1,11 @@
+# mypy: allow-untyped-defs
 """
 This module dispatches the graphs to either the forward-only or joint compilation
 pathways, taking into account the AOTConfig and the collected ViewAndMutationMetadata.
 """
 
 import dataclasses
-from typing import Any, Callable, List, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple
 
 import torch
 import torch.utils._pytree as pytree
@@ -58,7 +59,7 @@ def aot_dispatch_base_graph(
     aot_config: AOTConfig,
     *,
     fw_metadata: ViewAndMutationMeta,
-) -> Union[Callable, Tuple[Callable, List[Any], Optional[SubclassMeta]]]:
+) -> Tuple[torch.fx.GraphModule, List[Any], Optional[SubclassMeta]]:
     # aot_dispatch_base requires functionalization, but doesn't need to handle as many cases as the autograd case.
     # The cases that aot_dispatch_base doesn't need to handle include:
     # - outputs that are aliases of graph intermediates
@@ -186,11 +187,21 @@ def aot_dispatch_base_graph(
 
     if aot_config.enable_log:
         aot_graphs_log.info(
-            "%s", lazy_format_graph_code("Forward graph", fw_module, aot_config.aot_id)
+            "%s",
+            lazy_format_graph_code(
+                "Forward graph",
+                fw_module,
+                aot_config.aot_id,
+                include_stride=True,
+                include_device=True,
+                colored=True,
+            ),
         )
         trace_structured(
             "aot_forward_graph",
-            payload_fn=lambda: fw_module.print_readable(print_output=False),
+            payload_fn=lambda: fw_module.print_readable(
+                print_output=False, include_stride=True, include_device=True
+            ),
         )
 
     # TODO: should factor this into a separate function for export that always only returns just the graph.
@@ -198,7 +209,6 @@ def aot_dispatch_base_graph(
         assert (
             maybe_subclass_meta is None
         ), "aot_export_module does not support tensor subclass inputs for now."
-        return fw_module
     return fw_module, saved_updated_flat_args_subclasses_desugared, maybe_subclass_meta
 
 
@@ -212,7 +222,7 @@ def aot_dispatch_autograd_graph(
     aot_config: AOTConfig,
     *,
     fw_metadata: ViewAndMutationMeta,
-) -> Union[Callable, Tuple[Callable, List[Any], Optional[SubclassMeta]]]:
+) -> Tuple[torch.fx.GraphModule, Tuple[List[Any], List[Any]], Optional[SubclassMeta]]:
     # traced_tangents corresponds to the set of outputs in the traced forward that should get grad_outputs in the traced backward.
     # It includes outputs of the original forward, *and* any updated inputs due to input mutations.
     # However, it does *not* include any outputs that are aliases of inputs or intermediates, or any metadata-only input mutations.
@@ -282,5 +292,4 @@ def aot_dispatch_autograd_graph(
         assert (
             maybe_subclass_meta is None
         ), "aot_export_module does not support tensor subclass inputs for now."
-        return fx_g
-    return fx_g, saved_updated_joint_inputs, maybe_subclass_meta  # type: ignore[return-value]
+    return fx_g, saved_updated_joint_inputs, maybe_subclass_meta

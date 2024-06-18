@@ -34,7 +34,7 @@ concurrency:
 jobs:
   libtorch-cpu-shared-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-13-xlarge
+    runs-on: macos-14-xlarge
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch

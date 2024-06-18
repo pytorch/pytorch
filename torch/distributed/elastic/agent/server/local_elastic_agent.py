@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# mypy: allow-untyped-defs
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -273,10 +274,9 @@ class LocalElasticAgent(SimpleElasticAgent):
         spec = worker_group.spec
         store = worker_group.store
         assert store is not None
-        master_addr, master_port = super()._get_master_addr_port(store)
         restart_count = spec.max_restarts - self._remaining_restarts
 
-        use_agent_store = spec.rdzv_handler.get_backend() == "static"
+        use_agent_store: bool = spec.rdzv_handler.use_agent_store
 
         args: Dict[int, Tuple] = {}
         envs: Dict[int, Dict[str, str]] = {}
@@ -293,8 +293,8 @@ class LocalElasticAgent(SimpleElasticAgent):
                 "WORLD_SIZE": str(worker.world_size),
                 "GROUP_WORLD_SIZE": str(worker_group.group_world_size),
                 "ROLE_WORLD_SIZE": str(worker.role_world_size),
-                "MASTER_ADDR": master_addr,
-                "MASTER_PORT": str(master_port),
+                "MASTER_ADDR": worker_group.master_addr,
+                "MASTER_PORT": str(worker_group.master_port),
                 "TORCHELASTIC_RESTART_COUNT": str(restart_count),
                 "TORCHELASTIC_MAX_RESTARTS": str(spec.max_restarts),
                 "TORCHELASTIC_RUN_ID": spec.rdzv_handler.get_run_id(),

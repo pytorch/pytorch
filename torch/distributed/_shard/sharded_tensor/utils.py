@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import collections.abc
 import copy
 from typing import Optional, List, Sequence, TYPE_CHECKING

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import os  # noqa: C101
 import sys
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
@@ -9,11 +10,16 @@ def is_fbcode():
     return not hasattr(torch.version, "git_version")
 
 
+def fx_graph_remote_cache_default():
+    if os.environ.get("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE") == "1":
+        return True
+    if os.environ.get("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE") == "0":
+        return False
+    return None
+
+
 # add some debug printouts
 debug = False
-
-# add inf and NaN checkers
-debug_check_inf_and_nan = False
 
 # Whether to disable a progress bar for autotuning
 disable_progress = True
@@ -24,8 +30,11 @@ verbose_progress = False
 # use fx aot graph codegen cache
 fx_graph_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE") == "1"
 
-# use fx aot graph codegen cache
-fx_graph_remote_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE") == "1"
+# use remote fx aot graph codegen cache
+# False: Disables the cache
+# True: Enables the cache
+# None: Not set -- Off for OSS, JustKnobs based for internal
+fx_graph_remote_cache: Optional[bool] = fx_graph_remote_cache_default()
 
 # enable autotune local cache
 autotune_local_cache = True
@@ -173,7 +182,7 @@ force_fuse_int_mm_with_mul = False
 # for pattern torch.mm(a, b.to(dtype)) with cuda tensors,
 # enable torch._inductor.kernel.mm.tuned_mixed_mm fused kernel.
 # Autotune will compare perf with normal cast->then->mm option
-use_mixed_mm = False
+use_mixed_mm = True
 
 # enable runtime numeric check for pre/post grad fx passes
 # floating point provides limited accuracy (about 7 decimal digits for single precision
@@ -187,11 +196,20 @@ fx_passes_numeric_check: Dict[str, Any] = {
     "requires_optimizer": True,
 }
 
-# for pattern torch.mm(a, b.to(dtype)) with cuda tensors, always use
-# torch._inductor.kernel.mm.tuned_mixed_mm's fused kernel.
-# Autotune will not compare with normal cast->then->mm option.
-# (if force_mixed_mm is true, the use_mixed_mm flag will be ignored)
-force_mixed_mm = False
+# mixed_mm_choice can be used to control the behaviour for pattern torch.mm(a, b.to(dtype)) with cuda tensors.
+# The fallback aten implementation is normal cast->then->mm option.
+# If mixed_mm_choice is "default": this flag will be ignored.
+# If mixed_mm_choice is "triton":
+# - Always use torch._inductor.kernel.mm.tuned_mixed_mm's fused kernel.
+# - Autotune will not compare with fallback.
+# If mixed_mm_choice is "aten": always use the fallback aten implementation.
+# If mixed_mm_choice is "heuristic":
+# - Enables the heuristic.
+# - If the heuristic decides to add a config, it will add the config as the first choice.
+# - If autotune is disabled, this config will always be chosen.
+# - If autotune is enabled, it will also compare with fallback aten implementation and fused kernel.
+# The use_mixed_mm flag will be ignored if mixed_mm_choice != "default".
+mixed_mm_choice = "heuristic"
 
 # enable reordering pass for increasing overlap between compute and communication
 reorder_for_compute_comm_overlap = False
@@ -234,12 +252,13 @@ force_same_precision = (
 )
 
 # Specify candidate backends for gemm autotune.
-# Possible choices are combinations of: ATen, Triton, CUTLASS.
+# Possible choices are combinations of: ATen, Triton, CUTLASS, CPP.
 # ATen: default Pytorch ATen kernels.
 # Triton: Triton templates defined in torch inductor.
 # CUTLASS: Cutlass templates and kernels.
+# CPP: CPP templates and kernels for CPU.
 max_autotune_gemm_backends = os.environ.get(
-    "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON"
+    "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON,CPP"
 ).upper()
 
 # Specify the size of the search space for GEMM autotuning.
@@ -248,6 +267,11 @@ max_autotune_gemm_backends = os.environ.get(
 max_autotune_gemm_search_space = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_SEARCH_SPACE", "DEFAULT"
 ).upper()
+
+# Whether we fall back to ATen or hard error when no matches are found during autotuning
+autotune_fallback_to_aten = (
+    os.environ.get("TORCHINDUCTOR_AUTOTUNE_FALLBACK_TO_ATEN", "1") == "1"
+)
 
 # the value used as a fallback for the unbacked SymInts
 # that can appear in the input shapes (e.g., in autotuning)
@@ -377,10 +401,22 @@ debug_index_asserts = False
 is_nightly_or_source = "dev" in torch.__version__ or "git" in torch.__version__
 developer_warnings = is_fbcode() or is_nightly_or_source
 
+
 # The multiprocessing start method to use for inductor workers in the codecache.
-# TODO: fork is not safe in a multithreaded environment, we should evaluate changing
-# the default to spawn.
-worker_start_method = "fork"
+# "subprocess", "fork", or "spawn"
+def decide_worker_start_method():
+    start_method = os.environ.get(
+        "TORCHINDUCTOR_WORKER_START", "fork" if is_fbcode() else "subprocess"
+    )
+    assert start_method in [
+        "subprocess",
+        "fork",
+        "spawn",
+    ], f"Invalid start method: {start_method}"
+    return start_method
+
+
+worker_start_method = decide_worker_start_method()
 
 # Flags to turn on all_reduce fusion. These 2 flags should be automaticaly turned
 # on by DDP and should not be set by the users.
@@ -404,6 +440,8 @@ _fuse_ddp_communication_passes: List[Union[Callable[..., None], str]] = [
     "fuse_ddp_with_concat_op",
     "schedule_comm_wait",
 ]
+
+_micro_pipeline_tp: bool = False
 
 
 def decide_compile_threads():
@@ -455,8 +493,7 @@ shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "1") == "1"
 
 # Control if we will do padding for pointwise/reductions
 comprehensive_padding = (
-    os.environ.get("TORCHINDUCTOR_COMPREHENSIVE_PADDING", "0" if is_fbcode() else "1")
-    == "1"
+    os.environ.get("TORCHINDUCTOR_COMPREHENSIVE_PADDING", "1") == "1"
 )
 pad_channels_last = False
 
@@ -508,7 +545,7 @@ freezing_discard_parameters: bool = False
 # Kill switch for allowing temporary tensors to be allocated as stack arrays. Tests
 # should be run with this flag both on and off to make sure we have coverage.
 allow_stack_allocation: bool = (
-    os.environ.get("TORCHINDUCTOR_STACK_ALLOCATION", "1") == "1"
+    os.environ.get("TORCHINDUCTOR_STACK_ALLOCATION", "1" if is_fbcode() else "0") == "1"
 )
 
 # Enables an alternate DSO interface (the "minimal ArrayRef interface") intended
@@ -744,9 +781,6 @@ class aot_inductor:
     # rather than embedded into the data section. Needed to support 1B+ parameter models
     force_mmap_weights: bool = False
 
-    # flag to allow buffer mutation. This would remove the read-only property from buffers.
-    allow_buffer_mutation: bool = False
-
 
 class cuda:
     # CUDA arch to use for CUDA template kernel compilation.
@@ -791,8 +825,8 @@ class cuda:
     # Path to CUDA NVCC.
     # NVCC search order:
     # 1) cuda_cxx set in this config
-    # 2）CUDACXX environment variable
-    # 3）CUDA_HOME environment variable
+    # 2) CUDACXX environment variable
+    # 3) CUDA_HOME environment variable
     # 4) default system search PATH.
     cuda_cxx: Optional[str] = None
 
@@ -867,6 +901,12 @@ class trace:
     # to workaround the above failure.
     dot_graph_shape = os.environ.get("INDUCTOR_DOT_GRAPH_SHAPE_SVG", None)
 
+    # If not None, this is the URL that saves the SVG files of the input/output
+    # graph of each pass that changed the graph
+    # The nodes that are being transformed in each pass will be colored in yellow
+    # URL only supports local directory for now
+    log_url_for_graph_xform = os.environ.get("INDUCTOR_LOG_URL_FOR_GRAPH_XFORM", None)
+
     # Store cProfile (see snakeviz to view)
     compile_profile = False
 
@@ -877,10 +917,19 @@ class trace:
     log_autotuning_results: bool = False
 
 
-_save_config_ignore = {
+_save_config_ignore = [
     # workaround: "Can't pickle <function ...>"
     "trace.upload_tar",
-}
+]
+
+_cache_config_ignore_prefix = [
+    # trace functions are not relevant to config caching
+    "trace",
+    # uses absolute path
+    "cuda.cutlass_dir",
+    # not relevant
+    "compile_threads",
+]
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
