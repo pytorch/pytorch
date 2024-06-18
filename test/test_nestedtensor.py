@@ -5623,7 +5623,7 @@ class TestNestedTensorSubclass(TestCase):
 
         expected_grad = torch.zeros_like(nt)
         expected_grad.unbind()[1].add_(1.0)
-        self.assertEqual(nt.grad, expected_grad)
+        torch._dynamo.disable(self.assertEqual)(nt.grad, expected_grad)
 
     @dtypes(torch.float32, torch.double, torch.half)
     @parametrize("requires_grad", [False, True])
