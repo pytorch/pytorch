@@ -14,7 +14,7 @@ Background_Matting,pass_due_to_skip,0
 
 
 
-DALLE2_pytorch,pass,12
+DALLE2_pytorch,pass,6
 
 
 
@@ -150,7 +150,7 @@ hf_Bert_large,pass,0
 
 
 
-hf_BigBird,fail_accuracy,43
+hf_BigBird,fail_accuracy,13
 
 
 
@@ -370,8 +370,8 @@ vgg16,pass,0
 
 
 
-vision_maskrcnn,pass,17
+vision_maskrcnn,pass,16
 
 
 
-yolov3,pass,2
+yolov3,pass,0
