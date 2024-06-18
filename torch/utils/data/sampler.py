@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import torch
-from torch import Tensor
 
 from typing import Iterator, Iterable, Optional, Sequence, List, TypeVar, Generic, Sized, Union
 
@@ -213,7 +212,7 @@ class WeightedRandomSampler(Sampler[int]):
         [0, 1, 4, 3, 2]
     """
 
-    weights: Tensor
+    weights: torch.Tensor
     num_samples: int
     replacement: bool
 

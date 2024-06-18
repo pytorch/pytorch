@@ -261,6 +261,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.addcmul_,
             aten.addr,
             aten.affine_grid_generator,
+            aten.alias_copy,
             aten.all,
             aten.aminmax,
             aten.arange.default,

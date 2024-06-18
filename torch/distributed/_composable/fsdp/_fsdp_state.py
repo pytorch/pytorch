@@ -56,6 +56,8 @@ class FSDPState(_State):
         self._state_ctx = FSDPStateContext()
         self._comm_ctx = FSDPCommContext()
         self._training_state: TrainingState = TrainingState.IDLE
+        self._states_to_forward_prefetch: List[FSDPState] = []
+        self._states_to_backward_prefetch: List[FSDPState] = []
 
     # Define a separate init since `__init__` is called in the contract
     def init(
@@ -171,6 +173,9 @@ class FSDPState(_State):
                 args, kwargs = tree_map(cast_fn, args), tree_map(cast_fn, kwargs)
         if self._fsdp_param_group:
             args, kwargs = self._fsdp_param_group.pre_forward(module, args, kwargs)
+        for fsdp_state in self._states_to_forward_prefetch:
+            if (target_param_group := fsdp_state._fsdp_param_group) is not None:
+                FSDPParamGroup._prefetch_unshard(target_param_group, "forward")
         return args, kwargs
 
     @disable_if_config_true
@@ -205,7 +210,11 @@ class FSDPState(_State):
         self._training_state = TrainingState.PRE_BACKWARD
         self._register_root_post_backward_final_callback()
         if self._fsdp_param_group:
-            self._fsdp_param_group.pre_backward()
+            default_prefetch = len(self._states_to_backward_prefetch) == 0
+            self._fsdp_param_group.pre_backward(default_prefetch)
+        for fsdp_state in self._states_to_backward_prefetch:
+            if (target_param_group := fsdp_state._fsdp_param_group) is not None:
+                FSDPParamGroup._prefetch_unshard(target_param_group, "backward")
         return grad
 
     def _root_post_backward_final_callback(self) -> None:
