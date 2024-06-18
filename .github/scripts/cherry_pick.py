@@ -82,7 +82,6 @@ def get_tracker_issues(
     if not tracker_issues:
         return []
 
-    print(f"LOOKING {version}")
     # Figure out the tracker issue from the list by looking at the title
     return [issue for issue in tracker_issues if version in issue.get("title", "")]
 
