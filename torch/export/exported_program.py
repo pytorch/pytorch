@@ -608,6 +608,34 @@ class ExportedProgram:
             if not isinstance(spec.arg, ConstantArgument)
         }
 
+        # Run this pass before creating input/output specs, since size-related CSE/DCE might affect output signature.
+        # Overwrite output specs afterwards.
+        from torch._dynamo import config as _dynamo_config
+        from torch._export.passes._node_metadata_hook import (
+            _node_metadata_hook,
+            _set_node_metadata_hook,
+        )
+
+        if not _dynamo_config.do_not_emit_runtime_asserts:
+            stack_trace = (
+                'File "torch/fx/passes/runtime_assert.py", line 24, '
+                "in insert_deferred_runtime_asserts"
+            )
+            shape_env = _get_shape_env(gm)
+            if shape_env is not None:
+                with _set_node_metadata_hook(
+                    gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
+                ):
+                    insert_deferred_runtime_asserts(
+                        gm,
+                        shape_env,
+                        f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
+                        export=True,
+                    )
+
+        gm.recompile()
+        new_outputs = list(gm.graph.nodes)[-1].args[0]
+
         input_specs = [
             InputSpec(
                 spec.kind,
@@ -661,29 +689,6 @@ class ExportedProgram:
         for k, v in constants.items():
             assert k not in self.constants
             self.constants[k] = v
-
-        from torch._dynamo import config as _dynamo_config
-        from torch._export.passes._node_metadata_hook import (
-            _node_metadata_hook,
-            _set_node_metadata_hook,
-        )
-
-        if not _dynamo_config.do_not_emit_runtime_asserts:
-            stack_trace = (
-                'File "torch/fx/passes/runtime_assert.py", line 24, '
-                "in insert_deferred_runtime_asserts"
-            )
-            shape_env = _get_shape_env(gm)
-            if shape_env is not None:
-                with _set_node_metadata_hook(
-                    gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
-                ):
-                    insert_deferred_runtime_asserts(
-                        gm,
-                        shape_env,
-                        f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
-                        export=True,
-                    )
 
         exported_program = ExportedProgram(
             root=gm,

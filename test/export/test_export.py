@@ -5134,7 +5134,6 @@ def forward(self, x):
     return foo_unbacked""",
         )
         ep_aot = ep_pre.run_decompositions()
-        print(ep_aot)
         self.assertExpectedInline(
             str(ep_aot.graph_module.code).strip(),
             """\
@@ -5317,7 +5316,7 @@ def forward(self, x, y):
         self.assertEqual(out1.shape, torch.ones(126).shape)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Eq\(s0\*s1\*s2, s3\) on node 'eq.*'",
+            r"Runtime assertion failed for expression Eq\(\-s0\*s1\*s2 \+ s3, 0\) on node 'eq.*'",
         ):  # fail only at runtime
             ep.module()(torch.randn(4, 3, 2), torch.randn(10))  # fail
 
@@ -5733,18 +5732,12 @@ def forward(self, x, y):
             dynamic_shapes=shapes,
             _allow_complex_guards_as_runtime_asserts=True,
         )
-        # count 2 pow nodes, 1 add node, 2 sym_size.int nodes
+        # count 2 pow nodes, 2 sym_size.int nodes
         self.assertEqual(
             [node.target for node in ep.graph.nodes].count(
                 operator.pow,
             ),
             2
-        )
-        self.assertEqual(
-            [node.target for node in ep.graph.nodes].count(
-                operator.add,
-            ),
-            1
         )
         self.assertEqual(
             [node.target for node in ep.graph.nodes].count(

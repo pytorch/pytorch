@@ -15,6 +15,7 @@ def mocked_retraceability_export(*args, **kwargs):
     if "dynamic_shapes" in kwargs:
         if isinstance(kwargs["dynamic_shapes"], dict):
             kwargs["dynamic_shapes"] = tuple(kwargs["dynamic_shapes"].values())
+
     ep = export(ep.module(), *(args[1:]), **kwargs)
     return ep
 
