@@ -31,7 +31,10 @@ Other callbacks don't provide exception safety so avoid there.
 
 */
 
-#define DEFAULT_BACKLOG 16384
+// This controls how many un-accepted TCP connections can be waiting in the
+// backlog. This should be at least world size to avoid issues on init. We set
+// it to -1 to use the host max value which is controlled by `soconnmax`.
+#define DEFAULT_BACKLOG -1
 #define MAX_KEY_COUNT (128 * 1024)
 #define MAX_STRING_LEN (8 * 1024)
 #define MAX_PAYLOAD_LEN (8 * 1024 * 1024)
@@ -125,7 +128,7 @@ class UvTcpSocket : public UvHandle {
       try {
         uv_socket->processBuf(buf, nread);
       } catch (std::exception& ex) {
-        C10D_INFO("Error processing client message: {}", ex.what());
+        C10D_WARNING("Error processing client message: {}", ex.what());
         uv_socket->close();
       }
     }
@@ -134,12 +137,17 @@ class UvTcpSocket : public UvHandle {
  public:
   explicit UvTcpSocket(uv_loop_t* loop) {
     uv_tcp_init(loop, &client);
+    if (int err = uv_tcp_nodelay(&client, 1)) {
+      C10D_WARNING(
+          "The no-delay option cannot be enabled for the client socket. err={}",
+          err);
+    }
   }
 
   void startRead() {
     int res = uv_read_start((uv_stream_t*)&client, alloc_buffer, read_callback);
     if (res) {
-      C10D_INFO(
+      C10D_WARNING(
           "Failed to setup read callback. client:{} code:{} name:{} desc:{}.",
           (void*)this,
           res,
@@ -357,7 +365,7 @@ class WriterPayload : public c10::intrusive_ptr_target {
     auto handle = wp->handle;
 
     if (status) {
-      C10D_INFO(
+      C10D_WARNING(
           "Write to client failed. code:{} name:{} desc:{}.",
           status,
           uv_err_name(status),
@@ -387,7 +395,7 @@ class WriterPayload : public c10::intrusive_ptr_target {
         &req, (uv_stream_t*)handle->unsafeGetHandle(), &buf, 1, write_done);
 
     if (res) {
-      C10D_INFO(
+      C10D_WARNING(
           "Write setup to client failed. code:{} name:{} desc:{}.",
           res,
           uv_err_name(res),
@@ -994,7 +1002,7 @@ void LibUVStoreDaemon::onConnect(int status) {
     tcpServer->accept(client);
     client->startRead();
   } catch (std::exception& e) {
-    C10D_INFO("Failed to accept client due to {}", e.what());
+    C10D_WARNING("Failed to accept client due to {}", e.what());
     client->close();
   }
 }
@@ -1111,7 +1119,7 @@ void LibUVStoreDaemon::run() {
 void LibUVStoreDaemon::stop() {
   int res = uv_async_send(&exit_handle);
   if (res) {
-    C10D_INFO(
+    C10D_WARNING(
         "uv_async_send failed with:{} errn:{} desc:{}\n",
         res,
         uv_err_name(res),
