@@ -16,6 +16,7 @@
 #include <torch/csrc/autograd/autograd_not_implemented_fallback.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/autograd/input_metadata.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/profiler_python.h>
 #include <torch/csrc/autograd/python_function.h>
@@ -183,6 +184,15 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .value("MULTI_OUTPUT_NODE", CreationMeta::MULTI_OUTPUT_NODE)
       .value("NO_GRAD_MODE", CreationMeta::NO_GRAD_MODE)
       .value("INFERENCE_MODE", CreationMeta::INFERENCE_MODE);
+
+  py::class_<torch::autograd::InputMetadata>(m, "_InputMetadata")
+      .def("dtype", [](const torch::autograd::InputMetadata& m) {
+        PyObject* raw_obj = (PyObject*)torch::getTHPDtype(m.dtype().toScalarType());
+        return py::reinterpret_steal<py::object>(raw_obj);
+      })
+      .def("shape", &torch::autograd::InputMetadata::shape_as_dim_vector)
+      .def("is_nested_tensor", &torch::autograd::InputMetadata::is_nested_tensor)
+      .def("is_cpp_nested_tensor", &torch::autograd::InputMetadata::is_cpp_nested_tensor);
 
   py::class_<KinetoEvent>(m, "_KinetoEvent")
       // name of the event

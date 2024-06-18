@@ -212,6 +212,14 @@ PyObject* THPCppFunction_set_sequence_nr(
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPCppFunction_input_metadata(PyObject* self, PyObject* idx) {
+  HANDLE_TH_ERRORS;
+  auto& fn = *((THPCppFunction*)self)->cdata;
+  const auto& metadata = fn.input_metadata(THPUtils_unpackUInt64(idx));
+  return py::cast(metadata).release().ptr();
+  END_HANDLE_TH_ERRORS
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static struct PyMethodDef default_methods[] = {
     THP_FUNCTION_DEFAULT_METHODS,
