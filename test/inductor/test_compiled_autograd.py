@@ -1767,6 +1767,33 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
             out = compiled_fn(activations)
             self.assertTrue(len(activations) == 0)
 
+    def test_callback_graph_break_throws_error(self):
+        called = [0]
+
+        def callback_final():
+            called[0] += 1
+
+        class MyFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, input):
+                return input
+
+            @staticmethod
+            @torch.autograd.function.once_differentiable
+            def backward(ctx, grad):
+                torch.autograd.Variable._execution_engine.queue_callback(callback_final)
+                torch._dynamo.graph_break()
+                return grad
+
+        a = torch.rand((3, 3), requires_grad=True)
+        with self.assertRaisesRegex(
+            AssertionError,
+            "only supported when Compiled Autograd is enabled with fullgraph=True",
+        ):
+            with compiled_autograd.enable(make_compiler_fn(fullgraph=False)):
+                b = MyFunc.apply(a)
+                b.sum().backward()
+
     @unittest.skipIf(not HAS_CUDA, "requires cuda")
     def test_cudagraphs_cpu_division(self):
         from torch._dynamo.testing import reduce_to_scalar_loss
@@ -2177,7 +2204,6 @@ known_failing_tests = {
     "test_autograd_multiple_views_python",  # torch._dynamo.exc.Unsupported: call_function args: TensorVariable(
     "test_autograd_node_isinstance",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertIsInstance
     "test_autograd_simple_views_python",  # torch._dynamo.exc.TorchRuntimeError: Failed running call_function
-    "test_callback_adds_callback",  # torch._dynamo.exc.Unsupported: call_method UserDefinedObjectVariable
     "test_callback_propagates_errors_from_device_thread",  # AssertionError: "blah" does not match "call_method
     "test_custom_autograd_no_early_free",  # torch.autograd.gradcheck.GradcheckError: While computing batched gradients
     "test_custom_function_cycle",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
@@ -2223,6 +2249,7 @@ known_failing_tests = {
     "test_save_for_backward_inputs_are_namedtuple",  # torch._dynamo.exc.Unsupported: 'skip function
     "test_setitem",  # AssertionError: Tensor-likes are not close!
     "test_grad_nonleaf_register_hook",  # IndexError: list index out of range (NB: x.grad = y where both x and y are input tensors)
+    "test_unpack_hooks_exec_count",  # pack/unpack saved tensor hooks firing more than once
     "test_scalar_grad_mixed_device",  # Fake Tensors aren't propagating device properly for 0-dim grads
 }
 
