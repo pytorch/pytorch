@@ -178,7 +178,7 @@ function install_torchrec_and_fbgemm() {
 
 function clone_pytorch_xla() {
   if [[ ! -d ./xla ]]; then
-    git clone --recursive -b r2.4 https://github.com/pytorch/xla.git
+    git clone --recursive --quiet https://github.com/pytorch/xla.git
     pushd xla
     # pin the xla hash so that we don't get broken by changes to xla
     git checkout "$(cat ../.github/ci_commit_pins/xla.txt)"
@@ -186,28 +186,6 @@ function clone_pytorch_xla() {
     git submodule update --init --recursive
     popd
   fi
-}
-
-function checkout_install_torchdeploy() {
-  local commit
-  commit=$(get_pinned_commit multipy)
-  pushd ..
-  git clone --recurse-submodules https://github.com/pytorch/multipy.git
-  pushd multipy
-  git checkout "${commit}"
-  python multipy/runtime/example/generate_examples.py
-  BUILD_CUDA_TESTS=1 pip install -e .
-  popd
-  popd
-}
-
-function test_torch_deploy(){
- pushd ..
- pushd multipy
- ./multipy/runtime/build/test_deploy
- ./multipy/runtime/build/test_deploy_gpu
- popd
- popd
 }
 
 function checkout_install_torchbench() {
