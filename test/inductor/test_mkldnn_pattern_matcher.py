@@ -1775,7 +1775,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                         mod,
                         (v,),
                         [
-                            "torch.ops.onednn.qlinear_pointwise.default",
+                            "torch.ops.onednn.qlinear_pointwise.tensor",
                             "torch.ops.onednn.qlinear_pointwise.binary",
                         ],
                         [],
