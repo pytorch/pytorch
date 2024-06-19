@@ -241,7 +241,7 @@ static Tensor multinomial_batching_rule(const Tensor& self, const int64_t num_sa
     if (is_2D_case) {
       out = reshape_dim_outof_symint(0, maybe_layer->batchSize(), out);
     }
-    return makeBatched(out, 0, cur_level);;
+    return makeBatched(out, 0, cur_level);
   }
 
   TORCH_INTERNAL_ASSERT(randomness == RandomnessType::Same); // check_randomness eliminates error randomness

@@ -677,7 +677,7 @@ Tensor scaled_dot_product_attention(
     case sdp::SDPBackend::efficient_attention: {
       bool compute_logsumexp = should_compute_logsumexp(query_, key, value);
       if (attn_mask.has_value()) {
-        attn_mask.value() = preprocess_mask(attn_mask.value(), query_, key, value);;
+        attn_mask.value() = preprocess_mask(attn_mask.value(), query_, key, value);
       }
       auto out_and_lse = at::_scaled_dot_product_efficient_attention(
           query_, key, value, attn_mask, compute_logsumexp, dropout_p, is_causal, scale);

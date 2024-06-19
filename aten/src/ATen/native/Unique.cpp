@@ -282,7 +282,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_consecutive_cpu_template(
 
   if (numel > 0) {
     scalar_t *output_data = output.data_ptr<scalar_t>();
-    int64_t *inverse_data = inverse_indices.data_ptr<int64_t>();;
+    int64_t *inverse_data = inverse_indices.data_ptr<int64_t>();
     int64_t *counts_data = nullptr;
     scalar_t last_value = c10::load(input_data);
     *output_data = last_value;

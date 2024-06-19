@@ -166,7 +166,7 @@ void ltc_eager_fallback(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack) {
   // TODO(whc) this FN_TRACK thing hasn't been used so far in LTC iirc but could
-  // land/re-enable it LTC_FN_TRACK(3);;
+  // land/re-enable it LTC_FN_TRACK(3);
   const auto name = c10::toString(op.operator_name());
 
   // Manually applying the TORCH_LAZY_COUNTER macro.

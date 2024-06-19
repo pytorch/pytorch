@@ -573,7 +573,7 @@ void register_hook() {
 }
 
 const at::Generator& default_generator(c10::DeviceIndex device_index) {
-  return at::globalContext().defaultGenerator(at::Device(c10::DeviceType::PrivateUse1, device_index));;
+  return at::globalContext().defaultGenerator(at::Device(c10::DeviceType::PrivateUse1, device_index));
 }
 
 struct CustomAutogradFnReturnsSelf : public torch::autograd::Function<CustomAutogradFnReturnsSelf> {
