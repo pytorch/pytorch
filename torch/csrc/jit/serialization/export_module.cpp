@@ -871,7 +871,6 @@ void ExportModule(
       message << "Parent directory of " << filename << " does not exist.\n";
     } else {
       message << "Error while opening file: " << errno << '\n';
-      ;
     }
     TORCH_CHECK(false, message.str());
   }
