@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # pyre-strict
 from typing import Union
 

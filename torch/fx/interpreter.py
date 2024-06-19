@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from .graph_module import GraphModule
 from ._lazy_graph_module import _make_graph_module
 from .graph import Graph

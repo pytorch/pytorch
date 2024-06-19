@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from functools import wraps
 from inspect import unwrap
 from typing import Callable, List, Optional

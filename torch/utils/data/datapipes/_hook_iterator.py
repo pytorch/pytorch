@@ -1,8 +1,9 @@
+# mypy: allow-untyped-defs
 import inspect
 import functools
 from enum import Enum
 
-import torch.autograd
+import torch
 
 
 class _SnapshotState(Enum):
