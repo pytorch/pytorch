@@ -26,6 +26,7 @@ runs:
           -e PYTORCH_FINAL_PACKAGE_DIR \
           -e PYTORCH_ROOT \
           -e SKIP_ALL_TESTS \
+          -e USE_SPLIT_BUILD \
           --tty \
           --detach \
           -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
@@ -34,6 +35,9 @@ runs:
           -w / \
           "${DOCKER_IMAGE}"
         )
+
+        echo "use split build is"
+        echo "$USE_SPLIT_BUILD"
 
         if [[ "${GPU_ARCH_TYPE}" != "rocm" && "${BUILD_ENVIRONMENT}" != "linux-aarch64-binary-manywheel" && "${BUILD_ENVIRONMENT}" != "linux-s390x-binary-manywheel" ]]; then
           # Propagate download.pytorch.org IP to container. This is only needed on Linux non aarch64 runner

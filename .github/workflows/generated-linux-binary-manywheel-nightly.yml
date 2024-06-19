@@ -72,6 +72,7 @@ jobs:
       build_name: manywheel-py3_8-cpu
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge
+      use_split_build: True
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-cpu-upload:  # Uploading
@@ -135,6 +136,7 @@ jobs:
       build_name: manywheel-py3_8-cuda12_4-split
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
+      use_split_build: True
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-cuda12_4-split-upload:  # Uploading
@@ -196,6 +198,7 @@ jobs:
       build_name: manywheel-py3_9-cpu
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge
+      use_split_build: True
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cpu-upload:  # Uploading
@@ -259,6 +262,7 @@ jobs:
       build_name: manywheel-py3_9-cuda12_4-split
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
+      use_split_build: True
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cuda12_4-split-upload:  # Uploading
@@ -320,6 +324,7 @@ jobs:
       build_name: manywheel-py3_10-cpu
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge
+      use_split_build: True
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cpu-upload:  # Uploading
@@ -383,6 +388,7 @@ jobs:
       build_name: manywheel-py3_10-cuda12_4-split
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
+      use_split_build: True
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cuda12_4-split-upload:  # Uploading
@@ -444,6 +450,7 @@ jobs:
       build_name: manywheel-py3_11-cpu
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge
+      use_split_build: True
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cpu-upload:  # Uploading
@@ -507,6 +514,7 @@ jobs:
       build_name: manywheel-py3_11-cuda12_4-split
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
+      use_split_build: True
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cuda12_4-split-upload:  # Uploading
@@ -568,6 +576,7 @@ jobs:
       build_name: manywheel-py3_12-cpu
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge
+      use_split_build: True
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cpu-upload:  # Uploading
@@ -631,6 +640,7 @@ jobs:
       build_name: manywheel-py3_12-cuda12_4-split
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
+      use_split_build: True
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cuda12_4-split-upload:  # Uploading

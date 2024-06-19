@@ -70,5 +70,6 @@ jobs:
       build_name: manywheel-py3_8-cuda12_4-split
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
+      use_split_build: True
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
