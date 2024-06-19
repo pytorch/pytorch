@@ -344,8 +344,16 @@ class TestSelectAlgorithm(TestCase):
     @parametrize("bias", (False, True))
     @parametrize("input_3d", (False, True))
     @dtypes(torch.float32, torch.bfloat16)
+    @parametrize(
+        "epilogue",
+        (
+            "none",
+            "relu",
+            "gelu",
+        ),
+    )
     def test_quantized_linear_with_pointwise(
-        self, batch_size, in_features, out_features, bias, input_3d, dtype
+        self, batch_size, in_features, out_features, bias, input_3d, dtype, epilogue
     ):
         B = (2, batch_size) if input_3d else (batch_size,)
         input = torch.randn(*B, in_features).to(dtype=torch.float32)
@@ -354,9 +362,13 @@ class TestSelectAlgorithm(TestCase):
             def __init__(self, bias):
                 super().__init__()
                 self.linear = torch.nn.Linear(in_features, out_features, bias)
+                self.epilogue = _get_epilogue(epilogue)
+                self.linear2 = torch.nn.Linear(out_features, out_features, bias)
+                self.epilogue2 = _get_epilogue(epilogue)
 
             def forward(self, x):
-                res = self.linear(x)
+                res = self.epilogue(self.linear(x))
+                res = self.epilogue2(self.linear2(res))
                 return res
 
         counters.clear()
@@ -367,7 +379,7 @@ class TestSelectAlgorithm(TestCase):
 
         atol, rtol = 1e-3, 1e-3
         if dtype == torch.bfloat16:
-            atol, rtol = 1e-2, 1e-2
+            atol, rtol = 5e-2, 5e-2
 
         with patch.object(
             select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)

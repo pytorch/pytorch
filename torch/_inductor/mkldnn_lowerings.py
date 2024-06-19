@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import functools
 from typing import List, Optional
 
 import torch
@@ -701,6 +702,7 @@ def register_onednn_fusion_ops():
                         assert output_dtype in [
                             torch.float32,
                             torch.bfloat16,
+                            torch.uint8,
                         ]
                         input_loader = input_buffer.make_loader()
                         weight_compens_loader = weight_compens.make_loader()
@@ -749,18 +751,62 @@ def register_onednn_fusion_ops():
                                 _bias = bias_loader(weight_compens_index)
                                 temp = ops.add(temp, _bias)
 
-                            # Step 3: Cast output to BF16 if applicable
-                            if output_dtype == torch.bfloat16:
-                                temp = ops.to_dtype(temp, torch.bfloat16)
-
                             return temp
 
                         output_buf = ir.Pointwise(
                             device=input_buffer.get_device(),
-                            dtype=output_dtype,  # Hardcode to FP32 for u8s8f32
+                            dtype=torch.float32,  # Hardcode to FP32 for u8s8f32
                             inner_fn=inner_fn,
                             ranges=input_buffer.get_size(),
                         )
+
+                        # Step 3: Doing the unary post op fusion
+                        if attr != "none":
+                            output_buf = create_epilogue_with_attr(
+                                output_buf, attr, scalars=scalars, algorithm=algorithm
+                            )
+
+                        # Step 4: Cast output to Target Dtype
+                        if output_dtype == torch.bfloat16:
+                            output_cast_loader = output_buf.make_loader()
+
+                            def inner_fn_cast_output_to_bf16(index):
+                                input = output_cast_loader(index)
+                                return ops.to_dtype(input, output_dtype)
+
+                            output_buf = ir.Pointwise(
+                                device=output_buf.get_device(),
+                                dtype=output_dtype,
+                                inner_fn=inner_fn_cast_output_to_bf16,
+                                ranges=output_buf.get_size(),
+                            )
+                        elif output_dtype == torch.uint8:
+                            from .lowering import _create_constants
+
+                            requant_input_loader = output_buf.make_loader()
+
+                            def inner_fn_requant(index, scale, zero_point):
+                                input = requant_input_loader(index)
+                                inv_scale, zero_point = _create_constants(
+                                    1.0 / scale, zero_point, dtype=torch.float32
+                                )
+                                val = ops.round(input * inv_scale) + zero_point
+                                qmin, qmax = _create_constants(
+                                    0, 255, dtype=torch.float32
+                                )
+                                clamped = ops.minimum(ops.maximum(val, qmin), qmax)
+                                return ops.to_dtype(clamped, torch.uint8)
+
+                            output_buf = ir.Pointwise(
+                                device=output_buf.get_device(),
+                                dtype=output_dtype,
+                                inner_fn=functools.partial(
+                                    inner_fn_requant,
+                                    scale=float(o_scale),
+                                    zero_point=int(o_zero_point),
+                                ),
+                                ranges=output_buf.get_size(),
+                            )
 
                         return output_buf
 
