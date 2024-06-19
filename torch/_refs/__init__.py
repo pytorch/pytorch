@@ -3953,7 +3953,7 @@ def unbind(t: TensorLikeType, dim: int = 0) -> TensorSequenceType:
 @register_decomposition(aten.unbind_copy)
 @out_wrapper()
 def unbind_copy(x: TensorLikeType, dim: int = 0):
-    return x.clone(memory_format=torch.contiguous_format).unbind(dim)
+    return tuple(i.clone(memory_format=torch.contiguous_format) for i in x.unbind(dim))
 
 
 @out_wrapper()
