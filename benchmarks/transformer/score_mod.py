@@ -258,16 +258,23 @@ def generate_score_mods(score_mods: List[str]) -> List[Callable]:
         return score + 2 * h
 
     function_dict = {
-        'noop': noop,
-        'causal': causal_mask,
-        'rel': relative_bias,
-        'head_bias': head_bias
+        "noop": noop,
+        "causal": causal_mask,
+        "rel": relative_bias,
+        "head_bias": head_bias,
     }
     return [function_dict[name] for name in score_mods]
 
 
-def generate_experiment_configs(calculate_bwd: bool, batch_sizes: List[int], num_heads: List[int], seq_lens: List[int], head_dims: List[int], score_mods: List[str]) -> List[ExperimentConfig]:
-    q_kv_seq_lens = [(i, i) for i in seq_lens] # only testing q_len == kv_len
+def generate_experiment_configs(
+    calculate_bwd: bool,
+    batch_sizes: List[int],
+    num_heads: List[int],
+    seq_lens: List[int],
+    head_dims: List[int],
+    score_mods: List[str],
+) -> List[ExperimentConfig]:
+    q_kv_seq_lens = [(i, i) for i in seq_lens]  # only testing q_len == kv_len
     dtypes = [
         torch.bfloat16,
     ]
@@ -301,7 +308,11 @@ def main(args):
     np.random.seed(seed)
     torch.manual_seed(seed)
     results = []
-    for config in tqdm(generate_experiment_configs(args.calculate_bwd, args.b, args.nh, args.s, args.d, args.mods)):
+    for config in tqdm(
+        generate_experiment_configs(
+            args.calculate_bwd, args.b, args.nh, args.s, args.d, args.mods
+        )
+    ):
         results.append(
             Experiment(config, run_single_experiment(config, dynamic=args.dynamic))
         )
@@ -323,11 +334,21 @@ if __name__ == "__main__":
         "--calculate-bwd", action="store_true", help="Calculate backward pass times"
     )
 
-    parser.add_argument('-b', type=int, nargs='+', help='batch sizes', default=[2, 8, 16])
-    parser.add_argument('-nh', type=int, nargs='+', help='# of heads', default=[16])
-    parser.add_argument('-s', type=int, nargs='+', help='sequence lengths', default=[512, 1024, 4096])
-    parser.add_argument('-d', type=int, nargs='+', help='head dims', default=[64, 128])
-    parser.add_argument('-mods', type=str, nargs='+', help='score mods', default=['noop', 'causal', 'rel', 'head_bias'])
+    parser.add_argument(
+        "-b", type=int, nargs="+", help="batch sizes", default=[2, 8, 16]
+    )
+    parser.add_argument("-nh", type=int, nargs="+", help="# of heads", default=[16])
+    parser.add_argument(
+        "-s", type=int, nargs="+", help="sequence lengths", default=[512, 1024, 4096]
+    )
+    parser.add_argument("-d", type=int, nargs="+", help="head dims", default=[64, 128])
+    parser.add_argument(
+        "-mods",
+        type=str,
+        nargs="+",
+        help="score mods",
+        default=["noop", "causal", "rel", "head_bias"],
+    )
 
     # Parse arguments
     args = parser.parse_args()
