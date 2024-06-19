@@ -980,6 +980,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
+    @torch._functorch.config.patch(
+        recompute_views=True,
+    )
     def test_fw_bw_graph_correctness(self):
         cnt = CompileCounterWithBackend("aot_eager")
         make_tensor = functools.partial(

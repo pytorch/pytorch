@@ -4781,6 +4781,9 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         res = opt_fn(x_weak, y)
         self.assertEqual(ref, res)
 
+    @torch._functorch.config.patch(
+        recompute_views=True,
+    )
     def test_storage_resize_forward_full_graph(self):
         class TestModule(torch.nn.Module):
             def __init__(self):

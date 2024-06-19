@@ -804,7 +804,7 @@ def solve_min_cut(
             return False
         if node.target == operator.getitem:
             return False
-        if op_types.is_view(node):
+        if config.recompute_views and op_types.is_view(node):
             return False
         if node.target in [aten.lift_fresh_copy.default, aten.lift_fresh.default]:
             return False
@@ -858,7 +858,7 @@ def solve_min_cut(
 
     def get_node_weight(node) -> float:
         mem_sz = _size_of(node)
-        if op_types.is_view(node):
+        if config.recompute_views and op_types.is_view(node):
             # We never choose to save views, since views are free to recompute.
             # It makes it a bit simpler to analyze
             # NB: If they're not free to recompute (e.g. nested tensors)... I
