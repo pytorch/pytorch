@@ -692,7 +692,7 @@ def insert_deferred_runtime_asserts(
                             hash_cons[signature] = fx.Proxy(res)
                         return res
 
-                    res = fx.Proxy(unbacked_interp(node, keypath, _get_example_value(node)))
+                    res = fx.Proxy(unbacked_interp(node, keypath, _get_sym_val(node)))
                     # this below matches the logic mentioned above in the initial collection pass,
                     # about dynamo producing unbacked binding keys that match the symbols in the graph,
                     # but AOTAutograd producing new unbacked symbols, so we need to read the example value instead.
