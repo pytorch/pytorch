@@ -859,8 +859,9 @@ def solve_min_cut(
     def get_node_weight(node) -> float:
         mem_sz = _size_of(node)
         if config.recompute_views and op_types.is_view(node):
-            # We never choose to save views, since views are free to recompute.
-            # It makes it a bit simpler to analyze
+            # If `config.recompute_views=True`, we don't save views, this is generally
+            # a good idea since views are free to recompute, and it makes it a bit simpler
+            # to analyze.
             # NB: If they're not free to recompute (e.g. nested tensors)... I
             # think we should modify checks for view_ops to `is_view` and check
             # that. Basically, with nested tensors, `aten.view` is not a "view
