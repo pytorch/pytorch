@@ -5,7 +5,6 @@ import logging
 import operator
 from collections import Counter, defaultdict
 from typing import Any, Dict, List, Optional, Set, TYPE_CHECKING, Union
-from torch._inductor.virtualized import ops
 
 import torch
 import torch._inductor as inductor
@@ -13,7 +12,7 @@ import torch.utils._pytree as pytree
 from torch import fx
 from torch._decomp import register_decomposition
 from torch._dynamo.utils import counters, optimus_scuba_log
-from torch._inductor import ir
+from torch._inductor.virtualized import ops
 
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
 
@@ -127,7 +126,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         ):
             config.post_grad_custom_post_pass(gm.graph)
 
-
     stable_topological_sort(gm.graph)
 
     move_constructors_to_cuda(gm.graph)
@@ -218,33 +216,6 @@ def is_valid_mm_plus_mm(match: Match):
 
     return True
 
-# register_lowering_pattern does not seem to work since the output_node
-# has 2 users: a sum (handle ignore_index) and a sub
-# @register_lowering_pattern(
-#     CallFunction(
-#         prims.convert_element_type,
-#         CallFunction(
-#             aten.mul,
-#             CallFunction(
-#                 aten.scatter,
-#                 CallFunction(
-#                     aten.full,
-#                     KeywordArg("shape"),
-#                     KeywordArg("val")
-#                 ),
-#                 KeywordArg("dim"),
-#                 KeywordArg("selector"),
-#                 KeywordArg("val2"),
-#             ),
-#             KeywordArg("mul_rhs"),
-#         ),
-#         torch.float32,
-#     )
-#     # extra_check=scatter_upon_allzero_extra_check,
-#     # full_default_3, 1, where_2, -1.0
-# )
-# def scatter_upon_allzero(match: Match, shape, val, dim, selector, val2, mul_rhs):
-#     breakpoint()
 
 def scatter_upon_allzero_for_sum_extra_check(m):
     if len(m.kwargs["shape"]) != 2:
@@ -258,6 +229,7 @@ def scatter_upon_allzero_for_sum_extra_check(m):
     if not m.kwargs["keepdim"]:
         return False
     return True
+
 
 def scatter_upon_allzero_for_sub_extra_check(m):
     if len(m.kwargs["shape"]) != 2:
@@ -278,11 +250,7 @@ def scatter_upon_allzero_for_sub_extra_check(m):
                 aten.mul,
                 CallFunction(
                     aten.scatter,
-                    CallFunction(
-                        aten.full,
-                        KeywordArg("shape"),
-                        KeywordArg("val")
-                    ),
+                    CallFunction(aten.full, KeywordArg("shape"), KeywordArg("val")),
                     KeywordArg("dim"),
                     KeywordArg("selector"),
                     KeywordArg("val2"),
@@ -298,7 +266,9 @@ def scatter_upon_allzero_for_sub_extra_check(m):
     extra_check=scatter_upon_allzero_for_sum_extra_check,
     pass_dict=pass_patterns[0],
 )
-def scatter_upon_allzero_for_sum(match: Match, shape, val, dim, selector, val2, mul_rhs, rdims, keepdim):
+def scatter_upon_allzero_for_sum(
+    match: Match, shape, val, dim, selector, val2, mul_rhs, rdims, keepdim
+):
     sum_node = match.output_node()
     graph = match.graph
     with graph.inserting_after(sum_node):
@@ -306,6 +276,7 @@ def scatter_upon_allzero_for_sum(match: Match, shape, val, dim, selector, val2, 
         nd = graph.call_function(prims.convert_element_type, args=(nd, torch.float32))
     sum_node.replace_all_uses_with(nd)
     graph.erase_node(sum_node)
+
 
 @register_lowering_pattern(
     CallFunction(
@@ -316,11 +287,7 @@ def scatter_upon_allzero_for_sum(match: Match, shape, val, dim, selector, val2, 
                 aten.mul,
                 CallFunction(
                     aten.scatter,
-                    CallFunction(
-                        aten.full,
-                        KeywordArg("shape"),
-                        KeywordArg("val")
-                    ),
+                    CallFunction(aten.full, KeywordArg("shape"), KeywordArg("val")),
                     KeywordArg("dim"),
                     KeywordArg("selector"),
                     KeywordArg("val2"),
@@ -333,7 +300,9 @@ def scatter_upon_allzero_for_sum(match: Match, shape, val, dim, selector, val2, 
     ),
     extra_check=scatter_upon_allzero_for_sub_extra_check,
 )
-def scatter_upon_allzero_for_sub(match: Match, shape, val, dim, selector, val2, mul_rhs, sub_rhs):
+def scatter_upon_allzero_for_sub(
+    match: Match, shape, val, dim, selector, val2, mul_rhs, sub_rhs
+):
     selector_loader = selector.make_loader()
     rhs_loader = sub_rhs.make_loader()
     mul_rhs_loader = mul_rhs.make_loader()
@@ -341,11 +310,11 @@ def scatter_upon_allzero_for_sub(match: Match, shape, val, dim, selector, val2, 
     def inner_fn(idx):
         selector = selector_loader((idx[0], 0))
         lhs = ops.where(selector == ops.index_expr(idx[1], torch.int64), val2, 0)
-        mul_rhs = mul_rhs_loader((idx[0], 0)) # TODO don't hardcode index value 0
+        mul_rhs = mul_rhs_loader((idx[0], 0))  # TODO don't hardcode index value 0
         lhs = ops.mul(lhs, mul_rhs)
         lhs = ops.to_dtype(lhs, torch.float32)
         rhs = rhs_loader(idx)
-        return ops.sub(lhs,rhs)
+        return ops.sub(lhs, rhs)
 
     return ir.Pointwise.create(
         device=sub_rhs.get_device(),
