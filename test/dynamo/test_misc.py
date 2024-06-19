@@ -8290,6 +8290,7 @@ def ___make_guard_fn():
         f(x)
 
     def test_out_variant_custom_op(self):
+        # TODO(yf225): use `with torch.library._scoped_library` instead
         lib = torch.library.Library("test_out_variant_custom_op", "FRAGMENT")
         lib.define(
             "split_with_sizes_copy(Tensor all_gather_output, SymInt[] all_gather_input_split_sizes, int dim=0, *, Tensor(a!)[] out) -> ()"
