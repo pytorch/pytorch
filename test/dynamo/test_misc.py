@@ -8289,6 +8289,52 @@ def ___make_guard_fn():
         x = torch.zeros(100, dtype=torch.int64)
         f(x)
 
+    def test_out_variant_custom_op(self):
+        lib = torch.library.Library("test_out_variant_custom_op", "FRAGMENT")
+        lib.define(
+            "split_with_sizes_copy(Tensor all_gather_output, SymInt[] all_gather_input_split_sizes, int dim=0, *, Tensor(a!)[] out) -> ()"
+        )
+        @torch.library.impl(lib, "split_with_sizes_copy", "Meta")
+        @torch.library.impl(lib, "split_with_sizes_copy", "CPU")
+        def split_with_sizes_copy(
+            all_gather_output: torch.Tensor,
+            all_gather_input_split_sizes: List[int],
+            dim: int,
+            out: List[torch.Tensor],
+        ) -> None:
+            torch.split_with_sizes_copy(
+                all_gather_output, all_gather_input_split_sizes, dim=dim, out=out
+            )
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def f1(x):
+            return torch.ops.test_out_variant_custom_op.split_with_sizes_copy(x)
+
+        x = torch.zeros(100, dtype=torch.int64)
+        f1(x)
+
+
+        lib.define(
+            "chunk_cat(Tensor[] tensors, int dim, int num_chunks, *, Tensor(a!) out) -> ()"
+        )
+
+        @torch.library.impl(lib, "chunk_cat", "Meta")
+        @torch.library.impl(lib, "chunk_cat", "CPU")
+        def chunk_cat(
+            tensors: List[torch.Tensor],
+            dim: int,
+            num_chunks: int,
+            out: torch.Tensor,
+        ) -> None:
+            torch._chunk_cat(tensors, dim, num_chunks, out=out)
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def f2(x):
+            return torch.ops.test_out_variant_custom_op.chunk_cat(x)
+
+        x = torch.zeros(100, dtype=torch.int64)
+        f2(x)
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_runtime_assert_replacement(self):
         @torch.compile(backend="aot_eager")
