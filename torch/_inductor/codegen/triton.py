@@ -2669,6 +2669,7 @@ class TritonKernel(SIMDKernel):
 
     def call_kernel(self, name: str, node: Optional[IRNode] = None):
         wrapper = V.graph.wrapper_code
+        wrapper.write_triton_header_once()
         call_args, arg_types = self.get_call_args()
         grid: List[Any] = []
         self.add_numel_to_call_args_and_grid(name, call_args, arg_types, grid)
