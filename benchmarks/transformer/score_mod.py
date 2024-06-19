@@ -106,7 +106,9 @@ def generate_inputs(
     return query, key, value
 
 
-def run_single_experiment(config: ExperimentConfig, dynamic=False, max_autotune=False) -> ExperimentResults:
+def run_single_experiment(
+    config: ExperimentConfig, dynamic=False, max_autotune=False
+) -> ExperimentResults:
     device = torch.device("cuda")
     batch_size, num_heads, q_seq_len, head_dim = config.shape
     query, key, value = generate_inputs(
@@ -124,7 +126,9 @@ def run_single_experiment(config: ExperimentConfig, dynamic=False, max_autotune=
         return F.scaled_dot_product_attention(query, key, value)
 
     if max_autotune:
-        compiled_sdpa = torch.compile(_flex_attention, dynamic=dynamic, mode="max-autotune-no-cudagraphs")
+        compiled_sdpa = torch.compile(
+            _flex_attention, dynamic=dynamic, mode="max-autotune-no-cudagraphs"
+        )
     else:
         compiled_sdpa = torch.compile(_flex_attention, dynamic=dynamic)
 
@@ -271,6 +275,7 @@ def generate_score_mods(score_mods: List[str]) -> List[Callable]:
 
 def generate_experiment_configs(
     calculate_bwd: bool,
+    dtype: torch.dtype,
     batch_sizes: List[int],
     num_heads: List[int],
     seq_lens: List[int],
@@ -278,9 +283,7 @@ def generate_experiment_configs(
     score_mods: List[str],
 ) -> List[ExperimentConfig]:
     q_kv_seq_lens = [(i, i) for i in seq_lens]  # only testing q_len == kv_len
-    dtypes = [
-        torch.float16,
-    ]
+    dtypes = [dtype]
     score_mods = generate_score_mods(score_mods)
     all_configs = []
     for (
@@ -313,11 +316,16 @@ def main(args):
     results = []
     for config in tqdm(
         generate_experiment_configs(
-            args.calculate_bwd, args.b, args.nh, args.s, args.d, args.mods
+            args.calculate_bwd, args.dtype, args.b, args.nh, args.s, args.d, args.mods
         )
     ):
         results.append(
-            Experiment(config, run_single_experiment(config, dynamic=args.dynamic, max_autotune=args.max_autotune))
+            Experiment(
+                config,
+                run_single_experiment(
+                    config, dynamic=args.dynamic, max_autotune=args.max_autotune
+                ),
+            )
         )
 
     print_results(results)
@@ -336,6 +344,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--calculate-bwd", action="store_true", help="Calculate backward pass times"
     )
+
+    parser.add_argument("-dtype", type=str, help="dtype", default="bfloat16")
 
     parser.add_argument(
         "-b", type=int, nargs="+", help="batch sizes", default=[2, 8, 16]
@@ -358,5 +368,6 @@ if __name__ == "__main__":
 
     # Parse arguments
     args = parser.parse_args()
+    args.dtype = getattr(torch, args.dtype)
 
     main(args)

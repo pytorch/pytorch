@@ -17,7 +17,7 @@ from ..ir import (
     Subgraph,
     TensorBox,
 )
-from ..lowering import empty_strided, full, lowerings, register_lowering
+from ..lowering import empty_strided, lowerings, register_lowering
 from ..select_algorithm import autotune_select_algorithm, TritonTemplate
 
 log = logging.getLogger(__name__)
@@ -362,9 +362,9 @@ def _get_default_config_bwd(query) -> Tuple[int, int, int, int]:
     head_dim = query.get_size()[-1]
     dtype = query.get_dtype()
 
+    if dtype == torch.float32:
+        return (16, 16, 4, 1)
     if head_dim <= 256 and torch.cuda.get_device_capability() >= (9, 0):  # H100
-        if dtype == torch.float32:
-            return (32, 64, 4, 1)
         return (32, 128, 4, 3)
     elif torch.cuda.get_device_capability() >= (8, 0):  # A100
         if head_dim == 64:
@@ -400,7 +400,7 @@ def flex_attention(*args, **kwargs):
         query.get_device(),
         query.get_dtype(),
         query.get_size(),
-        FlexibleLayout.contiguous_strides(query.get_size()),
+        query.get_stride(),
     )
     # see NOTE:[TritonTemplates with multiple outputs]
     logsumexp_shape = query.get_size()[:-1]  # [B, H, M]
@@ -756,7 +756,7 @@ def flex_attention_backward(*args, **kwargs):
         key.get_device(),
         key.get_dtype(),
         key.get_size(),
-        FlexibleLayout.contiguous_strides(key.get_size()),
+        key.get_stride(),
     )
 
     # Create delta which will is needed for the bwd's kernel
@@ -764,11 +764,12 @@ def flex_attention_backward(*args, **kwargs):
     delta = lowerings[aten.sum](mul_delta, axis=-1)
 
     # see NOTE:[TritonTemplates with multiple outputs]
-    grad_query = full(
-        query.get_size(), 0.0, dtype=dtype, device=device
-    )  # torch.zeros equivalent
-    grad_query.realize()
-    grad_value = empty_strided(value.get_size(), None, dtype=dtype, device=device)
+    grad_query = empty_strided(
+        query.get_size(), query.get_stride(), dtype=dtype, device=device
+    )
+    grad_value = empty_strided(
+        value.get_size(), value.get_stride(), dtype=dtype, device=device
+    )
 
     choices: List[Any] = []
     configs: List[Tuple[int, int, int, int]] = []
