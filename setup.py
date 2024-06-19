@@ -272,6 +272,12 @@ if BUILD_LIBTORCH_WHL:
 if BUILD_PYTHON_ONLY:
     os.environ["BUILD_LIBTORCHLESS"] = "ON"
     os.environ["LIBTORCH_LIB_PATH"] = f"{_get_package_path(LIBTORCH_PKG_NAME)}/lib"
+    print(os.environ["LIBTORCH_LIB_PATH"])
+    # print contents of package path
+    for root, dirs, files in os.walk(os.environ["LIBTORCH_LIB_PATH"]):
+        print(root)
+        for file in files:
+            print(file)
 
 ################################################################################
 # Parameters parsed from environment
