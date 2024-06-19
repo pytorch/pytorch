@@ -2209,6 +2209,7 @@ def _make_copy_from_view(fn):
     """
     Given a view function (e.g. torch.diagonal) generates its copy variant (e.g. torch.diagonal_copy)
     """
+    fn = out_wrapper()(fn)
 
     @wraps(fn)
     def _fn(*args, out=None, **kwargs):
@@ -2220,8 +2221,6 @@ def _make_copy_from_view(fn):
             lambda x: x.clone(memory_format=torch.contiguous_format),
             result,
         )
-
-    _fn = out_wrapper()(_fn)
 
     copy_name = f"{fn.__name__}_copy"
     _fn.__name__ = copy_name
