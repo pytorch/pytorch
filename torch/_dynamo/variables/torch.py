@@ -842,6 +842,27 @@ Either create the tensor outside the compiled region, or do not set the tensor t
                     name = tx.find_symbolic_locals_name(kwargs["out"])
                     if name in tx.symbolic_locals:
                         tx.symbolic_locals[name] = tensor_variable
+                elif isinstance(tensor_variable, ConstantVariable) and tensor_variable.value is None:
+                    # Handle out-variant custom ops that return None.
+                    if isinstance(kwargs["out"], TensorVariable):
+                        assert "example_value" in kwargs["out"].proxy.node.meta
+                        fake_out = kwargs["out"].proxy.node.meta["example_value"]
+                        if not torch._prims_common.is_contiguous(fake_out):
+                            # It's difficult to handle strides correctly in functionalization
+                            # when calling an out= op with a non-contiguous out argument
+                            unimplemented(
+                                "out= op was called where output tensor was non-contiguous"
+                            )
+                    elif isinstance(kwargs["out"], ListVariable):
+                        for idx, x in enumerate(kwargs["out"].items):
+                            assert "example_value" in x.proxy.node.meta
+                            fake_out = x.proxy.node.meta["example_value"]
+                            if not torch._prims_common.is_contiguous(fake_out):
+                                # It's difficult to handle strides correctly in functionalization
+                                # when calling an out= op with a non-contiguous out argument
+                                unimplemented(
+                                    "out= op was called where output tensor was non-contiguous"
+                                )
                 else:
                     unimplemented(f"out variant of {type(kwargs['out'])}")
 
