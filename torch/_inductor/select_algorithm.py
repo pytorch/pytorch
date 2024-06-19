@@ -1597,7 +1597,7 @@ class AlgorithmSelectorCache(PersistentCache):
             result = timings[choice]
             if result:
                 sys.stderr.write(
-                    f"  {choice.name} {result:.4f} ms {best_time / result:.1%}\n"
+                    f"  {choice.name} {result:.4f} ms {best_time / result:.1%} {choice.debug_extra}\n"
                 )
             else:
                 sys.stderr.write(
