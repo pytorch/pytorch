@@ -18,16 +18,16 @@ import torch._prims as prims
 import torch._prims_common as utils
 from torch import sym_float, sym_int
 from torch._prims_common import (
-    BoolLike,
+    bool_like,
     DeviceLikeType,
     Dim,
     DimsSequenceType,
     DimsType,
     dtype_to_type,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
-    FloatLike,
+    float_like,
     FloatWithoutSymFloat,
-    IntLike,
+    int_like,
     is_weakly_lesser_type,
     Number,
     NumberType,
@@ -378,7 +378,7 @@ def _broadcast_shapes(*_shapes):
     from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
 
     shapes = tuple(
-        (x,) if isinstance(x, IntLike) else x
+        (x,) if isinstance(x, int_like) else x
         for x in filter(lambda x: x is not None, _shapes)
     )
 
@@ -4109,7 +4109,7 @@ def tensor_split(
             raise ValueError(msg)
 
     # Case 0 -- indices_or_sections is an integer or a scalar tensor n and a is split along dim into n parts of equal-ish length
-    if isinstance(indices_or_sections, IntLike) or (
+    if isinstance(indices_or_sections, int_like) or (
         isinstance(indices_or_sections, TensorLike) and indices_or_sections.ndim == 0
     ):
         sections: int = (
@@ -4171,7 +4171,7 @@ def hsplit(
         ),
     )
     dim = 0 if a.ndim == 1 else 1
-    if isinstance(indices_or_sections, IntLike):
+    if isinstance(indices_or_sections, int_like):
         split_size = indices_or_sections
         torch._check(
             (split_size != 0 and a.shape[dim] % split_size == 0),
@@ -4212,7 +4212,7 @@ def vsplit(
             + " dimensions!"
         ),
     )
-    if isinstance(indices_or_sections, IntLike):
+    if isinstance(indices_or_sections, int_like):
         split_size = indices_or_sections
         torch._check(
             (split_size != 0 and a.shape[0] % split_size == 0),
@@ -4432,7 +4432,7 @@ def dsplit(a: TensorLikeType, sections: DimsType) -> TensorSequenceType:
         raise RuntimeError(
             f"torch.dsplit requires a tensor with at least 3 dimension, but got a tensor with {a.ndim} dimensions!"
         )
-    if isinstance(sections, IntLike) and (sections == 0 or a.shape[2] % sections != 0):
+    if isinstance(sections, int_like) and (sections == 0 or a.shape[2] % sections != 0):
         raise RuntimeError(
             "torch.dsplit attempted to split along dimension 2, "
             + f"but the size of the dimension {a.shape[2]} is not divisible by the split_size {sections}!"
@@ -4965,7 +4965,7 @@ def arange(
     )
 
     args = (start, end, step)
-    integer_args = builtins.all(isinstance(arg, IntLike) for arg in args)
+    integer_args = builtins.all(isinstance(arg, int_like) for arg in args)
 
     if dtype is None:
         dtype = torch.int64 if integer_args else torch.get_default_dtype()
@@ -5090,11 +5090,11 @@ def linspace(
 
     # steps does not participate in the computation of the dtype
     torch._check_type(
-        isinstance(steps, IntLike),
+        isinstance(steps, int_like),
         lambda: f"received an invalid combination of arguments - got \
 ({type(start).__name__}, {type(end).__name__}, {type(steps).__name__})",
     )
-    assert isinstance(steps, IntLike)  # for mypy
+    assert isinstance(steps, int_like)  # for mypy
     torch._check(steps >= 0, lambda: "number of steps must be non-negative")
 
     factory_kwargs = {
@@ -5155,7 +5155,7 @@ def logspace(
 
     # NB: NumPy doesn't have this cast
     if prims.utils.is_integer_dtype(dtype):
-        if isinstance(start, FloatLike):
+        if isinstance(start, float_like):
             start = sym_int(start)
         elif isinstance(start, TensorLikeType):
             torch._check(
@@ -5163,7 +5163,7 @@ def logspace(
                 lambda: "logspace only supports 0-dimensional start and end tensors",
             )
             start = _maybe_convert_to_dtype(start, dtype)
-        if isinstance(end, FloatLike):
+        if isinstance(end, float_like):
             end = sym_int(end)
         elif isinstance(end, TensorLikeType):
             torch._check(
@@ -6336,11 +6336,11 @@ def _compute_sizes(seq, scalar_type):
 
 # xref: infer_scalar_type in torch/csrc/utils/tensor_new.cpp
 def _infer_scalar_type(obj):
-    if isinstance(obj, FloatLike):
+    if isinstance(obj, float_like):
         return torch.get_default_dtype()
-    if isinstance(obj, IntLike) and not isinstance(obj, bool):  # careful!
+    if isinstance(obj, int_like) and not isinstance(obj, bool):  # careful!
         return torch.int64
-    if isinstance(obj, BoolLike):
+    if isinstance(obj, bool_like):
         return torch.bool
     if isinstance(obj, complex):
         default_dtype = torch.get_default_dtype()

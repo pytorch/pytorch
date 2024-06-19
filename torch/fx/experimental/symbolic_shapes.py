@@ -60,6 +60,7 @@ from torch._logging import trace_structured, structured
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import SymBool, SymFloat, SymInt
 from torch._guards import ShapeGuard, Source, TracingContext
+from torch.types import IntLike
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._sympy.functions import (
     FloorDiv, Mod, PythonMod, IsNonOverlappingAndDenseIndicator, CleanDiv, FloorToInt, CeilToInt
@@ -212,7 +213,7 @@ def has_hint(a: Scalar) -> bool:
         return a.node.has_hint()
     return True
 
-def is_concrete_int(a: Union[int, SymInt]) -> bool:
+def is_concrete_int(a: IntLike) -> bool:
     r""" Utility to check if underlying object
     in SymInt is concrete value. Also returns
     true if integer is passed in.
