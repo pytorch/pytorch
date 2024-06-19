@@ -806,6 +806,10 @@ class CUDAGraphNode:
             i for i in range(len(inputs)) if i not in self.static_input_idxs
         ]
 
+        counters["inductor"]["cudagraph_recorded_non_static_inputs"] += len(
+            self.non_static_input_idx
+        )
+
         self.non_managed_static_input_idxs: LevelList[int] = [
             i
             for i in wrapped_function.static_input_idxs
@@ -955,9 +959,6 @@ class CUDAGraphNode:
         # Fails on empty lists
         if dst_tensors:
             torch._foreach_copy_(dst_tensors, src_tensors)
-            counters["inductor"]["cudagraph_copies_due_to_non_static_inputs"] += len(
-                dst_tensors
-            )
 
     def check_static_inputs_are_stable(self, new_inputs):
         # avoid checking managed tensor static points since we already checked those in check_invariants
