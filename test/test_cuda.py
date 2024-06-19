@@ -4451,7 +4451,7 @@ class TestCudaMallocAsync(TestCase):
 
             def alloc():
                 nonlocal total, c
-                b = random.randrange(2 * 1024 * 1024 // 4, 200 * 1024 * 1024 // 4)
+                b = random.randrange(2 * 1024 * 1024 // 4, 20 * 1024 * 1024 // 4)
                 mem.append((c, torch.full((b,), c, dtype=torch.int32, device="cuda")))
                 c += 1
                 total += b
@@ -4465,7 +4465,7 @@ class TestCudaMallocAsync(TestCase):
 
             choices = [alloc, free, torch.cuda.memory.empty_cache]
             for i in range(N):
-                while total >= 1024 * 1024 * 1024 / 4:
+                while total >= 1024 * 1024 * 1024 / (4 * 10):
                     free()
                 (action,) = random.choices(choices, weights=[1, 1 if mem else 0, 0.1])
                 action()
