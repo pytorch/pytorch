@@ -673,7 +673,7 @@ class WrapperCodeGen(CodeGen):
     def generate_user_defined_triton_kernel(
         self, kernel_name, grid, configs, args, triton_meta, arg_types=None
     ):
-        grid, code = user_defined_kernel_grid_fn_code(
+        grid_fn, code = user_defined_kernel_grid_fn_code(
             kernel_name, configs, grid, wrapper=self
         )
         # Must happen after free symbols are already codegened
@@ -681,11 +681,7 @@ class WrapperCodeGen(CodeGen):
         for line in code.split("\n"):
             self.writeline(line)
 
-        current_device = V.graph.scheduler.get_current_device_or_throw()
-        stream_name = self.write_get_raw_stream(current_device.index, V.graph)
-        self.writeline(
-            f"{kernel_name}.run({', '.join(args)}, grid={grid}, stream={stream_name})"
-        )
+        self.generate_kernel_call(kernel_name, args, grid_fn=grid_fn)
 
     def generate_scatter_fallback(
         self,
@@ -1363,6 +1359,24 @@ class WrapperCodeGen(CodeGen):
     def generate_default_grid(self, name: str, grid_args: List[Any]):
         return grid_args
 
+    def prepare_triton_kernel_call(self, device_index, call_args):
+        def wrap_arg(arg):
+            if isinstance(arg, str):
+                # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
+                return arg + ".item()" if V.graph.is_unspec_arg(arg) else arg
+            elif isinstance(arg, (int, float, bool, SymbolicCallArg)):
+                return str(arg)
+            else:
+                return pexpr(V.graph.sizevars.simplify(arg))
+
+        call_args = [wrap_arg(arg) for arg in call_args]
+
+        if device_index is None:
+            current_device = V.graph.scheduler.get_current_device_or_throw()
+            device_index = current_device.index
+
+        return device_index, call_args
+
     def generate_kernel_call(
         self,
         name,
@@ -1385,12 +1399,17 @@ class WrapperCodeGen(CodeGen):
                 Only valid when cuda == True.
         """
         if cuda:
-            call_args_str = ", ".join(pexpr(item) for item in call_args)
-            current_device = V.graph.scheduler.get_current_device_or_throw()
-            stream_name = self.write_get_raw_stream(current_device.index, V.graph)
+            device_index, call_args = self.prepare_triton_kernel_call(
+                device_index, call_args
+            )
+            call_args_str = ", ".join(call_args)
+            stream_name = self.write_get_raw_stream(device_index, V.graph)
             if triton:
-                grid_str = ", ".join(pexpr(item) for item in grid)
-                grid_str = f"{grid_fn}({grid_str})"
+                if grid is None:
+                    grid_str = grid_fn
+                else:
+                    grid_str = ", ".join(pexpr(item) for item in grid)
+                    grid_str = f"{grid_fn}({grid_str})"
                 self.writeline(
                     f"{name}.run({call_args_str}, grid={grid_str}, stream={stream_name})"
                 )
