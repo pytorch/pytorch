@@ -980,7 +980,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
-    @patch.object(torch._functorch.config, "recompute_views", True)
     def test_fw_bw_graph_correctness(self):
         cnt = CompileCounterWithBackend("aot_eager")
         make_tensor = functools.partial(
@@ -1046,12 +1045,6 @@ class GraphModule(torch.nn.Module):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f64[2, 2, 8, 4]", primals_2: "f64[2, 2, 8, 4]", primals_3: "f64[2, 2, 8, 4]", getitem: "f64[2, 2, 8, 4]", getitem_1: "f32[2, 2, 8]", tangents_1: "f64[2, 2, 8, 4]"):
-        alias: "f64[2, 2, 8, 4]" = torch.ops.aten.alias.default(getitem);  getitem = None
-        alias_2: "f64[2, 2, 8, 4]" = torch.ops.aten.alias.default(alias);  alias = None
-        alias_3: "f64[2, 2, 8, 4]" = torch.ops.aten.alias.default(alias_2);  alias_2 = None
-        alias_1: "f32[2, 2, 8]" = torch.ops.aten.alias.default(getitem_1);  getitem_1 = None
-        alias_4: "f32[2, 2, 8]" = torch.ops.aten.alias.default(alias_1);  alias_1 = None
-        alias_5: "f32[2, 2, 8]" = torch.ops.aten.alias.default(alias_4);  alias_4 = None
         fw_graph = self.fw_graph
         joint_graph = self.joint_graph
         flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem, getitem_1, tangents_1, fw_graph, joint_graph);  primals_1 = primals_2 = primals_3 = getitem = getitem_1 = tangents_1 = fw_graph = joint_graph = None
