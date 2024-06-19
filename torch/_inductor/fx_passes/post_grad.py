@@ -50,7 +50,6 @@ from .group_batch_fusion import group_batch_fusion_passes, POST_GRAD_FUSIONS
 from .micro_pipeline_tp import patterns as micro_pipeline_tp_patterns
 from .pre_grad import is_same_dict, save_inductor_dict
 from .reinplace import reinplace_inplaceable_ops
-from .scatter_upon_allzero import fuse_scatter_upon_allzero
 from .split_cat import POST_GRAD_PATTERNS
 
 if TYPE_CHECKING:
@@ -138,7 +137,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     # Keep these last, since they introduces mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
     reinplace_inplaceable_ops(gm.graph)
-    fuse_scatter_upon_allzero(gm.graph)
     decompose_auto_functionalized(gm.graph)
 
     gm.recompile()
