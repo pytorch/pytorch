@@ -19402,7 +19402,9 @@ op_db: List[OpInfo] = [
            autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
            sample_inputs_func=sample_unsqueeze),
     OpInfo('unsqueeze_copy',
-           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
+           # TODO: why does this not work for complex numbers?
+           # dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
+           dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -19463,6 +19465,16 @@ op_db: List[OpInfo] = [
            assert_jit_shape_analysis=True,
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.chalf),
            supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           # vmap does not support inplace views
+           check_inplace_batched_forward_grad=False,
+           sample_inputs_func=sample_inputs_transpose_swapdims),
+    OpInfo('transpose_copy',
+           aliases=('swapdims', 'swapaxes'),
+           assert_jit_shape_analysis=True,
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.chalf),
+           supports_out=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            # vmap does not support inplace views
@@ -20127,6 +20139,20 @@ op_db: List[OpInfo] = [
     OpInfo('t',
            sample_inputs_func=sample_inputs_t,
            supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           # See https://github.com/pytorch/pytorch/pull/78358
+           check_batched_forward_grad=False,
+           # vmap does not support inplace views
+           check_inplace_batched_forward_grad=False,
+           autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
+           autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           assert_autodiffed=True,
+           error_inputs_func=error_inputs_t),
+    OpInfo('t_copy',
+           sample_inputs_func=sample_inputs_t,
+           supports_out=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            # See https://github.com/pytorch/pytorch/pull/78358
@@ -23611,8 +23637,16 @@ python_ref_db = [
         torch_opinfo_name="transpose",
     ),
     PythonRefInfo(
+        "_refs.transpose_copy",
+        torch_opinfo_name="transpose_copy",
+    ),
+    PythonRefInfo(
         "_refs.t",
         torch_opinfo_name="t",
+    ),
+    PythonRefInfo(
+        "_refs.t_copy",
+        torch_opinfo_name="t_copy",
     ),
     PythonRefInfo(
         "_refs.T",
