@@ -37,35 +37,30 @@ inline void _scale_attn_mask_fusion_kernel(
       (vec_size2 == vec_size1 * 2 && is_reduced_floating_point_v<T2>) ? 2 : 1;
   constexpr int64_t T2_n = 1;
   auto vec_scale = at::vec::VectorizedN<T1, T1_n>(val);
+  auto b_first_val = (T1)b[0];
+  auto b_first_vec = at::vec::VectorizedN<T2, T2_n>(b_first_val);
   int64_t i = 0;
-  if (is_b_stride_zero) {
-    auto b_first_val = (T1)b[0];
-    auto b_first_vec = at::vec::VectorizedN<T2, T2_n>(b_first_val);
-    for (; i < size - (size % vec_size2); i += vec_size2) {
-      auto a_n = at::vec::VectorizedN<T1, T1_n>::loadu(a + i);
-      auto b_n = b_first_vec;
-      auto b_n_convert = at::vec::convert<T1, T1_n, T2, T2_n, true>(b_n);
-      auto res = a_n * vec_scale + b_n_convert;
-      res.store(out + i);
+  for (; i < size - (size % vec_size2); i += vec_size2) {
+    auto a_n = at::vec::VectorizedN<T1, T1_n>::loadu(a + i);
+    at::vec::VectorizedN<T2, T2_n> b_n;
+    if constexpr(is_b_stride_zero) {
+      b_n = b_first_vec;
+    } else {
+      b_n = at::vec::VectorizedN<T2, T2_n>::loadu(b + i);
     }
-    for (; i < size; i++) {
-      auto tmp0 = a[i];
-      auto tmp1 = b_first_val;
-      out[i] = tmp0 * val + tmp1;
+    auto b_n_convert = at::vec::convert<T1, T1_n, T2, T2_n, true>(b_n);
+    auto res = a_n * vec_scale + b_n_convert;
+    res.store(out + i);
+  }
+  for (; i < size; i++) {
+    auto tmp0 = a[i];
+    T1 tmp1;
+    if constexpr(is_b_stride_zero) {
+      tmp1 = b_first_val;
+    } else {
+      tmp1 = (T1)b[i];
     }
-  } else {
-    for (; i < size - (size % vec_size2); i += vec_size2) {
-      auto a_n = at::vec::VectorizedN<T1, T1_n>::loadu(a + i);
-      auto b_n = at::vec::VectorizedN<T2, T2_n>::loadu(b + i);
-      auto b_n_convert = at::vec::convert<T1, T1_n, T2, T2_n, true>(b_n);
-      auto res = a_n * vec_scale + b_n_convert;
-      res.store(out + i);
-    }
-    for (; i < size; i++) {
-      auto tmp0 = a[i];
-      auto tmp1 = (T1)b[i];
-      out[i] = tmp0 * val + tmp1;
-    }
+    out[i] = tmp0 * val + tmp1;
   }
 }
 
