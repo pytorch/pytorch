@@ -222,9 +222,6 @@ class NNModuleVariable(VariableTracker):
         if not isinstance(getattr_fn, types.FunctionType):
             unimplemented("torch.nn.Module with a non-function custom __getattr__")
 
-        if getattr(base, "_is_fsdp_managed_module", False):
-            from .builder import VariableBuilder
-            return VariableBuilder(tx, options["source"])(getattr_fn(base, name))
         return variables.UserMethodVariable(getattr_fn, self, **options).call_function(
             tx, [variables.ConstantVariable.create(name)], {}
         )
@@ -320,9 +317,6 @@ class NNModuleVariable(VariableTracker):
             elif is_safe_constant(subobj) or istensor(subobj):
                 # Support possibly common cases of class members
                 return VariableBuilder(tx, NNModuleSource(source))(subobj)
-            elif istype(subobj, types.GetSetDescriptorType):
-                assert source
-                return VariableBuilder(tx, source)(subobj.__get__(base))
             else:
                 unimplemented(
                     f"class property {name} - {typestr(base)} {typestr(subobj)}"
@@ -589,20 +583,6 @@ class NNModuleVariable(VariableTracker):
         elif name == "buffers":
             tx.output.guard_on_key_order.add(AttrSource(self.source, "_buffers").name())
             return wrap_values(module.named_buffers(**get_kwargs("recurse")))
-        elif name == "_named_members":
-            # The get_members_fn fails a const check, but this is a private internal lambda
-            # passed in nn_module, and so can be safely non-const, as it will not execute arbitrary user code
-            return wrap_values(
-                module._named_members(
-                    **get_kwargs(
-                        "get_members_fn",
-                        "prefix",
-                        "recurse",
-                        "remove_duplicates",
-                        assert_const=False,
-                    )
-                )
-            )
         elif name == "keys":
             assert not (args or kwargs)
             result = []
@@ -942,6 +922,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 ):
                     # Handle submodules
                     self.is_state_mutated = True
+                if self.is_state_mutated and not tx.output.side_effects.is_attribute_mutation(self):
+                    tx.output.side_effects.track_object_existing(self.value, self)
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -958,86 +940,13 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
     compilation.
     """
 
-    def __init__(self, value, module_key, **kwargs):
+    def __init__(self, value, **kwargs):
         source = kwargs.get("source", None)
         assert (
             source is not None
         ), "FSDPManagedNNModule depends on having an accurate source to control guarding."
 
         super().__init__(value=value, **kwargs)
-        self.source = FSDPManagedNNModuleVariable._wrap_source(source)
-        self.module_key = module_key
-        self.module = value
-
-    @staticmethod
-    def _wrap_source(source):
-        if not isinstance(source, (FSDPNNModuleSource, NotNNModuleSource)):
-            if torch._dynamo.config.skip_fsdp_guards:
-                return FSDPNNModuleSource(source)
-            else:
-                # this makes us behave like a usual UnspecializedNNModuleVariable for guarding purposes
-                return NotNNModuleSource(source)
-        else:
-            return source
-
-    def __setattr__(self, name: str, value: Any) -> None:
-        if name == "source":
-            value = FSDPManagedNNModuleVariable._wrap_source(value)
-
-        return super().__setattr__(name, value)
-
-    def call_method(
-        self, tx, name, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
-    ) -> VariableTracker:
-        key = self.module_key
-
-        named_embed = functools.partial(
-            _named_embed,
-            tx=tx,
-            key=key,
-            source_cls=FSDPNNModuleSource,
-            source=self.source,
-        )
-        wrap_values = functools.partial(
-            _wrap_values,
-            tx=tx,
-            key=key,
-            source_cls=FSDPNNModuleSource,
-            source=self.source,
-        )
-        get_kwargs = functools.partial(
-            _get_kwargs, mod=self.value, name=name, args=args, kwargs=kwargs
-        )
-
-        if name == "buffers":
-            return wrap_values(self.value.named_buffers(**get_kwargs("recurse")))
-        elif name == "named_buffers":
-            result = []
-            for name, buffer in self.value.named_buffers(
-                **get_kwargs("prefix", "recurse", "remove_duplicate")
-            ):
-                result.append(named_embed(name, buffer))
-            return variables.ListIteratorVariable(result, mutable_local=MutableLocal())
-        elif name == "children":
-            assert not (args or kwargs)
-            return wrap_values(self.value.named_children())
-        return super().call_method(tx, name, args, kwargs)
-
-    def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
-    ) -> "VariableTracker":
-        return super().call_function(tx, args, kwargs)
-
-    def var_getattr(self, tx, name):
-        if name in ["named_buffers", "children", "buffers"]:
-            # Route this to produce a ListIteratorVariable instead of getting the generator
-            return variables.LambdaVariable(
-                lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
-            )
-        return super().var_getattr(tx, name)
-
-    def as_python_constant(self):
-        return self.value
 
 
 def _gen_source(source, name):
