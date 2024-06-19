@@ -945,6 +945,11 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 ):
                     # Handle submodules
                     self.is_state_mutated = True
+                if (
+                    self.is_state_mutated
+                    and not tx.output.side_effects.is_attribute_mutation(self)
+                ):
+                    tx.output.side_effects.track_object_existing(self.value, self)
 
             if method is torch.nn.Module.__setattr__ and isinstance(
                 args[1], variables.DeletedVariable
