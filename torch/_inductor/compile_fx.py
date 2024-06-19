@@ -32,7 +32,12 @@ from torch._dynamo.utils import (
 )
 from torch._functorch import config as functorch_config
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
-from torch._inductor.codecache import code_hash, CompiledFxGraph, FxGraphCache
+from torch._inductor.codecache import (
+    _StrideExprStr,
+    code_hash,
+    CompiledFxGraph,
+    FxGraphCache,
+)
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
     get_placeholders,
@@ -51,7 +56,7 @@ from torch._logging import trace_structured
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import compile_time_strobelight_meta
-from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymExprPrinter
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
 from .._dynamo.backends.common import aot_autograd
@@ -832,17 +837,20 @@ def fx_codegen_and_compile(
         metrics_helper = metrics.CachedMetricsHelper()
         with V.set_graph_handler(graph):
             graph.run(*example_inputs)
-            output_strides: List[Optional[Tuple[str, ...]]] = []
+            output_strides: List[Optional[Tuple[_StrideExprStr, ...]]] = []
             if graph.graph_outputs is not None:
                 # We'll put the output strides in the compiled graph so we
                 # can later return them to the caller via TracingContext
+                p = SymExprPrinter()
                 for out in graph.graph_outputs:
                     if (
                         hasattr(out, "layout")
                         and len(free_unbacked_symbols(out.layout.stride)) == 0
                     ):
                         # Convert to string for eval on the load path
-                        output_strides.append(tuple(str(s) for s in out.layout.stride))
+                        output_strides.append(
+                            tuple(p.doprint(s) for s in out.layout.stride)
+                        )
                     else:
                         output_strides.append(None)
 

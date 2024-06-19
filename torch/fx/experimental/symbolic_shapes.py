@@ -1470,6 +1470,11 @@ class RuntimeAssert:
     stack: str = field(repr=False)
 
 
+# Used for printing SymExprs in compile_fx
+class SymExprPrinter(StrPrinter):
+    pass
+
+
 class ShapeGuardPrinter(StrPrinter):
     def __init__(
         self,
