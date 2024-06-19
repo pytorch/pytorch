@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Implements modules  used to perform fake quantization."""
 
 import torch

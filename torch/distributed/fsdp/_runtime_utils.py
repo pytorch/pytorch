@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import logging
 from enum import auto, Enum
@@ -37,6 +38,7 @@ from torch.distributed.utils import (
     _to_kwargs,
 )
 from torch.utils import _pytree as pytree
+
 
 logger = logging.getLogger(__name__)
 

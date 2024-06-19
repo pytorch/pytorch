@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from typing import Callable, Optional, Sequence, Tuple, Union
 
@@ -5,6 +6,7 @@ import torch
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed._tensor import DeviceMesh, DTensor
 from torch.distributed._tensor.placement_types import Placement
+
 
 try:
     from torch.utils import _cxx_pytree as pytree
