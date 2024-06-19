@@ -130,8 +130,9 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
         source = None if self.source is None else AttrSource(self.source, "__enter__")
         try:
             return variables.UserMethodVariable(
-                self.cm_obj.__enter__.__func__,
-                variables.UserDefinedObjectVariable(self.cm_obj),
+                self.cm_obj.value.__enter__.__func__,
+                self.cm_obj,
+                # variables.UserDefinedObjectVariable(self.cm_obj),
                 source=source,
             ).call_function(tx, [], {})
         except Unsupported as e:
@@ -144,8 +145,9 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
         source = None if self.source is None else AttrSource(self.source, "__exit__")
         try:
             x = variables.UserMethodVariable(
-                self.cm_obj.__exit__.__func__,
-                variables.UserDefinedObjectVariable(self.cm_obj),
+                self.cm_obj.value.__exit__.__func__,
+                # variables.UserDefinedObjectVariable(self.cm_obj),
+                self.cm_obj,
                 source=source,
             ).call_function(
                 tx,
