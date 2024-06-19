@@ -411,8 +411,18 @@ class SizeVarAllocator:
 
     def evaluate_min(self, left: Expr, right: Expr) -> Expr:
         """return the smaller of left and right, and guard on that choice"""
-        lv = self.size_hint(left)
-        rv = self.size_hint(right)
+        try:
+            lv = self.size_hint(left)
+            rv = self.size_hint(right)
+        except TypeError:  # unbacked symints
+            gcd = sympy.gcd(left, right)
+            if left == gcd:  # handle `min(10*u0, u0)` etc
+                return left
+            if right == gcd:
+                return right
+            raise TypeError(
+                f"evaluate_min({left}, {right}) with unbacked symints"
+            ) from None
         if lv <= rv:
             self.guard_leq(left, right)
             return left

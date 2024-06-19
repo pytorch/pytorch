@@ -522,15 +522,17 @@ class WrapperCodeGen(CodeGen):
     @cache_on_self
     def write_triton_header_once(self) -> None:
         self.header.splice(
-            """
+            f"""
             import triton
             import triton.language as tl
-            from {} import grid, split_scan_grid, start_graph, end_graph
-            {}
-            """.format(
-                triton_heuristics.__name__,
-                V.graph.device_ops.import_get_raw_stream_as("get_raw_stream"),
-            )
+            from {triton_heuristics.__name__} import grid, split_scan_grid, start_graph, end_graph
+            """
+        )
+
+    @cache_on_self
+    def write_get_raw_stream_header_once(self) -> None:
+        self.header.writeline(
+            V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
         )
 
     def add_meta_once(self, meta: TritonMetaParams) -> str:
@@ -601,7 +603,7 @@ class WrapperCodeGen(CodeGen):
     # that stream caching happens per graph instance. this
     # is important for nested subgraph codegening.
     def write_get_raw_stream(self, device_idx: int, graph=None) -> str:
-        self.write_triton_header_once()
+        self.write_get_raw_stream_header_once()
         name = f"stream{device_idx}"
         self.writeline(f"{name} = get_raw_stream({device_idx})")
         return name
