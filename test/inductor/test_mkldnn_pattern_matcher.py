@@ -400,13 +400,16 @@ class TestPatternMatcher(TestPatternMatcherBase):
         class M(torch.nn.Module):
             def __init__(self, dtype, unary_fn):
                 super().__init__()
-                self.linear = torch.nn.Linear(10, 64, bias=False)
-                self.bias = torch.randn(64).to(dtype=dtype)
+                self.linear1 = torch.nn.Linear(10, 64, bias=False)
+                self.bias1 = torch.randn(64).to(dtype=dtype)
+                self.linear2 = torch.nn.Linear(10, 64, bias=False)
+                self.bias2 = torch.randn(64).to(dtype=dtype)
                 self.unary_fn = unary_fn
 
             def forward(self, x):
-                x = self.linear(x) + self.bias
-                return self.unary_fn(x)
+                a = self.linear1(x) + self.bias1
+                b = self.linear2(x) + self.bias2
+                return self.unary_fn(a), self.unary_fn(b)
 
         dtypes = []
         if torch.ops.mkldnn._is_mkldnn_bf16_supported():
@@ -419,13 +422,14 @@ class TestPatternMatcher(TestPatternMatcherBase):
             mod = M(dtype, unary_fn).eval()
             v = torch.randn(2, 10)
             matcher_count = 3
-            # Add 1 for weight packing pass, add 2 for bias folding pass.
+            # Add 1 for weight packing pass, add 2 for bias folding pass per linear.
             matcher_nodes = unary_list[unary_fn] + 3
             if self._check_unary_is_decomposed(unary_fn):
                 # Has extra dtype conversion nodes for autocast.
                 matcher_nodes += 2
+            # we have 2 linears, so we double the matcher_count/nodes
             self._test_common(
-                mod, (v,), matcher_count, matcher_nodes, check_autocast=dtype
+                mod, (v,), matcher_count * 2, matcher_nodes * 2, check_autocast=dtype
             )
             self.assertEqual(metrics.generated_kernel_count, 1)
 
