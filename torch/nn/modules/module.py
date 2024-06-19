@@ -770,16 +770,15 @@ class Module:
         mod: torch.nn.Module = self
 
         for item in atoms:
-
             if not hasattr(mod, item):
-                raise AttributeError(mod._get_name() + " has no "
-                                     "attribute `" + item + "`")
+                raise AttributeError(
+                    mod._get_name() + " has no attribute `" + item + "`"
+                )
 
             mod = getattr(mod, item)
 
             if type(mod) is not torch.nn.Module:
-                raise AttributeError("`" + item + "` is not "
-                                     "an nn.Module")
+                raise AttributeError("`" + item + "` is not an nn.Module")
         setattr(mod, name, module)
 
     def get_parameter(self, target: str) -> "Parameter":
