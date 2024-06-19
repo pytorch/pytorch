@@ -288,8 +288,8 @@ else
       WERROR=1 python setup.py clean
 
       if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
-        echo "USE_SPLIT_BUILD cannot be used with xla or rocm"
-        exit 1
+        BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py bdist_wheel
+        BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 python setup.py bdist_wheel --cmake
       else
         WERROR=1 python setup.py bdist_wheel
       fi
@@ -299,8 +299,8 @@ else
         source .ci/pytorch/install_cache_xla.sh
       fi
       if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
-        BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py bdist_wheel
-        BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 python setup.py bdist_wheel --cmake
+        echo "USE_SPLIT_BUILD cannot be used with xla or rocm"
+        exit 1
       else
         python setup.py bdist_wheel
       fi
