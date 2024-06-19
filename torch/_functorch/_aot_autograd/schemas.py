@@ -184,8 +184,8 @@ class SubclassCreationMeta:
     # into __tensor_unflatten__.
     meta: Any
     inner_keys: List[Any]
-    outer_size: Tuple[int, ...]  # todo: this can be Tuple[SymInt, ...] as well
-    outer_stride: Tuple[int, ...]  # same thing here
+    outer_size: Tuple[int | torch.SymInt, ...]
+    outer_stride: Tuple[int | torch.SymInt, ...]  # same thing here
 
     def creation_fn(
         self,
