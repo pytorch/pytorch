@@ -7,7 +7,6 @@ import torch
 import torch.distributed as dist
 import torch.distributed._tensor.api as dtensor
 
-
 aten = torch.ops.aten
 
 

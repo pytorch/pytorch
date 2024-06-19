@@ -442,15 +442,7 @@ class TestPatternMatcher(TestCase):
                 .sub(8),
             )
 
-        def check_uint4x2_mixed_mm(args, expect_mixed_mm):
-            torch._dynamo.reset()
-            counters.clear()
-            ref = fn(*args)
-            test, (code,) = run_and_get_code(torch.compile(fn), *args)
-            torch.testing.assert_close(ref, test)
-            self.assertEqual("uint4x2_mixed_mm" in code, expect_mixed_mm)
-
-        args_expect_mixed_mm = [
+        args_list = [
             (
                 torch.randn(8, 8, device="cuda"),
                 torch.randint(0, 255, (4, 8), dtype=torch.uint8, device="cuda"),
@@ -462,13 +454,6 @@ class TestPatternMatcher(TestCase):
                 .contiguous()
                 .t(),
             ),
-        ]
-
-        for args in args_expect_mixed_mm:
-            check_uint4x2_mixed_mm(args, True)
-
-        # mixed mm is only enabled when casting from a lower-bitwidth dtype to a higher one
-        args_expect_no_mixed_mm = [
             (
                 torch.randn(8, 8, device="cuda"),
                 torch.randint(0, 255, (4, 8), dtype=torch.int32, device="cuda"),
@@ -479,8 +464,13 @@ class TestPatternMatcher(TestCase):
             ),
         ]
 
-        for args in args_expect_no_mixed_mm:
-            check_uint4x2_mixed_mm(args, False)
+        for args in args_list:
+            torch._dynamo.reset()
+            counters.clear()
+            ref = fn(*args)
+            test, (code,) = run_and_get_code(torch.compile(fn), *args)
+            torch.testing.assert_close(ref, test)
+            self.assertTrue("uint4x2_mixed_mm" in code)
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(use_mixed_mm=True)

@@ -103,7 +103,6 @@ class MinCutOptions:
     ban_if_materialized_backward: bool
     ban_if_not_in_allowlist: bool
     ban_if_reduction: bool
-    recompute_views: bool
 
 
 def must_recompute(node: fx.Node) -> bool:
@@ -805,7 +804,7 @@ def solve_min_cut(
             return False
         if node.target == operator.getitem:
             return False
-        if min_cut_options.recompute_views and op_types.is_view(node):
+        if op_types.is_view(node):
             return False
         if node.target in [aten.lift_fresh_copy.default, aten.lift_fresh.default]:
             return False
@@ -859,7 +858,7 @@ def solve_min_cut(
 
     def get_node_weight(node) -> float:
         mem_sz = _size_of(node)
-        if min_cut_options.recompute_views and op_types.is_view(node):
+        if op_types.is_view(node):
             # We never choose to save views, since views are free to recompute.
             # It makes it a bit simpler to analyze
             # NB: If they're not free to recompute (e.g. nested tensors)... I
@@ -1476,7 +1475,6 @@ def choose_saved_values_set(
         ban_if_materialized_backward=config.ban_recompute_materialized_backward,
         ban_if_not_in_allowlist=config.ban_recompute_not_in_allowlist,
         ban_if_reduction=config.ban_recompute_reductions,
-        recompute_views=config.recompute_views,
     )
 
     if config.aggressive_recomputation:
