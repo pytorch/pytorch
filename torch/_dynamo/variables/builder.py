@@ -1218,10 +1218,7 @@ class VariableBuilder:
             #
             # Due to (2), we skip guards on inner contents of fsdp_managed modules, by using FSDPNNModuleSource as the
             # guard source.  This behavior is gated on config.skip_fsdp_guards.
-            #
-            # ID_MATCH is required to disambiguate cases as simple as a unit test that constructs 2 models and wraps
-            # them differently with different FSDP configs.  (test_dynamo_distributed.py -k test_fsdp_aot_eager)
-            self.install_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.ID_MATCH)
+            self.install_guards(GuardBuilder.TYPE_MATCH)
             return FSDPManagedNNModuleVariable(value, source=self.get_source())
         else:
             return self.tx.output.register_attr_or_module(
