@@ -719,5 +719,3 @@ API Reference
     :members:
 
 .. automodule:: torch.export.custom_obj
-
-.. automodule:: torch.export.experimental
