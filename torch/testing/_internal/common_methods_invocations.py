@@ -13046,17 +13046,6 @@ op_db: List[OpInfo] = [
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
            )),
-    OpInfo('expand_copy',
-           op=lambda self, shape: self.expand(shape),
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           sample_inputs_func=sample_inputs_expand,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           assert_jit_shape_analysis=True,
-           supports_out=True,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
-           )),
     OpInfo('expand_as',
            op=lambda self, other: self.expand_as(other),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -16763,19 +16752,6 @@ op_db: List[OpInfo] = [
            supports_varargs=True,
            sample_inputs_func=sample_inputs_permute,
            reference_inputs_func=reference_inputs_permute),
-    OpInfo('permute_copy',
-           ref=np.transpose,
-           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
-           supports_out=True,
-           assert_autodiffed=True,
-           autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
-           autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
-           assert_jit_shape_analysis=True,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           supports_varargs=True,
-           sample_inputs_func=sample_inputs_permute,
-           reference_inputs_func=reference_inputs_permute),
     BinaryUfuncInfo('pow',
                     dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
                     dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16, torch.chalf),
@@ -19172,16 +19148,6 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            supports_gradgrad=True,
            supports_out=False,
-           ),
-    OpInfo('unbind_copy',
-           dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
-           ref=reference_unbind,
-           sample_inputs_func=sample_inputs_unbind,
-           error_inputs_func=error_inputs_unbind,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           supports_gradgrad=True,
-           supports_out=True,
            ),
     OpInfo('vstack',
            aliases=('row_stack',),
@@ -23459,10 +23425,6 @@ python_ref_db = [
         torch_opinfo_name="expand_as",
     ),
     PythonRefInfo(
-        "_refs.expand_copy",
-        torch_opinfo_name="expand_copy",
-    ),
-    PythonRefInfo(
         "_refs.flatten",
         torch_opinfo_name="flatten",
     ),
@@ -23514,10 +23476,6 @@ python_ref_db = [
     ),
     PythonRefInfo(
         "_refs.permute",
-        torch_opinfo_name="permute",
-    ),
-    PythonRefInfo(
-        "_refs.permute_copy",
         torch_opinfo_name="permute",
     ),
     ElementwiseUnaryPythonRefInfo(
@@ -23664,10 +23622,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.unbind",
         torch_opinfo_name="unbind",
-    ),
-    PythonRefInfo(
-        "_refs.unbind_copy",
-        torch_opinfo_name="unbind_copy",
     ),
     #
     # Reduction Reference OpInfos

@@ -260,7 +260,6 @@ __all__ = [
     "dstack",
     "expand",
     "expand_as",
-    "expand_copy",
     "flatten",
     "flip",
     "fliplr",
@@ -274,7 +273,6 @@ __all__ = [
     "native_group_norm",
     "native_layer_norm",
     "permute",
-    "permute_copy",
     "ravel",
     "repeat",
     "reshape",
@@ -305,7 +303,6 @@ __all__ = [
     "view_as_complex",
     "unflatten",
     "unbind",
-    "unbind_copy",
     "triu",
     "tril",
     "triu_indices",
@@ -3075,11 +3072,6 @@ def narrow(
     return prims.slice_in_dim(a, start, start + length, axis=dim)
 
 
-# TODO: This must return a sparse tensor if the input is sparse, but refs have
-# no sparse support. See narrow_copy_sparse in core.
-narrow_copy = _make_copy_from_view(narrow)
-
-
 def _normalize(
     a: Tensor, norm_dims: DimsType, eps: float
 ) -> Tuple[Tensor, Tensor, Tensor]:
@@ -3947,12 +3939,6 @@ def unbind(t: TensorLikeType, dim: int = 0) -> TensorSequenceType:
         return tuple(
             torch.squeeze(s, dim) for s in torch.tensor_split(t, t.shape[dim], dim)
         )
-
-
-@register_decomposition(aten.unbind_copy)
-@out_wrapper()
-def unbind_copy(x: TensorLikeType, dim: int = 0):
-    return tuple(i.clone(memory_format=torch.contiguous_format) for i in x.unbind(dim))
 
 
 @out_wrapper()
@@ -6308,14 +6294,17 @@ zero_ = _make_inplace(zero)
 alias_copy = _make_copy_from_view(alias)
 as_strided_copy = _make_copy_from_view(as_strided)
 diagonal_copy = _make_copy_from_view(diagonal)
-expand_copy = _make_copy_from_view(expand)
-permute_copy = _make_copy_from_view(permute)
+# TODO: narrow_copy must return a sparse tensor if the input is sparse, but refs have
+# no sparse support. See narrow_copy_sparse in core.
+narrow_copy = _make_copy_from_view(narrow)
 squeeze_copy = _make_copy_from_view(squeeze)
 t_copy = _make_copy_from_view(t)
 transpose_copy = _make_copy_from_view(transpose)
 unfold_copy = _make_copy_from_view(unfold)
 unsqueeze_copy = _make_copy_from_view(unsqueeze)
 view_copy = _make_copy_from_view(view)
+
+# TODO: Decompose expand_copy, permute_copy, select_copy, unbind_copy
 
 
 # xref: isStorage in torch/csrc/DynamicTypes.cpp

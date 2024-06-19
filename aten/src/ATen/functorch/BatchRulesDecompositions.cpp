@@ -101,7 +101,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(einsum);
   m.impl("embedding_backward", native::embedding_backward_symint);
   OP_DECOMPOSE(expand_as);
-  m.impl("expand_copy", native::expand_copy_symint);
   m.impl("fft_fft", native::fft_fft_symint);
   OP_DECOMPOSE(fft_fftshift);
   m.impl("fft_fft2", native::fft_fft2_symint);
@@ -327,7 +326,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(diagonal_copy);
   OP_DECOMPOSE(alias_copy);
   m.impl("as_strided_copy", native::as_strided_copy_symint);
-  m.impl("unbind_copy", native::unbind_copy_int);
   m.impl("pad", native::pad_symint);
   m.impl("_pad_circular", native::_pad_circular_symint);
   OP_DECOMPOSE(swapdims_);

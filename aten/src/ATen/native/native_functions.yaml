@@ -6185,12 +6185,12 @@
     CompositeExplicitAutogradNonFunctional: _nested_view_from_buffer_copy
   autogen: _nested_view_from_buffer_copy.out
 
-- func: _nested_view_from_jagged(Tensor(a) self, Tensor offsets, Tensor dummy, Tensor? lengths=None, int ragged_idx=1, Tensor? min_seqlen=None, Tensor? max_seqlen=None) -> Tensor(a)
+- func: _nested_view_from_jagged(Tensor(a) self, Tensor offsets, Tensor dummy, Tensor? lengths=None, int ragged_idx=1) -> Tensor(a)
   variants: function
   device_check: NoCheck
   dispatch: {}
 
-- func: _nested_view_from_jagged_copy(Tensor self, Tensor offsets, Tensor dummy, Tensor? lengths=None, int ragged_idx=1, Tensor? min_seqlen=None, Tensor? max_seqlen=None) -> Tensor
+- func: _nested_view_from_jagged_copy(Tensor self, Tensor offsets, Tensor dummy, Tensor? lengths=None, int ragged_idx=1) -> Tensor
   variants: function
   device_check: NoCheck
   tags: view_copy
@@ -6223,16 +6223,6 @@
   dispatch: {}
 
 - func: _nested_get_ragged_idx(Tensor self) -> int
-  variants: function
-  device_check: NoCheck
-  dispatch: {}
-
-- func: _nested_get_min_seqlen(Tensor self) -> Tensor
-  variants: function
-  device_check: NoCheck
-  dispatch: {}
-
-- func: _nested_get_max_seqlen(Tensor self) -> Tensor
   variants: function
   device_check: NoCheck
   dispatch: {}
@@ -15575,6 +15565,7 @@
   dispatch:
     CPU: _fused_adam_kernel_cpu_
     CUDA: _fused_adam_kernel_cuda_
+    MPS: _fused_adam_kernel_mps_
   autogen: _fused_adam, _fused_adam.out
 
 - func: _fused_adam_.tensor_lr(Tensor(a!)[] self, Tensor(b!)[] grads, Tensor(c!)[] exp_avgs, Tensor(d!)[] exp_avg_sqs, Tensor(e!)[] max_exp_avg_sqs, Tensor[] state_steps, *, Tensor lr, float beta1, float beta2, float weight_decay, float eps, bool amsgrad, bool maximize, Tensor? grad_scale=None, Tensor? found_inf=None) -> ()
@@ -15593,6 +15584,7 @@
   dispatch:
     CPU: _fused_adamw_kernel_cpu_
     CUDA: _fused_adamw_kernel_cuda_
+    MPS: _fused_adamw_kernel_mps_
   autogen: _fused_adamw, _fused_adamw.out
 
 - func: _fused_adamw_.tensor_lr(Tensor(a!)[] self, Tensor(b!)[] grads, Tensor(c!)[] exp_avgs, Tensor(d!)[] exp_avg_sqs, Tensor(e!)[] max_exp_avg_sqs, Tensor[] state_steps, *, Tensor lr, float beta1, float beta2, float weight_decay, float eps, bool amsgrad, bool maximize, Tensor? grad_scale=None, Tensor? found_inf=None) -> ()
