@@ -1143,19 +1143,15 @@ def compile_fx_aot(
     inner_compile: Callable[..., Any] = compile_fx_inner,
     config_patches: Optional[Dict[str, Any]] = None,
 ):
-    config_patches: Dict[str, Any] = (
-        {"cpp_wrapper": True}
-        if config_patches is None
-        else {**config_patches, "cpp_wrapper": True}
-    )
+    # Create a copy of config_patches so the following patches are not exposed
+    config_patches = {} if config_patches is None else config_patches.copy()
+    # No need to run the Python cudagraphs pass in AOTI
+    config_patches.update({"cpp_wrapper": True, "triton.cudagraphs": False})
     if (
         "aot_inductor.output_path" not in config_patches
         and not config.aot_inductor.output_path
     ):
-        config_patches = {
-            **config_patches,
-            "aot_inductor.output_path": code_hash(model_.code),
-        }
+        config_patches.update({"aot_inductor.output_path": code_hash(model_.code)})
 
     extern_node_serializer = config_patches.pop("extern_node_serializer", None)
     with V.set_aot_compilation(True):
@@ -1282,7 +1278,6 @@ def compile_fx(
             {
                 "cpp_wrapper": False,
                 "triton.autotune_cublasLt": False,
-                "triton.cudagraphs": False,
                 "triton.store_cubin": True,
             }
         ), V.set_real_inputs(example_inputs_):
