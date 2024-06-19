@@ -74,8 +74,6 @@ class BaseSchedulerNode:
         self.scheduler: Scheduler = scheduler
         self.node: Optional[ir.Buffer] = node
         self.users: List[NodeUser] = []
-        self.inverse_users: List[BaseSchedulerNode] = []
-        self.node_users: List[BaseSchedulerNode] = []
         self.set_read_writes(node.get_read_writes())
         self.ancestors: Set[str] = set()
         self.min_order: int
@@ -663,7 +661,6 @@ def pformat(obj: Any) -> str:
 class OutputNode:
     def __init__(self, dep: StarDep) -> None:
         self.unmet_dependencies = {dep}
-        self.inverse_users: List[BaseSchedulerNode] = []
 
     def is_reduction(self) -> bool:
         return False
@@ -922,8 +919,6 @@ class FusedSchedulerNode(BaseSchedulerNode):
         self.scheduler = scheduler
         self.node = None
         self.users: List[NodeUser] = []
-        self.inverse_users = []
-        self.node_users = []
         self.group = max(snodes, key=lambda x: int(x.is_reduction())).group
         self.ancestors = set.union(
             *[x.ancestors for x in snodes if x.ancestors is not None]
@@ -1431,8 +1426,6 @@ class Scheduler:
         self.fuse_nodes()
         self.finalize_multi_template_buffers()
         if config.reorder_for_compute_comm_overlap:
-            # Refresh node_users and inverse_users to reflect fused nodes
-            self.compute_node_users()
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
         self.compute_last_usage()
         V.debug.ir_post_fusion(self.nodes)
@@ -1709,44 +1702,6 @@ class Scheduler:
         for node in self.nodes:
             node.set_users(name_to_users[node.get_name()].items)
 
-        # populate inverse_users
-        for node in self.nodes:
-            for user in node.users:
-                user.node.inverse_users.append(node)
-
-    def compute_node_users(self) -> None:
-        # set up buffer name to (fused)snode mapping
-        buf_to_snode: Dict[str, BaseSchedulerNode] = {}
-        for node in self.nodes:
-            if isinstance(node, FusedSchedulerNode):
-                for x in node.snodes:
-                    buf_to_snode[x.get_name()] = node
-            buf_to_snode[node.get_name()] = node
-
-        for node in self.nodes:
-            node.node_users = []
-            node.inverse_users = []
-
-        # compute inverse_users
-        for node in self.nodes:
-            inverse_users: List[BaseSchedulerNode] = []
-            for dep in node.unmet_dependencies:
-                assert dep.name in buf_to_snode
-                dep_node = buf_to_snode[dep.name]
-                inverse_users.append(dep_node)
-            node.inverse_users = inverse_users
-
-        # compute node_users
-        # TODO: ideally, we should deduplicate .users and .node_users,
-        # but currently .users contains extra information that's difficult to
-        # extract into a standalone container.
-        node_to_users: Dict[BaseSchedulerNode, List[BaseSchedulerNode]] = {}
-        for node in self.nodes:
-            for inverse_user in node.inverse_users:
-                node_to_users.setdefault(inverse_user, []).append(node)
-        for node, users in node_to_users.items():
-            node.node_users = users
-
     def dead_node_elimination(self) -> None:
         """
         Remove any nodes without users
@@ -1901,9 +1856,6 @@ class Scheduler:
                 new_scheduler_node.min_order = node.min_order
                 new_scheduler_node.max_order = node.max_order
                 new_scheduler_node.last_usage = node.last_usage
-                for user in new_scheduler_node.users:
-                    user.node.inverse_users.remove(node)
-                    user.node.inverse_users.append(new_scheduler_node)
 
     def speedup_by_fusion(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode

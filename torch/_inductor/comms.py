@@ -2,7 +2,8 @@
 # pyre-strict
 from __future__ import annotations
 
-from typing import List, TYPE_CHECKING
+from collections import defaultdict
+from typing import List, Set, TYPE_CHECKING
 
 import torch
 
@@ -18,6 +19,7 @@ if TYPE_CHECKING:
 
 def sink_waits(
     snodes: List[BaseSchedulerNode],
+    node_users: Dict[BaseSchedulerNode, Set[BaseSchdulerNode]],
 ) -> List[BaseSchedulerNode]:
     """
     Greedily moves waits as late as possible (i.e. until we reach a use). Optimal in terms of
@@ -30,7 +32,7 @@ def sink_waits(
             cur_waits.add(snode)
         else:
             for wait in tuple_sorted(cur_waits):
-                if snode in wait.node_users:
+                if snode in node_users[wait]:
                     new_order.append(wait)
                     cur_waits.remove(wait)
             new_order.append(snode)
@@ -40,6 +42,7 @@ def sink_waits(
 
 def raise_comms(
     snodes: List[BaseSchedulerNode],
+    node_users: Dict[BaseSchedulerNode, Set[BaseSchdulerNode]],
 ) -> List[BaseSchedulerNode]:
     """
     Greedily moves comms as early as possible (i.e. until we reach an input).
@@ -56,10 +59,8 @@ def raise_comms(
         if is_collective(snode.node):
             cur_comms.append(snode)
         else:
-            for comm in cur_comms:
-                assert len(comm.inverse_users) > 0
             while len(cur_comms) > 0 and any(
-                snode in comm.inverse_users for comm in cur_comms
+                comm in node_users[snode] for comm in cur_comms
             ):
                 comm = cur_comms.pop(0)
                 new_order_reversed.append(comm)
@@ -69,13 +70,18 @@ def raise_comms(
     return new_order_reversed[::-1]
 
 
-def get_ancestors(node):
+def get_ancestors(node, node_users):
+    inverse_users: Dict[BaseSchedulerNode, Set[BaseSchedulerNode]] = defaultdict(set)
+    for node, users in node_users.items():
+        for user in users:
+            inverse_users[user].add(node)
+
     ancestors = set()
     cur_nodes = [node]
     while len(cur_nodes) > 0:
         new_nodes = []
         for node in cur_nodes:
-            for inp in node.inverse_users:
+            for inp in inverse_users[node]:
                 if inp not in ancestors:
                     ancestors.add(inp)
                     new_nodes.append(inp)
@@ -83,13 +89,13 @@ def get_ancestors(node):
     return ancestors
 
 
-def get_descendants(node):
+def get_descendants(node, node_users):
     descendants = set()
     cur_nodes = [node]
     while len(cur_nodes) > 0:
         new_nodes = []
         for node in cur_nodes:
-            for inp in node.node_users:
+            for inp in node_users[node]:
                 if inp not in descendants:
                     descendants.add(inp)
                     new_nodes.append(inp)
@@ -128,6 +134,15 @@ def estimate_op_runtime(snode: BaseSchedulerNode) -> float:
     return runtime
 
 
+def compute_node_users(
+    snodes: List[BaseSchedulerNode],
+) -> Dict[BaseSchedulerNode, Set[BaseSchedulerNode]]:
+    return {
+        node: {user.node for user in node.users}
+        for node in snodes
+    }
+
+
 def reorder_compute_for_overlap(
     snodes: List[BaseSchedulerNode],
 ) -> List[BaseSchedulerNode]:
@@ -147,6 +162,8 @@ def reorder_compute_for_overlap(
     """
     final_order = []
 
+    node_users = compute_node_users(snodes)
+
     comm_nodes = []
     for snode in snodes:
         if is_collective(snode.node):
@@ -155,12 +172,12 @@ def reorder_compute_for_overlap(
         # if there is no comm nodes, return the current order
         return snodes
 
-    comm_ancestors = {node: get_ancestors(node) for node in comm_nodes}
-    comm_descendants = {node: get_descendants(node) for node in comm_nodes}
+    comm_ancestors = {node: get_ancestors(node, node_users) for node in comm_nodes}
+    comm_descendants = {node: get_descendants(node, node_users) for node in comm_nodes}
 
     indeg = dict.fromkeys(snodes, 0)
     for snode in snodes:
-        for user in snode.node_users:
+        for user in node_users[snode]:
             if user in indeg:
                 indeg[user] += 1
     ready_to_schedule_nodes = {node for node in snodes if indeg[node] == 0}
@@ -177,7 +194,7 @@ def reorder_compute_for_overlap(
         ready_to_schedule_nodes.remove(snode)
         unscheduled_nodes.remove(snode)
         final_order.append(snode)
-        for user in tuple_sorted(snode.node_users):
+        for user in tuple_sorted(node_users[snode]):
             if user in indeg:
                 indeg[user] -= 1
                 if indeg[user] == 0:
