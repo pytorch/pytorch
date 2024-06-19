@@ -300,7 +300,7 @@ class AutogradCompilerInstance:
             try:
                 in_compiled_autograd_region = True
                 for i in runtime_inputs_to_move:
-                    inputs[i] = inputs[i].cuda()
+                    inputs[i] = inputs[i].cuda(non_blocking=True)
 
                 return compiled_fn(inputs, sizes, hooks)
             finally:
