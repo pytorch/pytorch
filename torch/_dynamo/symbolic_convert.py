@@ -424,30 +424,30 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                     self.push(value)
                 self.jump(inst)
         elif isinstance(value, UserDefinedObjectVariable):
-            # x = None
-            # if hasattr(value, "__bool__"):
-            #     x = value.var_getattr(self, "__bool__")
-            # # if __bool__ is missing, trying __len__ to infer a truth value.
-            # if (x is None or isinstance(x, GetAttrVariable)) and hasattr(value, "__len__"):
-            #     x = value.var_getattr(self, "__len__")
-            torch_log.warning(f"here1: value: {value}")
-            try:
+            x = None
+            if hasattr(value, "__bool__"):
                 x = value.var_getattr(self, "__bool__")
-                torch_log.warning(f"here2: x: {x}")
-            except exc.ObservedException:
-                # if __bool__ is missing, trying __len__ to infer a truth value.
+            # if __bool__ is missing, trying __len__ to infer a truth value.
+            if (x is None or isinstance(x, GetAttrVariable)) and hasattr(value, "__len__"):
                 x = value.var_getattr(self, "__len__")
-                torch_log.warning(f"here3: x: {x}")
-            else:
-                torch_log.warning(f"here4: x: {x}")
-                if isinstance(x, GetAttrVariable):
-                    # if __bool__ is missing, trying __len__ to infer a truth value.
-                    x = value.var_getattr(self, "__len__")
-                    torch_log.warning(f"here5: x: {x}")
-                #  or (
-                #     isinstance(x, UserDefinedClassVariable)
-                #     and x.value is torch._dynamo.variables.user_defined.NO_SUCH_SUBOBJ
-                # ):
+            # torch_log.warning(f"here1: value: {value}")
+            # try:
+            #     x = value.var_getattr(self, "__bool__")
+            #     torch_log.warning(f"here2: x: {x}")
+            # except exc.ObservedException:
+            #     # if __bool__ is missing, trying __len__ to infer a truth value.
+            #     x = value.var_getattr(self, "__len__")
+            #     torch_log.warning(f"here3: x: {x}")
+            # else:
+            #     torch_log.warning(f"here4: x: {x}")
+            #     if isinstance(x, GetAttrVariable):
+            #         # if __bool__ is missing, trying __len__ to infer a truth value.
+            #         x = value.var_getattr(self, "__len__")
+            #         torch_log.warning(f"here5: x: {x}")
+            #     #  or (
+            #     #     isinstance(x, UserDefinedClassVariable)
+            #     #     and x.value is torch._dynamo.variables.user_defined.NO_SUCH_SUBOBJ
+            #     # ):
 
             # __bool__ or __len__ is function
             if isinstance(x, UserMethodVariable):
