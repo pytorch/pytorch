@@ -24,6 +24,9 @@ import textwrap
 import threading
 from typing import Any, Callable, Dict, Optional, Set, Tuple, Type, TYPE_CHECKING, Union
 
+if TYPE_CHECKING:
+    from .types import IntLike
+
 
 # multipy/deploy is setting this import before importing torch, this is the most
 # reliable way we have to detect if we're running within deploy.
@@ -501,6 +504,9 @@ class SymInt:
     def __add__(self, other) -> "SymInt":
         raise TypeError("type stub not overridden")
 
+    def __mod__(self, other: "IntLike") -> "SymInt":
+        raise TypeError("type stub not overridden")
+
     def __mul__(self, other) -> "SymInt":
         raise TypeError("type stub not overridden")
 
@@ -532,6 +538,9 @@ class SymInt:
         raise TypeError("type stub not overridden")
 
     def __neg__(self):
+        raise TypeError("type stub not overridden")
+
+    def __sub__(self, other: "IntLike") -> "SymInt":
         raise TypeError("type stub not overridden")
 
     def __repr__(self):
