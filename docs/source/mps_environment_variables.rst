@@ -28,6 +28,7 @@ MPS Environment Variables
     - 0. : disables high watermark limit (may cause system failure if system-wide OOM occurs)
     - 1. : recommended maximum allocation size (i.e., device.recommendedMaxWorkingSetSize)
     - >1.: allows limits beyond the device.recommendedMaxWorkingSetSize
+
   e.g., value 0.95 means we allocate up to 95% of recommended maximum
   allocation size; beyond that, the allocations would fail with OOM error.
 
