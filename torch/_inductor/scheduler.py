@@ -84,6 +84,7 @@ class SchedulerBuffer:
             result.writeline(f"{name}.aliases = {pformat(self.get_aliases())}")
         if self.get_mutations():
             result.writeline(f"{name}.mutations = {pformat(self.get_mutations())}")
+        result.writeline(f"{name}.users = {pformat(self.users)}")
         return result.getvalue()
 
     def get_name(self) -> str:
@@ -149,8 +150,6 @@ class BaseSchedulerNode:
     def __init__(self, scheduler: Scheduler, node: ir.Operation) -> None:
         self.scheduler: Scheduler = scheduler
         self.node: Optional[ir.Operation] = node
-        # self.inverse_users: List[BaseSchedulerNode] = []
-        # self.node_users: List[BaseSchedulerNode] = []
         self.set_read_writes(node.get_read_writes())
         self.ancestors: Set[str] = set()
         self.min_order: int
@@ -702,7 +701,6 @@ def pformat(obj: Any) -> str:
 class OutputNode:
     def __init__(self, dep: StarDep) -> None:
         self.unmet_dependencies = {dep}
-        self.inverse_users: List[BaseSchedulerNode] = []
 
     def is_reduction(self) -> bool:
         return False
@@ -1460,8 +1458,6 @@ class Scheduler:
         self.fuse_nodes()
         self.finalize_multi_template_buffers()
         if config.reorder_for_compute_comm_overlap:
-            # Refresh node_users and inverse_users to reflect fused nodes
-            # self.compute_node_users()
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
         self.compute_last_usage()
         V.debug.ir_post_fusion(self.nodes)
@@ -1688,7 +1684,7 @@ class Scheduler:
                         if other_node.get_name() == node.get_name():
                             continue
 
-                        if not isinstance(other_node, BaseSchedulerNode):
+                        if not isinstance(other_node.node, BaseSchedulerNode):
                             continue
 
                         # this node must run after all prior readers
@@ -1700,7 +1696,8 @@ class Scheduler:
 
             # add normal non-mutation dependencies
             for read in node.read_writes.reads:
-                add_user(read.name, node, node.can_inplace(read))
+                if not isinstance(read, WeakDep):
+                    add_user(read.name, node, node.can_inplace(read))
 
             node.update_mutated_names(self.mutation_renames)
 
@@ -1751,69 +1748,40 @@ class Scheduler:
             for buf in node.get_outputs():
                 buf.set_users(name_to_users[buf.get_name()].items)
 
-        # populate inverse_users
-        # for node in self.nodes:
-        #     for user in node.users:
-        #         user.node.inverse_users.append(node)
-
-    # def compute_node_users(self) -> None:
-    #     # set up buffer name to (fused)snode mapping
-    #     buf_to_snode: Dict[str, BaseSchedulerNode] = {}
-    #     for node in self.nodes:
-    #         if isinstance(node, FusedSchedulerNode):
-    #             for x in node.snodes:
-    #                 buf_to_snode[x.get_name()] = node
-    #         buf_to_snode[node.get_name()] = node
-
-    #     for node in self.nodes:
-    #         node.node_users = []
-    #         node.inverse_users = []
-
-    #     # compute inverse_users
-    #     for node in self.nodes:
-    #         inverse_users: List[BaseSchedulerNode] = []
-    #         for dep in node.unmet_dependencies:
-    #             assert dep.name in buf_to_snode
-    #             dep_node = buf_to_snode[dep.name]
-    #             inverse_users.append(dep_node)
-    #         node.inverse_users = inverse_users
-
-    #     # compute node_users
-    #     # TODO: ideally, we should deduplicate .users and .node_users,
-    #     # but currently .users contains extra information that's difficult to
-    #     # extract into a standalone container.
-    #     node_to_users: Dict[BaseSchedulerNode, List[BaseSchedulerNode]] = {}
-    #     for node in self.nodes:
-    #         for inverse_user in node.inverse_users:
-    #             node_to_users.setdefault(inverse_user, []).append(node)
-    #     for node, users in node_to_users.items():
-    #         node.node_users = users
-
     def dead_node_elimination(self) -> None:
         """
         Remove any nodes without users
         """
-        again = True  # repeat until a fixed point
-        while again:
-            updated_nodes = []
-            for node in self.nodes:
+        # self.nodes is in topological order, so by iterating in reverse order
+        # we have visited (and potentially removed) all users before visiting a
+        # given node.
+        updated_nodes = []
+        for node in reversed(self.nodes):
 
-                def can_eliminate_user(user: NodeUser) -> bool:
-                    return user.get_name() in V.graph.removed_buffers
+            def can_eliminate_user(user: NodeUser) -> bool:
+                return user.is_weak or user.get_name() in V.graph.removed_operations
 
-                can_eliminate = not node.has_side_effects() and all(
-                    can_eliminate_user(u) for out in node.outputs for u in out.users
+            active_buffers = False
+            for buf in node.get_outputs():
+                can_eliminate = all(
+                    can_eliminate_user(u) for u in buf.users
                 )
-
-                if not can_eliminate:
-                    updated_nodes.append(node)
+                if can_eliminate:
+                    log.debug("removed dead buffer: %s", buf.get_name())
+                    V.graph.removed_buffers.add(buf.get_name())
                 else:
-                    # dead code
-                    log.debug("removed dead node: %s", node.get_name())
-                    V.graph.removed_buffers.add(node.get_name())
+                    active_buffers = True
 
-            again = len(self.nodes) > len(updated_nodes)
-            self.nodes = updated_nodes
+            can_eliminate = not node.has_side_effects() and not active_buffers
+
+            if not can_eliminate:
+                updated_nodes.append(node)
+            else:
+                # dead code
+                log.debug("removed dead operation: %s", node.get_name())
+                V.graph.removed_operations.add(node.get_name())
+
+        self.nodes = list(reversed(updated_nodes))
 
         # Prune any WeakDeps no longer needed
         for node in self.nodes:
@@ -2437,9 +2405,6 @@ class Scheduler:
             # Examples here include:
             #   - MemoryDep("foo", x) != MemoryDep("foo", x + 1)
             #   - MemoryDep("foo", x) != StarDep("foo")
-            print(node2.unmet_dependencies)
-            print(computed_deps)
-            print(node2.unmet_dependencies - computed_deps)
             why("memory deps did not match")
             return False
         for name in remaining_deps:

@@ -1641,7 +1641,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.device_ops = parent_graph.device_ops
         self.cpp_wrapper = parent_graph.cpp_wrapper
 
-        self.scheduler = Scheduler(self.buffers)
+        self.scheduler = Scheduler(self.operations)
         self.scheduler.codegen()
 
     def count_bytes(self):
