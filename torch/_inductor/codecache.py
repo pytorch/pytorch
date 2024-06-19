@@ -1376,8 +1376,6 @@ cdll.LoadLibrary("__lib_path__")
                 output_path = x86_isa_help_builder.get_target_file_path()
                 if not os.path.isfile(output_path):
                     status, target_file = x86_isa_help_builder.build()
-                    if status:
-                        return False
 
                 # Check build result
                 subprocess.check_call(
@@ -2573,11 +2571,14 @@ class CppPythonBindingsCodeCache(CppCodeCache):
 
         #ifndef _MSC_VER
         #if __cplusplus < 202002L
-        // C++20 earlier code
+        // C++20 (earlier) code
         // https://en.cppreference.com/w/cpp/language/attributes/likely
         #define likely(x)       __builtin_expect(!!(x), 1)
         #define unlikely(x)     __builtin_expect(!!(x), 0)
         #endif
+        #else
+        #define likely(x) (x)
+        #define unlikely(x) (x)
         #endif
 
         // This is defined in guards.cpp so we don't need to import PyTorch headers that are slooow.
@@ -2952,23 +2953,24 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
 
     @classmethod
     def _codegen_buffer(cls, name: str, arg: HalideInputSpec, cuda: bool):
+        assert arg.shape is not None
+        assert arg.stride is not None and len(arg.shape) == len(arg.stride)
+        assert arg.offset is not None
+        data_ptr = f"{arg.alias_of or arg.name} + {arg.offset}"
         if cuda:
-            device = f"reinterpret_cast<uint64_t>({arg.name})"
+            device = f"reinterpret_cast<uint64_t>({data_ptr})"
             device_interface = "cuda_interface"
             host = "nullptr"
             flags = "halide_buffer_flag_device_dirty"
         else:
             device = "0"
             device_interface = "nullptr"
-            host = f"reinterpret_cast<uint8_t*>({arg.name})"
+            host = f"reinterpret_cast<uint8_t*>({data_ptr})"
             flags = "halide_buffer_flag_host_dirty"
 
-        numel = "1"
         dims = []
-        assert arg.shape
-        for s in arg.shape:
-            dims.append(f"halide_dimension_t(0, {s}, {numel})")
-            numel = f"{numel}*({s})"  # column major (opposite of pytorch)
+        for size, stride in zip(arg.shape, arg.stride):
+            dims.append(f"halide_dimension_t(0, {size}, {stride})")
 
         return [
             f"halide_buffer_t {name};",
@@ -3005,7 +3007,11 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
                 "HalideRuntimeCuda.h" if is_cuda else "HalideRuntime.h"
             ),
             headerfile=headerfile,
-            argdefs=", ".join(f"{a.bindings_type()} {a.name}" for a in meta.argtypes),
+            argdefs=", ".join(
+                f"{a.bindings_type()} {a.name}"
+                for a in meta.argtypes
+                if a.alias_of is None
+            ),
             buffers=buffers,
             buffer_names=", ".join(buffer_names),
             cuda_device=meta.cuda_device,
@@ -3140,7 +3146,9 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
                 )
             )
 
-        binding_types = [arg.bindings_type() for arg in meta.argtypes]
+        binding_types = [
+            arg.bindings_type() for arg in meta.argtypes if arg.alias_of is None
+        ]
         if meta.is_cuda():
             binding_types.append("uintptr_t")  # stream
         bindings_future = cls.load_pybinding_async(

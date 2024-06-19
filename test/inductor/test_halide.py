@@ -29,8 +29,12 @@ except ImportError:
 
 
 make_halide = config.patch(
-    cpu_backend="halide",
-    fallback_random=True,  # TODO(jansel): support random
+    {
+        "cpu_backend": "halide",
+        "cuda_backend": "halide",
+        "fallback_random": True,  # TODO(jansel): support random
+        "halide.scan_kernels": True,
+    }
 )
 
 
@@ -40,12 +44,26 @@ class HalideTests(TestCase):
         fn = HalideCodeCache.generate_halide(
             HalideMeta(
                 argtypes=[
-                    HalideInputSpec(ctype="float*", name="in_ptr0", shape=["1024L"]),
-                    HalideInputSpec(ctype="float*", name="in_ptr1", shape=["1024L"]),
+                    HalideInputSpec(
+                        ctype="float*",
+                        name="in_ptr0",
+                        shape=["1024L"],
+                        stride=["1L"],
+                        offset="0",
+                    ),
+                    HalideInputSpec(
+                        ctype="float*",
+                        name="in_ptr1",
+                        shape=["1024L"],
+                        stride=["1L"],
+                        offset="0",
+                    ),
                     HalideInputSpec(
                         ctype="float*",
                         name="out_ptr0",
                         shape=["1024L"],
+                        stride=["1L"],
+                        offset="0",
                     ),
                 ],
                 target="host-no_runtime",
@@ -97,6 +115,10 @@ class HalideTests(TestCase):
 
 SweepInputsCpuHalideTest = make_halide(test_torchinductor.SweepInputsCpuTest)
 CpuHalideTests = make_halide(test_torchinductor.CpuTests)
+
+if test_torchinductor.HAS_GPU:
+    SweepInputsGPUHalideTest = make_halide(test_torchinductor.SweepInputsGPUTest)
+    GPUHalideTests = make_halide(test_torchinductor.GPUTests)
 
 if __name__ == "__main__":
     if HAS_CPU and not IS_MACOS and HAS_HALIDE:

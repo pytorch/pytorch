@@ -1674,7 +1674,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
 
         self.assertEqual(
-            15 if torch._dynamo.config.inline_inbuilt_nn_modules else 12, cnt.op_count
+            18 if torch._dynamo.config.inline_inbuilt_nn_modules else 12, cnt.op_count
         )
 
     def test_exec_import(self):
@@ -5223,6 +5223,14 @@ def forward(self, primals_1, primals_2):
         mod = Mod()
         opt_mod = torch.compile(mod, backend=compiler)
         opt_mod(torch.randn(2, 2))
+
+    def test_is_make_fx_tracing(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            torch.nn.modules.activation._is_make_fx_tracing()
+            return torch.sin(x)
+
+        fn(torch.rand(4))
 
 
 instantiate_parametrized_tests(ReproTests)
