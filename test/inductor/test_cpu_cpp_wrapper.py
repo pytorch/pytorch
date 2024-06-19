@@ -95,7 +95,9 @@ if config.abi_compatible:
         "test_qconv2d_relu_cpu",
         "test_qlinear_cpu",
         "test_qlinear_add_cpu",
+        "test_qlinear_add_relu_cpu",
         "test_qlinear_dequant_promotion_cpu",
+        "test_qlinear_gelu_cpu",
         "test_qlinear_relu_cpu",
     ]
     for test_name in xfail_list:
@@ -125,7 +127,6 @@ def make_test_case(
     slow=False,
     func_inputs=None,
     code_string_count=None,
-    skip=None,
 ):
     test_name = f"{name}_{device}" if device else name
     if code_string_count is None:
@@ -134,8 +135,6 @@ def make_test_case(
     func = getattr(tests, test_name)
     assert callable(func), "not a callable"
     func = slowTest(func) if slow else func
-    if skip:
-        func = unittest.skip(skip)(func)
 
     @config.patch(cpp_wrapper=True, search_autotune_cache=False)
     def fn(self):
@@ -183,7 +182,6 @@ if RUN_CPU:
         slow: bool = False
         func_inputs: list = None
         code_string_count: dict = {}
-        skip: str = None
 
     for item in [
         BaseTest("test_add_complex"),
@@ -242,9 +240,7 @@ if RUN_CPU:
             torch.backends.mkldnn.is_available()
             and torch.ops.mkldnn._is_mkldnn_bf16_supported(),
         ),
-        BaseTest(
-            "test_linear_packed", "", test_cpu_repro.CPUReproTests(), skip="Failing"
-        ),
+        BaseTest("test_linear_packed", "", test_cpu_repro.CPUReproTests()),
         BaseTest(
             "test_lstm_packed_change_input_sizes",
             "cpu",
@@ -318,21 +314,18 @@ if RUN_CPU:
             "cpu",
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
             condition=torch.backends.mkldnn.is_available(),
-            skip="Failing",
         ),
         BaseTest(
             "test_qlinear_add",
             "cpu",
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
             condition=torch.backends.mkldnn.is_available(),
-            skip="Failing",
         ),
         BaseTest(
             "test_qlinear_add_relu",
             "cpu",
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
             condition=torch.backends.mkldnn.is_available(),
-            skip="Failing",
         ),
         BaseTest(
             "test_qlinear_dequant_promotion",
@@ -388,7 +381,6 @@ if RUN_CPU:
             item.slow,
             item.func_inputs,
             item.code_string_count,
-            skip=item.skip,
         )
 
     test_torchinductor.copy_tests(
