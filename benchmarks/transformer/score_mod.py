@@ -276,7 +276,7 @@ def generate_experiment_configs(
 ) -> List[ExperimentConfig]:
     q_kv_seq_lens = [(i, i) for i in seq_lens]  # only testing q_len == kv_len
     dtypes = [
-        torch.bfloat16,
+        torch.float16,
     ]
     score_mods = generate_score_mods(score_mods)
     all_configs = []

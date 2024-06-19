@@ -361,6 +361,8 @@ def _get_default_config_bwd(query) -> Tuple[int, int, int, int]:
             return (32, 64, 4, 1)
         return (32, 128, 4, 3)
     elif torch.cuda.get_device_capability() >= (8, 0):  # A100
+        return (64, 64, 4, 1)
+
         if head_dim == 64:
             return (32, 128, 4, 3)
         elif head_dim == 128:
@@ -437,8 +439,8 @@ def flex_attention(*args, **kwargs):
             BLOCK_N=BLOCK_N,
             BLOCK_DMODEL=query.get_size()[-1],
             # For now, we always assume the "sound" option
-            SCORE_MOD_IS_LINEAR=True,
-            ROWS_GUARANTEED_SAFE=True,
+            SCORE_MOD_IS_LINEAR=False,
+            ROWS_GUARANTEED_SAFE=False,
             OUTPUT_LOGSUMEXP=True,
         )
     inputs_for_autotuning = [query, key, value, logsumexp] + list(other_buffers)
@@ -517,6 +519,7 @@ flex_attention_backward_template = TritonTemplate(
     MATMUL_PRECISION = Q.dtype.element_ty
 
     pid = tl.program_id(0)
+    NUM_Q_BLOCKS = Q_LEN // BLOCK_M2
     NUM_KV_BLOCKS = KV_LEN // BLOCK_N1
 
     off_hz = tl.program_id(2)
@@ -539,6 +542,7 @@ flex_attention_backward_template = TritonTemplate(
     DELTA += off_chz
 
     offs_k = tl.arange(0, BLOCK_DMODEL)
+    MIN_Q_KV_BLOCKS = min(NUM_Q_BLOCKS, NUM_KV_BLOCKS)
 
     if pid >= NUM_KV_BLOCKS:
         # THIS BLOCK DOES DQ
