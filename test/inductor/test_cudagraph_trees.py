@@ -1923,7 +1923,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 return gO + x.detach()
 
             with torch.device("cuda"):
-                for i in range(5):
+                for _ in range(5):
                     fn_compiled = torch.compile(fn_eager, mode="reduce-overhead")
                     param = torch.nn.Parameter(torch.randn([2, 2]))
                     gO = torch.randn([2, 2])
@@ -1932,9 +1932,13 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             self.assertFalse(out.requires_grad)
             # x is static (not copied), gO is not static (copied)
-            # no copy on first iteration (warmup)
+            # i=0: 0 copy (warmup)
+            # i=1: 1 copy (record graph 1)
+            # i=2: 1 copy (record graph 2)
+            # i=3: 1 copy (record graph 3)
+            # i=4: 0 copy (run)
             self.assertEqual(
-                counters["inductor"]["cudagraph_copies_due_to_non_static_inputs"], 4
+                counters["inductor"]["cudagraph_recorded_non_static_inputs"], 3
             )
 
     instantiate_parametrized_tests(CudaGraphTreeTests)
