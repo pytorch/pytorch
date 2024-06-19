@@ -6732,6 +6732,7 @@ class _CollectiveKernel(FallbackKernel):
         # This is important for being able to release collective memory as soon as possible by decreasing the collective output's refcount.
         if isinstance(self.layout, NoneLayout):
             from .codegen.wrapper import FreeIfNotReusedLine
+
             wrapper.writeline(FreeIfNotReusedLine(wrapper, self))
 
 

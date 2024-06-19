@@ -1,21 +1,27 @@
 # pyre-strict
 
-from typing import List, Dict
+import logging
+from collections import defaultdict
+from typing import Dict, List
 
 import torch
 
-from . import config, ir, scheduler
-from .utils import contains_collective, contains_wait, tuple_sorted, sympy_product
-import logging
+from . import ir, scheduler
+from .pass_utils import (
+    collect_node_to_input_prev_writes,
+    get_all_reads,
+    get_users_from_unfused_nodes,
+)
+from .utils import contains_collective, contains_wait, sympy_product
 from .virtualized import V
-from collections import defaultdict
-from .pass_utils import collect_node_to_input_prev_writes, get_users_from_unfused_nodes, get_all_reads
 
 torch_log = logging.getLogger("torch")
 
 
 def raise_last_usage(
-    name_to_fused_node: Dict[str, "scheduler.BaseSchedulerNode"], graph_inputs: Dict[str, "Buffer"], snodes: List["scheduler.BaseSchedulerNode"]
+    name_to_fused_node: Dict[str, "scheduler.BaseSchedulerNode"],
+    graph_inputs: Dict[str, "Buffer"],
+    snodes: List["scheduler.BaseSchedulerNode"],
 ) -> List["scheduler.BaseSchedulerNode"]:
     """
     For each node, we move its consumer nodes earlier if it satisfies the following conditions:
@@ -32,7 +38,11 @@ def raise_last_usage(
     def get_numel_by_name(buf_name):
         def _compute_elems(buf):
             if isinstance(buf.layout, ir.MultiOutputLayout):
-                users = [user for user in name_to_fused_node[buf.get_name()].node_users if user.get_name() != buf.get_name()]
+                users = [
+                    user
+                    for user in name_to_fused_node[buf.get_name()].node_users
+                    if user.get_name() != buf.get_name()
+                ]
                 return sum(_compute_elems(user.node) for user in users)
             else:
                 return V.graph.sizevars.size_hint(sympy_product(buf.get_size()))
@@ -70,27 +80,42 @@ def raise_last_usage(
             if isinstance(user.node.node, ir.MultiOutput):
                 continue
             # For now, we don't move users that are GroupedSchedulerNode
-            if isinstance(name_to_fused_node[user.node.get_name()], scheduler.GroupedSchedulerNode):
+            if isinstance(
+                name_to_fused_node[user.node.get_name()], scheduler.GroupedSchedulerNode
+            ):
                 continue
             # For now, we don't move users that have GroupedSchedulerNode as input
-            if any((not x.name in graph_inputs and isinstance(name_to_fused_node[x.name], scheduler.GroupedSchedulerNode)) for x in user.node.read_writes.reads):
+            if any(
+                (
+                    x.name not in graph_inputs
+                    and isinstance(
+                        name_to_fused_node[x.name], scheduler.GroupedSchedulerNode
+                    )
+                )
+                for x in user.node.read_writes.reads
+            ):
                 continue
             # For now, we don't move users that are run_and_save_rng_state ops
-            if isinstance(user.node.node, ir.ExternKernel) and user.node.node.op_overload is torch.ops.higher_order.run_and_save_rng_state:
-                continue
             if (
-                all(prev_write_name in scheduled for prev_write_name in node_to_input_prev_writes[user.node])
-                and (
-                    # if raising the user node saves memory
-                    get_numel_by_name(user.node.get_name()) < sum(get_numel_by_name(x_name) for x_name in user.node.last_usage)
-                    or (
-                        # always profitable to raise resize-to-0
-                        isinstance(user.node.node, ir.ResizeStorageBytes)
-                        and user.node.node.constant_args[0] == 0
-                    )
-                    # always okay to raise nop kernel
-                    or isinstance(user.node, scheduler.NopKernelSchedulerNode)
+                isinstance(user.node.node, ir.ExternKernel)
+                and user.node.node.op_overload
+                is torch.ops.higher_order.run_and_save_rng_state
+            ):
+                continue
+            if all(
+                prev_write_name in scheduled
+                for prev_write_name in node_to_input_prev_writes[user.node]
+            ) and (
+                # if raising the user node saves memory
+                get_numel_by_name(user.node.get_name())
+                < sum(get_numel_by_name(x_name) for x_name in user.node.last_usage)
+                or (
+                    # always profitable to raise resize-to-0
+                    isinstance(user.node.node, ir.ResizeStorageBytes)
+                    and user.node.node.constant_args[0] == 0
                 )
+                # always okay to raise nop kernel
+                or isinstance(user.node, scheduler.NopKernelSchedulerNode)
             ):
                 user_node = name_to_fused_node[user.node.get_name()]
                 new_order.append(user_node)
@@ -99,7 +124,9 @@ def raise_last_usage(
 
 
 def raise_primal_resize_zero_if_primal_is_unused(
-    name_to_fused_node: Dict[str, "scheduler.BaseSchedulerNode"], graph_inputs: Dict[str, "Buffer"], snodes: List["scheduler.BaseSchedulerNode"]
+    name_to_fused_node: Dict[str, "scheduler.BaseSchedulerNode"],
+    graph_inputs: Dict[str, "Buffer"],
+    snodes: List["scheduler.BaseSchedulerNode"],
 ) -> List["scheduler.BaseSchedulerNode"]:
     primal_to_reads = defaultdict(set)  # argX -> set of nodes that reads argX
     primal_resize_zero_nodes = []
@@ -113,7 +140,8 @@ def raise_primal_resize_zero_if_primal_is_unused(
             and snode.node.constant_args[0] == 0
             and snode.node.resized_buf_name in graph_inputs
             and len(primal_to_reads[snode.node.resized_buf_name]) == 1
-            and list(primal_to_reads[snode.node.resized_buf_name])[0] == snode.get_name()
+            and list(primal_to_reads[snode.node.resized_buf_name])[0]
+            == snode.get_name()
         ):
             primal_resize_zero_nodes.append(snode)
     new_order = primal_resize_zero_nodes

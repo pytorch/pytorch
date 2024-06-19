@@ -1473,19 +1473,19 @@ class WrapperCodeGen(CodeGen):
         return f"{self.declare}{new_name} = {old_name}{self.ending}  {self.comment} {comment}"
 
     def make_buffer_free(self, buffer):
-#         if buffer.get_name().startswith("buf"):
-#             ret = f"""\
-# torch.cuda.synchronize()
-#         gc.collect()
-#         mem_before_del = torch.cuda.memory_allocated()
-#         torch_log.warning("{buffer.get_name()} refcount: " + str(sys.getrefcount({buffer.get_name()})))
-#         del {buffer.get_name()}
-#         torch.cuda.synchronize()
-#         gc.collect()
-#         mem_after_del = torch.cuda.memory_allocated()
-#         torch_log.warning("{buffer.get_name()} deleted, delta in memory_allocated: " + str(mem_after_del - mem_before_del))
-# """
-#         else:
+        #         if buffer.get_name().startswith("buf"):
+        #             ret = f"""\
+        # torch.cuda.synchronize()
+        #         gc.collect()
+        #         mem_before_del = torch.cuda.memory_allocated()
+        #         torch_log.warning("{buffer.get_name()} refcount: " + str(sys.getrefcount({buffer.get_name()})))
+        #         del {buffer.get_name()}
+        #         torch.cuda.synchronize()
+        #         gc.collect()
+        #         mem_after_del = torch.cuda.memory_allocated()
+        #         torch_log.warning("{buffer.get_name()} deleted, delta in memory_allocated: " + str(mem_after_del - mem_before_del))
+        # """
+        #         else:
         ret = f"del {buffer.get_name()}"
         return ret
 

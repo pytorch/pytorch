@@ -502,11 +502,14 @@ def get_fused_kernel_name(node_schedule, descriptive_names):
     sources = sources
     return "_".join(["fused"] + sources)
 
+
 def cuda_sync_and_print(msg):
     torch.cuda.synchronize()
     import time
+
     time.sleep(0.5)
     torch_log.warning(msg)
+
 
 def get_kernel_metadata(node_schedule, wrapper):
     global yf225_debug_comment_count
@@ -824,7 +827,9 @@ class IndentedBuffer:
         # DEBUG yf225
         modify_code = False
         if modify_code and "cuda:1" not in code:
-            if "torch.ops._c10d_functional.reduce_scatter_tensor.default" in code:  # BWD graph
+            if (
+                "torch.ops._c10d_functional.reduce_scatter_tensor.default" in code
+            ):  # BWD graph
                 code = """
 
 """
@@ -1454,6 +1459,7 @@ def is_wait(node):
 
 def contains_collective(snode):
     from torch._inductor.scheduler import GroupedSchedulerNode
+
     if isinstance(snode, GroupedSchedulerNode):
         return any(contains_collective(subnode) for subnode in snode.snodes)
     else:
@@ -1462,6 +1468,7 @@ def contains_collective(snode):
 
 def contains_wait(snode):
     from torch._inductor.scheduler import GroupedSchedulerNode
+
     if isinstance(snode, GroupedSchedulerNode):
         return any(contains_wait(subnode) for subnode in snode.snodes)
     else:

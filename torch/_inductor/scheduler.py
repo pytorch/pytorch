@@ -35,7 +35,7 @@ from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._sympy.symbol import free_symbol_is_type, SymT
 from torch.utils._triton import has_triton
 
-from . import comms, config, dependencies, ir, metrics, memory_passes
+from . import config, dependencies, ir, metrics
 from .codecache import write_text
 from .codegen.common import BackendFeature, get_scheduling_for_device, Kernel
 from .comm_analysis import estimate_nccl_collective_runtime
@@ -534,9 +534,7 @@ class BaseSchedulerNode:
         layout = None
         dtype = None
         if not hasattr(self, "node") or not self.node:
-            assert isinstance(
-                self, _BaseGroupedSchedulerNode
-            ), f"{type(self)=}"
+            assert isinstance(self, _BaseGroupedSchedulerNode), f"{type(self)=}"
             assert self.snodes
             if not self.snodes[0].node:
                 return 0
@@ -2375,13 +2373,27 @@ class Scheduler:
         why = WhyNoFuse(node1, node2)
 
         if (
-            isinstance(node1, (ExternKernelSchedulerNode, NopKernelSchedulerNode, GroupedSchedulerNode))
+            isinstance(
+                node1,
+                (
+                    ExternKernelSchedulerNode,
+                    NopKernelSchedulerNode,
+                    GroupedSchedulerNode,
+                ),
+            )
             and not node1.is_template()
         ):
             why("node1 is extern or nop or grouped")
             return False
         if (
-            isinstance(node2, (ExternKernelSchedulerNode, NopKernelSchedulerNode, GroupedSchedulerNode))
+            isinstance(
+                node2,
+                (
+                    ExternKernelSchedulerNode,
+                    NopKernelSchedulerNode,
+                    GroupedSchedulerNode,
+                ),
+            )
             and not node2.is_template()
         ):
             why("node2 is extern or nop or grouped")

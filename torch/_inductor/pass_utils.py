@@ -2,6 +2,7 @@ from collections import defaultdict
 
 from . import ir, scheduler
 
+
 def _flatten_arg_list(args):
     flat_args = []
     for arg in args:
@@ -29,6 +30,7 @@ def get_all_names(snode):
             names.extend(get_all_names(sub_snode))
     return names
 
+
 def get_all_users(snode):
     users = set()
     users.update(snode.users)
@@ -37,6 +39,7 @@ def get_all_users(snode):
             users.update(get_all_users(sub_snode))
     return users
 
+
 def get_all_reads(snode):
     reads = set()
     reads.update(snode.read_writes.reads)
@@ -44,6 +47,7 @@ def get_all_reads(snode):
         for sub_snode in snode.snodes:
             reads.update(get_all_reads(sub_snode))
     return reads
+
 
 def get_all_writes(snode):
     writes = set()
@@ -54,12 +58,15 @@ def get_all_writes(snode):
     return writes
 
 
-
 def collect_node_to_input_prev_writes(snodes):
     # Returns:
     #   snode -> set of node names that write to snode's input args before snode
-    write_map = defaultdict(set)  # bufX -> set of nodes that write to bufX (including itself)
-    node_to_input_prev_writes = defaultdict(set)  # nodeY -> set of writes nodes to nodeY's input args before nodeY
+    write_map = defaultdict(
+        set
+    )  # bufX -> set of nodes that write to bufX (including itself)
+    node_to_input_prev_writes = defaultdict(
+        set
+    )  # nodeY -> set of writes nodes to nodeY's input args before nodeY
     for snode in snodes:
         for dep in get_all_writes(snode):
             write_map[dep.name].add(snode.get_name())

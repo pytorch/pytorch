@@ -1,8 +1,8 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
-from typing import Dict, List, Optional, TYPE_CHECKING
 import threading
+from typing import Dict, List, Optional, TYPE_CHECKING
 
 import torch
 from torch._dynamo.external_utils import (
@@ -409,6 +409,8 @@ def reset() -> None:
 
 
 compiler_fn_tls = threading.local()
+
+
 def compiler_fn(**compile_options):
     def _fn(gm):
         # if dist.get_rank() == 0:
@@ -416,12 +418,14 @@ def compiler_fn(**compile_options):
         #     import time
         #     time.sleep(600)
         import logging
+
         torch_log = logging.getLogger("torch")
         torch_log.warning("Compiling autograd?")
-        initialized = getattr(compiler_fn_tls, 'initialized', False)
+        initialized = getattr(compiler_fn_tls, "initialized", False)
         if not initialized:
             compiler_fn_tls.initialized = True
             return torch.compile(gm, backend="eager", fullgraph=False)
         else:
             return torch.compile(gm, **compile_options)
+
     return _fn

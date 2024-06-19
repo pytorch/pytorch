@@ -7,14 +7,13 @@ This module defines runtime wrappers, which, based on previous analysis attempts
 4. deduplicate inputs and consolidate views into their bases (see input_output_analysis)
 """
 import collections
+import logging
 import pprint
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
-import torch.distributed as dist
-import sys
-import logging
+
 torch_log = logging.getLogger("torch")
 
 import torch
@@ -1221,7 +1220,9 @@ def merge_view_inputs(
         torch_log.warning(f"i: {i}, idxs: {idxs}")
         for idx in idxs:
             t = fwd_inputs[idx]
-            torch_log.warning(f"t: {t}, id(t): {id(t)}, t.shape: {t.shape}, t.stride(): {t.stride()}, t.storage_offset(): {t.storage_offset()}, t.requires_grad: {t.requires_grad}, id(t.untyped_storage()): {id(t.untyped_storage())}")
+            torch_log.warning(
+                f"t: {t}, id(t): {id(t)}, t.shape: {t.shape}, t.stride(): {t.stride()}, t.storage_offset(): {t.storage_offset()}, t.requires_grad: {t.requires_grad}, id(t.untyped_storage()): {id(t.untyped_storage())}"
+            )
     # Note [Synthetic Base Info Metadata]
     # This list contains metadata that tells you what the i'th argument in the inner calling convention should be.
     # It's either:

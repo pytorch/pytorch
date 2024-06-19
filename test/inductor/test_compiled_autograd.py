@@ -1315,9 +1315,15 @@ main()
         seqlen = 2
         head_dim = 2
         cache_len = 2
-        xq = torch.ones((bs, n_local_heads, seqlen, head_dim), requires_grad=True, device="cpu")
-        xk = torch.ones((bs, n_local_heads, cache_len + seqlen, head_dim), requires_grad=True, device="cpu")
-            
+        xq = torch.ones(
+            (bs, n_local_heads, seqlen, head_dim), requires_grad=True, device="cpu"
+        )
+        xk = torch.ones(
+            (bs, n_local_heads, cache_len + seqlen, head_dim),
+            requires_grad=True,
+            device="cpu",
+        )
+
         def g(xq, xk):
             # xq: (bs, n_local_heads, seqlen, head_dim)
             # xk: (bs, n_local_heads, cache_len + seqlen, head_dim)
@@ -1339,13 +1345,21 @@ main()
 
         def make_compiler_fn_with_op_check():
             def _compiler_fn(gm):
-                self.assertTrue(any(node.target is torch.ops.higher_order.run_with_rng_state for node in gm.graph.nodes))
+                self.assertTrue(
+                    any(
+                        node.target is torch.ops.higher_order.run_with_rng_state
+                        for node in gm.graph.nodes
+                    )
+                )
                 return compiler_fn(gm)
+
             return _compiler_fn
 
         compiler_fn_with_op_check = make_compiler_fn_with_op_check()
 
-        self.check_output_and_recompiles(f, compiler_fn=compiler_fn_with_op_check, compile_fn=False)
+        self.check_output_and_recompiles(
+            f, compiler_fn=compiler_fn_with_op_check, compile_fn=False
+        )
 
     def test_autograd_cpp_node(self):
         cpp_source = """

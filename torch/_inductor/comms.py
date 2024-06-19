@@ -1,15 +1,20 @@
 # mypy: allow-untyped-defs
 # pyre-strict
 
-from typing import List, Dict
+import logging
+from typing import Dict, List
 
 import torch
 
 from . import config, ir, scheduler
 from .dependencies import WeakDep
+from .pass_utils import (
+    collect_node_to_input_prev_writes,
+    get_all_names,
+    get_all_reads,
+    get_users_from_unfused_nodes,
+)
 from .utils import contains_collective, contains_wait, tuple_sorted
-import logging
-from .pass_utils import collect_node_to_input_prev_writes, get_users_from_unfused_nodes, get_all_reads, get_all_names
 
 overlap_log = torch._logging.getArtifactLogger(__name__, "overlap")
 torch_log = logging.getLogger("torch")
@@ -359,18 +364,26 @@ def reorder_compute_and_comm_for_overlap(
 
 
 def enforce_comm_ordering_for_fsdp(
-    name_to_fused_node: Dict[str, "scheduler.BaseSchedulerNode"], graph_inputs: Dict[str, "Buffer"], snodes: List["scheduler.BaseSchedulerNode"],
+    name_to_fused_node: Dict[str, "scheduler.BaseSchedulerNode"],
+    graph_inputs: Dict[str, "Buffer"],
+    snodes: List["scheduler.BaseSchedulerNode"],
 ) -> List["scheduler.BaseSchedulerNode"]:
-    def _find_all_recursive_deps_of_node_up_to_the_graph_input(snode, collected_node_set):
+    def _find_all_recursive_deps_of_node_up_to_the_graph_input(
+        snode, collected_node_set
+    ):
         collected_node_set.add(snode)
         for dep in get_all_reads(snode):
             if dep.name not in graph_inputs:
                 dep_node = name_to_fused_node[dep.name]
                 if dep_node in collected_node_set:
                     continue
-                _find_all_recursive_deps_of_node_up_to_the_graph_input(dep_node, collected_node_set)
+                _find_all_recursive_deps_of_node_up_to_the_graph_input(
+                    dep_node, collected_node_set
+                )
 
-    def _find_all_recursive_users_of_node_down_to_the_target_node_type(snode, target_node_type_check_fn, collected_node_set):
+    def _find_all_recursive_users_of_node_down_to_the_target_node_type(
+        snode, target_node_type_check_fn, collected_node_set
+    ):
         collected_node_set.add(snode)
         if target_node_type_check_fn(snode):
             return
@@ -380,10 +393,14 @@ def enforce_comm_ordering_for_fsdp(
                     continue
                 if isinstance(user.node, scheduler.OutputNode):
                     continue
-                _find_all_recursive_users_of_node_down_to_the_target_node_type(user.node, target_node_type_check_fn, collected_node_set)
+                _find_all_recursive_users_of_node_down_to_the_target_node_type(
+                    user.node, target_node_type_check_fn, collected_node_set
+                )
 
     for snode in snodes:
-        torch_log.warning(f"snode: {snode}, snode.node: {snode.node}, snode.debug_str(): {snode.debug_str()}")
+        torch_log.warning(
+            f"snode: {snode}, snode.node: {snode.node}, snode.debug_str(): {snode.debug_str()}"
+        )
 
     new_order = []
     scheduled = set()
@@ -402,7 +419,10 @@ def enforce_comm_ordering_for_fsdp(
     for snode in snodes:
         if snode in scheduled:
             continue
-        if isinstance(snode.node, ir.FallbackKernel) and snode.node.op_overload is torch.ops.fsdp.all_gather_copy_in.default:
+        if (
+            isinstance(snode.node, ir.FallbackKernel)
+            and snode.node.op_overload is torch.ops.fsdp.all_gather_copy_in.default
+        ):
             # Find the "cast + copy_in + getitem + all_gather + all_gather_wait_tensor + copy_out" block
             collected_node_set = set()
             # torch_log.warning(f"before: len(collected_node_set): {len(collected_node_set)}, collected_node_set: {collected_node_set}")
@@ -414,14 +434,18 @@ def enforce_comm_ordering_for_fsdp(
             _find_all_recursive_users_of_node_down_to_the_target_node_type(
                 snode,
                 lambda sn: (
-                    isinstance(sn.node, ir.ExternKernel) and sn.node.op_overload is torch.ops.fsdp.split_with_sizes_copy.default
+                    isinstance(sn.node, ir.ExternKernel)
+                    and sn.node.op_overload
+                    is torch.ops.fsdp.split_with_sizes_copy.default
                 ),
                 collected_node_set,
             )
             # torch_log.warning(f"after collect users: len(collected_node_set): {len(collected_node_set)}, collected_node_set: {collected_node_set}")
 
             # sort nodes by original buffer order
-            collected_nodes = sorted(list(collected_node_set), key=lambda x: int(x.get_name()[3:]))
+            collected_nodes = sorted(
+                list(collected_node_set), key=lambda x: int(x.get_name()[3:])
+            )
             # # torch_log.warning(f"collected_nodes: {collected_nodes}")
             # copy_out_node = None
             # for n in collected_nodes:
@@ -440,20 +464,25 @@ def enforce_comm_ordering_for_fsdp(
             for i in range(len(collected_nodes) - 1):
                 node = collected_nodes[i]
                 nodes_to_group.append(node)
-                if isinstance(collected_nodes[i+1].node, ir._WaitKernel):
-                    wait_node_idx = i+1
+                if isinstance(collected_nodes[i + 1].node, ir._WaitKernel):
+                    wait_node_idx = i + 1
                     break
             comm_group_node = _create_group_node(nodes_to_group)
 
             # Enforce ordering: previous AllGather's "wait then copy_out" group node must run before next AllGather's "copy_in then AG" group node
             if prev_all_gather_wait_tensor_then_copy_out_node is not None:
-                comm_group_node.add_fake_dep(WeakDep(prev_all_gather_wait_tensor_then_copy_out_node.get_name()))
+                comm_group_node.add_fake_dep(
+                    WeakDep(prev_all_gather_wait_tensor_then_copy_out_node.get_name())
+                )
 
             # Group "all_gather_wait_tensor + copy_out" into one GroupedSchedulerNode
             nodes_to_group = collected_nodes[wait_node_idx:]
             wait_group_node = _create_group_node(nodes_to_group)
             prev_all_gather_wait_tensor_then_copy_out_node = wait_group_node
-        elif isinstance(snode.node, ir.FallbackKernel) and snode.node.op_overload is torch.ops.fsdp.chunk_cat.default:
+        elif (
+            isinstance(snode.node, ir.FallbackKernel)
+            and snode.node.op_overload is torch.ops.fsdp.chunk_cat.default
+        ):
             # Find the "reduce_scatter copy-in + reduce_scatter comm + reduce_scatter wait" block
             collected_node_set = set()
             _find_all_recursive_users_of_node_down_to_the_target_node_type(
@@ -461,12 +490,15 @@ def enforce_comm_ordering_for_fsdp(
                 lambda sn: (
                     isinstance(sn.node, ir._WaitKernel)
                     and isinstance(sn.node.inputs[0], ir._CollectiveKernel)
-                    and sn.node.inputs[0].op_overload is torch.ops._c10d_functional.reduce_scatter_tensor.default
+                    and sn.node.inputs[0].op_overload
+                    is torch.ops._c10d_functional.reduce_scatter_tensor.default
                 ),
                 collected_node_set,
             )
             # sort nodes by original buffer order
-            collected_nodes = sorted(list(collected_node_set), key=lambda x: int(x.get_name()[3:]))
+            collected_nodes = sorted(
+                list(collected_node_set), key=lambda x: int(x.get_name()[3:])
+            )
 
             # Group "reduce_scatter copy-in + reduce_scatter comm" into one GroupedSchedulerNode
             nodes_to_group = []
@@ -475,9 +507,9 @@ def enforce_comm_ordering_for_fsdp(
             for i in range(len(collected_nodes) - 1):
                 node = collected_nodes[i]
                 nodes_to_group.append(node)
-                if isinstance(collected_nodes[i+1].node, ir._WaitKernel):
-                    wait_node = collected_nodes[i+1]
-                    wait_node_idx = i+1
+                if isinstance(collected_nodes[i + 1].node, ir._WaitKernel):
+                    wait_node = collected_nodes[i + 1]
+                    wait_node_idx = i + 1
                     break
             assert wait_node is not None
             comm_group_node = _create_group_node(nodes_to_group)
@@ -491,7 +523,10 @@ def enforce_comm_ordering_for_fsdp(
 
             # Create mapping from RS copy-in node to comm node and RS wait node
             chunk_cat_node = comm_group_node.snodes[0]
-            rs_copyin_to_comm_and_wait[chunk_cat_node.get_name()] = (comm_group_node, wait_group_node)
+            rs_copyin_to_comm_and_wait[chunk_cat_node.get_name()] = (
+                comm_group_node,
+                wait_group_node,
+            )
         else:
             scheduled.add(snode)
             new_order.append(snode)
@@ -525,14 +560,22 @@ def enforce_comm_ordering_for_fsdp(
             return dep_chain
         for dep in get_all_reads(snode):
             dep_name = dep.name
-            if dep_name in graph_inputs:  # for now, we don't count distance to graph inputs
+            if (
+                dep_name in graph_inputs
+            ):  # for now, we don't count distance to graph inputs
                 continue
             if dep_name not in graph_inputs:
-                upstream_dep_chain = _get_dep_chain(dep_name, dist-1)
+                upstream_dep_chain = _get_dep_chain(dep_name, dist - 1)
                 dep_chain.update(upstream_dep_chain)
         return dep_chain
 
-    recursive_deps_of_rs_copyin = {n: sorted(list(_get_dep_chain(n, dist=2)), key=lambda name: int(name.split("_")[0][3:])) for n in rs_copyin_to_comm_and_wait.keys()}
+    recursive_deps_of_rs_copyin = {
+        n: sorted(
+            list(_get_dep_chain(n, dist=2)),
+            key=lambda name: int(name.split("_")[0][3:]),
+        )
+        for n in rs_copyin_to_comm_and_wait.keys()
+    }
 
     new_order2 = []
     scheduled = set()
@@ -556,15 +599,20 @@ def enforce_comm_ordering_for_fsdp(
                     dep_node = name_to_fused_node[dep_name]
                     all_reads_of_dep = set(x.name for x in get_all_reads(dep_node))
                     input_prev_writes_of_dep = node_to_input_prev_writes[dep_node]
-                    if (
-                        any(name in all_reads_of_dep for name in user_names)
-                        and all(prev_write_name in scheduled for prev_write_name in input_prev_writes_of_user)
+                    if any(name in all_reads_of_dep for name in user_names) and all(
+                        prev_write_name in scheduled
+                        for prev_write_name in input_prev_writes_of_user
                     ):
                         _schedule_node(user.node, new_order2, scheduled)
-                    if all(prev_write_name in scheduled for prev_write_name in input_prev_writes_of_dep):
+                    if all(
+                        prev_write_name in scheduled
+                        for prev_write_name in input_prev_writes_of_dep
+                    ):
                         _schedule_node(dep_node, new_order2, scheduled)
                         if rs_copyin_name in scheduled:
-                            rs_comm_node, rs_wait_node = rs_copyin_to_comm_and_wait[rs_copyin_name]
+                            rs_comm_node, rs_wait_node = rs_copyin_to_comm_and_wait[
+                                rs_copyin_name
+                            ]
                             _schedule_node(rs_comm_node, new_order2, scheduled)
                             _schedule_node(rs_wait_node, new_order2, scheduled)
     return new_order2
