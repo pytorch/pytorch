@@ -5,7 +5,6 @@ from typing import List
 import torch
 import torch.fx
 import torch.nn as nn
-
 from functorch.compile import make_boxed_func
 from torch._functorch.compilers import aot_module
 from torch._inductor.decomposition import select_decomp_table
