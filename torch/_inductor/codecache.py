@@ -1497,9 +1497,8 @@ supported_vec_isa_list = [VecAVX512(), VecAVX2(), VecNEON()]
 def valid_vec_isa_list() -> List[VecISA]:
     isa_list: List[VecISA] = []
     if sys.platform == "darwin" and platform.processor() == "arm":
-        return isa_list.append(VecNEON())
+        isa_list.append(VecNEON())
 
-    cur_os = sys.platform
     if sys.platform not in ["linux", "win32"]:
         return isa_list
 
