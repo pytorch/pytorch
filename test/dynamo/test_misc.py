@@ -8308,12 +8308,19 @@ def ___make_guard_fn():
             )
 
         @torch.compile(backend="aot_eager", fullgraph=True)
-        def f1(x):
-            return torch.ops.test_out_variant_custom_op.split_with_sizes_copy(x)
+        def f1(all_gather_output, all_gather_input_split_sizes, dim, out):
+            return torch.ops.test_out_variant_custom_op.split_with_sizes_copy(all_gather_output, all_gather_input_split_sizes, dim, out)
 
-        x = torch.zeros(100, dtype=torch.int64)
-        f1(x)
-
+        all_gather_output = torch.randn(2, 272)
+        all_gather_input_split_sizes = [128, 8, 128, 8]
+        dim = 1
+        out = [
+            torch.randn(2, 128),
+            torch.randn(2, 8),
+            torch.randn(2, 128),
+            torch.randn(2, 8),
+        ]
+        f1(all_gather_output, all_gather_input_split_sizes, dim, out)
 
         lib.define(
             "chunk_cat(Tensor[] tensors, int dim, int num_chunks, *, Tensor(a!) out) -> ()"
@@ -8334,7 +8341,24 @@ def ___make_guard_fn():
             return torch.ops.test_out_variant_custom_op.chunk_cat(x)
 
         x = torch.zeros(100, dtype=torch.int64)
+        tensors = [
+            torch.randn(2, 128),
+            torch.randn(2, 8),
+            torch.randn(2, 128),
+            torch.randn(2, 8),
+        ]
         f2(x)
+
+        [rank0]:W2024-06-19 11:24:41,153.153000 140256047269440 torch/distributed/_composable/fsdp/_fsdp_collectives.py:141] t.shape: torch.Size([16, 16])
+        [rank0]:W2024-06-19 11:24:41,153.153000 140256047269440 torch/distributed/_composable/fsdp/_fsdp_collectives.py:141] t.shape: torch.Size([16])
+        [rank0]:W2024-06-19 11:24:41,153.153000 140256047269440 torch/distributed/_composable/fsdp/_fsdp_collectives.py:141] t.shape: torch.Size([16, 16])
+        [rank0]:W2024-06-19 11:24:41,153.153000 140256047269440 torch/distributed/_composable/fsdp/_fsdp_collectives.py:141] t.shape: torch.Size([16])
+        [rank0]:W2024-06-19 11:24:41,153.153000 140256047269440 torch/distributed/_composable/fsdp/_fsdp_collectives.py:142] dim: 0
+        [rank0]:W2024-06-19 11:24:41,153.153000 140256047269440 torch/distributed/_composable/fsdp/_fsdp_collectives.py:143] num_chunks: 2
+        [rank0]:W2024-06-19 11:24:41,153.153000 140256047269440 torch/distributed/_composable/fsdp/_fsdp_collectives.py:144] out.shape: torch.Size([2, 272])
+
+
+        
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_runtime_assert_replacement(self):
