@@ -361,9 +361,8 @@ def _get_default_config_bwd(query) -> Tuple[int, int, int, int]:
             return (32, 64, 4, 1)
         return (32, 128, 4, 3)
     elif torch.cuda.get_device_capability() >= (8, 0):  # A100
-        return (64, 64, 4, 1)
         if head_dim == 64:
-            return (32, 128, 4, 3)
+            return (32, 128, 4, 1)
         elif head_dim == 128:
             return (64, 128, 8, 3)
         else:
