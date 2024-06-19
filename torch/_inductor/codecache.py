@@ -1297,23 +1297,10 @@ class VecISA:
     # In fbcode however, we are using the same compiler for pytorch and for inductor codegen,
     # making the runtime check unnecessary.
     _avx_code = """
-#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON)
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
-#endif
-
-#ifdef __APPLE__
-// Fix Mac OS UT failed.
-__attribute__((aligned(64))) float in_out_ptr0[16] = {0.0};
-#else
-#if defined(_WIN32)
-#define __at_align__ __declspec(align(64))
-#else
-#define __at_align__ __attribute__((aligned(64)))
-#endif
 
 __at_align__ float in_out_ptr0[16] = {0.0};
-#endif
 
 extern "C" void __avx_chk_kernel() {
     auto tmp0 = at::vec::Vectorized<float>(1);
