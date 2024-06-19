@@ -3203,8 +3203,11 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         afile = str(dirpath / "standalone_halide_runtime.a")
         sofile = str(dirpath / libname)
         if not os.path.exists(donefile):
-            import filelock
-            import halide as hl  # type: ignore[import-untyped]
+            try:
+                import filelock
+                import halide as hl  # type: ignore[import-untyped]
+            except ImportError as e:
+                raise RuntimeError("requires halide/filelock") from e
 
             with filelock.FileLock(lockfile, LOCK_TIMEOUT):
                 if not os.path.exists(donefile):

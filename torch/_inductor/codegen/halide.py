@@ -278,7 +278,7 @@ class HalideOverrides(OpOverrides):
 
     @staticmethod
     def where(a, b, c):
-        return f"hl.select({a}, {b}, {c})"
+        return f"hl.select({a}, {b}, hl.cast({b.name}.type(), {c}))"
 
     @staticmethod
     def cos(x):
@@ -1100,10 +1100,6 @@ class HalideKernel(SIMDKernel):
         if isinstance(value, tuple):
             assert reduction_type == "welford_combine"
             raise NotImplementedError("welford_combine")
-            # self.cse.reduction_cache[
-            #     cache_key
-            # ] = result_tuple = self.welford_combine_impl(*value)
-            # return result_tuple
 
         assert isinstance(value, HalideCSEVariable) and value.used_dims is not None
         reduction_vars = {*self.reduction_renames}
@@ -1387,9 +1383,23 @@ class HalideKernel(SIMDKernel):
 
         code.do_unindent(2)
         code.splice(
-            """
+            f"""
             if __name__ == "__main__":
                 hl.main()
+            else:
+                hl.load_plugin({HalideCodeCache.find_libautoschedule(meta.scheduler)!r})
+                target = hl.Target({meta.target!r})
+                autoscheduler = hl.AutoschedulerParams({meta.scheduler!r}, {meta.scheduler_flags!r})
+                with hl.GeneratorContext(target, autoscheduler):
+                    gen = Kernel()
+                    pipeline = gen._build_pipeline()
+                    # gen.compile_to_callable() does not run the autoscheduler
+                    pipeline.apply_autoscheduler(target, autoscheduler)
+                    kernel = pipeline.compile_to_callable([
+                            gen._get_input_parameter(a.name)._to_argument()
+                            for a in gen._get_arginfos()
+                            if a.dir == hl.ArgInfoDirection.Input
+                        ], target)
             """
         )
         return code.getvalue()
