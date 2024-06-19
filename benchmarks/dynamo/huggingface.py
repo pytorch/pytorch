@@ -7,7 +7,10 @@ import subprocess
 import sys
 import warnings
 
-from common import BenchmarkRunner, download_retry_decorator, main, reset_rng_state
+try:
+    from .common import BenchmarkRunner, download_retry_decorator, main, reset_rng_state
+except ImportError:
+    from common import BenchmarkRunner, download_retry_decorator, main, reset_rng_state
 
 import torch
 

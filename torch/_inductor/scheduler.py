@@ -28,6 +28,7 @@ from typing import (
 import sympy
 
 import torch
+import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
@@ -36,7 +37,7 @@ from torch.utils._triton import has_triton
 
 from . import comms, config, dependencies, ir, metrics
 from .codecache import write_text
-from .codegen.common import get_scheduling_for_device, Kernel
+from .codegen.common import BackendFeature, get_scheduling_for_device, Kernel
 from .comm_analysis import estimate_nccl_collective_runtime
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
 from .ir import ComputedBuffer, MultiOutput, MultiOutputLayout
@@ -62,107 +63,10 @@ log = logging.getLogger(__name__)
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 
 
-class WhyNoFuse:
-    # TODO when we drop support for Python < 3.10, we can use
-    # @dataclass(slots=True) instead of manually specifying __slots__.
-    __slots__ = ["node1", "node2", "reason", "args"]
-    reason: str
-    args: Tuple[Any, ...]
-
-    def __init__(self, node1: "BaseSchedulerNode", node2: "BaseSchedulerNode"):
-        self.node1 = node1
-        self.node2 = node2
-
-    def __call__(self, reason: str, *args: Any) -> None:
-        self.reason = reason
-        self.args = args
-        fusion_log.debug(self)
-
-    def __str__(self) -> str:
-        return f"cannot fuse {self.node1.get_name()} with {self.node2.get_name()}: " + (
-            self.reason % self.args
-        )
-
-
-def pformat(obj: Any) -> str:
-    if isinstance(obj, set):
-        # pformat has trouble with sets of sympy exprs
-        obj = sorted(obj, key=str)
-    result = pprint.pformat(obj, indent=4)
-    if "\n" in result:
-        return f"\n{textwrap.indent(result, ' '*4)}"
-    return result
-
-
-class OutputNode:
-    def __init__(self, dep: StarDep) -> None:
-        self.unmet_dependencies = {dep}
-        self.inverse_users: List[BaseSchedulerNode] = []
-
-    def is_reduction(self) -> bool:
-        return False
-
-    def get_inputs_that_alias_output(self) -> Sequence[str]:
-        return ()
-
-    def get_name(self) -> str:
-        return "OUTPUT"
-
-    __repr__ = get_name
-
-
-def _prune_redundant_deps(
-    node: "BaseSchedulerNode", name_to_fused_node: Dict[str, "BaseSchedulerNode"]
-) -> None:
-    """
-    Prunes weakdeps intended for mutation ordering
-    on an upstream fused node if after fusion there is another dependency
-    on the fused upstream node, making the weakdep redundant
-
-    In essence this enforces an ordering on fusions. As fusions occur, weakdeps will
-    be incrementally removed, enabling other fusions, ensuring they are fused in order.
-    """
-    name_to_dep_count: Counter[str] = collections.Counter()
-
-    for dep in node.unmet_dependencies:
-        if not isinstance(dep, WeakDep):
-            name_to_dep_count[name_to_fused_node[dep.name].get_name()] += 1
-
-    def should_prune(dep: Dep) -> bool:
-        if isinstance(dep, WeakDep):
-            is_redundant = (
-                name_to_dep_count[name_to_fused_node[dep.name].get_name()] > 0
-            )
-            # These can occur because fused nodes always gather deps from their snodes
-            # If B has a weakdep on A
-            # B gets fused with C, then any time BC is fused, the weakdep will reappear
-            is_self_dep = name_to_fused_node[dep.name] == node
-            return is_redundant or is_self_dep
-        else:
-            return False
-
-    deps_to_prune = {dep for dep in node.unmet_dependencies if should_prune(dep)}
-
-    if deps_to_prune:
-        node.unmet_dependencies = node.unmet_dependencies - deps_to_prune
-        node.set_read_writes(node.read_writes.remove_reads(deps_to_prune))
-
-
-# TODO(xmfan): reuse an existing mapping for this if it exists, or formalize this into ir.py:ExternKernel
-kernel_name_to_op = {
-    "extern_kernels.convolution": torch.ops.aten.convolution,
-    "extern_kernels.mm": torch.ops.aten.mm,
-    "extern_kernels.bmm": torch.ops.aten.bmm,
-    "extern_kernels.addmm": torch.ops.aten.addmm,
-}
-
-
 class BaseSchedulerNode:
     group: Tuple[torch.device, Tuple[Tuple[sympy.Expr, ...], ...]]
     read_writes: dependencies.ReadWrites
     unmet_dependencies: Set[Dep]
-    # Processed deps used while scoring fusion
-    read_and_write_deps_with_hint: Set[Tuple[Dep, int]]
 
     def __init__(self, scheduler: "Scheduler", node: ir.Buffer) -> None:
         self.scheduler: Scheduler = scheduler
@@ -203,6 +107,21 @@ class BaseSchedulerNode:
 
     def debug_str_extra(self) -> str:
         return ""
+
+    def debug_str_short(self) -> str:
+        maybe_data = getattr(self.node, "data", None)
+        data_str = ""
+        if isinstance(maybe_data, torch._inductor.ir.Pointwise):
+            data_str = ", " + maybe_data.str_helper(
+                [maybe_data.get_size()], shorten=False, multiline=False
+            )
+        elif isinstance(maybe_data, torch._inductor.ir.Reduction):
+            data_str = ", " + maybe_data.str_helper(
+                [maybe_data.get_reduction_size(), maybe_data.get_reduction_type()],
+                shorten=False,
+                multiline=False,
+            )
+        return f"{self}{data_str}"
 
     def log_details(self) -> None:
         log.info(
@@ -250,25 +169,6 @@ class BaseSchedulerNode:
         self.read_writes = rw
         self.unmet_dependencies = self.read_writes.reads
         self.prune_deps()
-
-        # read_and_write_deps_with_hint are a summary of read_writes used by
-        # score_fusion_memory()
-        def dep_size_hint(dep: Dep) -> int:
-            try:
-                if dep.has_unbacked_symbols():
-                    return 0
-                return dep.numbytes_hint()
-            except KeyError:
-                # In at least one test (test/inductor/test_torchbind.py) we
-                # create a StarDep that doesn't exist in the graph and calling
-                # `has_unbacked_symbols()` throws an error.
-                return 0
-
-        self.read_and_write_deps_with_hint = {
-            (dep, hint)
-            for dep in itertools.chain(self.read_writes.reads, self.read_writes.writes)
-            if (hint := dep_size_hint(dep)) > 0
-        }
 
     def op_counts(self) -> Counter[str]:
         return self.read_writes.op_counts
@@ -370,6 +270,7 @@ class BaseSchedulerNode:
         if (
             isinstance(self, (SchedulerNode,))
             and config.inplace_buffers
+            and V.graph.has_feature(self.get_device(), BackendFeature.INPLACE_BUFFERS)
             and (
                 not isinstance(V.kernel, torch._inductor.codegen.simd.SIMDKernel)
                 or getattr(V.kernel, "mutations", None) is not None
@@ -725,6 +626,101 @@ class BaseSchedulerNode:
         return None
 
 
+class WhyNoFuse:
+    # TODO when we drop support for Python < 3.10, we can use
+    # @dataclass(slots=True) instead of manually specifying __slots__.
+    __slots__ = ["node1", "node2", "reason", "args"]
+    reason: str
+    args: Tuple[Any, ...]
+
+    def __init__(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode):
+        self.node1 = node1
+        self.node2 = node2
+
+    def __call__(self, reason: str, *args: Any) -> None:
+        self.reason = reason
+        self.args = args
+        fusion_log.debug(self)
+
+    def __str__(self) -> str:
+        return f"cannot fuse {self.node1.get_name()} with {self.node2.get_name()}: " + (
+            self.reason % self.args
+        )
+
+
+def pformat(obj: Any) -> str:
+    if isinstance(obj, set):
+        # pformat has trouble with sets of sympy exprs
+        obj = sorted(obj, key=str)
+    result = pprint.pformat(obj, indent=4)
+    if "\n" in result:
+        return f"\n{textwrap.indent(result, ' '*4)}"
+    return result
+
+
+class OutputNode:
+    def __init__(self, dep: StarDep) -> None:
+        self.unmet_dependencies = {dep}
+        self.inverse_users: List[BaseSchedulerNode] = []
+
+    def is_reduction(self) -> bool:
+        return False
+
+    def get_inputs_that_alias_output(self) -> Sequence[str]:
+        return ()
+
+    def get_name(self) -> str:
+        return "OUTPUT"
+
+    __repr__ = get_name
+
+
+def _prune_redundant_deps(
+    node: BaseSchedulerNode, name_to_fused_node: Dict[str, BaseSchedulerNode]
+) -> None:
+    """
+    Prunes weakdeps intended for mutation ordering
+    on an upstream fused node if after fusion there is another dependency
+    on the fused upstream node, making the weakdep redundant
+
+    In essence this enforces an ordering on fusions. As fusions occur, weakdeps will
+    be incrementally removed, enabling other fusions, ensuring they are fused in order.
+    """
+    name_to_dep_count: Counter[str] = collections.Counter()
+
+    for dep in node.unmet_dependencies:
+        if not isinstance(dep, WeakDep):
+            name_to_dep_count[name_to_fused_node[dep.name].get_name()] += 1
+
+    def should_prune(dep: Dep) -> bool:
+        if isinstance(dep, WeakDep):
+            is_redundant = (
+                name_to_dep_count[name_to_fused_node[dep.name].get_name()] > 0
+            )
+            # These can occur because fused nodes always gather deps from their snodes
+            # If B has a weakdep on A
+            # B gets fused with C, then any time BC is fused, the weakdep will reappear
+            is_self_dep = name_to_fused_node[dep.name] == node
+            return is_redundant or is_self_dep
+        else:
+            return False
+
+    deps_to_prune = {dep for dep in node.unmet_dependencies if should_prune(dep)}
+
+    if deps_to_prune:
+        node.unmet_dependencies = node.unmet_dependencies - deps_to_prune
+        node.set_read_writes(node.read_writes.remove_reads(deps_to_prune))
+
+
+# TODO(xmfan): reuse an existing mapping for this if it exists, or formalize this into ir.py:ExternKernel
+kernel_name_to_op = {
+    "extern_kernels.convolution": torch.ops.aten.convolution,
+    "extern_kernels.mm": torch.ops.aten.mm,
+    "extern_kernels.bmm": torch.ops.aten.bmm,
+    "extern_kernels.addmm": torch.ops.aten.addmm,
+}
+
+
 class ExternKernelSchedulerNode(BaseSchedulerNode):
     def debug_str_extra(self) -> str:
         return f"{self.get_name()}.node.kernel = {getattr(self.node, 'python_kernel_name', None)}"
@@ -739,36 +735,6 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
 
 class NopKernelSchedulerNode(BaseSchedulerNode):
     pass
-
-
-def debug_triton_code(node: Union["SchedulerNode", "FusedSchedulerNode"]) -> List[str]:
-    lines = []
-    multi_template = node.get_template_node()
-    assert multi_template is None or isinstance(multi_template, ir.MultiTemplateBuffer)
-    if multi_template and multi_template.make_kernel_render is None:
-        lines.append(f"{node.get_name()} Unfinalized multi template buffer")
-    else:
-        from torch._inductor.codegen.cuda_combined_scheduling import (
-            CUDACombinedScheduling,
-        )
-        from torch._inductor.codegen.triton import TritonScheduling
-
-        snodes = (node,) if isinstance(node, SchedulerNode) else node.snodes
-        device = snodes[0].get_device()
-        backend = node.scheduler.get_backend(device)
-        assert isinstance(backend, (TritonScheduling, CUDACombinedScheduling))
-        V.graph.scheduler.current_device = device
-
-        # Don't increment kernel count when generating debug string.
-        # This will confuse some unit tests that check the number of
-        # generated kernels.
-        old_generated_kernel_count = metrics.generated_kernel_count
-        triton_code = backend.generate_kernel_code_from_nodes(snodes).strip()
-        metrics.generated_kernel_count = old_generated_kernel_count
-
-        lines.append(f"{node.get_name()} Triton code:")
-        lines.append(textwrap.indent(triton_code, "    "))
-    return lines
 
 
 class SchedulerNode(BaseSchedulerNode):
@@ -996,6 +962,10 @@ class FusedSchedulerNode(BaseSchedulerNode):
             lines.extend(debug_triton_code(self))
 
         return textwrap.indent("\n".join(lines).rstrip(), "    ")
+
+    def debug_str_short(self) -> str:
+        snodes_str = [node.debug_str_short() for node in self.snodes]
+        return f"{self}, snodes: {snodes_str}"
 
     def set_last_usage(
         self, future_used_buffers: Set[str], mutation_real_name: Dict[str, str]
@@ -1329,8 +1299,10 @@ def pick_loop_order(
             # 1-sizes don't matter, just move them to the end
             return cmp(sizes[a] == 1, sizes[b] == 1)
 
-        stride_len_a = [sl[a] for sl in stride_lengths]
-        stride_len_b = [sl[b] for sl in stride_lengths]
+        # Take abs, otherwise flipped dimensions are treated as smaller
+        # strides than contiguous dims
+        stride_len_a = [abs(sl[a]) for sl in stride_lengths]
+        stride_len_b = [abs(sl[b]) for sl in stride_lengths]
 
         # equivalent to
         # np.logical_or(stride_lengths[:, b] == 0, stride_lengths[:, a] < stride_lengths[:, b]).all()
@@ -1393,9 +1365,12 @@ _post_grad_graph_counter = itertools.count()
 
 
 class Scheduler:
+    __dep_size_hint_cache: Dict[Dep, int]
+
     @dynamo_timed
     def __init__(self, nodes: List[ir.Buffer]) -> None:
         super().__init__()
+        self.__dep_size_hint_cache = {}
         V.graph.scheduler = self
         self.backends: Dict[torch.device, BaseScheduling] = {}
         self.post_grad_graph_id = next(_post_grad_graph_counter)
@@ -1638,8 +1613,9 @@ class Scheduler:
         # generate a dependency because if we do, Inductor will start trying
         # to free the unbacked int but that's pointless
         for name, val in V.graph.graph_inputs.items():
-            if isinstance(val, sympy.Symbol):
-                unbacked_symbol_to_origin_node[val] = None
+            if isinstance(val, sympy.Expr):
+                for fs in val.free_symbols:
+                    unbacked_symbol_to_origin_node[fs] = None
 
         for node in self.nodes:
             log.debug("scheduling %s", node.node)
@@ -2102,6 +2078,10 @@ class Scheduler:
             - self.score_fusion(): assigns priority to a given fusion
         """
         fused_nodes = set(self.nodes)
+        if fusion_log.isEnabledFor(logging.DEBUG):
+            fusion_log.debug("fuse_nodes_once, candidates:")
+            for node in fused_nodes:
+                fusion_log.debug("  " + node.debug_str_short())  # noqa: G003
         for node1, node2 in self.get_possible_fusions():
             node1 = self.name_to_fused_node[node1.get_first_name()]
             node2 = self.name_to_fused_node[node2.get_first_name()]
@@ -2504,6 +2484,22 @@ class Scheduler:
             proximity_score,
         )
 
+    def dep_size_hint(self, dep: Dep) -> int:
+        res = 0
+        if dep not in self.__dep_size_hint_cache:
+            try:
+                if not dep.has_unbacked_symbols():
+                    res = dep.numbytes_hint()
+            except KeyError:
+                # In at least one test (test/inductor/test_torchbind.py) we
+                # create a StarDep that doesn't exist in the graph and calling
+                # `has_unbacked_symbols()` throws an error.
+                pass
+            self.__dep_size_hint_cache[dep] = res
+        else:
+            res = self.__dep_size_hint_cache[dep]
+        return res
+
     def score_fusion_memory(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> int:
@@ -2511,11 +2507,10 @@ class Scheduler:
         The first term in our fusion score that estimates number of saved
         memory operations.
         """
-        return sum(
-            hint
-            for dep, hint in node1.read_and_write_deps_with_hint
-            & node2.read_and_write_deps_with_hint
+        common_memory_deps = (node1.read_writes.reads | node1.read_writes.writes) & (
+            node2.read_writes.reads | node2.read_writes.writes
         )
+        return sum(self.dep_size_hint(dep) for dep in common_memory_deps)
 
     def get_possible_fusions_with_highest_priority(
         self, possible_fusions: List[Tuple[BaseSchedulerNode, BaseSchedulerNode]]
@@ -2772,9 +2767,6 @@ class Scheduler:
                 assert isinstance(node, NopKernelSchedulerNode)
                 node.allocate()
 
-            if config.debug_check_inf_and_nan:
-                V.graph.wrapper_code.generate_inf_and_nan_checker(node)
-
             if config.triton.debug_sync_kernel:
                 self.get_backend(device).codegen_sync()
 
@@ -2799,6 +2791,11 @@ class Scheduler:
 
 
 class BaseScheduling:
+    @classmethod
+    def get_backend_features(cls, device: torch.device) -> Sequence[BackendFeature]:
+        """Return a set of .codegen.common.BackendFeature()"""
+        return ()
+
     def can_fuse_vertical(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
@@ -2889,3 +2886,33 @@ class BaseScheduling:
         The smaller is with higher priority.
         """
         return 0
+
+
+def debug_triton_code(node: Union[SchedulerNode, FusedSchedulerNode]) -> List[str]:
+    lines = []
+    multi_template = node.get_template_node()
+    assert multi_template is None or isinstance(multi_template, ir.MultiTemplateBuffer)
+    if multi_template and multi_template.make_kernel_render is None:
+        lines.append(f"{node.get_name()} Unfinalized multi template buffer")
+    else:
+        from torch._inductor.codegen.cuda_combined_scheduling import (
+            CUDACombinedScheduling,
+        )
+        from .codegen.simd import SIMDScheduling
+
+        snodes = (node,) if isinstance(node, SchedulerNode) else node.snodes
+        device = snodes[0].get_device()
+        backend = node.scheduler.get_backend(device)
+        assert isinstance(backend, (SIMDScheduling, CUDACombinedScheduling))
+        V.graph.scheduler.current_device = device
+
+        # Don't increment kernel count when generating debug string.
+        # This will confuse some unit tests that check the number of
+        # generated kernels.
+        old_generated_kernel_count = metrics.generated_kernel_count
+        triton_code = backend.generate_kernel_code_from_nodes(snodes).strip()
+        metrics.generated_kernel_count = old_generated_kernel_count
+
+        lines.append(f"{node.get_name()} Triton code:")
+        lines.append(textwrap.indent(triton_code, "    "))
+    return lines

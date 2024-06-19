@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import copy
 import dataclasses
 import functools
@@ -18,6 +19,8 @@ from typing import (
     Union,
 )
 
+from torch._library.fake_class_registry import FakeScriptObject
+
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 
 if TYPE_CHECKING:
@@ -33,10 +36,13 @@ import torch
 import torch.utils._pytree as pytree
 from torch.export._tree_utils import is_equivalent, reorder_kwargs
 from torch.fx._compatibility import compatibility
+
+from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.experimental.proxy_tensor import maybe_disable_fake_tensor_mode
 
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.infra.pass_manager import PassManager
+from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
 from .graph_signature import (  # noqa: F401
     _sig_to_specs,
@@ -213,7 +219,7 @@ class ExportedProgram:
             Dict[str, torch.Tensor]
         ] = None,  # TODO: deprecate this
         constants: Optional[
-            Dict[str, Union[torch.Tensor, torch._C.ScriptObject]]
+            Dict[str, Union[torch.Tensor, FakeScriptObject, torch._C.ScriptObject]]
         ] = None,
     ):
         # Remove codegen related things from the graph. It should just be a flat graph.
@@ -335,6 +341,7 @@ class ExportedProgram:
     @property
     @compatibility(is_backward_compatible=False)
     def dialect(self) -> str:
+        assert self._verifier is not None
         return self._verifier.dialect
 
     @property
@@ -478,9 +485,9 @@ class ExportedProgram:
         return res
 
     def __str__(self) -> str:
-        graph_module = self.graph_module.print_readable(print_output=False).replace(
-            "\n", "\n    "
-        )
+        graph_module = self.graph_module.print_readable(
+            print_output=False, colored=True
+        ).replace("\n", "\n    ")
         string = (
             "ExportedProgram:\n"
             f"    {graph_module}\n"
@@ -533,9 +540,6 @@ class ExportedProgram:
         from torch._export.passes.lift_constants_pass import (
             ConstantAttrMap,
             lift_constants_pass,
-        )
-        from torch._export.passes.replace_sym_size_ops_pass import (
-            _replace_sym_size_ops_pass,
         )
         from torch._functorch.aot_autograd import aot_export_module
 
@@ -658,7 +662,28 @@ class ExportedProgram:
             assert k not in self.constants
             self.constants[k] = v
 
-        _replace_sym_size_ops_pass(gm)
+        from torch._dynamo import config as _dynamo_config
+        from torch._export.passes._node_metadata_hook import (
+            _node_metadata_hook,
+            _set_node_metadata_hook,
+        )
+
+        if not _dynamo_config.do_not_emit_runtime_asserts:
+            stack_trace = (
+                'File "torch/fx/passes/runtime_assert.py", line 24, '
+                "in insert_deferred_runtime_asserts"
+            )
+            shape_env = _get_shape_env(gm)
+            if shape_env is not None:
+                with _set_node_metadata_hook(
+                    gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
+                ):
+                    insert_deferred_runtime_asserts(
+                        gm,
+                        shape_env,
+                        f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
+                        export=True,
+                    )
 
         exported_program = ExportedProgram(
             root=gm,
@@ -799,30 +824,31 @@ class ExportedProgram:
         )
 
 
+def _get_shape_env(gm):
+    vals = [
+        node.meta["val"]
+        for node in gm.graph.nodes
+        if node.meta.get("val", None) is not None
+    ]
+    from torch._guards import detect_fake_mode
+
+    fake_mode = detect_fake_mode(vals)
+    if fake_mode is not None:
+        return fake_mode.shape_env
+    for v in vals:
+        if isinstance(v, torch.SymInt):
+            return v.node.shape_env
+
+
 def _get_updated_range_constraints(
     gm: torch.fx.GraphModule,
     old_range_constraints: "Optional[Dict[sympy.Symbol, Any]]" = None,
     _is_executorch: bool = True,
 ) -> "Dict[sympy.Symbol, Any]":
-    def get_shape_env(gm):
-        vals = [
-            node.meta["val"]
-            for node in gm.graph.nodes
-            if node.meta.get("val", None) is not None
-        ]
-        from torch._guards import detect_fake_mode
-
-        fake_mode = detect_fake_mode(vals)
-        if fake_mode is not None:
-            return fake_mode.shape_env
-        for v in vals:
-            if isinstance(v, torch.SymInt):
-                return v.node.shape_env
-
     # FIXME(tmanlaibaatar) Remove this whole branch once https://github.com/pytorch/pytorch/pull/123764
     if _is_executorch:
         assert old_range_constraints is None
-        shape_env = get_shape_env(gm)
+        shape_env = _get_shape_env(gm)
         if shape_env is None:
             return {}
         range_constraints = {
@@ -840,7 +866,7 @@ def _get_updated_range_constraints(
 
     assert old_range_constraints is not None
 
-    shape_env = get_shape_env(gm)
+    shape_env = _get_shape_env(gm)
     if shape_env is None:
         return {}
 
