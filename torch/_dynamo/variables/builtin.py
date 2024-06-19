@@ -1633,7 +1633,6 @@ class BuiltinVariable(VariableTracker):
         if isinstance(
             obj,
             (
-                variables.DataClassVariable,
                 variables.CustomizedDictVariable,
                 variables.PlacementVariable,
                 variables.UserDefinedObjectVariable,
@@ -1702,6 +1701,9 @@ class BuiltinVariable(VariableTracker):
                     return out
 
             tx.output.side_effects.store_attr(obj, name, val)
+            if name == "_grad":
+                tx.output.side_effects.store_attr(obj, "grad", val)
+
             return val
         elif isinstance(obj, variables.UserDefinedObjectVariable):
             unimplemented(

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import cast, List, Optional, Tuple, Union
 
 import torch
@@ -309,6 +310,8 @@ AdamW.__doc__ = (
         {_capturable_doc}
         {_differentiable_doc}
         {_fused_doc}
+    .. Note::
+        A prototype implementation of Adam and AdamW for MPS supports `torch.float32` and `torch.float16`.
     .. _Decoupled Weight Decay Regularization:
         https://arxiv.org/abs/1711.05101
     .. _On the Convergence of Adam and Beyond:
@@ -661,6 +664,10 @@ def _fused_adamw(
         ),
         _,
     ) in grouped_tensors.items():
+        if device.type == "mps":  # type: ignore[union-attr]
+            assert found_inf is None and grad_scale is None
+            assert not isinstance(lr, Tensor)
+
         device_grad_scale, device_found_inf = None, None
         if grad_scale is not None:
             device_grad_scale = grad_scale_dict.setdefault(

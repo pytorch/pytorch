@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import cProfile
 import inspect
 import io
@@ -23,6 +24,7 @@ from .api import (
     WRAPPED_EXCEPTION,
 )
 from .metadata import MetadataIndex, STATE_DICT_TYPE
+
 
 __all__ = ["find_tensor_shard", "find_state_dict_object"]
 

@@ -68,7 +68,7 @@ thread_local std::array<at::ScalarType, at::COMPILE_TIME_MAX_DEVICE_TYPES>
         at::kBFloat16, // XLA / TPU
         at::ScalarType::Undefined, // Vulkan
         at::ScalarType::Undefined, // Metal
-        at::kBFloat16, // XPU
+        at::kHalf, // XPU
         at::ScalarType::Undefined, // MPS
         at::ScalarType::Undefined, // Meta (tensors with no data)
         at::kBFloat16, // HPU / HABANA
