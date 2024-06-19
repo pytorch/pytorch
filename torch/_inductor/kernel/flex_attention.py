@@ -362,7 +362,6 @@ def _get_default_config_bwd(query) -> Tuple[int, int, int, int]:
         return (32, 128, 4, 3)
     elif torch.cuda.get_device_capability() >= (8, 0):  # A100
         return (64, 64, 4, 1)
-
         if head_dim == 64:
             return (32, 128, 4, 3)
         elif head_dim == 128:
@@ -519,7 +518,6 @@ flex_attention_backward_template = TritonTemplate(
     MATMUL_PRECISION = Q.dtype.element_ty
 
     pid = tl.program_id(0)
-    NUM_Q_BLOCKS = Q_LEN // BLOCK_M2
     NUM_KV_BLOCKS = KV_LEN // BLOCK_N1
 
     off_hz = tl.program_id(2)
@@ -542,7 +540,6 @@ flex_attention_backward_template = TritonTemplate(
     DELTA += off_chz
 
     offs_k = tl.arange(0, BLOCK_DMODEL)
-    MIN_Q_KV_BLOCKS = min(NUM_Q_BLOCKS, NUM_KV_BLOCKS)
 
     if pid >= NUM_KV_BLOCKS:
         # THIS BLOCK DOES DQ
@@ -570,7 +567,7 @@ flex_attention_backward_template = TritonTemplate(
         curr_n = start_n2
         num_steps = KV_LEN // BLOCK_N2
         for blk_idx in range(num_steps):
-            offs_n2= curr_n + tl.arange(0, BLOCK_N2)
+            offs_n2 = curr_n + tl.arange(0, BLOCK_N2)
             kT = tl.load(kT_ptrs)
             vT = tl.load(vT_ptrs)
             qk = tl.dot(q, kT)
@@ -701,7 +698,7 @@ flex_attention_backward_template = TritonTemplate(
         index_n = offs_n1[:, None]
         index_k = offs_k[None, :]
 
-        mask = index_n <= Q_LEN
+        mask = index_n <= KV_LEN
         {{store_output(("off_z", "off_h", "index_n", "index_k"), "dk", "mask", indent_width=8)}}
  """,
 )
