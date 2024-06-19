@@ -128,7 +128,7 @@ std::string get_privateuse1_backend(bool lower_case) {
   auto name_registered =
       privateuse1_backend_name_set.load(std::memory_order_acquire);
   // Guaranteed that if the flag is set, then privateuse1_backend_name has been
-  // set, and will never be written to.
+  // set.
   auto backend_name =
       name_registered ? privateuse1_backend_name : "privateuseone";
   return backend_name;
@@ -143,9 +143,17 @@ void register_privateuse1_backend(const std::string& backend_name) {
       privateuse1_backend_name);
 
   privateuse1_backend_name = backend_name;
-  // Invariant: once this flag is set, privateuse1_backend_name is NEVER written
-  // to.
-  privateuse1_backend_name_set.store(true, std::memory_order_relaxed);
+  // Use unregister_privateuse1_backend to unregister privateuse1
+  privateuse1_backend_name_set.store(true, std::memory_order_release);
+}
+
+void unregister_privateuse1_backend() {
+  // Mutex is used here to prevent other threads from
+  // register_privateuse1_backend at this time, and Release is used to ensure
+  // the order with other Acquire.
+  std::lock_guard<std::mutex> guard(privateuse1_lock);
+  privateuse1_backend_name = "";
+  privateuse1_backend_name_set.store(false, std::memory_order_release);
 }
 
 bool is_privateuse1_backend_registered() {
