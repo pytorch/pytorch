@@ -1,6 +1,6 @@
 import json
 from argparse import ArgumentParser
-from typing import Any, Tuple
+from typing import Any
 
 from github import Auth, Github
 from github.Issue import Issue
@@ -9,8 +9,6 @@ from github.Issue import Issue
 WORKFLOW_LABEL_META = ""  # use meta runners
 WORKFLOW_LABEL_LF = "lf."  # use runners from the linux foundation
 LABEL_TYPE_KEY = "label_type"
-MESSAGE_KEY = "message"
-MESSAGE = ""  # Debug message to return to the caller
 
 
 def parse_args() -> Any:
@@ -50,50 +48,45 @@ def is_exception_branch(branch: str) -> bool:
     return branch.split("/")[0] in {"main", "nightly", "release", "landchecks"}
 
 
-def get_workflow_type(issue: Issue, username: str) -> Tuple[str, str]:
+def get_workflow_type(issue: Issue, username: str) -> str:
     try:
         user_list = issue.get_comments()[0].body.split()
 
         if user_list[0] == "!":
-            MESSAGE = "LF Workflows are disabled for everyone. Using meta runners."
-            return WORKFLOW_LABEL_META, MESSAGE
+            print("LF Workflows are disabled for everyone. Using meta runners.")
+            return WORKFLOW_LABEL_META
         elif user_list[0] == "*":
-            MESSAGE = "LF Workflows are enabled for everyone. Using LF runners."
-            return WORKFLOW_LABEL_LF, MESSAGE
+            print("LF Workflows are enabled for everyone. Using LF runners.")
+            return WORKFLOW_LABEL_LF
         elif username in user_list:
-            MESSAGE = f"LF Workflows are enabled for {username}. Using LF runners."
-            return WORKFLOW_LABEL_LF, MESSAGE
+            print(f"LF Workflows are enabled for {username}. Using LF runners.")
+            return WORKFLOW_LABEL_LF
         else:
-            MESSAGE = f"LF Workflows are disabled for {username}. Using meta runners."
-            return WORKFLOW_LABEL_META, MESSAGE
+            print(f"LF Workflows are disabled for {username}. Using meta runners.")
+            return WORKFLOW_LABEL_META
     except Exception as e:
-        MESSAGE = f"Failed to get determine workflow type. Falling back to meta runners. Exception: {e}"
-        return WORKFLOW_LABEL_META, MESSAGE
+        print(
+            f"Failed to get determine workflow type. Falling back to meta runners. Exception: {e}"
+        )
+        return WORKFLOW_LABEL_META
 
 
 def main() -> None:
     args = parse_args()
 
     if is_exception_branch(args.github_branch):
-        output = {
-            LABEL_TYPE_KEY: WORKFLOW_LABEL_META,
-            MESSAGE_KEY: f"Exception branch: '{args.github_branch}', using meta runners",
-        }
+        print(f"Exception branch: '{args.github_branch}', using meta runners")
+        output = {LABEL_TYPE_KEY: WORKFLOW_LABEL_META}
     else:
         try:
             gh = get_gh_client(args.github_token)
             # The default issue we use - https://github.com/pytorch/test-infra/issues/5132
             issue = get_issue(gh, args.github_repo, args.github_issue)
-            label_type, message = get_workflow_type(issue, args.github_user)
-            output = {
-                LABEL_TYPE_KEY: label_type,
-                MESSAGE_KEY: message,
-            }
+
+            output = {LABEL_TYPE_KEY: get_workflow_type(issue, args.github_user)}
         except Exception as e:
-            output = {
-                LABEL_TYPE_KEY: WORKFLOW_LABEL_META,
-                MESSAGE_KEY: f"Failed to get issue. Falling back to meta runners. Exception: {e}",
-            }
+            print(f"Failed to get issue. Falling back to meta runners. Exception: {e}")
+            output = {LABEL_TYPE_KEY: WORKFLOW_LABEL_META}
 
     json_output = json.dumps(output)
     print(json_output)

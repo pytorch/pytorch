@@ -26,7 +26,6 @@ from torch.distributed.utils import _p_assert
 
 from ._flat_param import FlatParamHandle
 
-
 FLAT_PARAM = "_flat_param"
 
 
