@@ -431,7 +431,7 @@ def tuned_sparse_semi_structured_mm(
     )
 
     if m * n != 0 and use_cutlass_template(layout, m, n, k):
-        CUTLASSGemmTemplate.add_cutlass_gemm_choices(
+        CUTLASS2xGemmTemplate.add_cutlass_gemm_choices(
             choices, layout, [mat1, mat2, mat1_meta], fuseable=True, non_fuseable=True
         )
 
