@@ -631,9 +631,6 @@ variable_list compiled_autograd(
     bool accumulate_grad,
     const edge_list& output_edges) {
   TORCH_CHECK(
-      output_edges.empty() || !accumulate_grad,
-      "specifying inputs= with .backward() not yet implemented for compiled autograd")
-  TORCH_CHECK(
       c10::impl::TorchDispatchModeTLS::stack_len() == 0,
       "TorchDispatchMode not yet implemented for compiled autograd")
   static std::mutex lock;

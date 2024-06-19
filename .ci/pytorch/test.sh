@@ -289,6 +289,9 @@ test_python_shard() {
 
   # Bare --include flag is not supported and quoting for lint ends up with flag not being interpreted correctly
   # shellcheck disable=SC2086
+
+  # modify LD_LIBRARY_PATH to ensure it has the conda env.
+  # This set of tests has been shown to be buggy without it for the split-build
   time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS" --verbose $PYTHON_TEST_EXTRA_OPTION
 
   assert_git_not_dirty
@@ -548,6 +551,11 @@ test_single_dynamo_benchmark() {
 test_inductor_micro_benchmark() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   python benchmarks/gpt_fast/benchmark.py --output "${TEST_REPORTS_DIR}/gpt_fast_benchmark.csv"
+}
+
+test_inductor_halide() {
+  python test/run_test.py --include inductor/test_halide.py --verbose
+  assert_git_not_dirty
 }
 
 test_dynamo_benchmark() {
@@ -1237,11 +1245,10 @@ elif [[ "$TEST_CONFIG" == distributed ]]; then
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     test_rpc
   fi
-elif [[ "$TEST_CONFIG" == deploy ]]; then
-  checkout_install_torchdeploy
-  test_torch_deploy
 elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
   test_inductor_distributed
+elif [[ "${TEST_CONFIG}" == *inductor-halide* ]]; then
+  test_inductor_halide
 elif [[ "${TEST_CONFIG}" == *inductor-micro-benchmark* ]]; then
   test_inductor_micro_benchmark
 elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
