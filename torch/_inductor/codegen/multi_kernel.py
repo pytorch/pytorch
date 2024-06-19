@@ -198,11 +198,12 @@ class MultiKernel:
         for the multi-kernel.
         """
         assert kernel_name == self.kernel_name
-        call_args_list, arg_types = zip(
-            *[kernel.get_call_args() for kernel in self.kernels]
-        )
-        call_args_list = list(call_args_list)
-        arg_types_list = list(arg_types)
+        call_args_list = []
+        arg_types_list = []
+        for kernel in self.kernels:
+            _, call_args, _, arg_types = kernel.args.python_argdefs()
+            call_args_list.append(call_args)
+            arg_types_list.append(arg_types)
 
         all_call_args, arg_types = get_all_call_args(call_args_list, arg_types_list)
         grid: List[Any] = []
@@ -223,12 +224,10 @@ class MultiKernel:
         )
 
         grid = V.graph.wrapper_code.generate_default_grid(kernel_name, grid)
-        current_device = V.graph.scheduler.get_current_device_or_throw()
         V.graph.wrapper_code.generate_kernel_call(
             kernel_name,
             final_call_args,
             grid,
-            current_device.index,
             arg_types=arg_types,
         )
 
