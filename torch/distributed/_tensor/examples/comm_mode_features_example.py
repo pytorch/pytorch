@@ -130,17 +130,17 @@ class CommDebugModeExample:
     def test_MLP_module_tracing(self) -> None:
         """
         Example code to demonstrate CommModeDebug's module level tracing using a MLP model.
-        Prints a table of module level collective tracing information
+        Prints a table of module level collective tracing information and logs table to output.txt
 
         Expected Output
         Global
-        c10d_functional.all_reduce: 1
+        *c10d_functional.all_reduce: 1
         MLPModule
-            c10d_functional.all_reduce: 1
+            *c10d_functional.all_reduce: 1
             MLPModule.net1
             MLPModule.relu
             MLPModule.net2
-            c10d_functional.all_reduce: 1
+            *c10d_functional.all_reduce: 1
         """
 
         device_mesh = DeviceMesh(
@@ -170,42 +170,67 @@ class CommDebugModeExample:
 
         # print the module level collective tracing information
         print(comm_mode.generate_module_tracing_table())
+        comm_mode.log_module_tracing_table_to_file()
 
     def test_transformer_module_tracing(self, is_seq_parallel: bool = False) -> None:
         """
         Example code to demonstrate CommModeDebug's module level tracing using a distributed Transformer model.
-        Prints a table of module level collective tracing information
+        Prints a table of module level collective tracing information and logs table to output.txt
 
         Expected output:
         Global
-        c10d_functional.all_reduce: 6
-        c10d_functional.all_gather_into_tensor: 1
+        *c10d_functional.all_reduce: 6
+        *c10d_functional.all_gather_into_tensor: 1
         Transformer
-            c10d_functional.all_reduce: 6
-            c10d_functional.all_gather_into_tensor: 1
+            *c10d_functional.all_reduce: 6
+            *c10d_functional.all_gather_into_tensor: 1
             Transformer.tok_embeddings
-            c10d_functional.all_reduce: 1
+            *c10d_functional.all_reduce: 1
             Transformer.pos_embeddings
-            c10d_functional.all_reduce: 1
+            *c10d_functional.all_reduce: 1
             Transformer.dropout
             Transformer.layers.0
-            c10d_functional.all_reduce: 2
+            *c10d_functional.all_reduce: 2
             Transformer.layers.0.attention_norm
             Transformer.layers.0.attention
-                c10d_functional.all_reduce: 1
+                *c10d_functional.all_reduce: 1
                 Transformer.layers.0.attention.wq
                 Transformer.layers.0.attention.wk
                 Transformer.layers.0.attention.wv
                 Transformer.layers.0.attention.wo
-                c10d_functional.all_reduce: 1
+                *c10d_functional.all_reduce: 1
                 Transformer.layers.0.attention.resid_dropout
             Transformer.layers.0.ffn_norm
             Transformer.layers.0.feed_forward
-                c10d_functional.all_reduce: 1
+                *c10d_functional.all_reduce: 1
                 Transformer.layers.0.feed_forward.w1
                 Transformer.layers.0.feed_forward.gelu
                 Transformer.layers.0.feed_forward.w2
-                c10d_functional.all_reduce: 1
+                *c10d_functional.all_reduce: 1
+                Transformer.layers.0.feed_forward.resid_dropout
+            Transformer.layers.1
+            *c10d_functional.all_reduce: 2
+            Transformer.layers.1.attention_norm
+            Transformer.layers.1.attention
+                *c10d_functional.all_reduce: 1
+                Transformer.layers.1.attention.wq
+                Transformer.layers.1.attention.wk
+                Transformer.layers.1.attention.wv
+                Transformer.layers.1.attention.wo
+                *c10d_functional.all_reduce: 1
+                Transformer.layers.1.attention.resid_dropout
+            Transformer.layers.1.ffn_norm
+            Transformer.layers.1.feed_forward
+                *c10d_functional.all_reduce: 1
+                Transformer.layers.1.feed_forward.w1
+                Transformer.layers.1.feed_forward.gelu
+                Transformer.layers.1.feed_forward.w2
+                *c10d_functional.all_reduce: 1
+                Transformer.layers.1.feed_forward.resid_dropout
+            Transformer.norm
+            Transformer.output
+            *c10d_functional.all_gather_into_tensor: 1
+
         """
         device_mesh = DeviceMesh(
             self.device_type,
@@ -228,6 +253,7 @@ class CommDebugModeExample:
 
         # print the module level collective tracing information
         print(comm_mode.generate_module_tracing_table())
+        comm_mode.log_module_tracing_table_to_file()
 
 
 def run_example(world_size: int, rank: int, example_name: str) -> None:
