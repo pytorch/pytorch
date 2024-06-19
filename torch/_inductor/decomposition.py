@@ -340,7 +340,29 @@ def add(x, y, *, alpha=None):
     if alpha is not None:
         z = alpha * y
     complex_type = torch.promote_types(x.dtype, y.dtype)
-    return (x.view(x.real.dtype) + z.view(y.real.dtype)).view(complex_type)
+    if x_is_complex_tensor and y_is_complex_tensor:
+        # For complex typed `x`, `x.view(x.real.dtype)` doubles the last dimension and can cause problem 
+        # when broadcasting the add.
+        def reshape_tensor(tensor):
+            """ Reshape tensor from [*initial_dims, last_dim] to *initial_dims, last_dim/2, 2]"""
+            # Get the current shape of the tensor
+            *initial_dims, last_dim = tensor.shape
+     
+            # Check if the last dimension is even. We should never reach here since `x.view(x.real.dtype)` 
+            # doubles the last dimension for complex numbers.
+            if last_dim % 2 != 0:
+                raise ValueError("The size of the last dimension must be even to reshape it to [..., last_dim/2, 2]")
+      
+            # Reshape the tensor
+            new_shape = (*initial_dims, last_dim // 2, 2)
+            reshaped_tensor = tensor.view(new_shape)
+            return reshaped_tensor
+        x_reshaped = reshape_tensor(x.view(x.real.dtype))
+        y_reshaped = reshape_tensor(y.view(y.real.dtype))
+        result = torch.flatten(x_reshaped + y_reshaped, start_dim=-2).view(complex_type)
+    else:
+        result = (x.view(x.real.dtype) + z.view(y.real.dtype)).view(complex_type)
+    return result
 
 
 @register_decomposition([aten.conj_physical])
@@ -348,6 +370,18 @@ def conj_physical(self):
     assert not self.is_complex(), "TODO: implement this"
     return self
 
+
+# @register_decomposition([aten._conj])
+# def _conj(self):
+#     # assert not self.is_complex(), "TODO: implement this"
+#     if self.is_complex():
+#         print("complex")
+#         real = self.real
+#         imag = -self.imag
+#         print(real)
+#         print(imag)
+#         return real + imag
+#     return self
 
 @register_decomposition([aten.lift, aten.detach_])
 def lift(self):
