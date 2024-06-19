@@ -65,7 +65,7 @@ from torch.testing._internal import (
     common_methods_invocations,
     common_utils,
 )
-from torch.testing._internal.opinfo import core as opinfo_core
+from torch.testing._internal.opinfo import core as opinfo_core  # noqa: TCH001
 
 
 # NOTE: For ATen signature modifications that will break ONNX export,
@@ -219,6 +219,10 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         reason=onnx_test_common.reason_dynamo_does_not_support("Addr", "complex64")
     ),
     xfail(
+        "alias_copy",
+        reason="OnnxExporterError: Failed to export model",
+    ),
+    xfail(
         "allclose",
         reason=onnx_test_common.reason_dynamo_does_not_support("Allclose")
     ),
@@ -309,6 +313,11 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
     xfail(
         "bincount",
         reason=onnx_test_common.reason_dynamo_does_not_support("aten.bincount.default"),
+    ),
+    xfail(
+        "block_diag",
+        dtypes=onnx_test_common.COMPLEX_TYPES,
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Block_diag", "complex"),
     ),
     xfail(
         "bmm",
@@ -406,10 +415,6 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
     xfail(
         "combinations",
         reason=onnx_test_common.reason_dynamo_does_not_support("aten.masked.select"),
-    ),
-    xfail(
-        "cross",
-        reason=onnx_test_common.reason_onnx_script_does_not_support("linalg_cross"),
     ),
     xfail(
         "diag",
@@ -522,8 +527,7 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
     ),
     xfail(
         "gather",
-        reason="HandleNegativeAxis(int64_t, int64_t) IsAxisInRange(axis, tensor_rank) was \
-            false. axis 0 is not in valid range [-0,-1]"
+        reason="GatherElements op: Rank of input 'data' needs to be equal to rank of input 'indices'"
     ),
     xfail(
         "geometric",
@@ -543,6 +547,11 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         "index_fill",
         dtypes=onnx_test_common.COMPLEX_TYPES,
         reason=onnx_test_common.reason_dynamo_does_not_support("index_fill", "complex64")
+    ),
+    xfail(
+        "index_fill",
+        dtypes=onnx_test_common.INT_TYPES + onnx_test_common.BOOL_TYPES + onnx_test_common.FLOAT_TYPES,
+        reason="fixme: Constant input list has None. ONNXScript does not support None in constant list."
     ),
     xfail(
         "index_put",
@@ -585,6 +594,10 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         "linalg.lstsq",
         variant_name="grad_oriented",
         reason=onnx_test_common.reason_dynamo_does_not_support("aten.linalg_lstsq.default"),
+    ),
+    xfail(
+        "linalg.matrix_power",
+        reason="fixme: The values for attribute 'shape' do not match: torch.Size([2, 2]) != torch.Size([2, 2, 2])."
     ),
     xfail(
         "linalg.norm",
@@ -964,6 +977,10 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         reason="fixme: ONNX Runtime does not support int32/64 inputs",
     ),
     xfail(
+        "nn.functional.pixel_unshuffle",
+        reason=onnx_test_common.reason_onnx_script_does_not_support("aten.pixel_unshuffle.default"),
+    ),
+    xfail(
         "nn.functional.poisson_nll_loss",
         dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
         reason="fixme: result mismatch with NaN.",
@@ -1108,6 +1125,11 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         reason="ONNX doesn't support reduce='mean' option",
     ),
     xfail(
+        "sgn",
+        dtypes=onnx_test_common.BOOL_TYPES,
+        reason=onnx_test_common.reason_onnx_script_does_not_support("Sign", "bool"),
+    ),
+    xfail(
         "sign",
         dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_script_does_not_support("Sign", "bool"),
@@ -1141,6 +1163,11 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         reason=onnx_test_common.reason_onnx_script_does_not_support("Erfcx"),
     ),
     xfail(
+        "special.log_ndtr",
+        dtypes=onnx_test_common.INT_TYPES + onnx_test_common.FLOAT_TYPES,
+        reason="fixme: Assertion error: result mismatch",
+    ),
+    xfail(
         "special.ndtr",
         dtypes=(torch.float16,),
         reason="fixme: Assertion error: result mismatch",
@@ -1158,15 +1185,6 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
     xfail(
         "svd_lowrank",
         reason=onnx_test_common.reason_dynamo_does_not_support("wrapper_set_seed"),
-    ),
-    xfail(
-        "std_mean",
-        reason="fixme: NotImplementedError: Type promotion does not support node output of list or tuple."
-    ),
-    xfail(
-        "std_mean",
-        variant_name="unbiased",
-        reason="fixme: NotImplementedError: Type promotion does not support node output of list or tuple."
     ),
     xfail(
         "stft",
@@ -1498,7 +1516,6 @@ SKIP_XFAIL_SUBTESTS_WITH_MATCHER_AND_MODEL_TYPE: tuple[
         "nn.functional.batch_norm",
         matcher=lambda sample: sample.kwargs.get("training") is True
         and any(arg is not None for arg in sample.args[2:4]),
-        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
         reason="Flaky failure: https://github.com/pytorch/pytorch/issues/115106",
     ),
     xfail(
@@ -1961,8 +1978,10 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
         "addr": [3e-3, 4e-3],
         "baddbmm": [3e-2, 1e-3],
         "cumulative_trapezoid": [3e-2, 1e-3],
+        "cross": [3e-2, 2e-2],
         "diff": [1e-2, 5e-2],
         "gradient": [3e-3, 4e-3],
+        "linalg.cross": [1e-3, 2e-2],
         "linalg.multi_dot": [3e-2, 1e-3],
         "linalg.vecdot": [1e-2, 2e-2],
         "linspace": [2e-2, 2e-3],
@@ -1977,6 +1996,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
         "nn.functional.hardsigmoid": [1e-3, 5e-3],
         "nn.functional.hardswish": [1e-3, 5e-3],
         "nn.functional.hinge_embedding_loss": [4e-1, 3e-3],
+        "nn.functional.huber_loss": [1e-2, 1e-1],
         "nn.functional.instance_norm": [1e-2, 1e-3],
         "nn.functional.interpolate": [1e-2, 1e-3],
         "nn.functional.kl_div": [2e-3, 2e-4],
@@ -1984,6 +2004,8 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
         "nn.functional.local_response_norm": [1e-2, 5e-3],
         "nn.functional.poisson_nll_loss": [3e-2, 1e-3],
         "nn.functional.nll_loss": [3e-2, 1e-3],
+        "nn.functional.triplet_margin_loss": [2e-2, 1e-2],
+        "nn.functional.triplet_margin_with_distance_loss": [3e-2, 1e-2],
         "native_batch_norm": [3e-2, 1e-3],
         "norm": [1e-2, 1e-2],
         "dot": [3e-2, 1e-3],
@@ -1993,6 +2015,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
         "sub": [3e-2, 1e-3],
         "trapezoid": [1e-3, 7e-3],
         "trapz": [1e-3, 7e-3],
+        "vdot": [1e-3, 1e-2],
     }
 
     fp16_low_precision_variant_dict = {

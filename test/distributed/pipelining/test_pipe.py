@@ -1,6 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
-from model_registry import MLPModule
+from model_registry import MLPModule, ModelWithParamAlias
 
 import torch
 from torch.distributed.pipelining import pipe_split, pipeline
@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import (
 
 
 d_hid = 512
-batch_size = 256
+microbatch_size = 16
 
 torch.manual_seed(0)
 
@@ -64,20 +64,34 @@ class MultiMLP(torch.nn.Module):
         return x - y
 
 
+EXPECTED_N_STAGES = {
+    ExampleCode: 4,
+    MultiMLP: 4,
+    ModelWithParamAlias: 2,
+}
+
+# Currently, we don't enforce full set equality on the FQNs between the original
+# and pipelined models, because in the multi-use param case, PP will deduplicate
+# the FQNs from the state_dict.
+# TODO
+CHECK_FQN_SET_EQUALITY = False
+
+
 class PipeTests(TestCase):
-    @parametrize("ModelClass", [ExampleCode, MultiMLP])
+    @parametrize("ModelClass", [ExampleCode, MultiMLP, ModelWithParamAlias])
     def test_model_split(self, ModelClass):
         mod = ModelClass()
-        x = torch.randn(batch_size, d_hid)
-        y = torch.randn(batch_size, d_hid)
+        x = torch.randn(microbatch_size, d_hid)
+        y = torch.randn(microbatch_size, d_hid)
 
         pipe = pipeline(
             mod,
-            num_chunks=4,
-            example_args=(x, y),
+            mb_args=(x, y),
         )
 
-        assert pipe.num_stages == 4, f"nstages = {pipe.num_stages}, expect 4"
+        assert (
+            pipe.num_stages == EXPECTED_N_STAGES[ModelClass]
+        ), f"nstages = {pipe.num_stages}, expect {EXPECTED_N_STAGES[ModelClass]}"
 
         ref_out = mod(x, y)
         out = pipe(x, y)[0]
@@ -90,14 +104,17 @@ class PipeTests(TestCase):
         new_names = set()
         for idx in range(pipe.num_stages):
             stage_mod = pipe.get_stage_module(idx)
-            new_names.update(stage_mod.state_dict().keys())
+            stage_fqns = set(stage_mod.state_dict().keys())
+            assert stage_fqns.issubset(old_names)
+            new_names.update(stage_fqns)
 
-        assert (
-            old_names == new_names
-        ), f"""
-        old names {old_names}
-        new names {new_names}
-        """
+        if CHECK_FQN_SET_EQUALITY:
+            assert (
+                old_names == new_names
+            ), f"""
+            old names {old_names}
+            new names {new_names}
+            """
         print("Qualname check passed")
 
 

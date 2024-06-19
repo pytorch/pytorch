@@ -1,7 +1,8 @@
+# mypy: allow-untyped-defs
 """
-``torch.autograd`` provides classes and functions implementing automatic
-differentiation of arbitrary scalar valued functions. It requires minimal
-changes to the existing code - you only need to declare :class:`Tensor` s
+``torch.autograd`` provides classes and functions implementing automatic differentiation of arbitrary scalar valued functions.
+
+It requires minimal changes to the existing code - you only need to declare :class:`Tensor` s
 for which gradients should be computed with the ``requires_grad=True`` keyword.
 As of now, we only support autograd for floating point :class:`Tensor` types (
 half, float, double and bfloat16) and complex :class:`Tensor` types (cfloat, cdouble).
@@ -187,8 +188,7 @@ def backward(
     grad_variables: Optional[_TensorOrTensors] = None,
     inputs: Optional[_TensorOrTensorsOrGradEdge] = None,
 ) -> None:
-    r"""Computes the sum of gradients of given tensors with respect to graph
-    leaves.
+    r"""Compute the sum of gradients of given tensors with respect to graph leaves.
 
     The graph is differentiated using the chain rule. If any of ``tensors``
     are non-scalar (i.e. their data has more than one element) and require
@@ -255,6 +255,7 @@ def backward(
         warnings.warn(
             "`grad_variables` is deprecated. Use `grad_tensors` instead.",
             FutureWarning,
+            stacklevel=2,
         )
         if grad_tensors is None:
             grad_tensors = grad_variables
@@ -306,8 +307,7 @@ def grad(
     is_grads_batched: bool = False,
     materialize_grads: bool = False,
 ) -> Tuple[torch.Tensor, ...]:
-    r"""Computes and returns the sum of gradients of outputs with respect to
-    the inputs.
+    r"""Compute and return the sum of gradients of outputs with respect to the inputs.
 
     ``grad_outputs`` should be a sequence of length matching ``output``
     containing the "vector" in vector-Jacobian product, usually the pre-computed
@@ -400,6 +400,7 @@ def grad(
             "(defaults to True). To accumulate gradient for other "
             "parts of the graph, please use torch.autograd.backward.",
             FutureWarning,
+            stacklevel=2,
         )
 
     grad_outputs_ = _tensor_or_tensors_to_tuple(grad_outputs, len(t_outputs))
@@ -473,7 +474,7 @@ def _is_checkpoint_valid():
     return Variable._execution_engine.is_checkpoint_valid()
 
 
-def variable(*args, **kwargs):
+def variable(*args, **kwargs):  # noqa: D103
     raise RuntimeError(
         "torch.autograd.variable(...) is deprecated, use torch.tensor(...) instead"
     )

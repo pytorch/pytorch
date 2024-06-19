@@ -9,7 +9,7 @@ from model_registry import ExampleCode, ModelWithKwargs, MultiMLP
 import torch
 import torch.distributed as dist
 from torch.distributed.pipelining import (
-    ManualPipelineStage,
+    build_stage,
     pipeline,
     PipelineStage,
     ScheduleGPipe,
@@ -82,19 +82,18 @@ class StageTest(MultiProcContinousTest):
         mod.to(self.device)
 
         x = torch.randn(batch_size, d_hid, device=self.device)
+        x_mb = x.chunk(chunks)[0]
 
         split_spec = mod.split_spec if hasattr(mod, "split_spec") else None
         pipe = pipeline(
             mod,
-            chunks,
-            example_args=(x,),
+            mb_args=(x_mb,),
             split_spec=split_spec,
         )
 
-        stage = PipelineStage(
-            pipe,
+        stage = pipe.build_stage(
             self.rank,
-            device=self.device,
+            self.device,
         )
 
         # Attach to a schedule
@@ -150,17 +149,23 @@ class StageTest(MultiProcContinousTest):
         x = torch.randn(batch_size, d_hid, device=self.device)
         y = torch.randn(batch_size, d_hid, device=self.device)
 
+        x_mb = x.chunk(chunks)[0]
+        y_mb = y.chunk(chunks)[0]
+
         pipe = pipeline(
             mod,
-            chunks,
-            example_args=(x,),
-            example_kwargs={"y": y},
+            mb_args=(x_mb,),
+            mb_kwargs={"y": y_mb},
         )
 
-        stage = PipelineStage(
-            pipe,
+        stage_mod = pipe.get_stage_module(self.rank)
+
+        # Test build_stage
+        stage = build_stage(
+            stage_mod,
             self.rank,
-            device=self.device,
+            pipe.info(),
+            self.device,
         )
 
         # Attach to a schedule
@@ -211,12 +216,11 @@ class StageTest(MultiProcContinousTest):
 
         x = torch.randn(batch_size, d_hid, device=self.device)
 
-        stage = ManualPipelineStage(
+        stage = PipelineStage(
             stage_mod,
             self.rank,
             self.world_size,
             self.device,
-            chunks,
             input_args=x.chunk(chunks)[0],
         )
 

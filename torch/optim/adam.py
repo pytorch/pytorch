@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import List, Optional, Tuple, Union
 
 import torch
@@ -308,6 +309,8 @@ Adam.__doc__ = (
         {_capturable_doc}
         {_differentiable_doc}
         {_fused_doc}
+    .. Note::
+        A prototype implementation of Adam and AdamW for MPS supports `torch.float32` and `torch.float16`.
     .. _Adam\: A Method for Stochastic Optimization:
         https://arxiv.org/abs/1412.6980
     .. _On the Convergence of Adam and Beyond:
@@ -353,7 +356,7 @@ def _single_tensor_adam(
         step_t = state_steps[i]
 
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-        if not torch.compiler.is_compiling() and capturable:
+        if not torch._utils.is_compiling() and capturable:
             capturable_supported_devices = _get_capturable_supported_devices()
             assert (
                 param.device.type == step_t.device.type
@@ -466,7 +469,7 @@ def _multi_tensor_adam(
         )
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-    if not torch.compiler.is_compiling() and capturable:
+    if not torch._utils.is_compiling() and capturable:
         capturable_supported_devices = _get_capturable_supported_devices(
             supports_xla=False
         )
@@ -659,6 +662,10 @@ def _fused_adam(
         ),
         _,
     ) in grouped_tensors.items():
+        if device.type == "mps":  # type: ignore[union-attr]
+            assert found_inf is None and grad_scale is None
+            assert not isinstance(lr, Tensor)
+
         device_grad_scale, device_found_inf = None, None
         if grad_scale is not None:
             device_grad_scale = grad_scale_dict.setdefault(
@@ -743,7 +750,7 @@ def adam(
 
     # this check is slow during compilation, so we skip it
     # if it's strictly needed we can add this check back in dynamo
-    if not torch.compiler.is_compiling() and not all(
+    if not torch._utils.is_compiling() and not all(
         isinstance(t, torch.Tensor) for t in state_steps
     ):
         raise RuntimeError(

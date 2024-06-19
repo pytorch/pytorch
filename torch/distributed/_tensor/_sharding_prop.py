@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from functools import lru_cache
 from itertools import chain
 from typing import Callable, cast, Dict, List, Optional, Sequence, Tuple, Union
@@ -23,6 +24,7 @@ from torch.distributed._tensor._utils import (
 )
 from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
 from torch.distributed.device_mesh import DeviceMesh
+
 
 aten = torch.ops.aten
 
@@ -88,7 +90,7 @@ class ShardingPropagator:
         if schema_info is not None:
             self.op_to_schema_info[op_overload] = schema_info
 
-    @lru_cache
+    @lru_cache  # noqa: B019
     def _propagate_tensor_meta(
         self, op_schema: OpSchema
     ) -> Union[None, TensorMeta, Sequence[Optional[TensorMeta]]]:

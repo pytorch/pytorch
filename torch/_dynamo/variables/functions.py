@@ -22,6 +22,11 @@ from .constant import ConstantVariable
 if TYPE_CHECKING:
     from torch._guards import Source
 
+try:
+    from torch.distributed._composable.fsdp import _fsdp_param_group
+except ModuleNotFoundError:
+    _fsdp_param_group = None
+
 
 def wrap_bound_arg(tx, val, source=None):
     # Source propagation is best effort since not every object we encounter has a source to begin with.
@@ -338,6 +343,16 @@ class UserMethodVariable(UserFunctionVariable):
                 return self.obj.call_method(
                     tx, self.fn.__name__, args, kwargs, constant=self.is_constant
                 )
+        elif (
+            _fsdp_param_group is not None
+            and self.fn is _fsdp_param_group.FSDPParamGroup.use_training_state
+        ):
+            return variables.TorchCtxManagerClassVariable(self.fn).call_function(
+                tx, (self.obj, *args), kwargs
+            )
+        if self.is_constant:
+            fn = getattr(self.obj.value, self.fn.__name__)
+            return invoke_and_store_as_constant(tx, fn, self.get_name(), args, kwargs)
         return super().call_function(tx, args, kwargs)
 
     def inspect_parameter_names(self):
@@ -634,9 +649,30 @@ class SkipFunctionVariable(VariableTracker):
         else:
             try:
                 path = inspect.getfile(self.value)
+                msg = f"'skip function {self.value.__qualname__} in file {path}'"
             except TypeError:
-                path = f"Builtin {self.value.__name__}"
-            msg = f"'skip function {self.value.__qualname__} in file {path}'"
+                known_python_builtin_modules = {"_abc", "_warnings"}
+                if self.value.__module__ in known_python_builtin_modules:
+                    msg = (
+                        f"Graph break due to unsupported Python builtin {self.value.__module__}.{self.value.__qualname__}. "
+                        f"Please file an issue on GitHub "
+                        f"so the PyTorch team can add support for it. "
+                    )
+                else:
+                    msg = (
+                        f"Graph break due to unsupported builtin {self.value.__module__}.{self.value.__qualname__}. "
+                        f"This function is either a Python builtin (e.g. _warnings.warn) "
+                        f"or a third-party C/C++ Python extension (perhaps created with pybind). "
+                        f"If it is a Python builtin, please file an issue on GitHub "
+                        f"so the PyTorch team can add support for it and see the next case for a workaround. "
+                        f"If it is a third-party C/C++ Python extension, please "
+                        f"either wrap it into a PyTorch-understood custom operator "
+                        f"(see https://pytorch.org/docs/main/notes/custom_operators.html "
+                        f"for more details) or, if it is traceable, use "
+                        f"torch.compiler.allow_in_graph."
+                    )
+                    # also warn on it because most users won't see the graph break message
+                    torch._dynamo.utils.warn_once(msg)
             msg += f"', {self.reason}'" if self.reason else ""
             unimplemented(msg)
 

@@ -2,6 +2,9 @@ from typing_extensions import deprecated
 
 import torch
 
+# We need to keep this unused import for BC reasons
+from torch.amp.grad_scaler import OptState  # noqa: F401
+
 __all__ = ["GradScaler"]
 
 

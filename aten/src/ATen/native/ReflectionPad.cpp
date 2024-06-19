@@ -301,14 +301,6 @@ void reflection_pad2d_backward_out_template(
 
 } // namespace
 
-// TODO: I tihnk this function should be removed since we implement it with
-// TORCH_IMPL_FUNC below
-static Tensor& reflection_pad1d_out_cpu(const Tensor& input, IntArrayRef padding,
-    Tensor& output) {
-  reflection_pad1d_kernel(kCPU, output, input, padding);
-  return output;
-}
-
 Tensor& reflection_pad1d_out_quantized_cpu(const Tensor& input, IntArrayRef padding,
     Tensor& output) {
   TORCH_CHECK(input.qscheme() == kPerTensorAffine, "Only per tensor quantization is supported");

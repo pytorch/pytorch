@@ -317,9 +317,6 @@ function(caffe2_binary_target target_name_or_src)
   if(DEFINED Caffe2_MODULES)
     target_link_libraries(${__target} ${Caffe2_MODULES})
   endif()
-  if(USE_TBB AND NOT USE_SYSTEM_TBB)
-    target_include_directories(${__target} PUBLIC ${TBB_INCLUDE_DIR})
-  endif()
   install(TARGETS ${__target} DESTINATION bin)
 endfunction()
 
@@ -437,7 +434,6 @@ function(torch_compile_options libname)
       -Wextra
       -Wdeprecated
       -Wno-unused-parameter
-      -Wno-unused-function
       -Wno-missing-field-initializers
       -Wno-unknown-pragmas
       -Wno-type-limits
@@ -446,6 +442,11 @@ function(torch_compile_options libname)
       -Wno-strict-overflow
       -Wno-strict-aliasing
       )
+    if("${libname}" STREQUAL "torch_cpu")
+      list(APPEND private_compile_options -Wunused-function)
+    else()
+      list(APPEND private_compile_options -Wno-unused-function)
+    endif()
     if(NOT "${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
       list(APPEND private_compile_options
         # Considered to be flaky.  See the discussion at
@@ -453,12 +454,11 @@ function(torch_compile_options libname)
         -Wno-maybe-uninitialized)
     endif()
 
+    if(WERROR)
+      list(APPEND private_compile_options -Wno-strict-overflow)
+    endif()
   endif()
 
-  if(MSVC)
-  elseif(WERROR)
-    list(APPEND private_compile_options -Wno-strict-overflow)
-  endif()
 
   target_compile_options(${libname} PRIVATE
       $<$<COMPILE_LANGUAGE:CXX>:${private_compile_options}>)
@@ -482,9 +482,7 @@ function(torch_compile_options libname)
     # templated classes crossing library boundary get duplicated (but identical)
     # definitions. It's easier to just disable it.
     target_compile_options(${libname} PRIVATE
-        $<$<COMPILE_LANGUAGE:CXX>: -fvisibility=hidden>
-        $<$<COMPILE_LANGUAGE:OBJC>: -fvisibility=hidden>
-        $<$<COMPILE_LANGUAGE:OBJCXX>: -fvisibility=hidden>)
+        $<$<COMPILE_LANGUAGE:CXX>: -fvisibility=hidden>)
   endif()
 
   # Use -O2 for release builds (-O3 doesn't improve perf, and -Os results in perf regression)
