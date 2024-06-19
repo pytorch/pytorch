@@ -903,12 +903,6 @@ class WrapperCodeGen(CodeGen):
         pass
 
     def codegen_python_sizevar(self, x: Expr, *, simplify: bool = True) -> str:
-        import logging
-        torch_log = logging.getLogger("torch")
-        torch_log.warning(f"before: x: {x}")
-        if simplify and isinstance(x, Expr) and hasattr(V.graph, "sizevars"):
-            x = V.graph.sizevars.simplify(x)
-        torch_log.warning(f"after: x: {x}")
         return pexpr(x, simplify=simplify)
 
     def codegen_sizevar(self, x: Expr) -> str:
