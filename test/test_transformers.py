@@ -2539,13 +2539,12 @@ class TestSDPACudaOnly(NNTestCase):
         value = value.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
         key = key.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
 
-        major, minor = torch.cuda.get_device_capability(device)
-        is_sm90_or_newer = major >= 9
-
         if type != "nested" and PLATFORM_SUPPORTS_CUDNN_ATTENTION and SM90OrLater:
             assert torch._fused_sdp_choice(query, key, value) == SDPBackend.CUDNN_ATTENTION.value
         elif PLATFORM_SUPPORTS_FLASH_ATTENTION:
             assert torch._fused_sdp_choice(query, key, value) == SDPBackend.FLASH_ATTENTION.value
+        elif type != "nested" and PLATFORM_SUPPORTS_CUDNN_ATTENTION: # e.g., we're on Windows
+            assert torch._fused_sdp_choice(query, key, value) == SDPBackend.CUDNN_ATTENTION.value 
         else:
             assert torch._fused_sdp_choice(query, key, value) == SDPBackend.EFFICIENT_ATTENTION.value
 
