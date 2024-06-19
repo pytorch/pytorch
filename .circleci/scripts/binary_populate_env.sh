@@ -136,6 +136,7 @@ export DESIRED_PYTHON="${DESIRED_PYTHON:-}"
 export DESIRED_CUDA="$DESIRED_CUDA"
 export LIBTORCH_VARIANT="${LIBTORCH_VARIANT:-}"
 export BUILD_PYTHONLESS="${BUILD_PYTHONLESS:-}"
+export USE_SPLIT_BUILD="${USE_SPLIT_BUILD:-}"
 if [[ "${OSTYPE}" == "msys" ]]; then
   export LIBTORCH_CONFIG="${LIBTORCH_CONFIG:-}"
   if [[ "${LIBTORCH_CONFIG:-}" == 'debug' ]]; then
