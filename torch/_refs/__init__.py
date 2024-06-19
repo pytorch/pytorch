@@ -3950,6 +3950,12 @@ def unbind(t: TensorLikeType, dim: int = 0) -> TensorSequenceType:
         )
 
 
+@register_decomposition(aten.unbind_copy)
+@out_wrapper()
+def unbind_copy(x: TensorLikeType, dim: int = 0):
+    return x.clone(memory_format=torch.contiguous_format).unbind(dim)
+
+
 @out_wrapper()
 def index_copy(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
     return x.clone(memory_format=torch.contiguous_format).index_copy_(
@@ -6308,7 +6314,6 @@ permute_copy = _make_copy_from_view(permute)
 squeeze_copy = _make_copy_from_view(squeeze)
 t_copy = _make_copy_from_view(t)
 transpose_copy = _make_copy_from_view(transpose)
-unbind_copy = _make_copy_from_view(unbind)
 unfold_copy = _make_copy_from_view(unfold)
 unsqueeze_copy = _make_copy_from_view(unsqueeze)
 view_copy = _make_copy_from_view(view)
