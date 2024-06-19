@@ -264,7 +264,7 @@ def generate_experiment_configs(calculate_bwd: bool) -> List[ExperimentConfig]:
     batch_sizes = [2, 8, 16]
     num_heads = [16]
     q_kv_seq_lens = [(512, 512), (1024, 1024), (4096, 4096)]
-    head_dims = [64, 128, 256]
+    head_dims = [64, 128]
     dtypes = [
         torch.bfloat16,
     ]
@@ -302,8 +302,6 @@ def main(dynamic: bool, calculate_bwd: bool):
         results.append(
             Experiment(config, run_single_experiment(config, dynamic=dynamic))
         )
-    for config in tqdm(generate_experiment_configs(calculate_bwd)):
-        results.append(Experiment(config, run_single_experiment(config)))
 
     print_results(results)
 
