@@ -392,7 +392,7 @@ assert_indirect_indexing = True
 compute_all_bounds = False
 
 # constant folding on the joint graph
-joint_graph_constant_folding = True
+joint_graph_constant_folding = False
 
 # Enable indirect_indexing asserts for decompositions and lowerings
 debug_index_asserts = False
