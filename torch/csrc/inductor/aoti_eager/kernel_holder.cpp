@@ -147,6 +147,9 @@ std::vector<ParameterMetadata> unpack_input_parameters(
       }
     } else if (stack[idx].isTensor()) {
       inputs_metadata.push_back(ParameterMetadata(stack[idx].toTensor(), idx));
+    } else if (stack[idx].isString()) {
+      inputs_metadata.push_back(
+          ParameterMetadata(stack[idx].toStringRef(), idx));
     } else {
       TORCH_CHECK_NOT_IMPLEMENTED(
           false,
@@ -235,10 +238,11 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
   py::gil_scoped_acquire gil;
 
   py::handle load_aoti_eager_cache_function =
-      py::module::import("torch._inductor.utils").attr("load_aoti_eager_cache");
+      py::module::import("torch._inductor.aoti_eager")
+          .attr("load_aoti_eager_cache");
   TORCH_INTERNAL_ASSERT(
       load_aoti_eager_cache_function.ptr() != nullptr,
-      "Failed to import - torch._inductor.utils.load_aoti_eager_cache");
+      "Failed to import - torch._inductor.aoti_eager.load_aoti_eager_cache");
 
   auto result = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(
       load_aoti_eager_cache_function.ptr(),
@@ -308,6 +312,7 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
       uint64_t arg_idx = metadata["arg_order"].cast<uint64_t>();
       bool is_scalar = metadata.contains("scalar_value");
       bool is_tensor_list = metadata.contains("tensor_list");
+      bool is_string = metadata.contains("string_value");
 
       if (is_tensor_list) {
         // Tensor List
@@ -331,6 +336,12 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
         auto scalar_value = metadata["scalar_value"].cast<double>();
         parameter_metadata_list.push_back(
             ParameterMetadata(c10::Scalar(scalar_value), arg_idx));
+      } else if (is_string) {
+        // String
+        auto metadata = item_metadata.cast<py::dict>();
+        auto str_value = metadata["string_value"].cast<std::string>();
+        parameter_metadata_list.push_back(
+            ParameterMetadata(str_value, arg_idx));
       } else {
         // Tensor
         auto metadata = item_metadata.cast<py::dict>();
@@ -431,12 +442,12 @@ std::string AOTIPythonKernelHolder::produce_aoti_kernel_lib(
       overload_name);
 
   py::handle aot_compile_function =
-      py::module::import("torch._inductor.utils")
+      py::module::import("torch._inductor.aoti_eager")
           .attr("aoti_compile_with_persistent_cache");
   TORCH_INTERNAL_ASSERT(
       aot_compile_function.ptr() != nullptr &&
           aot_compile_function.ptr() != Py_None,
-      "Failed to import - torch._inductor.utils.aoti_compile_with_persistent_cache");
+      "Failed to import - torch._inductor.aoti_eager.aoti_compile_with_persistent_cache");
 
   // Pass the python operation to the AOT Inductor to generate the kernel
   // library.

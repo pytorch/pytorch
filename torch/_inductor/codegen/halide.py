@@ -488,11 +488,21 @@ class HalideOverrides(OpOverrides):
     def indirect_indexing(cls, index_var, size, check=True):
         # TODO(jansel): Halide only supports 32-bit indexing, we should error on overflow
         index_var = ops.to_dtype(index_var, torch.int32)
+        index_var = ops.halide_clamp(index_var, size, check)
         return sympy_index_symbol(str(index_var))
+
+    @classmethod
+    def halide_clamp(cls, value, size, check):
+        end = V.kernel.kexpr(V.kernel.rename_indexing(size) - 1)
+        if not isinstance(size, (int, sympy.Integer)):
+            end = f"hl.cast({value.name}.type(), {end})"
+        # Skip unsafe_promise_clamped to workaround: https://github.com/halide/Halide/issues/8261#issuecomment-2148835692
+        # return f"hl.unsafe_promise_clamped({value}, 0, {end})"
+        return f"hl.clamp({value}, 0, {end})"
 
     @staticmethod
     def masked(mask, body, other):
-        with V.kernel.mask_loads(mask) as new_mask:
+        with V.kernel.mask_loads(mask, other) as new_mask:
             result = body()
 
         if result.bounds.is_bool:
@@ -504,6 +514,7 @@ class HalideOverrides(OpOverrides):
             [],
             bounds=ValueRanges.wrap(other),
         )
+        # TODO(jansel): look into removing the where in the same places triton does
         return ops.where(new_mask, result, other)
 
 
