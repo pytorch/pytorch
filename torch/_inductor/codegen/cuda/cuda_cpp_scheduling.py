@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import logging
 from typing import cast, Sequence
 
@@ -27,6 +28,10 @@ class CUDACPPScheduling(BaseScheduling):
     def __init__(self, scheduler: Scheduler):
         super().__init__()
         self.scheduler = scheduler
+
+    @classmethod
+    def get_backend_features(cls, device):
+        return {}
 
     def group_fn(self, sizes):
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)

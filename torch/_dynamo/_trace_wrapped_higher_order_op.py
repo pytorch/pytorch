@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import autograd_not_implemented

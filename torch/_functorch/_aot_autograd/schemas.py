@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 The various dataclasses, Enums, namedtuples etc used in AOTAutograd. This includes
 input/output types, metadata, config, function signatures etc.
@@ -14,10 +15,14 @@ import torch.utils._pytree as pytree
 from torch._guards import Source
 from torch._subclasses import FakeTensor
 from torch._subclasses.fake_tensor import is_fake
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config
 
-from .functional_utils import _check_if_mutation_can_be_in_graph, has_same_metadata
+from .functional_utils import (
+    _check_if_mutation_can_be_in_graph,
+    FunctionalTensorMetadataEq,
+)
 from .utils import strict_zip
 
 zip = strict_zip
@@ -52,27 +57,6 @@ OutputType = Enum(
         "custom_function_view",
     ),
 )
-
-
-# Wrapper around a FunctionalTensorWrapper for comparing only the resulting metadata
-# after applying all the ViewMeta operations.
-class FunctionalTensorMetadataEq:
-    def __init__(self, tensor: torch.Tensor) -> None:
-        assert torch._is_functional_tensor(tensor)
-        self.tensor = tensor
-
-    def __eq__(self, other: object) -> bool:
-        # If other is None, then it probably means that we weren't able to recreate
-        # the FunctionalTensorMetadataEq. One of this cases is when we update the
-        # view metadata by calling: create_synthetic_base_metadata.
-        if other is None:
-            return True
-
-        # Comparison agains any other type is not implemented.
-        if not isinstance(other, FunctionalTensorMetadataEq):
-            return NotImplemented
-
-        return has_same_metadata(self.tensor, other.tensor)
 
 
 # This class stores info about every user output.
@@ -289,6 +273,13 @@ class ViewAndMutationMeta:
     # (need to default it to not break internal)
     is_train: bool = False
 
+    # length = (# inputs w data mutations) + (# user outputs that are non_aliasing tensors)
+    #        + (# intermediate bases)
+    # At runtime, we don't keep the traced_tangents around since they're not serializable.
+    # Instead, we keep any necessary subclass metadata necessary about each traced_tangent.
+    # This list is generated after calling make_runtime_safe().
+    traced_tangent_metas: Optional[List[Any]] = None
+
     num_symints_saved_for_bw: Optional[int] = None
 
     # The grad_enabled mutation that will be emitted in the runtime_wrapper epilogue
@@ -304,10 +295,23 @@ class ViewAndMutationMeta:
     # raised
     deterministic: Optional[bool] = None
 
+    # Keeps track of which input indices store parameters (which we will treat as static)
+    static_parameter_indices: List[int] = field(default_factory=list)
+
     # Map of effect type (ex. _EffectType.ORDERED) to token.  If there are
     # side-effectful operators, FunctionalTensorMode will populate this
     # dictionary telling us how many tokens we will need during tracing.
     tokens: Dict[Any, torch.Tensor] = field(default_factory=dict)
+
+    # Only filled in if/when we trace the joint function
+    # If an input requires grad and is mutated in the backward, it is only safe to keep the mutation
+    # in the graph if gradients are disabled while the backward runs
+    # (grad mode is disabled by default when users run the backward, but can be turned on with create_graph=True)
+    # At runtime during the backward, we use this list of indices to error properly if we find out
+    # that it was not safe to include a backward mutation in the graph.
+    indices_of_inputs_that_requires_grad_with_mutations_in_bw: List[int] = field(
+        default_factory=list
+    )
 
     def __post_init__(self):
         # pre-compute the indices of the inputs that are mutated.
@@ -444,6 +448,34 @@ class ViewAndMutationMeta:
         # which tensors to be saved for the bwd graph.  num_forward captures
         # this information.
         self.num_forward = self.num_forward_returns + self.num_outputs_rng_offset
+
+    def make_runtime_safe(self):
+        """
+        There are various fields in ViewAndMutationMeta that aren't serializable. This function is called after all tracing
+        is completed to simplify certain fields in the metadata so that they can be safely cached.
+
+        Doing so may lose information (in the case of traced_tangents), but none of the information is needed at runtime.
+        """
+        # TODO: This function is only a best effort: there are other fields that may not be cache safe
+        # (i.e., there's no guarantee that tensor_flatten() returns a serializable result), or that
+        # SubclassCreationMeta is cache safe.
+        assert self.traced_tangent_metas is None
+
+        def extract_metadata(t):
+            if isinstance(t, torch.Tensor) and is_traceable_wrapper_subclass(t):
+                (inner_tensors, flatten_spec) = t.__tensor_flatten__()  # type: ignore[attr-defined]
+                # Technically, we only need the flatten_spec, not the inner tensors.
+                # However, some Tensor subclasses (like TwoTensor) may have flatten_spec = None.
+                # And we want to be able to assert that this metadata is non-None,
+                # to distinguish between "this was a tensor subclass with no metadata" vs.
+                # "this wasn't a tensor subclass at all".
+                return (inner_tensors, flatten_spec)
+            else:
+                return None
+
+        self.traced_tangent_metas = [extract_metadata(t) for t in self.traced_tangents]
+        # Clear traced tangents at runtime
+        self.traced_tangents = []
 
     @property
     def tensors_saved_for_backwards_slice(self):
@@ -722,6 +754,9 @@ class AOTConfig:
     enable_log: bool = True
     # this is always false outside of export.
     pre_dispatch: bool = False
+
+    # Key to use for AOTAutogradCache
+    cache_key: Optional[str] = None
 
     def __post_init__(self):
         if self.pre_dispatch:
