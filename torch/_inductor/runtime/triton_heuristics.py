@@ -50,6 +50,7 @@ except ImportError:
 
 if triton is not None:
     from triton import Config
+    from triton.compiler import CompiledKernel
     from triton.runtime.autotuner import OutOfResources
     from triton.runtime.jit import KernelInterface
 
@@ -453,8 +454,8 @@ class CachingAutotuner(KernelInterface):
         scope = {
             "grid_meta": cfg.kwargs,
             "bin": binary,
-            "launch_enter_hook": binary.launch_enter_hook,
-            "launch_exit_hook": binary.launch_exit_hook,
+            "launch_enter_hook": CompiledKernel.launch_enter_hook,
+            "launch_exit_hook": CompiledKernel.launch_exit_hook,
             "metadata": binary.packed_metadata
             if hasattr(binary, "packed_metadata")
             else binary.metadata,

@@ -1164,11 +1164,7 @@ class VariableBuilder:
             and not config.allow_rnn
         ):
             unimplemented("TorchDynamo purposely graph breaks on RNN, GRU, LSTMs")
-
-        # Dont take this path for FSDP
-        if not getattr(
-            value, "_is_fsdp_managed_module", None
-        ) and mutation_guard.is_dynamic_nn_module(value, self.tx.export):
+        if mutation_guard.is_dynamic_nn_module(value, self.tx.export):
             # created dynamically, don't specialize on it
             self.install_guards(GuardBuilder.TYPE_MATCH)
             if (
@@ -1226,7 +1222,11 @@ class VariableBuilder:
             # ID_MATCH is required to disambiguate cases as simple as a unit test that constructs 2 models and wraps
             # them differently with different FSDP configs.  (test_dynamo_distributed.py -k test_fsdp_aot_eager)
             self.install_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.ID_MATCH)
-            return FSDPManagedNNModuleVariable(value, source=self.get_source())
+            result = FSDPManagedNNModuleVariable(value, source=self.get_source())
+            if not SideEffects.cls_supports_mutation_side_effects(type(value)):
+                # don't allow STORE_ATTR mutation with custom __setattr__
+                return result
+            return self.tx.output.side_effects.track_object_existing(value, result)
         else:
             return self.tx.output.register_attr_or_module(
                 value,
