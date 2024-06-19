@@ -149,6 +149,7 @@ class Inp:
 
 NON_STRICT_SUFFIX = "_non_strict"
 RETRACEABILITY_SUFFIX = "_retraceability"
+SERDES_SUFFIX = "_serdes"
 PREDISPATCH_SUFFIX = "_pre_dispatch"
 
 
@@ -158,6 +159,10 @@ def is_non_strict_test(test_name):
 
 def is_retracebility_test(test_name):
     return test_name.endswith(RETRACEABILITY_SUFFIX)
+
+
+def is_serdes_test(test_name):
+    return test_name.endswith(SERDES_SUFFIX)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -195,6 +200,19 @@ class TestDynamismExpression(TestCase):
                 (inp,),
                 dynamic_shapes={"x": {0: dim_x}},
             )
+
+    def test_export_slice_maxsize(self):
+        class Slice(torch.nn.Module):
+            def forward(self, *args):
+                return torch.ops.aten.slice.Tensor(*args)
+
+        inp = (torch.rand((10, 3, 224, 224)), 0, 0, 9223372036854775807)
+        dynamic_shapes = (({0: Dim("dim")}, None, None, None),)
+        torch.export.export(
+            Slice(),
+            inp,
+            dynamic_shapes=dynamic_shapes,
+        )
 
     def test_export_constraints_error(self):
         class ConflictingConstraints(torch.nn.Module):
@@ -1969,6 +1987,137 @@ class TestExport(TestCase):
         dynamic_shapes = {"x": (3 * _dx - 1,), "y": (3 * _dx,), "z": (3 * _dx + 2,)}
         export(Foo(), inputs, dynamic_shapes=dynamic_shapes)
 
+    def test_refine_dynamic_shapes_from_suggested_fixes(self):
+        from torch.export.dynamic_shapes import (
+            refine_dynamic_shapes_from_suggested_fixes,
+        )
+
+        def helper(model, inputs, dynamic_shapes):
+            # export, fail, parse & refine suggested fixes, re-export
+            try:
+                export(Foo(), inps, dynamic_shapes=dynamic_shapes)
+                raise Exception("should have raised constraint violation error")
+            except torch._dynamo.exc.UserError as exc:
+                new_shapes = refine_dynamic_shapes_from_suggested_fixes(
+                    exc.msg, dynamic_shapes
+                )
+                export(Foo(), inps, dynamic_shapes=new_shapes)
+                return new_shapes
+
+        # specialize dims + derived dims
+        class Foo(torch.nn.Module):
+            def forward(self, x, y, z):
+                x0 = x + y[1:] + z[2:]
+                x1 = x @ torch.randn(4, 4)
+                return x0, x1
+
+        inps = (
+            torch.randn(
+                4,
+            ),
+            torch.randn(
+                5,
+            ),
+            torch.randn(
+                6,
+            ),
+        )
+        dx = Dim("dx", max=16)
+        dynamic_shapes = {"x": (dx,), "y": (dx + 1,), "z": (dx + 2,)}
+        new_shapes = helper(Foo(), inps, dynamic_shapes)
+        self.assertEqual(new_shapes["x"][0], 4)
+        self.assertEqual(new_shapes["z"][0], 6)
+
+        # refine lower, upper bound
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                if x.shape[0] >= 6 and y.shape[0] <= 16:
+                    return x * 2.0, y + 1
+
+        inps = (torch.randn(16), torch.randn(12))
+        dynamic_shapes = {"x": (Dim("dx"),), "y": (Dim("dy"),)}
+        new_shapes = helper(Foo(), inps, dynamic_shapes)
+        self.assertEqual(new_shapes["x"][0].min, 6)
+        self.assertEqual(new_shapes["y"][0].max, 16)
+
+        # divisiblity, will introduce new root
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                if x.shape[0] >= 9:
+                    return x.reshape([-1, 3])
+
+        inps = (
+            torch.randn(
+                15,
+            ),
+        )
+        dynamic_shapes = ((Dim("dx"),),)
+        new_shapes = helper(Foo(), inps, dynamic_shapes)
+        dim = new_shapes[0][0]
+        root = dim.root
+        self.assertEqual(dim.fn(2), 6)
+        self.assertEqual(root.min, 3)
+
+        # turn dim into derived dim/relation
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y[4:]
+
+        inps = (torch.randn(6, 4), torch.randn(10, 4))
+        dynamic_shapes = {
+            "x": (Dim("dx0"), Dim("dx1")),
+            "y": (Dim("dy0"), Dim("dy1")),
+        }
+        new_shapes = helper(Foo(), inps, dynamic_shapes)
+        self.assertEqual(new_shapes["x"][0], new_shapes["y"][0].root)  # dy0 = dx0 + 4
+        self.assertEqual(new_shapes["y"][0].fn(5), 9)
+        self.assertEqual(new_shapes["x"][1], new_shapes["y"][1])  # dx1 = dy1
+
+        # nested dynamic shapes spec
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                x0 = x[0]["data"] + x[1] + x[2][2:]
+                x1 = y["a"] @ torch.randn(4, 4)
+                x2 = y["b"] @ torch.randn(6, 6)
+                return x0, x1, x2
+
+        inps = (
+            [
+                {"data": torch.randn(4, 4)},
+                torch.randn(4, 4),
+                torch.randn(6, 4),
+            ],
+            {
+                "a": torch.randn(8, 4),
+                "b": torch.randn(9, 6),
+            },
+        )
+        dynamic_shapes = {
+            "x": [
+                {"data": (Dim("dx00"), Dim("dx01"))},
+                (Dim("dx10"), Dim("dx11")),
+                (Dim("dx20"), Dim("dx21")),
+            ],
+            "y": {
+                "a": (Dim("dya0"), Dim("dya1")),
+                "b": (Dim("dyb0"), Dim("dyb1")),
+            },
+        }
+        new_shapes = helper(Foo(), inps, dynamic_shapes)
+        self.assertEqual(
+            new_shapes["x"][0]["data"][0], new_shapes["x"][1][0]
+        )  # dx10 = dx00
+        self.assertEqual(
+            new_shapes["x"][2][0].root, new_shapes["x"][0]["data"][0]
+        )  # dx20 = dx00 + 2
+        self.assertEqual(new_shapes["x"][2][0].fn(10), 12)
+        self.assertEqual(
+            new_shapes["x"][0]["data"][1], new_shapes["x"][1][1]
+        )  # dx11 = dx01
+        self.assertEqual(new_shapes["y"]["a"][1], 4)
+        self.assertEqual(new_shapes["y"]["b"][1], 6)
+        self.assertEqual(new_shapes["y"]["b"][0].__name__, "dyb0")  # unchanged
+
     def test_dynamic_shapes_spec_with_pytree(self):
         from torch.export import Dim, export
         from torch.utils._pytree import tree_map
@@ -2601,10 +2750,7 @@ def forward(self, x):
         ep = export(M(), (torch.tensor(1), torch.ones(4, 5)))
 
         # This is because we insert sym_constrain_range in the graph now
-        if is_non_strict_test(self._testMethodName):
-            error_msg = r"Invalid value range for -1 between"
-        else:
-            error_msg = "is outside of inline constraint"
+        error_msg = r"Invalid value range for -1 between"
         with self.assertRaisesRegex(RuntimeError, error_msg):
             _ = ep.module()(torch.tensor(-1), torch.randn(4, 5))
 
@@ -4982,14 +5128,12 @@ def forward(self, x):
     item = torch.ops.aten.item.default(x);  x = None
     sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(item)
     sym_constrain_range_default = torch.ops.aten.sym_constrain_range.default(item, min = 3, max = 5)
-    mul = -1 * item
-    le = mul <= 0;  mul = None
-    _assert_scalar_default = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression -u1 <= 0 on node 'le'");  le = None
-    mul_1 = -1 * item
-    lt = mul_1 < -2;  mul_1 = None
-    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression -u1 < -2 on node 'lt'");  lt = None
-    lt_1 = item < 6
-    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(lt_1, "Runtime assertion failed for expression u1 < 6 on node 'lt_1'");  lt_1 = None
+    ge = item >= 0
+    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression 0 <= u1 on node 'ge'");  ge = None
+    gt = item > 2
+    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(gt, "Runtime assertion failed for expression 2 < u1 on node 'gt'");  gt = None
+    lt = item < 6
+    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression u1 < 6 on node 'lt'");  lt = None
     foo_unbacked = torch.ops.testlib.foo_unbacked.default(item);  item = None
     return foo_unbacked""",
         )
@@ -5003,14 +5147,12 @@ def forward(self, x, y):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x);  x = None
     sym_constrain_range_for_size = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense)
     sym_constrain_range = torch.ops.aten.sym_constrain_range.default(_local_scalar_dense, min = 3, max = 5)
-    mul = -1 * _local_scalar_dense
-    le = mul <= 0;  mul = None
-    _assert_scalar = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression -u1 <= 0 on node 'le'");  le = None
-    mul_1 = -1 * _local_scalar_dense
-    lt = mul_1 < -2;  mul_1 = None
-    _assert_scalar_1 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression -u1 < -2 on node 'lt'");  lt = None
-    lt_1 = _local_scalar_dense < 6;  _local_scalar_dense = None
-    _assert_scalar_2 = torch.ops.aten._assert_scalar.default(lt_1, "Runtime assertion failed for expression u1 < 6 on node 'lt_1'");  lt_1 = None
+    ge = _local_scalar_dense >= 0
+    _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression 0 <= u1 on node 'ge'");  ge = None
+    gt = _local_scalar_dense > 2
+    _assert_scalar_1 = torch.ops.aten._assert_scalar.default(gt, "Runtime assertion failed for expression 2 < u1 on node 'gt'");  gt = None
+    lt = _local_scalar_dense < 6;  _local_scalar_dense = None
+    _assert_scalar_2 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression u1 < 6 on node 'lt'");  lt = None
     full = torch.ops.aten.full.default([4, 4], 1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
     add = torch.ops.aten.add.Tensor(y, sum_1);  y = sum_1 = None
     sum_2 = torch.ops.aten.sum.dim_IntList(full, []);  full = None
@@ -5047,7 +5189,7 @@ def forward(self, x, y):
         }
         export(f, (inputs,), dynamic_shapes=dynamic_shapes)
 
-    def test_disable_forced_specializations(self):
+    def test_disable_forced_specializations_ok(self):
         # check that _disable_forced_specializations and _allow_complex_guards_as_runtime_asserts flags
         # both behave correctly, avoiding forced specializations and deferring to runtime.
         # case 1: modulo guards
@@ -5139,7 +5281,7 @@ def forward(self, x, y):
         self.assertEqual(out2.shape, torch.ones(40).shape)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Eq\(s0\*s1 \- s2\*s3, 0\) on node 'eq.*'",
+            r"Runtime assertion failed for expression Eq\(s0\*s1, s2\*s3\) on node 'eq.*'",
         ):  # fail only at runtime
             ep.module()(torch.randn(5, 8), torch.randn(4, 5), torch.randn(30))  # fail
 
@@ -5188,7 +5330,7 @@ def forward(self, x, y):
         self.assertEqual(out1.shape, torch.ones(126).shape)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Eq\(s0\*s1\*s2 \- s3, 0\) on node 'eq.*'",
+            r"Runtime assertion failed for expression Eq\(s0\*s1\*s2, s3\) on node 'eq.*'",
         ):  # fail only at runtime
             ep.module()(torch.randn(4, 3, 2), torch.randn(10))  # fail
 
@@ -5239,6 +5381,26 @@ def forward(self, x, y):
                 strict=False,
                 _disable_forced_specializations=True,
             )
+
+    # TODO requires_grad doesn't seem to work with serialization.
+    @testing.expectedFailureSerDer
+    def test_preserve_requires_grad_placeholders(self):
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p = torch.nn.Parameter(torch.randn(3, 3))
+
+            def forward(self, x, y):
+                return self.p + x + y
+
+        m = Module()
+        ep = export(m, (torch.randn(3, 3), torch.randn(3, 3, requires_grad=True)))
+        placeholders = [
+            node for node in ep.graph_module.graph.nodes if node.op == "placeholder"
+        ]
+        self.assertTrue(placeholders[0].meta["val"].requires_grad)
+        self.assertFalse(placeholders[1].meta["val"].requires_grad)
+        self.assertTrue(placeholders[2].meta["val"].requires_grad)
 
     def test_reshape_view_helper(self):
         # see: https://github.com/pytorch/pytorch/issues/126607
@@ -5304,19 +5466,43 @@ def forward(self, x, y):
         self.assertEqual(out1.shape, torch.ones(27).shape)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Ne\(s0 \- s1, 0\)",
+            r"Runtime assertion failed for expression Ne\(s0, s1\)",
         ):  # fail only at runtime
             ep.module()(torch.randn(4), torch.randn(4))  # fail
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Ne\(s0 \- s1\**3, 0\)",
+            r"Runtime assertion failed for expression Ne\(s0, s1\**3\)",
         ):
             ep.module()(torch.randn(64), torch.randn(4))  # fail
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Eq\(s0\**2 \- 3\*s1, 0\)",
+            r"Runtime assertion failed for expression Eq\(s0\**2, 3\*s1\)",
         ):
             ep.module()(torch.randn(10), torch.randn(9))  # fail
+
+        # this should be set with command line flag TORCH_DYNAMO_DO_NOT_EMIT_RUNTIME_ASSERTS=1,
+        # but dynamo checks that at torch import time, so setting os.environ makes no difference
+        # instead, manually patch dynamo config and test.
+        # test that setting this flag removes runtime asserts
+        from torch._dynamo import config as _dynamo_config
+
+        with _dynamo_config.patch(
+            do_not_emit_runtime_asserts=True,
+        ):
+            ep = torch.export._trace._export(
+                Foo(),
+                inputs,
+                dynamic_shapes=dynamic_shapes,
+                _allow_complex_guards_as_runtime_asserts=True,
+            ).run_decompositions()
+
+        self.assertEqual(
+            [
+                node.target == torch.ops.aten._assert_scalar.default
+                for node in ep.graph.nodes
+            ].count(True),
+            0,
+        )
 
     def test_constant_aliasing(self):
         class M1(torch.nn.Module):

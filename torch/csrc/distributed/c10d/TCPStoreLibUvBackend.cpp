@@ -2,11 +2,13 @@
 #include <deque>
 #include <exception>
 #include <memory>
+#include <ostream>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
+#include <c10/util/thread_name.h>
 #include <fmt/format.h>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/TCPStoreBackend.hpp>
@@ -29,7 +31,10 @@ Other callbacks don't provide exception safety so avoid there.
 
 */
 
-#define DEFAULT_BACKLOG 16384
+// This controls how many un-accepted TCP connections can be waiting in the
+// backlog. This should be at least world size to avoid issues on init. We set
+// it to -1 to use the host max value which is controlled by `soconnmax`.
+#define DEFAULT_BACKLOG -1
 #define MAX_KEY_COUNT (128 * 1024)
 #define MAX_STRING_LEN (8 * 1024)
 #define MAX_PAYLOAD_LEN (8 * 1024 * 1024)
@@ -123,7 +128,7 @@ class UvTcpSocket : public UvHandle {
       try {
         uv_socket->processBuf(buf, nread);
       } catch (std::exception& ex) {
-        C10D_INFO("Error processing client message: {}", ex.what());
+        C10D_WARNING("Error processing client message: {}", ex.what());
         uv_socket->close();
       }
     }
@@ -132,12 +137,17 @@ class UvTcpSocket : public UvHandle {
  public:
   explicit UvTcpSocket(uv_loop_t* loop) {
     uv_tcp_init(loop, &client);
+    if (int err = uv_tcp_nodelay(&client, 1)) {
+      C10D_WARNING(
+          "The no-delay option cannot be enabled for the client socket. err={}",
+          err);
+    }
   }
 
   void startRead() {
     int res = uv_read_start((uv_stream_t*)&client, alloc_buffer, read_callback);
     if (res) {
-      C10D_INFO(
+      C10D_WARNING(
           "Failed to setup read callback. client:{} code:{} name:{} desc:{}.",
           (void*)this,
           res,
@@ -186,10 +196,14 @@ class UvTcpServer : public UvTcpSocket {
       int uv_res = uv_tcp_open((uv_tcp_t*)res->unsafeGetStream(), socket);
       TORCH_CHECK(
           uv_res == 0,
-          "Failed to open existing socket. socket:{} code:{} name:{} message:{}",
+          "Failed to open existing socket. ",
+          "socket: ",
           socket,
+          ", code: ",
           uv_res,
+          ", name: ",
           uv_err_name(uv_res),
+          ", message: ",
           uv_strerror(uv_res));
 
       res->cacheSocketPort();
@@ -221,30 +235,42 @@ class UvTcpServer : public UvTcpSocket {
       }
       TORCH_CHECK(
           uv_res == 0,
-          "UV Store addr parsing failure. useIpv6:{} code:{} name:{} message:{}",
+          "UV Store addr parsing failure. ",
+          "useIpv6: ",
           useIpv6,
+          ", code: ",
           uv_res,
+          ", name: ",
           uv_err_name(uv_res),
+          ", message: ",
           uv_strerror(uv_res));
 
       uv_res =
           uv_tcp_bind(res->unsafeGetSocket(), (const struct sockaddr*)&addr, 0);
       TORCH_CHECK(
           uv_res == 0,
-          "UV Store bind failed. useIpv6:{} code:{} name:{} message:{}",
+          "The server socket has failed to bind. ",
+          "useIpv6: ",
           useIpv6,
+          ", code: ",
           uv_res,
+          ", name: ",
           uv_err_name(uv_res),
+          ", message: ",
           uv_strerror(uv_res));
 
       uv_res =
           uv_listen(res->unsafeGetStream(), DEFAULT_BACKLOG, on_new_connection);
       TORCH_CHECK(
           uv_res == 0,
-          "UV Store listen failed. useIpv6:{} code:{} name:{} message:{}",
+          "The server socket has failed to listen on any local network address. ",
+          "useIpv6: ",
           useIpv6,
+          ", code: ",
           uv_res,
+          ", name: ",
           uv_err_name(uv_res),
+          ", message: ",
           uv_strerror(uv_res));
 
       res->cacheSocketPort();
@@ -265,9 +291,12 @@ class UvTcpServer : public UvTcpSocket {
         uv_accept(unsafeGetStream(), (uv_stream_t*)socket->unsafeGetHandle());
     TORCH_CHECK(
         res == 0,
-        "Failed to accept socket. code:{} name:{} desc:{}.",
+        "Failed to accept socket. ",
+        "code: ",
         res,
+        ", name: ",
         uv_err_name(res),
+        ", message: ",
         uv_strerror(res));
   }
 
@@ -336,7 +365,7 @@ class WriterPayload : public c10::intrusive_ptr_target {
     auto handle = wp->handle;
 
     if (status) {
-      C10D_INFO(
+      C10D_WARNING(
           "Write to client failed. code:{} name:{} desc:{}.",
           status,
           uv_err_name(status),
@@ -366,7 +395,7 @@ class WriterPayload : public c10::intrusive_ptr_target {
         &req, (uv_stream_t*)handle->unsafeGetHandle(), &buf, 1, write_done);
 
     if (res) {
-      C10D_INFO(
+      C10D_WARNING(
           "Write setup to client failed. code:{} name:{} desc:{}.",
           res,
           uv_err_name(res),
@@ -458,9 +487,12 @@ class ChunkedStream {
         if (buff_idx >= buffers.size() && remaining > 0) {
           TORCH_CHECK(
               false,
-              "Trying to read past end of buffer buffer_idx:{} available:{} remaining:{}",
+              "Trying to read past end of buffer. ",
+              "buffer_idx: ",
               buff_idx,
+              ", available: ",
               buffers.size(),
+              ", remaining: ",
               remaining);
         }
       }
@@ -498,8 +530,10 @@ class ChunkedStream {
       return false;
     TORCH_CHECK(
         size <= MAX_STRING_LEN,
-        "Invalid string size. size:{} max:{}",
+        "Invalid string size. ",
+        "size: ",
         size,
+        ", max: ",
         MAX_STRING_LEN);
 
     if (available() < size)
@@ -515,8 +549,10 @@ class ChunkedStream {
     auto size_in_bytes = size * sizeof(uint8_t);
     TORCH_CHECK(
         size_in_bytes <= MAX_PAYLOAD_LEN,
-        "Invalid payload size. size: {} max:{}",
+        "Invalid payload size. ",
+        "size: ",
         size_in_bytes,
+        ", max: ",
         MAX_PAYLOAD_LEN);
 
     if (available() < size_in_bytes)
@@ -782,8 +818,10 @@ class UvClient : public UvTcpSocket {
       return false;
     TORCH_CHECK(
         key_count <= MAX_KEY_COUNT,
-        "Too many keys being waited. keys:{} max:{}",
+        "Too many keys being waited. ",
+        "keys: ",
         key_count,
+        ", max: ",
         MAX_KEY_COUNT);
 
     std::vector<std::string> keys(key_count);
@@ -810,8 +848,10 @@ class UvClient : public UvTcpSocket {
     }
     TORCH_CHECK(
         key_count <= MAX_KEY_COUNT,
-        "Too many keys being waited. keys:{} max:{}",
+        "Too many keys being waited. ",
+        "keys: ",
         key_count,
+        ", max: ",
         MAX_KEY_COUNT);
 
     std::vector<std::string> keys(key_count);
@@ -872,8 +912,10 @@ class UvClient : public UvTcpSocket {
     }
     TORCH_CHECK(
         key_count <= MAX_KEY_COUNT,
-        "Too many keys with multi_get. keys:{} max:{}",
+        "Too many keys with multi_get. ",
+        "keys: ",
         key_count,
+        ", max: ",
         MAX_KEY_COUNT);
 
     StreamWriter sw(iptr());
@@ -898,8 +940,10 @@ class UvClient : public UvTcpSocket {
     }
     TORCH_CHECK(
         key_count <= MAX_KEY_COUNT,
-        "Too many keys with multi_get. keys:{} max:{}",
+        "Too many keys with multi_get. ",
+        "keys: ",
         key_count,
+        ", max: ",
         MAX_KEY_COUNT);
 
     for (const auto _ : c10::irange(key_count)) {
@@ -958,7 +1002,7 @@ void LibUVStoreDaemon::onConnect(int status) {
     tcpServer->accept(client);
     client->startRead();
   } catch (std::exception& e) {
-    C10D_INFO("Failed to accept client due to {}", e.what());
+    C10D_WARNING("Failed to accept client due to {}", e.what());
     client->close();
   }
 }
@@ -988,9 +1032,11 @@ void LibUVStoreDaemon::init(const TCPStoreOptions& opts) {
   port_ = tcpServer->port();
   TORCH_CHECK(
       port_ == opts.port || opts.port == 0, // zero means use any port
-      "listen fd {} is bound to port {}, expected to be bound to port {}",
+      "listen fd ",
       *opts.masterListenFd,
+      " is bound to port ",
       port_,
+      ", expected to be bound to port ",
       opts.port);
 }
 
@@ -1027,6 +1073,8 @@ void LibUVStoreDaemon::print_active_handles(uv_handle_t* handle, void* arg) {
 }
 
 void LibUVStoreDaemon::run() {
+  c10::setThreadName("pt_tcpstore_uv");
+
   C10D_DEBUG("Uv main loop running");
   int res = uv_run(&loop, UV_RUN_DEFAULT);
   if (res) {
@@ -1071,7 +1119,7 @@ void LibUVStoreDaemon::run() {
 void LibUVStoreDaemon::stop() {
   int res = uv_async_send(&exit_handle);
   if (res) {
-    C10D_INFO(
+    C10D_WARNING(
         "uv_async_send failed with:{} errn:{} desc:{}\n",
         res,
         uv_err_name(res),

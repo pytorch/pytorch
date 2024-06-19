@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# mypy: allow-untyped-defs
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -10,14 +11,15 @@ import datetime
 import logging
 from typing import cast, Optional
 
-from torch.distributed import Store, TCPStore, PrefixStore
+from torch.distributed import PrefixStore, Store, TCPStore
 from torch.distributed.elastic.rendezvous import (
-    RendezvousInfo,
     RendezvousHandler,
+    RendezvousInfo,
+    RendezvousParameters,
     RendezvousStoreInfo,
-    RendezvousParameters
 )
 from torch.distributed.elastic.rendezvous.utils import parse_rendezvous_endpoint
+
 
 __all__ = ["StaticTCPRendezvous", "create_rdzv_handler"]
 

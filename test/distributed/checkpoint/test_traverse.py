@@ -1,12 +1,15 @@
 # Owner(s): ["oncall: distributed"]
 
 from collections import OrderedDict
+from typing import TYPE_CHECKING
 
 import torch
 
 import torch.distributed.checkpoint._traverse as _traverse
-from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 from torch.testing._internal.common_utils import run_tests, TestCase
+
+if TYPE_CHECKING:
+    from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 
 
 # TODO: add comments for TestTraverse
