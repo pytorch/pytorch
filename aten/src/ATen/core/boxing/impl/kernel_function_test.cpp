@@ -662,18 +662,6 @@ void expectCallsConcatUnboxed(DispatchKey dispatch_key) {
   EXPECT_EQ("123", result);
 }
 
-void expectCannotCallConcatBoxed(DispatchKey dispatch_key) {
-  at::AutoDispatchBelowAutograd mode;
-
-  // assert that schema and cpu kernel are present
-  auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
-  ASSERT_TRUE(op.has_value());
-  expectThrows<c10::Error>(
-    [&] {callOp(*op, dummyTensor(dispatch_key), "1", "2", 3);},
-    "Tried to call KernelFunction::callBoxed() on a KernelFunction that can only be called with KernelFunction::call()."
-  );
-}
-
 TEST(OperatorRegistrationTestFunctionBasedKernel, givenKernel_whenRegistered_thenCanBeCalledUnboxed) {
   auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, str a, str b, int c) -> str", RegisterOperators::options().kernel<decltype(concatKernel), &concatKernel>(DispatchKey::CPU));
   expectCallsConcatUnboxed(DispatchKey::CPU);

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import collections
 import itertools
 import os
@@ -57,8 +58,8 @@ from torch.distributed.fsdp.api import (
 from torch.distributed.fsdp.wrap import _Policy
 from torch.distributed.tensor.parallel.fsdp import DTensorExtensions
 from torch.distributed.utils import _sync_params_and_buffers
-
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
 
 if TYPE_CHECKING:
     from torch.utils.hooks import RemovableHandle
@@ -166,8 +167,7 @@ def _init_process_group_state_for_hybrid_shard(
             state.process_group = device_mesh.get_group(mesh_dim=1)
         else:
             raise ValueError(
-                "Expected device_mesh to have ndim=2 "
-                f"but got {len(device_mesh.get_group())}"
+                f"Expected device_mesh to have ndim=2 but got {device_mesh.ndim}"
             )
     elif process_group is None:
         default_group = _get_default_group()
@@ -1094,25 +1094,6 @@ def _sync_module_params_and_buffers(
     _sync_params_and_buffers(
         process_group,
         module_states,
-        PARAM_BROADCAST_BUCKET_SIZE,
-        src=0,
-    )
-
-
-def _sync_module_states(
-    params: List[nn.Parameter],
-    buffers: List[torch.Tensor],
-    process_group: dist.ProcessGroup,
-) -> None:
-    # Assumes that each call to this method passes in disjoint `params` and
-    # and `buffers` across calls, so there is no chance of re-synchronizing
-    params_and_buffers = [param.detach() for param in params] + [
-        buffer.detach() for buffer in buffers
-    ]
-    _check_module_states_for_sync_module_states(params_and_buffers)
-    _sync_params_and_buffers(
-        process_group,
-        params_and_buffers,
         PARAM_BROADCAST_BUCKET_SIZE,
         src=0,
     )

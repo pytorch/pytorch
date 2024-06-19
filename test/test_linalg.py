@@ -963,9 +963,9 @@ class TestLinalg(TestCase):
         # eigh requires 'uplo' parameter to be 'U' or 'L'
         t = torch.randn(3, 3, device=device, dtype=dtype)
         for uplo in ["a", "wrong"]:
-            with self.assertRaisesRegex(RuntimeError, "be \'L\' or \'U\'"):
+            with self.assertRaisesRegex(RuntimeError, "be 'L' or 'U'"):
                 torch.linalg.eigh(t, UPLO=uplo)
-            with self.assertRaisesRegex(ValueError, "be \'L\' or \'U\'"):
+            with self.assertRaisesRegex(ValueError, "be 'L' or 'U'"):
                 np.linalg.eigh(t.cpu().numpy(), UPLO=uplo)
 
         # if non-empty out tensor with wrong shape is passed a warning is given
@@ -1062,9 +1062,9 @@ class TestLinalg(TestCase):
         # eigvalsh requires 'uplo' parameter to be 'U' or 'L'
         t = torch.randn(3, 3, device=device, dtype=dtype)
         for uplo in ["a", "wrong"]:
-            with self.assertRaisesRegex(RuntimeError, "be \'L\' or \'U\'"):
+            with self.assertRaisesRegex(RuntimeError, "be 'L' or 'U'"):
                 torch.linalg.eigvalsh(t, UPLO=uplo)
-            with self.assertRaisesRegex(ValueError, "be \'L\' or \'U\'"):
+            with self.assertRaisesRegex(ValueError, "be 'L' or 'U'"):
                 np.linalg.eigvalsh(t.cpu().numpy(), UPLO=uplo)
 
         # if non-empty out tensor with wrong shape is passed a warning is given
@@ -2416,7 +2416,7 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
-    @dtypes(torch.double)
+    @dtypes(torch.double, torch.cdouble)
     def test_svd_lowrank(self, device, dtype):
         from torch.testing._internal.common_utils import random_lowrank_matrix, random_sparse_matrix
 
@@ -2439,14 +2439,12 @@ class TestLinalg(TestCase):
 
             # check if u, s, v is a SVD
             u, s, v = u[..., :q], s[..., :q], v[..., :q]
-            A = u.matmul(s.diag_embed()).matmul(v.mT)
+            A = (u * s.unsqueeze(-2)).matmul(v.mH)
             self.assertEqual(A, a, rtol=1e-7, atol=2e-7)
 
-            # check if svd_lowrank produces same singular values as torch.svd
-            U, S, V = torch.svd(a)
-            self.assertEqual(s.shape, S.shape)
-            self.assertEqual(u.shape, U.shape)
-            self.assertEqual(v.shape, V.shape)
+            # check if svd_lowrank produces same singular values as linalg.svdvals
+            U, S, Vh = torch.linalg.svd(a, full_matrices=False)
+            V = Vh.mH
             self.assertEqual(s, S)
 
             if density == 1:
@@ -2454,10 +2452,11 @@ class TestLinalg(TestCase):
                 #
                 # check if pairs (u, U) and (v, V) span the same
                 # subspaces, respectively
-                u, s, v = u[..., :actual_rank], s[..., :actual_rank], v[..., :actual_rank]
-                U, S, V = U[..., :actual_rank], S[..., :actual_rank], V[..., :actual_rank]
-                self.assertEqual(u.mT.matmul(U).det().abs(), torch.ones(batches, device=device, dtype=dtype))
-                self.assertEqual(v.mT.matmul(V).det().abs(), torch.ones(batches, device=device, dtype=dtype))
+                u, v = u[..., :actual_rank], v[..., :actual_rank]
+                U, V = U[..., :actual_rank], V[..., :actual_rank]
+                expected_ones = u.mH.matmul(U).det().abs()
+                self.assertEqual(expected_ones, torch.ones_like(expected_ones))
+                self.assertEqual(v.mH.matmul(V).det().abs(), torch.ones_like(expected_ones))
 
         all_batches = [(), (1,), (3,), (2, 3)]
         for actual_rank, size, all_batches in [  # noqa: B020
@@ -4479,6 +4478,72 @@ class TestLinalg(TestCase):
                 x = make_arg(size_x, noncontiguous=nctg_x)
                 y = make_arg(size_y, noncontiguous=nctg_y)
                 self.check_single_matmul(x, y)
+
+    @onlyCUDA
+    @dtypes(*floating_types_and(torch.half))
+    def test_matmul_small_brute_force_tunableop(self, device, dtype):
+        # disable tunableop buffer rotation for all tests everywhere, it can be slow
+        import os
+        os.environ["PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE"] = "0"
+        assert torch.cuda.tunable.is_enabled() is False, "TunableOp should be off by default"
+        assert torch.cuda.tunable.tuning_is_enabled(), "TunableOp's tuning should be enabled by default"
+        torch.cuda.tunable.tuning_enable(False)
+        assert torch.cuda.tunable.tuning_is_enabled() is False
+        torch.cuda.tunable.tuning_enable(True)
+        assert torch.cuda.tunable.tuning_is_enabled()
+        assert torch.cuda.tunable.get_max_tuning_duration() == 30
+        assert torch.cuda.tunable.get_max_tuning_iterations() == 100
+
+        torch.cuda.tunable.enable()
+        # set these to single iterations to keep it short but still exercise the code
+        torch.cuda.tunable.set_max_tuning_duration(1)
+        torch.cuda.tunable.set_max_tuning_iterations(1)
+
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
+
+        for (size_x, size_y), nctg_x, nctg_y in product(self.gen_sizes_matmul(1), (True, False), (True, False)):
+            x = make_arg(size_x, noncontiguous=nctg_x)
+            y = make_arg(size_y, noncontiguous=nctg_y)
+            self.check_single_matmul(x, y)
+
+        filename1 = torch.cuda.tunable.get_filename()
+        filename2 = "tunableop_results_tmp1.csv"
+        filename3 = "tunableop_results_tmp2.csv"
+        ordinal = torch.cuda.current_device()
+        assert filename1 == f"tunableop_results{ordinal}.csv"
+        assert len(torch.cuda.tunable.get_validators()) > 0
+        assert len(torch.cuda.tunable.get_results()) > 0
+
+        assert torch.cuda.tunable.write_file()  # use default filename
+        assert torch.cuda.tunable.write_file(filename2)  # use custom, one-time filename
+        torch.cuda.tunable.set_filename(filename3)
+        assert torch.cuda.tunable.write_file()  # use previously set filename
+        assert torch.cuda.tunable.read_file()  # use previously set filename, will ignore duplicates and return True
+
+        with open(filename1) as file1:
+            file1_contents = file1.read()
+        with open(filename2) as file2:
+            file2_contents = file2.read()
+        with open(filename3) as file3:
+            file3_contents = file3.read()
+        assert file1_contents == file2_contents
+        assert file1_contents == file3_contents
+
+        # remove the files created above to avoid error 'Build left local git repository checkout dirty', ignore errors
+        for filename in [filename1, filename2, filename3]:
+            try:
+                import os
+                os.remove(filename)
+            finally:
+                pass
+
+        # disables TunableOp, no file will be written, restore to default values
+        torch.cuda.tunable.enable(False)
+        torch.cuda.tunable.set_filename(filename1)  # reset back to default filename for next unit test
+        torch.cuda.tunable.set_max_tuning_duration(30)
+        torch.cuda.tunable.set_max_tuning_iterations(100)
+        assert torch.cuda.tunable.is_enabled() is False, "TunableOp should be off after resetting"
+        assert torch.cuda.tunable.get_max_tuning_iterations() == 100
 
     @dtypes(torch.float, torch.complex64)
     def test_matmul_out_kernel_errors_with_autograd(self, device, dtype):

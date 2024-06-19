@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import cast, List, Optional, Tuple, Union
 
 import torch
@@ -309,6 +310,8 @@ AdamW.__doc__ = (
         {_capturable_doc}
         {_differentiable_doc}
         {_fused_doc}
+    .. Note::
+        A prototype implementation of Adam and AdamW for MPS supports `torch.float32` and `torch.float16`.
     .. _Decoupled Weight Decay Regularization:
         https://arxiv.org/abs/1711.05101
     .. _On the Convergence of Adam and Beyond:
@@ -354,7 +357,7 @@ def _single_tensor_adamw(
         step_t = state_steps[i]
 
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-        if not torch.compiler.is_compiling() and capturable:
+        if not torch._utils.is_compiling() and capturable:
             capturable_supported_devices = _get_capturable_supported_devices()
             assert (
                 param.device.type == step_t.device.type
@@ -467,7 +470,7 @@ def _multi_tensor_adamw(
         )
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-    if not torch.compiler.is_compiling() and capturable:
+    if not torch._utils.is_compiling() and capturable:
         capturable_supported_devices = _get_capturable_supported_devices(
             supports_xla=False
         )
@@ -661,6 +664,10 @@ def _fused_adamw(
         ),
         _,
     ) in grouped_tensors.items():
+        if device.type == "mps":  # type: ignore[union-attr]
+            assert found_inf is None and grad_scale is None
+            assert not isinstance(lr, Tensor)
+
         device_grad_scale, device_found_inf = None, None
         if grad_scale is not None:
             device_grad_scale = grad_scale_dict.setdefault(
@@ -728,7 +735,7 @@ def adamw(
 
     See :class:`~torch.optim.AdamW` for details.
     """
-    if not torch.compiler.is_compiling() and not all(
+    if not torch._utils.is_compiling() and not all(
         isinstance(t, torch.Tensor) for t in state_steps
     ):
         raise RuntimeError(

@@ -242,8 +242,7 @@ option(USE_COLORIZE_OUTPUT "Colorize output during compilation" ON)
 option(USE_ASAN "Use Address+Undefined Sanitizers" OFF)
 option(USE_TSAN "Use Thread Sanitizer" OFF)
 option(USE_CUDA "Use CUDA" ON)
-cmake_dependent_option(USE_XPU "Use XPU. Only available on Linux." ON "LINUX"
-                       OFF)
+option(USE_XPU "Use XPU" ON)
 cmake_dependent_option(
   BUILD_LAZY_CUDA_LINALG "Build cuda linalg ops as separate library" ON
   "USE_CUDA AND LINUX AND BUILD_PYTHON" OFF)
@@ -362,9 +361,6 @@ cmake_dependent_option(
 cmake_dependent_option(
     USE_TENSORPIPE "Use TensorPipe. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
-option(USE_TBB "Use TBB (Deprecated)" OFF)
-cmake_dependent_option(
-    USE_SYSTEM_TBB "Use system-provided Intel TBB." OFF "USE_TBB" OFF)
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
 option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
 option(BUILD_LIBTORCH_CPU_WITH_DEBUG
@@ -483,9 +479,6 @@ if(USE_SYSTEM_LIBS)
   if(USE_NCCL)
     set(USE_SYSTEM_NCCL ON)
   endif()
-  if(USE_TBB)
-    set(USE_SYSTEM_TBB ON)
-  endif()
 endif()
 
 # Used when building Caffe2 through setup.py
@@ -546,6 +539,8 @@ option(BUILD_EXECUTORCH "Master flag to build Executorch" ON)
 if(LINUX)
   set(CMAKE_SHARED_LINKER_FLAGS
       "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--no-as-needed")
+  set(CMAKE_SHARED_LINKER_FLAGS
+      "${CMAKE_SHARED_LINKER_FLAGS} $ENV{LDFLAGS}")
 endif()
 
 if(MSVC)
@@ -870,12 +865,13 @@ cmake_dependent_option(
 # Suspect users building from source will need this
 add_definitions(-DFLASHATTENTION_DISABLE_ALIBI)
 
-# CAVEAT: Again, do not check USE_ROCM here Flash Attention2 will error while
-# building for sm52 while Mem Eff Attention won't
+# CAVEAT: Again, Flash Attention2 will error while building for sm52 while Mem
+# Eff Attention won't
 cmake_dependent_option(
   USE_MEM_EFF_ATTENTION
   "Enable memory-efficient attention for scaled dot product attention.\
-  Will be disabled if not supported by the platform" ON "USE_CUDA" OFF)
+  Will be disabled if not supported by the platform" ON
+  "USE_CUDA OR USE_ROCM" OFF)
 
 if(DEBUG_CUDA)
   string(APPEND CMAKE_CUDA_FLAGS_DEBUG " -lineinfo")
@@ -898,6 +894,14 @@ endif()
 
 if(USE_SLEEF_FOR_ARM_VEC256)
   string(APPEND CMAKE_CXX_FLAGS " -DAT_BUILD_ARM_VEC256_WITH_SLEEF")
+  add_definitions(-DAT_BUILD_ARM_VEC256_WITH_SLEEF)
+endif()
+
+# Enable sleef on macOS with Apple silicon by default
+if((${CMAKE_SYSTEM_NAME} STREQUAL "Darwin") AND ("${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "arm64"))
+  message(STATUS "Running on macOS with Apple silicon")
+  string(APPEND CMAKE_CXX_FLAGS " -DAT_BUILD_ARM_VEC256_WITH_SLEEF")
+  add_definitions(-DAT_BUILD_ARM_VEC256_WITH_SLEEF)
 endif()
 
 if(USE_XNNPACK)

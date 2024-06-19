@@ -298,6 +298,7 @@ def _register_pytree_node(
             "`to_str_fn` and `maybe_from_str_fn` is deprecated. "
             "Please use `to_dumpable_context` and `from_dumpable_context` instead.",
             FutureWarning,
+            stacklevel=2,
         )
 
     _private_register_pytree_node(

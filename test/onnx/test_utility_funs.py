@@ -17,7 +17,6 @@ from pytorch_test_common import (
     skipIfUnsupportedMaxOpsetVersion,
     skipIfUnsupportedMinOpsetVersion,
 )
-from verify import verify
 
 import torch
 import torch.onnx
@@ -26,7 +25,7 @@ from torch.onnx import _constants, OperatorExportTypes, TrainingMode, utils
 from torch.onnx._globals import GLOBALS
 from torch.onnx.symbolic_helper import _unpack_list, parse_args
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import skipIfNoCaffe2, skipIfNoLapack
+from torch.testing._internal.common_utils import skipIfNoLapack
 
 
 def _remove_test_environment_prefix_from_scope_name(scope_name: str) -> str:
@@ -1622,25 +1621,6 @@ class TestUtilityFuns(_BaseTestCase):
                 graph_input_params,
                 "Graph parameter names does not match model parameters.",
             )
-
-    @skipIfNoCaffe2
-    def test_modifying_params(self):
-        class MyModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.param = torch.nn.Parameter(torch.tensor([2.0]))
-
-            def forward(self, x):
-                y = x * x
-                self.param.data.add_(1.0)
-                return y
-
-        x = torch.tensor([1, 2])
-        # Move import to local as caffe2 backend requires additional build flag,
-        # and is only used in this test case.
-        import caffe2.python.onnx.backend as backend
-
-        verify(MyModel(), x, backend, do_constant_folding=False)
 
     def test_fuse_conv_bn(self):
         class Fuse(torch.nn.Module):

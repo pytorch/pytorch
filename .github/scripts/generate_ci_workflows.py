@@ -60,7 +60,7 @@ class BinaryBuildWorkflow:
     branches: str = "nightly"
     # Mainly for macos
     cross_compile_arm64: bool = False
-    macos_runner: str = "macos-12-xl"
+    macos_runner: str = "macos-14-xlarge"
 
     def __post_init__(self) -> None:
         if self.abi_version:
@@ -285,7 +285,7 @@ MACOS_BINARY_BUILD_WORKFLOWS = [
             libtorch_variants=["shared-with-deps"],
         ),
         cross_compile_arm64=False,
-        macos_runner="macos-13-xlarge",
+        macos_runner="macos-14-xlarge",
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
             isolated_workflow=True,
@@ -298,7 +298,7 @@ MACOS_BINARY_BUILD_WORKFLOWS = [
             OperatingSystem.MACOS_ARM64
         ),
         cross_compile_arm64=False,
-        macos_runner="macos-13-xlarge",
+        macos_runner="macos-14-xlarge",
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
             isolated_workflow=True,
@@ -308,7 +308,7 @@ MACOS_BINARY_BUILD_WORKFLOWS = [
         os=OperatingSystem.MACOS_ARM64,
         package_type="conda",
         cross_compile_arm64=False,
-        macos_runner="macos-13-xlarge",
+        macos_runner="macos-14-xlarge",
         build_configs=generate_binary_build_matrix.generate_conda_matrix(
             OperatingSystem.MACOS_ARM64
         ),
