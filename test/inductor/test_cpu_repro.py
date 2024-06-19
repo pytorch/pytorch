@@ -1920,6 +1920,8 @@ class CPUReproTests(TestCase):
                 FileCheck().check(_target_code_check).run(code)
             if _target_code_check_not:
                 FileCheck().check_not(_target_code_check_not).run(code)
+                # Verify that the output isn't empty
+                FileCheck().check("Output code:").run(code)
 
             self.assertEqual(
                 _fn(*_inps),
@@ -1934,7 +1936,15 @@ class CPUReproTests(TestCase):
 
         if "ATen parallel backend: OpenMP" in torch.__config__.parallel_info():
             with set_num_threads(1):
-                _internal_check(fn, inps, "aten.scatter_reduce_")
+                # When running with a single thread, we expect the aten.scatter will go
+                # into the cpp backend codegen instead of a fallback to aten.scatter_reduce_.
+                # Avoid the inductor cache so we don't serve an entry compiled above.
+                with config.patch(
+                    {"fx_graph_cache": False, "fx_graph_remote_cache": False}
+                ):
+                    _internal_check(
+                        fn, inps, _target_code_check_not="aten.scatter_reduce_"
+                    )
 
             with config.patch({"cpp.dynamic_threads": True}), set_num_threads(1):
                 _internal_check(fn, inps, "aten.scatter_reduce_")
