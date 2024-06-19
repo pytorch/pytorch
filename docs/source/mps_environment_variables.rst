@@ -24,10 +24,11 @@ MPS Environment Variables
     - If set to ``1``, full back operations to CPU when MPS does not support them.
 
 .. note::
+
   **high watermark ratio** is a hard limit for the total allowed allocations
-    - 0. : disables high watermark limit (may cause system failure if system-wide OOM occurs)
-    - 1. : recommended maximum allocation size (i.e., device.recommendedMaxWorkingSetSize)
-    - >1.: allows limits beyond the device.recommendedMaxWorkingSetSize
+    - `0.0` : disables high watermark limit (may cause system failure if system-wide OOM occurs)
+    - `1.0`` : recommended maximum allocation size (i.e., device.recommendedMaxWorkingSetSize)
+    - `>1.0`: allows limits beyond the device.recommendedMaxWorkingSetSize
 
   e.g., value 0.95 means we allocate up to 95% of recommended maximum
   allocation size; beyond that, the allocations would fail with OOM error.
