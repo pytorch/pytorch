@@ -46,10 +46,14 @@ model(x).sum().backward()
             env=env,
         )
         self.assertIn("FSDP::root_pre_forward", stderr.decode("utf-8"))
-        self.assertIn("FSDP::pre_forward", stderr.decode("utf-8"))
-        self.assertIn("FSDP::post_forward", stderr.decode("utf-8"))
-        self.assertIn("FSDP::pre_backward", stderr.decode("utf-8"))
-        self.assertIn("FSDP::post_backward", stderr.decode("utf-8"))
+        self.assertIn("FSDP::pre_forward (0)", stderr.decode("utf-8"))
+        self.assertIn("FSDP::pre_forward (1)", stderr.decode("utf-8"))
+        self.assertIn("FSDP::post_forward (0)", stderr.decode("utf-8"))
+        self.assertIn("FSDP::post_forward (1)", stderr.decode("utf-8"))
+        self.assertIn("FSDP::pre_backward (0)", stderr.decode("utf-8"))
+        self.assertIn("FSDP::pre_backward (1)", stderr.decode("utf-8"))
+        self.assertIn("FSDP::post_backward (0)", stderr.decode("utf-8"))
+        self.assertIn("FSDP::post_backward (1)", stderr.decode("utf-8"))
         self.assertIn("FSDP::root_post_backward", stderr.decode("utf-8"))
 
 
