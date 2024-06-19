@@ -2291,10 +2291,13 @@ class TestCustomOpAPI(TestCase):
         class Stack(torch.autograd.Function):
             @staticmethod
             def forward(ctx, xs):
+                ctx.num_xs = len(xs)
                 return torch.stack(xs)
 
             @staticmethod
             def backward(ctx, grad):
+                expected = ([True] * ctx.num_xs,)
+                self.assertEqual(ctx.needs_input_grad, expected)
                 return list(grad.unbind(0))
 
         # call two applys, do a backward on the first
@@ -2327,19 +2330,21 @@ class TestCustomOpAPI(TestCase):
         class Foo(torch.autograd.Function):
             @staticmethod
             def forward(ctx, xs):
-                if len(xs) > 0:
+                if len(xs) > 1:
                     return Foo.apply(xs[1:])
                 ctx.len_xs = len(xs)
-                return x.sin()
+                return xs[0].sin()
 
             @staticmethod
             def backward(ctx, grad):
-                result = [None] * len_xs
+                result = [None] * ctx.len_xs
                 result[-1] = grad.cos()
                 return result
 
-        with self.assertRaisesRegex(NotImplementedError, "Recursive call"):
-            Foo.apply(xs)
+        # should work
+        result = Foo.apply(xs)
+        expected = xs[-1].sin()
+        self.assertEqual(result, expected)
 
         # recursive on backward
         @torch._library.autograd.supports_tensorlist
