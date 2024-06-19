@@ -19,7 +19,7 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
     if [[ "$BUILD_ENVIRONMENT" != *py3.8* ]]; then
       # Install numpy-2.0 release candidate for builds
       # Which should be backward compatible with Numpy-1.X
-      python -mpip install --pre numpy==2.0.0rc1
+      python -mpip install --pre numpy==2.0.0rc1 numba pandas scipy
     fi
   fi
 fi
