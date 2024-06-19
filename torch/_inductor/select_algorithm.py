@@ -13,6 +13,7 @@ import os
 import sys
 import textwrap
 import time
+from collections import namedtuple
 from concurrent.futures import ThreadPoolExecutor
 from io import StringIO
 
@@ -102,6 +103,16 @@ class PartialRender:
         return self.code
 
 
+SubgraphInfo = namedtuple(
+    "SubgraphInfo",
+    [
+        "body",
+        "template_mask",
+        "template_out",
+    ],
+)
+
+
 class TritonTemplateKernel(TritonKernel):
     def __init__(
         self,
@@ -132,7 +143,6 @@ class TritonTemplateKernel(TritonKernel):
         self.named_input_nodes = {}  # type: ignore[var-annotated]
         self.defines = defines
         self.kernel_name = kernel_name
-        self.template_mask = None
         self.use_jit = use_jit
         self.num_stages = num_stages
         self.num_warps = num_warps
@@ -147,21 +157,34 @@ class TritonTemplateKernel(TritonKernel):
         self.triton_meta: Optional[Dict[str, object]] = None
         # For Templated Attention this can be a list of ir.Subgraph
         self.subgraphs: Optional[List[ir.ComputedBuffer]] = subgraphs
+
+        # The following attributes (body, template_mask, output_val) are all
+        # used for triton kernel codegen.
+        # They are swapped onto the TritonTemplateKernel object by
+        # `set_subgraph_body`
+        self.subgraph_bodies: Dict[str, SubgraphInfo] = {}
+
         self.body: IndentedBuffer = FakeIndentedBuffer()
-        self.subgraph_bodies: Dict[str, IndentedBuffer] = {}
+        self.template_mask: Optional[str] = None
+        self.template_out: Optional[str] = None
 
     @contextlib.contextmanager
     def set_subgraph_body(self, body_name: str):
-        old_body = self.body
+        old_body, old_mask, old_out = self.body, self.template_mask, self.template_out
         assert body_name in self.subgraph_bodies, body_name
-        self.body = self.subgraph_bodies[body_name]
+        self.body, self.template_mask, self.template_out = self.subgraph_bodies[
+            body_name
+        ]
         yield
-        self.body = old_body
+        self.subgraph_bodies[body_name] = SubgraphInfo(
+            self.body, self.template_mask, self.template_out
+        )
+        self.body, self.template_mask, self.template_out = old_body, old_mask, old_out
 
     @contextlib.contextmanager
     def create_subgraph_body(self, body_name: str):
         assert body_name not in self.subgraph_bodies
-        self.subgraph_bodies[body_name] = IndentedBuffer()
+        self.subgraph_bodies[body_name] = SubgraphInfo(IndentedBuffer(), None, None)
         with self.set_subgraph_body(body_name):
             yield
 
@@ -406,7 +429,8 @@ class TritonTemplateKernel(TritonKernel):
             self.range_trees[0].lookup(
                 sympy.Integer(1), sympy_product(lengths)
             ).set_name("xindex")
-            self.template_mask = mask  # type: ignore[assignment]
+            self.template_mask = mask
+            self.template_out = val
             self.template_indices = indices
             output_index = self.output_node.get_layout().make_indexer()(index_symbols)
             output_index = self.rename_indexing(output_index)
@@ -492,7 +516,9 @@ class TritonTemplateKernel(TritonKernel):
         return super().indexing(
             index,
             dense_indexing=False,
-            copy_shape=self.template_mask,
+            # We pass template_out as the shape to broadcast the indexing to as
+            # the mask might be broadcast to the output shape
+            copy_shape=self.template_out,
             override_mask=self.template_mask,
             block_ptr=block_ptr,
         )
