@@ -12,8 +12,7 @@ import sympy
 import torch
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from .. import ir
-from ..utils import IndentedBuffer, sympy_index_symbol_with_prefix
-from ..scheduler import BaseSchedulerNode
+from ..utils import IndentedBuffer, sympy_index_symbol_with_prefix, sympy_subs
 from ..virtualized import V
 
 from .common import CSEVariable, ExprPrinter, Kernel, KernelArgs
@@ -304,15 +303,54 @@ def value_to_cpp(value, cpp_type):
         return f"static_cast<{cpp_type}>({repr(value)})"
 
 
+def rewrite_index_for_function(
+    localize_buffer_handler: "LocalizeBufferHandler",
+    index: sympy.Expr,
+):
+    # Local buffer at the inner dimensions
+    snode = V.graph.scheduler.name_to_node.get(
+        localize_buffer_handler.global_buf.get_name()
+    )
+    assert snode is not None
+    scheduler_nodes = snode.get_nodes()
+    _, (group, reduction_group) = max(
+        scheduler_nodes, key=lambda x: int(x.is_reduction())
+    ).group
+    call_ranges = tuple(group) + tuple(reduction_group)
+    indices_to_keep = [
+        f"x{len(call_ranges) - (idx + 1)}"
+        for idx in range(len(localize_buffer_handler.local_buf.get_layout().size))
+    ]
+    sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)  # type: ignore[attr-defined]
+    replacements = {}
+    for x in sorted_symbols:
+        if x.name.startswith("x") and x.name not in indices_to_keep:  # type: ignore[attr-defined]
+            # Only keep index used by local buffer
+            replacements[x] = sympy.core.numbers.Zero()
+    index = sympy_subs(index, replacements)  # type: ignore[arg-type]
+    return index
+
+
+def rewrite_index_for_nodes(
+    localize_buffer_handler: "LocalizeBufferHandler",
+    index: sympy.Expr,
+):
+    used_vars = {s for s in index.free_symbols if symbol_is_type(s, SymT.INDEX)}
+    index_vars = []
+    for i in range(len(localize_buffer_handler.local_buf.get_size())):
+        var = sympy_index_symbol_with_prefix(SymT.INDEX, i)
+        index_vars.append(var if var in used_vars else 0)
+    index = localize_buffer_handler.local_buf.layout.make_indexer()(index_vars)
+    return index
+
+
 class LocalizeBufferHandler(V.WrapperHandler):  # type: ignore[name-defined]
     def __init__(
         self,
         inner,
-        global_buf=None,
-        local_buf=None,
-        rewrite_index: Optional[
-            Callable[["LocalizeBufferHandler", sympy.Expr], sympy.Expr]
-        ] = None,
+        global_buf: ir.Buffer,
+        local_buf: ir.Buffer,
+        rewrite_index: Callable[["LocalizeBufferHandler", sympy.Expr], sympy.Expr],
     ):
         super().__init__(inner)
         self.global_buf = global_buf
@@ -339,8 +377,6 @@ class LocalizeBufferHandler(V.WrapperHandler):  # type: ignore[name-defined]
         ):
             # Remove name of local buffer from Kernel.store_buffer_names
             # local_buffer_name is added to Kernel.store_buffer_names in Kernel.CSEProxy.store.
-            # A special case is CppVecKernelChecker which uses VecCheckerProxy
-            # instead of CSEProxy, so local_buffer_name is not in store_buffer_names
             V.kernel.store_buffer_names.discard(local_buffer_name)
         return res
 
@@ -361,8 +397,10 @@ class LocalBufferContext:
     def __init__(self, kernel_args: KernelArgs):
         self.kernel_args = kernel_args
         self.exit_stack = contextlib.ExitStack()
+        # Map Local Buffer name to Local Buffer
         self.local_buffers: Dict[str, ir.Buffer] = {}
-        self.local_nodes: Dict[str, BaseSchedulerNode] = {}
+        # Map Local Buffer name to Global Buffer
+        self.global_buffers: Dict[str, ir.Buffer] = {}
 
     def __enter__(self):
         self.exit_stack.__enter__()
@@ -403,35 +441,42 @@ class LocalBufferContext:
         self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
 
     def add_local_buffer(
-        self, buffer: ir.Buffer, node: Optional[BaseSchedulerNode] = None
+        self, local_buffer: ir.Buffer, global_buffer: Optional[ir.Buffer] = None
     ):
-        assert buffer.get_name() not in self.local_buffers
-        self.local_buffers[buffer.get_name()] = buffer
-        if node:
-            self.local_nodes[buffer.get_name()] = node
-            # Patch the buffer's method of should_allocate
-            assert isinstance(node.node, ir.ComputedBuffer)
+        assert local_buffer.get_name() not in self.local_buffers
+        self.local_buffers[local_buffer.get_name()] = local_buffer
+        if global_buffer:
+            self.global_buffers[local_buffer.get_name()] = global_buffer
 
             def should_allocate():
-                # Local Buffer shouldn't allocate globally
-                assert isinstance(node.node, ir.ComputedBuffer)
+                assert isinstance(global_buffer, ir.Buffer)
                 # Never resue this buffer, sinice it's not real allocated.
-                V.graph.never_reuse_buffers.add(node.node.get_name())
+                V.graph.never_reuse_buffers.add(global_buffer.get_name())
                 # Mark this buffer as freed, so that we don't free it later.
-                V.graph.wrapper_code.freed.add(node.node.get_name())
+                V.graph.wrapper_code.freed.add(global_buffer.get_name())
+                # Avoid allocation of this Global Buffer
                 return False
 
+            assert isinstance(global_buffer, ir.Buffer)
+            # Patch the should_allocate of global buffer to avoid allocation
             self.exit_stack.enter_context(
-                patch.object(node.node, "should_allocate", should_allocate)
+                patch.object(global_buffer, "should_allocate", should_allocate)
             )
 
-    def localize_buffer_for_function(
+    def localize_for_function(
         self,
         fn: Callable[..., Any],
-        rewrite_index: Callable[["LocalizeBufferHandler", sympy.Expr], sympy.Expr],
-        global_buf: Optional[ir.Buffer],
-        local_buf: Optional[ir.Buffer],
+        rewrite_index: Callable[
+            ["LocalizeBufferHandler", sympy.Expr], sympy.Expr
+        ] = rewrite_index_for_function,
     ):
+        local_buffers = list(self.local_buffers.values())
+        global_buffers = list(self.global_buffers.values())
+        assert len(local_buffers) == 1
+        assert len(global_buffers) == 1
+        local_buf = local_buffers[0]
+        global_buf = global_buffers[0]
+
         def inner(node, *index_vars):
             with V.set_ops_handler(
                 LocalizeBufferHandler(
@@ -445,8 +490,12 @@ class LocalBufferContext:
 
         return inner
 
-    def localize_buffer_for_nodes(
-        self, global_buf: ir.Buffer, local_buf: ir.Buffer, nodes: List[ir.IRNode]
+    def localize_for_nodes(
+        self,
+        nodes: List[ir.IRNode],
+        rewrite_index: Callable[
+            ["LocalizeBufferHandler", sympy.Expr], sympy.Expr
+        ] = rewrite_index_for_nodes,
     ) -> List[ir.IRNode]:
         """
         Localizes the buffer `global_buf` to `local_buf` in the given `nodes` and returns
@@ -457,17 +506,12 @@ class LocalBufferContext:
         The `local_buf` should already be registered in the local scope and the data access
         is assumed to be contiguous with the same order as the `global_buf`.
         """
-        assert local_buf.get_name() in self.local_buffers
-        assert len(global_buf.get_size()) == len(local_buf.get_size())
+        local_buffers = list(self.local_buffers.values())
+        global_buffers = list(self.global_buffers.values())
+        assert len(local_buffers) == 1
+        assert len(global_buffers) == 1
+        assert len(global_buffers[0].get_size()) == len(local_buffers[0].get_size())
         assert len(nodes) > 0
-
-        def rewrite_index(self, index):
-            index_vars = sorted(
-                [s for s in index.free_symbols if symbol_is_type(s, SymT.INDEX)],
-                key=str,
-            )
-            index = self.local_buf.layout.make_indexer()(index_vars)
-            return index
 
         def wrap_inner_fn_for_node(node: ir.IRNode):
             loops = node.data if isinstance(node, ir.ComputedBuffer) else node
@@ -480,13 +524,12 @@ class LocalBufferContext:
             else:
                 new_node = new_loops  # type: ignore[assignment]
 
-            new_loops.inner_fn = self.localize_buffer_for_function(
+            new_loops.inner_fn = self.localize_for_function(
                 new_loops.inner_fn,
                 rewrite_index,
-                global_buf,
-                local_buf,
             )
             return new_node
+
         return [wrap_inner_fn_for_node(node) for node in nodes]
 
 

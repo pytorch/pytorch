@@ -70,8 +70,8 @@ from .cpp_utils import (
     cexpr_index,
     DTYPE_TO_CPP,
     INDEX_TYPE,
-    unify_mask_base_type,
     LocalBufferContext,
+    unify_mask_base_type,
     value_to_cpp,
 )
 
@@ -3510,35 +3510,9 @@ class CppKernelProxy(CppKernel):
             isinstance(V.local_buffer_context, LocalBufferContext)
             and V.local_buffer_context.local_buffers
         ):
-
-            def rewrite_index(self, index):
-                # Local buffer at the inner dimensions
-                scheduler_nodes = V.graph.scheduler.name_to_node.get(  # type: ignore[union-attr]
-                    self.global_buf.get_name()
-                ).get_nodes()
-                _, (group, reduction_group) = max(
-                    scheduler_nodes, key=lambda x: int(x.is_reduction())
-                ).group
-                call_ranges = tuple(group) + tuple(reduction_group)
-                indices_to_keep = [
-                    f"x{len(call_ranges) - (idx + 1)}"
-                    for idx in range(len(self.local_buf.get_layout().size))
-                ]
-                sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)  # type: ignore[attr-defined]
-                replacements = {}
-                for x in sorted_symbols:
-                    if x.name.startswith("x") and x.name not in indices_to_keep:
-                        # Only keep index used by local buffer
-                        replacements[x] = sympy.core.numbers.Zero()
-                index = sympy_subs(index, replacements)  # type: ignore[arg-type]
-                return index
-
             fn_list = [
-                V.local_buffer_context.localize_buffer_for_function(
+                V.local_buffer_context.localize_for_function(
                     fn,
-                    rewrite_index,
-                    next(iter(V.local_buffer_context.local_nodes.items()))[1].node,
-                    next(iter(V.local_buffer_context.local_buffers.items()))[1],
                 )
                 for fn in fn_list
             ]
@@ -3854,9 +3828,9 @@ class CppScheduling(BaseScheduling):
         node: OuterLoopFusedSchedulerNode,
     ):
         """
-        Generate the code for the outer loop fused node.
-        1. Codegen code with fused outer loop and local Buffer.
-        2. If failed, codegen code with fused outer loop and without local Buffer.
+        Generate the code for the outer loop fused scheduler node.
+        1. Codegen with local buffer and fused outer loop.
+        2. If failed, codegen without local buffer but with fused outer loop.
         3. If failed, fallback to standard codegen.
         """
         kernel_group = self.kernel_group
@@ -3893,7 +3867,7 @@ class CppScheduling(BaseScheduling):
                 # Only support this typical case at first.
                 return False
 
-            LocalBuffer = namedtuple("LocalBuffer", ["local_buf", "global_snode"])
+            LocalBuffer = namedtuple("LocalBuffer", ["local_buf", "global_buf"])
 
             local_buffers: List[LocalBuffer] = []
             for scheduler_node in node.get_nodes():
@@ -3921,7 +3895,7 @@ class CppScheduling(BaseScheduling):
                             local_buf=ir.Buffer(
                                 "local_buffer_data", local_buffer_layout
                             ),
-                            global_snode=scheduler_node,
+                            global_buf=global_buffer,
                         )
                     )
                     # At most 1 node with local buf for each OuterLoopFusedSchedulerNode
@@ -3934,7 +3908,7 @@ class CppScheduling(BaseScheduling):
             with LocalBufferContext(kernel_group.args) as scope:
                 assert len(local_buffers) == 1
                 scope.add_local_buffer(
-                    local_buffers[0].local_buf, local_buffers[0].global_snode
+                    local_buffers[0].local_buf, local_buffers[0].global_buf
                 )
                 for _node in node.get_outer_nodes():
                     assert isinstance(_node, (FusedSchedulerNode, SchedulerNode))
