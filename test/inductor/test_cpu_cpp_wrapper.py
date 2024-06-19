@@ -235,6 +235,7 @@ if RUN_CPU:
         BaseTest("test_int_div", "", test_cpu_repro.CPUReproTests()),
         BaseTest("test_linear1"),
         BaseTest("test_linear2"),
+        BaseTest("test_polar"),
         BaseTest(
             "test_linear_binary",
             "",

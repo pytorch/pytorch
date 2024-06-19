@@ -5,11 +5,15 @@ from typing import Tuple, Union
 from torch.distributed._tensor import DeviceMesh
 from torch.distributed._tensor.placement_types import Placement
 from torch.distributed.device_mesh import _mesh_resources
+
+
 try:
     from torch._dynamo.external_utils import is_compiling as is_torchdynamo_compiling
 except Exception:
+
     def is_torchdynamo_compiling():  # type: ignore[misc]
         return False
+
 
 LayoutsType = Union[Placement, Tuple[Placement, ...]]
 
@@ -46,8 +50,10 @@ def _validate_tp_mesh_dim(
         is valid, `False` otherwise.
     """
     if device_mesh.ndim > 1:
-        raise ValueError(f"Tensor Parallel only accepts a 1D DeviceMesh, but found {device_mesh.ndim}D!"
-                         'If you have a 2-D or N-D device_mesh, consider passing in device_mesh["tp"]')
+        raise ValueError(
+            f"Tensor Parallel only accepts a 1D DeviceMesh, but found {device_mesh.ndim}D!"
+            'If you have a 2-D or N-D device_mesh, consider passing in device_mesh["tp"]'
+        )
 
     parent_mesh = _mesh_resources.get_parent_mesh(device_mesh)
     if parent_mesh:
