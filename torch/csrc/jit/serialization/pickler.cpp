@@ -71,17 +71,19 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
       }
     });
   } else if (ivalue.isTensorList()) {
-    pushSpecializedList(ivalue, "build_tensorlist", [this](const IValue& ivalue) {
-      for (const at::Tensor& item : ivalue.toTensorVector()) {
-        pushIValue(item);
-      }
-    });
+    pushSpecializedList(
+        ivalue, "build_tensorlist", [this](const IValue& ivalue) {
+          for (const at::Tensor& item : ivalue.toTensorVector()) {
+            pushIValue(item);
+          }
+        });
   } else if (ivalue.isDoubleList()) {
-    pushSpecializedList(ivalue, "build_doublelist", [this](const IValue& ivalue) {
-      for (double item : ivalue.toDoubleVector()) {
-        pushDouble(item);
-      }
-    });
+    pushSpecializedList(
+        ivalue, "build_doublelist", [this](const IValue& ivalue) {
+          for (double item : ivalue.toDoubleVector()) {
+            pushDouble(item);
+          }
+        });
   } else if (ivalue.isBoolList()) {
     pushSpecializedList(ivalue, "build_boollist", [this](const IValue& ivalue) {
       for (bool item : ivalue.toBoolList()) {
