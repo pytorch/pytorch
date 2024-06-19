@@ -185,7 +185,7 @@ class SubclassCreationMeta:
     meta: Any
     inner_keys: List[Any]
     outer_size: Tuple[int | torch.SymInt, ...]
-    outer_stride: Tuple[int | torch.SymInt, ...]  # same thing here
+    outer_stride: Tuple[int | torch.SymInt, ...]
 
     def creation_fn(
         self,
