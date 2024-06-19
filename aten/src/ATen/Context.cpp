@@ -263,8 +263,7 @@ void Context::setLinalgPreferredBackend(at::LinalgBackend b) {
   }
 }
 
-at::BlasBackend Context::blasPreferredBackend() const {
-// Should this be called only once for performance reasons?
+at::BlasBackend Context::blasPreferredBackend() {
 #ifdef USE_ROCM
   if (blas_preferred_backend == at::BlasBackend::Cublaslt) {
     static const std::vector<std::string> archs = {"gfx90a", "gfx940", "gfx941", "gfx942"};
@@ -273,7 +272,7 @@ at::BlasBackend Context::blasPreferredBackend() const {
         TORCH_WARN_ONCE(
           "Attempting to use hipBLASLt on an unsupported architecture! "
           "Overriding blas backend to hipblas");
-        return at::BlasBackend::Cublas;
+        blas_preferred_backend = at::BlasBackend::Cublas;
       }
     }
   }
