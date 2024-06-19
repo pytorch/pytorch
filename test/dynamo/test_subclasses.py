@@ -1616,15 +1616,15 @@ Eq(s10, s8)""",
                     guard_str,
                     """\
 Eq(s3 - 1, s0)
-Eq(zf1, zf4)""",
+Eq(zf1, zf6)""",
                 )
             else:
                 self.assertExpectedInline(
                     guard_str,
                     """\
 Eq(s4 - 1, s1)
-Eq(s10 - 1, s5)
-Eq(s9, s7)""",
+Eq(s12 - 1, s7)
+Eq(s11, s9)""",
                 )
             return gm
 
