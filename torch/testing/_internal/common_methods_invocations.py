@@ -13101,7 +13101,8 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
            sample_inputs_func=sample_inputs_alias_copy,
            supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True),
+           supports_fwgrad_bwgrad=True,
+           supports_out=True),
     BinaryUfuncInfo('eq',
                     ref=np.equal,
                     dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
@@ -14464,6 +14465,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_neg_view'),
                DecorateInfo(unittest.skip("Numerous errors"), 'TestFwdGradients'),
                DecorateInfo(unittest.skip("Numerous errors"), 'TestBwdGradients'),
+               DecorateInfo(unittest.expectedFailure, 'TestDTensorOps', 'test_dtensor_op_db'),
            )),
     OpInfo('as_strided_scatter',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
@@ -21254,6 +21256,10 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.lerp",
         torch_opinfo_name="lerp",
+    ),
+    PythonRefInfo(
+        "_refs.view_copy",
+        torch_opinfo_name="view_copy",
     ),
     PythonRefInfo(
         "_refs.ones",
