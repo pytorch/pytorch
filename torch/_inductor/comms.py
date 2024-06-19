@@ -137,8 +137,16 @@ def estimate_op_runtime(snode: BaseSchedulerNode) -> float:
 def compute_node_users(
     snodes: List[BaseSchedulerNode],
 ) -> Dict[BaseSchedulerNode, Set[BaseSchedulerNode]]:
+    if not snodes:
+        return {}
+
+    name_to_node = snodes[0].scheduler.name_to_fused_node
     return {
-        node: {user.node for buf in node.get_outputs() for user in buf.users}
+        node: {
+            name_to_node[user.get_name()]
+            for buf in node.get_outputs()
+            for user in buf.users
+        }
         for node in snodes
     }
 

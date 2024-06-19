@@ -1763,9 +1763,7 @@ class Scheduler:
 
             active_buffers = False
             for buf in node.get_outputs():
-                can_eliminate = all(
-                    can_eliminate_user(u) for u in buf.users
-                )
+                can_eliminate = all(can_eliminate_user(u) for u in buf.users)
                 if can_eliminate:
                     log.debug("removed dead buffer: %s", buf.get_name())
                     V.graph.removed_buffers.add(buf.get_name())
