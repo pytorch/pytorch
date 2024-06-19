@@ -50,7 +50,6 @@ if _running_with_deploy():
 else:
     from torch.torch_version import __version__ as __version__
 
-
 __all__ = [
     "BoolStorage",
     "BoolTensor",
