@@ -921,6 +921,8 @@ class HalideKernel(SIMDKernel):
         for _, arg in self.halide_argdefs():
             if isinstance(arg, SizeArg):
                 shape = None
+                stride = None
+                offset = None
                 dtype = "long"
             else:
                 if arg.name in self.store_buffer_dimensions and "out" in arg.name:
@@ -928,25 +930,73 @@ class HalideKernel(SIMDKernel):
                         cexpr(self.rename_indexing(x))
                         for x in self.store_buffer_dimensions[arg.name]
                     ]
-                    assert shape
+                    stride = []
+                    prod = 1
+                    for x in self.store_buffer_dimensions[arg.name]:
+                        stride.append(cexpr(prod))
+                        prod *= x
                 else:
                     shape = [
                         cexpr(
                             self.rename_indexing(self.halide_buffer_numel(arg.buffer))
                         )
                     ] or ["1"]
+                    stride = ["1"]
+                offset = "0"
                 dtype = f"{DTYPE_TO_CPP[arg.dtype]}*"
             argtypes.append(
                 HalideInputSpec(
                     dtype,
                     arg.name,
-                    shape,
+                    shape=shape,
+                    stride=stride,
+                    offset=offset,
                 )
             )
-        target = ["host", "strict_float"]
-        # TODO(jansel): for cuda want target="host-cuda-cuda_capability_86-user_context"
+
+        current_device = V.graph.scheduler.get_current_device_or_throw()
+        if current_device.type == "cpu":
+            target = [config.halide.cpu_target]
+            schduler = config.halide.scheduler_cpu
+            scheduler_flags = {
+                "parallelism": parallel_num_threads(),
+            }
+            if config.halide.scheduler_cpu == "Mullapudi2016":
+                scheduler_flags[
+                    "last_level_cache_size"
+                ] = HalideCodeCache.cpu_cache_size()
+            cuda_device = None
+        else:
+            assert current_device.type == "cuda", "only cpu/cuda supported"
+            assert current_device.index <= 0, "only default device supported"
+            target = [config.halide.gpu_target]
+            schduler = config.halide.scheduler_cuda
+            capability = torch.cuda.get_device_properties(current_device)
+            if "cuda_capability" not in target[0]:
+                for major, minor in [(8, 6), (8, 0), (7, 5), (7, 0), (6, 1)]:
+                    if capability.major >= major and capability.minor >= minor:
+                        target.append(f"cuda_capability_{major}{minor}")
+                        break
+            target.append("user_context")
+            scheduler_flags = {
+                "parallelism": capability.multi_processor_count,
+                # TODO(jansel): explore other flags, see:
+                # grep parser.parse ~/Halide/src/autoschedulers/anderson2021/AutoSchedule.cpp
+            }
+            cuda_device = max(0, current_device.index)
+
+        # strict_float is requires for correctness
+        target.append("strict_float")
+
+        # without this we will initialize cuda once per kernel and hit errors
+        target.append("no_runtime")
+
         if not config.halide.asserts:
             target.append("no_asserts")
+
+        if config.halide.debug:
+            target.append("debug")
+
         if "64" in self.index_dtype:
             # TODO(jansel): it is unclear if this does anything, since input sizes are still int32
             target.append("large_buffers")
@@ -954,11 +1004,9 @@ class HalideKernel(SIMDKernel):
         return HalideMeta(
             argtypes,
             target="-".join(target),
-            scheduler="Mullapudi2016",
-            scheduler_flags={
-                "parallelism": parallel_num_threads(),
-                "last_level_cache_size": HalideCodeCache.cpu_cache_size(),
-            },
+            scheduler=schduler,
+            scheduler_flags=scheduler_flags,
+            cuda_device=cuda_device,
         )
 
     def codegen_kernel(self, name=None):
