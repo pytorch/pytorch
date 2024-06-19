@@ -156,6 +156,41 @@ def _reparametrize_module_undo(
     )
 
 
+class ReparametrizeModule:
+    def __init__(
+        self,
+        module: "torch.nn.Module",
+        parameters_and_buffers: Dict[str, Tensor],
+        tie_weights: bool,
+        strict: bool,
+        stack_weights: bool,
+    ):
+        self.module = module
+        self.parameters_and_buffers = parameters_and_buffers
+        self.tie_weights = tie_weights
+        self.strict = strict
+        self.stack_weights = stack_weights
+        (
+            self.accessor,
+            self.untied_parameters_and_buffers,
+        ) = _reparametrize_module_prepare(
+            module, parameters_and_buffers, tie_weights=tie_weights, strict=strict
+        )
+
+    def __enter__(self):
+        self.orig_parameters_and_buffers, _ = self.accessor.swap_tensors_dict(
+            self.untied_parameters_and_buffers, allow_missing=True
+        )
+
+    def __exit__(self, exception_type, exception_value, traceback):
+        _reparametrize_module_undo(
+            self.accessor,
+            self.parameters_and_buffers,
+            self.orig_parameters_and_buffers,
+            stack_weights=self.stack_weights,
+        )
+
+
 @contextlib.contextmanager
 def _reparametrize_module(
     module: "torch.nn.Module",
@@ -300,32 +335,37 @@ def _functional_call(
     if not isinstance(args, tuple):
         args = (args,)
 
-    if torch._dynamo.is_compiling():
-        accessor, untied_parameters_and_buffers = _reparametrize_module_prepare(
-            module, parameters_and_buffers, tie_weights=tie_weights, strict=strict
-        )
+    # if torch._dynamo.is_compiling():
+    #     accessor, untied_parameters_and_buffers = _reparametrize_module_prepare(
+    #         module, parameters_and_buffers, tie_weights=tie_weights, strict=strict
+    #     )
 
-        orig_parameters_and_buffers: Dict[str, Tensor] = {}
+    #     orig_parameters_and_buffers: Dict[str, Tensor] = {}
 
-        orig_parameters_and_buffers, _ = accessor.swap_tensors_dict(
-            untied_parameters_and_buffers, allow_missing=True
-        )
+    #     orig_parameters_and_buffers, _ = accessor.swap_tensors_dict(
+    #         untied_parameters_and_buffers, allow_missing=True
+    #     )
 
-        r = module(*args, **kwargs)
+    #     r = module(*args, **kwargs)
 
-        _reparametrize_module_undo(
-            accessor,
-            parameters_and_buffers,
-            orig_parameters_and_buffers,
-            stack_weights=False,
-        )
+    #     _reparametrize_module_undo(
+    #         accessor,
+    #         parameters_and_buffers,
+    #         orig_parameters_and_buffers,
+    #         stack_weights=False,
+    #     )
 
-        return r
-    else:
-        with _reparametrize_module(
-            module,
-            parameters_and_buffers,
-            tie_weights=tie_weights,
-            strict=strict,
-        ):
-            return module(*args, **kwargs)
+    #     return r
+    # else:
+    #     with _reparametrize_module(
+    #         module,
+    #         parameters_and_buffers,
+    #         tie_weights=tie_weights,
+    #         strict=strict,
+    #     ):
+    #         return module(*args, **kwargs)
+
+    with ReparametrizeModule(
+        module, parameters_and_buffers, tie_weights, strict, False
+    ):
+        return module(*args, **kwargs)
