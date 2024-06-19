@@ -473,36 +473,29 @@ class TestFlexAttention(InductorTestCase):
         
         q = (
             make_q()
-            .view(B, S, H, D)
+            .view(B, S, D, H)
+            .transpose(2, 3)
             .transpose(1, 2)
         )
         k = (
             make_kv()
-            .view(B, S, H, D)
-            .transpose(1, 2)
+            .view(H, B, S, D)
+            .transpose(0, 1)
         )
         v = (
             make_kv()
-            .view(B, S, H, D)
+            .view(B, S, D, H)
+            .transpose(2, 3)
             .transpose(1, 2)
         )
 
         sdpa_partial = create_attention(score_mod)
         compiled_sdpa = torch.compile(sdpa_partial)
-        golden_out = sdpa_partial(
-            q.to(torch.float64), k.to(torch.float64), v.to(torch.float64)
-        )
         ref_out = sdpa_partial(q, k, v)
         compiled_out = compiled_sdpa(q, k, v)
 
-        compiled_error = (golden_out - compiled_out).abs().mean()
-        ref_error = (golden_out - ref_out).abs().mean()
-        # Note, it seems like we really are less accurate
-        # likely due to the online softmax 
-        fudge_factor = 10.0
-        if compiled_error > ref_error * fudge_factor:
-            msg = f"Compiled error {compiled_error} is greater than ref error {ref_error} by more than {fudge_factor}X."
-            self.assertTrue(False, msg)
+        tolerance = Tolerances(atol=2e-1, rtol=2e-1)
+        torch.testing.assert_close(ref_out, compiled_out, atol=tolerance.atol, rtol=tolerance.rtol)
 
     test_input_strides = [
         ((H * S * D, S * D, D, 1), 997),  # offset
