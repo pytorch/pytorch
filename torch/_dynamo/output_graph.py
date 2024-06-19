@@ -759,7 +759,6 @@ class OutputGraph:
         options = dict(options)
         assert "source" in options
         source = options["source"]
-
         assert not isinstance(source, ParamBufferSource)
 
         if isinstance(target, torch.Tensor):

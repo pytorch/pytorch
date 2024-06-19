@@ -215,7 +215,7 @@ class NNModuleVariable(VariableTracker):
         if object_has_getattribute(base):
             unimplemented("torch.nn.Module with a custom __getattribute__ defined")
 
-        getattr_fn = get_custom_getattr(base)
+        getattr_fn = get_custom_getattr(base, ignore_nn_module_getattr=True)
         if getattr_fn is None:
             return None
 
@@ -508,6 +508,49 @@ class NNModuleVariable(VariableTracker):
             name = f"{module.__class__.__name__}_{name}_result"
             return invoke_and_store_as_constant(tx, fn, name, args, kwargs)
 
+        def assert_all_args_kwargs_const():
+            if not all(
+                x.is_python_constant() for x in itertools.chain(args, kwargs.values())
+            ):
+                unimplemented(f"non-const NNModule method {name}")
+
+        def get_kwargs(*names):
+            assert_all_args_kwargs_const()
+            fn = getattr(module, name)
+            bound_args = inspect.signature(fn).bind(
+                *([x.as_python_constant() for x in args]),
+                **{k: v.as_python_constant() for k, v in kwargs.items()},
+            )
+            bound_args.apply_defaults()
+            bound_args = bound_args.arguments
+            return {k: bound_args[k] for k in names}
+
+        def wrap_values(items):
+            result = []
+            for name, submod in items:
+                result.append(
+                    tx.output.register_attr_or_module(
+                        submod,
+                        key,
+                        name,
+                        source=NNModuleSource(gen_source(self.source, name)),
+                    )
+                )
+            return ListIteratorVariable(result, mutable_local=MutableLocal())
+
+        def named_embed(name, obj):
+            return TupleVariable(
+                [
+                    ConstantVariable.create(name),
+                    tx.output.register_attr_or_module(
+                        obj,
+                        key,
+                        name,
+                        source=NNModuleSource(gen_source(self.source, name)),
+                    ),
+                ]
+            )
+
         def gen_source(source, name):
             name_split = name.split(".")
             if name_split[0] == "":
@@ -516,24 +559,6 @@ class NNModuleVariable(VariableTracker):
                 x = name_split.pop(0)
                 source = AttrSource(source, x)
             return source
-
-        named_embed = functools.partial(
-            _named_embed,
-            tx=tx,
-            key=key,
-            source_cls=NNModuleSource,
-            source=self.source,
-        )
-        wrap_values = functools.partial(
-            _wrap_values,
-            tx=tx,
-            key=key,
-            source_cls=NNModuleSource,
-            source=self.source,
-        )
-        get_kwargs = functools.partial(
-            _get_kwargs, mod=module, name=name, args=args, kwargs=kwargs
-        )
 
         if name == "named_children":
             tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules").name())
@@ -640,7 +665,6 @@ class NNModuleVariable(VariableTracker):
             if isinstance(args[0], SliceVariable):
                 # Build a TupleVariable of NNModules
                 result = []
-                submods = []
 
                 # Turn the slice into the list of integers
                 keys = list(range(len(module)))[args[0].as_python_constant()]
@@ -654,9 +678,8 @@ class NNModuleVariable(VariableTracker):
                             source=src,
                         )
                     )
-                    submods.append(submod)
 
-                new_module = torch.nn.Sequential(*submods)
+                new_module = module[args[0].as_python_constant()]
                 new_module_variable = tx.output.register_attr_or_module(
                     new_module,
                     f"{self}.__getitem__(slice)",
@@ -670,8 +693,10 @@ class NNModuleVariable(VariableTracker):
 
             if isinstance(args[0], SymNodeVariable):
                 key = args[0].evaluate_expr(tx.output)
-            else:
+            elif args[0].is_python_constant():
                 key = args[0].as_python_constant()
+            else:
+                unimplemented(f"getitem on NNModuleVariable with key {args[0]}")
 
             submod = module[key]
             return tx.output.register_attr_or_module(
@@ -731,11 +756,6 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     """
 
     def __init__(self, value, **kwargs):
-        if (
-            getattr(value, "_is_fsdp_managed_module", False)
-            and type(self) == UnspecializedNNModuleVariable
-        ):
-            raise RuntimeError(f"Illegal construction {type(self)}")
         if type(value) is torch.jit._script.RecursiveScriptModule:
             raise Unsupported(
                 "ScriptModules aren't supported in UnspecializedNNModuleVariable"
@@ -770,7 +790,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     @functools.lru_cache(None)
     def _nn_module_method_ids():
         # Allow __setattr__ to fall through to base class handler
-        supported = {torch.nn.Module.__setattr__}
+        supported = {torch.nn.Module.__setattr__, torch.nn.Module.__init__}
         return {
             id(x.__code__)
             for x in torch.nn.Module.__dict__.values()
@@ -778,8 +798,6 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         }
 
     def unpack_var_sequence(self, tx):
-        from .builder import VariableBuilder
-
         try:
             fn = inspect.getattr_static(self.value_type, "__iter__")
         except AttributeError as e:
@@ -790,11 +808,16 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             torch.nn.ParameterList.__iter__,
             torch.nn.Sequential.__iter__,
         ):
-            assert self.source
-            return [
-                VariableBuilder(tx, source=GetItemSource(self.source, idx))(item)
-                for idx, item in enumerate(self.value)
-            ]
+            # The program can mutate the nn module object but the saved `value`
+            # will not reflect the mutations. So, trace through the `__iter__`
+            # function to reflect any tracked mutations.
+            return tx.inline_user_function_return(
+                variables.UserFunctionVariable(fn),
+                [
+                    self,
+                ],
+                {},
+            ).unpack_var_sequence(tx)
 
         return super().unpack_var_sequence(tx)
 
@@ -925,6 +948,17 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 if self.is_state_mutated and not tx.output.side_effects.is_attribute_mutation(self):
                     tx.output.side_effects.track_object_existing(self.value, self)
 
+            if method is torch.nn.Module.__setattr__ and isinstance(
+                args[1], variables.DeletedVariable
+            ):
+                # Trace through __delattr__ to track mutations on the module
+                # members like `_modules``.
+                return tx.inline_user_function_return(
+                    variables.UserFunctionVariable(torch.nn.Module.__delattr__),
+                    [self, args[0]],
+                    kwargs,
+                )
+
         return super().call_method(tx, name, args, kwargs)
 
 
@@ -947,58 +981,21 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
         ), "FSDPManagedNNModule depends on having an accurate source to control guarding."
 
         super().__init__(value=value, **kwargs)
+        self.source = source
 
+    @staticmethod
+    def _wrap_source(source):
+        if not isinstance(source, (FSDPNNModuleSource, NotNNModuleSource)):
+            if torch._dynamo.config.skip_fsdp_guards:
+                return FSDPNNModuleSource(source)
+            else:
+                # this makes us behave like a usual UnspecializedNNModuleVariable for guarding purposes
+                return NotNNModuleSource(source)
+        else:
+            return source
 
-def _gen_source(source, name):
-    name_split = name.split(".")
-    if name_split[0] == "":
-        return source
-    while len(name_split) > 0:
-        x = name_split.pop(0)
-        source = AttrSource(source, x)
-    return source
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name == "source":
+            value = FSDPManagedNNModuleVariable._wrap_source(value)
 
-
-def _assert_all_args_kwargs_const(name, args, kwargs):
-    if not all(
-        x.is_python_constant() for x in itertools.chain(args, kwargs.values())
-    ):
-        unimplemented(f"non-const NNModule method {name}")
-
-def _get_kwargs(*names, mod, name, args, kwargs, assert_const=True):
-    if assert_const:
-        _assert_all_args_kwargs_const(name, args, kwargs)
-    fn = getattr(mod, name)
-    bound_args = inspect.signature(fn).bind(
-        *([x.as_python_constant() for x in args]),
-        **{k: v.as_python_constant() for k, v in kwargs.items()},
-    )
-    bound_args.apply_defaults()
-    bound_args = bound_args.arguments
-    return {k: bound_args[k] for k in names}
-
-def _wrap_values(items, *, tx, key, source_cls, source):
-    result = []
-    for name, submod in items:
-        result.append(
-            tx.output.register_attr_or_module(
-                submod,
-                key,
-                name,
-                source=NNModuleSource(_gen_source(source, name)),
-            )
-        )
-    return variables.ListIteratorVariable(result, mutable_local=MutableLocal())
-
-def _named_embed(name, obj, *, tx, key, source_cls, source):
-    return TupleVariable(
-        [
-            ConstantVariable.create(name),
-            tx.output.register_attr_or_module(
-                obj,
-                key,
-                name,
-                source=NNModuleSource(_gen_source(source, name)),
-            ),
-        ]
-    )
+        return super().__setattr__(name, value)
