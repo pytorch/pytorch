@@ -4839,8 +4839,7 @@ def forward(self, primals_1, primals_2):
     _foreach_copy = torch.ops.aten._foreach_copy.default([primals_1], [primals_2]);  primals_1 = primals_2 = None
     getitem = _foreach_copy[0];  _foreach_copy = None
     mm = torch.ops.aten.mm.default(getitem, getitem)
-    t_1 = torch.ops.aten.t.default(getitem);  getitem = None
-    return [mm, t_1]""",
+    return [mm, getitem]""",
         )
         self.assertEqual(out_ref, out_test)
 
