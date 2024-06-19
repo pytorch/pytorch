@@ -1687,7 +1687,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             # i=0, 0 copies (warmup)
             # i=1, 2 copies (record, 1/3 inputs marked as static)
             # i>1, 0 copies (run)
-            self.assertEqual(counters["inductor"]["cudagraph_recorded_non_static_inputs"], 2)
+            self.assertEqual(
+                counters["inductor"]["cudagraph_recorded_non_static_inputs"], 2
+            )
 
         @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
         def test_incompatible_cudagraph_ops_nonzero(self):
