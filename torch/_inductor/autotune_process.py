@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import contextlib
@@ -11,7 +12,6 @@ import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor
 from ctypes import byref, c_size_t, c_void_p, CDLL
-from types import ModuleType
 from typing import (
     Any,
     Callable,
@@ -41,6 +41,7 @@ from torch._inductor.codecache import (
 if TYPE_CHECKING:
     from multiprocessing.process import BaseProcess
     from multiprocessing.queues import Queue
+    from types import ModuleType
 
     from torch._inductor.select_algorithm import TritonTemplateCaller
 

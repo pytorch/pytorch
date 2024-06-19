@@ -1,7 +1,10 @@
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
+#include <torch/csrc/distributed/c10d/control_plane/Handlers.hpp>
 
 #include <c10/util/CallOnce.h>
 #include <c10/util/env.h>
+#include <algorithm>
 
 #ifdef USE_C10D_NCCL
 #include <vector>
@@ -62,6 +65,33 @@ void NCCLComm::waitUntilInitialized(int timeoutSecs) {
         std::chrono::milliseconds(kCommInitBusyWaitMillis));
   }
 }
+
+#if defined(NCCL_HAS_COMM_SPLIT) && !defined(FBCODE_CAFFE2)
+// last argument to split() API is not used to support
+// multiple implementations
+std::shared_ptr<NCCLComm> NCCLComm::split(
+    NCCLComm* source,
+    int color_id,
+    int rank,
+    ncclConfig_t& config,
+    std::vector<uint64_t>& ranks_ull) {
+  auto comm = std::make_shared<NCCLComm>();
+  C10D_NCCL_CHECK(
+      ncclCommSplit(
+          source->ncclComm_, color_id, rank, &(comm->ncclComm_), &config),
+      c10::nullopt);
+  ++source->ncclCommSplitCounter_;
+  comm->rank_ = rank;
+  return comm;
+}
+#endif
+
+#ifndef FBCODE_CAFFE2
+bool shouldBroadcastNCCLUniqueID(bool isSendRecvSelf) {
+  // For point-to-point communication on the same process, don't need broadcast.
+  return !isSendRecvSelf;
+}
+#endif
 
 std::string getNcclVersion() {
   static c10::once_flag ncclGetVersionFlag;
@@ -210,6 +240,54 @@ std::string getNcclErrorDetailStr(
   }
   return interpret + err;
 }
+
+control_plane::RegisterHandler dumpHandler{
+    "dump_nccl_trace_pickle",
+    [](const control_plane::Request& req, control_plane::Response& res) {
+      const auto params = req.params();
+      size_t validParamCount = 0;
+
+      // valid params
+      const std::string includeCollectivesStr = "includecollectives";
+      const std::string includeStackTracesStr = "includestacktraces";
+      const std::string onlyActiveStr = "onlyactive";
+
+      std::unordered_map<std::string, bool> expectedParams = {
+          {includeCollectivesStr, true},
+          {includeStackTracesStr, true},
+          {onlyActiveStr, false}};
+
+      for (const auto& [paramName, paramValue] : params) {
+        auto it = expectedParams.find(paramName);
+        if (it != expectedParams.end()) {
+          validParamCount++;
+          if (paramValue == "true") {
+            it->second = true;
+          } else if (paramValue == "false") {
+            it->second = false;
+          } else {
+            res.setStatus(400);
+            res.setContent(
+                "Invalid value for " + paramName +
+                    " valid values are true or false",
+                "text/plain");
+            return;
+          }
+        }
+      }
+      if (validParamCount < params.size()) {
+        res.setStatus(400);
+        res.setContent(
+            "Invalid parameters - unexpected param passed in", "text/plain");
+        return;
+      }
+      res.setContent(
+          dump_nccl_trace(
+              expectedParams[includeCollectivesStr],
+              expectedParams[includeStackTracesStr],
+              expectedParams[onlyActiveStr]),
+          "application/octet-stream");
+    }};
 
 } // namespace c10d
 
