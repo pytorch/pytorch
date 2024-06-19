@@ -15,6 +15,7 @@ from typing import (
 )
 
 import torch
+
 from torch import Tensor
 from torch.distributed._tensor._op_schema import (
     OpSchema,
@@ -31,9 +32,9 @@ from torch.distributed._tensor.ops.utils import (
     prod,
     register_op_strategy,
 )
+
 from torch.distributed._tensor.placement_types import DTensorSpec, Placement, Replicate
 from torch.distributed.device_mesh import DeviceMesh
-
 
 aten = torch.ops.aten
 
