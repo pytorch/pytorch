@@ -11,13 +11,10 @@ import os
 import tempfile
 from base64 import b64decode, b64encode
 from datetime import timedelta
-from typing import Any, Optional, Tuple, cast
+from typing import Any, cast, Optional, Tuple
 
 from torch.distributed import FileStore, Store, TCPStore
-from torch.distributed.elastic.events import (
-    NodeState,
-    construct_and_record_rdzv_event,
-)
+from torch.distributed.elastic.events import construct_and_record_rdzv_event, NodeState
 
 from .api import (
     RendezvousConnectionError,
@@ -27,6 +24,7 @@ from .api import (
 )
 from .dynamic_rendezvous import RendezvousBackend, Token
 from .utils import _matches_machine_hostname, parse_rendezvous_endpoint
+
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +94,9 @@ class C10dRendezvousBackend(RendezvousBackend):
         else:
             token = self._NULL_SENTINEL
 
-        base64_state: bytes = self._call_store("compare_set", self._key, token, base64_state_str)
+        base64_state: bytes = self._call_store(
+            "compare_set", self._key, token, base64_state_str
+        )
 
         state_token_pair = self._decode_state(base64_state)
         if state_token_pair is None:
@@ -256,7 +256,9 @@ def create_backend(params: RendezvousParameters) -> Tuple[C10dRendezvousBackend,
         elif store_type == "tcp":
             store = _create_tcp_store(params)
         else:
-            raise ValueError("Invalid store type given. Currently only supports file and tcp.")
+            raise ValueError(
+                "Invalid store type given. Currently only supports file and tcp."
+            )
 
         backend = C10dRendezvousBackend(store, params.run_id)
 
