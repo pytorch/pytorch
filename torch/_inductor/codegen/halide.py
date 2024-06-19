@@ -203,6 +203,7 @@ pexpr = PythonPrinter().doprint
 
 _halide_type = {
     torch.bool: "hl.Bool()",
+    torch.bfloat16: "hl.BFloat(16)",
     torch.float16: "hl.Float(16)",
     torch.float32: "hl.Float(32)",
     torch.float64: "hl.Float(64)",
@@ -218,8 +219,6 @@ _halide_type = {
 
 
 def halide_type(dtype):
-    if dtype == torch.bfloat16:
-        raise Unsupported("torch.bfloat16")
     return _halide_type[dtype]
 
 
