@@ -804,8 +804,6 @@ def solve_min_cut(
             return False
         if node.target == operator.getitem:
             return False
-        if op_types.is_view(node):
-            return False
         if node.target in [aten.lift_fresh_copy.default, aten.lift_fresh.default]:
             return False
         # NB: "recompute" == 0 means that must save this node.
@@ -858,14 +856,6 @@ def solve_min_cut(
 
     def get_node_weight(node) -> float:
         mem_sz = _size_of(node)
-        if op_types.is_view(node):
-            # We never choose to save views, since views are free to recompute.
-            # It makes it a bit simpler to analyze
-            # NB: If they're not free to recompute (e.g. nested tensors)... I
-            # think we should modify checks for view_ops to `is_view` and check
-            # that. Basically, with nested tensors, `aten.view` is not a "view
-            # op".
-            return math.inf
 
         if isinstance(node.meta["val"], py_sym_types):
             # We never want to save symfloats
@@ -883,14 +873,6 @@ def solve_min_cut(
     nx_graph = nx.DiGraph()
     banned_nodes = set()
 
-    def ban_recomputation(node):
-        banned_nodes.add(node)
-        # A node will only ever be recomputed if there is a path from an
-        # ancestor of this node to the backwards path through this node that
-        # doesn't go through any saved value. If this node is saved, then that
-        # condition is not possible.
-        nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
-
     def ban_recomputation_if_allowed(node):
         if op_types.is_view(node):
             return False
@@ -906,7 +888,12 @@ def solve_min_cut(
         if "val" in node.meta and isinstance(node.meta["val"], torch.SymFloat):
             return False
 
-        ban_recomputation(node)
+        banned_nodes.add(node)
+        # A node will only ever be recomputed if there is a path from an
+        # ancestor of this node to the backwards path through this node that
+        # doesn't go through any saved value. If this node is saved, then that
+        # condition is not possible.
+        nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
         return True
 
     for node in joint_graph.nodes:
