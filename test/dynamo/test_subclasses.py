@@ -158,6 +158,57 @@ class WrapperTensor(torch.Tensor):
         return return_and_correct_aliasing(func, args, kwargs, out)
 
 
+class DoubleSizeTensor(torch.Tensor):
+    @staticmethod
+    def __new__(cls, inner):
+        # Double the outer-most dimension
+        if inner.numel() == 1:
+            outer_shape = ()
+        else:
+            outer_shape = (inner.shape[0] * 2,) + inner.shape[1:]
+
+        shape = outer_shape
+        kwargs = {}
+        kwargs["strides"] = inner.stride()
+        kwargs["device"] = inner.device
+        kwargs["layout"] = inner.layout
+        kwargs["requires_grad"] = inner.requires_grad
+        kwargs["dtype"] = inner.dtype
+        return torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
+
+    def __init__(self, inner):
+        self.inner_elem = inner
+
+    def __tensor_flatten__(self):
+        return ["inner_elem"], None
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
+        return DoubleSizeTensor(inner_tensors["inner_elem"])
+
+    def __repr__(self):
+        return f"DoubleSizeMayberAddGeThreeTensor({repr(self.inner_elem)})"
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+
+        args_inner = torch.utils._pytree.tree_map_only(
+            DoubleSizeTensor, lambda x: x.inner_elem, args
+        )
+        out_inner = func(*args_inner, **kwargs)
+
+        # Add guards on the  inner tensor's sizeso
+        if args_inner[0].numel() > 1 and args_inner[0].shape[0] > 3:
+            out_inner += 2
+
+        if isinstance(out_inner, bool):
+            return out_inner
+
+        return DoubleSizeTensor(out_inner)
+
+
 def traceable_subclass(c):
     return torch._dynamo.config.patch("traceable_tensor_subclasses", {c})
 
@@ -1977,7 +2028,7 @@ class GraphModule(torch.nn.Module):
             return t * t.size()[0]
 
         a = torch.ones(3, 4, requires_grad=True)
-        t = WrapperTensor(a)
+        t = WrapperSubclass(a)
 
         fw, bw = self._compile_check(f, [(t,)], dynamic=False, call_backward=True)
 
@@ -2100,6 +2151,27 @@ class GraphModule(torch.nn.Module):
     def forward(self, primals_5: "Sym(3)", tangents_1: "f32[12]"):
         view_1: "f32[3, 4]" = torch.ops.aten.view.default(tangents_1, [primals_5, 4]);  tangents_1 = primals_5 = None
         return [view_1, None, None, None]
+""",  # noqa: B950
+        )
+
+    @unittest.expectedFailure
+    def test_tensor_subclass_DoubleTensor_simple(self):
+        def f(t):
+            y = t.clone()
+            return y.view(-1) * 2
+
+        a = torch.ones(3, 4, requires_grad=True)
+        t = DoubleSizeTensor(a)
+
+        fw, _ = self._compile_check(f, [(t,)], dynamic=True, call_backward=False)
+
+        self.assertExpectedInline(
+            normalize_gm(fw[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[s2, s1]", primals_2: "Sym(s2)", primals_3: "Sym(s1)", primals_4: "Sym(2*s2)", primals_5: "Sym(s1)"):
+        mul: "f32[s2, s1]" = torch.ops.aten.mul.Tensor(primals_1, 2);  primals_1 = None
+        return [mul, primals_4, primals_5, primals_3, primals_2]
 """,  # noqa: B950
         )
 
