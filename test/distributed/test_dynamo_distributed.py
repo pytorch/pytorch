@@ -92,6 +92,38 @@ def get_model(
     return m, inputs, outputs
 
 
+class MutatingModel(nn.Module):
+    def __init__(self, in_feat=10, hidden_feat=5000, out_feat=5, ctx_manager=None):
+        super().__init__()
+        self.ctx_manager = ctx_manager
+        self.net = nn.Sequential(
+            *[nn.Linear(in_feat, hidden_feat), nn.ReLU()]
+            + [nn.Linear(hidden_feat, hidden_feat), nn.ReLU()]
+            + [nn.Linear(hidden_feat, hidden_feat), nn.ReLU()]
+            + [nn.Linear(hidden_feat, out_feat), nn.ReLU()]
+        )
+        self.state = 1
+
+    def forward(self, inputs):
+        self.state = 2
+        return self.net(inputs) * self.state
+
+
+def get_mutating_model(
+    device, bsz=20, in_feat=10, hidden_feat=5000, out_feat=5, ctx_manager=None
+):
+    m = MutatingModel(
+        in_feat=in_feat,
+        hidden_feat=hidden_feat,
+        out_feat=out_feat,
+        ctx_manager=ctx_manager,
+    ).to(device)
+    m.apply(init_weights)
+    inputs = torch.rand(bsz, in_feat).to(device)
+    outputs = m(inputs)
+    return m, inputs, outputs
+
+
 class ToyInnerModel(nn.Module):
     def __init__(self):
         super().__init__()
@@ -481,6 +513,17 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 use_orig_params=True,
             )
             fsdp_m = torch._dynamo.optimize("aot_eager")(fsdp_m)
+            outputs = fsdp_m(inputs)
+            self.assertTrue(same(correct_outputs, outputs))
+
+    @skip_if_lt_x_gpu(1)
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    def test_setattr(self):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            # Test with basic FSDP wrapping (outer wrap around whole model)
+            m, inputs, correct_outputs = get_mutating_model(f"cuda:{self.rank}")
+            fsdp_m = FSDP(m, use_orig_params=True)
+            fsdp_m = torch._dynamo.optimize("inductor", nopython=True)(fsdp_m)
             outputs = fsdp_m(inputs)
             self.assertTrue(same(correct_outputs, outputs))
 
