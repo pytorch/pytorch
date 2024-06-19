@@ -18,7 +18,7 @@ from functorch.compile import min_cut_rematerialization_partition
 from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.testing import CompileCounterWithBackend
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_CUDNN_ATTENTION
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_CUDNN_ATTENTION, SM90OrLater
 from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.two_tensor import TwoTensor
@@ -1207,8 +1207,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
         opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
         opt_fn(*args1).sum().backward()
-        # TODO(eqy): ADD SM90 check before MERGE!
-        if PLATFORM_SUPPORTS_CUDNN_ATTENTION:
+        if PLATFORM_SUPPORTS_CUDNN_ATTENTION and SM90OrLater:
             op = torch.ops.aten._scaled_dot_product_cudnn_attention.default
         else:
             op = torch.ops.aten._scaled_dot_product_flash_attention.default

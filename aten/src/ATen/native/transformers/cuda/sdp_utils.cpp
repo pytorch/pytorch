@@ -50,8 +50,7 @@ namespace {
 // Needs to be kept in-sync with test_fused_chocie in test_transformers.py
 bool check_prefer_cudnn_attention() {
   auto dprops = at::cuda::getCurrentDeviceProperties();
-  // TODO(eqy): revert this to 9 once testing is done
-  return dprops->major >= 8;
+  return dprops->major >= 9;
 }
 
 // flash_attention V2 is universally faster than efficient_attention and Math
