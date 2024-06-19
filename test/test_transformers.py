@@ -3158,13 +3158,12 @@ class TestSDPACudaOnly(NNTestCase):
         torch.testing.assert_close(rand_key.grad, key_ref.grad, atol=1e-3, rtol=1e-2)
         torch.testing.assert_close(rand_value.grad, value_ref.grad, atol=1e-3, rtol=1e-2)
 
-        
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if
                  PLATFORM_SUPPORTS_FLASH_ATTENTION else [SDPBackend.EFFICIENT_ATTENTION])
     def test_fused_kernels_seq_len_1_inputs(self, device, fused_kernel):
         rand_nested_tensor = partial(rand_sdpa_tensor, type="nested", device=device, dtype=torch.float16)
-        batch, num_heads, hequery_key_value_clonesad_dim = 32, 16, 64
+        batch, num_heads, head_dim = 32, 16, 64
         seq_lens = torch.randint(low=1, high=32, size=(batch,))
         # make sure some seq_lens are 1
         num_ones = 10
