@@ -363,7 +363,7 @@ def generate_wheels_matrix(
 
             # 12.1 linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
             if (
-                arch_version in ["12.4", "12.1", "11.8"]
+                arch_version in ["12.4"]
                 and os == "linux"
                 or arch_version == "cuda-aarch64"
             ):
@@ -389,6 +389,32 @@ def generate_wheels_matrix(
                             ),
                             "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}-split".replace(  # noqa: B950
                                 ".", "_"
+                            ),
+                        }
+                    )
+            else:
+                if arch_version == "cpu":
+                    ret.append(
+                        {
+                            "python_version": python_version,
+                            "gpu_arch_type": gpu_arch_type,
+                            "gpu_arch_version": gpu_arch_version,
+                            "desired_cuda": translate_desired_cuda(
+                                gpu_arch_type, gpu_arch_version
+                            ),
+                            "use_split_build": "True",
+                            "devtoolset": (
+                                "cxx11-abi" if arch_version == "cpu-cxx11-abi" else ""
+                            ),
+                            "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
+                            "package_type": package_type,
+                            "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
+                                ".", "_"
+                            ),
+                            "pytorch_extra_install_requirements": (
+                                PYTORCH_EXTRA_INSTALL_REQUIREMENTS["12.1"]  # fmt: skip
+                                if os != "linux"
+                                else ""
                             ),
                         }
                     )
