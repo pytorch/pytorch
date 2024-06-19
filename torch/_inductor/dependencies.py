@@ -253,7 +253,7 @@ class WeakDep(Dep):
         return self
 
     def numbytes_hint(self):
-        return 0  # Purely inserted for ordering, not an actual dep
+        return 1  # Purely inserted for ordering, not an actual dep
 
     def has_unbacked_symbols(self):
         return False

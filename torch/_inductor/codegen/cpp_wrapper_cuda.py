@@ -183,6 +183,9 @@ class CppWrapperCuda(CppWrapperCpu):
                 name, call_args, grid, device_index, cuda, triton, arg_types
             )
 
+        device_index, call_args = self.prepare_triton_kernel_call(
+            device_index, call_args
+        )
         params = CudaKernelParamCache.get(name)
         assert (
             params is not None
