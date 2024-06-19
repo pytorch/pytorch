@@ -260,7 +260,12 @@ for fk in FUNCTIONALITY_KEYS:
             )
 
 
-STRUCTURED_DISPATCH_KEYS = {DispatchKey.MPS, DispatchKey.CUDA, DispatchKey.CPU}
+STRUCTURED_DISPATCH_KEYS = {
+    DispatchKey.MPS,
+    DispatchKey.CUDA,
+    DispatchKey.CPU,
+    DispatchKey.XPU,
+}
 UFUNC_DISPATCH_KEYS = {DispatchKey.CUDA, DispatchKey.CPU}
 
 # Set of supported dispatch keys
@@ -271,6 +276,7 @@ dispatch_keys = [
     DispatchKey.MkldnnCPU,
     DispatchKey.CUDA,
     DispatchKey.MPS,
+    DispatchKey.XPU,
     DispatchKey.SparseCUDA,
     DispatchKey.SparseCsrCUDA,
     DispatchKey.QuantizedCPU,
@@ -573,6 +579,7 @@ class NativeFunction:
         loc: "Location",
         valid_tags: Set[str],
         ignore_keys: Optional[Set[DispatchKey]] = None,
+        whitelist_keys: Optional[Set[DispatchKey]] = None,
     ) -> Tuple[
         "NativeFunction", Dict[DispatchKey, Dict["OperatorName", "BackendMetadata"]]
     ]:
@@ -720,6 +727,8 @@ class NativeFunction:
                     num_dispatch_keys += 1
 
                     if ignore_keys and dispatch_key in ignore_keys:
+                        continue
+                    if whitelist_keys and (dispatch_key not in whitelist_keys):
                         continue
                     assert dispatch_key in dispatch_keys, (
                         f"Dispatch key {dispatch_key} of kernel {v} "
