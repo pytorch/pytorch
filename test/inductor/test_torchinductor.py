@@ -4697,6 +4697,16 @@ class CommonTemplate:
 
         self.common(fn, (x,))
 
+    def test_polar(self):
+        def fn(dist, angle):
+            return torch.polar(dist, angle)
+
+        inp = (
+            torch.tensor([1, 2], dtype=torch.float64),
+            torch.tensor([np.pi / 2, 5 * np.pi / 4], dtype=torch.float64),
+        )
+        self.common(fn, (*inp,))
+
     def test_cauchy(self):
         def fn(x, y):
             return torch.sum(1 / (torch.unsqueeze(x, -1) - y))
