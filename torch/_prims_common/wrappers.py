@@ -236,18 +236,12 @@ def out_wrapper(
         """
         Adds the out parameter to a Python reference.
         """
-        out_type = (
-            TensorLikeType
-            if is_tensor
-            else Tuple[tuple(TensorLikeType for _ in range(len(out_names)))]
-        )
-        return_type = (
-            TensorLikeType
-            if is_tensor
-            else NamedTuple(
-                f"return_types_{fn.__name__}", [(o, TensorLikeType) for o in out_names]
-            )
-        )
+        if is_tensor:
+            out_type = return_type = TensorLikeType
+        else:
+            out_type = Tuple[tuple(TensorLikeType for _ in range(len(out_names)))]
+            type_name = f"return_types_{fn.__name__}"
+            return_type = NamedTuple(type_name, [(o, TensorLikeType) for o in out_names])
 
         sig = inspect.signature(fn)
         factory_kwargs = ("device", "dtype")
