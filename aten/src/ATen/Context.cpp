@@ -263,18 +263,10 @@ void Context::setLinalgPreferredBackend(at::LinalgBackend b) {
   }
 }
 
-at::BlasBackend Context::getBlasAcceptableBackend(at::BlasBackend b) {
-  TORCH_CHECK((b != at::BlasBackend::Cublaslt) || hasCuBLASLt(),
-      "Cannot set preferred backend to cuBLASLt if PyTorch has not been compiled with cuBLASLt.");
-  if (b != at::BlasBackend::Cublas) {
-    TORCH_WARN_ONCE(
-      "torch.backends.cuda.preferred_blas_library is an experimental feature. "
-      "If you see any error or unexpected behavior when this flag is set "
-      "please file an issue on GitHub."
-    );
-  }
+at::BlasBackend Context::blasPreferredBackend() const {
+// Should this be called only once for performance reasons?
 #ifdef USE_ROCM
-  if (b == at::BlasBackend::Cublaslt) {
+  if (blas_preferred_backend == at::BlasBackend::Cublaslt) {
     static const std::vector<std::string> archs = {"gfx90a", "gfx940", "gfx941", "gfx942"};
     for (auto index = 0; index < at::getNumGPUs(); index++) {
       if (!detail::getCUDAHooks().isGPUArch(index, archs)) {
@@ -286,10 +278,6 @@ at::BlasBackend Context::getBlasAcceptableBackend(at::BlasBackend b) {
     }
   }
 #endif
-  return b;
-}
-
-at::BlasBackend Context::blasPreferredBackend() const {
   return blas_preferred_backend;
 }
 
@@ -300,7 +288,16 @@ void Context::setBlasPreferredBackend(at::BlasBackend b) {
     "It is not supported on Windows."
   );
 #else
-  blas_preferred_backend = getBlasAcceptableBackend(b);
+  TORCH_CHECK((b != at::BlasBackend::Cublaslt) || hasCuBLASLt(),
+      "Cannot set preferred backend to cuBLASLt if PyTorch has not been compiled with cuBLASLt.");
+  if (b != at::BlasBackend::Cublas) {
+    TORCH_WARN_ONCE(
+      "torch.backends.cuda.preferred_blas_library is an experimental feature. "
+      "If you see any error or unexpected behavior when this flag is set "
+      "please file an issue on GitHub."
+    );
+  }
+  blas_preferred_backend = b;
 #endif
 }
 
