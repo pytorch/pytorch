@@ -40,15 +40,29 @@ class HalideTests(TestCase):
         fn = HalideCodeCache.generate_halide(
             HalideMeta(
                 argtypes=[
-                    HalideInputSpec(ctype="float*", name="in_ptr0", shape=["1024L"]),
-                    HalideInputSpec(ctype="float*", name="in_ptr1", shape=["1024L"]),
+                    HalideInputSpec(
+                        ctype="float*",
+                        name="in_ptr0",
+                        shape=["1024L"],
+                        stride=["1L"],
+                        offset="0",
+                    ),
+                    HalideInputSpec(
+                        ctype="float*",
+                        name="in_ptr1",
+                        shape=["1024L"],
+                        stride=["1L"],
+                        offset="0",
+                    ),
                     HalideInputSpec(
                         ctype="float*",
                         name="out_ptr0",
                         shape=["1024L"],
+                        stride=["1L"],
+                        offset="0",
                     ),
                 ],
-                target="host",
+                target="host-no_runtime",
                 scheduler="Mullapudi2016",
                 scheduler_flags={
                     "parallelism": parallel_num_threads(),

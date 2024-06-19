@@ -1,16 +1,32 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import dataclasses
+import functools
 import itertools
 import logging
 import re
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
+from collections import defaultdict
+from math import inf
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    TYPE_CHECKING,
+    Union,
+)
 
 import sympy
 
 import torch
 import torch._logging
 from ..._prims_common import is_integer_dtype
+from ...utils._sympy.functions import FloorDiv, ModularIndexing
 from ...utils._sympy.symbol import symbol_is_type, SymT
 from ...utils._sympy.value_ranges import ValueRanges
 from .. import config, ir
@@ -22,7 +38,6 @@ from ..utils import (
     get_bounds_index_expr,
     get_kernel_metadata,
     parallel_num_threads,
-    sympy_dot,
     sympy_index_symbol,
     sympy_subs,
 )
@@ -35,10 +50,11 @@ from .common import (
     OpOverrides,
     PythonPrinter,
     SizeArg,
+    TensorArg,
 )
 from .cpp import DTYPE_TO_CPP
 from .cpp_utils import cexpr
-from .simd import constant_repr, IterationRangesEntry, SIMDKernel, SIMDScheduling
+from .simd import constant_repr, SIMDKernel, SIMDScheduling
 
 if TYPE_CHECKING:
     from ..ops_handler import ReductionType, StoreMode
@@ -488,11 +504,22 @@ class HalideOverrides(OpOverrides):
     def indirect_indexing(cls, index_var, size, check=True):
         # TODO(jansel): Halide only supports 32-bit indexing, we should error on overflow
         index_var = ops.to_dtype(index_var, torch.int32)
+        index_var = ops.halide_clamp(index_var, size, check)
+        index_var.indirect_indexing_size = size
         return sympy_index_symbol(str(index_var))
+
+    @classmethod
+    def halide_clamp(cls, value, size, check):
+        end = V.kernel.kexpr(V.kernel.rename_indexing(size) - 1)
+        if not isinstance(size, (int, sympy.Integer)):
+            end = f"hl.cast({value.name}.type(), {end})"
+        # Skip unsafe_promise_clamped to workaround: https://github.com/halide/Halide/issues/8261#issuecomment-2148835692
+        # return f"hl.unsafe_promise_clamped({value}, 0, {end})"
+        return f"hl.clamp({value}, 0, {end})"
 
     @staticmethod
     def masked(mask, body, other):
-        with V.kernel.mask_loads(mask) as new_mask:
+        with V.kernel.mask_loads(mask, other) as new_mask:
             result = body()
 
         if result.bounds.is_bool:
@@ -504,6 +531,7 @@ class HalideOverrides(OpOverrides):
             [],
             bounds=ValueRanges.wrap(other),
         )
+        # TODO(jansel): look into removing the where in the same places triton does
         return ops.where(new_mask, result, other)
 
 
@@ -517,7 +545,7 @@ class HalideCSEVariable(CSEVariable):
 
     def __init__(self, name, bounds: ValueRanges[Any]):
         super().__init__(name, bounds)
-        self.used_dims: Optional[List[str]] = None
+        self.used_dims: Optional[List[sympy.Symbol]] = None
 
     def update_on_args(self, name, args, kwargs):
         used = set(self.used_dims or ())
@@ -525,14 +553,13 @@ class HalideCSEVariable(CSEVariable):
             if isinstance(arg, HalideCSEVariable):
                 assert arg.used_dims is not None, (name, arg, args)
                 used.update(arg.used_dims)
-        self.used_dims = [t.name for t in V.kernel.range_trees if t.name in used]
-        assert len(self.used_dims) == len(used)
+        self.used_dims = V.kernel.sort_used_dims(used)
 
     def index_str(self, dims):
         if len(dims) == 0:
             return self.name
         # Reversed since Halide is column major
-        return f"{self.name}[{', '.join(map(str, reversed(dims)))}]"
+        return f"{self.name}[{', '.join(map(str, dims))}]"
 
     def __str__(self):
         if self.used_dims is None:
@@ -540,16 +567,43 @@ class HalideCSEVariable(CSEVariable):
             return f"{self.name}[?]"
         return self.index_str(self.used_dims)
 
-    def with_dom(self, suffix):
-        assert self.used_dims is not None
-        return self.index_str([f"{d}_{suffix}" for d in self.used_dims])
+    def subs_str(self, replacements):
+        assert self.used_dims is not None and all(
+            isinstance(x, sympy.Expr) for x in self.used_dims
+        )
+        return self.index_str([replacements.get(n, n) for n in self.used_dims])
 
-    def reduction_str(self):
-        assert self.used_dims is not None
-        dims = [*self.used_dims]
-        assert dims[-1] == "rindex"
-        dims[-1] = "rdom"
-        return self.index_str(dims)
+
+@dataclasses.dataclass
+class DimensionInfo:
+    expr: Optional[sympy.Expr]
+    size: sympy.Expr
+    stride: sympy.Expr
+
+    def __init__(self, expr, size, stride):
+        super().__init__()
+        if V.graph.sizevars.statically_known_leq(stride, 0):
+            stride = -stride
+            expr = -expr
+        self.expr = expr
+        self.size = size
+        self.stride = stride
+
+    def index_str(self, replacements=None, zero_vars=False):
+        assert self.expr is not None
+        expr = self.expr
+        if zero_vars and expr == 0:
+            return "hl.Var()"
+        if replacements:
+            replacements = {**replacements}
+            for sym in expr.free_symbols:
+                if symbol_is_type(sym, SymT.TMP):
+                    assert isinstance(sym, sympy.Symbol)
+                    var = V.kernel.lookup_cse_var(sym.name)
+                    assert isinstance(var, HalideCSEVariable)
+                    replacements[sym] = sympy_index_symbol(var.subs_str(replacements))
+            expr = sympy_subs(expr, replacements)
+        return V.kernel.index_to_str(expr)
 
 
 class HalideKernel(SIMDKernel):
@@ -580,41 +634,349 @@ class HalideKernel(SIMDKernel):
         self.indexing_code_dom = IndentedBuffer()
         self.needs_dom_indexing = self.inside_reduction
         self.has_reduction = self.inside_reduction
-        self.store_buffer_dimensions: Dict[str, List[sympy.Expr]] = {}
+        self.buffer_dimensions: Dict[str, List[DimensionInfo]] = {}
+        self.buffer_offsets: Dict[str, sympy.Expr] = {}
+        self.halide_vars: Dict[sympy.Symbol, sympy.Expr] = {}
+        self.index_replacements: Dict[sympy.Expr, sympy.Expr] = {}
+        self.reduction_renames: Dict[sympy.Symbol, sympy.Symbol] = {}
+        self.dom_renames: Dict[str, Dict[sympy.Symbol, sympy.Symbol]] = {}
+        self.buffer_aliases: Dict[str, List[str]] = defaultdict(list)
 
     def create_cse_var(self, name, bounds=None):
         self.body.writeline(f"{name} = hl.Func({name!r})")
         return HalideCSEVariable(name, bounds)
 
-    def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry):
-        expr = self.rename_indexing(entry.expr)
-        self.indexing_code.writeline(f"{entry.name} = {self.kexpr(expr)}")
+    def finalize_indexing(self, indices: Sequence[sympy.Expr]):
+        """
+        Hook called right before codegen with every index that will be
+        used in the fused kernel.
 
-        if self.has_reduction:
-            # idom includes iteration ranges of the numel of inputs
-            expr_idom = sympy_subs(
-                expr,
-                {
-                    tree.symbol(): sympy_index_symbol(f"{tree.name}_idom")
-                    for tree in self.range_trees
-                },
+        This populates self.halide_vars/index_replacements/reduction_renames which is an alternate indexing
+        scheme that avoids using divide and modulus.  Instead of xindex/yindex/rindex
+        we base indexing on a larger number of vars whose product combines to those.
+
+        This function populates self.halide_vars, self.index_replacements, and self.reduction_renames
+        """
+        assert not (
+            self.index_replacements or self.halide_vars or self.reduction_renames
+        )
+        eq = V.graph.sizevars.statically_known_equals
+        lt = V.graph.sizevars.statically_known_lt
+        size_hint = functools.partial(V.graph.sizevars.size_hint, fallback=inf)
+        indices = dict.fromkeys(map(super().prepare_indexing, indices))
+        all_used_symbols = set()
+        sym_to_node = {
+            n.symbol(): n
+            for n in itertools.chain.from_iterable(
+                [tree.nodes.values() for tree in self.range_trees]
             )
-            self.indexing_code_dom.writeline(
-                f"{entry.name}_idom = {self.kexpr(expr_idom)}"
+        }
+
+        def visit_modular_indexing(base, divisor, modulus):
+            if base in sym_to_node:
+                node = sym_to_node[base]
+                all_used_symbols.add(
+                    node.root.lookup(
+                        node.divisor * divisor,
+                        V.graph.sizevars.evaluate_min(
+                            modulus, FloorDiv(node.length, divisor)
+                        ),
+                    ).symbol()
+                )
+
+        def visit_floor_div(base, divisor):
+            if base in sym_to_node:
+                node = sym_to_node[base]
+                all_used_symbols.add(
+                    node.root.lookup(
+                        node.divisor * divisor,
+                        FloorDiv(node.length, divisor),
+                    ).symbol()
+                )
+
+        # first figure out all_used_symbols to do dead symbol elimination
+        for index in indices:
+            if index.has(ModularIndexing):
+                index.replace(
+                    ModularIndexing(
+                        sympy.Wild("base"),
+                        sympy.Wild("divisor"),
+                        sympy.Wild("modulus"),
+                    ),
+                    visit_modular_indexing,
+                )
+            if index.has(FloorDiv):
+                index.replace(
+                    FloorDiv(
+                        sympy.Wild("base"),
+                        sympy.Wild("divisor"),
+                    ),
+                    visit_floor_div,
+                )
+            all_used_symbols.update(super().prepare_indexing(index).free_symbols)
+
+        had_fallback = False
+        for tree in reversed(self.range_trees):
+            nodes = [n for n in tree.nodes.values() if n.symbol() in all_used_symbols]
+            nodes.sort(key=lambda n: size_hint(n.divisor))
+            handled_count = 0
+            divisor = sympy.Integer(1)
+            added_sym_size = []
+            # decide on a minimal set of symbols and put them in self.halide_vars
+            while handled_count < len(nodes):
+                sizes_to_add = [n.length for n in nodes if eq(n.divisor, divisor)]
+                handled_count += len(sizes_to_add)
+                assert sizes_to_add, nodes
+                end = divisor * functools.reduce(
+                    V.graph.sizevars.evaluate_max, sizes_to_add
+                )
+                sizes_to_add.extend(
+                    [
+                        sympy.simplify(n.divisor / divisor)
+                        for n in nodes
+                        if lt(divisor, n.divisor) and lt(n.divisor, end)
+                    ]
+                )
+                while sizes_to_add:
+                    next_size = functools.reduce(sympy.gcd, sizes_to_add)
+                    if eq(next_size, 1):
+                        # sizes share no common factors, e.g [2, 21, 42, 441, 889056]
+                        # TODO(jansel): we should just prevent fusion in cases that hit this
+                        next_size = sympy.simplify(tree.numel / divisor)
+                        sizes_to_add = []
+                        handled_count = len(nodes)
+                        had_fallback = True
+                    sym = sympy_index_symbol(f"h{len(self.halide_vars)}")
+                    self.halide_vars[sym] = next_size
+                    if tree.prefix == "r":
+                        self.reduction_renames[sym] = sympy_index_symbol(
+                            f"hr{len(self.halide_vars)}"
+                        )
+                    added_sym_size.append((sym, next_size))
+                    divisor *= next_size
+                    new_sizes = [n.length for n in nodes if eq(n.divisor, divisor)]
+                    handled_count += len(new_sizes)
+                    sizes_to_add = [
+                        sympy.simplify(s / next_size)
+                        for s in sizes_to_add
+                        if not eq(s, next_size)
+                    ]
+                    sizes_to_add.extend(new_sizes)
+
+            # create a mapping to the new set of symbols in self.index_replacements
+            for node in nodes:
+                try:
+                    idx = 0
+                    divisor = 1
+                    while not eq(node.divisor, divisor):
+                        sym, size = added_sym_size[idx]
+                        idx += 1
+                        divisor *= size
+                    length = 1
+                    expr = sympy.Integer(0)
+                    while not eq(node.length, length):
+                        sym, size = added_sym_size[idx]
+                        idx += 1
+                        expr += length * sym
+                        length *= size
+                    self.index_replacements[node.symbol()] = expr
+                except IndexError:
+                    assert had_fallback
+                    full_index = sympy.Integer(0)
+                    stride = sympy.Integer(1)
+                    for sym, size in added_sym_size:
+                        full_index += stride * sym
+                        stride *= size
+                    self.index_replacements[
+                        node.symbol()
+                    ] = V.graph.sizevars.simplify_with_ranges(
+                        ModularIndexing(full_index, node.divisor, node.length),
+                        self.halide_vars,  # type: ignore[arg-type]
+                    )
+
+        # codegen the variable definitions
+        for sym in self.halide_vars:
+            self.indexing_code.writeline(f"{sym} = hl.Var({sym.name!r})")
+        if self.reduction_renames:
+            self.codegen_rdom(
+                "rdom",
+                {rv: self.halide_vars[v] for v, rv in self.reduction_renames.items()},
             )
 
-        if entry.prefix != "r":
-            # idom includes iteration ranges of the numel of outputs (which is different for reductions)
-            expr_idom = sympy_subs(
-                expr,
-                {
-                    tree.symbol(): sympy_index_symbol(f"{tree.name}_odom")
-                    for tree in self.range_trees
-                },
+    def setup_dom_indexing(self):
+        """RDom based indexing uses explicit iteration ranges for Func updates"""
+        prefix = "i" if self.inside_reduction else "o"
+        if prefix in self.dom_renames:
+            return self.dom_renames[prefix]
+
+        renames = {}
+        for var in self.halide_vars.keys():
+            if not self.inside_reduction and var in self.reduction_renames:
+                continue
+            m = re.match(r"^h(\d+)$", var.name)
+            assert m
+            renames[var] = sympy_index_symbol(f"h{prefix}{m.group(1)}")
+
+        self.codegen_rdom(
+            f"{prefix}dom", {rv: self.halide_vars[v] for v, rv in renames.items()}
+        )
+
+        self.dom_renames[prefix] = renames
+        return renames
+
+    def codegen_rdom(self, name, vars):
+        rsizes = [f"hl.Range(0, {self.kexpr(size)})" for size in vars.values()]
+        self.indexing_code.writeline(f"{name} = hl.RDom([{', '.join(rsizes)}])")
+        for i, rsym in enumerate(vars.keys()):
+            self.indexing_code.writeline(f"{rsym} = {name}[{i}]")
+
+    def prepare_indexing(
+        self,
+        index: sympy.Expr,
+    ):
+        index = super().prepare_indexing(index)
+        index = sympy_subs(index, self.index_replacements)
+        return V.graph.sizevars.simplify_with_ranges(index, self.halide_vars)  # type: ignore[arg-type]
+
+    def sym_size(self, sym):
+        """The size of an index symbol"""
+        if symbol_is_type(sym, SymT.TMP):
+            return self.lookup_cse_var(sym.name).indirect_indexing_size
+        return self.halide_vars[sym]
+
+    def indexing_to_dimensions(self, var: str, index: sympy.Expr, is_store: bool):
+        """Convert address-based indexing into dimensions using self.halide_vars"""
+        symbols = []
+        for sym in sorted(index.free_symbols, key=lambda x: x.name):  # type: ignore[attr-defined]
+            if symbol_is_type(sym, (SymT.HALIDE, SymT.TMP)):
+                symbols.append(sym)
+            else:
+                assert symbol_is_type(
+                    sym,
+                    (
+                        SymT.UNBACKED_INT,
+                        SymT.SIZE,
+                        SymT.PRECOMPUTED_SIZE,
+                    ),
+                ), sym
+
+        # group the expression by variables used
+        offset = sympy.Integer(0)
+        split_expr = {s: sympy.Integer(0) for s in symbols}
+        split_failed: List[Tuple[List[sympy.Symbol], sympy.Expr]] = []
+        index = sympy.expand(self.rename_indexing(index))
+        for part in index.args if isinstance(index, sympy.Add) else [index]:
+            part_vars = [v for v in part.free_symbols if v in split_expr]
+            if len(part_vars) == 0:
+                offset += part
+            elif len(part_vars) == 1:
+                split_expr[part_vars[0]] += part
+            else:
+                new_split_failed = []
+                for i in range(len(split_failed)):
+                    assert split_failed[i] is not None
+                    other_vars, other_part = split_failed[i]
+                    if set(other_vars) & set(part_vars):
+                        part_vars.extend([v for v in other_vars if v not in part_vars])
+                        part += other_part
+                    else:
+                        new_split_failed.append((other_vars, other_part))
+                split_failed = [*new_split_failed, (part_vars, part)]
+
+        def expr_to_dimension(expr, syms):
+            expr = sympy.factor(expr)
+            if len(syms) == 1:
+                stride_wild = sympy.Wild("wild", exclude=symbols)
+                m = expr.match(stride_wild * syms[0])
+                if m:
+                    return DimensionInfo(
+                        syms[0], self.sym_size(syms[0]), m[stride_wild]
+                    )
+            assert not is_store, expr
+            length = sympy.simplify(
+                sympy_subs(expr, {sym: self.sym_size(sym) - 1 for sym in syms}) + 1
             )
-            self.indexing_code_dom.writeline(
-                f"{entry.name}_odom = {self.kexpr(expr_idom)}"
+            stride = sympy.Integer(1)
+            if isinstance(expr, sympy.Mul):
+                for term in expr.args:
+                    if isinstance(term, sympy.Integer):
+                        stride *= term
+                        expr = sympy.simplify(expr / term)
+                        length = sympy.simplify(sympy.ceiling(length / term))
+            return DimensionInfo(expr, length, stride)
+
+        # try to turn each group into a strided access
+        dims = []
+        for syms, expr in split_failed:
+            for v in syms:
+                expr += split_expr.pop(v)
+            dims.append(expr_to_dimension(expr, syms))
+        for sym, expr in split_expr.items():
+            dims.append(expr_to_dimension(expr, [sym]))
+        dims.sort(key=lambda d: V.graph.sizevars.size_hint(d.stride, fallback=inf))  # type: ignore[arg-type]
+
+        if not dims:  # scalar load/store
+            dims.append(DimensionInfo(sympy.Integer(0), 1, 1))
+        elif not V.graph.sizevars.statically_known_equals(dims[0].stride, 1):
+            # Halide assumes dimension 0 is stride == 1, so add a dummy dimension
+            dims.insert(
+                0, DimensionInfo(sympy.Integer(0), 1 if is_store else dims[0].stride, 1)
             )
+
+        if not is_store:
+            if var in self.buffer_offsets and V.graph.sizevars.statically_known_geq(
+                offset, self.buffer_offsets[var]
+            ):
+                # reuse the existing offset to avoid needing an input alias
+                self.apply_offset_to_dimension(dims, offset - self.buffer_offsets[var])
+                offset = self.buffer_offsets[var]
+            elif V.graph.sizevars.statically_known_gt(
+                offset, 0
+            ):  # TODO(jansel): negative offsets
+                # roll the offset into the dimensions for cleaner indexing
+                self.apply_offset_to_dimension(dims, offset)
+                offset = 0
+
+        orig_var = var
+        for i in itertools.count():
+            if self.install_dims(var, dims, offset, is_store):
+                return var, dims
+            assert not is_store
+            var = f"{orig_var}_view{i}"
+            if var not in self.buffer_aliases[orig_var]:
+                self.buffer_aliases[orig_var].append(var)
+
+    def install_dims(self, var, dims, offset, is_store):
+        """Try to set self.buffer_dimensions[var], return True on success"""
+        if var not in self.buffer_dimensions:
+            self.buffer_dimensions[var] = dims
+            self.buffer_offsets[var] = offset
+            return True
+        if self.buffer_offsets[var] != offset or len(
+            self.buffer_dimensions[var]
+        ) != len(dims):
+            return False
+        if is_store:
+            return self.buffer_dimensions[var] == dims
+        for old, new in zip(self.buffer_dimensions[var], dims):
+            if old.stride != new.stride:
+                return False
+            if old.size != new.size or old.expr != new.expr:
+                old.size = V.graph.sizevars.evaluate_max(old.size, new.size)
+                old.expr = None
+        return True
+
+    def apply_offset_to_dimension(self, dims, offset):
+        if offset == 0:
+            return
+        for i in reversed(range(len(dims))):
+            if dims[i].stride == 1 or V.graph.sizevars.statically_known_geq(
+                offset, dims[i].stride
+            ):
+                part = FloorDiv(offset, dims[i].stride)
+                offset -= part * dims[i].stride
+                dims[i].expr += part
+        assert offset == 0
 
     def used_dims_from_index(self, index: sympy.Expr):
         """Detect which range trees are used to populate HalideCSEVariable.used_dims"""
@@ -629,18 +991,25 @@ class HalideKernel(SIMDKernel):
                     and cse_var.used_dims is not None
                 )
                 used_dims.update(cse_var.used_dims)
+            elif symbol_is_type(sym, SymT.HALIDE):
+                used_dims.add(sym)
             elif symbol_is_type(
                 sym, (SymT.UNBACKED_INT, SymT.SIZE, SymT.PRECOMPUTED_SIZE, SymT.INDEX)
             ):
                 pass
             else:
-                # sym is one of xN, yN or rN
-                assert symbol_is_type(
-                    sym, (SymT.RINDEX, SymT.XBLOCK, SymT.YBLOCK)
-                ), sym.name
-                used_dims.add(f"{sym.name[0]}index")
+                raise NotImplementedError(f"unhandled symbol {sym}")
+        return self.sort_used_dims(used_dims)
 
-        ordered = [tree.name for tree in self.range_trees if tree.name in used_dims]
+    def sort_used_dims(self, used_dims):
+        assert all(isinstance(x, sympy.Expr) for x in used_dims)
+        ordered = [
+            sym
+            for sym in itertools.chain(
+                self.halide_vars, self.reduction_renames.values()
+            )
+            if sym in used_dims
+        ]
         assert len(ordered) == len(used_dims)
         return ordered
 
@@ -648,156 +1017,66 @@ class HalideKernel(SIMDKernel):
         """Codegen a load from an InputBuffer"""
         var = self.args.input(name)
         index = self.prepare_indexing(index)
-        index_str = self.index_to_str(index)
-        if self.is_indirect_indexing(index) or self._load_mask:
-            # Halide doesn't have a great way to do masked loads
-            var = f"hl.BoundaryConditions.constant_exterior({var}, 0)"
-        line = f"{var}[{index_str}]"
+        var, dims = self.indexing_to_dimensions(var, index, False)
+        index_str = ", ".join(d.index_str() for d in dims)
+        line = f"{var}[{index_str},]"  # trailing comma workaround for https://github.com/halide/Halide/issues/8299
         dtype = V.graph.get_dtype(name)
         if dtype in (torch.float16, torch.bfloat16):
             line = f"hl.cast(hl.Float(32), {line})"
-        return self.genfunc(line, self.used_dims_from_index(index))
 
-    def index_to_dom(self, index: sympy.Expr, suffix: str):
-        """Replace xindex => xindex_dom, x0 => x0_dom, etc for update-style indexing"""
-        replacements: Dict[sympy.Expr, Any] = {}
-        for sym in index.free_symbols:
-            assert isinstance(sym, sympy.Symbol)
-            if symbol_is_type(sym, SymT.TMP):
-                # indirect indexing
-                cse_var = self.lookup_cse_var(sym.name)
-                assert isinstance(cse_var, HalideCSEVariable)
-                replacements[sym] = sympy.Symbol(cse_var.with_dom(suffix))
-            elif symbol_is_type(
-                sym, (SymT.UNBACKED_INT, SymT.SIZE, SymT.PRECOMPUTED_SIZE, SymT.INDEX)
-            ):
-                pass
+        if self._load_mask:
+            assert (
+                isinstance(self._load_mask, HalideCSEVariable)
+                and self._load_mask.used_dims is not None
+            )
+            used_dims = {*self.used_dims_from_index(index), *self._load_mask.used_dims}
+            result = self.newfunc(self.sort_used_dims(used_dims))
+            if result.used_dims:
+                self.body.writeline(f"{result.name}_mask = hl.RDom([hl.Range(0, 1)])")
+                self.body.writeline(f"{result.name}_mask.where({self._load_mask})")
+                self.body.writeline(
+                    f"{result} = hl.cast({halide_type(dtype)}, {halide_constant(self._load_other or 0)})"
+                )
+                self.body.writeline(
+                    f"{result} = {line} + hl.cast({halide_type(dtype)}, {result.name}_mask)"
+                )
             else:
-                # sym is one of xN, yN or rN
-                assert symbol_is_type(
-                    sym, (SymT.RINDEX, SymT.XBLOCK, SymT.YBLOCK)
-                ), sym.name
-                replacements[sym] = sympy.Symbol(f"{sym.name}_{suffix}")
-        return sympy_subs(index, replacements)
+                # scalar case
+                self.body.writeline(
+                    f"{result} = hl.select({self._load_mask}, {line}, hl.cast({halide_type(dtype)}, 0))"
+                )
+            return result
+        else:
+            return self.genfunc(line, self.used_dims_from_index(index))
 
     def lookup_cse_var(self, name: str):
         return self.cse.varname_map[re.sub(r"\[.*", "", name)]
-
-    def determine_store_indexing(
-        self, name: str, index: sympy.Expr, value: HalideCSEVariable, var: str, mode
-    ):
-        """
-        Halide requires the initial definition of an output to be done with a plain Var(),
-        while subsequent updates can use Expr().  For us index may be an Expr. This function
-        tries to make the output index a var, and if that fails switches to the more flexible
-        hl.RDom()+update codegen.
-        """
-        assert value.used_dims is not None
-        assert var not in self.store_buffer_dimensions
-        eq = V.graph.sizevars.statically_known_equals
-
-        if index == 0 and eq(self.halide_buffer_numel(name), 1) and mode is None:
-            # 1-element case
-            index_str = "hl.Var()"  # halide requires storage dst to be a Var
-            value_str = value.index_str([0 for _ in value.used_dims])
-            return index_str, value_str
-
-        var_ranges = self.var_ranges()
-        range_trees = self.active_range_trees()
-        numel = self.halide_buffer_numel(name)
-
-        if (
-            isinstance(index, sympy.Symbol)
-            and index in var_ranges
-            and eq(var_ranges[index], numel)
-            and mode is None
-        ):
-            value_str = str(value)
-            index_str = self.index_to_str(index)
-            return index_str, value_str
-
-        try:
-            value_index, dim_sizes, index_vars = self.match_strides_to_dimensions(
-                index, var_ranges, range_trees, f"{var}_i", mode
-            )
-        except NotImplementedError:
-            pass
-        else:
-            self.store_buffer_dimensions[var] = dim_sizes
-            for v in index_vars:
-                self.body.writeline(
-                    DeferredLine(name, f"{v.name} = hl.Var({v.name!r})")
-                )
-            index_str = ", ".join(v.name for v in index_vars)
-            value_str = value.index_str([value_index[d[0]] for d in value.used_dims])
-            return index_str, value_str
-
-        self.needs_dom_indexing = True
-        # Fall back to using RDom-style store
-        self.body.writeline(
-            DeferredLine(name, f"{var}[hl.Var()] = hl.undef({var}.type())")
-        )
-        suffix = "idom" if self.inside_reduction else "odom"
-        value_str = value.with_dom(suffix)
-        index_str = self.index_to_str(self.index_to_dom(index, suffix))
-        return index_str, value_str
-
-    def match_strides_to_dimensions(
-        self, index, var_ranges, range_trees, varname, mode
-    ):
-        """Best effort conversion of 1D indexing into N-D indexing"""
-        if mode is not None:
-            raise NotImplementedError  # atomic_add
-        eq = V.graph.sizevars.statically_known_equals
-        used_vars = set(index.free_symbols)
-        var_ranges = {s: v for s, v in var_ranges.items() if s in used_vars}
-        strides = V.graph.sizevars.stride_vars(index, var_ranges)
-        if not strides or not eq(sympy_dot(var_ranges, strides), index):
-            raise NotImplementedError  # complex or indirect indexing
-
-        tree_numels = {t.prefix: sympy.Integer(1) for t in range_trees}
-        prefix_to_tree = {t.prefix: t for t in range_trees}
-        expected_stride = sympy.Integer(1)
-        new_lengths = []
-        new_index = {t.prefix: sympy.Integer(0) for t in range_trees}
-        new_vars: List[sympy.Symbol] = []
-        for stride, (v, length) in sorted(
-            zip(strides, var_ranges.items()),
-            key=lambda x: V.graph.sizevars.size_hint(x[0], fallback=float("inf")),  # type: ignore[arg-type]
-        ):
-            if not eq(expected_stride, stride):
-                raise NotImplementedError  # gaps in indexing or unbacked symints
-            prefix = v.name[0]
-            if prefix_to_tree[prefix].lookup(tree_numels[prefix], length) != v:
-                raise NotImplementedError  # output reordering
-            new_var = sympy.Symbol(f"{varname}{len(new_vars)}")
-            new_vars.append(new_var)
-            new_lengths.append(length)
-            new_index[prefix] += tree_numels[prefix] * new_var
-            tree_numels[prefix] *= length
-            expected_stride *= length
-        return new_index, new_lengths, new_vars
 
     def store(
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
     ) -> None:
         """Codegen a store to an OutputBuffer"""
+        assert isinstance(value, HalideCSEVariable)
         var = self.args.output(name)
         index = self.prepare_indexing(index)
-        assert isinstance(value, HalideCSEVariable)
-        index_str, value_str = self.determine_store_indexing(
-            name, index, value, var, mode
-        )
-
-        if self.is_indirect_indexing(index):
-            # Workaround "Buffer out_ptr0 may be accessed in an unbounded way"
-            # TODO(jansel): we should error here rather than writing to the first/last element
-            index_str = f"hl.clamp({index_str}, 0, {self.kexpr(self.halide_buffer_numel(name) - 1)})"
+        var, dims = self.indexing_to_dimensions(var, index, True)
+        if self.is_indirect_indexing(index) or mode is not None:
+            replacements = self.setup_dom_indexing()
+            index_str = ", ".join(d.index_str(replacements) for d in dims)
+            value_str = value.subs_str(replacements)
+            undef_dims = ", ".join(["hl.Var()"] * len(dims))
+            self.body.writeline(
+                DeferredLine(name, f"{var}[{undef_dims}] = hl.undef({var}.type())")
+            )
+        else:
+            index_str = ", ".join(d.index_str(zero_vars=True) for d in dims)
+            value_str = str(value)
 
         if mode is None:
-            line = f"{var}[{index_str}] = hl.cast({var}.type(), {value_str})"
+            dtype = V.graph.get_dtype(name)
+            line = f"{var}[{index_str},] = hl.cast({halide_type(dtype)}, {value_str})"
         elif mode == "atomic_add":
-            line = f"{var}[{index_str}] += {value_str}"
+            line = f"{var}[{index_str},] += {value_str}"
         else:
             raise NotImplementedError(f"store mode={mode}")
         self.body.writeline(DeferredLine(name, line))
@@ -818,25 +1097,39 @@ class HalideKernel(SIMDKernel):
         if cache_key in self.cse.reduction_cache:
             return self.cse.reduction_cache[cache_key]
 
-        acc_type = halide_acc_type(dtype)
+        if isinstance(value, tuple):
+            assert reduction_type == "welford_combine"
+            raise NotImplementedError("welford_combine")
+            # self.cse.reduction_cache[
+            #     cache_key
+            # ] = result_tuple = self.welford_combine_impl(*value)
+            # return result_tuple
+
+        assert isinstance(value, HalideCSEVariable) and value.used_dims is not None
+        reduction_vars = {*self.reduction_renames}
         result_var = self.newfunc(
-            [
-                tree.name
-                for tree in self.range_trees[:-1]
-                if tree.name in value.used_dims
-            ]
+            [v for v in value.used_dims if v not in reduction_vars]
         )
-
+        if reduction_vars - {*value.used_dims}:
+            value = self.genfunc(
+                f"{value}", self.sort_used_dims({*value.used_dims, *reduction_vars})
+            )
+        value_str = value.subs_str(self.reduction_renames)
         default = ir.Reduction.default_accumulator(reduction_type, src_dtype)
-
-        if value.used_dims[-1] != "rindex":
-            value = self.genfunc(f"{value}", [*value.used_dims, "rindex"])
-        value_str = value.reduction_str()
+        acc_type = halide_acc_type(dtype)
 
         if reduction_type in ("argmax", "argmin"):
-            self.body.writeline(
-                f"{result_var} = hl.{reduction_type}(rdom, {value_str})[0]"
-            )
+            index = f"{result_var.name}_{reduction_type}"
+            self.body.writeline(f"{index} = hl.{reduction_type}(rdom, {value_str})")
+            # turn the N-D argmax index into a 1-D one
+            parts = []
+            stride = 1
+            for i, sym in enumerate(self.reduction_renames):
+                parts.append(f"{index}[{i}]")
+                if stride != 1:
+                    parts[-1] += f"*{stride}"
+                stride *= self.halide_vars[sym]
+            self.body.writeline(f"{result_var} = {' + '.join(parts)}")
         elif reduction_type in ("sum", "prod", "min", "max", "any"):
             fn = {
                 "sum": "sum",
@@ -849,8 +1142,8 @@ class HalideKernel(SIMDKernel):
         elif reduction_type == "xor_sum":
             result_var_init = result_var
             if not result_var.used_dims:  # need a fake dim
-                result_var_init = result_var.index_str([self.range_trees[0].name])
-                result_var.used_dims = ["0"]
+                result_var_init = result_var.index_str([sympy.Symbol("hl.Var()")])
+                result_var.used_dims = [sympy.Integer(0)]
             self.body.writeline(
                 f"{result_var_init} = hl.cast({acc_type}, {halide_constant(default)})"
             )
@@ -901,8 +1194,26 @@ class HalideKernel(SIMDKernel):
                 assert "in_ptr" in arg.name
                 return 0
 
+        result = []
         _, a, b, _ = self.args.python_argdefs()
-        return sorted(zip(a, b), key=arg_order)
+        for call_str, arg in sorted(zip(a, b), key=arg_order):
+            result.append((call_str, arg))
+            if isinstance(arg, TensorArg):
+                assert arg.offset == 0 and arg.alias_of is None
+                for alias in self.buffer_aliases.get(arg.name, ()):
+                    result.append(
+                        (
+                            None,
+                            TensorArg(
+                                alias,
+                                arg.buffer,
+                                arg.dtype,
+                                arg.offset,
+                                alias_of=arg.name,
+                            ),
+                        )
+                    )
+        return result
 
     def halide_kernel_meta(self) -> HalideMeta:
         """Compute metadata required by codecache.py"""
@@ -910,32 +1221,76 @@ class HalideKernel(SIMDKernel):
         for _, arg in self.halide_argdefs():
             if isinstance(arg, SizeArg):
                 shape = None
+                stride = None
+                offset = None
                 dtype = "long"
             else:
-                if arg.name in self.store_buffer_dimensions and "out" in arg.name:
-                    shape = [
-                        cexpr(self.rename_indexing(x))
-                        for x in self.store_buffer_dimensions[arg.name]
-                    ]
-                    assert shape
-                else:
-                    shape = [
-                        cexpr(
-                            self.rename_indexing(self.halide_buffer_numel(arg.buffer))
-                        )
-                    ] or ["1"]
+                shape = [
+                    cexpr(self.rename_indexing(x.size))
+                    for x in self.buffer_dimensions[arg.name]
+                ]
+                assert shape, self.buffer_dimensions
+                stride = [
+                    cexpr(self.rename_indexing(x.stride))
+                    for x in self.buffer_dimensions[arg.name]
+                ]
+                assert len(shape) == len(stride)
+                offset = cexpr(self.buffer_offsets[arg.name])
                 dtype = f"{DTYPE_TO_CPP[arg.dtype]}*"
             argtypes.append(
                 HalideInputSpec(
                     dtype,
                     arg.name,
-                    shape,
+                    shape=shape,
+                    stride=stride,
+                    offset=offset,
+                    alias_of=arg.alias_of,
                 )
             )
-        target = ["host", "strict_float"]
-        # TODO(jansel): for cuda want target="host-cuda-cuda_capability_86-user_context"
+
+        current_device = V.graph.scheduler.get_current_device_or_throw()
+        if current_device.type == "cpu":
+            target = [config.halide.cpu_target]
+            schduler = config.halide.scheduler_cpu
+            scheduler_flags = {
+                "parallelism": parallel_num_threads(),
+            }
+            if config.halide.scheduler_cpu == "Mullapudi2016":
+                scheduler_flags[
+                    "last_level_cache_size"
+                ] = HalideCodeCache.cpu_cache_size()
+            cuda_device = None
+        else:
+            assert current_device.type == "cuda", "only cpu/cuda supported"
+            assert current_device.index <= 0, "only default device supported"
+            target = [config.halide.gpu_target]
+            schduler = config.halide.scheduler_cuda
+            capability = torch.cuda.get_device_properties(current_device)
+            if "cuda_capability" not in target[0]:
+                for major, minor in [(8, 6), (8, 0), (7, 5), (7, 0), (6, 1)]:
+                    if capability.major >= major and capability.minor >= minor:
+                        target.append(f"cuda_capability_{major}{minor}")
+                        break
+            target.append("user_context")
+            scheduler_flags = {
+                "parallelism": capability.multi_processor_count,
+                # TODO(jansel): explore other flags, see:
+                # grep parser.parse ~/Halide/src/autoschedulers/anderson2021/AutoSchedule.cpp
+            }
+            cuda_device = max(0, current_device.index)
+
+        # strict_float is requires for correctness
+        target.append("strict_float")
+
+        # without this we will initialize cuda once per kernel and hit errors
+        target.append("no_runtime")
+
         if not config.halide.asserts:
             target.append("no_asserts")
+
+        if config.halide.debug:
+            target.append("debug")
+
         if "64" in self.index_dtype:
             # TODO(jansel): it is unclear if this does anything, since input sizes are still int32
             target.append("large_buffers")
@@ -943,11 +1298,9 @@ class HalideKernel(SIMDKernel):
         return HalideMeta(
             argtypes,
             target="-".join(target),
-            scheduler="Mullapudi2016",
-            scheduler_flags={
-                "parallelism": parallel_num_threads(),
-                "last_level_cache_size": HalideCodeCache.cpu_cache_size(),
-            },
+            scheduler=schduler,
+            scheduler_flags=scheduler_flags,
+            cuda_device=cuda_device,
         )
 
     def codegen_kernel(self, name=None):
@@ -973,7 +1326,7 @@ class HalideKernel(SIMDKernel):
                 assert arg.buffer, arg
                 argcls = "hl.OutputBuffer" if "out" in arg.name else "hl.InputBuffer"
                 argtype = halide_type(arg.dtype)
-                ndim = len(self.store_buffer_dimensions.get(arg.name, (0,)))
+                ndim = len(self.buffer_dimensions[arg.name])
                 code.writeline(f"{arg.name} = {argcls}({argtype}, {ndim})")
         code.splice(
             """
@@ -985,31 +1338,7 @@ class HalideKernel(SIMDKernel):
             code.writeline(f"{arg.name} = g.{arg.name}")
         for old, new in self.args.aliases():
             code.writeline(f"{old} = {new}")
-
-        dom_size = {}
-        for tree in self.active_range_trees(reorder=True):
-            code.writeline(f"{tree.name} = hl.Var({tree.name!r})")
-            length = self.kexpr(self.rename_indexing(tree.numel))
-            dom_size[tree.name] = f"hl.Range(0, {length})"
-        assert len(dom_size) <= 3
         code.splice(self.indexing_code)
-
-        if self.inside_reduction:
-            sizes = [*dom_size.values()]
-            code.writeline(f"idom = hl.RDom([{', '.join(sizes)}])")
-            code.writeline(f"odom = hl.RDom([{', '.join(sizes[:-1])}])")
-            code.writeline(f"rdom = hl.RDom([{sizes[-1]}])")
-            for name, xyz in zip(dom_size.keys(), "xyz"):
-                code.writeline(f"{name}_idom = idom.{xyz}")
-                if name[0] != "r":
-                    code.writeline(f"{name}_odom = odom.{xyz}")
-        elif self.needs_dom_indexing:
-            code.writeline(f"odom = hl.RDom([{', '.join(dom_size.values())}])")
-            for name, xyz in zip(dom_size.keys(), "xyz"):
-                code.writeline(f"{name}_odom = odom.{xyz}")
-
-        if self.needs_dom_indexing:
-            code.splice(self.indexing_code_dom)
 
         def update_index(m):
             var = self.cse.varname_map[m.group(1)]
@@ -1035,15 +1364,25 @@ class HalideKernel(SIMDKernel):
                 hint = V.graph.sizevars.size_hint(arg.expr, fallback=1)
                 code.writeline(f"{arg.name}.set_estimate({hint})")
             else:
-                if arg.name in self.store_buffer_dimensions and "out" in arg.name:
-                    hints = V.graph.sizevars.size_hints(
-                        self.store_buffer_dimensions[arg.name], fallback=1
-                    )
-                else:
-                    hints = V.graph.sizevars.size_hints(
-                        [V.graph.get_numel(arg.buffer)], fallback=1
-                    )
-                range_hints = [f"hl.Range(0, {hint})" for hint in hints]
+                dims = self.buffer_dimensions[arg.name]
+                range_hints = []
+                for i, dim in enumerate(dims):
+                    hint = V.graph.sizevars.size_hint(dim.size, fallback=1)
+                    range_hints.append(f"hl.Range(0, {hint})")
+                    if "out" not in arg.name:
+                        code.writeline(f"{arg.name}.dim({i}).set_min(0)")
+                        try:
+                            code.writeline(
+                                f"{arg.name}.dim({i}).set_stride({int(dim.stride)})"
+                            )
+                        except TypeError:
+                            pass  # not integer
+                        try:
+                            code.writeline(
+                                f"{arg.name}.dim({i}).set_extent({int(dim.size)})"
+                            )
+                        except TypeError:
+                            pass  # not integer
                 code.writeline(f"{arg.name}.set_estimates([{', '.join(range_hints)}])")
 
         code.do_unindent(2)
@@ -1058,10 +1397,11 @@ class HalideKernel(SIMDKernel):
     def call_kernel(self, name: str, node=None):
         """Codegen a call to this kernel"""
         wrapper = V.graph.wrapper_code
-        call_args = [f"{n}" for n, _ in self.halide_argdefs()]
-        assert V.graph.scheduler.current_device is not None
-        current_device = V.graph.scheduler.current_device
-        assert current_device.type == "cpu", "TODO"
+        call_args = [f"{n}" for n, arg in self.halide_argdefs() if arg.alias_of is None]
+        current_device = V.graph.scheduler.get_current_device_or_throw()
+        if current_device.type == "cuda":
+            stream_name = wrapper.write_get_raw_stream(current_device.index, V.graph)
+            call_args.append(stream_name)
         wrapper.generate_kernel_call(
             name,
             call_args,
@@ -1088,6 +1428,7 @@ class HalideScheduling(SIMDScheduling):
         result = dict.fromkeys(
             [
                 BackendFeature.TUPLE_REDUCTION,
+                BackendFeature.PREFER_STORE_LOOP_ORDER,
             ]
         )
         return result

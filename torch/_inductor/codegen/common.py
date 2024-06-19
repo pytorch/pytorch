@@ -69,13 +69,18 @@ class TensorArg:
     name: str
     buffer: str
     dtype: torch.dtype
-    offset: sympy.Expr = sympy.Integer(0)
+    offset: sympy.Expr = sympy.Integer(0)  # c++ only
+    alias_of: Optional[str] = None  # halide only
 
 
 @dataclasses.dataclass
 class SizeArg:
     name: str
     expr: sympy.Expr
+
+    @property
+    def alias_of(self):
+        return None
 
 
 @dataclasses.dataclass
@@ -146,6 +151,7 @@ class BackendFeature(Enum):
     MASKED_SCATTER_WITH_INDEX = auto()
     SCAN = auto()
     TUPLE_REDUCTION = auto()
+    PREFER_STORE_LOOP_ORDER = auto()
 
 
 def get_backend_features(device: Union[torch.device, str]):
