@@ -1,10 +1,22 @@
-import copy
 import math
 import os
 import re
 import warnings
-from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Tuple, Type, TYPE_CHECKING, Union
+from copy import deepcopy
+from enum import auto, Enum
+from functools import partial, wraps
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Type,
+    TYPE_CHECKING,
+    Union,
+)
 
 from typing_extensions import Self
 
@@ -27,7 +39,8 @@ if TYPE_CHECKING:
     from torch.utils.hooks import RemovableHandle
 
 
-# This value is hard-coded here: https://github.com/pytorch/pytorch/blob/main/c10/cuda/CUDACachingAllocator.cpp#L117
+# This value is hard-coded here:
+# https://github.com/pytorch/pytorch/blob/5fba5d83f0703ff8077ab65448a998e9ad6598fd/c10/cuda/CUDACachingAllocator.cpp#L117
 _PYTORCH_MIN_ALLOCATE = (
     2**9 if int(os.environ.get("PYTORCH_NO_CUDA_MEMORY_CACHING", 0)) == 0 else 1
 )
@@ -133,13 +146,13 @@ class _WeakRefInfo:
         self, size: int, element_size: int, device: torch.device, reftype: _RefType
     ) -> None:
         """
-        Initializes the _WeakRefInfo object with tensor storage properties.
+        Initializes the ``_WeakRefInfo`` object with tensor storage properties.
 
         Args:
-        size (int): The number of elements in the tensor storage.
-        element_size (int): The size of each element in the tensor storage.
-        device (torch.device): The device on which the tensor is allocated.
-        reftype (_RefType): The reference type of the tensor.
+            size (int): The number of elements in the tensor storage.
+            element_size (int): The size of each element in the tensor storage.
+            device (torch.device): The device on which the tensor is allocated.
+            reftype (_RefType): The reference type of the tensor.
         """
         self.size = size
         self.element_size = element_size
@@ -152,22 +165,22 @@ class _WeakRefInfo:
         Calculates the memory consumed by the tensor storage, considering device-specific allocation rules.
 
         Returns:
-        int: The memory consumed in bytes.
+            int: The memory consumed in bytes.
         """
         mem = self.size * self.element_size
         if self.device.type == "cuda":
             return math.ceil((mem) / _PYTORCH_MIN_ALLOCATE) * _PYTORCH_MIN_ALLOCATE
         return mem
 
-    def get_mem_consumed(self, st: torch.UntypedStorage) -> int:
+    def update_mem_consumed(self, st: torch.UntypedStorage) -> int:
         """
         Updates and returns the memory consumed if the storage size has changed.
 
         Args:
-        st (torch.UntypedStorage): The tensor storage to check for size updates.
+            st (torch.UntypedStorage): The tensor storage to check for size updates.
 
         Returns:
-        int: The updated memory consumed in bytes.
+            int: The updated memory consumed in bytes.
         """
         if st.size() != self.size:
             self.size = st.size()
@@ -180,20 +193,27 @@ class _WeakRefInfo:
         Recursively extracts untyped storages from a tensor or its subclasses.
 
         Args:
-        t (torch.Tensor): The tensor to extract storages from.
+            t (torch.Tensor): The tensor to extract storages from.
 
         Returns:
-        Set[torch.UntypedStorage]: A set of untyped storages.
+            Set[torch.UntypedStorage]: A set of untyped storages.
         """
-        unflattend_tensors = [t]
+        unflattened_tensors = [t]
         flattened_tensor_storages = set()
-        while len(unflattend_tensors) > 0:
-            obj = unflattend_tensors.pop()
+        while len(unflattened_tensors) > 0:
+            obj = unflattened_tensors.pop()
             if is_traceable_wrapper_subclass(obj):
                 attrs, _ = obj.__tensor_flatten__()  # type: ignore[attr-defined]
-                unflattend_tensors.extend([getattr(obj, attr) for attr in attrs])
+                unflattened_tensors.extend([getattr(obj, attr) for attr in attrs])
             else:
-                flattened_tensor_storages.add(obj.untyped_storage())
+                if not hasattr(obj, "untyped_storage"):
+                    warnings.warn(
+                        f"Expected a tensor or a traceable wrapper-subclass of tensor, but got {type(obj)}",
+                        category=UserWarning,
+                        stacklevel=2,
+                    )
+                else:
+                    flattened_tensor_storages.add(obj.untyped_storage())
         return flattened_tensor_storages
 
     @classmethod
@@ -202,60 +222,37 @@ class _WeakRefInfo:
         st: torch.UntypedStorage,
         device: torch.device,
         reftype: _RefType,
-        WINFO: WeakIdKeyDictionary,
-    ) -> Self:
+        callback: Optional[Callable[[Self, weakref.ref], Any]] = None,
+    ) -> Tuple[Self, weakref.ref]:
         """
-        Creates a new _WeakRefInfo instance and stores it in a dictionary.
+        Creates a new ``_WeakRefInfo`` instance and a weak reference to a ``torch.UntypedStorage`` object,
+        optionally attaching a callback to the weak reference.
 
         Args:
-        st (torch.UntypedStorage): The storage for which to create the info.
-        device (torch.device): The device of the tensor.
-        reftype (_RefType): The reference type.
-        WINFO (WeakIdKeyDictionary): The dictionary to store the new _WeakRefInfo.
-
+            st (torch.UntypedStorage): The storage object for which to create the weak reference info.
+            device (torch.device): The device associated with the storage object.
+            reftype (_RefType): The type of reference, used to categorize the storage.
+            callback (Optional[Callable[[Self, weakref.ref]]]): A callback function that is called when
+                the storage object is about to be finalized (garbage collected). The callback function
+                should accept two arguments: the ``_WeakRefInfo`` instance and the weak reference to the storage.
         Returns:
-        Self: The newly created _WeakRefInfo instance.
+            Tuple[Self, weakref.ref]: A tuple containing the newly created ``_WeakRefInfo`` instance and the
+            weak reference to the storage object. The weak reference may have an attached callback if provided.
         """
+
         winfo = cls(st.size(), st.element_size(), device, reftype)
-        WINFO[st] = winfo
-        return winfo
-
-    @classmethod
-    def update_and_maybe_create_winfos(
-        cls,
-        t: torch.Tensor,
-        reftype: _RefType,
-        WINFO: WeakIdKeyDictionary,
-        update_existing: bool = False,
-    ) -> Set[Self]:
-        """
-        Updates or creates _WeakRefInfo instances for the tensor's storages.
-
-        Args:
-        t (torch.Tensor): The tensor to process.
-        reftype (_RefType): The reference type to apply.
-        WINFO (WeakIdKeyDictionary): The dictionary of _WeakRefInfo instances.
-        update_existing (bool): If True, raises an error if no existing info is found.
-
-        Returns:
-        Set[Self]: A set of updated or newly created _WeakRefInfo instances.
-        """
-        sts = cls.get_untyped_storages(t)
-        winfos = set()
-        for st in sts:
-            if winfo := WINFO.get(st, None):
-                winfo.reftype = reftype
-                winfos.add(winfo)
-            elif update_existing:
-                raise KeyError("No existing winfo found")
-            else:
-                winfo = cls.create_winfo(st, t.device, reftype, WINFO)
-                winfos.add(winfo)
-        return winfos
+        w_st = weakref.ref(st, partial(callback, winfo) if callback else None)
+        return winfo, w_st
 
 
 def _get_mem_divisor(units: str) -> int:
-    return {"B": 1, "KB": 2**10, "MB": 2**20, "GB": 2**30}.get(units, 1)
+    unit_dict = {"B": 1, "KiB": 2**10, "MiB": 2**20, "GiB": 2**30}
+    if units in unit_dict:
+        return unit_dict[units]
+    else:
+        raise ValueError(
+            f"Unsupported unit: {units}. Supported units are: {', '.join(unit_dict.keys())}"
+        )
 
 
 def _rounding_fn(value: int, divisor: int, precision: int) -> Union[float, int]:
@@ -288,26 +285,22 @@ def _print_snapshot_tabular(
         return
     try:
         from tabulate import tabulate
-
-        divisor = _get_mem_divisor(units)
-        table_data = []
-        key_list = list(next(iter(snapshot.values())).keys())
-        headers = ["Device"] + [f"{key}" for key in key_list]
-
-        for dev, dev_snap in snapshot.items():
-            if _rounding_fn(dev_snap[_TOTAL_KEY], divisor, 2) <= 0:
-                continue
-            row = [str(dev)]
-            row.extend(
-                f"{_rounding_fn(v, divisor, 2)} {units}" for v in dev_snap.values()
-            )
-            table_data.append(row)
-
-        print(tabulate(table_data, headers=headers, tablefmt="rst"))
     except ImportError as err:
         raise ImportError(
             "Please install tabulate to use the tabulate option."
         ) from err
+    divisor = _get_mem_divisor(units)
+    table_data = []
+    key_list = list(next(iter(snapshot.values())).keys())
+    headers = ["Device"] + [f"{key}" for key in key_list]
+
+    for dev, dev_snap in snapshot.items():
+        if _rounding_fn(dev_snap[_TOTAL_KEY], divisor, 2) <= 0:
+            continue
+        row = [str(dev)]
+        row.extend(f"{_rounding_fn(v, divisor, 2)} {units}" for v in dev_snap.values())
+        table_data.append(row)
+    print(tabulate(table_data, headers=headers, tablefmt="rst"))
 
 
 def _print_state_snapshots(
@@ -326,32 +319,44 @@ def _print_state_snapshots_tabular(
 ) -> None:
     try:
         from tabulate import tabulate
-
-        table_data = []
-        last_state_call = None
-        divisor = _get_mem_divisor(units)
-        for state, snapshot_list in snapshots.items():
-            for i, snapshot in enumerate(snapshot_list):
-                state_call = f"{state} # {i + 1}"
-                for dev, dev_snap in snapshot.items():
-                    if _rounding_fn(dev_snap[_TOTAL_KEY], divisor, 2) <= 0:
-                        continue
-                    row = {
-                        "State & Call": (
-                            state_call if state_call != last_state_call else ""
-                        ),
-                        "Device": str(dev),
-                    }
-                    last_state_call = state_call
-                    for k, v in dev_snap.items():
-                        row[f"{k}"] = f"{_rounding_fn(v, divisor, 2)} {units}"
-                    table_data.append(row)
-        print(tabulate(table_data, headers="keys", tablefmt="rst"))
-
     except ImportError as err:
         raise ImportError(
             "Please install tabulate to use the tabulate option."
         ) from err
+
+    table_data = []
+    last_state_call = None
+    divisor = _get_mem_divisor(units)
+    for state, snapshot_list in snapshots.items():
+        for i, snapshot in enumerate(snapshot_list):
+            state_call = f"{state} # {i + 1}"
+            for dev, dev_snap in snapshot.items():
+                if _rounding_fn(dev_snap[_TOTAL_KEY], divisor, 2) <= 0:
+                    continue
+                row = {
+                    "State & Call": (
+                        state_call if state_call != last_state_call else ""
+                    ),
+                    "Device": str(dev),
+                }
+                last_state_call = state_call
+                for k, v in dev_snap.items():
+                    row[f"{k}"] = f"{_rounding_fn(v, divisor, 2)} {units}"
+                table_data.append(row)
+    print(tabulate(table_data, headers="keys", tablefmt="rst"))
+
+
+class _UpdateType(Enum):
+    # These are used for tracking updates to the continuouly maintained memory snapshot.
+    # ADD - When a new tensor storage is tracked
+    # DEL - When a tensor storage is about to be finalized (garbage collected).
+    # REF - When a tensor reference is updated, for instance, the gradients are marked as
+    #       generic backward reference types until the grad_hook categorizes them as gradients.
+    # SIZE - When a tensor's storage is resized.
+    ADD = auto()
+    DEL = auto()
+    REF = auto()
+    SIZE = auto()
 
 
 class MemTracker(TorchDispatchMode):
@@ -391,11 +396,21 @@ class MemTracker(TorchDispatchMode):
                 optimizer.step()
                 optimizer.zero_grad()
             mt.display_snapshot("peak")
-            mt.display_modulewise_snapshots(depth = 3, units = "MB")
+            mt.display_modulewise_snapshots(depth = 3, units = "MiB")
+
+    Known Limitations:
+        - The ``MemTracker`` does not track memory for tensors that bypass the ``TorchDispatchMode`` ex. under ``no_dispatch``.
+        - Resizing tensor storages directly by using non-Tensor methods other than using ``torch.Untyped_Storage.resize_``
+          is not tracked. File a Github issue if you have use-cases for this.
+        - If the tensors are not traceable or wrappable subclasses of ``torch.Tensor``, then the tracker does not know how to
+            track their storages. File a Github issue if you have use-cases for this.
+        - During AC in the backward pass there might be misattribution between activation and temp memory, but the peak memory
+          will be tracked accurately. This will be fixed in the next update by hooking intricately with ``torch.uitls.checkpoint``.
     """
 
     def __init__(self) -> None:
         self.memory_tracking = WeakIdKeyDictionary()
+        self._curr_mem_snap: Dict[torch.device, Dict[str, int]] = {}
         self._peak_mem: Dict[torch.device, int] = {}
         self._peak_mem_snap: Dict[torch.device, Dict[str, int]] = {}
         self._param_to_grad_hook_handles = WeakIdKeyDictionary()
@@ -406,16 +421,117 @@ class MemTracker(TorchDispatchMode):
         self._WINFO = WeakIdKeyDictionary()
         self._mod_tracker = ModTracker()
         # This is a general memory tracker which can be used with any ``_RefType`` subclass
-        # We specify the default reference types for forward, backward and optimizer states
         self._ref_class: Type[_RefType] = _MemRefType
-        self._def_fw_ref: _RefType = _MemRefType.ACT
-        self._def_bw_ref: _RefType = _MemRefType.TEMP
-        self._def_opt_ref: _RefType = _MemRefType.OPT
         # Flags to track if we are in the AC region or optimizer step region
         self._in_opt: bool = False
         self._in_ac: bool = False
         # Weak references to the topmost AC module currently active
         self._ac_mod: Optional[weakref.ref] = None
+        self._orig_resize = torch.UntypedStorage.resize_
+
+    def _update_snap(
+        self,
+        u_type: _UpdateType,
+        winfo: _WeakRefInfo,
+        old_mem_consumed: Optional[int] = None,
+        old_reftype: Optional[_RefType] = None,
+    ) -> None:
+        # Initialize a flag to track if the total memory might drop to zero after updates.
+        maybe_zero = False
+        # Ensure the device entry exists in the current memory snapshot, initializing if necessary.
+        dev_snap = self._curr_mem_snap.setdefault(
+            winfo.device, {reftype: 0 for reftype in self._ref_class}
+        )
+        dev_snap.setdefault(_TOTAL_KEY, 0)
+        # Handle different types of updates based on the update type (`u_type`).
+        if u_type == _UpdateType.ADD:
+            # Increase the memory consumed for the specific reference type and update the total.
+            dev_snap[winfo.reftype] += winfo.mem_consumed
+            dev_snap[_TOTAL_KEY] += winfo.mem_consumed
+        elif u_type == _UpdateType.DEL:
+            # Decrease the memory consumed for the specific reference type and reduce the total.
+            dev_snap[winfo.reftype] -= winfo.mem_consumed
+            dev_snap[_TOTAL_KEY] -= winfo.mem_consumed
+            maybe_zero = True
+        elif u_type == _UpdateType.REF:
+            assert old_reftype is not None
+            # Adjust memory consumption between two reference types within the same device.
+            dev_snap[old_reftype] -= winfo.mem_consumed
+            dev_snap[winfo.reftype] += winfo.mem_consumed
+        elif u_type == _UpdateType.SIZE:
+            assert old_mem_consumed is not None
+            # Adjust the memory consumed for a reference type due to a change in size.
+            change = winfo.mem_consumed - old_mem_consumed
+            dev_snap[winfo.reftype] += change
+            dev_snap[_TOTAL_KEY] += change
+            maybe_zero = True
+        else:
+            raise ValueError(f"Invalid update type: {u_type}")
+        # Check if the total memory for the device has dropped to zero.
+        if maybe_zero:
+            if self._curr_mem_snap[winfo.device][_TOTAL_KEY] == 0:
+                # Remove the device entry from the memory snapshot if the total memory is zero.
+                del self._curr_mem_snap[winfo.device]
+
+    def _update_and_maybe_create_winfos(
+        self,
+        t: torch.Tensor,
+        reftype: _RefType,
+        update_existing: bool = False,
+    ) -> Set[_WeakRefInfo]:
+        sts = _WeakRefInfo.get_untyped_storages(t)
+        winfos = set()
+        for st in sts:
+            # Attempt to retrieve existing ``_WeakRefInfo`` and its weak reference from the tracking dictionary.
+            winfo, _ = self._WINFO.get(st, (None, None))
+            if winfo is not None:
+                # If ``_WeakRefInfo`` exists, check if the reference type needs to be updated.
+                old_reftype = winfo.reftype
+                if old_reftype != reftype:
+                    # Update the reference type and apply changes via ``_update_snap``.
+                    winfo.reftype = reftype
+                    self._update_snap(_UpdateType.REF, winfo, old_reftype=old_reftype)
+                winfos.add(winfo)
+            elif update_existing:
+                # If no existing ``_WeakRefInfo`` is found and update_existing is True, raise an error.
+                raise KeyError("No existing winfo found")
+            else:
+                # If no existing _WeakRefInfo is found and update_existing is False, create a new ``_WeakRefInfo``.
+                winfo, w_st = _WeakRefInfo.create_winfo(
+                    st, t.device, reftype, self._delete_callback
+                )
+                # Store the new ``_WeakRefInfo`` and its weak reference in the tracking dictionary.
+                self._WINFO[st] = (winfo, w_st)
+                # Update the snapshot for the newly added ``_WeakRefInfo``.
+                if winfo.mem_consumed > 0:
+                    self._update_snap(_UpdateType.ADD, winfo)
+                winfos.add(winfo)
+        return winfos
+
+    def _delete_callback(self, winfo: _WeakRefInfo, w_st: weakref.ref) -> None:
+        # Callback to be called when the storage object corresponding to the  ``_WeakRefInfo``
+        # instance is about to be finalized.
+        if winfo.mem_consumed > 0:
+            self._update_snap(_UpdateType.DEL, winfo)
+
+    def _track_resize(self) -> None:
+        # Need to monkey-patch this because ``torch.UntypedStorage.resize_`` is not captured
+        # by ``TorchDispatchMode``.
+        @wraps(self._orig_resize)
+        def resize_(st: torch.UntypedStorage, size: int) -> None:
+            self._orig_resize(st, size)
+            winfo, _ = self._WINFO.get(st, (None, None))
+            if winfo is not None and winfo.size != st.size():
+                old_mem_consumed = winfo.mem_consumed
+                winfo.update_mem_consumed(st)
+                self._update_snap(
+                    _UpdateType.SIZE, winfo, old_mem_consumed=old_mem_consumed
+                )
+
+        torch.UntypedStorage.resize_ = resize_  # type: ignore[method-assign, assignment]
+
+    def _restore_resize(self) -> None:
+        torch.UntypedStorage.resize_ = self._orig_resize  # type: ignore[method-assign]
 
     def _update_peak_stats(self, peak_state: _State) -> None:
         # We first capture the current memory snapshot of the current tracker state then,
@@ -423,41 +539,51 @@ class MemTracker(TorchDispatchMode):
         #  and check if it is currently active by querying ``_mod_tracker.parents``
         # If it is active, we update the per device peak memory usage for the module
         #  corresponding to the ``_State`` which can be ``PEAK_FW`` or ``PEAK_BW``.
-        curr_snap = self.get_tracker_snapshot()
+        curr_snap = self._curr_mem_snap
 
         for mod_stats in self.memory_tracking.values():
             if mod_stats.mod_fqn in self._mod_tracker.parents:
-                for dev, dev_snap in curr_snap.items():
-                    if mod_stats.local_peak.get(dev, 0) < dev_snap[_TOTAL_KEY]:
-                        mod_stats.local_peak[dev] = dev_snap[_TOTAL_KEY]
-                        if mod_stats.snapshots.get(peak_state, None) is None:
-                            mod_stats.snapshots.setdefault(peak_state, []).append(
-                                copy.deepcopy(dev_snap)
+                if peak_state not in mod_stats.snapshots:
+                    mod_stats.local_peak = {
+                        dev: dev_snap[_TOTAL_KEY] for dev, dev_snap in curr_snap.items()
+                    }
+                    mod_stats.snapshots[peak_state] = [deepcopy(curr_snap)]
+                else:
+                    for dev, dev_snap in curr_snap.items():
+                        if mod_stats.local_peak.get(dev, 0) < dev_snap[_TOTAL_KEY]:
+                            mod_stats.local_peak[dev] = dev_snap[_TOTAL_KEY]
+                            mod_stats.snapshots[peak_state][-1][dev] = deepcopy(
+                                dev_snap
                             )
-                        else:
-                            mod_stats.snapshots[peak_state][-1][dev] = dev_snap
 
         for dev, dev_snap in curr_snap.items():
             if self._peak_mem.get(dev, 0) < dev_snap[_TOTAL_KEY]:
                 self._peak_mem[dev] = dev_snap[_TOTAL_KEY]
-                self._peak_mem_snap[dev] = dev_snap
+                self._peak_mem_snap[dev] = deepcopy(dev_snap)
 
-    def _track(self, t: torch.Tensor) -> None:
+    def _track(self, reftype: _RefType, t: torch.Tensor) -> None:
         # Get the storages of the tensor and check if we have already tracked them.
-        # If not, create a new _WeakRefInfo instance and add it to the dictionary.
-        # If we are tracking an optimizer state, we use the default optimizer reference type.
-        # If we are in backward region and not in AC region, we use the default backward reference type.
-        # Else we use the default forward reference type.
+        # If yes, then check if the storage size has changed and update the current snapshot.
+        # Else create a new ``_WeakRefInfo`` instance and add it to the dictionary.
         sts = _WeakRefInfo.get_untyped_storages(t)
         for st in sts:
-            if self._WINFO.get(st, None):
+            winfo, _ = self._WINFO.get(st, (None, None))
+            if winfo is not None:
+                if winfo.size != st.size():
+                    old_mem_consumed = winfo.mem_consumed
+                    winfo.update_mem_consumed(st)
+                    self._update_snap(
+                        _UpdateType.SIZE, winfo, old_mem_consumed=old_mem_consumed
+                    )
                 return
-            elif self._in_opt:
-                _WeakRefInfo.create_winfo(st, t.device, self._def_opt_ref, self._WINFO)
-            elif self._mod_tracker.is_bw and not self._in_ac:
-                _WeakRefInfo.create_winfo(st, t.device, self._def_bw_ref, self._WINFO)
             else:
-                _WeakRefInfo.create_winfo(st, t.device, self._def_fw_ref, self._WINFO)
+                winfo, w_st = _WeakRefInfo.create_winfo(
+                    st, t.device, reftype, self._delete_callback
+                )
+                self._WINFO[st] = (winfo, w_st)
+                # Update the current snapshot for the newly added ``_WeakRefInfo``.
+                if winfo.mem_consumed > 0:
+                    self._update_snap(_UpdateType.ADD, winfo)
 
     def get_tracker_snapshot(
         self, type: str = "current"
@@ -477,19 +603,9 @@ class MemTracker(TorchDispatchMode):
             ValueError: If an invalid type is specified.
         """
         if type == "current":
-            snap: Dict[torch.device, Dict[str, int]] = {}
-            for st, winfo in self._WINFO.items():
-                dev_snap = snap.setdefault(
-                    winfo.device, {reftype: 0 for reftype in self._ref_class}
-                )
-                dev_snap[winfo.reftype] += winfo.get_mem_consumed(st)
-
-            for dev_snap in snap.values():
-                dev_snap[_TOTAL_KEY] = sum(dev_snap.values())
-
-            return snap
+            return deepcopy(self._curr_mem_snap)
         elif type == "peak":
-            return self._peak_mem_snap
+            return deepcopy(self._peak_mem_snap)
         else:
             raise ValueError(f"Invalid type {type}")
 
@@ -503,21 +619,22 @@ class MemTracker(TorchDispatchMode):
         # Return the total memory consumed by the parameters and buffers.
         def _grad_hook(param: nn.Parameter) -> None:
             if param.grad is not None:
-                _WeakRefInfo.update_and_maybe_create_winfos(
+                self._update_and_maybe_create_winfos(
                     param.grad,
                     _MemRefType.GRAD,
-                    self._WINFO,
                 )
 
         param_memory = 0
         for param in module.parameters():
-            winfos = _WeakRefInfo.update_and_maybe_create_winfos(
-                param, _MemRefType.PARAM, self._WINFO
+            winfos = self._update_and_maybe_create_winfos(
+                param,
+                _MemRefType.PARAM,
             )
             param_memory += sum(winfo.mem_consumed for winfo in winfos)
             if param.grad is not None:
-                _WeakRefInfo.update_and_maybe_create_winfos(
-                    param.grad, _MemRefType.GRAD, self._WINFO
+                self._update_and_maybe_create_winfos(
+                    param.grad,
+                    _MemRefType.GRAD,
                 )
             if (
                 self._param_to_grad_hook_handles.get(param, None) is None
@@ -527,8 +644,9 @@ class MemTracker(TorchDispatchMode):
                 self._param_to_grad_hook_handles[param] = grad_hook_handle
         buffer_memory = 0
         for buffer in module.buffers():
-            winfos = _WeakRefInfo.update_and_maybe_create_winfos(
-                buffer, _MemRefType.BUFFER, self._WINFO
+            winfos = self._update_and_maybe_create_winfos(
+                buffer,
+                _MemRefType.BUFFER,
             )
             buffer_memory += sum(winfo.mem_consumed for winfo in winfos)
         return (param_memory, buffer_memory)
@@ -541,7 +659,8 @@ class MemTracker(TorchDispatchMode):
             nonlocal input_or_output_memory
             sts = _WeakRefInfo.get_untyped_storages(t)
             for st in sts:
-                if winfo := self._WINFO.get(st, None):
+                winfo, _ = self._WINFO.get(st, (None, None))
+                if winfo is not None:
                     input_or_output_memory += winfo.mem_consumed
 
         tree_map_only(torch.Tensor, add_inps_or_outs, args)
@@ -600,7 +719,7 @@ class MemTracker(TorchDispatchMode):
                 dev: dev_snap[_TOTAL_KEY] for dev, dev_snap in mem_snapshot.items()
             }
             mod_stats.snapshots.setdefault(_ModState.PEAK_FW, []).append(mem_snapshot)
-        mod_stats.snapshots.setdefault(state, []).append(copy.deepcopy(mem_snapshot))
+        mod_stats.snapshots.setdefault(state, []).append(deepcopy(mem_snapshot))
 
     def _post_fw_hook(self, module: nn.Module, inputs: Any, outputs: Any) -> None:
         # This is installed as a post-fwd user hook with ``ModTracker``. Based on the following cases we
@@ -628,7 +747,7 @@ class MemTracker(TorchDispatchMode):
         # This can happen since this installed inside a multi-grad hook on the module's output tensors
         # and the module itself may not be alive during backward.
         if module is None:
-            warnings.warn("Module is None. Skipping PRE_BW hook.")
+            warnings.warn("Module is None. Skipping PRE_BW hook.", stacklevel=2)
             return
         mod_stats = self.memory_tracking[module]
         mem_snapshot = self.get_tracker_snapshot()
@@ -637,7 +756,7 @@ class MemTracker(TorchDispatchMode):
         }
         mod_stats.snapshots.setdefault(_ModState.PEAK_BW, []).append(mem_snapshot)
         mod_stats.snapshots.setdefault(_ModState.PRE_BW, []).append(
-            copy.deepcopy(mem_snapshot)
+            deepcopy(mem_snapshot)
         )
 
     def _post_bw_hook(self, module: nn.Module, args: Any) -> None:
@@ -646,19 +765,22 @@ class MemTracker(TorchDispatchMode):
         # This can happen since this installed inside a multi-grad hook on the module's input tensors
         # and the module itself may not be alive during backward.
         if module is None:
-            warnings.warn("Module is None. Skipping POST_BW hook.")
+            warnings.warn("Module is None. Skipping POST_BW hook.", stacklevel=2)
             return
         mod_stats = self.memory_tracking[module]
         mod_stats.snapshots.setdefault(_ModState.POST_BW, []).append(
             self.get_tracker_snapshot()
         )
 
-    def _track_optimizer_states(self, optimizer: optim.Optimizer) -> None:
+    def _track_optimizer_states(
+        self, reftype: _RefType, optimizer: optim.Optimizer
+    ) -> None:
         for states in optimizer.state.values():
             for val in states.values():
                 if isinstance(val, torch.Tensor):
-                    _WeakRefInfo.update_and_maybe_create_winfos(
-                        val, self._def_opt_ref, self._WINFO
+                    self._update_and_maybe_create_winfos(
+                        val,
+                        reftype,
                     )
 
     def _register_global_optimizer_hook(self) -> None:
@@ -673,7 +795,7 @@ class MemTracker(TorchDispatchMode):
         def _opt_step_post_hook(
             optimizer: optim.Optimizer, args: Any, kwargs: Any
         ) -> None:
-            self._track_optimizer_states(optimizer)
+            self._track_optimizer_states(_MemRefType.OPT, optimizer)
             self._in_opt = False
 
         self._optimizer_hook_handles = (
@@ -709,13 +831,14 @@ class MemTracker(TorchDispatchMode):
         flat_external, _ = tree_flatten(external)
         for obj in flat_external:
             if isinstance(obj, torch.Tensor):
-                _WeakRefInfo.update_and_maybe_create_winfos(
-                    obj, _MemRefType.OTH, self._WINFO
+                self._update_and_maybe_create_winfos(
+                    obj,
+                    _MemRefType.OTH,
                 )
             elif isinstance(obj, torch.nn.Module):
                 self._track_module_params_and_buffers(obj, install_grad_hooks=False)
             elif isinstance(obj, optim.Optimizer):
-                self._track_optimizer_states(obj)
+                self._track_optimizer_states(_MemRefType.OPT, obj)
             else:
                 raise TypeError(
                     f"Object of type {type(obj)} is not supported for tracking. "
@@ -731,7 +854,7 @@ class MemTracker(TorchDispatchMode):
         Keyword args:
             type (str): The type of snapshot to display. Can be "current" for the current memory usage or "peak" for the
                         peak memory usage. Defaults to "current".
-            units (str): The units to use for displaying memory usage. Defaults to "B". Supports ["B", "KB", "MB", "GB"].
+            units (str): The units to use for displaying memory usage. Defaults to "B". Supports ["B", "KiB", "MiB", "GiB"].
             tabulate (bool): Whether to display the snapshot in a tabular format. Defaults to False.
         """
         snapshot = self.get_tracker_snapshot(type)
@@ -751,7 +874,7 @@ class MemTracker(TorchDispatchMode):
 
         Keyword Args:
             depth (int, optional): The depth of the module hierarchy to display. Defaults to 2.
-            units (str, optional): The units to use for memory tracking. Defaults to "B". Supports ["B", "KB", "MB", "GB"].
+            units (str, optional): The units to use for memory tracking. Defaults to "B". Supports ["B", "KiB", "MiB", "GiB"].
             tabulate (bool, optional): Whether to display the snapshot in a tabular format. Defaults to False.
         """
 
@@ -789,6 +912,7 @@ class MemTracker(TorchDispatchMode):
             self._pre_bw_hook,
             self._post_bw_hook,
         )
+        self._track_resize()
         self._peak_mem_snap = self.get_tracker_snapshot()
         self._peak_mem = {
             dev: dev_snap[_TOTAL_KEY] for dev, dev_snap in self._peak_mem_snap.items()
@@ -800,12 +924,22 @@ class MemTracker(TorchDispatchMode):
     def __exit__(self, *args: Any) -> None:
         self._deregister_param_and_optimizer_hooks()
         self._mod_tracker.clear_user_hooks()
+        self._restore_resize()
         super().__exit__(*args)
         self._mod_tracker.__exit__(*args)
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):  # type: ignore[no-untyped-def]
         res = func(*args, **kwargs or {})
-        tree_map_only(torch.Tensor, self._track, res)
+        # If we are tracking an optimizer state, we use the optimizer reference type.
+        # If we are in backward region and not in AC region, we use the backward reference type.
+        # Else we use the forward reference type.
+        if self._in_opt:
+            reftype = _MemRefType.OPT
+        elif self._mod_tracker.is_bw and not self._in_ac:
+            reftype = _MemRefType.TEMP
+        else:
+            reftype = _MemRefType.ACT
+        tree_map_only(torch.Tensor, partial(self._track, reftype), res)
         peak_state = _ModState.PEAK_BW if self._mod_tracker.is_bw else _ModState.PEAK_FW
         self._update_peak_stats(peak_state)
         return res
