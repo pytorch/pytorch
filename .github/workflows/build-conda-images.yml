@@ -38,4 +38,4 @@ jobs:
     steps:
       - name: Build Docker Image
         run: |
-          ./ci/docker/build_docker_conda.sh
+          .ci/docker/build_docker_conda.sh
