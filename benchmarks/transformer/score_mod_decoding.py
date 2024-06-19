@@ -21,11 +21,47 @@ torch._dynamo.config.cache_size_limit = 1000
 from triton.testing import do_bench
 
 
-def benchmark_torch_function_in_microseconds(func: Callable, *args, **kwargs) -> float:
+
+
+
+def benchmark_torch_function_in_microseconds(func: Callable, cuda_graph: bool = True, *args, **kwargs) -> float:
+    def run_func():
+        func(*args, **kwargs)
+
+    if cuda_graph:
+        func(*args, **kwargs)
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            run_func()
+        def run_func():
+            g.replay()
+
     # warmup
     for _ in range(5):
-        func(*args, **kwargs)
-    return do_bench(lambda: func(*args, **kwargs)) * 1e3
+        run_func()
+    return do_bench(lambda: run_func()) * 1e3
+
+import csv
+def read_benchmark_results_from_csv(filename: str):
+    results = {}
+    with open(filename, 'r') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            shape = tuple(map(int, eval(row['shape'])))
+            dtype = eval(row['dtype'])
+            key = (*shape, dtype)
+            value = float(row['fwd_compiled_time'])
+            results[key] = value
+    return results
+
+
+def write_results_to_csv(results, filename: str):
+    with open(filename, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['shape', 'score_mod', 'dtype', 'baseline_time', 'fwd_eager_time', 'fwd_compiled_time', 'fwd_speedup', 'fwd_bw (TB/s)', 'GFlops/s'])
+        for shape, score_mod, dtype, baseline_time, fwd_eager_time, fwd_compiled_time, fwd_speedup, fwd_bw, gflops in zip(results['shape'], results['score_mod'], results['dtype'], results['baseline_time'], results['fwd_eager_time'], results['fwd_compiled_time'], results['fwd_speedup'], results['fwd_bw (TB/s)'], results['GFlops/s']):
+            writer.writerow([str(shape), score_mod, str(dtype), str(baseline_time), str(fwd_eager_time), str(fwd_compiled_time), str(fwd_speedup), str(fwd_bw), str(gflops)])
+    print("Results are written to score_mod_decoding_results.csv")
 
 
 @dataclass(frozen=True)
@@ -34,6 +70,7 @@ class ExperimentConfig:
     score_mod: Callable
     dtype: torch.dtype
     calculate_bwd_time: bool
+    bench_xformers: bool
     baseline_time: Optional[float]
 
     def __post_init__(self):
@@ -44,13 +81,18 @@ class ExperimentConfig:
         d = asdict(self)
         # Remove the 'calculate_bwd_time' key
         d.pop("calculate_bwd_time", None)
+        d.pop("bench_xformers", None)
+        if not self.baseline_time: 
+            d.pop("baseline_time")
+        d['shape(B,Hkv,Hq//Hkv,M,D,N)'] = d.pop('shape')
         return d
 
 
 @dataclass(frozen=True)
 class Times:
-    eager_time: float
-    compiled_time: float
+    baseline_time: float
+    optimized_time: float
+    xformers_time: Optional[float]
 
 
 @dataclass(frozen=True)
@@ -88,6 +130,7 @@ def generate_inputs(
     return query, key, value
 
 
+
 def run_single_experiment(config: ExperimentConfig, dynamic=False) -> ExperimentResults:
     device = torch.device("cuda")
     batch_size, num_heads, q_seq_len, head_dim, kv_seq_len = config.shape
@@ -105,50 +148,91 @@ def run_single_experiment(config: ExperimentConfig, dynamic=False) -> Experiment
     def eager_sdpa(query, key, value, _):
         return F.scaled_dot_product_attention(query, key, value)
 
-    compiled_sdpa = torch.compile(_flex_attention, dynamic=dynamic)
 
     score_mod = config.score_mod
 
     forward_eager_time = benchmark_torch_function_in_microseconds(
-        eager_sdpa, query, key, value, score_mod
-    )
-    forward_compiled_time = benchmark_torch_function_in_microseconds(
-        compiled_sdpa, query, key, value, score_mod
+        eager_sdpa, False, query, key, value, score_mod
     )
 
-    if config.calculate_bwd_time:
-        out_eager = eager_sdpa(query, key, value, score_mod)
-        dOut = torch.randn_like(out_eager)
-        backward_eager_time = benchmark_torch_function_in_microseconds(
-            out_eager.backward, dOut, retain_graph=True
-        )
+    compiled_flex_attention = torch.compile(_flex_attention, dynamic=dynamic)
+    forward_flex_decoding_time = benchmark_torch_function_in_microseconds(
+        compiled_flex_attention, False, query, key, value, score_mod
+    )
 
-        out_compile = compiled_sdpa(query, key, value, score_mod)
-        dOut = torch.randn_like(out_eager)
-        backward_compile_time = benchmark_torch_function_in_microseconds(
-            out_compile.backward, dOut, retain_graph=True
+
+    if config.bench_xformers and config.dtype in {torch.bfloat16, torch.float16}:
+        import xformers.ops as xops
+        from xformers.attn_bias_utils import create_attn_bias
+        def gen_xformers_input(Config: ExperimentConfig) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+            B, H, M, K, N = Config.shape
+            Hkv = H
+            Hq = Hkv * M
+            Mq = 1
+            Mkv = N
+
+            dtype = Config.dtype
+
+            q = torch.randn(
+                [B, Mq, Hkv, Hq // Hkv, K], device="cuda", dtype=dtype, requires_grad=False
+            )
+            k = torch.randn(
+                [B, Mkv, Hkv, 1, K], device="cuda", dtype=dtype, requires_grad=False
+            ).expand(-1, -1, -1, Hq // Hkv, -1)
+            v = torch.randn(
+                [B, Mkv, Hkv, 1, K], device="cuda", dtype=dtype, requires_grad=False
+            ).expand(-1, -1, -1, Hq // Hkv, -1)
+
+
+            if Hq == Hkv:
+                q = q[:, :, :, 0]
+                k = k[:, :, :, 0]
+                v = v[:, :, :, 0]
+            if Hkv == 1:
+                q = q[:, :, 0]
+                k = k[:, :, 0]
+                v = v[:, :, 0]
+            
+            return q, k, v
+ 
+
+        def xformers_sdpa(query, key, value, _):
+            return xops.memory_efficient_attention_forward(query, key, value, op=xops.fmha.triton_splitk.FwOp, attn_bias=None, scale=1)
+        
+        xformers_q, xformers_k, xformers_v = gen_xformers_input(config)
+        forward_xformers_time = benchmark_torch_function_in_microseconds(
+            xformers_sdpa,  True, xformers_q, xformers_k, xformers_v, score_mod
         )
 
         return ExperimentResults(
-            fwd_times=Times(forward_eager_time, forward_compiled_time),
-            bwd_times=Times(backward_eager_time, backward_compile_time),
+        fwd_times=Times(forward_eager_time, forward_flex_decoding_time, forward_xformers_time),
+        bwd_times=None,
         )
-    else:
-        return ExperimentResults(
-            fwd_times=Times(forward_eager_time, forward_compiled_time),
-            bwd_times=None,
-        )
+
+
+    return ExperimentResults(
+        fwd_times=Times(forward_eager_time, forward_flex_decoding_time, float('nan')),
+        bwd_times=None,
+    )
 
 
 def calculate_speedup(config: ExperimentConfig, results: ExperimentResults, type: str) -> float:
     if type == "fwd":
         if config.baseline_time is None:
-            return results.fwd_times.eager_time / results.fwd_times.compiled_time
+            return results.fwd_times.baseline_time / results.fwd_times.optimized_time
         else:
-            return config.baseline_time / results.fwd_times.compiled_time
+            return config.baseline_time / results.fwd_times.optimized_time
     elif type == "bwd":
         assert results.bwd_times is not None
-        return results.bwd_times.eager_time / results.bwd_times.compiled_time
+        return results.bwd_times.baseline_time / results.bwd_times.optimized_time
+    else:
+        raise ValueError(f"Invalid type {type}")
+
+
+
+def calculate_speedup_wrt_xformers(results: ExperimentResults, type: str) -> float:
+    if type == "fwd":
+        return results.fwd_times.xformers_time / results.fwd_times.optimized_time
     else:
         raise ValueError(f"Invalid type {type}")
 
@@ -158,7 +242,7 @@ def calculate_bandwidth(config: ExperimentConfig, results: ExperimentResults, ty
         kv_size =config.shape[0] * config.shape[1] * config.shape[4] * config.shape[3] * torch.finfo(config.dtype).bits / 8 * 2
         output_size = config.shape[0] * config.shape[1] * config.shape[2] * config.shape[3] * torch.finfo(config.dtype).bits / 8
         total_size = (query_size + kv_size + output_size) / 1024 / 1024 / 1024 # In GB 
-        time_in_seconds = results.fwd_times.compiled_time / 1e6
+        time_in_seconds = results.fwd_times.optimized_time / 1e6
         return total_size / time_in_seconds / 1024
     else:
         raise ValueError(f"Invalid type {type}")
@@ -174,18 +258,15 @@ def calculate_gflops(config: ExperimentConfig, results: ExperimentResults) -> fl
     o_flops = M * D * N * 2
     # Not counting split k overhead
     total_flops = B * H * (qk_flops + softmax_flops + o_flops)
-    return total_flops/ results.fwd_times.compiled_time / 1e3 # in GFLOPs/s
+    return total_flops/ results.fwd_times.optimized_time / 1e3 # in GFLOPs/s
 
 
 def get_func_name(func):
     return func.__name__.split("<locals>.")[-1].split(" at ")[0]
 
 
-def get_average_speedups(results: List[Experiment], type: str):
-    # Calculate speedups
-    speedups = [calculate_speedup(r.config, r.results, type) for r in results]
-    bw = [calculate_bandwidth(r.config, r.results, type) for r in results]
-    gflops = [calculate_gflops(r.config, r.results) for r in results]
+def get_average_speedups(results: List[Experiment], speedups:List[float], bw:List[float], gflops: List[float], type: str):
+
 
     # Find indices of max and min speedups
     max_speedup_index = np.nanargmax(speedups)
@@ -223,11 +304,13 @@ def print_results(results: List[Experiment]):
         for key, value in experiment.asdict().items():
             if key == "fwd_times":
                 for name, time in value.items():
-                    table_data[f"fwd_{name}"].append(float(time))
+                    if time: 
+                        table_data[f"fwd_{name}"].append(float(time))
             elif key == "bwd_times":
                 if experiment.config.calculate_bwd_time:
                     for name, time in value.items():
-                        table_data[f"bwd_{name}"].append(float(time))
+                        if time: 
+                            table_data[f"bwd_{name}"].append(float(time))
             else:
                 table_data[key].append(value)
 
@@ -238,6 +321,11 @@ def print_results(results: List[Experiment]):
         bwd_speedups = [calculate_speedup(r.config, r.results, type="bwd") for r in results]
         table_data["bwd_speedup"] = bwd_speedups
     
+    if results[0].config.bench_xformers:
+        xformers_speedup = [calculate_speedup_wrt_xformers(r.results, type="fwd" )for r in results]
+        table_data["speedup_wrt_xformers"] = xformers_speedup
+        
+    
     # calculate theoretical bandwidth
     fwd_bandwidth = [calculate_bandwidth(r.config, r.results, type="fwd") for r in results]
     table_data["fwd_bw (TB/s)"] = fwd_bandwidth
@@ -247,28 +335,26 @@ def print_results(results: List[Experiment]):
     table_data["score_mod"] = [get_func_name(func) for func in table_data["score_mod"]]
     print(tabulate(table_data, headers="keys", tablefmt="github", floatfmt=".3f"))
 
-    import csv
-    with open("score_mod_decoding_results.csv", mode="w", newline="") as f:
-        writer = csv.writer(f)
-        for key, value in table_data.items(): 
-            if isinstance(value[0], float):
-                writer.writerow([key] + [float("nan") if np.isnan(v) else v for v in value])
-            else:
-                writer.writerow([key] + value)
-    
-    print("Results are written to score_mod_decoding_results.csv")
+    write_results_to_csv(table_data, "score_mod_decoding_results.csv")
 
     print("\n")
     print("FWD Speedups".center(125, "="))
     print("\n")
-    average_data = get_average_speedups(results, type="fwd")
+    average_data = get_average_speedups(results, fwd_speedups, fwd_bandwidth, fwd_gflops, type="fwd")
     print(tabulate(average_data, headers="keys", tablefmt="github", floatfmt=".3f"))
+
+    if results[0].config.bench_xformers:
+        print("\n")
+        print("Speedups w.r.t Xformers SplitK Kernel".center(125, "="))
+        print("\n")
+        average_data = get_average_speedups(results, xformers_speedup, fwd_bandwidth, fwd_gflops, type="fwd")
+        print(tabulate(average_data, headers="keys", tablefmt="github", floatfmt=".3f"))
 
     if results[0].config.calculate_bwd_time:
         print("\n")
         print("BWD Speedups".center(125, "="))
         print("\n")
-        average_data = get_average_speedups(results, type="bwd")
+        average_data = get_average_speedups(results, bwd_speedups, bwd_bandwidth, bwd_gflops, type="bwd")
         print(tabulate(average_data, headers="keys", tablefmt="github", floatfmt=".3f"))
 
 
@@ -289,7 +375,7 @@ def generate_score_mods() -> List[Callable]:
     return [noop]
 
 
-def generate_experiment_configs(calculate_bwd: bool, baseline_performance) -> List[ExperimentConfig]:
+def generate_experiment_configs(calculate_bwd: bool, bench_xformers: bool, baseline_performance) -> List[ExperimentConfig]:
     kv_cache_sizes = [
         (128, 512), 
         (64, 1024), 
@@ -335,11 +421,12 @@ def generate_experiment_configs(calculate_bwd: bool, baseline_performance) -> Li
                     score_mod=score_mod,
                     dtype=dtype,
                     calculate_bwd_time=calculate_bwd,
+                    bench_xformers=bench_xformers,
                     baseline_time=None,
                 )
             )
         else: 
-            baseline_time = baseline_performance[(bsz, kv_seq_len, Hq, Hkv, head_dim, dtype)] # (B, Mkv, Hq, Hkv, K, dtype)
+            baseline_time = baseline_performance[(bsz, n_heads, q_seq_len, head_dim, kv_seq_len, dtype)] 
             if not baseline_time: 
                 baseline_time = float('nan')
             all_configs.append(
@@ -348,6 +435,7 @@ def generate_experiment_configs(calculate_bwd: bool, baseline_performance) -> Li
                     score_mod=score_mod,
                     dtype=dtype,
                     calculate_bwd_time=calculate_bwd,
+                    bench_xformers=bench_xformers,
                     baseline_time=baseline_time,
                 )
             )
@@ -356,13 +444,16 @@ def generate_experiment_configs(calculate_bwd: bool, baseline_performance) -> Li
 
 
 
-def main(dynamic: bool, calculate_bwd: bool):
+def main(dynamic: bool, calculate_bwd: bool, bench_xformers, baseline: str):
     seed = 123
     np.random.seed(seed)
     torch.manual_seed(seed)
-    baseline_performance = None
+    if baseline: 
+        baseline_performance = read_benchmark_results_from_csv(baseline)
+    else: 
+        baseline_performance = None
     results = []
-    for config in tqdm(generate_experiment_configs(calculate_bwd, baseline_performance)):
+    for config in tqdm(generate_experiment_configs(calculate_bwd, bench_xformers, baseline_performance)):
         results.append(
             Experiment(config, run_single_experiment(config, dynamic=dynamic))
         )
@@ -387,7 +478,14 @@ if __name__ == "__main__":
         "--calculate-bwd", action="store_true", help="Calculate backward pass times"
     )
 
+    parser.add_argument(
+        "--baseline", type=str, help="Baseline imported from csv"
+    )
+    parser.add_argument(
+        "--xformers", action="store_true", help="Benchmark against xformers splitK kernel"
+    )
+
     # Parse arguments
     args = parser.parse_args()
 
-    main(args.dynamic, args.calculate_bwd)
+    main(args.dynamic, args.calculate_bwd, args.xformers, args.baseline)
