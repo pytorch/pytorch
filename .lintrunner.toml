@@ -517,7 +517,7 @@ command = [
         int or float.  This is error-prone because you may also \
         have wanted to allow SymInt or SymFloat in your test.  \
         To suppress this lint, use an appropriate type alias defined \
-        in torch._prims_common; use IntLike/FloatLike when you would accept \
+        in torch._prims_common; use int_like/float_like when you would accept \
         both regular and symbolic numbers, Dim for ints representing \
         dimensions, or IntWithoutSymInt/FloatWithoutSymFloat if you really \
         meant to exclude symbolic numbers.

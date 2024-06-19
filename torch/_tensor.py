@@ -179,7 +179,7 @@ class Tensor(torch._C.TensorBase):
                             "an instance of a different type."
                         )
                     new_tensor.set_(
-                        new_storage, self.storage_offset(), self.size(), self.stride()
+                        new_storage, self.storage_offset(), self.size(), self.stride()  # type: ignore[arg-type]
                     )
                     if self.is_conj():
                         new_tensor = new_tensor.conj_physical()

@@ -237,7 +237,7 @@ class MetaTensorDescriber:
             # NB: We actually don't use storage to do views, but might as well
             # put it in for accuracy
             storage = self.describe_storage(t.untyped_storage(), trace=trace)
-            storage_offset = t.storage_offset()
+            storage_offset = t.storage_offset()  # type: ignore[assignment]
 
         stride = None
         if not (

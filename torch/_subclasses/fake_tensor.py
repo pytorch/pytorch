@@ -849,7 +849,7 @@ def extract_tensor_metadata(t: torch.Tensor) -> "TensorMetadata":
         device=t.device,
         layout=t.layout,
         memory_format=memory_format,
-        storage_offset=t.storage_offset(),
+        storage_offset=t.storage_offset(),  # type: ignore[arg-type]
         # Only set storage_bytes for tensors that have storage (not sparse)
         storage_bytes=t.untyped_storage().nbytes() if not t.is_sparse else None,
         requires_grad=t.requires_grad,
