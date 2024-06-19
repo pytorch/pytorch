@@ -6,7 +6,6 @@ from typing import List
 
 import torch
 import torch.utils._pytree as pytree
-from torch.autograd.variable import compiled_autograd_final_callbacks
 
 try:
     import numpy as np
