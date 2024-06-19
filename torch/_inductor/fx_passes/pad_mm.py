@@ -303,6 +303,30 @@ def should_exclude_padding_time(match, arg_name):
     if not fetch_fake_tensors(match, (arg_name,))[0].is_contiguous():
         return False
 
+    # TODO - see issue https://githpub.com/pytorch/pytorch/issues/128889
+    # We would only able to completely plan these out if we were only doing
+    # first dimension padding. non-first we would still need a copy
+    # because these outputs are fixed dense.
+    cannot_plan_output = [
+        aten.mm.default,
+        aten.convolution.default,
+        aten.convolution_backward.default,
+        aten.bmm.default,
+        aten.addmm.default,
+        aten._scaled_dot_product_flash_attention.default,
+        aten._scaled_dot_product_efficient_attention.default,
+    ]
+
+    if node_def.target in cannot_plan_output:
+        return False
+
+    if (
+        node_def.target == aten.cat.default
+        and len(node_def.all_input_nodes)
+        > torch._inductor.config.max_pointwise_cat_inputs
+    ):
+        return False
+
     # optimistically assume we should be able to memory plan away
     # all non inputs
     return node_def.op != "placeholder"
@@ -407,6 +431,7 @@ def should_pad_bench(
         mat2_pad = mat2
 
         is_bmm = op is torch.ops.aten.bmm
+
         mat1_pre_padded = should_exclude_padding_time(match, "mat1")
         fns = []
         if mat1_pre_padded and (m_padded_length or k_padded_length):
@@ -505,24 +530,35 @@ def should_pad_mm(match: Match) -> bool:
 
 
 def pad_mat1(mat1, *, m_padded_length, k_padded_length, is_bmm=False):
-    if k_padded_length != 0 or m_padded_length != 0:
+    if m_padded_length == 0 and k_padded_length == 0:
+        return mat1
+    elif k_padded_length != 0 and m_padded_length != 0:
         # dim order is reversed for constant_pad_nd, for every dim we specify right and left padding
         pad_arg = [0, k_padded_length, 0, m_padded_length]
         if is_bmm:
             pad_arg.extend((0, 0))
         return aten.constant_pad_nd(mat1, pad_arg)
-    return mat1
+    elif m_padded_length != 0:
+        return pad_dim(mat1, m_padded_length, 0 if not is_bmm else 1)
+    else:
+        assert k_padded_length != 0
+        return pad_dim(mat1, k_padded_length, 1 if not is_bmm else 2)
 
 
 def pad_mat2(mat2, *, k_padded_length, n_padded_length, is_bmm=False):
-    if k_padded_length != 0 or n_padded_length != 0:
+    if k_padded_length == 0 and n_padded_length == 0:
+        return mat2
+    elif k_padded_length != 0 and n_padded_length != 0:
         # dim order is reversed for constant_pad_nd, for every dim we specify right and left padding
         pad_arg = [0, n_padded_length, 0, k_padded_length]
         if is_bmm:
             pad_arg.extend((0, 0))
         return aten.constant_pad_nd(mat2, pad_arg)
+    elif k_padded_length != 0:
+        return pad_dim(mat2, k_padded_length, 0 if not is_bmm else 1)
     else:
-        return mat2
+        assert n_padded_length != 0
+        return pad_dim(mat2, n_padded_length, 1 if not is_bmm else 2)
 
 
 def pad_mm(

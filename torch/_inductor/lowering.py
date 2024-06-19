@@ -1415,11 +1415,17 @@ def cat(inputs, dim=0):
     MAX_COMPLEX_POINTWISE_CAT = 8
     MAX_SIMPLE_OP_COUNT = 2
 
+    def additional_pointwise_ops(op: torch._ops.OpOverload):
+        return op in (aten.cat.default, aten.constant_pad_nd.default)
+
     if len(inputs) <= MAX_COMPLEX_POINTWISE_CAT or (
         (len(inputs) <= config.max_pointwise_cat_inputs)
         and all(op_count(t) <= MAX_SIMPLE_OP_COUNT for t in inputs)
     ):
-        pointwise_uses = all(is_pointwise_use(use) for use in V.current_node.users)
+        pointwise_uses = all(
+            is_pointwise_use(use, additional_pointwise_ops)
+            for use in V.current_node.users
+        )
         # fuse in case we will be used in a pointwise node, and there are any inputs we
         # we can prevent materialization of.
         fuse_pointwise_use = (

@@ -313,7 +313,15 @@ def is_view(op: torch._ops.OpOverload):
     return any(a.alias_info is not None for a in op._schema.arguments)
 
 
-def is_pointwise_use(use):
+def is_pointwise_use(
+    use, is_pointwise_fn: Optional[Callable[[torch._ops.OpOverload], bool]] = None
+):
+    """
+    Do all uses of this op have torch.Tag.pointwise or return True for optional `is_pointwise_fn`
+
+    Uses in views ops will follow the views uses
+    """
+
     if not use.op == "call_function":
         return False
 
@@ -323,9 +331,11 @@ def is_pointwise_use(use):
         return False
 
     if use.target is operator.getitem or is_view(use.target):
-        return all(is_pointwise_use(u) for u in use.users)
+        return all(is_pointwise_use(u, is_pointwise_fn) for u in use.users)
 
-    return torch.Tag.pointwise in use.target.tags
+    return torch.Tag.pointwise in use.target.tags or (
+        is_pointwise_fn is not None and is_pointwise_fn(use.target)
+    )
 
 
 def gen_gm_and_inputs(target, args, kwargs):

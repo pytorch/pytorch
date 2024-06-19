@@ -220,7 +220,7 @@ class NumBytesMetricTests(TestCase):
         inp = [T(10, 10, 10), T(10, 10, 10)]
         self.assertExpectedInline(count_numel(f, *inp), """2600""")
 
-    def test_cat_pointwise(self):
+    def test_cat_pointwise_elias(self):
         def f(a, b):
             return torch.cat([torch.softmax(a, dim=-1), torch.softmax(b, dim=-1)])
 
@@ -262,6 +262,13 @@ class NumBytesMetricTests(TestCase):
 
         inp = (T(10, 10), T(10, 10))
         self.assertExpectedInline(count_numel(f, *inp), """400""")
+
+        def f(a, b):
+            a = a @ a
+            return torch.constant_pad_nd(torch.cat([a, b]), [2, 2], 0.5)
+
+        inp = (T(10, 10), T(10, 10))
+        self.assertExpectedInline(count_numel(f, *inp), """680""")
 
     @patch.object(config, "split_cat_fx_passes", False)
     @patch.object(

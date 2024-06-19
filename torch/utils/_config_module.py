@@ -8,6 +8,7 @@ import io
 import pickle
 import tokenize
 import unittest
+import warnings
 from types import FunctionType, ModuleType
 from typing import Any, Dict, Optional, Set, Union
 from typing_extensions import deprecated
@@ -178,6 +179,8 @@ class ConfigModule(ModuleType):
         mod = self.__name__
         for k, v in self._config.items():
             if k in self._config.get("_save_config_ignore", ()):
+                if v != self._default[k]:
+                    warnings.warn(f"Skipping serialization of {k} value {v}")
                 continue
             if v == self._default[k]:
                 continue
