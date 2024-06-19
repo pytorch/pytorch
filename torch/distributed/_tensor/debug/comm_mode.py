@@ -135,6 +135,7 @@ class CommDebugMode(TorchDispatchMode):
     def __init__(self):
         self.comm_counts: Dict[Any, int] = defaultdict(int)
         self.comm_module_counts = {}
+        self.comm_module_operation_counts = {}
         self.comm_registry = set()
         for native_op, py_op in NATIVE_TO_PY_MAPPING.items():
             self.comm_registry.add(native_op)
@@ -191,6 +192,8 @@ class CommDebugMode(TorchDispatchMode):
     def __enter__(self):
         self.comm_counts.clear()
         self.comm_module_counts.clear()
+        self.comm_module_operation_counts.clear()
+
         super().__enter__()
         self.advanced_module_tracker.__enter__()
         return self
@@ -219,6 +222,7 @@ class CommDebugMode(TorchDispatchMode):
         # run **before** subclasses get a chance to run.
         # Returning NotImplemented here gives us a chance to let DTensor
         # run and desugar into comms ops, before CommDebugMode sees them.
+
         if any(t == DTensor for t in types):
             return NotImplemented
         kwargs = kwargs if kwargs else {}
@@ -231,6 +235,11 @@ class CommDebugMode(TorchDispatchMode):
         # the need to modify all tests to accommodate the two implementations,
         # we make CommDebugMode translate native funcol ops into legacy funcol
         # ops until the migration finishes.
+
+        operation_dict = 
+        # add operations to current module
+        if self.advanced_module_tracker.name not in self.comm_module_operation_counts:
+
 
         if func_packet in self.comm_registry or func_packet in c10d_collective_ops:
             if func_packet in NATIVE_TO_PY_MAPPING:
