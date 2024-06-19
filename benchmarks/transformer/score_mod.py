@@ -106,7 +106,7 @@ def generate_inputs(
     return query, key, value
 
 
-def run_single_experiment(config: ExperimentConfig, dynamic=False) -> ExperimentResults:
+def run_single_experiment(config: ExperimentConfig, dynamic=False, max_autotune=False) -> ExperimentResults:
     device = torch.device("cuda")
     batch_size, num_heads, q_seq_len, head_dim = config.shape
     query, key, value = generate_inputs(
@@ -123,7 +123,10 @@ def run_single_experiment(config: ExperimentConfig, dynamic=False) -> Experiment
     def eager_sdpa(query, key, value, _):
         return F.scaled_dot_product_attention(query, key, value)
 
-    compiled_sdpa = torch.compile(_flex_attention, dynamic=dynamic)
+    if max_autotune:
+        compiled_sdpa = torch.compile(_flex_attention, dynamic=dynamic, mode="max-autotune-no-cudagraphs")
+    else:
+        compiled_sdpa = torch.compile(_flex_attention, dynamic=dynamic)
 
     score_mod = config.score_mod
 
@@ -276,7 +279,7 @@ def generate_experiment_configs(
 ) -> List[ExperimentConfig]:
     q_kv_seq_lens = [(i, i) for i in seq_lens]  # only testing q_len == kv_len
     dtypes = [
-        torch.bfloat16,
+        torch.float16,
     ]
     score_mods = generate_score_mods(score_mods)
     all_configs = []
@@ -314,7 +317,7 @@ def main(args):
         )
     ):
         results.append(
-            Experiment(config, run_single_experiment(config, dynamic=args.dynamic))
+            Experiment(config, run_single_experiment(config, dynamic=args.dynamic, max_autotune=args.max_autotune))
         )
 
     print_results(results)
@@ -348,6 +351,9 @@ if __name__ == "__main__":
         nargs="+",
         help="score mods",
         default=["noop", "causal", "rel", "head_bias"],
+    )
+    parser.add_argument(
+        "--max-autotune", action="store_true", help="Turn on max-autotune"
     )
 
     # Parse arguments
