@@ -573,7 +573,6 @@ def _jit_pass_onnx_preprocess_caffe2(graph: Graph) -> None: ...
 def _jit_pass_onnx_unpack_quantized_weights(
     graph: Graph,
     paramsDict: Dict[str, IValue],
-    caffe2: _bool,
 ) -> Dict[str, IValue]: ...
 def _jit_pass_onnx_quantization_insert_permutes(
     graph: Graph,
