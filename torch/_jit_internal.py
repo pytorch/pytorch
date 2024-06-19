@@ -14,26 +14,24 @@ import inspect
 import io
 import pickle
 import sys
+import textwrap
 import threading
 import types
 import typing
 import warnings
 import weakref
-from textwrap import dedent
-from typing import (  # noqa: F401
+from typing import (
     Any,
     Callable,
     Dict,
     Final,
     ForwardRef,
-    Generic,
-    get_args,  # new in 3.8
-    get_origin,  # new in 3.8
+    get_args,
+    get_origin,
     List,
     Optional,
     Tuple,
     Type,
-    TypeVar,
     Union,
 )
 
@@ -42,7 +40,7 @@ import torch
 # This is needed. `torch._jit_internal` is imported before `torch.distributed.__init__`.
 # Explicitly ask to import `torch.distributed.__init__` first.
 # Otherwise, "AttributeError: module 'torch' has no attribute 'distributed'" is raised.
-import torch.distributed.rpc
+import torch.distributed as dist
 import torch.package._mangling as package_mangling
 from torch._awaits import _Await
 from torch._C import _Await as CAwait, Future as CFuture
@@ -405,7 +403,7 @@ def get_type_hint_captures(fn):
     # by source inspection. This accounts for the case in which aliases are used
     # to annotate the arguments (e.g device_t = torch.device, and then d: device_t).
     # frontend.py cannot be used here because it includes _jit_internal, so use ast instead.
-    a = ast.parse(dedent(src))
+    a = ast.parse(textwrap.dedent(src))
     if len(a.body) != 1 or not isinstance(a.body[0], ast.FunctionDef):
         raise RuntimeError(f"Expected {fn} to be a function")
     f = a.body[0]
@@ -482,7 +480,13 @@ def createResolutionCallbackForClassMethods(cls):
 
 
 def boolean_dispatch(
-    arg_name, arg_index, default, if_true, if_false, module_name, func_name
+    arg_name,
+    arg_index,
+    default,
+    if_true,
+    if_false,
+    module_name,
+    func_name,
 ):
     """
     Dispatches to either of 2 script functions based on a boolean argument.
@@ -1083,7 +1087,7 @@ def is_await(ann) -> bool:
     return get_origin(ann) is _Await
 
 
-if torch.distributed.rpc.is_available():
+if dist.rpc.is_available():
     from torch._C._distributed_rpc import PyRRef
     from torch.distributed.rpc import RRef
 
@@ -1227,7 +1231,9 @@ def _try_get_dispatched_fn(fn):
 
 
 def _get_named_tuple_properties(
-    obj, loc: Optional[torch._C._jit_tree_views.SourceRange] = None, rcb=None
+    obj,
+    loc: Optional[torch._C._jit_tree_views.SourceRange] = None,
+    rcb=None,
 ):
     if loc is None:
         loc = fake_range()
@@ -1307,7 +1313,10 @@ def _get_named_tuple_properties(
 
 
 def _create_named_tuple(
-    t, unqual_name: str, field_names: List[str], defaults: Tuple[Any, ...]
+    t,
+    unqual_name: str,
+    field_names: List[str],
+    defaults: Tuple[Any, ...],
 ):
     TupleType = collections.namedtuple(unqual_name, field_names, defaults=defaults)  # type: ignore[call-arg, no-redef, misc]
     return TupleType(*t)
