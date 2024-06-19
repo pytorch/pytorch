@@ -9,17 +9,7 @@ import time
 import warnings
 from itertools import count
 
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Sequence,
-    Tuple,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 from unittest import mock
 
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
@@ -50,7 +40,6 @@ from torch._inductor.cudagraph_utils import (
 )
 
 from torch._inductor.debug import save_args_for_compile_fx_inner
-from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.utils import (
     BoxedBool,
     count_tangents,
@@ -83,9 +72,6 @@ from .utils import (
     output_node,
 )
 from .virtualized import V
-
-if TYPE_CHECKING:
-    import sympy
 
 if config.is_fbcode():
     from torch._inductor.fb.utils import log_optimus_to_scuba, time_and_log
@@ -567,12 +553,13 @@ def compile_fx_inner(
     if context is not None and context.output_strides is not None:
         assert len(context.output_strides) == 0
         shape_env = _shape_env_from_inputs(example_inputs)
-        sizevars = SizeVarAllocator(shape_env)
         for exprs in compiled_graph.output_strides:
             if exprs is None:
                 context.output_strides.append(None)
             else:
-                context.output_strides.append([sizevars.size_hint(s) for s in exprs])
+                context.output_strides.append(
+                    [shape_env.evaluate_symexpr(e) for e in exprs]
+                )
 
     if aot_mode:
         return compiled_graph
@@ -838,7 +825,7 @@ def fx_codegen_and_compile(
         metrics_helper = metrics.CachedMetricsHelper()
         with V.set_graph_handler(graph):
             graph.run(*example_inputs)
-            output_strides: List[Optional[Tuple[sympy.Expr, ...]]] = []
+            output_strides: List[Optional[Tuple[str, ...]]] = []
             if graph.graph_outputs is not None:
                 # We'll put the output strides in the compiled graph so we
                 # can later return them to the caller via TracingContext
@@ -847,7 +834,8 @@ def fx_codegen_and_compile(
                         hasattr(out, "layout")
                         and len(free_unbacked_symbols(out.layout.stride)) == 0
                     ):
-                        output_strides.append(out.layout.stride)
+                        # Convert to string for eval on the load path
+                        output_strides.append(tuple(str(s) for s in out.layout.stride))
                     else:
                         output_strides.append(None)
 

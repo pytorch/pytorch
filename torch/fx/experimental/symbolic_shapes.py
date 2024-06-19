@@ -4239,6 +4239,13 @@ class ShapeEnv:
             return " and ".join(produced_guards)
         return None
 
+    def evaluate_symexpr(self, code):
+        """
+        To be used by compile_fx to evaluate symexprs
+        """
+        args = {str(e): val for e, val in self.var_to_val.items()}
+        return eval(code, SYMPY_INTERP, args)
+
     def evaluate_guards_expression(self, code, args):
         """
         Expected to be used with produce_guards_expression(). Evaluates an expression
