@@ -10,6 +10,8 @@ rm artifacts/* && TORCH_NCCL_AVOID_RECORD_STREAMS=1 TORCH_LOGS="aot_graphs,outpu
 
 TORCH_NCCL_AVOID_RECORD_STREAMS=1 TORCH_LOGS="aot_graphs,output_code,compiled_autograd,recompiles,+dynamo,aot,inductor" TORCH_COMPILE_DEBUG=1 CUDA_VISIBLE_DEVICES=4,5 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 python -m torch.distributed.run --standalone --nproc_per_node=2 test_dynamo_fsdp.py >artifacts/run_output.txt 2>&1
 
+TORCHDYNAMO_INLINE_INBUILT_NN_MODULES=1 TORCH_NCCL_AVOID_RECORD_STREAMS=1 TORCH_LOGS="aot_graphs,output_code,compiled_autograd,recompiles,+dynamo,aot,inductor" TORCH_COMPILE_DEBUG=1 CUDA_VISIBLE_DEVICES=4,5 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 python -m torch.distributed.run --standalone --nproc_per_node=2 test_dynamo_fsdp.py >artifacts/run_output.txt 2>&1
+
 # 8-gpu
 rm artifacts/* && TORCH_NCCL_AVOID_RECORD_STREAMS=1 TORCH_LOGS="aot_graphs,output_code,compiled_autograd,recompiles,+dynamo,aot,inductor" TORCH_COMPILE_DEBUG=1 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=8 test_dynamo_fsdp.py >artifacts/run_output.txt 2>&1
 
