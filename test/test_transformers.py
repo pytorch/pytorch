@@ -3608,17 +3608,17 @@ class TestSDPAPrivateUse1Only(NNTestCase):
         k_privateuse1 = k_cpu.to("foo")
         v_privateuse1 = v_cpu.to("foo")
         attn_mask_privateuse1 = attn_mask.to("foo")
-        output, logsumexp, cum_seq_q, cum_seq_k, max_q, max_k, philox_seed, philox_offset, debug_attn_mask = torch.ops.aten._scaled_dot_product_fused_attention_overrideable(
-            q_privateuse1, k_privateuse1, v_privateuse1, attn_bias=attn_mask_privateuse1)
+        output, logsumexp, cum_seq_q, cum_seq_k, max_q, max_k, philox_seed, philox_offset, debug_attn_mask = \
+            torch.ops.aten._scaled_dot_product_fused_attention_overrideable(
+                q_privateuse1, k_privateuse1, v_privateuse1, attn_bias=attn_mask_privateuse1)
 
         rand_upward = torch.rand(shape, device="cpu", dtype=torch.float16, requires_grad=False)
         rand_upward_privateuse1 = rand_upward.to("foo")
-        grad_input_mask=[True, True, True, True]
+        grad_input_mask = [True, True, True, True]
         grad_q, grad_k, grad_v, grad_attn_mask = torch.ops.aten._scaled_dot_product_fused_attention_overrideable_backward(
-            rand_upward_privateuse1, q_privateuse1, k_privateuse1, v_privateuse1, attn_mask_privateuse1, grad_input_mask, output, logsumexp,
-            cum_seq_q, cum_seq_k, max_q, max_k, dropout_p=0.0,
-            is_causal=False, philox_seed=philox_seed, philox_offset=philox_offset
-        )
+            rand_upward_privateuse1, q_privateuse1, k_privateuse1, v_privateuse1, attn_mask_privateuse1,
+            grad_input_mask, output, logsumexp, cum_seq_q, cum_seq_k, max_q, max_k, dropout_p=0.0,
+            is_causal=False, philox_seed=philox_seed, philox_offset=philox_offset)
 
 if NOTEST_CPU:
     device_types = ("cuda", )
