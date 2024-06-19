@@ -45,6 +45,7 @@ from torch._subclasses.meta_utils import (
     is_sparse_compressed,
     MetaConverter,
 )
+from torch.types import IntLike
 from torch._utils import render_call
 from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv,
@@ -906,14 +907,12 @@ def extract_tensor_metadata(t: torch.Tensor) -> "TensorMetadata":
         stride: Tuple[Union[int, _SymExprHash], ...] = tuple(
             convert_to_sym_hash(x) for x in stride_
         )
-        storage_bytes: Optional[int] = None
+        storage_bytes: Optional[Union[int, _SymExprHash]] = None
     else:
         shape = tuple(cast(Sequence[int], t.shape))
         stride = stride_
         # Only set storage_bytes for tensors that have storage (not sparse)
-        storage_bytes = convert_to_sym_hash(
-            t.untyped_storage().nbytes() if not t.is_sparse else None
-        )
+        storage_bytes = convert_to_sym_hash(t.untyped_storage().nbytes()) if not t.is_sparse else None
 
     storage_offset = convert_to_sym_hash(t.storage_offset())
 

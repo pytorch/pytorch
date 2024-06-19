@@ -1530,6 +1530,7 @@ def _export(
 
     # The unbacked symint symbols are updated in aot_export
     # so we serialize them here instead of inside dynamo.
+    assert fake_mode.shape_env is not None
     gm.meta["inline_constraints"] = {
         k: v
         for k, v in fake_mode.shape_env.var_to_range.items()

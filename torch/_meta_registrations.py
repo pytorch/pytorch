@@ -19,7 +19,7 @@ from torch._prims_common import (
     corresponding_real_dtype,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
-    IntLike,
+    int_like,
     make_contiguous_strides_for,
     Number,
     TensorLike,
@@ -132,11 +132,11 @@ def meta_linspace_logspace(
 
     # steps does not participate in the computation of the dtype
     torch._check_type(
-        isinstance(steps, IntLike),
+        isinstance(steps, int_like),
         lambda: f"received an invalid combination of arguments - got \
 ({type(start).__name__}, {type(end).__name__}, {type(steps).__name__})",
     )
-    assert isinstance(steps, IntLike)  # for mypy
+    assert isinstance(steps, int_like)  # for mypy
     torch._check(steps >= 0, lambda: "number of steps must be non-negative")
 
     return torch.empty(
@@ -2188,24 +2188,24 @@ def calc_conv_nd_return_shape(
             raise RuntimeError("Invalid channel dimensions")
 
     ret_shape = [input_tensor.shape[0], out_channels]
-    if isinstance(stride, IntLike):
+    if isinstance(stride, int_like):
         stride = [stride] * len(dims)
     elif len(stride) == 1:
         stride = [stride[0]] * len(dims)
 
-    if isinstance(padding, IntLike):
+    if isinstance(padding, int_like):
         padding = [padding] * len(dims)
     elif len(padding) == 1:
         padding = [padding[0]] * len(dims)
 
-    if isinstance(dilation, IntLike):
+    if isinstance(dilation, int_like):
         dilation = [dilation] * len(dims)
     elif len(dilation) == 1:
         dilation = [dilation[0]] * len(dims)
 
     output_padding_list: Optional[List[int]] = None
     if output_padding:
-        if isinstance(output_padding, IntLike):
+        if isinstance(output_padding, int_like):
             output_padding_list = [output_padding] * len(dims)
         elif len(output_padding) == 1:
             output_padding_list = [output_padding[0]] * len(dims)
@@ -3603,7 +3603,7 @@ def shift_dtype_check(fn_name, self, val):
         )
     else:
         torch._check(
-            isinstance(val, IntLike),
+            isinstance(val, int_like),
             lambda: f"{fn_name}: Expected shift value to be an int. Got {val}",
         )
 
@@ -5891,7 +5891,7 @@ def meta_histc(input, bins=100, min=0, max=0):
             lambda: f"\"histogram_cpu\" not implemented for '{input.dtype}'",
         )
     torch._check(
-        isinstance(bins, IntLike),
+        isinstance(bins, int_like),
         lambda: f"{fn_name}: argument 'bins' must be int, not {type(bins)}",
     )
     torch._check(bins > 0, lambda: f"{fn_name}: bins must be > 0, but got {bins}")

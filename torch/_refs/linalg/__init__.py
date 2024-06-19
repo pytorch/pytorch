@@ -17,7 +17,7 @@ from torch._prims_common import (
     Dim,
     DimsType,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
-    IntLike,
+    int_like,
     NumberType,
     TensorLikeType,
 )
@@ -154,7 +154,7 @@ def vector_norm(
         x = _maybe_convert_to_dtype(x, computation_dtype)  # type: ignore[assignment]
         reduce_sum = partial(torch.sum, dim=dim, keepdim=keepdim)
 
-        is_ord_even = ord % 2 == 0 if isinstance(ord, IntLike) else ord % 2.0 == 0.0
+        is_ord_even = ord % 2 == 0 if isinstance(ord, int_like) else ord % 2.0 == 0.0
         if not (is_ord_even and utils.is_float_dtype(x.dtype)):
             x = torch.abs(x)
         return to_result_dtype(torch.pow(reduce_sum(torch.pow(x, ord)), 1.0 / ord))  # type: ignore[return-value]

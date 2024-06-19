@@ -2073,6 +2073,7 @@ class FlatParamHandle:
             device=self.flat_param.device,
             requires_grad=False,
         )
+        assert flat_param._params is not None
         for param, shard_param_info, (param_name, module, _) in zip(
             flat_param._params, flat_param._shard_param_infos, flat_param._param_infos
         ):
