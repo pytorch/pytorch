@@ -16,7 +16,7 @@ from torch import sym_float, sym_int, Tensor
 from torch._decomp import register_decomposition
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._prims_common import (
-    IntLike,
+    int_like,
     NumberType,
     suggest_memory_format,
     TensorLike,
@@ -1417,7 +1417,7 @@ def tensor_split_tensor_indices_or_sections_py_impl(
     )
     if split_dim == 0:
         sections = tensor_indices_or_sections.item()
-        assert isinstance(sections, IntLike)
+        assert isinstance(sections, int_like)
         return self.tensor_split(sections, dim)
     else:
         indices = [i.item() for i in tensor_indices_or_sections]
@@ -2454,7 +2454,7 @@ def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
         return torch.mean(vals, dim=(-3, -1))
 
     def maybe_mask(vals, length, range_max, adaptive, dim):
-        if isinstance(length, IntLike):
+        if isinstance(length, int_like):
             return vals, length
         else:
             # zero-out the things we didn't really want to select

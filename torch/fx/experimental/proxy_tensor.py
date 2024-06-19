@@ -195,6 +195,10 @@ def track_tensor(tensor, proxy, *, constant, tracer):
     def try_set_proxy_slot(outer_s, proxy_callable, *args):
         assert callable(proxy_callable)
         if isinstance(outer_s, SymInt):
+            symbols = outer_s.node.symbols()
+            new_symbol = any(SymInt(sym) in tracer.symnode_tracker for sym in symbols)
+            if not new_symbol:
+                return
             set_proxy_slot(outer_s, tracer, thunkify(proxy_callable, outer_s, *args))
     # The basic idea is that we need to associate each tensor/SymInt
     # with a Proxy.  How do we setup this association?  We just store

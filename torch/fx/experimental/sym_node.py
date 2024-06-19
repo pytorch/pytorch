@@ -16,7 +16,7 @@ import math
 import operator
 import sys
 from functools import lru_cache, update_wrapper
-from typing import Optional, Type, TYPE_CHECKING, Union
+from typing import FrozenSet, Optional, Type, TYPE_CHECKING, Union
 
 import torch
 
@@ -496,6 +496,13 @@ class SymNode:
 
     def is_constant(self):
         return False
+
+    def symbols(self) -> FrozenSet["SymNode"]:
+        return frozenset(
+            SymNode(atom, self.shape_env, self.pytype, None)
+            for atom in self._expr.atoms()
+            if atom.is_symbol
+        )
 
 
 # TODO: this probably needs the sizes-strides eval functions

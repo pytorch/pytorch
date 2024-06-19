@@ -48,12 +48,12 @@ NumberType: TypeAlias = Union[bool, int, float, complex]
 RealNumberType: TypeAlias = Union[bool, int, float]
 
 Number = (bool, int, float, complex, torch.SymInt, torch.SymFloat, torch.SymBool)
-# I don't call it Integral because numbers.Integral includes bool, but IntLike
+# I don't call it Integral because numbers.Integral includes bool, but int_like
 # does not
 Dim = int
-IntLike = (int, torch.SymInt)
-FloatLike = (float, torch.SymFloat)
-BoolLike = (bool, torch.SymBool)
+int_like = (int, torch.SymInt)
+float_like = (float, torch.SymFloat)
+bool_like = (bool, torch.SymBool)
 IntWithoutSymInt = int
 FloatWithoutSymFloat = float
 DeviceLikeType: TypeAlias = Union[str, torch.device, int]
@@ -1726,7 +1726,7 @@ def set_correction(
     elif correction is None and unbiased is not None:
         correction = 0.0 if unbiased is False else 1.0
     # NB: we don't actually support symint here, but it's harmless to accept
-    if not isinstance(correction, (IntLike, FloatLike)):
+    if not isinstance(correction, (int_like, float_like)):
         raise ValueError("correction argument should be integer or float")
     if correction < 0:
         raise ValueError("correction argument should be non-negative")
