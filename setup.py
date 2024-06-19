@@ -272,12 +272,6 @@ if BUILD_LIBTORCH_WHL:
 if BUILD_PYTHON_ONLY:
     os.environ["BUILD_LIBTORCHLESS"] = "ON"
     os.environ["LIBTORCH_LIB_PATH"] = f"{_get_package_path(LIBTORCH_PKG_NAME)}/lib"
-    print(os.environ["LIBTORCH_LIB_PATH"])
-    # print contents of package path
-    for root, dirs, files in os.walk(os.environ["LIBTORCH_LIB_PATH"]):
-        print(root)
-        for file in files:
-            print(file)
 
 ################################################################################
 # Parameters parsed from environment
@@ -1131,6 +1125,14 @@ def main():
         raise RuntimeError(
             "Conflict: 'BUILD_LIBTORCH_WHL' and 'BUILD_PYTHON_ONLY' can't both be 1. Set one to 0 and rerun."
         )
+
+    print("package paths are: these")
+    print(os.environ["LIBTORCH_LIB_PATH"])
+    # print contents of package path
+    for root, dirs, files in os.walk(os.environ["LIBTORCH_LIB_PATH"]):
+        print(root)
+        for file in files:
+            print(file)
 
     # the list of runtime dependencies required by this built package
     install_requires = [
