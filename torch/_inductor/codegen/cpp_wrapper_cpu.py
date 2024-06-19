@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import math
 import os
@@ -9,12 +10,13 @@ import sympy
 from sympy import Expr
 
 import torch
+
+import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch._ops
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey
 from .. import config, ir
-
 from ..codecache import CudaKernelParamCache
-from ..utils import cache_on_self, sympy_product
+from ..utils import _align, ALIGN_BYTES, cache_on_self, sympy_product
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import IndentedBuffer
@@ -92,6 +94,7 @@ class CppWrapperCpu(WrapperCodeGen):
         cuda=True,
         triton=True,
         arg_types=None,
+        raw_args=None,
         grid_fn: str = "grid",
         triton_meta=None,
     ):
@@ -237,8 +240,6 @@ class CppWrapperCpu(WrapperCodeGen):
                 };
                 """
             )
-
-        from .memory_planning import ALIGN_BYTES
 
         # Round up to the nearest multiple of ALIGN_BYTES
         # ALIGN_BYTES must be a power of 2
@@ -720,6 +721,11 @@ class CppWrapperCpu(WrapperCodeGen):
                 ), f"input {name=} cannot be symbolic"
                 self.write_input_output_info("inputs_info_", idx, name)
 
+            all_cuda = all(
+                V.graph.get_original_value_of_constant(name).is_cuda
+                for name in V.graph.constants.keys()
+                if name not in V.graph.folded_constants
+            )
             for idx, name in enumerate(V.graph.constants.keys()):
                 tensor = V.graph.get_original_value_of_constant(name)
                 assert isinstance(tensor, torch.Tensor)
@@ -730,14 +736,19 @@ class CppWrapperCpu(WrapperCodeGen):
                 self.prefix.writeline(
                     f"constants_info_[{idx}].offset = {tensor.storage_offset()};"
                 )
-                if tensor.is_mkldnn:
-                    self.prefix.writeline(
-                        f"constants_info_[{idx}].data_size = {torch.ops.mkldnn._nbytes(tensor)};"
-                    )
-                else:
-                    self.prefix.writeline(
-                        f"constants_info_[{idx}].data_size = {tensor.untyped_storage().nbytes()};"
-                    )
+
+                # If constants to serialize contain cpu tensors, we always align data_size it to 64.
+                # When loading the constants, the valid data will depends on the size
+                # not the data_size so there won't be correctness issue.
+                data_size = (
+                    torch.ops.mkldnn._nbytes(tensor)
+                    if tensor.is_mkldnn
+                    else tensor.untyped_storage().nbytes()
+                )
+                self.prefix.writeline(
+                    f"constants_info_[{idx}].data_size = {data_size if all_cuda else _align(data_size)};"
+                )
+
                 from_folded = "true" if name in V.graph.folded_constants else "false"
                 self.prefix.writeline(
                     f"constants_info_[{idx}].from_folded = {from_folded};"
@@ -1290,7 +1301,7 @@ class CppWrapperCpu(WrapperCodeGen):
             self.writeline(self.wrap_kernel_call(kernel, args))
 
     def generate_user_defined_triton_kernel(
-        self, kernel_name, grid, configs, args, triton_meta, arg_types=None
+        self, kernel_name, grid, configs, args, triton_meta, raw_args
     ):
         assert len(grid) != 0
         if len(grid) == 1:
@@ -1305,13 +1316,15 @@ class CppWrapperCpu(WrapperCodeGen):
                     break
             assert grid_decision is not None
 
-        current_device = V.graph.scheduler.get_current_device_or_throw()
+        arg_types = [
+            arg.get_dtype() if hasattr(arg, "get_dtype") else type(arg)
+            for arg in raw_args
+        ]
         self.generate_kernel_call(
             kernel_name,
             args,
             arg_types=arg_types,
             grid=grid_decision,
-            device_index=current_device.index,
             cuda=True,
             triton=True,
             triton_meta=triton_meta,
@@ -1503,7 +1516,7 @@ class CppWrapperCpu(WrapperCodeGen):
         for buf in nodes.get_names():
             # TODO: Add buf name directly into check_inf_and_nan.
             self.writeline(
-                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_check_inf_and_nan({buf}));"
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_check_inf_and_nan({buf}));"
             )
 
     def codegen_device(self, device):
@@ -1533,7 +1546,7 @@ class CppWrapperCpu(WrapperCodeGen):
         else:
             return LAYOUT_TO_ATEN[layout]
 
-    @functools.lru_cache(None)
+    @functools.lru_cache(None)  # noqa: B019
     def codegen_int_array_var(
         self,
         int_array: str,
@@ -2163,7 +2176,7 @@ if (custom_op_wrapper.get() == NULL) {
             elif isinstance(arg_type, torch.FloatType):
                 return f"PyFloat_FromDouble({raw_arg})"
             elif isinstance(arg_type, torch.BoolType):
-                return f"PyBool_FromLong({raw_arg})"
+                return f"PyBool_FromLong({1 if raw_arg else 0})"
             elif isinstance(arg_type, torch.StringType):
                 return f'PyUnicode_FromString("{raw_arg}")'
             else:
@@ -2309,10 +2322,9 @@ if (py_{buf_name}.get() == NULL) {{
             return "AtenTensorHandle"
         elif isinstance(type_, (torch.IntType, torch.SymIntType)):
             return "int64_t"
-        elif (
-            isinstance(type_, (torch.BoolType, torch.SymBoolType, torch.EnumType))
-            or repr(type_) == "ScalarType"
-        ):
+        elif isinstance(
+            type_, (torch.BoolType, torch.SymBoolType, torch.EnumType)
+        ) or repr(type_) in ("ScalarType", "Layout"):
             return "int32_t"
         elif isinstance(type_, torch.FloatType):
             return "double"
@@ -2412,7 +2424,16 @@ if (py_{buf_name}.get() == NULL) {{
                     # type_ is Optional[Tensor]
                     # Similar to other data type, use pointer to denote optional tensor arg in v2 C shim
                     base_handle = self.val_to_arg_str(val, element_type)
-                    if "wrap_with_raii_handle_if_needed" in base_handle:
+                    if config.use_minimal_arrayref_interface:
+                        base_handle = (
+                            f"convert_arrayref_tensor_to_tensor({base_handle})"
+                        )
+                    if base_handle.startswith(
+                        (
+                            "convert_arrayref_tensor_to_tensor",
+                            "wrap_with_raii_handle_if_needed",
+                        )
+                    ):
                         # wrap_with_raii_handle_if_needed creates a temp RAIIAtenTensorHandle, so we need to
                         # explicitly store it. Otherwise, it will be destroyed before the fallback kernel call.
                         tmp_var_name = f"var_{next(self.arg_var_id)}"

@@ -139,10 +139,10 @@ endif()
 set(CUDA_CUDA_LIB "${CUDA_cuda_driver_LIBRARY}" CACHE FILEPATH "")
 set(CUDA_NVRTC_LIB "${CUDA_nvrtc_LIBRARY}" CACHE FILEPATH "")
 if(CUDA_NVRTC_LIB AND NOT CUDA_NVRTC_SHORTHASH)
-  if("${PYTHON_EXECUTABLE}" STREQUAL "")
-    set(_python_exe "python")
+  if("${Python_EXECUTABLE}" STREQUAL "")
+    set(_python_exe "python3")
   else()
-    set(_python_exe "${PYTHON_EXECUTABLE}")
+    set(_python_exe "${Python_EXECUTABLE}")
   endif()
   execute_process(
     COMMAND "${_python_exe}" -c

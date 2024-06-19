@@ -433,6 +433,43 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             res = fn(input)
             self.assertIsInstance(res, LocalSubclass)
 
+    def test_torch_function_list_args(self):
+        HANDLED_FUNCTIONS = {}
+
+        class MyClass:
+            def __init__(self, foo):
+                self.foo = foo
+
+            @classmethod
+            def __torch_function__(
+                cls,
+                func,
+                types,
+                args=(),
+                kwargs=None,
+            ):
+                if kwargs is None:
+                    kwargs = {}
+                if func not in HANDLED_FUNCTIONS or not all(  # noqa: C419
+                    [  # noqa: C419
+                        issubclass(t, (torch.Tensor, MyClass)) for t in types
+                    ]
+                ):
+                    return NotImplemented
+                return HANDLED_FUNCTIONS[func](*args, **kwargs)
+
+        def _stack(input, dim=0, *, out=None):
+            return MyClass(sum([x.foo for x in input]))
+
+        HANDLED_FUNCTIONS[torch.stack] = _stack
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(v0, v1):
+            return torch.stack([v0, v1])
+
+        ret = fn(MyClass(1), MyClass(1))
+        self.assertEqual(ret.foo, 2)
+
     @parametrize(
         "comparison",
         [
@@ -1346,14 +1383,16 @@ class GraphModule(torch.nn.Module):
 
     @parametrize("dynamic", [False, True])
     def test_subclass_views(self, dynamic):
-        def _get_views(t):
+        def _get_views(t):  # returns (view: Tensor, expects_raises_false)
             # Note that any closed-over SymInts will be symbolicized during fake-ification.
-            yield t.narrow(dim=-1, start=3, length=8)
-            yield t.split(5, -1)
-            yield t.split_with_sizes([9, 6], -1)
-            yield t.unsqueeze(-1).expand(4, 15, 10)
-            yield t.select(-1, 6)
-            yield t[2:3, 5:9]
+            yield t.narrow(dim=-1, start=3, length=8), False
+            yield t.split(5, -1)[2], False
+            yield t.split_with_sizes([9, 6], -1)[1], False
+            yield t.unsqueeze(-1).expand(4, 15, 10), False
+            yield t.select(-1, 6), False
+            # https://github.com/pytorch/pytorch/issues/128649
+            yield t[2:3, 5:9], dynamic
+            yield t.view(-1, 15), False
 
         def f(x):
             return x * 2
@@ -1364,10 +1403,15 @@ class GraphModule(torch.nn.Module):
 
         # Take a view of a subclass to pass as input.
         t = TwoTensor(torch.randn(4, 15), torch.randn(4, 15))
-        for view in _get_views(t):
+        for view, expects_raises in _get_views(t):
+            torch._dynamo.reset()
             out_ref = f(view)
-            out_test = compiled_f(view)
-            self.assertEqual(out_ref, out_test)
+            if expects_raises:
+                with self.assertRaises(AssertionError):
+                    out_test = compiled_f(view)
+            else:
+                out_test = compiled_f(view)
+                self.assertEqual(out_ref, out_test)
 
 
 instantiate_parametrized_tests(SubclassTests)

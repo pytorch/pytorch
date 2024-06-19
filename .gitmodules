@@ -18,10 +18,6 @@
     ignore = dirty
     path = third_party/protobuf
     url = https://github.com/protocolbuffers/protobuf.git
-[submodule "third_party/ios-cmake"]
-    ignore = dirty
-    path = third_party/ios-cmake
-    url = https://github.com/Yangqing/ios-cmake.git
 [submodule "third_party/NNPACK"]
     ignore = dirty
     path = third_party/NNPACK

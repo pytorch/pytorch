@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import logging
 import operator
 from typing import Any, Dict, Optional, Set, TYPE_CHECKING
@@ -51,6 +52,9 @@ def insert_deferred_runtime_asserts(
 
     # We hash (node_name, min_val, max_val)
     nodes_that_already_have_sym_constraint_range = set()
+
+    # We hash only node name here because size don't take min/max
+    nodes_that_already_have_sym_constraint_size = set()
     # TODO this only works for top-level nodes today, also
     # we should potentially use it not create duplicate
     # assert_async nodes
@@ -61,8 +65,14 @@ def insert_deferred_runtime_asserts(
         ):
             assert len(node.args) == 1
             nodes_that_already_have_sym_constraint_range.add(
-                (node.args[0], node.kwargs["min"], node.kwargs["max"])
+                (node.args[0], node.kwargs.get("min"), node.kwargs.get("max"))
             )
+        if (
+            node.op == "call_function"
+            and node.target == torch.ops.aten.sym_constrain_range_for_size.default
+        ):
+            assert len(node.args) == 1
+            nodes_that_already_have_sym_constraint_size.add(node.args[0])
 
     # Import sympy locally
     import sympy
@@ -76,6 +86,7 @@ def insert_deferred_runtime_asserts(
         InnerTensorKey,
     )
     from torch.utils._sympy.interp import sympy_interp
+    from torch.utils._sympy.numbers import int_oo
     from torch.utils._sympy.reference import PythonReferenceAnalysis
 
     # TODO: Request simplification on runtime asserts before emitting them
@@ -87,8 +98,23 @@ def insert_deferred_runtime_asserts(
 
     graph_code_log.debug(
         "%s",
-        lazy_format_graph_code(f"pre insert_deferred_runtime_asserts {name}", gm),
+        lazy_format_graph_code(
+            f"pre insert_deferred_runtime_asserts {name}", gm, colored=True
+        ),
     )
+
+    # deduplicate unassociated runtime assertions
+    # we could do better, some guards might be redundant,
+    # e.g. Eq(s0, 4) & Eq(2*s0, 8)
+    # but unclear how to handle all of that right now.
+    # TODO(pianpwk): better way of doing this
+    new_ras = []
+    ras_exprs: Set[sympy.Expr] = set()
+    for ras in ras_by_symbol.pop(None, []):  # type: ignore[call-overload]
+        if ras.expr not in ras_exprs:
+            new_ras.append(ras)
+            ras_exprs.add(ras.expr)
+    ras_by_symbol[None] = new_ras  # type: ignore[index]
 
     # We are going to mutate the dict
     symbol_to_proxy: Dict[sympy.Symbol, fx.Proxy] = {}
@@ -96,10 +122,11 @@ def insert_deferred_runtime_asserts(
     last_placeholder = None
     for node in graph.nodes:
         if node.op != "placeholder":
-            last_placeholder = node
             break
+        last_placeholder = node
         placeholders.add(node)
-    assert last_placeholder is not None
+    if last_placeholder is None:  # no placeholders, just insert before first node
+        last_placeholder = next(iter(graph.nodes))
 
     # Identify what symbols we need to reify.  This isn't strictly needed
     # but helps reduce churn on the graph
@@ -137,6 +164,7 @@ def insert_deferred_runtime_asserts(
                     ),
                 )
 
+    inserted_sym_nodes = 0  # for inserting unassociated runtime asserts
     nodes = list(graph.nodes)
     for i, node in enumerate(nodes[:-1]):
         # Placeholders can match symbols, but when we destructure them
@@ -164,6 +192,8 @@ def insert_deferred_runtime_asserts(
                     ):
                         symbol_to_proxy[s] = fx.Proxy(cb())
                         log.debug("symbol_to_proxy[%s] = %s", s, symbol_to_proxy[s])
+                        nonlocal inserted_sym_nodes
+                        inserted_sym_nodes += 1
 
                 match_symbol(example_value, lambda: node)
                 if isinstance(t := example_value, torch.Tensor):
@@ -191,8 +221,13 @@ def insert_deferred_runtime_asserts(
             # Handle asserts that aren't associated with any symbol.  This
             # doesn't really have to be in the loop as it will only run once,
             # it just needs to happen right after the placeholders.
+            # insert this after placeholders & added sym nodes, and before non-placeholders.
             if node not in placeholders:
-                add_runtime_asserts(ras_by_symbol.pop(None, []))  # type: ignore[call-overload]
+                last_sym_node = last_placeholder
+                for _ in range(inserted_sym_nodes):
+                    last_sym_node = last_sym_node.next
+                with graph.inserting_before(last_sym_node.next):
+                    add_runtime_asserts(ras_by_symbol.pop(None, []))  # type: ignore[call-overload]
 
             defs = []
 
@@ -315,10 +350,14 @@ def insert_deferred_runtime_asserts(
 
                 if i0 in shape_env.size_like:
                     if export:
-                        graph.call_function(
-                            torch.ops.aten.sym_constrain_range_for_size.default,
-                            (symbol_to_proxy[i0].node,),
-                        )
+                        if (
+                            symbol_to_proxy[i0].node
+                            not in nodes_that_already_have_sym_constraint_size
+                        ):
+                            graph.call_function(
+                                torch.ops.aten.sym_constrain_range_for_size.default,
+                                (symbol_to_proxy[i0].node,),
+                            )
                     else:
                         graph.call_function(
                             torch._check_is_size, (symbol_to_proxy[i0].node,)
@@ -331,6 +370,8 @@ def insert_deferred_runtime_asserts(
                     # (refinement should not be necessary once runtime
                     # asserts cause refinement, but that's NYI)
                     def convert(s):
+                        if s in (int_oo, -int_oo):
+                            return None
                         try:
                             return int(s)
                         except TypeError:

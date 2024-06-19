@@ -103,7 +103,7 @@ DECLARE_DISPATCH(upsampling_bicubic2d, upsample_bicubic2d_kernel);
 DECLARE_DISPATCH(_upsampling_bicubic2d_aa, _upsample_bicubic2d_aa_kernel);
 DECLARE_DISPATCH(_upsampling_bicubic2d_aa, _upsample_bicubic2d_aa_backward_kernel);
 
-static C10_UNUSED std::array<int64_t, 3> upsample_1d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
+inline C10_UNUSED std::array<int64_t, 3> upsample_1d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
   TORCH_CHECK(
       output_size.size() == 1,
       "It is expected output_size equals to 1, but got size ",
@@ -131,7 +131,7 @@ static C10_UNUSED std::array<int64_t, 3> upsample_1d_common_check(IntArrayRef in
   return {nbatch, channels, output_width};
 }
 
-static C10_UNUSED std::array<int64_t, 4> upsample_2d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
+inline C10_UNUSED std::array<int64_t, 4> upsample_2d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
   TORCH_CHECK(
       output_size.size() == 2,
       "It is expected output_size equals to 2, but got size ",
@@ -167,7 +167,7 @@ static C10_UNUSED std::array<int64_t, 4> upsample_2d_common_check(IntArrayRef in
   return {nbatch, channels, output_height, output_width};
 }
 
-static C10_UNUSED
+inline C10_UNUSED
 std::array<int64_t, 5> upsample_3d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
   TORCH_CHECK(
       output_size.size() == 3,
@@ -210,7 +210,7 @@ std::array<int64_t, 5> upsample_3d_common_check(IntArrayRef input_size, IntArray
   return {nbatch, channels, output_depth, output_height, output_width};
 }
 
-static inline void upsample_2d_shape_check(
+inline void upsample_2d_shape_check(
     const Tensor& input,
     const Tensor& grad_output,
     int64_t nbatch,
@@ -251,7 +251,7 @@ static inline void upsample_2d_shape_check(
 }
 
 template <typename scalar_t>
-static inline scalar_t compute_scales_value(
+inline scalar_t compute_scales_value(
     const std::optional<double> scale,
     int64_t input_size,
     int64_t output_size) {
@@ -263,7 +263,7 @@ static inline scalar_t compute_scales_value(
 }
 
 template <typename scalar_t>
-static inline scalar_t area_pixel_compute_scale(
+inline scalar_t area_pixel_compute_scale(
     int64_t input_size,
     int64_t output_size,
     bool align_corners,
@@ -281,7 +281,7 @@ static inline scalar_t area_pixel_compute_scale(
 }
 
 template <typename scalar_t>
-static inline scalar_t area_pixel_compute_source_index(
+inline scalar_t area_pixel_compute_source_index(
     scalar_t scale,
     int64_t dst_index,
     bool align_corners,
@@ -308,7 +308,7 @@ static inline scalar_t area_pixel_compute_source_index(
   }
 }
 
-static inline int64_t nearest_neighbor_compute_source_index(
+inline int64_t nearest_neighbor_compute_source_index(
     const float scale,
     int64_t dst_index,
     int64_t input_size) {
@@ -319,7 +319,7 @@ static inline int64_t nearest_neighbor_compute_source_index(
   return src_index;
 }
 
-static inline int64_t nearest_neighbor_exact_compute_source_index(
+inline int64_t nearest_neighbor_exact_compute_source_index(
     const float scale,
     int64_t dst_index,
     int64_t input_size) {
@@ -331,7 +331,7 @@ static inline int64_t nearest_neighbor_exact_compute_source_index(
   return src_index;
 }
 
-static inline int64_t nearest_idx(
+inline int64_t nearest_idx(
     int64_t output_index,
     int64_t input_size,
     int64_t output_size,
@@ -352,7 +352,7 @@ static inline int64_t nearest_idx(
   }
 }
 
-static inline int64_t nearest_exact_idx(
+inline int64_t nearest_exact_idx(
     int64_t output_index,
     int64_t input_size,
     int64_t output_size,
@@ -365,7 +365,7 @@ static inline int64_t nearest_exact_idx(
 typedef int64_t (*nearest_idx_fn_t)(int64_t, int64_t, int64_t, std::optional<double>);
 
 template <typename scalar_t>
-static scalar_t upsample_get_value_bounded(
+scalar_t upsample_get_value_bounded(
     scalar_t* data,
     int64_t width,
     int64_t height,
@@ -377,7 +377,7 @@ static scalar_t upsample_get_value_bounded(
 }
 
 template <typename scalar_t>
-static void upsample_increment_value_bounded(
+void upsample_increment_value_bounded(
     scalar_t* data,
     int64_t width,
     int64_t height,
@@ -392,17 +392,17 @@ static void upsample_increment_value_bounded(
 // Based on
 // https://en.wikipedia.org/wiki/Bicubic_interpolation#Bicubic_convolution_algorithm
 template <typename scalar_t>
-static inline scalar_t cubic_convolution1(scalar_t x, scalar_t A) {
+scalar_t cubic_convolution1(scalar_t x, scalar_t A) {
   return ((A + 2) * x - (A + 3)) * x * x + 1;
 }
 
 template <typename scalar_t>
-static inline scalar_t cubic_convolution2(scalar_t x, scalar_t A) {
+scalar_t cubic_convolution2(scalar_t x, scalar_t A) {
   return ((A * x - 5 * A) * x + 8 * A) * x - 4 * A;
 }
 
 template <typename scalar_t>
-static inline void get_cubic_upsample_coefficients(
+void get_cubic_upsample_coefficients(
     scalar_t coeffs[4],
     scalar_t t) {
   scalar_t A = -0.75;
@@ -418,7 +418,7 @@ static inline void get_cubic_upsample_coefficients(
 }
 
 template <typename scalar_t>
-static inline scalar_t cubic_interp1d(
+inline scalar_t cubic_interp1d(
     scalar_t x0,
     scalar_t x1,
     scalar_t x2,
@@ -434,7 +434,7 @@ static inline scalar_t cubic_interp1d(
 // type can accurately represent, the type casting to `int64_t` might exceed
 // `input_size`, causing overflow. So we guard it with `std::min` below.
 template<typename scalar_t, typename opmath_t>
-static inline void guard_index_and_lambda(const opmath_t& real_input_index, const int64_t& input_size, int64_t& input_index, scalar_t& lambda) {
+inline void guard_index_and_lambda(const opmath_t& real_input_index, const int64_t& input_size, int64_t& input_index, scalar_t& lambda) {
   input_index = std::min(static_cast<int64_t>(floorf(real_input_index)), input_size - 1);
   lambda = std::min(
       std::max(real_input_index - input_index, static_cast<opmath_t>(0)),
@@ -443,7 +443,7 @@ static inline void guard_index_and_lambda(const opmath_t& real_input_index, cons
 }
 
 template<typename scalar_t, typename opmath_t>
-static inline void compute_source_index_and_lambda(
+inline void compute_source_index_and_lambda(
     int64_t& input_index0,
     int64_t& input_index1,
     scalar_t& lambda0,

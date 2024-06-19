@@ -2276,11 +2276,6 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
   return result.load();
 }
 
-static Tensor value_selecting_reduction_backward(const Tensor& grad, int64_t dim, const Tensor& indices, at::IntArrayRef sizes, bool keepdim) {
-    return at::native::value_selecting_reduction_backward_symint(grad, dim, indices, c10::fromIntArrayRefSlow(sizes), keepdim);
-}
-
-
 // max(dim), min(dim), topk(dim), mode(dim), are examples of reduction
 // functions that select values. value_selecting_reduction_backward is the
 // backward function for those operators; it propagates the grad to the

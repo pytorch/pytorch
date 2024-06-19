@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import operator
@@ -21,7 +22,7 @@ from typing import (
     TYPE_CHECKING,
     Union,
 )
-from typing_extensions import TypeAlias
+from typing_extensions import deprecated, TypeAlias
 
 
 if TYPE_CHECKING:
@@ -1045,17 +1046,17 @@ def type_to_dtype(typ: type) -> torch.dtype:
 
     assert isinstance(typ, type)
 
-    if typ is bool:
+    if typ in (bool, torch.SymBool):
         return torch.bool
-    if typ in [int, torch.SymInt]:
+    if typ in (int, torch.SymInt):
         return torch.long
-    if typ in [float, torch.SymFloat]:
+    if typ in (float, torch.SymFloat):
         return torch.get_default_dtype()
     # TODO: sym_complex_float?
     if typ is complex:
         return corresponding_complex_dtype(torch.get_default_dtype())
 
-    raise ValueError("Invalid type!")
+    raise ValueError(f"Invalid type {typ}!")
 
 
 def get_dtype(x: Union[torch.Tensor, NumberType]):
@@ -1362,8 +1363,12 @@ def number_type(
         return type(x)
 
 
-def expr_type(x: sympy.Expr) -> Type:
-    if x.is_integer:  # type: ignore[attr-defined]
+def expr_type(x: sympy.Basic) -> Type:
+    import sympy
+
+    if x.kind is sympy.core.kind.BooleanKind:
+        return bool
+    elif x.is_integer:  # type: ignore[attr-defined]
         return int
     else:
         # NB: Not strictly correct, but we don't support SymPy complex or bool.
@@ -1470,13 +1475,13 @@ def elementwise_dtypes(
     import sympy
 
     for x in args:
-        if not isinstance(x, (Number, TensorLike, sympy.Expr)):
+        if not isinstance(x, (Number, TensorLike, sympy.Basic)):
             msg = f"Unexpected type {str(type(x))} when computing elementwise type promotion!"
             raise ValueError(msg)
 
         if isinstance(x, Number):
             highest_type = get_higher_type(highest_type, number_type(x))
-        elif isinstance(x, sympy.Expr):
+        elif isinstance(x, sympy.Basic):
             highest_type = get_higher_type(highest_type, expr_type(x))
         else:
             # x is a TensorLike
@@ -1789,6 +1794,11 @@ def check_in_bounds_for_storage(
 # NOTE: This function should ideally be removed, but some Meta internal models
 # packaged with `torch.package` are using it, so it will have to be removed
 # at some point in the future when those models no longer use this function.
+@deprecated(
+    "`torch._prims_common.check` is deprecated and will be removed in the future. "
+    "Please use `torch._check*` functions instead.",
+    category=FutureWarning,
+)
 def check(
     b: bool, s: Callable[[], str], exc_type: Type[Exception] = RuntimeError
 ) -> None:
@@ -1801,12 +1811,6 @@ def check(
     .. note:: This function is planned for removal in the future. Please use
         `torch._check*` functions instead.
     """
-    warnings.warn(
-        DeprecationWarning(
-            "'torch._prims_common.check' will be removed in the future. Please use "
-            "'torch._check*' functions instead"
-        )
-    )
     torch._check_with(exc_type, b, s)
 
 

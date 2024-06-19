@@ -101,7 +101,7 @@ endfunction()
 # setting to `python -c`, or using with pycmd. This allows multiline code to be
 # nested nicely in the surrounding code structure.
 #
-# This function respsects PYTHON_EXECUTABLE if it defined, otherwise it uses
+# This function respsects Python_EXECUTABLE if it defined, otherwise it uses
 # `python` and hopes for the best. An error will be thrown if it is not found.
 #
 # Args:
@@ -109,11 +109,11 @@ endfunction()
 #     text   : text to remove indentation from
 #
 function(dedent outvar text)
-  # Use PYTHON_EXECUTABLE if it is defined, otherwise default to python
-  if("${PYTHON_EXECUTABLE}" STREQUAL "")
-    set(_python_exe "python")
+  # Use Python_EXECUTABLE if it is defined, otherwise default to python
+  if("${Python_EXECUTABLE}" STREQUAL "")
+    set(_python_exe "python3")
   else()
-    set(_python_exe "${PYTHON_EXECUTABLE}")
+    set(_python_exe "${Python_EXECUTABLE}")
   endif()
   set(_fixup_cmd "import sys; from textwrap import dedent; print(dedent(sys.stdin.read()))")
   file(WRITE "${CMAKE_BINARY_DIR}/indented.txt" "${text}")
@@ -134,11 +134,11 @@ endfunction()
 
 
 function(pycmd_no_exit outvar exitcode cmd)
-  # Use PYTHON_EXECUTABLE if it is defined, otherwise default to python
-  if("${PYTHON_EXECUTABLE}" STREQUAL "")
+  # Use Python_EXECUTABLE if it is defined, otherwise default to python
+  if("${Python_EXECUTABLE}" STREQUAL "")
     set(_python_exe "python")
   else()
-    set(_python_exe "${PYTHON_EXECUTABLE}")
+    set(_python_exe "${Python_EXECUTABLE}")
   endif()
   # run the actual command
   execute_process(
@@ -159,7 +159,7 @@ endfunction()
 # Common indentation in the text of `cmd` is removed before the command is
 # executed, so the caller does not need to worry about indentation issues.
 #
-# This function respsects PYTHON_EXECUTABLE if it defined, otherwise it uses
+# This function respsects Python_EXECUTABLE if it defined, otherwise it uses
 # `python` and hopes for the best. An error will be thrown if it is not found.
 #
 # Args:
@@ -434,7 +434,6 @@ function(torch_compile_options libname)
       -Wextra
       -Wdeprecated
       -Wno-unused-parameter
-      -Wno-unused-function
       -Wno-missing-field-initializers
       -Wno-unknown-pragmas
       -Wno-type-limits
@@ -443,6 +442,11 @@ function(torch_compile_options libname)
       -Wno-strict-overflow
       -Wno-strict-aliasing
       )
+    if("${libname}" STREQUAL "torch_cpu")
+      list(APPEND private_compile_options -Wunused-function)
+    else()
+      list(APPEND private_compile_options -Wno-unused-function)
+    endif()
     if(NOT "${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
       list(APPEND private_compile_options
         # Considered to be flaky.  See the discussion at
@@ -450,12 +454,11 @@ function(torch_compile_options libname)
         -Wno-maybe-uninitialized)
     endif()
 
+    if(WERROR)
+      list(APPEND private_compile_options -Wno-strict-overflow)
+    endif()
   endif()
 
-  if(MSVC)
-  elseif(WERROR)
-    list(APPEND private_compile_options -Wno-strict-overflow)
-  endif()
 
   target_compile_options(${libname} PRIVATE
       $<$<COMPILE_LANGUAGE:CXX>:${private_compile_options}>)
