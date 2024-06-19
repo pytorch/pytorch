@@ -329,14 +329,21 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and hasattr(
                 self.value, "__exit__"
             )  # TODO(voz): These can invoke user code!
-            and check_constant_args(args, kwargs)
-            and self.value.__init__ == object.__init__
+            # and check_constant_args(args, kwargs)
+            # and self.value.__init__ == object.__init__
             and len(kwargs) == 0  # TODO(ybliang): support kwargs
         ):
-            unwrapped_args = [x.as_python_constant() for x in args]
+            # unwrapped_args = [x.as_python_constant() for x in args]
+            cm_obj = tx.output.side_effects.track_object_new(
+                self.source, self.value, UserDefinedObjectVariable, {}
+            )
+            cm_obj.call_method(tx, "__init__", args, kwargs)
+
             return GenericContextWrappingVariable(
-                unwrapped_args,
-                cm_obj=self.value(*unwrapped_args),
+                # unwrapped_args,
+                args,
+                # cm_obj=self.value(*unwrapped_args),
+                cm_obj=cm_obj,
             )
 
         elif is_namedtuple_cls(self.value):
@@ -485,6 +492,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ]:
             inner = str(getattr(self.value, "__name__", None))
         return f"{self.__class__.__name__}({inner})"
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}({self.value_type.__name__})"
 
     def python_type(self):
         return self.value_type
