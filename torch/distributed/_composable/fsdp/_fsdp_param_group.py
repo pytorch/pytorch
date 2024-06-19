@@ -266,12 +266,12 @@ class FSDPParamGroup:
     def pre_forward(
         self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+        logger.debug("%s", self._with_fqn("FSDP::pre_forward"))
         with record_function(self._with_fqn("FSDP::pre_forward")):
             self._training_state = TrainingState.FORWARD
             self.unshard()
             self.wait_for_unshard()
             args, kwargs = self._register_post_backward_hook(args, kwargs)
-            logger.debug("%s", self._with_fqn("FSDP::pre_forward"))
             return args, kwargs
 
     def post_forward(self, module: nn.Module, input: Any, output: Any):
@@ -290,6 +290,7 @@ class FSDPParamGroup:
         self._post_forward_indices.append(post_forward_index)
 
     def pre_backward(self, default_prefetch: bool, *unused: Any):
+        logger.debug("%s", self._with_fqn("FSDP::pre_backward"))
         if self._training_state == TrainingState.PRE_BACKWARD:
             return
         with record_function(self._with_fqn("FSDP::pre_backward")):
@@ -298,9 +299,9 @@ class FSDPParamGroup:
             self.wait_for_unshard()
             if default_prefetch:
                 self._backward_prefetch()
-            logger.debug("%s", self._with_fqn("FSDP::pre_backward"))
 
     def post_backward(self, *unused: Any):
+        logger.debug("%s", self._with_fqn("FSDP::post_backward"))
         self._training_state = TrainingState.POST_BACKWARD
         with record_function(self._with_fqn("FSDP::post_backward_accumulate")):
             for fsdp_param in self.fsdp_params:
@@ -345,7 +346,6 @@ class FSDPParamGroup:
                 self.all_reduce_grads,
                 self._partial_reduce_output,
             )
-            logger.debug("%s", self._with_fqn("FSDP::post_backward"))
 
     def finalize_backward(self):
         if self._post_reduce_event is not None:
