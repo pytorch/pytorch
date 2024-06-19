@@ -292,7 +292,7 @@ def _get_warning_all_cflag(warning_all: bool = True) -> List[str]:
 
 def _get_cpp_std_cflag(std_num: str = "c++17") -> List[str]:
     if _IS_WINDOWS:
-        return [f"std:{std_num}"]
+        return [f"std:{std_num}", "openmp:experimental"]
     else:
         return [f"std={std_num}"]
 
@@ -345,7 +345,7 @@ def _get_optimization_cflags() -> List[str]:
 
 def _get_shared_cflag(compile_only: bool) -> List[str]:
     if _IS_WINDOWS:
-        SHARED_FLAG = ["DLL"]
+        SHARED_FLAG = ["DLL", "MD"]
     else:
         if compile_only:
             return ["fPIC"]
@@ -553,10 +553,13 @@ def _get_torch_related_args(include_pytorch: bool, aot_mode: bool):
     ]
     libraries_dirs = [TORCH_LIB_PATH]
     libraries = []
-    if sys.platform == "linux" and not config.is_fbcode():
+    if not config.is_fbcode():
         libraries = ["torch", "torch_cpu"]
         if not aot_mode:
             libraries.append("torch_python")
+    
+    if _IS_WINDOWS:
+        libraries.append("sleef")
 
     # Unconditionally import c10 for non-abi-compatible mode to use TORCH_CHECK - See PyTorch #108690
     if not config.abi_compatible:
@@ -989,7 +992,7 @@ class CppBuilder:
     """
 
     def _get_shared_lib_ext(self) -> str:
-        SHARED_LIB_EXT = ".dll" if _IS_WINDOWS else ".so"
+        SHARED_LIB_EXT = ".pyd" if _IS_WINDOWS else ".so"
         return SHARED_LIB_EXT
 
     def _get_object_ext(self) -> str:
@@ -1141,7 +1144,9 @@ class CppBuilder:
         return command_line
 
     def get_target_file_path(self):
-        return self._target_file
+        path = self._target_file
+        path = path.replace("\\", "/")
+        return path
 
     """
     def convert_to_cpp_extension_args(self):
@@ -1168,6 +1173,8 @@ class CppBuilder:
         _create_if_dir_not_exist(_build_tmp_dir)
 
         build_cmd = self.get_command_line()
+
+        print("!!!! build_cmd: ", build_cmd)
 
         status = run_command_line(build_cmd, cwd=_build_tmp_dir)
 

@@ -3925,7 +3925,7 @@ class KernelGroup:
         kernel_name = str(Placeholder.DESCRIPTIVE_NAME) if name is None else name
         arg_defs, _, _ = self.args.cpp_argdefs()
         arg_defs = ",\n".ljust(25).join(arg_defs)
-        code.writeline(f'extern "C" void {kernel_decl_name}({arg_defs})')
+        code.writeline(f'extern "C" __declspec(dllexport) void {kernel_decl_name}({arg_defs})')
 
         # 3. Function body
         with code.indent():

@@ -77,7 +77,14 @@ class VecISA:
 #include <ATen/cpu/vec/vec.h>
 #endif
 
-__attribute__((aligned(64))) float in_out_ptr0[16] = {0.0};
+#if defined(__GNUC__)
+#define __at_align__ __attribute__((aligned(64)))
+#elif defined(_WIN32)
+#define __at_align__ __declspec(align(64))
+#else
+#define __at_align__
+#endif
+__at_align__ float in_out_ptr0[16] = {0.0};
 
 extern "C" void __avx_chk_kernel() {
     auto tmp0 = at::vec::Vectorized<float>(1);
@@ -139,10 +146,9 @@ cdll.LoadLibrary("__lib_path__")
             try:
                 # Check if the output file exist, and compile when not.
                 output_path = x86_isa_help_builder.get_target_file_path()
+                output_path = output_path.replace("\\", "/")
                 if not os.path.isfile(output_path):
                     status, target_file = x86_isa_help_builder.build()
-                    if status:
-                        return False
 
                 # Check build result
                 subprocess.check_call(
@@ -155,7 +161,10 @@ cdll.LoadLibrary("__lib_path__")
                     env={**os.environ, "PYTHONPATH": ":".join(sys.path)},
                 )
             except Exception as e:
+                print("!!!!!!! 2")
                 return False
+            
+            print("!!!!!!! 3")
 
             return True
 
@@ -297,7 +306,7 @@ def valid_vec_isa_list() -> List[VecISA]:
     isa_list = []
     _cpu_supported_isa = x86_isa_checker()
     for isa in supported_vec_isa_list:
-        if str(isa) in _cpu_supported_isa:
+        if str(isa) in _cpu_supported_isa and isa:
             isa_list.append(isa)
     return isa_list
 

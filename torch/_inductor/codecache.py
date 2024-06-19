@@ -1139,13 +1139,17 @@ class CompiledFxGraph:
 
 
 def cpp_compiler() -> str:
-    if config.is_fbcode():
-        return build_paths.cc() if torch.version.hip is None else build_paths.clang()
-    if isinstance(config.cpp.cxx, (list, tuple)):
-        search = tuple(config.cpp.cxx)
+    if _IS_WINDOWS:
+        compiler = os.environ.get("CXX", "cl")
     else:
-        search = (config.cpp.cxx,)
-    return cpp_compiler_search(search)
+        if config.is_fbcode():
+            return build_paths.cc()
+        if isinstance(config.cpp.cxx, (list, tuple)):
+            search = tuple(config.cpp.cxx)
+        else:
+            search = (config.cpp.cxx,)
+        compiler = cpp_compiler_search(search)
+    return compiler
 
 
 @functools.lru_cache(1)
@@ -2043,6 +2047,7 @@ def cpp_prefix_path() -> str:
             content,
             "h",
         )
+    filename = filename.replace("\\", "/")
     return filename
 
 
@@ -2154,6 +2159,7 @@ class CppCodeCache:
 
     @staticmethod
     def _load_library_inner(path: str, key: str) -> Union[CDLL, ModuleType]:
+        print("!!!!!!!!!!!!!!!! path: ", path)
         return cdll.LoadLibrary(path)
 
     @classmethod
@@ -2292,11 +2298,14 @@ class CppPythonBindingsCodeCache(CppCodeCache):
 
         #ifndef _MSC_VER
         #if __cplusplus < 202002L
-        // C++20 earlier code
+        // C++20 (earlier) code
         // https://en.cppreference.com/w/cpp/language/attributes/likely
         #define likely(x)       __builtin_expect(!!(x), 1)
         #define unlikely(x)     __builtin_expect(!!(x), 0)
         #endif
+        #else
+        #define likely(x) (x)
+        #define unlikely(x) (x)
         #endif
 
         // This is defined in guards.cpp so we don't need to import PyTorch headers that are slooow.
