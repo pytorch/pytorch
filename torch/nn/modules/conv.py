@@ -278,7 +278,7 @@ class Conv1d(_ConvNd):
             output. Default: ``True``
 
     """.format(
-            **reproducibility_notes, **convolution_notes
+            **reproducibility_notes, **convolution_notes  # type: ignore[has-type]
         )
         + r"""
 
@@ -446,7 +446,7 @@ class Conv2d(_ConvNd):
         bias (bool, optional): If ``True``, adds a learnable bias to the
             output. Default: ``True``
     """.format(
-            **reproducibility_notes, **convolution_notes
+            **reproducibility_notes, **convolution_notes  # type: ignore[has-type]
         )
         + r"""
 
@@ -612,7 +612,7 @@ class Conv3d(_ConvNd):
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
         bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
     """.format(
-            **reproducibility_notes, **convolution_notes
+            **reproducibility_notes, **convolution_notes  # type: ignore[has-type]
         )
         + r"""
 
@@ -874,7 +874,7 @@ class ConvTranspose1d(_ConvTransposeNd):
         bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
     """.format(
-            **reproducibility_notes, **convolution_notes
+            **reproducibility_notes, **convolution_notes  # type: ignore[has-type]
         )
         + r"""
 
@@ -1037,7 +1037,7 @@ class ConvTranspose2d(_ConvTransposeNd):
         bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
     """.format(
-            **reproducibility_notes, **convolution_notes
+            **reproducibility_notes, **convolution_notes  # type: ignore[has-type]
         )
         + r"""
 
@@ -1225,7 +1225,7 @@ class ConvTranspose3d(_ConvTransposeNd):
         bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
     """.format(
-            **reproducibility_notes, **convolution_notes
+            **reproducibility_notes, **convolution_notes  # type: ignore[has-type]
         )
         + r"""
 

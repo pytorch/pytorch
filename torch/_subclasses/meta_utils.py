@@ -1565,7 +1565,7 @@ class MetaConverter:
 
         # Filter out cases we don't support
         # TODO: This can probably be simplified quite a bit
-        if isinstance(t, torch.Tensor) or is_traceable_wrapper_subclass(t):
+        if isinstance(t, torch.Tensor):
             if (
                 # Lazy tensors are not supported.  Note that XLA is
                 # implemented on top of lazy tensor, not excluded here; we

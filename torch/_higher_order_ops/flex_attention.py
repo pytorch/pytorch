@@ -181,6 +181,7 @@ def trace_flex_attention(
     ] + [torch.zeros((), dtype=torch.int) for _ in range(4)]
     with TransformGetItemToIndex():
         score_graph = reenter_make_fx(score_mod)(*example_vals, *other_buffers)
+    assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
     qualname = proxy_mode.tracer.get_fresh_qualname("sdpa_score")
     proxy_mode.tracer.root.register_module(qualname, score_graph)
     node_args = (query, key, value, score_graph, *other_buffers)
@@ -533,6 +534,7 @@ def trace_flex_attention_backward(
     with TransformGetItemToIndex():
         fw_graph = reenter_make_fx(fw_graph)(*fw_example_vals, *other_buffers)
         joint_graph = reenter_make_fx(joint_graph)(*bw_example_vals, *other_buffers)
+    assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
     proxy_mode.tracer.root.register_module("fw_graph", fw_graph)
     proxy_mode.tracer.root.register_module("joint_graph", joint_graph)
     node_args = (
