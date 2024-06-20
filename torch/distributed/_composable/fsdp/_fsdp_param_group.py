@@ -290,9 +290,9 @@ class FSDPParamGroup:
         self._post_forward_indices.append(post_forward_index)
 
     def pre_backward(self, default_prefetch: bool, *unused: Any):
-        logger.debug("%s", self._with_fqn("FSDP::pre_backward"))
         if self._training_state == TrainingState.PRE_BACKWARD:
             return
+        logger.debug("%s", self._with_fqn("FSDP::pre_backward"))
         with record_function(self._with_fqn("FSDP::pre_backward")):
             self._training_state = TrainingState.PRE_BACKWARD
             self.unshard()  # no-op if prefetched
