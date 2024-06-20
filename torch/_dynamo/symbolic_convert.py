@@ -422,15 +422,12 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                     self.push(value)
                 self.jump(inst)
         elif isinstance(value, UserDefinedObjectVariable):
-            try:
+            x = None
+            if hasattr(value, "__bool__"):
                 x = value.var_getattr(self, "__bool__")
-            except exc.ObservedException:
-                # if __bool__ is missing, trying __len__ to infer a truth value.
+            # if __bool__ is missing, trying __len__ to infer a truth value.
+            if (x is None or isinstance(x, GetAttrVariable)) and hasattr(value, "__len__"):
                 x = value.var_getattr(self, "__len__")
-            else:
-                if isinstance(x, GetAttrVariable):
-                    # if __bool__ is missing, trying __len__ to infer a truth value.
-                    x = value.var_getattr(self, "__len__")
 
             # __bool__ or __len__ is function
             if isinstance(x, UserMethodVariable):
@@ -448,6 +445,10 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                     )
             # __bool__ or __len__ is non-function or not existed in the user defined object
             else:
+                assert not (
+                    isinstance(x, UserDefinedClassVariable)
+                    and x.value is torch._dynamo.variables.user_defined.NO_SUCH_SUBOBJ
+                )
                 if truth_fn(True):
                     if push:
                         self.push(value)
