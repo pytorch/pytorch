@@ -680,12 +680,15 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Helper that either looks up the cached NCCL communicators or creates
   // a new set of NCCL communicators as a cache entry
+  // if 'onlyCached' is true, return nullptr if an existing cached communicator
+  // is not found
   std::shared_ptr<NCCLComm> getNCCLComm(
       const std::string& deviceKey,
       at::Device& device,
       OpType opType,
       int p2pRank = 0,
-      bool isSendRecvSelf = false);
+      bool isSendRecvSelf = false,
+      bool onlyCached = false);
 
   // Wrapper method which can be overridden for tests.
   virtual std::exception_ptr checkForNCCLErrors(
