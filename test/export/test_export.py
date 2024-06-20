@@ -1260,8 +1260,9 @@ def forward(self, x):
             (torch.ones(4, 4),),
             dynamic_shapes=({0: Dim("x")},),
         )
+
         self.assertEqual(
-            ep_for_training.range_constraints, ep_for_real.range_constraints
+            str(ep_for_training.range_constraints), str(ep_for_real.range_constraints)
         )
 
     def test_export_for_training_with_container_type(self):

@@ -1410,7 +1410,7 @@ def _export_to_aten_ir_make_fx(
         full_args.extend(flat_args)
 
         with enable_python_dispatcher():
-            gm = make_fx(functional_call, export=True, pre_dispatch=True)(*full_args)
+            gm = make_fx(functional_call, pre_dispatch=True)(*full_args)
 
         if isinstance(mod, torch.fx.GraphModule) and hasattr(mod, "meta"):
             gm.meta.update(mod.meta)
