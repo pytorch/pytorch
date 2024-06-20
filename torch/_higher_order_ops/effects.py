@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from enum import Enum
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -12,19 +12,26 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
+from .torchbind import call_torchbind
 
 
 class _EffectType(Enum):
     ORDERED = "Ordered"
 
 
-SIDE_EFFECTS: Dict[torch._ops.OpOverload, _EffectType] = {
+OpType = Union[torch._ops.HigherOrderOperator, torch._ops.OpOverload]
+
+
+SIDE_EFFECTS: Dict[OpType, _EffectType] = {
     torch.ops.aten._print.default: _EffectType.ORDERED,
+    call_torchbind: _EffectType.ORDERED,
 }
 
 
-def _register_effectful_op(op: torch._ops.OpOverload, effect: _EffectType):
-    assert isinstance(op, torch._ops.OpOverload) and not has_aliasing(op)
+def _register_effectful_op(op: OpType, effect: _EffectType):
+    assert isinstance(
+        op, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)
+    ) and not has_aliasing(op)
     if op in SIDE_EFFECTS and SIDE_EFFECTS[op] != effect:
         raise RuntimeError(
             f"Already registered effect type {SIDE_EFFECTS[op]} to op {op}, "
@@ -53,11 +60,11 @@ class WithEffects(HigherOrderOperator):
     def __call__(
         self,
         token,
-        op: torch._ops.OpOverload,
+        op: OpType,
         *args: Tuple[Any, ...],
         **kwargs: Dict[str, Any],
     ) -> Tuple[Any, ...]:
-        assert isinstance(op, torch._ops.OpOverload)
+        assert isinstance(op, (torch._ops.HigherOrderOperator, torch._ops.OpOverload))
         assert not has_aliasing(op), "Ops with aliasing is not supported"
         assert has_effects(op, args, kwargs)
         assert isinstance(kwargs, dict)
@@ -67,7 +74,11 @@ class WithEffects(HigherOrderOperator):
 with_effects = WithEffects()
 
 
-def has_aliasing(op: torch._ops.OpOverload):
+def has_aliasing(op: OpType):
+    # NOT FOR PUBLIC USE
+    if isinstance(op, torch._ops.HigherOrderOperator):
+        return op not in SIDE_EFFECTS
+
     for arg in op._schema.arguments:
         if arg.alias_info is not None:
             return True
@@ -84,7 +95,7 @@ def has_effects(op, args, kwargs) -> bool:
         return False
 
     return (
-        isinstance(op, torch._ops.OpOverload)
+        isinstance(op, (torch._ops.HigherOrderOperator, torch._ops.OpOverload))
         and not has_aliasing(op)
         and get_effect_key(op, args, kwargs) is not None
     )
@@ -163,10 +174,19 @@ with_effects.fallthrough(DispatchKey.AutogradCPU)
 with_effects.fallthrough(DispatchKey.AutogradCUDA)
 
 
+def _get_schema(op, args) -> torch.FunctionSchema:
+    if isinstance(op, torch._ops.OpOverload):
+        return op._schema
+    elif op == call_torchbind:
+        return getattr(args[0], args[1]).schema
+    else:
+        raise RuntimeError(f"Unable to get schema for op {op}")
+
+
 def handle_effects(
     allow_token_discovery: bool,
     tokens: Dict[_EffectType, torch.Tensor],
-    op: torch._ops.OpOverload,
+    op: OpType,
     args: Tuple[Any, ...],
     kwargs: Dict[str, Any],
 ) -> Any:
@@ -207,14 +227,15 @@ def handle_effects(
             unwrapped_token, op, *unwrapped_args, **unwrapped_kwargs  # type: ignore[arg-type]
         )
 
-    if len(op._schema.returns) == 0:
+    schema = _get_schema(op, unwrapped_args)
+    if len(schema.returns) == 0:
         assert unwrapped_outs[0] is None
         unwrapped_outs = None  # type: ignore[assignment]
-    elif len(op._schema.returns) == 1:
+    elif len(schema.returns) == 1:
         assert len(unwrapped_outs) == 1
         unwrapped_outs = unwrapped_outs[0]
     else:
-        assert len(unwrapped_outs) == len(op._schema.returns)
+        assert len(unwrapped_outs) == len(schema.returns)
 
     # Add the newly created token into the tokens map for a following call to
     # use this token.

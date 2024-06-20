@@ -35,7 +35,13 @@ from torch._prims_common import (
     Number,
 )
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
-from torch.utils._sympy.functions import CeilDiv, FloorDiv, IntTrueDiv, ModularIndexing
+from torch.utils._sympy.functions import (
+    CeilDiv,
+    FloorDiv,
+    Identity,
+    IntTrueDiv,
+    ModularIndexing,
+)
 from .._dynamo.utils import import_submodule
 
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
@@ -1021,7 +1027,9 @@ def pointwise_cat(inputs, dim=0):
 
             # if we're concatting [4], [2]
             # when we index the second tensor for 5 we want to index 5 - 4
-            idx_load[dim] -= inputs_ranges[i][0]
+            # Use Identity to prevent expansion of index * stride to keep expression
+            # in same int bitwidth as shape
+            idx_load[dim] = Identity(idx_load[dim] - inputs_ranges[i][0])
 
             masked_loads.append(
                 ops.masked(
@@ -3268,18 +3276,19 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
     if isinstance(src, Number):
         src = full_like(self, src)
 
-    fallback_result = scatter_fallback(
-        aten.scatter_reduce_.two,
-        self,
-        dim,
-        index,
-        src,
-        reduce=reduce,
-        include_self=include_self,
-    )
+    if reduce is not None:
+        fallback_result = scatter_fallback(
+            aten.scatter_reduce_.two,
+            self,
+            dim,
+            index,
+            src,
+            reduce=reduce,
+            include_self=include_self,
+        )
 
-    if fallback_result:
-        return fallback_result
+        if fallback_result:
+            return fallback_result
 
     assert isinstance(self, TensorBox)
     assert "int" in str(index.get_dtype())
