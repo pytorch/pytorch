@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Owner(s): ["oncall: distributed"]
 
 import contextlib
@@ -994,6 +995,19 @@ def patch_unshard(new_unshard: Callable):
     finally:
         dist.barrier()
         FSDPParamGroup.unshard = orig_unshard
+
+
+@no_type_check
+@contextlib.contextmanager
+def patch_reshard(new_reshard: Callable):
+    orig_reshard = FSDPParamGroup.reshard
+    dist.barrier()
+    FSDPParamGroup.reshard = new_reshard
+    try:
+        yield
+    finally:
+        dist.barrier()
+        FSDPParamGroup.reshard = orig_reshard
 
 
 @no_type_check

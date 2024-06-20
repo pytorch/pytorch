@@ -2623,6 +2623,10 @@ def sample_inputs_gather(op_info, device, dtype, requires_grad, **kwargs):
         make_arg((S,)),
         0,
         torch.tensor([], dtype=torch.uint8, device=device))
+    yield SampleInput(
+        make_arg((S,)),
+        0,
+        torch.tensor([[], []], dtype=torch.uint8, device=device))
     # 0D tensor case
     yield SampleInput(
         make_arg(()),
@@ -6631,9 +6635,7 @@ def sample_inputs_masked_fill(op_info, device, dtype, requires_grad, **kwargs):
 
     if torch.device(device).type == 'cuda':
         # `self` and `mask` on CUDA but `value` is a CPU scalar tensor.
-        yield SampleInput(make_arg((S, S)),
-                          args=(torch.randn(S, S, device=device) > 0,
-                                make_tensor((), device="cpu", dtype=dtype)))
+        yield SampleInput(make_arg((S, S)), args=(torch.randn(S, S, device=device) > 0, torch.randn(())))
 
 def error_inputs_masked_fill(op_info, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float, requires_grad=False)
@@ -11586,6 +11588,12 @@ def reference_flatten(input, start_dim=0, end_dim=-1):
     out_shape = in_shape[:start_dim] + (flatten_bit_dim,) + in_shape[end_dim + 1:]
     return np.reshape(input, out_shape)
 
+
+def sample_inputs_alias_copy(op_info, device, dtype, requires_grad, **kwargs):
+    yield SampleInput(make_tensor((S,), dtype=dtype, device=device, requires_grad=requires_grad))
+    yield SampleInput(make_tensor((), dtype=dtype, device=device, requires_grad=requires_grad))
+
+
 # Operator database (sorted alphabetically)
 op_db: List[OpInfo] = [
     UnaryUfuncInfo('abs',
@@ -12975,14 +12983,6 @@ op_db: List[OpInfo] = [
                     skips=(
                         # RuntimeError: MALFORMED INPUT: Unhandled node kind (in computeValue): aten::div
                         DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_working'),
-                        # FIXME:
-                        # torch.autograd.gradcheck.GradcheckError: Jacobian mismatch for
-                        # output 0 with respect to input 1,
-                        # numerical:tensor(-17746.9307, dtype=torch.float64)
-                        # analytical:tensor(0., dtype=torch.float64)
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients',
-                                     'test_fn_grad', device_type='cpu',
-                                     dtypes=(torch.float64,)),
                     )),
     BinaryUfuncInfo('div',
                     aliases=('divide',),
@@ -13097,6 +13097,11 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_diagonal_scatter),
+    OpInfo('alias_copy',
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
+           sample_inputs_func=sample_inputs_alias_copy,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True),
     BinaryUfuncInfo('eq',
                     ref=np.equal,
                     dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
@@ -13182,14 +13187,6 @@ op_db: List[OpInfo] = [
                         # False is not true : Tensors failed to compare as equal!
                         # Attempted to compare equality of tensors with different dtypes
                         DecorateInfo(unittest.skip("Skipped!"), 'TestOpInfo', device_type='xla', dtypes=(torch.long,)),
-                        # FIXME:
-                        # torch.autograd.gradcheck.GradcheckError: Jacobian mismatch for
-                        # output 0 with respect to input 1,
-                        # numerical:tensor(102.4676, dtype=torch.float64)
-                        # analytical:tensor(-17.5182, dtype=torch.float64)
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients',
-                                     'test_fn_grad', device_type='cpu',
-                                     dtypes=(torch.float64,)),
                     )),
     UnaryUfuncInfo('frac',
                    ref=lambda x: np.modf(x)[0],
@@ -14444,6 +14441,29 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta_inplace'),
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_inplace'),
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_inplace_all_strides'),
+           )),
+    OpInfo('as_strided_copy',
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
+           supports_out=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           # vmap does not support inplace views
+           check_inplace_batched_forward_grad=False,
+           sample_inputs_func=sample_inputs_as_strided,
+           skips=(
+               # Note: This xfail is fine -- it's inherent to how as_strided works
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples'),
+               # AssertionError: False is not true : Scalars failed to compare as equal!
+               DecorateInfo(unittest.skip("Errors when storage_offset is included"),
+                            'TestCommon', 'test_variant_consistency_eager'),
+               # Not close
+               DecorateInfo(unittest.skip("Errors when storage_offset is included"),
+                            'TestCommon', 'test_complex_half_reference_testing'),
+               # Not close
+               DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_conj_view'),
+               DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_neg_view'),
+               DecorateInfo(unittest.skip("Numerous errors"), 'TestFwdGradients'),
+               DecorateInfo(unittest.skip("Numerous errors"), 'TestBwdGradients'),
            )),
     OpInfo('as_strided_scatter',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
@@ -15727,7 +15747,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16,
                                            *[torch.bfloat16] if SM53OrLater or TEST_WITH_ROCM else []),
            decorators=(
-               DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-03, rtol=1.3e-03)}),
+               DecorateInfo(toleranceOverride({torch.float16: tol(atol=5e-05, rtol=1e-03)}),
                             'TestInductorOpInfo', 'test_comprehensive', device_type='cpu'),
            ),
            skips=(
@@ -15941,15 +15961,6 @@ op_db: List[OpInfo] = [
                          device_type='cpu'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_symbolic_meta_outplace',
                          device_type='cpu'),
-            # TODO: Do not work even on MI200 because of stride mismatching.
-            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_symbolic_meta_outplace',
-                         device_type='cuda', dtypes=[torch.float16, torch.bfloat16],
-                         active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_meta_outplace',
-                         device_type='cuda', dtypes=[torch.float16, torch.bfloat16],
-                         active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_crossref_backward_amp',
-                         device_type='cuda', active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
             # When changing input from Tensor to CompositeCompliantTensor, input.requires_grad() changes from true to false
             DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_backward',
                          device_type='cpu'),
@@ -15969,6 +15980,19 @@ op_db: List[OpInfo] = [
                          device_type='cuda', dtypes=(torch.bfloat16,), active_if=not SM80OrLater),
             DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_symbolic_meta_outplace',
                          device_type='cuda', dtypes=(torch.bfloat16,), active_if=not SM80OrLater),
+            # FIXME
+            DecorateInfo(unittest.skip('test_cow_input does not work with efficient attention on ROCM'),
+                         'TestCompositeCompliance', 'test_cow_input',
+                         device_type='cuda', dtypes=(torch.bfloat16, torch.float16, torch.float32),
+                         active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_MEM_EFF_ATTENTION),
+            DecorateInfo(unittest.skip('test_fake_crossref_backward_amp does not work with efficient attention on ROCM'),
+                         'TestFakeTensor', 'test_fake_crossref_backward_amp',
+                         device_type='cuda', dtypes=(torch.bfloat16, torch.float16, torch.float32),
+                         active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_MEM_EFF_ATTENTION),
+            DecorateInfo(unittest.skip('test_fake_crossref_backward_no_amp does not work with efficient attention on ROCM'),
+                         'TestFakeTensor', 'test_fake_crossref_backward_no_amp',
+                         device_type='cuda', dtypes=(torch.bfloat16, torch.float16, torch.float32),
+                         active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_MEM_EFF_ATTENTION),
             # registered in fake_impls.py instead of _meta_registrations.py, so meta kernels will fail.
             # However, for implementations that fall back to the constituent ops, the meta kernels may not
             # fail. Fused kernels will fail, whereas unfused kernels will not fail.
@@ -15976,6 +16000,7 @@ op_db: List[OpInfo] = [
             # mem_eff_attention also supports fp32 - so if it is supported the test will fail.
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace",
                          dtypes=(torch.bfloat16, torch.float16), active_if=PLATFORM_SUPPORTS_FUSED_ATTENTION),
+            # TODO: float32 support in ROCM efficient attention
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace",
                          dtypes=(torch.float32,), active_if=PLATFORM_SUPPORTS_MEM_EFF_ATTENTION),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace",
@@ -16015,13 +16040,6 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', device_type='cuda'),
             # None Mismatch Tensor
             DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward', device_type='cuda'),
-            # TODO: Do not work on MI200 because of stride mismatching.
-            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_symbolic_meta_outplace',
-                         device_type='cuda', dtypes=[torch.float16, torch.bfloat16],
-                         active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_meta_outplace',
-                         device_type='cuda', dtypes=[torch.float16, torch.bfloat16],
-                         active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
         )
     ),
     OpInfo(
@@ -16038,7 +16056,10 @@ op_db: List[OpInfo] = [
         check_batched_forward_grad=False,
         # TODO: Skip because it produces a CUDA illegal memory access for some reason
         skip_cow_input_backward=True,
-        decorators=[skipCUDAIf(TEST_WITH_ROCM, "ROCm doesn't support efficient attention")],
+        # FIXME: mask_type == 2 (LowerRight)
+        decorators=[
+            skipCUDAIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "This platform doesn't support efficient attention"),
+            skipCUDAIf(TEST_WITH_ROCM, "Efficient attention on ROCM doesn't support custom_mask_type==2")],
         skips=(
             # Device mismatch due to philox seed and offset
             DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_autocast', device_type='cuda'),
@@ -23242,6 +23263,10 @@ python_ref_db = [
     # View & Shape OpInfos
     #
     PythonRefInfo(
+        "_refs.alias_copy",
+        torch_opinfo_name="alias_copy",
+    ),
+    PythonRefInfo(
         "_refs.atleast_1d",
         torch_opinfo_name="atleast_1d",
         validate_view_consistency=False,
@@ -23259,6 +23284,18 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.as_strided",
         torch_opinfo_name="as_strided",
+        # FIXME: doesn't support chalf
+        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+        skips=(
+            # cloned_mutable_input.is_same(returned_output) INTERNAL ASSERT FAILED
+            DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_neg_view'),
+            DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_conj_view'),
+            DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_neg_conj_view'),
+        ),
+    ),
+    PythonRefInfo(
+        "_refs.as_strided_copy",
+        torch_opinfo_name="as_strided_copy",
         # FIXME: doesn't support chalf
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         skips=(

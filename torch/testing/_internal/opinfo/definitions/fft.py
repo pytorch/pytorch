@@ -259,16 +259,6 @@ op_db: List[OpInfo] = [
                 "TestSchemaCheckModeOpInfo",
                 "test_schema_correctness",
             ),
-            DecorateInfo(
-                # FIXME:
-                # Greatest absolute difference: 0.11340713500976562 at index (0, 6, 3)
-                # (up to 0.04 allowed)
-                # Greatest relative difference: 1.0 at index (0, 6, 3) (up to 0.04 allowed)
-                unittest.skip("Errors are too large; needs investigation"),
-                "TestCommon",
-                "test_complex_half_reference_testing",
-                device_type="cuda",
-            ),
         ),
     ),
     SpectralFuncInfo(

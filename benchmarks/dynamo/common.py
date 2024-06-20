@@ -1184,12 +1184,14 @@ class AOTInductorModelCache:
             else:
                 _register_dataclass_output_as_pytree(example_outputs)
 
-            gm = torch.export._trace._export(
+            # TODO(angelayi): change this to predispatch
+            # https://github.com/pytorch/pytorch/issues/127513 needs to be fixed before changing
+            # to predispatch to avoid performance regressions
+            gm = torch.export._trace._export_to_torch_ir(
                 model,
                 example_args,
                 example_kwargs,
-                pre_dispatch=True,
-            ).module()
+            )
             with torch.no_grad():
                 so_path = torch._inductor.aot_compile(
                     gm, example_args, example_kwargs
@@ -2210,6 +2212,10 @@ class BenchmarkRunner:
 
     @property
     def guard_on_nn_module_models(self):
+        return set()
+
+    @property
+    def inline_inbuilt_nn_modules_models(self):
         return set()
 
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
@@ -3975,9 +3981,12 @@ def run(runner, args, original_dir=None):
             assert "cuda" in args.devices, "Quantization requires CUDA device."
             assert args.bfloat16, "Quantization requires dtype bfloat16."
             try:
-                from .torchao_backend import setup_baseline, torchao_optimize_ctx
-            except ImportError:
                 from torchao_backend import setup_baseline, torchao_optimize_ctx
+            except ImportError:
+                from userbenchmark.dynamo.dynamobench.torchao_backend import (
+                    setup_baseline,
+                    torchao_optimize_ctx,
+                )
 
             setup_baseline()
             baseline_ctx = functools.partial(
@@ -4213,16 +4222,21 @@ def run(runner, args, original_dir=None):
             if name in runner.guard_on_nn_module_models:
                 guard_ctx = torch._dynamo.config.patch(guard_nn_modules=True)
 
+            inline_ctx = contextlib.nullcontext()
+            if name in runner.inline_inbuilt_nn_modules_models:
+                inline_ctx = torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
+
             with guard_ctx:
-                runner.run_one_model(
-                    name,
-                    model,
-                    example_inputs,
-                    optimize_ctx,
-                    experiment,
-                    explain=args.explain,
-                    tag=args.tag,
-                )
+                with inline_ctx:
+                    runner.run_one_model(
+                        name,
+                        model,
+                        example_inputs,
+                        optimize_ctx,
+                        experiment,
+                        explain=args.explain,
+                        tag=args.tag,
+                    )
         if args.generate_aot_autograd_stats:
             stats_file = output_filename.split(".csv")[0] + "_stats.csv"
             output_csv(

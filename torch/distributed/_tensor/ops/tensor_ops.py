@@ -1,8 +1,8 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from typing import cast, List, Optional, Sequence, Tuple
 
 import torch
-
 from torch.distributed._tensor._op_schema import (
     _is_inplace_op,
     OpSchema,

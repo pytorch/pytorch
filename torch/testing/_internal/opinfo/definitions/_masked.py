@@ -535,16 +535,6 @@ op_db: List[OpInfo] = [
                 device_type="cuda",
                 dtypes=(torch.bool, *integral_types(), *complex_types()),
             ),
-            DecorateInfo(
-                # FIXME:
-                # Absolute difference: 20.0 (up to 1e-05 allowed)
-                # Relative difference: 5.742947947068397e-06 (up to 1.3e-06 allowed)
-                unittest.skip("Results are incorrect and need investigation"),
-                "TestOperators",
-                "test_jvp",
-                device_type="cuda",
-                dtypes=(torch.float32,),
-            ),
         ),
         decorators=[
             DecorateInfo(

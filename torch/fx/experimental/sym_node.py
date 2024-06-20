@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 This file does three things:
 - Contains the definition of SymNode

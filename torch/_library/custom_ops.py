@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import inspect
 import weakref
 from typing import (

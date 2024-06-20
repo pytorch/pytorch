@@ -2,8 +2,9 @@
 
 import unittest
 from collections import deque, OrderedDict
-from contextlib import ContextDecorator
+from contextlib import ContextDecorator, contextmanager, nullcontext
 from copy import deepcopy
+from functools import partial
 from typing import Tuple
 
 import torch
@@ -11,6 +12,7 @@ import torch.nn as nn
 from torch.distributed._composable import checkpoint
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.utils.checkpoint import CheckpointError
 
 
 class MemoryDelta(ContextDecorator):
@@ -68,7 +70,7 @@ class MultiOutputModel(nn.Module):
         self.w1 = nn.Parameter(torch.randn((100, 100), device=device))
         self.w2 = nn.Parameter(torch.randn((100, 100), device=device))
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         z = x @ self.w1
         z = nn.functional.relu(z)
         z = z @ self.w2
@@ -218,6 +220,116 @@ class TestCheckpoint(TestCase):
             m(inp)
 
         self.assertEqual(None, checkpoint.state(m)._ac_generator)
+
+    def test_checkpoint_kwargs(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self, raise_exp: bool, change_shape_in_recomp: bool):
+                super().__init__()
+                self.fwd_count = 0
+                self.raise_exp = raise_exp
+                self.change_shape_in_recomp = change_shape_in_recomp
+                self.a = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                if self.raise_exp and self.fwd_count == 0:
+                    raise RuntimeError("foo")
+                if self.raise_exp and self.fwd_count == 1:
+                    raise RuntimeError("bar")
+                if self.change_shape_in_recomp and self.fwd_count == 1:
+                    x.relu_()
+                random_tensor = torch.randn(1, 2)
+                x = self.a(x + random_tensor)
+                self.fwd_count += 1
+                return x
+
+        m = MyModel(True, False)
+        m0, m1, m2, m3 = (deepcopy(m) for _ in range(4))
+
+        # composable checkpoint does not support use_reentrant=True
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            "use_reentrant=True is not supported in composable checkpoint. "
+            "Please use torch.utils.checkpoint.checkpoint instead.",
+        ):
+            checkpoint(m, use_reentrant=True)
+
+        # check giving an unsupported kwarg
+        with self.assertRaisesRegex(ValueError, "Unexpected keyword arguments: foo"):
+            checkpoint(m0, foo="bar")
+
+        handled_fwd_exp = False
+        handled_recomp_exp = False
+
+        @contextmanager
+        def fwd_ctx(mod: MyModel):
+            try:
+                mod.raise_exp = False
+                yield
+            finally:
+                nonlocal handled_fwd_exp
+                handled_fwd_exp = True
+                mod.raise_exp = True
+
+        @contextmanager
+        def recomp_ctx(mod: MyModel):
+            try:
+                mod.raise_exp = False
+                yield
+            finally:
+                nonlocal handled_recomp_exp
+                handled_recomp_exp = True
+                mod.raise_exp = True
+
+        # Test different context functions
+        x = torch.randn(1, 2, requires_grad=True)
+        checkpoint(
+            m1, context_fn=lambda: (partial(fwd_ctx, m1)(), partial(recomp_ctx, m1)())
+        )
+        m1(x.clone()).sum().backward()
+        self.assertEqual((handled_fwd_exp, handled_recomp_exp), (True, True))
+
+        checkpoint(m2, context_fn=lambda: (nullcontext(), partial(recomp_ctx, m2)()))
+        with self.assertRaisesRegex(RuntimeError, "foo"):
+            m2(x.clone())
+
+        handled_fwd_exp = False  # Reset flag
+        checkpoint(m3, context_fn=lambda: (partial(fwd_ctx, m3)(), nullcontext()))
+        with self.assertRaisesRegex(RuntimeError, "bar"):
+            m3(x.clone()).sum().backward()
+        self.assertEqual(handled_fwd_exp, True)
+
+        # Test determinism check failure
+        m4 = MyModel(False, True)
+        m5 = deepcopy(m4)
+        # Determinism check should not throw an error,
+        # but autograd should throw a RuntimeError
+        checkpoint(m4, determinism_check="none")
+        with self.assertRaises(RuntimeError):
+            m4(x.clone()).sum().backward()
+
+        # Determinism check should throw a CheckpointError
+        checkpoint(m5, determinism_check="default")
+        with self.assertRaises(CheckpointError):
+            m5(x.clone()).sum().backward()
+
+        # Test preserving random state
+        m6 = MyModel(False, False)
+        m7, m8 = (deepcopy(m6) for _ in range(2))
+        checkpoint(m7, preserve_rng_state=False)
+        checkpoint(m8, preserve_rng_state=True)
+
+        for mi in (m6, m7, m8):
+            torch.manual_seed(42)
+            loss = mi(x.clone()).sum()
+            torch.manual_seed(41)
+            loss.backward()
+        # check that m6 and m7 have at least one different grad
+        self.assertNotEqual(
+            (p1.grad for p1 in m6.parameters()), (p2.grad for p2 in m7.parameters())
+        )
+        # check that m6 and m8 have identical grads
+        for p1, p2 in zip(m6.parameters(), m8.parameters()):
+            self.assertEqual(p1.grad, p2.grad)
 
 
 if __name__ == "__main__":

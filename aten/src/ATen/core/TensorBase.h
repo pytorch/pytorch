@@ -953,7 +953,7 @@ TensorBase make_tensor_base(Args&&... args) {
 
 } // namespace detail
 
-static inline DispatchKey legacyExtractDispatchKey(const TensorBase& t) {
+inline DispatchKey legacyExtractDispatchKey(const TensorBase& t) {
   return legacyExtractDispatchKey(t.key_set());
 }
 

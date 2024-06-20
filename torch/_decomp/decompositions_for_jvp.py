@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import inspect
 from typing import Callable, Dict, List, Optional, Tuple
 
