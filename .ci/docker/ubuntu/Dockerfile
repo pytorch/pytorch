@@ -144,7 +144,7 @@ ARG TRITON
 COPY ./common/install_triton.sh install_triton.sh
 COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/triton.txt triton.txt
-RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi
+RUN bash ./install_triton.sh
 RUN rm install_triton.sh common_utils.sh triton.txt
 
 ARG EXECUTORCH
