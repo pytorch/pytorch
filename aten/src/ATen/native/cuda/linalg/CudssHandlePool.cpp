@@ -1,7 +1,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/DeviceThreadHandles.h>
 
-#if defined(CUDART_VERSION) || defined(USE_ROCM)
+#if defined(USE_CUDSS)
 
 namespace at::cuda {
 namespace {
@@ -49,4 +49,4 @@ cudssHandle_t getCurrentCudssHandle() {
 
 } // namespace at::cuda
 
-#endif // CUDART_VERSION
+#endif 

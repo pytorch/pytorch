@@ -716,6 +716,9 @@ void _apply_sparse_csr_linear_solve(
       false,
       "Calling torch.linalg.solve with sparse tensors requires compiling ",
       "PyTorch with CUDA and not supported in ROCm build.");
+#endif
+#ifndef USE_CUDSS
+  TORCH_CHECK(false, "cuDSS is not enabled. Please compile with cuDSS support.");
 #else
   TORCH_CHECK(A.is_sparse_csr(), "A must be a CSR matrix");
   TORCH_CHECK(b.dim() == 1, "b must be a 1D tensor");
