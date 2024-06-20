@@ -28,6 +28,7 @@ from torch.fx.passes import graph_drawer
 from . import config
 from ._aot_autograd.logging_utils import get_aot_graph_name
 from .compile_utils import fx_graph_cse, get_aten_target
+from torch.utils.checkpoint import CheckpointPolicy
 
 if TYPE_CHECKING:
     import sympy
@@ -105,20 +106,12 @@ class MinCutOptions:
     ban_if_reduction: bool
 
 
-"""
-Meaning of node.meta["recompute"] values:
-0: must not recompute
->0: prefer recompute, but partitioner makes the final decision based on heuristics
-math.inf: must recompute
-"""
-
-
 def must_recompute(node):
-    return node.meta.get("recompute", 0) == math.inf
+    return node.meta.get("recompute", None) == CheckpointPolicy.MUST_RECOMPUTE
 
 
 def prefer_recompute(node: fx.Node) -> bool:
-    return node.meta.get("recompute", 0) > 0
+    return node.meta.get("recompute", None) == CheckpointPolicy.PREFER_RECOMPUTE 
 
 
 def has_recomputable_ops(fx_g: fx.GraphModule) -> bool:
@@ -757,9 +750,9 @@ def cleanup_recompute_tags(joint_module: fx.GraphModule) -> fx.GraphModule:
             for user in node.users:
                 if (
                     prefer_recompute(user)
-                    and user.meta["recompute"] > node.meta["recompute"]
+                    and user.meta["ac_graph_id"] > node.meta["ac_graph_id"]
                 ):
-                    node.meta["recompute"] = 0
+                    node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
     return joint_module
 
 
@@ -820,8 +813,7 @@ def solve_min_cut(
             return False
         if node.target in [aten.lift_fresh_copy.default, aten.lift_fresh.default]:
             return False
-        # NB: "recompute" == 0 means that must save this node.
-        if node.meta.get("recompute", None) == 0:
+        if node.meta.get("recompute", None) == CheckpointPolicy.MUST_SAVE:
             return True
 
         if min_cut_options.ban_if_not_in_allowlist:
@@ -903,8 +895,6 @@ def solve_min_cut(
             return False
         # This bans recomputation of the node unless we've been forced not to by
         # user annotation
-        # NB: "recompute" > 0 means that user annotation has asked us to
-        # recompute it
         if prefer_recompute(node):
             return False
 

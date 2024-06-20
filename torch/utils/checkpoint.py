@@ -1266,9 +1266,9 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
         if is_compiling:
             # Here we overwrite each node's existing "recompute" tag to add in the user annotation.
             if policy == CheckpointPolicy.MUST_SAVE:
-                fx_traceback.current_meta["recompute"] = 0
+                fx_traceback.current_meta["recompute"] = CheckpointPolicy.MUST_SAVE
             elif policy == CheckpointPolicy.MUST_RECOMPUTE:
-                fx_traceback.current_meta["recompute"] = math.inf
+                fx_traceback.current_meta["recompute"] = CheckpointPolicy.MUST_RECOMPUTE
 
         out = func(*args, **kwargs)
 

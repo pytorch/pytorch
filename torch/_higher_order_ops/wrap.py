@@ -5,7 +5,7 @@ import logging
 
 import torch
 from torch._ops import HigherOrderOperator
-from torch.utils.checkpoint import checkpoint
+from torch.utils.checkpoint import checkpoint, CheckpointPolicy
 
 import torch._dynamo.config
 
@@ -144,7 +144,8 @@ class TagActivationCheckpoint(HigherOrderOperator):
         unique_graph_id = next(uid)
         for node in gmod.graph.nodes:
             if node.op in ("call_function", "call_method", "call_module"):
-                node.meta["recompute"] = unique_graph_id
+                node.meta["ac_graph_id"] = unique_graph_id
+                node.meta["recompute"] = CheckpointPolicy.PREFER_RECOMPUTE
         return gmod
 
     def __call__(self, gmod, *args, **kwargs):
