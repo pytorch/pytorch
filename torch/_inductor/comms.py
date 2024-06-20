@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 def sink_waits(
     snodes: List[BaseSchedulerNode],
-    node_users: Dict[BaseSchedulerNode, Set[BaseSchdulerNode]],
+    node_users: Dict[BaseSchedulerNode, Set[BaseSchedulerNode]],
 ) -> List[BaseSchedulerNode]:
     """
     Greedily moves waits as late as possible (i.e. until we reach a use). Optimal in terms of
@@ -42,7 +42,7 @@ def sink_waits(
 
 def raise_comms(
     snodes: List[BaseSchedulerNode],
-    node_users: Dict[BaseSchedulerNode, Set[BaseSchdulerNode]],
+    node_users: Dict[BaseSchedulerNode, Set[BaseSchedulerNode]],
 ) -> List[BaseSchedulerNode]:
     """
     Greedily moves comms as early as possible (i.e. until we reach an input).
