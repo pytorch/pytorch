@@ -2736,7 +2736,7 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
     else:
         # slow path, don't know inputs structure
         flat_inputs, spec = pytree.tree_flatten(inputs)
-        unflatten_fn = functools.partial(pytree.tree_unflatten, spec=spec)
+        unflatten_fn = functools.partial(pytree.tree_unflatten, treespec=spec)
         compiled_fn = compile_gm(GmWrapper(gm, unflatten_fn), flat_inputs)
         # note this doesn't check the spec, assuming it is the same
         flatten_fn = pytree.arg_tree_leaves
