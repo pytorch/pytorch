@@ -33,9 +33,9 @@ if [[ -z "$DOCKER_IMAGE" ]]; then
   if [[ "$PACKAGE_TYPE" == conda ]]; then
     export DOCKER_IMAGE="pytorch/conda-cuda"
   elif [[ "$DESIRED_CUDA" == cpu ]]; then
-    export DOCKER_IMAGE="pytorch/manylinux-cpu"
+    export DOCKER_IMAGE="pytorch/manylinux:cpu"
   else
-    export DOCKER_IMAGE="pytorch/manylinux-cuda${DESIRED_CUDA:2}"
+    export DOCKER_IMAGE="pytorch/manylinux-builder:${DESIRED_CUDA:2}"
   fi
 fi
 
