@@ -389,7 +389,15 @@ class TestSelectAlgorithm(TestCase):
             ref_res = ref_quantized_mod(input)
             cfn = torch.compile(ref_quantized_mod)
             res = cfn(input)
-            self.assertTrue(torch.allclose(ref_res, res, atol=atol, rtol=rtol))
+            self.assertEqual(
+                res,
+                ref_res,
+                atol=atol,
+                rtol=rtol,
+                equal_nan=True,
+                exact_dtype=True,
+            )
+            self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 2)
 
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
