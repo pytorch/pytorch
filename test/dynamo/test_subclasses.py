@@ -334,6 +334,41 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             res = fn(input)
             self.assertIsInstance(res, BadNewTorchFunction)
 
+    def test_no_torch_function_recompiles(self):
+        class NJT:
+            def __repr__(self):
+                return f"NJT(shape={self.shape})"
+
+            def __init__(self, values, offsets):
+                self._values = values
+                self._offsets = offsets
+
+            def sin(self):
+                return torch.sin(self)
+
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                if func == torch.sin:
+                    self = args[0]
+                    return NJT(func(self._values), self._offsets)
+                raise AssertionError("should not get here")
+
+        values1 = torch.randn(10, 3, 4, requires_grad=True)
+        values2 = torch.randn(10, 3, 4, requires_grad=True)
+        offsets = torch.tensor([0, 3, 10])
+        njt1 = NJT(values1, offsets)
+        njt2 = NJT(values2, offsets)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            return torch.sin(x)
+
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            f(njt1)
+            f(njt2)
+
     def test_base_torch_function_tracing(self):
         def fn(x):
             return torch.add(x, 1)
@@ -1392,6 +1427,7 @@ class GraphModule(torch.nn.Module):
             yield t.select(-1, 6), False
             # https://github.com/pytorch/pytorch/issues/128649
             yield t[2:3, 5:9], dynamic
+            yield t.view(-1, 15), False
 
         def f(x):
             return x * 2

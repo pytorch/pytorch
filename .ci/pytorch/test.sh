@@ -289,6 +289,9 @@ test_python_shard() {
 
   # Bare --include flag is not supported and quoting for lint ends up with flag not being interpreted correctly
   # shellcheck disable=SC2086
+
+  # modify LD_LIBRARY_PATH to ensure it has the conda env.
+  # This set of tests has been shown to be buggy without it for the split-build
   time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS" --verbose $PYTHON_TEST_EXTRA_OPTION
 
   assert_git_not_dirty
@@ -1174,15 +1177,21 @@ test_executorch() {
 
   pushd /executorch
 
-  # NB: We need to build ExecuTorch runner here and not inside the Docker image
-  # because it depends on PyTorch
+  export PYTHON_EXECUTABLE=python
+  export EXECUTORCH_BUILD_PYBIND=ON
+  export CMAKE_ARGS="-DEXECUTORCH_BUILD_XNNPACK=ON -DEXECUTORCH_BUILD_KERNELS_QUANTIZED=ON"
+
+  # NB: We need to rebuild ExecuTorch runner here because it depends on PyTorch
+  # from the PR
   # shellcheck disable=SC1091
-  source .ci/scripts/utils.sh
-  build_executorch_runner "cmake"
+  source .ci/scripts/setup-linux.sh cmake
+
+  echo "Run ExecuTorch unit tests"
+  pytest -v -n auto
+  # shellcheck disable=SC1091
+  LLVM_PROFDATA=llvm-profdata-12 LLVM_COV=llvm-cov-12 bash test/run_oss_cpp_tests.sh
 
   echo "Run ExecuTorch regression tests for some models"
-  # NB: This is a sample model, more can be added here
-  export PYTHON_EXECUTABLE=python
   # TODO(huydhn): Add more coverage here using ExecuTorch's gather models script
   # shellcheck disable=SC1091
   source .ci/scripts/test.sh mv3 cmake xnnpack-quantization-delegation ''
@@ -1242,9 +1251,6 @@ elif [[ "$TEST_CONFIG" == distributed ]]; then
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     test_rpc
   fi
-elif [[ "$TEST_CONFIG" == deploy ]]; then
-  checkout_install_torchdeploy
-  test_torch_deploy
 elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
   test_inductor_distributed
 elif [[ "${TEST_CONFIG}" == *inductor-halide* ]]; then

@@ -1712,6 +1712,15 @@ def sub(
 
     a, b = _maybe_broadcast(a, b)
 
+    if isinstance(a, TensorLike) and isinstance(b, TensorLike):
+        torch._check(
+            not utils.is_boolean_dtype(a.dtype) and not utils.is_boolean_dtype(b.dtype),
+            lambda: (
+                "Subtraction, the `-` operator, with two bool tensors is not supported. "
+                "Use the `^` or `logical_xor()` operator instead."
+            ),
+        )
+
     if alpha != 1:
         dtype = a.dtype if isinstance(a, TensorLike) else b.dtype  # type: ignore[union-attr]
         python_type = utils.dtype_to_type(dtype)
