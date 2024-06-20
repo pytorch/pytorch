@@ -2912,22 +2912,13 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   auto ncclComm = getNCCLComm(
       key, device, opType, p2pRank, isSendRecvSelf, /*onlyCached*/ true);
 
-  if (!batchP2P and !ncclComm) {
-    // TODO(whc) - unclear why we special-case batchP2P.  But I am preserving
-    // the current behavior for now.
-
-    TORCH_WARN_ONCE(
-        "A P2P op (send/recv) was called on a ProcessGroup that has not been fully initialized. "
-        "This will cause a separate 2-rank nccl communicator to be automatically created, which is inefficient. "
-        "To avoid this, please pass a device_id to init_process_group to eagerly initialize communicators, "
-        "or call a collective operation on this process group before the first P2P operation to lazily initialize.");
-
+  // TODO(whc) - unclear why we special-case batchP2P.  But I am preserving
+  // the current behavior for now.
+  if (!batchP2P && !ncclComm) {
     key = getKeySendRecv(rank_, peer);
     p2pRank = rank_ <= peer ? 0 : 1;
     isSendRecvSelf = rank_ == peer;
     p2pTargetRank = isSendRecvSelf ? 0 : 1 - p2pRank;
-
-    ncclComm = getNCCLComm(key, device, opType, p2pRank, isSendRecvSelf);
 
     if (!coalescing_state_) {
       // Bump P2P sequence number. Don't do so if it's a batch P2P, it will be
@@ -2936,6 +2927,15 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     }
   }
 
+  (!ncclComm) {
+    TORCH_WARN_ONCE(
+        "A P2P op (send/recv) was called on a ProcessGroup that has not been fully initialized. "
+        "This will cause a separate 2-rank nccl communicator to be automatically created, which is inefficient. "
+        "To avoid this, please pass a device_id to init_process_group to eagerly initialize communicators, "
+        "or call a collective operation on this process group before the first P2P operation to lazily initialize.");
+
+    ncclComm = getNCCLComm(y, device, opType, p2pRank, isSendRecvSelf);
+  }
   // Bump the logical operation counter regardless of whether this op is
   // coalesced or individual
   op_id_++;
