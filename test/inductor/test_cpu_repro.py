@@ -2547,7 +2547,7 @@ class CPUReproTests(TestCase):
             self.assertEqual(code.count("empty_strided_cpu("), 3)
 
     @config.patch(fx_graph_cache=False)
-    def test_two_local_buffer_in_outer_loop_fusion(self):
+    def test_share_two_local_buffer_in_outer_loop_fusion(self):
         def fn(x):
             max = torch.nn.functional.softmax(x, dim=-1)
             max = torch.nn.functional.softmax(max, dim=-1)
