@@ -1176,7 +1176,11 @@ class VariableBuilder:
             # the guard source.  This behavior is gated on
             # config.skip_fsdp_guards.
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            return FSDPManagedNNModuleVariable(value, source=self.get_source())
+            result = FSDPManagedNNModuleVariable(value, source=self.get_source())
+            if not SideEffects.cls_supports_mutation_side_effects(type(value)):
+                # don't allow STORE_ATTR mutation with custom __setattr__
+                return result
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif mutation_guard.is_dynamic_nn_module(value, self.tx.export):
             # created dynamically, don't specialize on it
             self.install_guards(GuardBuilder.TYPE_MATCH)
