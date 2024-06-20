@@ -1210,33 +1210,6 @@ class GuardBuilder(GuardBuilderBase):
         else:
             self._produce_guard_code(guard, [code])
 
-    def BOOL_FALSE(self, guard: Guard):
-        # Guard on the runtime value being 'False',
-        # can be faster than seemingly equivalent checks like DICT_KEYS for empty dict
-        #
-        # WARNING: this guard is not safe to use generally.  It only works if the runtime
-        # value is of a type that supports bool(), and some types e.g. Tensor do not.
-        # Only use this guard in cases you can guarantee the runtime type will be friendly.
-        # (e.g. Specialized NNModule with mutation protection via setattr)
-        #
-        # Why not simply check the runtime type inside this guard?  It's slow enough to defeat
-        # the purpose of using this guard, which itself is supposed to be a faster alternative
-        # to DICT_KEYS.
-        ref = self.arg_ref(guard)
-        code = f"not {ref}"
-        self._set_guard_export_info(guard, [code])
-
-        if config.enable_cpp_guard_manager:
-            # BOOL_FALSE is a weird guard. It is used to effectively check
-            # len(dict) == 0. Since it is used only and only for dicts, we don't
-            # have to anything here. DictGuardManager internally stores the size
-            # of the dict, and checks its size on every invocation. PyDict_Size
-            # is very fast, so we don't need BOOL_FALSE optimization. Just
-            # construct the dict guard manager to install a DictGuardManager.
-            self.get_guard_manager(guard)
-        else:
-            self._produce_guard_code(guard, [code])
-
     def ID_MATCH(self, guard: Guard):
         # ___check_obj_id is same as `id(x) == y`
         if isinstance(guard.originating_source, TypeSource):
