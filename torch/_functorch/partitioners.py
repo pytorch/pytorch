@@ -28,6 +28,7 @@ from torch.fx.passes import graph_drawer
 from . import config
 from ._aot_autograd.logging_utils import get_aot_graph_name
 from .compile_utils import fx_graph_cse, get_aten_target
+from torch.utils.checkpoint import CheckpointPolicy
 
 if TYPE_CHECKING:
     import sympy
@@ -105,14 +106,24 @@ class MinCutOptions:
     ban_if_reduction: bool
 
 
-def must_recompute(node: fx.Node) -> bool:
-    return node.meta.get("recompute", False)
+"""
+Meaning of node.meta["recompute"] values:
+0: must not recompute
+>0: prefer recompute, but partitioner makes the final decision based on heuristics
+math.inf: must recompute
+"""
+def must_recompute(node):
+    return node.meta.get("recompute", 0) == math.inf
+
+
+def prefer_recompute(node: fx.Node) -> bool:
+    return node.meta.get("recompute", 0) > 0
 
 
 def has_recomputable_ops(fx_g: fx.GraphModule) -> bool:
     found = False
     for node in fx_g.graph.nodes:
-        if must_recompute(node):
+        if prefer_recompute(node):
             return True
     return False
 
@@ -120,7 +131,7 @@ def has_recomputable_ops(fx_g: fx.GraphModule) -> bool:
 def has_recomputable_rng_ops(fx_g: fx.GraphModule) -> bool:
     for node in fx_g.graph.nodes:
         if (
-            must_recompute(node)
+            prefer_recompute(node)
             and hasattr(node.target, "tags")
             and torch.Tag.nondeterministic_seeded in node.target.tags
         ):
@@ -644,7 +655,7 @@ def functionalize_rng_ops(
     recomputable_rng_ops_map = dict()
     for node in joint_module.graph.nodes:
         if (
-            must_recompute(node)
+            prefer_recompute(node)
             and hasattr(node.target, "tags")
             and torch.Tag.nondeterministic_seeded in node.target.tags
         ):
@@ -741,10 +752,10 @@ def cleanup_recompute_tags(joint_module: fx.GraphModule) -> fx.GraphModule:
     non-recomputable to allow for that.
     """
     for node in joint_module.graph.nodes:
-        if must_recompute(node):
+        if prefer_recompute(node):
             for user in node.users:
                 if (
-                    must_recompute(user)
+                    prefer_recompute(user)
                     and user.meta["recompute"] > node.meta["recompute"]
                 ):
                     node.meta["recompute"] = 0
@@ -924,6 +935,14 @@ def solve_min_cut(
             # NestedTensor saves a offset tensor as part of the singleton int
             # in sizes.
             nx_graph.add_edge(node.name + "_out", "sink", capacity=math.inf)
+
+        if must_recompute(node):
+            # If user explicitly say they want to recompute a node, we honor it
+            # by adding an 0-capacity edge from the source and an inf edge to the sink.
+            # This way, X_in node is guaranteed to be part of the subgraph that contains "sink"
+            # after the cut, thus guaranteeing that X op will be recomputed.
+            nx_graph.add_edge("source", node.name + "_in", capacity=0)
+            nx_graph.add_edge(node.name + "_in", "sink", capacity=math.inf)
 
         if _is_primal(node) or _is_fwd_seed_offset(node):
             ban_recomputation_if_allowed(node)

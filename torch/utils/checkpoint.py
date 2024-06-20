@@ -8,6 +8,7 @@ from collections import defaultdict
 from typing import *  # noqa: F403
 import enum
 from weakref import ReferenceType
+import math
 
 import torch
 import torch.fx.traceback as fx_traceback
@@ -1262,8 +1263,11 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
                                 func, *args, **kwargs)
         is_compiling = _is_compiling(func, args, kwargs)
 
-        if is_compiling and policy == CheckpointPolicy.MUST_SAVE:
-            fx_traceback.current_meta["recompute"] = 0
+        if is_compiling:
+            if policy == CheckpointPolicy.MUST_SAVE:
+                fx_traceback.current_meta["recompute"] = 0
+            elif policy == CheckpointPolicy.MUST_RECOMPUTE:
+                fx_traceback.current_meta["recompute"] = math.inf
 
         out = func(*args, **kwargs)
 
