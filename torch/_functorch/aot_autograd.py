@@ -579,7 +579,15 @@ def create_aot_dispatcher_function(
                 )
 
                 output_and_mutation_safe = not any(
-                    x.requires_grad for x in fw_metadata.output_info
+                    x.requires_grad
+                    # view operations preserve requires_grad even in no_grad.
+                    # Do not count aliases of inputs with requires_grad as reason to make a training graph.
+                    and not (
+                        x.output_type
+                        in (OutputType.alias_of_input, OutputType.is_input)
+                        and fw_metadata.input_info[x.base_idx].requires_grad
+                    )
+                    for x in fw_metadata.output_info
                 ) and not any(
                     x.requires_grad
                     and x.mutates_data
