@@ -402,13 +402,13 @@ class LocalBufferContext:
     def __init__(self, kernel_args: KernelArgs):
         self.kernel_args = kernel_args
         self.exit_stack = contextlib.ExitStack()
-        # Map Local Buffer name to Local Buffer
+        # map local buffer name to local buffer
         self.local_buffers: Dict[str, ir.Buffer] = {}
-        # Map Local Buffer name to Global Buffer and 1 local buffer
-        # can be shared with multi global buffers
+        # map local buffer name to global buffers and one local buffer
+        # may be shared with multi global buffers
         self.local_to_global: Dict[str, List[ir.Buffer]] = {}
-        # Map Global Buffer name to Local Buffer and 1 global buffer
-        # must be corresponding to 1 local buffer
+        # map global buffer name to local buffer and one global buffer
+        # must be corresponding to one local buffer
         self.global_to_local: Dict[str, ir.Buffer] = {}
 
     def __enter__(self):

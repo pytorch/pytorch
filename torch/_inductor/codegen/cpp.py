@@ -3887,15 +3887,18 @@ class CppScheduling(BaseScheduling):
                             global_buffer_layout.stride[size_offset:],
                         )
                         if any(
-                            local_buffer_layout == _buffer_pair.local_buf.layout
-                            for _buffer_pair in local_buffers
+                            local_buffer_layout == local_buf_pair.local_buf.layout
+                            for local_buf_pair in local_buffers
                         ):
                             # Can share same local buffer between global buffers
-                            for _buffer_pair in local_buffers:
-                                if local_buffer_layout == _buffer_pair.local_buf.layout:
+                            for local_buf_pair in local_buffers:
+                                if (
+                                    local_buffer_layout
+                                    == local_buf_pair.local_buf.layout
+                                ):
                                     local_buffers.append(
                                         LocalBuffer(
-                                            _buffer_pair.local_buf,
+                                            local_buf_pair.local_buf,
                                             global_buf=global_buffer,
                                         )
                                     )
