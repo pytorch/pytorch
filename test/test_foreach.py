@@ -90,7 +90,7 @@ class ForeachFuncWrapper:
             mta_called = any("multi_tensor_apply_kernel" in k for k in keys)
             assert mta_called == (
                 expect_fastpath and (not zero_size)
-            ), f"{mta_called=}, {expect_fastpath=}, {zero_size=}"
+            ), f"{mta_called=}, {expect_fastpath=}, {zero_size=}, {self.func.__name__=}, {keys=}"
         else:
             actual = self.func(*inputs, **kwargs)
         if self.is_inplace:
@@ -865,8 +865,6 @@ class TestForeach(TestCase):
         "failing flakily on non sm86 cuda jobs",
     )
     def test_binary_op_tensors_on_different_devices(self, device, dtype, op):
-        # `tensors1`: ['cuda', 'cpu']
-        # `tensors2`: ['cuda', 'cpu']
         _cuda_tensors = next(
             iter(op.sample_inputs(device, dtype, num_input_tensors=[2], same_size=True))
         ).input

@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import functools
-
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import torch
@@ -13,9 +12,11 @@ from torch.distributed._composable_state import (
 )
 from torch.distributed.utils import _to_kwargs
 from torch.utils._pytree import tree_flatten, tree_map
+
 from ._fsdp_api import MixedPrecisionPolicy
 from ._fsdp_common import _cast_fp_tensor, TrainingState
 from ._fsdp_param_group import FSDPCommContext, FSDPParamGroup
+
 
 if TYPE_CHECKING:
     from ._fsdp_param import FSDPParam
@@ -35,6 +36,9 @@ class FSDPStateContext:
         self.post_backward_final_callback_queued: bool = False
         # Whether to finalize backward in this backward's final callback
         self.is_last_backward: bool = True
+        # Optional user-provided event recorded after optimizer for the
+        # all-gather streams to wait on in the root pre-forward
+        self.post_optim_event: Optional[torch.cuda.Event] = None
 
 
 def disable_if_config_true(func):
@@ -56,6 +60,8 @@ class FSDPState(_State):
         self._state_ctx = FSDPStateContext()
         self._comm_ctx = FSDPCommContext()
         self._training_state: TrainingState = TrainingState.IDLE
+        self._states_to_forward_prefetch: List[FSDPState] = []
+        self._states_to_backward_prefetch: List[FSDPState] = []
 
     # Define a separate init since `__init__` is called in the contract
     def init(
@@ -81,9 +87,14 @@ class FSDPState(_State):
         self._state_ctx.iter_forward_root = self
         with torch.profiler.record_function("FSDP::root_pre_forward"):
             # Wait for optimizer before implicitly prefetched all-gathers
-            current_stream = torch.cuda.current_stream()
-            self._comm_ctx.all_gather_copy_in_stream.wait_stream(current_stream)
-            self._comm_ctx.all_gather_stream.wait_stream(current_stream)
+            if (event := self._state_ctx.post_optim_event) is not None:
+                self._comm_ctx.all_gather_copy_in_stream.wait_event(event)
+                self._comm_ctx.all_gather_stream.wait_event(event)
+                self._state_ctx.post_optim_event = None
+            else:
+                current_stream = torch.cuda.current_stream()
+                self._comm_ctx.all_gather_copy_in_stream.wait_stream(current_stream)
+                self._comm_ctx.all_gather_stream.wait_stream(current_stream)
             if self._device.type == "cuda":
                 with torch.profiler.record_function("FSDP::inputs_to_device"):
                     args_tuple, kwargs_tuple = _to_kwargs(
@@ -171,6 +182,9 @@ class FSDPState(_State):
                 args, kwargs = tree_map(cast_fn, args), tree_map(cast_fn, kwargs)
         if self._fsdp_param_group:
             args, kwargs = self._fsdp_param_group.pre_forward(module, args, kwargs)
+        for fsdp_state in self._states_to_forward_prefetch:
+            if (target_param_group := fsdp_state._fsdp_param_group) is not None:
+                FSDPParamGroup._prefetch_unshard(target_param_group, "forward")
         return args, kwargs
 
     @disable_if_config_true
@@ -205,7 +219,11 @@ class FSDPState(_State):
         self._training_state = TrainingState.PRE_BACKWARD
         self._register_root_post_backward_final_callback()
         if self._fsdp_param_group:
-            self._fsdp_param_group.pre_backward()
+            default_prefetch = len(self._states_to_backward_prefetch) == 0
+            self._fsdp_param_group.pre_backward(default_prefetch)
+        for fsdp_state in self._states_to_backward_prefetch:
+            if (target_param_group := fsdp_state._fsdp_param_group) is not None:
+                FSDPParamGroup._prefetch_unshard(target_param_group, "backward")
         return grad
 
     def _root_post_backward_final_callback(self) -> None:
