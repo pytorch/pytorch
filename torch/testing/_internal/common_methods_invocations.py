@@ -19402,9 +19402,7 @@ op_db: List[OpInfo] = [
            autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
            sample_inputs_func=sample_unsqueeze),
     OpInfo('unsqueeze_copy',
-           # TODO: why does this not work for complex numbers?
-           # dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
-           dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            supports_out=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,

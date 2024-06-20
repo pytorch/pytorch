@@ -323,9 +323,13 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   m.impl("_convolution_mode", native::_convolution_mode_symint);
   OP_DECOMPOSE(type_as);
   OP_DECOMPOSE(linalg_diagonal);
-  OP_DECOMPOSE(diagonal_copy);
   OP_DECOMPOSE(alias_copy);
   m.impl("as_strided_copy", native::as_strided_copy_symint);
+  OP_DECOMPOSE(diagonal_copy);
+  m.impl("transpose_copy", native::transpose_copy_int);
+  OP_DECOMPOSE(squeeze_copy);
+  OP_DECOMPOSE(t_copy);
+  OP_DECOMPOSE(unsqueeze_copy);
   m.impl("pad", native::pad_symint);
   m.impl("_pad_circular", native::_pad_circular_symint);
   OP_DECOMPOSE(swapdims_);
