@@ -128,10 +128,10 @@ from .distributed import (
 from .functions import (
     CollectiveFunctionRewriteVariable,
     FunctoolsPartialVariable,
-    TorchJitFunctionVariable,
     TritonKernelVariable,
     UserFunctionVariable,
     UserMethodVariable,
+    WrapperUserFunctionVariable,
 )
 from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .iter import ItertoolsVariable
@@ -425,7 +425,9 @@ class VariableBuilder:
 
     def wrap_jit_function(self, value):
         self.install_guards(GuardBuilder.TYPE_MATCH)
-        return TorchJitFunctionVariable(value, source=self.source)
+        return WrapperUserFunctionVariable(
+            value, "_torchdynamo_inline", source=self.source
+        )
 
     @classmethod
     @functools.lru_cache(None)
@@ -905,7 +907,13 @@ class VariableBuilder:
         elif TorchCtxManagerClassVariable.is_matching_cls(value):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return TorchCtxManagerClassVariable(value, source=self.source)
+        elif inspect.getattr_static(value, "__script_if_tracing_wrapper", False):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            return WrapperUserFunctionVariable(
+                value, "__original_fn", source=self.source
+            )
         elif is_function_or_wrapper(value):
+            # breakpoint()
             value, attr_name = unwrap_with_attr_name_if_wrapper(value)
             # For these wrappers, Dynamo points to the wrapped function,
             # so source needs to be updated as well.

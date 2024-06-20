@@ -677,22 +677,22 @@ class SkipFunctionVariable(VariableTracker):
             unimplemented(msg)
 
 
-class TorchJitFunctionVariable(VariableTracker):
+class WrapperUserFunctionVariable(VariableTracker):
     """
-    Wrapper vt to forward the call to the _torchdynamo_inline attr. Earlier, we
-    were treating both the returned ScriptFunction and the _torchdynamo_inline
-    attr to be the same variable tracker. This caused issues because the source
-    would point the inner attribute, while the user code could try to access the
-    attr of the outer script object.
+    Used to represent a wrapper object that contains the actual callable as an
+    attribute. For example, torch.jit.script/trace have the original function at
+    their _torchdynamo_inline attribute. Similarly, functions with
+    __script_if_tracing_wrapper have the original attr at "__original_fn".
     """
 
-    def __init__(self, fn, **kwargs) -> None:
+    def __init__(self, wrapper_obj, attr_to_trace, **kwargs) -> None:
         super().__init__(**kwargs)
-        self.fn = fn
+        self.wrapper_obj = wrapper_obj
+        self.attr_to_trace = attr_to_trace
 
     def var_getattr(self, tx, name):
-        if name == "_torchdynamo_inline":
-            val = self.fn._torchdynamo_inline
+        if name == self.attr_to_trace:
+            val = getattr(self.wrapper_obj, self.attr_to_trace)
             if self.source:
                 from .builder import VariableBuilder
 
@@ -707,8 +707,8 @@ class TorchJitFunctionVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        return variables.UserFunctionVariable(polyfill.jit_inline).call_function(
-            tx, [self, *args], kwargs
+        return variables.UserFunctionVariable(polyfill.getattr_and_trace).call_function(
+            tx, [self, variables.ConstantVariable(self.attr_to_trace), *args], kwargs
         )
 
 
