@@ -1036,12 +1036,14 @@ class CppBuilder:
         self._target_file = ""
 
         self._use_absolute_path: bool = False
+        self._aot_mode: bool = False
 
         self._name = name
 
         # Code start here, initial self internal veriables firstly.
         self._compiler = BuildOption.get_compiler()
         self._use_absolute_path = BuildOption.get_use_absolute_path()
+        self._aot_mode = BuildOption.get_aot_mode()
 
         """
         TODO: validate and remove:
@@ -1064,7 +1066,7 @@ class CppBuilder:
             sources = [sources]
 
         if config.is_fbcode():
-            if BuildOption.get_aot_mode() and not self._use_absolute_path:
+            if self._aot_mode and not self._use_absolute_path:
                 inp_name = sources
                 # output process @ get_name_and_dir_from_output_file_path
             else:
@@ -1178,7 +1180,14 @@ class CppBuilder:
 
         build_cmd = self.get_command_line()
 
-        status = run_command_line(build_cmd, cwd=_build_tmp_dir)
+        # To compatible to Windows output: FileName.
+        current_working_directory = _build_tmp_dir
+        if config.is_fbcode():
+            if not (self._aot_mode and not self._use_absolute_path):
+                # To compatible to fb_code, output to FileName.
+                current_working_directory = os.getcwd()
+
+        status = run_command_line(build_cmd, cwd=current_working_directory)
 
         _remove_dir(_build_tmp_dir)
         return status, self._target_file
