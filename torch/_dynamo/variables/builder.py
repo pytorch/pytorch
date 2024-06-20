@@ -1154,7 +1154,34 @@ class VariableBuilder:
             and not config.allow_rnn
         ):
             unimplemented("TorchDynamo purposely graph breaks on RNN, GRU, LSTMs")
-        if mutation_guard.is_dynamic_nn_module(value, self.tx.export):
+
+        if getattr(value, "_is_fsdp_managed_module", False):
+            # See note [Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
+            # in fully_sharded_data_parallel.py for more information
+
+            # we can't do this assert inside FSDP constructor,
+            # since we don't know yet whether dynamo will be used
+            assert getattr(
+                value, "_fsdp_use_orig_params", False
+            ), "Dynamo only supports FSDP with use_orig_params=True"
+
+            # Note on FSDP guarding
+            # Eager FSDP already assumes (requires, but without enforcement)
+            # that users don't mutate their model parameters/structure after
+            # FSDP wrapping, because FSDP wouldn't notice or update its
+            # FlatParams.
+            #
+            # Therefore, torch.compile can skip guarding on params or submodule
+            # structure of fsdp_managed modules, by using FSDPNNModuleSource as
+            # the guard source.  This behavior is gated on
+            # config.skip_fsdp_guards.
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            result = FSDPManagedNNModuleVariable(value, source=self.get_source())
+            if not SideEffects.cls_supports_mutation_side_effects(type(value)):
+                # don't allow STORE_ATTR mutation with custom __setattr__
+                return result
+            return self.tx.output.side_effects.track_object_existing(value, result)
+        elif mutation_guard.is_dynamic_nn_module(value, self.tx.export):
             # created dynamically, don't specialize on it
             self.install_guards(GuardBuilder.TYPE_MATCH)
             if (
@@ -1185,38 +1212,6 @@ class VariableBuilder:
         ):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return UnspecializedNNModuleVariable(value, source=self.get_source())
-        elif getattr(value, "_is_fsdp_managed_module", False):
-            # See note [Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
-            # in fully_sharded_data_parallel.py for more information
-
-            # we can't do this assert inside FSDP constructor,
-            # since we don't know yet whether dynamo will be used
-            assert getattr(
-                value, "_fsdp_use_orig_params", False
-            ), "Dynamo only supports FSDP with use_orig_params=True"
-
-            # Note on FSDP guarding
-            # 1. We expect FSDP wrapping mutates an nn module irreversably (no way to de-wrap).
-            # 2. Eager FSDP already assumes (requires, but without enforcement) that users don't mutate their
-            #    model parameters/structure after FSDP wrapping, because FSDP wouldn't notice or update its FlatParams.
-            #
-            # Due to (1), once we enter this path we expect not to go back nor have to guard on type
-            # or _is_fsdp_managed_module.
-            #
-            # TODO(whc) We could add a guard on the opposite case, where a user compiled/ran
-            # pre-FSDP-wrapped model, then wrapped, to ensure that we recompile with the FSDP handling.
-            #
-            # Due to (2), we skip guards on inner contents of fsdp_managed modules, by using FSDPNNModuleSource as the
-            # guard source.  This behavior is gated on config.skip_fsdp_guards.
-            #
-            # ID_MATCH is required to disambiguate cases as simple as a unit test that constructs 2 models and wraps
-            # them differently with different FSDP configs.  (test_dynamo_distributed.py -k test_fsdp_aot_eager)
-            self.install_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.ID_MATCH)
-            result = FSDPManagedNNModuleVariable(value, source=self.get_source())
-            if not SideEffects.cls_supports_mutation_side_effects(type(value)):
-                # don't allow STORE_ATTR mutation with custom __setattr__
-                return result
-            return self.tx.output.side_effects.track_object_existing(value, result)
         else:
             return self.tx.output.register_attr_or_module(
                 value,
