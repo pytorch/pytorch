@@ -880,15 +880,15 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             ref = fn(x)
             res = opt_fn(x)
             self.assertTrue(same(ref, res))
-            self.assertEqual(cnts.frame_count, 2)
-            self.assertEqual(cnts.op_count, 2)
+            self.assertEqual(cnts.frame_count, 1)
+            self.assertEqual(cnts.op_count, 6)
 
         with torch.enable_grad():
             ref = fn(x)
             res = opt_fn(x)
             self.assertTrue(same(ref, res))
-            self.assertEqual(cnts.frame_count, 4)
-            self.assertEqual(cnts.op_count, 4)
+            self.assertEqual(cnts.frame_count, 2)
+            self.assertEqual(cnts.op_count, 12)
 
     def test_nested_generic_context_manager(self):
         def fn(x):
@@ -911,15 +911,15 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             ref = fn(x)
             res = opt_fn(x)
             self.assertTrue(same(ref, res))
-            self.assertEqual(cnts.frame_count, 4)
-            self.assertEqual(cnts.op_count, 4)
+            self.assertEqual(cnts.frame_count, 1)
+            self.assertEqual(cnts.op_count, 9)
 
         with torch.enable_grad():
             ref = fn(x)
             res = opt_fn(x)
             self.assertTrue(same(ref, res))
-            self.assertEqual(cnts.frame_count, 6)
-            self.assertEqual(cnts.op_count, 6)
+            self.assertEqual(cnts.frame_count, 2)
+            self.assertEqual(cnts.op_count, 18)
 
     def test_generic_context_manager_with_graph_break(self):
         def fn(x):
