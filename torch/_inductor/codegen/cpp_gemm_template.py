@@ -317,8 +317,8 @@ class CppPackedGemmTemplate(CppTemplate):
             m,
             n,
             k,
-            input_dtype=new_inputs[0].get_dtype() if int8_gemm else layout.dtype,
-            output_dtype=layout.get_dtype() if int8_gemm else torch.float,
+            input_dtype=new_inputs[0].get_dtype(),
+            output_dtype=torch.int32 if int8_gemm else torch.float,
             compute_dtype=torch.int32 if int8_gemm else None,
             alpha=alpha,
             num_threads=num_threads,
@@ -369,15 +369,15 @@ class CppPackedGemmTemplate(CppTemplate):
                 blocked_w = blocked_w.as_strided(blocked_w.shape, new_stride)
             new_inputs[W_idx] = blocked_w
             if int8_gemm:
-                BMatricCompens = None
+                BCompensate = None
                 if isinstance(W, ir.IRNode):
-                    BMatricCompens = V.graph.add_tensor_constant(
+                    BCompensate = V.graph.add_tensor_constant(
                         V.graph.constants[W.get_name() + "_BMatrixCompens"],
                         W.get_name() + "_BMatrixCompens",
                     )
                 else:
-                    BMatricCompens = torch.sum(W.to_dense().to(torch.float), dim=0)
-                new_inputs.append(BMatricCompens)
+                    BCompensate = torch.sum(W.to_dense().to(torch.float), dim=0)
+                new_inputs.append(BCompensate)
             return new_inputs, layout_or_out
 
         def preprocessor(inputs, layout):
@@ -513,8 +513,8 @@ class CppPackedGemmTemplate(CppTemplate):
             self.m,
             self.n,
             self.k,
-            input_dtype=X.get_dtype() if int8_gemm else self.layout.dtype,
-            output_dtype=self.layout.get_dtype() if int8_gemm else torch.float,
+            input_dtype=X.get_dtype(),
+            output_dtype=torch.int32 if int8_gemm else torch.float,
             compute_dtype=torch.int32 if int8_gemm else None,
             alpha=self.alpha,
             num_threads=self.num_threads,
