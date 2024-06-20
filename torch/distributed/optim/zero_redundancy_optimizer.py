@@ -20,9 +20,10 @@ from torch.distributed.optim.utils import functional_optim_map
 from torch.optim import Optimizer
 
 
-logger = logging.getLogger(__name__)
-
 __all__ = ["ZeroRedundancyOptimizer"]
+
+
+logger = logging.getLogger(__name__)
 
 
 # Credits:  classy_vision/generic/distributed_util.py
@@ -925,9 +926,9 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         mapping bucket indices to :class:`_DDPBucketAssignment` s for each
         rank.
         """
-        assert self._overlap_with_ddp, (
-            "`_bucket_assignments_per_rank` only be used if `overlap_with_ddp=True`"
-        )
+        assert (
+            self._overlap_with_ddp
+        ), "`_bucket_assignments_per_rank` only be used if `overlap_with_ddp=True`"
         if len(self._bucket_assignments_per_rank_cache) > 0:
             return self._bucket_assignments_per_rank_cache
 
@@ -1074,9 +1075,9 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                 "Specifying `gradients` should not "
                 "be used when `overlap_with_ddp=False`"
             )
-            assert closure is None, (
-                "`closure` is not supported when using a local functional optimizer"
-            )
+            assert (
+                closure is None
+            ), "`closure` is not supported when using a local functional optimizer"
             loss = self.optim.step(gradients=gradients)
 
         # Sync any updated attributes in the local optimizer to the exposed
@@ -1504,7 +1505,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                     "%s does not support the argument "
                     "`_allow_empty_param_list`; ZeroRedundancyOptimizer may "
                     "error due to an empty parameter list",
-                    self._optim_constructor
+                    self._optim_constructor,
                 )
                 self.optim: Any = self._optim_constructor(params, **self._optim_defaults)  # type: ignore[no-redef]
 
@@ -1515,17 +1516,16 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                     self._bucket_assignments_per_rank[self.global_rank]
                 )
                 logger.info(
-                    "rank %s with %s parameters "
-                    "across %s buckets",
-                    self.global_rank, local_numel, num_assigned_buckets
+                    "rank %s with %s parameters " "across %s buckets",
+                    self.global_rank,
+                    local_numel,
+                    num_assigned_buckets,
                 )
                 if self.global_rank == 0:
                     logger.info(
-                        "%s DDP "
-                        "buckets and "
-                        "%s bucket "
-                        "assignments",
-                        len(self._overlap_info.params_per_bucket), self._overlap_info.num_bucket_assignments
+                        "%s DDP " "buckets and " "%s bucket " "assignments",
+                        len(self._overlap_info.params_per_bucket),
+                        self._overlap_info.num_bucket_assignments,
                     )
         else:
             # NOTE: Passing `param_groups` into the local optimizer constructor
@@ -1640,7 +1640,8 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                     "Using the functional optimizer %s "
                     "instead of %s since "
                     "`overlap_with_ddp=True`",
-                    optim_constructor, optimizer_class
+                    optim_constructor,
+                    optimizer_class,
                 )
                 return optim_constructor
             else:

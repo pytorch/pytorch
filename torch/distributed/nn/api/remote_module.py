@@ -21,13 +21,14 @@ from typing import (
 
 import torch
 import torch.distributed.rpc as rpc
-from torch import Tensor, device, dtype, nn
-from torch.distributed.nn.jit import instantiator
+from torch import device, dtype, nn, Tensor
 from torch.distributed import _remote_device
+from torch.distributed.nn.jit import instantiator
 from torch.distributed.rpc.internal import _internal_rpc_pickler
 from torch.nn import Module
 from torch.nn.parameter import Parameter
 from torch.utils.hooks import RemovableHandle
+
 
 __all__ = ["RemoteModule"]
 
@@ -120,7 +121,6 @@ def _raise_not_supported(name: str) -> None:
 
 
 class _RemoteModule(nn.Module):
-
     def __new__(cls, *args, **kwargs):
         # Use __new__ for logging purposes.
         torch._C._log_api_usage_once("torch.distributed.nn.api.remote_module")
@@ -370,7 +370,10 @@ class _RemoteModule(nn.Module):
         self,
         hook: Union[
             Callable[[T, Tuple[Any, ...]], Optional[Any]],
-            Callable[[T, Tuple[Any, ...], Dict[str, Any]], Optional[Tuple[Any, Dict[str, Any]]]],
+            Callable[
+                [T, Tuple[Any, ...], Dict[str, Any]],
+                Optional[Tuple[Any, Dict[str, Any]]],
+            ],
         ],
         prepend: bool = False,
         with_kwargs: bool = False,
@@ -405,10 +408,7 @@ class _RemoteModule(nn.Module):
         )
 
     def named_parameters(  # type: ignore[return]
-        self,
-        prefix: str = "",
-        recurse: bool = True,
-        remove_duplicate: bool = True
+        self, prefix: str = "", recurse: bool = True, remove_duplicate: bool = True
     ) -> Iterator[Tuple[str, Parameter]]:
         _raise_not_supported(self.named_parameters.__name__)
 
@@ -416,10 +416,7 @@ class _RemoteModule(nn.Module):
         _raise_not_supported(self.buffers.__name__)
 
     def named_buffers(  # type: ignore[return]
-        self,
-        prefix: str = "",
-        recurse: bool = True,
-        remove_duplicate: bool = True
+        self, prefix: str = "", recurse: bool = True, remove_duplicate: bool = True
     ) -> Iterator[Tuple[str, Tensor]]:
         _raise_not_supported(self.named_buffers.__name__)
 
@@ -464,7 +461,11 @@ class _RemoteModule(nn.Module):
         assert rpc._is_current_rpc_agent_set(), "RemoteModule only works in RPC."
 
         remote_device = _remote_device(remote_device_str)
-        self.on = remote_device.worker_name() if remote_device.worker_name() is not None else remote_device.rank()
+        self.on = (
+            remote_device.worker_name()
+            if remote_device.worker_name() is not None
+            else remote_device.rank()
+        )
         self.device = str(remote_device.device())
         agent = rpc._get_current_rpc_agent()
         # If the device map of the remote worker is set,
