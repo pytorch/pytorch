@@ -563,14 +563,14 @@ def compile_fx_inner(
                 context.output_strides.append(None)
             else:
                 context.output_strides.append(
-                    [
+                    tuple(
                         (
                             shape_env.evaluate_symexpr(e)
                             if shape_env is not None
                             else int(e)
                         )
                         for e in exprs
-                    ]
+                    )
                 )
 
     if aot_mode:
