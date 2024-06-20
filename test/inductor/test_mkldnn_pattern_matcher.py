@@ -409,15 +409,15 @@ class TestPatternMatcher(TestPatternMatcherBase):
             def __init__(self, dtype, unary_fn):
                 super().__init__()
                 self.linear1 = torch.nn.Linear(10, 64, bias=False)
-                self.bias1 = torch.randn(64).to(dtype=dtype)
+                self.bias1 = torch.randn(64)
                 self.linear2 = torch.nn.Linear(10, 64, bias=False)
-                self.bias2 = torch.randn(64).to(dtype=dtype)
+                self.bias2 = torch.randn(64)
                 self.unary_fn = unary_fn
 
             def forward(self, x):
                 a = self.linear1(x) + self.bias1
                 b = self.linear2(x) + self.bias2
-                return self.unary_fn(a), self.unary_fn(b)
+                return self.unary_fn(a).to(dtype), self.unary_fn(b).to(dtype)
 
         dtypes = []
         if torch.ops.mkldnn._is_mkldnn_bf16_supported():

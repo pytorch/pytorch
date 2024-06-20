@@ -801,6 +801,12 @@ if torch._C._has_mkldnn:
             bias_meta = add_node.args[1].meta.get("val")
             if weight_meta is None or bias_meta is None:
                 return False
+            assert weight_meta.dtype in (
+                torch.bfloat16,
+                torch.float16,
+            )
+            if bias_meta.dtype not in (torch.bfloat16, torch.float16, torch.float):
+                return False
             return (
                 linear_node.args[2] is None
                 and bias_meta.dim() == 1
@@ -821,8 +827,15 @@ if torch._C._has_mkldnn:
             graph = match.graph
             add_node = match.output_node()
             linear_node = add_node.args[0]
+            w_node = linear_node.args[1].args[0].args[0]
+            w_dtype = w_node.meta.get("val").dtype
             new_args = list(linear_node.args)
-            new_args[2] = add_node.args[1]
+            bias_node = add_node.args[1]
+            to_dtype = graph.call_function(
+                prims.convert_element_type.default,
+                (bias_node, w_dtype),
+            )
+            new_args[2] = to_dtype
             repl = graph.call_function(
                 mkldnn._linear_pointwise.default, tuple(new_args)
             )
