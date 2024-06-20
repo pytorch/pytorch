@@ -46,6 +46,7 @@ from typing import (
     TYPE_CHECKING,
     Union,
 )
+from typing_extensions import TypeAlias
 
 import torch
 from torch._dynamo.utils import counters, dynamo_timed
@@ -419,7 +420,7 @@ def _ident(x: Any) -> Any:
     return x
 
 
-def extract_tensor_metadata_for_cache_key(t):
+def extract_tensor_metadata_for_cache_key(device_map, t):
     """
     Extracts the tensor metadata and removes fields of the TensorMetadata
     that are not needed for caching
@@ -427,18 +428,30 @@ def extract_tensor_metadata_for_cache_key(t):
     meta = extract_tensor_metadata(t)
     if not hasattr(t, "_is_inductor_static"):
         meta = dataclasses.replace(meta, storage_offset=0, storage_bytes=None)
+
+    # The pickle implementation avoids serializing the same object more than once.
+    # That behavior means the byte stream we create to hash will vary if, for example,
+    # we see two tensor objects with the same device, but the torch.device object is
+    # actually the same object vs. merely equivalent. We want to produce the same hash
+    # value in either situation, so we memoize the device objects and always reference
+    # the same object for a given device. It's possible other metadata fields deserve
+    # the same treatment, but so far we've only observed this issue with the device.
+    if meta.device not in device_map:
+        device_map[meta.device] = meta.device
+    meta = dataclasses.replace(meta, device=device_map[meta.device])
+
     return meta
 
 
-def _reduce_fake_tensor(t):
+def _reduce_fake_tensor(device_map, t):
     """
     See FxGraphCachePickler. Custom reducer to pickle FakeTensors.
     """
-    metadata = extract_tensor_metadata_for_cache_key(t)
+    metadata = extract_tensor_metadata_for_cache_key(device_map, t)
     return (_ident, (metadata,))
 
 
-def _reduce_tensor(t):
+def _reduce_tensor(device_map, t):
     """
     See FxGraphCachePickler. Custom reducer to pickle Tensors.
     If we see tensors, we know they're constants stored as attributes on
@@ -465,7 +478,7 @@ def _reduce_tensor(t):
             f"FX graph cache handling of a large constant took {elapsed:.1}s. Please file an issue."
         )
 
-    metadata = extract_tensor_metadata_for_cache_key(t)
+    metadata = extract_tensor_metadata_for_cache_key(device_map, t)
     return (_ident, (TensorMetadataAndValues(metadata, values),))
 
 
@@ -495,9 +508,13 @@ class FxGraphCachePickler(pickle.Pickler):
     data that allow us to compute a stable, but safe hash.
     """
 
+    # See extract_tensor_metadata_for_cache_key. Whenever we extract metadata during
+    # pickling, we make sure devices always reference the same torch.device object.
+    _device_map: Dict[torch.device, torch.device] = {}
+
     dispatch_table = copyreg.dispatch_table.copy()
-    dispatch_table[FakeTensor] = _reduce_fake_tensor
-    dispatch_table[torch.Tensor] = _reduce_tensor
+    dispatch_table[FakeTensor] = functools.partial(_reduce_fake_tensor, _device_map)
+    dispatch_table[torch.Tensor] = functools.partial(_reduce_tensor, _device_map)
     dispatch_table[torch.SymInt] = _reduce_symint
     dispatch_table[
         torch.fx.experimental._backward_state.BackwardState
@@ -538,7 +555,7 @@ class FxGraphCachePickler(pickle.Pickler):
 
         def get_str(obj) -> str:
             if isinstance(obj, torch.Tensor):
-                return str(extract_tensor_metadata_for_cache_key(obj))
+                return str(extract_tensor_metadata_for_cache_key(cls._device_map, obj))
             elif isinstance(obj, bytes):
                 return "<bytes>"
             elif type(obj) in cls.dispatch_table:
@@ -1082,6 +1099,9 @@ class FxGraphCache:
             pass
 
 
+_StrideExprStr: TypeAlias = str
+
+
 @dataclasses.dataclass
 class CompiledFxGraph:
     """
@@ -1099,7 +1119,7 @@ class CompiledFxGraph:
     mutated_input_idxs: Set[int]
     constants: Dict[str, torch.Tensor]
     torchbind_constants: Dict[str, torch._C.ScriptObject]
-    output_strides: Optional[List[Optional[Tuple[int, ...]]]]
+    output_strides: Optional[List[Optional[Tuple[_StrideExprStr, ...]]]]
     disabled_cudagraphs_reason: Optional[str]
     metrics_deltas: metrics.CachedMetricsDeltas
     # This is a string representation of an expression we serialize
@@ -1116,7 +1136,7 @@ class CompiledFxGraph:
         self,
         current_callable: Optional[Callable[..., Any]],
         graph: GraphLowering,
-        output_strides: List[Optional[Tuple[int, ...]]],
+        output_strides: List[Optional[Tuple[_StrideExprStr, ...]]],
         disabled_cudagraphs_reason: Optional[str],
         metrics_deltas: metrics.CachedMetricsDeltas,
     ):
@@ -1286,7 +1306,7 @@ class VecISA:
 #include <ATen/cpu/vec/vec.h>
 #endif
 
-__attribute__((aligned(64))) float in_out_ptr0[16] = {0.0};
+alignas(64) float in_out_ptr0[16] = {0.0};
 
 extern "C" void __avx_chk_kernel() {
     auto tmp0 = at::vec::Vectorized<float>(1);
@@ -1349,8 +1369,6 @@ cdll.LoadLibrary("__lib_path__")
                 output_path = x86_isa_help_builder.get_target_file_path()
                 if not os.path.isfile(output_path):
                     status, target_file = x86_isa_help_builder.build()
-                    if status:
-                        return False
 
                 # Check build result
                 subprocess.check_call(
@@ -1481,12 +1499,11 @@ supported_vec_isa_list = [VecAVX512(), VecAVX2(), VecNEON()]
 # we only cache some key isa information.
 @functools.lru_cache(None)
 def valid_vec_isa_list() -> List[VecISA]:
-    if sys.platform == "darwin" and platform.processor() == "arm":
-        return [VecNEON()]
-
     isa_list: List[VecISA] = []
-    cur_os = sys.platform
-    if cur_os != "linux" and cur_os != "win32":
+    if sys.platform == "darwin" and platform.processor() == "arm":
+        isa_list.append(VecNEON())
+
+    if sys.platform not in ["linux", "win32"]:
         return isa_list
 
     arch = platform.machine()
@@ -1503,9 +1520,9 @@ def valid_vec_isa_list() -> List[VecISA]:
                         if re.search(r"[\^ ]+vxe[\$ ]+", group):
                             isa_list.append(VecZVECTOR())
                             break
-        return isa_list
-
-    if arch == "x86_64" or arch == "AMD64":
+    elif arch == "aarch64":
+        isa_list.append(VecNEON())
+    elif arch in ["x86_64", "AMD64"]:
         """
         arch value is x86_64 on Linux, and the value is AMD64 on Windows.
         """
@@ -1513,7 +1530,6 @@ def valid_vec_isa_list() -> List[VecISA]:
         for isa in supported_vec_isa_list:
             if str(isa) in _cpu_supported_x86_isa and isa:
                 isa_list.append(isa)
-        return isa_list
 
     return isa_list
 
@@ -2546,11 +2562,14 @@ class CppPythonBindingsCodeCache(CppCodeCache):
 
         #ifndef _MSC_VER
         #if __cplusplus < 202002L
-        // C++20 earlier code
+        // C++20 (earlier) code
         // https://en.cppreference.com/w/cpp/language/attributes/likely
         #define likely(x)       __builtin_expect(!!(x), 1)
         #define unlikely(x)     __builtin_expect(!!(x), 0)
         #endif
+        #else
+        #define likely(x) (x)
+        #define unlikely(x) (x)
         #endif
 
         // This is defined in guards.cpp so we don't need to import PyTorch headers that are slooow.

@@ -53,7 +53,13 @@ from torch.autograd import DeviceType
 from torch.autograd.profiler_util import EventList
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.passes.shape_prop import ShapeProp
-from torch.utils._sympy.functions import CeilDiv, CleanDiv, FloorDiv, ModularIndexing
+from torch.utils._sympy.functions import (
+    CeilDiv,
+    CleanDiv,
+    FloorDiv,
+    Identity,
+    ModularIndexing,
+)
 from torch.utils._sympy.symbol import make_symbol, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from . import config
@@ -574,7 +580,7 @@ def sympy_str(expr: sympy.Expr) -> str:
     if isinstance(expr, sympy.Mul):
         return " * ".join(map(sympy_str, expr.args))
 
-    if isinstance(expr, (ModularIndexing, CleanDiv, FloorDiv)):
+    if isinstance(expr, (ModularIndexing, CleanDiv, FloorDiv, Identity)):
         return f"{expr.func.__name__}({', '.join(map(sympy_str, expr.args))})"
     return str(expr)
 
@@ -1784,7 +1790,7 @@ def run_and_get_cpp_code(fn, *args, **kwargs):
 
         log_capture_string = io.StringIO()
         ch = logging.StreamHandler(log_capture_string)
-        from torch._inductor.graph import output_code_log
+        from torch._inductor.codecache import output_code_log
 
         output_code_log.addHandler(ch)
         prev_level = output_code_log.level
