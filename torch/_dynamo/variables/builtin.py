@@ -13,6 +13,7 @@ from typing import Dict, List
 
 import torch
 from torch import sym_float, sym_int
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config, polyfill, variables
 from ..exc import (
@@ -64,7 +65,6 @@ from .tensor import (
     UnspecializedPythonVariable,
 )
 from .user_defined import UserDefinedObjectVariable, UserDefinedVariable
-from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 log = logging.getLogger(__name__)
 
@@ -1394,7 +1394,10 @@ class BuiltinVariable(VariableTracker):
                 def check_type(ty):
                     if ty not in tensortype_to_dtype:
                         example_val = arg.as_proxy().node.meta["example_value"]
-                        if is_traceable_wrapper_subclass(example_val) and ty is torch.nn.parameter.Parameter:
+                        if (
+                            is_traceable_wrapper_subclass(example_val)
+                            and ty is torch.nn.parameter.Parameter
+                        ):
                             # N.B: we are calling isinstance directly on the example value.
                             # torch.nn.Parameter has a meta-class that overrides __isinstance__,
                             # the isinstance check here allows us to invoke that logic.
