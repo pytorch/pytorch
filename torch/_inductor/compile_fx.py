@@ -790,7 +790,7 @@ def fx_codegen_and_compile(
         )
         if config.is_fbcode():
             log_optimus_to_scuba(
-                extra_logging={"pt2_configs": str(get_patched_config_dict())}
+                extra_logging={"pt2_configs": get_patched_config_dict()}
             )
 
     with V.set_fake_mode(fake_mode), maybe_disable_comprehensive_padding(
