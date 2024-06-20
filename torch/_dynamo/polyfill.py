@@ -71,3 +71,10 @@ def dropwhile(predicate, iterable):
             yield x
             break
     yield from iterable
+
+
+def jit_inline(*args, **kwargs):
+    script_obj = args[0]
+    return script_obj._torchdynamo_inline(*args[1:], **kwargs)
+
+    return torch.jit._overload_call(*args, **kwargs)

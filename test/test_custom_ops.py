@@ -2153,6 +2153,41 @@ class TestCustomOpAPI(TestCase):
         self.assertTrue(cpu_called)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_no_grad_skips_autograd(self):
+        @torch.library.custom_op("_torch_testing::add", mutates_args=())
+        def add(x: Tensor, y: float) -> Tensor:
+            x_np = x.numpy(force=True)
+            out_np = x_np + y
+            return torch.from_numpy(out_np).to(x.device)
+
+        called = 0
+
+        def setup_context(ctx, inputs, output):
+            nonlocal called
+            called += 1
+
+        def backward(ctx, grad):
+            raise AssertionError("should not be reached")
+
+        add.register_autograd(backward, setup_context=setup_context)
+
+        x = torch.randn(3, requires_grad=True)
+        with torch.no_grad():
+            y = add(x, 2.0)
+        self.assertEqual(called, 0)
+        self.assertEqual(y, x + 2.0)
+
+        x.requires_grad_(False)
+        y = add(x, 2.0)
+        self.assertEqual(called, 0)
+        self.assertEqual(y, x + 2.0)
+
+        x = torch.randn(3, requires_grad=True)
+        y = add(x, 2.0)
+        self.assertEqual(called, 1)
+        self.assertEqual(y, x + 2.0)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_manual_schema(self):
         @torch.library.custom_op(
             "_torch_testing::add",
@@ -2291,10 +2326,13 @@ class TestCustomOpAPI(TestCase):
         class Stack(torch.autograd.Function):
             @staticmethod
             def forward(ctx, xs):
+                ctx.num_xs = len(xs)
                 return torch.stack(xs)
 
             @staticmethod
             def backward(ctx, grad):
+                expected = ([True] * ctx.num_xs,)
+                self.assertEqual(ctx.needs_input_grad, expected)
                 return list(grad.unbind(0))
 
         # call two applys, do a backward on the first
@@ -2327,19 +2365,21 @@ class TestCustomOpAPI(TestCase):
         class Foo(torch.autograd.Function):
             @staticmethod
             def forward(ctx, xs):
-                if len(xs) > 0:
+                if len(xs) > 1:
                     return Foo.apply(xs[1:])
                 ctx.len_xs = len(xs)
-                return x.sin()
+                return xs[0].sin()
 
             @staticmethod
             def backward(ctx, grad):
-                result = [None] * len_xs
+                result = [None] * ctx.len_xs
                 result[-1] = grad.cos()
                 return result
 
-        with self.assertRaisesRegex(NotImplementedError, "Recursive call"):
-            Foo.apply(xs)
+        # should work
+        result = Foo.apply(xs)
+        expected = xs[-1].sin()
+        self.assertEqual(result, expected)
 
         # recursive on backward
         @torch._library.autograd.supports_tensorlist
@@ -2440,7 +2480,7 @@ class TestCustomOpAPI(TestCase):
         opname = f"source{idx}"
         op = getattr(torch.ops._torch_testing, opname).default
         entry = torch._library.simple_registry.singleton.find(op._name)
-        source = entry.abstract_impl.kernel.source
+        source = entry.fake_impl.kernel.source
         assert source is not None
         self.assertTrue("custom_op_db.py" in source)
 

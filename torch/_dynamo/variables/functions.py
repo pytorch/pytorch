@@ -6,12 +6,11 @@ import functools
 import inspect
 import itertools
 import types
-import warnings
 from typing import Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
 
-from .. import variables
+from .. import polyfill, variables
 from ..bytecode_transformation import create_call_function, create_rot_n
 from ..exc import unimplemented, Unsupported
 from ..guards import GuardBuilder, install_guard
@@ -22,6 +21,11 @@ from .constant import ConstantVariable
 
 if TYPE_CHECKING:
     from torch._guards import Source
+
+try:
+    from torch.distributed._composable.fsdp import _fsdp_param_group
+except ModuleNotFoundError:
+    _fsdp_param_group = None
 
 
 def wrap_bound_arg(tx, val, source=None):
@@ -339,6 +343,13 @@ class UserMethodVariable(UserFunctionVariable):
                 return self.obj.call_method(
                     tx, self.fn.__name__, args, kwargs, constant=self.is_constant
                 )
+        elif (
+            _fsdp_param_group is not None
+            and self.fn is _fsdp_param_group.FSDPParamGroup.use_training_state
+        ):
+            return variables.TorchCtxManagerClassVariable(self.fn).call_function(
+                tx, (self.obj, *args), kwargs
+            )
         if self.is_constant:
             fn = getattr(self.obj.value, self.fn.__name__)
             return invoke_and_store_as_constant(tx, fn, self.get_name(), args, kwargs)
@@ -661,9 +672,44 @@ class SkipFunctionVariable(VariableTracker):
                         f"torch.compiler.allow_in_graph."
                     )
                     # also warn on it because most users won't see the graph break message
-                    warnings.warn(msg)
+                    torch._dynamo.utils.warn_once(msg)
             msg += f"', {self.reason}'" if self.reason else ""
             unimplemented(msg)
+
+
+class TorchJitFunctionVariable(VariableTracker):
+    """
+    Wrapper vt to forward the call to the _torchdynamo_inline attr. Earlier, we
+    were treating both the returned ScriptFunction and the _torchdynamo_inline
+    attr to be the same variable tracker. This caused issues because the source
+    would point the inner attribute, while the user code could try to access the
+    attr of the outer script object.
+    """
+
+    def __init__(self, fn, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.fn = fn
+
+    def var_getattr(self, tx, name):
+        if name == "_torchdynamo_inline":
+            val = self.fn._torchdynamo_inline
+            if self.source:
+                from .builder import VariableBuilder
+
+                return VariableBuilder(tx, AttrSource(self.source, name))(val)
+            else:
+                from .builder import SourcelessBuilder
+
+                return SourcelessBuilder.create(tx, val)
+
+        return super().var_getattr(tx, name)
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        return variables.UserFunctionVariable(polyfill.jit_inline).call_function(
+            tx, [self, *args], kwargs
+        )
 
 
 def _traceable_collective_remaps():
