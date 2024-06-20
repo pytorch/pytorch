@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import copy
 import torch
 import warnings

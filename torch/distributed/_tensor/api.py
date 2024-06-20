@@ -1,10 +1,10 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import inspect
 import warnings
 from typing import Any, Callable, cast, Optional, Sequence, Tuple
 
 import torch
-
 import torch.distributed._tensor._dispatch as op_dispatch
 import torch.distributed._tensor.random as random
 import torch.nn as nn
@@ -240,7 +240,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             cls,
             spec.tensor_meta.shape,
             strides=spec.tensor_meta.stride,
-            dtype=spec.tensor_meta.dtype,
+            dtype=local_tensor.dtype,
             device=local_tensor.device,
             layout=local_tensor.layout,
             requires_grad=requires_grad,
@@ -294,10 +294,11 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         ]
         return self.redistribute(device_mesh=self.device_mesh, placements=placements)
 
-    def __coerce_same_metadata_as_tangent__(self, metadata_tensor):
+    def __coerce_same_metadata_as_tangent__(self, flatten_spec):
+        (spec, _) = flatten_spec  # Result of tensor_flatten()
         return self.redistribute(
             device_mesh=self.device_mesh,
-            placements=metadata_tensor.placements,
+            placements=spec.placements,
         )
 
     @classmethod

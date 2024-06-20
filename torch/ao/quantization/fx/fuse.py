@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from torch.fx import (
     GraphModule,
     Node,

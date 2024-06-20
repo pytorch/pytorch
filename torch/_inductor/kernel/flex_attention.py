@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """ Triton Implementation of the flex_attention Kernel"""
 
 import logging
@@ -241,10 +242,8 @@ flex_attention_template = TritonTemplate(
         start_n = tl.multiple_of(start_n, BLOCK_N)
         # -- load k, v --
         k = tl.load(K_block_ptr)
-        v = tl.load(V_block_ptr)
         # -- compute qk ---
-        qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
-        qk = tl.dot(q, k.to(MATMUL_PRECISION), acc=qk)
+        qk = tl.dot(q, k)
         # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
         m = offs_m[:, None]
         n = start_n + offs_n[None, :]
@@ -264,24 +263,26 @@ flex_attention_template = TritonTemplate(
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
         # -- compute scaling constant ---
-        row_max = tl.max(post_mod_scores, 1)
-        m_i_new = tl.maximum(m_i, row_max)
+        m_ij = tl.maximum(m_i, tl.max(post_mod_scores, 1))
 
-        alpha = tl.math.exp2(m_i - m_i_new)
-        p = tl.math.exp2(post_mod_scores - m_i_new[:, None])
+        alpha = tl.math.exp2(m_i - m_ij)
+        p = tl.math.exp2(post_mod_scores - m_ij[:, None])
         if not ROWS_GUARANTEED_SAFE:
-            masked_out_rows = (m_i_new == float("-inf"))
+            masked_out_rows = (m_ij == float("-inf"))
             alpha = tl.where(masked_out_rows, 0, alpha)
             p = tl.where(masked_out_rows[:, None], 0, p)
 
-        # -- scale and update acc --
-        acc_scale = l_i * 0 + alpha  # workaround some compiler bug
-        acc *= acc_scale[:, None]
-        acc = tl.dot(p.to(MATMUL_PRECISION), v.to(MATMUL_PRECISION), acc)
-
-        # -- update m_i and l_i --
+        # NB: l_i update is pulled up here since it's a bit faster
+        # NB: For headdim=256, it's faster to move it back down to after m_i =
+        # m_ij
         l_i = l_i * alpha + tl.sum(p, 1)
-        m_i = m_i_new
+        # # -- scale and update acc --
+        acc = acc * alpha[:, None]
+        v = tl.load(V_block_ptr)
+        acc = tl.dot(p.to(MATMUL_PRECISION), v, acc)
+
+        # -- update m_i
+        m_i = m_ij
         # update pointers
         K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
         V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
@@ -293,8 +294,8 @@ flex_attention_template = TritonTemplate(
     idx_m = offs_m[:, None]
     idx_d = tl.arange(0, BLOCK_DMODEL)[None, :]
 
+    mask = idx_m < Q_LEN
     # TODO generalize and add proper mask support
-    mask = (idx_m != -1) & (idx_d != -1)
     {{store_output(("idx_z", "idx_h", "idx_m", "idx_d"), "acc", "mask")}}
 
     # TODO dont want to write this if we dont require grad
@@ -360,7 +361,7 @@ def _get_default_config_bwd(query) -> Tuple[int, int, int, int]:
             return (64, 64, 4, 1)
         return (128, 128, 4, 3)
     elif head_dim <= 256 and torch.cuda.get_device_capability() >= (8, 0):  # A100
-        return (32, 32, 4, 1)
+        return (64, 64, 4, 1)
     else:  # modest hardware or extremely large head_dim
         return (16, 16, 4, 1)
 
@@ -762,14 +763,13 @@ def flex_attention_backward(*args, **kwargs):
     configs: List[Tuple[int, int, int, int]] = []
     configs.append(_get_default_config_bwd(query))
     if config.max_autotune:
-        configs += [
-            (128, 128, 4, 3),
-            (128, 128, 8, 1),
-            (64, 64, 4, 3),
-            (64, 64, 8, 1),
-        ]
+        for BLOCK1 in [32, 64]:
+            for BLOCK2 in [32, 64]:
+                for w in [4, 8]:
+                    for s in [1, 3]:
+                        configs.append((BLOCK1, BLOCK2, w, s))
 
-    for BLOCK_M, BLOCK_N, num_warps, num_stages in configs:
+    for BLOCK1, BLOCK2, num_warps, num_stages in configs:
         flex_attention_backward_template.maybe_append_choice(
             choices=choices,
             input_nodes=[
@@ -789,10 +789,10 @@ def flex_attention_backward(*args, **kwargs):
             call_sizes=query.get_size() + [key.get_size()[2]],
             num_stages=num_stages,
             num_warps=num_warps,
-            BLOCK_M1=BLOCK_M,
-            BLOCK_N1=BLOCK_N,
-            BLOCK_M2=BLOCK_N,
-            BLOCK_N2=BLOCK_M,
+            BLOCK_M1=BLOCK1,
+            BLOCK_N1=BLOCK1,
+            BLOCK_M2=BLOCK2,
+            BLOCK_N2=BLOCK2,
             BLOCK_DMODEL=query.get_size()[-1],
             # For now, we always assume the "sound" option
             SCORE_MOD_IS_LINEAR=False,

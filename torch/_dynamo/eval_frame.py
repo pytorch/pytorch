@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # mypy: disable-error-code="method-assign"
 
 """
@@ -153,8 +154,9 @@ class OptimizedModule(torch.nn.Module):
         if isinstance(self.dynamo_ctx, DisableContext):
             # No need to check trace rules
             self.forward = self.dynamo_ctx(self._orig_mod.__call__)
-        elif isinstance(self._orig_mod.forward, types.MethodType) and trace_rules.check(
-            self._orig_mod.forward
+        elif isinstance(self._orig_mod.forward, types.MethodType) and (
+            trace_rules.check(self._orig_mod.forward)
+            or getattr(self._orig_mod, "_is_fsdp_managed_module", False)
         ):
             # This may be a torch.nn.* instance in trace_rules.py which
             # won't trigger a frame evaluation workaround to add an extra
@@ -1431,7 +1433,8 @@ def export(
         assert fake_mode is not None
 
         log.info(
-            "Dynamo captured graph:\n\n%s", graph.print_readable(print_output=False)
+            "Dynamo captured graph:\n\n%s",
+            graph.print_readable(print_output=False, colored=True),
         )
 
         # This check need to happened before aten_graph

@@ -190,8 +190,8 @@ struct AttentionKernel {
     unsigned long long dropout_batch_head_rng_offset = 0;
     float dropout_prob = 0.0f;
     at::PhiloxCudaState rng_engine_inputs = at::PhiloxCudaState(0, 0);
-    int64_t* extragraph_offset;
-    int64_t* seed;
+    int64_t* extragraph_offset = nullptr;
+    int64_t* seed = nullptr;
 
     // Moves pointers to what we should process
     // Returns "false" if there is no work to do

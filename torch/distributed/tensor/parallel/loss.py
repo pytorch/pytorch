@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import contextlib
 from typing import cast, Dict, Optional, Tuple
@@ -16,6 +17,7 @@ from torch.distributed._tensor.ops.math_ops import (
 )
 from torch.distributed._tensor.placement_types import DTensorSpec, Placement, TensorMeta
 from torch.distributed.device_mesh import DeviceMesh
+
 
 aten = torch.ops.aten
 
