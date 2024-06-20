@@ -523,9 +523,13 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             # Test with basic FSDP wrapping (outer wrap around whole model)
             m, inputs, correct_outputs = get_mutating_model(f"cuda:{self.rank}")
             fsdp_m = FSDP(m, use_orig_params=True)
-            fsdp_m = torch._dynamo.optimize("inductor", nopython=True)(fsdp_m)
+            prof = torch._dynamo.utils.CompileProfiler()
+            fsdp_m = torch.compile(fsdp_m, backend=prof, fullgraph=False)
             outputs = fsdp_m(inputs)
             self.assertTrue(same(correct_outputs, outputs))
+            FileCheck().check(
+                "setattr(FSDPManagedNNModuleVariable(MutatingModel), state, ...)"
+            ).run(prof.report())
 
     @skip_if_lt_x_gpu(1)
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
