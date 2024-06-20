@@ -2030,26 +2030,25 @@ class CppKernel(Kernel):
                 ):
                     # Allocate local buffer
                     local_buffers = V.local_buffer_context.local_buffers
-                    assert len(local_buffers.items()) == 1
-                    local_buffer = next(iter(local_buffers.items()))[1]
-                    # For dynamic size, rename s to ks
-                    local_buf_size = sympy_product(
-                        [
-                            self.rename_indexing(size_val)
-                            for size_val in local_buffer.get_layout().size
-                        ]
-                    )
-                    local_buf_dtype = DTYPE_TO_CPP[local_buffer.get_layout().dtype]
-                    allocate = (
-                        f"std::make_unique<{local_buf_dtype} []>({local_buf_size})"
-                    )
-                    code.splice(
-                        f"std::unique_ptr<{local_buf_dtype} []> local_buffer = {allocate};"
-                    )
-                    local_buffer_name = local_buffer.get_name()
-                    code.splice(
-                        f"{local_buf_dtype}* {local_buffer_name} = local_buffer.get();"
-                    )
+                    for local_buffer in list(local_buffers.values()):
+                        # For dynamic size, rename s to ks
+                        local_buf_size = sympy_product(
+                            [
+                                self.rename_indexing(size_val)
+                                for size_val in local_buffer.get_layout().size
+                            ]
+                        )
+                        local_buf_dtype = DTYPE_TO_CPP[local_buffer.get_layout().dtype]
+                        allocate = (
+                            f"std::make_unique<{local_buf_dtype} []>({local_buf_size})"
+                        )
+                        local_buffer_name = local_buffer.get_name()
+                        code.splice(
+                            f"std::unique_ptr<{local_buf_dtype} []> buf_{local_buffer_name} = {allocate};"
+                        )
+                        code.splice(
+                            f"{local_buf_dtype}* {local_buffer_name} = buf_{local_buffer_name}.get();"
+                        )
                 gen_loops(loop_nest.root)
             else:
                 gen_kernel(loop_nest.kernel)
@@ -3887,23 +3886,25 @@ class CppScheduling(BaseScheduling):
                             global_buffer_layout.size[size_offset:],
                             global_buffer_layout.stride[size_offset:],
                         )
+                        local_buf_prefix = "local_buffer_data"
                         local_buffers.append(
                             LocalBuffer(
                                 local_buf=ir.Buffer(
-                                    "local_buffer_data", local_buffer_layout
+                                    f"{local_buf_prefix}_{len(local_buffers)}", local_buffer_layout
                                 ),
                                 global_buf=global_buffer,
                             )
                         )
-                        # At most 1 node with local buf for each OuterLoopFusedSchedulerNode
-                        break
-            assert len(local_buffers) in [0, 1]
+            #             # At most 1 node with local buf for each OuterLoopFusedSchedulerNode
+            #             break
+            # assert len(local_buffers) in [0, 1]
 
             with LocalBufferContext(kernel_group.args) as scope:
                 if len(local_buffers) > 0:
-                    scope.add_local_buffer(
-                        local_buffers[0].local_buf, local_buffers[0].global_buf
-                    )
+                    for local_buffer in local_buffers:
+                        scope.add_local_buffer(
+                            local_buffer.local_buf, local_buffer.global_buf
+                        )
                 for _node in node.get_outer_nodes():
                     assert isinstance(_node, (FusedSchedulerNode, SchedulerNode))
                     cpp_kernel_proxy = CppKernelProxy(kernel_group)
