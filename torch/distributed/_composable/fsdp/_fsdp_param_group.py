@@ -515,6 +515,7 @@ class FSDPParamGroup:
         return label
 
     def __bool__(self) -> bool:
+        # NOTE: this works around a short-term limitation of torch.compile
         return True
 
 
