@@ -2725,6 +2725,7 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
     if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
         # fast path, avoid pytree overhead
         assert idx_to_steal == [0]
+
         def compiled_autograd_wrapper(*args):
             assert args and isinstance(args[0], list)
             flat_args = args[0] + list(args[1:])
