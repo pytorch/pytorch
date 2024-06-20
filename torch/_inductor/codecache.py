@@ -1306,18 +1306,7 @@ class VecISA:
 #include <ATen/cpu/vec/vec.h>
 #endif
 
-#ifdef __APPLE__
-// Fix Mac OS UT failed.
-__attribute__((aligned(64))) float in_out_ptr0[16] = {0.0};
-#else
-#if defined(_WIN32)
-#define __at_align__ __declspec(align(64))
-#else
-#define __at_align__ __attribute__((aligned(64)))
-#endif
-
-__at_align__ float in_out_ptr0[16] = {0.0};
-#endif
+alignas(64) float in_out_ptr0[16] = {0.0};
 
 extern "C" void __avx_chk_kernel() {
     auto tmp0 = at::vec::Vectorized<float>(1);
@@ -1510,12 +1499,11 @@ supported_vec_isa_list = [VecAVX512(), VecAVX2(), VecNEON()]
 # we only cache some key isa information.
 @functools.lru_cache(None)
 def valid_vec_isa_list() -> List[VecISA]:
-    if sys.platform == "darwin" and platform.processor() == "arm":
-        return [VecNEON()]
-
     isa_list: List[VecISA] = []
-    cur_os = sys.platform
-    if cur_os != "linux" and cur_os != "win32":
+    if sys.platform == "darwin" and platform.processor() == "arm":
+        isa_list.append(VecNEON())
+
+    if sys.platform not in ["linux", "win32"]:
         return isa_list
 
     arch = platform.machine()
@@ -1532,9 +1520,9 @@ def valid_vec_isa_list() -> List[VecISA]:
                         if re.search(r"[\^ ]+vxe[\$ ]+", group):
                             isa_list.append(VecZVECTOR())
                             break
-        return isa_list
-
-    if arch == "x86_64" or arch == "AMD64":
+    elif arch == "aarch64":
+        isa_list.append(VecNEON())
+    elif arch in ["x86_64", "AMD64"]:
         """
         arch value is x86_64 on Linux, and the value is AMD64 on Windows.
         """
@@ -1542,7 +1530,6 @@ def valid_vec_isa_list() -> List[VecISA]:
         for isa in supported_vec_isa_list:
             if str(isa) in _cpu_supported_x86_isa and isa:
                 isa_list.append(isa)
-        return isa_list
 
     return isa_list
 
