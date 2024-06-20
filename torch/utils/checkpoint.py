@@ -8,7 +8,6 @@ from collections import defaultdict
 from typing import *  # noqa: F403
 import enum
 from weakref import ReferenceType
-import math
 
 import torch
 import torch.fx.traceback as fx_traceback

@@ -25,10 +25,10 @@ from torch.fx.experimental.symbolic_shapes import (
     is_symbol_binding_fx_node,
 )
 from torch.fx.passes import graph_drawer
+from torch.utils.checkpoint import CheckpointPolicy
 from . import config
 from ._aot_autograd.logging_utils import get_aot_graph_name
 from .compile_utils import fx_graph_cse, get_aten_target
-from torch.utils.checkpoint import CheckpointPolicy
 
 if TYPE_CHECKING:
     import sympy
@@ -111,7 +111,7 @@ def must_recompute(node):
 
 
 def prefer_recompute(node: fx.Node) -> bool:
-    return node.meta.get("recompute", None) == CheckpointPolicy.PREFER_RECOMPUTE 
+    return node.meta.get("recompute", None) == CheckpointPolicy.PREFER_RECOMPUTE
 
 
 def has_recomputable_ops(fx_g: fx.GraphModule) -> bool:
