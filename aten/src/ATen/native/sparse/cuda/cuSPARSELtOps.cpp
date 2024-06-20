@@ -35,14 +35,14 @@ const static std::unordered_map<hipDataType, hipsparseLtDatatype_t> sparseLtData
     {HIP_R_16BF, HIPSPARSELT_R_16BF},
 };
 
+static std::unordered_map<int, bool> cache;
+const static std::set<std::string> supported_archs = {"gfx940", "gfx941", "gfx942", "gfx1200", "gfx1201"};
 static bool isHipSparseLtSupported(int idx) {
-    static std::unordered_map<int, bool> cache;
     if (cache.find(idx) != cache.end()) {
         return cache[idx];
     }
-    hipDeviceProp_t* prop = at::cuda::getDeviceProperties(idx);
+    std::unique_ptr<hipDeviceProp_t> prop(at::cuda::getDeviceProperties(idx));
     std::string arch{prop->gcnArchName};
-    const static std::set<std::string> supported_archs = {"gfx940", "gfx941", "gfx942", "gfx1200", "gfx1201"};
     bool result = (supported_archs.find(arch) != supported_archs.end()) && (ROCM_VERSION >= 61000);
     cache[idx] = result;
     return result;
