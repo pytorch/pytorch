@@ -94,7 +94,7 @@ _COPY_META_FIELDS = [
     "recompute",
     "from_node",
     "quantization_tag",
-    "subgraph"
+    "partitioner_tag"
 ]
 
 

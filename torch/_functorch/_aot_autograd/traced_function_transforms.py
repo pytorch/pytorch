@@ -330,17 +330,16 @@ def create_functionalized_rng_ops_wrapper(func, args, trace_joint=True) -> Any:
 
 
 @contextmanager
-def set_subgraph(subgraph: str):
-    meta_key = "subgraph"
-    if fx_traceback.has_preserved_node_meta():
-        original_val = fx_traceback.current_meta.get(meta_key, None)
-        fx_traceback.current_meta[meta_key] = subgraph
-        try:
-            yield
-        finally:
-            fx_traceback.current_meta[meta_key] = original_val
-    else:
+def set_partitioner_tag(tag: str):
+    meta_key = "partitioner_tag"
+    assert fx_traceback.has_preserved_node_meta()
+
+    original_val = fx_traceback.current_meta.get(meta_key, None)
+    fx_traceback.current_meta[meta_key] = tag
+    try:
         yield
+    finally:
+        fx_traceback.current_meta[meta_key] = original_val
 
 
 # This creates the final function that we want to trace using make_fx(),
@@ -458,8 +457,8 @@ def create_functionalized_fn(
                     # Not banning here mutations on inpt_info.requires_grad -
                     # we'll check at runtime and fail only when backward is under torch.is_grad_enabled (create_graph)
                     # Add node meta for copy_ for partitioner that this node should be in backward graph.
-                    with torch.fx.traceback.preserve_node_meta(), set_subgraph(
-                        "backward"
+                    with torch.fx.traceback.preserve_node_meta(), set_partitioner_tag(
+                        "mutation_in_backward"
                     ):
                         before.copy_(after)
                     meta.indices_of_inputs_that_requires_grad_with_mutations_in_bw.append(

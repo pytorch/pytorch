@@ -170,9 +170,11 @@ def _extract_graph_with_inputs_outputs(
         env[node] = new_node
 
     for node in joint_graph.nodes:
-        node_subgraph = node.meta.get("subgraph", None)
         # If node subgraph is marked - only keep it if specified subgraph argument is the same
-        if subgraph and node_subgraph and subgraph != node_subgraph:
+        if (
+            node.meta.get("partitioner_tag", None) == "mutation_in_backward"
+            and subgraph != "backward"
+        ):
             continue
 
         if node in env:
@@ -283,7 +285,7 @@ def _extract_fwd_bwd_modules(
         joint_module.graph,
         saved_sym_nodes + saved_values + tangent_inputs + bwd_seed_offset_inputs,
         bwd_outputs,
-        subgraph="backward",
+        "backward",
     )
 
     for node in bwd_graph.find_nodes(op="placeholder"):
@@ -398,7 +400,7 @@ def default_partition(
         joint_module, num_fwd_outputs=num_fwd_outputs
     )
     forward_only_graph = _extract_graph_with_inputs_outputs(
-        joint_module.graph, inputs, fwd_outputs, subgraph="forward"
+        joint_module.graph, inputs, fwd_outputs, "forward"
     )
     forward_node_names = {
         node.name for node in forward_only_graph.nodes if node.op != "output"
