@@ -1375,7 +1375,7 @@ def _export_to_aten_ir_make_fx(
             mod, params_spec, params_len, store_orig_mod=True
         )
 
-        full_args = []
+        full_args: List[Any] = []
         full_args.extend(params_and_buffers_flat)
 
         flat_fn, out_spec = create_tree_flattened_fn(
@@ -1857,7 +1857,7 @@ def _export_for_training(
 
     exported_artifact = ExportArtifact(
         aten=aten_export_artifact,
-        out_spec=gm_torch_level._out_spec,
+        out_spec=gm_torch_level._out_spec,  # type: ignore[arg-type]
         fake_mode=dynamo_fake_mode,
         module_call_specs=gm_torch_level.meta["module_call_specs"],
     )
@@ -1911,6 +1911,8 @@ def _export_for_training(
     _verify_placeholder_names(gm, export_graph_signature)
 
     assert _EXPORT_MODULE_HIERARCHY is not None
+    from torch._export.verifier import TrainingIRVerifier
+
     exported_program = ExportedProgram(
         root=gm,
         graph=gm.graph,
@@ -1920,11 +1922,12 @@ def _export_for_training(
         module_call_graph=_make_module_call_graph(
             _EXPORT_MODULE_HIERARCHY,
             orig_in_spec,
-            out_spec,
+            orig_out_spec,
             module_call_signatures,
         ),
         example_inputs=(args, kwargs),
         constants=exported_artifact.aten.constants,
+        verifier=TrainingIRVerifier,
     )
 
     return exported_program
