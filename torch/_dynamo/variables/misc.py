@@ -14,7 +14,7 @@ import torch._numpy as tnp
 import torch.utils._pytree as pytree
 from .. import config, variables
 from ..bytecode_transformation import (
-    add_push_null,
+    add_push_null_call_function_ex,
     create_call_function,
     create_instruction,
 )
@@ -1071,7 +1071,7 @@ class StringFormatVariable(VariableTracker):
 
     def reconstruct(self, codegen):
         codegen.extend_output(
-            add_push_null(
+            add_push_null_call_function_ex(
                 [
                     codegen.create_load_const(self.format_string),
                     codegen.create_load_attr("format"),

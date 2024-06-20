@@ -171,7 +171,7 @@ def create_rot_n(n) -> List[Instruction]:
 
 
 def add_push_null(
-    inst_or_insts: Union[Instruction, List[Instruction]]
+    inst_or_insts: Union[Instruction, List[Instruction]],
 ) -> List[Instruction]:
     """
     Appends or prepends a PUSH_NULL instruction to `inst_or_insts`,
@@ -197,7 +197,6 @@ def add_push_null(
         return insts[idx].arg & 1 == 1
 
     def set_inst_bit(idx):
-        nonlocal insts
         assert insts[idx].arg is not None
         insts[idx].arg |= 1
 
@@ -226,6 +225,32 @@ def add_push_null(
             set_inst_bit(0)
         else:
             insts = [create_instruction("PUSH_NULL")] + insts
+    return insts
+
+
+def add_push_null_call_function_ex(
+    inst_or_insts: Union[Instruction, List[Instruction]],
+) -> List[Instruction]:
+    """Like add_push_null, but the low bit of LOAD_ATTR/LOAD_SUPER_ATTR
+    is not set, due to an expected CALL_FUNCTION_EX instruction.
+    """
+    if isinstance(inst_or_insts, Instruction):
+        insts = [inst_or_insts]
+    else:
+        insts = inst_or_insts
+
+    idx = -1 if sys.version_info >= (3, 13) else 0
+    if insts[idx].opname == "LOAD_GLOBAL":
+        assert insts[idx].arg is not None
+        if insts[idx].arg & 1 == 0:  # type: ignore[operator]
+            insts[idx].arg |= 1  # type: ignore[operator]
+            return insts
+
+    if sys.version_info >= (3, 13):
+        insts = insts + [create_instruction("PUSH_NULL")]
+    else:
+        insts = [create_instruction("PUSH_NULL")] + insts
+
     return insts
 
 
