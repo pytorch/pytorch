@@ -170,7 +170,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 cls.visit(fn, subvalue, cache)
 
     def __repr__(self):
-        return f"{self.__class__.__name__}()"
+        return f"{self.__class__.__name__}({id(self)})"
 
     def debug_repr(self):
         # Intended to be overridden to provide more info

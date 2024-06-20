@@ -1011,6 +1011,20 @@ class EventVariable(VariableTracker):
     def as_proxy(self):
         return self.proxy
 
+    def reconstruct(self, codegen):
+        # If we got here, this torch.cuda.Event is fully subsumed by the graph - this means it is
+        # not an input or global
+        assert not self.source
+        # Similar to torch.cuda.Stream handling, we lift the torch.cuda.Event into a global
+        # and then codegen bytecode to load it from there.
+        prefix = f"_event_{self.value.device}"
+        print(f"self.value: {self.value}")
+        print(f"prefix: {prefix}")
+        name = codegen.tx.output.install_global_by_id(prefix, self.value)
+        codegen.append_output(
+            codegen.create_load_global(name, push_null=False, add=True)
+        )
+
 
 class WithExitFunctionVariable(VariableTracker):
     _nonvar_fields = {

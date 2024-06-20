@@ -430,6 +430,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             # if __bool__ is missing, trying __len__ to infer a truth value.
             if (x is None or isinstance(x, GetAttrVariable)) and hasattr(value, "__len__"):
                 x = value.var_getattr(self, "__len__")
+
             # torch_log.warning(f"here1: value: {value}")
             # try:
             #     x = value.var_getattr(self, "__bool__")
@@ -440,14 +441,15 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             #     torch_log.warning(f"here3: x: {x}")
             # else:
             #     torch_log.warning(f"here4: x: {x}")
-            #     if isinstance(x, GetAttrVariable):
+            #     if isinstance(x, GetAttrVariable) or (
+            #         isinstance(x, UserDefinedClassVariable)
+            #         and x.value is torch._dynamo.variables.user_defined.NO_SUCH_SUBOBJ
+            #     ):
             #         # if __bool__ is missing, trying __len__ to infer a truth value.
             #         x = value.var_getattr(self, "__len__")
             #         torch_log.warning(f"here5: x: {x}")
-            #     #  or (
-            #     #     isinstance(x, UserDefinedClassVariable)
-            #     #     and x.value is torch._dynamo.variables.user_defined.NO_SUCH_SUBOBJ
-            #     # ):
+
+            print(f"here999: x: {x}")
 
             # __bool__ or __len__ is function
             if isinstance(x, UserMethodVariable):
