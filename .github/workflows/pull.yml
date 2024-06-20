@@ -41,7 +41,7 @@ jobs:
     with:
       build-environment: linux-jammy-py3.8-gcc11
       docker-image-name: pytorch-linux-jammy-py3.8-gcc11
-      runner: lf.linux.2xlarge
+      runner: lf.c.linux.2xlarge
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 3, runner: "linux.2xlarge" },
@@ -54,26 +54,6 @@ jobs:
           { config: "distributed", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
         ]}
 
-  linux-focal-py3_8-clang9-xla-build:
-    name: linux-focal-py3_8-clang9-xla
-    uses: ./.github/workflows/_linux-build-label.yml
-    with:
-      build-environment: linux-focal-py3.8-clang9-xla
-      docker-image-name: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/xla_base:v1.1-lite
-      test-matrix: |
-        { include: [
-          { config: "xla", shard: 1, num_shards: 1, runner: "linux.12xlarge" },
-        ]}
-
-  linux-focal-py3_8-clang9-xla-test:
-    name: linux-focal-py3_8-clang9-xla
-    uses: ./.github/workflows/_linux-test.yml
-    needs: linux-focal-py3_8-clang9-xla-build
-    with:
-      build-environment: linux-focal-py3.8-clang9-xla
-      docker-image: ${{ needs.linux-focal-py3_8-clang9-xla-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-py3_8-clang9-xla-build.outputs.test-matrix }}
-
   win-vs2019-cpu-py3-build:
     # don't run build twice on main
     if: github.event_name == 'pull_request'
@@ -85,7 +65,7 @@ jobs:
       sync-tag: win-cpu-build
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 3, runner: "lf.windows.4xlarge.nonephemeral" },
-          { config: "default", shard: 2, num_shards: 3, runner: "lf.windows.4xlarge.nonephemeral" },
-          { config: "default", shard: 3, num_shards: 3, runner: "lf.windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 1, num_shards: 3, runner: "lf.c.windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 2, num_shards: 3, runner: "lf.c.windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 3, num_shards: 3, runner: "lf.c.windows.4xlarge.nonephemeral" },
         ]}
