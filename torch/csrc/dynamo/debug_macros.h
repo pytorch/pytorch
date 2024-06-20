@@ -1,6 +1,10 @@
 #pragma once
 
+#ifdef __cplusplus
+#include <cstdio>
+#else
 #include <stdio.h>
+#endif
 
 #ifdef _WIN32
 #define unlikely(x) (x)

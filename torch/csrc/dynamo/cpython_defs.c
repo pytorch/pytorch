@@ -1,31 +1,12 @@
 #include <torch/csrc/dynamo/cpython_defs.h>
-
-#ifdef _WIN32
-#define unlikely(x) (x)
-#else
-#define unlikely(x) __builtin_expect((x), 0)
-#endif
-
-#define CHECK(cond)                                                     \
-  if (unlikely(!(cond))) {                                              \
-    fprintf(stderr, "DEBUG CHECK FAILED: %s:%d\n", __FILE__, __LINE__); \
-    abort();                                                            \
-  } else {                                                              \
-  }
+#include <torch/csrc/dynamo/cpython_includes.h>
+#include <torch/csrc/dynamo/debug_macros.h>
 
 #if IS_PYTHON_3_11_PLUS
 
-// Problem in CPython includes when mixing core and non-core build
-// The fix was not backported to 3.12 so this is needed here
-// https://github.com/python/cpython/issues/105268
-#if IS_PYTHON_3_12_PLUS
-#undef _PyGC_FINALIZED
-#endif
-
 #define Py_BUILD_CORE
-#include <internal/pycore_pystate.h>
-
 #define NEED_OPCODE_TABLES // To get _PyOpcode_Deopt, _PyOpcode_Caches
+
 #if IS_PYTHON_3_13_PLUS
 #include <cpython/code.h> // To get PyUnstable_Code_GetFirstFree
 #define NEED_OPCODE_METADATA
@@ -34,10 +15,8 @@
 #else
 #include <internal/pycore_opcode.h>
 #endif
+
 #undef NEED_OPCODE_TABLES
-
-#include <internal/pycore_frame.h>
-
 #undef Py_BUILD_CORE
 
 // As a simple way to reduce the impact of ABI changes on the CPython side, this check forces
