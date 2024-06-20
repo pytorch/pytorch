@@ -1056,7 +1056,12 @@ class DecompOneOffTests(TestCase):
     @onlyCUDA
     def test_exponential_non_inf(self, device):
         inp = torch.empty((4, 400, 256), device=device)
+
+        with torch._dynamo.utils.preserve_rng_state():
+            exp_ref = inp.exponential_()
         exp = torch._refs.exponential(inp)
+
+        self.assertEqual(exp, exp_ref)
         self.assertFalse(exp.isinf().any())
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
