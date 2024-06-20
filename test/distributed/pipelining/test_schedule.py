@@ -9,7 +9,7 @@ import unittest
 from typing import Dict, List, Optional, Tuple
 
 from model_registry import ModelWithKwargs, MultiMLP
-from schedule_registry import ScheduleUnevenLooped
+from schedule_registry import ScheduleUnbalanced, ScheduleVShaped
 
 import torch
 import torch.distributed as dist
@@ -406,9 +406,9 @@ class ScheduleTest(MultiProcContinousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_non_symmetric_stage_ids(self):
-        stages_per_rank = 2
-        n_stages = stages_per_rank * self.world_size
+    @parametrize("ScheduleClass", [ScheduleVShaped, ScheduleUnbalanced])
+    def test_non_symmetric_stage_ids(self, ScheduleClass):
+        n_stages = ScheduleClass.n_stages
         full_mod = MultiMLP(d_hid, n_layers=n_stages)
         full_mod.to(self.device)
 
@@ -429,14 +429,10 @@ class ScheduleTest(MultiProcContinousTest):
             ref_loss.backward()
 
         # Create a pipeline stage to wrap that submodule
-        x = torch.randn(batch_size, d_hid, device=self.device)
         chunks = 1
         input_args = x.chunk(chunks)[0]
-        stage_index_to_group_rank = {
-            0: [0, 3],
-            1: [1, 2],
-        }
-        stage_indices = stage_index_to_group_rank[self.rank]
+        rank_stages = ScheduleClass.rank_stages
+        stage_indices = rank_stages[self.rank]
         print(f"Rank {self.rank} stages: {stage_indices}")
         submod_names = [f"layers.{i}" for i in stage_indices]
         stage_modules = [
@@ -450,19 +446,15 @@ class ScheduleTest(MultiProcContinousTest):
                 self.device,
                 input_args=input_args,
             )
-            for stage_module, stage_idx in zip(
-                stage_modules, stage_index_to_group_rank[self.rank]
-            )
+            for stage_module, stage_idx in zip(stage_modules, rank_stages[self.rank])
         ]
 
         # Attach to a schedule
-        flattened_stage_index_to_group_rank = {
-            value: key
-            for key, values in stage_index_to_group_rank.items()
-            for value in values
+        stage_index_to_group_rank = {
+            value: key for key, values in rank_stages.items() for value in values
         }
-        schedule = ScheduleUnevenLooped(
-            stages, chunks, flattened_stage_index_to_group_rank, loss_fn=loss_fn
+        schedule = ScheduleClass(
+            stages, chunks, stage_index_to_group_rank, loss_fn=loss_fn
         )
 
         # Run
@@ -476,6 +468,31 @@ class ScheduleTest(MultiProcContinousTest):
                 out = schedule.step(x, target=target, losses=losses)
             else:
                 schedule.step()
+
+        dist.barrier()
+
+        # Last rank checks result
+        if self.rank == 0:
+            # Check output
+            torch.testing.assert_close(out, ref_out)
+            # Check loss
+            # Since the reduction used in the loss function above is "sum", we use
+            # "sum" here to reduce microbatch losses into a single value too.
+            pipe_loss = sum(losses)
+            torch.testing.assert_close(pipe_loss, ref_loss)
+
+        # Every rank checks gradients
+        for stage_module, submod_name in zip(stage_modules, submod_names):
+            # Get corresponding submodule from reference model
+            ref_submod = ref_mod.get_submodule(submod_name)
+            # Check gradients per parameter
+            for name, p in stage_module.named_parameters():
+                ref_p = ref_submod.get_parameter(name)
+                try:
+                    torch.testing.assert_close(p.grad, ref_p.grad, rtol=1e-5, atol=4e-5)
+                except AssertionError:
+                    print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
+                    raise
 
 
 instantiate_parametrized_tests(ScheduleTest)
