@@ -108,10 +108,12 @@ def op_count(gm):
     return result
 
 
-def _get_custom_policy(no_recompute_list=None):
+def _get_custom_policy(no_recompute_list=None, must_recompute_list=None):
     def _custom_policy(ctx, func, *args, **kwargs):
         if func in no_recompute_list:
             return CheckpointPolicy.MUST_SAVE
+        if must_recompute_list is not None and func in must_recompute_list:
+            return CheckpointPolicy.MUST_RECOMPUTE
         else:
             return CheckpointPolicy.PREFER_RECOMPUTE
 
@@ -540,10 +542,10 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             must_recompute_list = [
                 torch.ops.aten.sigmoid.default,
             ]
-            return _pt2_selective_checkpoint_context_fn_gen(
-                no_recompute_policy_fn=_get_custom_policy(func_list=no_recompute_list),
-                must_recompute_policy_fn=_get_custom_policy(
-                    func_list=must_recompute_list
+            return create_selective_checkpoint_contexts(
+                _get_custom_policy(
+                    no_recompute_list=no_recompute_list,
+                    must_recompute_list=must_recompute_list,
                 ),
             )
 
@@ -551,8 +553,10 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             no_recompute_list = [
                 torch.ops.aten.mm.default,
             ]
-            return _pt2_selective_checkpoint_context_fn_gen(
-                no_recompute_policy_fn=_get_custom_policy(func_list=no_recompute_list),
+            return create_selective_checkpoint_contexts(
+                _get_custom_policy(
+                    no_recompute_list=no_recompute_list,
+                ),
             )
 
         def _test(context_fn, bw_compiler):
@@ -560,7 +564,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 # NOTE: Normally in this case, sigmoid doesn't need to be recomputed
                 # (because we always have its output which is the program output).
                 # But here we show that we can force its recomputation by using
-                # `_pt2_selective_checkpoint_context_fn_gen`'s `must_recompute_policy_fn` arg.
+                # a custom policy (CheckpointPolicy.MUST_RECOMPUTE) for sigmoid ops.
                 return torch.sigmoid(torch.matmul(x, x))
 
             def fn(x):
@@ -607,7 +611,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
     @torch._dynamo.config.patch(
         "_experimental_support_context_fn_in_torch_utils_checkpoint", True
     )
-    def test_compile_selective_checkpoint_exclude_gemm_only(self):
+    def test_compile_selective_checkpoint_must_not_recompute_gemm(self):
         def selective_checkpointing_context_fn():
             no_recompute_list = [
                 torch.ops.aten.mm.default,
