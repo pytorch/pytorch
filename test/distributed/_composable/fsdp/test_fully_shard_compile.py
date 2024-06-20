@@ -135,6 +135,7 @@ class TestFullyShardCompile(FSDPTest):
         self.assertEqual(cnt.op_count, 1)
         self.assertEqual(len(cnt.graphs), 1)
 
+    @torch._functorch._config.patch(recompute_views=True)
     def _test_traceable_fsdp(
         self, model_init_fn, input_creation_fn, backend, fullgraph
     ):
