@@ -1129,7 +1129,7 @@ class DeferredCudaKernelLine(DeferredLineBase):
         self,
         line_template: str,
         kernel_name: str,
-        keys: Tuple[str],
+        keys: Tuple[str, ...],
     ):
         super().__init__(line_template)
         assert not isinstance(line_template, DeferredLineBase)
