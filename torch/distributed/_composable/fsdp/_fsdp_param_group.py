@@ -514,6 +514,10 @@ class FSDPParamGroup:
             return f"{label} ({self._module_fqn})"
         return label
 
+    def __bool__(self) -> bool:
+        # NOTE: this works around a short-term limitation of torch.compile
+        return True
+
 
 def _get_param_module_infos(
     params: List[nn.Parameter], module: nn.Module
