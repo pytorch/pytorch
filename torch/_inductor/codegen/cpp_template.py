@@ -51,11 +51,11 @@ class CppTemplate(KernelTemplate):
                 kernel.args.cpp_argdefs(),
                 kernel.args.python_argdefs(),
             )
+
         expected_args = list(
             unique(input_node.get_name() for input_node in self.input_nodes)
         )
         expected_args.extend([self.output_node.get_name()])
-        # breakpoint()
         assert list(call_args)[: len(expected_args)] == expected_args, (
             call_args,
             expected_args,

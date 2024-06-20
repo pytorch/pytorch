@@ -910,7 +910,6 @@ def register_onednn_fusion_ops():
                 w_zp = V.graph.add_tensor_constant(
                     torch.tensor(w_zp_tensor, dtype=torch.int32), name=w_zp.get_name()
                 )
-            # binary_attr = "add"
             if binary_attr == "sum":
                 if output_dtype in [
                     torch.float32,
@@ -974,7 +973,7 @@ def register_onednn_fusion_ops():
                     and torch.equal(
                         torch.zeros_like(V.graph.constants[w_zp.get_name()]),
                         V.graph.constants[w_zp.get_name()],
-                    )  # We only composentate MatrixB and assume B_zp is 0 to avoid the composantation of MatrixA
+                    )  # We only compensate MatrixB and assume B_zp is 0 to avoid the compensation of MatrixA
                     and use_cpp_packed_gemm_template(layout, x, packed_weight)
                     and binary_attr == "add"  # <TODO> Support inplace sum fusion
                 ):
@@ -996,7 +995,7 @@ def register_onednn_fusion_ops():
 
                         input_loader = input_buffer.make_loader()
                         x2_loader = x2.make_loader()
-                        weight_compo_loader = weight_compens.make_loader()
+                        weight_compens_loader = weight_compens.make_loader()
                         x_scale_loader = x_scale.make_loader()
                         w_scale_loader = w_scale.make_loader()
                         x_zp_loader = x_zp.make_loader()
@@ -1015,9 +1014,11 @@ def register_onednn_fusion_ops():
                             # MicroKernel Output is with int32
                             # cvt to FP32 before doing compensation
                             input = ops.to_dtype(input, torch.float32)
-                            weight_compo_index = (index[-1],)
-                            _w_scale = w_scale_loader(weight_compo_index)
-                            _weight_compo = weight_compo_loader(weight_compo_index)
+                            weight_compens_index = (index[-1],)
+                            _w_scale = w_scale_loader(weight_compens_index)
+                            _weight_compens = weight_compens_loader(
+                                weight_compens_index
+                            )
                             # Step 1: Doing compensation to cvt fp32
                             temp = ops.mul(
                                 ops.mul(
@@ -1036,13 +1037,13 @@ def register_onednn_fusion_ops():
                                         ),
                                         _x_zp,
                                     ),
-                                    _weight_compo,
+                                    _weight_compens,
                                 ),
                             )
 
                             # Step 2: add Bias if applicable
                             if bias is not None:
-                                _bias = bias_loader(weight_compo_index)
+                                _bias = bias_loader(weight_compens_index)
                                 temp = ops.add(temp, _bias)
 
                             # Step 3: Binary add

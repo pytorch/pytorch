@@ -401,6 +401,7 @@ class TestSelectAlgorithm(TestCase):
     @parametrize("bias", (False, True))
     @parametrize("input_3d", (False, True))
     @parametrize("int8_mixed_bf16", (False, True))
+    @dtypes(torch.float32, torch.bfloat16)
     @parametrize(
         "epilogue",
         (
@@ -416,62 +417,56 @@ class TestSelectAlgorithm(TestCase):
         bias,
         input_3d,
         int8_mixed_bf16,
+        dtype,
         epilogue,
     ):
+        if not int8_mixed_bf16 and dtype == torch.bfloat16:
+            return
         B = (2, batch_size) if input_3d else (batch_size,)
         input = torch.randn(*B, in_features).to(dtype=torch.float32)
 
-        test_dtype = (
-            [torch.float32, torch.bfloat16]
-            if int8_mixed_bf16
-            else [
-                torch.float32,
-            ]
+        other = torch.randn(*B, out_features).to(dtype=dtype)
+        other2 = torch.randn(*B, out_features).to(dtype=dtype)
+
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+                self.epilogue = _get_epilogue(epilogue)
+                self.linear2 = torch.nn.Linear(out_features, out_features, bias)
+                self.epilogue2 = _get_epilogue(epilogue)
+
+            def forward(self, x, other, other2):
+                res = self.epilogue(self.linear(x) + other)
+                res = self.epilogue2(self.linear2(res) + other2)
+                return res
+
+        counters.clear()
+        ref_quantized_mod = _generate_qdq_quantized_model(
+            M(bias=bias).eval(),
+            (input, other, other2),
         )
-
-        for dtype in test_dtype:
-            other = torch.randn(*B, out_features).to(dtype=dtype)
-            other2 = torch.randn(*B, out_features).to(dtype=dtype)
-
-            class M(torch.nn.Module):
-                def __init__(self, bias):
-                    super().__init__()
-                    self.linear = torch.nn.Linear(in_features, out_features, bias)
-                    self.epilogue = _get_epilogue(epilogue)
-                    self.linear2 = torch.nn.Linear(out_features, out_features, bias)
-                    self.epilogue2 = _get_epilogue(epilogue)
-
-                def forward(self, x, other, other2):
-                    res = self.epilogue(self.linear(x) + other)
-                    res = self.epilogue2(self.linear2(res) + other2)
-                    return res
-
-            counters.clear()
-            ref_quantized_mod = _generate_qdq_quantized_model(
-                M(bias=bias).eval(),
-                (input, other, other2),
+        atol, rtol = 5e-2, 5e-2
+        with patch.object(
+            select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)
+        ), torch.no_grad(), torch.autocast(
+            "cpu", enabled=int8_mixed_bf16, dtype=torch.bfloat16
+        ):
+            ref_res = ref_quantized_mod(input, other, other2)
+            cfn = torch.compile(ref_quantized_mod)
+            res = cfn(input, other, other2)
+            self.assertEqual(
+                res,
+                ref_res,
+                atol=atol,
+                rtol=rtol,
+                equal_nan=True,
+                exact_dtype=True,
             )
-            atol, rtol = 5e-2, 5e-2
-            with patch.object(
-                select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)
-            ), torch.no_grad(), torch.autocast(
-                "cpu", enabled=int8_mixed_bf16, dtype=torch.bfloat16
-            ):
-                ref_res = ref_quantized_mod(input, other, other2)
-                cfn = torch.compile(ref_quantized_mod)
-                res = cfn(input, other, other2)
-                self.assertEqual(
-                    res,
-                    ref_res,
-                    atol=atol,
-                    rtol=rtol,
-                    equal_nan=True,
-                    exact_dtype=True,
-                )
-                self.assertEqual(
-                    counters["inductor"]["select_algorithm_autotune"],
-                    2 if input_3d else 1,
-                )
+            self.assertEqual(
+                counters["inductor"]["select_algorithm_autotune"],
+                2 if input_3d else 1,
+            )
 
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
