@@ -1475,7 +1475,7 @@ class SymExprPrinter(StrPrinter):
     pass
 
 
-class ShapeGuardPrinter(StrPrinter):
+class ShapeGuardPrinter(SymExprPrinter):
     def __init__(
         self,
         symbol_to_source,
