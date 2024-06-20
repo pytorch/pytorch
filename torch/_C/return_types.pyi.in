@@ -1,0 +1,37 @@
+# mypy: allow-untyped-defs
+# ${generated_comment}
+
+from typing import (
+    Any,
+    Callable,
+    ContextManager,
+    Iterator,
+    List,
+    Literal,
+    NamedTuple,
+    NoReturn,
+    Optional,
+    overload,
+    Sequence,
+    Tuple,
+    Type,
+    TypeVar,
+    Union,
+)
+
+from torch import contiguous_format, Generator, inf, memory_format, strided, Tensor, SymInt
+from torch.types import (
+    _bool,
+    _device,
+    _dtype,
+    _float,
+    _int,
+    _layout,
+    _qscheme,
+    _size,
+    Number,
+)
+
+${structseq_defs}
+
+all_return_types: List[Type] = []
