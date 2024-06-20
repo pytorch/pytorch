@@ -4,6 +4,7 @@ import random
 import unittest
 
 import numpy as np
+
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
@@ -331,7 +332,6 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         # specialization is allowed)
         opt_fn(x)
 
-    @unittest.expectedFailure
     def test_conv1d_symint_padding(self):
         kernel = torch.randn(1, 1, 4)
 
@@ -340,7 +340,6 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             out = F.conv1d(x, kernel, padding=padding, stride=2)
             return out
 
-        # TODO: NameError: name 's1' is not defined when dynamic=True
         opt_func = torch.compile(func)
 
         x = torch.randn(1, 1, 175)
@@ -393,6 +392,36 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(f2(r), optimize(f2)(r))
         self.assertEqual(f3(r), optimize(f3)(r))
         self.assertEqual(f4(r), optimize(f4)(r))
+
+    def test_to_tensor(self):
+        def f1():
+            a = np.random.uniform(low=-1, high=1, size=(20, 1))
+            return torch.tensor([a, a, a, a], dtype=torch.float64, device="cpu")
+
+        def f2():
+            a = torch.tensor([[[123]]])
+            return torch.tensor([a, a])
+
+        def f3():
+            a = torch.tensor(123)
+            return torch.tensor([a, a])
+
+        def f4():
+            a = torch.tensor(123)
+            b = torch.tensor([[[456]]])
+            return torch.tensor([a, b])
+
+        def f5():
+            a = np.array([1, 2])
+            return torch.tensor([a, a])
+
+        optimize = torch.compile(backend="aot_eager", fullgraph=True)
+
+        self.assertEqual(f1().shape, optimize(f1)().shape)
+        self.assertEqual(f2(), optimize(f2)())
+        self.assertEqual(f3(), optimize(f3)())
+        self.assertEqual(f4(), optimize(f4)())
+        self.assertEqual(f5(), optimize(f5)())
 
     def test_sym_int_conversion(self):
         def f(x):

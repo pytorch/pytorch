@@ -15,6 +15,7 @@ import pickle
 import shutil
 import pathlib
 import platform
+from collections import OrderedDict
 from copy import deepcopy
 from itertools import product
 
@@ -27,9 +28,10 @@ from torch.serialization import check_module_version_greater_or_equal, get_defau
 from torch.testing._internal.common_utils import (
     IS_FILESYSTEM_UTF8_ENCODING, TemporaryDirectoryName,
     TestCase, IS_FBCODE, IS_WINDOWS, TEST_DILL, run_tests, download_file, BytesIOContext, TemporaryFileName,
-    parametrize, instantiate_parametrized_tests, AlwaysWarnTypedStorageRemoval, serialTest)
+    parametrize, instantiate_parametrized_tests, AlwaysWarnTypedStorageRemoval, serialTest, skipIfTorchDynamo)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_dtype import all_types_and_complex_and
+from torch.testing._internal.two_tensor import TwoTensor  # noqa: F401
 
 if not IS_WINDOWS:
     from mmap import MAP_SHARED, MAP_PRIVATE
@@ -493,6 +495,15 @@ class SerializationMixin:
         def map_location(storage, loc):
             return storage
 
+        def generate_map_locations(device_type):
+            return [
+                {'cuda:0': device_type + ':0'},
+                device_type,
+                device_type + ':0',
+                torch.device(device_type),
+                torch.device(device_type, 0)
+            ]
+
         def load_bytes():
             with open(test_file_path, 'rb') as f:
                 return io.BytesIO(f.read())
@@ -504,33 +515,38 @@ class SerializationMixin:
             'cpu',
             torch.device('cpu'),
         ]
-        gpu_0_map_locations = [
-            {'cuda:0': 'cuda:0'},
-            'cuda',
-            'cuda:0',
-            torch.device('cuda'),
-            torch.device('cuda', 0)
-        ]
+        gpu_0_map_locations = generate_map_locations('cuda')
         gpu_last_map_locations = [
             f'cuda:{torch.cuda.device_count() - 1}',
         ]
+        xpu_0_map_locations = generate_map_locations('xpu')
+        xpu_last_map_locations = [
+            f'xpu:{torch.xpu.device_count() - 1}',
+        ]
 
-        def check_map_locations(map_locations, tensor_class, intended_device):
+        def check_map_locations(map_locations, dtype, intended_device):
             for fileobject_lambda in fileobject_lambdas:
                 for map_location in map_locations:
                     tensor = torch.load(fileobject_lambda(), map_location=map_location)
 
                     self.assertEqual(tensor.device, intended_device)
-                    self.assertIsInstance(tensor, tensor_class)
-                    self.assertEqual(tensor, tensor_class([[1.0, 2.0], [3.0, 4.0]]))
+                    self.assertEqual(tensor.dtype, dtype)
+                    self.assertEqual(tensor, torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=dtype, device=intended_device))
 
-        check_map_locations(cpu_map_locations, torch.FloatTensor, torch.device('cpu'))
+        check_map_locations(cpu_map_locations, torch.float, torch.device('cpu'))
         if torch.cuda.is_available():
-            check_map_locations(gpu_0_map_locations, torch.cuda.FloatTensor, torch.device('cuda', 0))
+            check_map_locations(gpu_0_map_locations, torch.float, torch.device('cuda', 0))
             check_map_locations(
                 gpu_last_map_locations,
-                torch.cuda.FloatTensor,
+                torch.float,
                 torch.device('cuda', torch.cuda.device_count() - 1)
+            )
+        if torch.xpu.is_available():
+            check_map_locations(xpu_0_map_locations, torch.float, torch.device('xpu', 0))
+            check_map_locations(
+                xpu_last_map_locations,
+                torch.float,
+                torch.device('xpu', torch.xpu.device_count() - 1)
             )
 
     @unittest.skipIf(torch.cuda.is_available(), "Testing torch.load on CPU-only machine")
@@ -1024,7 +1040,7 @@ class TestSerialization(TestCase, SerializationMixin):
             self.assertIsNone(torch.load(f, weights_only=False))
             f.seek(0)
             # Safe load should assert
-            with self.assertRaisesRegex(pickle.UnpicklingError, "Unsupported class"):
+            with self.assertRaisesRegex(pickle.UnpicklingError, "Unsupported global: GLOBAL __builtin__.print"):
                 torch.load(f, weights_only=True)
 
     @parametrize('weights_only', (False, True))
@@ -4172,6 +4188,60 @@ class TestSubclassSerialization(TestCase):
             torch.save(tensor, f)
             f.seek(0)
             tensor2 = torch.load(f)
+
+    @skipIfTorchDynamo("name 'SYNTHETIC_LOCAL' is not defined")
+    def test_safe_globals_for_weights_only(self):
+        '''
+        Tests import semantic for tensor subclass and the {add/get/clear}_safe_globals APIs
+        '''
+        t = TwoTensor(torch.randn(2, 3), torch.randn(2, 3))
+        p = torch.nn.Parameter(t)
+        sd = OrderedDict([('t', t), ('p', p)])
+
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(sd, f)
+
+            # Loading tensor subclass with weights_only=True should fail
+            # since tensor subclass is not in safe_globals
+            with self.assertRaisesRegex(pickle.UnpicklingError,
+                                        "Unsupported global: GLOBAL torch.testing._internal.two_tensor.TwoTensor"):
+                f.seek(0)
+                sd = torch.load(f, weights_only=True)
+
+            # Loading tensor subclass should work if the class is marked safe
+            f.seek(0)
+            try:
+                torch.serialization.add_safe_globals([TwoTensor])
+                self.assertTrue(torch.serialization.get_safe_globals() == [TwoTensor])
+                sd = torch.load(f, weights_only=True)
+                self.assertEqual(sd['t'], t)
+                self.assertEqual(sd['p'], p)
+
+                # Should fail again when safe globals are cleared
+                torch.serialization.clear_safe_globals()
+                f.seek(0)
+                with self.assertRaisesRegex(pickle.UnpicklingError,
+                                            "Unsupported global: GLOBAL torch.testing._internal.two_tensor.TwoTensor"):
+                    torch.load(f, weights_only=True)
+            finally:
+                torch.serialization.clear_safe_globals()
+
+    @unittest.skipIf(not torch.cuda.is_available(), "map_location loads to cuda")
+    def test_tensor_subclass_map_location(self):
+        t = TwoTensor(torch.randn(2, 3), torch.randn(2, 3))
+        sd = {'t': t}
+
+        with TemporaryFileName() as f:
+            torch.save(sd, f)
+            sd_loaded = torch.load(f, map_location=torch.device('cuda:0'))
+            self.assertTrue(sd_loaded['t'].device == torch.device('cuda:0'))
+            self.assertTrue(sd_loaded['t'].a.device == torch.device('cuda:0'))
+            self.assertTrue(sd_loaded['t'].b.device == torch.device('cuda:0'))
+            # make sure map_location is not propagated over multiple torch.load calls
+            sd_loaded = torch.load(f)
+            self.assertTrue(sd_loaded['t'].device == torch.device('cpu'))
+            self.assertTrue(sd_loaded['t'].a.device == torch.device('cpu'))
+            self.assertTrue(sd_loaded['t'].b.device == torch.device('cpu'))
 
 
 instantiate_device_type_tests(TestBothSerialization, globals())
