@@ -392,6 +392,8 @@ class TestSelectAlgorithm(TestCase):
             self.assertTrue(torch.allclose(ref_res, res, atol=atol, rtol=rtol))
 
     @inductor_config.patch({"freezing": True})
+    @inductor_config.patch({"fx_graph_cache": False})
+    @inductor_config.patch({"fx_graph_remote_cache": False})
     @patches
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
