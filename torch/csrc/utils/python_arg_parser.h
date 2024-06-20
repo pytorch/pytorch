@@ -813,8 +813,14 @@ inline at::Device toDevice(PyObject* obj) {
           c10::DeviceType::PrivateUse1,
           static_cast<c10::DeviceIndex>(device_index));
     }
+#ifdef USE_CUDA
     return at::Device(
         c10::DeviceType::CUDA, static_cast<c10::DeviceIndex>(device_index));
+#elif USE_XPU
+    return at::Device(
+        c10::DeviceType::XPU, static_cast<c10::DeviceIndex>(device_index));
+#endif
+    TORCH_CHECK(false, "Expected an explicit device type.");
   }
   const std::string& device_str = THPUtils_unpackString(obj);
   return at::Device(device_str);
