@@ -63,6 +63,20 @@ def check_node_safe(node: Node):
     """
     Checks that the node only uses supported operators. We are starting with very
     conservative cacheability constraints, and incrementally adding more support as we expand.
+
+    [Note: AOTAutograd Cacheability checks]
+    - Our cache key is computed from the FX graph produced by Dynamo and the input example values
+    - A node is "safe" if the same cache key results in a compiled artifact that has the same behavior
+        (i.e, the set of inputs that go into our cache key is sufficient to distinguish its behavior)
+
+    To accomplish this safety check, we consider the following functions to be safe:
+        - Public functions under modules torch, torch.functional, and torch.nn.functional: these are
+        allowed in the graph by dynamo, so we can assume they are safe to cache.
+        - method calls on base tensor types
+        - Any call_module that dynamo deemed safe to allow AOTAutograd to trace
+        - Non callable nodes, such as placeholder, output, get_attr
+
+    The test suite test_aot_autograd_cache.py::AOTAutogradCachePicklerTests tries its best to fully cover/specify this behavior.
     """
     SAFE_TORCH_MODULES = ("torch.functional", "torch.nn.functional", "torch")
 
