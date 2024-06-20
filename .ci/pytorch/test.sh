@@ -150,6 +150,8 @@ elif [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="xpu"
   # setting PYTHON_TEST_EXTRA_OPTION
   export PYTHON_TEST_EXTRA_OPTION="--xpu"
+  # Prevent Triton override signal handler and stop propagate.
+  export export TRITON_DISABLE_PYTHON_STACKTRACE=1
 fi
 
 if [[ "$TEST_CONFIG" == *crossref* ]]; then
