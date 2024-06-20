@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import functools
-import os
 from itertools import chain, count
 from typing import Any, List, Optional, TYPE_CHECKING
 
@@ -15,6 +14,7 @@ from ..codecache import CudaKernelParamCache
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .codegen_device_driver import cuda_kernel_driver, cuda_kernel_header
+from .common import DeferredCudaKernelLine
 from .cpp_utils import DTYPE_TO_CPP
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .wrapper import SymbolicCallArg
@@ -81,21 +81,28 @@ class CppWrapperCuda(CppWrapperCpu):
     def generate_load_kernel_once(
         self,
         name: str,
-        mangled_name: str,
-        cubin_path: str,
-        shared_mem: int,
         graph: "GraphLowering",  # for per-graph caching
     ):
+        keys = (get_cpp_wrapper_cubin_path_name(), "mangled_name", "shared_mem")
         if V.graph.aot_mode:
             self.writeline(f"if (kernels.{name} == nullptr) {{")
             self.writeline(
-                f"""    kernels.{name} = loadKernel("{cubin_path}", "{mangled_name}", {shared_mem}, this->cubin_dir_);"""
+                DeferredCudaKernelLine(
+                    f"kernels.{name}"
+                    + """ = loadKernel("%s", "%s", %s, this->cubin_dir_);""",
+                    name,
+                    keys,
+                )
             )
             self.writeline("}")
         else:
             self.writeline(f"if ({name} == nullptr) {{")
             self.writeline(
-                f"""    {name} = loadKernel("{cubin_path}", "{mangled_name}", {shared_mem});"""
+                DeferredCudaKernelLine(
+                    name + """ = loadKernel("%s", "%s", %s);""",
+                    name,
+                    keys,
+                )
             )
             self.writeline("}")
 
@@ -163,7 +170,7 @@ class CppWrapperCuda(CppWrapperCpu):
 
     def generate_kernel_call(
         self,
-        name,
+        kernel_name,
         call_args,
         grid=None,
         device_index=None,
@@ -181,27 +188,13 @@ class CppWrapperCuda(CppWrapperCpu):
         if not cuda:
             # Even in CppWrapperCuda, we may see cpp kernels
             return super().generate_kernel_call(
-                name, call_args, grid, device_index, cuda, triton, arg_types
+                kernel_name, call_args, grid, device_index, cuda, triton, arg_types
             )
 
         device_index, call_args = self.prepare_triton_kernel_call(
             device_index, call_args
         )
-        params = CudaKernelParamCache.get(name)
-        assert (
-            params is not None
-        ), f"cuda kernel parameters for {name} should already exist at this moment"
-        mangled_name = params.get("mangled_name", None)
-        assert mangled_name is not None, "missing mangled_name"
-        cubin_path = params.get(get_cpp_wrapper_cubin_path_name(), None)
-        assert cubin_path is not None and os.path.exists(
-            cubin_path
-        ), f"cubin file should already exist at this moment: {cubin_path}"
-        shared_mem = params.get("shared_mem", 0)
-
-        self.generate_load_kernel_once(
-            name, mangled_name, cubin_path, shared_mem, V.graph
-        )
+        self.generate_load_kernel_once(kernel_name, V.graph)
 
         # args with value 1 are added into equal_to_1 and constants
         # in triton_meta (in the Python codegen) which makes them
@@ -223,7 +216,7 @@ class CppWrapperCuda(CppWrapperCpu):
             if V.graph.aot_mode
             else self.write_get_raw_stream(device_index, V.graph)
         )
-        grid_name = f"{name}_grid_{next(self.grid_id)}"
+        grid_name = f"{kernel_name}_grid_{next(self.grid_id)}"
         assert isinstance(
             grid, (list, tuple)
         ), f"expected grid to be a list or tuple but got: {grid=}"
@@ -236,17 +229,19 @@ class CppWrapperCuda(CppWrapperCpu):
 
         if grid_uses_symbolic_shapes:
             self.writeline(f"if ({grid_name}.is_non_zero()) {{")
-        kernel_var_name = f"kernels.{name}" if V.graph.aot_mode else name
+        kernel_var_name = f"kernels.{kernel_name}" if V.graph.aot_mode else kernel_name
         self.writeline(
-            "launchKernel({}, {}, {}, {}, {}, {}, {}, {});".format(
-                kernel_var_name,
-                f"{grid_name}.grid_x",
-                f"{grid_name}.grid_y",
-                f"{grid_name}.grid_z",
-                params["num_warps"],
-                params["shared_mem"],
-                kernel_args_var,
-                stream,
+            DeferredCudaKernelLine(
+                "launchKernel({}, {}, {}, {},".format(
+                    kernel_var_name,
+                    f"{grid_name}.grid_x",
+                    f"{grid_name}.grid_y",
+                    f"{grid_name}.grid_z",
+                )
+                + "%s, %s,"
+                + f"{kernel_args_var}, {stream});",
+                kernel_name,
+                ("num_warps", "shared_mem"),
             )
         )
         if grid_uses_symbolic_shapes:
