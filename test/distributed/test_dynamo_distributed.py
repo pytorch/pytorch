@@ -527,9 +527,13 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             fsdp_m = torch.compile(fsdp_m, backend=prof, fullgraph=False)
             outputs = fsdp_m(inputs)
             self.assertTrue(same(correct_outputs, outputs))
-            FileCheck().check_not(
+            FileCheck().check("Torchdynamo Profiler Report").check(
+                "Graph Breaks"
+            ).check_not(
                 "setattr(FSDPManagedNNModuleVariable(MutatingModel), state, ...)"
-            ).run(prof.report())
+            ).run(
+                prof.report()
+            )
 
     @skip_if_lt_x_gpu(1)
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
