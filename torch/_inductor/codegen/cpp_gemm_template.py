@@ -3,13 +3,14 @@ from typing import Any, Callable, cast, List, Optional, Union
 
 import torch
 import torch.utils
+from ..._dynamo.utils import counters
 from .. import ir, lowering as L
 
 from ..kernel.mm_common import mm_args
 from ..select_algorithm import DataProcessorTemplateWrapper
 from ..utils import cache_on_self, has_free_symbols, parallel_num_threads
 from ..virtualized import V
-from .cpp_micro_gemm import create_micro_gemm, LayoutType
+from .cpp_micro_gemm import CppMicroGemmAMX, create_micro_gemm, LayoutType
 from .cpp_template import CppTemplate
 
 from .cpp_template_kernel import CppTemplateKernel
@@ -477,6 +478,8 @@ class CppPackedGemmTemplate(CppTemplate):
         )
         assert micro_gemm is not None
         assert self.register_blocking == micro_gemm.register_blocking
+        if isinstance(micro_gemm, CppMicroGemmAMX):
+            counters["inductor"]["cpp_micro_gemm_amx_counter"] += 1
 
         options = dict(
             X=X,
