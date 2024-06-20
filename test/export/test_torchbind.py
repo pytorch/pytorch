@@ -696,18 +696,25 @@ def forward(self, arg0_1, arg1_1):
         self.assertExpectedInline(
             ep.graph_module.code.strip(),
             """\
-def forward(self, p_linear_weight, p_linear_bias, tq, x):
-    call_torchbind = torch.ops.higher_order.call_torchbind(tq, 'pop')
-    call_torchbind_1 = torch.ops.higher_order.call_torchbind(tq, 'float_size')
-    add = torch.ops.aten.add.Tensor(call_torchbind, 1.0);  call_torchbind = None
+def forward(self, token, p_linear_weight, p_linear_bias, tq, x):
+    with_effects = torch._higher_order_ops.effects.with_effects(token, torch.ops.higher_order.call_torchbind, tq, 'pop');  token = None
+    getitem = with_effects[0]
+    getitem_1 = with_effects[1];  with_effects = None
+    with_effects_1 = torch._higher_order_ops.effects.with_effects(getitem, torch.ops.higher_order.call_torchbind, tq, 'float_size');  getitem = None
+    getitem_2 = with_effects_1[0];  with_effects_1 = None
+    add = torch.ops.aten.add.Tensor(getitem_1, 1.0);  getitem_1 = None
     linear = torch.ops.aten.linear.default(x, p_linear_weight, p_linear_bias);  p_linear_weight = p_linear_bias = None
     add_1 = torch.ops.aten.add.Tensor(add, linear);  add = linear = None
-    call_torchbind_2 = torch.ops.higher_order.call_torchbind(tq, 'is_empty')
-    call_torchbind_3 = torch.ops.higher_order.call_torchbind(tq, 'pop')
-    call_torchbind_4 = torch.ops.higher_order.call_torchbind(tq, 'size')
-    add_2 = torch.ops.aten.add.Tensor(call_torchbind_3, 0);  call_torchbind_3 = None
+    with_effects_2 = torch._higher_order_ops.effects.with_effects(getitem_2, torch.ops.higher_order.call_torchbind, tq, 'is_empty');  getitem_2 = None
+    getitem_4 = with_effects_2[0];  with_effects_2 = None
+    with_effects_3 = torch._higher_order_ops.effects.with_effects(getitem_4, torch.ops.higher_order.call_torchbind, tq, 'pop');  getitem_4 = None
+    getitem_6 = with_effects_3[0]
+    getitem_7 = with_effects_3[1];  with_effects_3 = None
+    with_effects_4 = torch._higher_order_ops.effects.with_effects(getitem_6, torch.ops.higher_order.call_torchbind, tq, 'size');  getitem_6 = None
+    getitem_8 = with_effects_4[0];  with_effects_4 = None
+    add_2 = torch.ops.aten.add.Tensor(getitem_7, 0);  getitem_7 = None
     add_3 = torch.ops.aten.add.Tensor(add_2, x);  add_2 = x = None
-    return (add_3, add_1, tq)""",
+    return (getitem_8, add_3, add_1, tq)""",
         )
         self.assertEqual(tq.size(), 2)
         self.assertTrue(tq.pop() is a)

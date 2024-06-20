@@ -1302,7 +1302,18 @@ class VecISA:
 #include <ATen/cpu/vec/vec.h>
 #endif
 
+#ifdef __APPLE__
+// Fix Mac OS UT failed.
 __attribute__((aligned(64))) float in_out_ptr0[16] = {0.0};
+#else
+#if defined(_WIN32)
+#define __at_align__ __declspec(align(64))
+#else
+#define __at_align__ __attribute__((aligned(64)))
+#endif
+
+__at_align__ float in_out_ptr0[16] = {0.0};
+#endif
 
 extern "C" void __avx_chk_kernel() {
     auto tmp0 = at::vec::Vectorized<float>(1);
@@ -1365,8 +1376,6 @@ cdll.LoadLibrary("__lib_path__")
                 output_path = x86_isa_help_builder.get_target_file_path()
                 if not os.path.isfile(output_path):
                     status, target_file = x86_isa_help_builder.build()
-                    if status:
-                        return False
 
                 # Check build result
                 subprocess.check_call(
@@ -2562,11 +2571,14 @@ class CppPythonBindingsCodeCache(CppCodeCache):
 
         #ifndef _MSC_VER
         #if __cplusplus < 202002L
-        // C++20 earlier code
+        // C++20 (earlier) code
         // https://en.cppreference.com/w/cpp/language/attributes/likely
         #define likely(x)       __builtin_expect(!!(x), 1)
         #define unlikely(x)     __builtin_expect(!!(x), 0)
         #endif
+        #else
+        #define likely(x) (x)
+        #define unlikely(x) (x)
         #endif
 
         // This is defined in guards.cpp so we don't need to import PyTorch headers that are slooow.
