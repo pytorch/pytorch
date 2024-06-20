@@ -75,7 +75,7 @@ class TestFullyShardCompileCompute(FSDPTest):
 
 
 def cleanup_fsdp(model):
-    # This is important for release memory of all tensors used in the FSDP-wrapped modules.
+    # This is important for releasing memory of all tensors used in the FSDP-wrapped modules.
     torch._dynamo.reset()
     for state in torch.distributed._composable_state._module_state_mapping.values():
         if hasattr(state._fsdp_param_group, "fsdp_params"):
