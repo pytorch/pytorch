@@ -488,7 +488,10 @@ def _register_quantized_linear_binary_lowering(
 
         binary_op_name = binary_unary_attr.binary_op_name
 
-        if binary_op_name == "sum" and not _can_be_inplace(x2):
+        assert len(x.get_size()) == len(x2.get_size())
+        if binary_op_name == "sum" and (
+            not _can_be_inplace(x2) or len(x.get_size()) > 2
+        ):
             # When we enable the GEMM Template, the output of QLinear
             # will be reshaped from 2D back to 3D if the input is 3D.
             # This causes _can_be_inplace(x2) to return False if x2 happens

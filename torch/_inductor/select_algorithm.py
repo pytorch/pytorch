@@ -1390,6 +1390,7 @@ class AlgorithmSelectorCache(PersistentCache):
             )
             expected = None
             if VERIFY:
+                # breakpoint()
                 choices[0].benchmark(*example_inputs_extern, out=out_extern)
                 expected = out_extern.clone()
 
@@ -1424,6 +1425,10 @@ class AlgorithmSelectorCache(PersistentCache):
                 # triton templates want the base pointer for sliced tensors
                 result = choice.benchmark(*example_inputs, out=out)
             if VERIFY and expected is not None:
+                # breakpoint()
+                # print(isinstance(choice, ExternKernelCaller), flush=True)
+                # print("---- out_extern is: {}".format(out_extern), flush=True)
+                # print("---- expected is: {}".format(expected), flush=True)
                 torch.testing.assert_close(out_extern, expected, **VERIFY)
             if torch.cuda.is_available():
                 torch.cuda.synchronize()  # shake out any CUDA errors
