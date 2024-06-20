@@ -47,7 +47,6 @@ from torch._dynamo.testing import (
     same,
     skipIfNotPy311,
     unsupported,
-    xfailIfPy312,
 )
 from torch._dynamo.utils import CompileProfiler, counters, ifdynstaticdefault
 from torch._inductor.utils import run_and_get_code
@@ -912,41 +911,6 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
         finally:
             cleanup_op("mylib::foo")
             del lib
-
-    def test_auto_functionalize_tensorlist(self):
-        device = "cuda"
-        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-            torch.library.define(
-                "mylib::foo",
-                "(Tensor all_gather_output, SymInt[] all_gather_input_split_sizes, int dim, Tensor(a!)[] out) -> ()",
-                tags=torch.Tag.pt2_compliant_tag,
-                lib=lib,
-            )
-
-            @torch.library.impl("mylib::foo", device, lib=lib)
-            @torch._dynamo.disable
-            def foo_impl(all_gather_output, all_gather_input_split_sizes, dim, out):
-                for o in out:
-                    o.copy_(all_gather_output)
-
-            def f(all_gather_output, all_gather_input_split_sizes, dim, out):
-                torch.ops.mylib.foo(
-                    all_gather_output, all_gather_input_split_sizes, dim, out
-                )
-
-            a = torch.ones(4, device=device)
-            b = [2, 3]
-            c = 0
-            d = [torch.empty(4, device=device) for _ in range(2)]
-            orig_args = (a, b, c, d)
-
-            compiled_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
-            # Inductor doesn't support mutable List[Tensor] codegen for now
-            torch.compile(f, backend="inductor", fullgraph=True)(*compiled_args)
-
-            eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
-            f(*eager_args)
-            self.assertEqual(compiled_args, eager_args)
 
     def test_shape_int_inplace_binops(self):
         def fn(x):
@@ -9981,10 +9945,6 @@ fn
             lambda mod: mod,
         )
 
-    # The following 2 tests fail due to https://github.com/python/cpython/issues/118013.
-    # Tracked by https://github.com/pytorch/pytorch/issues/124302.
-    # The xfails can be removed once Python 3.12 is updated on CI.
-    @xfailIfPy312
     def test_outside_linear_module_free(self):
         # Compared to test_linear_module_free, the linear
         # layer is not the code object that is directly compiled.
@@ -10019,7 +9979,6 @@ fn
         gc.collect()
         self.assertTrue(cleared)
 
-    @xfailIfPy312
     def test_parameter_free(self):
         def model_inp_ctr():
             param = torch.nn.Parameter(torch.randn(100, 100))
