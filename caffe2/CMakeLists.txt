@@ -750,6 +750,9 @@ if(BUILD_LIBTORCHLESS)
     find_library(TORCH_XPU_LIB torch_xpu PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
   endif()
   add_subdirectory(../torch torch)
+  # ---[ Torch python bindings build
+  set(TORCH_PYTHON_COMPILE_OPTIONS ${TORCH_PYTHON_COMPILE_OPTIONS} PARENT_SCOPE)
+  set(TORCH_PYTHON_LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS} PARENT_SCOPE)
 else()
   set(TORCH_LIB torch)
   set(TORCH_CPU_LIB torch_cpu)
@@ -1073,7 +1076,15 @@ if(USE_XPU)
         "-Wl,--whole-archive,\"$<TARGET_FILE:torch_xpu_ops>\" -Wl,--no-whole-archive")
     endif()
   endif()
-endif()
+
+  # Set exported torch-xpu-ops header to torch
+  set(INCLUDE_DIR_FOR_TORCH "${CMAKE_BINARY_DIR}/aten/src/ATen/xpu" )
+  file(MAKE_DIRECTORY ${INCLUDE_DIR_FOR_TORCH})
+  file(GLOB xpu_h "${TORCH_ROOT}/third_party/torch-xpu-ops/src/aten/*.h")
+  foreach(HEADER  ${xpu_h})
+    file(COPY ${HEADER} DESTINATION ${INCLUDE_DIR_FOR_TORCH})
+  endforeach()
+  endif()
 
 if(NOT MSVC AND USE_XNNPACK)
   TARGET_LINK_LIBRARIES(torch_cpu PRIVATE fxdiv)
@@ -1270,12 +1281,10 @@ install(FILES
   ${PROJECT_BINARY_DIR}/TorchConfig.cmake
   DESTINATION share/cmake/Torch)
 
-
 # ---[ Torch python bindings build
 add_subdirectory(../torch torch)
 set(TORCH_PYTHON_COMPILE_OPTIONS ${TORCH_PYTHON_COMPILE_OPTIONS} PARENT_SCOPE)
 set(TORCH_PYTHON_LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS} PARENT_SCOPE)
-
 # ==========================================================
 # END formerly-libtorch flags
 # ==========================================================
