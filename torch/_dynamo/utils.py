@@ -2722,6 +2722,17 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
         if node.op == "placeholder" and node.meta.get("steal_arg", False)
     ]
 
+    if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+        # fast path, avoid pytree overhead
+        def compiled_autograd_wrapper(*args):
+            assert args and isinstance(args[0], list)
+            flat_args = args[0] + list(args[1:])
+            for i in idx_to_steal:
+                args[i].clear()
+            return compiled_fn(flat_args)
+
+        return compiled_autograd_wrapper
+
     def wrapper(*args):
         # note this doesn't check the spec, assuming it is the same
         flat_args = pytree.arg_tree_leaves(*args)
