@@ -400,7 +400,7 @@ class LocalBufferContext:
         # Map Local Buffer name to Local Buffer
         self.local_buffers: Dict[str, ir.Buffer] = {}
         # Map Local Buffer name to Global Buffer
-        self.global_buffers: Dict[str, ir.Buffer] = {}
+        self.local_to_global: Dict[str, ir.Buffer] = {}
 
     def __enter__(self):
         self.exit_stack.__enter__()
@@ -446,7 +446,7 @@ class LocalBufferContext:
         assert local_buffer.get_name() not in self.local_buffers
         self.local_buffers[local_buffer.get_name()] = local_buffer
         if global_buffer:
-            self.global_buffers[local_buffer.get_name()] = global_buffer
+            self.local_to_global[local_buffer.get_name()] = global_buffer
 
             def should_allocate():
                 assert isinstance(global_buffer, ir.Buffer)
@@ -463,7 +463,7 @@ class LocalBufferContext:
                 patch.object(global_buffer, "should_allocate", should_allocate)
             )
 
-    def localize_for_function(
+    def localize_function(
         self,
         fn: Callable[..., Any],
         rewrite_index: Callable[
@@ -471,9 +471,7 @@ class LocalBufferContext:
         ] = rewrite_index_for_function,
     ):
         local_buffers = list(self.local_buffers.values())
-        global_buffers = list(self.global_buffers.values())
-        assert len(local_buffers) == 1
-        assert len(global_buffers) == 1
+        global_buffers = list(self.local_to_global.values())
         local_buf = local_buffers[0]
         global_buf = global_buffers[0]
 
@@ -490,7 +488,7 @@ class LocalBufferContext:
 
         return inner
 
-    def localize_for_nodes(
+    def localize_nodes(
         self,
         nodes: List[ir.IRNode],
         rewrite_index: Callable[
@@ -498,18 +496,18 @@ class LocalBufferContext:
         ] = rewrite_index_for_nodes,
     ) -> List[ir.IRNode]:
         """
-        Localizes the buffer `global_buf` to `local_buf` in the given `nodes` and returns
-        a new list of IR nodes that work on `local_buf` instead of `global_buf`, i.e., all
-        the loads and stores are redirected to `local_buf`. This helps the fused loops to
-        work on smaller-sized local buffers for better data locality.
+        Given `local_buf` and `global_buf` registered in current `LocalBufferContext`
+        though the method of `add_local_buffer`, localizes the `global_buf` to `local_buf`
+        for the given `nodes` and returns a new list of IR nodes that work on `local_buf`
+        instead of `global_buf`, i.e., all the loads and stores are redirected to
+        `local_buf`. This helps the fused loops to work on smaller-sized local buffers
+        for better data locality.
 
-        The `local_buf` should already be registered in the local scope and the data access
-        is assumed to be contiguous with the same order as the `global_buf`.
+        The the data access of `local_buf` is assumed to be contiguous with the
+        same order as the `global_buf`.
         """
         local_buffers = list(self.local_buffers.values())
-        global_buffers = list(self.global_buffers.values())
-        assert len(local_buffers) == 1
-        assert len(global_buffers) == 1
+        global_buffers = list(self.local_to_global.values())
         assert len(global_buffers[0].get_size()) == len(local_buffers[0].get_size())
         assert len(nodes) > 0
 
@@ -524,7 +522,7 @@ class LocalBufferContext:
             else:
                 new_node = new_loops  # type: ignore[assignment]
 
-            new_loops.inner_fn = self.localize_for_function(
+            new_loops.inner_fn = self.localize_function(
                 new_loops.inner_fn,
                 rewrite_index,
             )

@@ -3511,7 +3511,7 @@ class CppKernelProxy(CppKernel):
             and V.local_buffer_context.local_buffers
         ):
             fn_list = [
-                V.local_buffer_context.localize_for_function(
+                V.local_buffer_context.localize_function(
                     fn,
                 )
                 for fn in fn_list
