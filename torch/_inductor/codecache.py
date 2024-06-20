@@ -46,6 +46,7 @@ from typing import (
     TYPE_CHECKING,
     Union,
 )
+from typing_extensions import TypeAlias
 
 import torch
 from torch._dynamo.utils import counters, dynamo_timed
@@ -1098,6 +1099,9 @@ class FxGraphCache:
             pass
 
 
+_StrideExprStr: TypeAlias = str
+
+
 @dataclasses.dataclass
 class CompiledFxGraph:
     """
@@ -1115,7 +1119,7 @@ class CompiledFxGraph:
     mutated_input_idxs: Set[int]
     constants: Dict[str, torch.Tensor]
     torchbind_constants: Dict[str, torch._C.ScriptObject]
-    output_strides: Optional[List[Optional[Tuple[int, ...]]]]
+    output_strides: Optional[List[Optional[Tuple[_StrideExprStr, ...]]]]
     disabled_cudagraphs_reason: Optional[str]
     metrics_deltas: metrics.CachedMetricsDeltas
     # This is a string representation of an expression we serialize
@@ -1132,7 +1136,7 @@ class CompiledFxGraph:
         self,
         current_callable: Optional[Callable[..., Any]],
         graph: GraphLowering,
-        output_strides: List[Optional[Tuple[int, ...]]],
+        output_strides: List[Optional[Tuple[_StrideExprStr, ...]]],
         disabled_cudagraphs_reason: Optional[str],
         metrics_deltas: metrics.CachedMetricsDeltas,
     ):
