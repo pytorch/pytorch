@@ -1472,7 +1472,12 @@ class RuntimeAssert:
     stack: str = field(repr=False)
 
 
-class ShapeGuardPrinter(StrPrinter):
+# Used for printing SymExprs in compile_fx
+class SymExprPrinter(StrPrinter):
+    pass
+
+
+class ShapeGuardPrinter(SymExprPrinter):
     def __init__(
         self,
         symbol_to_source,
@@ -4246,6 +4251,13 @@ class ShapeEnv:
         if produced_guards:
             return " and ".join(produced_guards)
         return None
+
+    def evaluate_symexpr(self, code):
+        """
+        To be used by compile_fx to evaluate symexprs
+        """
+        args = {str(e): val for e, val in self.var_to_val.items()}
+        return eval(code, SYMPY_INTERP, args)
 
     def evaluate_guards_expression(self, code, args):
         """
