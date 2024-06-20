@@ -8,9 +8,11 @@ from typing import List, Optional, Union
 import torch
 import torch._inductor.runtime.runtime_utils
 from torch import Tensor
+from torch._dynamo.utils import counters
 from torch._inductor import utils
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._mode_utils import no_dispatch
+
 from ...utils._triton import has_triton
 
 from ..pattern_matcher import (
@@ -488,7 +490,16 @@ def should_pad_bench(
         # Shape padding introduces additional memory ops. Based on microbenchmarks, 1.1x represents a reasonable
         # tradeoff between performance improvement from shape padding and overhead from additional memory ops
         # TODO: Build a learned model which would be better than this heuristic
-        should_pad = _skip_do_bench_times or ori_time > pad_time * 1.1
+        multiplier = 1.1
+        if (
+            "shape_padding_multiplier"
+            in torch._inductor.config.post_grad_fusion_options
+        ):
+            multiplier = torch._inductor.config.post_grad_fusion_options[
+                "shape_padding_multiplier"
+            ].get("value", 1.1)
+        counters["inductor"]["shape_padding_multiplier"] += 1
+        should_pad = _skip_do_bench_times or ori_time > pad_time * multiplier
         set_cached_should_pad(key, should_pad)
         return should_pad
 

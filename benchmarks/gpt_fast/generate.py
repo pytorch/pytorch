@@ -3,8 +3,9 @@ import itertools
 import time
 from typing import Optional, Tuple
 
-from mixtral_moe_model import Transformer as MixtralMoE
+from mixtral_moe_model import ConditionalFeedForward, Transformer as MixtralMoE
 from mixtral_moe_quantize import (
+    ConditionalFeedForwardInt8,
     WeightOnlyInt8QuantHandler as MixtralMoEWeightOnlyInt8QuantHandler,
 )
 from model import Transformer as LLaMA
@@ -27,6 +28,7 @@ class GPTModelConfig:
     quantizer: type
     token_per_sec: float
     memory_bandwidth: float
+    compilation_time: float
 
 
 def device_sync(device):
@@ -153,6 +155,7 @@ def _load_model(x: GPTModelConfig, device="cuda", precision=torch.bfloat16):
     return model.eval()
 
 
+# Only count activated parameters and buffers.
 def _get_model_size(model):
     model_size = 0
     for name, child in model.named_children():
@@ -163,6 +166,28 @@ def _get_model_size(model):
                     for p in itertools.chain(child.parameters(), child.buffers())
                 ]
             )
+
+    # Remove the inactivated experts from the model size if this is mixture of experts
+    # architecture, since only activated experts are loaded.
+    if hasattr(model.config, "num_experts"):
+        config = model.config
+        for submodule in model.modules():
+            if isinstance(
+                submodule, (ConditionalFeedForward, ConditionalFeedForwardInt8)
+            ):
+                model_size -= (
+                    sum(
+                        [
+                            p.numel() * p.dtype.itemsize
+                            for p in itertools.chain(
+                                submodule.parameters(), child.buffers()
+                            )
+                        ]
+                    )
+                    * (config.num_experts - config.num_activated_experts)
+                    / config.num_experts
+                )
+
     return model_size
 
 
@@ -172,8 +197,8 @@ def run_experiment(
     max_new_tokens: int = 200,
     top_k: int = 200,
     temperature: float = 0.8,
+    device: str = "cuda",
 ) -> None:
-    device = "cuda"
     print(f"Loading model {x.name}")
     t0 = time.time()
     model = _load_model(x)
@@ -190,6 +215,7 @@ def run_experiment(
 
     aggregate_metrics = {"tokens_per_sec": [], "memory_bandwidth": []}
     start = -1
+    compilation_time = None
 
     for i in range(start, num_samples):
         device_sync(device=device)  # MKG
@@ -200,7 +226,8 @@ def run_experiment(
         )
 
         if i == -1:
-            print(f"Compilation time: {time.perf_counter() - t0:.2f} seconds")
+            compilation_time = time.perf_counter() - t0
+            print(f"Compilation time: {compilation_time:.2f} seconds")
             continue
 
         device_sync(device=device)  # MKG
@@ -217,11 +244,11 @@ def run_experiment(
     print(f"Average tokens/sec: {token_per_sec:.2f} tokens/sec")
     print(f"Average bandwidth achieved: {memory_bandwidth:.02f} GB/s")
     print(f"Memory used: {torch.cuda.max_memory_reserved() / 1e9:.02f} GB")
-    return token_per_sec, memory_bandwidth
+    return token_per_sec, memory_bandwidth, compilation_time
 
 
 # token_per_sec and memory_bandwidth target numbers are for A100-40GB, which are different from the typical A100-80GB.
-def run_llama2_7b_bf16():
+def run_llama2_7b_bf16(device: str = "cuda"):
     from benchmark import Experiment
 
     model = GPTModelConfig(
@@ -231,26 +258,39 @@ def run_llama2_7b_bf16():
         LLaMAWeightOnlyInt8QuantHandler,
         94,
         1253,
+        162,
     )
-    token_per_sec, memory_bandwidth = run_experiment(model)
+    token_per_sec, memory_bandwidth, compilation_time = run_experiment(model)
     return [
         Experiment(
-            "llama2_7b_bf16",
+            model.name,
             "token_per_sec",
             model.token_per_sec,
             f"{token_per_sec:.02f}",
+            model.mode,
+            device,
         ),
         Experiment(
-            "llama2_7b_bf16",
+            model.name,
             "memory_bandwidth(GB/s)",
             model.memory_bandwidth,
             f"{memory_bandwidth:.02f}",
+            model.mode,
+            device,
+        ),
+        Experiment(
+            model.name,
+            "compilation_time(s)",
+            model.compilation_time,
+            f"{compilation_time:.02f}",
+            model.mode,
+            device,
         ),
     ]
 
 
 # token_per_sec and memory_bandwidth target numbers are for A100-40GB, which are different from the typical A100-80GB.
-def run_llama2_7b_int8():
+def run_llama2_7b_int8(device: str = "cuda"):
     from benchmark import Experiment
 
     model = GPTModelConfig(
@@ -260,26 +300,39 @@ def run_llama2_7b_int8():
         LLaMAWeightOnlyInt8QuantHandler,
         144,
         957,
+        172,
     )
-    token_per_sec, memory_bandwidth = run_experiment(model)
+    token_per_sec, memory_bandwidth, compilation_time = run_experiment(model)
     return [
         Experiment(
-            "llama2_7b_int8",
+            model.name,
             "token_per_sec",
             model.token_per_sec,
             f"{token_per_sec:.02f}",
+            model.mode,
+            device,
         ),
         Experiment(
-            "llama2_7b_int8",
+            model.name,
             "memory_bandwidth(GB/s)",
             model.memory_bandwidth,
             f"{memory_bandwidth:.02f}",
+            model.mode,
+            device,
+        ),
+        Experiment(
+            model.name,
+            "compilation_time(s)",
+            model.compilation_time,
+            f"{compilation_time:.02f}",
+            model.mode,
+            device,
         ),
     ]
 
 
 # token_per_sec and memory_bandwidth target numbers are for A100-40GB, which are different from the typical A100-80GB.
-def run_mixtral_8x7b_int8():
+def run_mixtral_8x7b_int8(device: str = "cuda"):
     from benchmark import Experiment
 
     # We reduced the original number of layers from 32 to 16 to adapt CI memory limitation.
@@ -289,20 +342,33 @@ def run_mixtral_8x7b_int8():
         "int8",
         MixtralMoEWeightOnlyInt8QuantHandler,
         175,
-        4129,
+        1280,
+        162,
     )
-    token_per_sec, memory_bandwidth = run_experiment(model)
+    token_per_sec, memory_bandwidth, compilation_time = run_experiment(model)
     return [
         Experiment(
-            "mixtral_8x7b_int8",
+            model.name,
             "token_per_sec",
             model.token_per_sec,
             f"{token_per_sec:.02f}",
+            model.mode,
+            device,
         ),
         Experiment(
-            "mixtral_8x7b_int8",
+            model.name,
             "memory_bandwidth(GB/s)",
             model.memory_bandwidth,
             f"{memory_bandwidth:.02f}",
+            model.mode,
+            device,
+        ),
+        Experiment(
+            model.name,
+            "compilation_time(s)",
+            model.compilation_time,
+            f"{compilation_time:.02f}",
+            model.mode,
+            device,
         ),
     ]
