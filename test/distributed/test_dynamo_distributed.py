@@ -517,8 +517,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             self.assertTrue(same(correct_outputs, outputs))
 
     @skip_if_lt_x_gpu(1)
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    def test_setattr(self):
+    def test_fsdp_setattr(self):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             # Test with basic FSDP wrapping (outer wrap around whole model)
             m, inputs, correct_outputs = get_mutating_model(f"cuda:{self.rank}")
@@ -531,6 +530,8 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 "Graph Breaks"
             ).check_not(
                 "setattr(FSDPManagedNNModuleVariable(MutatingModel), state, ...)"
+            ).check_not(
+                "setattr(FSDPManagedNNModuleVariable(FullyShardedDataParallel), _is_root, ...)"
             ).run(
                 prof.report()
             )
