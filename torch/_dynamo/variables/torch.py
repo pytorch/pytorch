@@ -864,7 +864,7 @@ Either create the tensor outside the compiled region, or do not set the tensor t
                                 # It's difficult to handle strides correctly in functionalization
                                 # when calling an out= op with a non-contiguous out argument
                                 unimplemented(
-                                    "out= op was called where output tensor was non-contiguous"
+                                    "out= op was called where some of the output tensors were non-contiguous"
                                 )
                 else:
                     unimplemented(f"out variant of {type(kwargs['out'])}")
