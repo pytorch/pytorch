@@ -842,14 +842,17 @@ def get_cpp_torch_cuda_options(cuda: bool, aot_mode: bool = False):
     libraries_dirs: List[str] = []
     libraries: List[str] = []
     passthough_args: List[str] = []
-
+    """
     if (
         config.is_fbcode()
         and "CUDA_HOME" not in os.environ
         and "CUDA_PATH" not in os.environ
     ):
         os.environ["CUDA_HOME"] = build_paths.cuda()
+    """
+    from torch._inductor.codecache import _set_gpu_runtime_env
 
+    _set_gpu_runtime_env()
     from torch.utils import cpp_extension
 
     include_dirs = cpp_extension.include_paths(cuda)
