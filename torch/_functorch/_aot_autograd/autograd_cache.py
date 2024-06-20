@@ -66,13 +66,19 @@ def check_node_safe(node: Node):
     """
     SAFE_TORCH_MODULES = ("torch.functional", "torch.nn.functional", "torch")
 
+    def is_public_torch_api(target):
+        # Don't blindly allow private functions in the torch namespace
+        is_private = target.__name__.startswith("_")
+        return (
+            getattr(target, "__module__", None) in SAFE_TORCH_MODULES and not is_private
+        )
+
     def is_torch_function(target):
         if isinstance(target, torch._ops.OpOverload):
             return True
-        if hasattr(target, "__module__") and target.__module__ in SAFE_TORCH_MODULES:
+        if is_public_torch_api(target):
             return True
         is_builtin_fun_or_type = type(target).__name__ == "builtin_function_or_method"
-        # TODO: handle torch.nn.functional and other non inlined targets, which don't compile down to a builtin
         return is_builtin_fun_or_type
 
     def is_tensor(target):
