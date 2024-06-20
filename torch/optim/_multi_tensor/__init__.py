@@ -6,7 +6,19 @@ future.
 """
 from functools import partialmethod
 
-from torch import optim
+from .. import (
+    Adadelta as _Adadelta,
+    Adagrad as _Adagrad,
+    Adam as _Adam,
+    Adamax as _Adamax,
+    AdamW as _AdamW,
+    ASGD as _ASGD,
+    NAdam as _NAdam,
+    RAdam as _RAdam,
+    RMSprop as _RMSprop,
+    Rprop as _Rprop,
+    SGD as _SGD,
+)
 
 
 def partialclass(cls, *args, **kwargs):
@@ -16,14 +28,27 @@ def partialclass(cls, *args, **kwargs):
     return NewCls
 
 
-Adam = partialclass(optim.Adam, foreach=True)
-AdamW = partialclass(optim.AdamW, foreach=True)
-NAdam = partialclass(optim.NAdam, foreach=True)
-SGD = partialclass(optim.SGD, foreach=True)
-RAdam = partialclass(optim.RAdam, foreach=True)
-RMSprop = partialclass(optim.RMSprop, foreach=True)
-Rprop = partialclass(optim.Rprop, foreach=True)
-ASGD = partialclass(optim.ASGD, foreach=True)
-Adamax = partialclass(optim.Adamax, foreach=True)
-Adadelta = partialclass(optim.Adadelta, foreach=True)
-Adagrad = partialclass(optim.Adagrad, foreach=True)
+Adam = partialclass(_Adam, foreach=True)
+AdamW = partialclass(_AdamW, foreach=True)
+NAdam = partialclass(_NAdam, foreach=True)
+SGD = partialclass(_SGD, foreach=True)
+RAdam = partialclass(_RAdam, foreach=True)
+RMSprop = partialclass(_RMSprop, foreach=True)
+Rprop = partialclass(_Rprop, foreach=True)
+ASGD = partialclass(_ASGD, foreach=True)
+Adamax = partialclass(_Adamax, foreach=True)
+Adadelta = partialclass(_Adadelta, foreach=True)
+Adagrad = partialclass(_Adagrad, foreach=True)
+
+
+del _Adam
+del _AdamW
+del _NAdam
+del _SGD
+del _RAdam
+del _RMSprop
+del _Rprop
+del _ASGD
+del _Adamax
+del _Adadelta
+del _Adagrad
