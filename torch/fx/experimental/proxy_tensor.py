@@ -734,7 +734,6 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         tracer,
         tracing_mode,
         pre_dispatch=False,
-        export=False,
         _allow_fake_constant=False,
         _error_on_data_dependent_ops=True
     ):
@@ -744,7 +743,6 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         self.tracing_mode = tracing_mode
         self.enable_tracing = True
         self.pre_dispatch = pre_dispatch
-        self.export = export
         self._allow_fake_constant = _allow_fake_constant
         self._error_on_data_dependent_ops = _error_on_data_dependent_ops
         self.sym_mode = ProxySymDispatchMode(tracer)
@@ -1161,7 +1159,6 @@ class _MakefxTracer:
         tracing_mode: str,
         _allow_non_fake_inputs: bool,
         pre_dispatch: bool,
-        export: bool,
         record_module_stack: bool,
         _allow_fake_constant: bool,
         _error_on_data_dependent_ops: bool
@@ -1173,7 +1170,6 @@ class _MakefxTracer:
         self.tracing_mode: str = tracing_mode
         self._allow_non_fake_inputs: bool = _allow_non_fake_inputs
         self.pre_dispatch: bool = pre_dispatch
-        self.export: bool = export
         self.record_module_stack: bool = record_module_stack
         self._allow_fake_constant: bool = _allow_fake_constant
         self._error_on_data_dependent_ops: bool = _error_on_data_dependent_ops
@@ -1267,7 +1263,6 @@ class _MakefxTracer:
             fx_tracer,
             self.tracing_mode,
             pre_dispatch=self.pre_dispatch,
-            export=self.export,
             _allow_fake_constant=self._allow_fake_constant,
             _error_on_data_dependent_ops=self._error_on_data_dependent_ops
         )
@@ -1385,7 +1380,6 @@ class _MakefxTracer:
             self.tracing_mode,
             self._allow_non_fake_inputs,
             self.pre_dispatch,
-            self.export,
             self.record_module_stack,
             self._allow_fake_constant,
             self._error_on_data_dependent_ops
@@ -1412,7 +1406,6 @@ def make_fx(
         _allow_non_fake_inputs=False,
         *,
         pre_dispatch=False,
-        export=False,  # See Note [Decomposition behaviour in export]
         record_module_stack=False,
         _allow_fake_constant=False,
         _error_on_data_dependent_ops=True):
@@ -1425,7 +1418,6 @@ def make_fx(
         tracing_mode,
         _allow_non_fake_inputs,
         pre_dispatch,
-        export,
         record_module_stack,
         _allow_fake_constant,
         _error_on_data_dependent_ops

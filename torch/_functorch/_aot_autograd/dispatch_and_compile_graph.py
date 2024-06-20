@@ -48,12 +48,6 @@ def _create_graph(f, args, *, aot_config: AOTConfig) -> torch.fx.GraphModule:
             decomposition_table=aot_config.decompositions,
             record_module_stack=True,
             pre_dispatch=aot_config.pre_dispatch,
-            # Note [Decomposition behaviour in export]
-            # During aot export, we don't want to decompose compositeimplicit ops
-            # as the export inference IR we are targetting is different from torch.compile
-            # where we get core aten IR. This is useful when the tracer tries to decompose ops
-            # even under torch.inference_mode context manager
-            export=aot_config.is_export,
         )(*args)
 
     return fx_g
