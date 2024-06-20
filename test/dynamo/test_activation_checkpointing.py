@@ -49,6 +49,7 @@ def count_ops(
                 return node.args[1] == op
         return False
 
+    # assert ((freq or freq_ge) and op) or ((freqs or freqs_ge) and ops)
     if op is not None:
         assert not isinstance(op, list)
         ops = [op]
@@ -56,7 +57,7 @@ def count_ops(
         freqs = [freq]
     if freq_ge is not None:
         freqs_ge = [freq_ge]
-    if freqs is not None:
+    if freqs:
         for op, freq in zip(ops, freqs):
             actual_count = 0
             for node in gm.graph.nodes:
@@ -65,7 +66,7 @@ def count_ops(
             err_msg = f"In graph {gm}, expected {op} to have occurred {freq} times in the graph, but got {actual_count}."
             assert actual_count == freq, err_msg
     else:
-        assert freqs_ge is not None:
+        assert freqs_ge is not None
         for op, freq_ge in zip(ops, freqs_ge):
             actual_count = 0
             for node in gm.graph.nodes:
