@@ -34,6 +34,9 @@
 #if INDUCTOR_USE_VECTOR_TYPES()
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
+#else
+// For calc_erfinv
+#include <ATen/native/Math.h>
 #endif
 
 typedef at::Half half;
