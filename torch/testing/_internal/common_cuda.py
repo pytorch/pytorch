@@ -50,9 +50,6 @@ def evaluate_platform_supports_flash_attention():
         return not IS_WINDOWS and SM80OrLater
     return False
 
-def evaluate_platform_supports_cudnn_attention():
-    return (not TEST_WITH_ROCM) and (not IS_WINDOWS) and TEST_CUDA and SM80OrLater
-
 def evaluate_platform_supports_efficient_attention():
     if TEST_WITH_ROCM:
         return evaluate_gfx_arch_exact('gfx90a:sramecc+:xnack-') or evaluate_gfx_arch_exact('gfx942:sramecc+:xnack-')
@@ -62,12 +59,11 @@ def evaluate_platform_supports_efficient_attention():
 
 PLATFORM_SUPPORTS_FLASH_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_flash_attention())
 PLATFORM_SUPPORTS_MEM_EFF_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_efficient_attention())
-PLATFORM_SUPPORTS_CUDNN_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_cudnn_attention())
-
+# TODO(eqy): gate this against a cuDNN version
+PLATFORM_SUPPORTS_CUDNN_ATTENTION: bool = LazyVal(lambda: TEST_CUDA and not TEST_WITH_ROCM and
+                                                  torch.backends.cuda.cudnn_sdp_enabled())
 # This condition always evaluates to PLATFORM_SUPPORTS_MEM_EFF_ATTENTION but for logical clarity we keep it separate
-PLATFORM_SUPPORTS_FUSED_ATTENTION: bool = LazyVal(lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION or
-                                                  PLATFORM_SUPPORTS_CUDNN_ATTENTION or
-                                                  PLATFORM_SUPPORTS_MEM_EFF_ATTENTION)
+PLATFORM_SUPPORTS_FUSED_ATTENTION: bool = LazyVal(lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION or PLATFORM_SUPPORTS_MEM_EFF_ATTENTION)
 
 PLATFORM_SUPPORTS_FUSED_SDPA: bool = TEST_CUDA and not TEST_WITH_ROCM
 

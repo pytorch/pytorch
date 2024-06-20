@@ -201,11 +201,19 @@ def _unlift_graph(mod, gm, graph_signature):
 
     outputs = list(gm.graph.nodes)[-1].args[0]
     mutated_outputs = []
-    for out in outputs:
-        if out.name in graph_signature.buffers_to_mutate:
-            mutated_outputs.append(graph_signature.buffers_to_mutate[out.name])
-        else:
-            mutated_outputs.append(None)
+    buffer_mutations = graph_signature.buffers_to_mutate
+    user_input_mutations = graph_signature.user_inputs_to_mutate
+    output_tokens = graph_signature.output_tokens
+    for idx, out in enumerate(outputs):
+        value = None
+
+        if idx < len(buffer_mutations) + len(user_input_mutations) + len(output_tokens):
+            if out.name in buffer_mutations:
+                value = buffer_mutations[out.name]
+            elif out.name in user_input_mutations:
+                value = user_input_mutations[out.name]
+
+        mutated_outputs.append(value)
 
     unlifted_gm = _unlift(
         gm,
@@ -384,15 +392,15 @@ def fake_tensor_prop(
 
 
 def should_use_remote_fx_graph_cache():
-    if config.fx_graph_remote_cache:
-        return True
+    if config.fx_graph_remote_cache is not None:
+        return config.fx_graph_remote_cache
     if not config.is_fbcode():
         return False
     if torch.version.hip is not None:
         return False
 
     try:
-        from triton.runtime.fb_memcache import MEMCACHE_VERSION
+        from triton.fb.fb_memcache import MEMCACHE_VERSION
     except ModuleNotFoundError:
         return False
 
@@ -748,7 +756,11 @@ def fx_codegen_and_compile(
         post_grad_graphs_log.debug(
             "%s",
             lazy_format_graph_code(
-                "AFTER POST GRAD", gm, include_stride=True, include_device=True
+                "AFTER POST GRAD",
+                gm,
+                include_stride=True,
+                include_device=True,
+                colored=True,
             ),
         )
         trace_structured(

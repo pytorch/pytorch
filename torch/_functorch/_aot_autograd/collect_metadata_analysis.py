@@ -76,8 +76,8 @@ def coerce_tangent(x):
     #     with a Replicate/Shard placement, we have no way to convert the tangent "back" to a _Partial placement.
     #     This method lets us avoid the problem entirely by allowing subclasses to ensure that we can never
     #     have a tangent with "problematic" metadata, that we cannot convert to.
-    # (1) __coerce_same_metadata_as_tangent__(self, target)
-    #     Given a subclass, and a target subclass with differing metadata,
+    # (1) __coerce_same_metadata_as_tangent__(self, metadata)
+    #     Given a subclass, and a target differing metadata,
     #     convert self to have the same metadata as the target.
     #     With DTensor being the main example, we can use this to convert a DTensor with a Replicate()
     #     placement into one with a Shard() placement, in the case that we "guessed wrong",
