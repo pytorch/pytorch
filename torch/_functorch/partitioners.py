@@ -1103,9 +1103,7 @@ def solve_min_cut(
 
     cut_nodes = set()
     for node_in, node_out in cutset:
-        assert (
-            node_in[:-3] == node_out[:-4]
-        ), f"node_in: {node_in}, node_out: {node_out}"
+        assert node_in[:-3] == node_out[:-4]
         node_name = node_in[:-3]
         cut_nodes.add(node_name)
 
