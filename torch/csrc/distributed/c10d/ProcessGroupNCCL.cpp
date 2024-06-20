@@ -2912,9 +2912,15 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   auto ncclComm = getNCCLComm(
       key, device, opType, p2pRank, isSendRecvSelf, /*onlyCached*/ true);
 
-  // TODO(whc) - unclear why we special-case batchP2P.  But I am preserving
-  // the current behavior for now.
   if (!batchP2P && !ncclComm) {
+    // We create special 2-rank communicators for each pair of send/recv rank if
+    // P2P operations are called before
+    // the full communicator (for this whole PG) is initialized. We should
+    // consider deprecating this path after migrating users to opt-into eager
+    // initialization (by passing device_id to init_process_group).
+
+    // TODO(whc) - unclear why we special-case batchP2P to avoid this path, but
+    // I preserved this existing special case.
     key = getKeySendRecv(rank_, peer);
     p2pRank = rank_ <= peer ? 0 : 1;
     isSendRecvSelf = rank_ == peer;
@@ -2927,14 +2933,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     }
   }
 
-  (!ncclComm) {
+  if (!ncclComm) {
     TORCH_WARN_ONCE(
         "A P2P op (send/recv) was called on a ProcessGroup that has not been fully initialized. "
         "This will cause a separate 2-rank nccl communicator to be automatically created, which is inefficient. "
         "To avoid this, please pass a device_id to init_process_group to eagerly initialize communicators, "
         "or call a collective operation on this process group before the first P2P operation to lazily initialize.");
 
-    ncclComm = getNCCLComm(y, device, opType, p2pRank, isSendRecvSelf);
+    ncclComm = getNCCLComm(key, device, opType, p2pRank, isSendRecvSelf);
   }
   // Bump the logical operation counter regardless of whether this op is
   // coalesced or individual
