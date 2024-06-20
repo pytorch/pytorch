@@ -47,7 +47,6 @@ from torch._dynamo.testing import (
     same,
     skipIfNotPy311,
     unsupported,
-    xfailIfPy312,
 )
 from torch._dynamo.utils import CompileProfiler, counters, ifdynstaticdefault
 from torch._inductor.utils import run_and_get_code
@@ -9946,10 +9945,6 @@ fn
             lambda mod: mod,
         )
 
-    # The following 2 tests fail due to https://github.com/python/cpython/issues/118013.
-    # Tracked by https://github.com/pytorch/pytorch/issues/124302.
-    # The xfails can be removed once Python 3.12 is updated on CI.
-    @xfailIfPy312
     def test_outside_linear_module_free(self):
         # Compared to test_linear_module_free, the linear
         # layer is not the code object that is directly compiled.
@@ -9984,7 +9979,6 @@ fn
         gc.collect()
         self.assertTrue(cleared)
 
-    @xfailIfPy312
     def test_parameter_free(self):
         def model_inp_ctr():
             param = torch.nn.Parameter(torch.randn(100, 100))
