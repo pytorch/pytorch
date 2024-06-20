@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import List, Set, TYPE_CHECKING
+from typing import Dict, List, Set, TYPE_CHECKING
 
 import torch
 
@@ -141,9 +141,14 @@ def compute_node_users(
         return {}
 
     name_to_node = snodes[0].scheduler.name_to_fused_node
-    return {
-        node: {name_to_node[user.get_name()] for user in node.users} for node in snodes
-    }
+
+    def user_to_fused_node(user):
+        name = user.get_name()
+        if user.get_name() == "OUTPUT":
+            return user.node
+        return name_to_node[name]
+
+    return {node: {user_to_fused_node(user) for user in node.users} for node in snodes}
 
 
 def reorder_compute_for_overlap(
