@@ -129,6 +129,7 @@ from .functions import (
     CollectiveFunctionRewriteVariable,
     FunctoolsPartialVariable,
     TritonKernelVariable,
+    UserFunctionVariable,
     UserMethodVariable,
 )
 from .higher_order_ops import TorchHigherOrderOperatorVariable
@@ -146,6 +147,7 @@ from .lists import (
     TupleVariable,
 )
 from .misc import (
+    AutogradEngineVariable,
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
     ComptimeVariable,
@@ -726,6 +728,23 @@ class VariableBuilder:
                 ),
                 "apply",
             )
+        elif isinstance(value, torch._C._ImperativeEngine):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return AutogradEngineVariable(value, source=self.source)
+        elif (
+            value
+            is torch._dynamo.external_utils.FakeCompiledAutogradEngine._exec_final_callbacks_stub
+        ):
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            return LambdaVariable(
+                lambda: UserFunctionVariable(
+                    torch._dynamo.external_utils.FakeCompiledAutogradEngine.exec_final_callbacks,
+                ).call_function(
+                    self.tx,
+                    (self.tx.output.side_effects.get_ca_final_callbacks_var(),),
+                    {},
+                )
+            )
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
@@ -1145,11 +1164,7 @@ class VariableBuilder:
             and not config.allow_rnn
         ):
             unimplemented("TorchDynamo purposely graph breaks on RNN, GRU, LSTMs")
-
-        # Dont take this path for FSDP
-        if not getattr(
-            value, "_is_fsdp_managed_module", None
-        ) and mutation_guard.is_dynamic_nn_module(value, self.tx.export):
+        if mutation_guard.is_dynamic_nn_module(value, self.tx.export):
             # created dynamically, don't specialize on it
             self.install_guards(GuardBuilder.TYPE_MATCH)
             if (
@@ -1207,7 +1222,11 @@ class VariableBuilder:
             # ID_MATCH is required to disambiguate cases as simple as a unit test that constructs 2 models and wraps
             # them differently with different FSDP configs.  (test_dynamo_distributed.py -k test_fsdp_aot_eager)
             self.install_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.ID_MATCH)
-            return FSDPManagedNNModuleVariable(value, source=self.get_source())
+            result = FSDPManagedNNModuleVariable(value, source=self.get_source())
+            if not SideEffects.cls_supports_mutation_side_effects(type(value)):
+                # don't allow STORE_ATTR mutation with custom __setattr__
+                return result
+            return self.tx.output.side_effects.track_object_existing(value, result)
         else:
             return self.tx.output.register_attr_or_module(
                 value,
@@ -2211,6 +2230,7 @@ def _automatic_dynamic(
     constraint_dims = []
     for i in range(e.dim()):
         # NB: mark dynamic has precedence over static
+        marked_unbacked = i in getattr(e, "_dynamo_unbacked_indices", set())
         marked_dynamic = i in getattr(e, "_dynamo_dynamic_indices", set())
         marked_weak_dynamic = i in getattr(e, "_dynamo_weak_dynamic_indices", set())
         marked_static = i in getattr(e, "_dynamo_static_indices", set())
@@ -2262,7 +2282,9 @@ def _automatic_dynamic(
         constraint_dims.append(constraint_dim)
 
         # Now, figure out if the dim is dynamic/duck/static
-        if (
+        if marked_unbacked:
+            dynamic = DimDynamic.SIZE_LIKE_UNBACKED
+        elif (
             constraint_dim is not None
             or marked_dynamic
             or marked_weak_dynamic
