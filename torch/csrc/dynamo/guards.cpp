@@ -73,16 +73,17 @@ TensorCheck::TensorCheck(
 TensorCheck::TensorCheck(
     const LocalState& state,
     PyTypeObject* pt,
-    uint64_t dispatch_key,
+    c10::DispatchKeySet dispatch_key_set,
     at::ScalarType dtype,
     at::DeviceIndex device_index,
+    bool requires_grad,
     std::vector<std::optional<c10::SymInt>> dynamic_dims_sizes,
     std::vector<std::optional<c10::SymInt>> dynamic_dims_strides)
     : pytype(pt),
-      dispatch_key_(dispatch_key),
+      dispatch_key_(state.apply(dispatch_key_set).raw_repr()),
       dtype_(dtype),
       device_index_(device_index),
-      requires_grad_(false),
+      requires_grad_(requires_grad),
       sizes_(std::move(dynamic_dims_sizes)),
       strides_(std::move(dynamic_dims_strides)),
       dim_(static_cast<int64_t>(sizes_.size())) {}
@@ -90,18 +91,46 @@ TensorCheck::TensorCheck(
 // See note in guards.py [Note - On Export Tensor Guards]
 // Logic parallel to here must be maintained in python
 bool TensorCheck::check(const LocalState& state, const at::Tensor& v) {
-  if (dispatch_key_ != state.apply(v.key_set()).raw_repr() ||
-      dtype_ != v.dtype().toScalarType() ||
-      device_index_ != v.device().index() ||
-      requires_grad_ != v.requires_grad()) {
+  // In terms of a sparse_csr tensor, it does not support strides informatio
+  c10::SymIntArrayRef sym_strides(std::vector<SymInt>(v.ndimension(), -1));
+  bool does_not_support_stride = v.layout() == c10::kSparseCsr ||
+      v.layout() == c10::kSparseCsc || v.layout() == c10::kSparseBsc ||
+      v.layout() == c10::kSparseBsr;
+  if (!does_not_support_stride) {
+    sym_strides = v.sym_strides();
+  }
+
+  return check(
+      state,
+      v.key_set(),
+      v.dtype().toScalarType(),
+      v.device(),
+      v.sym_sizes(),
+      sym_strides,
+      v.requires_grad());
+}
+
+bool TensorCheck::check(
+    const LocalState& state,
+    const c10::DispatchKeySet& dispatch_key_set,
+    const at::ScalarType& dtype,
+    const c10::Device& device,
+    const c10::SymIntArrayRef& sym_sizes,
+    const c10::SymIntArrayRef& sym_strides,
+    const bool& requires_grad) {
+  if (dispatch_key_ != state.apply(dispatch_key_set).raw_repr() ||
+      dtype_ != dtype || device_index_ != device.index() ||
+      requires_grad_ != requires_grad) {
     return false;
   }
-  auto ndim = v.ndimension();
-  if (ndim != dim_) {
+
+  auto ndim = sym_sizes.size();
+  if (ndim != static_cast<size_t>(dim_)) {
     return false;
   }
-  const auto& sizes = v.sym_sizes();
-  const auto& strides = v.sym_strides();
+
+  const auto& sizes = sym_sizes;
+  const auto& strides = sym_strides;
   for (auto i : c10::irange(ndim)) {
     auto known_size = sizes_[i];
     auto known_stride = strides_[i];
@@ -671,6 +700,8 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
     PyErr_SetString(PyExc_AssertionError, "wrong number of dimensions");
     return nullptr;
   }
+  std::stringstream msg;
+  int num_errors = 0;
   for (auto i : c10::irange(ndim)) {
     int64_t want_size = THPUtils_unpackLong(PyTuple_GET_ITEM(size, i));
     int64_t want_stride = THPUtils_unpackLong(PyTuple_GET_ITEM(stride, i));
@@ -679,13 +710,19 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
     if (want_size != actual_size ||
         // ignore stride differences when size is 1
         (want_stride != actual_stride && actual_size > 1)) {
-      std::stringstream msg;
+      if (num_errors > 0)
+        msg << "; ";
       msg << "expected size " << actual_size << "==" << want_size << ", stride "
           << actual_stride << "==" << want_stride << " at dim=" << i;
-      PyErr_SetString(PyExc_AssertionError, msg.str().c_str());
-      return nullptr;
+      num_errors++;
     }
   }
+
+  if (num_errors) {
+    PyErr_SetString(PyExc_AssertionError, msg.str().c_str());
+    return nullptr;
+  }
+
   Py_RETURN_TRUE;
 }
 
@@ -3174,6 +3211,51 @@ class GlobalWeakRefGuardAccessor : public GuardAccessor {
 };
 
 /**
+ * Implements weakref call - x_weak()
+ */
+class WeakRefCallGuardAccessor : public GuardAccessor {
+ public:
+  WeakRefCallGuardAccessor(
+      RootGuardManager* root,
+      py::str name,
+      std::string source,
+      py::handle example_value,
+      py::handle guard_manager_enum)
+      : GuardAccessor(
+            root,
+            std::move(name),
+            std::move(source),
+            example_value,
+            guard_manager_enum) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj) override { // borrowed ref
+    if (!PyWeakref_Check(obj)) {
+      return false;
+    }
+
+    PyObject* x = PyWeakref_GetObject(obj); // borrowed ref
+    return _guard_manager->check_nopybind(x);
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    if (!PyWeakref_Check(obj)) {
+      return GuardDebugInfo(
+          false, std::string("Not a weakref obj ") + get_source(), 0);
+    }
+
+    PyObject* x = PyWeakref_GetObject(obj); // borrowed ref
+    return _guard_manager->check_verbose_nopybind(x);
+  }
+
+  std::string repr() const override {
+    return "WeakRefCallGuardAccessor()";
+  }
+};
+
+/**
  * Similar to PythonLambdaLeafGuard, this class is a way to allow developers to
  * supply accessor as a python function. This is useful for from_numpy source.
  */
@@ -3501,6 +3583,12 @@ PyObject* torch_c_dynamo_guards_init() {
       std::unique_ptr<TypeGuardAccessor>>(py_m, "TypeGuardAccessor");
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
+      WeakRefCallGuardAccessor,
+      GuardAccessor,
+      std::unique_ptr<WeakRefCallGuardAccessor>>(
+      py_m, "WeakRefCallGuardAccessor");
+  // NOLINTNEXTLINE(bugprone-unused-raii)
+  py::class_<
       TupleIteratorGetItemAccessor,
       GuardAccessor,
       std::unique_ptr<TupleIteratorGetItemAccessor>>(
@@ -3779,6 +3867,26 @@ PyObject* torch_c_dynamo_guards_init() {
             // A unique key is used to save as the accessor key.
             py::str unique_key("__type_accessor__");
             return self.get_child_manager<TypeGuardAccessor>(
+                std::move(unique_key),
+                std::move(source),
+                example_value,
+                guard_manager_enum);
+          },
+          py::arg("source"),
+          py::arg("example_value"),
+          py::arg("guard_manager_enum"),
+          py::return_value_policy::reference)
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
+          "weakref_call_manager",
+          [](GuardManager& self,
+             std::string source,
+             py::handle example_value,
+             py::handle guard_manager_enum) -> GuardManager* {
+            // A unique key is used to save as the accessor key.
+            py::str unique_key("__weakref_call_accessor__");
+            return self.get_child_manager<WeakRefCallGuardAccessor>(
                 std::move(unique_key),
                 std::move(source),
                 example_value,
