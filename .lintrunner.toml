@@ -68,6 +68,7 @@ include_patterns = [
     'aten/src/ATen/native/cudnn/*.cpp',
     'c10/**/*.h',
     'c10/**/*.cpp',
+    'distributed/c10d/*SymmetricMemory.*',
     'torch/csrc/**/*.h',
     'torch/csrc/**/*.hpp',
     'torch/csrc/**/*.cpp',
