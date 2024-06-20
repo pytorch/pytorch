@@ -413,3 +413,65 @@ inline void mm_get_thread_blocks(
   m_block_start = std::min(thread_id * Mt_blocks, M_blocks);
   m_block_end = std::min(m_block_start + Mt_blocks, M_blocks);
 }
+
+struct amx_tilecfg {
+  uint8_t palette_id;
+  uint8_t start_row;
+  uint8_t reserved_0[14];
+  uint16_t colsb[16];
+  uint8_t rows[16];
+};
+
+class AMXState {
+ private:
+  amx_tilecfg tilecfg_;
+  uint8_t rows_;
+  uint16_t colsb_;
+  uint8_t num_tile_rows_;
+  uint8_t num_tile_columns_;
+
+ public:
+  AMXState() : rows_(0), colsb_(0), num_tile_rows_(0), num_tile_columns_(0) {
+    memset(&tilecfg_, 0, sizeof(tilecfg_));
+  }
+
+  inline void configure(
+      uint8_t rows,
+      uint16_t colsb,
+      uint8_t num_tile_rows,
+      uint8_t num_tile_columns,
+      void (*loadconfig)(const amx_tilecfg&)) {
+    if (tilecfg_.palette_id == 1 && rows_ == rows && colsb_ == colsb &&
+        num_tile_rows_ == num_tile_rows &&
+        num_tile_columns_ == num_tile_columns) {
+      return;
+    }
+    tilecfg_.palette_id = 1;
+    rows_ = rows;
+    colsb_ = colsb;
+    num_tile_rows_ = num_tile_rows;
+    num_tile_columns_ = num_tile_columns;
+    const auto num_c_tiles = num_tile_rows * num_tile_columns;
+    // For C
+    for (int i = 0; i < num_c_tiles; i++) {
+      tilecfg_.rows[i] = rows;
+      tilecfg_.colsb[i] = 64;
+    }
+    // For A
+    for (int i = 0; i < num_tile_rows; i++) {
+      tilecfg_.rows[i + num_c_tiles] = rows;
+      tilecfg_.colsb[i + num_c_tiles] = colsb;
+    }
+    // For B
+    for (int i = 0; i < num_tile_columns; i++) {
+      tilecfg_.rows[i + num_c_tiles + num_tile_rows] = colsb / 4;
+      tilecfg_.colsb[i + num_c_tiles + num_tile_rows] = 64;
+    }
+    loadconfig(tilecfg_);
+  }
+
+  inline void release(void (*tile_release)()) {
+    tilecfg_.palette_id = 0;
+    tile_release();
+  }
+};
