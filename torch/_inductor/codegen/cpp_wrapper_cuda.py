@@ -230,7 +230,7 @@ class CppWrapperCuda(CppWrapperCpu):
 
         grid = [V.graph.sizevars.simplify(item) for item in grid]
         grid_uses_symbolic_shapes = any(item.free_symbols for item in grid)
-        grid_args = [self.grid_expr_printer(item) for item in grid]
+        grid_args = [self.expr_printer(item) for item in grid]
         grid_args_str = ", ".join(grid_args)
         self.writeline(f"Grid {grid_name} = Grid({grid_args_str});")
 
