@@ -1570,7 +1570,16 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> "VariableTracker":
         from .builder import wrap_fx_proxy
 
-        query, key, value, score_mod = self.normalize_to_args(args, kwargs)
+        (
+            query,
+            key,
+            value,
+            score_mod,
+            sparse_mask_kv_num_blocks,
+            sparse_mask_kv_indices,
+            sparse_mask_q_num_blocks,
+            sparse_mask_q_indices,
+        ) = self.normalize_to_args(args, kwargs)
 
         p_args = self.create_wrapped_node(tx, query, score_mod)
         proxied_args = [query, key, value]
@@ -1579,6 +1588,15 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # Norm_kwargs contains the score_function and we dont want to proxy this because
         # Proxying user defined functions is not supported.
         inp_args, _ = proxy_args_kwargs(proxied_args, {})
+        sparse_mask_args, _ = proxy_args_kwargs(
+            [
+                sparse_mask_kv_num_blocks,
+                sparse_mask_kv_indices,
+                sparse_mask_q_num_blocks,
+                sparse_mask_q_indices,
+            ],
+            {},
+        )
 
         query_meta = query.as_proxy().node.meta["example_value"]
         logsumexp_shape = query_meta.size()[:-1]  # [B, H, M]
@@ -1594,7 +1612,7 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             proxy=tx.output.create_proxy(
                 "call_function",
                 self.value,
-                args=inp_args + p_args,
+                args=inp_args + p_args[:1] + sparse_mask_args + p_args[1:],
                 kwargs={},
             ),
             example_value=example_value,
