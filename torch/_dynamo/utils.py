@@ -714,18 +714,15 @@ def record_compilation_metrics(
         name = "compilation_metrics"
     else:
         name = "bwd_compilation_metrics"
-    # Currently only record fwd compilation metrics, will add bwd compilation metrics
-    # after the internal Scuba logging changes finish.
-    if isinstance(compilation_metrics, CompilationMetrics):
-        torch._logging.trace_structured(
-            name,
-            lambda: {
-                k: list(v) if isinstance(v, set) else v
-                for k, v in dataclasses.asdict(compilation_metrics).items()
-            },
-        )
-        if config.log_compilation_metrics:
-            log_compilation_event(compilation_metrics)
+    torch._logging.trace_structured(
+        name,
+        lambda: {
+            k: list(v) if isinstance(v, set) else v
+            for k, v in dataclasses.asdict(compilation_metrics).items()
+        },
+    )
+    if config.log_compilation_metrics:
+        log_compilation_event(compilation_metrics)
 
 
 def set_compilation_metrics_limit(new_size: int) -> None:
@@ -2767,3 +2764,19 @@ def warn_once(msg, stacklevel=1):
         return
     warn_once_cache.add(msg)
     warnings.warn(msg, stacklevel=stacklevel + 1)
+
+
+def strip_color_from_string(text):
+    # This regular expression matches ANSI escape codes
+    ansi_escape = re.compile(r"\x1B[@-_][0-?]*[ -/]*[@-~]")
+    return ansi_escape.sub("", text)
+
+
+@contextlib.contextmanager
+def _disable_saved_tensors_hooks_during_tracing():
+    # See NOTE: [Deferring tensor pack/unpack hooks until runtime]
+    try:
+        prior = torch._C._autograd._saved_tensors_hooks_set_tracing(True)
+        yield
+    finally:
+        torch._C._autograd._saved_tensors_hooks_set_tracing(prior)
