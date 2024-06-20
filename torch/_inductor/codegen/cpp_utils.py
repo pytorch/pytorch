@@ -513,10 +513,11 @@ class LocalBufferContext:
         The the data access of `local_buf` is assumed to be contiguous with the
         same order as the `global_buf`.
         """
-        # local_buffers = list(self.local_buffers.values())
-        # global_buffers = list(self.local_to_global.values())
-        # assert len(global_buffers[0].get_size()) == len(local_buffers[0].get_size())
-        # assert len(nodes) > 0
+        for local_buffer_name, global_buffers in self.local_to_global.items():
+            local_buffer = self.local_buffers[local_buffer_name]
+            for global_buffer in global_buffers:
+                assert len(global_buffer.get_size()) == len(local_buffer.get_size())
+        assert len(nodes) > 0
 
         def wrap_inner_fn_for_node(node: ir.IRNode):
             loops = node.data if isinstance(node, ir.ComputedBuffer) else node

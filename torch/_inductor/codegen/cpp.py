@@ -3932,7 +3932,7 @@ class CppScheduling(BaseScheduling):
                 metrics.cpp_outer_loop_fused_inner_counts.append(
                     metrics.CppOuterLoopFusedCount(
                         len(cpp_kernel_proxy_list),
-                        local_buffer_number=len(local_buffers),
+                        local_buffer_number=len(list(scope.local_buffers.values())),
                     )
                 )
                 outer_fusion_cpp_kernel_proxy = node.merge_outer_fusion_kernels(
