@@ -10,7 +10,6 @@ from typing import Any, Dict, Optional, Tuple, Union
 
 import torch
 import torch._C as _C
-import torch.utils.hooks as hooks
 from torch._namedtensor_internals import (
     check_serializing_named_tensor,
     is_ellipsis,
@@ -26,7 +25,6 @@ from torch.overrides import (
     has_torch_function_unary,
     has_torch_function_variadic,
 )
-from torch.utils.dlpack import DLDeviceType
 
 
 def _handle_torch_function_and_wrap_type_error_to_not_implemented(f):
@@ -247,8 +245,11 @@ class Tensor(torch._C.TensorBase):
 
     def _reduce_ex_internal(self, proto):
         check_serializing_named_tensor(self)
+
+        from torch.utils.hooks import warn_if_has_hooks
+
         # See Note [Don't serialize hooks]
-        torch.utils.hooks.warn_if_has_hooks(self)
+        warn_if_has_hooks(self)
         backward_hooks: Dict[Any, Any] = OrderedDict()
         # Note: Numpy array is chosen to be the rebuild component for XLA, MTIA, MAIA Tensors.
         # We considered a few options:
@@ -565,7 +566,10 @@ class Tensor(torch._C.TensorBase):
             self._backward_hooks = OrderedDict()
             if self.grad_fn is not None:
                 self.grad_fn._register_hook_dict(self)
-        handle = hooks.RemovableHandle(self._backward_hooks)
+
+        from torch.utils.hooks import RemovableHandle
+
+        handle = RemovableHandle(self._backward_hooks)
         self._backward_hooks[handle.id] = hook
         return handle
 
@@ -621,7 +625,10 @@ class Tensor(torch._C.TensorBase):
             )
         if self._post_accumulate_grad_hooks is None:
             self._post_accumulate_grad_hooks: Dict[Any, Any] = OrderedDict()
-        handle = hooks.RemovableHandle(self._post_accumulate_grad_hooks)
+
+        from torch.utils.hooks import RemovableHandle
+
+        handle = RemovableHandle(self._post_accumulate_grad_hooks)
         self._post_accumulate_grad_hooks[handle.id] = hook
         return handle
 
@@ -1503,6 +1510,9 @@ class Tensor(torch._C.TensorBase):
     def __dlpack_device__(self) -> Tuple[enum.IntEnum, int]:
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__dlpack_device__, (self,), self)
+
+        from torch.utils.dlpack import DLDeviceType
+
         device = self.device
         idx = device.index if device.index is not None else 0
         torch_device_type = device.type
