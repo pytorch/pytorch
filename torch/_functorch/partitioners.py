@@ -170,7 +170,6 @@ def _extract_graph_with_inputs_outputs(
         env[node] = new_node
 
     for node in joint_graph.nodes:
-        # If node subgraph is marked - only keep it if specified subgraph argument is the same
         if (
             node.meta.get("partitioner_tag", None) == "mutation_in_backward"
             and subgraph != "backward"
