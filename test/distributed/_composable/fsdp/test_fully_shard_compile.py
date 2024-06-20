@@ -137,15 +137,15 @@ class TestFullyShardCompile(FSDPTest):
     ):
         n_iter = 10
 
-        def compiler_fn():
+        def compiler_fn(compiled_autograd_backend):
             def _fn(gm):
                 # fullgraph=True because graph-break in Compiled Autograd BWD graph is not supported by Traceable FSDP2 yet
                 # (main difficulty comes from queue_callback not working well when BWD has graph break).
-                return torch.compile(gm, backend=backend, fullgraph=True)
+                return torch.compile(gm, backend=compiled_autograd_backend, fullgraph=True)
 
             return _fn
 
-        def run(model, optim, compiled_autograd_backend=None):
+        def run_all_iters(model, optim, compiled_autograd_backend=None):
             torch.manual_seed(42)
             losses = []
             for i in range(n_iter):
@@ -153,7 +153,7 @@ class TestFullyShardCompile(FSDPTest):
                 inp = input_creation_fn()
                 if compiled_autograd_backend is not None:
                     maybe_compiled_autograd_ctx = compiled_autograd.enable(
-                        compiler_fn(backend=compiled_autograd_backend)
+                        compiler_fn(compiled_autograd_backend)
                     )
                 else:
                     maybe_compiled_autograd_ctx = contextlib.nullcontext()
@@ -170,12 +170,12 @@ class TestFullyShardCompile(FSDPTest):
             return losses
 
         def test_compiled():
-            model, optim = input_creation_fn()
+            model, optim = model_init_fn()
             # FSDP2 does lazy init using 1st run, so run it once to init using eager mode
-            run(model, optim, 1)
+            run_all_iters(model, optim, 1)
 
             model_compiled = torch.compile(model, backend=backend, fullgraph=True)
-            res = run(model_compiled, optim, n_iter, compiled_autograd_backend=backend)
+            res = run_all_iters(model_compiled, optim, compiled_autograd_backend=backend)
             cleanup_fsdp(model)
             del model_compiled
             del model
@@ -186,9 +186,9 @@ class TestFullyShardCompile(FSDPTest):
         def test_eager():
             model, optim = model_init_fn()
             # FSDP2 does lazy init using 1st run, so run it once to init using eager mode
-            run(model, optim, 1)
+            run_all_iters(model, optim, 1)
 
-            res = run(model, optim, n_iter)
+            res = run_all_iters(model, optim)
             cleanup_fsdp(model)
             del model
             optim.zero_grad(set_to_none=True)
@@ -234,7 +234,6 @@ class TestFullyShardCompile(FSDPTest):
             *self._create_simple_mlp_factory_fns(), "eager", fullgraph=True
         )
 
-    @unittest.expectedFailure
     def test_simple_mlp_fullgraph_backend_aot_eager(self):
         self._test_traceable_fsdp(
             *self._create_simple_mlp_factory_fns(), "aot_eager", fullgraph=True
@@ -287,7 +286,6 @@ class TestFullyShardCompile(FSDPTest):
             *self._create_transformer_factory_fns(), "eager", fullgraph=True
         )
 
-    @unittest.expectedFailure
     def test_transformer_fullgraph_backend_aot_eager(self):
         self._test_traceable_fsdp(
             *self._create_transformer_factory_fns(), "aot_eager", fullgraph=True
