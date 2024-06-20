@@ -1,4 +1,3 @@
-# Owner(s): ["module: fsdp"]
 import functools
 import os
 import unittest.mock

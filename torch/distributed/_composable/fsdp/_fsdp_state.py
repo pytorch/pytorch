@@ -86,6 +86,7 @@ class FSDPState(_State):
         self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
         self._lazy_init()
+        logger.debug("FSDP::root_pre_forward")
         if self._state_ctx.iter_forward_root is not None:
             return args, kwargs
         self._state_ctx.iter_forward_root = self
@@ -105,7 +106,6 @@ class FSDPState(_State):
                         args, kwargs, self._device, False
                     )  # same as DDP
                 args, kwargs = args_tuple[0], kwargs_tuple[0]
-        logger.debug("FSDP::root_pre_forward")
         return args, kwargs
 
     def _lazy_init(self) -> None:
