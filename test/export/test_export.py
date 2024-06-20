@@ -686,7 +686,7 @@ class TestExport(TestCase):
                 return x.sin()
 
             def forward(self, x):
-                return cond(x.shape[0] <= 2, self.subm.forward, self.bar, [x])
+                return cond(x.sum() <= 2, self.subm.forward, self.bar, [x])
 
         example_inputs = (torch.randn(1, 3, 3, 3),)
         m = CondBranchClassMethod()
@@ -3075,7 +3075,7 @@ def forward(self, x):
         ):
             torch.export.export(exported_v2.module(), (torch.randn(2, 2),))
 
-    def test_export_cond(self):
+    def test_export_cond_symbool_pred(self):
         class A(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -3098,10 +3098,20 @@ def forward(self, x):
 
                 return cond(x.shape[0] > 4, true_fn, false_fn, [x])
 
+        dim0 = torch.export.Dim("dim0", min=3)
         inp = torch.ones(6, 4)
-        ep = export(
-            Foo(),
-            (inp,),
+        ep = export(Foo(), (inp,), dynamic_shapes={"x": {0: dim0}})
+        self.assertExpectedInline(
+            ep.graph_module.code.strip(),
+            """\
+def forward(self, b_a_buffer, x):
+    sym_size_int = torch.ops.aten.sym_size.int(x, 0)
+    gt = sym_size_int > 4;  sym_size_int = None
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [x, b_a_buffer]);  gt = true_graph_0 = false_graph_0 = x = b_a_buffer = None
+    getitem = conditional[0];  conditional = None
+    return (getitem,)""",
         )
         self.assertTrue(
             torch.allclose(ep.module()(torch.ones(6, 4)), Foo()(torch.ones(6, 4)))

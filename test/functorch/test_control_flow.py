@@ -1263,14 +1263,18 @@ def forward(self, x_1):
             return view_x
 
         def f(x):
-            pred = x.shape[0] == 4
+            pred = x.sum() > 0
             return cond(pred, true_fn, false_fn, [x])
 
         example_input = torch.ones(5, 5)
         try:
             example_input_func = to_fun_old(example_input)
             torch._enable_functionalization(reapply_views=False)
-            f(example_input_func)
+            with self.assertRaisesRegex(
+                UnsupportedAliasMutationException,
+                "One of torch.cond branch might be aliasing",
+            ):
+                f(example_input_func)
         finally:
             torch._disable_functionalization()
 
