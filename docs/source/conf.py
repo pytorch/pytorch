@@ -2713,6 +2713,7 @@ coverage_ignore_classes = [
     "GuardOnDataDependentSymNode",
     "PendingUnbackedSymbolNotFound",
     "LoggingShapeGuardPrinter",
+    "SymExprPrinter",
     "RelaxedUnspecConstraint",
     "RuntimeAssert",
     "ShapeGuardPrinter",
