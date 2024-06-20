@@ -31,10 +31,6 @@ requires_distributed = functools.partial(
 )
 
 
-def not_none(obj):
-    return obj is not None
-
-
 def checkpoint_wrapper(fn):
     def inner(*args):
         return torch.utils.checkpoint.checkpoint(fn, *args, use_reentrant=True)
@@ -53,17 +49,14 @@ def count_ops(
                 return node.args[1] == op
         return False
 
-    assert ((not_none(freq) or not_none(freq_ge)) and not_none(op)) or (
-        (not_none(freqs) or not_none(freqs_ge)) and not_none(ops)
-    )
-    if not_none(op):
+    if op is not None:
         assert not isinstance(op, list)
         ops = [op]
-    if not_none(freq):
+    if freq is not None:
         freqs = [freq]
-    if not_none(freq_ge):
+    if freq_ge is not None:
         freqs_ge = [freq_ge]
-    if not_none(freqs):
+    if freqs is not None:
         for op, freq in zip(ops, freqs):
             actual_count = 0
             for node in gm.graph.nodes:
@@ -72,7 +65,7 @@ def count_ops(
             err_msg = f"In graph {gm}, expected {op} to have occurred {freq} times in the graph, but got {actual_count}."
             assert actual_count == freq, err_msg
     else:
-        assert not_none(freqs_ge)
+        assert freqs_ge is not None:
         for op, freq_ge in zip(ops, freqs_ge):
             actual_count = 0
             for node in gm.graph.nodes:
