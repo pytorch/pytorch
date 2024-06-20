@@ -329,20 +329,15 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and hasattr(
                 self.value, "__exit__"
             )  # TODO(voz): These can invoke user code!
-            # and check_constant_args(args, kwargs)
-            # and self.value.__init__ == object.__init__
-            and len(kwargs) == 0  # TODO(ybliang): support kwargs
+            and self.value.__new__ == object.__new__
         ):
-            # unwrapped_args = [x.as_python_constant() for x in args]
             cm_obj = tx.output.side_effects.track_object_new(
                 self.source, self.value, UserDefinedObjectVariable, {}
             )
             cm_obj.call_method(tx, "__init__", args, kwargs)
 
             return GenericContextWrappingVariable(
-                # unwrapped_args,
                 args,
-                # cm_obj=self.value(*unwrapped_args),
                 cm_obj=cm_obj,
             )
 
