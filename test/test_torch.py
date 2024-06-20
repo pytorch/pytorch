@@ -5889,54 +5889,77 @@ else:
         [optim for optim in optim_db if optim.optim_cls in [torch.optim.AdamW, torch.optim.Adam, torch.optim.SGD]],
         dtypes=[torch.float32]
     )
-    def test_grad_scaling_autocast(self, device, dtype, optim_info, foreach, fused):
-        try_pickle = False
+    # def test_grad_scaling_autocast(self, device, dtype, optim_info, foreach, fused):
+#     try_pickle = False
+#
+#     def run(device, data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
+#         for i, (input, target) in enumerate(data):
+#             optimizer.zero_grad()
+#             with torch.autocast(device_type=device, dtype=torch.half, enabled=try_scaling_api):
+#                 output = model(input)
+#                 loss = loss_fn(output, target)
+#             if try_scaling_api:
+#                 scaler.scale(loss).backward()
+#                 if i == skip_iter and scaler.is_enabled():
+#                     with torch.no_grad():
+#                         model[1].weight.grad.fill_(float('inf'))
+#                 scaler.step(optimizer)
+#                 scaler.update()
+#                 if try_pickle:
+#                     scaler = pickle.loads(pickle.dumps(scaler))
+#             else:
+#                 loss.backward()
+#                 if (not scaler.is_enabled()) or (i != skip_iter):
+#                     optimizer.step()
+#         return scaler
+#
+#     optimizer_ctor = optim_info.optim_cls
+#
+#     # Compares no scaling + no autocasting against scaling + autocasting.
+#     # NOTE(mkozuki): With current way of testing, `torch.optim.Adam` is failing in spite of `foreach` and `fused`.
+#     #   Giving some flexibility to this test might help.
+#     context = contextlib.nullcontext
+#     if optimizer_ctor in (torch.optim.Adam, torch.optim.AdamW):
+#         from functools import partial
+#         context = partial(self.assertRaises, AssertionError)
+#     with context():
+#         # sets atol=1e-3 because we're comparing pure fp32 arithmetic vs a mixture of fp16 and fp32
+#         self._run_scaling_case(
+#             device, run, unskipped=3, skipped=1, atol=1e-3,
+#             optimizer_ctor=optimizer_ctor, optimizer_kwargs={"foreach": foreach, "fused": fused},
+#         )
+#         # this will be picked up by try_pickle within run():
+#         try_pickle = True
+#         self._run_scaling_case(
+#             device, run, unskipped=3, skipped=1, atol=1e-3,
+#             optimizer_ctor=optimizer_ctor, optimizer_kwargs={"foreach": foreach, "fused": fused},
+#         )
+#
+# # Make sure that the parameters become nonsense when scaled gradients are finite
+# # but they get invalidated before `optimizer.step`, after `GradScaler.unscale_`
 
-        def run(device, data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
-            for i, (input, target) in enumerate(data):
-                optimizer.zero_grad()
-                with torch.autocast(device_type=device, dtype=torch.half, enabled=try_scaling_api):
-                    output = model(input)
-                    loss = loss_fn(output, target)
-                if try_scaling_api:
-                    scaler.scale(loss).backward()
-                    if i == skip_iter and scaler.is_enabled():
-                        with torch.no_grad():
-                            model[1].weight.grad.fill_(float('inf'))
-                    scaler.step(optimizer)
-                    scaler.update()
-                    if try_pickle:
-                        scaler = pickle.loads(pickle.dumps(scaler))
-                else:
-                    loss.backward()
-                    if (not scaler.is_enabled()) or (i != skip_iter):
-                        optimizer.step()
-            return scaler
-
-        optimizer_ctor = optim_info.optim_cls
-
-        # Compares no scaling + no autocasting against scaling + autocasting.
-        # NOTE(mkozuki): With current way of testing, `torch.optim.Adam` is failing in spite of `foreach` and `fused`.
-        #   Giving some flexibility to this test might help.
-        context = contextlib.nullcontext
-        if optimizer_ctor in (torch.optim.Adam, torch.optim.AdamW):
-            from functools import partial
-            context = partial(self.assertRaises, AssertionError)
-        with context():
-            # sets atol=1e-3 because we're comparing pure fp32 arithmetic vs a mixture of fp16 and fp32
-            self._run_scaling_case(
-                device, run, unskipped=3, skipped=1, atol=1e-3,
-                optimizer_ctor=optimizer_ctor, optimizer_kwargs={"foreach": foreach, "fused": fused},
-            )
-            # this will be picked up by try_pickle within run():
-            try_pickle = True
-            self._run_scaling_case(
-                device, run, unskipped=3, skipped=1, atol=1e-3,
-                optimizer_ctor=optimizer_ctor, optimizer_kwargs={"foreach": foreach, "fused": fused},
-            )
-
-    # Make sure that the parameters become nonsense when scaled gradients are finite
-    # but they get invalidated before `optimizer.step`, after `GradScaler.unscale_`
+    @onlyNativeDeviceTypes
+    @parametrize("dtype, optim_info, foreach, fused, test_is_scaling",
+                 [(torch.float, optim_info, None, None, False),
+                  (torch.float, optim_info, True, None, False),
+                  (torch.float, optim_info, None, True, False),
+                  (torch.float, optim_info, None, None, True),
+                  (torch.float, optim_info, True, None, True),
+                  (torch.float, optim_info, None, True, True)])
+    @optims(
+        torch.optim.SGD,
+        torch.optim.Adam,
+        torch.optim.AdamW,
+        torch.optim.RMSprop,
+        torch.optim.Rprop,
+        torch.optim.ASGD,
+        torch.optim.Adamax,
+    )
+    def test_grad_scaling_autocast(self, device, dtype, optim_info, foreach, fused, test_is_scaling):
+        if test_is_scaling:
+            self._grad_scaling_autocast_test(device, dtype, optim_info, foreach, fused, test_is_scaling=True)
+        else:
+            self._grad_scaling_autocast_test(device, dtype, optim_info, foreach, fused)
 
     @onlyNativeDeviceTypes
     @optims(
