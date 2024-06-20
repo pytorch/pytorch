@@ -2127,7 +2127,7 @@ def forward(self, primals_1, primals_2):
         ):
             out = f_compiled(*inp_grad)
 
-    def test_backward_mutation_forward_inputs(self):
+    def test_backward_mutation_forward_inputsX(self):
         @torch.library.custom_op("_test::_clone", mutates_args={})
         def f(x: torch.Tensor, x1: torch.Tensor) -> torch.Tensor:
             return x.clone()
@@ -2149,8 +2149,7 @@ def forward(self, primals_1, primals_2):
         f.register_autograd(backward, setup_context=setup_context)
 
         def fn(x: torch.Tensor, x1: torch.Tensor, x2: torch.Tensor) -> torch.Tensor:
-            with torch.no_grad():
-                x2.mul_(5)
+            x2.mul_(5)
             return torch.ops._test._clone(x, x1) + x2
 
         inp_x, inp_x1, inp_x2 = (
@@ -2162,7 +2161,7 @@ def forward(self, primals_1, primals_2):
         ref_x, ref_x1, ref_x2 = inp_x.clone(), inp_x1.clone(), inp_x2.clone()
         ref_y = fn(ref_x, ref_x1, ref_x2)
 
-        compiled_f = aot_function(fn, nop)
+        compiled_f = aot_function(fn, nop, keep_inference_input_mutations=True)
 
         x, x1, x2 = inp_x.clone(), inp_x1.clone(), inp_x2.clone()
         y = compiled_f(x, x1, x2)
