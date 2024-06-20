@@ -128,8 +128,6 @@ compare_op_handlers["not in"] = lambda tx, args, _: handle_not(
     tx, [handle_contains(tx, [*reversed(args)], {})], {}
 )
 
-torch_log = logging.getLogger("torch")
-
 
 @dataclasses.dataclass
 class SpeculationEntry:
@@ -430,10 +428,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 # if __bool__ is missing, trying __len__ to infer a truth value.
                 x = value.var_getattr(self, "__len__")
             else:
-                if isinstance(x, GetAttrVariable) or (
-                    isinstance(x, UserDefinedClassVariable)
-                    and x.value is torch._dynamo.variables.user_defined.NO_SUCH_SUBOBJ
-                ):
+                if isinstance(x, GetAttrVariable):
                     # if __bool__ is missing, trying __len__ to infer a truth value.
                     x = value.var_getattr(self, "__len__")
 
