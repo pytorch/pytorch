@@ -460,7 +460,6 @@ class TestSelectAlgorithm(TestCase):
         )
         atol, rtol = 5e-2, 5e-2
 
-
         atol, rtol = 1e-1, 1e-1
 
         with patch.object(
