@@ -525,14 +525,14 @@ class GraphModule(torch.nn.Module):
         autograd_function_apply: "f32[]" = torch._functorch.autograd_function.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, l_z_, l_weird_b, l_weird_c, args_tensor_mask = [True, False, True]);  fwd_body_0 = bwd_body_0 = l_x_ = l_z_ = l_weird_b = l_weird_c = None
         return (autograd_function_apply,)
 
-    class GraphModule(torch.nn.Module):
+    class fwd_body_0(torch.nn.Module):
         def forward(self, function_ctx, l_x_: "f32[]", l_z_: "f32[]", l_weird_b: "f32[]", l_weird_c: "f32[]"):
             mul: "f32[]" = l_weird_b * l_weird_c
             clone: "f32[]" = l_x_.clone();  l_x_ = None
             mul_1: "f32[]" = mul * clone;  mul = clone = None
             return (mul_1, [l_weird_b, l_weird_c])
 
-    class GraphModule(torch.nn.Module):
+    class bwd_body_0(torch.nn.Module):
         def forward(self, function_ctx, mul_1: "f32[]", l_weird_b: "f32[]", l_weird_c: "f32[]"):
             _set_grad_enabled = torch._C._set_grad_enabled(False)
 
