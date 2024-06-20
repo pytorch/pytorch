@@ -858,8 +858,8 @@ Either create the tensor outside the compiled region, or do not set the tensor t
                             )
                     elif isinstance(kwargs["out"], ListVariable):
                         for idx, x in enumerate(kwargs["out"].items):
-                            assert "example_value" in x.proxy.node.meta
-                            fake_out = x.proxy.node.meta["example_value"]
+                            assert "example_value" in x.proxy.node.meta  # type: ignore[attr-defined]
+                            fake_out = x.proxy.node.meta["example_value"]  # type: ignore[attr-defined]
                             if not torch._prims_common.is_contiguous(fake_out):
                                 # It's difficult to handle strides correctly in functionalization
                                 # when calling an out= op with a non-contiguous out argument
