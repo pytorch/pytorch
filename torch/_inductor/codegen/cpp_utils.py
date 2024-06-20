@@ -310,7 +310,7 @@ def rewrite_index_for_function(
 ):
     # Local buffer at the inner dimensions
     snode = V.graph.scheduler.name_to_node.get(global_buf_name)
-    local_buf = localize_buffer_handler.global_to_local[global_buf_name] # localize_buffer_handler.local_buf
+    local_buf = localize_buffer_handler.global_to_local[global_buf_name]
     assert snode is not None
     scheduler_nodes = snode.get_nodes()
     _, (group, reduction_group) = max(
@@ -338,7 +338,7 @@ def rewrite_index_for_nodes(
 ):
     used_vars = {s for s in index.free_symbols if symbol_is_type(s, SymT.INDEX)}
     index_vars = []
-    local_buf = localize_buffer_handler.global_to_local[global_buf_name]    # localize_buffer_handler.local_buf
+    local_buf = localize_buffer_handler.global_to_local[global_buf_name]
     for i in range(len(local_buf.get_size())):
         var = sympy_index_symbol_with_prefix(SymT.INDEX, i)
         index_vars.append(var if var in used_vars else 0)
@@ -351,17 +351,17 @@ class LocalizeBufferHandler(V.WrapperHandler):  # type: ignore[name-defined]
         self,
         inner,
         global_to_local,
-        rewrite_index: Callable[["LocalizeBufferHandler", sympy.Expr], sympy.Expr],
+        rewrite_index: Callable[["LocalizeBufferHandler", sympy.Expr, str], sympy.Expr],
     ):
         super().__init__(inner)
         self.global_to_local = global_to_local
         self.rewrite_index = rewrite_index
 
     def localize(self, name: str, index: sympy.Expr):
-        if name in self.global_to_local:
+        if self.global_to_local and name in self.global_to_local:
             assert self.rewrite_index is not None
             global_buf_name = name
-            name = self.global_to_local[name].get_name()
+            name = self.global_to_local[global_buf_name].get_name()
             index = self.rewrite_index(
                 self,
                 index,
@@ -404,11 +404,11 @@ class LocalBufferContext:
         self.exit_stack = contextlib.ExitStack()
         # Map Local Buffer name to Local Buffer
         self.local_buffers: Dict[str, ir.Buffer] = {}
-        # Map Local Buffer name to Global Buffer
-        # 1 local buffer can be shared with multi global buffers
+        # Map Local Buffer name to Global Buffer and 1 local buffer
+        # can be shared with multi global buffers
         self.local_to_global: Dict[str, List[ir.Buffer]] = {}
-        # Map Global Buffer name to Local Buffer
-        # 1 global buffer must corresponding to 1 local buffer
+        # Map Global Buffer name to Local Buffer and 1 global buffer
+        # must be corresponding to 1 local buffer
         self.global_to_local: Dict[str, ir.Buffer] = {}
 
     def __enter__(self):
@@ -452,13 +452,12 @@ class LocalBufferContext:
     def add_local_buffer(
         self, local_buffer: ir.Buffer, global_buffer: Optional[ir.Buffer] = None
     ):
-        assert local_buffer.get_name() not in self.local_buffers
-        self.local_buffers[local_buffer.get_name()] = local_buffer
+        if local_buffer.get_name() not in self.local_buffers:
+            self.local_buffers[local_buffer.get_name()] = local_buffer
         if global_buffer:
             if local_buffer.get_name() not in self.local_to_global:
                 self.local_to_global[local_buffer.get_name()] = []
             self.local_to_global[local_buffer.get_name()].append(global_buffer)
-            # if global_buffer.get_name() not in self.global_to_local:
             assert global_buffer.get_name() not in self.global_to_local
             self.global_to_local[global_buffer.get_name()] = local_buffer
 
@@ -481,14 +480,9 @@ class LocalBufferContext:
         self,
         fn: Callable[..., Any],
         rewrite_index: Callable[
-            ["LocalizeBufferHandler", sympy.Expr], sympy.Expr
+            ["LocalizeBufferHandler", sympy.Expr, str], sympy.Expr
         ] = rewrite_index_for_function,
     ):
-        # local_buffers = list(self.local_buffers.values())
-        # global_buffers = list(self.local_to_global.values())
-        # local_buf = local_buffers[0]
-        # global_buf = global_buffers[0]
-
         def inner(node, *index_vars):
             with V.set_ops_handler(
                 LocalizeBufferHandler(
@@ -505,7 +499,7 @@ class LocalBufferContext:
         self,
         nodes: List[ir.IRNode],
         rewrite_index: Callable[
-            ["LocalizeBufferHandler", sympy.Expr], sympy.Expr
+            ["LocalizeBufferHandler", sympy.Expr, str], sympy.Expr
         ] = rewrite_index_for_nodes,
     ) -> List[ir.IRNode]:
         """

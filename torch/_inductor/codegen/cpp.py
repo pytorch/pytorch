@@ -3890,14 +3890,12 @@ class CppScheduling(BaseScheduling):
                         local_buffers.append(
                             LocalBuffer(
                                 local_buf=ir.Buffer(
-                                    f"{local_buf_prefix}_{len(local_buffers)}", local_buffer_layout
+                                    f"{local_buf_prefix}_{len(local_buffers)}",
+                                    local_buffer_layout,
                                 ),
                                 global_buf=global_buffer,
                             )
                         )
-            #             # At most 1 node with local buf for each OuterLoopFusedSchedulerNode
-            #             break
-            # assert len(local_buffers) in [0, 1]
 
             with LocalBufferContext(kernel_group.args) as scope:
                 if len(local_buffers) > 0:
