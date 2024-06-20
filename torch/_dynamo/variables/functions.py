@@ -667,7 +667,7 @@ class SkipFunctionVariable(VariableTracker):
                         f"so the PyTorch team can add support for it and see the next case for a workaround. "
                         f"If it is a third-party C/C++ Python extension, please "
                         f"either wrap it into a PyTorch-understood custom operator "
-                        f"(see https://pytorch.org/docs/main/notes/custom_operators.html "
+                        f"(see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html "
                         f"for more details) or, if it is traceable, use "
                         f"torch.compiler.allow_in_graph."
                     )
