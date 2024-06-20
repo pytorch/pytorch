@@ -1036,7 +1036,7 @@ def register_onednn_fusion_ops():
                                 algorithm=unary_algorithmm,
                             )
 
-                        # Step 5: Doing the requant for uint8 or cast to bf16 for output
+                        # Step 5: Cast output to Target Dtype
                         if output_dtype == torch.bfloat16:
                             output_cast_loader = output_buf.make_loader()
 

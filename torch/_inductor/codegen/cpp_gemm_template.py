@@ -456,9 +456,9 @@ class CppPackedGemmTemplate(CppTemplate):
             inp = None
             if self.has_bias:
                 if len(self.input_nodes) > 8:
-                    # which means binary fusion with bias
+                    # Case of int8 gemm with binary fusion and with bias
                     is_int8_binary_with_bias = True
-                # Note that X2 is at ahead of inp in param list
+                # Note that X2 is at front of inp in param list
                 inp = self.input_nodes[7 if is_int8_binary_with_bias else 6]
             Y = self.output_node
         else:
