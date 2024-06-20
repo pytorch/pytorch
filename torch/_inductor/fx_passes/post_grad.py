@@ -217,185 +217,51 @@ def is_valid_mm_plus_mm(match: Match):
     return True
 
 
-def scatter_upon_allzero_for_sum_extra_check(m):
-    if len(m.kwargs["shape"]) != 2:
-        return False
-    if m.kwargs["val"] != 0:
-        return False
-    if m.kwargs["dim"] != 1:
-        return False
-    if m.kwargs["rdims"] != [1]:
-        return False
-    if not m.kwargs["keepdim"]:
-        return False
-    return True
+def scatter_upon_allzero_extra_check(m):
+    allzero_shape = m.kwargs["shape"]
+    selector = m.kwargs["selector"]
+    val = m.kwargs["val"]
 
+    # Only match scatter against 2D tensors for now.
+    if len(allzero_shape) != 2:
+        return False
+    if not isinstance(val, float):
+        return False
 
-def scatter_upon_allzero_for_sub_extra_check(m):
-    if len(m.kwargs["shape"]) != 2:
-        return False
-    if m.kwargs["val"] != 0:
-        return False
-    if m.kwargs["dim"] != 1:
+    selector_ft = selector.meta["val"]
+    if selector_ft.dim() == 2 and selector_ft.size(1) != 1:
         return False
     return True
 
 
-@register_graph_pattern(
-    CallFunction(
-        aten.sum,
-        CallFunction(
-            prims.convert_element_type,
-            CallFunction(
-                aten.mul,
-                CallFunction(
-                    aten.scatter,
-                    CallFunction(aten.full, KeywordArg("shape"), KeywordArg("val")),
-                    KeywordArg("dim"),
-                    KeywordArg("selector"),
-                    KeywordArg("val2"),
-                ),
-                KeywordArg("mul_rhs"),
-            ),
-            torch.float32,
-            _users=2,
-        ),
-        KeywordArg("rdims"),
-        KeywordArg("keepdim"),
-    ),
-    extra_check=scatter_upon_allzero_for_sum_extra_check,
-    pass_dict=pass_patterns[0],
-)
-def scatter_upon_allzero_for_sum(
-    match: Match, shape, val, dim, selector, val2, mul_rhs, rdims, keepdim
-):
-    sum_node = match.output_node()
-    graph = match.graph
-    with graph.inserting_after(sum_node):
-        nd = graph.call_function(aten.mul, args=(mul_rhs, val2))
-        nd = graph.call_function(prims.convert_element_type, args=(nd, torch.float32))
-    sum_node.replace_all_uses_with(nd)
-    graph.erase_node(sum_node)
-
-# for llm.c
-@register_graph_pattern(
-    CallFunction(
-        aten.sum,
-        CallFunction(
-            aten.mul,
-            CallFunction(
-                aten.scatter,
-                CallFunction(aten.full, KeywordArg("shape"), KeywordArg("val")),
-                KeywordArg("dim"),
-                KeywordArg("selector"),
-                KeywordArg("val2"),
-            ),
-            KeywordArg("mul_rhs"),
-            _users=2,
-        ),
-        KeywordArg("rdims"),
-        KeywordArg("keepdim"),
-    ),
-    extra_check=scatter_upon_allzero_for_sum_extra_check,
-    pass_dict=pass_patterns[0],
-)
-def scatter_upon_allzero_for_sum_llmc(
-    match: Match, shape, val, dim, selector, val2, mul_rhs, rdims, keepdim
-):
-    sum_node = match.output_node()
-    graph = match.graph
-    with graph.inserting_after(sum_node):
-        nd = graph.call_function(aten.mul, args=(mul_rhs, val2))
-    sum_node.replace_all_uses_with(nd)
-    graph.erase_node(sum_node)
-
-
-
 @register_lowering_pattern(
     CallFunction(
-        aten.sub,
-        CallFunction(
-            prims.convert_element_type,
-            CallFunction(
-                aten.mul,
-                CallFunction(
-                    aten.scatter,
-                    CallFunction(aten.full, KeywordArg("shape"), KeywordArg("val")),
-                    KeywordArg("dim"),
-                    KeywordArg("selector"),
-                    KeywordArg("val2"),
-                ),
-                KeywordArg("mul_rhs"),
-            ),
-            torch.float32,
-        ),
-        KeywordArg("sub_rhs"),
+        aten.scatter,
+        CallFunction(aten.full, KeywordArg("shape"), 0.0, dtype=KeywordArg("dtype")),
+        1,  # dim
+        KeywordArg("selector"),
+        KeywordArg("val"),  # scalar value
     ),
-    extra_check=scatter_upon_allzero_for_sub_extra_check,
+    extra_check=scatter_upon_allzero_extra_check,
 )
-def scatter_upon_allzero_for_sub(
-    match: Match, shape, val, dim, selector, val2, mul_rhs, sub_rhs
-):
+def scatter_upon_allzero(match: Match, shape, dtype, selector, val):
+    from torch._inductor import lowering
+
+    if len(selector.get_size()) == 2:
+        # normalize to 1D tensor
+        selector = lowering.squeeze(selector, dim=1)
+
     selector_loader = selector.make_loader()
-    rhs_loader = sub_rhs.make_loader()
-    mul_rhs_loader = mul_rhs.make_loader()
 
     def inner_fn(idx):
-        selector = selector_loader((idx[0], 0))
-        lhs = ops.where(selector == ops.index_expr(idx[1], torch.int64), val2, 0)
-        mul_rhs = mul_rhs_loader((idx[0], 0))  # TODO don't hardcode index value 0
-        lhs = ops.mul(lhs, mul_rhs)
-        lhs = ops.to_dtype(lhs, torch.float32)
-        rhs = rhs_loader(idx)
-        return ops.sub(lhs, rhs)
+        selector = selector_loader((idx[0],))
+        return ops.where(selector == ops.index_expr(idx[1], torch.int64), val, 0)
 
     return ir.Pointwise.create(
-        device=sub_rhs.get_device(),
-        dtype=sub_rhs.get_dtype(),
+        device=selector.get_device(),
+        dtype=dtype,
         inner_fn=inner_fn,
-        ranges=sub_rhs.get_size(),
-    )
-
-# for llmc
-@register_lowering_pattern(
-    CallFunction(
-        aten.sub,
-        CallFunction(
-            aten.mul,
-            CallFunction(
-                aten.scatter,
-                CallFunction(aten.full, KeywordArg("shape"), KeywordArg("val")),
-                KeywordArg("dim"),
-                KeywordArg("selector"),
-                KeywordArg("val2"),
-            ),
-            KeywordArg("mul_rhs"),
-        ),
-        KeywordArg("sub_rhs"),
-    ),
-    extra_check=scatter_upon_allzero_for_sub_extra_check,
-)
-def scatter_upon_allzero_for_sub_llmc(
-    match: Match, shape, val, dim, selector, val2, mul_rhs, sub_rhs
-):
-    selector_loader = selector.make_loader()
-    rhs_loader = sub_rhs.make_loader()
-    mul_rhs_loader = mul_rhs.make_loader()
-
-    def inner_fn(idx):
-        selector = selector_loader((idx[0], 0))
-        lhs = ops.where(selector == ops.index_expr(idx[1], torch.int64), val2, 0)
-        mul_rhs = mul_rhs_loader((idx[0], 0))  # TODO don't hardcode index value 0
-        lhs = ops.mul(lhs, mul_rhs)
-        lhs = ops.to_dtype(lhs, torch.float32)
-        rhs = rhs_loader(idx)
-        return ops.sub(lhs, rhs)
-
-    return ir.Pointwise.create(
-        device=sub_rhs.get_device(),
-        dtype=sub_rhs.get_dtype(),
-        inner_fn=inner_fn,
-        ranges=sub_rhs.get_size(),
+        ranges=shape,
     )
 
 
@@ -412,8 +278,13 @@ def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
 
 
 def cuda_and_enabled_mixed_mm(match):
-    return (config.use_mixed_mm or config.mixed_mm_choice != "default") and getattr(
-        match.kwargs["mat1"].meta.get("val"), "is_cuda", False
+    return (
+        (config.use_mixed_mm or config.mixed_mm_choice != "default")
+        and getattr(match.kwargs["mat1"].meta.get("val"), "is_cuda", False)
+        and (
+            match.kwargs["mat2_dtype"].itemsize
+            > match.kwargs["mat2"].meta.get("val").dtype.itemsize
+        )
     )
 
 
