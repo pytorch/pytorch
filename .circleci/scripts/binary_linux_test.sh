@@ -100,10 +100,10 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
   if [[ "\$BUILD_ENVIRONMENT" != *s390x* ]]; then
     if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
-      pkg="/final_pkgs/$(ls -1 /final_pkgs/torch_no_python* | sort | tail -1)"
+      pkg="/final_pkgs/\$(ls -1 /final_pkgs/torch_no_python* | sort |tail -1)"
       pip install "\$pkg" --index-url "https://download.pytorch.org/whl/\${CHANNEL}/${DESIRED_CUDA}"
       retry pip install -q numpy protobuf typing-extensions
-      pkg="/final_pkgs/$(ls -1 /final_pkgs/torch-* | sort | tail -1)"
+      pkg="/final_pkgs/\$(ls -1 /final_pkgs/torch-* | sort |tail -1)"
       pip install "\$pkg" --index-url "https://download.pytorch.org/whl/\${CHANNEL}/${DESIRED_CUDA}"
       retry pip install -q numpy protobuf typing-extensions
     else
