@@ -935,11 +935,11 @@ def solve_min_cut(
 
         if must_recompute(node):
             # If user explicitly says they want to recompute a node, we honor it
-            # by adding an 0-capacity edge from the source and an inf edge to the sink.
+            # by adding an inf-capacity edge from X_in to the sink.
             # This way, X_in node is guaranteed to be part of the subgraph that contains "sink"
             # after the cut, thus guaranteeing that X op will be recomputed.
-            nx_graph.add_edge("source", node.name + "_in", capacity=0)
             nx_graph.add_edge(node.name + "_in", "sink", capacity=math.inf)
+            continue
 
         if _is_primal(node) or _is_fwd_seed_offset(node):
             ban_recomputation_if_allowed(node)
@@ -1099,7 +1099,7 @@ def solve_min_cut(
 
     cut_nodes = set()
     for node_in, node_out in cutset:
-        assert node_in[:-3] == node_out[:-4]
+        assert node_in[:-3] == node_out[:-4], f"node_in: {node_in}, node_out: {node_out}"
         node_name = node_in[:-3]
         cut_nodes.add(node_name)
 
