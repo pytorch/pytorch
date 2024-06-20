@@ -1,4 +1,4 @@
-name: Check whether the workflow owner can use ARC runners
+name: Check whether the workflow owner can use ARC runnerss
 
 on:
   workflow_call:
