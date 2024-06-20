@@ -653,31 +653,6 @@ def register_onednn_fusion_ops():
                 )
 
             choices: List[ChoiceCaller] = []
-            if len(choices) == 0 or use_aten_gemm_kernels():
-                choices.append(
-                    aten_mkldnn_qlinear_unary.bind(
-                        (x, x_scale, x_zp, packed_weight, w_scale, w_zp),
-                        layout,
-                        bias=None,
-                        output_scale=o_scale,
-                        output_zero_point=o_zero_point,
-                        output_dtype=output_dtype,
-                        post_op_name=attr,
-                        post_op_args=scalars,
-                        post_op_algorithm=algorithm,
-                    )
-                    if bias is None
-                    else aten_mkldnn_qlinear_unary.bind(
-                        (x, x_scale, x_zp, packed_weight, w_scale, w_zp, bias),
-                        layout,
-                        output_scale=o_scale,
-                        output_zero_point=o_zero_point,
-                        output_dtype=output_dtype,
-                        post_op_name=attr,
-                        post_op_args=scalars,
-                        post_op_algorithm=algorithm,
-                    )
-                )
             if use_max_autotune():
                 *_, layout, x, packed_weight = mm_args(
                     x, packed_weight, layout=layout, out_dtype=output_dtype
@@ -691,10 +666,8 @@ def register_onednn_fusion_ops():
                     and torch.equal(
                         torch.zeros_like(V.graph.constants[w_zp.get_name()]),
                         V.graph.constants[w_zp.get_name()],
-                    )  # We only composentate MatrixB and assume B_zp is 0 to avoid the composantation of MatrixA
-                    and use_cpp_packed_gemm_template(
-                        layout, x, packed_weight, output_dtype=output_dtype
-                    )
+                    )  # We only compensate MatrixB and assume B_zp is 0 to avoid the compensation of MatrixA
+                    and use_cpp_packed_gemm_template(layout, x, packed_weight)
                 ):
                     W_tensor = V.graph.constants[packed_weight.get_name()].to_dense()
                     weight_compens_tensor = torch.sum(W_tensor.to(torch.float), dim=0)
@@ -832,6 +805,31 @@ def register_onednn_fusion_ops():
                             has_bias=True,
                             epilogue_creator=epilogue_creator,
                         )
+            if len(choices) == 0 or use_aten_gemm_kernels():
+                choices.append(
+                    aten_mkldnn_qlinear_unary.bind(
+                        (x, x_scale, x_zp, packed_weight, w_scale, w_zp),
+                        layout,
+                        bias=None,
+                        output_scale=o_scale,
+                        output_zero_point=o_zero_point,
+                        output_dtype=output_dtype,
+                        post_op_name=attr,
+                        post_op_args=scalars,
+                        post_op_algorithm=algorithm,
+                    )
+                    if bias is None
+                    else aten_mkldnn_qlinear_unary.bind(
+                        (x, x_scale, x_zp, packed_weight, w_scale, w_zp, bias),
+                        layout,
+                        output_scale=o_scale,
+                        output_zero_point=o_zero_point,
+                        output_dtype=output_dtype,
+                        post_op_name=attr,
+                        post_op_args=scalars,
+                        post_op_algorithm=algorithm,
+                    )
+                )
             assert packed_weight.get_name() in V.graph.constants
             input_gen_fns = {
                 3: lambda x: V.graph.constants[x.get_name()],
@@ -927,39 +925,6 @@ def register_onednn_fusion_ops():
                     ), "dtype of accum for qlinear post op sum should be the same as output"
             x2_dtype = x2.get_dtype()
             choices: List[ChoiceCaller] = []
-            if len(choices) == 0 or use_aten_gemm_kernels():
-                choices.append(
-                    aten_mkldnn_qlinear_binary.bind(
-                        (x, x_scale, x_zp, packed_weight, w_scale, w_zp, x2),
-                        layout,
-                        bias=None,
-                        output_scale=o_scale,
-                        output_zero_point=o_zero_point,
-                        output_dtype=output_dtype,
-                        other_scale=x2_scale,
-                        other_zp=x2_zp,
-                        binary_post_op=binary_attr,
-                        binary_alpha=alpha,
-                        unary_post_op=unary_attr,
-                        unary_post_op_args=unary_scalars,
-                        unary_post_op_algorithm=unary_algorithmm,
-                    )
-                    if bias is None
-                    else aten_mkldnn_qlinear_binary.bind(
-                        (x, x_scale, x_zp, packed_weight, w_scale, w_zp, x2, bias),
-                        layout,
-                        output_scale=o_scale,
-                        output_zero_point=o_zero_point,
-                        output_dtype=output_dtype,
-                        other_scale=x2_scale,
-                        other_zp=x2_zp,
-                        binary_post_op=binary_attr,
-                        binary_alpha=alpha,
-                        unary_post_op=unary_attr,
-                        unary_post_op_args=unary_scalars,
-                        unary_post_op_algorithm=unary_algorithmm,
-                    )
-                )
             if use_max_autotune():
                 *_, layout, x, packed_weight, x2 = mm_args(
                     x, packed_weight, x2, layout=layout, out_dtype=output_dtype
@@ -1131,7 +1096,39 @@ def register_onednn_fusion_ops():
                             has_bias=True,
                             epilogue_creator=epilogue_creator,
                         )
-
+            if len(choices) == 0 or use_aten_gemm_kernels():
+                choices.append(
+                    aten_mkldnn_qlinear_binary.bind(
+                        (x, x_scale, x_zp, packed_weight, w_scale, w_zp, x2),
+                        layout,
+                        bias=None,
+                        output_scale=o_scale,
+                        output_zero_point=o_zero_point,
+                        output_dtype=output_dtype,
+                        other_scale=x2_scale,
+                        other_zp=x2_zp,
+                        binary_post_op=binary_attr,
+                        binary_alpha=alpha,
+                        unary_post_op=unary_attr,
+                        unary_post_op_args=unary_scalars,
+                        unary_post_op_algorithm=unary_algorithmm,
+                    )
+                    if bias is None
+                    else aten_mkldnn_qlinear_binary.bind(
+                        (x, x_scale, x_zp, packed_weight, w_scale, w_zp, x2, bias),
+                        layout,
+                        output_scale=o_scale,
+                        output_zero_point=o_zero_point,
+                        output_dtype=output_dtype,
+                        other_scale=x2_scale,
+                        other_zp=x2_zp,
+                        binary_post_op=binary_attr,
+                        binary_alpha=alpha,
+                        unary_post_op=unary_attr,
+                        unary_post_op_args=unary_scalars,
+                        unary_post_op_algorithm=unary_algorithmm,
+                    )
+                )
             assert packed_weight.get_name() in V.graph.constants
             input_gen_fns = {
                 3: lambda x: V.graph.constants[x.get_name()],
