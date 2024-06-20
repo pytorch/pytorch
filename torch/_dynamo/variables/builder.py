@@ -519,17 +519,7 @@ class VariableBuilder:
             result.source = self.source
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
-            if not value and self.get_source().is_nn_module():
-                # It is faster to guard on 'false' property than to guard
-                # on actual dict keys, but we can't do this fast guard in general because
-                # it omits a crucial type check that ensures the value is actually still a dict at runtime.
-
-                # Why is this OK for (specialized) nnmodules? We set up a setattr hook
-                # to check for module property mutations, which does a reasonable,
-                # but not completely secure job ensuring a property wasn't changed.
-                self.install_guards(GuardBuilder.BOOL_FALSE)
-            else:
-                self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
+            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
             # Optimisation for the common case strings, ints, etc
             all_const = all(ConstantVariable.is_literal(k) for k in value.keys())
@@ -1222,7 +1212,11 @@ class VariableBuilder:
             # ID_MATCH is required to disambiguate cases as simple as a unit test that constructs 2 models and wraps
             # them differently with different FSDP configs.  (test_dynamo_distributed.py -k test_fsdp_aot_eager)
             self.install_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.ID_MATCH)
-            return FSDPManagedNNModuleVariable(value, source=self.get_source())
+            result = FSDPManagedNNModuleVariable(value, source=self.get_source())
+            if not SideEffects.cls_supports_mutation_side_effects(type(value)):
+                # don't allow STORE_ATTR mutation with custom __setattr__
+                return result
+            return self.tx.output.side_effects.track_object_existing(value, result)
         else:
             return self.tx.output.register_attr_or_module(
                 value,
