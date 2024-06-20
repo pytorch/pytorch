@@ -2697,14 +2697,14 @@ def nn_module_proxy(mod):
 
 
 class GmWrapper(torch.nn.Module):
-    def __init__(self, gm, spec):
+    def __init__(self, gm, unflatten_fn):
         super().__init__()
         self.gm = gm
-        self.spec = spec
+        self.unflatten_fn = unflatten_fn
 
     def forward(self, *args):
         args: List[Any] = list(args)
-        return self.gm(*pytree.tree_unflatten(args, self.spec))
+        return self.gm(*self.unflatten_fn(args))
 
 
 def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
@@ -2713,10 +2713,7 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
     accepts those inputs.  This is needed for graphs that take
     bumpy inputs.
     """
-    inputs, spec = pytree.tree_flatten(inputs)
-    compiled_fn = compile_gm(GmWrapper(gm, spec), inputs)
-
-    idx_to_steal = [
+    inputs_idx_to_clear = [
         i
         for i, node in enumerate(gm.graph.nodes)
         if node.op == "placeholder" and node.meta.get("steal_arg", False)
@@ -2724,22 +2721,31 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
 
     if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
         # fast path, avoid pytree overhead
-        assert idx_to_steal == [0]
+        # compiled autograd inputs are always a list of tensors, maybe followed by symints
+        assert inputs_idx_to_clear == [0]
+        assert isinstance(inputs[0], list)
+        boxed_inputs_count = len(inputs[0])
 
-        def compiled_autograd_wrapper(*args):
-            assert args and isinstance(args[0], list)
-            flat_args = args[0] + list(args[1:])
-            args[0].clear()
-            return compiled_fn(flat_args)
+        def flatten_fn(args):
+            return args[0] + list(args[1:])
 
-        return compiled_autograd_wrapper
+        def unflatten_fn(flat_args):
+            return (flat_args[:boxed_inputs_count], *flat_args[boxed_inputs_count:])
+
+        compiled_fn = compile_gm(GmWrapper(gm, unflatten_fn), flatten_fn(inputs))
+    else:
+        # slow path, don't know inputs structure
+        flat_inputs, spec = pytree.tree_flatten(inputs)
+        unflatten_fn = functools.partial(pytree.tree_unflatten, spec=spec)
+        compiled_fn = compile_gm(GmWrapper(gm, unflatten_fn), flat_inputs)
+        # note this doesn't check the spec, assuming it is the same
+        flatten_fn = pytree.arg_tree_leaves
 
     def wrapper(*args):
-        # note this doesn't check the spec, assuming it is the same
-        flat_args = pytree.arg_tree_leaves(*args)
+        flat_args = flatten_fn(args)
 
         # flat_args is a new list, so we need to clear references from the old list
-        for i in idx_to_steal:
+        for i in inputs_idx_to_clear:
             args[i].clear()
 
         # this call is boxed to avoid increasing refcount until we reach aot_module_simplified forward
