@@ -1022,6 +1022,7 @@ class HalideKernel(SIMDKernel):
         line = f"{var}[{index_str},]"  # trailing comma workaround for https://github.com/halide/Halide/issues/8299
         dtype = V.graph.get_dtype(name)
         if dtype in (torch.float16, torch.bfloat16):
+            dtype = torch.float32
             line = f"hl.cast(hl.Float(32), {line})"
 
         if self._load_mask:
@@ -1034,8 +1035,9 @@ class HalideKernel(SIMDKernel):
             if result.used_dims:
                 self.body.writeline(f"{result.name}_mask = hl.RDom([hl.Range(0, 1)])")
                 self.body.writeline(f"{result.name}_mask.where({self._load_mask})")
+                other = self.kexpr(self._load_other or 0)  # type: ignore[arg-type]
                 self.body.writeline(
-                    f"{result} = hl.cast({halide_type(dtype)}, {halide_constant(self._load_other or 0)})"
+                    f"{result} = hl.cast({halide_type(dtype)}, {other})"
                 )
                 self.body.writeline(
                     f"{result} = {line} + hl.cast({halide_type(dtype)}, {result.name}_mask)"
@@ -1091,7 +1093,6 @@ class HalideKernel(SIMDKernel):
         """Codegen a reduction operation"""
         assert self.inside_reduction
         assert not self._load_mask
-        assert isinstance(value, HalideCSEVariable) and value.used_dims is not None
 
         cache_key = (src_dtype, reduction_type, value)
         if cache_key in self.cse.reduction_cache:
@@ -1308,6 +1309,7 @@ class HalideKernel(SIMDKernel):
         code.splice(
             """
             import halide as hl
+            from math import inf, nan
 
             @hl.generator(name="kernel")
             class Kernel:
