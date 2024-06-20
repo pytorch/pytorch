@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import collections
 import contextlib
 import dataclasses
@@ -1665,7 +1667,7 @@ class Scan(Loops):
         combine_fn: Callable[[Tuple[Any, ...], Tuple[Any, ...]], Tuple[Any, ...]],
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         **kwargs,
-    ) -> List[Optional["TensorBox"]]:
+    ) -> List[Optional[TensorBox]]:
         pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
         scan_ranges = [size[axis]]
 
@@ -2293,7 +2295,7 @@ class View(GenericView):
 class ReinterpretView(BaseView):
     """Pretend our storage has a different layout"""
 
-    layout: "Layout"
+    layout: Layout
 
     def __post_init__(self):
         super().__post_init__()
@@ -2898,7 +2900,7 @@ class FlexibleLayout(Layout):
 class NonOwningLayout(Layout):
     """Is a view into the storage of another tensor"""
 
-    def __init__(self, view: Union[BaseView, "TensorBox"]):
+    def __init__(self, view: Union[BaseView, TensorBox]):
         layout = view.get_layout()
         super().__init__(
             layout.device,
@@ -2960,7 +2962,7 @@ class MutationLayoutSHOULDREMOVE(Layout):
     def storage_size(self) -> sympy.Expr:
         return self.real_layout().storage_size()
 
-    def get_buffer(self) -> "Buffer":
+    def get_buffer(self) -> Buffer:
         def unwrap_views(target):
             if isinstance(target, MutationLayoutSHOULDREMOVE):
                 return unwrap_views(target.target)
@@ -3640,7 +3642,7 @@ class ChoiceCaller:
     def hash_key(self) -> str:
         raise NotImplementedError
 
-    def output_node(self) -> "TensorBox":
+    def output_node(self) -> TensorBox:
         raise NotImplementedError
 
     def info_dict(self) -> Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
@@ -3709,7 +3711,7 @@ class CUDATemplateBuffer(TemplateBuffer):
         inputs,
         make_kernel_render,
         workspace_size: int,
-        template: "CUDATemplate",  # type: ignore[name-defined]  # noqa: F821
+        template: CUDATemplate,  # type: ignore[name-defined]  # noqa: F821
     ):
         super().__init__(layout, inputs, make_kernel_render)
         # Global memory (in bytes) needed for this template.
@@ -5976,7 +5978,7 @@ class StorageBox(MutableBox):
 class Subgraph(IRNode):
     name: str
     graph_module: torch.fx.GraphModule
-    graph: Optional["GraphLowering"] = None
+    graph: Optional[GraphLowering] = None
 
 
 def _has_aliased_buffers(buffers):
