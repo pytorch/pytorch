@@ -1671,6 +1671,26 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             ).run(captured_output[0])
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
+        @torch._dynamo.config.patch("compiled_autograd", True)
+        def test_compiled_autograd_static_input_params(self):
+            @torch.compile(mode="reduce-overhead")
+            def bwd(loss):
+                loss.backward()
+
+            model = torch.nn.Linear(10, 10, bias=False, device="cuda")
+            x = torch.randn(10, 10, device="cuda")
+            for i in range(5):
+                out = model(x)
+                bwd(out.sum())
+                model.weight.grad = None
+
+            # i=0, 0 copies (warmup)
+            # i=1, 2 copies (record, 1/3 inputs marked as static)
+            # i>1, 0 copies (run)
+            self.assertEqual(
+                counters["inductor"]["cudagraph_recorded_non_static_inputs"], 2
+            )
+
         @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
         def test_incompatible_cudagraph_ops_nonzero(self):
             @torch.compile(mode="reduce-overhead")
