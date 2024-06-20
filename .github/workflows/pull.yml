@@ -535,9 +535,9 @@ jobs:
   linux-focal-py3_12-clang10-experimental-split-build-test:
     name: linux-focal-py3.12-clang10-experimental-split-build
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-focal-py3_12-clang10-experimental-split-build-build
+    needs: linux-focal-py3_12-clang10-experimental-split-build
     with:
       build-environment: linux-focal-py3.12-clang10-experimental-split-build
-      docker-image: ${{ needs.linux-focal-py3_12-clang10-experimental-split-build-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-py3_12-clang10-experimental-split-build-build.outputs.test-matrix }}
+      docker-image: ${{ needs.linux-focal-py3_12-clang10-experimental-split-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-py3_12-clang10-experimental-split-build.outputs.test-matrix }}
       timeout-minutes: 600
