@@ -21,7 +21,10 @@ from torch.distributed._tensor import init_device_mesh
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, MLP
 from torch.testing._internal.common_utils import run_tests
-from torch.testing._internal.distributed._tensor.common_dtensor import ModelArgs, Transformer
+from torch.testing._internal.distributed._tensor.common_dtensor import (
+    ModelArgs,
+    Transformer,
+)
 from torch.utils._triton import has_triton
 
 
@@ -141,7 +144,9 @@ class TestFullyShardCompile(FSDPTest):
             def _fn(gm):
                 # fullgraph=True because graph-break in Compiled Autograd BWD graph is not supported by Traceable FSDP2 yet
                 # (main difficulty comes from queue_callback not working well when BWD has graph break).
-                return torch.compile(gm, backend=compiled_autograd_backend, fullgraph=True)
+                return torch.compile(
+                    gm, backend=compiled_autograd_backend, fullgraph=True
+                )
 
             return _fn
 
@@ -175,7 +180,9 @@ class TestFullyShardCompile(FSDPTest):
             run_all_iters(model, optim, 1)
 
             model_compiled = torch.compile(model, backend=backend, fullgraph=True)
-            res = run_all_iters(model_compiled, optim, compiled_autograd_backend=backend)
+            res = run_all_iters(
+                model_compiled, optim, compiled_autograd_backend=backend
+            )
             cleanup_fsdp(model)
             del model_compiled
             del model
