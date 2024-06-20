@@ -37,7 +37,13 @@ from .. import variables
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import ObservedException, unimplemented
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, GetItemSource, ODictGetItemSource, RandomValueSource
+from ..source import (
+    AttrSource,
+    GetItemSource,
+    ODictGetItemSource,
+    RandomValueSource,
+    WeakRefCallSource,
+)
 from ..utils import (
     all_hook_names,
     build_checkpoint_variable,
@@ -384,9 +390,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.CustomizedDictVariable.create(
                 self.value, args, kwargs, options
             )
-        elif variables.DataClassVariable.is_matching_cls(self.value):
-            options = {"mutable_local": MutableLocal()}
-            return variables.DataClassVariable.create(self.value, args, kwargs, options)
         elif (
             variables.RestrictedListSubclassVariable.is_matching_cls(self.value)
             and self.source
@@ -938,8 +941,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
         ):
             if source:
-                install_guard(source.make_guard(GuardBuilder.HASATTR))
-                return VariableBuilder(tx, source)(subobj)
+                return variables.LazyVariableTracker.create(subobj, source)
             elif ConstantVariable.is_literal(subobj):
                 return ConstantVariable.create(subobj)
             elif (
@@ -1079,6 +1081,29 @@ class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
             args,
             kwargs,
         )
+
+
+class WeakRefVariable(UserDefinedObjectVariable):
+    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
+
+    def __init__(self, value, **kwargs):
+        super().__init__(value, **kwargs)
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        call_source = None
+        referent = self.value()
+
+        if self.source:
+            from .builder import VariableBuilder
+
+            call_source = WeakRefCallSource(self.source)
+            return VariableBuilder(tx, call_source)(referent)
+        else:
+            from .builder import SourcelessBuilder
+
+            return SourcelessBuilder.create(tx, referent)
 
 
 class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
