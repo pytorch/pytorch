@@ -16,14 +16,14 @@ using HandleType = void*;
 class CUDASymmetricMemory : public SymmetricMemory {
  public:
   CUDASymmetricMemory(
-    std::vector<HandleType> handles,
-    size_t block_size,
-    std::vector<void*> buffers,
-    std::vector<void*> signal_pads,
-    size_t buffer_size,
-    int local_device_idx,
-    int rank,
-    int world_size);
+      std::vector<HandleType> handles,
+      size_t block_size,
+      std::vector<void*> buffers,
+      std::vector<void*> signal_pads,
+      size_t buffer_size,
+      int local_device_idx,
+      int rank,
+      int world_size);
 
   ~CUDASymmetricMemory() override;
 
@@ -88,12 +88,10 @@ struct Block : public c10::intrusive_ptr_target {
 
 class CUDASymmetricMemoryAllocator : public SymmetricMemoryAllocator {
  public:
-  void* alloc(
-      size_t size,
-      int device_idx,
-      const std::string& group_name) override;
+  void* alloc(size_t size, int device_idx, const std::string& group_name)
+      override;
 
-  void free(void *ptr) override;
+  void free(void* ptr) override;
   size_t get_alloc_size(void* ptr) override;
   c10::intrusive_ptr<SymmetricMemory> rendezvous(void* ptr) override;
   bool is_rendezvous_completed(void* ptr) override;
