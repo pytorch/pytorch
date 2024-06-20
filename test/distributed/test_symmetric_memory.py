@@ -113,6 +113,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
         del t
         self._verify_symmetric_memory(symm_mem)
+        dist.destroy_process_group()
 
     @skipIfRocm
     @skip_if_lt_x_gpu(2)
@@ -152,6 +153,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         self.assertEqual(id(symm_mem_0), id(symm_mem_1))
 
         self._verify_symmetric_memory(symm_mem_0)
+        dist.destroy_process_group()
 
     @skipIfRocm
     @skip_if_lt_x_gpu(2)
