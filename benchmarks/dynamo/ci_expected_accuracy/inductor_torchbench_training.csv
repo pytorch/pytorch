@@ -98,7 +98,7 @@ hf_Bert_large,pass,6
 
 
 
-hf_BigBird,pass,52
+hf_BigBird,pass,49
 
 
 
@@ -286,4 +286,4 @@ vision_maskrcnn,pass,34
 
 
 
-yolov3,pass,9
+yolov3,pass,8

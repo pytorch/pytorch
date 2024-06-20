@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from dataclasses import dataclass
 import torch
 import torch.distributed._shard.sharded_tensor.metadata as sharded_tensor_meta

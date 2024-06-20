@@ -3,7 +3,7 @@ import random
 
 import torch
 import torch._functorch.config as config
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, TestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.utils.flop_counter import FlopCounterMode
 
@@ -297,5 +297,6 @@ class MemoryBudgetTest(TestCase):
 
 
 if __name__ == "__main__":
-    if HAS_CUDA:
+    # I'm using the cuda memory allocator to verify memory allocations
+    if HAS_CUDA and not TEST_WITH_ROCM:
         run_tests()

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import functools
@@ -45,6 +46,25 @@ _cumulative_compile_time = 0.0
 _t0: Optional[float] = None
 
 kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
+
+
+def pre_fork_setup():
+    """
+    Setup that must be done prior to forking with a process pool.
+    """
+    # ensure properties have been calculated before processes
+    # are forked
+    caching_device_properties()
+
+    # Computing the triton key can be slow. If we call it before fork,
+    # it will be cached for the forked subprocesses.
+    try:
+        from triton.compiler.compiler import triton_key
+
+        triton_key()
+    except ModuleNotFoundError:
+        # Might not be installed.
+        pass
 
 
 def caching_device_properties():
@@ -115,9 +135,7 @@ class AsyncCompile:
             # Wrapper around ProcessPoolExecutor forks in a new process we control
             pool = SubprocPool(config.compile_threads)
         else:
-            # ensure properties have been calculated before processes
-            # are forked
-            caching_device_properties()
+            pre_fork_setup()
             ctx = multiprocessing.get_context(config.worker_start_method)
             pool = ProcessPoolExecutor(
                 config.compile_threads,

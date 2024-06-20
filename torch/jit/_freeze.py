@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Freezing.
 
 This is not intended to be imported directly; please use the exposed
