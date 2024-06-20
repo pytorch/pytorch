@@ -224,7 +224,6 @@ class FSDPParamGroup:
             return  # no preceding unshard
         if self._training_state == TrainingState.FORWARD:  # implicit prefetch
             if prev_all_gather_state := self.comm_ctx.all_gather_state:
-                assert prev_all_gather_state.event is not None
                 self._wait_all_gather_streams_on_event(prev_all_gather_state.event)
                 self.comm_ctx.all_gather_state = None  # free the all-gather result
         with record_function(self._with_fqn("FSDP::all_gather_copy_out")):
@@ -243,7 +242,6 @@ class FSDPParamGroup:
                 self._all_gather_result, all_gather_copy_out_event
             )
         else:
-            assert all_gather_copy_out_event is not None
             self._wait_all_gather_streams_on_event(all_gather_copy_out_event)
         self._all_gather_result = None  # free unless saved in `all_gather_state`
 
