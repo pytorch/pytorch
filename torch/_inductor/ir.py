@@ -715,7 +715,7 @@ class Reduction(Loops):
         if get_device_type(device) == "xpu":
             num_sm = device_properties.gpu_subslice_count
         else:
-            # default is cuda beheavior
+            # default is cuda behavior
             num_sm = device_properties.multi_processor_count
 
         min_elements_per_thread = 32
