@@ -112,7 +112,7 @@ def must_recompute(node: fx.Node) -> bool:
 def has_recomputable_ops(fx_g: fx.GraphModule) -> bool:
     found = False
     for node in fx_g.graph.nodes:
-        if prefer_recompute(node):
+        if must_recompute(node):
             return True
     return False
 
@@ -644,7 +644,7 @@ def functionalize_rng_ops(
     recomputable_rng_ops_map = dict()
     for node in joint_module.graph.nodes:
         if (
-            prefer_recompute(node)
+            must_recompute(node)
             and hasattr(node.target, "tags")
             and torch.Tag.nondeterministic_seeded in node.target.tags
         ):
@@ -741,7 +741,7 @@ def cleanup_recompute_tags(joint_module: fx.GraphModule) -> fx.GraphModule:
     non-recomputable to allow for that.
     """
     for node in joint_module.graph.nodes:
-        if prefer_recompute(node):
+        if must_recompute(node):
             for user in node.users:
                 if (
                     must_recompute(user)

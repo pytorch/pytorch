@@ -618,13 +618,8 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             no_recompute_list = [
                 torch.ops.aten.mm.default,
             ]
-<<<<<<< HEAD
-            return _pt2_selective_checkpoint_context_fn_gen(
-                no_recompute_policy_fn=_get_custom_policy(func_list=no_recompute_list),
-=======
             return create_selective_checkpoint_contexts(
                 _get_custom_policy(no_recompute_list=no_recompute_list)
->>>>>>> 5fba5d83f0703ff8077ab65448a998e9ad6598fd
             )
 
         def gn(x, y):
@@ -673,13 +668,8 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             no_recompute_list = [
                 torch.ops.aten.mm.default,
             ]
-<<<<<<< HEAD
-            return _pt2_selective_checkpoint_context_fn_gen(
-                no_recompute_policy_fn=_get_custom_policy(func_list=no_recompute_list)
-=======
             return create_selective_checkpoint_contexts(
                 _get_custom_policy(no_recompute_list=no_recompute_list)
->>>>>>> 5fba5d83f0703ff8077ab65448a998e9ad6598fd
             )
 
         def gn(x, y):
@@ -748,13 +738,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
         def selective_checkpointing_context_fn():
             meta = {}
-<<<<<<< HEAD
-            return _pt2_selective_checkpoint_context_fn_gen(
-                no_recompute_policy_fn=_get_custom_policy(meta)
-            )
-=======
             return create_selective_checkpoint_contexts(_get_custom_policy(meta))
->>>>>>> 5fba5d83f0703ff8077ab65448a998e9ad6598fd
 
         def gn(x, y):
             return torch.sigmoid(
@@ -802,13 +786,8 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
     )
     def test_compile_selective_checkpoint_partial_ctx_fn(self):
         def selective_checkpointing_context_fn(no_recompute_list):
-<<<<<<< HEAD
-            return _pt2_selective_checkpoint_context_fn_gen(
-                no_recompute_policy_fn=_get_custom_policy(func_list=no_recompute_list)
-=======
             return create_selective_checkpoint_contexts(
                 _get_custom_policy(no_recompute_list=no_recompute_list)
->>>>>>> 5fba5d83f0703ff8077ab65448a998e9ad6598fd
             )
 
         def gn(x, y):
@@ -860,13 +839,8 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 torch.ops.aten.mm.default,
                 torch.ops.aten.sigmoid.default,
             ]
-<<<<<<< HEAD
-            return _pt2_selective_checkpoint_context_fn_gen(
-                no_recompute_policy_fn=_get_custom_policy(func_list=no_recompute_list),
-=======
             return create_selective_checkpoint_contexts(
                 _get_custom_policy(no_recompute_list=no_recompute_list),
->>>>>>> 5fba5d83f0703ff8077ab65448a998e9ad6598fd
             )
 
         def gn(x, y):
@@ -917,13 +891,8 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 torch.ops.aten.mm.default,
                 torch.ops.aten.sigmoid.default,
             ]
-<<<<<<< HEAD
-            return _pt2_selective_checkpoint_context_fn_gen(
-                no_recompute_policy_fn=_get_custom_policy(func_list=no_recompute_list)
-=======
             return create_selective_checkpoint_contexts(
                 _get_custom_policy(no_recompute_list=no_recompute_list)
->>>>>>> 5fba5d83f0703ff8077ab65448a998e9ad6598fd
             )
 
         def gn(x, y):
@@ -973,13 +942,8 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 no_recompute_list = [
                     torch.ops.aten.sigmoid.default,
                 ]
-<<<<<<< HEAD
-                return _pt2_selective_checkpoint_context_fn_gen(
-                    no_recompute_policy_fn=_get_custom_policy(func_list=no_recompute_list)
-=======
                 return create_selective_checkpoint_contexts(
                     _get_custom_policy(no_recompute_list=no_recompute_list)
->>>>>>> 5fba5d83f0703ff8077ab65448a998e9ad6598fd
                 )
 
             def gn(x):
