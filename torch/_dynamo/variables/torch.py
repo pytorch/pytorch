@@ -842,7 +842,10 @@ Either create the tensor outside the compiled region, or do not set the tensor t
                     name = tx.find_symbolic_locals_name(kwargs["out"])
                     if name in tx.symbolic_locals:
                         tx.symbolic_locals[name] = tensor_variable
-                elif isinstance(tensor_variable, ConstantVariable) and tensor_variable.value is None:
+                elif (
+                    isinstance(tensor_variable, ConstantVariable)
+                    and tensor_variable.value is None
+                ):
                     # Handle out-variant custom ops that return None.
                     if isinstance(kwargs["out"], TensorVariable):
                         assert "example_value" in kwargs["out"].proxy.node.meta
