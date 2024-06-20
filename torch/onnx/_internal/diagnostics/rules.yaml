@@ -192,10 +192,9 @@
 
       - If exists, apply the auto-fix suggested by the diagnostic. TODO: this part is not available yet.
       - Rewrite the model using only supported PyTorch operators or functions.
-      - Follow this [guide](https://pytorch.org/docs/stable/onnx.html#onnx-script-functions) to write and
+      - Follow this [guide](https://pytorch.org/tutorials/beginner/onnx/onnx_registry_tutorial.html#overview) to write and
         register a custom symbolic function for the unsupported call_function FX node.
 
-      TODO: Replace above link once docs for `dynamo_export` custom op registration are available.
   message_strings:
     default:
       text: "No symbolic function to convert the \"call_function\" node {target} to ONNX. "

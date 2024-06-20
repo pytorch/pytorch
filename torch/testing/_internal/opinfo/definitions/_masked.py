@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import unittest
 from collections.abc import Sequence
 from functools import partial

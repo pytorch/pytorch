@@ -5,10 +5,12 @@ import itertools
 from typing import cast, List, Optional
 
 import torch
+import torch.nn.functional as F
 from torch.distributed._tensor import DeviceMesh, distribute_tensor
 from torch.distributed._tensor.api import DTensor
+from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed._tensor.placement_types import (
-    _Partial,
+    Partial,
     Placement,
     Replicate,
     Shard,
@@ -40,6 +42,23 @@ class DistMatrixOpsTest(DTensorTestBase):
         self.assertEqual(dist_res.full_tensor(), local_res)
 
     @with_comms
+    def test_addmm_empty_operand(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        shard_spec = [Shard(0)]
+        replica_spec = [Replicate()]
+
+        tensor_to_shard = torch.randn(12, 0)
+        mat1 = distribute_tensor(tensor_to_shard, device_mesh, shard_spec)
+        tensor_to_replicate = torch.randn(0, 4)
+        mat2 = distribute_tensor(tensor_to_replicate, device_mesh, replica_spec)
+        input_tensor = torch.randn(4)
+        inp = distribute_tensor(input_tensor, device_mesh, replica_spec)
+
+        dist_res = torch.addmm(inp, mat1, mat2)
+        local_res = torch.addmm(input_tensor, tensor_to_shard, tensor_to_replicate)
+        self.assertEqual(dist_res.full_tensor(), local_res)
+
+    @with_comms
     def test_addmm_auto_redistribute(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         shard0_spec = [Shard(0)]
@@ -58,7 +77,7 @@ class DistMatrixOpsTest(DTensorTestBase):
 
         # test if addmm output is a partial
         self.assertIsInstance(dist_res, DTensor)
-        self.assertIsInstance(dist_res.placements[0], _Partial)
+        self.assertIsInstance(dist_res.placements[0], Partial)
 
         # test if result is the same as tensor
         dist_local_res = dist_res.full_tensor()
@@ -125,11 +144,11 @@ class DistMatrixOpsTest(DTensorTestBase):
         da = distribute_tensor(a, device_mesh, [Shard(1)])
         db = distribute_tensor(b, device_mesh, [Shard(0)])
 
-        # mm(da, db) should return a _Partial tensor.
-        # transposing it should keep it _Partial
+        # mm(da, db) should return a Partial tensor.
+        # transposing it should keep it Partial
         dc = torch.mm(da, db).t()
 
-        self.assertTrue(isinstance(dc.placements[0], _Partial))
+        self.assertTrue(isinstance(dc.placements[0], Partial))
 
         # check that the local and distributed op results match
         self.assertEqual(
@@ -246,6 +265,78 @@ class DistMatrixOpsTest(DTensorTestBase):
         # tests that currently pass
         for spec in shard_specs_comb:
             test_placement_comb([spec[0]], [spec[1]])
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_scaled_dot_product_attention(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        comm_mode = CommDebugMode()
+        # bsz, n_heads, slen, head_dim
+        query = torch.rand(
+            (4, 8, 8, 8),
+            device=self.device_type,
+            dtype=torch.bfloat16,
+            requires_grad=True,
+        )
+        key = torch.rand(
+            (4, 8, 8, 8),
+            device=self.device_type,
+            dtype=torch.bfloat16,
+            requires_grad=True,
+        )
+        value = torch.rand(
+            (4, 8, 8, 8),
+            device=self.device_type,
+            dtype=torch.bfloat16,
+            requires_grad=True,
+        )
+
+        dist_query = distribute_tensor(query, device_mesh, [Shard(1)])
+        dist_key = distribute_tensor(key, device_mesh, [Shard(1)])
+        dist_value = distribute_tensor(value, device_mesh, [Shard(1)])
+
+        from torch.nn.attention import sdpa_kernel, SDPBackend
+
+        available_backends = []
+        dropout_p = 0.0
+        # TODO: Add test cases where is_causal=False and an attention mask is provided.
+        #       Gaps include missing op support for aten.masked_fill_.Scalar.
+        is_causal = True
+        params = torch.backends.cuda.SDPAParams(
+            query, key, value, None, dropout_p, is_causal
+        )
+        if torch.backends.cuda.can_use_flash_attention(params, debug=False):
+            available_backends.append(SDPBackend.FLASH_ATTENTION)
+        if torch.backends.cuda.can_use_efficient_attention(params, debug=False):
+            available_backends.append(SDPBackend.EFFICIENT_ATTENTION)
+
+        for backend in available_backends:
+            with sdpa_kernel(backends=[backend]):
+                out = F.scaled_dot_product_attention(
+                    query, key, value, dropout_p=dropout_p, is_causal=is_causal
+                )
+                with comm_mode:
+                    dist_out = F.scaled_dot_product_attention(
+                        dist_query,
+                        dist_key,
+                        dist_value,
+                        dropout_p=dropout_p,
+                        is_causal=is_causal,
+                    )
+                    self.assertEqual(comm_mode.get_total_counts(), 0)
+                    self.assertTrue(dist_out.placements[0].is_shard(dim=1))
+                    self.assertEqual(dist_out.full_tensor(), out)
+
+                out.sum().backward()
+                with comm_mode:
+                    dist_out.sum().backward()
+                    self.assertEqual(comm_mode.get_total_counts(), 0)
+                    self.assertTrue(dist_query.grad.placements[0].is_shard(dim=1))
+                    self.assertEqual(dist_query.grad.full_tensor(), query.grad)
+                    self.assertTrue(dist_key.grad.placements[0].is_shard(dim=1))
+                    self.assertEqual(dist_key.grad.full_tensor(), key.grad)
+                    self.assertTrue(dist_value.grad.placements[0].is_shard(dim=1))
+                    self.assertEqual(dist_value.grad.full_tensor(), value.grad)
 
 
 if __name__ == "__main__":

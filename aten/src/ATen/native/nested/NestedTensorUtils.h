@@ -119,7 +119,7 @@ inline std::vector<IntArrayRef> NestedTensor_get_sizes(
   if (orig_dim == 0) {
     return sizes;
   }
-  const int64_t* sizemat_ptr = sizemat.data_ptr<int64_t>();
+  const int64_t* sizemat_ptr = sizemat.const_data_ptr<int64_t>();
 
   for (const auto i : c10::irange(ntensors)) {
     sizes[i] = IntArrayRef(sizemat_ptr, sizemat_ptr + orig_dim);
@@ -152,7 +152,7 @@ inline std::vector<IntArrayRef> NestedTensor_get_strides(
   if (orig_dim == 0) {
     return strides;
   }
-  const int64_t* stridemat_ptr = stridemat.data_ptr<int64_t>();
+  const int64_t* stridemat_ptr = stridemat.const_data_ptr<int64_t>();
   for (const auto i : c10::irange(ntensors)) {
     strides[i] = IntArrayRef(stridemat_ptr, stridemat_ptr + orig_dim);
     stridemat_ptr += orig_dim;
@@ -178,6 +178,40 @@ inline void check_numel_equals_buffer_size(const NestedTensorImpl* self_ptr) {
       self_ptr->numel() == static_cast<int64_t>(self_ptr->get_buffer_size()),
       "Number of elements in nested tensor must match number of elements in buffer.");
 }
+
+// Helper function to get size / stride / offset for a nested/normal tensor.
+inline IntArrayRef get_size_for_index(const Tensor& tensor, int i) {
+  if (tensor.is_nested()) {
+    std::vector<IntArrayRef> tensor_sizes =
+        NestedTensor_get_sizes(get_nested_tensor_impl(tensor));
+    return tensor_sizes[i];
+  } else {
+    return tensor.sizes().slice(1);
+  }
+}
+
+inline IntArrayRef get_stride_for_index(const Tensor& tensor, int i) {
+  if (tensor.is_nested()) {
+    std::vector<IntArrayRef> tensor_strides =
+        NestedTensor_get_strides(get_nested_tensor_impl(tensor));
+    return tensor_strides[i];
+  } else {
+    return tensor.strides().slice(1);
+  }
+}
+
+inline int64_t get_offset_for_index(const Tensor& tensor, int i) {
+  if (tensor.is_nested()) {
+    int64_t* offsets_ptr = get_nested_tensor_impl(tensor)
+                               ->get_storage_offsets()
+                               .data_ptr<int64_t>();
+    return offsets_ptr[i];
+
+  } else {
+    int64_t offset = tensor.storage_offset();
+    return offset + tensor.strides()[0] * i;
+  }
+}
 //  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // Data structures and functions for generically applying a function on a nested
 // tensor.
@@ -193,7 +227,8 @@ struct NestedNode {
   // NestedNode(NestedNode&) = delete;
   // NestedNode(const NestedNode&) = delete;
   // NestedNode& operator=(NestedNode) = delete;
-  explicit NestedNode(T payload) : _is_leaf(true), _payload(std::move(payload)) {}
+  explicit NestedNode(T payload)
+      : _is_leaf(true), _payload(std::move(payload)) {}
   inline bool is_leaf() const {
     return _is_leaf;
   }
@@ -305,10 +340,10 @@ inline TensorNode get_nested_tensor_structure(at::Tensor tensor) {
 
 inline Tensor wrap_tensor_node(
     TensorNode tensor_node,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory) {
   TORCH_CHECK(
       !tensor_node.is_leaf(), "Expected TensorNode to wrap a list of Tensors.");
   TensorOptions options_ =
@@ -367,7 +402,7 @@ inline Tensor wrap_tensor_node(
                   if (tensor_node.children(i).numel() > 0) {
                     memcpy(
                         nt_buffer.mutable_data_ptr<scalar_t>() + start_offsets[i],
-                        tensor_node.children(i).data_ptr<scalar_t>(),
+                        tensor_node.children(i).const_data_ptr<scalar_t>(),
                         tensor_node.children(i).numel() * sizeof(scalar_t));
                   }
                 }

@@ -26,7 +26,7 @@ from torch.ao.quantization.quantizer import (  # noqa: F401
 from torch.fx.passes.infra.pass_manager import PassManager
 from torch.ao.quantization.pt2e.duplicate_dq_pass import DuplicateDQPass
 from torch.ao.quantization.pt2e.port_metadata_pass import PortNodeMetaForQDQ
-from torch._inductor.constant_folding import constant_fold
+from torch._export.passes.constant_folding import constant_fold
 
 __all__ = [
     "prepare_pt2e",
@@ -201,18 +201,14 @@ def _quant_node_constraint(n: Node) -> bool:
 def convert_pt2e(
     model: GraphModule,
     use_reference_representation: bool = False,
-    fold_quantize: bool = False,
+    fold_quantize: bool = True,
 ) -> GraphModule:
     """Convert a calibrated/trained model to a quantized model
 
     Args:
       * `model` (torch.fx.GraphModule): calibrated/trained model
       * `use_reference_representation` (bool): boolean flag to indicate whether to produce referece representation or not
-      * `fold_quantize` (bool): boolean flag to indicate whether fold the quantize op or not
-
-    Note: please set `fold_quantize` to True whenever you can, we'll deprecate this flag and
-    make True the default option in the future, to make sure the change doesn't break BC for you, it's
-    better to set the flag to True now.
+      * `fold_quantize` (bool): boolean flag for whether fold the quantize op or not
 
     Returns:
         quantized model, either in q/dq representation or reference representation

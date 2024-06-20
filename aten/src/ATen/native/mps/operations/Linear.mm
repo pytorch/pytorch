@@ -15,11 +15,17 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const c10::opt
 
   auto weight = (weight_arg.dim() == 1) ? weight_arg.view({1, weight_arg.size(0)}) : weight_arg;
 
-  TORCH_CHECK(input.scalar_type() == ScalarType::Float || input.scalar_type() == ScalarType::Half,
-              "MPS device does not support linear for non-float inputs");
+  TORCH_CHECK(supportedFloatingOrComplexType(input), "MPS device does not support linear for non-float inputs");
+  TORCH_CHECK(input.is_mps(), "Tensor for argument input is on ", input.device(), " but expected on mps");
+  TORCH_CHECK(supportedFloatingOrComplexType(weight_arg), "MPS device does not support linear for non-float weights");
+  TORCH_CHECK(weight_arg.is_mps(), "Tensor for argument weight is on ", weight_arg.device(), " but expected on mps");
 
   const Tensor& bias = *(at::borrow_from_optional_tensor(bias_opt));
-  bool is_bias_defined = bias.defined();
+  const bool is_bias_defined = bias.defined();
+  if (is_bias_defined) {
+    TORCH_CHECK(bias.is_mps(), "Tensor for argument bias is on ", bias.device(), " but expected on mps");
+    TORCH_CHECK(supportedFloatingOrComplexType(bias), "MPS device does not support linear for non-float bias");
+  }
 
   auto input_size = input.sizes();
   std::vector<int64_t> output_size(input_size.begin(), input_size.end() - 1);
@@ -107,10 +113,7 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const c10::opt
       biasPlaceholder = Placeholder(cachedGraph->biasTensor_, bias);
       feeds[biasPlaceholder.getMPSGraphTensor()] = biasPlaceholder.getMPSGraphTensorData();
     }
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 
   // Shave off '1' present at the end of the shape
@@ -125,12 +128,11 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const c10::opt
 
 static Tensor _mps_linear_backward_input(IntArrayRef input_size, const Tensor& grad_output, const Tensor& weight) {
   TORCH_CHECK(grad_output.is_mps(), "mps_linear_backward: grad_output needs to be mps layout");
-  TORCH_CHECK(weight.device().is_mps() && (weight.scalar_type() == kFloat || (weight.scalar_type() == kHalf)),
+  TORCH_CHECK(weight.device().is_mps() && supportedFloatingOrComplexType(weight),
               "mps_linear_backward: unsupported weights data type: ",
               weight.scalar_type());
 
-  TORCH_CHECK(grad_output.scalar_type() == ScalarType::Double || grad_output.scalar_type() == ScalarType::Float ||
-                  grad_output.scalar_type() == ScalarType::Half,
+  TORCH_CHECK(supportedFloatingOrComplexType(grad_output),
               "MPS device does not support linear backward for non-float inputs");
 
   const Tensor weight_reshaped = weight.is_contiguous() ? weight : weight.contiguous();
@@ -178,15 +180,8 @@ static Tensor _mps_linear_backward_input(IntArrayRef input_size, const Tensor& g
     Placeholder gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_output);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      weightPlaceholder.getMPSGraphTensor() : weightPlaceholder.getMPSGraphTensorData(),
-      gradOutputPlaceholder.getMPSGraphTensor() : gradOutputPlaceholder.getMPSGraphTensorData()
-    };
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(weightPlaceholder, gradOutputPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
 
     return output;
   }
@@ -199,7 +194,7 @@ static std::tuple<Tensor, Tensor> _mps_linear_backward_weights(const Tensor& gra
   TORCH_CHECK(grad_output.is_mps() && input.is_mps(),
               "_mps_linear_backward: grad_output and input needs to be mps layout");
 
-  TORCH_CHECK(grad_output.scalar_type() == ScalarType::Float || grad_output.scalar_type() == ScalarType::Half,
+  TORCH_CHECK(supportedFloatingOrComplexType(grad_output),
               "MPS device does not support linear backward for non-float inputs");
 
   struct CachedGraph : public MPSCachedGraph {
@@ -241,7 +236,7 @@ static std::tuple<Tensor, Tensor> _mps_linear_backward_weights(const Tensor& gra
   MPSStream* stream = getCurrentMPSStream();
 
   @autoreleasepool {
-    string key = "mps_linear_backward_weights:" + to_string(bias_defined) + ":" +
+    string key = "mps_linear_backward_weights:" + std::to_string(bias_defined) + ":" +
         getTensorsStringKey({input_reshaped, weight, grad_output_reshaped});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_reshaped);
@@ -276,17 +271,9 @@ static std::tuple<Tensor, Tensor> _mps_linear_backward_weights(const Tensor& gra
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
     Placeholder biasPlaceholder = Placeholder(cachedGraph->biasTensor_, bias);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      gradOutputPlaceholder.getMPSGraphTensor() : gradOutputPlaceholder.getMPSGraphTensorData(),
-      inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
-      weightPlaceholder.getMPSGraphTensor() : weightPlaceholder.getMPSGraphTensorData()
-    };
-
-    NSMutableDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = [NSMutableDictionary dictionary];
-    results[outputPlaceholder.getMPSGraphTensor()] = outputPlaceholder.getMPSGraphTensorData();
-    if (bias_defined)
-      results[biasPlaceholder.getMPSGraphTensor()] = biasPlaceholder.getMPSGraphTensorData();
-
+    auto feeds = dictionaryFromPlaceholders(gradOutputPlaceholder, inputPlaceholder, weightPlaceholder);
+    auto results = bias_defined ? dictionaryFromPlaceholders(outputPlaceholder, biasPlaceholder)
+                                : dictionaryFromPlaceholders(outputPlaceholder);
     runMPSGraph(stream, cachedGraph->graph(), feeds, results);
 
     return std::tuple<Tensor, Tensor>{output, bias};

@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 MAX_CYCLE = 3000
 
 import itertools
@@ -84,9 +86,10 @@ class ItertoolsVariable(VariableTracker):
                 else:
                     try:
                         acc = func(tx, [acc, item], {})
-                    except Exception:
-                        raise unimplemented(  # noqa: TRY200
-                            f"Unexpected failure in invoking function during accumulate. Failed running func {func}({item}{acc})"
+                    except Exception as e:
+                        unimplemented(
+                            f"Unexpected failure in invoking function during accumulate. Failed running func {func}({item}{acc})",
+                            from_exc=e,
                         )
                 items.append(acc)
 
@@ -118,7 +121,7 @@ class ItertoolsVariable(VariableTracker):
                 elif isinstance(key, variables.ConstantVariable):
                     return key.as_python_constant()
                 else:
-                    raise unimplemented(
+                    unimplemented(
                         "Unsupported key type for itertools.groupby: " + str(type(key))
                     )
 
@@ -154,9 +157,10 @@ class ItertoolsVariable(VariableTracker):
                             mutable_local=MutableLocal(),
                         )
                     )
-            except Exception:
-                raise unimplemented(  # noqa: TRY200
-                    "Unexpected failure when calling itertools.groupby"
+            except Exception as e:
+                unimplemented(
+                    "Unexpected failure when calling itertools.groupby",
+                    from_exc=e,
                 )
             return variables.ListIteratorVariable(result, mutable_local=MutableLocal())
         elif self.value is itertools.repeat:
@@ -168,12 +172,16 @@ class ItertoolsVariable(VariableTracker):
             from .builder import SourcelessBuilder
 
             return tx.inline_user_function_return(
-                SourcelessBuilder()(tx, polyfill.repeat), args, kwargs
+                SourcelessBuilder.create(tx, polyfill.repeat), args, kwargs
             )
         elif self.value is itertools.count:
             return variables.CountIteratorVariable(*args, mutable_local=MutableLocal())
         elif self.value is itertools.cycle:
             return variables.CycleIteratorVariable(*args, mutable_local=MutableLocal())
+        elif self.value is itertools.dropwhile:
+            return variables.UserFunctionVariable(polyfill.dropwhile).call_function(
+                tx, args, kwargs
+            )
         else:
             return super().call_function(tx, args, kwargs)
 
@@ -182,7 +190,7 @@ class IteratorVariable(VariableTracker):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-    def next_variables(self, tx):
+    def next_variable(self, tx):
         unimplemented("abstract method, must implement")
 
 
@@ -192,8 +200,8 @@ class RepeatIteratorVariable(IteratorVariable):
         self.item = item
 
     # Repeat needs no mutation, clone self
-    def next_variables(self, tx):
-        return self.item, self
+    def next_variable(self, tx):
+        return self.item
 
 
 class CountIteratorVariable(IteratorVariable):
@@ -206,12 +214,12 @@ class CountIteratorVariable(IteratorVariable):
         self.item = item
         self.step = step
 
-    def next_variables(self, tx):
+    def next_variable(self, tx):
         assert self.mutable_local
         tx.output.side_effects.mutation(self)
         next_item = self.item.call_method(tx, "__add__", [self.step], {})
         self.item = next_item
-        return self.item, self
+        return self.item
 
 
 class CycleIteratorVariable(IteratorVariable):
@@ -231,12 +239,12 @@ class CycleIteratorVariable(IteratorVariable):
         self.saved_index = saved_index
         self.item = item
 
-    def next_variables(self, tx):
+    def next_variable(self, tx):
         assert self.mutable_local
 
         if self.iterator is not None:
             try:
-                new_item, _ = self.iterator.next_variables(tx)
+                new_item = self.iterator.next_variable(tx)
                 if len(self.saved) > MAX_CYCLE:
                     unimplemented(
                         "input iterator to itertools.cycle has too many items"
@@ -245,14 +253,14 @@ class CycleIteratorVariable(IteratorVariable):
                 self.saved.append(new_item)
                 self.item = new_item
                 if self.item is None:
-                    return self.next_variables(tx)
-                return self.item, self
+                    return self.next_variable(tx)
+                return self.item
             except StopIteration:
                 self.iterator = None
-                return self.next_variables(tx)
+                return self.next_variable(tx)
         elif len(self.saved) > 0:
             tx.output.side_effects.mutation(self)
             self.saved_index = (self.saved_index + 1) % len(self.saved)
-            return self.item, self
+            return self.item
         else:
             raise StopIteration

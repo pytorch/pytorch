@@ -47,3 +47,9 @@ TEST(ScalarTest, Equality) {
   // ensure that we don't incorrectly coerce bitrep
   ASSERT_FALSE(Scalar(-1).equal(0xFFFFFFFFFFFFFFFF));
 }
+
+TEST(ScalarTest, LongsAndLongLongs) {
+  Scalar longOne = 1L;
+  Scalar longlongOne = 1LL;
+  ASSERT_EQ(longOne.toInt(), longlongOne.toInt());
+}

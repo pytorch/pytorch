@@ -1,12 +1,15 @@
 # Owner(s): ["oncall: export"]
+import copy
 import unittest
 
 import torch
+
 from functorch.experimental import control_flow
 from torch._dynamo.eval_frame import is_dynamo_supported
-from torch.export import export
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.export import export
+from torch.fx.passes.infra.pass_base import PassResult
+from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
 
 
 @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
@@ -39,6 +42,7 @@ class TestPassInfra(TestCase):
             self.assertEqual(new_node.op, old_node.op)
             self.assertEqual(new_node.target, old_node.target)
 
+    @unittest.skipIf(IS_WINDOWS, "Windows not supported")
     def test_cond(self) -> None:
         class M(torch.nn.Module):
             def __init__(self):
@@ -47,12 +51,14 @@ class TestPassInfra(TestCase):
             def forward(self, pred, x, y):
                 def true_fn(x, y):
                     b = x.item()
-                    torch._constrain_as_value(b, min=2, max=5)
+                    torch._check(b >= 2)
+                    torch._check(b <= 5)
                     return x - y
 
                 def false_fn(x, y):
                     c = y.item()
-                    torch._constrain_as_value(c, min=2, max=5)
+                    torch._check(c >= 2)
+                    torch._check(c <= 5)
                     return x + y
 
                 ret = control_flow.cond(pred, true_fn, false_fn, [x, y])
@@ -61,7 +67,9 @@ class TestPassInfra(TestCase):
         x = torch.tensor([2])
         y = torch.tensor([5])
         mod = M()
-        _ = export(mod, (torch.tensor(True), x, y))._transform_do_not_use(_ExportPassBaseDeprecatedDoNotUse())
+        _ = export(mod, (torch.tensor(True), x, y))._transform_do_not_use(
+            _ExportPassBaseDeprecatedDoNotUse()
+        )
 
     def test_node_name_stability(self) -> None:
         # Tests that graph nodes stay the same for nodes that are not touched
@@ -74,12 +82,14 @@ class TestPassInfra(TestCase):
                 self.my_parameter = torch.nn.Parameter(torch.tensor(2.0))
 
                 # Define two buffers
-                self.register_buffer('my_buffer1', torch.tensor(3.0))
-                self.register_buffer('my_buffer2', torch.tensor(4.0))
+                self.register_buffer("my_buffer1", torch.tensor(3.0))
+                self.register_buffer("my_buffer2", torch.tensor(4.0))
 
             def forward(self, x1, x2):
                 # Use the parameter, buffers, and both inputs in the forward method
-                output = (x1 + self.my_parameter) * self.my_buffer1 + x2 * self.my_buffer2
+                output = (
+                    x1 + self.my_parameter
+                ) * self.my_buffer1 + x2 * self.my_buffer2
 
                 # Mutate one of the buffers (e.g., increment it by 1)
                 self.my_buffer2.add_(1.0)
@@ -122,7 +132,7 @@ class TestPassInfra(TestCase):
         input_tensor1 = torch.tensor(5.0)
         input_tensor2 = torch.tensor(6.0)
 
-        ep_before = torch._export.export(my_module, (input_tensor1, input_tensor2))
+        ep_before = torch.export.export(my_module, (input_tensor1, input_tensor2))
         from torch.fx.passes.infra.pass_base import PassResult
 
         def modify_input_output_pass(gm):
@@ -141,6 +151,46 @@ class TestPassInfra(TestCase):
         old_signature = ep_before.graph_signature
         self.assertNotEqual(new_signature.user_outputs, old_signature.user_outputs)
 
+    def test_replace_hook_basic(self) -> None:
+        class CustomModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
 
-if __name__ == '__main__':
+                self.my_parameter = torch.nn.Parameter(torch.tensor(2.0))
+
+                self.register_buffer("my_buffer1", torch.tensor(3.0))
+                self.register_buffer("my_buffer2", torch.tensor(4.0))
+
+            def forward(self, x1, x2):
+                # Use the parameter, buffers, and both inputs in the forward method
+                output = (
+                    x1 + self.my_parameter
+                ) * self.my_buffer1 + x2 * self.my_buffer2
+                return output
+
+        my_module = CustomModule()
+        inputs = (torch.tensor(6.0), torch.tensor(7.0))
+        ep_before = export(my_module, inputs)
+
+        def replace_pass(gm):
+            for node in gm.graph.nodes:
+                if node.op == "call_function":
+                    node.name = node.name + "_modified"
+            gm.recompile()
+            return PassResult(gm, True)
+
+        gm = copy.deepcopy(ep_before.graph_module)
+        sig = copy.deepcopy(ep_before.graph_signature)
+
+        with gm._set_replace_hook(sig.get_replace_hook()):
+            replace_pass(gm)
+
+        for node_name in sig.user_outputs:
+            self.assertTrue("_modified" in node_name)
+
+        old_signature = ep_before.graph_signature
+        self.assertNotEqual(sig.user_outputs, old_signature.user_outputs)
+
+
+if __name__ == "__main__":
     run_tests()

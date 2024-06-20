@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import functools
 import warnings
 from typing import Callable, Union

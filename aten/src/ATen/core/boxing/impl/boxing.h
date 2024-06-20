@@ -39,7 +39,15 @@ template <class T, class Enable = void>
 struct has_ivalue_to : std::false_type {};
 
 template <class T>
-struct has_ivalue_to<T, std::void_t<decltype(std::declval<IValue>().to<T>())>>
+struct ivalue_to_helper
+{
+    using type = decltype(std::declval<IValue>().template to<T>());
+};
+template <class T>
+using ivalue_to_helper_t = typename ivalue_to_helper<T>::type;
+
+template <class T>
+struct has_ivalue_to<T, std::void_t<ivalue_to_helper_t<T>>>
 : std::true_type
 {};
 

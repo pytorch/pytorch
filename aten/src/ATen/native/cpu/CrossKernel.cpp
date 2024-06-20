@@ -21,8 +21,8 @@ static void apply_cross(const Tensor& result, const Tensor& a, const Tensor& b, 
   int64_t b_stride = b.stride(dim);
   int64_t r_stride = result.stride(dim);
 
-  scalar_t *a_ptr = a.data_ptr<scalar_t>();
-  scalar_t *b_ptr = b.data_ptr<scalar_t>();
+  const scalar_t *a_ptr = a.const_data_ptr<scalar_t>();
+  const scalar_t *b_ptr = b.const_data_ptr<scalar_t>();
   scalar_t *r_ptr = result.data_ptr<scalar_t>();
 
   parallel_for(0, total, internal::GRAIN_SIZE, [&](int64_t s, int64_t e) {

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 
 __all__ = [
@@ -44,7 +45,7 @@ class LSTM(torch.ao.nn.quantizable.LSTM):
 
     @classmethod
     def from_observed(cls, other):
-        assert type(other) == cls._FLOAT_MODULE
+        assert type(other) == cls._FLOAT_MODULE  # type: ignore[has-type]
         converted = torch.ao.quantization.convert(other, inplace=False,
                                                   remove_qconfig=True)
         converted.__class__ = cls

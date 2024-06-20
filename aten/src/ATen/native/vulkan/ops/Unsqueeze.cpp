@@ -16,8 +16,8 @@ struct Block final {
 
 Tensor unsqueeze(const at::Tensor& self, int64_t dim) {
   TORCH_CHECK(
-      self.dim() >= 1 || self.dim() <= 3,
-      "Vulkan unsqueeze supports 1d, 2d, 3d tensors as input!");
+      self.dim() <= 3,
+      "Vulkan unsqueeze only supports up to 3d tensors as input!");
   TORCH_CHECK(
       dim >= -self.dim() - 1 && dim <= self.dim(),
       "Vulkan unsqueeze dimension out of range expected to be in range of [",

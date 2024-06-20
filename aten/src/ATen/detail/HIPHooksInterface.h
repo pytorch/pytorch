@@ -6,7 +6,6 @@
 
 #include <c10/util/Registry.h>
 
-#include <cstddef>
 #include <memory>
 
 namespace at {
@@ -38,7 +37,7 @@ struct TORCH_API HIPHooksInterface {
     return false;
   }
 
-  virtual int64_t current_device() const {
+  virtual c10::DeviceIndex current_device() const {
     return -1;
   }
 

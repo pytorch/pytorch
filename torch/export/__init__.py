@@ -22,7 +22,6 @@ from typing import (
 )
 
 import torch
-import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
 from torch.fx._compatibility import compatibility
 
@@ -59,15 +58,13 @@ __all__ = [
     "unflatten",
     "FlatArgsAdapter",
     "UnflattenedModule",
-    "WrapperModule",
 ]
 
 
-from .dynamic_shapes import Constraint, Dim, dims, dynamic_dim
+from .dynamic_shapes import Constraint, Dim, dims, dynamic_dim, ShapesCollection
 from .exported_program import ExportedProgram, ModuleCallEntry, ModuleCallSignature
 from .graph_signature import ExportBackwardSignature, ExportGraphSignature
 from .unflatten import FlatArgsAdapter, unflatten, UnflattenedModule
-from .wrapper import WrapperModule
 
 
 PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
@@ -78,8 +75,7 @@ def export(
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
     *,
-    constraints: Optional[List[Constraint]] = None,
-    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
+    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
     strict: bool = True,
     preserve_module_call_signature: Tuple[str, ...] = (),
 ) -> ExportedProgram:
@@ -130,16 +126,8 @@ def export(
 
         kwargs: Optional example keyword inputs.
 
-        constraints: [DEPRECATED: use ``dynamic_shapes`` instead, see below]
-         An optional list of constraints on the dynamic arguments
-         that specify their possible range of shapes. By default, shapes of
-         input torch.Tensors are assumed to be static. If an input torch.Tensor
-         is expected to have dynamic shapes, please use :func:`dynamic_dim`
-         to define :class:`Constraint` objects that specify the dynamics and the possible
-         range of shapes. See :func:`dynamic_dim` docstring for examples on
-         how to use it.
-
-        dynamic_shapes: Should either be:
+        dynamic_shapes:
+         An optional argument where the type should either be:
          1) a dict from argument names of ``f`` to their dynamic shape specifications,
          2) a tuple that specifies dynamic shape specifications for each input in original order.
          If you are specifying dynamism on keyword args, you will need to pass them in the order that
@@ -177,31 +165,20 @@ def export(
 
     """
     from ._trace import _export
-    from .dynamic_shapes import _process_dynamic_shapes
 
     if not isinstance(mod, torch.nn.Module):
         raise ValueError(
             f"Expected `mod` to be an instance of `torch.nn.Module`, got {type(mod)}."
         )
 
-    if constraints is not None:
-        warnings.warn(
-            "Using `constraints` to specify dynamic shapes for export is DEPRECATED "
-            "and will not be supported in the future. "
-            "Please use `dynamic_shapes` instead (see docs on `torch.export.export`).",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-    else:
-        constraints = _process_dynamic_shapes(mod, args, kwargs, dynamic_shapes)
-
     return _export(
         mod,
         args,
         kwargs,
-        constraints,
+        dynamic_shapes,
         strict=strict,
         preserve_module_call_signature=preserve_module_call_signature,
+        pre_dispatch=True,
     )
 
 
@@ -258,6 +235,11 @@ def save(
 
     """
     from torch._export import save
+
+    if not isinstance(ep, ExportedProgram):
+        raise TypeError(
+            f"The 'ep' parameter must be an instance of 'ExportedProgram', got '{type(ep).__name__}' instead."
+        )
 
     save(ep, f, extra_files=extra_files, opset_version=opset_version)
 
@@ -320,12 +302,19 @@ def load(
     )
 
 
-def register_dataclass(cls: Type[Any]) -> None:
+def register_dataclass(
+    cls: Type[Any],
+    *,
+    serialized_type_name: Optional[str] = None,
+) -> None:
     """
     Registers a dataclass as a valid input/output type for :func:`torch.export.export`.
 
     Args:
         cls: the dataclass type to register
+        serialized_type_name: The serialized name for the dataclass. This is
+        required if you want to serialize the pytree TreeSpec containing this
+        dataclass.
 
     Example::
 
@@ -351,4 +340,6 @@ def register_dataclass(cls: Type[Any]) -> None:
 
     from torch._export.utils import register_dataclass_as_pytree_node
 
-    return register_dataclass_as_pytree_node(cls)
+    return register_dataclass_as_pytree_node(
+        cls, serialized_type_name=serialized_type_name
+    )

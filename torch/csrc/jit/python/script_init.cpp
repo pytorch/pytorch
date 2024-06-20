@@ -50,6 +50,7 @@
 #include <torch/csrc/jit/runtime/logging.h>
 #include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <torch/csrc/jit/serialization/import_source.h>
+#include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/csrc/jit/serialization/python_print.h>
 #include <torch/csrc/jit/testing/hooks_for_testing.h>
 
@@ -73,6 +74,8 @@
 #include <tuple>
 #include <utility>
 #include <vector>
+
+#include <fmt/format.h>
 
 namespace torch::jit {
 
@@ -204,7 +207,7 @@ void checkOverloadDecl(const Decl& new_decl, const Decl& old_decl) {
   }
 }
 
-c10::optional<IValue> tryCalculateDefaultParam(
+std::optional<IValue> tryCalculateDefaultParam(
     const Argument& arg,
     const py::object& def_value) {
   auto n = arg.N();
@@ -284,7 +287,7 @@ FunctionSchema getSchemaWithNameAndDefaults(
     auto it = default_args.find(arg.name());
     if (it != default_args.end()) {
       checkMutableFunctionDefault(range, arg, it->second);
-      c10::optional<IValue> value = tryCalculateDefaultParam(arg, it->second);
+      std::optional<IValue> value = tryCalculateDefaultParam(arg, it->second);
       if (!value) {
         ErrorReport error(range);
         error << "Expected a default value of type " << arg.type()->repr_str()
@@ -665,13 +668,13 @@ static constexpr std::array<const char*, 48> magic_method_names = {
 };
 
 struct DeepCopyMemoTable {
-  std::shared_ptr<IValue::HashAliasedIValueMap> map;
+  std::shared_ptr<IValue::HashIdentityIValueMap> map;
 };
 
 IValue pyIValueDeepcopy(const IValue& ivalue, const py::dict& memo) {
   if (!memo.contains(py::str("__torch_script_memo_table"))) {
     memo["__torch_script_memo_table"] =
-        DeepCopyMemoTable{std::make_shared<IValue::HashAliasedIValueMap>()};
+        DeepCopyMemoTable{std::make_shared<IValue::HashIdentityIValueMap>()};
   }
   auto& ivalue_memo =
       *py::cast<DeepCopyMemoTable>(memo["__torch_script_memo_table"]).map;
@@ -878,9 +881,7 @@ void initJitScriptBindings(PyObject* module) {
               },
               [](const std::tuple<py::object, std::string>& state_tup)
                   -> Object {
-                py::object state;
-                std::string qualname;
-                std::tie(state, qualname) = state_tup;
+                auto [state, qualname] = state_tup;
                 auto class_type = getCustomClass(qualname);
                 TORCH_CHECK(
                     class_type,
@@ -973,10 +974,11 @@ void initJitScriptBindings(PyObject* module) {
           [mm_name](const Object& self, py::args args, py::kwargs kwargs) {
             auto method = self.find_method(mm_name);
             if (!method) {
-              throw c10::NotImplementedError(
-                  "'%s' is not implemented for %s",
+              std::string msg = fmt::format(
+                  "'{}' is not implemented for {}",
                   mm_name,
-                  self.type()->str().c_str());
+                  self.type()->str());
+              throw c10::NotImplementedError(msg);
             }
             return invokeScriptMethodFromPython(
                 *method,
@@ -1367,10 +1369,10 @@ void initJitScriptBindings(PyObject* module) {
           [](std::shared_ptr<CompilationUnit> self, const std::string& name) {
             auto fn = self->find_function(QualifiedName(name));
             if (fn) {
-              return c10::optional<StrongFunctionPtr>(
+              return std::optional<StrongFunctionPtr>(
                   StrongFunctionPtr(std::move(self), fn));
             } else {
-              return c10::optional<StrongFunctionPtr>(c10::nullopt);
+              return std::optional<StrongFunctionPtr>(c10::nullopt);
             }
           })
       .def(
@@ -1597,7 +1599,10 @@ void initJitScriptBindings(PyObject* module) {
             }
             return std::make_tuple(pp.str(), consts);
           })
-      .def_property_readonly("owner", &Method::owner);
+      .def_property_readonly("owner", &Method::owner)
+      .def_property_readonly("raw_owner", [](const Method& self) {
+        return Object(self.raw_owner());
+      });
   m.def("_generate_upgraders_graph", &generate_upgraders_graph);
   m.def(
       "_calculate_package_version_based_on_upgraders",
@@ -1847,7 +1852,7 @@ void initJitScriptBindings(PyObject* module) {
          py::object map_location,
          const py::dict& extra_files,
          bool restore_shapes = false) {
-        c10::optional<at::Device> optional_device;
+        std::optional<at::Device> optional_device;
         if (!map_location.is_none()) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
           optional_device =
@@ -1872,7 +1877,7 @@ void initJitScriptBindings(PyObject* module) {
              storage_context,
          py::object map_location,
          std::string ts_id) {
-        c10::optional<at::Device> optional_device;
+        std::optional<at::Device> optional_device;
         if (!map_location.is_none()) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
           optional_device =
@@ -1893,7 +1898,7 @@ void initJitScriptBindings(PyObject* module) {
          const py::dict& extra_files,
          bool restore_shapes = false) {
         std::istringstream in(buffer);
-        c10::optional<at::Device> optional_device;
+        std::optional<at::Device> optional_device;
         if (!map_location.is_none()) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
           optional_device =
@@ -1913,7 +1918,7 @@ void initJitScriptBindings(PyObject* module) {
   m.def(
       "_load_for_lite_interpreter",
       [](const std::string& filename, py::object map_location) {
-        c10::optional<at::Device> optional_device;
+        std::optional<at::Device> optional_device;
         if (!map_location.is_none()) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
           optional_device =
@@ -1925,7 +1930,7 @@ void initJitScriptBindings(PyObject* module) {
       "_load_for_lite_interpreter_from_buffer",
       [](const std::string& buffer, py::object map_location) {
         std::istringstream in(buffer);
-        c10::optional<at::Device> optional_device;
+        std::optional<at::Device> optional_device;
         if (!map_location.is_none()) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
           optional_device =
@@ -1970,7 +1975,7 @@ void initJitScriptBindings(PyObject* module) {
   m.def(
       "_get_model_extra_files",
       [](const std::string& filename, const py::dict& py_extra_files) {
-        c10::optional<at::Device> optional_device;
+        std::optional<at::Device> optional_device;
         ExtraFilesMap cpp_extra_files = ExtraFilesMap();
         _load_for_mobile(filename, optional_device, cpp_extra_files);
         extra_files_to_python(cpp_extra_files, py_extra_files);
@@ -1985,7 +1990,7 @@ void initJitScriptBindings(PyObject* module) {
   m.def(
       "_get_model_extra_files_from_buffer",
       [](const std::string& buffer, const py::dict& py_extra_files) {
-        c10::optional<at::Device> optional_device;
+        std::optional<at::Device> optional_device;
         ExtraFilesMap cpp_extra_files = ExtraFilesMap();
         std::istringstream in(buffer);
         _load_for_mobile(in, optional_device, cpp_extra_files);
@@ -2119,7 +2124,7 @@ void initJitScriptBindings(PyObject* module) {
 
   m.def(
       "_get_graph_executor_optimize",
-      [](c10::optional<bool> new_setting = c10::nullopt) {
+      [](std::optional<bool> new_setting = c10::nullopt) {
         bool old_value = getGraphExecutorOptimize();
         if (new_setting) {
           setGraphExecutorOptimize(*new_setting);
@@ -2441,6 +2446,11 @@ void initJitScriptBindings(PyObject* module) {
     result["type_names"] = minfo.type_names;
     result["opname_to_num_args"] = minfo.opname_to_num_args;
     return result;
+  });
+
+  m.def("_pickle_save", [](IValue v) {
+    auto bytes = torch::jit::pickle_save(std::move(v));
+    return py::bytes(bytes.data(), bytes.size());
   });
 
   initScriptDictBindings(module);

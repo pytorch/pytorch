@@ -1,12 +1,14 @@
+# mypy: allow-untyped-defs
 import logging
 import os
-from typing import Any, Dict, List
+from typing import Any, List
 
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 
 from .. import config
 from ..codecache import PyCodeCache, TritonFuture
-from ..utils import cache_on_self, do_bench
+from ..runtime.runtime_utils import do_bench_gpu
+from ..utils import cache_on_self
 from ..virtualized import V
 from .common import TensorArg
 
@@ -14,22 +16,29 @@ log = logging.getLogger(__name__)
 
 
 def get_kernel_argdefs(kernel):
-    arg_defs, _, _ = kernel.args.python_argdefs()
+    arg_defs, _, _, _ = kernel.args.python_argdefs()
     return arg_defs
 
 
+def _get_all_args(args_list, arg_types_list=None):
+    all_args = max(args_list, key=len)[:]
+    arg_types = max(arg_types_list, key=len)[:] if arg_types_list is not None else None
+    for args in args_list:
+        assert set(args).issubset(set(all_args)), f"{args} v.s. {all_args}"
+
+    return all_args, arg_types
+
+
 def get_all_kernel_argdefs(kernels):
+    """
+    The logic here must match with `get_all_call_args`, except no need to get arg_types here
+    """
     argdefs_list = [get_kernel_argdefs(kernel) for kernel in kernels]
-    all_argdefs: Dict[
-        Any, None
-    ] = {}  # use a dict rather than set to maintain insertion order
-    for argdefs in argdefs_list:
-        all_argdefs.update({arg: None for arg in argdefs})
 
-    return list(all_argdefs.keys())
+    return _get_all_args(argdefs_list)[0]
 
 
-def get_all_call_args(call_args_list):
+def get_all_call_args(call_args_list, arg_types_list):
     """
     Passed in the call_args for each subkernel and return the call_args for the
     combined multi-kernel.
@@ -47,15 +56,10 @@ def get_all_call_args(call_args_list):
     It will fail if any kernel has the same argument passed in multiple times.
     Check test_pass_same_arg_multi_times in test_multi_kernel.py
 
-    Instead, we pick the longest call args and assert that otehr call args are
+    Instead, we pick the longest call args and assert that other call args are
     a subset of it.
     """
-    all_call_args = max(call_args_list, key=len)[:]
-    for call_args in call_args_list:
-        assert set(call_args).issubset(
-            set(all_call_args)
-        ), f"{call_args} v.s. {all_call_args}"
-    return all_call_args
+    return _get_all_args(call_args_list, arg_types_list)
 
 
 def get_numel_argdefs(kernel):
@@ -101,6 +105,11 @@ class MultiKernelState:
         multi_kernel_name = f"multi_kernel_{len(self.subkernel_to_kernel_name)}"
         self.subkernel_to_kernel_name[kernel_names] = multi_kernel_name
 
+        if V.graph.cpp_wrapper:
+            # we should not generate any python code for multi-kernel during
+            # the second pass of cpp-wrapper.
+            return multi_kernel_name
+
         wrapper = V.graph.wrapper_code
 
         kernel_call_def_code = "\n".join(
@@ -121,7 +130,7 @@ class MultiKernelState:
         )
 
         # add subkernel src code hashes to the multi-kernel source code so changing a
-        # subkernel implementation will result in a differnt py file for
+        # subkernel implementation will result in a different py file for
         # multi-kernel. This makes cache implementation straightforward since
         # we can decide cache file name based on multi-kernel py file name
         # directly.
@@ -141,7 +150,7 @@ def run(multi_kernel_call, {', '.join(get_all_kernel_argdefs(kernels))}, {', '.j
         """  # noqa: B950 line too long
         wrapper.header.splice(
             f"""
-        {multi_kernel_name} = async_compile.multi_kernel([
+        {multi_kernel_name} = async_compile.multi_kernel({multi_kernel_name!r}, [
             {", ".join(kernel_names)},
         ],
             '''
@@ -189,34 +198,50 @@ class MultiKernel:
         for the multi-kernel.
         """
         assert kernel_name == self.kernel_name
-        call_args_list = [kernel.get_call_args() for kernel in self.kernels]
+        call_args_list, arg_types = zip(
+            *[kernel.get_call_args() for kernel in self.kernels]
+        )
+        call_args_list = list(call_args_list)
+        arg_types_list = list(arg_types)
 
-        all_call_args = get_all_call_args(call_args_list)
+        all_call_args, arg_types = get_all_call_args(call_args_list, arg_types_list)
         grid: List[Any] = []
+
+        if V.graph.cpp_wrapper:
+            # for the second pass of cpp-wrapper codegen, we should call
+            # the fast kernel directly
+            picked_kernel = MultiKernelCall.lookup_choice(kernel_name)
+            kernel_name = self.kernels[picked_kernel].kernel_name
+            final_call_args = call_args_list[picked_kernel]
+            arg_types = arg_types_list[picked_kernel]
+        else:
+            final_call_args = all_call_args
 
         # numels for all subkernels should be the same. Use kernels[0] here
         self.kernels[0].add_numel_to_call_args_and_grid(
-            kernel_name, all_call_args, grid
+            kernel_name, final_call_args, arg_types, grid
         )
-        grid = V.graph.wrapper_code.generate_default_grid(kernel_name, grid)
 
+        grid = V.graph.wrapper_code.generate_default_grid(kernel_name, grid)
+        current_device = V.graph.scheduler.get_current_device_or_throw()
         V.graph.wrapper_code.generate_kernel_call(
-            self.kernel_name,
-            all_call_args,
+            kernel_name,
+            final_call_args,
             grid,
-            V.graph.scheduler.current_device.index,
+            current_device.index,
+            arg_types=arg_types,
         )
 
     def codegen_nan_check(self):
         wrapper = V.graph.wrapper_code
         seen = set()
         for k in self.kernels:
-            _, call_args, arg_types = k.args.python_argdefs()
-            for arg, arg_type in zip(call_args, arg_types):
+            _, call_args, precompile_args, _ = k.args.python_argdefs()
+            for arg, precompile_arg in zip(call_args, precompile_args):
                 if arg in seen:
                     continue
                 seen.add(arg)
-                if isinstance(arg_type, TensorArg):
+                if isinstance(precompile_arg, TensorArg):
                     line = f"assert not {arg}.isnan().any().item()"
                     wrapper.writeline(line)
                     line = f"assert not {arg}.isinf().any().item()"
@@ -249,9 +274,10 @@ class MultiKernelCall:
     This class is called at run time to actually run the kernel
     """
 
-    def __init__(self, kernels, src_code):
+    def __init__(self, multi_kernel_name, kernels, src_code):
         assert len(kernels) >= 2
         self._kernels = kernels
+        self.multi_kernel_name = multi_kernel_name
 
         self._run = PyCodeCache.load(src_code).run
         self.disable_cache = os.environ.get(
@@ -266,6 +292,8 @@ class MultiKernelCall:
             self.picked_kernel = picked_by_config
         elif not self.disable_cache:
             self.load_cache()
+
+        self._recorded = False
 
     def cache_file_path(self):
         py_file_path = self._run.__globals__["__file__"]
@@ -319,9 +347,42 @@ class MultiKernelCall:
         be picked.
         """
         return [
-            do_bench(lambda: kernel_call(True), rep=40, fast_flush=True)
+            do_bench_gpu(lambda: kernel_call(True), rep=40, fast_flush=True)
             for kernel_call in kernel_calls
         ]
+
+    # record_choice and lookup_choice are helper functions for cpp-wrapper
+    # codegen. The first pass use record_choice to keep the choice and
+    # the second pass do lookup by calling lookup_choice.
+    #
+    # An alternative that reused the multi-kernel cache does not work well
+    # since during codegen of the second pass, it's very hard to know the
+    # path for the cache file. Also reading the cache file need do some IO
+    # which can be slower.
+    @staticmethod
+    def record_choice(multi_kernel_name, choice):
+        """
+        Record the multi-kernel choice for cpp-wrapper first pass codegen
+        for the second pass.
+
+        We should do nothing if this function is not called during codegen.
+        """
+        from torch._inductor.graph import GraphLowering
+
+        if not isinstance(V.graph, GraphLowering):
+            return
+
+        if not V.graph.record_multi_kernel_choice:
+            return
+
+        V.graph.multi_kernel_to_choice[multi_kernel_name] = choice
+
+    @staticmethod
+    def lookup_choice(multi_kernel_name):
+        # this should always been done during cpp-wrapper codegen
+        assert V.graph.record_multi_kernel_choice
+        # there should be no miss
+        return V.graph.multi_kernel_to_choice[multi_kernel_name]
 
     def run_with_argless_kernels(self, kernel_calls):
         if self.picked_kernel is None:
@@ -351,6 +412,11 @@ class MultiKernelCall:
                     "speedup": timings[1] / timings[0],
                 }
             )
+
             if not self.disable_cache:
                 self.store_cache()
+
+        if not self._recorded:
+            self._recorded = True
+            self.record_choice(self.multi_kernel_name, self.picked_kernel)
         kernel_calls[self.picked_kernel]()

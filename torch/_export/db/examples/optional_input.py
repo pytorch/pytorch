@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 
 from torch._export.db.case import export_case, SupportLevel
@@ -13,7 +14,7 @@ class OptionalInput(torch.nn.Module):
     Tracing through optional input is not supported yet
     """
 
-    def forward(self, x, y=torch.ones(2, 3)):
+    def forward(self, x, y=torch.randn(2, 3)):
         if y is not None:
             return x + y
         return x

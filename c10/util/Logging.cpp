@@ -1,8 +1,13 @@
 #include <c10/util/Backtrace.h>
 #include <c10/util/Flags.h>
+#include <c10/util/Lazy.h>
 #include <c10/util/Logging.h>
 #ifdef FBCODE_CAFFE2
 #include <folly/synchronization/SanitizeThread.h>
+#endif
+
+#ifndef _WIN32
+#include <sys/time.h>
 #endif
 
 #include <algorithm>
@@ -20,16 +25,22 @@ C10_DEFINE_bool(
 namespace c10 {
 
 namespace {
-std::function<string()>* GetFetchStackTrace() {
-  static std::function<string()> func = []() {
-    return get_backtrace(/*frames_to_skip=*/1);
+std::function<::c10::Backtrace()>& GetFetchStackTrace() {
+  static std::function<::c10::Backtrace()> func = []() {
+    return get_lazy_backtrace(/*frames_to_skip=*/1);
   };
-  return &func;
-};
+  return func;
+}
 } // namespace
 
-void SetStackTraceFetcher(std::function<string(void)> fetcher) {
-  *GetFetchStackTrace() = std::move(fetcher);
+void SetStackTraceFetcher(std::function<::c10::Backtrace()> fetcher) {
+  GetFetchStackTrace() = std::move(fetcher);
+}
+
+void SetStackTraceFetcher(std::function<string()> fetcher) {
+  SetStackTraceFetcher([fetcher = std::move(fetcher)] {
+    return std::make_shared<PrecomputedLazyValue<std::string>>(fetcher());
+  });
 }
 
 void ThrowEnforceNotMet(
@@ -38,7 +49,7 @@ void ThrowEnforceNotMet(
     const char* condition,
     const std::string& msg,
     const void* caller) {
-  c10::Error e(file, line, condition, msg, (*GetFetchStackTrace())(), caller);
+  c10::Error e(file, line, condition, msg, GetFetchStackTrace()(), caller);
   if (FLAGS_caffe2_use_fatal_for_enforce) {
     LOG(FATAL) << e.msg();
   }
@@ -61,7 +72,7 @@ void ThrowEnforceFiniteNotMet(
     const std::string& msg,
     const void* caller) {
   throw c10::EnforceFiniteError(
-      file, line, condition, msg, (*GetFetchStackTrace())(), caller);
+      file, line, condition, msg, GetFetchStackTrace()(), caller);
 }
 
 void ThrowEnforceFiniteNotMet(
@@ -72,15 +83,35 @@ void ThrowEnforceFiniteNotMet(
     const void* caller) {
   ThrowEnforceFiniteNotMet(file, line, condition, std::string(msg), caller);
 }
+
+namespace {
+
+class PyTorchStyleBacktrace : public OptimisticLazyValue<std::string> {
+ public:
+  PyTorchStyleBacktrace(SourceLocation source_location)
+      : backtrace_(GetFetchStackTrace()()), source_location_(source_location) {}
+
+ private:
+  std::string compute() const override {
+    return str(
+        "Exception raised from ",
+        source_location_,
+        " (most recent call first):\n",
+        backtrace_->get());
+  }
+
+  ::c10::Backtrace backtrace_;
+  SourceLocation source_location_;
+};
+
+} // namespace
+
 // PyTorch-style error message
 // (This must be defined here for access to GetFetchStackTrace)
 Error::Error(SourceLocation source_location, std::string msg)
     : Error(
           std::move(msg),
-          str("Exception raised from ",
-              source_location,
-              " (most recent call first):\n",
-              (*GetFetchStackTrace())())) {}
+          std::make_shared<PyTorchStyleBacktrace>(source_location)) {}
 
 using APIUsageLoggerType = std::function<void(const std::string&)>;
 using APIUsageMetadataLoggerType = std::function<void(
@@ -103,19 +134,19 @@ APIUsageLoggerType* GetAPIUsageLogger() {
   static APIUsageLoggerType func =
       IsAPIUsageDebugMode() ? &APIUsageDebug : [](const string&) {};
   return &func;
-};
+}
 
 APIUsageMetadataLoggerType* GetAPIUsageMetadataLogger() {
   static APIUsageMetadataLoggerType func =
       [](const std::string&,
          const std::map<std::string, std::string>& metadata_map) {};
   return &func;
-};
+}
 
 DDPUsageLoggerType* GetDDPUsageLogger() {
   static DDPUsageLoggerType func = [](const DDPLoggingData&) {};
   return &func;
-};
+}
 } // namespace
 
 void SetAPIUsageLogger(std::function<void(const std::string&)> logger) {
@@ -351,27 +382,37 @@ MessageLogger::MessageLogger(const char* file, int line, int severity)
 #else // !ANDROID
   tag_ = "";
 #endif // ANDROID
-  /*
-  time_t rawtime;
-  struct tm * timeinfo;
+
+  time_t rawtime = 0;
   time(&rawtime);
-  timeinfo = localtime(&rawtime);
-  std::chrono::nanoseconds ns =
-      std::chrono::duration_cast<std::chrono::nanoseconds>(
-          std::chrono::high_resolution_clock::now().time_since_epoch());
-  */
+
+#ifndef _WIN32
+  struct tm raw_timeinfo = {0};
+  struct tm* timeinfo = &raw_timeinfo;
+  localtime_r(&rawtime, timeinfo);
+#else
+  // is thread safe on Windows
+  struct tm* timeinfo = localtime(&rawtime);
+#endif
+
+#ifndef _WIN32
+  // Get the current nanoseconds since epoch
+  struct timespec ts = {0};
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  long ns = ts.tv_nsec;
+#else
+  long ns = 0;
+#endif
+
   if (GLOBAL_RANK != -1) {
     stream_ << "[rank" << GLOBAL_RANK << "]:";
   }
-  stream_ << "["
-          << CAFFE2_SEVERITY_PREFIX[std::min(4, GLOG_FATAL - severity_)]
-          //<< (timeinfo->tm_mon + 1) * 100 + timeinfo->tm_mday
-          //<< std::setfill('0')
-          //<< " " << std::setw(2) << timeinfo->tm_hour
-          //<< ":" << std::setw(2) << timeinfo->tm_min
-          //<< ":" << std::setw(2) << timeinfo->tm_sec
-          //<< "." << std::setw(9) << ns.count() % 1000000000
-          << " " << c10::detail::StripBasename(std::string(file)) << ":" << line
+  stream_ << "[" << CAFFE2_SEVERITY_PREFIX[std::min(4, GLOG_FATAL - severity_)]
+          << (timeinfo->tm_mon + 1) * 100 + timeinfo->tm_mday
+          << std::setfill('0') << " " << std::setw(2) << timeinfo->tm_hour
+          << ":" << std::setw(2) << timeinfo->tm_min << ":" << std::setw(2)
+          << timeinfo->tm_sec << "." << std::setw(9) << ns << " "
+          << c10::detail::StripBasename(std::string(file)) << ":" << line
           << "] ";
 }
 
@@ -420,8 +461,7 @@ MessageLogger::~MessageLogger() {
 
 #endif // !C10_USE_GLOG
 
-namespace c10 {
-namespace detail {
+namespace c10::detail {
 namespace {
 
 void setLogLevelFlagFromEnv() {
@@ -467,5 +507,4 @@ void setLogLevelFlagFromEnv() {
 }
 
 } // namespace
-} // namespace detail
-} // namespace c10
+} // namespace c10::detail

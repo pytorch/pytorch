@@ -22,12 +22,13 @@
 
 namespace sdp {
 
-constexpr int32_t num_backends = 3;
+constexpr int32_t num_backends = 4;
 enum class SDPBackend {
   error = -1,
   math = 0,
   flash_attention = 1,
-  efficient_attention = 2
+  efficient_attention = 2,
+  cudnn_attention = 3
 };
 
 // Note that if this changed make sure to update
@@ -43,7 +44,7 @@ struct sdp_params {
   at::Tensor query;
   at::Tensor key;
   at::Tensor value;
-  c10::optional<at::Tensor> attn_mask;
+  std::optional<at::Tensor> attn_mask;
   double dropout;
   bool is_causal;
 };
@@ -52,7 +53,7 @@ SDPBackend select_sdp_backend_cpp(sdp_params const& kernel_params);
 
 inline c10::SymFloat calculate_scale(
     const at::Tensor& query,
-    c10::optional<double> scale) {
+    std::optional<double> scale) {
   const auto softmax_scale = scale.has_value()
       ? scale.value()
       : (c10::SymFloat(1.0) / (c10::SymFloat(query.sym_size(-1)).sqrt()));
@@ -265,7 +266,7 @@ inline bool check_requires_grad_and_nested(sdp_params const& params, bool debug)
 inline bool check_for_attn_mask(sdp_params const& params, bool debug) {
   if (params.attn_mask.has_value()) {
     if (debug) {
-      TORCH_WARN("Both fused kernels do not support non-null attn_mask.");
+      TORCH_WARN("Flash Attention does not support non-null attn_mask.");
     }
     return false;
   }

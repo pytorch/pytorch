@@ -18,6 +18,7 @@ time python test/run_test.py --verbose -i distributed/test_c10d_gloo
 time python test/run_test.py --verbose -i distributed/test_c10d_nccl
 time python test/run_test.py --verbose -i distributed/test_c10d_spawn_gloo
 time python test/run_test.py --verbose -i distributed/test_c10d_spawn_nccl
+time python test/run_test.py --verbose -i distributed/test_cuda_p2p
 time python test/run_test.py --verbose -i distributed/test_store
 time python test/run_test.py --verbose -i distributed/test_pg_wrapper
 time python test/run_test.py --verbose -i distributed/rpc/cuda/test_tensorpipe_agent
@@ -34,7 +35,6 @@ time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/test
 # functional collective tests
 time python test/run_test.py --verbose -i distributed/test_functional_api
 
-
 # DTensor tests
 time python test/run_test.py --verbose -i distributed/_tensor/test_random_ops
 time python test/run_test.py --verbose -i distributed/_tensor/test_dtensor_compile
@@ -46,9 +46,17 @@ time python test/run_test.py --verbose -i distributed/test_device_mesh
 time python test/run_test.py --verbose -i distributed/tensor/parallel/test_ddp_2d_parallel
 time python test/run_test.py --verbose -i distributed/tensor/parallel/test_fsdp_2d_parallel
 time python test/run_test.py --verbose -i distributed/tensor/parallel/test_tp_examples
+time python test/run_test.py --verbose -i distributed/tensor/parallel/test_tp_random_state
+
+# FSDP2 tests
+time python test/run_test.py --verbose -i distributed/_composable/fsdp/test_fully_shard_training -- -k test_2d_mlp_with_nd_mesh
+
+# Pipelining composability tests
+time python test/run_test.py --verbose -i distributed/pipelining/test_composability.py
 
 # Other tests
 time python test/run_test.py --verbose -i test_cuda_primary_ctx
-time python test/run_test.py --verbose -i test_optim -- -k optimizers_with_varying_tensors
+time python test/run_test.py --verbose -i test_optim -- -k test_forloop_goes_right_direction_multigpu
+time python test/run_test.py --verbose -i test_optim -- -k test_mixed_device_dtype
 time python test/run_test.py --verbose -i test_foreach -- -k test_tensors_grouping
 assert_git_not_dirty

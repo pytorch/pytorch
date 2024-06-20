@@ -313,30 +313,6 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
             with FSDP.state_dict_type(model, StateDictType.LOCAL_STATE_DICT):
                 optim_state_dict = FSDP.optim_state_dict(model, optim)
 
-        with self.assertLogs(
-            "torch.distributed.fsdp._state_dict_utils", level="WARNING"
-        ) as log:
-            with FSDP.state_dict_type(model, StateDictType.FULL_STATE_DICT):
-                state_dict = model.state_dict()
-                self.assertEqual(len(log.records), 1)
-                self.assertEqual(len(log.output), 1)
-                self.assertIn(
-                    "Found both state_dict_type FULL_STATE_DICT and device_mesh.",
-                    log.output[0],
-                )
-
-        with self.assertLogs(
-            "torch.distributed.fsdp._optim_utils", level="WARNING"
-        ) as log:
-            with FSDP.state_dict_type(model, StateDictType.FULL_STATE_DICT):
-                state_dict = FSDP.optim_state_dict(model, optim)
-                self.assertEqual(len(log.records), 1)
-                self.assertEqual(len(log.output), 1)
-                self.assertIn(
-                    "Found both state_dict_type FULL_STATE_DICT and device_mesh.",
-                    log.output[0],
-                )
-
 
 instantiate_parametrized_tests(TestFSDPWithDeviceMeshAndDTensor)
 if __name__ == "__main__":

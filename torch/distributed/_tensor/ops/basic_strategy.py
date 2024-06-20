@@ -1,12 +1,12 @@
 import itertools
 from dataclasses import dataclass
 
-from typing import List, Tuple
+from typing import List, Set, Tuple
 
-from torch.distributed._tensor.op_schema import OpStrategy, PlacementStrategy
+from torch.distributed._tensor._op_schema import OpStrategy, PlacementStrategy
 from torch.distributed._tensor.placement_types import (
-    _Partial,
     DTensorSpec,
+    Partial,
     Placement,
     Replicate,
     Shard,
@@ -44,10 +44,9 @@ class EinsumDims:
         Parse the dims and extract the contracting, batch, and free dimensions
         for the left and right hand sides.
         """
-        dim_char_set = set()
+        dim_char_set: Set[str] = set()
         for input_dim in input_dims:
-            for input_char in list(input_dim):
-                dim_char_set.add(input_char)
+            dim_char_set.update(input_dim)
 
         # get a determinisitc order of all dim chars
         all_dim_chars = sorted(dim_char_set)
@@ -127,7 +126,7 @@ def gen_einsum_strategies(
 
         # split contracting dim
         for contracting_dim in edims.contracting_dims:
-            placement_list = [_Partial()]
+            placement_list = [Partial()]
             for input_dim in input_dims:
                 input_contracting_dim = input_dim.index(contracting_dim)
                 placement_list.append(Shard(input_contracting_dim))
@@ -158,9 +157,9 @@ def gen_einsum_strategies(
 
         # linearity strategy
         if linearity:
-            linearity_placement_list: List[Placement] = [_Partial()]
+            linearity_placement_list: List[Placement] = [Partial()]
             for input_dim in input_dims:
-                linearity_placement_list.append(_Partial())
+                linearity_placement_list.append(Partial())
             mesh_dim_strategies.append(linearity_placement_list)
 
         all_mesh_dim_strategies.append(mesh_dim_strategies)
@@ -178,7 +177,7 @@ def gen_einsum_strategies(
         spec_list = []
         for specs in zip(*strategy_comb):
             spec_list.append(DTensorSpec(mesh, tuple(specs)))
-        strat = PlacementStrategy(output_spec=spec_list[0], input_specs=spec_list[1:])
+        strat = PlacementStrategy(output_specs=spec_list[0], input_specs=spec_list[1:])
         all_strategies.append(strat)
 
     return OpStrategy(all_strategies)

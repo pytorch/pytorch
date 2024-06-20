@@ -62,7 +62,7 @@ struct FusedSgdMathFunctor {
       depth == 2 || depth == 3,
       "depth of 2 for SGD w/ momentum == 0, 3 for SGD w/ momentum != 0");
   C10_DEVICE __forceinline__ void operator()(
-      int chunk_size,
+      const int chunk_size,
       TensorListMetadata<depth>& tl,
       const double weight_decay,
       const double momentum,
@@ -77,22 +77,17 @@ struct FusedSgdMathFunctor {
     if (found_inf_ptr && *found_inf_ptr == 1) {
       return;
     }
-    auto tensor_loc = tl.block_to_tensor[blockIdx.x];
-    auto chunk_idx = tl.block_to_chunk[blockIdx.x];
-    auto n = tl.numel_for_tensor[tensor_loc];
+    const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
+    const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
 
     scalar_t* args[depth];
     scalar_t r_args[depth][kILP];
     const auto all_aligned{
         init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc)};
-    n -= chunk_idx * chunk_size;
+    const auto n = tl.numel_for_tensor[tensor_loc] - chunk_idx * chunk_size;
 
-#ifndef USE_ROCM
     const auto use_faster_load_store =
         (n % kILP == 0) && (chunk_size % kILP == 0) && all_aligned;
-#else
-    const auto use_faster_load_store{false};
-#endif
     if (use_faster_load_store) {
       for (auto i_start = threadIdx.x;
            i_start * kILP < n && i_start * kILP < chunk_size;
@@ -158,8 +153,8 @@ void _fused_sgd_with_momentum_kernel_cuda_(
     const bool nesterov,
     const bool maximize,
     const bool is_first_step,
-    const c10::optional<at::Tensor>& grad_scale,
-    const c10::optional<at::Tensor>& found_inf) {
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf) {
   TORCH_CHECK_GT(momentum, 0);
   TORCH_CHECK(at::native::check_fast_path_restrictions(
       {params, grads, momentum_buffer_list}));
@@ -204,8 +199,8 @@ void _fused_sgd_with_momentum_kernel_cuda_(
     const bool nesterov,
     const bool maximize,
     const bool is_first_step,
-    const c10::optional<at::Tensor>& grad_scale,
-    const c10::optional<at::Tensor>& found_inf) {
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf) {
   if (lr.is_cpu()) {
     _fused_sgd_with_momentum_kernel_cuda_(
         params,
@@ -280,8 +275,8 @@ void _fused_sgd_kernel_cuda_(
     const bool nesterov,
     const bool maximize,
     const bool is_first_step,
-    const c10::optional<at::Tensor>& grad_scale,
-    const c10::optional<at::Tensor>& found_inf) {
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf) {
   if (!momentum_buffer_list.empty()) {
     _fused_sgd_with_momentum_kernel_cuda_(
         params,
@@ -344,8 +339,8 @@ void _fused_sgd_kernel_cuda_(
     const bool nesterov,
     const bool maximize,
     const bool is_first_step,
-    const c10::optional<at::Tensor>& grad_scale,
-    const c10::optional<at::Tensor>& found_inf) {
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf) {
   if (!momentum_buffer_list.empty()) {
     _fused_sgd_with_momentum_kernel_cuda_(
         params,

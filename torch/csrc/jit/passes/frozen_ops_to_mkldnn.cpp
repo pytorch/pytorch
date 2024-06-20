@@ -300,8 +300,7 @@ void MKLDNNLayerNormOp(Stack& stack, bool inplace) {
   auto shape = pop(stack).toDimVector();
   auto input = pop(stack).toTensor();
 
-  at::Tensor dst, mean, rstd;
-  std::tie(dst, mean, rstd) =
+  auto [dst, mean, rstd] =
       at::native::mkldnn_layer_norm_last_index_weight_bias_f32(
           input, shape, weight, bias, eps, inplace);
   push(stack, dst);
@@ -1100,7 +1099,7 @@ class MKLDNNSubgraphSlicer {
 
   // Try to merge `consumer` into `producer`. If successful, this destroys
   // `consumer` and returns the `producer` group.
-  c10::optional<Node*> tryMerge(Node* producer, Node* consumer) {
+  std::optional<Node*> tryMerge(Node* producer, Node* consumer) {
     AT_ASSERT(producer->kind() == prim::MKLDNNGroup);
     bool canMerge = shouldConsiderForMerge(consumer) &&
         aliasDb_.moveAfterTopologicallyValid(consumer, producer);

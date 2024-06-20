@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import operator
 from typing import Dict, List
 
@@ -7,7 +9,7 @@ from torch._dynamo.source import GetItemSource
 from .. import variables
 from ..exc import unimplemented, UserError, UserErrorType
 from ..guards import GuardBuilder, install_guard
-from ..utils import istype, np
+from ..utils import common_constant_types, istype, np
 from .base import typestr, VariableTracker
 
 _type_to_assert_reason = {
@@ -37,7 +39,7 @@ class ConstantVariable(VariableTracker):
                 assert not isinstance(value, disallowed_type), reason
 
         # Routing for list and tuple literals.
-        if is_literal and isinstance(value, (list, tuple)):
+        if is_literal and isinstance(value, (list, tuple, set, frozenset)):
             items = []
             for i, x in enumerate(value):
                 item_source = GetItemSource(source, i) if source else None
@@ -49,7 +51,11 @@ class ConstantVariable(VariableTracker):
                         source=item_source,
                     )
                 )
-            return variables.BaseListVariable.cls_for(type(value))(items, **kwargs)
+            if isinstance(value, (list, tuple)):
+                return variables.BaseListVariable.cls_for(type(value))(items, **kwargs)
+            else:
+                assert isinstance(value, (set, frozenset)), type(value)
+                return variables.SetVariable(items)
 
         return ConstantVariable(value, **kwargs)
 
@@ -71,14 +77,16 @@ class ConstantVariable(VariableTracker):
         return self.value
 
     def __str__(self):
-        # return f"ConstantVariable({self.value})"
-        return f"ConstantVariable({type(self.value).__name__})"
+        return f"ConstantVariable({type(self.value).__name__}: {repr(self.value)})"
 
     def python_type(self):
         return type(self.value)
 
     def as_python_constant(self):
         return self.value
+
+    def is_python_constant(self):
+        return True
 
     @property
     def items(self):
@@ -95,16 +103,7 @@ class ConstantVariable(VariableTracker):
 
     @staticmethod
     def is_literal(obj):
-        if type(obj) in (
-            int,
-            float,
-            bool,
-            type(None),
-            str,
-            Ellipsis.__class__,
-            torch.dtype,
-            torch.device,
-        ):
+        if type(obj) in common_constant_types:
             return True
         # The structure within is_literal get routed to variables.BaseListVariable
         if type(obj) in (list, tuple, set, frozenset, torch.Size):
@@ -127,7 +126,7 @@ class ConstantVariable(VariableTracker):
             )
         member = getattr(self.value, name)
         if callable(member):
-            raise NotImplementedError()
+            raise NotImplementedError
         return member
 
     def call_method(
@@ -202,6 +201,14 @@ class EnumVariable(VariableTracker):
         super().__init__(**kwargs)
         self.value = value
 
+    @classmethod
+    def create(cls, cls_type, value_vt, options):
+        if isinstance(value_vt, variables.ConstantVariable):
+            for member in list(cls_type):
+                if member.value == value_vt.as_python_constant():
+                    return cls(member, **options)
+        unimplemented("Enum variable is constructed with non constant values")
+
     def as_proxy(self):
         return self.value
 
@@ -217,5 +224,5 @@ class EnumVariable(VariableTracker):
     def const_getattr(self, tx, name):
         member = getattr(self.value, name)
         if callable(member):
-            raise NotImplementedError()
+            raise NotImplementedError
         return member

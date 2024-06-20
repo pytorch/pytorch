@@ -54,7 +54,14 @@ DEFAULT_KERNEL_NAMESPACE = "at::native"
 
 # NOTE: Keep the list in sync with `DispatchKey` in c10/core/DispatchKey.h
 BACKEND_COMPONENTS = "CPU CUDA HIP XLA MTIA MPS IPU XPU HPU VE Lazy Meta PrivateUse1 PrivateUse2 PrivateUse3".split()
-FUNCTIONALITY_KEYS = ["", "Quantized", "Sparse", "NestedTensor", "Autograd"]
+FUNCTIONALITY_KEYS = [
+    "",
+    "Quantized",
+    "Sparse",
+    "SparseCsr",
+    "NestedTensor",
+    "Autograd",
+]
 
 # This list guards dispatches that can be used in derivatives.yaml
 # For now we omit AutogradFunctionality and AutogradOther
@@ -72,7 +79,7 @@ class DispatchKey(Enum):
     CatchAll = Undefined
 
     FPGA = auto()
-    ORT = auto()
+    MAIA = auto()
     Vulkan = auto()
     Metal = auto()
     MKLDNN = auto()
@@ -82,12 +89,13 @@ class DispatchKey(Enum):
     CustomRNGKeyId = auto()
     MkldnnCPU = auto()
     Sparse = auto()
-    SparseCsrCPU = auto()
-    SparseCsrCUDA = auto()
+    SparseCsr = auto()
     NestedTensor = auto()
     Dense = auto()
 
+    PythonTLSSnapshot = auto()
     PreDispatch = auto()
+    PythonDispatcher = auto()
     Python = auto()
     FuncTorchDynamicLayerBackMode = auto()
     ZeroTensor = auto()
@@ -100,6 +108,8 @@ class DispatchKey(Enum):
     AutogradNestedTensor = auto()
     Tracer = auto()
     Autocast = auto()
+    AutocastCPU = auto()
+    AutocastCUDA = auto()
     Batched = auto()
     VmapMode = auto()
     FuncTorchGradWrapper = auto()
@@ -165,6 +175,21 @@ class DispatchKey(Enum):
     SparsePrivateUse1 = auto()
     SparsePrivateUse2 = auto()
     SparsePrivateUse3 = auto()
+    SparseCsrCPU = auto()
+    SparseCsrCUDA = auto()
+    SparseCsrHIP = auto()
+    SparseCsrXLA = auto()
+    SparseCsrMTIA = auto()
+    SparseCsrMPS = auto()
+    SparseCsrIPU = auto()
+    SparseCsrXPU = auto()
+    SparseCsrHPU = auto()
+    SparseCsrVE = auto()
+    SparseCsrLazy = auto()
+    SparseCsrMeta = auto()
+    SparseCsrPrivateUse1 = auto()
+    SparseCsrPrivateUse2 = auto()
+    SparseCsrPrivateUse3 = auto()
     NestedTensorCPU = auto()
     NestedTensorCUDA = auto()
     NestedTensorHIP = auto()
@@ -260,6 +285,7 @@ dispatch_keys = [
     # kernels
     DispatchKey.Meta,
     DispatchKey.SparseMeta,
+    DispatchKey.SparseCsrMeta,
     DispatchKey.QuantizedMeta,
     DispatchKey.NestedTensorMeta,
     DispatchKey.ZeroTensor,
@@ -600,6 +626,9 @@ class NativeFunction:
         assert device_check_s is None or isinstance(
             device_check_s, str
         ), f"not a str: {device_check_s}"
+        assert (
+            device_check_s is None or device_check_s in DeviceCheckType.__members__
+        ), f"illegal device_check: {device_check_s}"
         device_check: DeviceCheckType
         if device_check_s is None:
             device_check = DeviceCheckType.ExactSame
@@ -680,7 +709,12 @@ class NativeFunction:
             for ks, v in raw_dispatch.items():
                 if ks == "__line__":
                     continue  # not worth tracking line numbers for dispatch entries
-                assert isinstance(ks, str), e
+                assert isinstance(
+                    ks, str
+                ), f"illegal dispatch key '{ks}' in {raw_dispatch}"
+                assert isinstance(
+                    v, str
+                ), f"illegal dispatch value '{v}' in {raw_dispatch}"
                 for k in ks.split(","):
                     dispatch_key = DispatchKey.parse(k.strip())
                     num_dispatch_keys += 1
@@ -839,16 +873,16 @@ class NativeFunction:
             )
 
         has_composite_implicit_autograd_kernel = (
-            DispatchKey.CompositeImplicitAutograd in dispatch.keys()
+            DispatchKey.CompositeImplicitAutograd in dispatch
         )
         has_composite_implicit_autograd_nested_tensor_kernel = (
-            DispatchKey.CompositeImplicitAutogradNestedTensor in dispatch.keys()
+            DispatchKey.CompositeImplicitAutogradNestedTensor in dispatch
         )
         has_composite_explicit_autograd_kernel = (
-            DispatchKey.CompositeExplicitAutograd in dispatch.keys()
+            DispatchKey.CompositeExplicitAutograd in dispatch
         )
         has_composite_explicit_autograd_non_functional_kernel = (
-            DispatchKey.CompositeExplicitAutogradNonFunctional in dispatch.keys()
+            DispatchKey.CompositeExplicitAutogradNonFunctional in dispatch
         )
 
         # We aren't going to store dispatch metadata inline in NativeFunctions;
@@ -1336,6 +1370,17 @@ class FunctionSchema:
 
     # TODO: Need to handle collisions with argument names at some point
     returns: Tuple["Return", ...]
+
+    @property
+    def is_mutable(self) -> bool:
+        def is_write(arg: "Argument") -> bool:
+            if arg.annotation is None:
+                return False
+            return arg.annotation.is_write
+
+        # Corresponds to torch._C._FunctionSchema.is_mutable
+        # See aten/src/ATen/core/function_schema.h (keep these in sync)
+        return any(is_write(a) for a in self.arguments.flat_all)
 
     def schema_order_arguments(self) -> Iterator["Argument"]:
         return itertools.chain(
@@ -1961,12 +2006,20 @@ class Argument:
     # model will have to change!
     annotation: Optional[Annotation]
 
+    @property
+    def alias_info(self) -> Optional[Annotation]:
+        return self.annotation
+
     @staticmethod
     def parse(arg: str) -> "Argument":
         name: str
         default: Optional[str]
+        assert " " in arg, f"illegal argument '{arg}'"
         type_and_annot, name_and_default = arg.rsplit(" ", 1)
         if "=" in name_and_default:
+            assert (
+                name_and_default.count("=") == 1
+            ), f"illegal argument with default value: '{name_and_default}'"
             name, default = name_and_default.split("=")
         else:
             name = name_and_default
@@ -2019,6 +2072,10 @@ class Return:
     name: Optional[str]
     type: Type
     annotation: Optional[Annotation]
+
+    @property
+    def alias_info(self) -> Optional[Annotation]:
+        return self.annotation
 
     @staticmethod
     def parse(arg: str) -> "Return":
@@ -2747,6 +2804,9 @@ class Precompute:
             )
 
             arg, with_list_raw = raw_replace_item.split(" -> ")
+            assert (
+                " " not in arg
+            ), f"illegal kernel param name '{arg}' in precomputed parameters'"
             with_list = with_list_raw.split(",")
             with_list_args = [Argument.parse(name.strip()) for name in with_list]
             replace[arg] = with_list_args

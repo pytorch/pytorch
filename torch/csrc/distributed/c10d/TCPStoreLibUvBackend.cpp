@@ -2,10 +2,13 @@
 #include <deque>
 #include <exception>
 #include <memory>
+#include <ostream>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
+#include <c10/util/thread_name.h>
 #include <fmt/format.h>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/TCPStoreBackend.hpp>
@@ -15,8 +18,7 @@
 #include <uv.h>
 #endif
 
-namespace c10d {
-namespace detail {
+namespace c10d::detail {
 
 #ifdef TORCH_USE_LIBUV
 
@@ -29,7 +31,10 @@ Other callbacks don't provide exception safety so avoid there.
 
 */
 
-#define DEFAULT_BACKLOG 16384
+// This controls how many un-accepted TCP connections can be waiting in the
+// backlog. This should be at least world size to avoid issues on init. We set
+// it to -1 to use the host max value which is controlled by `soconnmax`.
+#define DEFAULT_BACKLOG -1
 #define MAX_KEY_COUNT (128 * 1024)
 #define MAX_STRING_LEN (8 * 1024)
 #define MAX_PAYLOAD_LEN (8 * 1024 * 1024)
@@ -40,7 +45,7 @@ Other callbacks don't provide exception safety so avoid there.
 #define ALLOC_BUFFER_SIZE ((size_t)4000)
 class UvHandle : public c10::intrusive_ptr_target {
  public:
-  virtual ~UvHandle() {}
+  ~UvHandle() override = default;
 
   c10::intrusive_ptr<UvHandle> iptr() {
     return c10::intrusive_ptr<UvHandle>::reclaim_copy(this);
@@ -83,7 +88,7 @@ class UvHandle : public c10::intrusive_ptr_target {
 };
 
 class UvTcpSocket : public UvHandle {
-  uv_tcp_t client;
+  uv_tcp_t client{};
 
   c10::intrusive_ptr<UvTcpSocket> iptr() {
     return c10::intrusive_ptr<UvTcpSocket>::reclaim_copy(this);
@@ -123,7 +128,7 @@ class UvTcpSocket : public UvHandle {
       try {
         uv_socket->processBuf(buf, nread);
       } catch (std::exception& ex) {
-        C10D_INFO("Error processing client message: {}", ex.what());
+        C10D_WARNING("Error processing client message: {}", ex.what());
         uv_socket->close();
       }
     }
@@ -132,12 +137,17 @@ class UvTcpSocket : public UvHandle {
  public:
   explicit UvTcpSocket(uv_loop_t* loop) {
     uv_tcp_init(loop, &client);
+    if (int err = uv_tcp_nodelay(&client, 1)) {
+      C10D_WARNING(
+          "The no-delay option cannot be enabled for the client socket. err={}",
+          err);
+    }
   }
 
   void startRead() {
     int res = uv_read_start((uv_stream_t*)&client, alloc_buffer, read_callback);
     if (res) {
-      C10D_INFO(
+      C10D_WARNING(
           "Failed to setup read callback. client:{} code:{} name:{} desc:{}.",
           (void*)this,
           res,
@@ -186,10 +196,14 @@ class UvTcpServer : public UvTcpSocket {
       int uv_res = uv_tcp_open((uv_tcp_t*)res->unsafeGetStream(), socket);
       TORCH_CHECK(
           uv_res == 0,
-          "Failed to open existing socket. socket:%d code:{} name:{} message:{}",
+          "Failed to open existing socket. ",
+          "socket: ",
           socket,
+          ", code: ",
           uv_res,
+          ", name: ",
           uv_err_name(uv_res),
+          ", message: ",
           uv_strerror(uv_res));
 
       res->cacheSocketPort();
@@ -212,8 +226,8 @@ class UvTcpServer : public UvTcpSocket {
     auto res = c10::make_intrusive<UvTcpServer>(loop);
     res->handleReady();
     try {
-      struct sockaddr_storage addr;
-      int uv_res;
+      struct sockaddr_storage addr {};
+      int uv_res = 0;
       if (useIpv6) {
         uv_res = uv_ip6_addr("::", port, (struct sockaddr_in6*)&addr);
       } else {
@@ -221,30 +235,42 @@ class UvTcpServer : public UvTcpSocket {
       }
       TORCH_CHECK(
           uv_res == 0,
-          "UV Store addr parsing failure. useIpv6:{} code:{} name:{} message:{}",
+          "UV Store addr parsing failure. ",
+          "useIpv6: ",
           useIpv6,
+          ", code: ",
           uv_res,
+          ", name: ",
           uv_err_name(uv_res),
+          ", message: ",
           uv_strerror(uv_res));
 
       uv_res =
           uv_tcp_bind(res->unsafeGetSocket(), (const struct sockaddr*)&addr, 0);
       TORCH_CHECK(
           uv_res == 0,
-          "UV Store bind failed. useIpv6:{} code:{} name:{} message:{}",
+          "The server socket has failed to bind. ",
+          "useIpv6: ",
           useIpv6,
+          ", code: ",
           uv_res,
+          ", name: ",
           uv_err_name(uv_res),
+          ", message: ",
           uv_strerror(uv_res));
 
       uv_res =
           uv_listen(res->unsafeGetStream(), DEFAULT_BACKLOG, on_new_connection);
       TORCH_CHECK(
           uv_res == 0,
-          "UV Store listen failed. useIpv6:{} code:{} name:{} message:{}",
+          "The server socket has failed to listen on any local network address. ",
+          "useIpv6: ",
           useIpv6,
+          ", code: ",
           uv_res,
+          ", name: ",
           uv_err_name(uv_res),
+          ", message: ",
           uv_strerror(uv_res));
 
       res->cacheSocketPort();
@@ -260,19 +286,23 @@ class UvTcpServer : public UvTcpSocket {
     return portNum;
   }
 
-  void accept(c10::intrusive_ptr<UvTcpSocket> socket) {
+  void accept(const c10::intrusive_ptr<UvTcpSocket>& socket) {
     int res =
         uv_accept(unsafeGetStream(), (uv_stream_t*)socket->unsafeGetHandle());
     TORCH_CHECK(
-        "Failed to accept socket. code:{} name:{} desc:{}.",
+        res == 0,
+        "Failed to accept socket. ",
+        "code: ",
         res,
+        ", name: ",
         uv_err_name(res),
+        ", message: ",
         uv_strerror(res));
   }
 
  private:
   OnConnectCallback onConnectCb;
-  uint16_t portNum;
+  uint16_t portNum{};
 
   c10::intrusive_ptr<UvTcpServer> iptr() {
     return c10::intrusive_ptr<UvTcpServer>::reclaim_copy(this);
@@ -335,7 +365,7 @@ class WriterPayload : public c10::intrusive_ptr_target {
     auto handle = wp->handle;
 
     if (status) {
-      C10D_INFO(
+      C10D_WARNING(
           "Write to client failed. code:{} name:{} desc:{}.",
           status,
           uv_err_name(status),
@@ -353,11 +383,11 @@ class WriterPayload : public c10::intrusive_ptr_target {
   WriterPayload(
       std::vector<uint8_t>&& in_data,
       c10::intrusive_ptr<UvHandle> handle)
-      : data(std::move(in_data)), handle(handle) {
+      : data(std::move(in_data)), handle(std::move(handle)) {
     uv_req_set_data((uv_req_t*)&req, this);
   }
 
-  ~WriterPayload() {}
+  ~WriterPayload() override = default;
 
   void send() {
     buf = uv_buf_init((char*)data.data(), data.size());
@@ -365,7 +395,7 @@ class WriterPayload : public c10::intrusive_ptr_target {
         &req, (uv_stream_t*)handle->unsafeGetHandle(), &buf, 1, write_done);
 
     if (res) {
-      C10D_INFO(
+      C10D_WARNING(
           "Write setup to client failed. code:{} name:{} desc:{}.",
           res,
           uv_err_name(res),
@@ -387,7 +417,8 @@ class StreamWriter {
   void* operator new(size_t);
 
  public:
-  StreamWriter(c10::intrusive_ptr<UvHandle> handle) : handle(handle) {}
+  StreamWriter(c10::intrusive_ptr<UvHandle> handle)
+      : handle(std::move(handle)) {}
 
   void write1(uint8_t val) {
     data.push_back(val);
@@ -416,19 +447,14 @@ class StreamWriter {
 
 class ChunkedStream {
   std::deque<uv_buf_t> buffers;
-  size_t buff_idx;
-  size_t buff_offset;
-  size_t capacity;
-  size_t buff_offset_commit;
-  size_t read_offset;
+  size_t buff_idx{0};
+  size_t buff_offset{0};
+  size_t capacity{0};
+  size_t buff_offset_commit{0};
+  size_t read_offset{0};
 
  public:
-  ChunkedStream()
-      : buff_idx(0),
-        buff_offset(0),
-        capacity(0),
-        buff_offset_commit(0),
-        read_offset(0) {}
+  ChunkedStream() = default;
 
   size_t buf_count() {
     return buffers.size();
@@ -461,9 +487,12 @@ class ChunkedStream {
         if (buff_idx >= buffers.size() && remaining > 0) {
           TORCH_CHECK(
               false,
-              "Trying to read past end of buffer buffer_idx:{} available:{} remaining:{}",
+              "Trying to read past end of buffer. ",
+              "buffer_idx: ",
               buff_idx,
+              ", available: ",
               buffers.size(),
+              ", remaining: ",
               remaining);
         }
       }
@@ -501,8 +530,10 @@ class ChunkedStream {
       return false;
     TORCH_CHECK(
         size <= MAX_STRING_LEN,
-        "Invalid string size. size:{} max:{}",
+        "Invalid string size. ",
+        "size: ",
         size,
+        ", max: ",
         MAX_STRING_LEN);
 
     if (available() < size)
@@ -518,8 +549,10 @@ class ChunkedStream {
     auto size_in_bytes = size * sizeof(uint8_t);
     TORCH_CHECK(
         size_in_bytes <= MAX_PAYLOAD_LEN,
-        "Invalid payload size. size: {} max:{}",
+        "Invalid payload size. ",
+        "size: ",
         size_in_bytes,
+        ", max: ",
         MAX_PAYLOAD_LEN);
 
     if (available() < size_in_bytes)
@@ -571,15 +604,15 @@ class LibUVStoreDaemon : public BackgroundThread {
   bool checkKeys(const std::vector<std::string>& keys);
   bool waitKeys(
       const std::vector<std::string>& keys,
-      c10::intrusive_ptr<UvHandle> client);
+      const c10::intrusive_ptr<UvHandle>& client);
   int64_t size();
   int64_t deleteKey(const std::string& key);
   void append(const std::string& key, const std::vector<uint8_t>& value);
 
-  void registerClient(c10::intrusive_ptr<UvHandle> client);
-  void unregisterClient(c10::intrusive_ptr<UvHandle> client);
-  void clearClientWaitState(c10::intrusive_ptr<UvHandle> client);
-  bool isMiscellaneousClient(c10::intrusive_ptr<UvHandle> client);
+  void registerClient(const c10::intrusive_ptr<UvHandle>& client);
+  void unregisterClient(const c10::intrusive_ptr<UvHandle>& client);
+  void clearClientWaitState(const c10::intrusive_ptr<UvHandle>& client);
+  bool isMiscellaneousClient(const c10::intrusive_ptr<UvHandle>& client);
 
   uint16_t get_socket_port(uv_tcp_t* handle);
   void init(const TCPStoreOptions& opts);
@@ -589,10 +622,10 @@ class LibUVStoreDaemon : public BackgroundThread {
   void stop() override;
 
  private:
-  uv_loop_t loop;
+  uv_loop_t loop{};
   c10::intrusive_ptr<UvTcpServer> tcpServer;
 
-  uv_async_t exit_handle;
+  uv_async_t exit_handle{};
   std::unordered_map<std::string, std::vector<uint8_t>> tcpStore_;
   // From key -> the list of UvClient waiting on the key
   std::unordered_map<std::string, std::vector<c10::intrusive_ptr<UvHandle>>>
@@ -707,7 +740,7 @@ class UvClient : public UvTcpSocket {
   }
 
   bool parse_validate_command() {
-    uint32_t validateNumber;
+    uint32_t validateNumber = 0;
     if (!stream.read_value(validateNumber))
       return false;
 
@@ -755,7 +788,7 @@ class UvClient : public UvTcpSocket {
     if (!stream.read_key(key))
       return false;
 
-    auto data = store->get(key);
+    const auto& data = store->get(key);
     StreamWriter sw(iptr());
     sw.write_vector(data);
     sw.send();
@@ -785,8 +818,10 @@ class UvClient : public UvTcpSocket {
       return false;
     TORCH_CHECK(
         key_count <= MAX_KEY_COUNT,
-        "Too many keys being waited. keys:{} max:{}",
+        "Too many keys being waited. ",
+        "keys: ",
         key_count,
+        ", max: ",
         MAX_KEY_COUNT);
 
     std::vector<std::string> keys(key_count);
@@ -813,8 +848,10 @@ class UvClient : public UvTcpSocket {
     }
     TORCH_CHECK(
         key_count <= MAX_KEY_COUNT,
-        "Too many keys being waited. keys:{} max:{}",
+        "Too many keys being waited. ",
+        "keys: ",
         key_count,
+        ", max: ",
         MAX_KEY_COUNT);
 
     std::vector<std::string> keys(key_count);
@@ -875,8 +912,10 @@ class UvClient : public UvTcpSocket {
     }
     TORCH_CHECK(
         key_count <= MAX_KEY_COUNT,
-        "Too many keys with multi_get. keys:{} max:{}",
+        "Too many keys with multi_get. ",
+        "keys: ",
         key_count,
+        ", max: ",
         MAX_KEY_COUNT);
 
     StreamWriter sw(iptr());
@@ -887,8 +926,7 @@ class UvClient : public UvTcpSocket {
         return false;
       }
 
-      auto data = store->get(key);
-      sw.write_vector(data);
+      sw.write_vector(store->get(key));
     }
     sw.send();
 
@@ -902,8 +940,10 @@ class UvClient : public UvTcpSocket {
     }
     TORCH_CHECK(
         key_count <= MAX_KEY_COUNT,
-        "Too many keys with multi_get. keys:{} max:{}",
+        "Too many keys with multi_get. ",
+        "keys: ",
         key_count,
+        ", max: ",
         MAX_KEY_COUNT);
 
     for (const auto _ : c10::irange(key_count)) {
@@ -962,7 +1002,7 @@ void LibUVStoreDaemon::onConnect(int status) {
     tcpServer->accept(client);
     client->startRead();
   } catch (std::exception& e) {
-    C10D_INFO("Failed to accept client due to {}", e.what());
+    C10D_WARNING("Failed to accept client due to {}", e.what());
     client->close();
   }
 }
@@ -992,9 +1032,11 @@ void LibUVStoreDaemon::init(const TCPStoreOptions& opts) {
   port_ = tcpServer->port();
   TORCH_CHECK(
       port_ == opts.port || opts.port == 0, // zero means use any port
-      "listen fd {} is bound to port {}, expected to be bound to port {}",
+      "listen fd ",
       *opts.masterListenFd,
+      " is bound to port ",
       port_,
+      ", expected to be bound to port ",
       opts.port);
 }
 
@@ -1031,6 +1073,8 @@ void LibUVStoreDaemon::print_active_handles(uv_handle_t* handle, void* arg) {
 }
 
 void LibUVStoreDaemon::run() {
+  c10::setThreadName("pt_tcpstore_uv");
+
   C10D_DEBUG("Uv main loop running");
   int res = uv_run(&loop, UV_RUN_DEFAULT);
   if (res) {
@@ -1044,8 +1088,8 @@ void LibUVStoreDaemon::run() {
     uv_walk(&loop, LibUVStoreDaemon::print_active_handles, nullptr);
   }
 
-  for (auto it = clients_.begin(); it != clients_.end(); ++it) {
-    (*it)->close();
+  for (const auto& client : clients_) {
+    client->close();
   }
   tcpServer->close();
 
@@ -1054,7 +1098,7 @@ void LibUVStoreDaemon::run() {
     uv_walk(&loop, LibUVStoreDaemon::print_active_handles, nullptr);
   }
 
-  while (1) {
+  while (true) {
     res = uv_loop_close(&loop);
     if (res == 0) {
       break;
@@ -1065,7 +1109,9 @@ void LibUVStoreDaemon::run() {
         uv_err_name(res),
         uv_strerror(res));
     res = uv_run(&loop, UV_RUN_NOWAIT);
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    if (res != 0) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    }
   }
   C10D_INFO("uv_loop cleanup finished.");
 }
@@ -1073,7 +1119,7 @@ void LibUVStoreDaemon::run() {
 void LibUVStoreDaemon::stop() {
   int res = uv_async_send(&exit_handle);
   if (res) {
-    C10D_INFO(
+    C10D_WARNING(
         "uv_async_send failed with:{} errn:{} desc:{}\n",
         res,
         uv_err_name(res),
@@ -1082,7 +1128,7 @@ void LibUVStoreDaemon::stop() {
 }
 
 bool LibUVStoreDaemon::isMiscellaneousClient(
-    c10::intrusive_ptr<UvHandle> client) {
+    const c10::intrusive_ptr<UvHandle>& client) {
   if (miscellaneousClients_.find(client) != miscellaneousClients_.end()) {
     miscellaneousClients_.erase(client);
     return true;
@@ -1090,12 +1136,14 @@ bool LibUVStoreDaemon::isMiscellaneousClient(
   return false;
 }
 
-void LibUVStoreDaemon::registerClient(c10::intrusive_ptr<UvHandle> client) {
+void LibUVStoreDaemon::registerClient(
+    const c10::intrusive_ptr<UvHandle>& client) {
   clients_.insert(client);
   miscellaneousClients_.insert(client);
 }
 
-void LibUVStoreDaemon::unregisterClient(c10::intrusive_ptr<UvHandle> client) {
+void LibUVStoreDaemon::unregisterClient(
+    const c10::intrusive_ptr<UvHandle>& client) {
   clients_.erase(client);
   if (miscellaneousClients_.find(client) != miscellaneousClients_.end()) {
     miscellaneousClients_.erase(client);
@@ -1104,7 +1152,7 @@ void LibUVStoreDaemon::unregisterClient(c10::intrusive_ptr<UvHandle> client) {
 }
 
 void LibUVStoreDaemon::clearClientWaitState(
-    c10::intrusive_ptr<UvHandle> client) {
+    const c10::intrusive_ptr<UvHandle>& client) {
   if (keysAwaited_.find(client) == keysAwaited_.end()) {
     return;
   }
@@ -1152,7 +1200,7 @@ const std::vector<uint8_t>& LibUVStoreDaemon::compareAndSet(
     }
   } else {
     if (pos->second == expectedValue) {
-      pos->second = std::move(newValue);
+      pos->second = newValue;
     }
     wakeupWaitingClients(key);
     return pos->second;
@@ -1192,7 +1240,7 @@ bool LibUVStoreDaemon::checkKeys(const std::vector<std::string>& keys) {
 
 bool LibUVStoreDaemon::waitKeys(
     const std::vector<std::string>& keys,
-    c10::intrusive_ptr<UvHandle> client) {
+    const c10::intrusive_ptr<UvHandle>& client) {
   if (checkKeys(keys)) {
     return true;
   }
@@ -1234,7 +1282,7 @@ void LibUVStoreDaemon::append(
 void LibUVStoreDaemon::wakeupWaitingClients(const std::string& key) {
   auto socketsToWait = waitingSockets_.find(key);
   if (socketsToWait != waitingSockets_.end()) {
-    for (auto client : socketsToWait->second) {
+    for (const auto& client : socketsToWait->second) {
       if (--keysAwaited_[client] == 0) {
         StreamWriter sw(client->iptr());
         sw.write1((uint8_t)WaitResponseType::STOP_WAITING);
@@ -1266,5 +1314,4 @@ bool is_libuv_tcpstore_backend_available() {
 #endif
 }
 
-} // namespace detail
-} // namespace c10d
+} // namespace c10d::detail

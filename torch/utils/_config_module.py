@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import contextlib
 
 import copy
@@ -7,9 +8,9 @@ import io
 import pickle
 import tokenize
 import unittest
-import warnings
 from types import FunctionType, ModuleType
 from typing import Any, Dict, Optional, Set, Union
+from typing_extensions import deprecated
 from unittest import mock
 
 # Types saved/loaded in configs
@@ -78,10 +79,10 @@ def get_assignments_with_compile_ignored_comments(module):
     tokens = tokenize.tokenize(io.BytesIO(source_code.encode("utf-8")).readline)
     current_comment = "", -1
     prev_name = ""
-    prev_assigned = "", -1
 
     for token in tokens:
         if token.type == tokenize.COMMENT:
+            prev_name = ""
             maybe_current = token.string.strip()
             if COMPILE_IGNORED_MARKER in maybe_current:
                 assert current_comment == (
@@ -89,15 +90,12 @@ def get_assignments_with_compile_ignored_comments(module):
                     -1,
                 ), f"unconsumed {COMPILE_IGNORED_MARKER}"
                 current_comment = maybe_current, token.start[0]
-                if token.start[0] == prev_assigned[1]:
-                    # Check if the current assignment is followed with
-                    # a same-line comment with COMPILE_IGNORED_MARKER
-                    assignments.add(prev_assigned[0])
-                    current_comment = "", -1  # reset
         elif token.type == tokenize.NAME:
-            prev_name = token.string
+            # Only accept the first name token, to handle if you have
+            # something like foo: Bar = ...
+            if not prev_name:
+                prev_name = token.string
         elif token.type == tokenize.OP and token.string == "=":
-            prev_assigned = prev_name, token.start[0]
             # Check if the current assignment follows a comment
             # with COMPILE_IGNORED_MARKER
             if (
@@ -106,6 +104,7 @@ def get_assignments_with_compile_ignored_comments(module):
             ):
                 assignments.add(prev_name)
                 current_comment = "", -1  # reset
+            prev_name = ""
     assert current_comment == ("", -1), f"unconsumed {COMPILE_IGNORED_MARKER}"
     return assignments
 
@@ -158,6 +157,19 @@ class ConfigModule(ModuleType):
             config.pop(key)
         return pickle.dumps(config, protocol=2)
 
+    def save_config_portable(self) -> Dict[str, Any]:
+        """Convert config to portable format"""
+        config: Dict[str, Any] = {}
+        for key in sorted(self._config):
+            if key.startswith("_"):
+                continue
+            if any(
+                key.startswith(e) for e in self._config["_cache_config_ignore_prefix"]
+            ):
+                continue
+            config[key] = self._config[key]
+        return config
+
     def codegen_config(self) -> str:
         """Convert config to Python statements that replicate current config.
         This does NOT include config settings that are at default values.
@@ -185,12 +197,12 @@ class ConfigModule(ModuleType):
             self._is_dirty = False
         return self._hash_digest
 
+    @deprecated(
+        "`config.to_dict()` has been deprecated. It may no longer change the underlying config."
+        " use `config.shallow_copy_dict()` or `config.get_config_copy()` instead",
+        category=FutureWarning,
+    )
     def to_dict(self) -> Dict[str, Any]:
-        warnings.warn(
-            "config.to_dict() has been deprecated. It may no longer change the underlying config."
-            " use config.shallow_copy_dict() or config.get_config_copy() instead",
-            DeprecationWarning,
-        )
         return self.shallow_copy_dict()
 
     def shallow_copy_dict(self) -> Dict[str, Any]:
@@ -267,6 +279,37 @@ class ConfigModule(ModuleType):
                 prior.clear()
 
         return ConfigPatch()
+
+    def _make_closure_patcher(self, **changes):
+        """
+        A lower-overhead version of patch() for things on the critical path.
+
+        Usage:
+
+            # do this off the critical path
+            change_fn = config.make_closure_patcher(foo=True)
+
+            ...
+
+            revert = change_fn()
+            try:
+              ...
+            finally:
+                revert()
+
+        """
+        config = self._config
+
+        def change():
+            prior = {k: config[k] for k in changes}
+            config.update(changes)
+
+            def revert():
+                config.update(prior)
+
+            return revert
+
+        return change
 
 
 class ContextDecorator(contextlib.ContextDecorator):

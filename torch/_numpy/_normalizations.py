@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 """ "Normalize" arguments: convert array_likes to tensors, dtypes to torch dtypes and so on.
 """
 from __future__ import annotations
@@ -106,8 +108,12 @@ def normalize_outarray(arg, parm=None):
     # almost normalize_ndarray, only return the array, not its tensor
     if arg is None:
         return arg
-
     from ._ndarray import ndarray
+
+    # Dynamo can pass torch tensors as out arguments,
+    # wrap it in an ndarray before processing
+    if isinstance(arg, torch.Tensor):
+        arg = ndarray(arg)
 
     if not isinstance(arg, ndarray):
         raise TypeError(f"'{parm.name}' must be an array")
@@ -168,7 +174,7 @@ def maybe_copy_to(out, result, promote_scalar_result=False):
             maybe_copy_to(o, r, promote_scalar_result) for o, r in zip(out, result)
         )
     else:
-        raise AssertionError()  # We should never hit this path
+        raise AssertionError  # We should never hit this path
 
 
 def wrap_tensors(result):

@@ -4,6 +4,7 @@ import random
 import unittest
 
 import numpy as np
+
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
@@ -11,6 +12,7 @@ import torch.nn.functional as F
 
 from torch._dynamo.comptime import comptime
 from torch._dynamo.testing import CompileCounter, same
+from torch.testing._internal.logging_utils import logs_to_string
 
 
 # The intention of this test file is you should put test cases specifically
@@ -212,6 +214,24 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 1)
 
+    def test_no_recompiles_prod_backward(self):
+        # https://github.com/pytorch/pytorch/issues/120608
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True, dynamic=True)
+        def fn(t):
+            return torch.prod(t, 3, keepdim=True)
+
+        input_shapes = [(8, 10, 3, 2), (8, 3, 5, 2), (8, 4, 8, 2)]
+        for s in input_shapes:
+            t1 = torch.randn(s, requires_grad=True)
+            h_result = fn(t1)
+            grad = torch.ones_like(h_result)
+            h_result.backward(grad)
+
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)
+
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_builtin_functions_on_cuda(self):
         def fn(x, scaler):
@@ -267,6 +287,15 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             res = opt_fn(x, y)
             self.assertTrue(same(ref, res))
 
+    def test_mark_static_inside(self):
+        def fn(x):
+            torch._dynamo.mark_static(x, 0)
+            comptime.assert_static(x.size(0))
+            return x + 1
+
+        opt_fn = torch.compile(fn, dynamic=True, fullgraph=True)
+        opt_fn(torch.randn(12, 23))
+
     def test_shape_graph_break(self):
         from torch._dynamo.comptime import comptime
 
@@ -303,7 +332,6 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         # specialization is allowed)
         opt_fn(x)
 
-    @unittest.expectedFailure
     def test_conv1d_symint_padding(self):
         kernel = torch.randn(1, 1, 4)
 
@@ -312,7 +340,6 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             out = F.conv1d(x, kernel, padding=padding, stride=2)
             return out
 
-        # TODO: NameError: name 's1' is not defined when dynamic=True
         opt_func = torch.compile(func)
 
         x = torch.randn(1, 1, 175)
@@ -366,6 +393,36 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(f3(r), optimize(f3)(r))
         self.assertEqual(f4(r), optimize(f4)(r))
 
+    def test_to_tensor(self):
+        def f1():
+            a = np.random.uniform(low=-1, high=1, size=(20, 1))
+            return torch.tensor([a, a, a, a], dtype=torch.float64, device="cpu")
+
+        def f2():
+            a = torch.tensor([[[123]]])
+            return torch.tensor([a, a])
+
+        def f3():
+            a = torch.tensor(123)
+            return torch.tensor([a, a])
+
+        def f4():
+            a = torch.tensor(123)
+            b = torch.tensor([[[456]]])
+            return torch.tensor([a, b])
+
+        def f5():
+            a = np.array([1, 2])
+            return torch.tensor([a, a])
+
+        optimize = torch.compile(backend="aot_eager", fullgraph=True)
+
+        self.assertEqual(f1().shape, optimize(f1)().shape)
+        self.assertEqual(f2(), optimize(f2)())
+        self.assertEqual(f3(), optimize(f3)())
+        self.assertEqual(f4(), optimize(f4)())
+        self.assertEqual(f5(), optimize(f5)())
+
     def test_sym_int_conversion(self):
         def f(x):
             y = x.size(0)
@@ -383,6 +440,17 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         dim = (-1, 1, 0, 2)
         compl_fn = torch.compile(fn, dynamic=True, backend="eager", fullgraph=True)
         self.assertEqual(compl_fn(inputs, dim), fn(inputs, dim))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_item_max(self):
+        def fn(x):
+            return torch.ones(max(x.item(), 1024))
+
+        x = torch.tensor([1000])
+        y = torch.tensor([2000])
+        compl_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), compl_fn(x))
+        self.assertEqual(fn(y), compl_fn(y))
 
     # https://github.com/pytorch/pytorch/issues/104812
     def test_argmin_coerces_symint_to_intlist_spec(self):
@@ -404,6 +472,83 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         op_inputs_dict = {"lambd": 10, "generator": None}
         compl_fn = torch.compile(fn, dynamic=True, backend="eager", fullgraph=True)
         self.assertEqual(compl_fn(inputs, op_inputs_dict), fn(inputs, op_inputs_dict))
+
+    def test_symbol_guard_limit_before_specialize(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch._dynamo.optimize(cnts, dynamic=True)
+        def fn(x):
+            torch._check(x.size(0) != 3)
+            torch._check(x.size(0) != 4)
+            torch._check(x.size(0) != 5)
+            torch._check(x.size(0) != 6)
+            return x + 2
+
+        # Control test
+        fn(torch.randn(12))
+        fn(torch.randn(13))
+        fn(torch.randn(14))
+
+        self.assertExpectedInline(cnts.frame_count, """1""")
+        cnts.frame_count = 0
+
+        torch._dynamo.reset()
+
+        with torch.fx.experimental._config.patch(
+            symbol_guard_limit_before_specialize=3
+        ):
+            fn(torch.randn(12))
+            fn(torch.randn(13))
+            fn(torch.randn(14))
+
+            self.assertExpectedInline(cnts.frame_count, """3""")
+
+    def test_defaults(self):
+        def g(x, i=8):
+            comptime.assert_static(i)
+            return x * i
+
+        def fn(x):
+            return g(x)
+
+        inputs = torch.randn(2, 3, 4)
+        compl_fn = torch.compile(fn, dynamic=True, backend="eager")
+        self.assertEqual(compl_fn(inputs), fn(inputs))
+
+    @torch._dynamo.config.patch(specialize_float=False, assume_static_by_default=True)
+    def test_unspec_float_input(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def f(x, y):
+            if y == 5.0:
+                return x + 2
+            else:
+                return x + y
+
+        cf = torch.compile(backend=cnts, fullgraph=True)(f)
+
+        x = torch.randn(3)
+        self.assertEqual(f(x, 3.0), cf(x, 3.0))
+        self.assertEqual(f(x, 4.0), cf(x, 4.0))
+        self.assertExpectedInline(cnts.frame_count, """1""")  # no recompile
+        self.assertEqual(f(x, 5.0), cf(x, 5.0))
+        self.assertExpectedInline(cnts.frame_count, """2""")  # guard worked
+        self.assertEqual(f(x, math.nan), cf(x, math.nan))
+        self.assertExpectedInline(cnts.frame_count, """3""")  # nan always recompiles
+
+    @torch._dynamo.config.patch(specialize_float=False, assume_static_by_default=True)
+    def test_unspec_float_output(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def f(x, y):
+            return x + 1, y * 2
+
+        cf = torch.compile(backend=cnts, fullgraph=True)(f)
+        x = torch.randn(3)
+
+        self.assertEqual(f(x, 3.0), cf(x, 3.0))
+        self.assertEqual(f(x, 4.0), cf(x, 4.0))
+        self.assertEqual(f(x, 5.0), cf(x, 5.0))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_data_dependent_evaluate_expr_graph_break(self):
@@ -431,7 +576,46 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         fn(x)
 
         self.assertExpectedInline(cnts.frame_count, """2""")
-        self.assertExpectedInline(cnts.op_count, """3""")
+        self.assertExpectedInline(cnts.op_count, """4""")
+
+    def test_prune_torch_check(self):
+        log_stream, ctx = logs_to_string("torch._dynamo.output_graph", "graph_code")
+
+        @torch.compile(fullgraph=True, dynamic=True, backend="eager")
+        def f(x, y):
+            torch._check(y + 5 == 85)
+            torch._check(x.size(0) == 80)
+
+        with ctx():
+            f(torch.randn(80, 100), 80)
+
+        out = "\n".join(log_stream.getvalue().strip().split("\n")[3:]).strip()
+        self.assertExpectedInline(
+            out,
+            """\
+def forward(self):
+        return ()""",
+        )
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_split_aot_autograd(self):
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def f(x, i):
+            y, z = i.tolist()
+            return torch.split(x, [y, z])
+
+        print(f(torch.randn(10, requires_grad=True), torch.tensor([7, 3])))
+
+    def test_bool_tensor_ctor(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, dynamic=True, fullgraph=True)
+        def f(x):
+            y = torch.empty((x.size(0) // 13) * 13)
+            return torch.tensor(y.numel() == 0)
+
+        self.assertTrue(f(torch.empty(8)).item())
+        self.assertFalse(f(torch.empty(13)).item())
 
 
 if __name__ == "__main__":

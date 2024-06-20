@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 # Torch
 from torch.autograd import Variable
 from torch.autograd.function import _nested_map

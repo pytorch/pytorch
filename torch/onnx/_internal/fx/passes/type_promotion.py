@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Owner(s): ["module: onnx"]
 from __future__ import annotations
 
@@ -24,7 +25,7 @@ from torch._prims_common import (
 from torch._refs import linalg as _linalg_refs, nn as _nn_refs, special as _special_refs
 from torch._refs.nn import functional as _functional_refs
 from torch._subclasses import fake_tensor
-from torch.fx.experimental import proxy_tensor, symbolic_shapes
+from torch.fx.experimental import proxy_tensor
 
 # Imported to resolve beartype issue when type checking node.Argument.
 from torch.fx.node import Node  # noqa: F401
@@ -67,30 +68,6 @@ class TypePromotionSnapshot:
 
     out_dtype: torch.dtype
     """Expected output dtype of the node."""
-
-
-@_beartype.beartype
-def _fake_tensor_from_node_val(
-    node: torch.fx.Node,
-) -> Union[fake_tensor.FakeTensor, int, float, bool]:
-    """Syntactic sugar for retrieving fake tensor from node.meta['val']."""
-    val = node.meta.get("val", None)
-    if isinstance(val, fake_tensor.FakeTensor):
-        return val
-    elif isinstance(val, (torch.SymInt, torch.SymFloat, torch.SymBool)):
-        # For type promotion, the actual value should not matter. For example,
-        # we can return any `int` for a `torch.SymInt` node. Let's
-        # remove this assert and return dummy values (e.g., 0 for SymInt,
-        # 0.0 for SymFloat, and false for SymBool) if finding the hint
-        # becomes a problem.
-        assert symbolic_shapes.has_hint(
-            val.node
-        ), f"Cannot retrieve hint value from torch.Sym* node {node}."
-        return val.node.hint
-    else:
-        raise RuntimeError(
-            f"Cannot retrieve fake tensor from node {node}. Got type({type(val)}) instead."
-        )
 
 
 class TypePromotionRule(abc.ABC):
@@ -208,10 +185,9 @@ class ElementwiseTypePromotionRule(TypePromotionRule):
         since there is no way to differentiate between inserted upcasts and model code
         casts. Hence we consolidate the input dtype to the result dtype to avoid this.
         """
-        if (
-            not self._USE_OPMATH
-            and self.promotion_kind
-            == _prims_common.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+        if not self._USE_OPMATH and self.promotion_kind in (
+            _prims_common.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+            _prims_common.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         ):
             return result_dtype
         return computed_dtype
@@ -240,8 +216,8 @@ class ElementwiseTypePromotionRule(TypePromotionRule):
         )
 
         return TypePromotionSnapshot(
-            {i: consolidated_input_dtype for i in candidate_args.keys()},
-            {name: consolidated_input_dtype for name in candidate_kwargs.keys()},
+            dict.fromkeys(candidate_args.keys(), consolidated_input_dtype),
+            dict.fromkeys(candidate_kwargs.keys(), consolidated_input_dtype),
             result_dtype,
         )
 
@@ -317,9 +293,11 @@ class ReductionTypePromotionRule(TypePromotionRule):
     def preview_type_promotion(
         self, args: tuple, kwargs: dict
     ) -> TypePromotionSnapshot:
-        assert len(args) >= 1 and isinstance(
-            arg := args[0], torch.Tensor
+        assert (
+            len(args) >= 1
         ), f"Reduction op torch.ops.{self.namespace}.{self.op_name} expects at least one argument"
+        arg = args[0]
+        assert isinstance(arg, torch.Tensor), f"{type(arg)=} is not torch.Tensor"
         dtype: Optional[torch.dtype] = kwargs.get("dtype", None)
 
         computation_dtype, result_dtype = _prims_common.reduction_dtypes(
@@ -354,9 +332,11 @@ class AllOrAnyReductionTypePromotionRule(ReductionTypePromotionRule):
     def preview_type_promotion(
         self, args: tuple, kwargs: dict
     ) -> TypePromotionSnapshot:
-        assert len(args) >= 1 and isinstance(
-            arg := args[0], torch.Tensor
+        assert (
+            len(args) >= 1
         ), f"Reduction op torch.ops.{self.namespace}.{self.op_name} expects at least one argument"
+        arg = args[0]
+        assert isinstance(arg, torch.Tensor), f"{type(arg)=} is not torch.Tensor"
         computation_dtype = torch.bool
         # Preserves uint8 -- probably a legacy mask thing
         result_dtype = torch.uint8 if arg.dtype == torch.uint8 else torch.bool
@@ -377,9 +357,11 @@ class SumLikeReductionTypePromotionRule(ReductionTypePromotionRule):
     def preview_type_promotion(
         self, args: tuple, kwargs: dict
     ) -> TypePromotionSnapshot:
-        assert len(args) >= 1 and isinstance(
-            arg := args[0], torch.Tensor
+        assert (
+            len(args) >= 1
         ), f"Reduction op torch.ops.{self.namespace}.{self.op_name} expects at least one argument"
+        arg = args[0]
+        assert isinstance(arg, torch.Tensor), f"{type(arg)=} is not torch.Tensor"
         dtype: Optional[torch.dtype] = kwargs.get("dtype", None)
         # The below logic is copied from `torch/_refs/__init__.py` reduction ops impl.
         if dtype is None:
@@ -1683,7 +1665,7 @@ class InsertTypePromotion(_pass.Transform):
     metadata, specifically the fake tensor stored under node.meta["val"], and ensure it
     reflects the latest changes.
 
-    See [FXE0015: fx_node_insert_type_promotion](https://pytorch.org/docs/master/generated/onnx_dynamo_diagnostics_rules/FXE0015%3Afx-node-insert-type-promotion.html) for more details.  # noqa: B950
+    See [FXE0015: fx_node_insert_type_promotion](https://pytorch.org/docs/main/generated/onnx_dynamo_diagnostics_rules/FXE0015%3Afx-node-insert-type-promotion.html) for more details.  # noqa: B950
     """
 
     def __init__(
@@ -1699,7 +1681,19 @@ class InsertTypePromotion(_pass.Transform):
 
     def _fetch_fake_args(
         self,
-    ) -> Sequence[Optional[Union[fake_tensor.FakeTensor, float, int, bool]]]:
+    ) -> Sequence[
+        Optional[
+            Union[
+                fake_tensor.FakeTensor,
+                float,
+                int,
+                bool,
+                torch.SymInt,
+                torch.SymFloat,
+                torch.SymBool,
+            ]
+        ]
+    ]:
         """Fetch fake args from fx graph.
 
         For each argument, try to fetch fake tensor from the matching placeholder node.
@@ -1708,12 +1702,14 @@ class InsertTypePromotion(_pass.Transform):
         for node in self.module.graph.nodes:
             if node.op == "placeholder":
                 try:
-                    fake_tensor = _fake_tensor_from_node_val(node)
+                    # Meta value can be torch.Tensor, int, float, bool,
+                    # torch.SymInt, torch.SymFloat, torch.SymBool.
+                    meta_value = _val = node.meta.get("val", None)
                 except RuntimeError as e:
                     if not node.users:
                         # If the placeholder is not used, we can safely ignore it and put
                         # None as placeholder.
-                        fake_tensor = None
+                        meta_value = None
                     else:
                         raise RuntimeError(
                             "Cannot fetch symbolic fake args from fx graph. "
@@ -1721,7 +1717,7 @@ class InsertTypePromotion(_pass.Transform):
                             "Otherwise the pass will produce inaccurate dynamic shape. "
                         ) from e
 
-                fake_args.append(fake_tensor)
+                fake_args.append(meta_value)
         return fake_args
 
     @_beartype.beartype

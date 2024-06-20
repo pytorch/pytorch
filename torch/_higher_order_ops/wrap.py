@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import inspect
 import logging
 
@@ -29,6 +30,24 @@ class Wrap(HigherOrderOperator):
         return wrapper()
 
 wrap = Wrap()
+
+class WrapWithSetGradEnabled(HigherOrderOperator):
+    def __init__(self):
+        super().__init__("wrap_with_set_grad_enabled")
+
+    def __call__(self, enable_grad, wrapped_func, *args, **kwargs):
+        # Dynamo already traces the body of HigherOrderOp beforehand when it
+        # so no need to trace into it.
+        import torch._dynamo  # noqa: F401
+        from torch._dynamo import disable
+
+        @disable
+        def wrapper():
+            with torch.set_grad_enabled(enable_grad):
+                return wrapped_func(*args, **kwargs)
+        return wrapper()
+
+wrap_with_set_grad_enabled = WrapWithSetGradEnabled()
 
 class WrapActivationCheckpoint(HigherOrderOperator):
     """

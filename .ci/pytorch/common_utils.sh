@@ -158,6 +158,11 @@ function install_torchvision() {
   fi
 }
 
+function install_tlparse() {
+  pip_install --user "tlparse==0.3.7"
+  PATH="$(python -m site --user-base)/bin:$PATH"
+}
+
 function install_torchrec_and_fbgemm() {
   local torchrec_commit
   torchrec_commit=$(get_pinned_commit torchrec)
@@ -181,28 +186,6 @@ function clone_pytorch_xla() {
     git submodule update --init --recursive
     popd
   fi
-}
-
-function checkout_install_torchdeploy() {
-  local commit
-  commit=$(get_pinned_commit multipy)
-  pushd ..
-  git clone --recurse-submodules https://github.com/pytorch/multipy.git
-  pushd multipy
-  git checkout "${commit}"
-  python multipy/runtime/example/generate_examples.py
-  BUILD_CUDA_TESTS=1 pip install -e .
-  popd
-  popd
-}
-
-function test_torch_deploy(){
- pushd ..
- pushd multipy
- ./multipy/runtime/build/test_deploy
- ./multipy/runtime/build/test_deploy_gpu
- popd
- popd
 }
 
 function checkout_install_torchbench() {

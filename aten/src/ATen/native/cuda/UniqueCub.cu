@@ -84,7 +84,7 @@ std::tuple<Tensor, Tensor, Tensor> compute_unique(
     const dim3 block =
         dim3(std::min(static_cast<int64_t>(cuda::getApplyBlock().x), num_inp));
     dim3 grid;
-    int curDevice = -1;
+    c10::DeviceIndex curDevice = -1;
     c10::cuda::GetDevice(&curDevice);
     cuda::getApplyGrid(num_inp, grid, curDevice);
     adjacent_difference_kernel<<<grid, block, 0, stream>>>(
@@ -158,12 +158,14 @@ struct UniqueCub {
     } else {
       sorted = at::empty(self.sizes(), self.options());
     }
-    scalar_t* sorted_data = sorted.mutable_data_ptr<scalar_t>();
 
     Tensor sorted_indices;
     if (!return_inverse) {
       if (!consecutive) {
-        cuda::cub::radix_sort_keys(self.const_data_ptr<scalar_t>(), sorted_data, num_inp);
+        cuda::cub::radix_sort_keys(
+          self.const_data_ptr<scalar_t>(),
+          sorted.mutable_data_ptr<scalar_t>(),
+          num_inp);
       }
     } else {
       if (!consecutive) {
@@ -172,7 +174,7 @@ struct UniqueCub {
         sorted_indices = at::empty({num_inp}, options);
         cuda::cub::radix_sort_pairs(
             self.const_data_ptr<scalar_t>(),
-            sorted_data,
+            sorted.mutable_data_ptr<scalar_t>(),
             range.const_data_ptr<int64_t>(),
             sorted_indices.mutable_data_ptr<int64_t>(),
             num_inp);
@@ -286,7 +288,7 @@ struct UniqueCub<bool> {
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
 
-    // Final sync to fix the ouput tensors shape
+    // Final sync to fix the output tensors shape
     int num_true = 0;
     at::cuda::memcpy_and_sync(&num_true, tmp_num_true.get(), sizeof(int),
                               cudaMemcpyDeviceToHost, stream);
@@ -333,6 +335,9 @@ INSTANTIATE_UNIQUE_CUDA_TEMPLATE(float);
 INSTANTIATE_UNIQUE_CUDA_TEMPLATE(int32_t);
 INSTANTIATE_UNIQUE_CUDA_TEMPLATE(int64_t);
 INSTANTIATE_UNIQUE_CUDA_TEMPLATE(int16_t);
+INSTANTIATE_UNIQUE_CUDA_TEMPLATE(uint32_t);
+INSTANTIATE_UNIQUE_CUDA_TEMPLATE(uint64_t);
+INSTANTIATE_UNIQUE_CUDA_TEMPLATE(uint16_t);
 INSTANTIATE_UNIQUE_CUDA_TEMPLATE(bool);
 INSTANTIATE_UNIQUE_CUDA_TEMPLATE(at::Half);
 

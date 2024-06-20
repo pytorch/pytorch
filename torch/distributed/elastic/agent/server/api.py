@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+# mypy: ignore-errors
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -7,7 +7,6 @@
 # LICENSE file in the root directory of this source tree.
 
 import abc
-import functools
 import json
 import os
 import signal
@@ -15,7 +14,7 @@ import socket
 import time
 import traceback
 import warnings
-from contextlib import closing
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -23,14 +22,13 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import torch.distributed.elastic.rendezvous as rdzv
 import torch.distributed.elastic.utils.store as store_util
 from torch.distributed.elastic.rendezvous import RendezvousGracefulExitError
-from torch.distributed import Store
 from torch.distributed.elastic.events import Event, EventSource, record
 from torch.distributed.elastic.metrics import prof, put_metric
 from torch.distributed.elastic.multiprocessing import (
     ProcessFailure,
     SignalException,
-    Std,
 )
+from collections import defaultdict
 from torch.distributed.elastic.utils.logging import get_logger
 
 __all__ = [
@@ -45,7 +43,7 @@ __all__ = [
 _TERMINAL_STATE_SYNC_ID = "torchelastic/agent/terminal_state"
 
 DEFAULT_ROLE = "default"
-log = get_logger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -86,12 +84,10 @@ class WorkerSpec:
     entrypoint: Union[Callable, str, None] = None
     args: Tuple = ()
     max_restarts: int = 3
-    monitor_interval: float = 30.0
+    monitor_interval: float = 0.1
     master_port: Optional[int] = None
     master_addr: Optional[str] = None
     local_addr: Optional[str] = None
-    redirects: Union[Std, Dict[int, Std]] = Std.NONE
-    tee: Union[Std, Dict[int, Std]] = Std.NONE
 
     def __post_init__(self):
         assert self.local_world_size > 0
@@ -254,7 +250,7 @@ class WorkerGroup:
     group contains cross instance workers or not depends on the implementation of the agent.
     """
 
-    __slots__ = ["spec", "workers", "store", "group_rank", "group_world_size", "state"]
+    __slots__ = ["spec", "workers", "store", "group_rank", "group_world_size", "state", "master_addr", "master_port"]
 
     def __init__(self, spec: WorkerSpec):
         self.spec = spec
@@ -264,6 +260,8 @@ class WorkerGroup:
         self.store = None
         self.group_rank = None
         self.group_world_size = None
+        self.master_addr = None
+        self.master_port = None
 
         self.state = WorkerState.INIT
 
@@ -359,37 +357,6 @@ class RunResult:
         return self.state == WorkerState.FAILED
 
 
-def _get_socket_with_port() -> socket.socket:
-    """Return a free port on localhost.
-
-    The free port is "reserved" by binding a temporary socket on it.
-    Close the socket before passing the port to the entity that
-    requires it. Usage example::
-
-    sock = _get_socket_with_port()
-    with closing(sock):
-        port = sock.getsockname()[1]
-        sock.close()
-        # there is still a race-condition that some other process
-        # may grab this port before func() runs
-        func(port)
-    """
-    addrs = socket.getaddrinfo(
-        host="localhost", port=None, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM
-    )
-    for addr in addrs:
-        family, type, proto, _, _ = addr
-        s = socket.socket(family, type, proto)
-        try:
-            s.bind(("localhost", 0))
-            s.listen(0)
-            return s
-        except OSError as e:
-            s.close()
-            log.info("Socket creation attempt failed.", exc_info=e)
-    raise RuntimeError("Failed to create a socket")
-
-
 def _get_fq_hostname() -> str:
     return socket.getfqdn(socket.gethostname())
 
@@ -423,7 +390,7 @@ class ElasticAgent(abc.ABC):
       if group_result.is_failed():
         # workers failed
         failure = group_result.failures[0]
-        log.exception("worker 0 failed with exit code : %s", failure.exit_code)
+        logger.exception("worker 0 failed with exit code : %s", failure.exit_code)
       else:
         return group_result.return_values[0] # return rank 0's results
 
@@ -442,7 +409,7 @@ class ElasticAgent(abc.ABC):
         Raises:
             Exception - any other failures NOT related to worker process
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @abc.abstractmethod
     def get_worker_group(self, role: str = DEFAULT_ROLE) -> WorkerGroup:
@@ -453,7 +420,7 @@ class ElasticAgent(abc.ABC):
         Implementors are encouraged (but not required) to return
         a defensive read-only copy.
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 class SimpleElasticAgent(ElasticAgent):
@@ -480,17 +447,17 @@ class SimpleElasticAgent(ElasticAgent):
         This is according to worker spec for the worker group .
         Returns a map of ``local_rank`` to worker ``id``.
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @abc.abstractmethod
-    def _stop_workers(self, worker_group: WorkerGroup) -> None:
+    def _stop_workers(self, worker_group: WorkerGroup, is_restart: bool = False) -> None:
         r"""Stop all workers in the given worker group.
 
         Implementors must deal with workers in all states defined by
         ``WorkerState``. That is, it must gracefully handle stopping
         non-existent workers, unhealthy (stuck) workers, etc.
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @abc.abstractmethod
     def _monitor_workers(self, worker_group: WorkerGroup) -> RunResult:
@@ -498,47 +465,17 @@ class SimpleElasticAgent(ElasticAgent):
 
         This function also returns the new state of the worker group.
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @abc.abstractmethod
-    def _shutdown(self, death_sig: signal.Signals = signal.SIGTERM) -> None:
+    def _shutdown(self, death_sig: signal.Signals = signal.SIGTERM, is_restart: bool = False) -> None:
         """Clean up any resources that were allocated during the agent's work.
 
         Args:
             death_sig: Signal to send to the child process, SIGTERM is default
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
-    @staticmethod
-    def _set_master_addr_port(
-        store: Store,
-        master_addr: Optional[str],
-        master_port: Optional[int],
-        local_addr: Optional[str],
-    ):
-        if master_port is None:
-            sock = _get_socket_with_port()
-            with closing(sock):
-                master_port = sock.getsockname()[1]
-
-        if master_addr is None:
-            # If user specified the address for the local node, use it as the master addr if not exist
-            if local_addr:
-                master_addr = local_addr
-            else:
-                master_addr = _get_fq_hostname()
-
-        store.set("MASTER_ADDR", master_addr.encode(encoding="UTF-8"))
-        store.set("MASTER_PORT", str(master_port).encode(encoding="UTF-8"))
-
-    @staticmethod
-    def _get_master_addr_port(store: Store) -> Tuple[str, int]:
-        master_addr = store.get("MASTER_ADDR").decode(encoding="UTF-8")
-        master_port = int(store.get("MASTER_PORT").decode(encoding="UTF-8"))
-        return (master_addr, master_port)
-
-    # pyre-fixme[56]: Pyre was not able to infer the type of the decorator
-    #  `torch.distributed.elastic.metrics.prof`.
     @prof
     def _rendezvous(self, worker_group: WorkerGroup) -> None:
         r"""Run rendezvous for the workers specified by the worker spec.
@@ -548,27 +485,31 @@ class SimpleElasticAgent(ElasticAgent):
         """
         spec = worker_group.spec
 
-        store, group_rank, group_world_size = spec.rdzv_handler.next_rendezvous()
+        with self.record_duration("RENDEZVOUS"):
+            rdzv_info = spec.rdzv_handler.next_rendezvous()
+        store = rdzv_info.store
+        group_rank = rdzv_info.rank
+        group_world_size = rdzv_info.world_size
+
+        # master_addr/master_port could be explicitly overriden
+        # TODO: BC - specific to static rdzv and can be simplifed further
+        master_addr = spec.master_addr or rdzv_info.bootstrap_store_info.master_addr
+        master_port = spec.master_port or rdzv_info.bootstrap_store_info.master_port
+
         self._store = store
 
-        workers = self._assign_worker_ranks(store, group_rank, group_world_size, spec)
+        with self.record_duration("ASSIGN_WORKER_RANKS"):
+            workers = self._assign_worker_ranks(store, group_rank, group_world_size, spec)
         worker_group.workers = workers
         worker_group.store = store
         worker_group.group_rank = group_rank
         worker_group.group_world_size = group_world_size
+        worker_group.master_addr = master_addr
+        worker_group.master_port = master_port
 
-        if group_rank == 0:
-            self._set_master_addr_port(
-                store,
-                spec.master_addr,
-                spec.master_port,
-                spec.local_addr,
-            )
-
-        master_addr, master_port = self._get_master_addr_port(store)
         restart_count = spec.max_restarts - self._remaining_restarts
 
-        log.info(
+        logger.info(
             "[%(role)s] Rendezvous complete for workers. Result:\n"
             "  restart_count=%(restart_count)s\n"
             "  master_addr=%(master_addr)s\n"
@@ -595,26 +536,6 @@ class SimpleElasticAgent(ElasticAgent):
             }
         )
 
-    def _get_ranks(
-        self,
-        role_infos: List[_RoleInstanceInfo],
-        role_idx: int,
-        start_idx: int = 0,
-        end_idx: int = -1,
-    ) -> Tuple[int, List[int]]:
-        if end_idx == -1:
-            end_idx = len(role_infos)
-        prefix_sum = 0
-        total_sum = 0
-        for idx in range(start_idx, end_idx):
-            if role_idx > idx:
-                prefix_sum += role_infos[idx].local_world_size
-            total_sum += role_infos[idx].local_world_size
-        return (
-            total_sum,
-            list(range(prefix_sum, prefix_sum + role_infos[role_idx].local_world_size)),
-        )
-
     # pyre-fixme[56]: Pyre was not able to infer the type of the decorator
     #  `torch.distributed.elastic.metrics.prof`.
     @prof
@@ -627,62 +548,85 @@ class SimpleElasticAgent(ElasticAgent):
 
         1. Each agent writes its configuration(group_rank, group_world_size
            , num_workers) to the common store.
-        2. Each agent retrieves configuration for all agents
-           and performs two level sort using role and rank.
-        3. Determine the global rank: the global rank of the workers for the current
-           agent is the offset of the infos array up to group_rank of the agent.
-           The offset is computed as a sum of local_world_size of all agents that
-           have rank less than the group_rank. The workers would have the ranks:
-           [offset, offset+local_world_size)
+        2. The rank 0 agent reads all the role_info from the store and
+           determines each agents worker ranks.
+        3. Determine the global rank: the global rank of the workers is computed
+           by cumulative sum of the local_world_size for all workers in front of it.
+           For efficiency reasons each worker is assigned a base global rank
+           such that it's workers are in the range [base_global_rank,
+           base_global_rank + local_world_size).
         4. Determine the role rank: The role rank is determined using the algorithms
-           in the point 3 with the exception that the offset is done from the first
-           agent that has the same role as current one and has the minimum group rank.
+           in the point 3 with the exception that the ranks are calculated with
+           respect to the role name.
+        5. The rank 0 agent writes the assigned ranks to the store.
+        6. Each agent reads the assigned ranks from the store.
+
+        Time complexity: each worker O(1), rank0 O(n), overall O(n)
         """
-        role_infos = self._share_and_gather(store, group_rank, group_world_size, spec)
-        my_role_info = role_infos[group_rank]
-        worker_world_size, worker_global_ranks = self._get_ranks(role_infos, group_rank)
-        role_infos = sorted(
-            role_infos, key=functools.cmp_to_key(_RoleInstanceInfo.compare)
+
+        ROLE_INFO_PREFIX = "torchelastic/role_info/"
+        ASSIGNED_RANKS_PREFIX = "torchelastic/assigned_ranks/"
+
+        agent_role_info = _RoleInstanceInfo(
+            spec.role, group_rank, spec.local_world_size
         )
-        role_start_idx, role_end_idx = _RoleInstanceInfo.find_role_boundaries(
-            role_infos, my_role_info.role
+        store.set(f"{ROLE_INFO_PREFIX}{group_rank}", agent_role_info.serialize())
+
+        # tcp store is collocated with rank 0 so we can use it to do extra compute to reduce overall # of operations.
+        if group_rank == 0:
+            role_infos_bytes = store.multi_get(
+                [f"torchelastic/role_info/{i}" for i in range(group_world_size)]
+            )
+            role_infos = [
+                _RoleInstanceInfo.deserialize(info_bytes)
+                for info_bytes in role_infos_bytes
+            ]
+
+            role_sizes = defaultdict(lambda: 0)
+            global_size = 0
+            for role_info in role_infos:
+                role_sizes[role_info.role] += role_info.local_world_size
+                global_size += role_info.local_world_size
+
+            base_global_rank = 0
+            role_ranks = defaultdict(lambda: 0)
+
+            keys = []
+            values = []
+            for i, role_info in enumerate(role_infos):
+                keys.append(f"{ASSIGNED_RANKS_PREFIX}{i}")
+                values.append(
+                    json.dumps(
+                        [
+                            base_global_rank,
+                            global_size,
+                            role_ranks[role_info.role],
+                            role_sizes[role_info.role],
+                        ]
+                    )
+                )
+
+                base_global_rank += role_info.local_world_size
+                role_ranks[role_info.role] += role_info.local_world_size
+
+            store.multi_set(keys, values)
+
+        # get will block until the data is available in the store.
+        base_global_rank, global_world_size, base_role_rank, role_world_size = json.loads(
+            store.get(f"{ASSIGNED_RANKS_PREFIX}{group_rank}")
         )
-        role_pos = next(
-            idx
-            for idx, role_info in enumerate(role_infos)
-            if _RoleInstanceInfo.compare(role_info, my_role_info) == 0
-        )
-        role_world_size, role_ranks = self._get_ranks(
-            role_infos, role_pos, role_start_idx, role_end_idx + 1
-        )
+
         workers = []
-        for ind in range(spec.local_world_size):
+        for local_rank in range(spec.local_world_size):
             worker = Worker(
-                local_rank=ind,
-                global_rank=worker_global_ranks[ind],
-                role_rank=role_ranks[ind],
-                world_size=worker_world_size,
+                local_rank=local_rank,
+                global_rank=base_global_rank + local_rank,
+                role_rank=base_role_rank + local_rank,
+                world_size=global_world_size,
                 role_world_size=role_world_size,
             )
             workers.append(worker)
         return workers
-
-    def _share_and_gather(
-        self, store, group_rank: int, group_world_size: int, spec: WorkerSpec
-    ) -> List:
-        agent_role_info = _RoleInstanceInfo(
-            spec.role, group_rank, spec.local_world_size
-        )
-        key_prefix = "torchelastic/role_info"
-        agent_config_enc = agent_role_info.serialize()
-        role_infos_bytes = store_util.synchronize(
-            store, agent_config_enc, group_rank, group_world_size, key_prefix
-        )
-        role_infos = [
-            _RoleInstanceInfo.deserialize(role_info_bytes)
-            for role_info_bytes in role_infos_bytes
-        ]
-        return role_infos
 
     # pyre-fixme[56]: Pyre was not able to infer the type of the decorator
     #  `torch.distributed.elastic.metrics.prof`.
@@ -699,7 +643,7 @@ class SimpleElasticAgent(ElasticAgent):
         of state to ``_monitor_workers()`` method
         """
         role = worker_group.spec.role
-        log.info("[%s] Rendezvous'ing worker group", role)
+        logger.info("[%s] Rendezvous'ing worker group", role)
 
         # TODO after stopping workers, wait at least monitor_interval*2 for
         # workers on different nodes to fail on a collective op before waiting
@@ -707,7 +651,7 @@ class SimpleElasticAgent(ElasticAgent):
         # at around the same time and reduce false positive rdzv timeout errors
         self._rendezvous(worker_group)
 
-        log.info("[%s] Starting worker group", role)
+        logger.info("[%s] Starting worker group", role)
         worker_ids = self._start_workers(worker_group)
         for local_rank, w_id in worker_ids.items():
             worker = worker_group.workers[local_rank]
@@ -721,8 +665,8 @@ class SimpleElasticAgent(ElasticAgent):
     def _restart_workers(self, worker_group: WorkerGroup) -> None:
         """Restart (stops, rendezvous, starts) all local workers in the group."""
         role = worker_group.spec.role
-        log.info("[%s] Stopping worker group", role)
-        self._stop_workers(worker_group)
+        logger.info("[%s] Stopping worker group", role)
+        self._stop_workers(worker_group, is_restart=True)
         worker_group.state = WorkerState.STOPPED
         self._initialize_workers(worker_group)
 
@@ -739,9 +683,9 @@ class SimpleElasticAgent(ElasticAgent):
             self._record_worker_events(result)
             return result
         except RendezvousGracefulExitError as e:
-            log.info("Rendezvous gracefully exited: %s", e)
+            logger.info("Rendezvous gracefully exited: %s", e)
         except SignalException as e:
-            log.warning("Received %s death signal, shutting down workers", e.sigval)
+            logger.warning("Received %s death signal, shutting down workers", e.sigval)
             self._shutdown(e.sigval)
             shutdown_called = True
             raise
@@ -781,12 +725,23 @@ class SimpleElasticAgent(ElasticAgent):
         else:
             raise ValueError(f"Unknown worker: {worker.global_rank}")
 
+    @contextmanager
+    def record_duration(self, state: str):
+        start_time = time.perf_counter()
+        try:
+            yield
+        finally:
+            end_time = time.perf_counter()
+            duration_ms = (end_time - start_time) * 1000
+            record(self._construct_event(state=state, source=EventSource.AGENT, duration_ms=duration_ms))
+
     def _construct_event(
         self,
         state: str,
         source: EventSource,
         worker: Optional[Worker] = None,
         raw_error: Optional[str] = None,
+        duration_ms: Optional[float] = None,
     ) -> Event:
         wg = self._worker_group
         spec = wg.spec
@@ -817,6 +772,7 @@ class SimpleElasticAgent(ElasticAgent):
             "raw_error": raw_error,
             "metadata": md_str,
             "agent_restarts": spec.max_restarts - self._remaining_restarts,
+            "duration_ms": duration_ms,
         }
         return Event(
             f"torchelastic.worker.status.{state}", source=source, metadata=metadata
@@ -866,7 +822,7 @@ class SimpleElasticAgent(ElasticAgent):
         spec = self._worker_group.spec
         role = spec.role
 
-        log.info(
+        logger.info(
             "[%s] starting workers for entrypoint: %s", role, spec.get_entrypoint_name()
         )
 
@@ -885,7 +841,7 @@ class SimpleElasticAgent(ElasticAgent):
             put_metric(f"workers.{role}.{state.name.lower()}", 1)
 
             if state == WorkerState.SUCCEEDED:
-                log.info(
+                logger.info(
                     "[%s] worker group successfully finished."
                     " Waiting %s seconds for other agents to finish.",
                     role, self._exit_barrier_timeout
@@ -894,7 +850,7 @@ class SimpleElasticAgent(ElasticAgent):
                 return run_result
             elif state in {WorkerState.UNHEALTHY, WorkerState.FAILED}:
                 if self._remaining_restarts > 0:
-                    log.info(
+                    logger.info(
                         "[%s] Worker group %s. "
                         "%s/%s attempts left;"
                         " will restart worker group",
@@ -911,7 +867,7 @@ class SimpleElasticAgent(ElasticAgent):
                 num_nodes_waiting = rdzv_handler.num_nodes_waiting()
                 group_rank = self._worker_group.group_rank
                 if num_nodes_waiting > 0:
-                    log.info(
+                    logger.info(
                         "[%s] Detected %s "
                         "new nodes from group_rank=%s; "
                         "will restart worker group",
@@ -919,7 +875,7 @@ class SimpleElasticAgent(ElasticAgent):
                     )
                     self._restart_workers(self._worker_group)
             else:
-                raise Exception(f"[{role}] Worker group in {state.name} state")
+                raise Exception(f"[{role}] Worker group in {state.name} state")  # noqa: TRY002
 
     def _exit_barrier(self):
         """
@@ -930,7 +886,7 @@ class SimpleElasticAgent(ElasticAgent):
         acts as a safety guard against user scripts that terminate at different
         times.
         """
-        log.info(
+        logger.info(
             "Local worker group finished (%s). "
             "Waiting %s seconds for other agents to finish",
             self._worker_group.state, self._exit_barrier_timeout
@@ -938,20 +894,19 @@ class SimpleElasticAgent(ElasticAgent):
         start = time.time()
         try:
             store_util.barrier(
-                self._store,
-                self._worker_group.group_rank,
-                self._worker_group.group_world_size,
+                store=self._store,
+                world_size=self._worker_group.group_world_size,
                 key_prefix=_TERMINAL_STATE_SYNC_ID,
                 barrier_timeout=self._exit_barrier_timeout,
             )
-            log.info(
+            logger.info(
                 "Done waiting for other agents. Elapsed: %s seconds", time.time() - start
             )
         except SignalException as e:
-            log.warning("Got termination signal: %s", e.sigval)
+            logger.warning("Got termination signal: %s", e.sigval)
             raise
         except Exception:
-            log.exception(
+            logger.exception(
                 "Error waiting on exit barrier. Elapsed: %s seconds",
                 time.time() - start
             )

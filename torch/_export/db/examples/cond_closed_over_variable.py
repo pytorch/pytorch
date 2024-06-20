@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 
 from torch._export.db.case import export_case
@@ -5,7 +6,7 @@ from functorch.experimental.control_flow import cond
 
 
 @export_case(
-    example_inputs=(torch.tensor(True), torch.ones(3, 2)),
+    example_inputs=(torch.tensor(True), torch.randn(3, 2)),
     tags={"torch.cond", "python.closure"},
 )
 class CondClosedOverVariable(torch.nn.Module):

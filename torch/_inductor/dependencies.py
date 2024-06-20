@@ -1,3 +1,5 @@
+# mypy: allow-untyped-defs
+import abc
 import collections
 import dataclasses
 import itertools
@@ -5,6 +7,7 @@ import logging
 import re
 import typing
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from unittest.mock import patch
 
 import sympy
 
@@ -12,22 +15,103 @@ import torch
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
 from .codegen.common import index_prevent_reordering
-from .utils import get_dtype_size, sympy_str, sympy_subs, sympy_symbol, VarRanges
-from .virtualized import V
+from .utils import (
+    get_dtype_size,
+    reduction_num_outputs,
+    sympy_index_symbol,
+    sympy_str,
+    sympy_subs,
+    VarRanges,
+)
+from .virtualized import OpsHandler, ReductionType, V
 
 log = logging.getLogger(__name__)
 is_indirect = re.compile(r"indirect|tmp").search
-Dep = Union["MemoryDep", "StarDep", "WeakDep"]
 
 
-class MemoryDep(typing.NamedTuple):
+class Dep(abc.ABC):
+    name: str
+    index: sympy.Expr
+
+    @abc.abstractmethod
+    def rename(self, renames: Dict[str, str]) -> "Dep":
+        pass
+
+    @abc.abstractmethod
+    def get_numel(self) -> sympy.Expr:
+        pass
+
+    @abc.abstractmethod
+    def numbytes_hint(self):
+        pass
+
+    @abc.abstractmethod
+    def has_unbacked_symbols(self) -> bool:
+        pass
+
+    @abc.abstractmethod
+    def is_contiguous(self) -> bool:
+        pass
+
+
+@dataclasses.dataclass(frozen=True)
+class MemoryDep(Dep):
     name: str
     index: sympy.Expr
     var_names: Tuple[sympy.Symbol, ...]
     size: Tuple[sympy.Expr, ...]
+    mode: Optional[str] = None
 
     def __repr__(self):
-        return f"MemoryDep({self.name!r}, {self.index}, {self.ranges})"
+        return f"MemoryDep({self.name!r}, {self.index}, {self.ranges}, {self.mode})"
+
+    def get_offset(self):
+        """
+        Return the offset by setting every variable to be 0.
+        """
+        return sympy_subs(self.index, {v: 0 for v in self.var_names})
+
+    def normalize_with_stride_order(self, prefix="t"):
+        r"""
+        Used to decide if two MemoryDep does not equal due to different loop orders.
+        More specifically, when dep1 and dep2 are not equal, we can normalize
+        both and check if they are equal after that. If yes, then the mismatch is
+        caused by different loop orders.
+        """
+        # import here to avoid circular import
+        from torch._inductor import ir
+
+        strides = V.graph.sizevars.stride_hints(self.index, self.var_names)
+
+        # pick a loop order with stride ordered decreasingly
+        order = sorted(range(len(strides)), key=strides.__getitem__, reverse=True)
+        stride_reorder = ir.same_reorder(order)
+        sizes = self.size
+        var_names = self.var_names
+
+        new_reordered_sizes = stride_reorder(sizes)
+        new_reordered_var_names = stride_reorder(var_names)
+
+        new_simplified_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
+            new_reordered_var_names,
+            new_reordered_sizes,
+            index_prevent_reordering(
+                [self.index], new_reordered_var_names, new_reordered_sizes
+            ),
+        )
+
+        # now let's create new symbols with the passed in prefix
+        var_ranges, add_var = var_builder(prefix)
+        replacement = dict(
+            zip(
+                new_reordered_var_names,
+                reindex([add_var(x) for x in new_simplified_sizes]),
+            )
+        )
+        new_index = sympy_subs(sympy.expand(self.index), replacement)
+
+        out = MemoryDep(self.name, new_index, tuple(var_ranges.keys()), tuple(var_ranges.values()))  # type: ignore[arg-type]
+        return out
 
     @property
     def ranges(self) -> Dict[sympy.Symbol, sympy.Expr]:
@@ -48,7 +132,11 @@ class MemoryDep(typing.NamedTuple):
     def rename(self, renames: Dict[str, str]) -> "MemoryDep":
         if self.name in renames:
             return MemoryDep(
-                renames[self.name], self.index, var_names=self.var_names, size=self.size
+                renames[self.name],
+                self.index,
+                var_names=self.var_names,
+                size=self.size,
+                mode=self.mode,
             )
         return self
 
@@ -63,19 +151,50 @@ class MemoryDep(typing.NamedTuple):
     def is_contiguous(self) -> bool:
         return isinstance(self.index, sympy.Symbol) and self.index in self.var_names
 
+    def stride1_for_last_dim(self, result_for_complex_expression=True) -> bool:
+        """
+        Whether the stride for the last dimension is 1.
+        """
+        # python test/inductor/test_torchinductor_opinfo.py -k test_comprehensive_masked_scatter_cuda_float16
+        # will exercise thru this corner case.
+        if len(self.var_names) == 0:
+            return True
+
+        terms = self.index.args if isinstance(self.index, sympy.Add) else [self.index]
+
+        last_sym = self.var_names[-1]
+        for term in terms:
+            if term is last_sym:
+                return True
+
+            # Having a >1 stride for the last dimension is bad for perf
+            # return False.
+            if (
+                isinstance(term, sympy.Mul)
+                and len(term.args) == 2
+                and term.args[1] is last_sym
+                and isinstance(term.args[0], (int, sympy.Integer))
+                and term.args[0] > 1
+            ):
+                return False
+
+        return result_for_complex_expression
+
     def is_scalar(self) -> bool:
         if isinstance(self.index, sympy.Symbol):
             return self.index not in self.var_names and not self.is_indirect()
         return isinstance(self.index, (int, sympy.Integer))
 
     def is_indirect(self) -> bool:
-        return any(is_indirect(v.name) for v in self.index.free_symbols)
+        return any(is_indirect(v.name) for v in self.index.free_symbols)  # type: ignore[attr-defined]
 
 
-class StarDep(typing.NamedTuple):
-    # depends on the entire buffer
+@dataclasses.dataclass(frozen=True)
+class StarDep(Dep):
     name: str
+    mode: Optional[str] = None
 
+    # depends on the entire buffer
     @property
     def index(self):
         raise NotImplementedError("StarDep does not have an index")
@@ -85,7 +204,7 @@ class StarDep(typing.NamedTuple):
 
     def rename(self, renames: Dict[str, str]) -> "StarDep":
         if self.name in renames:
-            return StarDep(renames[self.name])
+            return StarDep(renames[self.name], self.mode)
         return self
 
     def numbytes_hint(self):
@@ -110,9 +229,12 @@ class StarDep(typing.NamedTuple):
 # if A reads a buffer and B mutates it
 # B must be ordered after A
 #
-# It is weak because if it turns out A's read is never used, we can still
-# eliminate it
-class WeakDep(typing.NamedTuple):
+# This is useful for a variety of reasons.
+# For example, if A's read is never actually used, we can eliminate it.
+# Another case is if A's buffer ends up being fused away, we never need to
+# materialize that buffer
+@dataclasses.dataclass(frozen=True)
+class WeakDep(Dep):
     name: str
 
     @property
@@ -137,8 +259,9 @@ class WeakDep(typing.NamedTuple):
         return False
 
 
-class IndexExprDep(typing.NamedTuple):
-    index: sympy.Expr
+@dataclasses.dataclass(frozen=True)
+class IndexExprDep:
+    index: sympy.Expr  # type: ignore[assignment]
     var_names: Tuple[sympy.Symbol, ...]
     size: Tuple[sympy.Expr, ...]
 
@@ -208,6 +331,20 @@ class ReadWrites:
     def reads_and_writes(self):
         return itertools.chain(self.reads, self.writes)
 
+    def buffer_names(self, ignore_integer_index=True):
+        """
+        Integer index is used for load_seed.
+        """
+        names = set()
+        for dep in self.reads_and_writes():
+            if not isinstance(dep, MemoryDep):
+                continue
+            if not ignore_integer_index or not isinstance(
+                dep.index, (int, sympy.Integer)
+            ):
+                names.add(dep.name)
+        return names
+
 
 class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
     def __init__(self, var_ranges: VarRanges, normalize: bool):
@@ -227,7 +364,7 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
                 k for k, v in zip(self._var_ranges.keys(), sizes) if v != 1
             )
             sizes = tuple(v for v in sizes if v != 1)
-            return index, var_names, sizes
+            return index, var_names, sizes  # type: ignore[return-value]
 
         # Try to further simplify the indexes even if simplify_loops didn't
         # convert it to the simplest form because of the interference from
@@ -261,7 +398,7 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
             # downstream users won't.  Normalize this away.
             new_vars.pop()
             new_sizes.pop()
-        return index, tuple(new_vars), tuple(new_sizes)
+        return index, tuple(new_vars), tuple(new_sizes)  # type: ignore[arg-type]
 
     def load(self, name: str, index: sympy.Expr) -> str:
         self._reads.add(MemoryDep(name, *self.canonicalize(index)))
@@ -272,7 +409,7 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         return self.load(name, sympy.Integer(index))
 
     def store(self, name: str, index: sympy.Expr, value: str, mode=None) -> str:
-        self._writes.add(MemoryDep(name, *self.canonicalize(index)))
+        self._writes.add(MemoryDep(name, *self.canonicalize(index), mode=mode))
         return f"store({name}, {sympy_str(index)}, {value}, {mode})"
 
     def store_reduction(self, name: str, index, value) -> str:
@@ -316,12 +453,13 @@ class RecordLoadStore(V.KernelFormatterHandler):  # type: ignore[name-defined]
         super().__init__(parent_handler=parent_handler)
 
 
+# TODO: check call sites
 def var_builder(prefix: str) -> Tuple[VarRanges, Callable[[sympy.Expr], sympy.Symbol]]:
     cnt = itertools.count()
     var_ranges: VarRanges = dict()
 
     def add_var(length: sympy.Expr) -> sympy.Symbol:
-        v = sympy_symbol(f"{prefix}{next(cnt)}")
+        v = sympy_index_symbol(f"{prefix}{next(cnt)}")
         var_ranges[v] = length
         return v
 
@@ -442,3 +580,60 @@ def extract_input_node_reduction_ranges(
 
 def canonicalization_prefix():
     return "c"
+
+
+# ops handler which computes all the free unbacked symbols for an IR
+class FreeUnbackedSymbolsOpsHandler:
+    symbols: Set[sympy.Symbol]
+
+    def __init__(self):
+        self.symbols = set()
+
+    def __getattr__(self, name: str) -> Callable[..., Any]:
+        def inner(*args, **kwargs):
+            for a in itertools.chain(args, kwargs.values()):
+                if isinstance(a, (sympy.Expr, sympy.logic.boolalg.Boolean)):
+                    self.symbols |= free_unbacked_symbols(a)
+
+        return inner
+
+    def indirect_indexing(self, index_var, size, check=True) -> sympy.Symbol:
+        assert not isinstance(index_var, (sympy.Expr, sympy.logic.boolalg.Boolean))
+        self.symbols |= free_unbacked_symbols(size)
+        return sympy_index_symbol(f"({str(index_var)})")
+
+    def frexp(self, x):
+        return (None,) * 2
+
+    def scan(self, dtypes, combine_fn, values):
+        return (None,) * len(values)
+
+    def reduction(
+        self,
+        dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        reduction_type: ReductionType,
+        value: Union[None, Tuple[None, ...]],
+    ) -> Union[None, Tuple[None, ...]]:
+        num_values = reduction_num_outputs(reduction_type)
+        return (None,) * num_values if num_values > 1 else None
+
+
+def _typecheck_FreeUnbackedSymbolsOpsHandler(
+    h: FreeUnbackedSymbolsOpsHandler,
+) -> OpsHandler[None]:
+    return h
+
+
+def extract_free_unbacked_symbols(fn: Callable[..., Any], index, rindex=None):
+    from .ir import FlexibleLayout
+
+    args = [index, rindex] if rindex is not None else [index]
+    handler = FreeUnbackedSymbolsOpsHandler()
+    # NB: I cargo culted the allow_indexing patch here, I don't understand why
+    # people do this all over
+    with V.set_ops_handler(handler), patch.object(
+        FlexibleLayout, "allow_indexing", True
+    ):
+        fn(*args)
+    return handler.symbols

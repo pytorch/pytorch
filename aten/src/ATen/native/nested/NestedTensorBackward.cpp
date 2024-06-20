@@ -44,16 +44,16 @@ std::tuple<Tensor, Tensor, Tensor> nested_linear_backward(
     return std::tuple<Tensor, Tensor, Tensor>{Tensor(), Tensor(), Tensor()};
   }
   Tensor grad_input, grad_weight, grad_bias;
-  auto grad_ouput_contiguous = grad_output.contiguous();
-  auto* nt_grad_output = get_nested_tensor_impl(grad_ouput_contiguous);
+  auto grad_output_contiguous = grad_output.contiguous();
+  auto* nt_grad_output = get_nested_tensor_impl(grad_output_contiguous);
   auto* nt_input = get_nested_tensor_impl(input);
   TORCH_INTERNAL_ASSERT(nt_grad_output != nullptr);
   TORCH_INTERNAL_ASSERT(nt_input != nullptr);
   TORCH_INTERNAL_ASSERT(nested_tensor_impl_is_contiguous(nt_grad_output));
-  auto grad_ouput_buffer = nt_grad_output->get_buffer();
+  auto grad_output_buffer = nt_grad_output->get_buffer();
   auto input_buffer = nt_input->get_buffer();
 
-  auto reshaped_grad = grad_ouput_buffer.reshape({-1, weight.size(0)});
+  auto reshaped_grad = grad_output_buffer.reshape({-1, weight.size(0)});
 
   if (output_mask[0]) {
     auto grad_input_buffer = at::mm(reshaped_grad, weight).view({-1});
@@ -137,7 +137,7 @@ Tensor _nested_sum_backward_cpu(
   AT_DISPATCH_ALL_TYPES_AND2(
     ScalarType::Half, ScalarType::BFloat16, self_grad_buffer.scalar_type(), "nested_sum_dim_cpu", [&]() {
     auto* self_grad_data = self_grad_buffer.data_ptr<scalar_t>();
-    const auto* output_grad_data = grad_buffer.data_ptr<scalar_t>();
+    const auto* output_grad_data = grad_buffer.const_data_ptr<scalar_t>();
     int64_t out_idx = 0, in_idx = 0;
     for (const auto i : c10::irange(ntensors)) {
       int64_t segments = num_segments[i].item<int64_t>();
@@ -197,8 +197,8 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_nested(
     IntArrayRef normalized_shape,
     const Tensor& mean,
     const Tensor& rstd,
-    const c10::optional<Tensor>& weight_opt /* optional */,
-    const c10::optional<Tensor>& bias_opt /*{ optional */,
+    const std::optional<Tensor>& weight_opt /* optional */,
+    const std::optional<Tensor>& bias_opt /*{ optional */,
     std::array<bool, 3> grad_input_mask) {
   // For NestedTensors weight and bias are non nested.
   auto* nt_impl_grad = get_nested_tensor_impl(grad);

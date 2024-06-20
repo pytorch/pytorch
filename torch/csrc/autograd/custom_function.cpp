@@ -5,28 +5,7 @@
 
 #include <utility>
 
-namespace torch {
-namespace autograd {
-
-VariableInfo::VariableInfo(const Variable& var)
-    : layout(var.layout()),
-      device(var.device()),
-      scalar_type(var.scalar_type()),
-      size(var.sym_sizes().vec()),
-      requires_grad(var.requires_grad()),
-      is_empty(false) {}
-
-VariableInfo::VariableInfo() : requires_grad(false), is_empty(true) {}
-
-Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
-  if (is_empty) {
-    // Return undefined tensor.
-    return at::Tensor();
-  } else {
-    return at::zeros_symint(
-        size, at::TensorOptions(scalar_type).device(device).layout(layout));
-  }
-}
+namespace torch::autograd {
 
 // This function has two main goals:
 //  1) Use the user-provided jvp function to populate the outputs' forward
@@ -49,7 +28,7 @@ Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
 static void _process_forward_mode_AD(
     const variable_list& inputs,
     std::unordered_map<at::TensorImpl*, size_t> inputs_mapping,
-    const at::ArrayRef<c10::optional<Variable>> raw_outputs,
+    const at::ArrayRef<std::optional<Variable>> raw_outputs,
     const optional_variable_list& outputs,
     const std::unordered_set<at::TensorImpl*>& non_differentiable,
     const std::unordered_set<at::TensorImpl*>& dirty_inputs,
@@ -131,6 +110,9 @@ static void _process_forward_mode_AD(
       ")");
 
   for (const auto i : c10::irange(num_outputs)) {
+    if (!raw_outputs[i].has_value()) {
+      continue;
+    }
     const auto& out =
         outputs[i].has_value() ? outputs[i].value() : at::Tensor();
     auto out_tensor_impl = raw_outputs[i].value().unsafeGetTensorImpl();
@@ -149,7 +131,6 @@ static void _process_forward_mode_AD(
       continue;
     }
 
-    TORCH_INTERNAL_ASSERT(raw_outputs[i].has_value());
     bool is_input = inputs_mapping.count(out_tensor_impl) > 0;
     bool is_modified = dirty_inputs.count(out_tensor_impl) > 0;
 
@@ -277,7 +258,7 @@ static optional_variable_list _process_backward_mode_ad(
     const std::unordered_map<at::TensorImpl*, size_t>& inputs_mapping,
     const std::unordered_set<at::TensorImpl*>& non_differentiable,
     const std::unordered_set<at::TensorImpl*>& dirty_inputs,
-    const at::ArrayRef<c10::optional<Variable>> raw_outputs,
+    const at::ArrayRef<std::optional<Variable>> raw_outputs,
     const std::shared_ptr<Node>& cdata,
     const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
     const _view_as_self_fn_t& view_as_self_fn) {
@@ -457,7 +438,7 @@ optional_variable_list _wrap_outputs(
     const variable_list& input_vars,
     const std::unordered_set<at::TensorImpl*>& non_differentiable,
     const std::unordered_set<at::TensorImpl*>& dirty_inputs,
-    const at::ArrayRef<c10::optional<Variable>> raw_outputs,
+    const at::ArrayRef<std::optional<Variable>> raw_outputs,
     const std::shared_ptr<Node>& cdata,
     const _jvp_fn_t& jvp_user_function,
     const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
@@ -600,5 +581,4 @@ const std::unordered_set<at::TensorImpl*>& AutogradContext::
     get_non_differentiable() const {
   return non_differentiable_;
 }
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

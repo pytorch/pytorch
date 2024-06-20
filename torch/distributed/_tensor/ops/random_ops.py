@@ -1,6 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import torch
-from torch.distributed._tensor.op_schema import (
+from torch.distributed._tensor._op_schema import (
     OpSchema,
     OpStrategy,
     PlacementStrategy,
@@ -21,10 +21,10 @@ def random_op_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
 
     random_strategy = OpStrategy([])
     for arg_strategy in self_strategy.strategies:
-        arg_spec = arg_strategy.out_spec
+        arg_spec = arg_strategy.output_spec
         if is_tensor_partial(arg_spec):
             # TODO: figure out how inplace random op should behave when it's partial
-            raise RuntimeError(f"{op_schema.op} with _Partial is not supported yet!")
-        random_strategy.strategies.append(PlacementStrategy(output_spec=arg_spec))
+            raise RuntimeError(f"{op_schema.op} with Partial is not supported yet!")
+        random_strategy.strategies.append(PlacementStrategy(output_specs=arg_spec))
 
     return random_strategy

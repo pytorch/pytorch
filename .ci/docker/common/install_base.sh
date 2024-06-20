@@ -3,7 +3,7 @@
 set -ex
 
 install_ubuntu() {
-  # NVIDIA dockers for RC releases use tag names like `11.0-cudnn8-devel-ubuntu18.04-rc`,
+  # NVIDIA dockers for RC releases use tag names like `11.0-cudnn9-devel-ubuntu18.04-rc`,
   # for this case we will set UBUNTU_VERSION to `18.04-rc` so that the Dockerfile could
   # find the correct image. As a result, here we have to check for
   #   "$UBUNTU_VERSION" == "18.04"*
@@ -113,7 +113,6 @@ install_centos() {
     glibc-devel \
     glibc-headers \
     glog-devel \
-    hiredis-devel \
     libstdc++-devel \
     libsndfile-devel \
     make \
@@ -153,7 +152,7 @@ wget https://ossci-linux.s3.amazonaws.com/valgrind-${VALGRIND_VERSION}.tar.bz2
 tar -xjf valgrind-${VALGRIND_VERSION}.tar.bz2
 cd valgrind-${VALGRIND_VERSION}
 ./configure --prefix=/usr/local
-make -j6
+make -j$[$(nproc) - 2]
 sudo make install
 cd ../../
 rm -rf valgrind_build

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 
 import torch
 import torch.utils._pytree as pytree
@@ -95,12 +96,6 @@ def trace_out_dtype(proxy_mode, func_overload, op, output_dtype, *args):
         "call_function", func_overload, proxy_args, {}, name="out_dtype"
     )
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
-
-
-@out_dtype.py_impl(DispatchKey.PreDispatch)  # type: ignore[attr-defined]
-def out_dtype_predispatch(*args, **kwargs):
-    with torch._C._ExcludeDispatchKeyGuard(torch._C.DispatchKeySet(DispatchKey.PreDispatch)):  # type: ignore[attr-defined]
-        return out_dtype(*args, **kwargs)
 
 
 @out_dtype.py_impl(DispatchKey.CompositeExplicitAutograd)

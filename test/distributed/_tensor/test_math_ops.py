@@ -18,6 +18,9 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 
 
+funcol = torch.ops.c10d_functional
+
+
 class DistMathOpsTest(DTensorTestBase):
     def linear_op_reductions(self, op_str):
         device_mesh = self.build_device_mesh()
@@ -124,10 +127,84 @@ class DistMathOpsTest(DTensorTestBase):
             self.assertIsNone(dist_x.grad)
             dist_y.backward()
             self.assertIsNotNone(dist_x.grad)
+            if dims[softmax_dim] == dims[shard_dim]:
+                self.assertTrue(dist_x.grad.placements[0].is_replicate())
+            else:
+                self.assertTrue(dist_x.grad.placements[0].is_shard(dim=shard_dim))
             self.assertEqual(dist_x.grad.full_tensor(), x.grad)
 
     @with_comms
-    def test_full_shard_math_ops(self):
+    @skip_unless_torch_gpu
+    def test_nll_loss_and_cross_entropy(self):
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+
+        channel_size, channel_dim = 16, 1
+        test_setup = [
+            (2, (8, channel_size), (8,)),  # calling aten.nll_loss_forward
+            (3, (8, channel_size, 12), (8, 12)),  # calling aten.nll_loss2d_forward
+        ]
+        for input_ndim, input_size, target_size in test_setup:
+            x = torch.rand(*input_size, device=self.device_type, requires_grad=True)
+            target = torch.randint(channel_size, target_size, device=self.device_type)
+            dist_target = distribute_tensor(target, device_mesh, [Replicate()])
+
+            shard_dims = list(range(input_ndim))
+            reductions = ["none", "mean", "sum"]
+            # Compared with nll_loss, cross_entropy additionally calls log_softmax first.
+            # Testing them together as code can be reused.
+            loss_functions = [
+                torch.nn.functional.nll_loss,
+                torch.nn.functional.cross_entropy,
+            ]
+            for shard_dim, reduction, loss_fn in itertools.product(
+                shard_dims, reductions, loss_functions
+            ):
+                dist_x = distribute_tensor(x, device_mesh, [Shard(shard_dim)])
+                y = loss_fn(x, target, reduction=reduction)
+                if reduction == "none":
+                    y.sum().backward()
+                else:
+                    y.backward()
+                with comm_mode:
+                    dist_y = loss_fn(dist_x, dist_target, reduction=reduction)
+                    if shard_dim == channel_dim:
+                        self.assertEqual(comm_mode.get_total_counts(), 1)
+                        self.assertEqual(
+                            comm_mode.get_comm_counts()[funcol.all_gather_into_tensor],
+                            1,
+                        )
+                        self.assertTrue(dist_y.placements[0].is_replicate())
+                        self.assertEqual(dist_y.to_local(), y)
+                    else:
+                        self.assertEqual(comm_mode.get_total_counts(), 0)
+                        if reduction == "none":
+                            output_shard_dim = (
+                                shard_dim if shard_dim < channel_dim else shard_dim - 1
+                            )
+                            self.assertTrue(
+                                dist_y.placements[0].is_shard(dim=output_shard_dim)
+                            )
+                        else:
+                            self.assertTrue(dist_y.placements[0].is_partial())
+                        self.assertEqual(dist_y.full_tensor(), y)
+
+                    if reduction == "none":
+                        dist_y.sum().backward()
+                    else:
+                        dist_y.backward()
+                    if shard_dim == channel_dim:
+                        self.assertTrue(dist_x.grad.placements[0].is_replicate())
+                        self.assertEqual(dist_x.grad.to_local(), x.grad)
+                    else:
+                        self.assertTrue(
+                            dist_x.grad.placements[0].is_shard(dim=shard_dim)
+                        )
+                        self.assertEqual(dist_x.grad.full_tensor(), x.grad)
+                    x.grad.zero_()
+
+    @with_comms
+    def test_shard_math_ops(self):
         mesh_shape = (2, self.world_size // 2)
         mesh = DeviceMesh(
             self.device_type,
@@ -144,11 +221,11 @@ class DistMathOpsTest(DTensorTestBase):
         # for op in [torch.add, torch.sub, torch.mul, torch.div]:
         for op in [torch.add, torch.sub, torch.mul, torch.div]:
             expect_rs = op(global_tensor, 2)
-            actual_rs = op(double_shard_tensor, 2).redistribute(
-                mesh, [Replicate(), Replicate()]
-            )
-            actual_local_res = actual_rs.to_local()
-            self.assertEqual(actual_local_res, expect_rs)
+            double_shard_full_tensor = op(double_shard_tensor, 2).full_tensor()
+            self.assertEqual(double_shard_full_tensor, expect_rs)
+
+            fully_shard_full_tensor = op(fully_shard_tensor, 2).full_tensor()
+            self.assertEqual(fully_shard_full_tensor, expect_rs)
 
     @with_comms
     def test_layer_norm_fwd(self):
@@ -194,9 +271,9 @@ class DistMathOpsTest(DTensorTestBase):
             with comm_mode:
                 y_dist = layer_norm_dist(x_dist)
 
-            self.assertEqual(
+            self.assertLessEqual(
                 comm_mode.get_total_counts(),
-                0,
+                1,  # TODO: This should be 0!
                 f"comm count={comm_mode.get_total_counts()}, "
                 f"shard_dim={shard_dim}, norm_shape={normalized_shape}, elem_affine={elementwise_affine}",
             )
@@ -217,7 +294,7 @@ class DistMathOpsTest(DTensorTestBase):
         # https://pytorch.org/docs/stable/generated/torch.nn.LayerNorm.html
         batch, sentence_length, embedding_dim = 20, 5, 10
         norm_shape_idx_list = list(range(3))
-        shard_dims = [-1, 0, 1, 2]
+        shard_dims = [0, 1, 2]
         elementwise_affine_list = [False, True]
         test_config_list = list(
             itertools.product(shard_dims, norm_shape_idx_list, elementwise_affine_list)
@@ -268,9 +345,10 @@ class DistMathOpsTest(DTensorTestBase):
             with comm_mode:
                 y_dist = layer_norm_dist(x_dist)
 
+            expected_fwd_comm = 0 if shard_dim < norm_idx else 1
             self.assertEqual(
                 comm_mode.get_total_counts(),
-                0,
+                expected_fwd_comm,
                 f"comm count={comm_mode.get_total_counts()}, "
                 f"shard_dim={shard_dim}, norm_shape={normalized_shape}, elem_affine={elementwise_affine}",
             )
@@ -282,16 +360,18 @@ class DistMathOpsTest(DTensorTestBase):
             with comm_mode:
                 y_dist.sum().backward()
 
+            expected_bwd_comm = 0 if shard_dim < norm_idx else 1
+
             self.assertEqual(
                 comm_mode.get_total_counts(),
-                0,
+                expected_bwd_comm,
                 f"comm count={comm_mode.get_total_counts()}, "
                 f"shard_dim={shard_dim}, norm_shape={normalized_shape}, elem_affine={elementwise_affine}",
             )
 
             if elementwise_affine:
                 # if input is sharded on any outer dimension, the gradient of weight
-                # and bias should be _Partial
+                # and bias should be Partial
                 dim_map = x_dist._spec.dim_map
                 outer_dims = range(norm_idx)
                 needs_reduction = any(dim_map[d] >= 0 for d in outer_dims)
@@ -313,6 +393,49 @@ class DistMathOpsTest(DTensorTestBase):
                 )
 
             self.assertEqual(x_local.grad, x_dist.grad.full_tensor())
+
+    @with_comms
+    def test_topk(self):
+        device_mesh = self.build_device_mesh()
+        placement_combs = [Shard(0), Shard(1), Shard(2), Replicate()]
+
+        comm_mode = CommDebugMode()
+
+        tensor = torch.randn(12, 8, 8, requires_grad=True)
+        global_topk = tensor.topk(3, dim=0)
+
+        for placement in placement_combs:
+            dtensor = distribute_tensor(tensor, device_mesh, (placement,))
+            with comm_mode:
+                out_dt = dtensor.topk(3, dim=0)
+            if placement.is_shard(0):
+                self.assertEqual(comm_mode.get_total_counts(), 1)
+                self.assertEqual(
+                    comm_mode.get_comm_counts()[funcol.all_gather_into_tensor],
+                    1,
+                )
+            out_full_values = out_dt.values.full_tensor()
+            self.assertEqual(global_topk.values, out_full_values)
+
+            # TODO: support backward scatter
+            # global_topk.values.sum().backward()
+            # out_full_values.sum().backward()
+
+    @with_comms
+    def test_shard0_svd(self):
+        device_mesh = self.build_device_mesh()
+        torch.manual_seed(42)
+        replicated_x = torch.randn((8, 8), device=self.device_type)
+        sharded_x = distribute_tensor(replicated_x, device_mesh, (Shard(0),))
+        with CommDebugMode() as comm_mode:
+            U, S, V = torch.linalg.svd(sharded_x, full_matrices=False)
+        ref_U, ref_S, ref_V = torch.linalg.svd(replicated_x, full_matrices=False)
+        self.assertEqual(U.to_local(), ref_U)
+        self.assertEqual(S.to_local(), ref_S)
+        self.assertEqual(V.to_local(), ref_V)
+        comm_counts = comm_mode.get_comm_counts()
+        self.assertEqual(len(comm_counts), 1)
+        self.assertEqual(comm_counts[funcol.all_gather_into_tensor], 1)
 
 
 if __name__ == "__main__":

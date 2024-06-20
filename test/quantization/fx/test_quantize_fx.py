@@ -3121,19 +3121,20 @@ class TestQuantizeFx(QuantizationTestCase):
 
         b = io.BytesIO()
         torch.save(obs_dict, b)
-        b.seek(0)
 
         # Load the stats into new model
-        model_2 = orig
-        model_2 = prepare_fx(model_2, qconfig_dict, example_inputs=(x,))
+        for weights_only in [True, False]:
+            b.seek(0)
+            model_2 = orig
+            model_2 = prepare_fx(model_2, qconfig_dict, example_inputs=(x,))
 
-        loaded_dict = torch.load(b)
-        torch.ao.quantization.load_observer_state_dict(model_2, loaded_dict)
+            loaded_dict = torch.load(b, weights_only=weights_only)
+            torch.ao.quantization.load_observer_state_dict(model_2, loaded_dict)
 
-        quant_2 = convert_fx(model_2)
+            quant_2 = convert_fx(model_2)
 
-        # Verify that loaded state dict produces same results.
-        self.assertEqual(quant(x), quant_2(x))
+            # Verify that loaded state dict produces same results.
+            self.assertEqual(quant(x), quant_2(x))
 
     @skipIfNoFBGEMM
     def test_custom_module_class(self):
@@ -4284,6 +4285,7 @@ class TestQuantizeFx(QuantizationTestCase):
         m.load_state_dict(state_dict)
         with TemporaryFileName() as fname:
             torch.save(m.state_dict(), fname)
+            # Don't test weights_only here as this is loading a ScriptModule
             m.load_state_dict(torch.load(fname))
 
         checkModel(m, data, ref_weight, ref_bias, ref_res)
@@ -5796,7 +5798,7 @@ class TestQuantizeFx(QuantizationTestCase):
             self.checkGraphModuleNodes(model, expected_node_occurrence=expected_node_occurrence)
         except AssertionError as e:
             if qconfig_name is not None:
-                print("ERROR: Validation for QConfig '%s' failed" % qconfig_name)
+                print(f"ERROR: Validation for QConfig '{qconfig_name}' failed")
             raise e
 
     def test_backend_config_quantization_range(self):
@@ -8718,7 +8720,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 continue
                 # fp16 dynamic quant is not supported for qnnpack
 
-            eager_qconfig_dict = {x : qconfig for x in module_types}
+            eager_qconfig_dict = dict.fromkeys(module_types, qconfig)
             model_eager = quantize_dynamic(model_eager, qconfig_spec=eager_qconfig_dict)
 
             graph_qconfig_dict = {

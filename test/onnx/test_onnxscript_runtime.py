@@ -5,8 +5,9 @@ from typing import List
 
 import onnx_test_common
 import onnxscript
-import torch
 from onnxscript.onnx_types import FLOAT
+
+import torch
 from torch.onnx._internal import jit_utils
 from torch.testing._internal import common_utils
 
@@ -23,13 +24,13 @@ class TestONNXScriptRuntime(onnx_test_common._TestONNXRuntime):
 
         from onnxscript.onnx_opset import opset15 as op
 
-        # TODO(titaiwang): make an official domain for onnxscript usage
         custom_opset = onnxscript.values.Opset(domain="onnx-script", version=1)
 
         @onnxscript.script(custom_opset)
-        def Selu(X):
-            # TODO: onnx/ort doesn't support default values for now
-            # move this when they do
+        def Selu(
+            X,
+        ):
+            # default value is not supported by onnxscript
             alpha = 1.67326  # auto wrapped as Constants
             gamma = 1.0507
             alphaX = op.CastLike(alpha, X)
@@ -108,7 +109,7 @@ class TestONNXScriptRuntime(onnx_test_common._TestONNXRuntime):
         def custom_layer_norm(
             g, input, normalized_shape, weight, bias, eps, cudnn_enable
         ):
-            # TODO: move the comprehension into local function once it's supported by onnxscript
+            # comprehension is not supported by onnxscript
             axes = [-i for i in range(len(normalized_shape), 0, -1)]
             return g.onnxscript_op(
                 layer_norm, input, weight, bias, axes_i=axes, eps_f=eps

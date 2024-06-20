@@ -3,12 +3,6 @@
 #ifdef USE_VULKAN_API
 
 #include <ATen/native/vulkan/api/api.h>
-#include <ATen/native/vulkan/impl/Registry.h>
-
-#define VK_KERNEL(shader_name) \
-  ::at::native::vulkan::get_shader_info(#shader_name)
-#define VK_LOOKUP_KERNEL(op_name) \
-  ::at::native::vulkan::look_up_shader_info(#op_name)
 
 namespace at {
 namespace native {

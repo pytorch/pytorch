@@ -6,6 +6,8 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/operations/BinaryKernel.h>
+// For MTLLanguageVersion_3_1
+#include <ATen/native/mps/MPSGraphSonomaOps.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -22,7 +24,7 @@
 namespace at::native {
 namespace mps {
 
-static const char* METAL_BINARY = R"BINARY_METAL(
+static MetalShaderLibrary lib(R"BINARY_METAL(
 
 #include <metal_stdlib>
 using namespace metal;
@@ -190,24 +192,25 @@ kernel void nextafter_kernel(constant void  * input_       [[buffer(0)]],
                              device   void  * out_         [[buffer(2)]],
                              constant uint3 * offsets      [[buffer(3)]],
                              uint tid [[thread_position_in_grid]]) {
-  device   T* out   = (device   T*)((device uint8_t*)out_ + offsets[tid].x);
-  constant T* input = (constant T*)((constant uint8_t*)input_ + offsets[tid].y);
-  constant T* other = (constant T*)((constant uint8_t*)other_ + offsets[tid].z);
-
-  if (*input == *other)
-  {
-    *out = *other;
-  }
-  else if (isnan(*input) || isnan(*other))
-  {
+  auto out   = (device   T*)((device uint8_t*)out_ + offsets[tid].x);
+  auto input = *(constant T*)((constant uint8_t*)input_ + offsets[tid].y);
+  auto other = *(constant T*)((constant uint8_t*)other_ + offsets[tid].z);
+#if __METAL_VERSION__ >= 310
+  *out = nextafter(input, other);
+#else
+  if (input == other) {
+    *out = input;
+  } else if (isnan(input) || isnan(other)) {
     *out = NAN;
-  }
-  else
-  {
-    U bits = as_type<U>(*input);
-    bits = bits + ((*other > *input) ? 1 : -1);
+  } else if (input == 0) {
+    constexpr auto one = as_type<T>(static_cast<U>(1));
+    *out = other > 0 ? one : -one;
+  } else {
+    U bits = as_type<U>(input);
+    (input > 0) ^ (input > other) ? bits++ : bits--;
     *out = as_type<T>(bits);
   }
+#endif
 }
 
 #define REGISTER_NEXTAFTER_OP(DTYPE, UTYPE)  \
@@ -249,43 +252,7 @@ kernel void complex_kernel<DTYPE>(       \
 REGISTER_COMPLEX_OUT_OP(float);
 REGISTER_COMPLEX_OUT_OP(half);
 
-)BINARY_METAL";
-
-using namespace mps;
-
-static id<MTLLibrary> compileBinaryOpsLibrary(id<MTLDevice> device) {
-  static id<MTLLibrary> binaryLibrary = nil;
-  if (binaryLibrary) {
-    return binaryLibrary;
-  }
-
-  NSError* error = nil;
-  MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
-  [options setLanguageVersion:MTLLanguageVersion2_3];
-  binaryLibrary = [device newLibraryWithSource:[NSString stringWithCString:METAL_BINARY encoding:NSASCIIStringEncoding]
-                                       options:options
-                                         error:&error];
-  TORCH_CHECK(binaryLibrary, "Failed to create metal binary library, error: ", [[error description] UTF8String]);
-  return binaryLibrary;
-}
-
-static id<MTLComputePipelineState> binaryPipelineState(id<MTLDevice> device, const std::string& kernel) {
-  static std::unordered_map<std::string, id<MTLComputePipelineState>> psoCache;
-  id<MTLComputePipelineState> pso = psoCache[kernel];
-  if (pso) {
-    return pso;
-  }
-
-  NSError* error = nil;
-  id<MTLLibrary> binaryLib = compileBinaryOpsLibrary(device);
-  id<MTLFunction> binaryFunc = [binaryLib newFunctionWithName:[NSString stringWithUTF8String:kernel.c_str()]];
-  TORCH_CHECK(binaryFunc, "Failed to create function state object for: ", kernel);
-  pso = [device newComputePipelineStateWithFunction:binaryFunc error:&error];
-  TORCH_CHECK(pso, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
-
-  psoCache[kernel] = pso;
-  return pso;
-}
+)BINARY_METAL");
 
 static void binary_mps_impl(TensorIteratorBase& iter, const std::string func_name) {
   TORCH_CHECK(iter.common_dtype() != at::kDouble, "float64 is not supported on MPS");
@@ -302,10 +269,10 @@ static void binary_mps_impl(TensorIteratorBase& iter, const std::string func_nam
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      const std::string kernel = func_name + "_" + scalarToMetalTypeString(input.scalar_type());
+      const std::string kernel = func_name + "_" + scalarToMetalTypeString(input);
       auto kernelDataOffsets = generateKernelDataOffsets(computeEncoder, iter);
 
-      id<MTLComputePipelineState> binaryPSO = binaryPipelineState(device, kernel);
+      id<MTLComputePipelineState> binaryPSO = lib.getPipelineStateForFunc(kernel);
 
       // this function call is a no-op if MPS Profiler is not enabled
       getMPSProfiler().beginProfileKernel(binaryPSO, kernel, {input, other});
@@ -323,7 +290,7 @@ static void binary_mps_impl(TensorIteratorBase& iter, const std::string func_nam
 }
 
 void complex_mul_out(const Tensor& input, const Tensor& other, const Tensor& output) {
-  TORCH_INTERNAL_ASSERT(c10::isComplexType(input.scalar_type()) && c10::isComplexType(other.scalar_type()));
+  TORCH_INTERNAL_ASSERT(c10::isComplexType(input.scalar_type()) || c10::isComplexType(other.scalar_type()));
   auto new_size = at::infer_size(input.sizes(), other.sizes());
   if (!output.sizes().equals(new_size)) {
     output.resize_(new_size);
@@ -332,9 +299,10 @@ void complex_mul_out(const Tensor& input, const Tensor& other, const Tensor& out
   if (length == 0) {
     return;
   }
+  auto common_dtype = output.scalar_type();
   auto output_as_real = at::view_as_real(output).select(output.dim(), 0);
-  auto input_as_real = at::view_as_real(input).select(input.dim(), 0);
-  auto other_as_real = at::view_as_real(other).select(other.dim(), 0);
+  auto input_as_real = at::view_as_real(input.to(kMPS, common_dtype)).select(input.dim(), 0);
+  auto other_as_real = at::view_as_real(other.to(kMPS, common_dtype)).select(other.dim(), 0);
   auto iter =
       TensorIteratorConfig().add_output(output_as_real).add_input(input_as_real).add_input(other_as_real).build();
 

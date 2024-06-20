@@ -2,17 +2,16 @@
 """Unit tests for the internal registration wrapper module."""
 from __future__ import annotations
 
-import logging
 import operator
 from typing import TypeVar, Union
 
 import onnxscript  # type: ignore[import]
-
-import torch
-import torch.fx
 from onnxscript import BFLOAT16, DOUBLE, FLOAT, FLOAT16  # type: ignore[import]
 from onnxscript.function_libs.torch_lib import ops  # type: ignore[import]
 from onnxscript.onnx_opset import opset15 as op  # type: ignore[import]
+
+import torch
+import torch.fx
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.fx import (
     analysis,
@@ -142,8 +141,6 @@ class TestRegistration(common_utils.TestCase):
 class TestDispatcher(common_utils.TestCase):
     def setUp(self):
         self.registry = torch.onnx.OnnxRegistry()
-        # TODO: remove this once we have a better way to do this
-        logger = logging.getLogger("TestDispatcher")
         self.diagnostic_context = diagnostics.DiagnosticContext(
             "torch.onnx.dynamo_export", torch.__version__
         )

@@ -41,11 +41,11 @@ to lower precision with minimal accuracy loss.
 Quantization API Summary
 -----------------------------
 
-PyTorch provides three different modes of quantization: Eager Mode Quantization, FX Graph Mode Quantization (maintainence) and PyTorch 2 Export Quantization.
+PyTorch provides three different modes of quantization: Eager Mode Quantization, FX Graph Mode Quantization (maintenance) and PyTorch 2 Export Quantization.
 
 Eager Mode Quantization is a beta feature. User needs to do fusion and specify where quantization and dequantization happens manually, also it only supports modules and not functionals.
 
-FX Graph Mode Quantization is an automated quantization workflow in PyTorch, and currently it's a prototype feature, it is in maintainence mode since we have PyTorch 2 Export Quantization. It improves upon Eager Mode Quantization by adding support for functionals and automating the quantization process, although people might need to refactor the model to make the model compatible with FX Graph Mode Quantization (symbolically traceable with ``torch.fx``). Note that FX Graph Mode Quantization is not expected to work on arbitrary models since the model might not be symbolically traceable, we will integrate it into domain libraries like torchvision and users will be able to quantize models similar to the ones in supported domain libraries with FX Graph Mode Quantization. For arbitrary models we'll provide general guidelines, but to actually make it work, users might need to be familiar with ``torch.fx``, especially on how to make a model symbolically traceable.
+FX Graph Mode Quantization is an automated quantization workflow in PyTorch, and currently it's a prototype feature, it is in maintenance mode since we have PyTorch 2 Export Quantization. It improves upon Eager Mode Quantization by adding support for functionals and automating the quantization process, although people might need to refactor the model to make the model compatible with FX Graph Mode Quantization (symbolically traceable with ``torch.fx``). Note that FX Graph Mode Quantization is not expected to work on arbitrary models since the model might not be symbolically traceable, we will integrate it into domain libraries like torchvision and users will be able to quantize models similar to the ones in supported domain libraries with FX Graph Mode Quantization. For arbitrary models we'll provide general guidelines, but to actually make it work, users might need to be familiar with ``torch.fx``, especially on how to make a model symbolically traceable.
 
 PyTorch 2 Export Quantization is the new full graph mode quantization workflow, released as prototype feature in PyTorch 2.1. With PyTorch 2, we are moving to a better solution for full program capture (torch.export) since it can capture a higher percentage (88.8% on 14K models) of models compared to torch.fx.symbolic_trace (72.7% on 14K models), the program capture solution used by FX Graph Mode Quantization. torch.export still has limitations around some python constructs and requires user involvement to support dynamism in the exported model, but overall it is an improvement over the previous program capture solution. PyTorch 2 Export Quantization is built for models captured by torch.export, with flexibility and productivity of both modeling users and backend developers in mind. The main features are
 (1). Programmable API for configuring how a model is quantized that can scale to many more use cases
@@ -62,7 +62,7 @@ The following table compares the differences between Eager Mode Quantization, FX
 |                 |                   |Quantization       |                         |
 +-----------------+-------------------+-------------------+-------------------------+
 |Release          |beta               |prototype          |prototype                |
-|Status           |                   |(maintainence)     |                         |
+|Status           |                   |(maintenance)      |                         |
 +-----------------+-------------------+-------------------+-------------------------+
 |Operator         |Manual             |Automatic          |Automatic                |
 |Fusion           |                   |                   |                         |
@@ -430,7 +430,7 @@ to do the following in addition:
    to be fused. We currently support the following fusions:
    [Conv, Relu], [Conv, BatchNorm], [Conv, BatchNorm, Relu], [Linear, Relu]
 
-(Prototype - maintaince mode) FX Graph Mode Quantization
+(Prototype - maintenance mode) FX Graph Mode Quantization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 There are multiple quantization types in post training quantization (weight only, dynamic and static) and the configuration is done through `qconfig_mapping` (an argument of the `prepare_fx` function).
@@ -534,7 +534,7 @@ API Example::
 
   # Step 1. program capture
   # NOTE: this API will be updated to torch.export API in the future, but the captured
-  # result shoud mostly stay the same
+  # result should mostly stay the same
   m = capture_pre_autograd_graph(m, *example_inputs)
   # we get a model with aten ops
 
@@ -1227,7 +1227,7 @@ An example::
 
 Symbolic Trace Error when using FX Graph Mode Quantization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Symbolic traceability is a requirement for `(Prototype - maintaince mode) FX Graph Mode Quantization`_, so if you pass a PyTorch Model that is not symbolically traceable to `torch.ao.quantization.prepare_fx` or `torch.ao.quantization.prepare_qat_fx`, we might see an error like the following::
+Symbolic traceability is a requirement for `(Prototype - maintenance mode) FX Graph Mode Quantization`_, so if you pass a PyTorch Model that is not symbolically traceable to `torch.ao.quantization.prepare_fx` or `torch.ao.quantization.prepare_qat_fx`, we might see an error like the following::
 
   torch.fx.proxy.TraceError: symbolically traced variables cannot be used as inputs to control flow
 
@@ -1334,7 +1334,7 @@ Please take a look at `Limitations of Symbolic Tracing <https://pytorch.org/docs
 .. py:module:: torch.ao.quantization.fx.utils
 .. py:module:: torch.ao.quantization.observer
 .. py:module:: torch.ao.quantization.pt2e.duplicate_dq_pass
-.. py:module:: torch.ao.quantization.pt2e.eval_utils
+.. py:module:: torch.ao.quantization.pt2e.export_utils
 .. py:module:: torch.ao.quantization.pt2e.graph_utils
 .. py:module:: torch.ao.quantization.pt2e.port_metadata_pass
 .. py:module:: torch.ao.quantization.pt2e.prepare
@@ -1345,7 +1345,6 @@ Please take a look at `Limitations of Symbolic Tracing <https://pytorch.org/docs
 .. py:module:: torch.ao.quantization.qconfig_mapping
 .. py:module:: torch.ao.quantization.quant_type
 .. py:module:: torch.ao.quantization.quantization_mappings
-.. py:module:: torch.ao.quantization.quantize
 .. py:module:: torch.ao.quantization.quantize_fx
 .. py:module:: torch.ao.quantization.quantize_jit
 .. py:module:: torch.ao.quantization.quantize_pt2e

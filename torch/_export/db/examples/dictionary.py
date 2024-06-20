@@ -1,10 +1,11 @@
+# mypy: allow-untyped-defs
 import torch
 
 from torch._export.db.case import export_case
 
 
 @export_case(
-    example_inputs=(torch.ones(3, 2), torch.tensor(4)),
+    example_inputs=(torch.randn(3, 2), torch.tensor(4)),
     tags={"python.data-structure"},
 )
 class Dictionary(torch.nn.Module):

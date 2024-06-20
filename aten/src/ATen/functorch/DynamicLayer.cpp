@@ -17,8 +17,7 @@
 #include <ATen/FuncTorchTLS.h>
 #include <iostream>
 
-namespace at {
-namespace functorch {
+namespace at::functorch {
 
 void setDynamicLayerFrontBackKeysIncluded(bool included) {
   c10::impl::tls_set_dispatch_key_included(DispatchKey::FuncTorchDynamicLayerFrontMode, included);
@@ -235,7 +234,7 @@ int64_t pushDynamicLayer(DynamicLayer&& dynamic_layer) {
   auto& dynamicLayerStack = dynamicLayerStackAccessor();
   int64_t layerId = 1 + dynamicLayerStack.size();
   TORCH_INTERNAL_ASSERT(layerId == dynamic_layer.layerId());
-  dynamicLayerStack.emplace_back(dynamic_layer);
+  dynamicLayerStack.emplace_back(std::move(dynamic_layer));
 
   if (layerId == 1) {
     setDynamicLayerFrontBackKeysIncluded(true);
@@ -258,7 +257,7 @@ int64_t initAndPushDynamicLayer(
     optional<bool> functionalize_add_back_views) {
   const auto& dynamicLayerStack = dynamicLayerStackAccessor();
   const auto layerId = 1 + dynamicLayerStack.size();
-  DynamicLayer new_layer(transform_type, layerId, batch_size, randomness, prev_grad_mode, prev_fwd_grad_mode, functionalize_add_back_views);
+  DynamicLayer new_layer(transform_type, layerId, std::move(batch_size), randomness, prev_grad_mode, prev_fwd_grad_mode, functionalize_add_back_views);
   // NB: this function should be called while holding the GIL to avoid races
   new_layer.interpreter().set_is_alive(true);
   pushDynamicLayer(std::move(new_layer));
@@ -307,7 +306,7 @@ void foreachTensorInplace(std::vector<IValue>& args, int64_t begin, int64_t end,
 }
 
 void foreachTensorInplaceWithFlag(std::vector<IValue>& args, int64_t begin, int64_t end,
-    const std::bitset<64> use_flag_relative, std::function<Tensor(const Tensor&, bool)> func){
+    const std::bitset<64> use_flag_relative, const std::function<Tensor(const Tensor&, bool)>& func){
   TORCH_INTERNAL_ASSERT(begin >= 0);
   TORCH_INTERNAL_ASSERT(end >= 0);
   TORCH_INTERNAL_ASSERT(begin <= end);
@@ -388,7 +387,7 @@ bool isInplaceOp(const FunctionSchema& schema) {
   return return_alias_info && return_alias_info->isWrite();
 }
 
-c10::optional<size_t> findAliasedOutput(const FunctionSchema& schema, const int64_t immutable_input_idx) {
+std::optional<size_t> findAliasedOutput(const FunctionSchema& schema, const int64_t immutable_input_idx) {
   for (size_t res_idx = 0; res_idx != schema.returns().size(); ++res_idx) {
     if (schema.may_contain_alias(SchemaArgument(SchemaArgType::input, immutable_input_idx), SchemaArgument(SchemaArgType::output, res_idx))) {
       return res_idx; // for everything currently in native_functions, each input aliases at most one output (tensor list counts as one output)
@@ -511,5 +510,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchDynamicLayerBackMode, m) {
   SPECIAL_GRAD_CASE(alias);
 }
 
-}
-} // namespace at
+} // namespace at::functorch

@@ -68,6 +68,7 @@ class TORCH_API TensorRef {
 };
 
 template <typename T>
+// NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
 auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_void_t<T> {
   // Return the grad argument in case of a hook with void return type to have an
   // std::function with Tensor return type
@@ -81,6 +82,7 @@ auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_void_t<T> {
 }
 
 template <typename T>
+// NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
 auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_var_t<T> {
   return _register_hook([fn=std::forward<T>(hook)](const TensorBase& grad_base) {
     TensorRef grad(grad_base);

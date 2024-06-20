@@ -37,7 +37,7 @@ __global__ void upsample_bilinear2d_out_frame(
     const accscalar_t rheight,
     const accscalar_t rwidth,
     const bool align_corners,
-    const PackedTensorAccessor<scalar_t, 4> idata,
+    const PackedTensorAccessor<const scalar_t, 4> idata,
     PackedTensorAccessor<scalar_t, 4> odata) {
   int index = threadIdx.x + blockIdx.x * blockDim.x;
 
@@ -264,8 +264,8 @@ static void upsample_bilinear2d_out_cuda_template(
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
   TensorArg input_arg{input, "input", 1}, output_arg{output, "output", 2};
   checkAllSameGPU(__func__, {input_arg, output_arg});
 
@@ -337,7 +337,7 @@ static void upsample_bilinear2d_out_cuda_template(
 
       using accscalar_t = at::acc_type<scalar_t, true>;
 
-      auto idata = input.packed_accessor64<scalar_t, 4>();
+      auto idata = input.packed_accessor64<const scalar_t, 4>();
       auto odata = output.packed_accessor64<scalar_t, 4>();
 
       const accscalar_t rheight = area_pixel_compute_scale<accscalar_t>(
@@ -362,8 +362,8 @@ static void upsample_bilinear2d_backward_out_cuda_template(
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
   TensorArg grad_input_arg{grad_input, "grad_input", 1},
       grad_output_arg{grad_output_, "grad_output_", 2};
   checkAllSameGPU(__func__, {grad_output_arg, grad_input_arg});
@@ -474,7 +474,7 @@ C10_LAUNCH_BOUNDS_1(256) // 256 performs better then 1024
 __global__ void upsample_gen2d_aa_out_frame(
     const accscalar_t height_scale,
     const accscalar_t width_scale,
-    const PackedTensorAccessor64<scalar_t, 4> idata,
+    const PackedTensorAccessor64<const scalar_t, 4> idata,
     PackedTensorAccessor64<scalar_t, 4> odata,
     const InterpFilter & interp_filter) {
 
@@ -545,19 +545,20 @@ __global__ void upsample_gen2d_aa_out_frame(
 
   const scalar_t * buffer1;
 
-  for (int n = 0; n < batchsize; n++) {
-    for (int c = 0; c < channels; c++) {
-      // interpolate on y-axis for ymin to ymin + ysize
-      for (int y = 0; y < ysize; y++) {
-        buffer1 = &(idata[n][c][ymin + y][xmin]);
-        buffer2[y] = static_cast<scalar_t>(
-            upsample_antialias::interpolate_aa_single_dim<scalar_t, accscalar_t>(
-                buffer1, wx, xsize));
-      }
-      odata[n][c][output_y][output_x] = static_cast<scalar_t>(
+  // Parallelized across batch/channels
+  for (int i = blockIdx.z; i < batchsize * channels; i += gridDim.z) {
+    int n = i / channels;
+    int c = i % channels;
+    // interpolate on y-axis for ymin to ymin + ysize
+    for (int y = 0; y < ysize; y++) {
+      buffer1 = &(idata[n][c][ymin + y][xmin]);
+      buffer2[y] = static_cast<scalar_t>(
           upsample_antialias::interpolate_aa_single_dim<scalar_t, accscalar_t>(
-              buffer2, wy, ysize));
+              buffer1, wx, xsize));
     }
+    odata[n][c][output_y][output_x] = static_cast<scalar_t>(
+        upsample_antialias::interpolate_aa_single_dim<scalar_t, accscalar_t>(
+            buffer2, wy, ysize));
   }
 }
 
@@ -568,7 +569,7 @@ __global__ void upsample_gen2d_aa_backward_out_frame(
     const accscalar_t height_scale,
     const accscalar_t width_scale,
     PackedTensorAccessor64<scalar_t, 4> idata,
-    const PackedTensorAccessor64<scalar_t, 4> odata,
+    const PackedTensorAccessor64<const scalar_t, 4> odata,
     const InterpFilter & interp_filter) {
 
   const int batchsize = idata.size(0);
@@ -587,11 +588,11 @@ __global__ void upsample_gen2d_aa_backward_out_frame(
 
   // special case: output just copy
   if (input_height == output_height && input_width == output_width) {
-    for (int n = 0; n < batchsize; n++) {
-      for (int c = 0; c < channels; c++) {
-        const scalar_t val = odata[n][c][output_y][output_x];
-        idata[n][c][output_y][output_x] = val;
-      }
+    for (int i = blockIdx.z; i < batchsize * channels; i += gridDim.z) {
+      int n = i / channels;
+      int c = i % channels;
+      const scalar_t val = odata[n][c][output_y][output_x];
+      idata[n][c][output_y][output_x] = val;
     }
     return;
   }
@@ -645,21 +646,22 @@ __global__ void upsample_gen2d_aa_backward_out_frame(
 
   __syncthreads();
 
-  for (int n = 0; n < batchsize; n++) {
-    for (int c = 0; c < channels; c++) {
-      scalar_t out_value = odata[n][c][output_y][output_x];
-      for (int y = 0; y < ysize; y++) {
-        for (int x = 0; x < xsize; x++) {
-          upsample_increment_value_bounded<scalar_t, accscalar_t>(
-              idata,
-              n,
-              c,
-              input_height,
-              input_width,
-              ymin + y,
-              xmin + x,
-              wx[x] * wy[y] * out_value);
-        }
+  // Parallelized across batch/channels
+  for (int i = blockIdx.z; i < batchsize * channels; i += gridDim.z) {
+    int n = i / channels;
+    int c = i % channels;
+    scalar_t out_value = odata[n][c][output_y][output_x];
+    for (int y = 0; y < ysize; y++) {
+      for (int x = 0; x < xsize; x++) {
+        upsample_increment_value_bounded<scalar_t, accscalar_t>(
+            idata,
+            n,
+            c,
+            input_height,
+            input_width,
+            ymin + y,
+            xmin + x,
+            wx[x] * wy[y] * out_value);
       }
     }
   }
@@ -674,8 +676,8 @@ static void upsample_gen2d_aa_out_cuda_template(
     const Tensor& input_,
     IntArrayRef output_size,
     bool align_corners,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
   TensorArg input_arg{input_, "input_", 1}, output_arg{output, "output", 2};
   checkAllSameGPU("upsample_gen2d_aa_out_cuda", {input_arg, output_arg});
 
@@ -704,7 +706,7 @@ static void upsample_gen2d_aa_out_cuda_template(
       input.scalar_type(), "upsample_bilinear2d_out_frame", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
-        auto idata = input.packed_accessor64<scalar_t, 4>();
+        auto idata = input.packed_accessor64<const scalar_t, 4>();
         auto odata = output_c.packed_accessor64<scalar_t, 4>();
 
         const accscalar_t height_scale = area_pixel_compute_scale<accscalar_t>(
@@ -732,7 +734,8 @@ static void upsample_gen2d_aa_out_cuda_template(
         const dim3 block(block_x, block_y);
 
         int grid_y = std::min<int>(maxGridSize[1], ceil_div(output_height, block_y));
-        const dim3 grid(grid_x, grid_y);
+        int grid_z = std::min<int>(maxGridSize[2], input.size(0) * input.size(1));
+        const dim3 grid(grid_x, grid_y, grid_z);
 
         // Compute actual size of required shared memory and verify if we can allocate it
         // - wx and wy size:
@@ -769,8 +772,8 @@ static void upsample_gen2d_aa_backward_out_cuda_template(
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
 
   // Inspired from UpSampleBicubic2d.cu::upsample_bicubic2d_backward_out_cuda_template
   TensorArg grad_input_arg{grad_input, "grad_input", 1},
@@ -799,7 +802,8 @@ static void upsample_gen2d_aa_backward_out_cuda_template(
   int* maxGridSize = at::cuda::getCurrentDeviceProperties()->maxGridSize;
   int grid_x = std::min<int>(maxGridSize[0], ceil_div(output_width, block_x));
   int grid_y = std::min<int>(maxGridSize[1], ceil_div(output_height, block_y));
-  const dim3 grid(grid_x, grid_y);
+  int grid_z = std::min<int>(maxGridSize[2], input_size[0] * input_size[1]);
+  const dim3 grid(grid_x, grid_y, grid_z);
 
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16,
@@ -807,7 +811,7 @@ static void upsample_gen2d_aa_backward_out_cuda_template(
         using accscalar_t = at::acc_type<scalar_t, true>;
 
         auto idata = grad_input.packed_accessor64<scalar_t, 4>();
-        auto odata = grad_output.packed_accessor64<scalar_t, 4>();
+        auto odata = grad_output.packed_accessor64<const scalar_t, 4>();
 
         const accscalar_t height_scale = area_pixel_compute_scale<accscalar_t>(
             input_height, output_height, align_corners, scales_h);
@@ -844,8 +848,8 @@ TORCH_IMPL_FUNC(upsample_bilinear2d_out_cuda) (
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w,
     const Tensor& output) {
   upsample_bilinear2d_out_cuda_template(output, input, output_size, align_corners, scales_h, scales_w);
 }
@@ -855,8 +859,8 @@ TORCH_IMPL_FUNC(upsample_bilinear2d_backward_out_cuda) (
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w,
     const Tensor& grad_input) {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
@@ -869,8 +873,8 @@ TORCH_IMPL_FUNC(_upsample_bilinear2d_aa_out_cuda) (
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w,
     const Tensor& output) {
 
   upsample_gen2d_aa_out_cuda_template<upsample_antialias::BilinearFilterFunctor>(
@@ -882,8 +886,8 @@ TORCH_IMPL_FUNC(_upsample_bilinear2d_aa_backward_out_cuda) (
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w,
     const Tensor& grad_input) {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
@@ -898,8 +902,8 @@ TORCH_IMPL_FUNC(_upsample_bicubic2d_aa_out_cuda) (
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w,
     const Tensor& output) {
   upsample_gen2d_aa_out_cuda_template<upsample_antialias::BicubicFilterFunctor>(
       output, input, output_size, align_corners, scales_h, scales_w);
@@ -910,8 +914,8 @@ TORCH_IMPL_FUNC(_upsample_bicubic2d_aa_backward_out_cuda) (
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w,
     const Tensor& grad_input) {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage

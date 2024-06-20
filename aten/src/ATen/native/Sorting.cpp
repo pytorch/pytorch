@@ -71,7 +71,7 @@ TORCH_META_FUNC(topk)
 }
 
 TORCH_META_FUNC2(sort, stable)
-(const Tensor& self, c10::optional<bool> stable, int64_t dim, bool descending) {
+(const Tensor& self, std::optional<bool> stable, int64_t dim, bool descending) {
   maybe_wrap_dim(dim, self.dim());
 
   // See issue: https://github.com/pytorch/pytorch/issues/65863
@@ -546,7 +546,7 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
     .declare_static_shape(sizes, /*squash_dims=*/dim)
     .add_output(vals)
     .add_output(inds)
-    .add_input(in)
+    .add_const_input(in)
     .build();
 
   AT_DISPATCH_ALL_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, in.scalar_type(), "median_out", [&] {
@@ -939,7 +939,7 @@ Tensor nanmedian_cpu(const Tensor& self) {
 
 TORCH_IMPL_FUNC(sort_stable_out)
 (const Tensor& self,
- c10::optional<bool> stable,
+ std::optional<bool> stable,
  int64_t dim,
  bool descending,
  const Tensor& values,

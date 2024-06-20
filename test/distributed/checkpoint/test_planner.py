@@ -3,30 +3,34 @@
 import sys
 
 import torch
-
+import torch.distributed.checkpoint as dcp
+import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import (
     Shard,
     ShardedTensor,
     ShardedTensorMetadata,
     ShardMetadata,
 )
-from torch.distributed._shard.sharded_tensor.metadata import TensorProperties
-from torch.distributed.checkpoint._dedup_tensors import dedup_tensors
-
+from torch.distributed._shard.sharded_tensor.metadata import (
+    TensorProperties as TensorProperties_Shard,
+)
+from torch.distributed.checkpoint._dedup_save_plans import dedup_save_plans
+from torch.distributed.checkpoint.api import CheckpointException
 from torch.distributed.checkpoint.default_planner import (
     _create_default_local_metadata,
     create_default_global_save_plan,
     create_default_local_load_plan,
     create_default_local_save_plan,
+    DefaultLoadPlanner,
 )
 from torch.distributed.checkpoint.metadata import (
     BytesStorageMetadata,
     ChunkStorageMetadata,
     MetadataIndex,
+    TensorProperties,
     TensorStorageMetadata,
 )
 from torch.distributed.checkpoint.planner import LoadItemType, WriteItemType
-
 from torch.distributed.checkpoint.planner_helpers import (
     create_read_items_for_chunk_list,
 )
@@ -36,6 +40,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
 )
+from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 from torch.testing._internal.distributed.distributed_utils import (
     with_dist,
@@ -73,7 +78,7 @@ def create_sharded_tensor(rank, world_size, shards_per_rank, shard_size=8):
     sharded_tensor_md = ShardedTensorMetadata(
         shards_metadata=shards_metadata,
         size=torch.Size([shard_size * len(shards_metadata)]),
-        tensor_properties=TensorProperties.create_from_tensor(torch.zeros(1)),
+        tensor_properties=TensorProperties_Shard.create_from_tensor(torch.zeros(1)),
     )
 
     return ShardedTensor._init_from_local_shards_and_global_metadata(
@@ -89,7 +94,7 @@ class TestSavePlan(TestCase):
         st = create_sharded_tensor(rank=1, world_size=4, shards_per_rank=1)
         state_dict = {"tensor": tensor, "value": val, "st": st}
         plan = create_default_local_save_plan(state_dict, False)
-        self.assertEqual(2, len(plan.items))
+        self.assertEqual(3, len(plan.items))
         wi = plan.items[0]
         self.assertEqual(wi.index, MetadataIndex("tensor", [0]))
         self.assertEqual(wi.type, WriteItemType.TENSOR)
@@ -101,7 +106,7 @@ class TestSavePlan(TestCase):
         self.assertEqual(wi.tensor_data.chunk.offsets, torch.Size([0]))
         self.assertEqual(wi.tensor_data.chunk.sizes, torch.Size([10]))
 
-        st_wi = plan.items[1]
+        st_wi = plan.items[2]
         self.assertEqual(st_wi.index, MetadataIndex("st", [8]))
         self.assertEqual(st_wi.type, WriteItemType.SHARD)
         self.assertEqual(st_wi.tensor_data.size, st.size())
@@ -140,7 +145,7 @@ class TestSavePlan(TestCase):
                 return create_default_local_save_plan(state_dict, rank == 0)
 
         all_plans = [create_data(0), create_data(1), create_data(2), create_data(3)]
-        all_plans = dedup_tensors(all_plans)
+        all_plans = dedup_save_plans(all_plans)
         final_plans, metadata = create_default_global_save_plan(all_plans=all_plans)
 
         # The default global plan updates all indexes to include hints
@@ -332,6 +337,28 @@ class TestPlannerHelpers(TestCase):
         self.assertEqual(torch.Size([0]), read_items[1].storage_offsets)
 
         self.assertEqual(torch.Size([3]), read_items[1].lengths)
+
+
+class TestLoadPlanner(TestCase):
+    @with_temp_dir
+    def test_strict(self):
+        original_module = nn.Linear(2, 2)
+        dcp.save(state_dict={"module": original_module}, checkpoint_id=self.temp_dir)
+
+        new_module = nn.Linear(2, 2)
+        new_module.extra_param = nn.Parameter(torch.randn(2, 2))
+        dcp.load(
+            state_dict={"module": new_module},
+            checkpoint_id=self.temp_dir,
+            planner=DefaultLoadPlanner(allow_partial_load=True),
+        )
+
+        with self.assertRaisesRegex(CheckpointException, "Missing key in checkpoint"):
+            dcp.load(
+                state_dict={"module": new_module},
+                checkpoint_id=self.temp_dir,
+                planner=DefaultLoadPlanner(allow_partial_load=False),
+            )
 
 
 if __name__ == "__main__":

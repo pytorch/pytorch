@@ -1992,7 +1992,7 @@ void linalg_eigh_magma(const Tensor& eigenvalues, const Tensor& eigenvectors, co
 }
 
 void linalg_eigh_kernel(const Tensor& eigenvalues, const Tensor& eigenvectors, const Tensor& infos, bool upper, bool compute_eigenvectors) {
-#if defined(USE_LINALG_SOLVER) && !defined(USE_ROCM)
+#if defined(USE_LINALG_SOLVER)
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
   switch (preferred_backend) {
     case at::LinalgBackend::Magma:
@@ -2210,7 +2210,7 @@ void svd_magma(const Tensor& A,
 void svd_kernel(const Tensor& A,
                 const bool full_matrices,
                 const bool compute_uv,
-                const c10::optional<c10::string_view>& driver,
+                const std::optional<c10::string_view>& driver,
                 const Tensor& U,
                 const Tensor& S,
                 const Tensor& Vh,
@@ -2427,7 +2427,7 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
   // magma implementation of LU solve cannot handle a b tensor with last dim > 1024
   // See https://bitbucket.org/icl/magma/issues/19/dgesv_batched-dgetrs_batched-fails-for
   bool over_batched_magma_dim_limit = k > 1024;
-  // heuristics determined from tests dicussed in https://github.com/pytorch/pytorch/pull/72935
+  // heuristics determined from tests discussed in https://github.com/pytorch/pytorch/pull/72935
 
   // Computes X = U^{-1}L^{-1}P^T B via triangular solves
   // Helps mitigating the bugs in magma
@@ -2443,7 +2443,7 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
       .resize_outputs(false)
       .declare_static_shape(pivots_->sizes(), /*squash_dim=*/pivots_->dim() - 1)
       .add_output(perm)
-      .add_input(*pivots_)
+      .add_const_input(*pivots_)
       .build();
     unpack_pivots_stub(pivots_->device().type(), iter, n, n);
 
@@ -2665,8 +2665,8 @@ void linalg_lstsq_gels(const Tensor& A, const Tensor& B, const Tensor& /*infos*/
 
     // Step 3: solve R X = B
     triangular_solve_kernel(
-        const_cast<Tensor&>(A_broadcasted),
-        const_cast<Tensor&>(B),
+        A_broadcasted,
+        B,
         /*left=*/true,
         /*upper=*/true,
         /*transpose=*/TransposeType::NoTranspose,
@@ -2689,8 +2689,8 @@ void linalg_lstsq_gels(const Tensor& A, const Tensor& B, const Tensor& /*infos*/
     const auto trans = Ah_broadcasted.is_complex() ? TransposeType::ConjTranspose
                                                    : TransposeType::Transpose;
     triangular_solve_kernel(
-        const_cast<Tensor&>(Ah_broadcasted),
-        const_cast<Tensor&>(B),
+        Ah_broadcasted,
+        B,
         /*left=*/true,
         /*upper=*/true,
         /*transpose=*/trans,

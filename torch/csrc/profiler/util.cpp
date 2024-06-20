@@ -10,20 +10,16 @@
 #include <libkineto.h>
 #endif
 #ifdef USE_DISTRIBUTED
-#ifdef USE_C10D
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
-#endif // USE_C10D
 #endif // USE_DISTRIBUTED
 
-namespace torch {
-namespace profiler {
-namespace impl {
+namespace torch::profiler::impl {
 
 namespace {
-c10::optional<bool> soft_assert_raises_;
+std::optional<bool> soft_assert_raises_;
 } // namespace
 
-void setSoftAssertRaises(c10::optional<bool> value) {
+void setSoftAssertRaises(std::optional<bool> value) {
   soft_assert_raises_ = value;
 }
 
@@ -336,26 +332,24 @@ std::vector<std::string> inputTypes(const at::RecordFunction& fn) {
 // ----------------------------------------------------------------------------
 // -- NCCL Metadata -----------------------------------------------------------
 // ----------------------------------------------------------------------------
-#ifdef USE_DISTRIBUTED
-#ifdef USE_C10D
-static constexpr auto kCommuName = "Collective name";
-static constexpr auto kDtype = "dtype";
-static constexpr auto kInMsgNelems = "In msg nelems";
-static constexpr auto kOutMsgNelems = "Out msg nelems";
-static constexpr auto kInSplit = "In split size";
-static constexpr auto kOutSplit = "Out split size";
-static constexpr auto kGlobalRankStart = "Global rank start";
-static constexpr auto kGlobalRankStride = "Global rank stride";
-static constexpr auto kGroupSize = "Group size";
+
 static constexpr int32_t kTruncatLength = 30;
-#endif // USE_C10D
-#endif // USE_DISTRIBUTED
+
+template <typename ListLikeType>
+inline std::string format_list(ListLikeType list, bool truncate) {
+  if (truncate && list.size() > kTruncatLength) {
+    return fmt::format(
+        "\"[{}, ...]\"",
+        fmt::join(list.begin(), list.begin() + kTruncatLength, ", "));
+  }
+  return fmt::format("\"[{}]\"", fmt::join(list.begin(), list.end(), ", "));
+}
 
 std::unordered_map<std::string, std::string> saveNcclMeta(
-    const at::RecordFunction& fn) {
+    const at::RecordFunction& fn,
+    bool truncate) {
   std::unordered_map<std::string, std::string> map;
 #ifdef USE_DISTRIBUTED
-#ifdef USE_C10D
   auto debugInfo = dynamic_cast<ParamCommsDebugInfo*>(
       c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PARAM_COMMS_INFO));
   if (debugInfo == nullptr) {
@@ -364,45 +358,38 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
     return map;
   }
 
-  map.emplace(kCommuName, fmt::format("\"{}\"", debugInfo->getColumnName()));
+  map.emplace(
+      kCommsName, fmt::format("\"{}\"", debugInfo->getCollectiveName()));
   map.emplace(
       kDtype, fmt::format("\"{}\"", c10::toString(debugInfo->getDType())));
   map.emplace(kInMsgNelems, std::to_string(debugInfo->getInMessageNelems()));
   map.emplace(kOutMsgNelems, std::to_string(debugInfo->getOutMessageNelems()));
+
   auto& inSplitSizes = debugInfo->getInputSplitSizes();
-  if (!inSplitSizes.empty() && inSplitSizes.size() <= kTruncatLength) {
-    map.emplace(
-        kInSplit, fmt::format("\"[{}]\"", fmt::join(inSplitSizes, ", ")));
-  } else if (inSplitSizes.size() > kTruncatLength) {
-    map.emplace(
-        kInSplit,
-        fmt::format(
-            "\"[{}, ...]\"",
-            fmt::join(
-                inSplitSizes.begin(),
-                inSplitSizes.begin() + kTruncatLength,
-                ", ")));
-  }
+  map.emplace(kInSplit, format_list(inSplitSizes, truncate));
+
   auto& outSplitSizes = debugInfo->getOutputSplitSizes();
-  if (!outSplitSizes.empty() && outSplitSizes.size() <= kTruncatLength) {
-    map.emplace(
-        kOutSplit, fmt::format("\"[{}]\"", fmt::join(outSplitSizes, ", ")));
-  } else if (outSplitSizes.size() > kTruncatLength) {
-    map.emplace(
-        kOutSplit,
-        fmt::format(
-            "\"[{}, ...]\"",
-            fmt::join(
-                outSplitSizes.begin(),
-                outSplitSizes.begin() + kTruncatLength,
-                ", ")));
+  map.emplace(kOutSplit, format_list(outSplitSizes, truncate));
+
+  auto globalRankStart = debugInfo->getGlobalRankStart();
+  if (globalRankStart >= 0) {
+    map.emplace(kGlobalRankStart, std::to_string(globalRankStart));
   }
-  map.emplace(
-      kGlobalRankStart, std::to_string(debugInfo->getGlobalRankStart()));
-  map.emplace(
-      kGlobalRankStride, std::to_string(debugInfo->getGlobalRankStride()));
+  auto globalRankStride = debugInfo->getGlobalRankStride();
+  if (globalRankStride > 0) {
+    map.emplace(kGlobalRankStride, std::to_string(globalRankStride));
+  }
   map.emplace(kGroupSize, std::to_string(debugInfo->getWorldSize()));
-#endif // USE_C10D
+  auto& group_name = debugInfo->getProcessGroupName();
+  if (!group_name.empty()) {
+    map.emplace(kProcessGroupName, fmt::format("\"{}\"", group_name));
+  }
+  auto& group_desc = debugInfo->getProcessGroupDesc();
+  if (!group_desc.empty()) {
+    map.emplace(kProcessGroupDesc, fmt::format("\"{}\"", group_desc));
+  }
+  auto& groupRanks = debugInfo->getGroupRanks();
+  map.emplace(kGroupRanks, format_list(groupRanks, truncate));
 #endif // USE_DISTRIBUTED
   return map;
 }
@@ -612,12 +599,10 @@ uint64_t computeFlops(
     }
     // format of the input is defined in
     // torch.ao.nn.quantized.functional.conv2d()
-    uint64_t minibatch = 0, in_channels = 0, input_h = 0, input_w = 0;
-    uint64_t out_channels = 0, kernel_h = 0, kernel_w = 0;
     const uint64_t conv2d_multiply_factor = 2;
-    std::tie(minibatch, in_channels, input_h, input_w) = std::make_tuple(
+    auto [minibatch, in_channels, input_h, input_w] = std::make_tuple(
         input_sizes[0], input_sizes[1], input_sizes[2], input_sizes[3]);
-    std::tie(out_channels, std::ignore, kernel_h, kernel_w) = std::make_tuple(
+    auto [out_channels, _, kernel_h, kernel_w] = std::make_tuple(
         kernel_sizes[0], kernel_sizes[1], kernel_sizes[2], kernel_sizes[3]);
     uint64_t output_h =
         (input_h + 2 * padding[0] - dilation[0] * (kernel_h - 1) - 1) /
@@ -760,6 +745,4 @@ uint64_t computeFlops(
   return 0;
 }
 
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl

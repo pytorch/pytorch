@@ -11,6 +11,10 @@ from torchgen.api.types import (
     FunctionalizationLambda,
     iTensorListRefT,
     NativeSignature,
+    OptionalCType,
+    optionalSymIntArrayRefT,
+    symIntArrayRefT,
+    SymIntT,
     tensorListT,
     tensorT,
     VectorCType,
@@ -44,6 +48,7 @@ from torchgen.native_function_generation import (
 )
 
 from torchgen.selective_build.selector import SelectiveBuilder
+from torchgen.utils import dataclass_repr
 
 
 # Note: [Mutable Ops Not Using Functionalization]
@@ -280,6 +285,58 @@ but found an argument of type {str(args[0].type)} for operator: {str(func.name)}
 View operators with multiple aliasing inputs aren't supported yet. Found an operator that doesn't satisfy this constraint"""
 
 
+# One-liner expression for checking if an expression expr of type type has any
+# symbolic values.
+def emit_expr_has_symbolic_values(expr: str, type: CType) -> str:
+    if type == BaseCType(SymIntT):
+        return f"{expr}.is_symbolic()"
+
+    if isinstance(type, OptionalCType):
+        innerexpr = f"(*{expr})"
+        return f"{expr}.has_value() ? {emit_expr_has_symbolic_values(innerexpr, type.elem)} : false"
+
+    if type == BaseCType(optionalSymIntArrayRefT):
+        return emit_expr_has_symbolic_values(
+            expr, OptionalCType(BaseCType(symIntArrayRefT))
+        )
+
+    if type in (BaseCType(symIntArrayRefT), VectorCType(BaseCType(SymIntT))):
+        argname = "arg"
+        lambda_check = emit_expr_has_symbolic_values(argname, BaseCType(SymIntT))
+        return (
+            "std::any_of("
+            f"{expr}.begin(), {expr}.end(), "
+            f"[=](auto& {argname}) {{ return {lambda_check}; }})"
+        )
+
+    raise ValueError(
+        "unsupported type for has_symbolic_values check. "
+        "It should be a SymInt or a collection of those. "
+        f"Got: {type.cpp_type()}"
+    )
+
+
+# Detects whether any of the SymInt arguments are, in fact, symbolic values.
+# This is used in the constructor of ViewMeta.
+def emit_has_symbolic_inputs(sig: DispatcherSignature) -> Tuple[str, str]:
+    name = "has_symbolic_inputs"
+    statements = [
+        f"{name} = {name} | ({emit_expr_has_symbolic_values(binding.name, binding.nctype.type)});"
+        for binding in sig.arguments()
+        if (
+            isinstance(binding.argument, Argument)
+            and binding.argument.type.is_symint_like()
+        )
+    ]
+    body = "\n      ".join(statements)
+    return (
+        name,
+        f"""
+      bool {name} = false;
+      {body}""",
+    )
+
+
 # Generates the Functionalization kernel for:
 # - ops that create aliases (e.g. transpose())
 # - ops that are views AND mutations (e.g. transpose_())
@@ -333,6 +390,11 @@ def emit_view_functionalization_body(
             e.expr for e in translate(meta_call_ctx, call_sig.arguments(), method=False)
         ]
 
+        (
+            symbolic_inputs_varname,
+            symbolic_inputs_check,
+        ) = emit_has_symbolic_inputs(call_sig)
+
         if "inplace_view" in f.tags:
             # See Note [Functionalization Pass - Inplace View Ops] for more details
             return f"""
@@ -348,6 +410,7 @@ def emit_view_functionalization_body(
           reapply_views ? at::functionalization::InverseReturnMode::ViewOrScatterInverse
             : at::functionalization::InverseReturnMode::NeverView
       );
+      {symbolic_inputs_check}
       at::functionalization::ViewMeta view_meta = at::functionalization::ViewMeta(
         {forward_lambda.decl()} {{
           if (reapply_views) {{
@@ -358,7 +421,8 @@ def emit_view_functionalization_body(
         }},
         {reverse_lambda.decl()} {{
           return {reverse_lambda.inner_call()}
-        }}
+        }},
+        /*has_symbolic_inputs=*/{symbolic_inputs_varname}
       );
       auto compute_reference_meta =
         {view_tensor_name}.key_set().has_backend(c10::BackendComponent::XLABit) ||
@@ -420,6 +484,7 @@ def emit_view_functionalization_body(
           tmp_output = at::_ops::{api_name}::call({', '.join(view_redispatch_args)});
         }}
       }}
+      {symbolic_inputs_check}
       at::functionalization::ViewMeta view_meta = at::functionalization::ViewMeta(
         {forward_lambda.decl()} {{
           if (reapply_views) {{
@@ -431,7 +496,9 @@ def emit_view_functionalization_body(
         {reverse_lambda.decl()} {{
           return {reverse_lambda.inner_call()}
         }},
-        /*is_multi_output=*/{str(is_multi_output_view).lower()}
+        /*has_symbolic_inputs=*/{symbolic_inputs_varname},
+        /*is_multi_output=*/{str(is_multi_output_view).lower()},
+        /*is_as_strided=*/{str(str(f.func.name) == 'as_strided').lower()}
       );
       auto out = at::functionalization::impl::create_functional_tensor_with_view_meta(tmp_output, {view_tensor_name}, view_meta);
       // See  Note [Propagating strides in the functionalization pass]
@@ -664,7 +731,7 @@ def emit_inplace_functionalization_body(
          // case 2: arguments are not functional tensors, so we no-op and redispatch.
          at::AutoDispatchSkipFunctionalize guard;
          {maybe_create_output(f, 'tmp_output')}at::_ops::{f.func.name.unambiguous_name()}::call({', '.join(inplace_exprs)});
-         {return_from_mutable_noop_redispatch(f, 'tmp_output')};
+         {return_from_mutable_noop_redispatch(f, 'tmp_output')}
         }}
       }} else {{
         {return_type} tmp_output;
@@ -778,7 +845,7 @@ def gen_functionalization_definition(
         if not g.composite:
             # invariant: NativeFunctionsViewGroup's always have a view_copy operator
             # if the view is not composite (implicit autograd)
-            assert g.view_copy is not None
+            assert g.view_copy is not None, dataclass_repr(g, indent=1)
             view_defs.append(emit_view_functionalization_body(g, view_inplace=False))
             if g.view_inplace is not None:
                 view_defs.append(emit_view_functionalization_body(g, view_inplace=True))

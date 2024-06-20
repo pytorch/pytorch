@@ -20,6 +20,12 @@ try:
 except ImportError as e:
     print(f"Unable to import boto3. Will not be emitting metrics.... Reason: {e}")
 
+# Sometimes our runner machines are located in one AWS account while the metrics table may be in
+# another, so we need to specify the table's ARN explicitly.
+TORCHCI_METRICS_TABLE_ARN = (
+    "arn:aws:dynamodb:us-east-1:308535385114:table/torchci-metrics"
+)
+
 
 class EnvVarMetric:
     name: str
@@ -105,7 +111,7 @@ def emit_metric(
     env_var_metrics = [
         EnvVarMetric("repo", "GITHUB_REPOSITORY"),
         EnvVarMetric("workflow", "GITHUB_WORKFLOW"),
-        EnvVarMetric("build_environment", "BUILD_ENVIRONMENT"),
+        EnvVarMetric("build_environment", "BUILD_ENVIRONMENT", required=False),
         EnvVarMetric("job", "GITHUB_JOB"),
         EnvVarMetric("test_config", "TEST_CONFIG", required=False),
         EnvVarMetric("pr_number", "PR_NUMBER", required=False, type_conversion_fn=int),
@@ -153,7 +159,7 @@ def emit_metric(
     if EMIT_METRICS:
         try:
             session = boto3.Session(region_name="us-east-1")
-            session.resource("dynamodb").Table("torchci-metrics").put_item(
+            session.resource("dynamodb").Table(TORCHCI_METRICS_TABLE_ARN).put_item(
                 Item={
                     **reserved_metrics,
                     **metrics,
@@ -177,6 +183,8 @@ def _convert_float_values_to_decimals(data: Dict[str, Any]) -> Dict[str, Any]:
             return [_helper(v) for v in o]
         if isinstance(o, dict):
             return {_helper(k): _helper(v) for k, v in o.items()}
+        if isinstance(o, tuple):
+            return tuple(_helper(v) for v in o)
         return o
 
     return {k: _helper(v) for k, v in data.items()}

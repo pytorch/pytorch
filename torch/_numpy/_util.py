@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 """Assorted utilities, which do not need anything other then torch and stdlib.
 """
 
@@ -176,7 +178,7 @@ def _try_convert_to_tensor(obj):
         tensor = torch.as_tensor(obj)
     except Exception as e:
         mesg = f"failed to convert {obj} to ndarray. \nInternal error is: {str(e)}."
-        raise NotImplementedError(mesg)  # noqa: TRY200
+        raise NotImplementedError(mesg)  # noqa: B904
     return tensor
 
 

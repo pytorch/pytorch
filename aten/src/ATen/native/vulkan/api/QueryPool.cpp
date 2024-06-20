@@ -188,7 +188,7 @@ std::string QueryPool::generate_string_report() {
 
   std::stringstream ss;
 
-  int kernel_name_w = 25;
+  int kernel_name_w = 40;
   int global_size_w = 15;
   int duration_w = 25;
 

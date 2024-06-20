@@ -35,7 +35,7 @@ struct PyNode : public Node {
       const std::vector<bool>& is_variable_input);
 
   variable_list apply(variable_list&& inputs) override;
-  variable_list compiled_apply(
+  variable_list defer_to_dynamo(
       variable_list&& inputs,
       std::optional<PyObject*> compiler);
 
@@ -55,6 +55,10 @@ struct PyNode : public Node {
 
   // The AutogradCompilerCall::hooks idx corresponding to this node's backward
   std::optional<int> _backward_idx;
+
+  // The AutogradCompilerCall::hooks idx corresponding to this node's
+  // backward_state
+  std::optional<int> _backward_state_idx;
 
   // NOLINTNEXTLINE(bugprone-exception-escape)
   ~PyNode() override {
@@ -121,6 +125,7 @@ struct THPFunction {
   // This is enabled by compiled autograd as a way to signal to AotAutograd it
   // should call the original FX graph rather than compiling.
   bool compiled_autograd_tracing;
+  PyObject* compiled_autograd_backward_state;
   std::vector<c10::SymInt> compiled_autograd_symints;
 
   std::vector<torch::autograd::VariableInfo> output_info;

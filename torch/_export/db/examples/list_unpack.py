@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import List
 
 import torch
@@ -6,7 +7,7 @@ from torch._export.db.case import export_case
 
 
 @export_case(
-    example_inputs=([torch.ones(3, 2), torch.tensor(4), torch.tensor(5)],),
+    example_inputs=([torch.randn(3, 2), torch.tensor(4), torch.tensor(5)],),
     tags={"python.control-flow", "python.data-structure"},
 )
 class ListUnpack(torch.nn.Module):

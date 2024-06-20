@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 import torch.nn as nn
 from torch import Tensor  # noqa: F401
@@ -71,7 +72,7 @@ class Embedding(torch.nn.Module):
     r"""
     A quantized Embedding module with quantized packed weights as inputs.
     We adopt the same interface as `torch.nn.Embedding`, please see
-    https://pytorch.org/docs/stable/nn.html#torch.nn.Embedding for documentation.
+    https://pytorch.org/docs/stable/generated/torch.nn.Embedding.html for documentation.
 
     Similar to :class:`~torch.nn.Embedding`, attributes will be randomly
     initialized at module creation time and will be overwritten later
@@ -125,9 +126,8 @@ class Embedding(torch.nn.Module):
         return _hide_packed_params_repr(self, EmbeddingPackedParams)
 
     def extra_repr(self):
-        extra_repr_str = 'num_embeddings={}, embedding_dim={}, dtype={}, qscheme={}'.format(
-            self.num_embeddings, self.embedding_dim, self._packed_params.dtype, self.weight().qscheme()
-        )
+        extra_repr_str = (f'num_embeddings={self.num_embeddings}, embedding_dim={self.embedding_dim}, '
+                          f'dtype={self._packed_params.dtype}, qscheme={self.weight().qscheme()}')
 
         return extra_repr_str
 
@@ -138,7 +138,7 @@ class Embedding(torch.nn.Module):
         return self._packed_params._weight()
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         r"""Create a quantized embedding module from a float module
 
         Args:
@@ -196,7 +196,7 @@ class EmbeddingBag(Embedding):
     r"""
     A quantized EmbeddingBag module with quantized packed weights as inputs.
     We adopt the same interface as `torch.nn.EmbeddingBag`, please see
-    https://pytorch.org/docs/stable/nn.html#torch.nn.EmbeddingBag for documentation.
+    https://pytorch.org/docs/stable/generated/torch.nn.EmbeddingBag.html for documentation.
 
     Similar to :class:`~torch.nn.EmbeddingBag`, attributes will be randomly
     initialized at module creation time and will be overwritten later
@@ -242,7 +242,7 @@ class EmbeddingBag(Embedding):
         return 'QuantizedEmbeddingBag'
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         r"""Create a quantized embedding_bag module from a float module
 
         Args:

@@ -1,39 +1,55 @@
 # Owner(s): ["oncall: jit"]
 
-import unittest
+import copy
 import io
 import os
 import sys
-import copy
+import unittest
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.autograd import Variable, Function
+from torch.autograd import Function, Variable
 from torch.testing import FileCheck
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.common_utils import suppress_warnings, \
-    skipIfCompiledWithoutNumpy, enable_profiling_mode_for_profiling_tests, \
-    IS_SANDCASTLE, TemporaryFileName, skipIfCrossRef, skipIfTorchDynamo
-from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, \
-    _tmp_donotuse_dont_inline_everything, _trace, RUN_CUDA, \
-    RUN_CUDA_MULTI_GPU, make_global
-from torch.testing._internal.common_cuda import with_tf32_off
-from torch import Tensor
+import warnings
 
 # Standard library
 from collections import namedtuple
 from itertools import chain
 from typing import Dict, List, Optional, Tuple
-import warnings
 
-if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_jit.py TESTNAME\n\n"
-                       "instead.")
+from torch import Tensor
+from torch.testing._internal.common_cuda import with_tf32_off
+from torch.testing._internal.common_utils import (
+    enable_profiling_mode_for_profiling_tests,
+    IS_SANDCASTLE,
+    skipIfCompiledWithoutNumpy,
+    skipIfCrossRef,
+    skipIfTorchDynamo,
+    suppress_warnings,
+    TemporaryFileName,
+)
+from torch.testing._internal.jit_utils import (
+    _tmp_donotuse_dont_inline_everything,
+    _trace,
+    enable_cpu_fuser,
+    JitTestCase,
+    make_global,
+    RUN_CUDA,
+    RUN_CUDA_MULTI_GPU,
+)
+
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test file is not meant to be run directly, use:\n\n"
+        "\tpython test/test_jit.py TESTNAME\n\n"
+        "instead."
+    )
+
 
 @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
 class TestTracer(JitTestCase):
@@ -123,18 +139,23 @@ class TestTracer(JitTestCase):
                         return x
                     else:
                         return torch.zeros_like(x)
+
                 x = torch.neg(x)
                 return make_decision(flag, x)
 
-
         decision = TracedInlineDecision()
-        torch.jit.trace(decision, (torch.rand(3, 4), torch.tensor([True], dtype=torch.bool)), check_trace=True)
+        torch.jit.trace(
+            decision,
+            (torch.rand(3, 4), torch.tensor([True], dtype=torch.bool)),
+            check_trace=True,
+        )
 
     def test_trace_single_tuple(self):
-        x = torch.tensor(2.)
+        x = torch.tensor(2.0)
 
         def f2(x):
             return (x,)
+
         jit_f2 = torch.jit.trace(f2, x)
         assert f2(x) == jit_f2(x)  # fails
 
@@ -149,7 +170,7 @@ class TestTracer(JitTestCase):
         trace_model = torch.jit.trace(run_cummax, (example_input, out_1, out_2))
 
     def test_trace_namedtuple(self):
-        Point = namedtuple('point', ['x', 'y'])
+        Point = namedtuple("point", ["x", "y"])
 
         def f(p):
             if type(p) is tuple:
@@ -172,15 +193,20 @@ class TestTracer(JitTestCase):
         test_inputs = (torch.randint(0, 9, (9, 9)), torch.tensor(8))
         eager_out = mod(*test_inputs)
         traced_out = traced_func(*test_inputs)
-        self.assertNotWarn(lambda: traced_func(*test_inputs), "Shouldn't throw slicing related warn here")
+        self.assertNotWarn(
+            lambda: traced_func(*test_inputs),
+            "Shouldn't throw slicing related warn here",
+        )
         self.assertEqual(eager_out, traced_out)
 
         test_inputs = (torch.randint(0, 50, (50, 50)), torch.tensor(12))
         eager_out = mod(*test_inputs)
         traced_out = traced_func(*test_inputs)
-        self.assertNotWarn(lambda: traced_func(*test_inputs), "Shouldn't throw slicing related warn here")
+        self.assertNotWarn(
+            lambda: traced_func(*test_inputs),
+            "Shouldn't throw slicing related warn here",
+        )
         self.assertEqual(eager_out, traced_out)
-
 
     def test_typeas_trace_check(self):
         a = torch.tensor([0.4], requires_grad=True)
@@ -198,7 +224,13 @@ class TestTracer(JitTestCase):
         def fn(x, y):
             return x[y]
 
-        fn_traced = torch.jit.trace(fn, (x, y,))
+        fn_traced = torch.jit.trace(
+            fn,
+            (
+                x,
+                y,
+            ),
+        )
 
         self.assertEqual(fn(x, y), fn_traced(x, y))
 
@@ -223,9 +255,9 @@ class TestTracer(JitTestCase):
 
     def test_index_put(self):
         ten = torch.zeros(3, 3)
-        mask = torch.tensor([[True, True, True],
-                             [True, False, False],
-                             [True, True, False]])
+        mask = torch.tensor(
+            [[True, True, True], [True, False, False], [True, True, False]]
+        )
 
         def test_fn(ten, mask):
             ten[mask] = torch.ones(6)
@@ -251,14 +283,14 @@ class TestTracer(JitTestCase):
         graph = traced.graph_for(x)
         # There should be 4 int constants for the right sides of operators, plus one
         # for the alpha argument for add and sub
-        self.assertTrue(str(traced.graph_for(x)).count(': int = prim::Constant') == 5)
+        self.assertTrue(str(traced.graph_for(x)).count(": int = prim::Constant") == 5)
 
     @suppress_warnings
     def test_constant(self):
         x = torch.randn(2, 2, requires_grad=True)
 
         def f(x):
-            return x.matmul(torch.diag(torch.tensor([2., 2.])))
+            return x.matmul(torch.diag(torch.tensor([2.0, 2.0])))
 
         self.checkTrace(f, (x,), (torch.ones(2, 2, requires_grad=True),))
 
@@ -276,9 +308,8 @@ class TestTracer(JitTestCase):
 
         scripted = torch.jit.trace(foobar, (), check_trace=True)
 
-
     def test_inplace_transplant(self):
-        x = torch.tensor([0.], requires_grad=True)
+        x = torch.tensor([0.0], requires_grad=True)
 
         def fn(x):
             y = x.clone()
@@ -287,10 +318,10 @@ class TestTracer(JitTestCase):
             return y
 
         g, _ = torch.jit._get_trace_graph(fn, (x,))
-        self.run_pass('dce', g)
-        FileCheck().check_count("aten::clone", 1, exactly=True) \
-            .check_count("aten::add_", 2, exactly=True) \
-            .check_next("return").run(str(g))
+        self.run_pass("dce", g)
+        FileCheck().check_count("aten::clone", 1, exactly=True).check_count(
+            "aten::add_", 2, exactly=True
+        ).check_next("return").run(str(g))
         self.assertExportImport(g, (x,))
 
     def test_inplace_flags(self):
@@ -313,7 +344,7 @@ class TestTracer(JitTestCase):
             def backward(ctx, go):
                 return go
 
-        x = torch.tensor([0.], requires_grad=True)
+        x = torch.tensor([0.0], requires_grad=True)
 
         def fn(x):
             y = RegularFn.apply(x)
@@ -323,13 +354,13 @@ class TestTracer(JitTestCase):
             return y
 
         trace_graph, _ = torch.jit._get_trace_graph(fn, (x,), _force_outplace=True)
-        self.run_pass('dce', trace_graph)
+        self.run_pass("dce", trace_graph)
         ops = list(trace_graph.nodes())
         for op in ops:
-            self.assertTrue(op.hasAttribute('inplace'))
+            self.assertTrue(op.hasAttribute("inplace"))
         inplace_flags = [False, True, True, False]
         for op, is_inplace in zip(ops, inplace_flags):
-            self.assertEqual(op.i('inplace'), is_inplace)
+            self.assertEqual(op.i("inplace"), is_inplace)
 
     def test_inplace_check(self):
         class MyInplaceFn(Function):
@@ -348,12 +379,13 @@ class TestTracer(JitTestCase):
 
         x = torch.randn(5, 5)
         ge = torch.jit.trace(fn, (x,), _force_outplace=True, check_trace=False)
-        with self.assertRaisesRegex(RuntimeError, 'inplace MyInplaceFn'):
+        with self.assertRaisesRegex(RuntimeError, "inplace MyInplaceFn"):
             ge(x)
 
     def test_force_outplace_check_fill(self):
         def f(x):
             return torch.empty(x.shape).fill_(7)
+
         x = torch.randn(10, 15)
         ft = torch.jit.trace(f, x, _force_outplace=True)
         self.assertEqual(f(x), ft(x))
@@ -361,6 +393,7 @@ class TestTracer(JitTestCase):
     def test_force_outplace_check_zero(self):
         def f(x):
             return torch.empty(x.shape).zero_()
+
         x = torch.randn(10, 15)
         ft = torch.jit.trace(f, x, _force_outplace=True)
         self.assertEqual(f(x), ft(x))
@@ -433,7 +466,7 @@ class TestTracer(JitTestCase):
     # Test that a trace of torch.full(x.shape) doesn't store the shape as a constant
     def test_trace_full_dynamic_shape(self):
         def full_with_shape_like(x):
-            return torch.full(x.shape, 2.)
+            return torch.full(x.shape, 2.0)
 
         x = torch.randn(3, 4)
         ge = torch.jit.trace(full_with_shape_like, example_inputs=x)
@@ -460,7 +493,7 @@ class TestTracer(JitTestCase):
         def slice(x):
             results = []
             for i in range(4):
-                results.append(x[:x.size(0) - i, i:x.size(2), i:3])
+                results.append(x[: x.size(0) - i, i : x.size(2), i:3])
             return tuple(results)
 
         def slice_select(x):
@@ -489,20 +522,21 @@ class TestTracer(JitTestCase):
     def test_trace_slice_with_grad(self):
         self.do_trace_slice(True)
 
-
     def test_trace_casts(self):
         casts = [
             lambda x: x.byte(),
             lambda x: x.float(),
             lambda x: x.cpu(),
-            lambda x: x.to(device='cpu'),
+            lambda x: x.to(device="cpu"),
             lambda x: x.to(dtype=torch.int64),
-            lambda x: x.to(device='cpu', dtype=torch.float),
-            lambda x: x.to(x)
+            lambda x: x.to(device="cpu", dtype=torch.float),
+            lambda x: x.to(x),
         ]
 
         def assertContainsCast(trace):
-            self.assertEqual(sum(n.kind() == 'aten::to' for n in trace.graph.nodes()), 1)
+            self.assertEqual(
+                sum(n.kind() == "aten::to" for n in trace.graph.nodes()), 1
+            )
 
         for cast in casts:
             trace = torch.jit.trace(cast, torch.randn(2, 2))
@@ -513,7 +547,9 @@ class TestTracer(JitTestCase):
         def to_tensor(x, y):
             return x.to(y)
 
-        to_tensor_trace = torch.jit.trace(to_tensor, (torch.randn(2, 2), torch.randn(1, 8)))
+        to_tensor_trace = torch.jit.trace(
+            to_tensor, (torch.randn(2, 2), torch.randn(1, 8))
+        )
         assertContainsCast(to_tensor_trace)
         x, y = torch.randn(2, 2), torch.randn(1, 10)
         self.assertEqual(to_tensor_trace(x, y), to_tensor(x, y))
@@ -524,7 +560,7 @@ class TestTracer(JitTestCase):
         def fn(x):
             int(x)  # Warning 1.
             y = x * 1
-            if y:   # Warning 2.
+            if y:  # Warning 2.
                 pass
             q = [x, x * 4]
             z = q[y]
@@ -540,12 +576,12 @@ class TestTracer(JitTestCase):
         for warn in warns:
             self.assertIs(warn.category, torch.jit.TracerWarning)
         warns = [str(w.message) for w in warns]
-        self.assertIn('a Python integer', warns[0])
-        self.assertIn('a Python boolean', warns[1])
-        self.assertIn('a Python float', warns[2])
-        self.assertIn('a Python list', warns[3])
-        self.assertIn('a NumPy array', warns[4])
-        self.assertIn('Iterating over', warns[5])
+        self.assertIn("a Python integer", warns[0])
+        self.assertIn("a Python boolean", warns[1])
+        self.assertIn("a Python float", warns[2])
+        self.assertIn("a Python list", warns[3])
+        self.assertIn("a NumPy array", warns[4])
+        self.assertIn("Iterating over", warns[5])
 
     def test_trace_tuple(self):
         def fn(x, y):
@@ -555,15 +591,18 @@ class TestTracer(JitTestCase):
         traced_fn = torch.jit.trace(fn, (x, y))
         self.assertEqual(traced_fn(x, y), fn(x, y))
         # should be a tuple nested within another tuple
-        FileCheck().check_count("prim::TupleConstruct", 2, exactly=True).check_next("return") \
-            .run(str(traced_fn.graph))
+        FileCheck().check_count("prim::TupleConstruct", 2, exactly=True).check_next(
+            "return"
+        ).run(str(traced_fn.graph))
         self.assertExportImport(traced_fn.graph, (x, y))
 
     def test_trace_random(self):
         def f(mean, std):
             return torch.normal(mean, std)
 
-        traced = torch.jit.trace(f, (torch.zeros(2, 3), torch.ones(2, 3)), check_trace=False)
+        traced = torch.jit.trace(
+            f, (torch.zeros(2, 3), torch.ones(2, 3)), check_trace=False
+        )
         mean, std = torch.zeros(5, 5), torch.ones(5, 5)
         with torch.random.fork_rng(devices=[]):
             output = f(mean, std)
@@ -572,19 +611,20 @@ class TestTracer(JitTestCase):
 
     def test_trace_tensor_factory(self):
         def run(**kwargs):
-            inputs_require_grads = kwargs.pop('inputs_require_grads', True)
+            inputs_require_grads = kwargs.pop("inputs_require_grads", True)
 
             def fn(x):
                 return x + torch.ones(2, 3, **kwargs)
 
             input_kwargs = kwargs.copy()
-            if 'out' in input_kwargs:
-                del input_kwargs['out']
+            if "out" in input_kwargs:
+                del input_kwargs["out"]
             input = torch.ones(2, 3, **input_kwargs)
             self.checkTrace(fn, (input,), inputs_require_grads=inputs_require_grads)
             # check we recorded 'ones' and did not just record a constant
             tfn = torch.jit.trace(fn, input)
             self.assertTrue("ones" in str(tfn.graph))
+
         run()
         run(dtype=torch.int, inputs_require_grads=False)
         run(out=torch.tensor([]))
@@ -598,6 +638,7 @@ class TestTracer(JitTestCase):
             x = x.clone()
             x[0] = y
             return x
+
         example = torch.rand(3, 4)
         self.checkTrace(stuff, (example, example[0] + 1))
 
@@ -605,8 +646,17 @@ class TestTracer(JitTestCase):
     @unittest.expectedFailure
     def test_output_unflatten(self):
         """Check that outputs of traced functions retain the original structure and nesting"""
+
         def fn(x):
-            return (x * 2, (x ** 2, x + 4, (x + 2,), ), x * 4)
+            return (
+                x * 2,
+                (
+                    x**2,
+                    x + 4,
+                    (x + 2,),
+                ),
+                x * 4,
+            )
 
         self.checkTrace(fn, (torch.randn(2, 2),))
 
@@ -629,94 +679,103 @@ class TestTracer(JitTestCase):
 
     def test_input_dict_remembers_keys(self):
         """Check that the trace remembers which keys were in a dict input"""
+
         class TestModule(torch.nn.Module):
             def forward(self, dict_input):
-                return dict_input['x']
+                return dict_input["x"]
 
-        input_1 = {'x': torch.tensor(1)}
+        input_1 = {"x": torch.tensor(1)}
         m = TestModule()
-        m_traced = torch.jit.trace(m, (input_1, ))
+        m_traced = torch.jit.trace(m, (input_1,))
         self.assertEqual(m_traced(input_1), torch.tensor(1))
 
         # should work to change the values and not the keys
-        input_same_key_different_value = {'x': torch.tensor(2)}
+        input_same_key_different_value = {"x": torch.tensor(2)}
         self.assertEqual(m_traced(input_same_key_different_value), torch.tensor(2))
 
         # error to use something that doesn't have `x`
-        input_different_key = {'y': torch.tensor(3)}
+        input_different_key = {"y": torch.tensor(3)}
         with self.assertRaises(RuntimeError):
             m_traced(input_different_key)
 
         # it's okay to have additional elements in the dictionary, so long as 'x' is there
-        input_additional_key = {'x': torch.tensor(4), 'y': torch.tensor(3)}
+        input_additional_key = {"x": torch.tensor(4), "y": torch.tensor(3)}
         self.assertEqual(m_traced(input_additional_key), torch.tensor(4))
 
     def test_input_dict_insertion_order(self):
         """Check that dictionary access doesn't care about insertion order"""
+
         class TestModule(torch.nn.Module):
             def forward(self, dict_input):
-                return dict_input['x'], dict_input['y']
+                return dict_input["x"], dict_input["y"]
+
         input_x_then_y = {}
-        input_x_then_y['x'] = torch.tensor(1)
-        input_x_then_y['y'] = torch.tensor(2)
+        input_x_then_y["x"] = torch.tensor(1)
+        input_x_then_y["y"] = torch.tensor(2)
 
         m = TestModule()
-        m_traced = torch.jit.trace(m, (input_x_then_y, ))
+        m_traced = torch.jit.trace(m, (input_x_then_y,))
 
         self.assertEqual(m_traced(input_x_then_y), (torch.tensor(1), torch.tensor(2)))
 
         input_y_then_x = {}
-        input_y_then_x['y'] = torch.tensor(4)
-        input_y_then_x['x'] = torch.tensor(3)
+        input_y_then_x["y"] = torch.tensor(4)
+        input_y_then_x["x"] = torch.tensor(3)
 
         self.assertEqual(m_traced(input_y_then_x), (torch.tensor(3), torch.tensor(4)))
 
     def test_input_dict_recursive(self):
         class TestModule(torch.nn.Module):
             def forward(self, dict_input):
-                return dict_input['x'][1]
+                return dict_input["x"][1]
 
-        input_1 = {'x': {1: torch.tensor(1)}}
+        input_1 = {"x": {1: torch.tensor(1)}}
         m = TestModule()
-        m_traced = torch.jit.trace(m, (input_1, ))
+        m_traced = torch.jit.trace(m, (input_1,))
 
-        input_2 = {'x': {1: torch.tensor(2)}}
+        input_2 = {"x": {1: torch.tensor(2)}}
         self.assertEqual(m_traced(input_2), torch.tensor(2))
 
     def test_input_dict_checkTrace_mut(self):
         def test(d):
-            d['x'].tanh_()
-            return d['x']
-        inputs = {'x': torch.rand(3, 4), 'y': torch.rand(3, 4)}
+            d["x"].tanh_()
+            return d["x"]
+
+        inputs = {"x": torch.rand(3, 4), "y": torch.rand(3, 4)}
         self.checkTrace(test, (inputs,), inputs_require_grads=False)
 
     def test_input_dict_unify(self):
         def test(d):
-            return d['int'], d['float']
-        inputs = {'int': torch.ones((2, 2), dtype=torch.int32),
-                  'float': torch.ones((2, 2), dtype=torch.float32)}
+            return d["int"], d["float"]
+
+        inputs = {
+            "int": torch.ones((2, 2), dtype=torch.int32),
+            "float": torch.ones((2, 2), dtype=torch.float32),
+        }
         self.checkTrace(test, (inputs,), inputs_require_grads=False)
 
     def test_input_tuple_of_dicts(self):
         def test(t):
             d = t[0]
-            return d['x']['y']
-        inputs = {'x': {'y': torch.rand(2, 3)}}
+            return d["x"]["y"]
+
+        inputs = {"x": {"y": torch.rand(2, 3)}}
         self.checkTrace(test, ((inputs, inputs),), allow_unused=True)
 
     def test_input_dict_of_dicts(self):
         def test(d):
-            return d['x']['y']
-        nested_input = {'y': torch.rand(2, 3)}
-        unified_nested = {'y': torch.rand(3, 2)}
-        inputs = {'x': nested_input, 'force_unify': unified_nested}
+            return d["x"]["y"]
+
+        nested_input = {"y": torch.rand(2, 3)}
+        unified_nested = {"y": torch.rand(3, 2)}
+        inputs = {"x": nested_input, "force_unify": unified_nested}
         self.checkTrace(test, (inputs,), allow_unused=True)
 
     def test_input_dict_of_lists(self):
         def test(d):
-            return d['x'][0]
+            return d["x"][0]
 
-        inputs = {'x': [torch.rand(3, 2)]}
+        inputs = {"x": [torch.rand(3, 2)]}
         self.checkTrace(test, (inputs,))
 
     def test_input_list_toplevel_flatten(self):
@@ -730,32 +789,38 @@ class TestTracer(JitTestCase):
         class Test(torch.nn.Module):
             def forward(self, t1, t2):
                 return torch.add(t1, t2)
+
         inputs = [torch.ones(2, 2), torch.rand(2, 2)]
         torch.jit.trace(Test(), inputs)
 
     def test_input_list_of_tuples(self):
         def test(l):
             return l[0][0]
+
         inputs = [(torch.ones(2, 2),)]
         self.checkTrace(test, (inputs,))
 
     def test_input_dict_empty_list(self):
         def test(d):
             pass
+
         inputs = {1: []}
-        with self.assertRaisesRegex(RuntimeError, 'List trace'):
+        with self.assertRaisesRegex(RuntimeError, "List trace"):
             self.checkTrace(test, (inputs,))
 
     def test_input_list_mixed_type(self):
         def test(d):
             pass
+
         inputs = [torch.rand(2, 3), (torch.ones(2), torch.ones(2))]
-        with self.assertRaisesRegex(RuntimeError, 'consistent'):
+        with self.assertRaisesRegex(RuntimeError, "consistent"):
             self.checkTrace(test, (inputs,))
 
     def test_conv(self):
         x = torch.ones(20, 16, 50, 40)
-        g, outputs, inputs = torch.jit._get_trace_graph(nn.Conv2d(16, 13, 3, bias=False), x, return_inputs=True)
+        g, outputs, inputs = torch.jit._get_trace_graph(
+            nn.Conv2d(16, 13, 3, bias=False), x, return_inputs=True
+        )
         m = self.createFunctionFromGraph(g)
         self.assertEqual(outputs, m(*inputs))
 
@@ -773,7 +838,8 @@ class TestTracer(JitTestCase):
     def test_nested_inplace(self):
         x = torch.randn(2, 2)
         g, outputs, inputs = torch.jit._get_trace_graph(
-            lambda x: F.threshold(x, 0, 0, inplace=True), (x, ), return_inputs=True)
+            lambda x: F.threshold(x, 0, 0, inplace=True), (x,), return_inputs=True
+        )
         m = self.createFunctionFromGraph(g)
         self.assertEqual(outputs, m(*inputs))
         FileCheck().check("threshold_").run(str(g))
@@ -807,8 +873,8 @@ class TestTracer(JitTestCase):
             out.copy_(x)
             return out
 
-        g, outputs, inputs = torch.jit._get_trace_graph(f, (x, ), return_inputs=True)
-        self.run_pass('dce', g)
+        g, outputs, inputs = torch.jit._get_trace_graph(f, (x,), return_inputs=True)
+        self.run_pass("dce", g)
         m = self.createFunctionFromGraph(g)
         self.assertEqual(outputs, m(*inputs))
         self.assertExportImport(g, (x,))
@@ -822,8 +888,9 @@ class TestTracer(JitTestCase):
             return out
 
         g, outputs, inputs = torch.jit._get_trace_graph(
-            f, (x, ), return_inputs=True, _force_outplace=True)
-        self.run_pass('dce', g)
+            f, (x,), return_inputs=True, _force_outplace=True
+        )
+        self.run_pass("dce", g)
         m = self.createFunctionFromGraph(g)
         self.assertEqual(outputs, m(*inputs))
         self.assertExportImport(g, (x,))
@@ -840,7 +907,7 @@ class TestTracer(JitTestCase):
 
         m = MyModule()
         g, _ = torch.jit._get_trace_graph(m, (torch.randn(2, 2),))
-        self.run_pass('dce', g)
+        self.run_pass("dce", g)
         self.assertEqual(len(list(g.inputs())), 2)
         FileCheck().check("mul").check("add").run(str(g))
 
@@ -853,52 +920,73 @@ class TestTracer(JitTestCase):
         class MyModel(torch.nn.Module):
             def forward(self, scores, bbox_deltas, im_info, anchors):
                 a, b = torch.ops._caffe2.GenerateProposals(
-                    (scores), (bbox_deltas), (im_info), (anchors),
-                    2.0, 6000, 300, 0.7, 16, True, -90, 90, 1.0, True,
+                    (scores),
+                    (bbox_deltas),
+                    (im_info),
+                    (anchors),
+                    2.0,
+                    6000,
+                    300,
+                    0.7,
+                    16,
+                    True,
+                    -90,
+                    90,
+                    1.0,
+                    True,
                 )
                 return a, b
+
         model = MyModel()
         A = 4
         H = 10
         W = 8
         img_count = 3
         scores = torch.ones(img_count, A, H, W, dtype=torch.float32)
-        bbox_deltas = torch.linspace(0, 10, steps=img_count * 4 * A * H * W,
-                                     dtype=torch.float32)
+        bbox_deltas = torch.linspace(
+            0, 10, steps=img_count * 4 * A * H * W, dtype=torch.float32
+        )
         bbox_deltas = bbox_deltas.view(img_count, 4 * A, H, W)
         im_info = torch.ones(img_count, 3, dtype=torch.float32)
         anchors = torch.ones(A, 4, dtype=torch.float32)
         inputs = (scores, bbox_deltas, im_info, anchors)
         traced_model = torch.jit.trace(model, inputs)
         self.assertEqual(traced_model(*inputs), model(*inputs))
-        self.assertExportImportModule(traced_model, (scores, bbox_deltas, im_info, anchors))
+        self.assertExportImportModule(
+            traced_model, (scores, bbox_deltas, im_info, anchors)
+        )
 
     def run_ge_tests(self, optimize, use_cuda):
-
         with enable_profiling_mode_for_profiling_tests():
             with torch.jit.optimized_execution(optimize):
+
                 def rand(*args):
                     t = torch.rand(*args).float()
                     if use_cuda:
                         t = t.cuda()
                     return t
-                self.checkTrace(lambda a, b: a * b + b,
-                                [rand(1), rand(1)], [rand(2, 3), rand(2, 3)])
+
+                self.checkTrace(
+                    lambda a, b: a * b + b, [rand(1), rand(1)], [rand(2, 3), rand(2, 3)]
+                )
                 # trivial identity
                 self.checkTrace(lambda a, b: (b, a), [rand(1), rand(1)])
 
                 def foo(a):
                     t = a * a
                     return t * t, 4 * t
+
                 self.checkTrace(foo, [rand(1)])
                 # unused input
                 self.checkTrace(
-                    lambda a, b: a * a, [rand(1), rand(1)], allow_unused=True)
+                    lambda a, b: a * a, [rand(1), rand(1)], allow_unused=True
+                )
                 # test outputs that do not get used in grad
                 self.checkTrace(foo, [rand(1)], drop=1)
                 # test autograd fallback
-                self.checkTrace(lambda a, b: a * b /
-                                (a - 2 * b) + b, [rand(1), rand(1)])
+                self.checkTrace(
+                    lambda a, b: a * b / (a - 2 * b) + b, [rand(1), rand(1)]
+                )
 
     def test_ge_unoptimized(self):
         self.run_ge_tests(False, False)
@@ -917,22 +1005,24 @@ class TestTracer(JitTestCase):
     def test_ge(self):
         def foo(a, b):
             return a * b / (a - b) + b
+
         V = Variable
         a, b = V(torch.rand(1)), V(torch.rand(1))
         ge = torch.jit.trace(foo, (a, b))
         a, b = V(torch.rand(1), requires_grad=True), V(
-            torch.rand(1), requires_grad=True)
-        r, = ge(a, b)
+            torch.rand(1), requires_grad=True
+        )
+        (r,) = ge(a, b)
         da, db = torch.autograd.grad(r + 3, [a, b], create_graph=True)
 
-        l2 = (da * db + db * db)
+        l2 = da * db + db * db
         g2result = torch.autograd.grad(l2, [da, db])
 
         r = foo(a, b)
         da2, db2 = torch.autograd.grad(r + 3, [a, b], create_graph=True)
         self.assertEqual(da, da2)
         self.assertEqual(db, db2)
-        l3 = (da2 * db2 + db2 * db2)
+        l3 = da2 * db2 + db2 * db2
         g2result2 = torch.autograd.grad(l3, [da2, db2])
         self.assertEqual(g2result, g2result2)
 
@@ -953,8 +1043,10 @@ class TestTracer(JitTestCase):
             def __init__(self, num_features, num_layers):
                 super().__init__()
                 self.num_layers = num_layers
-                layers = [[nn.Linear(num_features, num_features), nn.Sigmoid()]
-                          for _ in range(num_layers)]
+                layers = [
+                    [nn.Linear(num_features, num_features), nn.Sigmoid()]
+                    for _ in range(num_layers)
+                ]
                 self.submodule = nn.Sequential(*chain(*layers))
 
             def forward(self, x):
@@ -977,7 +1069,9 @@ class TestTracer(JitTestCase):
         with self.assertRaises(AttributeError):
             linear_submodule.in_features
         linear_submodule.weight
-        linear_submodule.weight = nn.Parameter(torch.randn(linear_submodule.weight.shape))
+        linear_submodule.weight = nn.Parameter(
+            torch.randn(linear_submodule.weight.shape)
+        )
         with self.assertRaises(RuntimeError):
             del linear_submodule.weight
 
@@ -992,9 +1086,9 @@ class TestTracer(JitTestCase):
         traced_model.cpu()
         cpu_out = traced_model(x.float())
         self.assertEqual(cpu_out, cuda_out)
-        traced_model.to('cuda')
+        traced_model.to("cuda")
         cuda_out = traced_model(x.float().cuda())
-        traced_model.to('cpu')
+        traced_model.to("cpu")
         cpu_out = traced_model(x.float())
         self.assertEqual(cpu_out, cuda_out)
         traced_model.to(torch.get_default_dtype())
@@ -1022,15 +1116,23 @@ class TestTracer(JitTestCase):
                 return h
 
         a = Model()
-        b = torch.jit.trace(a, example_inputs=(torch.ones([1], device=torch.device("cuda")),))
+        b = torch.jit.trace(
+            a, example_inputs=(torch.ones([1], device=torch.device("cuda")),)
+        )
         FileCheck().check_not("device").run(b.code)
 
     def test_export_no_reorder(self):
         def func(a, b):
             return a * b / (a - 2 * b) + b
 
-        recording_inputs = [torch.tensor([0.55619788169860839844], dtype=torch.float32, requires_grad=True),
-                            torch.tensor([0.25947844982147216797], dtype=torch.float32, requires_grad=True)]
+        recording_inputs = [
+            torch.tensor(
+                [0.55619788169860839844], dtype=torch.float32, requires_grad=True
+            ),
+            torch.tensor(
+                [0.25947844982147216797], dtype=torch.float32, requires_grad=True
+            ),
+        ]
 
         ge1 = torch.jit.trace(func, recording_inputs)
         ge2 = self.getExportImportCopy(ge1)
@@ -1057,7 +1159,7 @@ class TestTracer(JitTestCase):
         def fn(x):
             return MyFn.apply(x + 2) + 3
 
-        x = torch.tensor([1., 2., 3.])
+        x = torch.tensor([1.0, 2.0, 3.0])
         y = torch.randn(2, 2, requires_grad=True)
         fn(x)
         fn(y)
@@ -1076,7 +1178,8 @@ class TestTracer(JitTestCase):
         def fn(x):
             a, b = MyFn.apply(x + 2)
             return a + b + 3
-        x = torch.tensor([1., 2., 3.])
+
+        x = torch.tensor([1.0, 2.0, 3.0])
         y = torch.randn(2, 2, requires_grad=True)
         fn(x)
         fn(y)
@@ -1150,21 +1253,20 @@ class TestTracer(JitTestCase):
                 self.foo = Foo()
 
             def forward(self, a, b):
-                return self.foo({'a': a, 'b': b})['a']
+                return self.foo({"a": a, "b": b})["a"]
 
         class Foo(torch.nn.Module):
             def forward(self, x):
-                return {'a': x['a'] * x['b']}
+                return {"a": x["a"] * x["b"]}
 
         x = (torch.rand(3), torch.rand(3))
         model = Bar()
         self.checkTrace(model, x)
 
     def test_trace_dict_output(self):
-
         class TraceDictStrTensor(torch.nn.Module):
             def forward(self, a, b):
-                return {'a': a, 'b': b}
+                return {"a": a, "b": b}
 
         class TraceDictTensorTensor(torch.nn.Module):
             def forward(self, a, b):
@@ -1175,15 +1277,20 @@ class TestTracer(JitTestCase):
             torch.jit.trace(TraceDictStrTensor(), x)
 
         traced_dict_str_mod = torch.jit.trace(TraceDictStrTensor(), x, strict=False)
-        self.assertEqual(traced_dict_str_mod(*x), {'a': x[0], 'b': x[1]})
+        self.assertEqual(traced_dict_str_mod(*x), {"a": x[0], "b": x[1]})
 
-        traced_dict_tensor_mod = torch.jit.trace(TraceDictTensorTensor(), x, strict=False)
+        traced_dict_tensor_mod = torch.jit.trace(
+            TraceDictTensorTensor(), x, strict=False
+        )
         self.assertEqual(traced_dict_tensor_mod(*x), {x[0]: x[1], x[1]: x[0]})
 
     def test_trace_with_tensor_list_output(self):
         def f():
             return [torch.zeros(1), torch.zeros(5)]
-        with self.assertWarnsRegex(torch.jit.TracerWarning, "cause the trace to be incorrect"):
+
+        with self.assertWarnsRegex(
+            torch.jit.TracerWarning, "cause the trace to be incorrect"
+        ):
             torch.jit.trace(f, [])
         traced_non_strict_f = torch.jit.trace(f, [], strict=False)
         self.assertEqual(traced_non_strict_f(), f())
@@ -1191,14 +1298,42 @@ class TestTracer(JitTestCase):
     def test_trace_with_number_list_output(self):
         def f():
             return [1, 5]
-        with self.assertRaisesRegex(RuntimeError, r"Only tensors.+can be output from traced functions"):
+
+        with self.assertRaisesRegex(
+            RuntimeError, r"Only tensors.+can be output from traced functions"
+        ):
             traced_f = torch.jit.trace(f, [])
 
     def test_trace_with_nested_tensor_list_output(self):
         def f():
             return [[torch.zeros(1)], [torch.zeros(5)]]
-        with self.assertRaisesRegex(RuntimeError, r"Only tensors.+can be output from traced functions"):
+
+        with self.assertRaisesRegex(
+            RuntimeError, r"Only tensors.+can be output from traced functions"
+        ):
             traced_f = torch.jit.trace(f, [])
+
+    def test_trace_with_nested_strided_tensor_output(self):
+        @torch.jit.script
+        def nt_construct(values, kv_lengths):
+            kv_lengths_list: List[int] = kv_lengths.tolist()
+            return torch._nested_tensor_from_tensor_list(
+                list(values.split(kv_lengths_list, dim=0)), None, None, None, None
+            )
+
+        def f(x, offsets):
+            kv_lengths = offsets[1:] - offsets[:-1]
+            return nt_construct(x, kv_lengths).cos()
+
+        x = torch.rand(5, 4)
+        offsets = torch.tensor([0, 2, 5])
+        ref = f(x, offsets)
+        f_t = torch.jit.trace(f, (x, offsets))
+        res = f_t(x, offsets)
+        self.assertEqual(ref, res)
+        x2 = torch.rand((8, 4))
+        offsets2 = torch.tensor([0, 2, 4, 8])
+        self.assertEqual(f(x2, offsets2), f_t(x2, offsets2))
 
     def test_trace_variable_instantiation(self):
         def random_foo(x):
@@ -1231,15 +1366,28 @@ class TestTracer(JitTestCase):
             return torch.tensor([x.size()[0]])
 
         self.assertEqual(
-            tensor_size(torch.rand(15,)),
-            torch.tensor([15])
+            tensor_size(
+                torch.rand(
+                    15,
+                )
+            ),
+            torch.tensor([15]),
         )
 
-        traced_tensor_size = torch.jit.trace(tensor_size, torch.rand(7,))
+        traced_tensor_size = torch.jit.trace(
+            tensor_size,
+            torch.rand(
+                7,
+            ),
+        )
 
         self.assertEqual(
-            traced_tensor_size(torch.rand(15,)),
-            torch.tensor([15])
+            traced_tensor_size(
+                torch.rand(
+                    15,
+                )
+            ),
+            torch.tensor([15]),
         )
 
         @torch.jit.script
@@ -1249,8 +1397,13 @@ class TestTracer(JitTestCase):
         def foo(x):
             return use_device(x)
 
-        traced_tensor_size = torch.jit.trace(foo, torch.rand(7,))
-        self.run_pass('inline', traced_tensor_size.graph)
+        traced_tensor_size = torch.jit.trace(
+            foo,
+            torch.rand(
+                7,
+            ),
+        )
+        self.run_pass("inline", traced_tensor_size.graph)
         FileCheck().check("prim::device").run(traced_tensor_size.graph)
 
     def test_trace_save(self):
@@ -1314,10 +1467,12 @@ class TestTracer(JitTestCase):
         f = Foo()
 
         traced = torch.jit.trace(f, (torch.rand(3, 4),))
-        expected_names = ['__getstate__', '__setstate__']
+        expected_names = ["__getstate__", "__setstate__"]
 
         def check(mod):
-            self.assertTrue(all(name in mod._c._method_names() for name in expected_names))
+            self.assertTrue(
+                all(name in mod._c._method_names() for name in expected_names)
+            )
 
         check(traced)
 
@@ -1353,10 +1508,12 @@ class TestTracer(JitTestCase):
         f = Wrapper()
 
         traced = torch.jit.trace(f, (torch.rand(3, 4),))
-        expected_names = ['__getstate__', '__setstate__']
+        expected_names = ["__getstate__", "__setstate__"]
 
         def check(mod):
-            self.assertTrue(all(name in mod._c._method_names() for name in expected_names))
+            self.assertTrue(
+                all(name in mod._c._method_names() for name in expected_names)
+            )
 
         check(traced.foo)
 
@@ -1390,7 +1547,7 @@ class TestTracer(JitTestCase):
         f = WrapperExports()
 
         traced = torch.jit.trace(f, (torch.rand(3, 4),))
-        expected_names = ['addOne']
+        expected_names = ["addOne"]
         check(traced)
 
     def test_trace_autograd_function(self):
@@ -1403,11 +1560,9 @@ class TestTracer(JitTestCase):
             def backward(ctx, grad_output):
                 return torch.neg(grad_output)
 
-
         class TracedModule(torch.nn.Module):
             def forward(self, x):
                 return torch.relu(TestFunc.apply(x))
-
 
         class Wrapper(torch.nn.Module):
             def __init__(self):
@@ -1447,9 +1602,11 @@ class TestTracer(JitTestCase):
         print(traced.graph)
 
         # Expected output schema of the custom autograd.Function.
-        schema = '(Double(1, 2, strides=[2, 1], requires_grad=0, device=cpu), '\
-            'Double(3, 2, strides=[2, 1], requires_grad=0, device=cpu)) '\
-            '= ^Foo'
+        schema = (
+            "(Double(1, 2, strides=[2, 1], requires_grad=0, device=cpu), "
+            "Double(3, 2, strides=[2, 1], requires_grad=0, device=cpu)) "
+            "= ^Foo"
+        )
 
         # See if expected schema exists.
         FileCheck().check(schema).run(traced.graph)
@@ -1468,7 +1625,9 @@ class TestTracer(JitTestCase):
 
             def forward(self, x):
                 y = self.conv(x)
-                w = nn.functional.interpolate(y, mode='bilinear', align_corners=False, scale_factor=3)
+                w = nn.functional.interpolate(
+                    y, mode="bilinear", align_corners=False, scale_factor=3
+                )
                 return w
 
         f = test()
@@ -1532,10 +1691,9 @@ class TestTracer(JitTestCase):
         tm = torch.jit.trace(TracedModule(), torch.rand(3, 4))
 
         # Note: neg op from the traced function should be properly inlined
-        FileCheck().check("aten::mm") \
-            .check('name="traced_fn"') \
-            .check_next("prim::CallFunction") \
-            .run(str(tm.graph))
+        FileCheck().check("aten::mm").check('name="traced_fn"').check_next(
+            "prim::CallFunction"
+        ).run(str(tm.graph))
 
     @_tmp_donotuse_dont_inline_everything
     def test_call_traced_module_from_traced_module(self):
@@ -1558,7 +1716,9 @@ class TestTracer(JitTestCase):
 
         tm = torch.jit.trace(TracedModule(), torch.rand(3, 4))
 
-        FileCheck().check("aten::mm").check("prim::CallMethod").check_same("forward").check("aten::add").run(str(tm.graph))
+        FileCheck().check("aten::mm").check("prim::CallMethod").check_same(
+            "forward"
+        ).check("aten::add").run(str(tm.graph))
 
     def test_index_put_trace_with_view(self):
         @_trace(torch.rand(100), torch.tensor([1, 2, 3, 4]), torch.rand(1, 1, 1, 4))
@@ -1566,7 +1726,9 @@ class TestTracer(JitTestCase):
             target[indices] = rhs
             return target
 
-        FileCheck().check("aten::view").check("index_put_").run(str(test_index_put.graph))
+        FileCheck().check("aten::view").check("index_put_").run(
+            str(test_index_put.graph)
+        )
 
     def test_index_put_trace_without_view(self):
         @_trace(torch.rand(100), torch.tensor([1, 2, 3, 4]), torch.rand(4))
@@ -1574,12 +1736,17 @@ class TestTracer(JitTestCase):
             target[indices] = rhs
             return target
 
-        FileCheck().check_not("aten::view").check("index_put_").run(str(test_index_put.graph))
+        FileCheck().check_not("aten::view").check("index_put_").run(
+            str(test_index_put.graph)
+        )
 
     @suppress_warnings
     def test_trace_checker_dot_data(self):
-        with self.assertRaisesRegex(torch.jit.TracingCheckError, r'Tensor-valued Constant nodes differed in value '
-                                                                 r'across invocations'):
+        with self.assertRaisesRegex(
+            torch.jit.TracingCheckError,
+            r"Tensor-valued Constant nodes differed in value " r"across invocations",
+        ):
+
             @_trace(torch.rand(3, 4), check_inputs=[(torch.rand(3, 4),)])
             def foo(x):
                 y = x.data
@@ -1592,18 +1759,25 @@ class TestTracer(JitTestCase):
                 x = torch.neg(x)
             return x
 
-        with self.assertRaisesRegex(torch.jit.TracingCheckError, r'Graphs differed across invocations!'):
+        with self.assertRaisesRegex(
+            torch.jit.TracingCheckError, r"Graphs differed across invocations!"
+        ):
             torch.jit.trace(foo, torch.randn(3, 4), check_inputs=[torch.randn(4, 4)])
 
     @suppress_warnings
     def test_trace_checker_memoization(self):
-        with self.assertRaisesRegex(torch.jit.TracingCheckError, r'Graphs differed across invocations!'):
+        with self.assertRaisesRegex(
+            torch.jit.TracingCheckError, r"Graphs differed across invocations!"
+        ):
+
             def foo(x):
-                if not hasattr(foo, 'cache'):
+                if not hasattr(foo, "cache"):
                     foo.cache = torch.neg(x)
                 return x + foo.cache
 
-            traced = torch.jit.trace(foo, torch.rand(3, 4), check_inputs=[(torch.rand(3, 4),)])
+            traced = torch.jit.trace(
+                foo, torch.rand(3, 4), check_inputs=[(torch.rand(3, 4),)]
+            )
 
     def test_trace_checker_slice_lhs(self):
         def foo(x):
@@ -1618,34 +1792,45 @@ class TestTracer(JitTestCase):
             x.view(-1).add_(-x.view(-1))
             return x
 
-        with self.assertWarnsRegex(torch.jit.TracerWarning,
-                                   'Output nr 1. of the traced function does not match the '
-                                   'corresponding output of the Python function'):
-            torch.jit.trace(foo,
-                            torch.rand(3, 4),
-                            check_inputs=[torch.rand(5, 6)],
-                            _force_outplace=True)
+        with self.assertWarnsRegex(
+            torch.jit.TracerWarning,
+            "Output nr 1. of the traced function does not match the "
+            "corresponding output of the Python function",
+        ):
+            torch.jit.trace(
+                foo,
+                torch.rand(3, 4),
+                check_inputs=[torch.rand(5, 6)],
+                _force_outplace=True,
+            )
 
     def test_lhs_index_fails(self):
         def foo(x):
             x[0, 1] = 4
             return x
 
-        with self.assertWarnsRegex(torch.jit.TracerWarning, "cause the trace to be incorrect"):
+        with self.assertWarnsRegex(
+            torch.jit.TracerWarning, "cause the trace to be incorrect"
+        ):
             torch.jit.trace(foo, torch.rand(3, 4), _force_outplace=True)
 
     def test_lhs_index_trivial(self):
         def foo(y, x):
             y[...] = x
             return y
-        self.checkTrace(foo, (torch.rand(3, 4), torch.rand(4)), inputs_require_grads=False)
+
+        self.checkTrace(
+            foo, (torch.rand(3, 4), torch.rand(4)), inputs_require_grads=False
+        )
 
     def test_inplace_warn(self):
         def foo(x):
             x.view(-1).add_(-x.view(-1))
             return x
 
-        with self.assertWarnsRegex(torch.jit.TracerWarning, "cause the trace to be incorrect"):
+        with self.assertWarnsRegex(
+            torch.jit.TracerWarning, "cause the trace to be incorrect"
+        ):
             torch.jit.trace(foo, torch.rand(3, 4), _force_outplace=True)
 
     @suppress_warnings
@@ -1653,13 +1838,16 @@ class TestTracer(JitTestCase):
         def foo(x):
             return torch.dropout(x, p=0.5, train=True)
 
-        with self.assertWarnsRegex(torch.jit.TracerWarning,
-                                   'Output nr 1. of the traced function does not match the '
-                                   'corresponding output of the Python function'):
+        with self.assertWarnsRegex(
+            torch.jit.TracerWarning,
+            "Output nr 1. of the traced function does not match the "
+            "corresponding output of the Python function",
+        ):
             torch.jit.trace(foo, torch.rand(3, 4), check_inputs=[torch.rand(5, 6)])
 
-        with self.assertWarnsRegex(torch.jit.TracerWarning,
-                                   'Trace had nondeterministic nodes'):
+        with self.assertWarnsRegex(
+            torch.jit.TracerWarning, "Trace had nondeterministic nodes"
+        ):
             torch.jit.trace(foo, torch.rand(3, 4), check_inputs=[torch.rand(5, 6)])
 
     def test_trace_checker_dropout_notrain(self):
@@ -1714,10 +1902,7 @@ class TestTracer(JitTestCase):
         class MyMod(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.ml = torch.nn.ModuleList([
-                    MySubmod(),
-                    MySubmod()
-                ])
+                self.ml = torch.nn.ModuleList([MySubmod(), MySubmod()])
 
             def forward(self, x):
                 for mod in self.ml:
@@ -1738,9 +1923,7 @@ class TestTracer(JitTestCase):
         class Mod(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.ml = torch.nn.ModuleList([
-                    MySubmod() for i in range(2)
-                ])
+                self.ml = torch.nn.ModuleList([MySubmod() for i in range(2)])
 
             def forward(self, x):
                 futs = []
@@ -1791,9 +1974,9 @@ class TestTracer(JitTestCase):
 
         traced = torch.jit.trace(foo, (torch.rand(3, 3), torch.rand(3, 3)))
         graph_str = str(traced.graph)
-        assert 'bar' in graph_str
-        assert 'baz' in graph_str
-        assert 'quick_brown_fox' in graph_str
+        assert "bar" in graph_str
+        assert "baz" in graph_str
+        assert "quick_brown_fox" in graph_str
 
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_tracing_hooks(self):
@@ -1882,7 +2065,10 @@ class TestTracer(JitTestCase):
 
         example_weight = torch.rand(1, 1, 3, 3)
         example_forward_input = torch.rand(1, 1, 3, 3)
-        inputs = {'forward' : example_forward_input, 'weighted_kernel_sum' : example_weight}
+        inputs = {
+            "forward": example_forward_input,
+            "weighted_kernel_sum": example_weight,
+        }
         n = Net()
         module = torch.jit.trace_module(n, inputs)
 
@@ -1890,14 +2076,26 @@ class TestTracer(JitTestCase):
         for i in range(2):
             check_weight = torch.rand(1, 1, 3, 3)
             check_forward_input = torch.rand(1, 1, 3, 3)
-            check_inputs.append({'forward' : check_forward_input, 'weighted_kernel_sum' : check_weight})
-        module = torch.jit.trace_module(n, inputs, check_trace=True, check_inputs=check_inputs)
+            check_inputs.append(
+                {"forward": check_forward_input, "weighted_kernel_sum": check_weight}
+            )
+        module = torch.jit.trace_module(
+            n, inputs, check_trace=True, check_inputs=check_inputs
+        )
         self.assertTrue(module._c._has_method("forward"))
         self.assertTrue(module._c._has_method("weighted_kernel_sum"))
 
         module = torch.jit.trace(n.forward, example_forward_input)
-        module = torch.jit.trace(n.forward, example_forward_input, check_trace=True, check_inputs=[example_forward_input])
-        with self.assertRaisesRegex(AttributeError, "trace doesn't support compiling individual module's functions"):
+        module = torch.jit.trace(
+            n.forward,
+            example_forward_input,
+            check_trace=True,
+            check_inputs=[example_forward_input],
+        )
+        with self.assertRaisesRegex(
+            AttributeError,
+            "trace doesn't support compiling individual module's functions",
+        ):
             module = torch.jit.trace(n.weighted_kernel_sum, inputs)
 
     def test_tensor_with_grad_as_constant(self):
@@ -1906,13 +2104,19 @@ class TestTracer(JitTestCase):
 
         def f(x):
             return x + param
-        with self.assertRaisesRegex(RuntimeError, "Cannot insert a Tensor that requires grad as a constant"):
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Cannot insert a Tensor that requires grad as a constant"
+        ):
             torch.jit.trace(f, x)
 
     def test_non_tensor_tracing(self):
         def f(x):
             return x + param  # noqa: F821
-        with self.assertRaisesRegex(RuntimeError, r"Type 'Tuple\[int\]' cannot be traced"):
+
+        with self.assertRaisesRegex(
+            RuntimeError, r"Type 'Tuple\[int\]' cannot be traced"
+        ):
             torch.jit.trace(f, (1,))
 
     def test_trace_skip_none_submodule(self):
@@ -1926,7 +2130,7 @@ class TestTracer(JitTestCase):
                 return inputs
 
         m = TestModule()
-        tm = torch.jit.trace(m, torch.tensor(1.))
+        tm = torch.jit.trace(m, torch.tensor(1.0))
         self.assertFalse(hasattr(tm, "submod"))
 
     def test_trace_with_conditional_property(self):
@@ -1935,7 +2139,7 @@ class TestTracer(JitTestCase):
                 super().__init__()
                 if attr is not None:
                     self._attr = attr
-                self.attr_name = '_attr'
+                self.attr_name = "_attr"
 
             @property
             def attr(self):
@@ -1952,16 +2156,16 @@ class TestTracer(JitTestCase):
             return first_arg + second_arg
 
         traced_fn = torch.jit.trace(fn, (torch.ones(1), torch.ones(1)))
-        FileCheck().check("first_arg").check_next("second_arg") \
-            .run(str(traced_fn.graph))
+        FileCheck().check("first_arg").check_next("second_arg").run(
+            str(traced_fn.graph)
+        )
 
     def test_trace_partial_func_argument_names_captured(self):
         def fn(first_arg: torch.Tensor, second_arg=1) -> torch.Tensor:
             return first_arg + second_arg
 
         traced_fn = torch.jit.trace(fn, (torch.ones(1),))
-        FileCheck().check("first_arg").check_not("second_arg") \
-            .run(str(traced_fn.graph))
+        FileCheck().check("first_arg").check_not("second_arg").run(str(traced_fn.graph))
 
     def test_trace_module_argument_names_captured(self):
         class TestModule(nn.Module):
@@ -1977,13 +2181,15 @@ class TestTracer(JitTestCase):
 
         # Explicitly tracing module's forward method
         traced_module_forward = torch.jit.trace(m.forward, example_input)
-        FileCheck().check("first_arg").check_next("second_arg") \
-            .run(str(traced_module_forward.graph))
+        FileCheck().check("first_arg").check_next("second_arg").run(
+            str(traced_module_forward.graph)
+        )
 
         # Tracing module's directly
         traced_module = torch.jit.trace(m, example_input)
-        FileCheck().check("first_arg").check_next("second_arg") \
-            .run(str(traced_module.graph))
+        FileCheck().check("first_arg").check_next("second_arg").run(
+            str(traced_module.graph)
+        )
 
     def test_trace_checking_with_deprecated_name(self):
         class MyClass(torch.nn.Module):
@@ -1992,12 +2198,18 @@ class TestTracer(JitTestCase):
 
             def forward(self, x, y, **deprecated_arguments):
                 if len(deprecated_arguments) > 0:
-                    raise RuntimeError(f"Got unexpected arguments: {deprecated_arguments}")
+                    raise RuntimeError(
+                        f"Got unexpected arguments: {deprecated_arguments}"
+                    )
                 return x + y
 
         model = MyClass()
         m2 = torch.jit.trace(model, (torch.ones(1), torch.ones(1)))
-        m3 = torch.jit.trace(model, example_kwarg_inputs={'x': torch.ones(1), "y": torch.ones(1)}, strict=False)
+        m3 = torch.jit.trace(
+            model,
+            example_kwarg_inputs={"x": torch.ones(1), "y": torch.ones(1)},
+            strict=False,
+        )
 
     def test_trace_with_tuple_tensor(self):
         class MyClass(torch.nn.Module):
@@ -2008,11 +2220,21 @@ class TestTracer(JitTestCase):
                 return x + y[0] + y[1]
 
         model = MyClass()
-        traced_model = torch.jit.trace(model, (torch.ones(1), (torch.ones(1), torch.ones(1))))
-        input_dict = {"x": torch.tensor([2, 3]), "y": (torch.tensor([5, 6]), torch.tensor([7, 8]))}
+        traced_model = torch.jit.trace(
+            model, (torch.ones(1), (torch.ones(1), torch.ones(1)))
+        )
+        input_dict = {
+            "x": torch.tensor([2, 3]),
+            "y": (torch.tensor([5, 6]), torch.tensor([7, 8])),
+        }
         self.assertEqual(model(**input_dict), traced_model(**input_dict))
-        traced_model = torch.jit.trace(model, example_kwarg_inputs={
-                                       'x': torch.ones(1), "y": (torch.ones(1), torch.ones(1))})
+        traced_model = torch.jit.trace(
+            model,
+            example_kwarg_inputs={
+                "x": torch.ones(1),
+                "y": (torch.ones(1), torch.ones(1)),
+            },
+        )
         self.assertEqual(model(**input_dict), traced_model(**input_dict))
 
     def test_trace_no_duplicated_lifted_input_output(self):
@@ -2076,7 +2298,9 @@ class TestMixTracingScripting(JitTestCase):
         self.checkTrace(func2, ((a, b),))
 
         @torch.jit.script
-        def func3(x: Tensor, method: str = 'bilinear', align_corners: bool = True) -> Tensor:
+        def func3(
+            x: Tensor, method: str = "bilinear", align_corners: bool = True
+        ) -> Tensor:
             hw = x.shape[2:4]
             return F.interpolate(x, hw, mode=method, align_corners=align_corners)
 
@@ -2093,7 +2317,7 @@ class TestMixTracingScripting(JitTestCase):
     def test_trace_mixed_by_script_with_dict_output(self):
         @torch.jit.script
         def return_dict(input: torch.Tensor) -> Dict[str, torch.Tensor]:
-            return {"foo" : input + 1}
+            return {"foo": input + 1}
 
         class TraceModule(torch.nn.Module):
             def forward(self, input):
@@ -2213,18 +2437,18 @@ class TestMixTracingScripting(JitTestCase):
         # for each of these checks, check that *BOTH* the underlying
         # _C.ScriptModule object has the expected method/param, as well as the
         # Python object that wraps it.
-        self.assertTrue(traced.ssm._c._has_method('foo'))
-        self.assertTrue(hasattr(traced.ssm, 'foo'))
+        self.assertTrue(traced.ssm._c._has_method("foo"))
+        self.assertTrue(hasattr(traced.ssm, "foo"))
 
         imported = self.getExportImportCopy(traced)
 
-        self.assertTrue(imported.ssm._c._has_method('foo'))
-        self.assertTrue(hasattr(imported.ssm, 'foo'))
+        self.assertTrue(imported.ssm._c._has_method("foo"))
+        self.assertTrue(hasattr(imported.ssm, "foo"))
 
-        self.assertTrue(imported.ssm.asm._c._has_method('bar'))
-        self.assertTrue(hasattr(imported.ssm.asm, 'bar'))
+        self.assertTrue(imported.ssm.asm._c._has_method("bar"))
+        self.assertTrue(hasattr(imported.ssm.asm, "bar"))
 
-        self.assertTrue(hasattr(imported.ssm.asm, 'param'))
+        self.assertTrue(hasattr(imported.ssm.asm, "param"))
 
     def test_trace_parameter(self):
         class Param(nn.Module):
@@ -2281,7 +2505,9 @@ class TestMixTracingScripting(JitTestCase):
                 return scripted_fn(torch.mm(x, self.param))
 
         tm = torch.jit.trace(TracedModule(), torch.rand(3, 4))
-        FileCheck().check("aten::mm").check("name=\"scripted_fn\"").check("prim::CallFunction").run(str(tm.graph))
+        FileCheck().check("aten::mm").check('name="scripted_fn"').check(
+            "prim::CallFunction"
+        ).run(str(tm.graph))
 
     @_tmp_donotuse_dont_inline_everything
     def test_call_script_module_from_traced_module(self):
@@ -2305,7 +2531,9 @@ class TestMixTracingScripting(JitTestCase):
 
         tm = torch.jit.trace(TracedModule(), torch.rand(3, 4))
 
-        FileCheck().check("aten::mm").check("prim::CallMethod").check_same("forward").check("aten::add").run(str(tm.graph))
+        FileCheck().check("aten::mm").check("prim::CallMethod").check_same(
+            "forward"
+        ).check("aten::add").run(str(tm.graph))
 
     @_tmp_donotuse_dont_inline_everything
     def test_call_traced_fn_from_script_fn(self):
@@ -2317,10 +2545,16 @@ class TestMixTracingScripting(JitTestCase):
         def script_fn(x):
             return traced_fn(x) + 1
 
-        FileCheck().check("prim::CallFunction").check("aten::add").run(str(script_fn.graph))
+        FileCheck().check("prim::CallFunction").check("aten::add").run(
+            str(script_fn.graph)
+        )
 
     def test_call_traced_mod_from_script_fn(self):
-        with self.assertRaisesRegex(RuntimeError, "Cannot call a ScriptModule that is not a submodule of the caller"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Cannot call a ScriptModule that is not a submodule of the caller",
+        ):
+
             class TracedModule(torch.nn.Module):
                 def forward(self, x):
                     return torch.mm(x, torch.zeros(4, 3))
@@ -2347,7 +2581,9 @@ class TestMixTracingScripting(JitTestCase):
                 return traced_fn(torch.mm(x, self.param))
 
         sm = ScriptMod()
-        FileCheck().check("aten::mm").check("prim::CallFunction").run(str(sm.forward.graph))
+        FileCheck().check("aten::mm").check("prim::CallFunction").run(
+            str(sm.forward.graph)
+        )
 
     @_tmp_donotuse_dont_inline_everything
     def test_call_tracing_mod_from_script_module(self):
@@ -2415,31 +2651,41 @@ class TestMixTracingScripting(JitTestCase):
 
                 return self.b(feature_map)
 
-        input_map = {"1" : [torch.rand(2, 2), torch.rand(2, 2)], "3" : [torch.rand(2, 2), torch.rand(2, 2)]}
+        input_map = {
+            "1": [torch.rand(2, 2), torch.rand(2, 2)],
+            "3": [torch.rand(2, 2), torch.rand(2, 2)],
+        }
         model = testA()
         traced_model = torch.jit.trace(model, input_map)
-        new_input_map = {"1" : [torch.rand(2, 2), torch.randn(2, 2)], "3" : [torch.rand(2, 2), torch.rand(2, 2)]}
+        new_input_map = {
+            "1": [torch.rand(2, 2), torch.randn(2, 2)],
+            "3": [torch.rand(2, 2), torch.rand(2, 2)],
+        }
         self.assertEqual(model(new_input_map), traced_model(new_input_map))
 
     def test_trace_script_returning_complex_dict(self):
         """Tracing over a script function returning a dictionary should work.
         The dictionary can should be able to contain other containers (like a tuple) recursively.
         """
+
         class ReturnsDict(torch.nn.Module):
             def forward(
-                self, id_score_list: Dict[str, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]
+                self,
+                id_score_list: Dict[
+                    str, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+                ],
             ) -> Dict[str, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
                 # do some random operations and then return a dict of the same structure
                 v = id_score_list["1000"]
                 idx_keys = v[1] - 1500000
                 weights = v[2]
-                result = {
-                    "1000": (v[0], idx_keys, weights)
-                }
+                result = {"1000": (v[0], idx_keys, weights)}
                 return result
 
         class ChecksDict(torch.nn.Module):
-            def forward(self, input: Dict[str, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]):
+            def forward(
+                self, input: Dict[str, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]
+            ):
                 v = input["1000"]
                 return v[1] + 1
 
@@ -2449,7 +2695,9 @@ class TestMixTracingScripting(JitTestCase):
                 self.checks_dict = checks_dict
                 self.returns_dict = returns_dict
 
-            def forward(self, input: Dict[str, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]):
+            def forward(
+                self, input: Dict[str, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]
+            ):
                 foo = self.returns_dict(input)
                 return self.checks_dict(foo)
 
@@ -2457,7 +2705,7 @@ class TestMixTracingScripting(JitTestCase):
             "1000": (
                 torch.tensor([0]),
                 torch.tensor([], dtype=torch.int64),
-                torch.tensor([])
+                torch.tensor([]),
             )
         }
 
@@ -2465,7 +2713,7 @@ class TestMixTracingScripting(JitTestCase):
             "1000": (
                 torch.tensor([0]),
                 torch.tensor([1500000, 1500004], dtype=torch.int64),
-                torch.tensor([2.0, 3.0])
+                torch.tensor([2.0, 3.0]),
             )
         }
 
@@ -2480,15 +2728,14 @@ class TestMixTracingScripting(JitTestCase):
         """Tracing over a module returning a dictionary whose values are tuples of tensors
         should work.
         """
+
         class ReturnsDict(torch.nn.Module):
             def forward(
                 self, k: torch.Tensor, v: torch.Tensor
             ) -> Dict[str, Tuple[torch.Tensor, torch.Tensor]]:
                 x = 2 * k
                 y = 3 * v
-                result = {
-                    "imakey": (x, y)
-                }
+                result = {"imakey": (x, y)}
                 return result
 
         class ReturnsBadDict(torch.nn.Module):
@@ -2496,22 +2743,24 @@ class TestMixTracingScripting(JitTestCase):
                 self, k: torch.Tensor, v: torch.Tensor
             ) -> Dict[str, Tuple[torch.Tensor, float]]:
                 x = 2 * k
-                result = {
-                    "imakey": (x, 1)
-                }
+                result = {"imakey": (x, 1)}
                 return result
 
         mod = ReturnsDict()
-        traced_module = torch.jit.trace(mod, [torch.ones(1), torch.ones(1)], strict=False)
+        traced_module = torch.jit.trace(
+            mod, [torch.ones(1), torch.ones(1)], strict=False
+        )
         out = traced_module(torch.ones(1), torch.ones(1))
-        expected = {
-            "imakey": (torch.tensor([2.]), torch.tensor([3.]))
-        }
+        expected = {"imakey": (torch.tensor([2.0]), torch.tensor([3.0]))}
         self.assertEqual(out, expected)
 
-        with self.assertRaisesRegex(RuntimeError, "cannot be understood by the tracer, only outputs matching"):
+        with self.assertRaisesRegex(
+            RuntimeError, "cannot be understood by the tracer, only outputs matching"
+        ):
             mod = ReturnsBadDict()
-            traced_module = torch.jit.trace(mod, [torch.ones(1), torch.ones(1)], strict=False)
+            traced_module = torch.jit.trace(
+                mod, [torch.ones(1), torch.ones(1)], strict=False
+            )
 
     def test_trace_linear(self):
         m = torch.nn.Linear(20, 20)
@@ -2523,7 +2772,9 @@ class TestMixTracingScripting(JitTestCase):
     def test_traced_module_implements_interface(self):
         @torch.jit.interface
         class TestModuleInterface(nn.Module):
-            def forward(self, first_arg: torch.Tensor, second_arg: torch.Tensor) -> torch.Tensor:
+            def forward(
+                self, first_arg: torch.Tensor, second_arg: torch.Tensor
+            ) -> torch.Tensor:
                 pass
 
         make_global(TestModuleInterface)
@@ -2533,7 +2784,9 @@ class TestMixTracingScripting(JitTestCase):
                 super().__init__()
                 self.conv = nn.Conv2d(1, 1, 3)
 
-            def forward(self, first_arg: torch.Tensor, second_arg: torch.Tensor) -> torch.Tensor:
+            def forward(
+                self, first_arg: torch.Tensor, second_arg: torch.Tensor
+            ) -> torch.Tensor:
                 return self.conv(first_arg) + second_arg
 
         def fn_takes_interface(x: TestModuleInterface):
@@ -2544,7 +2797,6 @@ class TestMixTracingScripting(JitTestCase):
         self.checkScript(fn_takes_interface, (scripted_test_module,))
 
     def test_traced_module_contains_scripted_interface_types(self):
-
         class LeafModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()

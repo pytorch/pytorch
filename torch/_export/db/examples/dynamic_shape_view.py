@@ -1,10 +1,11 @@
+# mypy: allow-untyped-defs
 import torch
 
 from torch._export.db.case import export_case
 
 
 @export_case(
-    example_inputs=(torch.ones(10, 10),),
+    example_inputs=(torch.randn(10, 10),),
     tags={"torch.dynamic-shape"},
 )
 class DynamicShapeView(torch.nn.Module):

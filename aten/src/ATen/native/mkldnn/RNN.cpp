@@ -55,9 +55,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
     const Tensor& output,
     const Tensor& hy_,
     const Tensor& cy_,
-    const c10::optional<Tensor>& grad_output_r_opt,
-    const c10::optional<Tensor>& grad_hy_r_opt,
-    const c10::optional<Tensor>& grad_cy_r_opt,
+    const std::optional<Tensor>& grad_output_r_opt,
+    const std::optional<Tensor>& grad_hy_r_opt,
+    const std::optional<Tensor>& grad_cy_r_opt,
     bool reverse,
     int64_t mode,
     int64_t hidden_size,
@@ -75,7 +75,7 @@ REGISTER_NO_CPU_DISPATCH(lstm_mkldnn_stub);
 
 } // namespace at::native
 
-#else // AT_MKLDNN_EBABLED
+#else // AT_MKLDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
@@ -167,10 +167,6 @@ struct RNNParams {
     return {{1, 1, mini_batch, hidden_size}, dtype, format::ldnc};
   }
 };
-
-static std::vector<int64_t> _hidden_size(const RNNParams& rnn) {
-  return {rnn.num_layers * rnn.num_directions, rnn.mini_batch, rnn.hidden_size};
-}
 
 template<bool is_single_direction>
 std::vector<int64_t> _output_size(const RNNParams& rnn) {
@@ -306,9 +302,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
     const Tensor& output,
     const Tensor& hy_,
     const Tensor& cy_,
-    const c10::optional<Tensor>& grad_output_r_opt,
-    const c10::optional<Tensor>& grad_hy_r_opt,
-    const c10::optional<Tensor>& grad_cy_r_opt,
+    const std::optional<Tensor>& grad_output_r_opt,
+    const std::optional<Tensor>& grad_hy_r_opt,
+    const std::optional<Tensor>& grad_cy_r_opt,
     bool reverse,
     int64_t mode,
     int64_t hidden_size,
@@ -541,8 +537,7 @@ std::pair<Tensor, hidden_type> mkldnn_impl(
     const Tensor& input, const hidden_type& hidden,
     TensorList params, bool has_biases, ideep::rnn_kind mode,
     int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
-  Tensor hx, cx;
-  std::tie(hx, cx) = unpack_hidden(hidden);
+  auto [hx, cx] = unpack_hidden(hidden);
   int64_t hidden_size = hx.size(2);
 
   auto mkldnn_output = mkldnn_rnn(
@@ -569,4 +564,4 @@ REGISTER_ALL_CPU_DISPATCH(lstm_mkldnn_stub, &lstm_mkldnn);
 
 } // namespace at::native
 
-#endif // AT_MKLDNN_EBABLED
+#endif // AT_MKLDNN_ENABLED

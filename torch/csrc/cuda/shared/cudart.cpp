@@ -103,7 +103,7 @@ void initCudartBindings(PyObject* module) {
   cudart.def(
       "cuda"
       "MemGetInfo",
-      [](int device) -> std::pair<size_t, size_t> {
+      [](c10::DeviceIndex device) -> std::pair<size_t, size_t> {
         c10::cuda::CUDAGuard guard(device);
         size_t device_free = 0;
         size_t device_total = 0;

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import Dict, List, Optional
 
 import torch
@@ -53,6 +54,7 @@ class _FunctionalAdadelta:
         grads = []
         square_avgs = []
         acc_deltas = []
+        state_steps = []
         lr = self.defaults["lr"]
         rho = self.defaults["rho"]
         eps = self.defaults["eps"]
@@ -85,6 +87,7 @@ class _FunctionalAdadelta:
                 state = self.state[param]
                 square_avgs.append(state["square_avg"])
                 acc_deltas.append(state["acc_delta"])
+                state_steps.append(state["step"])
 
         with torch.no_grad():
             F.adadelta(
@@ -92,6 +95,7 @@ class _FunctionalAdadelta:
                 grads,
                 square_avgs,
                 acc_deltas,
+                state_steps,
                 lr=lr,
                 rho=rho,
                 eps=eps,

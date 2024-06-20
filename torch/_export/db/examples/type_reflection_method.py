@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 
 from torch._export.db.case import export_case, SupportLevel, export_rewrite_case
@@ -10,7 +11,7 @@ class A:
 
 
 @export_case(
-    example_inputs=(torch.ones(3, 4),),
+    example_inputs=(torch.randn(3, 4),),
     tags={"python.builtin"},
     support_level=SupportLevel.SUPPORTED,
 )

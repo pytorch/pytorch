@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import io
 
 import torch
@@ -88,7 +89,7 @@ def _load_storages(id, zip_reader, obj_bytes, serialized_storages, serialized_dt
         importer = sys_importer
 
     unpickler = PackageUnpickler(importer, io.BytesIO(obj_bytes))
-    unpickler.persistent_load = persistent_load  # type: ignore[assignment]
+    unpickler.persistent_load = persistent_load  # type: ignore[method-assign]
     result = _deploy_objects[id] = unpickler.load()
     return result
 

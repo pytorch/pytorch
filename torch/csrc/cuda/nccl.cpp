@@ -279,8 +279,9 @@ ArrayRef<ncclComm_t> get_communicators(TensorList inputs) {
   };
   device_list devices = fmap(inputs, get_device);
   auto it = _communicators.find(devices);
-  if (it == _communicators.end())
-    std::tie(it, std::ignore) = _communicators.emplace(devices, devices);
+  if (it == _communicators.end()) {
+    it = _communicators.emplace(devices, devices).first;
+  }
   return it->second.ref();
 }
 
@@ -415,20 +416,18 @@ AutoNcclGroup::AutoNcclGroup() {
   (c10::cuda::getFreeMutex())->lock();
 #endif
   comm_nonblocking_ = false;
+  comm_ = nullptr;
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
   detail::NCCL_CHECK(ncclGroupStart());
 #endif
 }
 
-AutoNcclGroup::AutoNcclGroup(
-    std::vector<ncclComm_t>& comms,
-    bool comm_nonblocking) {
+AutoNcclGroup::AutoNcclGroup(ncclComm_t comm, bool comm_nonblocking) {
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR < 2)
   // nccl < 2.0 cannot be called concurrently with cudaFree
   (c10::cuda::getFreeMutex())->lock();
 #endif
-  // TODO(eqy): can we make comms_ reference?
-  comms_ = comms;
+  comm_ = comm;
   comm_nonblocking_ = comm_nonblocking;
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
   detail::NCCL_CHECK(ncclGroupStart());
@@ -437,10 +436,10 @@ AutoNcclGroup::AutoNcclGroup(
 
 AutoNcclGroup::~AutoNcclGroup() noexcept(false) {
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-  if (!comm_nonblocking_) {
-    detail::NCCL_CHECK(ncclGroupEnd());
+  if (comm_nonblocking_ && comm_ != nullptr) {
+    detail::NCCL_CHECK_TIMEOUT(ncclGroupEnd(), comm_);
   } else {
-    detail::NCCL_CHECK_TIMEOUT(ncclGroupEnd(), comms_);
+    detail::NCCL_CHECK(ncclGroupEnd());
   }
 #endif
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR < 2)
@@ -584,7 +583,7 @@ void broadcast(
   AutoNcclGroup nccl_group_guard;
   at::cuda::OptionalCUDAGuard device_guard;
   for (size_t i = 0, num_tensors = tensors.size(); i < num_tensors; i++) {
-    int device = tensors[i].get_device();
+    auto device = tensors[i].get_device();
     device_guard.set_index(device);
     // Default to the current stream
     const auto stream = (streams.empty() || !streams[i])
@@ -636,7 +635,7 @@ void reduce(
   AutoNcclGroup nccl_group_guard;
   at::cuda::OptionalCUDAGuard device_guard;
   for (const auto i : c10::irange(len)) {
-    int device = inputs[i].device().index();
+    auto device = inputs[i].device().index();
     device_guard.set_index(device);
     // Default to the current stream
     const auto stream = (streams.empty() || !streams[i])
@@ -690,7 +689,7 @@ void all_reduce(
   AutoNcclGroup nccl_group_guard;
   at::cuda::OptionalCUDAGuard device_guard;
   for (const auto i : c10::irange(len)) {
-    int device = inputs[i].device().index();
+    auto device = inputs[i].device().index();
     device_guard.set_index(device);
     // Default to the current stream
     const auto stream = (streams.empty() || !streams[i])
@@ -732,7 +731,7 @@ void reduce_scatter(
   AutoNcclGroup nccl_group_guard;
   at::cuda::OptionalCUDAGuard device_guard;
   for (const auto i : c10::irange(len)) {
-    int device = inputs[i].device().index();
+    auto device = inputs[i].device().index();
     device_guard.set_index(device);
     // Default to the current stream
     const auto stream = (streams.empty() || !streams[i])
@@ -773,7 +772,7 @@ void all_gather(
   AutoNcclGroup nccl_group_guard;
   at::cuda::OptionalCUDAGuard device_guard;
   for (const auto i : c10::irange(len)) {
-    int device = inputs[i].device().index();
+    auto device = inputs[i].device().index();
     device_guard.set_index(device);
     // Default to the current stream
     const auto stream = (streams.empty() || !streams[i])
@@ -819,10 +818,10 @@ void all2all_single_equal_split(
   auto type = to_nccl_data_type(input);
   size_t count = input.numel() / size;
   size_t rankdiff = input.nbytes() / size;
-  const auto* sendbuff = reinterpret_cast<char*>(input.data_ptr());
+  const auto* sendbuff = reinterpret_cast<const char*>(input.const_data_ptr());
   auto* recvbuff = reinterpret_cast<char*>(output.data_ptr());
   auto comm = to_nccl_comm(_comm);
-#if defined(USE_ROCM) && ROCM_VERSION >= 50000
+#if defined(USE_ROCM)
   NCCL_CHECK(ncclAllToAll(sendbuff, recvbuff, count, type, comm, stream));
 #else
   NCCL_CHECK(ncclCommCount(comm, &numranks));
@@ -1041,7 +1040,7 @@ void gather(
 
   size_t count = inputs.numel();
   auto type = to_nccl_data_type(inputs);
-  const auto* sendbuff = reinterpret_cast<char*>(inputs.data_ptr());
+  const auto* sendbuff = reinterpret_cast<const char*>(inputs.const_data_ptr());
 
   NCCL_CHECK(ncclGroupStart());
 
@@ -1098,7 +1097,8 @@ void scatter(
       if (r != root) {
         size_t send_count = inputs[r].numel();
         auto send_type = to_nccl_data_type(inputs[r]);
-        const auto* sendbuff = reinterpret_cast<char*>(inputs[r].data_ptr());
+        const auto* sendbuff =
+            reinterpret_cast<const char*>(inputs[r].const_data_ptr());
         NCCL_CHECK(ncclSend(sendbuff, send_count, send_type, r, comm, stream));
       } else {
         // on its own rank, simply copy it to the output

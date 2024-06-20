@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import os
 
 import torch
@@ -23,7 +25,7 @@ def _check_validate(op_info, sample):
         except sample.error_type:
             pass
         except Exception as msg:
-            raise AssertionError(  # noqa: TRY200
+            raise AssertionError(  # noqa: B904
                 f"{op_info.name} on {sample.sample_input=} expected exception "
                 f"{sample.error_type}: {sample.error_regex}, got {type(msg).__name__}: {msg}"
             )
@@ -37,7 +39,7 @@ def _check_validate(op_info, sample):
         try:
             op_info(sample.input, *sample.args, **sample.kwargs)
         except Exception as msg:
-            raise AssertionError(  # noqa: TRY200
+            raise AssertionError(  # noqa: B904
                 f"{op_info.name} on {sample=} expected to succeed "
                 f", got {type(msg).__name__}: {msg}"
             )
@@ -796,15 +798,7 @@ def _validate_sample_input_sparse_like_fns(op_info, sample, check_validate=False
         torch.sparse_csc,
         torch.sparse_bsr,
         torch.sparse_bsc,
-    }:
-        if sample.kwargs.get("device", sample.input.device) != sample.input.device:
-            return ErrorInput(
-                sample,
-                error_regex=(
-                    "device of (ccol|crow)_indices \\(=(cpu|cuda.*)\\) must"
-                    " match device of values \\(=(cuda.*|cpu)\\)"
-                ),
-            )
+    } and op_info.name not in {"zeros_like"}:
         if sample.kwargs.get("layout", sample.input.layout) != sample.input.layout:
             return ErrorInput(
                 sample,

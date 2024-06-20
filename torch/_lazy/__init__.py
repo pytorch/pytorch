@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import threading
 
 import torch._C._lazy

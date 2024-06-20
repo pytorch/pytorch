@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import itertools
 import logging
 
@@ -51,7 +52,7 @@ def get_step_logger(logger):
 
     step = next(_step_counter)
 
-    def log(level, msg):
-        logger.log(level, "Step %s: %s", step, msg)
+    def log(level, msg, **kwargs):
+        logger.log(level, "Step %s: %s", step, msg, **kwargs)
 
     return log

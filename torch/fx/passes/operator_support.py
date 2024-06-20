@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import abc
 import typing as t
 
@@ -31,7 +32,7 @@ class OperatorSupportBase(abc.ABC):
     def is_node_supported(
         self, submodules: t.Mapping[str, torch.nn.Module], node: torch.fx.Node
     ) -> bool:
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 @compatibility(is_backward_compatible=False)
@@ -188,9 +189,6 @@ class OpSupports:
             node: torch.fx.Node,
         ) -> bool:
             for arg in node.all_input_nodes:
-                # escape dtype check for get_attr node
-                if arg.op == "get_attr":
-                    continue
                 arg_dtype = _get_arg_dtype(arg)
                 if arg_dtype == dtype:
                     return False

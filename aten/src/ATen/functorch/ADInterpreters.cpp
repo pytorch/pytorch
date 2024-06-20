@@ -3,7 +3,7 @@
 #include <ATen/functorch/TensorWrapper.h>
 #include <bitset>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 constexpr size_t default_bitset_size = 64;
 
@@ -73,7 +73,7 @@ static void autogradBasedTransformProcess(
     return materializeGradWrappers(tensor, current_level);
   };
   auto num_args = op.schema().arguments().size();
-  foreachTensorInplace(*stack, stack->size() - num_args, stack->size(), maybeTransformGradWrappers);
+  foreachTensorInplace(*stack, static_cast<int64_t>(stack->size() - num_args), static_cast<int64_t>(stack->size()), maybeTransformGradWrappers);
 
   setup_dispatch_key_tls(transform_type, {});
   op.callBoxed(stack);
@@ -133,7 +133,7 @@ static void autogradBasedTransformSendToNext(
   auto args_size = op.schema().arguments().size();
   const auto ret_size = op.schema().returns().size();
   // Step 1
-  auto front = stack->size() - args_size;
+  auto front = static_cast<int64_t>(stack->size()) - args_size;
   for (const auto arg_idx : c10::irange(0, args_size)) {
     stack->push_back((*stack)[front + arg_idx]);
   }
@@ -151,7 +151,7 @@ static void autogradBasedTransformSendToNext(
         // if the input is immutable, we find if it aliases anything, noting that
         // args are in reverse order on stack, so the last arg is at the top of the stack
         const auto relative_pos = idx - (stack->size() - args_size);
-        const auto aliased_out = findAliasedOutput(op.schema(), relative_pos);
+        const auto aliased_out = findAliasedOutput(op.schema(), static_cast<int64_t>(relative_pos));
         if (aliased_out.has_value()) {
           outputs_aliasing_immutable.flip(*aliased_out); // each output aliases at most one input, so we can only hit this once
         }
@@ -160,7 +160,7 @@ static void autogradBasedTransformSendToNext(
   }
 
   // Step 2
-  foreachTensorInplace(*stack, stack->size() - args_size, stack->size(), unwrap);
+  foreachTensorInplace(*stack, static_cast<int64_t>(stack->size() - args_size), static_cast<int64_t>(stack->size()), unwrap);
 
   // See NOTE [grad and vjp interaction with no_grad]
   optional<c10::AutoGradMode> grad_guard;
@@ -183,7 +183,7 @@ static void autogradBasedTransformSendToNext(
   op.callBoxed(stack);
 
   // Step 4
-  foreachTensorInplaceWithFlag(*stack, stack->size() - ret_size, stack->size(), outputs_aliasing_immutable, wrap);
+  foreachTensorInplaceWithFlag(*stack, static_cast<int64_t>(stack->size() - ret_size), static_cast<int64_t>(stack->size()), outputs_aliasing_immutable, wrap);
 
   // Step 5
   auto args_front = stack->size() - args_size - ret_size;
@@ -200,7 +200,7 @@ static void autogradBasedTransformSendToNext(
   }
 
   // Step 6
-  stack->erase(stack->end() - (args_size + ret_size), stack->end() - ret_size);
+  stack->erase(stack->end() - std::ptrdiff_t(args_size + ret_size), stack->end() - std::ptrdiff_t(ret_size));
 }
 
 void GradInterpreterPtr::processImpl(
@@ -239,4 +239,4 @@ void JvpInterpreterPtr::sendToNextInterpreterImpl(
       grad_special_case);
 }
 
-}} // namespace at::functorch
+} // namespace at::functorch

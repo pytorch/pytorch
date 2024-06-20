@@ -79,6 +79,7 @@ C10_ALWAYS_INLINE static const std::
 // we have:
 // - "Dense":     CPU, CUDA, XLA, ... (~12 keys)
 // - "Sparse":    SparseCPU, SparseCUDA, ...
+// - "SparseCsr": SparseCsrCPU, SparseCsrCUDA, ...
 // - "Quantized": QuantizedCPU, QuantizedCUDA, QuantizedXLA, ...
 // - "Autograd":  AutogradCPU, AutogradCUDA, Autograd XLA, ...
 // The problem is that total number of keys grows quadratically with [#
@@ -92,7 +93,7 @@ C10_ALWAYS_INLINE static const std::
 // (1) "Building block" keys
 //    (a) backends: Everything in the BackendComponent enum (e.g. CPUBit,
 //    CUDABit) (b) functionalities: (per-backend) functionality-bit DispatchKeys
-//    (e.g. AutogradFunctionality, Sparse, Dense)
+//    (e.g. AutogradFunctionality, SparseCsr, Sparse, Dense)
 // (2) "Runtime" keys
 //    (a) "non-customizable backends" (e.g. FPGA)
 //    (b) "non-customizable functionalities" (e.g. Functionalize)
@@ -116,14 +117,16 @@ C10_ALWAYS_INLINE static const std::
 // Backend keys and functionality keys that count as "building blocks" will
 // contribute to a full cross product of functionality that can be overriden.
 //
-// For example, right now we have at least 12 "backend" building blocks (CPU,
-// CUDA, XLA, ...) and at least 4 "functionality" building blocks (Dense,
-// Sparse, Quantized, AutogradFunctionality, ...). These keys together allow
-// every dispatcher operator to be customized in up to 12*4 different ways. Each
-// of those requires a slot in the operator table of every dispatcher operator.
-// Not every piece of functionality necessarily needs to be customizable
-// per-backend, and not every backend necessarily needs to be able to customize
-// every type of functionality.
+// For example, right now we have at least 12 "backend" building
+// blocks (CPU, CUDA, XLA, ...) and at least 5 "functionality"
+// building blocks (Dense, Sparse, SparseCsr, Quantized,
+// AutogradFunctionality, ...). These keys together allow every
+// dispatcher operator to be customized in up to 12*4 different
+// ways. Each of those requires a slot in the operator table of every
+// dispatcher operator.  Not every piece of functionality necessarily
+// needs to be customizable per-backend, and not every backend
+// necessarily needs to be able to customize every type of
+// functionality.
 //
 //
 // (2) Every runtime key corresponds directly to a slot in an operator's runtime
@@ -307,6 +310,7 @@ class DispatchKeySet final {
                              DispatchKey::Dense,
                              DispatchKey::Quantized,
                              DispatchKey::Sparse,
+                             DispatchKey::SparseCsr,
                              DispatchKey::AutogradFunctionality,
                          })
               .repr_) == 0));
@@ -685,8 +689,7 @@ constexpr DispatchKeySet python_ks = DispatchKeySet({
 
 constexpr DispatchKeySet sparse_ks = DispatchKeySet(DispatchKey::Sparse);
 
-constexpr DispatchKeySet sparse_csr_ks =
-    DispatchKeySet({DispatchKey::SparseCsrCPU, DispatchKey::SparseCsrCUDA});
+constexpr DispatchKeySet sparse_csr_ks = DispatchKeySet(DispatchKey::SparseCsr);
 
 constexpr DispatchKeySet mkldnn_ks = DispatchKeySet(DispatchKey::MkldnnCPU);
 
@@ -699,15 +702,14 @@ constexpr DispatchKeySet autogradother_backends =
         // Technically, HIP will now redispatch to its own custom AutogradHIP
         // slot in the runtime table.
         {DispatchKey::FPGA,
-         DispatchKey::ORT,
+         DispatchKey::MAIA,
          DispatchKey::Vulkan,
          DispatchKey::Metal,
-         DispatchKey::SparseCsrCPU,
-         DispatchKey::SparseCsrCUDA,
          DispatchKey::CustomRNGKeyId,
          DispatchKey::MkldnnCPU,
          // Sparse and Quantized backends also live here.
          DispatchKey::Sparse,
+         DispatchKey::SparseCsr,
          DispatchKey::Quantized})
     // Including the backend bits because this keyset is used during op
     // registration, which requires looping over all runtime autogradother
@@ -785,6 +787,7 @@ constexpr DispatchKeySet backend_functionality_keys =
         DispatchKey::Dense,
         DispatchKey::Quantized,
         DispatchKey::Sparse,
+        DispatchKey::SparseCsr,
     }) |
     DispatchKeySet(DispatchKeySet::RAW, full_backend_mask);
 
@@ -898,7 +901,7 @@ C10_API bool isIncludedInAlias(DispatchKey k, DispatchKey alias);
 // legacy code that is still using DispatchKey for things like instanceof
 // checks; if at all possible, refactor the code to stop using DispatchKey in
 // those cases.
-static inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
+inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
   // NB: If you add any extra keys that can be stored in TensorImpl on
   // top of existing "backend" keys like CPU/CUDA, you need to add it
   // here.  At the moment, autograd keys and ADInplaceOrView key need this
