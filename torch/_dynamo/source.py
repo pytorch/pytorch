@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import collections
 import dataclasses
 import enum
@@ -139,6 +140,19 @@ class GlobalWeakRefSource(Source):
 
     def name(self):
         return f"G[{repr(self.global_name)}]()"
+
+
+@dataclasses.dataclass(frozen=True)
+class WeakRefCallSource(ChainedSource):
+    def reconstruct(self, codegen):
+        self.base.reconstruct(codegen)
+        codegen.extend_output(create_call_function(0, True))
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"{self.base.name()}()"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -566,6 +580,15 @@ class NumpyTensorSource(ChainedSource):
 class FloatTensorSource(ChainedSource):
     def name(self) -> str:
         return f"___as_tensor({self.base.name()})"
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+
+@dataclasses.dataclass(frozen=True)
+class CallMethodItemSource(ChainedSource):
+    def name(self) -> str:
+        return f"{self.base.name()}.item()"
 
     def guard_source(self):
         return self.base.guard_source()

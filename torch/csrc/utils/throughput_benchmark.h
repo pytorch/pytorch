@@ -14,8 +14,7 @@
 
 namespace py = pybind11;
 
-namespace torch {
-namespace throughput_benchmark {
+namespace torch::throughput_benchmark {
 
 /**
  * The struct is used to provide results of a benchmark to the caller
@@ -193,7 +192,6 @@ class C10_HIDDEN ThroughputBenchmark {
   detail::ScriptModuleBenchmark script_module_;
   detail::ModuleBenchmark module_;
 };
-} // namespace throughput_benchmark
-} // namespace torch
+} // namespace torch::throughput_benchmark
 
 #include <torch/csrc/utils/throughput_benchmark-inl.h>

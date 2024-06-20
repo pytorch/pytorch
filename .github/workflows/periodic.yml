@@ -37,6 +37,59 @@ jobs:
     permissions:
       id-token: write
       contents: read
+  linux-focal-cuda12_1-py3_10-gcc9-build:
+    name: linux-focal-cuda12.1-py3.10-gcc9
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-focal-cuda12.1-py3.10-gcc9
+      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9
+      test-matrix: |
+        { include: [
+          { config: "nogpu_AVX512", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+          { config: "nogpu_NO_AVX2", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+          { config: "jit_legacy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
+        ]}
+  linux-focal-cuda12_1-py3_10-gcc9-test:
+    name: linux-focal-cuda12.1-py3.10-gcc9
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-focal-cuda12_1-py3_10-gcc9-build
+      - target-determination
+    with:
+      build-environment: linux-focal-cuda12.1-py3.10-gcc9
+      docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-build.outputs.test-matrix }}
+
+  linux-focal-cuda12_4-py3_10-gcc9-build:
+    name: linux-focal-cuda12.4-py3.10-gcc9
+    uses: ./.github/workflows/_linux-build-label.yml
+    with:
+      build-environment: linux-focal-cuda12.4-py3.10-gcc9
+      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 3, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 4, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 5, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "deploy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "nogpu_AVX512", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+          { config: "nogpu_NO_AVX2", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+          { config: "jit_legacy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
+        ]}
+
+  linux-focal-cuda12_4-py3_10-gcc9-test:
+    name: linux-focal-cuda12.4-py3.10-gcc9
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-focal-cuda12_4-py3_10-gcc9-build
+      - target-determination
+    with:
+      timeout-minutes: 360
+      build-environment: linux-focal-cuda12.4-py3.10-gcc9
+      docker-image: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-build.outputs.test-matrix }}
 
   parallelnative-linux-jammy-py3_8-gcc11-build:
     name: parallelnative-linux-jammy-py3.8-gcc11
@@ -67,7 +120,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-focal-cuda11.8-py3.9-gcc9
-      docker-image-name: pytorch-linux-focal-cuda11.8-cudnn8-py3-gcc9
+      docker-image-name: pytorch-linux-focal-cuda11.8-cudnn9-py3-gcc9
       cuda-arch-list: 8.6
       test-matrix: |
         { include: [
@@ -89,7 +142,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-focal-cuda11.8-py3.10-gcc9-debug
-      docker-image-name: pytorch-linux-focal-cuda11.8-cudnn8-py3-gcc9
+      docker-image-name: pytorch-linux-focal-cuda11.8-cudnn9-py3-gcc9
       build-with-debug: true
       test-matrix: |
         { include: [
@@ -151,7 +204,7 @@ jobs:
           { config: "default",
             shard: 1,
             num_shards: 1,
-            runner: "macos-13-xlarge",
+            runner: "macos-14-xlarge",
             ios_platform: "SIMULATOR",
             ios_arch: "arm64",
             use_lite_interpreter: 1,
@@ -162,7 +215,7 @@ jobs:
           { config: "default",
             shard: 1,
             num_shards: 1,
-            runner: "macos-13-xlarge",
+            runner: "macos-14-xlarge",
             ios_platform: "OS",
             ios_arch: "arm64",
             use_lite_interpreter: 1,

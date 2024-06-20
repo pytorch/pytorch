@@ -379,7 +379,6 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
 
 
 class DDPOptimizer:
-
     """Note [DDPOptimizer]
     DDPOptimizer applies when dynamo compiles models wrapped in DistributedDataParallel (DDP),
     breaking the dynamo graph into chunks to compile separately, with the breaks aligning to
@@ -464,13 +463,30 @@ class DDPOptimizer:
     def _ignore_parameter(self, parameter):
         return hasattr(parameter, "_ddp_ignored") and parameter._ddp_ignored
 
+    def add_param(self, bucket, param, name):
+        bucket.size += param.untyped_storage().nbytes()
+        bucket.params.append(name)
+        bucket.param_ids.append(id(param))
+
     def add_module_params_to_bucket(self, mod, bucket, processed_modules, prefix):
         processed_modules.add(mod)
         for name, param in mod.named_parameters():
             if param.requires_grad and not self._ignore_parameter(param):
-                bucket.size += param.untyped_storage().nbytes()
-                bucket.params.append(f"{prefix}_{name}")
-                bucket.param_ids.append(id(param))
+                self.add_param(bucket, param, f"{prefix}_{name}")
+
+    def add_param_args(self, bucket, node):
+        for arg in node.args:
+            if not isinstance(arg, torch.fx.node.Node):
+                continue
+            if arg.op != "placeholder":
+                continue
+            param = arg.meta["example_value"]
+            if (
+                isinstance(param, torch.nn.Parameter)
+                and param.requires_grad
+                and not self._ignore_parameter(param)
+            ):
+                self.add_param(bucket, param, arg.target)
 
     def compile_fn(self, gm: fx.GraphModule, example_inputs: List[torch.Tensor]):
         """
@@ -518,7 +534,11 @@ class DDPOptimizer:
                     if buckets[0].opcount_increased_to_capture_external_output == 0:
                         buckets[0].paramsize_before_opcount_increase = buckets[0].size
                     buckets[0].opcount_increased_to_capture_external_output += 1
-            if node.op == "call_module":
+
+            if node.op == "call_function":
+                self.add_param_args(buckets[0], node)
+
+            elif node.op == "call_module":
                 target_mod = gm.get_submodule(node.target)
                 if target_mod not in processed_modules:
                     self.add_module_params_to_bucket(
@@ -535,6 +555,11 @@ class DDPOptimizer:
                         self.add_module_params_to_bucket(
                             target_mod, buckets[0], processed_modules, node.target
                         )
+                    # This handles situations like  tmp = torch.mm(x, self.weight.t())
+                    # t: "f32[512, 512]" = l_self_seq_2_weight.t();  l_self_seq_2_weight = None
+                    # tmp: "f32[512, 512]" = torch.mm(input_2, t);  input_2 = t = None
+                    self.add_param_args(buckets[0], node)
+
             elif node.op == "get_attr":
                 maybe_param = getattr(gm, node.target)
                 if (
@@ -542,9 +567,7 @@ class DDPOptimizer:
                     and maybe_param.requires_grad
                     and not self._ignore_parameter(maybe_param)
                 ):
-                    buckets[0].size += maybe_param.untyped_storage().nbytes()
-                    buckets[0].params.append(node.target)
-                    buckets[0].param_ids.append(id(maybe_param))
+                    self.add_param(buckets[0], maybe_param, node.target)
 
             # All nodes have to be mapped to a bucket, even if they don't have their own params
             # Ignored params still end up in buckets, we just don't count them towards the capacity

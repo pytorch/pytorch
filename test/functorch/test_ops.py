@@ -10,8 +10,6 @@ import functools
 import itertools
 import unittest
 
-import torch
-import torch.autograd.forward_ad as fwAD
 from common_utils import (
     check_vmap_fallback,
     decorate,
@@ -29,8 +27,12 @@ from common_utils import (
     tol2,
     xfail,
 )
-from functorch import grad, jacfwd, jacrev, vjp, vmap
 from functorch_additional_op_db import additional_op_db
+
+import torch
+import torch.autograd.forward_ad as fwAD
+
+from functorch import grad, jacfwd, jacrev, vjp, vmap
 from torch import Tensor
 from torch._functorch.eager_transforms import _as_tuple, jvp
 from torch.testing._internal.autograd_function_db import autograd_function_db
@@ -397,6 +399,7 @@ aliasing_ops_list_return = {
 
 skip_noncontig = {
     "_batch_norm_with_update",
+    "as_strided_copy",
 }
 
 
@@ -606,6 +609,7 @@ class TestOperators(TestCase):
                 "nn.functional.batch_norm", {torch.float32: tol(atol=4e-05, rtol=5e-05)}
             ),
             tol1("nn.functional.conv2d", {torch.float32: tol(atol=4e-05, rtol=5e-05)}),
+            tol1("svd_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
             tol1("pca_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
             tol1(
                 "nn.functional.multi_head_attention_forward",
@@ -912,6 +916,7 @@ class TestOperators(TestCase):
                 skip("ormqr"),  # Takes too long
                 xfail("as_strided"),  # incorrect output
                 xfail("as_strided", "partial_views"),  # incorrect output
+                xfail("as_strided_copy"),  # incorrect output
                 xfail("as_strided_scatter"),  # incorrect output
                 skip("bernoulli"),  # calls random op
                 xfail("bfloat16"),  # rank 4 tensor for channels_last
@@ -1146,6 +1151,7 @@ class TestOperators(TestCase):
             xfail("nn.functional.max_unpool2d", "grad"),
             xfail("sparse.sampled_addmm", ""),
             xfail("sparse.mm", "reduce"),
+            xfail("as_strided_copy", ""),  # calls as_strided
             xfail("as_strided_scatter", ""),  # calls as_strided
             xfail("index_reduce", "prod"),  # .item() call
             # ---------------------------------------------------------------------
@@ -1184,6 +1190,7 @@ class TestOperators(TestCase):
         vmapvjp_fail.union(
             {
                 xfail("as_strided"),
+                xfail("as_strided_copy"),
                 xfail("as_strided", "partial_views"),
             }
         ),
@@ -1249,6 +1256,7 @@ class TestOperators(TestCase):
         xfail("quantile"),  # at::equal batching rule (cpu), also, in-place vmap (cuda)
         skip("as_strided"),  # Test runner cannot handle this
         # requires special handling, and does not yet have a batching rule. Feel free to file a github issue!
+        xfail("as_strided_copy"),
         xfail("as_strided_scatter"),
         xfail(
             "nn.functional.gaussian_nll_loss"
@@ -1388,6 +1396,11 @@ class TestOperators(TestCase):
                 xfail("masked.cumprod", ""),
                 xfail("renorm"),  # hit vmap fallback, which is disabled
             }
+        ).difference(
+            {
+                # as_strided_copy fails test_vmapvjp, succeeds here
+                xfail("as_strided_copy", ""),
+            }
         ),
     )
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
@@ -1523,6 +1536,11 @@ class TestOperators(TestCase):
                 xfail(
                     "index_fill"
                 ),  # aten::_unique hit the vmap fallback which is currently disabled
+            }
+        ).difference(
+            {
+                # as_strided_copy fails test_vmapvjp, succeeds here
+                xfail("as_strided_copy", ""),
             }
         ),
     )
@@ -1886,6 +1904,7 @@ class TestOperators(TestCase):
                 xfail(
                     "as_strided", "partial_views"
                 ),  # AssertionError: Tensor-likes are not close!
+                xfail("as_strided_copy"),  # AssertionError: Tensor-likes are not close!
                 xfail(
                     "as_strided_scatter"
                 ),  # AssertionError: Tensor-likes are not close!
@@ -2028,6 +2047,10 @@ class TestOperators(TestCase):
             tol1("linalg.multi_dot", {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
             tol2(
                 "linalg.pinv", "hermitian", {torch.float32: tol(atol=5e-04, rtol=5e-04)}
+            ),
+            tol1(
+                "nn.functional.conv_transpose2d",
+                {torch.float32: tol(atol=5e-04, rtol=5e-04)},
             ),
             tol1("svd", {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
             tol1("matrix_exp", {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
@@ -2364,6 +2387,8 @@ class TestOperators(TestCase):
                 "linalg.pinv", "hermitian", {torch.float32: tol(atol=5e-06, rtol=5e-06)}
             ),
             tol1("nn.functional.conv3d", {torch.float32: tol(atol=5e-04, rtol=9e-03)}),
+            tol1("svd_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
+            tol1("pca_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
         ),
     )
     def test_vmap_autograd_grad(self, device, dtype, op):

@@ -12,12 +12,13 @@ from unittest.mock import patch
 
 import numpy as np
 import sympy
+
 import torch
 from torch import nn
 from torch._C import FileCheck
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
-from torch._inductor import codecache, config, metrics
+from torch._inductor import codecache, config, metrics, test_operators
 from torch._inductor.codegen.common import OptimizationContext
 from torch._inductor.codegen.cpp import (
     CppOverrides,
@@ -39,6 +40,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_MACOS,
     parametrize,
+    skipIfRocm,
     slowTest,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -111,6 +113,7 @@ class LstmModule(torch.nn.Module):
 class CPUReproTests(TestCase):
     common = check_model
 
+    @skipIfRocm
     def test_conv_stride_constraints(self):
         for fmt in [torch.contiguous_format, torch.channels_last]:
             # TorchDispatch doesn't work in our cuda invocation for some reason
@@ -1873,6 +1876,24 @@ class CPUReproTests(TestCase):
         # For forward and backward kernel
         check_metrics_vec_kernel_count(2)
 
+    @requires_vectorization
+    def test_ops_masked_with_bool_input(self):
+        x = torch.zeros(129, dtype=torch.bool)
+        size = [2, 3]
+        res_aten_eager = torch.constant_pad_nd(x, size)
+        cfn = torch.compile(torch.constant_pad_nd)
+        res = cfn(x, size)
+        self.assertEqual(res_aten_eager, res)
+        check_metrics_vec_kernel_count(1)
+
+    def test_bitwise_right_shift(self):
+        x = torch.randint(-1, 0, (1, 1, 1), device="cpu", dtype=torch.int64)
+        bit_num = 31
+        res_aten_eager = torch.bitwise_right_shift(x, bit_num)
+        cfn = torch.compile(torch.bitwise_right_shift)
+        res = cfn(x, bit_num)
+        self.assertEqual(res_aten_eager, res)
+
     @patch("torch.cuda.is_available", lambda: False)
     def test_scatter_using_atomic_add(self):
         def fn(a, dim, index, b):
@@ -1899,6 +1920,8 @@ class CPUReproTests(TestCase):
                 FileCheck().check(_target_code_check).run(code)
             if _target_code_check_not:
                 FileCheck().check_not(_target_code_check_not).run(code)
+                # Verify that the output isn't empty
+                FileCheck().check("Output code:").run(code)
 
             self.assertEqual(
                 _fn(*_inps),
@@ -1912,10 +1935,16 @@ class CPUReproTests(TestCase):
             _internal_check(fn, inps, "aten.scatter_reduce_")
 
         if "ATen parallel backend: OpenMP" in torch.__config__.parallel_info():
-            # Fix https://github.com/pytorch/pytorch/issues/118518
-            # which fails to change thread number with native thread pool
             with set_num_threads(1):
-                _internal_check(fn, inps, _target_code_check_not="aten.scatter_reduce_")
+                # When running with a single thread, we expect the aten.scatter will go
+                # into the cpp backend codegen instead of a fallback to aten.scatter_reduce_.
+                # Avoid the inductor cache so we don't serve an entry compiled above.
+                with config.patch(
+                    {"fx_graph_cache": False, "fx_graph_remote_cache": False}
+                ):
+                    _internal_check(
+                        fn, inps, _target_code_check_not="aten.scatter_reduce_"
+                    )
 
             with config.patch({"cpp.dynamic_threads": True}), set_num_threads(1):
                 _internal_check(fn, inps, "aten.scatter_reduce_")
@@ -2213,7 +2242,6 @@ class CPUReproTests(TestCase):
         graph_lowering = GraphLowering(
             torch.fx.GraphModule(submodules, _graph),
             shape_env=None,
-            num_static_inputs=0,
         )
 
         def set_opt_dtype(graph):
@@ -2324,7 +2352,6 @@ class CPUReproTests(TestCase):
         graph_lowering = GraphLowering(
             torch.fx.GraphModule(submodules, _graph),
             shape_env=None,
-            num_static_inputs=0,
         )
         with patch.object(graph_lowering, "wrapper_code", ""), V.set_graph_handler(
             graph_lowering
@@ -3640,6 +3667,30 @@ class CPUReproTests(TestCase):
         self.common(fn, (x,))
         assert metrics.generated_cpp_vec_kernel_count == 1
 
+    def test_highp_to_lowp_cse_var_cache_with_store(self):
+        # Fix issue: https://github.com/pytorch/pytorch/issues/128263
+        input = torch.randn(5, 128, dtype=torch.float32)
+        input2 = torch.randint(0, 10, (5, 128), dtype=torch.int8)
+        input3 = torch.randn(128, 128, dtype=torch.float32)
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, x2, x3):
+                x2 = x2.to(torch.int32)
+                temp = test_operators.realize(x2.to(torch.float16))
+                temp2 = temp.to(torch.float32)
+                temp2 = temp2 * x
+                return torch.mm(temp, x3.to(torch.float16)), temp2
+
+        metrics.reset()
+        m = Model()
+        self.common(
+            m,
+            (input, input2, input3),
+        )
+
     def test_reduction_float_to_int64(self):
         # https://github.com/pytorch/pytorch/issues/124821
         def fn(x):
@@ -3740,7 +3791,21 @@ class CPUReproTests(TestCase):
         _, code = run_and_get_cpp_code(opt_fn, x)
         FileCheck().check_count(
             "return at::vec::VectorizedN<int64_t,2>::loadu(tmpbuf.data(),",
-            2,
+            4,
+            exactly=True,
+        ).run(code)
+
+    def test_repeated_exp(self):
+        def fn(x):
+            y = x.sigmoid()
+            return y + 1, y.sum(-1)
+
+        x = torch.randn(1000, 1000)
+        opt_fn = torch.compile(fn)
+        _, code = run_and_get_cpp_code(opt_fn, x)
+        FileCheck().check_count(
+            ".exp()",
+            1,
             exactly=True,
         ).run(code)
 
