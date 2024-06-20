@@ -502,13 +502,8 @@ class TS2FXGraphConverter:
         target = torch.ops.aten.scalar_tensor
         args = tuple(self.get_fx_value(input) for input in node.inputs())
 
-        # This is scalar_tensor node, but its dtype needs to be fixed.
-        fx_node = self.fx_graph.call_function(target, args)
+        fx_node = self.fx_graph.call_function(target, args, {"dtype": torch.long})
         output_name = node.output().debugName()
-
-        # We add another node on top of it to convert dtype.
-        cast_func = lambda t: t.type(torch.LongTensor)
-        fx_node = self.fx_graph.call_function(cast_func, (fx_node,))
         self.name_to_node[output_name] = fx_node
 
     def convert_prim_CreateObject(self, node: torch._C.Node):

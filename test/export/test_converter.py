@@ -713,8 +713,14 @@ class TestConverter(TestCase):
                 1, dtype=torch.float
             )
 
-        def func6(x):
-            return x.numel(), torch.ones(x.numel())
+        def func6(x1, x2, x3, x4):
+            return (
+                x1.numel(),
+                x2.numel(),
+                x3.numel(),
+                x4.numel(),
+                torch.ones(x1.numel()),
+            )
 
         class M1(torch.nn.Module):
             def __init__(self, value):
@@ -743,7 +749,12 @@ class TestConverter(TestCase):
         self._check_equal_ts_ep_converter(M2(), inp)
 
         self._check_equal_ts_ep_converter(func5, ())
-        inp = (torch.randn([2, 3, 4]),)
+        inp = (
+            torch.randn([2, 3, 4]).to(torch.int8),
+            torch.randn([2, 3, 4]).to(torch.int32),
+            torch.randn([2, 3, 4]).to(torch.float32),
+            torch.randn([2, 3, 4]).to(torch.float64),
+        )
         self._check_equal_ts_ep_converter(func6, inp)
 
     def test_prim_tolist(self):
