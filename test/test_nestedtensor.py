@@ -5470,6 +5470,7 @@ class TestNestedTensorSubclass(TestCase):
     )
     @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @skipCUDAIfRocm
     def test_compile_preserves_metadata_cache(self, device, dtype):
         # shape (B, *, D)
         nt = random_nt_from_dims(
@@ -5500,6 +5501,7 @@ class TestNestedTensorSubclass(TestCase):
     )
     @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @skipCUDAIfRocm
     def test_compile_with_dynamic_max_seq_len(self, device, dtype):
         # shape (B, *, D)
         # max seq len: 18
@@ -5536,6 +5538,7 @@ class TestNestedTensorSubclass(TestCase):
     )
     @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @skipCUDAIfRocm
     def test_compile_with_dynamic_min_seq_len(self, device, dtype):
         # shape (B, *, D)
         # min seq len: 7
@@ -5572,6 +5575,7 @@ class TestNestedTensorSubclass(TestCase):
     )
     @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @skipCUDAIfRocm
     def test_compile_with_propagated_dynamic_max_seq_len(self, device, dtype):
         # shape (B, *, D)
         # max seq len: 18

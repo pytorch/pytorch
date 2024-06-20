@@ -129,6 +129,7 @@ from .functions import (
     CollectiveFunctionRewriteVariable,
     FunctoolsPartialVariable,
     TritonKernelVariable,
+    UserFunctionVariable,
     UserMethodVariable,
 )
 from .higher_order_ops import TorchHigherOrderOperatorVariable
@@ -146,6 +147,7 @@ from .lists import (
     TupleVariable,
 )
 from .misc import (
+    AutogradEngineVariable,
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
     ComptimeVariable,
@@ -517,17 +519,7 @@ class VariableBuilder:
             result.source = self.source
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
-            if not value and self.get_source().is_nn_module():
-                # It is faster to guard on 'false' property than to guard
-                # on actual dict keys, but we can't do this fast guard in general because
-                # it omits a crucial type check that ensures the value is actually still a dict at runtime.
-
-                # Why is this OK for (specialized) nnmodules? We set up a setattr hook
-                # to check for module property mutations, which does a reasonable,
-                # but not completely secure job ensuring a property wasn't changed.
-                self.install_guards(GuardBuilder.BOOL_FALSE)
-            else:
-                self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
+            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
             # Optimisation for the common case strings, ints, etc
             all_const = all(ConstantVariable.is_literal(k) for k in value.keys())
@@ -725,6 +717,23 @@ class VariableBuilder:
                     value.__self__, source=AttrSource(self.source, member="__self__")
                 ),
                 "apply",
+            )
+        elif isinstance(value, torch._C._ImperativeEngine):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return AutogradEngineVariable(value, source=self.source)
+        elif (
+            value
+            is torch._dynamo.external_utils.FakeCompiledAutogradEngine._exec_final_callbacks_stub
+        ):
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            return LambdaVariable(
+                lambda: UserFunctionVariable(
+                    torch._dynamo.external_utils.FakeCompiledAutogradEngine.exec_final_callbacks,
+                ).call_function(
+                    self.tx,
+                    (self.tx.output.side_effects.get_ca_final_callbacks_var(),),
+                    {},
+                )
             )
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if is_callable_allowed(value):
@@ -1146,10 +1155,33 @@ class VariableBuilder:
         ):
             unimplemented("TorchDynamo purposely graph breaks on RNN, GRU, LSTMs")
 
-        # Dont take this path for FSDP
-        if not getattr(
-            value, "_is_fsdp_managed_module", None
-        ) and mutation_guard.is_dynamic_nn_module(value, self.tx.export):
+        if getattr(value, "_is_fsdp_managed_module", False):
+            # See note [Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
+            # in fully_sharded_data_parallel.py for more information
+
+            # we can't do this assert inside FSDP constructor,
+            # since we don't know yet whether dynamo will be used
+            assert getattr(
+                value, "_fsdp_use_orig_params", False
+            ), "Dynamo only supports FSDP with use_orig_params=True"
+
+            # Note on FSDP guarding
+            # Eager FSDP already assumes (requires, but without enforcement)
+            # that users don't mutate their model parameters/structure after
+            # FSDP wrapping, because FSDP wouldn't notice or update its
+            # FlatParams.
+            #
+            # Therefore, torch.compile can skip guarding on params or submodule
+            # structure of fsdp_managed modules, by using FSDPNNModuleSource as
+            # the guard source.  This behavior is gated on
+            # config.skip_fsdp_guards.
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            result = FSDPManagedNNModuleVariable(value, source=self.get_source())
+            if not SideEffects.cls_supports_mutation_side_effects(type(value)):
+                # don't allow STORE_ATTR mutation with custom __setattr__
+                return result
+            return self.tx.output.side_effects.track_object_existing(value, result)
+        elif mutation_guard.is_dynamic_nn_module(value, self.tx.export):
             # created dynamically, don't specialize on it
             self.install_guards(GuardBuilder.TYPE_MATCH)
             if (
@@ -1180,34 +1212,6 @@ class VariableBuilder:
         ):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return UnspecializedNNModuleVariable(value, source=self.get_source())
-        elif getattr(value, "_is_fsdp_managed_module", False):
-            # See note [Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
-            # in fully_sharded_data_parallel.py for more information
-
-            # we can't do this assert inside FSDP constructor,
-            # since we don't know yet whether dynamo will be used
-            assert getattr(
-                value, "_fsdp_use_orig_params", False
-            ), "Dynamo only supports FSDP with use_orig_params=True"
-
-            # Note on FSDP guarding
-            # 1. We expect FSDP wrapping mutates an nn module irreversably (no way to de-wrap).
-            # 2. Eager FSDP already assumes (requires, but without enforcement) that users don't mutate their
-            #    model parameters/structure after FSDP wrapping, because FSDP wouldn't notice or update its FlatParams.
-            #
-            # Due to (1), once we enter this path we expect not to go back nor have to guard on type
-            # or _is_fsdp_managed_module.
-            #
-            # TODO(whc) We could add a guard on the opposite case, where a user compiled/ran
-            # pre-FSDP-wrapped model, then wrapped, to ensure that we recompile with the FSDP handling.
-            #
-            # Due to (2), we skip guards on inner contents of fsdp_managed modules, by using FSDPNNModuleSource as the
-            # guard source.  This behavior is gated on config.skip_fsdp_guards.
-            #
-            # ID_MATCH is required to disambiguate cases as simple as a unit test that constructs 2 models and wraps
-            # them differently with different FSDP configs.  (test_dynamo_distributed.py -k test_fsdp_aot_eager)
-            self.install_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.ID_MATCH)
-            return FSDPManagedNNModuleVariable(value, source=self.get_source())
         else:
             return self.tx.output.register_attr_or_module(
                 value,
@@ -2211,6 +2215,7 @@ def _automatic_dynamic(
     constraint_dims = []
     for i in range(e.dim()):
         # NB: mark dynamic has precedence over static
+        marked_unbacked = i in getattr(e, "_dynamo_unbacked_indices", set())
         marked_dynamic = i in getattr(e, "_dynamo_dynamic_indices", set())
         marked_weak_dynamic = i in getattr(e, "_dynamo_weak_dynamic_indices", set())
         marked_static = i in getattr(e, "_dynamo_static_indices", set())
@@ -2262,7 +2267,9 @@ def _automatic_dynamic(
         constraint_dims.append(constraint_dim)
 
         # Now, figure out if the dim is dynamic/duck/static
-        if (
+        if marked_unbacked:
+            dynamic = DimDynamic.SIZE_LIKE_UNBACKED
+        elif (
             constraint_dim is not None
             or marked_dynamic
             or marked_weak_dynamic

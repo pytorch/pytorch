@@ -178,7 +178,9 @@ class EtcdStore(Store):
             # Read whole directory (of keys), filter only the ones waited for
             all_nodes = self.client.get(key=self.prefix)
             req_nodes = {
-                node.key: node.value for node in all_nodes.children if node.key in b64_keys
+                node.key: node.value
+                for node in all_nodes.children
+                if node.key in b64_keys
             }
 
             if len(req_nodes) == len(b64_keys):
