@@ -97,9 +97,11 @@ if TYPE_CHECKING:
     from torch._higher_order_ops.effects import _EffectType
     from .codegen.wrapper import WrapperCodeGen
 
+from torch._inductor.codecache import output_code_log
+
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
-output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
+
 aten = torch.ops.aten
 
 _post_grad_graph_counter = itertools.count()
