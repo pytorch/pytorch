@@ -41,7 +41,7 @@ jobs:
     with:
       build-environment: linux-jammy-py3.8-gcc11
       docker-image-name: pytorch-linux-jammy-py3.8-gcc11
-      runner: lf.c.linux.2xlarge
+      runner: lf.linux.2xlarge
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 3, runner: "linux.2xlarge" },
@@ -64,7 +64,7 @@ jobs:
       sync-tag: win-cpu-build
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 3, runner: "lf.c.windows.4xlarge.nonephemeral" },
-          { config: "default", shard: 2, num_shards: 3, runner: "lf.c.windows.4xlarge.nonephemeral" },
-          { config: "default", shard: 3, num_shards: 3, runner: "lf.c.windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 1, num_shards: 3, runner: "lf.windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 2, num_shards: 3, runner: "lf.windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 3, num_shards: 3, runner: "lf.windows.4xlarge.nonephemeral" },
         ]}
