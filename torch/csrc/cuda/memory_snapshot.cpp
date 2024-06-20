@@ -275,6 +275,7 @@ std::string _memory_snapshot_pickled() {
   IValue snapshot_s = "snapshot";
   IValue oom_s = "oom";
   IValue device_free_s = "device_free";
+  IValue user_defined_s = "user_defined";
 
   using namespace c10::cuda::CUDACachingAllocator;
 
@@ -298,6 +299,8 @@ std::string _memory_snapshot_pickled() {
         return segment_unmap_s;
       case TraceEntry::SEGMENT_MAP:
         return segment_map_s;
+      case TraceEntry::USER_DEFINED:
+        return user_defined_s;
     }
     throw std::runtime_error("unreachable");
   };
