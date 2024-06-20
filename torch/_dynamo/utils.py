@@ -2648,19 +2648,22 @@ def get_first_attr(obj, *attrs):
 
 
 @contextlib.contextmanager
-def maybe_enable_compiled_autograd(should_enable):
-    def compiler_fn(gm):
-        def inner_compiler(gm_, example_inputs_):
-            torch._dynamo.utils.counters["compiled_autograd"]["compiles"] += 1
-            return torch._inductor.compile(gm_, example_inputs_)
+def maybe_enable_compiled_autograd(should_enable, fullgraph=True, dynamic=True):
+    if not should_enable:
+        yield
+    else:
 
-        return torch.compile(gm, backend=inner_compiler, fullgraph=True, dynamic=True)
+        def compiler_fn(gm):
+            def inner_compiler(gm_, example_inputs_):
+                torch._dynamo.utils.counters["compiled_autograd"]["compiles"] += 1
+                return torch._inductor.compile(gm_, example_inputs_)
 
-    if should_enable:
+            return torch.compile(
+                gm, backend=inner_compiler, fullgraph=fullgraph, dynamic=dynamic
+            )
+
         with torch._dynamo.compiled_autograd.enable(compiler_fn) as ctx:
             yield ctx
-    else:
-        yield
 
 
 def invalid_removeable_handle():
