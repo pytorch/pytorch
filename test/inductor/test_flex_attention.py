@@ -32,6 +32,7 @@ from torch.utils._triton import has_triton
 # Skip tests if Triton is not available
 supported_platform = skipUnless(
     torch.cuda.is_available()
+    and torch.hip.version is None
     and has_triton()
     and torch.cuda.get_device_capability() >= (8, 0),
     "Requires CUDA and Triton",
@@ -395,7 +396,6 @@ class TestFlexAttention(InductorTestCase):
         self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
 
     @supported_platform
-    @common_utils.skipIfRocm
     @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_builtin_score_mods(self, dtype: torch.dtype, score_mod: Callable):
