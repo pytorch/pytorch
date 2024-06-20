@@ -813,9 +813,6 @@ class WrapperCodeGen(CodeGen):
             else:
                 self.memory_plan_reuse()
 
-            if config.triton.store_cubin:
-                self.generate_reset_kernel_saved_flags()
-
             for line in self.lines:
                 if isinstance(line, WrapperLine):
                     line.codegen(self.wrapper_call)
@@ -829,9 +826,6 @@ class WrapperCodeGen(CodeGen):
 
             if config.profile_bandwidth:
                 self.generate_end_graph()
-
-            if config.triton.store_cubin:
-                self.generate_save_uncompiled_kernels()
 
             if config.triton.autotune_at_compile_time:
                 self.generate_autotune_block()
@@ -1418,41 +1412,6 @@ class WrapperCodeGen(CodeGen):
 
     def generate_end_graph(self):
         self.wrapper_call.writeline(f"end_graph({config.profile_bandwidth_output!r})")
-
-    def generate_reset_kernel_saved_flags(self):
-        self.wrapper_call.splice(
-            f"""
-            for kernel in globals().values():
-                if isinstance(kernel, {triton_heuristics.__name__}.CachingAutotuner):
-                    kernel.cuda_kernel_saved = False
-            """
-        )
-
-    def generate_save_uncompiled_kernels(self):
-        """
-        Precompile and save the CUBINs of the Triton kernels that haven't
-        been precompiled and saved as a side effect of running the generated
-        JIT model (Python wrapper). This can happen when the model contains
-        control flow: only one pass through the control flow operators covers
-        the kernels that are saved, the remaining kernels are not launched,
-        hence not saved. The main purpose of this codegen is to compile and
-        save the Triton kernels outside the active control flow path for
-        subsequent AOTInductor code generation and compilation.
-        """
-        self.wrapper_call.splice(
-            f"""
-            for kernel in globals().values():
-                if isinstance(kernel, {triton_heuristics.__name__}.CachingAutotuner):
-                    if not kernel.cuda_kernel_saved:
-                        if len(kernel.launchers) == 0:
-                            kernel.precompile()
-                        kernel.save_cuda_kernel(
-                            grid=(0, 0, 0),   # use dummy grid
-                            stream="stream",  # use dummy stream
-                            launcher=kernel.launchers[0],
-                        )
-            """
-        )
 
     def generate_default_grid(self, name: str, grid_args: List[Any]):
         return grid_args
