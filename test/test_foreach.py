@@ -90,7 +90,7 @@ class ForeachFuncWrapper:
             mta_called = any("multi_tensor_apply_kernel" in k for k in keys)
             assert mta_called == (
                 expect_fastpath and (not zero_size)
-            ), f"{mta_called=}, {expect_fastpath=}, {zero_size=}"
+            ), f"{mta_called=}, {expect_fastpath=}, {zero_size=}, {self.func.__name__=}, {keys=}"
         else:
             actual = self.func(*inputs, **kwargs)
         if self.is_inplace:
@@ -865,8 +865,6 @@ class TestForeach(TestCase):
         "failing flakily on non sm86 cuda jobs",
     )
     def test_binary_op_tensors_on_different_devices(self, device, dtype, op):
-        # `tensors1`: ['cuda', 'cpu']
-        # `tensors2`: ['cuda', 'cpu']
         _cuda_tensors = next(
             iter(op.sample_inputs(device, dtype, num_input_tensors=[2], same_size=True))
         ).input
@@ -1205,6 +1203,17 @@ class TestForeach(TestCase):
         self.assertEqual(actual, [t.mul(scalar_cpu_tensor) for t in tensors])
         actual = torch._foreach_div(tensors, scalar_cpu_tensor)
         self.assertEqual(actual, [t.div(scalar_cpu_tensor) for t in tensors])
+
+    @onlyCUDA
+    def test_div_reciprocal(self):
+        expect_m, expect_e = torch.frexp(
+            torch.div(torch.tensor(0.1, device="cuda"), 10.0)
+        )
+        actual_m, actual_e = torch.frexp(
+            torch._foreach_div([torch.tensor(0.1, device="cuda")], [10.0])[0]
+        )
+        self.assertEqual(expect_m, actual_m)
+        self.assertEqual(expect_e, actual_e)
 
     @onlyCUDA
     def test_0dim_tensor_overload_exception(self):
