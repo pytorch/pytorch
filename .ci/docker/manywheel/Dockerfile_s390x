@@ -57,4 +57,34 @@ ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib64:/op
 # For more details see https://github.com/pytorch/pytorch/issues/78659#issuecomment-1144107327
 RUN git config --global --add safe.directory "*"
 
-FROM base as final
+# installed python doesn't have development parts. Rebuild it from scratch
+RUN /bin/rm -rf /opt/_internal /opt/python /usr/local/*/*
+
+FROM base as openssl
+# Install openssl (this must precede `build python` step)
+# (In order to have a proper SSL module, Python is compiled
+# against a recent openssl [see env vars above], which is linked
+# statically. We delete openssl afterwards.)
+ADD ./common/install_openssl.sh install_openssl.sh
+RUN bash ./install_openssl.sh && rm install_openssl.sh
+ENV SSL_CERT_FILE=/opt/_internal/certs.pem
+
+# EPEL for cmake
+FROM base as patchelf
+# Install patchelf
+ADD ./common/install_patchelf.sh install_patchelf.sh
+RUN bash ./install_patchelf.sh && rm install_patchelf.sh
+RUN cp $(which patchelf) /patchelf
+
+FROM patchelf as python
+# build python
+COPY .ci/docker/manywheel/build_scripts /build_scripts
+ADD ./common/install_cpython.sh /build_scripts/install_cpython.sh
+ENV SSL_CERT_FILE=
+RUN bash build_scripts/build.sh && rm -r build_scripts
+
+FROM openssl as final
+COPY --from=python             /opt/python                           /opt/python
+COPY --from=python             /opt/_internal                        /opt/_internal
+COPY --from=python             /opt/python/cp39-cp39/bin/auditwheel  /usr/local/bin/auditwheel
+COPY --from=patchelf           /usr/local/bin/patchelf               /usr/local/bin/patchelf
