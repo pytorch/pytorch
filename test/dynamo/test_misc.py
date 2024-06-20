@@ -8288,6 +8288,72 @@ def ___make_guard_fn():
         x = torch.zeros(100, dtype=torch.int64)
         f(x)
 
+    def test_out_variant_custom_op(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define(
+                "split_with_sizes_copy(Tensor all_gather_output, SymInt[] all_gather_input_split_sizes, int dim=0, *, Tensor(a!)[] out) -> ()"
+            )
+
+            @torch.library.impl(lib, "split_with_sizes_copy", "Meta")
+            @torch.library.impl(lib, "split_with_sizes_copy", "CPU")
+            def split_with_sizes_copy(
+                all_gather_output: torch.Tensor,
+                all_gather_input_split_sizes: typing.List[int],
+                dim: int,
+                out: typing.List[torch.Tensor],
+            ) -> None:
+                torch.split_with_sizes_copy(
+                    all_gather_output, all_gather_input_split_sizes, dim=dim, out=out
+                )
+
+            @torch.compile(backend="eager", fullgraph=True)
+            def f1(all_gather_output, all_gather_input_split_sizes, dim, out):
+                return torch.ops.mylib.split_with_sizes_copy(
+                    all_gather_output, all_gather_input_split_sizes, dim, out=out
+                )
+
+            all_gather_output = torch.randn(2, 272)
+            all_gather_input_split_sizes = [128, 8, 128, 8]
+            dim = 1
+            out = [
+                torch.empty(2, 128),
+                torch.empty(2, 8),
+                torch.empty(2, 128),
+                torch.empty(2, 8),
+            ]
+            f1(all_gather_output, all_gather_input_split_sizes, dim, out)
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define(
+                "chunk_cat(Tensor[] tensors, int dim, int num_chunks, *, Tensor(a!) out) -> ()"
+            )
+
+            @torch.library.impl(lib, "chunk_cat", "Meta")
+            @torch.library.impl(lib, "chunk_cat", "CPU")
+            def chunk_cat(
+                tensors: typing.List[torch.Tensor],
+                dim: int,
+                num_chunks: int,
+                out: torch.Tensor,
+            ) -> None:
+                torch._chunk_cat(tensors, dim, num_chunks, out=out)
+
+            @torch.compile(backend="eager", fullgraph=True)
+            def f2(tensors, dim, num_chunks, out):
+                return torch.ops.mylib.chunk_cat(tensors, dim, num_chunks, out=out)
+
+            x = torch.zeros(100, dtype=torch.int64)
+            tensors = [
+                torch.randn(16, 16),
+                torch.randn(16),
+                torch.randn(16, 16),
+                torch.randn(16),
+            ]
+            dim = 0
+            num_chunks = 2
+            out = torch.empty(2, 272)
+            f2(tensors, dim, num_chunks, out)
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_runtime_assert_replacement(self):
         @torch.compile(backend="aot_eager")
