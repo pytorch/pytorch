@@ -102,6 +102,9 @@ jobs:
       {%- else %}
       runs_on: linux.4xlarge
       {%- endif %}
+      {%- if config.use_split_build is defined %}
+      use_split_build: !{{ config["use_split_build"] }}
+      {%- endif %}
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     {%- else %}
