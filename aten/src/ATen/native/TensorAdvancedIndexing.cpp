@@ -2169,8 +2169,7 @@ Tensor put_along_dim(
     return at::scatter(self, opt_dim.value(), new_indices, new_values);
   } else {
     TORCH_CHECK(indices.dim() == 1, "when axis=None, `indices` must have a single dimension");
-    auto result = at::scatter(self.flatten(), 0, indices, values);
-    return result.reshape(self.sizes());
+    return self.put(indices, values);
   }
 }
 
@@ -2181,8 +2180,7 @@ Tensor& put_along_dim_out(const Tensor& self, const Tensor& indices, const Tenso
     at::scatter_out(result, self, opt_dim.value(), indices, values);
   } else {
     TORCH_CHECK(indices.dim() == 1, "when axis=None, `indices` must have a single dimension");
-    at::scatter_out(result, self.flatten(), 0, indices, values);
-    result = result.reshape(self.sizes());
+    at::put_out(result, self, indices, values);
   }
   return result;
 }
