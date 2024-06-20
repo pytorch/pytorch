@@ -28,7 +28,6 @@ from torch.fx.passes import graph_drawer
 from . import config
 from ._aot_autograd.logging_utils import get_aot_graph_name
 from .compile_utils import fx_graph_cse, get_aten_target
-from torch.utils.checkpoint import CheckpointPolicy
 
 if TYPE_CHECKING:
     import sympy
@@ -902,9 +901,7 @@ def solve_min_cut(
             return False
         # This bans recomputation of the node unless we've been forced not to by
         # user annotation
-        # NB: "recompute" > 0 means that user annotation has asked us to
-        # recompute it
-        if node.meta.get("recompute", 0) > 0:
+        if prefer_recompute(node):
             return False
 
         if "val" in node.meta and isinstance(node.meta["val"], torch.SymFloat):
@@ -937,7 +934,7 @@ def solve_min_cut(
             nx_graph.add_edge(node.name + "_out", "sink", capacity=math.inf)
 
         if must_recompute(node):
-            # If user explicitly say they want to recompute a node, we honor it
+            # If user explicitly says they want to recompute a node, we honor it
             # by adding an 0-capacity edge from the source and an inf edge to the sink.
             # This way, X_in node is guaranteed to be part of the subgraph that contains "sink"
             # after the cut, thus guaranteeing that X op will be recomputed.
