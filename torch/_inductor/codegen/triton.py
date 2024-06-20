@@ -2657,19 +2657,9 @@ class TritonKernel(SIMDKernel):
             if tree.grid_dim is not None:
                 grid.append(expr)
 
-    def get_call_args(self):
-        # arg_types is needed for cpp wrapper codegen
-        _, call_args, _, arg_types = self.args.python_argdefs()
-        # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
-        for i in range(len(call_args)):
-            if V.graph.is_unspec_arg(call_args[i]):
-                call_args[i] = call_args[i] + ".item()"
-
-        return call_args, arg_types
-
     def call_kernel(self, name: str, node: Optional[IRNode] = None):
         wrapper = V.graph.wrapper_code
-        call_args, arg_types = self.get_call_args()
+        _, call_args, _, arg_types = self.args.python_argdefs()
         grid: List[Any] = []
         self.add_numel_to_call_args_and_grid(name, call_args, arg_types, grid)
         current_device = V.graph.scheduler.get_current_device_or_throw()
