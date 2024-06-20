@@ -85,6 +85,7 @@ from ..utils import (
     get_locals_to_steal,
     get_static_address_type,
     is_function_or_wrapper,
+    is_lru_cache_wrapped_function,
     is_namedtuple,
     is_typing,
     is_utils_checkpoint,
@@ -912,8 +913,10 @@ class VariableBuilder:
             return WrapperUserFunctionVariable(
                 value, "__original_fn", source=self.source
             )
+        elif is_lru_cache_wrapped_function(value):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            return WrapperUserFunctionVariable(value, "__wrapped__", source=self.source)
         elif is_function_or_wrapper(value):
-            # breakpoint()
             value, attr_name = unwrap_with_attr_name_if_wrapper(value)
             # For these wrappers, Dynamo points to the wrapped function,
             # so source needs to be updated as well.
