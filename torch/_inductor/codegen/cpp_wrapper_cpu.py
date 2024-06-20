@@ -1617,7 +1617,11 @@ class CppWrapperCpu(WrapperCodeGen):
                     device_type,
                     device_idx,
                 ]
-                return f"ArrayRefTensor<{cpp_type}> {name}({', '.join(args)});"
+                self.wrapper_call.writeline(
+                    f"ArrayRefTensor<{cpp_type}> {name}_tensor({', '.join(args)});"
+                )
+                self.wrapper_call.writeline(f"AtenTensorHandle {name};")
+                return f"convert_output_to_handle({name}_tensor, {name});"
 
             args = [
                 str(len(shape)),
