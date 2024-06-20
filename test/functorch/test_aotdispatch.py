@@ -2127,7 +2127,7 @@ def forward(self, primals_1, primals_2):
         ):
             out = f_compiled(*inp_grad)
 
-    def test_backward_mutation_forward_inputsX(self):
+    def test_backward_mutation_forward_inputs(self):
         @torch.library.custom_op("_test::_clone", mutates_args={})
         def f(x: torch.Tensor, x1: torch.Tensor) -> torch.Tensor:
             return x.clone()
