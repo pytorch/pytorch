@@ -2127,7 +2127,7 @@ def forward(self, primals_1, primals_2):
         ):
             out = f_compiled(*inp_grad)
 
-    def test_backward_mutation_forward_inputsX(self):
+    def test_backward_mutation_forward_inputs(self):
         @torch.library.custom_op("_test::_clone", mutates_args={})
         def f(x: torch.Tensor, x1: torch.Tensor) -> torch.Tensor:
             return x.clone()
@@ -2213,10 +2213,7 @@ def forward(self, primals_1, primals_2):
             "aot_autograd does not support input mutations with requires_grad in backward for create_graph=True",
         ):
             torch.autograd.grad(loss, inp_x, create_graph=True)
-
-        self.assertEqual(ref_x, x)
-        self.assertEqual(ref_x1, x1)
-        self.assertEqual(ref_y, y)
+        # Not checking equality of ref and x as Exception is expected
 
     # Partially addresses https://github.com/pytorch/pytorch/issues/106457
     def test_input_mutation_false_aliasing(self):
