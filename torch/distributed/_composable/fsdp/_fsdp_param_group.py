@@ -516,6 +516,9 @@ class FSDPParamGroup:
             return f"{label} ({self._module_fqn})"
         return label
 
+    def __bool__(self) -> bool:
+        return True
+
 
 def _get_param_module_infos(
     params: List[nn.Parameter], module: nn.Module

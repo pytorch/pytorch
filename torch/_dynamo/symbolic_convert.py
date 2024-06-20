@@ -424,36 +424,21 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                     self.push(value)
                 self.jump(inst)
         elif isinstance(value, UserDefinedObjectVariable):
-            x = None
-            if hasattr(value, "__bool__"):
+            try:
                 x = value.var_getattr(self, "__bool__")
-            # if __bool__ is missing, trying __len__ to infer a truth value.
-            if (x is None or isinstance(x, GetAttrVariable)) and hasattr(value, "__len__"):
+            except exc.ObservedException:
+                # if __bool__ is missing, trying __len__ to infer a truth value.
                 x = value.var_getattr(self, "__len__")
-
-            # torch_log.warning(f"here1: value: {value}")
-            # try:
-            #     x = value.var_getattr(self, "__bool__")
-            #     torch_log.warning(f"here2: x: {x}")
-            # except exc.ObservedException:
-            #     # if __bool__ is missing, trying __len__ to infer a truth value.
-            #     x = value.var_getattr(self, "__len__")
-            #     torch_log.warning(f"here3: x: {x}")
-            # else:
-            #     torch_log.warning(f"here4: x: {x}")
-            #     if isinstance(x, GetAttrVariable) or (
-            #         isinstance(x, UserDefinedClassVariable)
-            #         and x.value is torch._dynamo.variables.user_defined.NO_SUCH_SUBOBJ
-            #     ):
-            #         # if __bool__ is missing, trying __len__ to infer a truth value.
-            #         x = value.var_getattr(self, "__len__")
-            #         torch_log.warning(f"here5: x: {x}")
-
-            torch_log.warning(f"here999: x: {x}")
+            else:
+                if isinstance(x, GetAttrVariable) or (
+                    isinstance(x, UserDefinedClassVariable)
+                    and x.value is torch._dynamo.variables.user_defined.NO_SUCH_SUBOBJ
+                ):
+                    # if __bool__ is missing, trying __len__ to infer a truth value.
+                    x = value.var_getattr(self, "__len__")
 
             # __bool__ or __len__ is function
             if isinstance(x, UserMethodVariable):
-                torch_log.warning(f"here6: x: {x}")
                 result = x.call_function(self, [], {})
                 if isinstance(result, ConstantVariable) and isinstance(
                     result.value, (bool, int)
@@ -468,7 +453,6 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                     )
             # __bool__ or __len__ is non-function or not existed in the user defined object
             else:
-                torch_log.warning(f"here7: x: {x}")
                 if truth_fn(True):
                     if push:
                         self.push(value)
