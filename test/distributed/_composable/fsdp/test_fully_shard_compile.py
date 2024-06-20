@@ -21,7 +21,7 @@ from torch.distributed._tensor import init_device_mesh
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, MLP
 from torch.testing._internal.common_utils import run_tests
-from torch.testing._internal.llama_model import ModelArgs, Transformer
+from torch.testing._internal.distributed._tensor.common_dtensor import ModelArgs, Transformer
 from torch.utils._triton import has_triton
 
 
@@ -262,8 +262,7 @@ class TestFullyShardCompile(FSDPTest):
                 n_heads=1,
                 vocab_size=1024,
             )
-            transformer_class = Transformer
-            model = transformer_class(model_args)
+            model = Transformer(model_args)
             for layer_id, mod in enumerate(model.layers):
                 fully_shard(mod, mesh=mesh, reshard_after_forward=True, **fsdp_config)
                 model.layers[layer_id] = mod
