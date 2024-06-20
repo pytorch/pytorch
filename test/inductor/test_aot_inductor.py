@@ -3028,7 +3028,7 @@ CPU_TEST_FAILURES = {
     ),
     "test_dynamic_cat": fail_minimal_arrayref_interface(),
     # https://github.com/pytorch/pytorch/issues/122978
-    "test_dynamic_scalar": fail_stack_allocation(is_skip=True),
+    # "test_dynamic_scalar": fail_stack_allocation(is_skip=True),
     # https://github.com/pytorch/pytorch/issues/122980
     "test_fft_c2c": fail_stack_allocation(is_skip=True),
     # TODO: test_freezing_abi_compatible_cpu fails,
