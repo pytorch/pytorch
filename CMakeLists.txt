@@ -252,6 +252,7 @@ cmake_dependent_option(USE_CUDNN "Use cuDNN" ON "USE_CUDA" OFF)
 cmake_dependent_option(USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
                        "USE_CUDNN" OFF)
 cmake_dependent_option(USE_CUSPARSELT "Use cuSPARSELt" ON "USE_CUDA" OFF)
+cmake_dependent_option(USE_CUDSS "Use cuDSS" ON "USE_CUDA" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_KINETO "Use Kineto profiling library" ON)
 option(USE_CUPTI_SO "Use CUPTI as a shared library" ON)
@@ -1325,6 +1326,10 @@ if(BUILD_SHARED_LIBS)
     COMPONENT dev)
   install(
     FILES ${PROJECT_SOURCE_DIR}/cmake/Modules/FindCUSPARSELT.cmake
+    DESTINATION share/cmake/Caffe2/
+    COMPONENT dev)
+  install(
+    FILES ${PROJECT_SOURCE_DIR}/cmake/Modules/FindCUDSS.cmake
     DESTINATION share/cmake/Caffe2/
     COMPONENT dev)
   install(
