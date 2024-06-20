@@ -209,7 +209,6 @@ if sys.platform == "win32" and sys.maxsize.bit_length() == 31:
 
 import platform
 
-
 BUILD_LIBTORCH_WHL = os.getenv("BUILD_LIBTORCH_WHL", "0") == "1"
 BUILD_PYTHON_ONLY = os.getenv("BUILD_PYTHON_ONLY", "0") == "1"
 
@@ -254,15 +253,6 @@ def _get_package_path(package_name):
             if loader is not None:
                 file_path = loader.get_filename()  # type: ignore[attr-defined]
                 return os.path.dirname(file_path)
-            else:
-                # return build directory otherwise
-                script_path = os.path.abspath(__file__)
-                build_dir = f"{os.path.dirname(script_path)}/build"
-                if not os.path.isdir(build_dir):
-                    raise RuntimeError(
-                        f"{build_dir} does not exist nor is torch importable"
-                    )
-                return build_dir
         except AttributeError:
             pass
     return None
@@ -1133,16 +1123,6 @@ def main():
         raise RuntimeError(
             "Conflict: 'BUILD_LIBTORCH_WHL' and 'BUILD_PYTHON_ONLY' can't both be 1. Set one to 0 and rerun."
         )
-    if BUILD_PYTHON_ONLY:
-        print("package paths are: these")
-        print(os.environ["LIBTORCH_LIB_PATH"])
-        # print contents of package path
-        for root, dirs, files in os.walk(os.environ["LIBTORCH_LIB_PATH"]):
-            print(root)
-            for file in files:
-                print(file)
-
-    # the list of runtime dependencies required by this built package
     install_requires = [
         "filelock",
         "typing-extensions>=4.8.0",
