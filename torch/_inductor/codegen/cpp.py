@@ -3886,16 +3886,31 @@ class CppScheduling(BaseScheduling):
                             global_buffer_layout.size[size_offset:],
                             global_buffer_layout.stride[size_offset:],
                         )
-                        local_buf_prefix = "local_buffer_data"
-                        local_buffers.append(
-                            LocalBuffer(
-                                local_buf=ir.Buffer(
-                                    f"{local_buf_prefix}_{len(local_buffers)}",
-                                    local_buffer_layout,
-                                ),
-                                global_buf=global_buffer,
+                        if any(
+                            local_buffer_layout == _buffer_pair.local_buf.layout
+                            for _buffer_pair in local_buffers
+                        ):
+                            # Can share same local buffer between global buffers
+                            for _buffer_pair in local_buffers:
+                                if local_buffer_layout == _buffer_pair.local_buf.layout:
+                                    local_buffers.append(
+                                        LocalBuffer(
+                                            _buffer_pair.local_buf,
+                                            global_buf=global_buffer,
+                                        )
+                                    )
+                                    break
+                        else:
+                            local_buf_prefix = "local_buffer_data"
+                            local_buffers.append(
+                                LocalBuffer(
+                                    local_buf=ir.Buffer(
+                                        f"{local_buf_prefix}_{len(local_buffers)}",
+                                        local_buffer_layout,
+                                    ),
+                                    global_buf=global_buffer,
+                                )
                             )
-                        )
 
             with LocalBufferContext(kernel_group.args) as scope:
                 if len(local_buffers) > 0:
