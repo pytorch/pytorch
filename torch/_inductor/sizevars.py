@@ -415,6 +415,10 @@ class SizeVarAllocator:
             lv = self.size_hint(left)
             rv = self.size_hint(right)
         except TypeError:  # unbacked symints
+            if left == right or self.statically_known_leq(left, right):
+                return left
+            if self.statically_known_leq(right, left):
+                return right
             gcd = sympy.gcd(left, right)
             if left == gcd:  # handle `min(10*u0, u0)` etc
                 return left
@@ -458,7 +462,10 @@ class SizeVarAllocator:
             return expr
         free_symbols = expr.free_symbols
         if not free_symbols:
-            return int(expr)  # type: ignore[return-value]
+            try:
+                return int(expr)  # type: ignore[return-value]
+            except TypeError:
+                return expr  # inf/nan/I
         expr = self.remove_precomputed_replacements(expr)
         return sympy_subs(expr, self.var_to_val)
 
