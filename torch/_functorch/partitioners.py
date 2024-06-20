@@ -111,6 +111,8 @@ Meaning of node.meta["recompute"] values:
 >0: prefer recompute, but partitioner makes the final decision based on heuristics
 math.inf: must recompute
 """
+
+
 def must_recompute(node):
     return node.meta.get("recompute", 0) == math.inf
 
@@ -1099,7 +1101,9 @@ def solve_min_cut(
 
     cut_nodes = set()
     for node_in, node_out in cutset:
-        assert node_in[:-3] == node_out[:-4], f"node_in: {node_in}, node_out: {node_out}"
+        assert (
+            node_in[:-3] == node_out[:-4]
+        ), f"node_in: {node_in}, node_out: {node_out}"
         node_name = node_in[:-3]
         cut_nodes.add(node_name)
 
