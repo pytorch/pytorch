@@ -150,7 +150,7 @@ hf_Bert_large,pass,0
 
 
 
-hf_BigBird,pass,46
+hf_BigBird,pass,43
 
 
 
@@ -178,7 +178,7 @@ hf_T5_base,eager_fail_to_run,0
 
 
 
-hf_T5_generate,fail_to_run,5
+hf_T5_generate,pass,5
 
 
 
@@ -374,4 +374,4 @@ vision_maskrcnn,pass,17
 
 
 
-yolov3,pass,2
+yolov3,pass,0

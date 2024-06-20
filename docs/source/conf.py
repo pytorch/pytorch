@@ -606,47 +606,6 @@ coverage_ignore_functions = [
     # torch.distributed.optim.utils
     "as_functional_optim",
     "register_functional_optim",
-    # torch.distributed.pipeline.sync.checkpoint
-    "checkpoint",
-    "enable_checkpointing",
-    "enable_recomputing",
-    "is_checkpointing",
-    "is_recomputing",
-    "restore_rng_states",
-    "save_rng_states",
-    # torch.distributed.pipeline.sync.dependency
-    "fork",
-    "join",
-    # torch.distributed.pipeline.sync.microbatch
-    "check",
-    "gather",
-    "scatter",
-    # torch.distributed.pipeline.sync.phony
-    "get_phony",
-    # torch.distributed.pipeline.sync.skip.layout
-    "inspect_skip_layout",
-    # torch.distributed.pipeline.sync.skip.tracker
-    "current_skip_tracker",
-    "use_skip_tracker",
-    # torch.distributed.pipeline.sync.stream
-    "as_cuda",
-    "current_stream",
-    "default_stream",
-    "get_device",
-    "is_cuda",
-    "new_stream",
-    "record_stream",
-    "use_device",
-    "use_stream",
-    "wait_stream",
-    # torch.distributed.pipeline.sync.utils
-    "partition_model",
-    # torch.distributed.pipeline.sync.worker
-    "create_workers",
-    "spawn_workers",
-    "worker",
-    # torch.distributed.pipelining.PipelineSchedule
-    "step",
     # torch.distributed.rendezvous
     "register_rendezvous_handler",
     "rendezvous",
@@ -2650,52 +2609,6 @@ coverage_ignore_classes = [
     "PostLocalSGDOptimizer",
     # torch.distributed.optim.zero_redundancy_optimizer
     "ZeroRedundancyOptimizer",
-    # torch.distributed.pipeline.sync.batchnorm
-    "DeferredBatchNorm",
-    # torch.distributed.pipeline.sync.checkpoint
-    "Checkpoint",
-    "Checkpointing",
-    "Context",
-    "Function",
-    "Recompute",
-    "ThreadLocal",
-    # torch.distributed.pipeline.sync.copy
-    "Context",
-    "Copy",
-    "Wait",
-    # torch.distributed.pipeline.sync.dependency
-    "Fork",
-    "Join",
-    # torch.distributed.pipeline.sync.microbatch
-    "Batch",
-    "NoChunk",
-    # torch.distributed.pipeline.sync.pipe
-    "BalanceError",
-    "Pipe",
-    "PipeSequential",
-    "WithDevice",
-    # torch.distributed.pipeline.sync.pipeline
-    "Pipeline",
-    # torch.distributed.pipeline.sync.skip.layout
-    "SkipLayout",
-    # torch.distributed.pipeline.sync.skip.namespace
-    "Namespace",
-    # torch.distributed.pipeline.sync.skip.portal
-    "Context",
-    "Portal",
-    "PortalBlue",
-    "PortalCopy",
-    "PortalOrange",
-    # torch.distributed.pipeline.sync.skip.skippable
-    "Skippable",
-    # torch.distributed.pipeline.sync.skip.tracker
-    "SkipTracker",
-    "SkipTrackerThroughPotals",
-    "ThreadLocal",
-    # torch.distributed.pipeline.sync.stream
-    "CPUStreamType",
-    # torch.distributed.pipeline.sync.worker
-    "Task",
     # torch.distributed.rpc.api
     "AllGatherStates",
     "RRef",

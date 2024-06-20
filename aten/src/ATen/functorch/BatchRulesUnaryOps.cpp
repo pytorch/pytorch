@@ -59,13 +59,6 @@ view_as_complex_batch_rule(const Tensor& self, optional<int64_t> self_bdim) {
   return std::make_tuple(result, 0);
 }
 
-std::tuple<Tensor,optional<int64_t>>
-to_other_batch_rule(const Tensor& self, optional<int64_t> self_bdim,
-                    const Tensor& other, optional<int64_t> other_bdim,
-                    bool non_blocking,
-                    bool copy, std::optional<at::MemoryFormat> memory_format) {
-  return std::make_tuple(self.to(other, non_blocking, copy, memory_format), self_bdim);
-}
 }
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {

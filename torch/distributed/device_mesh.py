@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
 import math
@@ -470,48 +471,50 @@ else:
             submesh = _mesh_resources.create_child_mesh(self, mesh_dim_names)
             return submesh
 
-        def get_group(
-            self, mesh_dim: Optional[Union[int, str]] = None
-        ) -> Union[ProcessGroup, List[ProcessGroup]]:
+        def get_group(self, mesh_dim: Optional[Union[int, str]] = None) -> ProcessGroup:
             """
-            Returns a list of ProcessGroups corresponding to the mesh dimensions, or
-            returns a single ProcessGroup if mesh_dim is specified or the given mesh has
-            only one mesh dimension.
+            Returns the single ProcessGroup specified by mesh_dim, or, if mesh_dim is not specified and the
+            DeviceMesh is 1-dimensional, returns the only ProcessGroup in the mesh.
 
             Args:
                 mesh_dim (str/int, optional): it can be the name of the mesh dimension or the index
                 of the mesh dimension. Default is None.
 
             Returns:
-                A list of :class:`ProcessGroup` object when `mesh_dim` is not specified for
-                a DeviceMesh with more than 1 dimension; otherwise, returns a single
-                :class:`ProcessGroup` object.
+                A :class:`ProcessGroup` object.
             """
             if not hasattr(self, "_dim_group_infos"):
                 raise RuntimeError("DeviceMesh process groups not initialized!")
 
-            if self.mesh.ndim == 1:
-                return not_none(
-                    _find_pg_by_ranks_and_tag(*self._dim_group_infos[0][:2])
+            if self.mesh.ndim > 1 and mesh_dim is None:
+                raise RuntimeError(
+                    f"Found the DeviceMesh have {self.mesh.ndim} dimensions",
+                    "Optional kwarg `mesh_dim` needs to be specified when device_mesh.ndim > 1.",
+                    "If you want to get the list of all the ProcessGroups in the DeviceMesh,"
+                    "please use `get_all_groups()` instead.",
                 )
 
-            if mesh_dim is not None:
-                if isinstance(mesh_dim, str):
-                    mesh_dim = _mesh_resources.get_mesh_dim_by_name(self, mesh_dim)
-                return not_none(
-                    _find_pg_by_ranks_and_tag(*self._dim_group_infos[mesh_dim][:2])
-                )
+            if self.mesh.ndim == 1 and mesh_dim is None:
+                mesh_dim = 0
             else:
-                dim_groups = []
-                for ith_dim in range(self.mesh.ndim):
-                    dim_groups.append(
-                        not_none(
-                            _find_pg_by_ranks_and_tag(
-                                *self._dim_group_infos[ith_dim][:2]
-                            )
-                        )
-                    )
-                return dim_groups
+                mesh_dim = (
+                    _mesh_resources.get_mesh_dim_by_name(self, mesh_dim)
+                    if isinstance(mesh_dim, str)
+                    else mesh_dim
+                )
+
+            return not_none(
+                _find_pg_by_ranks_and_tag(*self._dim_group_infos[mesh_dim][:2])  # type: ignore[index]
+            )
+
+        def get_all_groups(self) -> List[ProcessGroup]:
+            """
+            Returns a list of ProcessGroups for all mesh dimensions.
+
+            Returns:
+                A list of :class:`ProcessGroup` object.
+            """
+            return [self.get_group(i) for i in range(self.mesh.ndim)]
 
         @staticmethod
         def from_group(
