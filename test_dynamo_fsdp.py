@@ -322,6 +322,7 @@ def init(activation_checkpoint):
     if apply_fsdp:
         torch._dynamo.config.trace_distributed = True
         torch._functorch.config.aggressive_recomputation = False
+        torch._functorch.config.recompute_views = True
         # torch._inductor.config.reorder_for_compute_comm_overlap = True
         # torch._inductor.config.reorder_for_compute_comm_overlap_passes = [
         #     "sink_waits",

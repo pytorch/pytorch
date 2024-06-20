@@ -449,7 +449,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             #         x = value.var_getattr(self, "__len__")
             #         torch_log.warning(f"here5: x: {x}")
 
-            print(f"here999: x: {x}")
+            torch_log.warning(f"here999: x: {x}")
 
             # __bool__ or __len__ is function
             if isinstance(x, UserMethodVariable):

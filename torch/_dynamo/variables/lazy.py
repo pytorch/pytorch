@@ -48,6 +48,9 @@ class LazyVariableTracker(VariableTracker):
         return LazyVariableTracker(LazyCache(value, source), source=source, **options)
 
     def __init__(self, _cache, **kwargs):
+        # import traceback
+        # traceback.print_stack()
+        # print(f"id(self): {id(self)}")
         assert isinstance(_cache, LazyCache)
         super().__init__(**kwargs)
         self._cache = _cache
