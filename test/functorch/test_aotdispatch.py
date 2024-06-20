@@ -2127,7 +2127,7 @@ def forward(self, primals_1, primals_2):
         ):
             out = f_compiled(*inp_grad)
 
-    def test_backward_mutation_forward_inputs(self):
+    def test_backward_mutation_forward_inputsX(self):
         @torch.library.custom_op("_test::_clone", mutates_args={})
         def f(x: torch.Tensor, x1: torch.Tensor) -> torch.Tensor:
             return x.clone()
@@ -2148,24 +2148,29 @@ def forward(self, primals_1, primals_2):
         f.register_fake(f_fake)
         f.register_autograd(backward, setup_context=setup_context)
 
-        def fn(x: torch.Tensor, x1: torch.Tensor) -> torch.Tensor:
-            return torch.ops._test._clone(x, x1)
+        def fn(x: torch.Tensor, x1: torch.Tensor, x2: torch.Tensor) -> torch.Tensor:
+            x2.copy_(x2.mul(5))
+            return torch.ops._test._clone(x, x1) + x2
 
-        inp_x, inp_x1 = torch.randn(3, requires_grad=True), torch.randn(
-            3, requires_grad=False
+        inp_x, inp_x1, inp_x2 = (
+            torch.randn(3, requires_grad=True),
+            torch.randn(3, requires_grad=False),
+            torch.randn(3, requires_grad=False),
         )
 
-        ref_x, ref_x1 = inp_x.clone(), inp_x1.clone()
-        ref_y = f(ref_x, ref_x1)
+        ref_x, ref_x1, ref_x2 = inp_x.clone(), inp_x1.clone(), inp_x2.clone()
+        ref_y = fn(ref_x, ref_x1, ref_x2)
         ref_y.sum().backward()
-        x, x1 = inp_x.clone(), inp_x1.clone()
+        x, x1, x2 = inp_x.clone(), inp_x1.clone(), inp_x2.clone()
         compiled_f = aot_function(fn, nop)
-        y = compiled_f(x, x1)
-        loss = y.sum()
-        loss.backward()
+        y = compiled_f(x, x1, x2)
+        # Verify that backward mutation is not in forward
+        self.assertEqual(inp_x1, x1)
+        y.sum().backward()
 
         self.assertEqual(ref_x, x)
         self.assertEqual(ref_x1, x1)
+        self.assertEqual(ref_x2, x2)
         self.assertEqual(ref_y, y)
 
     def test_backward_mutation_forward_inputs_create_graph(self):
