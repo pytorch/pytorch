@@ -1219,6 +1219,7 @@ def f(x):
             self.assertIn("HEYA", "".join(traceback.format_tb(e.__traceback__)))
 
     def test_format_traceback_short(self):
+        self.assertEqual(1, 2)
         try:
             raise RuntimeError
         except RuntimeError as e:
