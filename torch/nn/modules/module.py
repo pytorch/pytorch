@@ -493,8 +493,8 @@ class Module:
         super().__setattr__ for all other attributes.
         """
         super().__setattr__("training", True)
-        super().__setattr__("_parameters", OrderedDict())
-        super().__setattr__("_buffers", OrderedDict())
+        super().__setattr__("_parameters", dict())
+        super().__setattr__("_buffers", dict())
         super().__setattr__("_non_persistent_buffers_set", set())
         super().__setattr__("_backward_pre_hooks", OrderedDict())
         super().__setattr__("_backward_hooks", OrderedDict())
@@ -508,7 +508,7 @@ class Module:
         super().__setattr__("_state_dict_pre_hooks", OrderedDict())
         super().__setattr__("_load_state_dict_pre_hooks", OrderedDict())
         super().__setattr__("_load_state_dict_post_hooks", OrderedDict())
-        super().__setattr__("_modules", OrderedDict())
+        super().__setattr__("_modules", dict())
 
         if self.call_super_init:
             super().__init__(*args, **kwargs)
@@ -2834,7 +2834,7 @@ class Module:
 
         # replicas do not have parameters themselves, the replicas reference the original
         # module.
-        replica._parameters = OrderedDict()
+        replica._parameters = dict()
         replica._buffers = replica._buffers.copy()
         replica._modules = replica._modules.copy()
         replica._is_replica = True  # type: ignore[assignment]
