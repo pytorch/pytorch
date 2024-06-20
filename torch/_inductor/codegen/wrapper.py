@@ -410,6 +410,64 @@ class NullLine(MemoryPlanningLine):
     pass
 
 
+@dataclasses.dataclass
+class RegisteredCommBufferAllocateLine(WrapperLine):
+    wrapper: "WrapperCodeGen"
+    node: ir.Buffer
+    reg_type: str
+
+    @property
+    def size(self):
+        numel = self.node.get_numel()
+        dtype = self.node.get_dtype()
+        return numel * dtype.itemsize
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        raise NotImplementedError
+
+
+@dataclasses.dataclass
+class SymmMemAllocateLine(RegisteredCommBufferAllocateLine):
+    def __init__(self, wrapper, node):
+        super().__init__(wrapper, node, "symm_mem")
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        assert self.node.get_name() not in V.graph.removed_buffers
+        name = self.node.get_name()
+        device = self.node.get_device()
+        dtype = self.node.get_dtype()
+        shape = tuple(self.node.get_size())
+        stride = tuple(self.node.get_stride())
+        code.writeline(
+            self.make_allocation_line(self.wrapper, name, device, dtype, shape, stride)
+        )
+
+    @staticmethod
+    def make_allocation_line(wrapper, name, device, dtype, shape, stride):
+        import random
+
+        return (
+            f"{name} = empty_strided_p2p("
+            f"{wrapper.codegen_shape_tuple(shape)}, "
+            f"{wrapper.codegen_shape_tuple(stride)}, "
+            f"{dtype}, "
+            f'torch.device("cuda:{device.index}"), '
+            f'group_name="0", '
+            f"alloc_id={random.randint(0, 2**64 - 1)})"
+        )
+
+
+@dataclasses.dataclass
+class RegisteredCommBufferFreeLine(WrapperLine):
+    wrapper: "WrapperCodeGen"
+    node: ir.Buffer
+    reg_type: str
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        line = self.wrapper.make_buffer_free(self.node)
+        code.writeline(f"{line} # registered comm buffer free")
+
+
 BufferName = str
 
 
@@ -514,6 +572,7 @@ class WrapperCodeGen(CodeGen):
                 assert_size_stride = torch._C._dynamo.guards.assert_size_stride
                 empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
                 empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
+                empty_strided_p2p = torch._C._distributed_c10d._SymmetricMemory.empty_strided_p2p
                 reinterpret_tensor = torch._C._dynamo.guards._reinterpret_tensor
                 alloc_from_pool = torch.ops.inductor._alloc_from_pool
                 async_compile = AsyncCompile()
@@ -750,6 +809,9 @@ class WrapperCodeGen(CodeGen):
             else:
                 self.memory_plan_reuse()
 
+            if config._register_comm_buffers:
+                self.plan_registered_comm_buffers()
+
             if config.triton.store_cubin:
                 self.generate_reset_kernel_saved_flags()
 
@@ -829,6 +891,11 @@ class WrapperCodeGen(CodeGen):
             and config.allow_stack_allocation
             and total_allocated_buffer_size <= MAX_STACK_ALLOCATION_SIZE
         )
+
+    def plan_registered_comm_buffers(self):
+        from .memory_planning import RegisteredCommBufferPlanner
+
+        self.lines = RegisteredCommBufferPlanner(self).plan(self.lines)
 
     def codegen_input_size_var_decl(self, code: IndentedBuffer, name):
         code.writeline(f"{self.declare}{name}_size = {name}.{self.size}{self.ending}")
@@ -1526,6 +1593,19 @@ class WrapperCodeGen(CodeGen):
             )
         )
 
+    def codegen_registered_comm_buffer_allocation(self, name, buffer):
+        reg_type = V.graph.buffer_reg_type[name]
+        if reg_type == "symm_mem":
+            self.writeline(SymmMemAllocateLine(self, buffer))
+        else:
+            raise NotImplementedError(
+                "Unsupported comm buffer registration type: {reg_type}"
+            )
+
+    def codegen_registered_comm_buffer_free(self, name, buffer):
+        reg_type = V.graph.buffer_reg_type[name]
+        self.writeline(RegisteredCommBufferFreeLine(self, buffer, reg_type))
+
     def codegen_allocation(self, buffer):
         name = buffer.get_name()
 
@@ -1549,6 +1629,10 @@ class WrapperCodeGen(CodeGen):
             self.codegen_deferred_allocation(name, layout)
             return
 
+        if name in V.graph.buffer_reg_type:
+            self.codegen_registered_comm_buffer_allocation(name, buffer)
+            return
+
         self.writeline(AllocateLine(self, buffer))
 
     def codegen_free(self, buffer):
@@ -1561,6 +1645,10 @@ class WrapperCodeGen(CodeGen):
         # can be freed but not reused
         if isinstance(buffer, ir.InputBuffer):
             self.writeline(self.make_buffer_free(buffer))
+            return
+
+        if name in V.graph.buffer_reg_type:
+            self.codegen_registered_comm_buffer_free(name, buffer)
             return
 
         if not self.can_reuse(buffer):

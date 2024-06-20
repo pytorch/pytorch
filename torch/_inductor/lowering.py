@@ -6213,18 +6213,15 @@ try:
 
     @register_lowering(_c10d_functional.all_reduce)
     def _all_reduce(inp, reduce_op, group_name):
-        inp = clone(inp)
-        ir._CollectiveKernel.create_inplace(
-            _c10d_functional.all_reduce_.default, inp, reduce_op, group_name
-        )
-        return inp
+        from .comm_lowering import all_reduce
+
+        return all_reduce(inp, reduce_op, group_name)
 
     @register_lowering(_c10d_functional.all_reduce_)
     def _all_reduce_(inp, reduce_op, group_name):
-        ir._CollectiveKernel.create_inplace(
-            _c10d_functional.all_reduce_.default, inp, reduce_op, group_name
-        )
-        return inp
+        from .comm_lowering import all_reduce_
+
+        return all_reduce_(inp, reduce_op, group_name)
 
     @register_lowering(_c10d_functional.all_reduce_coalesced)
     def _all_reduce_coalesced(inputs, reduce_op, group_name):
@@ -6324,6 +6321,10 @@ try:
 
     @register_lowering(_c10d_functional.wait_tensor)
     def _wait_tensor(inp):
+        if inp.get_name() in V.graph.skip_wait:
+            V.graph.skip_wait.remove(inp.get_name())
+            return inp
+
         ir._WaitKernel.create_wait(_c10d_functional.wait_tensor.default, inp)
         return inp
 

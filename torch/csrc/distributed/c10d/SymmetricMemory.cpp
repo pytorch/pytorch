@@ -81,13 +81,15 @@ static at::Tensor empty_strided_p2p_persistent(
   if (alloc_id_to_dev_ptr.find(alloc_id) != alloc_id_to_dev_ptr.end()) {
     dev_ptr = alloc_id_to_dev_ptr[alloc_id];
     TORCH_CHECK(
-        alloc_size == allocator->get_alloc_size(dev_ptr),
+        alloc_size <= allocator->get_alloc_size(dev_ptr),
         "SymmetricMemory::empty_strided_p2p_persistent: ",
         "requested allocation size (",
         alloc_size,
-        ") is different from the size of a previous allocation ",
-        "with the same alloc_id ",
-        allocator->get_alloc_size(dev_ptr));
+        " bytes) is greater than the size reserved for alloc_id == ",
+        alloc_id,
+        " (",
+        allocator->get_alloc_size(dev_ptr),
+        " bytes)");
   } else {
     dev_ptr = allocator->alloc(alloc_size, device.index(), group_name);
     alloc_id_to_dev_ptr[alloc_id] = dev_ptr;
@@ -176,7 +178,7 @@ at::Tensor empty_strided_p2p(
 TORCH_API c10::intrusive_ptr<SymmetricMemory> rendezvous(
     const at::Tensor& tensor) {
   auto allocator = get_allocator(tensor.device().type());
-  return allocator->rendezvous(tensor.data_ptr());
+  return allocator->rendezvous(tensor.storage().data_ptr().get());
 }
 
 c10::intrusive_ptr<SymmetricMemory> get_symmetric_memory(
@@ -186,7 +188,7 @@ c10::intrusive_ptr<SymmetricMemory> get_symmetric_memory(
       allocator->is_rendezvous_completed(tensor.data_ptr()),
       "SymmetricMemory: must invoke rendezvous on a tensor ",
       "before calling get_symmetric_memory on it");
-  return allocator->rendezvous(tensor.data_ptr());
+  return allocator->rendezvous(tensor.storage().data_ptr().get());
 }
 
 } // namespace symmetric_memory

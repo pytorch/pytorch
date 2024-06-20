@@ -408,6 +408,13 @@ class GraphLowering(torch.fx.Interpreter):
         self.effectful_ops: Dict[_EffectType, ir.Buffer] = {}
         self.aligned_inputs: Set[str] = set()
 
+        self.needs_wait: Set[str] = set()
+
+        # Buffer name to registration type
+        self.buffer_reg_type: Dict[str, str] = {}
+
+        self.skip_wait: Set[str] = set()
+
     def has_feature(self, device, feature):
         assert isinstance(feature, BackendFeature), feature
         return feature in self.get_backend_features(get_device_type(device))

@@ -250,11 +250,41 @@ def _pipelined_produce_and_all2all(
 
 lib = torch.library.Library("symm_mem", "DEF")  # noqa: TOR901
 lib.define(
+    "one_shot_all_reduce(Tensor tensor, str reduce_op, str group_name) -> Tensor"
+)
+lib.define(
     "fused_all_gather_matmul(Tensor A, Tensor[] Bs, int gather_dim, str group_name) -> (Tensor, Tensor[])"
 )
 lib.define(
     "fused_matmul_reduce_scatter(Tensor A, Tensor B, str reduce_op, int scatter_dim, str group_name) -> Tensor"
 )
+
+
+@torch.library.impl(lib, "one_shot_all_reduce", "Meta")
+def _one_shot_all_reduce_meta(
+    tensor: torch.Tensor,
+    reduce_op: str,
+    group_name: str,
+) -> torch.Tensor:
+    return tensor
+
+
+@torch.library.impl(lib, "one_shot_all_reduce", "CUDA")
+def _one_shot_all_reduce(
+    tensor: torch.Tensor,
+    reduce_op: str,
+    group_name: str,
+) -> torch.Tensor:
+    assert reduce_op == "avg"
+    symm_mem = _SymmetricMemory.rendezvous(tensor)
+    symm_mem.barrier()
+    bufs = [
+        symm_mem.get_buffer(rank, tensor.shape, tensor.dtype, tensor.storage_offset())
+        for rank in range(symm_mem.world_size)
+    ]
+    stacked = torch.stack(bufs)
+    symm_mem.barrier()
+    return torch.mean(stacked, dim=0)
 
 
 @torch.library.impl(lib, "fused_all_gather_matmul", "Meta")

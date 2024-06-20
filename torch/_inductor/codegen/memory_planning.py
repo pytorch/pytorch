@@ -20,6 +20,7 @@ from .wrapper import (
     MemoryPlanningLine,
     NullLine,
     ReuseLine,
+    WrapperLine,
 )
 
 
@@ -768,3 +769,149 @@ class MemoryPlanner:
                         pool.root.get_live_ranges().end <= line.timestep
                     )
                     seen.add(pool)
+
+
+from .wrapper import (
+    RegisteredCommBufferAllocateLine,
+    RegisteredCommBufferFreeLine,
+    SymmMemAllocateLine,
+)
+
+
+@dataclasses.dataclass
+class SymmMemAllocationPool(AllocationPool):
+    def codegen_create(self, wrapper, code: IndentedBuffer):
+        assert self.name
+        nbytes = self.root.get_symbolic_size()
+        code.writeline(
+            SymmMemAllocateLine.make_allocation_line(
+                wrapper,
+                self.name,
+                device=self.device,
+                dtype=torch.uint8,
+                shape=(nbytes,),
+                stride=(1,),
+            )
+        )
+
+
+@dataclasses.dataclass
+class SymmMemAllocationPools(AllocationPools):
+    def allocate(self, block: Allocation):
+        pools = self.get_pools(block)
+
+        for pool in pools:
+            if pool.allocate(block, is_last=pool is pools[-1]):
+                return
+
+        # everything is full, make a new pool
+        pools.append(
+            SymmMemAllocationPool(
+                block.device,
+                TemporalSplit([block]),
+                can_expand=True,
+            )
+        )
+        block.mark_allocated()
+
+
+@dataclasses.dataclass
+class CopyOutLine(WrapperLine):
+    name: str
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        code.writeline(f"{self.name} = {self.name}.clone()")
+
+
+@dataclasses.dataclass
+class RegisteredCommBufferPlanner:
+    wrapper: Any
+
+    def plan(self, lines: List[Any]) -> List[Any]:
+        reg_types = set()
+        for line in lines:
+            if isinstance(line, RegisteredCommBufferAllocateLine):
+                reg_types.add(line.reg_type)
+
+        for reg_type in reg_types:
+            self._plan_for_reg_type(lines, reg_type)
+        return lines
+
+    def _plan_for_reg_type(self, lines: List[Any], reg_type: str) -> None:
+        """
+        Only processes RegisteredCommBufferAllocateLine and
+        RegisteredCommBufferFreeLine for the given reg_type.
+        """
+        name_to_group = {}
+        to_copy_out = []
+
+        # Similar to MemoryPlanner.convert_to_pool_lines, except that it's
+        # simpler for registered comm buffers since they are not reusable.
+        for i, line in enumerate(lines):
+            if (
+                isinstance(line, RegisteredCommBufferAllocateLine)
+                and line.reg_type == reg_type
+            ):
+                if line.node.name in V.graph.get_output_names():
+                    to_copy_out.append(line.node.name)
+                    continue
+                name_to_group[line.node.name] = BufferGroup(line.node)
+                lines[i] = AllocFromPoolLine(
+                    self.wrapper,
+                    name_to_group[line.node.name],
+                )
+                if len(name_to_group) == 1:
+                    lines[i].is_first_pool_usage = True
+            elif (
+                isinstance(line, RegisteredCommBufferFreeLine)
+                and line.reg_type == reg_type
+            ):
+                if line.node.name in V.graph.get_output_names():
+                    continue
+                lines[i] = DeallocFromPoolLine(
+                    self.wrapper,
+                    name_to_group[line.node.name],
+                )
+
+        buffer_groups = list(name_to_group.values())
+
+        # Compute live ranges
+        timestep = 0
+        worklist = collections.deque(lines)
+        while worklist:
+            if isinstance(worklist[0], MemoryPlanningLine):
+                timestep += 1
+                while worklist and isinstance(worklist[0], MemoryPlanningLine):
+                    line = worklist.popleft()
+                    if isinstance(line, PoolMemoryPlanningLine):
+                        line.group.update_usage(timestep)
+                        line.timestep = timestep
+            else:
+                worklist.popleft()
+
+        timestep += 1
+        assert buffer_groups is not None
+        for group in buffer_groups:
+            if group.is_output:
+                group.update_usage(timestep)
+
+        # Allocate groups
+        for group in buffer_groups:
+            group.make_allocation()
+
+        from typing import cast
+
+        blocks = [cast(Allocation, group.allocation) for group in buffer_groups]
+        pools = SymmMemAllocationPools()
+        for block in sorted(
+            blocks,
+            key=lambda x: (
+                x.size_hint,
+                -len(x.live_range),
+            ),
+        ):
+            pools.allocate(block)
+        pools.finalize()
+
+        for name in to_copy_out:
+            lines.append(CopyOutLine(str(name)))

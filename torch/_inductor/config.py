@@ -443,6 +443,8 @@ _fuse_ddp_communication_passes: List[Union[Callable[..., None], str]] = [
 
 _micro_pipeline_tp: bool = False
 
+_register_comm_buffers: bool = True
+
 
 def decide_compile_threads():
     """

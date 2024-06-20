@@ -348,7 +348,9 @@ class BaseSchedulerNode:
             return
 
         if isinstance(self, (SchedulerNode,)) and (
-            self.node.get_inputs_that_alias_output() or self.node.get_mutation_names()
+            self.node.get_inputs_that_alias_output()
+            or self.node.get_mutation_names()
+            or self.get_name() in V.graph.buffer_reg_type
         ):
             V.graph.wrapper_code.codegen_allocation(self.node)
             return
