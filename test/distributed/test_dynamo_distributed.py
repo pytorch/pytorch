@@ -527,7 +527,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             fsdp_m = torch.compile(fsdp_m, backend=prof, fullgraph=False)
             outputs = fsdp_m(inputs)
             self.assertTrue(same(correct_outputs, outputs))
-            FileCheck().check(
+            FileCheck().check_not(
                 "setattr(FSDPManagedNNModuleVariable(MutatingModel), state, ...)"
             ).run(prof.report())
 
