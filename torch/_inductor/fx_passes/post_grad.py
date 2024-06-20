@@ -277,6 +277,39 @@ def scatter_upon_allzero_for_sum(
     sum_node.replace_all_uses_with(nd)
     graph.erase_node(sum_node)
 
+# for llm.c
+@register_graph_pattern(
+    CallFunction(
+        aten.sum,
+        CallFunction(
+            aten.mul,
+            CallFunction(
+                aten.scatter,
+                CallFunction(aten.full, KeywordArg("shape"), KeywordArg("val")),
+                KeywordArg("dim"),
+                KeywordArg("selector"),
+                KeywordArg("val2"),
+            ),
+            KeywordArg("mul_rhs"),
+            _users=2,
+        ),
+        KeywordArg("rdims"),
+        KeywordArg("keepdim"),
+    ),
+    extra_check=scatter_upon_allzero_for_sum_extra_check,
+    pass_dict=pass_patterns[0],
+)
+def scatter_upon_allzero_for_sum_llmc(
+    match: Match, shape, val, dim, selector, val2, mul_rhs, rdims, keepdim
+):
+    sum_node = match.output_node()
+    graph = match.graph
+    with graph.inserting_after(sum_node):
+        nd = graph.call_function(aten.mul, args=(mul_rhs, val2))
+    sum_node.replace_all_uses_with(nd)
+    graph.erase_node(sum_node)
+
+
 
 @register_lowering_pattern(
     CallFunction(
@@ -301,6 +334,48 @@ def scatter_upon_allzero_for_sum(
     extra_check=scatter_upon_allzero_for_sub_extra_check,
 )
 def scatter_upon_allzero_for_sub(
+    match: Match, shape, val, dim, selector, val2, mul_rhs, sub_rhs
+):
+    selector_loader = selector.make_loader()
+    rhs_loader = sub_rhs.make_loader()
+    mul_rhs_loader = mul_rhs.make_loader()
+
+    def inner_fn(idx):
+        selector = selector_loader((idx[0], 0))
+        lhs = ops.where(selector == ops.index_expr(idx[1], torch.int64), val2, 0)
+        mul_rhs = mul_rhs_loader((idx[0], 0))  # TODO don't hardcode index value 0
+        lhs = ops.mul(lhs, mul_rhs)
+        lhs = ops.to_dtype(lhs, torch.float32)
+        rhs = rhs_loader(idx)
+        return ops.sub(lhs, rhs)
+
+    return ir.Pointwise.create(
+        device=sub_rhs.get_device(),
+        dtype=sub_rhs.get_dtype(),
+        inner_fn=inner_fn,
+        ranges=sub_rhs.get_size(),
+    )
+
+# for llmc
+@register_lowering_pattern(
+    CallFunction(
+        aten.sub,
+        CallFunction(
+            aten.mul,
+            CallFunction(
+                aten.scatter,
+                CallFunction(aten.full, KeywordArg("shape"), KeywordArg("val")),
+                KeywordArg("dim"),
+                KeywordArg("selector"),
+                KeywordArg("val2"),
+            ),
+            KeywordArg("mul_rhs"),
+        ),
+        KeywordArg("sub_rhs"),
+    ),
+    extra_check=scatter_upon_allzero_for_sub_extra_check,
+)
+def scatter_upon_allzero_for_sub_llmc(
     match: Match, shape, val, dim, selector, val2, mul_rhs, sub_rhs
 ):
     selector_loader = selector.make_loader()
