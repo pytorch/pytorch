@@ -86,9 +86,9 @@ class FSDPState(_State):
         self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
         self._lazy_init()
-        logger.debug("FSDP::root_pre_forward")
         if self._state_ctx.iter_forward_root is not None:
             return args, kwargs
+        logger.debug("FSDP::root_pre_forward")
         self._state_ctx.iter_forward_root = self
         with torch.profiler.record_function("FSDP::root_pre_forward"):
             # Wait for optimizer before implicitly prefetched all-gathers
