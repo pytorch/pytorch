@@ -151,7 +151,7 @@ static void linalg_lu_factor_out_mps_impl(const Tensor& A, bool pivot, Tensor& L
     return;
   }
 
-  Tensor A_ = A_t.dim() > 3 ? A_t.view({-1, A_t.size(-2), A_t.size(-1)}) : A_t;
+  Tensor A_ = A_t.dim() > 3 ? A_t.flatten(0, -3) : A_t;
 
   uint64_t batchSize = A_.dim() > 2 ? A_.size(0) : 1;
   std::vector<Tensor> status_tensors;
