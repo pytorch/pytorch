@@ -8,7 +8,6 @@ import time
 import warnings
 from contextlib import contextmanager, nullcontext
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
-from unittest.mock import patch
 
 import torch
 import torch._dynamo
@@ -262,6 +261,19 @@ def _skip_autograd_kernel(*args, **kwargs):
         return kernel(*args, **kwargs)
 
 
+def _register_cia_to_meta(*args, **kwargs):
+    kernel = kwargs["kernel"]
+    del kwargs["kernel"]
+    if torch._C._dispatch_has_kernel_for_dispatch_key(
+        kernel.name(), torch._C.DispatchKey.CompositeImplicitAutograd
+    ):
+        return kernel._op_dk(
+            torch._C.DispatchKey.CompositeImplicitAutograd, *args, **kwargs
+        )
+    else:
+        return NotImplemented
+
+
 @contextmanager
 def override_composite_implicit_decomp(ops_to_preserve):
     # This function overrides CompositeImplicitAutograd decomp for
@@ -318,8 +330,21 @@ def override_composite_implicit_decomp(ops_to_preserve):
                 op_overload.py_impl(override_dispatch_key)(
                     functools.partial(_skip_autograd_kernel, kernel=op_overload)
                 )
+        if torch._C.DispatchKey.CompositeImplicitAutograd in op_overload.py_kernels:
+            del op_overload.py_kernels[torch._C.DispatchKey.CompositeImplicitAutograd]
+
+        def _(*args, **kwargs):
+            return NotImplemented
+
+        op_overload.py_impl(torch._C.DispatchKey.CompositeImplicitAutograd)(_)
+
+        # For fake tensor prop, we do want to register meta kernel directly
+        if torch._C.DispatchKey.Meta not in op_overload.py_kernels:
+            op_overload.py_impl(torch._C.DispatchKey.Meta)(
+                functools.partial(_register_cia_to_meta, kernel=op_overload)
+            )
     try:
-        yield patched_ops
+        yield
     finally:
         for op in patched_ops:
             op.py_kernels.clear()
@@ -2044,26 +2069,20 @@ def _export(
         if not pre_dispatch
         else nullcontext()
     )
-    with override_decomp as patched_ops:
-        should_patch_ops = (
-            patch("torch._ops.OPS_THAT_SHOULDNT_GET_DECOMPOSED", patched_ops)  # type: ignore[attr-defined]
-            if patched_ops is not None
-            else nullcontext()
+    with override_decomp:
+        export_artifact = export_func(
+            mod,
+            args,
+            kwargs,
+            dynamic_shapes,
+            preserve_module_call_signature,
+            pre_dispatch,
+            original_state_dict,
+            orig_in_spec,
+            _allow_complex_guards_as_runtime_asserts,
+            _disable_forced_specializations,
+            _is_torch_jit_trace,
         )
-        with should_patch_ops:  # type: ignore[attr-defined]
-            export_artifact = export_func(
-                mod,
-                args,
-                kwargs,
-                dynamic_shapes,
-                preserve_module_call_signature,
-                pre_dispatch,
-                original_state_dict,
-                orig_in_spec,
-                _allow_complex_guards_as_runtime_asserts,
-                _disable_forced_specializations,
-                _is_torch_jit_trace,
-            )
     # Decompose here for readability.
     gm = export_artifact.aten.gm
     export_graph_signature = export_artifact.aten.sig

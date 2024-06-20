@@ -35,11 +35,6 @@ def dl_open_guard():
         sys.setdlopenflags(old_flags)
 
 
-# export monkey-patches this list while exporting to
-# customize op.decompose function
-OPS_THAT_SHOULDNT_GET_DECOMPOSED: List["OpOverload"] = []
-
-
 class OperatorBase:
     """
     Base class for OpOverload (which represents C++ ATen operators) and HigherOrderOperator
@@ -701,8 +696,6 @@ class OpOverload(OperatorBase):
         return self._schema.name.split("::")[0]
 
     def decompose(self, *args, **kwargs):
-        if self in OPS_THAT_SHOULDNT_GET_DECOMPOSED:
-            return NotImplemented
         dk = torch._C.DispatchKey.CompositeImplicitAutograd
         if dk in self.py_kernels:
             # NB: This branch is not too necessary anymore, because we can
