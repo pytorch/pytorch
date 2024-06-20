@@ -3,6 +3,7 @@
 #include <ATen/core/TensorBody.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/native/ConvUtils.h>
+#include <ATen/record_function.h>
 #include <c10/core/Device.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/UniqueVoidPtr.h>
@@ -38,6 +39,7 @@
 #include <torch/csrc/cuda/THCP.h>
 #include <torch/csrc/cuda/memory_snapshot.h>
 #include <torch/csrc/cuda/python_comm.h>
+#include <torch/csrc/profiler/combined_traceback.h>
 #include <torch/csrc/profiler/python/combined_traceback.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/device_lazy_init.h>
@@ -738,6 +740,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   py::str snapshot_s = "snapshot";
   py::str oom_s = "oom";
   py::str device_free_s = "device_free";
+  py::str user_defined_s = "user_defined";
 
   using namespace c10::cuda::CUDACachingAllocator;
 
@@ -761,6 +764,8 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
         return segment_unmap_s;
       case TraceEntry::SEGMENT_MAP:
         return segment_map_s;
+      case TraceEntry::USER_DEFINED:
+        return user_defined_s;
     }
     throw std::runtime_error("unreachable");
   };
@@ -961,6 +966,28 @@ static void registerCudaDeviceProperties(PyObject* module) {
           std::optional<std::string>,
           const std::string&,
           size_t)>(torch::cuda::_record_memory_history));
+
+  // Save user annotations to CCA memory snapshot tool
+  at::addThreadLocalCallback(at::RecordFunctionCallback(
+      [](const at::RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
+        if (fn.scope() != at::RecordScope::USER_SCOPE) {
+          return nullptr; // only record user-defined scopes.
+        }
+        unwind::Frame frame{fn.name(), "START", 0};
+        auto r = std::make_shared<CapturedTraceback>();
+        r->recordUserDefinedFrame(frame);
+        c10::cuda::CUDACachingAllocator::recordAnnotation(r);
+        return nullptr;
+      },
+      [](const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) {
+        if (fn.scope() != at::RecordScope::USER_SCOPE) {
+          return; // only record user-defined scopes.
+        }
+        unwind::Frame frame{fn.name(), "END", 0};
+        auto r = std::make_shared<CapturedTraceback>();
+        r->recordUserDefinedFrame(frame);
+        c10::cuda::CUDACachingAllocator::recordAnnotation(r);
+      }));
 
   m.def("_cuda_isHistoryEnabled", []() {
     return c10::cuda::CUDACachingAllocator::isHistoryEnabled();

@@ -153,6 +153,7 @@ def compute_node_users(
 
 def reorder_compute_for_overlap(
     snodes: List[BaseSchedulerNode],
+    node_users: Dict[BaseSchedulerNode, Set[BaseSchedulerNode]],
 ) -> List[BaseSchedulerNode]:
     """
     Decides a global ordering of all compute and communication nodes,
@@ -169,8 +170,6 @@ def reorder_compute_for_overlap(
         Repeat this for subsequent comm nodes.
     """
     final_order = []
-
-    node_users = compute_node_users(snodes)
 
     comm_nodes = []
     for snode in snodes:
@@ -371,6 +370,8 @@ def reorder_compute_and_comm_for_overlap(
     snodes: List[BaseSchedulerNode],
 ) -> List[BaseSchedulerNode]:
     order = snodes
+    node_users = compute_node_users(snodes)
+
     for p in config.reorder_for_compute_comm_overlap_passes:
         if isinstance(p, str) and p in globals():
             p = globals()[p]  # it is a builtin pass
@@ -382,7 +383,7 @@ def reorder_compute_and_comm_for_overlap(
                 visualize_overlap(order)
             except Exception as e:
                 overlap_log.debug(str(e))
-        order = p(order)  # type: ignore[operator]
+        order = p(order, node_users)  # type: ignore[operator]
         if torch.distributed.get_rank() == 0:
             overlap_log.debug(
                 f"==== Visualize overlap after reordering pass {p} ===="  # noqa: G004
