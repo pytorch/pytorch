@@ -346,7 +346,7 @@ def get_default_x86_inductor_quantization_config(
     act_quantization_spec = QuantizationSpec(
         dtype=torch.uint8,
         quant_min=0,
-        quant_max=255,  # reduce_range=False
+        quant_max=127,  # reduce_range=False
         qscheme=torch.per_tensor_affine,
         is_dynamic=is_dynamic,
         observer_or_fake_quant_ctr=act_observer_or_fake_quant_ctr.with_args(

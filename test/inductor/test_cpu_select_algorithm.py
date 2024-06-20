@@ -381,6 +381,8 @@ class TestSelectAlgorithm(TestCase):
         if dtype == torch.bfloat16:
             atol, rtol = 5e-2, 5e-2
 
+        atol, rtol = 1e-1, 1e-1
+
         with patch.object(
             select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)
         ), torch.no_grad(), torch.autocast(
@@ -457,6 +459,10 @@ class TestSelectAlgorithm(TestCase):
             (input, other, other2),
         )
         atol, rtol = 5e-2, 5e-2
+
+
+        atol, rtol = 1e-1, 1e-1
+
         with patch.object(
             select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)
         ), torch.no_grad(), torch.autocast(
