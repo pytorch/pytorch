@@ -933,7 +933,7 @@ def get_cpp_torch_cuda_options(cuda: bool, aot_mode: bool = False):
     ):
         os.environ["CUDA_HOME"] = build_paths.cuda()
     """
-    from torch._inductor.codecache import _set_gpu_runtime_env, cpp_prefix_path
+    from torch._inductor.codecache import cpp_prefix_path
 
     _set_gpu_runtime_env()
     from torch.utils import cpp_extension
@@ -1263,7 +1263,14 @@ class CppBuilder:
 
         build_cmd = self.get_command_line()
 
-        status = run_command_line(build_cmd, cwd=_build_tmp_dir)
+        # To compatible to Windows output: FileName.
+        current_working_directory = _build_tmp_dir
+        if config.is_fbcode():
+            if not (self._aot_mode and not self._use_absolute_path):
+                # To compatible to fb_code, output to FileName.
+                current_working_directory = os.getcwd()
+
+        status = run_command_line(build_cmd, cwd=current_working_directory)
 
         _remove_dir(_build_tmp_dir)
         return status, self._target_file
