@@ -9379,7 +9379,7 @@ for shape in [(1,), ()]:
 
             @staticmethod
             def backward(ctx, grad_output):
-                x, = ctx.saved_tensors
+                (x,) = ctx.saved_tensors
                 before = a._version
                 x.add_(1)
                 self.assertEqual(a._version, before)
