@@ -903,6 +903,8 @@ def solve_min_cut(
             return False
         # This bans recomputation of the node unless we've been forced not to by
         # user annotation
+        # NB: "recompute" > 0 means that user annotation has asked us to
+        # recompute it
         if prefer_recompute(node):
             return False
 
