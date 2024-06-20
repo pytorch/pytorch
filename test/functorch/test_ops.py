@@ -1257,7 +1257,8 @@ class TestOperators(TestCase):
         skip("as_strided"),  # Test runner cannot handle this
         # requires special handling, and does not yet have a batching rule. Feel free to file a github issue!
         xfail("as_strided_copy"),
-        xfail("as_strided_scatter"),
+        xfail("squeeze_copy"),
+        xfail("transpose_copy"),
         xfail(
             "nn.functional.gaussian_nll_loss"
         ),  # .item or data-dependent control flow
@@ -1398,8 +1399,9 @@ class TestOperators(TestCase):
             }
         ).difference(
             {
-                # as_strided_copy fails test_vmapvjp, succeeds here
+                # These test fail test_vmapvjp, succeeds here
                 xfail("as_strided_copy", ""),
+                xfail("transpose_copy", ""),
             }
         ),
     )
@@ -1475,6 +1477,7 @@ class TestOperators(TestCase):
                 ),  # aten::scatter_reduce.two hit the vmap fallback
                 xfail("quantile"),
                 xfail("renorm"),
+                xfail("squeeze_copy"),
                 xfail("take"),
                 xfail("tensor_split"),
                 xfail("to_sparse"),

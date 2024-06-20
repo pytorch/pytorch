@@ -16683,7 +16683,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_outplace_all_strides'),
            )),
     OpInfo('view_copy',
-           dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            ref=lambda x, newshape: np.reshape(x, newshape).copy(),
            supports_out=True,
            supports_forward_ad=True,
