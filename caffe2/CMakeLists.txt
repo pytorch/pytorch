@@ -560,7 +560,6 @@ if(USE_CUDA)
       append_filelist("libtorch_cuda_distributed_extra_sources" Caffe2_GPU_SRCS)
       set_source_files_properties(
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/intra_node_comm.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/c10d/CUDASymmetricMemory.cu
         PROPERTIES COMPILE_FLAGS "-DPYTORCH_C10_DRIVER_API_SUPPORTED=1"
       )
     endif()
@@ -750,6 +749,9 @@ if(BUILD_LIBTORCHLESS)
     find_library(TORCH_XPU_LIB torch_xpu PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
   endif()
   add_subdirectory(../torch torch)
+  # ---[ Torch python bindings build
+  set(TORCH_PYTHON_COMPILE_OPTIONS ${TORCH_PYTHON_COMPILE_OPTIONS} PARENT_SCOPE)
+  set(TORCH_PYTHON_LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS} PARENT_SCOPE)
 else()
   set(TORCH_LIB torch)
   set(TORCH_CPU_LIB torch_cpu)
@@ -1270,12 +1272,10 @@ install(FILES
   ${PROJECT_BINARY_DIR}/TorchConfig.cmake
   DESTINATION share/cmake/Torch)
 
-
 # ---[ Torch python bindings build
 add_subdirectory(../torch torch)
 set(TORCH_PYTHON_COMPILE_OPTIONS ${TORCH_PYTHON_COMPILE_OPTIONS} PARENT_SCOPE)
 set(TORCH_PYTHON_LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS} PARENT_SCOPE)
-
 # ==========================================================
 # END formerly-libtorch flags
 # ==========================================================
