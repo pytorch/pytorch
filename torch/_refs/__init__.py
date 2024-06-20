@@ -5989,7 +5989,7 @@ def exponential(self, rate=1, generator=None):
 
     uniform_val = torch.rand_like(self)
 
-    # copying numerics of transformation::exponential. see comment:
+    # copying numerics of transformation::exponential instead of torch.log. see comment:
     # curand_uniform has (0,1] bounds. log(1) is 0 and exponential excludes 0.
     # we need log to be not 0, and not underflow when converted to half
     # fast __logf approximation can underflow, so set log to -epsilon/2 for 1 or close to 1 args
