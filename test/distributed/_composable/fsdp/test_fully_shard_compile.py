@@ -229,17 +229,21 @@ class TestFullyShardCompile(FSDPTest):
 
         return model_init_fn, input_creation_fn
 
+    @skip_if_lt_x_gpu(2)
     def test_simple_mlp_fullgraph_backend_eager(self):
         self._test_traceable_fsdp(
             *self._create_simple_mlp_factory_fns(), "eager", fullgraph=True
         )
 
+    @skip_if_lt_x_gpu(2)
     def test_simple_mlp_fullgraph_backend_aot_eager(self):
         self._test_traceable_fsdp(
             *self._create_simple_mlp_factory_fns(), "aot_eager", fullgraph=True
         )
 
     @unittest.expectedFailure
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
     def test_simple_mlp_fullgraph_backend_inductor(self):
         self._test_traceable_fsdp(
             *self._create_simple_mlp_factory_fns(), "inductor", fullgraph=True
@@ -281,17 +285,21 @@ class TestFullyShardCompile(FSDPTest):
 
         return model_init_fn, input_creation_fn
 
+    @skip_if_lt_x_gpu(2)
     def test_transformer_fullgraph_backend_eager(self):
         self._test_traceable_fsdp(
             *self._create_transformer_factory_fns(), "eager", fullgraph=True
         )
 
+    @skip_if_lt_x_gpu(2)
     def test_transformer_fullgraph_backend_aot_eager(self):
         self._test_traceable_fsdp(
             *self._create_transformer_factory_fns(), "aot_eager", fullgraph=True
         )
 
     @unittest.expectedFailure
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
     def test_transformer_fullgraph_backend_inductor(self):
         self._test_traceable_fsdp(
             *self._create_transformer_factory_fns(), "inductor", fullgraph=True
