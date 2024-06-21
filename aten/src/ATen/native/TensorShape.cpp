@@ -1618,24 +1618,13 @@ Tensor alias_with_sizes_and_strides(
   return self_;
 }
 
-// TODO: Remove these before merging
-#define USE_LAZY_CLONE
-// #define USE_VIEW
-
 Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
   if (self.is_sparse()) {
-    AT_ERROR("reshape is not implemented for sparse tensors");
+    TORCH_CHECK(false, "reshape is not implemented for sparse tensors");
   }
 
   if (self.is_contiguous() && !self.is_mkldnn()) {
-#ifdef USE_LAZY_CLONE
     return self.view_symint(proposed_shape)._lazy_clone();
-#elif defined(USE_VIEW)
-    Tensor res = self.view_symint(proposed_shape);
-    return res.view_symint(res.sym_sizes());
-#else
-    return self.view_symint(proposed_shape);
-#endif
   }
 
   c10::SymDimVector shape = infer_size_dv(proposed_shape, self.sym_numel());
@@ -1666,23 +1655,9 @@ Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
     // We need to do the checks here instead of in `native_functions.yaml`
     // to preserve backwards compatibility.
     if (!self.is_xla() && !self.is_lazy() && !self.is_ipu() && !at::isTensorSubclassLike(self)) {
-#ifdef USE_LAZY_CLONE
       return self._reshape_alias_symint(shape, stride.value())._lazy_clone();
-#elif defined(USE_VIEW)
-      Tensor res = self._reshape_alias_symint(shape, stride.value());
-      return res.view_symint(res.sym_sizes());
-#else
-      return self._reshape_alias_symint(shape, stride.value());
-#endif
     } else {
-#ifdef USE_LAZY_CLONE
       return self.view_symint(shape)._lazy_clone();
-#elif defined(USE_VIEW)
-      Tensor res = self.view_symint(shape);
-      return res.view_symint(res.sym_sizes());
-#else
-      return self.view_symint(shape);
-#endif
     }
   }
   return at::_unsafe_view_symint(self.clone(at::MemoryFormat::Contiguous), shape);
@@ -1709,7 +1684,7 @@ Tensor _reshape_copy_symint(const Tensor& self, c10::SymIntArrayRef proposed_sha
 // minimize breakages.
 Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
   if (self.is_sparse()) {
-    AT_ERROR("reshape is not implemented for sparse tensors");
+    TORCH_CHECK(false, "reshape is not implemented for sparse tensors");
   }
   DimVector shape = infer_size_dv(proposed_shape, self.numel());
 
@@ -1739,23 +1714,9 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
     // We need to do the checks here instead of in `native_functions.yaml`
     // to preserve backwards compatibility.
     if (!self.is_xla() && !self.is_lazy() && !self.is_ipu()) {
-#ifdef USE_LAZY_CLONE
       return self._reshape_alias(shape, stride.value())._lazy_clone();
-#elif defined(USE_VIEW)
-      Tensor res = self._reshape_alias(shape, stride.value());
-      return res.view_symint(res.sym_sizes());
-#else
-      return self._reshape_alias(shape, stride.value());
-#endif
     } else {
-#ifdef USE_LAZY_CLONE
       return self.view(shape)._lazy_clone();
-#elif defined(USE_VIEW)
-      Tensor res = self.view(shape);
-      return res.view_symint(res.sym_sizes());
-#else
-      return self.view(shape);
-#endif
     }
   }
   return at::_unsafe_view(self.clone(at::MemoryFormat::Contiguous), shape);

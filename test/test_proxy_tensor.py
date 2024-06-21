@@ -1201,7 +1201,9 @@ def forward(self, x_1):
         batch_size = 4
         src_tokens = torch.randint(1, vocab_size, (batch_size, prompt_size))
         gm = make_fx(f, tracing_mode="symbolic")(src_tokens)
-        self.assertEqual(len(gm.shape_env.guards), 0)
+        # Guards to rule out batch_size == sys.maxsize (wobbling between 2 and
+        # 1 ok)
+        self.assertEqual(len(gm.shape_env.guards), 1)
 
     @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
     def test_cpu_scalar_cuda(self):
@@ -1347,18 +1349,18 @@ def forward(self, crop_camera_1, mask_1):
     sym_size_int = torch.ops.aten.sym_size.int(index, 0)
     expand = torch.ops.aten.expand.default(eye, [sym_size_int, 3, 3])
     view = torch.ops.aten.view.default(expand, [sym_size_int, 3, 3]);  expand = None
-    _lazy_clone = torch.ops.aten._lazy_clone.default(view);  view = None
+    _lazy_clone_alias = torch.ops.aten._lazy_clone_alias.default(view);  view = None
     sym_size_int_1 = torch.ops.aten.sym_size.int(crop_camera_1, 1)
     sym_size_int_2 = torch.ops.aten.sym_size.int(crop_camera_1, 2)
     expand_1 = torch.ops.aten.expand.default(index, [sym_size_int, sym_size_int_1, sym_size_int_2]);  index = None
     view_1 = torch.ops.aten.view.default(expand_1, [sym_size_int, sym_size_int_1, sym_size_int_2]);  expand_1 = sym_size_int_1 = sym_size_int_2 = None
-    _lazy_clone_1 = torch.ops.aten._lazy_clone.default(view_1);  view_1 = None
-    bmm = torch.ops.aten.bmm.default(_lazy_clone, _lazy_clone_1);  _lazy_clone = _lazy_clone_1 = None
+    _lazy_clone_alias_1 = torch.ops.aten._lazy_clone_alias.default(view_1);  view_1 = None
+    bmm = torch.ops.aten.bmm.default(_lazy_clone_alias, _lazy_clone_alias_1);  _lazy_clone_alias = _lazy_clone_alias_1 = None
     view_2 = torch.ops.aten.view.default(bmm, [sym_size_int, 3, 3]);  bmm = None
     mul = sym_size_int * 3
     view_3 = torch.ops.aten.view.default(view_2, [mul, 3]);  view_2 = mul = None
-    _lazy_clone_2 = torch.ops.aten._lazy_clone.default(view_3);  view_3 = None
-    mm = torch.ops.aten.mm.default(_lazy_clone_2, eye);  _lazy_clone_2 = eye = None
+    _lazy_clone_alias_2 = torch.ops.aten._lazy_clone_alias.default(view_3);  view_3 = None
+    mm = torch.ops.aten.mm.default(_lazy_clone_alias_2, eye);  _lazy_clone_alias_2 = eye = None
     view_4 = torch.ops.aten.view.default(mm, [sym_size_int, 3, 3]);  mm = sym_size_int = None
     index_put_ = torch.ops.aten.index_put_.default(crop_camera_1, [mask_1], view_4);  crop_camera_1 = mask_1 = view_4 = None
     return None""")  # noqa: B950

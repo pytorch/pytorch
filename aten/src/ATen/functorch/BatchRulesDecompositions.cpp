@@ -224,6 +224,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   m.impl("repeat_interleave.self_int", static_cast<decltype(&ATEN_FN2(repeat_interleave, self_int))>(native::repeat_interleave_symint));
   m.impl("repeat_interleave.self_Tensor", static_cast<decltype(&ATEN_FN2(repeat_interleave, self_Tensor))>(native::repeat_interleave_symint));
   m.impl("reshape", native::reshape_symint);
+  OP_DECOMPOSE(_lazy_clone);
   OP_DECOMPOSE(resolve_conj);
   OP_DECOMPOSE(resolve_neg);
   OP_DECOMPOSE(rms_norm);
@@ -325,6 +326,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(linalg_diagonal);
   OP_DECOMPOSE(diagonal_copy);
   OP_DECOMPOSE(alias_copy);
+  m.impl("as_strided_copy", native::as_strided_copy_symint);
   m.impl("pad", native::pad_symint);
   m.impl("_pad_circular", native::_pad_circular_symint);
   OP_DECOMPOSE(swapdims_);

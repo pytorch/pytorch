@@ -40,10 +40,16 @@ bool has_simple_data_ptr(const c10::StorageImpl& storage) {
   const void* ctx = data_ptr.get_context();
   const void* data = data_ptr.get();
   const c10::Allocator* allocator = storage.allocator();
-  if (allocator != nullptr) {
+  if (ctx == data) {
+    return true;
+  } else if (allocator != nullptr) {
+    // TODO: Sometimes even when this Allocator* is non-null,
+    // it may still point to invalid memory, causing a segfault
+    // here. I need to find out why that happens before this is
+    // merged.
     return allocator->is_simple_data_ptr(data_ptr);
   } else {
-    return ctx == data;
+    return false;
   }
 }
 

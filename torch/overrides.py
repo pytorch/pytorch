@@ -362,6 +362,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._conj,
         Tensor._conj_physical,
         Tensor._lazy_clone,
+        Tensor._lazy_clone_alias,
         Tensor._neg_view,
         Tensor._is_zerotensor,
         Tensor._is_all_true,

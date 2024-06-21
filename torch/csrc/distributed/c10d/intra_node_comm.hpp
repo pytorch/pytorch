@@ -4,12 +4,16 @@
 #include <ATen/cuda/CUDAEvent.h>
 #include <c10/cuda/CUDAStream.h>
 #include <torch/csrc/distributed/c10d/Store.hpp>
+#include <torch/csrc/distributed/c10d/SymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/Work.hpp>
 
 namespace c10d::intra_node_comm {
 
+using namespace c10d::symmetric_memory;
+
 constexpr size_t kMaxDevices = 8;
 constexpr size_t kDefaultBufferSize = 10ull * 1024 * 1024;
+constexpr size_t kP2pStateSize = 2048;
 
 using NvlMesh = std::array<std::array<size_t, kMaxDevices>, kMaxDevices>;
 using HybridCubeMesh = std::array<std::array<int, 4>, kMaxDevices>;
@@ -27,6 +31,7 @@ enum class AllReduceAlgo : uint8_t {
   HCM = 3
 };
 
+// NOTE: this class will be be removed soon in favor of SymmetricMemory
 class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
  public:
   IntraNodeComm(
@@ -97,8 +102,8 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
    */
   bool isInitialized_ = false;
   Topology topology_ = Topology::UNKNOWN;
-  std::array<void*, kMaxDevices> p2pStates_{};
-  std::array<void*, kMaxDevices> buffers_{};
+  void* symmetricMemoryPtr_ = nullptr;
+  c10::intrusive_ptr<SymmetricMemory> symmetricMemory_ = nullptr;
   void* p2pStatesDev_{};
   void* buffersDev_{};
   void* topoInfo_{};

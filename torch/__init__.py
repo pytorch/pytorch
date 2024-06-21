@@ -50,7 +50,6 @@ if _running_with_deploy():
 else:
     from torch.torch_version import __version__ as __version__
 
-
 __all__ = [
     "BoolStorage",
     "BoolTensor",
@@ -271,38 +270,6 @@ def _preload_cuda_deps(lib_folder, lib_name):
 
 # See Note [Global dependencies]
 def _load_global_deps() -> None:
-    LIBTORCH_PKG_NAME = "libtorchsplit"
-
-    def find_package_path(package_name):
-        spec = importlib.util.find_spec(package_name)
-        if spec:
-            # The package might be a namespace package, so get_data may fail
-            try:
-                loader = spec.loader
-                if loader is not None:
-                    file_path = loader.get_filename()  # type: ignore[attr-defined]
-                    return os.path.dirname(file_path)
-            except AttributeError:
-                pass
-        return None
-
-    def load_shared_libraries(library_path):
-        lib_dir = os.path.join(library_path, "lib")
-        if not os.path.exists(lib_dir):
-            return
-
-        # Find all shared library files with the appropriate extension
-        library_files = [f for f in os.listdir(lib_dir) if f.endswith(lib_ext)]
-        if not library_files:
-            return
-
-        for lib_file in library_files:
-            lib_path = os.path.join(lib_dir, lib_file)
-            try:
-                ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
-            except OSError as err:
-                print(f"Failed to load {lib_path}: {err}")
-
     if _running_with_deploy() or platform.system() == "Windows":
         return
 
@@ -312,11 +279,6 @@ def _load_global_deps() -> None:
     here = os.path.abspath(__file__)
     global_deps_lib_path = os.path.join(os.path.dirname(here), "lib", lib_name)
 
-    split_build_lib_name = LIBTORCH_PKG_NAME
-    library_path = find_package_path(split_build_lib_name)
-
-    if library_path:
-        global_deps_lib_path = os.path.join(library_path, "lib", lib_name)
     try:
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
     except OSError as err:
@@ -343,10 +305,6 @@ def _load_global_deps() -> None:
         for lib_folder, lib_name in cuda_libs.items():
             _preload_cuda_deps(lib_folder, lib_name)
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
-
-    if library_path:
-        # loading libtorch_global_deps first due its special logic
-        load_shared_libraries(library_path)
 
 
 if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv("TORCH_USE_RTLD_GLOBAL")) and (
@@ -1141,11 +1099,13 @@ def set_default_dtype(d):
     """
     _C._set_default_dtype(d)
 
+
 def set_future_lazy_clone(mode: builtins.bool) -> None:
     r"""Enables future behavior of always copying for operators that currently
     conditionally return a copy or view of the input.
     """
     return _C._set_future_lazy_clone(mode)
+
 
 def get_future_lazy_clone() -> builtins.bool:
     r"""Check whether future behavior of always copying is enabled for operators
@@ -1153,17 +1113,20 @@ def get_future_lazy_clone() -> builtins.bool:
     """
     return _C._get_future_lazy_clone()
 
+
 def set_extra_conditional_view_warnings(mode: builtins.bool) -> None:
     r"""Enables raising extra warnings for deprecated views created by operators
     that currently conditionally return a copy or view of the input.
     """
     return _C._set_extra_conditional_view_warnings(mode)
 
+
 def get_extra_conditional_view_warnings() -> builtins.bool:
     r"""Check whether extra warnings are enabled for deprecated views created by
     operators that currently conditionally return a copy or view of the input.
     """
     return _C._get_extra_conditional_view_warnings()
+
 
 def use_deterministic_algorithms(
     mode: builtins.bool,
@@ -2022,8 +1985,6 @@ from torch.autograd import (  # usort: skip
     set_grad_enabled as set_grad_enabled,
 )
 
-import torch.utils.backcompat
-import torch.utils.data
 from torch import (
     __config__ as __config__,
     __future__ as __future__,
@@ -2050,6 +2011,7 @@ from torch import (
     special as special,
     testing as testing,
     types as types,
+    utils as utils,
     xpu as xpu,
 )
 from torch.signal import windows as windows
@@ -2382,7 +2344,7 @@ def compile(
 
 from torch import export as export
 
-from torch._higher_order_ops import cond as cond
+from torch._higher_order_ops import cond, while_loop
 
 
 def _register_device_module(device_type, module):
