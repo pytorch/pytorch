@@ -174,10 +174,10 @@ class FunctionalTensor(torch.Tensor):
                 torch.ops.aten.is_contiguous.memory_format,
             ]:
                 assert len(args) == 2 and isinstance(args[0], FunctionalTensor)
-                return func(args[0].elem, args[1])
+                return func(torch._from_functional_tensor(args[0].elem), args[1])
             assert len(args) == 1 and isinstance(args[0], FunctionalTensor)
 
-            return func(args[0].elem)
+            return func(torch._from_functional_tensor(args[0].elem))
         # Originally I tried to implement my subclass without giving it a torch_dispatch, but I gave up:
         # - _make_wrapper_subclass requires a __torch_dispatch__
         # - If we want to use _make_subclass(), we have a problem: the subclass will share a TensorImpl with the inner tensor,
