@@ -33,7 +33,9 @@ build:cpu-only --@rules_cuda//cuda:enable_cuda=False
 
 # Definition of --config=shell
 # interactive shell immediately before execution
-build:shell --run_under="//tools/bazel_tools:shellwrap"
+# Need to be used like
+# cat /dev/tty | bazel run --config=shell //:target
+run:shell --run_under="//tools/bazel_tools:shellwrap"
 
 # Disable all warnings for external repositories. We don't care about
 # their warnings.

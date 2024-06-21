@@ -5,9 +5,7 @@
 # This can provide a quick way to explore the sandbox directory and filesystem.
 # Typical use is with
 #
-#     bazel run --run_under=//tools/bazel:shell_wrapper //:target
-#     OR
-#     bazel run --config=shell //:target
+#     cat /dev/tty | bazel run --config=shell //:target
 
 shell='/bin/bash'
 rcfile='/tmp/pytorch_bazel_tools_shellwrap'
@@ -30,9 +28,12 @@ while [[ $# -gt 0 ]] ; do
     esac
 done
 
-if ! tty -s; then
-    echo 'A tty is not available.'
-    echo "Use \`bazel run\`, not \`bazel test\`."
+# Unfortunately vanilla bazel doesn't have good way to achive this so we relay on a weired way to execute this step
+# https://github.com/bazelbuild/bazel/issues/11371#issuecomment-628372628
+if tty -s; then
+    echo 'Detected un-redirected tty'
+    echo "Prefix your command with 'cat /dev/tty | '"
+    echo "For example: cat /dev/tty | bazel run --config=shell //:target"
     exit 1
 fi
 
