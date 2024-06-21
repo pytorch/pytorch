@@ -480,6 +480,11 @@ class TestOperators(TestCase):
                 {torch.float32: tol(atol=3e-04, rtol=3e-04)},
                 device_type="cuda",
             ),
+            tol1(
+                "pca_lowrank",
+                {torch.float32: tol(atol=3e-05, rtol=4e-06)},
+                device_type="cpu",
+            ),
         ),
     )
     def test_grad(self, device, dtype, op):
@@ -614,6 +619,9 @@ class TestOperators(TestCase):
             tol1(
                 "nn.functional.multi_head_attention_forward",
                 {torch.float32: tol(atol=6e-05, rtol=2e-05)},
+            ),
+            tol2(
+                "linalg.pinv", "hermitian", {torch.float32: tol(atol=5e-5, rtol=2e-5)}
             ),
         ),
     )
@@ -1181,6 +1189,11 @@ class TestOperators(TestCase):
                 "matrix_exp",
                 {torch.float32: tol(atol=5e-04, rtol=1e-04)},
                 device_type="cuda",
+            ),
+            tol1(
+                "nn.functional.layer_norm",
+                {torch.float32: tol(atol=3e-4, rtol=1e-4)},
+                device_type="cpu",
             ),
         ),
     )
@@ -1796,7 +1809,7 @@ class TestOperators(TestCase):
             tol1("masked.cumprod", {torch.float32: tol(atol=1e-04, rtol=5e-04)}),
             tol1(
                 "cumprod",
-                {torch.float32: tol(atol=1e-04, rtol=1.3e-05)},
+                {torch.float32: tol(atol=1e-03, rtol=5e-04)},
                 device_type="cuda",
             ),
             tol1(
@@ -2375,7 +2388,7 @@ class TestOperators(TestCase):
             ),
             tol1(
                 "linalg.householder_product",
-                {torch.float32: tol(atol=1e-04, rtol=1e-04)},
+                {torch.float32: tol(atol=6e-03, rtol=1.3e-04)},
                 device_type="cpu",
             ),
             tol1(

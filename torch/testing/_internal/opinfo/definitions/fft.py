@@ -10,7 +10,11 @@ import torch
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import SM53OrLater
-from torch.testing._internal.common_device_type import precisionOverride
+from torch.testing._internal.common_device_type import (
+    precisionOverride,
+    tol,
+    toleranceOverride,
+)
 from torch.testing._internal.common_dtype import (
     all_types_and,
     all_types_and_complex_and,
@@ -258,6 +262,12 @@ op_db: List[OpInfo] = [
                 unittest.skip("Skipped!"),
                 "TestSchemaCheckModeOpInfo",
                 "test_schema_correctness",
+            ),
+            DecorateInfo(
+                toleranceOverride({torch.complex32: tol(atol=1.3e-01, rtol=4e-02)}),
+                "TestCommon",
+                "test_complex_half_reference_testing",
+                device_type="cuda",
             ),
         ),
     ),

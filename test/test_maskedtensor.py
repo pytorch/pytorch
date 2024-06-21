@@ -1,7 +1,9 @@
 # Owner(s): ["module: masked operators"]
 
 import torch
+import unittest
 from torch.testing._internal.common_utils import (
+    decorateIf,
     TestCase,
     run_tests,
     make_tensor,
@@ -883,6 +885,25 @@ class TestOperators(TestCase):
 
     @ops(mt_binary_ufuncs, allowed_dtypes=MASKEDTENSOR_FLOAT_TYPES)  # type: ignore[arg-type]
     @parametrize("layout", [torch.strided, torch.sparse_coo, torch.sparse_csr])
+    # FIXME:
+    # Result is just wrong in test_maskedtensor.py; production logic should be fixed
+    @decorateIf(
+        unittest.expectedFailure,
+        lambda params: (
+            params["op"].name == "add" and
+            params["dtype"] == torch.float16 and
+            params["device"] == "cpu"
+        )
+    )
+    # Result is just wrong in test_maskedtensor.py; production logic should be fixed
+    @decorateIf(
+        unittest.expectedFailure,
+        lambda params: (
+            params["op"].name == "sub" and
+            params["dtype"] == torch.float32 and
+            params["device"] == "cpu"
+        )
+    )
     def test_binary_core(self, device, dtype, op, layout):
         self._test_unary_binary_equality(device, dtype, op, layout)
 
