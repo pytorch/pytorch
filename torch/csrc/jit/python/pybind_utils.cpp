@@ -13,6 +13,7 @@
 #include <torch/csrc/utils/python_arg_parser.h>
 
 #include <limits>
+#include <optional>
 
 namespace torch::jit {
 
@@ -55,7 +56,7 @@ IValue listToIValue(py::handle obj) {
   return c10::impl::toList<T>(rs);
 }
 
-IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
+IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
   switch (type->kind()) {
     case TypeKind::TensorType: {
       if (obj.ptr() == Py_None) {
@@ -114,6 +115,16 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       if (torch::is_symfloat(py::handle(obj))) {
         return py::cast<c10::SymFloat>(obj).guard_float(__FILE__, __LINE__);
       }
+      if (THPVariable_Check(obj.ptr())) {
+        auto var = py::cast<autograd::Variable>(obj);
+        // NB: We carefully test if the storage is meta, because that is
+        // always accurate even if you have a fake tensor (which is the
+        // primary case we are trying to detect here)
+        if (var.storage().device_type() == c10::kMeta) {
+          throw py::cast_error(
+              "cannot extract float from tensor with meta storage");
+        }
+      }
       return py::cast<double>(obj);
     case TypeKind::ComplexType: {
       auto c_obj = py::cast<std::complex<double>>(obj.ptr());
@@ -144,6 +155,13 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       }
       if (torch::is_symint(py::handle(obj))) {
         return py::cast<c10::SymInt>(obj).guard_int(__FILE__, __LINE__);
+      }
+      if (THPVariable_Check(obj.ptr())) {
+        auto var = py::cast<autograd::Variable>(obj);
+        if (var.storage().device_type() == c10::kMeta) {
+          throw py::cast_error(
+              "cannot extract int from tensor with meta storage");
+        }
       }
       return py::cast<int64_t>(obj);
     case TypeKind::LayoutType: {
@@ -194,6 +212,13 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     case TypeKind::BoolType:
       if (torch::is_symbool(obj.ptr())) {
         return py::cast<c10::SymBool>(obj).guard_bool(__FILE__, __LINE__);
+      }
+      if (THPVariable_Check(obj.ptr())) {
+        auto var = py::cast<autograd::Variable>(obj);
+        if (var.storage().device_type() == c10::kMeta) {
+          throw py::cast_error(
+              "cannot extract bool from tensor with meta storage");
+        }
       }
       return py::cast<bool>(obj);
     case TypeKind::TupleType: {
@@ -778,7 +803,7 @@ py::object invokeOperatorFromPython(
     const std::vector<std::shared_ptr<Operator>>& operations,
     py::args args,
     const py::kwargs& kwargs,
-    c10::optional<c10::DispatchKey> dk) {
+    std::optional<c10::DispatchKey> dk) {
   auto [found_op, stack] = getOpWithStack(operations, args, kwargs);
   {
     pybind11::gil_scoped_release no_gil_guard;
@@ -792,7 +817,7 @@ py::object invokeOperatorFromPython(
   return createPyObjectForStack(std::move(stack));
 }
 
-py::tuple _maybe_handle_torch_function(
+std::optional<py::object> _maybe_handle_torch_function(
     const std::string& ns,
     const std::string& method_name,
     const std::string& overload_name,
@@ -837,18 +862,16 @@ py::tuple _maybe_handle_torch_function(
     }
     std::string module_name("torch.ops");
     module_name.append(ns);
-    return py::make_tuple(
-        true,
-        pybind11::reinterpret_steal<py::object>(
-            handle_torch_function_no_python_arg_parser(
-                overloaded_args,
-                args.ptr(),
-                kwargs.ptr(),
-                method_name.c_str(),
-                self_func.ptr(),
-                module_name.c_str())));
+    return {pybind11::reinterpret_steal<py::object>(
+        handle_torch_function_no_python_arg_parser(
+            overloaded_args,
+            args.ptr(),
+            kwargs.ptr(),
+            method_name.c_str(),
+            self_func.ptr(),
+            module_name.c_str()))};
   }
-  return py::make_tuple(false, py::none());
+  return std::nullopt;
 }
 
 py::object _get_operation_for_overload_or_packet(
@@ -857,15 +880,15 @@ py::object _get_operation_for_overload_or_packet(
     py::args args,
     const py::kwargs& kwargs,
     bool is_overload,
-    c10::optional<c10::DispatchKey> dk) {
+    std::optional<c10::DispatchKey> dk) {
   std::string ns = symbol.ns().toUnqualString();
   std::string method_name = symbol.toUnqualString();
   std::string overload_name = operations[0]->schema().overload_name();
   auto res = _maybe_handle_torch_function(
       ns, method_name, overload_name, is_overload, args, kwargs);
-  auto torch_function_called = py::cast<bool>(res[0]);
+  auto torch_function_called = res.has_value();
   return torch_function_called
-      ? res[1]
+      ? *res
       : invokeOperatorFromPython(operations, args, kwargs, dk);
 }
 

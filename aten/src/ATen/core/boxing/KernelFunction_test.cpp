@@ -6,7 +6,7 @@
 
 using std::vector;
 using std::tuple;
-using c10::optional;
+using std::optional;
 using c10::IValue;
 using c10::OperatorKernel;
 using c10::OperatorHandle;
@@ -273,16 +273,6 @@ void expectOutOfPlaceMultiBoxedCallingWorks(const KernelFunction& func) {
   EXPECT_TRUE(stack[0].toTensor().is_same(t1));
   EXPECT_TRUE(stack[1].isTensor());
   EXPECT_TRUE(stack[1].toTensor().is_same(t2));
-}
-
-void expectBoxedCallingFailsWith(const KernelFunction& func, const char* errorMessage) {
-  called_with_args = c10::nullopt;
-  vector<IValue> stack {3, 4};
-  OperatorHandle dummy = makeDummyOperatorHandle();
-
-  expectThrows<c10::Error>([&] {
-    func.callBoxed(dummy, CPU_TEST_SET, &stack);
-  }, errorMessage);
 }
 
 //

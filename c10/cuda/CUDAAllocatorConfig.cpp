@@ -133,8 +133,8 @@ size_t CUDAAllocatorConfig::parseRoundUpPower2Divisions(
               false, "Error parsing roundup_power2_divisions value", "");
         }
         TORCH_CHECK(
-            llvm::isPowerOf2_64(val2),
-            "For roundups, the divisons has to be power of 2 ",
+            val2 == 0 || llvm::isPowerOf2_64(val2),
+            "For roundups, the divisons has to be power of 2 or 0 to disable roundup ",
             "");
 
         if (std::string_view(val1) == ">") {
@@ -234,7 +234,7 @@ size_t CUDAAllocatorConfig::parseAllocatorConfig(
   return i;
 }
 
-void CUDAAllocatorConfig::parseArgs(const std::optional<std::string>& env) {
+void CUDAAllocatorConfig::parseArgs(const char* env) {
   // If empty, set the default values
   m_max_split_size = std::numeric_limits<size_t>::max();
   m_roundup_power2_divisions.assign(kRoundUpPowerOfTwoIntervals, 0);
@@ -242,16 +242,16 @@ void CUDAAllocatorConfig::parseArgs(const std::optional<std::string>& env) {
   bool used_cudaMallocAsync = false;
   bool used_native_specific_option = false;
 
-  if (!env.has_value()) {
+  if (env == nullptr) {
     return;
   }
   {
     std::lock_guard<std::mutex> lock(m_last_allocator_settings_mutex);
-    m_last_allocator_settings = env.value();
+    m_last_allocator_settings = env;
   }
 
   std::vector<std::string> config;
-  lexArgs(env.value().c_str(), config);
+  lexArgs(env, config);
 
   for (size_t i = 0; i < config.size(); i++) {
     std::string_view config_item_view(config[i]);
