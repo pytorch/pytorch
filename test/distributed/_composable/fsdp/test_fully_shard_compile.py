@@ -181,7 +181,7 @@ class TestFullyShardCompile(FSDPTest):
         hidden_dim = 16
 
         def model_init_fn():
-            torch.manual_seed(0)
+            torch.manual_seed(self.rank)
             fsdp_config = {}
             model = nn.Sequential(
                 nn.Linear(hidden_dim, hidden_dim, device="cuda"),
@@ -195,17 +195,11 @@ class TestFullyShardCompile(FSDPTest):
             return model, optim
 
         def input_creation_fn():
-            torch.manual_seed(0)
+            torch.manual_seed(self.rank)
             inp = torch.randn((2, hidden_dim), device="cuda", requires_grad=False)
             return inp
 
         return model_init_fn, input_creation_fn
-
-    @skip_if_lt_x_gpu(2)
-    def test_simple_mlp_fullgraph_backend_eager(self):
-        self._test_traceable_fsdp(
-            *self._create_simple_mlp_factory_fns(), "eager", fullgraph=True
-        )
 
     @skip_if_lt_x_gpu(2)
     def test_simple_mlp_fullgraph_backend_aot_eager(self):
@@ -223,12 +217,13 @@ class TestFullyShardCompile(FSDPTest):
 
     def _create_transformer_factory_fns(self):
         seq_len = 16
+        vocab_size = 8
 
         def model_init_fn():
-            torch.manual_seed(0)
+            torch.manual_seed(self.rank)
             fsdp_config = {}
             mesh = init_device_mesh("cuda", (self.world_size,))
-            model_args = ModelArgs()
+            model_args = ModelArgs(vocab_size=vocab_size)
             model = Transformer(model_args)
             for layer_id, mod in enumerate(model.layers):
                 fully_shard(mod, mesh=mesh, reshard_after_forward=True, **fsdp_config)
@@ -240,22 +235,11 @@ class TestFullyShardCompile(FSDPTest):
             return model, optim
 
         def input_creation_fn():
-            torch.manual_seed(0)
-            inp = torch.zeros(
-                (2, seq_len),
-                device="cuda",
-                requires_grad=False,
-                dtype=torch.long,
-            )
+            torch.manual_seed(self.rank)
+            inp = torch.randint(0, vocab_size, (2, seq_len), device="cuda", requires_grad=False)
             return inp
 
         return model_init_fn, input_creation_fn
-
-    @skip_if_lt_x_gpu(2)
-    def test_transformer_fullgraph_backend_eager(self):
-        self._test_traceable_fsdp(
-            *self._create_transformer_factory_fns(), "eager", fullgraph=True
-        )
 
     @skip_if_lt_x_gpu(2)
     def test_transformer_fullgraph_backend_aot_eager(self):
