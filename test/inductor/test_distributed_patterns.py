@@ -9,7 +9,7 @@ from torch._dynamo import compiled_autograd
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_utils import IS_MACOS
-from torch.testing._internal.inductor_utils import HAS_CPU
+from torch.testing._internal.inductor_utils import HAS_CPU, requires_gpu
 
 # Fake distributed
 WORLD_SIZE = 2
@@ -146,6 +146,7 @@ class DistributedPatternTests(TestCase):
         self.assertEqual(x1.grad, x3.grad)
 
     @torch.no_grad()
+    @requires_gpu()
     def test_storage_resize_zero(self):
         @torch.compile(fullgraph=True)
         def fn(x):
@@ -153,13 +154,15 @@ class DistributedPatternTests(TestCase):
             x.untyped_storage().resize_(0)
             return torch.cos(y)
 
-        x = torch.randn(10)
-        expected = torch.cos(torch.sin(x))
-        y = fn(x)
-        self.assertEqual(y, expected)
-        self.assertEqual(x.untyped_storage().size(), 0)
+        for device in ("cpu", "cuda"):
+            x = torch.randn(10, device=device)
+            expected = torch.cos(torch.sin(x))
+            y = fn(x)
+            self.assertEqual(y, expected)
+            self.assertEqual(x.untyped_storage().size(), 0)
 
     @torch.no_grad()
+    @requires_gpu()
     def test_storage_resize_nonzero(self):
         @torch.compile(fullgraph=True)
         def fn(x, out):
@@ -168,13 +171,14 @@ class DistributedPatternTests(TestCase):
             out.untyped_storage().resize_(x.untyped_storage().size())
             out.copy_(y.cos())
 
-        x = torch.randn(10)
-        out = torch.randn(10)
-        expected = torch.cos(torch.sin(x))
-        out.untyped_storage().resize_(0)
-        fn(x, out)
-        self.assertEqual(out.untyped_storage().size(), x.untyped_storage().size())
-        self.assertEqual(out, expected)
+        for device in ("cpu", "cuda"):
+            x = torch.randn(10, device=device)
+            out = torch.randn(10, device=device)
+            expected = torch.cos(torch.sin(x))
+            out.untyped_storage().resize_(0)
+            fn(x, out)
+            self.assertEqual(out.untyped_storage().size(), x.untyped_storage().size())
+            self.assertEqual(out, expected)
 
     @torch.no_grad()
     def test_unsafe_set_version_counter1(self):
