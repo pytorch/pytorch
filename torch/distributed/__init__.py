@@ -1,6 +1,9 @@
 # mypy: allow-untyped-defs
+import os
 import sys
+from enum import Enum
 import pdb
+import io
 
 import torch
 
@@ -140,8 +143,4 @@ else:
 
     class _ProcessGroupStub:
         pass
-
-    ProcessGroup = _ProcessGroupStub  # type: ignore[misc,assignment]
-
-
-from torch.distributed import rpc as rpc
+    sys.modules["torch.distributed"].ProcessGroup = _ProcessGroupStub  # type: ignore[attr-defined]
