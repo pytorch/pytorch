@@ -958,6 +958,10 @@ class DeviceCachingAllocator {
     }
   }
 
+  void recordAnnotation(const std::shared_ptr<GatheredContext>& name) {
+    record_trace(TraceEntry::USER_DEFINED, 0, 0, nullptr, 0, name);
+  }
+
   bool isHistoryEnabled() {
     return record_history;
   }
@@ -3023,6 +3027,12 @@ class NativeCachingAllocator : public CUDAAllocator {
     for (auto& allocator : device_allocator) {
       allocator->recordHistory(
           enabled, context_recorder, alloc_trace_max_entries, when);
+    }
+  }
+
+  void recordAnnotation(const std::shared_ptr<GatheredContext>& name) override {
+    for (auto& allocator : device_allocator) {
+      allocator->recordAnnotation(name);
     }
   }
 

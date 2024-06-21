@@ -52,7 +52,6 @@ class HalideTests(TestCase):
                 scheduler="Mullapudi2016",
                 scheduler_flags={
                     "parallelism": parallel_num_threads(),
-                    "last_level_cache_size": HalideCodeCache.cpu_cache_size(),
                 },
             ),
             textwrap.dedent(
