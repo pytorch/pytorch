@@ -436,9 +436,9 @@ class TestSelectAlgorithm(TestCase):
         input = torch.randn(*B, in_features).to(dtype=torch.float32)
 
         other = torch.randn(*B, out_features).to(dtype=dtype)
-        if input_3d:
-            other2 = torch.randn(*B, out_features).to(dtype=dtype)
-        else:
+        other2 = torch.randn(*B, out_features).to(dtype=dtype)
+        if not input_3d:
+            # Avoid hiting qlinear inplace sum fusion
             other2 = torch.randn(1, *B, out_features).to(dtype=dtype)
 
         class M(torch.nn.Module):
