@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import collections
 import contextlib
 import dataclasses
@@ -1665,7 +1667,7 @@ class Scan(Loops):
         combine_fn: Callable[[Tuple[Any, ...], Tuple[Any, ...]], Tuple[Any, ...]],
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         **kwargs,
-    ) -> List[Optional["TensorBox"]]:
+    ) -> List[Optional[TensorBox]]:
         pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
         scan_ranges = [size[axis]]
 
@@ -2293,7 +2295,7 @@ class View(GenericView):
 class ReinterpretView(BaseView):
     """Pretend our storage has a different layout"""
 
-    layout: "Layout"
+    layout: Layout
 
     def __post_init__(self):
         super().__post_init__()
@@ -2898,7 +2900,7 @@ class FlexibleLayout(Layout):
 class NonOwningLayout(Layout):
     """Is a view into the storage of another tensor"""
 
-    def __init__(self, view: Union[BaseView, "TensorBox"]):
+    def __init__(self, view: Union[BaseView, TensorBox]):
         layout = view.get_layout()
         super().__init__(
             layout.device,
@@ -2960,7 +2962,7 @@ class MutationLayoutSHOULDREMOVE(Layout):
     def storage_size(self) -> sympy.Expr:
         return self.real_layout().storage_size()
 
-    def get_buffer(self) -> "Buffer":
+    def get_buffer(self) -> Buffer:
         def unwrap_views(target):
             if isinstance(target, MutationLayoutSHOULDREMOVE):
                 return unwrap_views(target.target)
@@ -3640,7 +3642,7 @@ class ChoiceCaller:
     def hash_key(self) -> str:
         raise NotImplementedError
 
-    def output_node(self) -> "TensorBox":
+    def output_node(self) -> TensorBox:
         raise NotImplementedError
 
     def info_dict(self) -> Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
@@ -3709,7 +3711,7 @@ class CUDATemplateBuffer(TemplateBuffer):
         inputs,
         make_kernel_render,
         workspace_size: int,
-        template: "CUDATemplate",  # type: ignore[name-defined]  # noqa: F821
+        template: CUDATemplate,  # type: ignore[name-defined]  # noqa: F821
     ):
         super().__init__(layout, inputs, make_kernel_render)
         # Global memory (in bytes) needed for this template.
@@ -4675,23 +4677,26 @@ class UserDefinedTritonKernel(ExternKernel):
         )
 
         args = self.codegen_kwargs()
-        raw_args = list(self.kwargs.values())
-
+        arg_types = []
         if V.graph.cpp_wrapper:
             # in C++ wrapper, we don't pass constexpr args, as they don't
             # get added as parameters to the PTX code compiled from the
             # user-defined Triton kernel (only non-constexpr args do)
             args = [arg for i, arg in enumerate(args) if i not in kernel.constexprs]
-            # Unify raw_args computation between cpp wrapper and python wrapper
-            raw_args = []
-            for i, arg_name in enumerate(self.ordered_kwargs_for_cpp_kernel):
-                if i not in kernel.constexprs:
-                    raw_args.append(self.get_kwargs_value(arg_name))
+            # cpp wrapper needs arg type info for codegen
+            for arg_name in self.ordered_kwargs_for_cpp_kernel:
+                val = self.get_kwargs_value(arg_name)
+                arg_types.append(
+                    val.get_dtype() if hasattr(val, "get_dtype") else type(val)
+                )
+            arg_types = [
+                t for i, t in enumerate(arg_types) if i not in kernel.constexprs
+            ]
 
         # Call to kernel
         self.codegen_comment(wrapper)
         wrapper.generate_user_defined_triton_kernel(
-            new_name, self.grid, configs, args, triton_meta, raw_args
+            new_name, self.grid, configs, args, triton_meta, arg_types
         )
 
     def should_allocate(self):
@@ -5973,7 +5978,7 @@ class StorageBox(MutableBox):
 class Subgraph(IRNode):
     name: str
     graph_module: torch.fx.GraphModule
-    graph: Optional["GraphLowering"] = None
+    graph: Optional[GraphLowering] = None
 
 
 def _has_aliased_buffers(buffers):

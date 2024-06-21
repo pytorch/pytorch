@@ -79,7 +79,6 @@ class CppWrapperCpu(WrapperCodeGen):
         cuda=True,
         triton=True,
         arg_types=None,
-        raw_args=None,
         grid_fn: str = "grid",
         triton_meta=None,
     ):
@@ -1286,7 +1285,7 @@ class CppWrapperCpu(WrapperCodeGen):
             self.writeline(self.wrap_kernel_call(kernel, args))
 
     def generate_user_defined_triton_kernel(
-        self, kernel_name, grid, configs, args, triton_meta, raw_args
+        self, kernel_name, grid, configs, args, triton_meta, arg_types=None
     ):
         assert len(grid) != 0
         if len(grid) == 1:
@@ -1301,15 +1300,13 @@ class CppWrapperCpu(WrapperCodeGen):
                     break
             assert grid_decision is not None
 
-        arg_types = [
-            arg.get_dtype() if hasattr(arg, "get_dtype") else type(arg)
-            for arg in raw_args
-        ]
+        current_device = V.graph.scheduler.get_current_device_or_throw()
         self.generate_kernel_call(
             kernel_name,
             args,
             arg_types=arg_types,
             grid=grid_decision,
+            device_index=current_device.index,
             cuda=True,
             triton=True,
             triton_meta=triton_meta,
@@ -2290,6 +2287,12 @@ if (py_{buf_name}.get() == NULL) {{
         )
 
         self.extern_call_ops.add(cpp_kernel_key)
+
+    def generate_reset_kernel_saved_flags(self):
+        pass
+
+    def generate_save_uncompiled_kernels(self):
+        pass
 
     def c_type_for_prim_type(self, type_) -> str:
         assert (
