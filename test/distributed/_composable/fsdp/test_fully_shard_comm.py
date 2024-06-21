@@ -933,6 +933,7 @@ class TestFullyShardUnshardMultiThread(FSDPTestMultiThread):
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_unshard_without_lazy_init(self):
+        torch.manual_seed(42)
         model = MLP(4)
         for param in model.parameters():
             dist.broadcast(param, src=0)
