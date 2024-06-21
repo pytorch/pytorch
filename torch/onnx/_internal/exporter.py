@@ -1561,7 +1561,7 @@ def common_pre_export_passes(
     module = passes.InsertTypePromotion(diagnostic_context, module).run()
 
     # TODO: Delete this after https://github.com/pytorch/pytorch/issues/112443 is done
-    module = passes.RemoveAssertions(diagnostic_context, module).run(*fx_module_args)
+    module = passes.RemoveAssertions(diagnostic_context, module).run()
 
     analysis.UnsupportedFxNodesAnalysis(
         diagnostic_context, module, options.onnxfunction_dispatcher
