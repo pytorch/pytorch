@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include <nlohmann/json.hpp>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -922,6 +923,10 @@ struct NCCLTraceBuffer {
       pg_config.insert(std::get<0>(pg_name), pg_info);
     }
     return pg_config;
+  }
+
+  nlohmann::json dump() {
+    return nlohmann::json("");
   }
 
   // dump all collectives + ncclDumpMap
