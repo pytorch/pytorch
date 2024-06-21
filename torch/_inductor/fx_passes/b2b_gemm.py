@@ -9,6 +9,7 @@ from ..select_algorithm import (
 from ..utils import use_triton_template
 from ..kernel.mm_common import mm_args
 from ..utils import ceildiv
+from ..ir import FixedLayout
 
 aten = torch.ops.aten
 
@@ -78,8 +79,8 @@ b2b_gemm_template = TritonTemplate(
         offs_col += COL_BLOCK_SIZE
 
     # store
-    idx_m = offs_row[:, None] * stride_am
-    idx_p = tl.arange(0, P)[None, :] * stride_cp
+    idx_m = offs_row[:, None]
+    idx_p = tl.arange(0, P)[None, :]
     mask = (idx_m < M) & (idx_p < P)
 
     {{store_output(("idx_m", "idx_p"), "acc", "mask")}}
@@ -100,7 +101,7 @@ def can_apply_b2b_gemm(mat1, mat2, mat3) -> bool:
     return mat1.shape[1] == 64 and mat3.shape[1] == 64
 
 def tuned_b2b_gemm(mat1, mat2, mat3, *, layout=None):
-    _, _, _, layout, _, _ = mm_args(mat1, mat2, layout=layout)
+    layout = FixedLayout(mat1.get_device(), mat1.get_dtype(), [mat1.shape[0], mat3.shape[1]])
     choices = []
     # TODO: change N and P to non-constexpr
     # TODO: add more configs for tuning
