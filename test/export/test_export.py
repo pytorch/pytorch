@@ -1086,7 +1086,7 @@ def forward(self, p_linear_weight, p_linear_bias, x):
         ep = torch.export._trace._export(
             Foo(),
             (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50)),
-            _preserve_ops=torch.export._trace.COMPOSITE_OPS_THAT_CAN_BE_PRESERVED,
+            _preserve_ops=testing.COMPOSITE_OPS_THAT_CAN_BE_PRESERVED,
         )
         self.assertExpectedInline(
             str(ep.graph_module.code).strip(),
