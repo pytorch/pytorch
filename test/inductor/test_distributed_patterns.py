@@ -159,7 +159,7 @@ class DistributedPatternTests(TestCase):
             y = fn(x)
             self.assertEqual(y, expected)
             self.assertEqual(x.untyped_storage().size(), 0)
-    
+
     def test_storage_resize_zero_cpu(self):
         self._test_storage_resize_zero("cpu")
 
