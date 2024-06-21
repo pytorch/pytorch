@@ -731,6 +731,7 @@ def mps_ops_modifier(ops):
         'nn.functional.interpolatearea': None,
         'nn.functional.interpolatebicubic': None,
         'nn.functional.interpolatetrilinear': None,
+        'nn.functional.max_pool2d': integral_types() if product_version < 14.0 else [],
         'nn.functional.max_unpool1dgrad': None,
         'nn.functional.max_unpool2dgrad': None,
         'nn.functional.max_unpool3dgrad': None,
