@@ -4,6 +4,7 @@ import copy
 import dataclasses
 import io
 import logging
+import operator
 import re
 import unittest
 import warnings
@@ -2778,12 +2779,18 @@ def forward(self, x):
 
         ep = torch.export.export(M(), (torch.tensor(1),))
         FileCheck().check_count(
-            "torch.ops.aten._assert_scalar.default", 2, exactly=True
+            "torch.ops.aten._assert_scalar.default", 0, exactly=True
+        ).run(ep.graph_module.code)
+        FileCheck().check_count(
+            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
         ).run(ep.graph_module.code)
         decompose_ep = ep.run_decompositions()
         FileCheck().check_count(
-            "torch.ops.aten._assert_scalar.default", 2, exactly=True
-        ).run(decompose_ep.graph_module.code)
+            "torch.ops.aten._assert_scalar.default", 0, exactly=True
+        ).run(ep.graph_module.code)
+        FileCheck().check_count(
+            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
+        ).run(ep.graph_module.code)
 
     def test_mixed_input(self):
         class Module(torch.nn.Module):
@@ -2814,7 +2821,10 @@ def forward(self, x):
         self.assertEqual(ep.module()(torch.tensor([6])).shape, (6, 4))
 
         FileCheck().check_count(
-            "torch.ops.aten._assert_scalar.default", 2, exactly=True
+            "torch.ops.aten._assert_scalar.default", 0, exactly=True
+        ).run(ep.graph_module.code)
+        FileCheck().check_count(
+            "torch.ops.aten.sym_constrain_range.default", 1, exactly=True
         ).run(ep.graph_module.code)
 
         with self.assertRaisesRegex(
@@ -2837,7 +2847,10 @@ def forward(self, x):
         ep = export(f, (torch.tensor([6]),))
         self.assertEqual(ep.module()(torch.tensor([5])).shape, (10, 5))
         FileCheck().check_count(
-            "torch.ops.aten._assert_scalar.default", 2, exactly=True
+            "torch.ops.aten._assert_scalar.default", 0, exactly=True
+        ).run(ep.graph_module.code)
+        FileCheck().check_count(
+            "torch.ops.aten.sym_constrain_range.default", 1, exactly=True
         ).run(ep.graph_module.code)
 
     def test_to_module_with_mutated_buffer(self):
@@ -3457,7 +3470,7 @@ def forward(self, x):
             "torch.ops.aten.sym_constrain_range.default", 1, exactly=True
         ).run(ep.graph_module.code)
         FileCheck().check_count(
-            "torch.ops.aten._assert_scalar.default", 1, exactly=True
+            "torch.ops.aten._assert_scalar.default", 0, exactly=True
         ).run(ep.graph_module.code)
 
         ep = ep.run_decompositions()
@@ -3466,7 +3479,7 @@ def forward(self, x):
             "torch.ops.aten.sym_constrain_range.default", 1, exactly=True
         ).run(ep.graph_module.code)
         FileCheck().check_count(
-            "torch.ops.aten._assert_scalar.default", 1, exactly=True
+            "torch.ops.aten._assert_scalar.default", 0, exactly=True
         ).run(ep.graph_module.code)
 
     def test_non_arg_name_dynamic_shapes_api(self):
@@ -5130,12 +5143,10 @@ def forward(self, x):
     item = torch.ops.aten.item.default(x);  x = None
     sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(item)
     sym_constrain_range_default = torch.ops.aten.sym_constrain_range.default(item, min = 3, max = 5)
-    ge = item >= 0
-    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression 0 <= u1 on node 'ge'");  ge = None
     gt = item > 2
-    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(gt, "Runtime assertion failed for expression 2 < u1 on node 'gt'");  gt = None
+    _assert_scalar_default = torch.ops.aten._assert_scalar.default(gt, "Runtime assertion failed for expression 2 < u1 on node 'gt'");  gt = None
     lt = item < 6
-    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression u1 < 6 on node 'lt'");  lt = None
+    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression u1 < 6 on node 'lt'");  lt = None
     foo_unbacked = torch.ops.testlib.foo_unbacked.default(item);  item = None
     return foo_unbacked""",
         )
@@ -5147,14 +5158,12 @@ def forward(self, x, y):
     sin = torch.ops.aten.sin.default(y)
     sum_1 = torch.ops.aten.sum.dim_IntList(sin, []);  sin = None
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x);  x = None
-    sym_constrain_range_for_size = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense)
-    sym_constrain_range = torch.ops.aten.sym_constrain_range.default(_local_scalar_dense, min = 3, max = 5)
-    ge = _local_scalar_dense >= 0
-    _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression 0 <= u1 on node 'ge'");  ge = None
+    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense)
+    sym_constrain_range_default = torch.ops.aten.sym_constrain_range.default(_local_scalar_dense, min = 3, max = 5)
     gt = _local_scalar_dense > 2
-    _assert_scalar_1 = torch.ops.aten._assert_scalar.default(gt, "Runtime assertion failed for expression 2 < u1 on node 'gt'");  gt = None
+    _assert_scalar = torch.ops.aten._assert_scalar.default(gt, "Runtime assertion failed for expression 2 < u1 on node 'gt'");  gt = None
     lt = _local_scalar_dense < 6;  _local_scalar_dense = None
-    _assert_scalar_2 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression u1 < 6 on node 'lt'");  lt = None
+    _assert_scalar_1 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression u1 < 6 on node 'lt'");  lt = None
     full = torch.ops.aten.full.default([4, 4], 1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
     add = torch.ops.aten.add.Tensor(y, sum_1);  y = sum_1 = None
     sum_2 = torch.ops.aten.sum.dim_IntList(full, []);  full = None
@@ -5506,25 +5515,6 @@ def forward(self, x, y):
             0,
         )
 
-    def test_intermediate_sym(self):
-        class Foo(torch.nn.Module):
-            def forward(self, x, y):
-                if x[1].storage_offset() ** 2 - x.shape[0] >= 4:
-                    n = y.item()
-                    torch._check(n >= 2)
-                    torch._check(n <= 10)
-                    z = torch.cat([x, x], dim=0).repeat(n, n)
-                    return x.size(0) + x.stride(0) + n + z.size(1) + z.stride(0)
-        
-        inps = (torch.randn(7, 9), torch.tensor([2]))
-        shapes = {"x": (Dim("d0"), Dim("d1", min=4)), "y": None}
-        ep = torch.export._trace._export(
-            Foo(),
-            inps,
-            dynamic_shapes=shapes,
-            _allow_complex_guards_as_runtime_asserts=True,
-        )
-
     def test_constant_aliasing(self):
         class M1(torch.nn.Module):
             def __init__(self, m2, foo):
@@ -5584,18 +5574,118 @@ def forward(self, x, y):
         for param in ["alpha", "beta", "gamma"]:
             self.assertTrue(param in unep.state_dict())
 
-    def test_ras(self):
+    def test_intermediate_shape_comp(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
-                n = x.item()
+                z = torch.cat([x, x], dim=0)
+                w = z.repeat(y.shape[0])
+                return w.shape[0] + x.shape[0]
+
+        inputs = (torch.randn(6), torch.randn(4))
+        shapes = {
+            "x": (Dim("dx"),),
+            "y": (Dim("dy"),),
+        }
+        ep = export(
+            Foo(),
+            inputs,
+            dynamic_shapes=shapes,
+        )
+        # test that shape is from size compute, not sym_size call
+        add_node = [node for node in ep.graph.nodes if node.target == operator.add][0]
+        self.assertTrue(add_node.args[0].target == operator.mul)
+        # test sym_size calls only happen on placeholders
+        sym_size_nodes = [
+            node for node in ep.graph.nodes
+            if node.target == torch.ops.aten.sym_size.int
+        ]
+        self.assertEqual(len(sym_size_nodes), 2)
+        self.assertTrue(all(node.args[0].op == "placeholder" for node in sym_size_nodes))
+        # test that repeat node gets DCE'd
+        repeat_nodes = [
+            node for node in ep.graph.nodes
+            if node.target == torch.ops.aten.repeat.default
+        ]
+        self.assertEqual(len(repeat_nodes), 0)
+
+    def test_checks_to_constrain_range(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                n = y.item()
+                m = y.item()
                 torch._check_is_size(n)
-                torch.sym_constrain_range_for_size(n, min=2)
-                torch.sym_constrain_range_for_size(n, min=4)
-                torch.sym_constrain_range_for_size(n, min=3, max=10)
-                torch.sym_constrain_range_for_size(n, min=2, max=8)
-                return y[:n]
-        inps = (torch.tensor([6]), torch.randn(10))
-        ep = export(Foo(), inps)
+                torch._check(m >= 0)
+                torch._check(n >= 3)
+                torch._check(-m >= -9)  # m <= 9
+                torch._check(n != 2)
+                # n has range [3, 9]
+                return x[n]
+
+        inputs = (torch.randn(10), torch.tensor(6))
+        ep = export(Foo(), inputs)
+        FileCheck().check_count(
+            "torch.ops.aten._assert_scalar.default", 0, exactly=True
+        ).run(ep.graph_module.code)
+        FileCheck().check_count(
+            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
+        ).run(ep.graph_module.code)
+
+        ep = ep.run_decompositions()
+        FileCheck().check_count(
+            "torch.ops.aten._assert_scalar.default", 0, exactly=True
+        ).run(ep.graph_module.code)
+        FileCheck().check_count(
+            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
+        ).run(ep.graph_module.code)
+
+        # check runtime
+        ep.module()(torch.randn(10), torch.tensor(8))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Invalid value range for 2 between \[3, 9\]"
+        ):
+            ep.module()(torch.randn(10), torch.tensor(2))
+
+    def test_cse_for_symint(self):
+        class Foo(torch.nn.Module):
+            # check sym ops only get computed once
+            def forward(self, x, y):
+                if (
+                    x.shape[0] ** 2 - y.shape[0] ** 2 >= 4  # 16
+                    and x.shape[0] ** 2 - y.shape[0] ** 2 <= 20
+                    and x.shape[0] ** 2 - y.shape[0] ** 2 != 15
+                ):
+                    return x * 2, y * 2
+
+        inputs = (torch.randn(5), torch.randn(3))
+        shapes = {"x": (Dim("dx"),), "y": (Dim("dy"),)}
+        ep = torch.export._trace._export(
+            Foo(),
+            inputs,
+            dynamic_shapes=shapes,
+            _allow_complex_guards_as_runtime_asserts=True,
+        )
+        # count 2 pow nodes, 2 sym_size.int nodes
+        self.assertEqual(
+            [node.target for node in ep.graph.nodes].count(
+                operator.pow,
+            ),
+            2
+        )
+        FileCheck().check_count(
+            "torch.ops.aten.sym_size.int", 2, exactly=True
+        ).run(ep.graph_module.code)
+
+        ep = ep.run_decompositions()
+        self.assertEqual(
+            [node.target for node in ep.graph.nodes].count(
+                operator.pow,
+            ),
+            2
+        )
+        FileCheck().check_count(
+            "torch.ops.aten.sym_size.int", 2, exactly=True
+        ).run(ep.graph_module.code)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")

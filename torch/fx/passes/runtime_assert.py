@@ -43,6 +43,29 @@ def _get_sym_val(node: fx.Node) -> Optional["sympy.Expr"]:
     return None
 
 
+def _is_size_stride_or_storage_offset_call(node: fx.Node) -> bool:
+    if (
+        node.target in (
+            torch.ops.aten.sym_size.int,
+            torch.ops.aten.sym_stride.int,
+            torch.ops.aten.storage_offset.default,
+        )
+        and node.args[0].op != "placeholder"
+    ):  # export
+        return True
+    if (
+        node.target == operator.getitem
+        and node.args[0].target in (
+            "size",
+            "stride",
+            "storage_offset",
+        )
+        and node.args[0].args[0].op != "placeholder"
+    ):  # dynamo export
+        return True
+    return False
+
+
 @compatibility(is_backward_compatible=True)
 def insert_deferred_runtime_asserts(
     gm: GraphModule,
@@ -76,9 +99,6 @@ def insert_deferred_runtime_asserts(
     # TODO: Request simplification on runtime asserts before emitting them
     ras_by_symbol = shape_env.deferred_runtime_asserts.copy()
     graph = gm.graph
-    if not any(ras for ras in ras_by_symbol.values()):
-        return
-
     graph_code_log.debug(
         "%s",
         lazy_format_graph_code(
@@ -103,6 +123,13 @@ def insert_deferred_runtime_asserts(
     for ras in ras_by_symbol.values():
         for ra in ras:
             needed_symbols.update(free_symbols(ra.expr))
+    for node in gm.graph.nodes:
+        if (
+            node.op == "call_function"
+            and _is_size_stride_or_storage_offset_call(node)
+            and (sym_expr := _get_sym_val(node)) is not None
+        ):
+            needed_symbols.update(sym_expr.free_symbols)
 
     log.debug("needed_symbols = %s", needed_symbols)
 
@@ -119,7 +146,7 @@ def insert_deferred_runtime_asserts(
         if isinstance(expr, (Integer, Number, Symbol, BooleanAtom)):
             return sympy_interp(
                 PythonReferenceAnalysis, symbol_to_proxy, expr
-            )
+            )  # this returns non-proxy object, don't cache
         if expr in symbol_to_proxy:
             return symbol_to_proxy[expr]
 
@@ -128,7 +155,9 @@ def insert_deferred_runtime_asserts(
             if arg in symbol_to_proxy:
                 res = symbol_to_proxy[arg]
             else:
-                res = symbol_to_proxy[arg] = _sympy_interp(symbol_to_proxy, arg)
+                res = _sympy_interp(symbol_to_proxy, arg)
+                if isinstance(res, fx.Proxy):
+                    symbol_to_proxy[arg] = res
             fx_args.append(res)
         
         symbol_to_proxy[expr] = run_sympy_handler(
@@ -137,13 +166,14 @@ def insert_deferred_runtime_asserts(
         return symbol_to_proxy[expr]
 
     def _is_bound_expr_for_symbol(expr: "sympy.Expr") -> bool:
+        # This is probably unnecessary, but since torch._check() calls for single-symbol bounds
+        # like u0 >= 0, 10 >= u0 accumulate range info in the ShapeEnv, and we insert sym_constrain_range calls
+        # anyways, we designate these calls as redundant and remove them.
         if len(expr.args) != 2:
             return False
         if expr.func not in (
             sympy.LessThan,
-            sympy.StrictLessThan,
             sympy.GreaterThan,
-            sympy.StrictGreaterThan,
             sympy.Equality,
         ):
             return False
@@ -160,7 +190,7 @@ def insert_deferred_runtime_asserts(
                 or (
                     not (ra.expr.free_symbols - constrained_unbacked_symbols)
                     and _is_bound_expr_for_symbol(ra.expr)
-                )
+                )  # single-symbol bound checks are handled by sym_constrain_range
             ):
                 continue
 
@@ -270,15 +300,7 @@ def insert_deferred_runtime_asserts(
                     gm.graph.erase_node(node)
                     log.debug("CSE node %s -> %s for expr %s", node, hash_node, sym_expr)
                 elif (
-                    node.target in (
-                        "size",
-                        "stride",
-                        "storage_offset",
-                        torch.ops.aten.sym_size.int,
-                        torch.ops.aten.sym_stride.int,
-                        torch.ops.aten.storage_offset.default,
-                    )
-                    and node.args[0].op != "placeholder"
+                    _is_size_stride_or_storage_offset_call(node)
                     and not (sym_expr.free_symbols - symbol_to_proxy.keys())
                 ):
                     symbol_to_proxy[sym_expr] = _sympy_interp(symbol_to_proxy, sym_expr)
@@ -286,8 +308,11 @@ def insert_deferred_runtime_asserts(
                     node.replace_all_uses_with(hash_node)
                     gm.graph.erase_node(node)
                     log.debug("CSE node %s -> %s for expr %s", node, hash_node, sym_expr)
-                else:  # actually exclude size/stride/storage
+                else:
                     symbol_to_proxy[sym_expr] = fx.Proxy(node)
+
+            if not any(ras for ras in ras_by_symbol.values()):
+                continue  # only CSE
 
             # If the symbol is used, we'll call sym_constrain_range(_for_size) later when we see it anyways,
             # so delete calls before that
@@ -494,5 +519,3 @@ def insert_deferred_runtime_asserts(
 
                 constrained_unbacked_symbols.add(i0)
                 add_runtime_asserts(ras)
-
-    gm.graph.eliminate_dead_code()

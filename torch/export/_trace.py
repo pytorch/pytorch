@@ -27,9 +27,6 @@ from torch._export.passes._node_metadata_hook import (
     _node_metadata_hook,
     _set_node_metadata_hook,
 )
-from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
-    _AddRuntimeAssertionsForInlineConstraintsPass,
-)
 from torch._export.passes.collect_tracepoints_pass import CollectTracepointsPass
 from torch._export.passes.lift_constants_pass import (
     ConstantAttrMap,
@@ -150,23 +147,6 @@ def _strip_root(x):
         stripped = x[len("_export_root") :]
         return stripped[1:] if stripped.startswith(".") else stripped
     return x
-
-
-def _add_runtime_assertions_to_cond_in_subgraph(range_constraints, gm, fake_mode):
-    # We can't get rid of this yet, since for some reason
-    # insert_deferred_runtime_assertions doesn't add assertions to cond
-    # subgraphs
-    if len(range_constraints) > 0:
-        stack_trace = (
-            'File "torch/_export/passes/add_runtime_assertions_for_constraints_pass.py", line 46, '
-            "in _AddRuntimeAssertionsForInlineConstraintsPass"
-        )
-        with fake_mode, _set_node_metadata_hook(
-            gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
-        ):
-            res = _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints)(gm)
-        assert res is not None
-        gm = res.graph_module
 
 
 def _rewrite_node(gm):
@@ -1553,12 +1533,6 @@ def _export(
         dynamic_shapes,
         num_lifted,
     )
-    if strict:
-        _add_runtime_assertions_to_cond_in_subgraph(
-            range_constraints,
-            gm,
-            fake_mode,
-        )
 
     # Make module signatures.
     module_call_signatures = {}
