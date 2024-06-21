@@ -1,5 +1,5 @@
 import torch
-from torch._dynamo.utils import counters
+from ..._dynamo.utils import counters
 from ..pattern_matcher import Arg, CallFunction, Match, register_graph_pattern
 from .split_cat import construct_pattern_matcher_pass
 from ..select_algorithm import (
@@ -7,6 +7,8 @@ from ..select_algorithm import (
     autotune_select_algorithm,
 )
 from ..utils import use_triton_template
+from ..kernel.mm_common import mm_args
+from ..utils import ceildiv
 
 aten = torch.ops.aten
 
@@ -24,7 +26,7 @@ def b2b_gemm_grid(m, n, meta):
     """
     The CUDA grid size for matmul triton templates.
     """
-    return (cdiv(m, meta["ROW_BLOCK_SIZE"]) * cdiv(n, meta["COL_BLOCK_SIZE"]), 1, 1)
+    return (ceildiv(m, meta["ROW_BLOCK_SIZE"]) * ceildiv(n, meta["COL_BLOCK_SIZE"]), 1, 1)
 
 b2b_gemm_template = TritonTemplate(
     name="b2b_gemm",
@@ -58,18 +60,15 @@ b2b_gemm_template = TritonTemplate(
     # accumulator
     acc = tl.zeros((ROW_BLOCK_SIZE, P), dtype=tl.float16)
 
-    # A
-    a_ptrs = a_ptr + (offs_row[:, None] * stride_am + tl.arange(0, N)[None, :] * stride_an)
+    a_ptrs = A + (offs_row[:, None] * stride_am + tl.arange(0, N)[None, :] * stride_an)
     a = tl.load(a_ptrs)
 
     for _ in range(num_col_block):
 
-        # B
-        b_ptrs = b_ptr + (tl.arange(0, N)[:, None] * stride_bn + offs_col[None, :] * stride_bo)
+        b_ptrs = B + (tl.arange(0, N)[:, None] * stride_bn + offs_col[None, :] * stride_bo)
         b = tl.load(b_ptrs)
 
-        # C
-        c_ptrs = c_ptr + (offs_col[:, None] * stride_co + tl.arange(0, P)[None, :] * stride_cp)
+        c_ptrs = C + (offs_col[:, None] * stride_co + tl.arange(0, P)[None, :] * stride_cp)
         c = tl.load(c_ptrs)
 
         # computation (TODO: floating point errors)
@@ -100,12 +99,14 @@ def can_apply_b2b_gemm(mat1, mat2, mat3) -> bool:
     # TODO: change to a real-check for size restrictions
     return mat1.shape[1] == 64 and mat3.shape[1] == 64
 
-def tuned_b2b_gemm(mat1, mat2, mat3, layout=None):
+def tuned_b2b_gemm(mat1, mat2, mat3, *, layout=None):
     _, _, _, layout, _, _ = mm_args(mat1, mat2, layout=layout)
     choices = []
+    # TODO: change N and P to non-constexpr
+    # TODO: add more configs for tuning
     for config in [
         {"ROW_BLOCK_SIZE": 32, "COL_BLOCK_SIZE": 32, "num_stages": 2, "num_warps": 4, "N": 64, "P": 64}
-    ]:  # later may add more configs
+    ]:
         b2b_gemm_template.maybe_append_choice(
             choices,
             input_nodes=(mat1, mat2, mat3),
@@ -115,7 +116,8 @@ def tuned_b2b_gemm(mat1, mat2, mat3, layout=None):
     return autotune_select_algorithm("b2b_gemm", choices, [mat1, mat2, mat3], layout)
 
 # currently it matches ((A @ B) @ C)
-# later will change to matching (A @ B) in (epilogue2 ((epilogue1 (A @ B)) @ C)) and inspecting the graph
+# TODO: later will change to matching (A @ B) in (epilogue2 ((epilogue1 (A @ B)) @ C)) and inspecting the graph
+# TODO: match more cases
 @register_graph_pattern(
     CallFunction(aten.mm, CallFunction(aten.mm, Arg(), Arg()), Arg()),
     pass_dict=construct_pattern_matcher_pass("b2b_gemm_pass"),
@@ -127,6 +129,7 @@ def b2b_gemm(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node, mat3: torch
         graph = match.graph
         root_node = match.nodes[-1]
         with graph.inserting_before(root_node):
+            tuned_b2b_gemm._inductor_lowering_function = True
             replacement = graph.call_function(tuned_b2b_gemm, tuple(match.args), match.kwargs)
             replacement.meta.update(root_node.meta)
             root_node.replace_all_uses_with(replacement)
