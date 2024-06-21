@@ -39,7 +39,7 @@ RUN bash ./install_openssl.sh && rm install_openssl.sh
 
 FROM base as conda
 # Install Anaconda
-ADD ./common/install_conda.sh install_conda.sh
+ADD ./common/install_conda_docker.sh install_conda.sh
 RUN bash ./install_conda.sh && rm install_conda.sh
 
 # Install CUDA
