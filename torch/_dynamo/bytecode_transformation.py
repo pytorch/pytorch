@@ -239,6 +239,9 @@ def add_push_null_call_function_ex(
     else:
         insts = inst_or_insts
 
+    if sys.version_info < (3, 11):
+        return insts
+
     idx = -1 if sys.version_info >= (3, 13) else 0
     if insts[idx].opname == "LOAD_GLOBAL":
         assert insts[idx].arg is not None

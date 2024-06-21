@@ -29,9 +29,13 @@
 #if IS_PYTHON_3_13_PLUS
 #define F_CODE(x) ((PyCodeObject*)(x)->f_executable)
 #define PREV_INSTR(x) (x)->instr_ptr
-#define FUNC(x) ((x)->f_funcobj)
 #else
 #define F_CODE(x) ((PyCodeObject*)(x)->f_code)
 #define PREV_INSTR(x) (x)->prev_instr
+#endif
+
+#if IS_PYTHON_3_12_PLUS
+#define FUNC(x) ((x)->f_funcobj)
+#else
 #define FUNC(x) ((x)->f_func)
 #endif

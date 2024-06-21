@@ -56,6 +56,7 @@ FrameLocalsMapping::FrameLocalsMapping(THP_EVAL_API_FRAME_OBJECT* frame) {
 }
 
 py::handle FrameLocalsMapping::getitem(const std::string& key) const {
+  printf("get item %s\n", key.c_str());
   return this->mapping.at(key);
 }
 

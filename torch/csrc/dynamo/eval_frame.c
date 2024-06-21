@@ -611,10 +611,9 @@ static PyObject* _custom_eval_frame(
     *should_clear_frame = 1;
     return NULL;
   }
-  PyObject *f_locals = frame->f_locals;
   _PytorchRecordFunctionState* rf = _pytorch_record_function_enter(cache_lookup_profiler_str);
   printf("do lookup\n");
-  PyObject* maybe_cached_code = lookup(extra, f_locals, backend);
+  PyObject* maybe_cached_code = lookup(extra, locals, backend);
   _pytorch_record_function_exit(rf);
   FrameLocalsMapping_delete(&locals);
   if (maybe_cached_code == NULL) {
