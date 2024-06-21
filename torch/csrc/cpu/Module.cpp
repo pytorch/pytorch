@@ -11,6 +11,8 @@ void initModule(PyObject* module) {
   cpu.def("_is_cpu_support_avx2", at::cpu::is_cpu_support_avx2);
   cpu.def("_is_cpu_support_avx512", at::cpu::is_cpu_support_avx512);
   cpu.def("_is_cpu_support_avx512_vnni", at::cpu::is_cpu_support_avx512_vnni);
+  cpu.def("_is_cpu_support_amx_tile", at::cpu::is_cpu_support_amx_tile);
+  cpu.def("_init_amx", at::cpu::init_amx);
 }
 
 } // namespace torch::cpu
