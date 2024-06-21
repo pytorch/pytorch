@@ -32,9 +32,9 @@ from torch.testing._internal.common_utils import IS_LINUX, LazyVal, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.utils import _pytree as pytree
 
-
+# NVIDIA A100-SXM4-40GB
 is_a100 = LazyVal(
-    lambda: IS_LINUX and torch.cuda.is_available() and get_gpu_shared_memory() == 166912
+    lambda: IS_LINUX and torch.cuda.is_available() and "A100" in torch.cuda.get_device_name(0)
 )
 
 

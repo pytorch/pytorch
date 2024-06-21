@@ -259,10 +259,6 @@ def main(output_file=DEFAULT_OUTPUT_FILE):
 
 
 if __name__ == "__main__":
-    # DEBUG
-    if torch.cuda.is_available():
-        print(f"===== {torch.cuda.get_device_name(0)}")
-
     parser = argparse.ArgumentParser(description="Run experiments.")
     parser.add_argument(
         "--output",

@@ -1656,10 +1656,6 @@ def check_pip_packages() -> None:
 
 
 def main():
-    # DEBUG
-    if torch.cuda.is_available():
-        print(f"===== {torch.cuda.get_device_name(0)}")
-
     check_pip_packages()
 
     options = parse_args()
