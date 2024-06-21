@@ -1738,9 +1738,7 @@ class Kernel(CodeGen):
                     value = getattr(parent_handler, name)(*args, **kwargs)  # type: ignore[has-type]
 
                     def do_cse(v):
-                        csevar = V.kernel.cse.generate(
-                            V.kernel.compute, v, bounds=bounds
-                        )
+                        csevar = self.cse.generate(self.compute, v, bounds=bounds)
                         csevar.update_on_args(name, args, kwargs)
                         return csevar
 
