@@ -357,6 +357,15 @@ struct TORCH_CUDA_CPP_API CTCLossDescriptor
     AT_CUDNN_CHECK(
         cudnnSetCTCLossDescriptorEx(mut_desc(), datatype, normMode, gradMode));
   }
+  void set_v9(
+      cudnnDataType_t datatype,
+      cudnnLossNormalizationMode_t normMode,
+      cudnnCTCGradMode_t gradMode,
+      int maxLabelLength) {
+    AT_CUDNN_CHECK(
+        cudnnSetCTCLossDescriptor_v9(mut_desc(), datatype, normMode, gradMode, maxLabelLength));
+  }
+
 };
 
 struct TORCH_CUDA_CPP_API ActivationDescriptor
