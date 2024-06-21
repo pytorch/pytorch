@@ -61,7 +61,7 @@ void PropertyPropBase::propagateBlock(Block* block, bool insert_expands) {
   for (Node* node : block->nodes()) {
     try {
       propagateNode(node, insert_expands);
-    } catch (propagation_error& e) {
+    } catch (propagation_error&) {
       setUnshapedType(node);
     } catch (std::exception& e) {
       throw ErrorReport(node->sourceRange())

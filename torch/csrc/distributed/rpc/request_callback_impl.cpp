@@ -120,7 +120,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackImpl::runPythonFunction(
     e.restore();
     PyErr_Clear();
     return future;
-  } catch (std::exception& e) {
+  } catch (std::exception&) {
     return asFuture(std::current_exception());
   }
 

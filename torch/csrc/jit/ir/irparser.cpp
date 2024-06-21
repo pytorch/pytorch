@@ -195,10 +195,10 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
         double imag = 0.0f;
         try {
           imag = std::stod(str.substr(0, str.size() - 1));
-        } catch (const std::invalid_argument& e) {
+        } catch (const std::invalid_argument&) {
           throw ErrorReport(token.range)
               << "Number cannot be converted to double";
-        } catch (const std::out_of_range& e) {
+        } catch (const std::out_of_range&) {
           throw ErrorReport(token.range)
               << "Number is too long to be represented in type double";
         }
@@ -209,10 +209,10 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
         r.k = AttributeKind::f;
         try {
           r.f = std::stod(str);
-        } catch (const std::invalid_argument& e) {
+        } catch (const std::invalid_argument&) {
           throw ErrorReport(token.range)
               << "Number cannot be converted to double";
-        } catch (const std::out_of_range& e) {
+        } catch (const std::out_of_range&) {
           throw ErrorReport(token.range)
               << "Number is too long to be represented in type double";
         }
@@ -220,10 +220,10 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
         r.k = AttributeKind::i;
         try {
           r.i = std::stoll(str);
-        } catch (const std::invalid_argument& e) {
+        } catch (const std::invalid_argument&) {
           throw ErrorReport(token.range)
               << "Number cannot be converted to integer";
-        } catch (const std::out_of_range& e) {
+        } catch (const std::out_of_range&) {
           throw ErrorReport(token.range) << "Number is too big";
         }
       }

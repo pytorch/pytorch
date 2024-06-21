@@ -86,7 +86,7 @@ std::shared_ptr<Operator> matchBuiltinOp(
         opWithStack;
     try {
       opWithStack = torch::jit::getOpWithStack(c10OpsForSymbol, args, kwargs);
-    } catch (const std::runtime_error& e) {
+    } catch (const std::runtime_error&) {
       opWithStack = torch::jit::getOpWithStack(ops, args, kwargs);
     }
     matchedOperator = std::get<0>(opWithStack);
@@ -172,7 +172,7 @@ c10::intrusive_ptr<JitFuture> toPyJitFuture(
               e.restore();
               PyErr_Clear();
               return;
-            } catch (std::exception& e) {
+            } catch (std::exception&) {
               child->setErrorIfNeeded(std::current_exception());
               return;
             }

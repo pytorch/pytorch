@@ -156,7 +156,7 @@ std::optional<IValue> toTypeInferredIValueOptional(py::handle input) {
   // on various object types, but we want it to work with all types.
   try {
     return toTypeInferredIValue(input);
-  } catch (const c10::Error& e) {
+  } catch (const c10::Error&) {
     return c10::nullopt;
   }
 }
