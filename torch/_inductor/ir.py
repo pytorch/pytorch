@@ -4853,6 +4853,7 @@ class MutationOutput(ExternKernel):
         super().__init__(None, layout, [mutated_node, node_doing_mutating], ())
         self.node_doing_mutating = node_doing_mutating
         self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
 
     def should_allocate(self):
         return False

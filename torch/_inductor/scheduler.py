@@ -85,7 +85,7 @@ class SchedulerBuffer:
         if self.get_mutations():
             result.writeline(f"{name}.mutations = {pformat(self.get_mutations())}")
         result.writeline(f"{name}.users = {pformat(self.users)}")
-        return result.getvalue()
+        return result.getrawvalue()
 
     def get_name(self) -> str:
         return self.node.get_name()
@@ -176,7 +176,7 @@ class BaseSchedulerNode:
         name = self.get_name()
         buf = IndentedBuffer()
         buf.splice(
-            f"""
+            f"""\
 {name}: {type(self).__name__}({type(getattr(self, 'node', None)).__name__})
 {name}.writes = {pformat(self.read_writes.writes)}
 {name}.unmet_dependencies = {pformat(self.unmet_dependencies)}
@@ -194,7 +194,7 @@ class BaseSchedulerNode:
         except Exception:
             log.warning("Ignoring error in debug_str()", exc_info=True)
 
-        return buf.getvalue()
+        return buf.getrawvalue().rstrip()
 
     def debug_str_extra(self) -> str:
         return ""
@@ -1084,13 +1084,13 @@ class FusedSchedulerNode(BaseSchedulerNode):
         node_typestr = ",".join(type(n).__name__ for n in self.snodes)
         buf = IndentedBuffer()
         buf.splice(
-            f"""
+            f"""\
 {name}: {type(self).__name__}({node_typestr})
 {name}.writes = {pformat(self.read_writes.writes)}
 {name}.unmet_dependencies = {pformat(self.unmet_dependencies)}
 {name}.met_dependencies = {pformat(self.read_writes.reads - self.unmet_dependencies)}
 {name}.outputs = [
-        """
+            """
         )
         with buf.indent():
             for out in self.get_outputs():
@@ -1102,7 +1102,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
         except Exception:
             log.warning("Ignoring error in debug_str()", exc_info=True)
 
-        return buf.getvalue()
+        return buf.getrawvalue().rstrip()
 
 
 class ForeachKernelSchedulerNode(FusedSchedulerNode):
