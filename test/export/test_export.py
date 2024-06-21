@@ -5601,12 +5601,16 @@ def forward(self, x, y):
         ]
         self.assertEqual(len(sym_size_nodes), 2)
         self.assertTrue(all(node.args[0].op == "placeholder" for node in sym_size_nodes))
-        # test that repeat node gets DCE'd
+        # dynamo will DCE the repeat node, AOTAutograd will leave it
         repeat_nodes = [
             node for node in ep.graph.nodes
             if node.target == torch.ops.aten.repeat.default
         ]
-        self.assertEqual(len(repeat_nodes), 0)
+        self.assertEqual(
+            len(repeat_nodes),
+            1 if is_non_strict_test(self._testMethodName) else 0,
+        )
+        
 
     def test_checks_to_constrain_range(self):
         class Foo(torch.nn.Module):

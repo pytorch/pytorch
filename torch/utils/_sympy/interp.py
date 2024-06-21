@@ -106,14 +106,13 @@ def handlers():
 ASSOCIATIVE_OPS = {"minimum", "maximum", "mul", "add", "and_", "or_"}
 
 
-def run_sympy_handler(analysis, args, func, index_dtype=torch.int64):
+def run_sympy_handler(analysis, args, expr, index_dtype=torch.int64):
     # Special cases
-    if (
-        func == sympy.Pow
-        and isinstance(args[1], sympy.core.numbers.Half)
+    if isinstance(expr, sympy.Pow) and isinstance(
+        expr.args[1], sympy.core.numbers.Half
     ):
         return analysis.sqrt(args[0])
-    if func == ToFloat:
+    if isinstance(expr, ToFloat):
         return analysis.to_dtype(args[0], torch.float64)
 
     # These handlers are special because they take an extra dtype argument
@@ -131,13 +130,13 @@ def run_sympy_handler(analysis, args, func, index_dtype=torch.int64):
         CeilToInt: "ceil_to_int",
         RoundToInt: "round_to_int",
     }
-    if (handler_name := INDEX_DTYPE_HANDLERS.get(func)) is not None:
+    if (handler_name := INDEX_DTYPE_HANDLERS.get(expr.func)) is not None:
         return getattr(analysis, handler_name)(*args, index_dtype)
 
-    if hasattr(func, "_torch_handler_name"):
-        handler_name = func._torch_handler_name
+    if hasattr(expr.func, "_torch_handler_name"):
+        handler_name = expr.func._torch_handler_name
     else:
-        handler_name = handlers()[func]
+        handler_name = handlers()[expr.func]
     handler = getattr(analysis, handler_name)
     try:
         if handler_name in ASSOCIATIVE_OPS:
@@ -181,6 +180,6 @@ def sympy_interp(
     return run_sympy_handler(
         analysis,
         [sympy_interp(analysis, env, arg) for arg in expr.args],
-        expr.func,
+        expr,
         index_dtype=index_dtype,
     )  # type: ignore[arg-type]

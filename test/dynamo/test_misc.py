@@ -370,7 +370,6 @@ class MiscTests(torch._inductor.test_case.TestCase):
             unpack4,
             2,
             expected_ops=5,
-            expected_ops_dynamic=ifdynstaticdefault(5, 7),
         )
 
     def test_unpack5(self):
@@ -387,7 +386,6 @@ class MiscTests(torch._inductor.test_case.TestCase):
             unpack5,
             2,
             expected_ops=5,
-            expected_ops_dynamic=ifdynstaticdefault(5, 7),
         )
 
     def test_matmul1(self):
