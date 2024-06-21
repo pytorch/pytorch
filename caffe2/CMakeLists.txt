@@ -1084,7 +1084,7 @@ if(USE_XPU)
   foreach(HEADER  ${xpu_h})
     file(COPY ${HEADER} DESTINATION ${INCLUDE_DIR_FOR_TORCH})
   endforeach()
-  endif()
+endif()
 
 if(NOT MSVC AND USE_XNNPACK)
   TARGET_LINK_LIBRARIES(torch_cpu PRIVATE fxdiv)
