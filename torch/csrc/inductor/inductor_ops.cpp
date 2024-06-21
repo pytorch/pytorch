@@ -81,7 +81,6 @@ static void accumulate_grad_(const Tensor& variable, const Tensor& new_grad) {
   }
 }
 
-
 TORCH_LIBRARY_FRAGMENT(inductor, m) {
   m.def(
       "_mm_plus_mm(Tensor a, Tensor b, Tensor c, Tensor d, Tensor(t!) out) -> Tensor(t!)",
