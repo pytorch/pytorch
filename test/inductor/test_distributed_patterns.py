@@ -16,7 +16,7 @@ WORLD_SIZE = 2
 RESIZE = True
 
 
-def init_fake_distributed():
+def init_fake_distributed(device="cpu"):
     @torch.no_grad
     def all_gather(t):
         # clone since all_gather input and output should not be aliases.
@@ -83,7 +83,7 @@ def init_fake_distributed():
         mod.unsharded_weight.untyped_storage().resize_(0)
 
     torch.manual_seed(1234)
-    m = nn.Linear(20, 10, bias=False)
+    m = nn.Linear(20, 10, bias=False, device=device)
 
     # Mimics eager 1st iteration
     m.sharded_weight = nn.Parameter(reduce_scatter(m.weight))
@@ -95,7 +95,7 @@ def init_fake_distributed():
     m.register_full_backward_hook(bw_post_hook)
     m.register_forward_pre_hook(fw_pre_hook)
     m.register_forward_hook(fw_post_hook)
-    return m, torch.rand(2, 20, requires_grad=True)
+    return m, torch.rand(2, 20, requires_grad=True, device=device)
 
 
 def init_module_bw_hooks(allow_eager):
@@ -449,34 +449,20 @@ class DistributedPatternTests(TestCase):
         # Recompile on grad==None/grad!=None
         self.assertEqual(bw_cnt.frame_count, 2)
 
+    @requires_gpu()
     @torch._functorch.config.patch(recompute_views=True)
     def test_fake_distributed_inductor(self):
-        m1, inp1 = init_fake_distributed()
+        m1, inp1 = init_fake_distributed("cuda")
         out1 = steps(m1, inp1)
 
-        m2, inp2 = init_fake_distributed()
+        m2, inp2 = init_fake_distributed("cuda")
         m2 = torch.compile(m2, fullgraph=True)
-        # The forward runs successfully, but functionalizing the backward errors today.
-        # See bullet (8) of the description at https://github.com/pytorch/pytorch/pull/120971 for more  details.
-        # TLDR: we see the parameter as two separate inputs in the bw graph:
-        # (a) one from a saved activation (potential the weight.t())
-        # (b) one from the pre-backward hook closing over the parameter
-        # The second is what actually sees the resize_() / copy in,
-        # while the first is used in the actual compute.
-        # The easiest way to handle this would be to figure out how to de-duplicate the parameter
-        # before we functionalize the backward.
-        # This can be done either as:
-        # (1) a custom FX pass (Will F. has pass for it, although it is not guaranteed to be safe)
-        # (2) Detecting when input aliases an safely be deduplicated and regenerated inside of the graph.
-        #     This is likely safer but will be a reasonable amount of work
         with compiled_autograd.enable(torch.compile(fullgraph=True)):
             out2 = steps(m2, inp2)
 
         self._assert_same_grad(m1.weight, m2.weight)
         self._assert_same_grad(inp1, inp2)
         self._assert_same_grad(out1, out2)
-        # Recompile on grad==None/grad!=None
-        self.assertEqual(bw_cnt.frame_count, 2)
 
 
 if __name__ == "__main__":
