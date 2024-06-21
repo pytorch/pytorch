@@ -8,7 +8,7 @@ import torch
 from torch._library.utils import Kernel, RegistrationHandle
 
 
-class FakeImplHolder:
+class AbstractImplHolder:
     """A holder where one can register an fake impl to."""
 
     def __init__(self, qualname: str):
@@ -58,7 +58,7 @@ class FakeImplHolder:
         # Also register the fake impl to Meta key
         if self.lib is None:
             ns = self.qualname.split("::")[0]
-            self.lib = torch.library.Library(ns, "FRAGMENT")  # noqa: TOR901
+            self.lib = torch.library.Library(ns, "FRAGMENT")
         meta_kernel = construct_meta_kernel(self.qualname, self)
         self.lib.impl(self.qualname, meta_kernel, "Meta")
 
@@ -71,13 +71,15 @@ class FakeImplHolder:
         return RegistrationHandle(deregister_fake_class)
 
 
-def construct_meta_kernel(qualname: str, fake_impl_holder: FakeImplHolder) -> Callable:
-    assert fake_impl_holder.kernel is not None
+def construct_meta_kernel(
+    qualname: str, abstract_impl_holder: AbstractImplHolder
+) -> Callable:
+    assert abstract_impl_holder.kernel is not None
 
-    @functools.wraps(fake_impl_holder.kernel.func)
+    @functools.wraps(abstract_impl_holder.kernel.func)
     def meta_kernel(*args, **kwargs):
-        assert fake_impl_holder.kernel is not None
-        source = fake_impl_holder.kernel.source
+        assert abstract_impl_holder.kernel is not None
+        source = abstract_impl_holder.kernel.source
 
         def error_on_ctx():
             raise RuntimeError(
@@ -90,7 +92,7 @@ def construct_meta_kernel(qualname: str, fake_impl_holder: FakeImplHolder) -> Ca
             )
 
         with set_ctx_getter(error_on_ctx):
-            return fake_impl_holder.kernel(*args, **kwargs)
+            return abstract_impl_holder.kernel(*args, **kwargs)
 
     return meta_kernel
 
@@ -113,7 +115,7 @@ def set_ctx_getter(ctx_getter):
         global_ctx_getter = prev
 
 
-class FakeImplCtx:
+class AbstractImplCtx:
     """
     Context object for writing fake implementations for custom operators.
     """

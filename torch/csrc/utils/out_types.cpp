@@ -1,6 +1,7 @@
 #include <torch/csrc/utils/out_types.h>
 
-namespace torch::utils {
+namespace torch {
+namespace utils {
 
 // Used by python binding codegen to ensure any TensorOptions arguments are
 // consistent with the out tensor's options
@@ -44,4 +45,5 @@ void check_out_type_matches(
   }
 }
 
-} // namespace torch::utils
+} // namespace utils
+} // namespace torch

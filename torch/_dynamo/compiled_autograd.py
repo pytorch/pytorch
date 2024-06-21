@@ -272,12 +272,12 @@ class AutogradCompilerInstance:
         )
         set_locals_to_steal(graph, ["inputs"])
         compiled_autograd_log.info(
-            "%s", lazy_format_graph_code("Compiled autograd graph", graph, colored=True)
+            "%s", lazy_format_graph_code("Compiled autograd graph", graph)
         )
         verbose_log.debug(
             "%s",
             lazy_format_graph_code(
-                "Compiled autograd graph", graph, include_device=True, colored=True
+                "Compiled autograd graph", graph, include_device=True
             ),
         )
         trace_structured(

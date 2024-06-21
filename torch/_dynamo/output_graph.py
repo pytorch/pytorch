@@ -752,9 +752,7 @@ class OutputGraph:
         **options,
     ):
         if is_dynamic_nn_module(target, self.root_tx.export):
-            # Instead of returning UnspecializedNNModuleVariable, call
-            # VariableBuilder so that it is tracked for mutation.
-            return VariableBuilder(self.current_tx, **options)(target)
+            return variables.UnspecializedNNModuleVariable(target, **options)
 
         options = dict(options)
         assert "source" in options
@@ -1292,9 +1290,7 @@ class OutputGraph:
 
         graph_code_log.debug(
             "%s",
-            lazy_format_graph_code(
-                name, gm, include_stride=True, include_device=True, colored=True
-            ),
+            lazy_format_graph_code(name, gm, include_stride=True, include_device=True),
         )
         torch._logging.trace_structured(
             "dynamo_output_graph",

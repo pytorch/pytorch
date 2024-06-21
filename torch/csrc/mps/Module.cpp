@@ -11,7 +11,8 @@
 #include <pthread.h>
 #endif
 
-namespace torch::mps {
+namespace torch {
+namespace mps {
 
 namespace {
 // True for children forked after mps init
@@ -224,7 +225,9 @@ static PyObject* MPSModule_elapsedTimeOfEvents(
   END_HANDLE_TH_ERRORS
 }
 
-// NOLINTNEXTLINE(*-c-arrays, *-global-variables)
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,
+// cppcoreguidelines-avoid-non-const-global-variables,
+// cppcoreguidelines-avoid-c-arrays)
 static struct PyMethodDef _MPSModule_methods[] = {
     {"_mps_deviceSynchronize",
      MPSModule_deviceSynchronize,
@@ -278,4 +281,5 @@ PyMethodDef* python_functions() {
   return _MPSModule_methods;
 }
 
-} // namespace torch::mps
+} // namespace mps
+} // namespace torch

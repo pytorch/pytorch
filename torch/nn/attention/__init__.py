@@ -4,7 +4,6 @@ import contextlib
 from typing import List, Union
 from warnings import warn
 
-from torch._C import _SDPBackend as SDPBackend
 from torch.backends.cuda import (
     can_use_efficient_attention,
     can_use_flash_attention,
@@ -19,7 +18,6 @@ from torch.backends.cuda import (
     SDPAParams,
 )
 
-
 __all__: List[str] = ["SDPBackend", "sdpa_kernel", "WARN_FOR_UNFUSED_KERNELS"]
 
 # Note: [SDPA warnings]
@@ -31,6 +29,8 @@ __all__: List[str] = ["SDPBackend", "sdpa_kernel", "WARN_FOR_UNFUSED_KERNELS"]
 # torch.nn.attention.WARN_FOR_UNFUSED_KERNELS = True
 WARN_FOR_UNFUSED_KERNELS = False
 
+
+from torch._C import _SDPBackend as SDPBackend
 
 # Hacks for Sphinx documentation:
 # https://stackoverflow.com/questions/38765577/overriding-sphinx-autodoc-alias-of-for-import-of-private-class
