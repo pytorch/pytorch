@@ -1,11 +1,9 @@
-import torch.nn.functional as F
+from .module import Module
+from .. import functional as F
+
 from torch import Tensor
 
-from .module import Module
-
-
-__all__ = ["PixelShuffle", "PixelUnshuffle"]
-
+__all__ = ['PixelShuffle', 'PixelUnshuffle']
 
 class PixelShuffle(Module):
     r"""Rearrange elements in a tensor according to an upscaling factor.
@@ -48,7 +46,7 @@ class PixelShuffle(Module):
         https://arxiv.org/abs/1609.05158
     """
 
-    __constants__ = ["upscale_factor"]
+    __constants__ = ['upscale_factor']
     upscale_factor: int
 
     def __init__(self, upscale_factor: int) -> None:
@@ -59,7 +57,7 @@ class PixelShuffle(Module):
         return F.pixel_shuffle(input, self.upscale_factor)
 
     def extra_repr(self) -> str:
-        return f"upscale_factor={self.upscale_factor}"
+        return f'upscale_factor={self.upscale_factor}'
 
 
 class PixelUnshuffle(Module):
@@ -101,7 +99,7 @@ class PixelUnshuffle(Module):
         https://arxiv.org/abs/1609.05158
     """
 
-    __constants__ = ["downscale_factor"]
+    __constants__ = ['downscale_factor']
     downscale_factor: int
 
     def __init__(self, downscale_factor: int) -> None:
@@ -112,4 +110,4 @@ class PixelUnshuffle(Module):
         return F.pixel_unshuffle(input, self.downscale_factor)
 
     def extra_repr(self) -> str:
-        return f"downscale_factor={self.downscale_factor}"
+        return f'downscale_factor={self.downscale_factor}'
