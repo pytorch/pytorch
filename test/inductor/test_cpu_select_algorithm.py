@@ -436,24 +436,31 @@ class TestSelectAlgorithm(TestCase):
         input = torch.randn(*B, in_features).to(dtype=torch.float32)
 
         other = torch.randn(*B, out_features).to(dtype=dtype)
-        other2 = torch.randn(*B, out_features).to(dtype=dtype)
+        if input_3d:
+            other2 = torch.randn(*B, out_features).to(dtype=dtype)
+        else:
+            other2 = torch.randn(1, *B, out_features).to(dtype=dtype)
 
         class M(torch.nn.Module):
-            def __init__(self, bias):
+            def __init__(self, bias, input_3d):
                 super().__init__()
                 self.linear = torch.nn.Linear(in_features, out_features, bias)
                 self.epilogue = _get_epilogue(epilogue)
                 self.linear2 = torch.nn.Linear(out_features, out_features, bias)
                 self.epilogue2 = _get_epilogue(epilogue)
+                self.input_3d = input_3d
 
             def forward(self, x, other, other2):
                 res = self.epilogue(self.linear(x) + other)
+                if not self.input_3d:
+                    # Avoid hiting qlinear inplace sum fusion
+                    other2 = other2.view(other2.size(1), other2.size(2))
                 res = self.epilogue2(self.linear2(res) + other2)
                 return res
 
         counters.clear()
         ref_quantized_mod = _generate_qdq_quantized_model(
-            M(bias=bias).eval(),
+            M(bias=bias, input_3d=input_3d).eval(),
             (input, other, other2),
         )
         atol, rtol = 5e-2, 5e-2
@@ -475,7 +482,7 @@ class TestSelectAlgorithm(TestCase):
             )
             self.assertEqual(
                 counters["inductor"]["select_algorithm_autotune"],
-                2 if input_3d else 1,
+                2,
             )
 
 
