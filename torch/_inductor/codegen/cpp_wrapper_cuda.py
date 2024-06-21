@@ -170,7 +170,6 @@ class CppWrapperCuda(CppWrapperCpu):
         cuda=True,
         triton=True,
         arg_types=None,
-        raw_args=None,
         grid_fn: str = "grid",
         triton_meta=None,
     ):
