@@ -3,6 +3,7 @@
 #include <torch/csrc/dynamo/cache_entry.h>
 #include <torch/csrc/dynamo/cpython_defs.h>
 #include <torch/csrc/dynamo/debug_macros.h>
+#include <torch/csrc/dynamo/framelocals_mapping.h>
 #include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/utils/python_compat.h>
 
