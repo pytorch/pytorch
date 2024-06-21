@@ -21,7 +21,6 @@ from torch.nn.parallel._functions import _get_stream
 from torch.nn.parallel.scatter_gather import _is_namedtuple
 from torch.nn.utils.rnn import PackedSequence
 
-
 __all__ = []  # type: ignore[var-annotated]
 
 
