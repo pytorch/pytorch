@@ -24,8 +24,6 @@ from typing import (
     Union,
 )
 
-import numpy as np
-
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch import multiprocessing
@@ -675,130 +673,6 @@ class TritonBenchmarkRequest(GPUDeviceBenchmarkRequest):
 
     def __str__(self) -> str:
         return f"{self.kernel_name=}, {self.module_path=}, {self.module_cache_key=}"
-
-
-class GroupedTritonBenchmarkRequest:
-    def __init__(self, choices):
-        super().__init__()
-        self.choices = choices
-
-    def do_benchmark(
-        self,
-        choice_to_callable: Dict[TritonTemplateCaller, Callable[[], Any]],
-        target: float,
-    ) -> Dict[TritonTemplateCaller, float]:
-        timings: Dict[TritonTemplateCaller, float] = {}
-
-        to_estimate = []
-        for choice, callable in choice_to_callable.items():
-            # backout of invalid choices. this covers choices
-            # that crash during ptx generation, or choices that
-            # are not supported on the current device.
-            if not choice.valid:
-                timings[choice] = float("inf")
-                continue
-
-            # initialize the choices before benchmarking, and
-            # backout of choices that crash during compile time
-            try:
-                callable()
-            except Exception:
-                timings[choice] = float("inf")
-                continue
-            
-            to_estimate.append(choice)
-        
-        @functools.lru_cache(None)
-        def get_cache_size():
-            device = torch.cuda.current_device()
-            properties = torch.cuda.get_device_properties(device)
-            return properties.l2CacheSize
-
-        cache = torch.empty(int(get_cache_size() // 4), dtype=torch.int, device="cuda")
-
-        def interleaved_timing(choices, iters):
-            choice_event_pairs = {
-                choice: [
-                    (
-                        torch.cuda.Event(enable_timing=True),
-                        torch.cuda.Event(enable_timing=True),
-                    )
-                    for _ in range(iters)
-                ]
-                for choice in choices
-            }
-
-            for iter in range(iters):
-                for choice, event_pairs in choice_event_pairs.items():
-                    start_event, end_event = event_pairs[iter]
-                    callable = choice_to_callable[choice]
-                    cache.zero_()
-                    start_event.record()
-                    callable()
-                    end_event.record()
-            torch.cuda.synchronize()
-
-            return {
-                choice: min(
-                    [
-                        start_event.elapsed_time(end_event)
-                        for start_event, end_event in event_pairs
-                    ]
-                )
-                for choice, event_pairs in choice_event_pairs.items()
-            }
-
-        estimation_iters = 5
-        estimates = interleaved_timing(to_estimate, estimation_iters)
-        timings.update(estimates)
-
-        to_benchmark = []
-        target = min(target, estimates[min(estimates, key=estimates.__getitem__)])
-        for choice, estimate in estimates.items():
-            if estimate * 0.975 <= target:
-                to_benchmark.append(choice)
-        
-        benchmarking_iters = 15
-        benchmarks = interleaved_timing(to_benchmark, benchmarking_iters)
-        for choice, benchmark in benchmarks.items():
-            timings[choice] = min(timings[choice], benchmark)
-
-        del cache
-
-        return timings
-
-
-    def benchmark(
-        self,
-        *input_tensors: torch.Tensor,
-        output_tensor: Optional[torch.Tensor] = None,
-        target: float = float("inf"),
-    ) -> Dict[TritonTemplateCaller, float]:
-        timings: Dict[TritonTemplateCaller, float] = {}
-
-        if self.choices == []:
-            return timings
-
-        # generate inputs/output tensors using choices[0] as
-        # the default. every choice should take the same exact
-        # inputs/outputs
-        if output_tensor is None:
-            assert len(input_tensors) == 0
-            example_bmreq = self.choices[0].bmreq
-            input_tensors = tuple(
-                x.to_tensor() for x in example_bmreq.input_tensor_meta
-            )
-            output_tensor = example_bmreq.output_tensor_meta.to_tensor()
-
-        choice_to_callable = {}
-        for choice in self.choices:
-            _callable = choice.bmreq.make_run_fn(
-                *input_tensors, output_tensor=output_tensor
-            )
-            choice_to_callable[choice] = _callable
-
-        timings.update(self.do_benchmark(choice_to_callable, target))
-        return timings
 
 
 class CUDABenchmarkRequest(GPUDeviceBenchmarkRequest):
