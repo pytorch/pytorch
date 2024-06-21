@@ -231,7 +231,6 @@ class TestFullyShardCompile(FSDPTest):
             model = Transformer(model_args)
             for layer_id, mod in enumerate(model.layers):
                 fully_shard(mod, mesh=mesh, reshard_after_forward=True, **fsdp_config)
-                model.layers[layer_id] = mod
             model = fully_shard(
                 model, mesh=mesh, reshard_after_forward=True, **fsdp_config
             )
