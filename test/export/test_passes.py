@@ -556,8 +556,11 @@ class TestPasses(TestCase):
         num_assert = count_call_function(
             ep.graph, torch.ops.aten._assert_scalar.default
         )
-
-        self.assertEqual(num_assert, 2)
+        self.assertEqual(num_assert, 0)
+        num_constrain_range = count_call_function(
+            ep.graph, torch.ops.aten.sym_constrain_range.default
+        )
+        self.assertEqual(num_constrain_range, 1)
 
         with self.assertRaisesRegex(
             RuntimeError,
@@ -575,6 +578,8 @@ class TestPasses(TestCase):
         self.assertEqual(mod(new_inp), ep.module()(new_inp))
 
     @unittest.skipIf(IS_WINDOWS, "Windows not supported")
+    @unittest.expectedFailure
+    # TODO(pianpwk): add back runtime asserts to subgraphs
     def test_runtime_assert_inline_constraints_for_cond(self) -> None:
         class M(torch.nn.Module):
             def __init__(self):

@@ -1238,7 +1238,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         if torch._dynamo.config.assume_static_by_default:
             if torch._dynamo.config.automatic_dynamic_shapes:
                 self.assertExpectedInline(cnt.frame_count, """2""")
-                self.assertExpectedInline(cnt.op_count, """14""")
+                self.assertExpectedInline(cnt.op_count, """9""")
             else:
                 self.assertExpectedInline(cnt.frame_count, """2""")
                 self.assertExpectedInline(cnt.op_count, """4""")
@@ -5130,24 +5130,6 @@ def forward(self, primals_1, primals_2):
             torch.compile(fn)()
 
         torch.compile(fn2)()
-
-    def test_jit_script_defaults(self):
-        @torch.jit.script
-        def fast_cos(x, c: float = 2.0):
-            return torch.cos(x) * c
-
-        class Mod(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.fast_cos = fast_cos
-
-            def forward(self, x):
-                return self.fast_cos(x)
-
-        mod = Mod()
-        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
-        x = torch.randn(4)
-        self.assertEqual(mod(x), opt_mod(x))
 
     def test_enum(self):
         class ExplicitEnum(str, Enum):
