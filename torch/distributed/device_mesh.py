@@ -6,9 +6,10 @@ import threading
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
-from torch.distributed import is_available
-from torch.utils._typing_utils import not_none
 
+from torch.distributed import is_available
+
+from ..utils._typing_utils import not_none
 
 __all__ = ["init_device_mesh", "DeviceMesh"]
 
