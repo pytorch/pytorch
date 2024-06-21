@@ -383,6 +383,6 @@ def override_test_values(arg_map: Dict[str, str], op_name: str, index: int) -> N
         return
     if op_name in ("diagonal", "linalg_diagonal"):
         arg_map["offset"] = "0"
-        arg_map["dim0"] = "1"
         arg_map["dim1"] = "2"
+        arg_map["dim2"] = "1"
         return

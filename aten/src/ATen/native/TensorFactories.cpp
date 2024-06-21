@@ -172,16 +172,8 @@ Tensor arange(
   return at::arange_out(result, start, end, step);
 }
 
-static Tensor& arange_start_out(const Scalar& start, const Scalar& end, Tensor& result) {
-    return at::arange_out(result, start, end, /*step=*/1);
-}
-
 Tensor& arange_out(const Scalar& end, Tensor& result) {
   return at::arange_out(result, /*start=*/0, end, /*step=*/1);
-}
-
-static Tensor& arange_out(Tensor& result, const Scalar& start, const Scalar& end) {
-  return at::arange_out(result, start, end, /*step=*/1);
 }
 
 Tensor _dim_arange(const Tensor& like, int64_t dim) {
@@ -252,8 +244,8 @@ Tensor polar(const Tensor& abs, const Tensor& angle) {
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Tensor empty_cpu(IntArrayRef size, std::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt,
-                 std::optional<Device> device_opt, c10::optional<bool> pin_memory_opt, c10::optional<c10::MemoryFormat> memory_format_opt) {
+Tensor empty_cpu(IntArrayRef size, std::optional<ScalarType> dtype_opt, std::optional<Layout> layout_opt,
+                 std::optional<Device> device_opt, std::optional<bool> pin_memory_opt, std::optional<c10::MemoryFormat> memory_format_opt) {
   Tensor result = at::detail::empty_cpu(size, dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
   // See Note [Enabling Deterministic Operations]
   if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms() && at::globalContext().deterministicFillUninitializedMemory())) {
@@ -286,7 +278,7 @@ Tensor empty_names(
 }
 
 Tensor empty_permuted_symint(SymIntArrayRef size, IntArrayRef physical_layout, std::optional<ScalarType> dtype_opt,
-  std::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt
+  std::optional<Layout> layout_opt, std::optional<Device> device_opt, std::optional<bool> pin_memory_opt
 ) {
   // size is logical; aka, the output size you'll get from the operation overall
   //
@@ -325,7 +317,7 @@ Tensor empty_permuted_symint(SymIntArrayRef size, IntArrayRef physical_layout, s
 }
 
 Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, std::optional<ScalarType> dtype_opt,
-                         std::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
+                         std::optional<Layout> layout_opt, std::optional<Device> device_opt, std::optional<bool> pin_memory_opt) {
   Tensor result = at::detail::empty_strided_cpu(size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
   // See Note [Enabling Deterministic Operations]
   if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms() && at::globalContext().deterministicFillUninitializedMemory())) {
@@ -1186,7 +1178,7 @@ Tensor range(
 
 Tensor tril_indices_cpu(
     int64_t row, int64_t col, int64_t offset, std::optional<ScalarType> dtype_opt,
-    std::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
+    std::optional<Layout> layout_opt, std::optional<Device> device_opt, std::optional<bool> pin_memory_opt) {
   if (!dtype_opt.has_value()) {
     dtype_opt = ScalarType::Long;
   }
@@ -1236,7 +1228,7 @@ Tensor tril_indices_cpu(
 
 Tensor triu_indices_cpu(
     int64_t row, int64_t col, int64_t offset, std::optional<ScalarType> dtype_opt,
-    std::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
+    std::optional<Layout> layout_opt, std::optional<Device> device_opt, std::optional<bool> pin_memory_opt) {
   if (!dtype_opt.has_value()) {
     dtype_opt = ScalarType::Long;
   }
@@ -1717,7 +1709,7 @@ Tensor tensor_complex_backend(ArrayRef<T> values, const TensorOptions& options) 
   return at::detail::tensor_complex_backend(values, options);
 }
 
-Tensor from_file(c10::string_view filename, std::optional<bool> shared, c10::optional<int64_t> size,
+Tensor from_file(c10::string_view filename, std::optional<bool> shared, std::optional<int64_t> size,
     std::optional<ScalarType> dtype,
     std::optional<Layout> layout,
     std::optional<Device> device,
