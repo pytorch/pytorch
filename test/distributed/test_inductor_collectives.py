@@ -609,7 +609,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             .check("buf0 = empty_strided")
             .check("buf5 = empty_strided")
             .check(".run(arg0_1, buf0, buf5, 16")
-            .check("buf1 = torch.ops._c10d_functional.all_reduce_.default(buf0")
+            .check("torch.ops._c10d_functional.all_reduce_.default(buf0")
             .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
             .check("buf6 = empty_strided")
             .check(".run(buf6, 16")
