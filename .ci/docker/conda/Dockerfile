@@ -70,11 +70,6 @@ FROM base as mnist
 ADD ./common/install_mnist.sh install_mnist.sh
 RUN bash ./install_mnist.sh
 
-# Add jni.h for java host build
-COPY ./common/install_jni.sh install_jni.sh
-COPY ./java/jni.h jni.h
-RUN bash ./install_jni.sh && rm install_jni.sh
-
 FROM base as all_cuda
 COPY --from=cuda11.8  /usr/local/cuda-11.8 /usr/local/cuda-11.8
 COPY --from=cuda12.1  /usr/local/cuda-12.1 /usr/local/cuda-12.1
@@ -85,6 +80,11 @@ FROM ${BASE_TARGET} as final
 COPY --from=openssl            /opt/openssl           /opt/openssl
 COPY --from=patchelf           /patchelf              /usr/local/bin/patchelf
 COPY --from=conda              /opt/conda             /opt/conda
+
+# Add jni.h for java host build
+COPY ./common/install_jni.sh install_jni.sh
+COPY ./java/jni.h jni.h
+RUN bash ./install_jni.sh && rm install_jni.sh
 
 ENV  PATH /opt/conda/bin:$PATH
 COPY --from=mnist  /usr/local/mnist /usr/local/mnist
