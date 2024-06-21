@@ -106,9 +106,7 @@ def generate_inputs(
     return query, key, value
 
 
-def run_single_experiment(
-    config: ExperimentConfig, dynamic=False, max_autotune=False
-) -> ExperimentResults:
+def run_single_experiment(config: ExperimentConfig, dynamic=False) -> ExperimentResults:
     device = torch.device("cuda")
     batch_size, num_heads, q_seq_len, head_dim = config.shape
     query, key, value = generate_inputs(
@@ -125,12 +123,7 @@ def run_single_experiment(
     def eager_sdpa(query, key, value, _):
         return F.scaled_dot_product_attention(query, key, value)
 
-    if max_autotune:
-        compiled_sdpa = torch.compile(
-            _flex_attention, dynamic=dynamic, mode="max-autotune-no-cudagraphs"
-        )
-    else:
-        compiled_sdpa = torch.compile(_flex_attention, dynamic=dynamic)
+    compiled_sdpa = torch.compile(_flex_attention, dynamic=dynamic)
 
     score_mod = config.score_mod
 
@@ -251,7 +244,7 @@ def print_results(results: List[Experiment]):
         print(tabulate(average_data, headers="keys", tablefmt="github", floatfmt=".3f"))
 
 
-def generate_score_mods(score_mods: List[str]) -> List[Callable]:
+def generate_score_mods() -> List[Callable]:
     def noop(score, b, h, m, n):
         return score
 
@@ -264,27 +257,18 @@ def generate_score_mods(score_mods: List[str]) -> List[Callable]:
     def head_bias(score, b, h, m, n):
         return score + 2 * h
 
-    function_dict = {
-        "noop": noop,
-        "causal": causal_mask,
-        "rel": relative_bias,
-        "head_bias": head_bias,
-    }
-    return [function_dict[name] for name in score_mods]
+    return [noop, causal_mask, relative_bias, head_bias]
 
 
-def generate_experiment_configs(
-    calculate_bwd: bool,
-    dtype: torch.dtype,
-    batch_sizes: List[int],
-    num_heads: List[int],
-    seq_lens: List[int],
-    head_dims: List[int],
-    score_mods: List[str],
-) -> List[ExperimentConfig]:
-    q_kv_seq_lens = [(i, i) for i in seq_lens]  # only testing q_len == kv_len
-    dtypes = [dtype]
-    score_mods = generate_score_mods(score_mods)
+def generate_experiment_configs(calculate_bwd: bool) -> List[ExperimentConfig]:
+    batch_sizes = [2, 8, 16]
+    num_heads = [16]
+    q_kv_seq_lens = [(512, 512), (1024, 1024), (4096, 4096)]
+    head_dims = [64, 128]
+    dtypes = [
+        torch.bfloat16,
+    ]
+    score_mods = generate_score_mods()
     all_configs = []
     for (
         bsz,
@@ -309,23 +293,14 @@ def generate_experiment_configs(
     return all_configs
 
 
-def main(args):
+def main(dynamic: bool, calculate_bwd: bool):
     seed = 123
     np.random.seed(seed)
     torch.manual_seed(seed)
     results = []
-    for config in tqdm(
-        generate_experiment_configs(
-            args.calculate_bwd, args.dtype, args.b, args.nh, args.s, args.d, args.mods
-        )
-    ):
+    for config in tqdm(generate_experiment_configs(calculate_bwd)):
         results.append(
-            Experiment(
-                config,
-                run_single_experiment(
-                    config, dynamic=args.dynamic, max_autotune=args.max_autotune
-                ),
-            )
+            Experiment(config, run_single_experiment(config, dynamic=dynamic))
         )
 
     print_results(results)
@@ -345,29 +320,7 @@ if __name__ == "__main__":
         "--calculate-bwd", action="store_true", help="Calculate backward pass times"
     )
 
-    parser.add_argument("-dtype", type=str, help="dtype", default="bfloat16")
-
-    parser.add_argument(
-        "-b", type=int, nargs="+", help="batch sizes", default=[2, 8, 16]
-    )
-    parser.add_argument("-nh", type=int, nargs="+", help="# of heads", default=[16])
-    parser.add_argument(
-        "-s", type=int, nargs="+", help="sequence lengths", default=[512, 1024, 4096]
-    )
-    parser.add_argument("-d", type=int, nargs="+", help="head dims", default=[64, 128])
-    parser.add_argument(
-        "-mods",
-        type=str,
-        nargs="+",
-        help="score mods",
-        default=["noop", "causal", "rel", "head_bias"],
-    )
-    parser.add_argument(
-        "--max-autotune", action="store_true", help="Turn on max-autotune"
-    )
-
     # Parse arguments
     args = parser.parse_args()
-    args.dtype = getattr(torch, args.dtype)
 
-    main(args)
+    main(args.dynamic, args.calculate_bwd)
