@@ -334,37 +334,45 @@ def angle(x):
 def add(x, y, *, alpha=None):
     x_is_complex_tensor = torch.is_tensor(x) and x.is_complex()
     y_is_complex_tensor = torch.is_tensor(y) and y.is_complex()
-    if not x_is_complex_tensor or not y_is_complex_tensor:
+    if not x_is_complex_tensor and not y_is_complex_tensor:
         return NotImplemented
     z = y
     if alpha is not None:
         z = alpha * y
     complex_type = torch.promote_types(x.dtype, y.dtype)
-    if x_is_complex_tensor and y_is_complex_tensor:
-        # For complex typed `x`, `x.view(x.real.dtype)` doubles the last dimension and can cause problem
-        # when broadcasting the add.
-        def reshape_tensor(tensor):
-            """Reshape tensor from [*initial_dims, last_dim] to *initial_dims, last_dim/2, 2]"""
-            # Get the current shape of the tensor
-            *initial_dims, last_dim = tensor.shape
 
-            # Check if the last dimension is even. We should never reach here since `x.view(x.real.dtype)`
-            # doubles the last dimension for complex numbers.
-            if last_dim % 2 != 0:
-                raise ValueError(
-                    "The size of the last dimension must be even to reshape it to [..., last_dim/2, 2]"
-                )
+    # For complex typed `x`, `x.view(x.real.dtype)` doubles the last dimension and can cause problem
+    # when broadcasting the add.
+    def reshape_tensor_complex(tensor):
+        """Reshape tensor from [*initial_dims, last_dim] to *initial_dims, last_dim/2, 2]"""
+        # Get the current shape of the tensor
+        *initial_dims, last_dim = tensor.shape
 
-            # Reshape the tensor
-            new_shape = (*initial_dims, last_dim // 2, 2)
-            reshaped_tensor = tensor.view(new_shape)
-            return reshaped_tensor
+        # Check if the last dimension is even. We should never reach here since `x.view(x.real.dtype)`
+        # doubles the last dimension for complex numbers.
+        if last_dim % 2 != 0:
+            raise AssertionError(
+                "The size of the last dimension must be even to reshape it to [..., last_dim/2, 2]"
+            )
 
-        x_reshaped = reshape_tensor(x.view(x.real.dtype))
-        z_reshaped = reshape_tensor(z.view(y.real.dtype))
-        result = torch.flatten(x_reshaped + z_reshaped, start_dim=-2).view(complex_type)
-    else:
-        result = (x.view(x.real.dtype) + z.view(y.real.dtype)).view(complex_type)
+        # Reshape the tensor
+        new_shape = (*initial_dims, last_dim // 2, 2)
+        reshaped_tensor = tensor.view(new_shape)
+        return reshaped_tensor
+
+    def reshape_tensor_real(tensor):
+        tensor_unsqueezed = tensor.unsqueeze(-1)
+        zeros = torch.zeros_like(tensor_unsqueezed)
+        return torch.cat((tensor_unsqueezed, zeros), dim=-1)
+
+    def reshape_tensor(tensor, real_type):
+        if tensor.is_complex():
+            return reshape_tensor_complex(tensor.view(real_type))
+        return reshape_tensor_real(tensor.view(real_type))
+
+    x_reshaped = reshape_tensor(x, x.real.dtype)
+    z_reshaped = reshape_tensor(z, y.real.dtype)
+    result = torch.flatten(x_reshaped + z_reshaped, start_dim=-2).view(complex_type)
     return result
 
 
