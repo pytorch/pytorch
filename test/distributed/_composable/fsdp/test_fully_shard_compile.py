@@ -77,23 +77,6 @@ class TestFullyShardCompileCompute(FSDPTest):
             self.assertTrue(trace_rules_check_count > 0)
 
 
-def cleanup_fsdp(model):
-    # This is important for releasing memory of all tensors used in the FSDP-wrapped modules.
-    torch._dynamo.reset()
-    for state in torch.distributed._composable_state._module_state_mapping.values():
-        if hasattr(state._fsdp_param_group, "fsdp_params"):
-            for fsdp_param in state._fsdp_param_group.fsdp_params:
-                fsdp_param._sharded_param_data.untyped_storage().resize_(0)
-    managed_modules = _get_managed_modules(model)
-    params, buffers = _get_managed_states(managed_modules)
-    for tensor in itertools.chain(params, buffers):
-        try:
-            tensor.untyped_storage().resize_(0)
-        except Exception:
-            pass
-    torch.distributed._composable_state._module_state_mapping = {}
-
-
 class TestFullyShardCompile(FSDPTest):
     @property
     def world_size(self) -> int:
@@ -170,9 +153,6 @@ class TestFullyShardCompile(FSDPTest):
                     losses.append(loss.item())
                     loss.backward()
                 optim.step()
-                del loss
-                del out
-                del inp
                 torch.cuda.synchronize()
             return losses
 
@@ -185,11 +165,7 @@ class TestFullyShardCompile(FSDPTest):
             res = run_all_iters(
                 model_compiled, optim, compiled_autograd_backend=backend
             )
-            cleanup_fsdp(model)
-            del model_compiled
-            del model
             optim.zero_grad(set_to_none=True)
-            del optim
             return res
 
         def test_eager():
@@ -198,10 +174,7 @@ class TestFullyShardCompile(FSDPTest):
             run_all_iters(model, optim, 1)
 
             res = run_all_iters(model, optim)
-            cleanup_fsdp(model)
-            del model
             optim.zero_grad(set_to_none=True)
-            del optim
             return res
 
         losses_compiled = test_compiled()
