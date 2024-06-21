@@ -189,10 +189,10 @@ def generate_gemm_config(
     vec_isa_cls,
     register_blockings,
     input_dtype=torch.float,
+    input2_dtype=None,
     output_dtype=None,
     compute_dtype=None,
     extra_check=None,
-    input2_dtype=None,
 ):
     if output_dtype is None:
         output_dtype = input_dtype
@@ -460,10 +460,10 @@ def check_amx_extra(config, m, n, k, alpha, num_threads):
         VecAMX,
         [(32, 32, 64), (48, 16, 64)],
         input_dtype=torch.uint8,
+        input2_dtype=torch.int8,
         output_dtype=torch.int32,
         compute_dtype=torch.int32,
         extra_check=check_amx_extra,
-        input2_dtype=torch.int8,
     ),
 )
 class CppMicroGemmAMX(CppMicroGemm):
