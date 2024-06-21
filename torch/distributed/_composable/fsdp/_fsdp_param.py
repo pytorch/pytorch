@@ -65,17 +65,19 @@ lib = torch.library.Library("fsdp", "FRAGMENT")
 
 lib.define("set_(Tensor(a!) tensor, Tensor data) -> ()")
 
+
 @torch.library.impl(lib, "set_", "Meta")
 @torch.library.impl(lib, "set_", "CUDA")
 @torch.library.impl(lib, "set_", "CPU")
 def set_(tensor, data):
     tensor.set_(data)
 
+
 @torch.library.impl(lib, "set_", "Functionalize")
-def set_(tensor, data):
+def set__functionalize(tensor, data):
     tensor_inner = torch._from_functional_tensor(tensor)
     data_inner = torch._from_functional_tensor(data)
-    tensor_inner.set_(data_inner)
+    tensor_inner.set_(data_inner)  # type: ignore[call-overload]
 
 
 class ShardedState(Enum):

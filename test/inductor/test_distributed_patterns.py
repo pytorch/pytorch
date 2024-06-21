@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: pt2"]
 import dataclasses
 import functools
-from unittest.mock import patch
 
 import torch
 from torch import nn
@@ -32,11 +31,17 @@ def init_fake_distributed(device="cpu"):
             mod.unsharded_weight.untyped_storage().resize_(
                 mod.unsharded_weight.nelement() * mod.unsharded_weight.element_size()
             )
-            with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(mod.unsharded_weight):
+            with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(
+                mod.unsharded_weight
+            ):
                 mod.unsharded_weight.copy_(all_gather(mod.sharded_weight))
         else:
-            with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(mod.unsharded_weight):
-                torch.ops.fsdp.set_(mod.unsharded_weight, all_gather(mod.sharded_weight))
+            with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(
+                mod.unsharded_weight
+            ):
+                torch.ops.fsdp.set_(
+                    mod.unsharded_weight, all_gather(mod.sharded_weight)
+                )
         mod.weight = mod.unsharded_weight
 
     # Forward:
@@ -58,11 +63,17 @@ def init_fake_distributed(device="cpu"):
             mod.unsharded_weight.untyped_storage().resize_(
                 mod.unsharded_weight.nelement() * mod.unsharded_weight.element_size()
             )
-            with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(mod.unsharded_weight):
+            with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(
+                mod.unsharded_weight
+            ):
                 mod.unsharded_weight.copy_(all_gather(mod.sharded_weight))
         else:
-            with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(mod.unsharded_weight):
-                torch.ops.fsdp.set_(mod.unsharded_weight, all_gather(mod.sharded_weight))
+            with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(
+                mod.unsharded_weight
+            ):
+                torch.ops.fsdp.set_(
+                    mod.unsharded_weight, all_gather(mod.sharded_weight)
+                )
         mod.weight = mod.unsharded_weight
 
     # Backward:
