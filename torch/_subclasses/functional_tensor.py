@@ -348,8 +348,10 @@ class FunctionalTensorMode(TorchDispatchMode):
             if func in FunctionalTensor.maybe_aliasing_or_mutating_ops:
                 return True
 
-            # (1) we unconditionally decompose maybe-aliasing or maybe-mutating ops, because we must know statically of an op mutates or aliasing in order to functionalize it properly
-            # (2) for mutating ops that have CompositeImplicit decomps, we choose to decompose them today. In theory, we could walk this back and avoid decomposing them later if we need to.
+            # (1) we unconditionally decompose maybe-aliasing or maybe-mutating ops,
+            # because we must know statically of an op mutates or aliasing in order to functionalize it properly
+            # (2) for mutating ops that have CompositeImplicit decomps, we choose to decompose them today.
+            # In theory, we could walk this back and avoid decomposing them later if we need to.
             alias_info_present = any(arg.alias_info for arg in func._schema.arguments)
             if alias_info_present or func._schema.is_mutable:
                 return True
