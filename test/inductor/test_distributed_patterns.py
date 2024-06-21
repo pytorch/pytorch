@@ -153,12 +153,11 @@ class DistributedPatternTests(TestCase):
             x.untyped_storage().resize_(0)
             return torch.cos(y)
 
-        for device in ("cpu", "cuda"):
-            x = torch.randn(10, device=device)
-            expected = torch.cos(torch.sin(x))
-            y = fn(x)
-            self.assertEqual(y, expected)
-            self.assertEqual(x.untyped_storage().size(), 0)
+        x = torch.randn(10, device=device)
+        expected = torch.cos(torch.sin(x))
+        y = fn(x)
+        self.assertEqual(y, expected)
+        self.assertEqual(x.untyped_storage().size(), 0)
 
     def test_storage_resize_zero_cpu(self):
         self._test_storage_resize_zero("cpu")
