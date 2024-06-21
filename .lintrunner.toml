@@ -224,7 +224,6 @@ exclude_patterns = [
     'c10/util/win32-headers.h',
     'c10/util/*inl.h',
     'c10/test/**/*.h',
-    'aten/src/ATen/core/TensorImpl_test.cpp',
     'third_party/**/*',
     'torch/csrc/api/**',
     'torch/csrc/autograd/generated/**',
@@ -232,8 +231,6 @@ exclude_patterns = [
     'torch/csrc/dynamo/eval_frame.h',
     'torch/csrc/inductor/**/*',
     'torch/csrc/jit/**/*',
-    'torch/csrc/jit/serialization/import_legacy.cpp',
-    'torch/csrc/jit/serialization/export.cpp',
     'torch/csrc/lazy/**/*',
 ]
 init_command = [
