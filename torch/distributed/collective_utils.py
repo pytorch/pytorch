@@ -14,9 +14,7 @@ from typing import Any, Callable, cast, Generic, List, Optional, Tuple, TypeVar,
 
 import torch.distributed as dist
 
-
 T = TypeVar("T")
-
 
 @dataclass
 class SyncPayload(Generic[T]):
@@ -24,7 +22,6 @@ class SyncPayload(Generic[T]):
     success: bool
     payload: T
     exception: Optional[Exception] = None
-
 
 def broadcast(
     data_or_fn: Union[T, Callable[[], T]],
@@ -58,12 +55,10 @@ def broadcast(
     """
 
     if not success and data_or_fn is not None:
-        raise AssertionError(
-            "Data or Function is expected to be None if not successful"
-        )
+        raise AssertionError("Data or Function is expected to be None if not successful")
 
     payload: Optional[T] = None
-    exception: Optional[Exception] = None
+    exception : Optional[Exception] = None
     # if no pg is passed then execute if rank is 0
     if (pg is None and rank == 0) or (pg is not None and pg.rank() == rank):
         # determine if it is an executable function or data payload only
@@ -124,7 +119,7 @@ def all_gather(
     >> all_ids = all_gather(data_or_fn=allocate_id, pg=ext_pg.my_pg)
     """
     payload: Optional[T] = None
-    exception: Optional[Exception] = None
+    exception : Optional[Exception] = None
     success = True
     # determine if it is an executable function or data payload only
     if callable(data_or_fn):
@@ -166,8 +161,7 @@ def all_gather(
 
         if len(exception_list) > 0:
             raise RuntimeError(  # type: ignore[misc]
-                error_msg, exception_list
-            ) from exception_list[0]
+                error_msg, exception_list) from exception_list[0]
         return ret_list
     else:
         if not sync_obj.success:
