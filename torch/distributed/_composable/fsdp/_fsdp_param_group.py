@@ -41,10 +41,13 @@ class FSDPCommContext:
 
     def __init__(self):
         # Initialize all streams using default stream at construction time and
-        # set them to new streams during lazy initialization (use `...` if CUDA
-        # is not available to delay the CUDA requirement to lazy init)
+        # set them to new streams during lazy initialization
         current_stream = (
-            torch.cuda.current_stream() if torch.cuda.is_available() else ...
+            # Defer CUDA requirement to lazy init and use dummy object to
+            # appease type checking
+            torch.cuda.current_stream()
+            if torch.cuda.is_available()
+            else cast(torch.cuda.Stream, object())
         )
         # All-gather state and copy-in stream allow overlapping the next
         # copy-in with the current all-gather in forward; copy-in overlaps with
