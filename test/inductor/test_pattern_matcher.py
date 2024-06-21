@@ -33,7 +33,7 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.utils import _pytree as pytree
 
 # NVIDIA A100-SXM4-40GB
-is_a100 = LazyVal(
+is_a100_linux = LazyVal(
     lambda: IS_LINUX
     and torch.cuda.is_available()
     and "A100" in torch.cuda.get_device_name(0)
@@ -283,7 +283,7 @@ class TestPatternMatcher(TestCase):
             self._test_mixed_impl(fn, args, True, False)
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
-    @unittest.skipIf(not is_a100, "heuristic only run on A100")
+    @unittest.skipIf(not is_a100_linux, "heuristic only run on Linux A100")
     @inductor_config.patch(mixed_mm_choice="heuristic")
     def test_mixed_mm_heuristic_no(self):
         def fn(a, b):
@@ -330,7 +330,7 @@ class TestPatternMatcher(TestCase):
             self._test_mixed_impl(fn, args, True, True)
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
-    @unittest.skipIf(not is_a100, "heuristic only run on A100")
+    @unittest.skipIf(not is_a100_linux, "heuristic only run on Linux A100")
     @inductor_config.patch(mixed_mm_choice="heuristic")
     def test_mixed_mm_heuristic_yes(self):
         def fn(a, b):
