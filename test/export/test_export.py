@@ -5623,7 +5623,7 @@ def forward(self, x, y):
                 torch._check(-m >= -9)  # m <= 9
                 torch._check(n != 2)
                 # n has range [3, 9]
-                return x[n]
+                return x[:n]
 
         inputs = (torch.randn(10), torch.tensor(6))
         ep = export(Foo(), inputs)

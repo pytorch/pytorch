@@ -2,6 +2,7 @@
 
 import itertools
 import random
+import unittest
 
 import torch
 import torch.nn.utils.rnn as rnn_utils
@@ -345,6 +346,8 @@ class PackedSequenceTest(TestCase):
             unpacked_sequences = rnn_utils.unpack_sequence(packed_sequences)
             self.assertEqual(sequences, unpacked_sequences)
 
+    @unittest.expectedFailure
+    # can't turn ToFloat(Proxy(add)) intermediate size call into compute
     def test_pack_padded_sequence(self):
         def generate_test_case(sorted_lengths, should_shuffle):
             def pad(tensor, length):

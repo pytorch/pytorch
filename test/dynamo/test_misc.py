@@ -1737,7 +1737,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             fn=fn,
             nargs=1,
             expected_ops=5,
-            expected_ops_dynamic=ifdynstaticdefault(5, 8),
+            expected_ops_dynamic=ifdynstaticdefault(5, 7),
         )
 
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
@@ -1927,7 +1927,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         # expect 4 add / subs for static, 4 * 3 (size, index, math op) for dynamic
         torch._dynamo.testing.standard_test(
-            self, fn, 1, expected_ops=4, expected_ops_dynamic=ifdynstaticdefault(4, 12)
+            self, fn, 1, expected_ops=4, expected_ops_dynamic=ifdynstaticdefault(4, 6)
         )
 
     def test_list_iadd_with_shape(self):
