@@ -714,18 +714,15 @@ def record_compilation_metrics(
         name = "compilation_metrics"
     else:
         name = "bwd_compilation_metrics"
-    # Currently only record fwd compilation metrics, will add bwd compilation metrics
-    # after the internal Scuba logging changes finish.
-    if isinstance(compilation_metrics, CompilationMetrics):
-        torch._logging.trace_structured(
-            name,
-            lambda: {
-                k: list(v) if isinstance(v, set) else v
-                for k, v in dataclasses.asdict(compilation_metrics).items()
-            },
-        )
-        if config.log_compilation_metrics:
-            log_compilation_event(compilation_metrics)
+    torch._logging.trace_structured(
+        name,
+        lambda: {
+            k: list(v) if isinstance(v, set) else v
+            for k, v in dataclasses.asdict(compilation_metrics).items()
+        },
+    )
+    if config.log_compilation_metrics:
+        log_compilation_event(compilation_metrics)
 
 
 def set_compilation_metrics_limit(new_size: int) -> None:
