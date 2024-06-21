@@ -2898,17 +2898,15 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   }
 
   auto device = getDevice(tensor);
-  std::string key;
-  int p2pRank = 0, p2pTargetRank = 0;
+  std::string key = getKeyFromDevice(device);
+  int p2pRank = rank_;
+  int p2pTargetRank = peer;
   bool isSendRecvSelf = false;
   // For batch_isend_irecv, ncclGroupStart() would be called upfront
   bool batchP2P = ncclActiveGroupCounter_ > 0;
 
   // If an existing communicator exists, we want to use it (for batch or
   // non-batch  P2P)
-  key = getKeyFromDevice(device);
-  p2pRank = rank_;
-  p2pTargetRank = peer;
   auto ncclComm = getNCCLComm(
       key, device, opType, p2pRank, isSendRecvSelf, /*onlyCached*/ true);
 
