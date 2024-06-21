@@ -961,10 +961,6 @@ class HalideKernel(SIMDKernel):
             scheduler_flags = {
                 "parallelism": parallel_num_threads(),
             }
-            if config.halide.scheduler_cpu == "Mullapudi2016":
-                scheduler_flags[
-                    "last_level_cache_size"
-                ] = HalideCodeCache.cpu_cache_size()
             cuda_device = None
         else:
             assert current_device.type == "cuda", "only cpu/cuda supported"
