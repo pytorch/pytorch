@@ -247,14 +247,13 @@ def tuned_scaled_mm(
     m, n, k, layout, mat_a, mat_b = mm_args(
         mat_a, mat_b, layout=layout, out_dtype=out_dtype
     )
-
-    scale_a = realize_inputs(scale_a)
-    scale_b = realize_inputs(scale_b)
+    scale_a, scale_b = realize_inputs(scale_a, scale_b)
 
     if bias is None:
         input_nodes = (mat_a, mat_b, scale_a, scale_b)
         triton_template = scaled_mm_template
     else:
+        bias = realize_inputs(bias)
         input_nodes = (mat_a, mat_b, scale_a, scale_b, bias)
         triton_template = scaled_mm_bias_template
 
