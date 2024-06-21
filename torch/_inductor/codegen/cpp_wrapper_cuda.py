@@ -14,9 +14,9 @@ from ..codecache import CudaKernelParamCache
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .codegen_device_driver import cuda_kernel_driver, cuda_kernel_header
-from .common import DeferredCudaKernelLine
 from .cpp_utils import DTYPE_TO_CPP
 from .cpp_wrapper_cpu import CppWrapperCpu
+from .triton_utils import DeferredCudaKernelLine
 from .wrapper import SymbolicCallArg
 
 if TYPE_CHECKING:
@@ -77,34 +77,56 @@ class CppWrapperCuda(CppWrapperCpu):
             self.prefix.writeline("\n")
         return super().generate(is_inference)
 
+    def generate_user_defined_triton_kernel(
+        self, kernel_name, grid, configs, args, triton_meta, raw_args
+    ):
+        assert len(grid) != 0
+        if len(grid) == 1:
+            grid_decision = grid[0]
+        else:
+            meta = CudaKernelParamCache.get(kernel_name)
+            assert meta is not None
+            grid_decision = None
+            for i, c in enumerate(configs):
+                if all(arg == meta["meta"][key] for key, arg in c.kwargs.items()):
+                    grid_decision = grid[i]
+                    break
+            assert grid_decision is not None
+
+        arg_types = [
+            arg.get_dtype() if hasattr(arg, "get_dtype") else type(arg)
+            for arg in raw_args
+        ]
+        self.generate_kernel_call(
+            kernel_name,
+            args,
+            arg_types=arg_types,
+            grid=grid_decision,
+            cuda=True,
+            triton=True,
+            triton_meta=triton_meta,
+        )
+
     @functools.lru_cache(None)  # noqa: B019
     def generate_load_kernel_once(
         self,
-        name: str,
+        kernel_name: str,
         graph: "GraphLowering",  # for per-graph caching
     ):
         keys = (get_cpp_wrapper_cubin_path_name(), "mangled_name", "shared_mem")
-        if V.graph.aot_mode:
-            self.writeline(f"if (kernels.{name} == nullptr) {{")
-            self.writeline(
-                DeferredCudaKernelLine(
-                    f"kernels.{name}"
-                    + """ = loadKernel("%s", "%s", %s, this->cubin_dir_);""",
-                    name,
-                    keys,
-                )
+        kernel_var_name = f"kernels.{kernel_name}" if V.graph.aot_mode else kernel_name
+        self.writeline(f"if ({kernel_var_name} == nullptr) {{")
+        self.writeline(
+            DeferredCudaKernelLine(
+                kernel_name,
+                kernel_var_name + """ = loadKernel("%s", "%s", %s, this->cubin_dir_);"""
+                if V.graph.aot_mode
+                else kernel_var_name + """ = loadKernel("%s", "%s", %s);""",
+                keys,
             )
-            self.writeline("}")
-        else:
-            self.writeline(f"if ({name} == nullptr) {{")
-            self.writeline(
-                DeferredCudaKernelLine(
-                    name + """ = loadKernel("%s", "%s", %s);""",
-                    name,
-                    keys,
-                )
-            )
-            self.writeline("}")
+        )
+        self.writeline("}")
+        return kernel_var_name
 
     def generate_args_decl(self, call_args, arg_types):
         new_args = []
@@ -194,7 +216,7 @@ class CppWrapperCuda(CppWrapperCpu):
         device_index, call_args = self.prepare_triton_kernel_call(
             device_index, call_args
         )
-        self.generate_load_kernel_once(kernel_name, V.graph)
+        kernel_var_name = self.generate_load_kernel_once(kernel_name, V.graph)
 
         # args with value 1 are added into equal_to_1 and constants
         # in triton_meta (in the Python codegen) which makes them
@@ -229,9 +251,9 @@ class CppWrapperCuda(CppWrapperCpu):
 
         if grid_uses_symbolic_shapes:
             self.writeline(f"if ({grid_name}.is_non_zero()) {{")
-        kernel_var_name = f"kernels.{kernel_name}" if V.graph.aot_mode else kernel_name
         self.writeline(
             DeferredCudaKernelLine(
+                kernel_name,
                 "launchKernel({}, {}, {}, {},".format(
                     kernel_var_name,
                     f"{grid_name}.grid_x",
@@ -240,9 +262,8 @@ class CppWrapperCuda(CppWrapperCpu):
                 )
                 + "%s, %s,"
                 + f"{kernel_args_var}, {stream});",
-                kernel_name,
                 ("num_warps", "shared_mem"),
-            )
+            ),
         )
         if grid_uses_symbolic_shapes:
             self.writeline("}")

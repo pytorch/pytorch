@@ -6,7 +6,6 @@ import itertools
 import logging
 import math
 import operator
-import os
 import re
 from enum import auto, Enum
 from itertools import chain
@@ -34,7 +33,6 @@ from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRangeAnalysis, ValueRanges
 
 from .. import config, metrics
-from ..codecache import CudaKernelParamCache, get_cpp_wrapper_cubin_path_name
 from ..utils import (
     DeferredLineBase,
     generate_assert,
@@ -148,6 +146,7 @@ class BackendFeature(Enum):
     MASKED_SCATTER_WITH_INDEX = auto()
     SCAN = auto()
     TUPLE_REDUCTION = auto()
+    PREFER_STORE_LOOP_ORDER = auto()
 
 
 def get_backend_features(device: Union[torch.device, str]):
@@ -1117,42 +1116,6 @@ class DeferredLine(DeferredLineBase):
 
     def _new_line(self, line):
         return DeferredLine(self.name, line)
-
-
-class DeferredCudaKernelLine(DeferredLineBase):
-    """
-    When using cpp wrapper, CUDA kernel load and launch needs to wait for Triton kernels
-    to be tuned and stored as cubin files, so use a deferred line to backfill those information
-    """
-
-    def __init__(
-        self,
-        line_template: str,
-        kernel_name: str,
-        keys: Tuple[str, ...],
-    ):
-        super().__init__(line_template)
-        assert not isinstance(line_template, DeferredLineBase)
-        self.line_template = line_template
-        self.kernel_name = kernel_name
-        self.keys = keys
-
-    def __call__(self):
-        params = CudaKernelParamCache.get(self.kernel_name)
-        assert (
-            params is not None
-        ), f"{self.kernel_name} not found in CudaKernelParamCache"
-        for key in self.keys:
-            assert (
-                key in params
-            ), f"{key} not found in CudaKernelParamCache[{self.kernel_name}]"
-            if key == get_cpp_wrapper_cubin_path_name():
-                assert os.path.exists(params[key]), f"{params[key]} does not exist"
-
-        return self.line_template % tuple(params[key] for key in self.keys)
-
-    def _new_line(self, line):
-        return DeferredCudaKernelLine(line, self.kernel_name, self.keys)
 
 
 class BracesBuffer(IndentedBuffer):
