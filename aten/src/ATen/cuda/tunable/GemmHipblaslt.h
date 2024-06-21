@@ -263,19 +263,19 @@ static size_t GetHipblasltWorkspaceSize() {
   // 256MB is max workspace size allowed for hipblaslt
   // hipblaslt-bench uses 32MB
   // recommendation from hipblaslt author was 76MB
-  size_t workspace_size = 2*128*1024*1024; // default 256MB
+  size_t workspace_size = 32*1024;  // going with 32MB
   if (env) {
     try {
       workspace_size = std::stoi(env);
     } catch(std::invalid_argument const& e) {
       TORCH_WARN("invalid HIPBLASLT_WORKSPACE_SIZE,",
-                 " using default workspace size of ", workspace_size, " bytes.");
+                 " using default workspace size of ", workspace_size, " KiB.");
     } catch(std::out_of_range const& e) {
       TORCH_WARN("HIPBLASLT_WORKSPACE_SIZE out of range,",
-                 " using default workspace size of ", workspace_size, " bytes.");
+                 " using default workspace size of ", workspace_size, " KiB.");
     }
   }
-  return workspace_size;
+  return workspace_size * 1024;
 }
 
 template <typename T, cublasStatus_t (*destructor)(T*)>
@@ -413,12 +413,10 @@ class HipblasltGemmOp : public Callable<ParamsT> {
 
       if (status == HIPBLAS_STATUS_SUCCESS) {
         if (ret_workspace_size >= workspace_size) {
-          //TUNABLE_LOG("[hipBLASLt] Solution #", algo_index, " workspace too large");
           return FAIL;
         }
       }
       else {
-        //TUNABLE_LOG("[hipBLASLt] Solution #", algo_index, " not supported");
         return FAIL;
       }
 

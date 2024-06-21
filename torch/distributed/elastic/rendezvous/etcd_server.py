@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# mypy: allow-untyped-defs
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -15,6 +16,7 @@ import subprocess
 import tempfile
 import time
 from typing import Optional, TextIO, Union
+
 
 try:
     import etcd  # type: ignore[import]
