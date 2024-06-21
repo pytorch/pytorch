@@ -97,7 +97,7 @@ struct TORCH_API Function {
   // executor.
   virtual bool call(
       Stack&,
-      c10::optional<size_t>,
+      std::optional<size_t>,
       c10::function_ref<void(const Code&)>) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false);
     return false;

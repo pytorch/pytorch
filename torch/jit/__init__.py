@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import warnings
 
 from contextlib import contextmanager
@@ -81,6 +82,7 @@ __all__ = [
     "export_opnames",
     "fork",
     "freeze",
+    "interface",
     "ignore",
     "isinstance",
     "load",

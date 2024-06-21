@@ -107,7 +107,7 @@ inline void searchsorted_pre_check(
     const Tensor& output,
     const bool out_int32,
     const bool right,
-    const c10::optional<c10::string_view> side_opt,
+    const std::optional<c10::string_view> side_opt,
     const Tensor& sorter) {
   if (side_opt) {
     const c10::string_view side = *side_opt;

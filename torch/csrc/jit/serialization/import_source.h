@@ -17,8 +17,7 @@
 #include <string>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using SourceLoader = std::function<std::shared_ptr<Source>(const std::string&)>;
 
@@ -45,7 +44,7 @@ struct SourceImporterImpl : public Resolver,
  private:
   void importFunction(const std::string& qualifier, const Def& def);
   void importNamedType(const std::string& qualifier, const ClassDef& class_def);
-  c10::optional<Assign> attributeAssignmentSpecialHandlingHack(
+  std::optional<Assign> attributeAssignmentSpecialHandlingHack(
       const QualifiedName& qualified_classname,
       const Assign& assign);
   void importClass(
@@ -66,7 +65,7 @@ struct SourceImporterImpl : public Resolver,
   std::shared_ptr<CompilationUnit> cu_;
   std::unordered_map<std::string, std::shared_ptr<SugaredValue>> env_;
   SourceLoader source_loader_;
-  c10::optional<size_t> version_ = c10::nullopt;
+  std::optional<size_t> version_ = c10::nullopt;
   std::unordered_set<std::string> loaded_sources_;
   // named types and functions loaded from a file but not yet defined because
   // their type has not been requested yet.
@@ -99,5 +98,4 @@ struct TORCH_API SourceImporter {
   std::shared_ptr<SourceImporterImpl> pImpl;
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

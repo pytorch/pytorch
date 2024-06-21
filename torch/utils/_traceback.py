@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from types import TracebackType
 from typing import List, Optional
 import tempfile
@@ -128,7 +129,7 @@ def report_compile_source_on_error():
             tb.tb_next = tb_next
             tb_next = tb
 
-        raise exc.with_traceback(tb_next)  # noqa: TRY200
+        raise exc.with_traceback(tb_next)  # noqa: B904
 
 def shorten_filename(fn, *, base=None):
     """Shorten a source filepath, with the assumption that torch/ subdirectories don't need to be shown to user."""

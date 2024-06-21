@@ -9,15 +9,13 @@
 #import <ATen/native/metal/mpscnn/MPSImageUtils.h>
 #include <torch/library.h>
 
-namespace at {
-namespace native {
-namespace metal {
+namespace at::native::metal {
 
 using MetalTensorImpl = at::MetalTensorImpl<MetalTensorImplStorage>;
 
 // NB: this is currently unused, but I've left it because in principle
 // it's useful
-Tensor& hardshrink_(Tensor& input, const at::Scalar& lambda=0.5) {
+static Tensor& hardshrink_(Tensor& input, const at::Scalar& lambda=0.5) {
   float l = lambda.toFloat();
   MPSImage* X = imageFromTensor(input);
   MetalCommandBuffer* commandBuffer = getCommandBuffer(input);
@@ -51,7 +49,7 @@ Tensor& hardshrink_(Tensor& input, const at::Scalar& lambda=0.5) {
   return input;
 }
 
-Tensor hardshrink(const at::Tensor& input, const at::Scalar& lambda=0.5) {
+static Tensor hardshrink(const at::Tensor& input, const at::Scalar& lambda=0.5) {
   float l = lambda.toFloat();
   MPSImage* X = imageFromTensor(input);
   IntArrayRef outputSize = input.sizes();
@@ -87,8 +85,6 @@ Tensor hardshrink(const at::Tensor& input, const at::Scalar& lambda=0.5) {
 
 TORCH_LIBRARY_IMPL(aten, Metal, m) {
   m.impl(TORCH_SELECTIVE_NAME("aten::hardshrink"), TORCH_FN(hardshrink));
-};
+}
 
-}
-}
-}
+} // namespace at::native::metal

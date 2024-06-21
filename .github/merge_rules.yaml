@@ -27,12 +27,12 @@
   - third_party/onnx
   - caffe2/python/onnx/**
   approved_by:
-  - BowenBao
   - justinchuby
+  - liqunfu
   - shubhambhokare1
-  - thiagocrepaldi
   - titaiwangms
   - wschin
+  - xadupre
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -242,7 +242,9 @@
   - torch/csrc/xpu/**
   - torch/xpu/**
   - test/xpu/**
+  - test/test_xpu.py
   - third_party/xpu.txt
+  - .ci/docker/ci_commit_pins/triton-xpu.txt
   approved_by:
   - EikanWang
   - jgong5
@@ -380,6 +382,7 @@
   - test/inductor/test_mkldnn_pattern_matcher.py
   - test/inductor/test_cpu_repo.py
   - test/inductor/test_cpu_cpp_wrapper.py
+  - aten/src/ATen/cpu/**
   - aten/src/ATen/native/quantized/cpu/**
   - test/quantization/core/test_quantized_op.py
   - torch/ao/quantization/quantizer/x86_inductor_quantizer.py
