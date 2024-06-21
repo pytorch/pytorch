@@ -5624,7 +5624,7 @@ def forward(self, x, y):
         inputs = (torch.randn(10), torch.tensor(6))
         ep = export(Foo(), inputs)
         FileCheck().check_count(
-            "torch.ops.aten._assert_scalar.default", 0, exactly=True
+            "torch.ops.aten.sym_constrain_range.default", 1, exactly=True
         ).run(ep.graph_module.code)
         FileCheck().check_count(
             "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
@@ -5632,7 +5632,7 @@ def forward(self, x, y):
 
         ep = ep.run_decompositions()
         FileCheck().check_count(
-            "torch.ops.aten._assert_scalar.default", 0, exactly=True
+            "torch.ops.aten.sym_constrain_range.default", 1, exactly=True
         ).run(ep.graph_module.code)
         FileCheck().check_count(
             "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
