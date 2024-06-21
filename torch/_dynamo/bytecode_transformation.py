@@ -218,7 +218,7 @@ def add_push_null(
         elif insts[0].opname == "LOAD_GLOBAL" and not inst_has_bit_set(0):
             set_inst_bit(0)
         else:
-            insts = [(create_instruction("PUSH_NULL"))] + insts
+            insts = [create_instruction("PUSH_NULL")] + insts
     elif sys.version_info >= (3, 11):
         # 3.11 introduced NULL preceding callable
         if inst_has_op_bits(insts[0].opname) and not inst_has_bit_set(0):
