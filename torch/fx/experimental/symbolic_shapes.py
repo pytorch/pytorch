@@ -847,11 +847,10 @@ def _constrain_range_for_size(a, min: Optional[int] = None, max: Optional[int] =
     if isinstance(a, (SymFloat, SymBool)):
         raise ValueError("Constraining SymFloat/SymBool is nyi")
 
-    if (
-        isinstance(a, SymInt)
-        and isinstance(a.node.expr, sympy.Symbol)
-    ):  # follow _advise_is_size(), no-op if a is concrete value
-        a.node.shape_env._constrain_range_for_size(a.node.expr, min, max)
+    assert isinstance(a, SymInt), "can only constrain range for SymInt"
+    assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
+
+    a.node.shape_env._constrain_range_for_size(a.node.expr, min, max)
 
 
 # inclusive both ways

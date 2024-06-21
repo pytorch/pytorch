@@ -8,11 +8,9 @@ handler; only those with corresponding Sympy expressions.  To see an example
 of a full handler, see torch.utils._sympy.value_ranges.ValueRangeAnalysis.
 """
 
-import contextlib
 import functools
 import logging
-import sys
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, Union
 
 import sympy
 from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
@@ -39,7 +37,6 @@ from .functions import (
     TruncToInt,
     Where,
 )
-from torch import fx
 
 
 log = logging.getLogger(__name__)
@@ -113,15 +110,9 @@ def sympy_interp(
     analysis,
     env: Dict[sympy.Symbol, Any],
     expr: Union[sympy.Expr, SympyBoolean],
-    hash_cons: Optional[Dict[sympy.Expr, fx.Node]] = None,
     *,
-    insert_after_args=False,
     index_dtype=torch.int64,
 ):
-    # hash cons
-    if hash_cons is not None and expr in hash_cons:
-        return hash_cons[expr]
-
     # Handle base cases
     dtype = None
     if isinstance(expr, BooleanAtom):
@@ -140,22 +131,14 @@ def sympy_interp(
     if isinstance(expr, sympy.Pow) and isinstance(
         expr.args[1], sympy.core.numbers.Half
     ):
-        return analysis.sqrt(sympy_interp(analysis, env, expr.args[0], hash_cons, insert_after_args=insert_after_args))
+        return analysis.sqrt(sympy_interp(analysis, env, expr.args[0]))
     if isinstance(expr, ToFloat):
         return analysis.to_dtype(
-            sympy_interp(analysis, env, expr.args[0], hash_cons, insert_after_args=insert_after_args), torch.float64
+            sympy_interp(analysis, env, expr.args[0]), torch.float64
         )
 
-    def insert_after_last_node(args):
-        # Watch where we insert
-        node_args = [n.node for n in args if isinstance(n, fx.Proxy)]
-        if not insert_after_args or not node_args:
-            return contextlib.nullcontext()
-        last_node = max(node_args)
-        return last_node.graph.inserting_before(last_node.next)
-
     # Recursive case
-    args = [sympy_interp(analysis, env, arg, hash_cons, insert_after_args=insert_after_args) for arg in expr.args]  # type: ignore[arg-type]
+    args = [sympy_interp(analysis, env, arg) for arg in expr.args]  # type: ignore[arg-type]
 
     # These handlers are special because they take an extra dtype argument
     # specifying what they should convert to, and we need to appropriately set
@@ -172,36 +155,26 @@ def sympy_interp(
         CeilToInt: "ceil_to_int",
         RoundToInt: "round_to_int",
     }
+    if (handler_name := INDEX_DTYPE_HANDLERS.get(expr.func)) is not None:
+        return getattr(analysis, handler_name)(*args, index_dtype)
 
-    # Watch where we insert
-    with insert_after_last_node(args):
-
-        if (handler_name := INDEX_DTYPE_HANDLERS.get(expr.func)) is not None:
-            result = getattr(analysis, handler_name)(*args, index_dtype)
-            if hash_cons is not None:
-                hash_cons[expr] = result
-            return result
-
-        if hasattr(expr.func, "_torch_handler_name"):
-            handler_name = expr.func._torch_handler_name
+    if hasattr(expr.func, "_torch_handler_name"):
+        handler_name = expr.func._torch_handler_name
+    else:
+        handler_name = handlers()[expr.func]
+    handler = getattr(analysis, handler_name)
+    try:
+        if handler_name in ASSOCIATIVE_OPS:
+            assert len(args) > 1
+            acc = handler(args[0], args[1])
+            for i in range(2, len(args)):
+                acc = handler(acc, args[i])
+            log.debug("%s(%s) -> %s", handler_name, args, acc)
+            return acc
         else:
-            handler_name = handlers()[expr.func]
-        handler = getattr(analysis, handler_name)
-        try:
-            if handler_name in ASSOCIATIVE_OPS:
-                assert len(args) > 1
-                acc = handler(args[0], args[1])
-                for i in range(2, len(args)):
-                    acc = handler(acc, args[i])
-                log.debug("%s(%s) -> %s", handler_name, args, acc)
-                result = acc
-            else:
-                result = handler(*args)
-                log.debug("%s(%s) -> %s", handler_name, args, result)
-        except Exception:
-            log.warning("failed while executing %s(%s)", handler_name, args)
-            raise
-
-        if hash_cons is not None:
-            hash_cons[expr] = result
-        return result
+            r = handler(*args)
+            log.debug("%s(%s) -> %s", handler_name, args, r)
+            return r
+    except Exception:
+        log.warning("failed while executing %s(%s)", handler_name, args)
+        raise
