@@ -1,9 +1,3 @@
-#ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/Functions.h>
-#else
-#include <ATen/ops/mm.h>
-#endif
-
 #include <torch/library.h>
 
 #include <ATen/FunctionalTensorWrapper.h>
