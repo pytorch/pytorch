@@ -604,6 +604,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             ),
         )
 
+    @requires_cuda
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     def test_compile_selective_checkpoint_must_not_recompute_gemm(self):
         def selective_checkpointing_context_fn():
