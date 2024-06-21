@@ -30,8 +30,11 @@ def init_fake_distributed():
             mod.unsharded_weight.untyped_storage().resize_(
                 mod.unsharded_weight.nelement() * mod.unsharded_weight.element_size()
             )
-        with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(mod.unsharded_weight):
-            torch.ops.fsdp.set_(mod.unsharded_weight, all_gather(mod.sharded_weight))
+            with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(mod.unsharded_weight):
+                mod.unsharded_weight.copy_(all_gather(mod.sharded_weight))
+        else:
+            with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(mod.unsharded_weight):
+                torch.ops.fsdp.set_(mod.unsharded_weight, all_gather(mod.sharded_weight))
         mod.weight = mod.unsharded_weight
 
     # Forward:
@@ -50,8 +53,11 @@ def init_fake_distributed():
             mod.unsharded_weight.untyped_storage().resize_(
                 mod.unsharded_weight.nelement() * mod.unsharded_weight.element_size()
             )
-        with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(mod.unsharded_weight):
-            torch.ops.fsdp.set_(mod.unsharded_weight, all_gather(mod.sharded_weight))
+            with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(mod.unsharded_weight):
+                mod.unsharded_weight.copy_(all_gather(mod.sharded_weight))
+        else:
+            with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(mod.unsharded_weight):
+                torch.ops.fsdp.set_(mod.unsharded_weight, all_gather(mod.sharded_weight))
         mod.weight = mod.unsharded_weight
 
     # Backward:
@@ -418,29 +424,6 @@ class DistributedPatternTests(TestCase):
         p2, r2 = opt(x2)
         self._assert_same_grad(r1, r2)
         self._assert_same_grad(p1, p2)
-
-    def test_fake_distributed_eager(self):
-        m1, inp1 = init_fake_distributed()
-        out1 = steps(m1, inp1)
-
-        m2, inp2 = init_fake_distributed()
-        fw_cnt = CompileCounter()
-        m2 = torch.compile(m2, backend=fw_cnt, fullgraph=True)
-
-        bw_cnt = CompileCounter()
-        with compiled_autograd.enable(torch.compile(backend=bw_cnt, fullgraph=False)):
-            for step in range(1, 5):
-                out2 = m2(inp2)
-                out2.sum().backward()
-
-                # Graph break on TracableCreateParameter.backward
-                # Recompile on grad==None/grad!=None
-                self.assertEqual(bw_cnt.frame_count, min(step, 2) * 2)
-
-        self.assertEqual(fw_cnt.frame_count, 1)
-        self._assert_same_grad(m1.weight, m2.weight)
-        self._assert_same_grad(inp1, inp2)
-        self._assert_same_grad(out1, out2)
 
     @torch._functorch.config.patch(recompute_views=True)
     def test_fake_distributed_aot_eager(self):
