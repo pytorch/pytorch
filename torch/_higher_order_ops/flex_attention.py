@@ -494,7 +494,7 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
                 sparse_mask_kv_indices,
                 sparse_mask_q_num_blocks,
                 sparse_mask_q_indices,
-                 *other_buffers,
+                *other_buffers,
             )
 
         ctx.save_for_backward(

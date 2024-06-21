@@ -60,21 +60,35 @@ def index_to_other_buffers(cnt: int, graph_type: SubgraphType) -> int:
         cnt (int): The current index of the placeholder node
         is_joint_graph (bool): Whether or not this subgraph represents the joint graph
     """
-    # Current fwd_args = [query, key, value, score_mod, *other_buffers]
+    # Current fwd_args = [
+    #   query, key, value, score_mod,
+    #   sparse_mask_kv_num_blocks,
+    #   sparse_mask_kv_indices,
+    #   sparse_mask_q_num_blocks,
+    #   sparse_mask_q_indices,
+    #   *other_buffers
+    # ]
     # For fwd_graphs we have 5 dummy values this when the first lifted args
-    # is seen cnt = 5 and the start of the index_buffers is at args[4]
-    # thus we subtract 1 from the current cnt
+    # is seen cnt = 5 and the start of the index_buffers is at args[8]
+    # thus we add 3 from the current cnt
     if graph_type == SubgraphType.FWD:
-        return cnt - 1
-
-    # Current bwd_args = [q, k, v, out, lse, grad_out, fw_graph, joint_graph, *other_buffers]
-    # We have 5 dummy values but the start of other_buffers is at index 8
-    if graph_type == SubgraphType.JOINT_FWD:
         return cnt + 3
 
-    # Same bwd args but now with 6 dummy values while other_buffers still start at 8
+    # Current bwd_args = [
+    #   q, k, v, out, lse, grad_out, fw_graph, joint_graph,
+    #   sparse_mask_kv_num_blocks,
+    #   sparse_mask_kv_indices,
+    #   sparse_mask_q_num_blocks,
+    #   sparse_mask_q_indices,
+    #   *other_buffers
+    # ]
+    # We have 5 dummy values but the start of other_buffers is at index 12
+    if graph_type == SubgraphType.JOINT_FWD:
+        return cnt + 7
+
+    # Same bwd args but now with 6 dummy values while other_buffers still start at 12
     if graph_type == SubgraphType.JOINT_BWD:
-        return cnt + 2
+        return cnt + 6
 
 
 def build_subgraph_buffer(
