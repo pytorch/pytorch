@@ -81,8 +81,11 @@ COPY --from=openssl            /opt/openssl           /opt/openssl
 COPY --from=patchelf           /patchelf              /usr/local/bin/patchelf
 COPY --from=conda              /opt/conda             /opt/conda
 
+COPY ./common/install_jni.sh install_jni.sh
+COPY ./java/jni.h jni.h
+RUN bash ./install_jni.sh && rm install_jni.sh
 # ADD  ./java/jni.h /usr/local/include/jni.h
-COPY ./java/jni.h /usr/local/include/jni.h
+
 ENV  PATH /opt/conda/bin:$PATH
 COPY --from=mnist  /usr/local/mnist /usr/local/mnist
 RUN rm -rf /usr/local/cuda
