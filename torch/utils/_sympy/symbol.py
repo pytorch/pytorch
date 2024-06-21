@@ -49,6 +49,8 @@ class SymT(Enum):
     YBLOCK = auto()
     # Inductor: this is used solely for dynamic_reshape_indexer
     VIEW = auto()
+    # Alternate (non-modular) indexing used in halide kernels
+    HALIDE = auto()
 
 
 # Invariant: there must not be a prefix which is a prefix of another string,
@@ -70,6 +72,7 @@ prefix_str = {
     SymT.YBLOCK: "y",
     SymT.INDIRECT: "indirect",  # false aliasing?
     SymT.VIEW: "view",
+    SymT.HALIDE: "h",
 }
 
 
