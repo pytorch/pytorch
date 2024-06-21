@@ -60,6 +60,7 @@ inline void {{kernel_name}}(
         compute_dtype,
         register_blocking,
         alpha=1,
+        input2_dtype=None,
     ):
         self.name = name
         self.input_dtype = input_dtype
@@ -67,11 +68,13 @@ inline void {{kernel_name}}(
         self.compute_dtype = compute_dtype
         self.register_blocking = register_blocking
         self.alpha = alpha
+        self.input2_dtype = input2_dtype if input2_dtype else input_dtype
 
     def get_common_options(self):
         if self.input_dtype == torch.uint8:
             assert self.compute_dtype == torch.int32
             assert self.output_dtype == torch.int32
+            assert self.input2_dtype == torch.int8
         return {
             "torch": torch,
             "kernel_name": self.name,
@@ -79,11 +82,7 @@ inline void {{kernel_name}}(
             "output_dtype": self.output_dtype,
             "compute_dtype": self.compute_dtype,
             "input_t": DTYPE_TO_CPP[self.input_dtype],
-            "input2_t": DTYPE_TO_CPP[torch.int8]
-            if self.input_dtype == torch.uint8
-            else DTYPE_TO_CPP[
-                self.input_dtype
-            ],  # TODO: support dtype other than s8 for weight
+            "input2_t": DTYPE_TO_CPP[self.input2_dtype],
             "output_t": DTYPE_TO_CPP[self.output_dtype],
             "compute_t": DTYPE_TO_CPP[self.compute_dtype],
             "alpha": self.alpha,
@@ -162,6 +161,7 @@ inline void {{kernel_name}}(
 @dataclasses.dataclass
 class CppMicroGemmConfig:
     input_dtype: torch.dtype
+    input2_dtype: torch.dtype
     output_dtype: torch.dtype
     compute_dtype: torch.dtype
     vec_isa_cls: Type[VecISA]
@@ -191,14 +191,18 @@ def generate_gemm_config(
     output_dtype=None,
     compute_dtype=None,
     extra_check=None,
+    input2_dtype=None,
 ):
     if output_dtype is None:
         output_dtype = input_dtype
     if compute_dtype is None:
         compute_dtype = output_dtype
+    if input2_dtype is None:
+        input2_dtype = input_dtype
     return [
         CppMicroGemmConfig(
             input_dtype,
+            input2_dtype,
             output_dtype,
             compute_dtype,
             vec_isa_cls,
@@ -229,9 +233,17 @@ class CppMicroGemmRef(CppMicroGemm):
 }
 """
 
-    def __init__(self, name, input_dtype, output_dtype, compute_dtype, alpha):
+    def __init__(
+        self, name, input_dtype, output_dtype, compute_dtype, alpha, input2_dtype=None
+    ):
         super().__init__(
-            name, input_dtype, output_dtype, compute_dtype, GemmBlocking(1, 1, 1), alpha
+            name,
+            input_dtype,
+            output_dtype,
+            compute_dtype,
+            GemmBlocking(1, 1, 1),
+            alpha,
+            input2_dtype,
         )
 
     def codegen_define(self, kernel: CppTemplateKernel) -> str:
@@ -450,6 +462,7 @@ def check_amx_extra(config, m, n, k, alpha, num_threads):
         output_dtype=torch.int32,
         compute_dtype=torch.int32,
         extra_check=check_amx_extra,
+        input2_dtype=torch.int8,
     ),
 )
 class CppMicroGemmAMX(CppMicroGemm):
@@ -675,6 +688,7 @@ def create_micro_gemm(
     alpha=1,
     num_threads=-1,
     use_ref=True,
+    input2_dtype=None,
 ) -> Optional[CppMicroGemm]:
     def create_from_config(cls, config: CppMicroGemmConfig):
         return cls(
@@ -684,6 +698,7 @@ def create_micro_gemm(
             config.compute_dtype,
             config.register_blocking,
             alpha,
+            config.input2_dtype,
         )
 
     assert isinstance(n, int) or n.is_number, n
@@ -710,6 +725,7 @@ def create_micro_gemm(
                     else config.output_dtype == output_dtype
                 )
                 and config.compute_dtype == compute_dtype
+                and (config.input2_dtype is None or config.input2_dtype == input2_dtype)
             ):
                 if config.extra_check is not None and not config.extra_check(
                     config, m, n, k, alpha, num_threads
@@ -753,7 +769,7 @@ def create_micro_gemm(
     if len(matched_configs) == 0:
         if use_ref:
             return CppMicroGemmRef(
-                name, input_dtype, output_dtype, compute_dtype, alpha
+                name, input_dtype, output_dtype, compute_dtype, alpha, input2_dtype
             )
         else:
             return None

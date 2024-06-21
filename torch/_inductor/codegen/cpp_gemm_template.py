@@ -14,7 +14,7 @@ from .cpp_micro_gemm import CppMicroGemmAMX, create_micro_gemm, LayoutType
 from .cpp_template import CppTemplate
 
 from .cpp_template_kernel import CppTemplateKernel
-from .cpp_utils import GemmBlocking
+from .cpp_utils import GemmBlocking, get_gemm_template_output_and_compute_dtype
 
 GEMM_TEMPLATE = r"""
 {{template.header().getvalue()}}
@@ -321,16 +321,20 @@ class CppPackedGemmTemplate(CppTemplate):
         )
         int8_gemm = _is_int8_gemm(new_inputs)
         m, n, k, *_ = mm_args(new_inputs[0], new_inputs[3 if int8_gemm else 1])
+        output_dtype, compute_dtype = get_gemm_template_output_and_compute_dtype(
+            new_inputs[0].get_dtype()
+        )
         micro_gemm = create_micro_gemm(
             "micro_gemm",
             m,
             n,
             k,
             input_dtype=new_inputs[0].get_dtype(),
-            output_dtype=torch.int32 if int8_gemm else torch.float,
-            compute_dtype=torch.int32 if int8_gemm else None,
+            output_dtype=output_dtype,
+            compute_dtype=compute_dtype,
             alpha=alpha,
             num_threads=num_threads,
+            input2_dtype=new_inputs[3 if int8_gemm else 1].get_dtype(),
         )
         assert micro_gemm is not None
         _, block_n, _ = micro_gemm.register_blocking
@@ -546,16 +550,20 @@ class CppPackedGemmTemplate(CppTemplate):
                     storage = ir.StorageBox(Y)
                 Y_2d = ir.ReinterpretView(storage, template_buffer.get_layout())
 
+        output_dtype, compute_dtype = get_gemm_template_output_and_compute_dtype(
+            X.get_dtype()
+        )
         micro_gemm = create_micro_gemm(
             f"{kernel.kernel_name}_micro_gemm",
             self.m,
             self.n,
             self.k,
             input_dtype=X.get_dtype(),
-            output_dtype=torch.int32 if int8_gemm else torch.float,
-            compute_dtype=torch.int32 if int8_gemm else None,
+            output_dtype=output_dtype,
+            compute_dtype=compute_dtype,
             alpha=self.alpha,
             num_threads=self.num_threads,
+            input2_dtype=W.get_dtype(),
         )
         assert micro_gemm is not None
         assert self.register_blocking == micro_gemm.register_blocking
