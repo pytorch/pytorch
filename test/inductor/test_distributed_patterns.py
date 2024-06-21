@@ -8,9 +8,8 @@ from torch import nn
 from torch._dynamo import compiled_autograd
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter
-from torch.testing._internal.common_utils import IS_MACOS
+from torch.testing._internal.common_utils import IS_MACOS, parametrize
 from torch.testing._internal.inductor_utils import HAS_CPU, requires_gpu
-from torch.testing._internal.common_utils import parametrize
 
 # Fake distributed
 WORLD_SIZE = 2
