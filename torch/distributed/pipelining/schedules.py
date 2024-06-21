@@ -682,7 +682,6 @@ class PipelineScheduleMulti(_PipelineSchedule):
                     s_id = action.stage_index
                     ctype = action.computation_type
                     mb_id = action.microbatch_index
-                    print(f"processed action stage {s_id} ctype {ctype} mb_id {mb_id}")
                     if ctype == F:
                         stage_actions[s_id][F].add(mb_id)
                     elif ctype == B:
