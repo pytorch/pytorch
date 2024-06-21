@@ -2,7 +2,6 @@
 
 
 import contextlib
-import itertools
 import unittest
 
 import torch
@@ -12,10 +11,6 @@ from torch._dynamo import compiled_autograd
 
 from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._composable.fsdp._fsdp_common import TrainingState
-from torch.distributed._composable.fsdp._fsdp_init import (
-    _get_managed_modules,
-    _get_managed_states,
-)
 from torch.distributed._composable.fsdp._fsdp_param_group import FSDPParamGroup
 from torch.distributed._tensor import init_device_mesh
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
