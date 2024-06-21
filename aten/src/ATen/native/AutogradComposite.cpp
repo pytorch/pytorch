@@ -94,7 +94,7 @@ bool _has_same_storage_numel(const at::Tensor& base, const at::Tensor& other) {
   return base.storage().sym_nbytes() / base.itemsize() == other.storage().sym_nbytes() / other.itemsize();
 }
 
-Tensor _lazy_clone_impl(Tensor const& self, bool future) {
+static Tensor _lazy_clone_impl(Tensor const& self, bool future) {
   c10::StorageImpl* self_storage = self.storage().unsafeGetStorageImpl();
 
   // If data pointer is shared between processes, we cannot convert it to
