@@ -1262,7 +1262,6 @@ coverage_ignore_functions = [
     "args_have_same_dtype",
     "check_training_mode",
     "dequantize_helper",
-    "is_caffe2_aten_fallback",
     "is_complex_value",
     "quantize_helper",
     "quantized_args",
