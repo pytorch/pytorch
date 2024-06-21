@@ -1,7 +1,9 @@
+# mypy: allow-untyped-defs
 from collections import namedtuple
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Type
 
 from torch.utils._pytree import PyTree, structseq, TreeSpec
+
 
 FlattenFuncSpec = Callable[[PyTree, TreeSpec], List]
 FlattenFuncExactMatchSpec = Callable[[PyTree, TreeSpec], bool]

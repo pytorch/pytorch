@@ -136,7 +136,7 @@ ExprHandle promoteIntegerToDefaultType(const ExprHandle& e) {
 
 ExprHandle demoteOutput(
     const ExprHandle& e,
-    const c10::optional<ScalarType> type) {
+    const std::optional<ScalarType> type) {
   if (!type.has_value()) {
     return e;
   }
@@ -160,7 +160,7 @@ ExprHandle demoteOutput(
   return e;
 }
 
-c10::optional<TensorInfo> getTensorInfo(BufHandle b) {
+std::optional<TensorInfo> getTensorInfo(BufHandle b) {
   std::vector<int64_t> dims;
   for (auto dim : b.dims()) {
     auto val = intValue(dim.node());
@@ -321,7 +321,7 @@ Tensor computeChunk(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     at::Device device) {
   return Compute(
       "prim_constantchunk",
@@ -355,7 +355,7 @@ Tensor computeTranspose(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     at::Device device) {
   auto A = std::get<BufHandle>(inputs[0]);
   // Trivial case of 0-dim and 1-dim tensors: transpose is just a copy
@@ -382,7 +382,7 @@ Tensor computeExpand(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     at::Device device) {
   auto A = std::get<BufHandle>(inputs[0]);
   return Compute(
@@ -396,7 +396,7 @@ Tensor computeReshape(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     at::Device device) {
   auto A = std::get<BufHandle>(inputs[0]);
   if (A.ndim() == 0) {
@@ -464,7 +464,7 @@ Tensor computeFlatten(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     at::Device device) {
   std::vector<int64_t> outputShapeVec;
   for (const auto dim : c10::irange(outputShape.size())) {
@@ -576,7 +576,7 @@ static Tensor computeCatWoConditionals(
     std::vector<ExprPtr> store_indices(dims.size());
     for (int64_t i = 0; i < static_cast<int64_t>(dims.size()); ++i) {
       for_vars[i] = alloc<Var>(
-          "i" + c10::to_string(inp_pos) + "_" + c10::to_string(i),
+          "i" + std::to_string(inp_pos) + "_" + std::to_string(i),
           dims[i].dtype());
       load_indices[i] = for_vars[i];
       if (i == norm_concat_dim) {
@@ -622,7 +622,7 @@ Tensor computeCat(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     at::Device device) {
   if (device == at::kCPU && getCatWoConditionals()) {
     return computeCatWoConditionals(inputs, outputShape, outputStrides);
@@ -685,7 +685,7 @@ Tensor computeEmbedding(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     at::Device device) {
   Dtype dtype = kFloat;
   if (outputType) {

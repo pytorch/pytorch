@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# mypy: allow-untyped-defs
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -409,6 +410,7 @@ from torch.distributed.elastic.utils import macros
 from torch.distributed.elastic.utils.logging import get_logger
 from torch.distributed.launcher.api import LaunchConfig, elastic_launch
 from torch.utils.backend_registration import _get_custom_mod_func
+import torch.multiprocessing
 
 logger = get_logger(__name__)
 
@@ -499,7 +501,7 @@ def get_args_parser() -> ArgumentParser:
         "--monitor_interval",
         action=env,
         type=float,
-        default=5,
+        default=0.1,
         help="Interval, in seconds, to monitor the state of workers.",
     )
     parser.add_argument(
@@ -802,7 +804,7 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
             ranks = set(map(int, args.local_ranks_filter.split(",")))
             assert ranks
         except Exception as e:
-            raise Exception(
+            raise ValueError(
                 "--local_ranks_filter must be a comma-separated list of integers e.g. --local_ranks_filter=0,1,2"
             ) from e
 
@@ -873,6 +875,8 @@ def run_script_path(training_script: str, *training_script_args: str):
 
 
 def run(args):
+    torch.multiprocessing._set_thread_name("pt_elastic")
+
     if args.standalone:
         args.rdzv_backend = "c10d"
         args.rdzv_endpoint = "localhost:0"

@@ -2,6 +2,7 @@ import inspect
 
 import torch
 
+
 __all__ = ["pytree_register_structseq", "all_return_types"]
 
 all_return_types = []
