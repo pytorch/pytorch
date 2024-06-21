@@ -366,7 +366,7 @@ class TestSelectAlgorithm(TestCase):
     @patches
     @torch.no_grad
     @parametrize("bias", (True, False))
-    def test_linear_with_embedding(self, bias, dtype):
+    def test_linear_with_embedding(self, bias):
         batch_size = 384
         in_features = 196
         out_features = 384
