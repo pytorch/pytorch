@@ -556,7 +556,7 @@ class TestPasses(TestCase):
         num_assert = count_call_function(
             ep.graph, torch.ops.aten._assert_scalar.default
         )
-        self.assertEqual(num_assert, 2)
+        self.assertEqual(num_assert, 0)
         num_constrain_range = count_call_function(
             ep.graph, torch.ops.aten.sym_constrain_range.default
         )

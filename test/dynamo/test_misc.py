@@ -8364,6 +8364,7 @@ def ___make_guard_fn():
             return x + z
 
         fn(torch.randn(4), torch.tensor([3]))
+        breakpoint()
         self.assertRaises(RuntimeError, lambda: fn(torch.randn(4), torch.tensor([4])))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)

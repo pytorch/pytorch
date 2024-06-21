@@ -2779,14 +2779,14 @@ def forward(self, x):
 
         ep = torch.export.export(M(), (torch.tensor(1),))
         FileCheck().check_count(
-            "torch.ops.aten._assert_scalar.default", 2, exactly=True
+            "torch.ops.aten._assert_scalar.default", 0, exactly=True
         ).run(ep.graph_module.code)
         FileCheck().check_count(
             "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
         ).run(ep.graph_module.code)
         decompose_ep = ep.run_decompositions()
         FileCheck().check_count(
-            "torch.ops.aten._assert_scalar.default", 2, exactly=True
+            "torch.ops.aten._assert_scalar.default", 0, exactly=True
         ).run(ep.graph_module.code)
         FileCheck().check_count(
             "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
@@ -2821,7 +2821,7 @@ def forward(self, x):
         self.assertEqual(ep.module()(torch.tensor([6])).shape, (6, 4))
 
         FileCheck().check_count(
-            "torch.ops.aten._assert_scalar.default", 2, exactly=True
+            "torch.ops.aten._assert_scalar.default", 0, exactly=True
         ).run(ep.graph_module.code)
         FileCheck().check_count(
             "torch.ops.aten.sym_constrain_range.default", 1, exactly=True
@@ -2847,7 +2847,7 @@ def forward(self, x):
         ep = export(f, (torch.tensor([6]),))
         self.assertEqual(ep.module()(torch.tensor([5])).shape, (10, 5))
         FileCheck().check_count(
-            "torch.ops.aten._assert_scalar.default", 2, exactly=True
+            "torch.ops.aten._assert_scalar.default", 0, exactly=True
         ).run(ep.graph_module.code)
         FileCheck().check_count(
             "torch.ops.aten.sym_constrain_range.default", 1, exactly=True
@@ -3470,7 +3470,7 @@ def forward(self, x):
             "torch.ops.aten.sym_constrain_range.default", 1, exactly=True
         ).run(ep.graph_module.code)
         FileCheck().check_count(
-            "torch.ops.aten._assert_scalar.default", 1, exactly=True
+            "torch.ops.aten._assert_scalar.default", 0, exactly=True
         ).run(ep.graph_module.code)
 
         ep = ep.run_decompositions()
@@ -3479,7 +3479,7 @@ def forward(self, x):
             "torch.ops.aten.sym_constrain_range.default", 1, exactly=True
         ).run(ep.graph_module.code)
         FileCheck().check_count(
-            "torch.ops.aten._assert_scalar.default", 1, exactly=True
+            "torch.ops.aten._assert_scalar.default", 0, exactly=True
         ).run(ep.graph_module.code)
 
     def test_non_arg_name_dynamic_shapes_api(self):
@@ -5143,12 +5143,10 @@ def forward(self, x):
     item = torch.ops.aten.item.default(x);  x = None
     sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(item)
     sym_constrain_range_default = torch.ops.aten.sym_constrain_range.default(item, min = 3, max = 5)
-    ge = item >= 0
-    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression 0 <= u1 on node 'ge'");  ge = None
     gt = item > 2
-    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(gt, "Runtime assertion failed for expression 2 < u1 on node 'gt'");  gt = None
+    _assert_scalar_default = torch.ops.aten._assert_scalar.default(gt, "Runtime assertion failed for expression 2 < u1 on node 'gt'");  gt = None
     lt = item < 6
-    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression u1 < 6 on node 'lt'");  lt = None
+    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression u1 < 6 on node 'lt'");  lt = None
     foo_unbacked = torch.ops.testlib.foo_unbacked.default(item);  item = None
     return foo_unbacked""",
         )
@@ -5162,12 +5160,10 @@ def forward(self, x, y):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x);  x = None
     sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense)
     sym_constrain_range_default = torch.ops.aten.sym_constrain_range.default(_local_scalar_dense, min = 3, max = 5)
-    ge = _local_scalar_dense >= 0
-    _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression 0 <= u1 on node 'ge'");  ge = None
     gt = _local_scalar_dense > 2
-    _assert_scalar_1 = torch.ops.aten._assert_scalar.default(gt, "Runtime assertion failed for expression 2 < u1 on node 'gt'");  gt = None
+    _assert_scalar = torch.ops.aten._assert_scalar.default(gt, "Runtime assertion failed for expression 2 < u1 on node 'gt'");  gt = None
     lt = _local_scalar_dense < 6;  _local_scalar_dense = None
-    _assert_scalar_2 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression u1 < 6 on node 'lt'");  lt = None
+    _assert_scalar_1 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression u1 < 6 on node 'lt'");  lt = None
     full = torch.ops.aten.full.default([4, 4], 1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
     add = torch.ops.aten.add.Tensor(y, sum_1);  y = sum_1 = None
     sum_2 = torch.ops.aten.sum.dim_IntList(full, []);  full = None

@@ -166,9 +166,32 @@ def insert_deferred_runtime_asserts(
         )
         return symbol_to_proxy[expr]
 
+    def _is_bound_expr_for_symbol(expr: "sympy.Expr") -> bool:
+        # This is probably unnecessary, but since torch._check() calls for single-symbol bounds
+        # like u0 >= 0, 10 >= u0 accumulate range info in the ShapeEnv, and we insert sym_constrain_range calls
+        # anyways, we designate these calls as redundant and remove them.
+        if len(expr.args) != 2:
+            return False
+        if expr.func not in (
+            sympy.LessThan,
+            sympy.GreaterThan,
+        ):
+            return False
+        lhs, rhs = expr.args
+        return (
+            (isinstance(lhs, sympy.Symbol) and isinstance(rhs, sympy.Number))
+            or (isinstance(rhs, sympy.Symbol) and isinstance(lhs, sympy.Number))
+        )
+
     def add_runtime_asserts(ras):
         for ra in ras:
-            if ra.expr in added_asserts:  # redundant
+            if (
+                ra.expr in added_asserts  # redundant
+                or (
+                    not (ra.expr.free_symbols - constrained_unbacked_symbols)
+                    and _is_bound_expr_for_symbol(ra.expr)
+                )  # single-symbol bound checks are handled by sym_constrain_range
+            ):
                 continue
 
             log.debug("inserting runtime assert %s", ra.expr)
