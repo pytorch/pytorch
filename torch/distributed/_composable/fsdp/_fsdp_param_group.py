@@ -134,6 +134,9 @@ class FSDPParamGroup:
         # Whether to reshard parameters after backward (only useful for
         # gradient accumulation)
         self.reshard_after_backward: bool = True
+        # Optional custom reduce-scatter reduce op (e.g. to divide by a
+        # factor other than the shard world size)
+        self.reduce_scatter_reduce_op: Optional[dist.ReduceOp] = None
 
         # - CUDA events for stream synchronization
         # Holds the all-gather output buffer, sync objects, and metadata
@@ -333,6 +336,7 @@ class FSDPParamGroup:
                 self._orig_dtype,
                 self._reduce_dtype,
                 self.device,
+                self.reduce_scatter_reduce_op,
                 self._all_reduce_process_group if self._is_hsdp else None,
                 self.comm_ctx.all_reduce_stream,
                 self.all_reduce_grads,
