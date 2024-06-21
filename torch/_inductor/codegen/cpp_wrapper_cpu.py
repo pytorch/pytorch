@@ -1474,32 +1474,18 @@ class CppWrapperCpu(WrapperCodeGen):
         )
 
     def make_buffer_free(self, buffer):
-        if (
-            isinstance(buffer.get_layout(), ir.MultiOutputLayout)
+        return (
+            ""
+            if isinstance(buffer.get_layout(), ir.MultiOutputLayout)
             or (V.graph.aot_mode and buffer.get_name() in self.stack_allocated_buffers)
             or (
                 config.use_minimal_arrayref_interface
                 and V.graph.aot_mode
                 and buffer.get_name() in V.graph.graph_inputs
             )
-        ):
-            return ""
-        elif isinstance(buffer, ir.ExternKernel) and isinstance(
-            buffer.op_overload, torch._ops.OpOverload
-        ):
-            # NOTE: len(returns) > 1 is the MultiOutputLayout case and we explicitly
-            # don't generate buffer free code for it (see above branch).
-            assert len(buffer.op_overload._schema.returns) == 1
-            if isinstance(buffer.op_overload._schema.returns[0].type, torch.TensorType):
-                return f"{buffer.get_name()}.reset();"
-            elif isinstance(
-                buffer.op_overload._schema.returns[0].type, torch.ListType
-            ) and isinstance(
-                buffer.op_overload._schema.returns[0].type.getElementType(),
-                torch.TensorType,
-            ):
-                return f"for (auto& t : {buffer.get_name()}) {{t.reset();}};"
-        return f"{buffer.get_name()}.reset();"
+            else f"{buffer.get_name()}.reset();"
+        )
+
 
     def make_free_by_names(self, names_to_del: List[str]):
         return " ".join(f"{name}.reset();" for name in names_to_del)

@@ -6751,7 +6751,9 @@ class _CollectiveKernel(FallbackKernel):
         # because downstream should depend on the input (instead of the output) of the op.
         # This is important for being able to release collective output memory as soon as possible
         # (by decreasing the collective output tensor's refcount whenever possible).
-        if self.inplace:
+        #
+        # NOTE: With cpp wrapper, it seems the above assumption is not always true, so skipping it for now.
+        if self.inplace and not V.graph.cpp_wrapper:
             from .codegen.wrapper import FreeIfNotReusedLine
 
             wrapper.writeline(FreeIfNotReusedLine(wrapper, self))
