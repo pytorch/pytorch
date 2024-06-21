@@ -81,7 +81,7 @@ COPY --from=openssl            /opt/openssl           /opt/openssl
 COPY --from=patchelf           /patchelf              /usr/local/bin/patchelf
 COPY --from=conda              /opt/conda             /opt/conda
 
-# Add jni.h for java host build
+# Add jni.h for java host build.
 COPY ./common/install_jni.sh install_jni.sh
 COPY ./java/jni.h jni.h
 RUN bash ./install_jni.sh && rm install_jni.sh
