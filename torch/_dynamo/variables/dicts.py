@@ -180,6 +180,10 @@ class ConstDictVariable(VariableTracker):
             and not isinstance(self.items[Hashable(vt)], variables.DeletedVariable)
         )
 
+    def __len__(self):
+        # TODO(anijain2305) - Exclude the DeletedVariable.
+        return len(self.items)
+
     def reconstruct(self, codegen):
         # instructions to load collections.OrderedDict if necessary
         if self.user_cls is collections.OrderedDict:
@@ -209,6 +213,12 @@ class ConstDictVariable(VariableTracker):
         key = ConstDictVariable._HashableTracker(arg)
         if key not in self.items:
             unimplemented(f"dict KeyError: {arg.value}")
+        return self.items[key]
+
+    def maybe_getitem_const(self, arg: VariableTracker):
+        key = ConstDictVariable._HashableTracker(arg)
+        if key not in self.items:
+            return None
         return self.items[key]
 
     def call_method(

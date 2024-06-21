@@ -862,6 +862,17 @@ class PythonModuleVariable(VariableTracker):
             return variables.ConstantVariable.create(result)
         return super().call_hasattr(tx, name)
 
+    def var_getattr(self, tx, name):
+        if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
+            return tx.output.side_effects.load_attr(self, name)
+
+        assert self.source
+        from .builder import VariableBuilder
+
+        return VariableBuilder(tx, AttrSource(self.source, name))(
+            getattr(self.value, name)
+        )
+
 
 class TypingVariable(VariableTracker):
     def __init__(self, value, **kwargs):
