@@ -18,17 +18,14 @@
     }                                                                      \
   } while (0)
 
-#define C10_LIBCUDA_DRIVER_API(_)   \
-  _(cuMemAddressReserve)            \
-  _(cuMemRelease)                   \
-  _(cuMemMap)                       \
-  _(cuMemAddressFree)               \
-  _(cuMemSetAccess)                 \
-  _(cuMemUnmap)                     \
-  _(cuMemCreate)                    \
-  _(cuMemGetAllocationGranularity)  \
-  _(cuMemExportToShareableHandle)   \
-  _(cuMemImportFromShareableHandle) \
+#define C10_LIBCUDA_DRIVER_API(_) \
+  _(cuMemAddressReserve)          \
+  _(cuMemRelease)                 \
+  _(cuMemMap)                     \
+  _(cuMemAddressFree)             \
+  _(cuMemSetAccess)               \
+  _(cuMemUnmap)                   \
+  _(cuMemCreate)                  \
   _(cuGetErrorString)
 
 #define C10_NVML_DRIVER_API(_)           \
