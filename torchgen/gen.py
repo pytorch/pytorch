@@ -3,7 +3,6 @@ import functools
 import json
 import os
 import pathlib
-
 from collections import defaultdict, namedtuple, OrderedDict
 from dataclasses import dataclass, field
 from typing import (
@@ -27,7 +26,6 @@ import torchgen.api.meta as meta
 import torchgen.api.native as native
 import torchgen.api.structured as structured
 import torchgen.dest as dest
-
 from torchgen.aoti.fallback_ops import inductor_fallback_ops
 from torchgen.api import cpp
 from torchgen.api.translate import translate
@@ -59,7 +57,6 @@ from torchgen.gen_functionalization_type import (
     GenCompositeViewCopyKernel,
 )
 from torchgen.gen_vmap_plumbing import gen_all_vmap_plumbing
-
 from torchgen.model import (
     Argument,
     BackendIndex,
@@ -104,6 +101,7 @@ from torchgen.utils import (
     Target,
 )
 from torchgen.yaml_utils import YamlDumper, YamlLoader
+
 
 T = TypeVar("T")
 
@@ -165,9 +163,11 @@ def parse_native_yaml_struct(
     rs: List[NativeFunction] = []
     bs: Dict[DispatchKey, Dict[OperatorName, BackendMetadata]] = defaultdict(dict)
     for e in es:
+        assert isinstance(e, dict), f"expected to be dict: {e}"
         assert isinstance(e.get("__line__"), int), e
         loc = Location(path, e["__line__"])
         funcs = e.get("func")
+        assert funcs is not None, f"missed 'func' in {e}"
         with context(lambda: f"in {loc}:\n  {funcs}"):
             func, m = NativeFunction.from_yaml(e, loc, valid_tags, ignore_keys)
             rs.append(func)
@@ -268,7 +268,11 @@ def error_check_native_functions(funcs: Sequence[NativeFunction]) -> None:
         base_func_map[f.func.name.name].append(f)
     for f in funcs:
         if f.structured_delegate is not None:
-            delegate_func = func_map[f.structured_delegate]
+            delegate_func = func_map.get(f.structured_delegate)
+            assert delegate_func is not None, (
+                f"{f.func.name} is marked as a structured_delegate pointing to "
+                f"{f.structured_delegate}, but {f.structured_delegate} is missing."
+            )
             assert delegate_func.structured, (
                 f"{f.func.name} is marked as a structured_delegate pointing to "
                 f"{f.structured_delegate}, but {f.structured_delegate} is not marked as structured. "

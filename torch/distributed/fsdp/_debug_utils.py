@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import logging
 import time
 from collections import defaultdict
@@ -13,6 +14,7 @@ from torch.distributed.fsdp._common_utils import (
     _get_module_fsdp_state,
     clean_tensor_name,
 )
+
 
 logger = logging.getLogger(__name__)
 
