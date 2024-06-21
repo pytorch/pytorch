@@ -452,6 +452,7 @@ class DistributedPatternTests(TestCase):
     @requires_gpu()
     @torch._functorch.config.patch(recompute_views=True)
     def test_fake_distributed_inductor(self):
+        # TODO: fix .set_ lowering in CPU inductor, and enable the CPU test.
         m1, inp1 = init_fake_distributed("cuda")
         out1 = steps(m1, inp1)
 
