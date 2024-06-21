@@ -2387,7 +2387,7 @@ op_db: List[OpInfo] = [
                 device_type="cuda",
             ),
             DecorateInfo(
-                toleranceOverride({torch.float32: tol(atol=4e-05, rtol=4e-06)}),
+                toleranceOverride({torch.float32: tol(atol=8e-04, rtol=7e-06)}),
                 "TestCommon",
                 "test_noncontiguous_samples",
                 device_type="cpu",

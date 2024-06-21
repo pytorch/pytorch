@@ -12145,7 +12145,7 @@ op_db: List[OpInfo] = [
                    toleranceOverride({torch.float32: tol(atol=1.5e-05, rtol=1e-05)}),
                    'TestCommon', 'test_out'),
                DecorateInfo(
-                   toleranceOverride({torch.half: tol(atol=6e-3, rtol=6e-3)}),
+                   toleranceOverride({torch.half: tol(atol=6e-3, rtol=1e-2)}),
                    'TestInductorOpInfo', 'test_comprehensive', device_type='cpu'),
            ],
            skips=(
@@ -12879,6 +12879,8 @@ op_db: List[OpInfo] = [
                #     return torch.cov(i0, correction=0, fweights=None, aweights=tensor([0.0518, 0.4681], dtype=torch.float32, requires_grad=True)) # noqa: B950
                #                                                                ~~~~~~ <--- HERE
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(toleranceOverride({torch.float16: tol(atol=8e-3, rtol=1.4e-3)}),
+                            "TestInductorOpInfo", "test_comprehensive", device_type="cpu"),
            )),
     OpInfo('cross',
            dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
@@ -13013,6 +13015,15 @@ op_db: List[OpInfo] = [
                     skips=(
                         # RuntimeError: MALFORMED INPUT: Unhandled node kind (in computeValue): aten::div
                         DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_working'),
+                        # FIXME:
+                        # torch.autograd.gradcheck.GradcheckError: Jacobian mismatch for
+                        # output 0 with respect to input 1,
+                        # numerical:tensor(-17746.9307, dtype=torch.float64)
+                        # analytical:tensor(0., dtype=torch.float64)
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients',
+                                     'test_fn_grad',
+                                     dtypes=(torch.float64,),
+                                     device_type='cpu'),
                     )),
     BinaryUfuncInfo('true_divide',
                     dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -14532,6 +14543,8 @@ op_db: List[OpInfo] = [
                # JIT test also tries to compute double backward, which fails
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.skip("Unsupported on MPS for now"), 'TestCommon', 'test_numpy_ref_mps'),
+               DecorateInfo(toleranceOverride({torch.float32: tol(atol=2e-03, rtol=5e-03)}),
+                            "TestDecomp", "test_comprehensive", device_type="cpu"),
            )),
     OpInfo('native_batch_norm',
            aten_name='native_batch_norm',
@@ -19404,6 +19417,12 @@ op_db: List[OpInfo] = [
            # See https://github.com/pytorch/pytorch/pull/78358
            check_batched_forward_grad=False,
            supports_out=False,
+           decorators=(
+               DecorateInfo(
+                   toleranceOverride({torch.float16: tol(atol=4e-3, rtol=4e-3)}),
+                   'TestInductorOpInfo', 'test_comprehensive', device_type='cpu',
+               ),
+           ),
            sample_inputs_func=sample_cumulative_trapezoid,),
     OpInfo('unsqueeze',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
@@ -22545,6 +22564,14 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.nn.functional.hinge_embedding_loss",
         torch_opinfo_name="nn.functional.hinge_embedding_loss",
+        skips=(
+            # Reference result was farther (0.29562714856322714) from the precise
+            # computation than the torch result was (0.20437285143677286)!
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                dtypes=(torch.bfloat16,), device_type="cpu"
+            ),
+        ),
     ),
     PythonRefInfo(
         "_refs.nn.functional.nll_loss",

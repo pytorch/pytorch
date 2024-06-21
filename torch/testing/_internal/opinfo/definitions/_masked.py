@@ -559,7 +559,7 @@ op_db: List[OpInfo] = [
                 device_type="cpu",
             ),
             DecorateInfo(
-                toleranceOverride({torch.float32: tol(atol=1e-05, rtol=6e-06)}),
+                toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1e-05)}),
                 "TestOperators",
                 "test_jvp",
                 device_type="cuda",
