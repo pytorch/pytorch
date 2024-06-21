@@ -101,8 +101,9 @@ def split_with_sizes_copy(
         all_gather_output, all_gather_input_split_sizes, dim=dim, out=out
     )
 
+
 @torch.library.impl(lib, "split_with_sizes_copy", "Functionalize")
-def split_with_sizes_copy(
+def split_with_sizes_copy_functionalize(
     all_gather_output: torch.Tensor,
     all_gather_input_split_sizes: List[int],
     dim: int,
@@ -113,7 +114,6 @@ def split_with_sizes_copy(
     torch.split_with_sizes_copy(
         ag_output_elem, all_gather_input_split_sizes, dim=dim, out=out_elem
     )
-
 
 
 lib.define(
