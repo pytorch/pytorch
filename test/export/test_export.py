@@ -1293,8 +1293,6 @@ def forward(self, x):
             )
         )
 
-    # FIXME (tmanlaibaatar) run_decomp doesn't work rn because the graph signature is updated
-    @unittest.expectedFailure
     def test_export_for_training_run_decomp(self):
         class Foo(torch.nn.Module):
             def __init__(self):

@@ -674,54 +674,12 @@ def _export_to_torch_ir(
     return gm_torch_level
 
 
-def _export_to_aten_ir(
-    mod: torch.nn.Module,
-    fake_args,
-    fake_kwargs,
-    fake_params_buffers,
-    constant_attrs: ConstantAttrMap,
-    *,
-    transform=lambda x: x,  # TODO(zhxchen17) Revisit if this is needed later.
-    pre_dispatch=False,
-    _is_torch_jit_trace=False,
-) -> ATenExportArtifact:
-    # [NOTE] If the user is exporting under training mode, we want to detect if there is any
-    # state change in the autograd global state and error. If the user is exporting under inference
-    # mode, we don't care. At predispatch level, we don't care about the state change.
-    is_grad_enabled = torch._C.is_grad_enabled()
-    grad_safe_guard = nullcontext()
-    if not pre_dispatch and is_grad_enabled:
-        grad_safe_guard = AutogradStateOpsFailSafeguard()  # type: ignore[assignment]
-
-    @contextmanager
-    def _compiling_state_context():
-        old_value = torch.compiler._is_compiling_flag
-        try:
-            torch.compiler._is_compiling_flag = True
-            yield
-        finally:
-            torch.compiler._is_compiling_flag = old_value
-
-    # This _reparametrize_module makes sure inputs and module.params/buffers have the same fake_mode,
-    # otherwise aot_export_module will error out because it sees a mix of fake_modes.
-    # And we want aot_export_module to use the fake_tensor mode in dynamo to keep the pipeline easy to reason about.
-    with torch.nn.utils.stateless._reparametrize_module(
-        mod,
-        fake_params_buffers,
-        tie_weights=True,
-        strict=True,
-        stack_weights=True,
-    ), grad_safe_guard, _ignore_backend_decomps(), _compiling_state_context():  # type: ignore[attr-defined]
-        gm, graph_signature = transform(aot_export_module)(
-            mod,
-            fake_args,
-            trace_joint=False,
-            pre_dispatch=pre_dispatch,
-            kwargs=fake_kwargs,
-        )
+def post_process_aot_autograd(mod, gm, graph_signature, fake_args, fake_kwargs, fake_params_buffers, pre_dispatch):
     # TODO unfortunately preserving graph-level metadata is not
     # working well with aot_export. So we manually copy it.
     # (The node-level meta is addressed above.)
+    constant_attrs = _gather_constant_attrs(mod)
+
     if isinstance(mod, torch.fx.GraphModule) and hasattr(mod, "meta"):
         gm.meta.update(mod.meta)
 
@@ -759,13 +717,13 @@ def _export_to_aten_ir(
 
     # NOTE: aot_export adds symint metadata for placeholders with int values;
     # since these become specialized, we replace such metadata with the original values
-    flat_args = pytree.tree_leaves((fake_args, fake_kwargs))
     index = 0
     total_non_user_inputs = (
         len(graph_signature.parameters)
         + len(graph_signature.buffers)
         + len(graph_signature.input_tokens)
     )
+    flat_args, _ = pytree.tree_flatten((fake_args, fake_kwargs))
     for node in gm.graph.nodes:
         if node.op == "placeholder":
             if index >= total_non_user_inputs:
@@ -859,6 +817,54 @@ def _export_to_aten_ir(
         constants,
     )
 
+
+def _export_to_aten_ir(
+    mod: torch.nn.Module,
+    fake_args,
+    fake_kwargs,
+    fake_params_buffers,
+    constant_attrs: ConstantAttrMap,
+    *,
+    transform=lambda x: x,  # TODO(zhxchen17) Revisit if this is needed later.
+    pre_dispatch=False,
+    _is_torch_jit_trace=False,
+) -> ATenExportArtifact:
+    # [NOTE] If the user is exporting under training mode, we want to detect if there is any
+    # state change in the autograd global state and error. If the user is exporting under inference
+    # mode, we don't care. At predispatch level, we don't care about the state change.
+    is_grad_enabled = torch._C.is_grad_enabled()
+    grad_safe_guard = nullcontext()
+    if not pre_dispatch and is_grad_enabled:
+        grad_safe_guard = AutogradStateOpsFailSafeguard()  # type: ignore[assignment]
+
+    @contextmanager
+    def _compiling_state_context():
+        old_value = torch.compiler._is_compiling_flag
+        try:
+            torch.compiler._is_compiling_flag = True
+            yield
+        finally:
+            torch.compiler._is_compiling_flag = old_value
+
+    # This _reparametrize_module makes sure inputs and module.params/buffers have the same fake_mode,
+    # otherwise aot_export_module will error out because it sees a mix of fake_modes.
+    # And we want aot_export_module to use the fake_tensor mode in dynamo to keep the pipeline easy to reason about.
+    with torch.nn.utils.stateless._reparametrize_module(
+        mod,
+        fake_params_buffers,
+        tie_weights=True,
+        strict=True,
+        stack_weights=True,
+    ), grad_safe_guard, _ignore_backend_decomps(), _compiling_state_context():  # type: ignore[attr-defined]
+        gm, graph_signature = transform(aot_export_module)(
+            mod,
+            fake_args,
+            trace_joint=False,
+            pre_dispatch=pre_dispatch,
+            kwargs=fake_kwargs,
+        )
+    
+    return post_process_aot_autograd(mod, gm, graph_signature, fake_args, pre_dispatch=pre_dispatch)
 
 def _get_params_buffers(mod: torch.nn.Module) -> Dict[str, torch.Tensor]:
     params_buffers: Dict[str, torch.Tensor] = {}
