@@ -10,8 +10,9 @@ import warnings
 from collections import namedtuple
 from os.path import abspath, exists
 
-import torch
 import yaml
+
+import torch
 
 try:
     from .common import BenchmarkRunner, main
@@ -23,6 +24,10 @@ from torch._dynamo.utils import clone_inputs
 
 # We are primarily interested in tf32 datatype
 torch.backends.cuda.matmul.allow_tf32 = True
+
+# Enable FX graph caching
+if "TORCHINDUCTOR_FX_GRAPH_CACHE" not in os.environ:
+    torch._inductor.config.fx_graph_cache = True
 
 
 def _reassign_parameters(model):
@@ -209,6 +214,19 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     @property
     def guard_on_nn_module_models(self):
         return {
+            "vision_maskrcnn",
+        }
+
+    @property
+    def inline_inbuilt_nn_modules_models(self):
+        return {
+            "basic_gnn_edgecnn",
+            "drq",
+            "hf_Reformer",
+            "DALLE2_pytorch",
+            "hf_BigBird",
+            "detectron2_maskrcnn_r_50_fpn",
+            "detectron2_maskrcnn_r_101_fpn",
             "vision_maskrcnn",
         }
 
@@ -432,7 +450,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         cloned_inputs = clone_inputs(inputs)
         self.optimizer_zero_grad(mod)
         with self.autocast(**self.autocast_arg):
-            if isinstance(clone_inputs, dict):
+            if isinstance(cloned_inputs, dict):
                 pred = mod(**cloned_inputs)
             else:
                 pred = mod(*cloned_inputs)

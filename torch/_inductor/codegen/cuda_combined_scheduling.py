@@ -1,4 +1,5 @@
-from typing import List, Union
+# mypy: allow-untyped-defs
+from typing import Sequence, Union
 
 from ..scheduler import (
     BaseSchedulerNode,
@@ -28,6 +29,9 @@ class CUDACombinedScheduling(BaseScheduling):
         self._triton_scheduling = TritonScheduling(scheduler)
         self._cuda_cpp_scheduling = CUDACPPScheduling(scheduler)
 
+    def get_backend_features(self, device):
+        return self._triton_scheduling.get_backend_features(device)
+
     def choose_node_backend(self, node: BaseSchedulerNode) -> BaseScheduling:
         if self._cuda_cpp_scheduling.is_cuda_cpp_template(node):
             return self._cuda_cpp_scheduling
@@ -50,7 +54,9 @@ class CUDACombinedScheduling(BaseScheduling):
         return self._triton_scheduling.group_fn(sizes)
 
     def codegen_template(
-        self, template_node: SchedulerNode, epilogue_nodes: List[SchedulerNode]
+        self,
+        template_node: BaseSchedulerNode,
+        epilogue_nodes: Sequence[BaseSchedulerNode],
     ):
         if self._cuda_cpp_scheduling.is_cuda_cpp_template(template_node):
             assert epilogue_nodes is None or len(epilogue_nodes) == 0
