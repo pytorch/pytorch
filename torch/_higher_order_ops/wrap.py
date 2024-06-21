@@ -3,11 +3,9 @@ import inspect
 import itertools
 import logging
 
-import torch
 from torch._ops import HigherOrderOperator
 from torch.utils.checkpoint import checkpoint, CheckpointPolicy
 
-import torch._dynamo.config
 
 log = logging.getLogger(__name__)
 
