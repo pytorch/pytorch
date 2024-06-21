@@ -132,26 +132,6 @@ DEFAULT_EXPORT_DYNAMO_CONFIG.reorderable_logging_functions = {
 }
 
 
-COMPOSITE_OPS_THAT_CAN_BE_PRESERVED = [
-    # torch.ops.aten.batch_norm.default,
-    # torch.ops.aten.broadcast_to.default,
-    # torch.ops.aten.chunk.default,
-    torch.ops.aten.conv_transpose1d.default,
-    torch.ops.aten.conv_transpose2d.input,
-    torch.ops.aten.conv_transpose3d.input,
-    torch.ops.aten.conv1d.default,
-    torch.ops.aten.conv2d.default,
-    torch.ops.aten.conv3d.default,
-    # torch.ops.aten.flatten.using_ints,
-    torch.ops.aten.linear.default,
-    # torch.ops.aten.reshape.default,
-    # torch.ops.aten.sym_numel.default,  These are all aten ops that correspond to metadata queries
-    torch.ops.aten.sym_size.int,
-    # torch.ops.aten.sym_storage_offset.default,  These are all aten ops that correspond to metadata queries
-    torch.ops.aten.sym_stride.int,
-]
-
-
 @contextmanager
 def _ignore_backend_decomps():
     orig_mkldnn_flag = torch.backends.mkldnn.set_flags(False)
