@@ -41,8 +41,9 @@ from torch.utils._stats import count
 from torch.utils._traceback import CapturedTraceback
 from torch.utils.weak import WeakTensorKeyDictionary, WeakIdKeyDictionary, _WeakHashRef
 from typing import (
-    Any, Callable, Concatenate, Dict, List, Optional, Tuple, Union, Mapping, Sequence,
-    TypeVar, Generator, Protocol, ParamSpec, overload, Self, Type, TYPE_CHECKING)
+    Any, Callable, Dict, List, Optional, Tuple, Union, Mapping, Sequence,
+    TypeVar, Generator, Protocol, overload, Type, TYPE_CHECKING)
+from typing_extensions import Concatenate, ParamSpec, Self
 from weakref import WeakKeyDictionary
 
 if TYPE_CHECKING:
@@ -272,7 +273,7 @@ def get_proxy_slot(
     if obj not in tracker:
         if isinstance(default, NoDefault):
             raise RuntimeError(f"{obj} is not tracked with proxy for {tracer}")
-        assert isinstance(default, (_ProxyTensor, Proxy))
+        assert isinstance(default, (_ProxyTensor, Proxy, Tensor))
         return default
     value = tracker[obj]
     res = transform(value)
@@ -679,8 +680,8 @@ def proxy_call(
             for i, a in enumerate(args[0]):
                 a.proxy = proxy_out[0][i]
         else:
-            assert isinstance(args[0], FakeTensor), type(args[0])
-            # Adding an undefined attribute to FakeTensor?
+            assert isinstance(args[0], Tensor), type(args[0])
+            # Adding an undefined attribute to Tensor?
             args[0].proxy = proxy_out  # type: ignore[attr-defined]
 
     out = func(*args, **kwargs)

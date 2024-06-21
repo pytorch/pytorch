@@ -17,10 +17,10 @@ from typing import (
     Tuple,
     Type,
     TYPE_CHECKING,
-    TypeGuard,
     TypeVar,
     Union,
 )
+from typing_extensions import TypeGuard
 from weakref import ReferenceType
 
 import torch
