@@ -706,28 +706,30 @@ class CustomizedDictVariable(ConstDictVariable):
     def reconstruct(self, codegen):
         is_hf_model_output = self.is_matching_cls_hf(self.user_cls)
 
-        # If the user class is a ModelOutput, then wrap the instance creation in
-        # torch._dynamo.disable(). Even though we mark the __post_init__ as skip
-        # in `create` function, this is not enough. TorchDynamo can still get
-        # triggered on the child functions of __post_init__. This upsets export.
-        # Since, we know that ModelOutput __post_init__ is not worth optimizing,
-        # we just wrap the instance creation in torch._dynamo.disable(),
-        # regardless whether its export or not.
-        if is_hf_model_output:
-            # load torch._dynamo.disable
-            def gen_fn():
-                codegen.append_output(codegen.create_load_global("torch", add=True))
-                codegen.append_output(codegen.create_load_attr("_dynamo"))
-                codegen.append_output(codegen.create_load_attr("disable"))
+        def gen_fn1():
+            # If the user class is a ModelOutput, then wrap the instance creation in
+            # torch._dynamo.disable(). Even though we mark the __post_init__ as skip
+            # in `create` function, this is not enough. TorchDynamo can still get
+            # triggered on the child functions of __post_init__. This upsets export.
+            # Since, we know that ModelOutput __post_init__ is not worth optimizing,
+            # we just wrap the instance creation in torch._dynamo.disable(),
+            # regardless whether its export or not.
+            if is_hf_model_output:
+                # load torch._dynamo.disable
+                def gen_fn2():
+                    codegen.append_output(codegen.create_load_global("torch", add=True))
+                    codegen.append_output(codegen.create_load_attr("_dynamo"))
+                    codegen.append_output(codegen.create_load_attr("disable"))
 
-            codegen.add_push_null(gen_fn)
-        codegen.add_push_null(
-            lambda: codegen.extend_output([codegen._create_load_const(self.user_cls)])
-        )
+                codegen.add_push_null(gen_fn2)
 
-        if is_hf_model_output:
-            # Wrap user_cls with disable
-            codegen.extend_output(create_call_function(1, False))
+            codegen.extend_output([codegen._create_load_const(self.user_cls)])
+
+            if is_hf_model_output:
+                # Wrap user_cls with disable
+                codegen.extend_output(create_call_function(1, False))
+
+        codegen.add_push_null(gen_fn1)
 
         # All the keys are just wrapped strings
         d = self.keys_as_python_constant()
