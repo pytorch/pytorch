@@ -10,7 +10,12 @@ from typing import Any, Dict, List
 import torch.nn
 
 from .. import trace_rules, variables
-from ..exc import unimplemented, UnspecializeRestartAnalysis, Unsupported
+from ..exc import (
+    ObservedException,
+    unimplemented,
+    UnspecializeRestartAnalysis,
+    Unsupported,
+)
 from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import GenerationTracker
 from ..source import (
@@ -832,6 +837,36 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             initialize_lazy_module(tx, mod, args, kwargs)
         name = "_call_impl"
         fn = getattr(self.value_type, name)
+
+        if not tx.output.side_effects.has_pending_mutation(self):
+            if fn is torch.nn.Module._call_impl:
+                # TODO(anijain2305) - Load this once - should give ~3 seconds on MobileBert
+                import importlib
+
+                module_name = "torch.nn.modules.module"
+                module_source = tx.import_source(module_name)
+                fglobals_value = importlib.import_module(module_name)  # type: ignore[assignment]
+                from .builder import VariableBuilder
+
+                fglobals_vt = VariableBuilder(tx, module_source)(fglobals_value)
+
+                if not tx.output.side_effects.has_pending_mutation(fglobals_vt):
+                    # Check if we can take the fast path of directly tracing forward.
+                    if not (
+                        len(self.var_getattr(tx, "_backward_hooks").realize())
+                        or len(self.var_getattr(tx, "_backward_pre_hooks").realize())
+                        or len(self.var_getattr(tx, "_forward_hooks").realize())
+                        or len(self.var_getattr(tx, "_forward_pre_hooks").realize())
+                        or len(
+                            fglobals_vt.var_getattr(tx, "_global_backward_pre_hooks")
+                        )
+                        or len(fglobals_vt.var_getattr(tx, "_global_backward_hooks"))
+                        or len(fglobals_vt.var_getattr(tx, "_global_forward_hooks"))
+                        or len(fglobals_vt.var_getattr(tx, "_global_forward_pre_hooks"))
+                    ):
+                        name = "forward"
+                        fn = self.value_type.forward
+
         if self.source:
             source = AttrSource(AttrSource(self.source, "__class__"), name)
         else:
@@ -958,6 +993,30 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 )
 
         return super().call_method(tx, name, args, kwargs)
+
+    def getattr_helper(self, tx, field, name_vt):
+        dict_vt = self.var_getattr(tx, field)
+        # print("dict_vt", self.source.name(), field, name_vt.value, id(dict_vt))
+        dict_vt = dict_vt.realize()
+        # print(name_vt.value, dict_vt)
+        return dict_vt.maybe_getitem_const(name_vt)
+
+    def manually_trace_nn_module_getattr(self, tx, name):
+        """
+        Dynamo tracing of nn.Module __getattr__ can be expensive if the model
+        has deep submodule hierarchy. Since the __getattr__ is stable, we can
+        directly look into the underlying datastructures. This saves a lot of
+        compilation time.
+        """
+        name_vt = variables.ConstantVariable(name)
+        out = self.getattr_helper(tx, "_parameters", name_vt)
+        if out is None:
+            out = self.getattr_helper(tx, "_modules", name_vt)
+        if out is None:
+            out = self.getattr_helper(tx, "_buffers", name_vt)
+        if out is None:
+            raise ObservedException("raised exception")
+        return out
 
 
 class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
