@@ -12,6 +12,7 @@ import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 import torch._inductor.select_algorithm as select_algorithm
 from torch._dynamo.utils import counters
+from torch._inductor.codecache import VecAMX
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -333,6 +334,37 @@ class TestSelectAlgorithm(TestCase):
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
 
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @parametrize("bias", (True, False))
+    def test_linear_amx(self, bias):
+        batch_size = 1024
+        in_features = 1024
+        out_features = 1024
+        dtype = torch.bfloat16
+
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        counters.clear()
+        v = torch.randn(batch_size, in_features).to(dtype=dtype)
+        mod = M(bias=bias).to(dtype=dtype).eval()
+        atol, rtol = 1e-2, 1e-2
+        with patch.object(select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        vec_amx = VecAMX()
+        if vec_amx:
+            self.assertTrue(counters["inductor"]["cpp_micro_gemm_amx_counter"] > 0)
+        else:
+            self.assertEqual(counters["inductor"]["cpp_micro_gemm_amx_counter"], 0)
+
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
 class _DynamicShapesTestBase(TestCase):
@@ -351,6 +383,7 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
     test_linear_with_unary_binary_dynamic_shapes = (
         TestSelectAlgorithm.test_linear_with_unary_binary
     )
+    test_linear_amx_dynamic_shapes = TestSelectAlgorithm.test_linear_amx
 
 
 instantiate_device_type_tests(TestSelectAlgorithm, globals(), only_for="cpu")
