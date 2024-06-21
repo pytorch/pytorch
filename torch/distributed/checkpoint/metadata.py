@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import os
 from dataclasses import dataclass, field
 from enum import Enum
@@ -5,6 +6,7 @@ from typing import Any, Dict, List, Optional, Sequence, Union
 
 import torch
 from torch.distributed.checkpoint.stateful import StatefulT
+
 
 __all__ = [
     "ChunkStorageMetadata",
@@ -103,7 +105,7 @@ class TensorProperties:
             layout=tensor.layout,
             requires_grad=tensor.requires_grad,
             memory_format=torch.contiguous_format,
-            pin_memory=tensor.is_pinned(),
+            pin_memory=tensor.is_pinned(device=tensor.device),
         )
 
 

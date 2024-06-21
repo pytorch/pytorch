@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """This module contains utility method for mobile model optimization and lint."""
 
 import torch

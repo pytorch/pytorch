@@ -155,16 +155,31 @@ class TCPClient {
       const TCPStoreOptions& opts);
 
   void sendRaw(uint8_t* data, size_t lenght) {
-    tcputil::sendBytes(socket_.handle(), data, lenght);
+    try {
+      tcputil::sendBytes(socket_.handle(), data, lenght);
+    } catch (const std::exception& e) {
+      C10D_WARNING("sendBytes failed on {}: {}", socket_.repr(), e.what());
+      throw;
+    }
   }
 
   std::vector<std::uint8_t> receiveBits() {
-    return tcputil::recvVector<std::uint8_t>(socket_.handle());
+    try {
+      return tcputil::recvVector<std::uint8_t>(socket_.handle());
+    } catch (const std::exception& e) {
+      C10D_WARNING("recvVector failed on {}: {}", socket_.repr(), e.what());
+      throw;
+    }
   }
 
   template <typename T>
   T receiveValue() {
-    return tcputil::recvValue<T>(socket_.handle());
+    try {
+      return tcputil::recvValue<T>(socket_.handle());
+    } catch (const std::exception& e) {
+      C10D_WARNING("recvValue failed on {}: {}", socket_.repr(), e.what());
+      throw;
+    }
   }
   template <typename T>
   bool receiveValueWithTimeout(T& t, std::chrono::milliseconds timeout) {
@@ -291,6 +306,17 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
     TORCH_CHECK(
         ::c10d::detail::is_libuv_tcpstore_backend_available(),
         "use_libuv was requested but PyTorch was build without libuv support");
+
+    if (opts.masterListenFd.has_value()) {
+      // TODO(xilunwu): support this init method after testing
+      constexpr auto* msg =
+          "The libuv TCPStore backend does not support initialization with an listen fd. "
+          "Please switch to the legacy TCPStore by setting environment variable USE_LIBUV "
+          "to \"0\".";
+      C10D_ERROR(msg);
+      C10_THROW_ERROR(NotImplementedError, msg);
+      return;
+    }
   }
 
   Socket::initialize();

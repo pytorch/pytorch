@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import io
 import pickle
 import warnings

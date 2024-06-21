@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import copy
 import glob
 import importlib
@@ -960,6 +961,9 @@ def CppExtension(name, sources, *args, **kwargs):
     libraries.append('torch')
     libraries.append('torch_cpu')
     libraries.append('torch_python')
+    if IS_WINDOWS:
+        libraries.append("sleef")
+
     kwargs['libraries'] = libraries
 
     kwargs['language'] = 'c++'
@@ -1879,9 +1883,6 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
         extra_ldflags.append('-ltorch')
         if not is_standalone:
             extra_ldflags.append('-ltorch_python')
-
-        if is_standalone and "TBB" in torch.__config__.parallel_info():
-            extra_ldflags.append('-ltbb')
 
         if is_standalone:
             extra_ldflags.append(f"-Wl,-rpath,{TORCH_LIB_PATH}")
