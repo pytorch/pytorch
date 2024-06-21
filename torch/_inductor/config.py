@@ -873,7 +873,7 @@ class halide:
 
     # Halide autoscheduler to use, choices are:
     # "Anderson2021" (gpu-only), "Li2018", "Adams2019" (cpu-only), or "Mullapudi2016" (cpu-only)
-    scheduler_cuda = "Li2018"
+    scheduler_cuda = "Anderson2021"
     scheduler_cpu = "Adams2019"
 
     # Controls `no_asserts` flag passed to Halide target (warning: can false positive)
