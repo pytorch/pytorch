@@ -1457,6 +1457,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     // Leave another two mins for desync report generation or process group
     // destroy.
     std::this_thread::sleep_for(std::chrono::seconds(heartbeatTimeoutInSec_));
+    LOG(INFO) << logPrefix() << "slept for " << heartbeatTimeoutInSec_;
   }
 
   // At this point, we either already sleep for another `heartbeatTimeoutInSec_`
@@ -1686,6 +1687,7 @@ void ProcessGroupNCCL::watchdogHandler() {
             // exception
             std::this_thread::sleep_for(
                 std::chrono::seconds(heartbeatTimeoutInSec_));
+            LOG(INFO) << logPrefix() << "slept for " << heartbeatTimeoutInSec_;
           } catch (const std::exception& e) {
             LOG(ERROR) << logPrefix()
                        << "Failed to set dump signal in tcpstore. "
