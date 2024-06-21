@@ -39,7 +39,7 @@ RUN bash ./install_openssl.sh && rm install_openssl.sh
 
 FROM base as conda
 # Install Anaconda
-ADD ./common/install_conda.sh install_conda.sh
+ADD ./common/install_conda_docker.sh install_conda.sh
 RUN bash ./install_conda.sh && rm install_conda.sh
 
 # Install CUDA
@@ -81,7 +81,11 @@ COPY --from=openssl            /opt/openssl           /opt/openssl
 COPY --from=patchelf           /patchelf              /usr/local/bin/patchelf
 COPY --from=conda              /opt/conda             /opt/conda
 
-ADD  ./java/jni.h /usr/local/include/jni.h
+# Add jni.h for java host build
+COPY ./common/install_jni.sh install_jni.sh
+COPY ./java/jni.h jni.h
+RUN bash ./install_jni.sh && rm install_jni.sh
+
 ENV  PATH /opt/conda/bin:$PATH
 COPY --from=mnist  /usr/local/mnist /usr/local/mnist
 RUN rm -rf /usr/local/cuda

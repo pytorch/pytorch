@@ -26,13 +26,12 @@ esac
   set -x
   docker build \
     --target final \
-    --progress plain \
     --build-arg "BASE_TARGET=${BASE_TARGET}" \
     --build-arg "CUDA_VERSION=${CUDA_VERSION}" \
     --build-arg "DEVTOOLSET_VERSION=9" \
     -t "pytorch/conda-builder:${DOCKER_TAG}" \
-    -f "${TOPDIR}/.ci/docker/conda/Dockerfile" \
-    ${TOPDIR}/.ci/docker/
+    -f "${TOPDIR}/conda/Dockerfile" \
+    ${TOPDIR}
 )
 
 DOCKER_IMAGE="pytorch/conda-builder:${DOCKER_TAG}"
