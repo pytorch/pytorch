@@ -115,6 +115,7 @@ class TestFullyShardCompile(FSDPTest):
 
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
     @torch._functorch.config.patch(recompute_views=True)
+    @torch._functorch.config.patch(cse=False)
     def _test_traceable_fsdp(
         self, model_init_fn, input_creation_fn, backend, fullgraph
     ):
@@ -172,7 +173,7 @@ class TestFullyShardCompile(FSDPTest):
         for loss_compiled, loss_eager in zip(losses_compiled, losses_eager):
             self.assertTrue(
                 torch.allclose(
-                    torch.tensor(loss_compiled), torch.tensor(loss_eager), rtol=1e-3
+                    torch.tensor(loss_compiled), torch.tensor(loss_eager), rtol=1e-5
                 ),
                 f"{loss_compiled} vs {loss_eager}",
             )
@@ -191,7 +192,7 @@ class TestFullyShardCompile(FSDPTest):
                 nn.Linear(hidden_dim, hidden_dim, device="cuda"),
             )
             fully_shard(model, reshard_after_forward=True, **fsdp_config)
-            optim = torch.optim.SGD(model.parameters(), lr=1e-2)
+            optim = torch.optim.SGD(model.parameters(), lr=1e-4)
             return model, optim
 
         def input_creation_fn():
@@ -231,7 +232,7 @@ class TestFullyShardCompile(FSDPTest):
             model = fully_shard(
                 model, mesh=mesh, reshard_after_forward=True, **fsdp_config
             )
-            optim = torch.optim.SGD(model.parameters(), lr=1e-2)
+            optim = torch.optim.SGD(model.parameters(), lr=1e-4)
             return model, optim
 
         def input_creation_fn():
