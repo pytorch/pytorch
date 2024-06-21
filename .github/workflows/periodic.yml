@@ -73,7 +73,6 @@ jobs:
           { config: "default", shard: 3, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
           { config: "default", shard: 4, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
           { config: "default", shard: 5, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "deploy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
           { config: "nogpu_AVX512", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
           { config: "nogpu_NO_AVX2", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
           { config: "jit_legacy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },

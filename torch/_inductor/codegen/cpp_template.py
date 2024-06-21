@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import ctypes
 import functools
 import itertools
 import logging
@@ -62,6 +63,9 @@ class CppTemplate(KernelTemplate):
         extra_args = V.graph.sizevars.size_hints(
             map(sympy.expand, call_args[len(expected_args) :])
         )
+        # Cast the size hint from int to ctypes.c_ulonglong explicitly
+        # since in cpp kernel, we bind it to C long
+        extra_args = tuple(ctypes.c_ulonglong(x) for x in extra_args)
 
         kernel_hash_name = f"cpp_{self.name}_{next(self.index_counter)}"
 
