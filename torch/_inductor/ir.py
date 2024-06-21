@@ -1861,6 +1861,7 @@ class Sort(Loops):
         sort_numel = sizevars.simplify(sympy_product(sort_ranges))
 
         # Heuristic, smallest rblock where triton usually outperforms aten.sort
+        # It also isn't bandwidth bound so fusion is unlikely to help.
         max_rblock = 256
         is_persistent_kernel = (
             config.triton.persistent_reductions

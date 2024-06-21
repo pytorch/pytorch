@@ -754,11 +754,11 @@ class NoopHandler:
 
     @staticmethod
     def scan(dtypes, combine_fn, values) -> Tuple[None, ...]:
-        return tuple(None for i in range(len(values)))
+        return (None,) * len(values)
 
     @staticmethod
     def sort(dtypes, values, stable, descending) -> Tuple[None, ...]:
-        return tuple(None for i in range(len(values)))
+        return (None,) * len(values)
 
     @staticmethod
     def indirect_indexing(index_var, size, check=True) -> sympy.Symbol:

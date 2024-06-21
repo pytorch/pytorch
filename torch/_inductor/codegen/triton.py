@@ -1904,20 +1904,16 @@ class TritonKernel(SIMDKernel):
         ), "ops.sort is only supported in persistent reductions"
         reduction_range_prefix = self.range_trees[-1].prefix
 
-        broadcasted_values = []
-
         cse_compute = functools.partial(self.cse.generate, self.compute)
         dim = self.triton_tensor_ndim() - 1
 
-        for value, dtype in zip(values, dtypes):
-            acc_type = triton_acc_type(dtype)
-            cond = " & ".join(masks)
-
-            value = self.cse.generate(
+        broadcasted_values = [
+            cse_compute(
                 self.compute,
                 f"tl.broadcast_to({value}, {self.dense_size_str()})",
             )
-            broadcasted_values.append(value)
+            for value in values
+        ]
 
         def csv(values):
             return " ".join(f"{value}," for value in values)
@@ -1948,8 +1944,9 @@ class TritonKernel(SIMDKernel):
         else:
             raise AssertionError("Unhandled sort")
 
-        for result_var in result_vars:
+        for result_var, input_var in zip(result_vars, values):
             result_var.mask_vars = masks  # type: ignore[attr-defined]
+            result_var.bounds = input_var.bounds
 
         return tuple(result_vars)
 

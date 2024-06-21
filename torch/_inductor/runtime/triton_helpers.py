@@ -474,11 +474,6 @@ def _bitonic_merge_with_index(
     stable: tl.constexpr,
     descending: tl.constexpr,
 ):
-    """
-    order_type 0 == ascending
-    order_type 1 == descending
-    order_type 2 == alternating
-    """
     n_outer: tl.constexpr = x.numel >> n_dims
     tl.static_assert(stage <= n_dims)
     # flip denotes whether to re-arrange sub-sequences of elements in ascending or
