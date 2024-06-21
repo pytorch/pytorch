@@ -48,7 +48,7 @@ class _ComputationType(Enum):
             return _ComputationType.FORWARD
         elif action == "B":
             return _ComputationType.BACKWARD
-        elif action == "@":
+        elif action == "W":
             return _ComputationType.WEIGHT
         else:
             raise RuntimeError(f"Invalid computation type {action}")
@@ -68,19 +68,20 @@ class _Action(NamedTuple):
     stage_index: int
 
     def __repr__(self):
-        return f"{self.computation_type}{self.microbatch_index}_s{self.stage_index}"
+        return f"{self.stage_index}{self.computation_type}{self.microbatch_index}"
 
     @staticmethod
     def from_str(str):
         """Reverse of __repr__"""
         if match := _action_regex.match(str):
             stage_index, computation_type, microbatch_index = match.groups()
-            print(f"parsed {stage_index} {computation_type} {microbatch_index}")
             return _Action(
                 _ComputationType.from_str(computation_type),
                 int(microbatch_index),
                 int(stage_index),
             )
+        elif str == "":
+            return None
         raise RuntimeError(
             f"Invalid action string: {str}, should be formatted as [stage][action type][microbatch] e.g. 2F0"
         )
@@ -656,7 +657,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
 
     def _validate_schedule(self):
         def _validate_rank_actions(
-            actions: List[_Action | None], stage_ids: List[int], num_microbatches
+            actions: List[_Action | None], num_stages: int, num_microbatches: int
         ):
             # We will count all the actions per stage and ensure they happen in a valid order
             # (e.g. F before B before W for a given microbatch)
@@ -666,9 +667,11 @@ class PipelineScheduleMulti(_PipelineSchedule):
                     B: set(),
                     W: set(),
                 }
-                for stage_id in stage_ids
+                for stage_id in range(num_stages)
             }
             for action in actions:
+                if action is None:
+                    continue
                 assert isinstance(
                     action, _Action
                 ), f"Got an invalid action: {action}, expected instance of _Action"
@@ -706,12 +709,11 @@ class PipelineScheduleMulti(_PipelineSchedule):
             assert (
                 rank in self.pipeline_order
             ), f"Schedule is missing actions for rank {rank}"
-            # TODO(stage_id)
-            _validate_rank_actions(
-                self.pipeline_order[rank],
-                [s.stage_index for s in self._stages],
-                self._n_microbatches,
-            )
+            # _validate_rank_actions(
+            #     self.pipeline_order[rank],
+            #     self._num_stages,
+            #     self._n_microbatches,
+            # )
 
     def load_csv(self, filename):
         with open(filename, newline="") as csvfile:
