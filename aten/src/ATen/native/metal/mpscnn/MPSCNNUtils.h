@@ -20,10 +20,7 @@
     }                                                                            \
   } while (false)
 
-namespace at {
-namespace native {
-namespace metal {
-namespace mpscnn {
+namespace at::native::metal::mpscnn {
 
 struct LaunchParams {
   MTLSize threadsPerThreadgroup;
@@ -71,7 +68,4 @@ static inline int computeMPSAlignOffset(int kernel, int pad) {
   return mps_offset - pt_offset;
 }
 
-}
-} // namespace metal
-} // namespace native
-} // namespace at
+} // namespace at::native::metal::mpscnn

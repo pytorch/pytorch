@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import functools
@@ -535,14 +536,6 @@ def is_complex_value(x: _C.Value) -> bool:
 
 
 @_beartype.beartype
-def is_caffe2_aten_fallback() -> bool:
-    return (
-        GLOBALS.operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
-        and _C_onnx._CAFFE2_ATEN_FALLBACK
-    )
-
-
-@_beartype.beartype
 def _get_tensor_rank(x: _C.Value) -> Optional[int]:
     if not _is_tensor(x) or x.type() is None:
         return None
@@ -591,9 +584,7 @@ def _get_dim_for_cross(x: _C.Value, dim: Optional[int]):
 @_beartype.beartype
 def _unimplemented(op: str, msg: str, value: Optional[_C.Value] = None) -> None:
     # For BC reasons, the behavior for Caffe2 does not raise exception for unimplemented operators
-    if _C_onnx._CAFFE2_ATEN_FALLBACK:
-        warnings.warn(f"ONNX export failed on {op} because {msg} not supported")
-    elif GLOBALS.operator_export_type == _C_onnx.OperatorExportTypes.ONNX:
+    if GLOBALS.operator_export_type == _C_onnx.OperatorExportTypes.ONNX:
         _onnx_unsupported(f"{op}, {msg}", value)
 
 

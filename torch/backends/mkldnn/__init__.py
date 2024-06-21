@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import sys
 from contextlib import contextmanager
 
@@ -64,21 +65,23 @@ class verbose:
         return False
 
 
-def set_flags(_enabled):
-    orig_flags = (torch._C._get_mkldnn_enabled(),)
+def set_flags(_enabled, _deterministic=None):
+    orig_flags = (torch._C._get_mkldnn_enabled(), torch._C._get_mkldnn_deterministic())
     torch._C._set_mkldnn_enabled(_enabled)
+    if _deterministic is not None:
+        torch._C._set_mkldnn_deterministic(_deterministic)
     return orig_flags
 
 
 @contextmanager
-def flags(enabled=False):
+def flags(enabled=False, deterministic=False):
     with __allow_nonbracketed_mutation():
-        orig_flags = set_flags(enabled)
+        orig_flags = set_flags(enabled, deterministic)
     try:
         yield
     finally:
         with __allow_nonbracketed_mutation():
-            set_flags(orig_flags[0])
+            set_flags(*orig_flags)
 
 
 class MkldnnModule(PropModule):
@@ -86,12 +89,13 @@ class MkldnnModule(PropModule):
         super().__init__(m, name)
 
     enabled = ContextProp(torch._C._get_mkldnn_enabled, torch._C._set_mkldnn_enabled)
+    deterministic = ContextProp(
+        torch._C._get_mkldnn_deterministic, torch._C._set_mkldnn_deterministic
+    )
 
 
 if TYPE_CHECKING:
     enabled: ContextProp
+    deterministic: ContextProp
 
-
-# Cool stuff from torch/backends/cudnn/__init__.py and
-# https://stackoverflow.com/questions/2447353/getattr-on-a-module/7668273#7668273
 sys.modules[__name__] = MkldnnModule(sys.modules[__name__], __name__)
