@@ -13,7 +13,6 @@ from torch.testing._internal.inductor_utils import HAS_CPU, requires_gpu
 
 # Fake distributed
 WORLD_SIZE = 2
-RESIZE = True
 
 
 def init_fake_distributed(device="cpu"):
