@@ -15,9 +15,9 @@ class TORCH_API Request {
  public:
   virtual ~Request() = default;
 
-  virtual const std::multimap<std::string, std::string>& params() const = 0;
-
   virtual const std::string& body() = 0;
+
+  virtual const std::multimap<std::string, std::string>& params() const = 0;
 };
 
 // Response represents a response to the handler. This conceptually maps to an
