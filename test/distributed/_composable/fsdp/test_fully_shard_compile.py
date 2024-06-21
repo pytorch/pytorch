@@ -132,7 +132,6 @@ class TestFullyShardCompile(FSDPTest):
             torch.manual_seed(42)
             losses = []
             for i in range(n_iter):
-                optim.zero_grad(set_to_none=True)
                 inp = input_creation_fn()
                 if compiled_autograd_backend is not None:
                     maybe_compiled_autograd_ctx = compiled_autograd.enable(
@@ -146,7 +145,7 @@ class TestFullyShardCompile(FSDPTest):
                     losses.append(loss.item())
                     loss.backward()
                 optim.step()
-                torch.cuda.synchronize()
+                optim.zero_grad(set_to_none=True)
             return losses
 
         def test_compiled():
@@ -158,7 +157,6 @@ class TestFullyShardCompile(FSDPTest):
             res = run_all_iters(
                 model_compiled, optim, compiled_autograd_backend=backend
             )
-            optim.zero_grad(set_to_none=True)
             return res
 
         def test_eager():
@@ -167,7 +165,6 @@ class TestFullyShardCompile(FSDPTest):
             run_all_iters(model, optim, n_iter=1)
 
             res = run_all_iters(model, optim)
-            optim.zero_grad(set_to_none=True)
             return res
 
         losses_compiled = test_compiled()
@@ -194,7 +191,7 @@ class TestFullyShardCompile(FSDPTest):
                 nn.Linear(hidden_dim, hidden_dim, device="cuda"),
             )
             fully_shard(model, reshard_after_forward=True, **fsdp_config)
-            optim = torch.optim.SGD(model.parameters(), lr=1e-6)
+            optim = torch.optim.SGD(model.parameters(), lr=1e-2)
             return model, optim
 
         def input_creation_fn():
@@ -225,18 +222,13 @@ class TestFullyShardCompile(FSDPTest):
         )
 
     def _create_transformer_factory_fns(self):
-        hidden_dim = 16
+        seq_len = 16
 
         def model_init_fn():
             torch.manual_seed(0)
             fsdp_config = {}
             mesh = init_device_mesh("cuda", (self.world_size,))
-            model_args = ModelArgs(
-                dim=hidden_dim,
-                n_layers=2,
-                n_heads=1,
-                vocab_size=1024,
-            )
+            model_args = ModelArgs()
             model = Transformer(model_args)
             for layer_id, mod in enumerate(model.layers):
                 fully_shard(mod, mesh=mesh, reshard_after_forward=True, **fsdp_config)
@@ -244,13 +236,13 @@ class TestFullyShardCompile(FSDPTest):
             model = fully_shard(
                 model, mesh=mesh, reshard_after_forward=True, **fsdp_config
             )
-            optim = torch.optim.SGD(model.parameters(), lr=1e-6)
+            optim = torch.optim.SGD(model.parameters(), lr=1e-2)
             return model, optim
 
         def input_creation_fn():
             torch.manual_seed(0)
             inp = torch.zeros(
-                (2, hidden_dim),
+                (2, seq_len),
                 device="cuda",
                 requires_grad=False,
                 dtype=torch.long,
