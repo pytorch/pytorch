@@ -129,7 +129,8 @@ class FSDPParamGroup:
         # after this module's backward compute. We register a multi-grad hook
         # on the unsharded parameters to run the post-backward earlier.
         self._multi_grad_hook_handle: Optional[RemovableHandle] = None
-        # Guard whether to run the multi-grad hook based on whether this
+        # Guard whether to run the multi-grad hook based on whether the current
+        # forward's inputs require gradient or not
         self._run_multi_grad_hook: bool = False
 
         # - Communication and communication/computation overlap
