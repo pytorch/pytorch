@@ -1,7 +1,9 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
+import csv
 import logging
+import re
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from enum import Enum
@@ -40,6 +42,25 @@ class _ComputationType(Enum):
         }
         return str_map[self]
 
+    @staticmethod
+    def from_str(action):
+        if action == "F":
+            return _ComputationType.FORWARD
+        elif action == "B":
+            return _ComputationType.BACKWARD
+        elif action == "@":
+            return _ComputationType.WEIGHT
+        else:
+            raise RuntimeError(f"Invalid computation type {action}")
+
+
+F = _ComputationType.FORWARD
+B = _ComputationType.BACKWARD
+W = _ComputationType.WEIGHT
+
+
+_action_regex = re.compile(r"(\d+)([F,B,W])(\d+)")
+
 
 class _Action(NamedTuple):
     computation_type: _ComputationType
@@ -48,6 +69,21 @@ class _Action(NamedTuple):
 
     def __repr__(self):
         return f"{self.computation_type}{self.microbatch_index}_s{self.stage_index}"
+
+    @staticmethod
+    def from_str(str):
+        """Reverse of __repr__"""
+        if match := _action_regex.match(str):
+            stage_index, computation_type, microbatch_index = match.groups()
+            print(f"parsed {stage_index} {computation_type} {microbatch_index}")
+            return _Action(
+                _ComputationType.from_str(computation_type),
+                int(microbatch_index),
+                int(stage_index),
+            )
+        raise RuntimeError(
+            f"Invalid action string: {str}, should be formatted as [stage][action type][microbatch] e.g. 2F0"
+        )
 
 
 class _PipelineSchedule(ABC):
@@ -611,6 +647,78 @@ class PipelineScheduleMulti(_PipelineSchedule):
             stage._prepare_forward_infra(n_microbatches)
             if self._has_backward:
                 stage._prepare_backward_infra(n_microbatches)
+
+    def dump_csv(self, filename):
+        with open(filename, "w", newline="") as csvfile:
+            writer = csv.writer(csvfile)
+            for rank in self.pipeline_order:
+                writer.writerow(self.pipeline_order[rank])
+
+    def _validate_schedule(self):
+        def _validate_rank_actions(
+            actions: List[_Action | None], stage_ids: List[int], num_microbatches
+        ):
+            # We will count all the actions per stage and ensure they happen in a valid order
+            # (e.g. F before B before W for a given microbatch)
+            stage_actions: Dict[int, Dict[_ComputationType, Set]] = {
+                stage_id: {
+                    F: set(),
+                    B: set(),
+                    W: set(),
+                }
+                for stage_id in stage_ids
+            }
+            for action in actions:
+                assert isinstance(
+                    action, _Action
+                ), f"Got an invalid action: {action}, expected instance of _Action"
+                s_id = action.stage_index
+                ctype = action.computation_type
+                mb_id = action.microbatch_index
+
+                if ctype == F:
+                    stage_actions[s_id][F].add(mb_id)
+                elif ctype == B:
+                    assert (
+                        mb_id in stage_actions[s_id][F]
+                    ), f"Running Backward for stage {s_id}, microbatch {mb_id} without first running Forward"
+                    stage_actions[s_id][B].add(mb_id)
+                elif ctype == W:
+                    assert (
+                        not self.use_full_backward
+                    ), "Schedule contains 'W' actions, but is configured to use full backward"
+                    assert (
+                        mb_id in stage_actions[s_id][B]
+                    ), f"Running Weight for stage {s_id}, microbatch {mb_id} without first running Backward"
+                    stage_actions[s_id][W].add(mb_id)
+
+            for s_id in stage_actions:
+                for ctype in (F, B, W):
+                    stage_mb = len(stage_actions[s_id][ctype])
+                    assert (
+                        stage_mb == num_microbatches
+                    ), f"Got {stage_mb} {ctype} microbatches for stage {s_id}, expected {num_microbatches}"
+
+        assert (
+            len(self.pipeline_order) == self.pp_group_size
+        ), f"Schedule has incorrect number of ranks - expected {self.pp_group_size}, actual {len(self.pipeline_order)}"
+        for rank in range(self.pp_group_size):
+            assert (
+                rank in self.pipeline_order
+            ), f"Schedule is missing actions for rank {rank}"
+            # TODO(stage_id)
+            _validate_rank_actions(
+                self.pipeline_order[rank],
+                [s.stage_index for s in self._stages],
+                self._n_microbatches,
+            )
+
+    def load_csv(self, filename):
+        with open(filename, newline="") as csvfile:
+            reader = csv.reader(csvfile)
+            for rank, row in enumerate(reader):
+                self.pipeline_order[rank] = [_Action.from_str(s) for s in row]
+        self._validate_schedule()
 
     def step(self, *args, target=None, losses: Optional[List] = None, **kwargs):
         """
