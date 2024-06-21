@@ -27,6 +27,7 @@ def init_fake_distributed():
 
     def fw_pre_hook(mod, inp):
         if not compiled_autograd.compiled_autograd_enabled:
+            # torch.ops.fsdp.set_ doesn't work well in eager mode, so use the slow copy_ path instead.
             mod.unsharded_weight.untyped_storage().resize_(
                 mod.unsharded_weight.nelement() * mod.unsharded_weight.element_size()
             )
@@ -50,6 +51,7 @@ def init_fake_distributed():
 
     def bw_pre_hook(mod, gO):
         if not compiled_autograd.compiled_autograd_enabled:
+            # torch.ops.fsdp.set_ doesn't work well in eager mode, so use the slow copy_ path instead.
             mod.unsharded_weight.untyped_storage().resize_(
                 mod.unsharded_weight.nelement() * mod.unsharded_weight.element_size()
             )
