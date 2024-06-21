@@ -277,7 +277,7 @@ def _register_cia_to_meta(*args, **kwargs):
 @contextmanager
 def override_composite_implicit_decomp(ops_to_preserve):
     # This function overrides CompositeImplicitAutograd decomp for
-    # functional composite ops. Ideally we want to not-decompose
+    # functional composite ops that user specified. Ideally we want to not-decompose
     # ALL composite ops but today's C++ functinalization relies on
     # the fact that it is working with the opset after decomp is run.
     # Hence we can only do it for functional ops. One caveat is that
@@ -286,7 +286,12 @@ def override_composite_implicit_decomp(ops_to_preserve):
     saved_tables = {}
     patched_ops = set()
     for op_overload in ops_to_preserve:
-
+        # Our strategy for deciding if we can preserve CIA is following:
+        # 1. The op should be known statically that it is functional
+        # 2. If it is maybe aliasing, we decompose because we must know if an op
+        #    is mutating or aliasing.
+        # TODO (tmanlaibaatar) make this utility function and share it with functional_tensor
+        # decomp part.
         def can_preserve(op_overload):
             if op_overload in FunctionalTensor.maybe_aliasing_or_mutating_ops:
                 return False
@@ -313,10 +318,10 @@ def override_composite_implicit_decomp(ops_to_preserve):
             return True
 
         if not can_preserve(op_overload):
-            warnings.warn(
-                f"We can't preserve {op_overload} in export because this op is unsafe to keep"
+            # TODO (tmanlaibaatar) Better error message
+            raise RuntimeError(
+                f"We can't preserve {op_overload} in export, because it doesn't pass our safety check."
             )
-            continue
 
         saved_tables[op_overload] = op_overload.py_kernels.copy()
         patched_ops.add(op_overload)
@@ -2063,7 +2068,7 @@ def _export(
     # Call the appropriate export function based on the strictness of tracing.
     export_func = _strict_export if strict else _non_strict_export
 
-    # TODO we only want to do this for aot-dispatch for now. Pre-dispatch will be deleted soon
+    # TODO we only want to do this for aot-dispatch for now. Pre-dispatch functionalization will be deleted soon
     override_decomp = (
         override_composite_implicit_decomp(_preserve_ops if _preserve_ops else [])
         if not pre_dispatch

@@ -348,15 +348,20 @@ class FunctionalTensorMode(TorchDispatchMode):
             if func in FunctionalTensor.maybe_aliasing_or_mutating_ops:
                 return True
 
-            # We unconditionally decompose ops that are mutating or aliasing ops
+            # (1) we unconditionally decompose maybe-aliasing or maybe-mutating ops, because we must know statically of an op mutates or aliasing in order to functionalize it properly
+            # (2) for mutating ops that have CompositeImplicit decomps, we choose to decompose them today. In theory, we could walk this back and avoid decomposing them later if we need to.
             alias_info_present = any(arg.alias_info for arg in func._schema.arguments)
             if alias_info_present or func._schema.is_mutable:
                 return True
 
             # If we are here, it means we are seeing functional composite op.
             # For pre-dispatch IR or export inference IR, we wont' decompose them
+            assert (self.export and self.pre_dispatch) or (
+                not self.export and not self.pre_dispatch
+            )
             if self.export or self.pre_dispatch:
                 if func.namespace not in ["aten", "prim"]:
+                    # TODO (tmanlaibaatar) check if the op is PT2 compliant
                     warnings.warn(
                         f"At pre-dispatch tracing, we assume that any custom op marked with "
                         f"CompositeImplicitAutograd and functional are safe to not decompose. "
