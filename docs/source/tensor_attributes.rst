@@ -5,7 +5,7 @@
 Tensor Attributes
 =================
 
-Each ``torch.Tensor`` has a :class:`torch.dtype`, :class:`torch.device`, and :class:`torch.layout`.
+Each ``torch.Tensor`` has a :class:`torch.dtype`, :class:`torch.device`, :class:`torch.layout`, and :class:`torch.memory_format`.
 
 .. _dtype-doc:
 
@@ -13,6 +13,8 @@ torch.dtype
 -----------
 
 .. class:: dtype
+
+Introductory version: 0.4.0 +
 
 A :class:`torch.dtype` is an object that represents the data type of a
 :class:`torch.Tensor`. PyTorch has twelve different data types:
@@ -136,6 +138,8 @@ torch.device
 
 .. class:: device
 
+Introductory version: 0.4.0 +
+
 A :class:`torch.device` is an object representing the device on which a :class:`torch.Tensor` is
 or will be allocated.
 
@@ -250,6 +254,8 @@ torch.layout
 
 .. class:: layout
 
+Introductory version: 0.4.0+
+
 .. warning::
   The ``torch.layout`` class is in beta and subject to change.
 
@@ -281,6 +287,8 @@ torch.memory_format
 -------------------
 
 .. class:: memory_format
+
+Introductory version: 1.5.0+
 
 A :class:`torch.memory_format` is an object representing the memory format on which a :class:`torch.Tensor` is
 or will be allocated.
