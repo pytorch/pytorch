@@ -1486,7 +1486,6 @@ class CppWrapperCpu(WrapperCodeGen):
             else f"{buffer.get_name()}.reset();"
         )
 
-
     def make_free_by_names(self, names_to_del: List[str]):
         return " ".join(f"{name}.reset();" for name in names_to_del)
 
