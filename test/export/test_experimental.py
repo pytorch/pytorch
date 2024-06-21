@@ -11,6 +11,7 @@ from torch._export.wrappers import _mark_strict_experimental
 
 from torch._functorch.aot_autograd import aot_export_module
 from torch.export._trace import _convert_ts_to_export_experimental
+from torch.export.experimental import _export_forward_backward
 
 from torch.testing import FileCheck
 
@@ -193,6 +194,76 @@ def forward(self, arg0_1, arg1_1):
         _check_equality_and_annotations(
             MDict, ({"0": torch.randn(4), "1": torch.randn(4)},)
         )
+
+    def test_joint_basic(self) -> None:
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+                self.loss = torch.nn.CrossEntropyLoss()
+
+            def forward(self, x):
+                return self.loss(
+                    self.linear(x).softmax(dim=0), torch.tensor([1.0, 0.0, 0.0])
+                )
+
+        m = Module()
+        example_inputs = (torch.randn(3),)
+        m(*example_inputs)
+        ep = torch.export._trace._export(m, example_inputs, pre_dispatch=True)
+        joint_ep = _export_forward_backward(ep)
+        print(joint_ep)
+
+        """
+        ExportedProgram:
+            class GraphModule(torch.nn.Module):
+                def forward(self, arg0_1: "f32[3, 3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]"):
+                    # No stacktrace found for following nodes
+                    view: "f32[1, 3]" = torch.ops.aten.view.default(arg3_1, [1, 3]);  arg3_1 = None
+                    t: "f32[3, 3]" = torch.ops.aten.t.default(arg0_1);  arg0_1 = None
+                    addmm: "f32[1, 3]" = torch.ops.aten.addmm.default(arg1_1, view, t);  arg1_1 = t = None
+                    view_1: "f32[3]" = torch.ops.aten.view.default(addmm, [3]);  addmm = None
+                    _softmax: "f32[3]" = torch.ops.aten._softmax.default(view_1, 0, False);  view_1 = None
+                    detach_1: "f32[3]" = torch.ops.aten.detach.default(_softmax)
+                    clone: "f32[3]" = torch.ops.aten.clone.default(arg2_1);  arg2_1 = None
+                    detach_5: "f32[3]" = torch.ops.aten.detach.default(clone);  clone = None
+                    _log_softmax: "f32[3]" = torch.ops.aten._log_softmax.default(_softmax, 0, False);  _softmax = None
+                    detach_12: "f32[3]" = torch.ops.aten.detach.default(_log_softmax)
+                    mul: "f32[3]" = torch.ops.aten.mul.Tensor(_log_softmax, detach_5);  _log_softmax = None
+                    sum_1: "f32[]" = torch.ops.aten.sum.default(mul);  mul = None
+                    neg: "f32[]" = torch.ops.aten.neg.default(sum_1);  sum_1 = None
+                    div: "f32[]" = torch.ops.aten.div.Scalar(neg, 1);  neg = None
+                    ones_like: "f32[]" = torch.ops.aten.ones_like.default(div, pin_memory = False, memory_format = torch.preserve_format)
+                    div_1: "f32[]" = torch.ops.aten.div.Scalar(ones_like, 1);  ones_like = None
+                    neg_1: "f32[]" = torch.ops.aten.neg.default(div_1);  div_1 = None
+                    expand: "f32[3]" = torch.ops.aten.expand.default(neg_1, [3]);  neg_1 = None
+                    mul_1: "f32[3]" = torch.ops.aten.mul.Tensor(expand, detach_5);  expand = detach_5 = None
+                    _log_softmax_backward_data: "f32[3]" = torch.ops.aten._log_softmax_backward_data.default(mul_1, detach_12, 0, torch.float32);  mul_1 = detach_12 = None
+                    _softmax_backward_data: "f32[3]" = torch.ops.aten._softmax_backward_data.default(_log_softmax_backward_data, detach_1, 0, torch.float32);  _log_softmax_backward_data = detach_1 = None
+                    view_2: "f32[1, 3]" = torch.ops.aten.view.default(_softmax_backward_data, [1, 3]);  _softmax_backward_data = None
+                    t_1: "f32[3, 1]" = torch.ops.aten.t.default(view_2)
+                    mm: "f32[3, 3]" = torch.ops.aten.mm.default(t_1, view);  t_1 = view = None
+                    t_2: "f32[3, 3]" = torch.ops.aten.t.default(mm);  mm = None
+                    sum_2: "f32[1, 3]" = torch.ops.aten.sum.dim_IntList(view_2, [0], True);  view_2 = None
+                    view_3: "f32[3]" = torch.ops.aten.view.default(sum_2, [3]);  sum_2 = None
+                    t_3: "f32[3, 3]" = torch.ops.aten.t.default(t_2);  t_2 = None
+                    return (div, t_3, view_3)
+
+        Graph signature: ExportGraphSignature(
+            input_specs=[
+                InputSpec(kind=<InputKind.PARAMETER: 2>, arg=TensorArgument(name='arg0_1'), target='linear.weight', persistent=None),
+                InputSpec(kind=<InputKind.PARAMETER: 2>, arg=TensorArgument(name='arg1_1'), target='linear.bias', persistent=None),
+                InputSpec(kind=<InputKind.CONSTANT_TENSOR: 4>, arg=TensorArgument(name='arg2_1'), target='lifted_tensor_0', persistent=None),
+                InputSpec(kind=<InputKind.USER_INPUT: 1>, arg=TensorArgument(name='arg3_1'), target=None, persistent=None)
+            ],
+            output_specs=[
+                OutputSpec(kind=<OutputKind.USER_OUTPUT: 1>, arg=TensorArgument(name='div'), target=None),
+                OutputSpec(kind=<OutputKind.GRADIENT_TO_PARAMETER: 4>, arg=TensorArgument(name='t_3'), target='linear.weight'),
+                OutputSpec(kind=<OutputKind.GRADIENT_TO_PARAMETER: 4>, arg=TensorArgument(name='view_3'), target='linear.bias')
+            ]
+        )
+        Range constraints: {}
+        """
 
 
 if __name__ == "__main__":
