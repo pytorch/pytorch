@@ -502,6 +502,11 @@ class TS2FXGraphConverter:
         target = torch.ops.aten.scalar_tensor
         args = tuple(self.get_fx_value(input) for input in node.inputs())
 
+        # prim::NumToTensor IRs are currently triggered by:
+        # .size() https://github.com/pytorch/pytorch/blob/main/torch/csrc/jit/frontend/tracer.cpp#L950
+        # .numel() https://github.com/pytorch/pytorch/blob/main/torch/csrc/jit/frontend/tracer.cpp#L971
+        # For both of those APIs, the tracer implicitly sets the output tensor type
+        # from NumToTensor to be a LongTensor. 
         fx_node = self.fx_graph.call_function(target, args, {"dtype": torch.long})
         output_name = node.output().debugName()
         self.name_to_node[output_name] = fx_node
