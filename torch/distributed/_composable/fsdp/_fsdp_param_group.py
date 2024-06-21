@@ -593,7 +593,7 @@ def _register_multi_post_acc_grad_hook(
     if not all(t.is_leaf for t in tensors):
         raise ValueError("Requires all tensors to be leaf tensors")
     if len(tensors) == 0:
-        raise ValueError("Requires at least one leaf tensor that requires grad")
+        return _MultiHandle(tuple())
 
     acc_grads = [_get_grad_fn_or_grad_acc(t) for t in tensors]
     count: Dict[int, int] = dict()
