@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import copy
 import dataclasses
 import functools
@@ -72,9 +73,6 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.utils._sympy.value_ranges import ValueRangeError, ValueRanges
 
-from .passes.add_runtime_assertions_for_constraints_pass import (
-    _AddRuntimeAssertionsForInlineConstraintsPass,
-)
 from .wrappers import _wrap_submodules
 
 log = logging.getLogger(__name__)
@@ -138,7 +136,7 @@ def capture_pre_autograd_graph(
         An nn.Module containing the traced method.
 
     """
-    from torch.export._trace import _convert_input_to_fake, DEFAULT_EXPORT_DYNAMO_CONFIG
+    from torch.export._trace import _convert_input_to_fake, DEFAULT_EXPORT_DYNAMO_CONFIG, _ignore_backend_decomps
     from torch._utils_internal import export_api_rollout_check
 
     capture_pre_autograd_graph_warning()
@@ -165,7 +163,7 @@ def capture_pre_autograd_graph(
             for op in FunctionalTensor.maybe_aliasing_or_mutating_ops
             if op != torch.ops.aten.dropout.default
         }
-        with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
+        with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)), _ignore_backend_decomps():
             m = torch._dynamo.export(
                 f,
                 dynamic_shapes=dynamic_shapes,
