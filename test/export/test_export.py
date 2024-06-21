@@ -221,6 +221,8 @@ class TestDynamismExpression(TestCase):
                 torch._check_is_size(b)
                 torch._check(b >= 4)
                 torch._check(b <= 5)
+                torch._check(b <= 5)
+                torch._check(True)
                 return torch.full((b, 1), 1)
 
         inp = (torch.tensor([3]),)
@@ -5504,6 +5506,25 @@ def forward(self, x, y):
             0,
         )
 
+    def test_intermediate_sym(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                if x[1].storage_offset() ** 2 - x.shape[0] >= 4:
+                    n = y.item()
+                    torch._check(n >= 2)
+                    torch._check(n <= 10)
+                    z = torch.cat([x, x], dim=0).repeat(n, n)
+                    return x.size(0) + x.stride(0) + n + z.size(1) + z.stride(0)
+        
+        inps = (torch.randn(7, 9), torch.tensor([2]))
+        shapes = {"x": (Dim("d0"), Dim("d1", min=4)), "y": None}
+        ep = torch.export._trace._export(
+            Foo(),
+            inps,
+            dynamic_shapes=shapes,
+            _allow_complex_guards_as_runtime_asserts=True,
+        )
+
     def test_constant_aliasing(self):
         class M1(torch.nn.Module):
             def __init__(self, m2, foo):
@@ -5562,6 +5583,19 @@ def forward(self, x, y):
         unep = unflatten(ep)
         for param in ["alpha", "beta", "gamma"]:
             self.assertTrue(param in unep.state_dict())
+
+    def test_ras(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                n = x.item()
+                torch._check_is_size(n)
+                torch.sym_constrain_range_for_size(n, min=2)
+                torch.sym_constrain_range_for_size(n, min=4)
+                torch.sym_constrain_range_for_size(n, min=3, max=10)
+                torch.sym_constrain_range_for_size(n, min=2, max=8)
+                return y[:n]
+        inps = (torch.tensor([6]), torch.randn(10))
+        ep = export(Foo(), inps)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
