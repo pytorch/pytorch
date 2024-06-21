@@ -39,34 +39,6 @@ reference to avoid holding onto memory after forward.
 class FSDPCommContext:
     """This has the communication state shared across FSDP states/parameter groups."""
 
-    def __init__(self):
-        # Initialize all streams using default stream at construction time and
-        # set them to new streams during lazy initialization
-        current_stream = (
-            # Defer CUDA requirement to lazy init and use dummy object to
-            # appease type checking
-            torch.cuda.current_stream()
-            if torch.cuda.is_available()
-            else cast(torch.cuda.Stream, object())
-        )
-        # All-gather state and copy-in stream allow overlapping the next
-        # copy-in with the current all-gather in forward; copy-in overlaps with
-        # reduce-scatter in backward without the separate copy-in stream
-        self.all_gather_copy_in_stream = current_stream
-        self.all_gather_state: Optional[AllGatherState] = None
-        # All-gather stream allows overlapping next all-gather with current
-        # forward compute
-        self.all_gather_stream = current_stream
-        # Reduce-scatter stream gives separate execution "thread" for post-
-        # backward logic like pre/post-gradient division and reduce-scatter
-        self.reduce_scatter_stream = current_stream
-        # Run the HSDP all-reduces concurrently with all-gather/reduce-scatter
-        # since collectives use different network resources and can overlap
-        # in the typical intra-node sharding / inter-node replication case
-        self.all_reduce_stream = current_stream
-        # Post-forward order for explicit backward prefetching
-        self.post_forward_order: List[FSDPParamGroup] = []  # will cause ref cycles
-
     def lazy_init(self):
         if not torch.cuda.is_available():
             raise RuntimeError("FSDP requires CUDA for streams")
@@ -74,10 +46,23 @@ class FSDPCommContext:
         # can help avoid some issues where their copies in/out are delayed and
         # block computation (this is different from high-pri NCCL streams)
         high_priority = -1
+        # All-gather state and copy-in stream allow overlapping the next
+        # copy-in with the current all-gather in forward; copy-in overlaps with
+        # reduce-scatter in backward without the separate copy-in stream
         self.all_gather_copy_in_stream = torch.cuda.Stream(priority=high_priority)
+        self.all_gather_state: Optional[AllGatherState] = None
+        # All-gather stream allows overlapping next all-gather with current
+        # forward compute
         self.all_gather_stream = torch.cuda.Stream(priority=high_priority)
+        # Reduce-scatter stream gives separate execution "thread" for post-
+        # backward logic like pre/post-gradient division and reduce-scatter
         self.reduce_scatter_stream = torch.cuda.Stream(priority=high_priority)
+        # Run the HSDP all-reduces concurrently with all-gather/reduce-scatter
+        # since collectives use different network resources and can overlap
+        # in the typical intra-node sharding / inter-node replication case
         self.all_reduce_stream = torch.cuda.Stream()
+        # Post-forward order for explicit backward prefetching
+        self.post_forward_order: List[FSDPParamGroup] = []  # will cause ref cycles
 
     def get_all_gather_streams(
         self, training_state: TrainingState
@@ -262,8 +247,11 @@ class FSDPParamGroup:
         self._all_gather_result = None  # free unless saved in `all_gather_state`
 
     def _wait_all_gather_streams_on_event(self, event: torch.cuda.Event):
-        self.comm_ctx.all_gather_copy_in_stream.wait_event(event)
-        self.comm_ctx.all_gather_stream.wait_event(event)
+        # Calling `unshard` before lazy init means streams are not initialized
+        if hasattr(self.comm_ctx, "all_gather_copy_in_stream"):
+            self.comm_ctx.all_gather_copy_in_stream.wait_event(event)
+        if hasattr(self.comm_ctx, "all_gather_stream"):
+            self.comm_ctx.all_gather_stream.wait_event(event)
 
     def reshard(self):
         if self._training_state == TrainingState.FORWARD:
