@@ -1,6 +1,5 @@
 #include <ATen/Context.h>
 #include <ATen/DeviceAccelerator.h>
-#include <iostream>
 namespace at {
 
 C10_API std::optional<DeviceType> getAccelerator(bool checked) {
