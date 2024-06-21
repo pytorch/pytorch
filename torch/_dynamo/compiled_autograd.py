@@ -4,7 +4,11 @@ import functools
 from typing import Dict, List, Optional, TYPE_CHECKING
 
 import torch
-from torch._dynamo.external_utils import call_backward, call_hook
+from torch._dynamo.external_utils import (
+    call_backward,
+    call_hook,
+    FakeCompiledAutogradEngine,
+)
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.utils import counters, lazy_format_graph_code, set_locals_to_steal
 from torch._logging import getArtifactLogger, trace_structured
@@ -255,6 +259,12 @@ class AutogradCompilerInstance:
         return []
 
     def end_capture(self, outputs):
+        self.fx_tracer.create_proxy(
+            "call_function",
+            FakeCompiledAutogradEngine._exec_final_callbacks_stub,
+            (),
+            {},
+        )
         self.stack.close()
         self.fx_tracer.create_node(
             "output",
@@ -313,8 +323,11 @@ class AutogradCompilerInstance:
             return [self.to_proxy(x) for x in t]
         if isinstance(t, tuple):
             return tuple(self.to_proxy(x) for x in t)
-        assert isinstance(t, (torch.Tensor, torch.SymInt))
-        return fetch_object_proxy(self.fx_tracer)(t).proxy
+        # can it be torch.SymInt as the code used to imply?
+        assert isinstance(t, torch.Tensor)
+        proxy_tensor = fetch_object_proxy(self.fx_tracer, t)
+        assert isinstance(proxy_tensor, torch.fx.experimental.proxy_tensor._ProxyTensor)
+        return proxy_tensor.proxy
 
     def bind_tensors_to_proxies(self, tensors, proxies):
         if isinstance(proxies, torch.fx.Proxy):

@@ -52,6 +52,7 @@ Number = (bool, int, float, complex, torch.SymInt, torch.SymFloat, torch.SymBool
 # does not
 Dim = int
 IntLike = (int, torch.SymInt)
+IntLikeType = Union[int, torch.SymInt]
 FloatLike = (float, torch.SymFloat)
 BoolLike = (bool, torch.SymBool)
 IntWithoutSymInt = int

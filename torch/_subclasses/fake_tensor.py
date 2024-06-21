@@ -20,6 +20,7 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import TypeGuard
 from weakref import ReferenceType
 
 import torch
@@ -148,7 +149,7 @@ def unset_fake_temporarily():
             torch._C._set_dispatch_mode(old)
 
 
-def is_fake(x):
+def is_fake(x: object) -> TypeGuard[torch.Tensor]:
     if isinstance(x, FakeTensor):
         return True
     if is_traceable_wrapper_subclass(x):

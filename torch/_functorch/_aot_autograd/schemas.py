@@ -8,11 +8,23 @@ import collections
 import functools
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, NewType, Optional, Set, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    NewType,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Union,
+)
 
 import torch
 import torch.utils._pytree as pytree
 from torch._guards import Source
+from torch._ops import OpOverload
 from torch._subclasses import FakeTensor
 from torch._subclasses.fake_tensor import is_fake
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -181,7 +193,7 @@ class SubclassCreationMeta:
     # We need to keep them around along with outer_size / outer_stride to plumb them
     # into __tensor_unflatten__.
     meta: Any
-    inner_keys: List[Any]
+    inner_keys: Sequence[Any]
     outer_size: Tuple[int, ...]
     outer_stride: Tuple[int, ...]
 
@@ -742,7 +754,7 @@ class AOTConfig:
     fw_compiler: Callable
     bw_compiler: Callable
     partition_fn: Callable
-    decompositions: Dict[Callable, Callable]
+    decompositions: Dict[OpOverload, Callable]
     num_params_buffers: int
     aot_id: int
     keep_inference_input_mutations: bool
