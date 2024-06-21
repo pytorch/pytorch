@@ -548,7 +548,7 @@ def proxy_call(
     f_flat_args_kwargs = [
         (
             fetch_object_proxy(tracer, x)
-            if isinstance(x, (Tensor,) + _AnyScriptObject)
+            if isinstance(x, (Tensor, _AnyScriptObject))
             else x
         )
         for x in flat_args_kwargs
@@ -1262,6 +1262,8 @@ class _ModuleNotInstalledAsSubmoduleError(NameError):
 
 class _AttrProxy:
     def __init__(self, tracer: _ModuleStackTracer, base: Module, path: str) -> None:
+        # Warning: We blow away our own attributes here to mimic the base class
+        # - so don't expect `self.x` to do anything useful.
         self.__class__ = type(
             base.__class__.__name__,
             (self.__class__, base.__class__),
@@ -1272,24 +1274,22 @@ class _AttrProxy:
         self.__class__.__qualname__ = base.__class__.__qualname__
         tracer.proxy_paths[self] = path
         tracer.proxy_modules[self] = base
-        self.tracer = tracer
 
-    def __getattr__(self, name: str) -> _AttrProxy:
+    def _getattr_helper(self, tracer: _ModuleStackTracer, name: str) -> _AttrProxy:
         assert isinstance(self, Module)
-        attr_val = super().__getattr__(name)
+        attr_val = super().__getattr__(name)  # type: ignore[misc]
         if isinstance(attr_val, _AttrProxy):
-            attr_val = self.tracer.proxy_modules[attr_val]
+            attr_val = tracer.proxy_modules[attr_val]
         elif not isinstance(attr_val, Module):
             return attr_val
-        return _AttrProxy(self.tracer, attr_val, self.tracer.proxy_paths[self] + "." + name)
+        return _AttrProxy(tracer, attr_val, tracer.proxy_paths[self] + "." + name)
 
-    @property
-    def _modules(self) -> Dict[str, _AttrProxy]:
+    def _modules_helper(self, tracer: _ModuleStackTracer) -> Dict[str, _AttrProxy]:
         assert "_modules" in self.__dict__
         submodules = self.__dict__["_modules"]
         assert isinstance(submodules, dict)
         return {
-            key: _AttrProxy(self.tracer, value, self.tracer.proxy_paths[self] + "." + str(key))
+            key: _AttrProxy(tracer, value, tracer.proxy_paths[self] + "." + str(key))
             for key, value in submodules.items()
         }
 
@@ -1324,6 +1324,21 @@ class _ModuleStackTracer(PythonKeyTracer):
         for name, mod in self.scope_root.named_modules(remove_duplicate=False):
             self.module_id_cache[id(mod)].append(name)
 
+        # Build a wrapper around _AttrProxy to provide the tracer. We can't
+        # store it on _AttrProxy itself beceause we mimic the underlying class
+        # (including its attributes).
+        tracer = self
+
+        class AttrProxy(_AttrProxy):
+            def __getattr__(self, name: str) -> _AttrProxy:
+                return self._getattr_helper(tracer, name)
+
+            @property
+            def _modules(self) -> Dict[str, _AttrProxy]:
+                return self._modules_helper(tracer)
+
+        self.make_proxy = lambda base, path: AttrProxy(self, base, path)
+
     def path_of_module(self, mod: Module) -> str:
         """
         Use tracked access path during tracing instead of the default BFS behavior.
@@ -1345,7 +1360,7 @@ class _ModuleStackTracer(PythonKeyTracer):
             return super().getattr(attr, attr_val, parameter_proxy_cache)
         if isinstance(attr_val, _AttrProxy):
             return attr_val
-        return _AttrProxy(self, attr_val, attr)
+        return self.make_proxy(attr_val, attr)
 
     def trace(
             self,
