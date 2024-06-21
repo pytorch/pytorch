@@ -202,6 +202,7 @@ struct SchemaParser {
       return parseSingleConstant(
           type, type.expectRef<c10::DynamicType>().dynamicKind());
     }
+    const auto& str2dtype = c10::getStringToDtypeMap();
     switch (L.cur().kind) {
       case TK_TRUE:
         L.next();
@@ -219,18 +220,14 @@ struct SchemaParser {
       case TK_IDENT: {
         auto tok = L.next();
         auto text = tok.text();
-        if ("float" == text) {
-          return static_cast<int64_t>(at::kFloat);
-        } else if ("complex" == text) {
-          return static_cast<int64_t>(at::kComplexFloat);
-        } else if ("long" == text) {
-          return static_cast<int64_t>(at::kLong);
-        } else if ("strided" == text) {
+        if ("strided" == text) {
           return static_cast<int64_t>(at::kStrided);
         } else if ("Mean" == text) {
           return static_cast<int64_t>(at::Reduction::Mean);
         } else if ("contiguous_format" == text) {
           return static_cast<int64_t>(c10::MemoryFormat::Contiguous);
+        } else if (str2dtype.count(text) > 0) {
+          return static_cast<int64_t>(str2dtype.at(text));
         } else {
           throw ErrorReport(L.cur().range) << "invalid numeric default value";
         }

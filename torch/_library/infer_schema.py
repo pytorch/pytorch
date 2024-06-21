@@ -74,10 +74,16 @@ def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
         if param.default is inspect.Parameter.empty:
             params.append(f"{schema_type} {name}")
         else:
+            default_repr = None
             if param.default is None or isinstance(param.default, (int, float, bool)):
                 default_repr = str(param.default)
             elif isinstance(param.default, str):
                 default_repr = f'"{param.default}"'
+            elif isinstance(param.default, torch.dtype):
+                dtype_repr = str(param.default)
+                torch_dot = "torch."
+                assert dtype_repr.startswith(torch_dot)
+                default_repr = dtype_repr[len(torch_dot) :]
             else:
                 error_fn(
                     f"Parameter {name} has an unsupported default value type {type(param.default)}. "
