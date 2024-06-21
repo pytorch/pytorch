@@ -245,7 +245,9 @@ def scatter_upon_allzero_extra_check(m):
     extra_check=scatter_upon_allzero_extra_check,
 )
 def scatter_upon_allzero(match: Match, shape, dtype, selector, val):
-    from torch._inductor import lowering
+    from torch._inductor import lowering, metrics
+
+    metrics.num_matches_for_scatter_upon_const_tensor += 1
 
     if len(selector.get_size()) == 2:
         # normalize to 1D tensor
