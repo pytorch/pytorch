@@ -799,6 +799,7 @@ libtorch_python_core_sources = [
     "torch/csrc/Size.cpp",
     "torch/csrc/Storage.cpp",
     "torch/csrc/StorageMethods.cpp",
+    "torch/csrc/inductor/resize_storage_bytes.cpp",
     "torch/csrc/StorageSharing.cpp",
     "torch/csrc/Stream.cpp",
     "torch/csrc/Event.cpp",
