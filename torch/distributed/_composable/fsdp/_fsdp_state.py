@@ -35,6 +35,9 @@ class FSDPStateContext:
         self.post_backward_final_callback_queued: bool = False
         # Whether to finalize backward in this backward's final callback
         self.is_last_backward: bool = True
+        # Optional user-provided event recorded after optimizer for the
+        # all-gather streams to wait on in the root pre-forward
+        self.post_optim_event: Optional[torch.cuda.Event] = None
 
 
 def disable_if_config_true(func):
@@ -83,9 +86,14 @@ class FSDPState(_State):
         self._state_ctx.iter_forward_root = self
         with torch.profiler.record_function("FSDP::root_pre_forward"):
             # Wait for optimizer before implicitly prefetched all-gathers
-            current_stream = torch.cuda.current_stream()
-            self._comm_ctx.all_gather_copy_in_stream.wait_stream(current_stream)
-            self._comm_ctx.all_gather_stream.wait_stream(current_stream)
+            if (event := self._state_ctx.post_optim_event) is not None:
+                self._comm_ctx.all_gather_copy_in_stream.wait_event(event)
+                self._comm_ctx.all_gather_stream.wait_event(event)
+                self._state_ctx.post_optim_event = None
+            else:
+                current_stream = torch.cuda.current_stream()
+                self._comm_ctx.all_gather_copy_in_stream.wait_stream(current_stream)
+                self._comm_ctx.all_gather_stream.wait_stream(current_stream)
             if self._device.type == "cuda":
                 with torch.profiler.record_function("FSDP::inputs_to_device"):
                     args_tuple, kwargs_tuple = _to_kwargs(
