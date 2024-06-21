@@ -11,7 +11,6 @@ import copy
 import inspect
 import io
 import re
-import textwrap
 import typing
 import warnings
 from typing import (
@@ -512,6 +511,10 @@ def export(
     """
 
     if dynamo:
+        if isinstance(model, (torch.jit.ScriptModule, torch.jit.ScriptFunction)):
+            raise TypeError(
+                "Dynamo export does not support ScriptModule or ScriptFunction."
+            )
         # Unsupported parameters for dynamo export
         # TODO: These are not supported AT THE TIME
         warnings.warn(
@@ -519,7 +522,6 @@ def export(
             "do_constant_folding, keep_initializers_as_inputs, custom_opsets, export_modules_as_functions, and "
             "autograd_inlining are not supported for dynamo export at the moment."
         )
-        # TODO: check args normalization
         args = _decide_input_format(model, args)
         kwargs = {}
         if args is not None and isinstance(args[-1], dict):
@@ -527,18 +529,14 @@ def export(
             args = args[:-1]
         # TODO: refactor this when we have migrated ExportedProgam and
         # needs users to specify dynamic_axes
-        if dynamic_axes is None or not isinstance(dynamic_axes, dict):
-            dynamic_shapes = False
-        else:
-            dynamic_shapes = True
-            warnings.warn(
-                "Specified dynamic axes is not supported for dynamo export at the moment."
-            )
-        # TODO: expose more ExportOptions?
-        export_options = torch.onnx.ExportOptions(dynamic_shapes=dynamic_shapes)
-        onnx_program = torch.onnx.dynamo_export(
-            model, *args, **kwargs, export_options=export_options
+        dynamic_shapes = _from_dynamic_axes_to_dynamic_shapes(
+            model, dynamic_axes, input_names
         )
+        exported_program = torch.export.export(
+            model, args=args, kwargs=kwargs, dynamic_shapes=dynamic_shapes  # type: ignore[arg-type]
+        )
+        # TODO: expose ExportOptions?
+        onnx_program = torch.onnx.dynamo_export(exported_program, *args, **kwargs)
         if f is not None:
             onnx_program.save(f)
         return onnx_program
@@ -682,27 +680,6 @@ def _optimize_graph(
     _C._jit_pass_onnx_unpack_quantized_weights(
         graph, params_dict, symbolic_helper.is_caffe2_aten_fallback()
     )
-    if symbolic_helper.is_caffe2_aten_fallback():
-        # Insert permutes before and after each conv op to ensure correct order.
-        _C._jit_pass_onnx_quantization_insert_permutes(graph, params_dict)
-
-        # Find consecutive permutes that are no-ops and remove them.
-        _C._jit_pass_custom_pattern_based_rewrite_graph(
-            textwrap.dedent(
-                """\
-                graph(%Pi):
-                    %Pq = quantized::nhwc2nchw(%Pi)
-                    %Pr = quantized::nchw2nhwc(%Pq)
-                    return (%Pr)"""
-            ),
-            textwrap.dedent(
-                """\
-                graph(%Ri):
-                    return (%Ri)"""
-            ),
-            graph,
-        )
-
     # onnx only supports tensors, so we turn all out number types into tensors
     _C._jit_pass_erase_number_types(graph)
     if GLOBALS.onnx_shape_inference:
@@ -735,18 +712,9 @@ def _optimize_graph(
     graph = _C._jit_pass_canonicalize(graph)
     _C._jit_pass_lint(graph)
     if GLOBALS.onnx_shape_inference:
-        try:
-            _C._jit_pass_onnx_graph_shape_type_inference(
-                graph, params_dict, GLOBALS.export_onnx_opset_version
-            )
-        except RuntimeError as exc:
-            if (
-                _C_onnx._CAFFE2_ATEN_FALLBACK
-                and exc.args[0]
-                == "ScalarType UNKNOWN_SCALAR is an unexpected tensor scalar type!"
-            ):
-                # Caffe2 builds can have UNKNOWN_SCALAR for some tensors
-                pass
+        _C._jit_pass_onnx_graph_shape_type_inference(
+            graph, params_dict, GLOBALS.export_onnx_opset_version
+        )
 
     return graph
 
@@ -784,17 +752,6 @@ def warn_on_static_input_change(input_states):
 @_beartype.beartype
 def _resolve_args_by_export_type(arg_name, arg_value, operator_export_type):
     """Resolves the arguments that are ignored when export_type != operator_export_type.ONNX."""
-    if (
-        operator_export_type is not operator_export_type.ONNX
-        and _C_onnx._CAFFE2_ATEN_FALLBACK
-    ):
-        if arg_value is True:
-            warnings.warn(
-                f"'{arg_name}' can be set to True only when 'operator_export_type' is "
-                "`ONNX`. Since 'operator_export_type' is not set to 'ONNX', "
-                f"'{arg_name}' argument will be ignored."
-            )
-        arg_value = False
     return arg_value
 
 
@@ -913,6 +870,65 @@ def _decide_input_format(model, args):
     except Exception as e:
         warnings.warn(f"Skipping _decide_input_format\n {e.args[0]}")
     return args
+
+
+@_beartype.beartype
+def _from_dynamic_axes_to_dynamic_shapes(
+    model,
+    dynamic_axes: Optional[
+        Union[Mapping[str, Mapping[int, str]], Mapping[str, Sequence[int]]]
+    ] = None,
+    input_names: Optional[Sequence[str]] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+
+    dynamic_axes examples:
+    (1) dynamic_axes = {"x": {0: "my_custom_axis_name_1"}, "y": {1: "my_custom_axis_name_2"}}
+    (2) dynamic_axes = {"x": [0], "y": [1]}
+
+    these will be converted to dynamic_shapes respectively:
+    (1) dynamic_shapes = {"x": {0: Dim("my_custom_axis_name_1")}, "y": {1: Dim("my_custom_axis_name_2")}}
+    (2) dynamic_shapes = {"x": {0: Dim("x_dim_0")}, "y": {1: Dim("y_dim_1")}}  # auto-generated dim names
+
+    """
+    if dynamic_axes is None:
+        return None
+
+    if input_names is None:
+        input_names_set = set()
+    else:
+        input_names_set = set(input_names)
+
+    dynamic_shapes: Dict[str, Optional[Any]] = {}
+    for input_name, axes in dynamic_axes.items():
+        if input_name in input_names_set:
+            raise ValueError(
+                "Assinging new input names is not supported yet. Please use model forward signature "
+                "to specify input names in dynamix_axes."
+            )
+        if isinstance(axes, dict):
+            dynamic_shapes[input_name] = {
+                k: torch.export.Dim(v) for k, v in axes.items()
+            }
+        elif isinstance(axes, list):
+            dynamic_shapes[input_name] = {
+                k: torch.export.Dim(f"{input_name}_dim_{k}") for k in axes
+            }
+        else:
+            raise TypeError(
+                f"dynamic_axes value must be either a dict or a list, but got {type(axes)}"
+            )
+    # torch.export.export needs static dim to present in dynamic_shapes
+    # for all input tensors, so we need to add them with None
+    try:
+        sig = _signature(model)
+    except ValueError as e:
+        warnings.warn(f"{e}, skipping auto filling None on static axes...")
+        return dynamic_shapes
+    for input_name in sig.parameters.keys():
+        if input_name not in dynamic_shapes:
+            dynamic_shapes[input_name] = None
+    return dynamic_shapes
 
 
 @_beartype.beartype
@@ -1240,18 +1256,9 @@ def _model_to_graph(
         _C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
 
     if GLOBALS.onnx_shape_inference:
-        try:
-            _C._jit_pass_onnx_graph_shape_type_inference(
-                graph, params_dict, GLOBALS.export_onnx_opset_version
-            )
-        except RuntimeError as exc:
-            if (
-                _C_onnx._CAFFE2_ATEN_FALLBACK
-                and exc.args[0]
-                == "ScalarType UNKNOWN_SCALAR is an unexpected tensor scalar type!"
-            ):
-                # Caffe2 builds can have UNKNOWN_SCALAR for some tensors
-                pass
+        _C._jit_pass_onnx_graph_shape_type_inference(
+            graph, params_dict, GLOBALS.export_onnx_opset_version
+        )
 
     params_dict = _C._jit_pass_onnx_eliminate_unused_items(graph, params_dict)
 
@@ -1554,15 +1561,6 @@ def _export(
     if export_type is None:
         export_type = _exporter_states.ExportTypes.PROTOBUF_FILE
 
-    # Discussed deprecation with Nikita Shulga and Sergii Dymchenko from Meta
-    if _C_onnx._CAFFE2_ATEN_FALLBACK:
-        warnings.warn(
-            "Caffe2 ONNX exporter is deprecated in version 2.0 and will be "
-            "removed in 2.2. Please use PyTorch 2.1 or older for this capability.",
-            category=FutureWarning,
-            stacklevel=2,
-        )
-
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError(
             "torch.nn.DataParallel is not supported by ONNX "
@@ -1597,10 +1595,7 @@ def _export(
             "no local function support. "
         )
     if not operator_export_type:
-        if _C_onnx._CAFFE2_ATEN_FALLBACK:
-            operator_export_type = _C_onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
-        else:
-            operator_export_type = _C_onnx.OperatorExportTypes.ONNX
+        operator_export_type = _C_onnx.OperatorExportTypes.ONNX
 
     # By default, training=TrainingMode.EVAL,
     # which is good because running a model in training mode could result in
@@ -1846,21 +1841,12 @@ def _should_aten_fallback(
     is_aten_fallback_export = (
         operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
     )
-    is_caffe2_build = _C_onnx._CAFFE2_ATEN_FALLBACK
 
     if not name.startswith("aten::"):
         return False
 
-    if is_caffe2_build:
-        if (
-            is_onnx_aten_export or is_aten_fallback_export
-        ) and not is_exportable_aten_op:
-            return True
-    else:
-        if is_onnx_aten_export or (
-            is_aten_fallback_export and not is_exportable_aten_op
-        ):
-            return True
+    if is_onnx_aten_export or (is_aten_fallback_export and not is_exportable_aten_op):
+        return True
 
     return False
 
@@ -1910,7 +1896,7 @@ def _symbolic_context_handler(symbolic_fn: Callable) -> Callable:
 def _get_aten_op_overload_name(n: _C.Node) -> str:
     # Returns `overload_name` attribute to ATen ops on non-Caffe2 builds
     schema = n.schema()
-    if not schema.startswith("aten::") or symbolic_helper.is_caffe2_aten_fallback():
+    if not schema.startswith("aten::"):
         return ""
     return _C.parse_schema(schema).overload_name
 
@@ -1974,14 +1960,7 @@ def _run_symbolic_function(
         )
 
     try:
-        # Caffe2-specific: Quantized op symbolics are registered for opset 9 only.
-        if symbolic_helper.is_caffe2_aten_fallback() and opset_version == 9:
-            symbolic_caffe2.register_quantized_ops("caffe2", opset_version)
-
-        if namespace == "quantized" and symbolic_helper.is_caffe2_aten_fallback():
-            domain = "caffe2"
-        else:
-            domain = namespace
+        domain = namespace
         symbolic_function_name = f"{domain}::{op_name}"
 
         symbolic_function_group = registration.registry.get_function_group(
@@ -2015,10 +1994,7 @@ def _run_symbolic_function(
     except RuntimeError:
         if operator_export_type == _C_onnx.OperatorExportTypes.ONNX_FALLTHROUGH:
             return None
-        elif (
-            operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
-            and not symbolic_helper.is_caffe2_aten_fallback()
-        ):
+        elif operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
             # Emit ATen op for non-Caffe2 builds when `operator_export_type==ONNX_ATEN_FALLBACK`
             attrs = {
                 k + "_" + node.kindOf(k)[0]: symbolic_helper._node_get(node, k)
