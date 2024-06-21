@@ -370,7 +370,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
             unpack4,
             2,
             expected_ops=5,
-            expected_ops_dynamic=ifdynstaticdefault(5, 7),
+            expected_ops_dynamic=5,
         )
 
     def test_unpack5(self):
@@ -387,7 +387,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
             unpack5,
             2,
             expected_ops=5,
-            expected_ops_dynamic=ifdynstaticdefault(5, 7),
+            expected_ops_dynamic=5,
         )
 
     def test_matmul1(self):
@@ -925,7 +925,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
             return x + p
 
         torch._dynamo.testing.standard_test(
-            self, fn, 1, expected_ops=1, expected_ops_dynamic=ifdynstaticdefault(1, 10)
+            self, fn, 1, expected_ops=1, expected_ops_dynamic=ifdynstaticdefault(1, 8)
         )
 
     def test_int_shape_inplace_binops(self):
