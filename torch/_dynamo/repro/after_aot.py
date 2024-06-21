@@ -244,8 +244,6 @@ isolate_fails_code_str = None
         elif isinstance(arg, torch.Tensor):
             # TODO: improve these names with FQN
             writer.tensor(placeholder, arg)
-        elif isinstance(arg, torch.fx.experimental._backward_state.BackwardState):
-            writer.list(placeholder, arg)
         else:
             raise TypeError(f"arg is neither SymInt/int nor torch.Tensor, {arg}")
 
