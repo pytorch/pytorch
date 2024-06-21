@@ -213,7 +213,8 @@ non-None device argument.  To globally change the default device, see also
 
 .. note::
    For legacy reasons, a device can be constructed via a single device ordinal, which is treated
-   as a cuda device.  This matches :meth:`Tensor.get_device`, which returns an ordinal for cuda
+   as a currently available device type (i.e. "cuda" if cuda is available, "xpu" if xpu is available).
+   This matches :meth:`Tensor.get_device`, which returns an ordinal for cuda
    tensors and is not supported for cpu tensors.
 
    >>> torch.device(1)
