@@ -1,13 +1,14 @@
 # mypy: allow-untyped-defs
 import contextlib
+import functools
 
-from typing import Any, cast, Dict, List, NamedTuple, Optional, Set, Tuple
+from typing import Any, Callable, cast, Dict, List, NamedTuple, Optional, Set, Tuple
 
 import torch
 import torch._dynamo.compiled_autograd as ca
 import torch.distributed as dist
 import torch.nn as nn
-from torch.autograd.graph import register_multi_grad_hook
+from torch.autograd.graph import _get_grad_fn_or_grad_acc, _MultiHandle
 from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
 from torch.profiler import record_function
 from torch.utils._pytree import tree_flatten, tree_unflatten
@@ -467,7 +468,7 @@ class FSDPParamGroup:
                 tensors = [
                     fsdp_param.unsharded_param for fsdp_param in self.fsdp_params
                 ]
-                self._multi_grad_hook_handle = register_multi_grad_hook(
+                self._multi_grad_hook_handle = _register_multi_post_acc_grad_hook(
                     tensors, self._multi_grad_post_backward
                 )
             return args, kwargs  # no tensors that require gradients
@@ -583,3 +584,35 @@ class RegisterPostBackwardFunction(torch.autograd.Function):
     def backward(ctx, *grads: torch.Tensor):
         ctx.param_group.post_backward()
         return (None,) + grads
+
+
+def _register_multi_post_acc_grad_hook(
+    tensors: List[nn.Parameter], fn: Callable
+) -> RemovableHandle:
+    tensors = [t for t in tensors if t.requires_grad]
+    if not all(t.is_leaf for t in tensors):
+        raise ValueError("Requires all tensors to be leaf tensors")
+    if len(tensors) == 0:
+        raise ValueError("Requires at least one leaf tensor that requires grad")
+
+    acc_grads = [_get_grad_fn_or_grad_acc(t) for t in tensors]
+    count: Dict[int, int] = dict()
+    nb_calls = None
+
+    @functools.wraps(fn)
+    def wrapped_fn(tensor: torch.Tensor) -> None:
+        nonlocal count, nb_calls
+        id = torch._C._current_graph_task_id()
+        assert id != -1, "expected this hook to be called inside a backward call"
+        count[id] = count.get(id, 0)
+        if count[id] == 0:
+            nb_calls = sum(
+                torch._C._will_engine_execute_node(n) for n in acc_grads  # type: ignore[attr-defined]
+            )
+        count[id] += 1
+        if count[id] == nb_calls:
+            fn(tensors)
+            del count[id]
+
+    handles = tuple(t.register_post_accumulate_grad_hook(wrapped_fn) for t in tensors)
+    return _MultiHandle(handles)
