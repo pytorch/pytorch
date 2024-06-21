@@ -556,12 +556,15 @@ def is_numpy_float_type(value):
     )
 
 
+def is_lru_cache_wrapped_function(value):
+    return isinstance(value, functools._lru_cache_wrapper) and is_function(
+        inspect.getattr_static(value, "__wrapped__")
+    )
+
+
 def is_function_or_wrapper(value):
-    return (
-        is_function(value)
-        or isinstance(value, functools._lru_cache_wrapper)
-        and is_function(inspect.getattr_static(value, "__wrapped__"))
-        or isinstance(value, (torch._ops.OpOverloadPacket, torch._ops.OpOverload))
+    return is_function(value) or isinstance(
+        value, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
     )
 
 
@@ -573,7 +576,6 @@ def is_function(value):
             types.BuiltinFunctionType,
             types.MethodDescriptorType,
             types.WrapperDescriptorType,
-            torch.jit.ScriptFunction,
         ),
     )
 
@@ -583,20 +585,11 @@ def unwrap_if_wrapper(fn):
 
 
 def unwrap_with_attr_name_if_wrapper(fn):
-    # unpack @functools.lru_cache wrapped function
-    if isinstance(fn, functools._lru_cache_wrapper):
-        fn = inspect.getattr_static(fn, "__wrapped__")
-        attr_name = "__wrapped__"
+    # TODO(anijain2305) - Investigate if we can get rid of this function
     # unpack @torch._dynamo.optimize()(fn) wrapped function
-    elif is_function(fn) and inspect.getattr_static(fn, "_torchdynamo_inline", False):
+    if is_function(fn) and inspect.getattr_static(fn, "_torchdynamo_inline", False):
         fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
         attr_name = "_torchdynamo_inline"
-    # unpack torch.jit.script_if_tracing
-    elif is_function(fn) and inspect.getattr_static(
-        fn, "__script_if_tracing_wrapper", False
-    ):
-        fn = inspect.getattr_static(fn, "__original_fn", fn)
-        attr_name = "__original_fn"
     else:
         attr_name = None
     return fn, attr_name
