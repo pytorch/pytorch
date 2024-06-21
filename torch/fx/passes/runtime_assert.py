@@ -52,7 +52,7 @@ def _is_size_stride_or_storage_offset_call(node: fx.Node) -> bool:
         )
         and node.args[0].op != "placeholder"
     ):  # export
-        return not isinstance(node)
+        return True
     if (
         node.target == operator.getitem
         and node.args[0].target in (
@@ -128,6 +128,7 @@ def insert_deferred_runtime_asserts(
             node.op == "call_function"
             and _is_size_stride_or_storage_offset_call(node)
             and (sym_expr := _get_sym_val(node)) is not None
+            and not isinstance(sym_expr, sympy.Number)
         ):
             needed_symbols.update(sym_expr.free_symbols)
 

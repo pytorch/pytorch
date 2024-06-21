@@ -1381,14 +1381,14 @@ utils_device.CURRENT_DEVICE == None""".split(
             get_test_fn(func=min),
             2,
             expected_ops=1,
-            expected_ops_dynamic=ifdynstaticdefault(1, 14),
+            expected_ops_dynamic=ifdynstaticdefault(1, 12),
         )
         torch._dynamo.testing.standard_test(
             self,
             get_test_fn(func=max),
             2,
             expected_ops=1,
-            expected_ops_dynamic=ifdynstaticdefault(1, 17),
+            expected_ops_dynamic=ifdynstaticdefault(1, 7),
         )
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
@@ -1940,9 +1940,10 @@ utils_device.CURRENT_DEVICE == None""".split(
             return output
 
         # expect 6 add / subs for static, 6 * 3 (size, index, math op) for dynamic
+        # dynamic CSEd down to 8
 
         torch._dynamo.testing.standard_test(
-            self, fn, 1, expected_ops=6, expected_ops_dynamic=ifdynstaticdefault(6, 18)
+            self, fn, 1, expected_ops=6, expected_ops_dynamic=ifdynstaticdefault(6, 8)
         )
 
     def test_list_iadd_side_effect(self):
