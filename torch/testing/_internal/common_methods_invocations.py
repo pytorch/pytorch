@@ -19477,7 +19477,10 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            # vmap does not support inplace views
            check_inplace_batched_forward_grad=False,
-           sample_inputs_func=sample_inputs_transpose_swapdims),
+           sample_inputs_func=sample_inputs_transpose_swapdims,
+           skips=(
+               DecorateInfo(unittest.expectedFailure, 'TestDTensorOps', 'test_dtensor_op_db'),
+           )),
     OpInfo('T',
            op=lambda x: x.T,
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.chalf),
