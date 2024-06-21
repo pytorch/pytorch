@@ -156,7 +156,7 @@ flex_attention_template = TritonTemplate(
     name="flex_attention",
     grid=flex_attention_grid,
     source=r"""
-{{def_kernel("Q", "K", "V", "LSE", "SBM_KV_NUM_BLKS", "SBM_KV_IDX")}}
+{{def_kernel("Q", "K", "V", "LSE", "SM_KV_NUM_BLKS", "SM_KV_IDX")}}
     # Sub notation for this kernel:
     # Q: Query, K: Key, V: Value
     # M: Number of queries, N: Number of keys/values, D: Model dimension
@@ -169,6 +169,9 @@ flex_attention_template = TritonTemplate(
     # ROWS_GUARANTEED_SAFE: Is it guaranteed that at least one value in each row
     # is not masked out? If so, we can skip an extra safety check
     # OUTPUT_LOGSUMEXP: We only need to store the logsumexp if we require grad
+
+    tl.static_assert(BLOCKSPARSE_Q >= BLOCK_M and BLOCKSPARSE_Q % BLOCK_M == 0)
+    tl.static_assert(BLOCKSPARSE_KV >= BLOCK_N and BLOCKSPARSE_KV % BLOCK_N == 0)
 
     # Define Q Strides
     stride_qz = {{stride("Q", 0)}}
@@ -188,8 +191,8 @@ flex_attention_template = TritonTemplate(
 
     Z = {{size("Q", 0)}}
     H = {{size("Q", 1)}}
-    Q_LEN: tl.constexpr = {{size("Q", 2)}}
-    KV_LEN: tl.constexpr = {{size("K", 2)}}
+    Q_LEN = {{size("Q", 2)}}
+    KV_LEN = {{size("K", 2)}}
 
     qk_scale = 1.0
     MATMUL_PRECISION = Q.dtype.element_ty
@@ -205,14 +208,14 @@ flex_attention_template = TritonTemplate(
     BLOCKSPARSE_Q_MULTIPLE: tl.constexpr = (BLOCKSPARSE_Q // BLOCK_M)
     BLOCKSPARSE_KV_MULTIPLE: tl.constexpr = (BLOCKSPARSE_KV // BLOCK_N)
 
-    BLOCKSPARSE_Q_LEN: tl.constexpr = Q_LEN // BLOCKSPARSE_Q
+    # BLOCKSPARSE_Q_LEN: tl.constexpr = Q_LEN // BLOCKSPARSE_Q
     BLOCKSPARSE_KV_LEN: tl.constexpr = KV_LEN // BLOCKSPARSE_KV
 
     indices_offset = (start_m // BLOCKSPARSE_Q_MULTIPLE) * BLOCKSPARSE_KV_LEN
     block_q_index = start_m // BLOCKSPARSE_Q_MULTIPLE
-    kv_indices = SBM_KV_IDX + indices_offset
+    kv_indices = SM_KV_IDX + indices_offset
     kv_start = tl.load(kv_indices) * BLOCKSPARSE_KV # first kv block we're loading
-    sbm_kv_num_blocks = tl.load(SBM_KV_NUM_BLKS + block_q_index)
+    sbm_kv_num_blocks = tl.load(SM_KV_NUM_BLKS + block_q_index)
 
     Q_block_ptr = tl.make_block_ptr(
         base=Q + q_offset,
@@ -541,7 +544,7 @@ flex_attention_backward_template = TritonTemplate(
     name="flex_attention_backward",
     grid=flex_attention_backward_grid,
     source=r"""
-{{def_kernel("Q", "K", "V", "OUT", "LSE", "DELTA", "DO", "DQ", "DV", "SBM_KV_NUM_BLKS", "SBM_KV_IDX", "SBM_Q_NUM_BLKS", "SBM_Q_IDX")}}
+{{def_kernel("Q", "K", "V", "OUT", "LSE", "DELTA", "DO", "DQ", "DV", "SM_KV_NUM_BLKS", "SM_KV_IDX", "SM_Q_NUM_BLKS", "SM_Q_IDX")}}
     # Sub notation for this kernel:
     # Q: Query, K: Key, V: Value
     # OUT: Forward output, LSE: logsumexp (logsumexp is always stored in fp32 regardless of the input dtype)
@@ -613,14 +616,14 @@ flex_attention_backward_template = TritonTemplate(
         BLOCKSPARSE_Q_MULTIPLE = (BLOCKSPARSE_Q // BLOCK_M2)
         BLOCKSPARSE_KV_MULTIPLE = (BLOCKSPARSE_KV // BLOCK_N2)
 
-        BLOCKSPARSE_Q_LEN = Q_LEN // BLOCKSPARSE_Q
+        # BLOCKSPARSE_Q_LEN = Q_LEN // BLOCKSPARSE_Q
         BLOCKSPARSE_KV_LEN = KV_LEN // BLOCKSPARSE_KV
 
         indices_offset = (off_pid // BLOCKSPARSE_Q_MULTIPLE) * BLOCKSPARSE_KV_LEN
         block_q_index = off_pid // BLOCKSPARSE_Q_MULTIPLE
-        kv_indices = SBM_KV_IDX + indices_offset
+        kv_indices = SM_KV_IDX + indices_offset
         kv_start = tl.load(kv_indices) * BLOCKSPARSE_KV # first kv block we're loading
-        sbm_kv_num_blocks = tl.load(SBM_KV_NUM_BLKS + block_q_index)
+        sbm_kv_num_blocks = tl.load(SM_KV_NUM_BLKS + block_q_index)
 
         start_m2 = off_pid * BLOCK_M2
 
@@ -714,9 +717,9 @@ flex_attention_backward_template = TritonTemplate(
 
         indices_offset = (pid // BLOCKSPARSE_KV_MULTIPLE) * BLOCKSPARSE_Q_LEN
         block_kv_index = pid // BLOCKSPARSE_KV_MULTIPLE
-        q_indices = SBM_Q_IDX + indices_offset
+        q_indices = SM_Q_IDX + indices_offset
         q_start = tl.load(q_indices) * BLOCKSPARSE_Q # first q block we're loading
-        sbm_q_num_blocks = tl.load(SBM_Q_NUM_BLKS + block_kv_index)
+        sbm_q_num_blocks = tl.load(SM_Q_NUM_BLKS + block_kv_index)
 
         start_n1 = pid * BLOCK_N1
         start_m1 = q_start

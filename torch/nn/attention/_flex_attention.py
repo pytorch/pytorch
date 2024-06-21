@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 """This module implements the user facing API for flex_attention in PyTorch."""
 import functools
-from typing import Callable
+from typing import Callable, Optional
 
 import torch
 from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
@@ -39,7 +39,7 @@ def _identity(
     return score
 
 
-class _SparseBlockMask:
+class _BlockSparseMask:
     kv_num_blocks: torch.Tensor
     kv_indices: torch.Tensor
     q_num_blocks: torch.Tensor
@@ -58,7 +58,7 @@ class _SparseBlockMask:
         self.q_indices = q_indices
 
 
-def _create_sparse_block_mask(
+def _create_block_sparse_mask(
     mask: torch.Tensor,
     q_block_size: int,
     kv_block_size: int,
@@ -79,7 +79,7 @@ def _create_sparse_block_mask(
     q_num_blocks = block_mask.sum(dim=0)
     q_indices = torch.argsort(block_mask, dim=0, descending=True, stable=True).t()
     # q_indices = torch.concat([q_indices, q_indices[:, -1][:, None]], dim=1)
-    return _SparseBlockMask(
+    return _BlockSparseMask(
         kv_num_blocks=kv_num_blocks.to(torch.int32).to(mask.device).contiguous(),
         kv_indices=kv_indices.to(torch.int32).to(mask.device).contiguous(),
         q_num_blocks=q_num_blocks.to(torch.int32).to(mask.device).contiguous(),
@@ -87,8 +87,8 @@ def _create_sparse_block_mask(
     )
 
 
-def _create_empty_sparse_block_mask(device):
-    return _SparseBlockMask(
+def _create_empty_block_sparse_mask(device):
+    return _BlockSparseMask(
         kv_num_blocks=torch.ones([1], dtype=torch.int32, device=device),
         kv_indices=torch.zeros([1, 1], dtype=torch.int32, device=device),
         q_num_blocks=torch.ones([1], dtype=torch.int32, device=device),
@@ -101,7 +101,7 @@ def _flex_attention(
     key: torch.Tensor,
     value: torch.Tensor,
     score_mod: _score_mod_signature = _identity,
-    sparse_block_mask: _SparseBlockMask = None,
+    block_sparse_mask: Optional[_BlockSparseMask] = None,
 ) -> torch.Tensor:
     r"""This function implements scaled dot product attention with an arbitrary attention score modification function.
 
@@ -151,8 +151,8 @@ def _flex_attention(
 
     """
 
-    if sparse_block_mask is None:
-        sparse_block_mask = _create_empty_sparse_block_mask(query.device)
+    if block_sparse_mask is None:
+        block_sparse_mask = _create_empty_block_sparse_mask(query.device)
     if torch.compiler.is_dynamo_compiling():
         # mark head_dim always to be static
         for x in [query, key, value]:
@@ -162,10 +162,10 @@ def _flex_attention(
             key,
             value,
             score_mod,
-            sparse_block_mask.kv_num_blocks,
-            sparse_block_mask.kv_indices,
-            sparse_block_mask.q_num_blocks,
-            sparse_block_mask.q_indices,
+            block_sparse_mask.kv_num_blocks,
+            block_sparse_mask.kv_indices,
+            block_sparse_mask.q_num_blocks,
+            block_sparse_mask.q_indices,
         )
         return out
 
@@ -187,10 +187,10 @@ def _flex_attention(
                     key,
                     value,
                     score_mod,
-                    sparse_block_mask.kv_num_blocks,
-                    sparse_block_mask.kv_indices,
-                    sparse_block_mask.q_num_blocks,
-                    sparse_block_mask.q_indices,
+                    block_sparse_mask.kv_num_blocks,
+                    block_sparse_mask.kv_indices,
+                    block_sparse_mask.q_num_blocks,
+                    block_sparse_mask.q_indices,
                 )
                 return out
 
