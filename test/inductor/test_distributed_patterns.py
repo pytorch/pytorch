@@ -9,7 +9,8 @@ from torch._dynamo import compiled_autograd
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_utils import IS_MACOS
-from torch.testing._internal.inductor_utils import HAS_CPU
+from torch.testing._internal.inductor_utils import HAS_CPU, requires_gpu
+from torch.testing._internal.common_utils import parametrize
 
 # Fake distributed
 WORLD_SIZE = 2
@@ -146,21 +147,25 @@ class DistributedPatternTests(TestCase):
         self.assertEqual(x1.grad, x3.grad)
 
     @torch.no_grad()
-    def test_storage_resize_zero(self):
+    @requires_gpu()
+    @parametrize("device", ["cpu", "cuda"])
+    def test_storage_resize_zero(self, device):
         @torch.compile(fullgraph=True)
         def fn(x):
             y = torch.sin(x)
             x.untyped_storage().resize_(0)
             return torch.cos(y)
 
-        x = torch.randn(10)
+        x = torch.randn(10, device=device)
         expected = torch.cos(torch.sin(x))
         y = fn(x)
         self.assertEqual(y, expected)
         self.assertEqual(x.untyped_storage().size(), 0)
 
     @torch.no_grad()
-    def test_storage_resize_nonzero(self):
+    @requires_gpu()
+    @parametrize("device", ["cpu", "cuda"])
+    def test_storage_resize_nonzero(self, device):
         @torch.compile(fullgraph=True)
         def fn(x, out):
             y = torch.sin(x)
@@ -168,8 +173,8 @@ class DistributedPatternTests(TestCase):
             out.untyped_storage().resize_(x.untyped_storage().size())
             out.copy_(y.cos())
 
-        x = torch.randn(10)
-        out = torch.randn(10)
+        x = torch.randn(10, device=device)
+        out = torch.randn(10, device=device)
         expected = torch.cos(torch.sin(x))
         out.untyped_storage().resize_(0)
         fn(x, out)
