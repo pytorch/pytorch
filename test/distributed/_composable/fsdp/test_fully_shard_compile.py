@@ -173,7 +173,10 @@ class TestFullyShardCompile(FSDPTest):
         for loss_compiled, loss_eager in zip(losses_compiled, losses_eager):
             self.assertTrue(
                 torch.allclose(
-                    torch.tensor(loss_compiled), torch.tensor(loss_eager), rtol=1e-5
+                    torch.tensor(loss_compiled),
+                    torch.tensor(loss_eager),
+                    rtol=1e-5,
+                    atol=1e-8,
                 ),
                 f"{loss_compiled} vs {loss_eager}",
             )
@@ -237,7 +240,9 @@ class TestFullyShardCompile(FSDPTest):
 
         def input_creation_fn():
             torch.manual_seed(self.rank)
-            inp = torch.randint(0, vocab_size, (2, seq_len), device="cuda", requires_grad=False)
+            inp = torch.randint(
+                0, vocab_size, (2, seq_len), device="cuda", requires_grad=False
+            )
             return inp
 
         return model_init_fn, input_creation_fn
