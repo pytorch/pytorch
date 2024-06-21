@@ -972,9 +972,6 @@ def configure_extension_build():
         main_libraries = ["torch"]
         main_sources = []
 
-    if cmake_cache_vars["USE_CUDA"]:
-        library_dirs.append(os.path.dirname(cmake_cache_vars["CUDA_CUDA_LIB"]))
-
     if build_type.is_debug():
         if IS_WINDOWS:
             extra_compile_args.append("/Z7")
