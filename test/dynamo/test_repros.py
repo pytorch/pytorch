@@ -4781,6 +4781,9 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         res = opt_fn(x_weak, y)
         self.assertEqual(ref, res)
 
+    @torch._functorch.config.patch(
+        recompute_views=True,
+    )
     def test_storage_resize_forward_full_graph(self):
         class TestModule(torch.nn.Module):
             def __init__(self):
@@ -4839,8 +4842,7 @@ def forward(self, primals_1, primals_2):
     _foreach_copy = torch.ops.aten._foreach_copy.default([primals_1], [primals_2]);  primals_1 = primals_2 = None
     getitem = _foreach_copy[0];  _foreach_copy = None
     mm = torch.ops.aten.mm.default(getitem, getitem)
-    t_1 = torch.ops.aten.t.default(getitem);  getitem = None
-    return [mm, t_1]""",
+    return [mm, getitem]""",
         )
         self.assertEqual(out_ref, out_test)
 
@@ -5129,6 +5131,24 @@ def forward(self, primals_1, primals_2):
 
         torch.compile(fn2)()
 
+    def test_jit_script_defaults(self):
+        @torch.jit.script
+        def fast_cos(x, c: float = 2.0):
+            return torch.cos(x) * c
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fast_cos = fast_cos
+
+            def forward(self, x):
+                return self.fast_cos(x)
+
+        mod = Mod()
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(mod(x), opt_mod(x))
+
     def test_enum(self):
         class ExplicitEnum(str, Enum):
             @classmethod
@@ -5223,6 +5243,14 @@ def forward(self, primals_1, primals_2):
         mod = Mod()
         opt_mod = torch.compile(mod, backend=compiler)
         opt_mod(torch.randn(2, 2))
+
+    def test_is_make_fx_tracing(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            torch.nn.modules.activation._is_make_fx_tracing()
+            return torch.sin(x)
+
+        fn(torch.rand(4))
 
 
 instantiate_parametrized_tests(ReproTests)

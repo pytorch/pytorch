@@ -714,7 +714,9 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             maybe_mark_step(args)
 
             with maybe_mark_profile(p=p, mark="actual"), maybe_enable_compiled_autograd(
-                args.compiled_autograd
+                args.compiled_autograd,
+                fullgraph=args.nopython,
+                dynamic=args.dynamic_shapes,
             ):
                 timings[rep, 1], actual_output = timed(
                     model,
@@ -2586,7 +2588,11 @@ class BenchmarkRunner:
                         new_result = optimized_model_iter_fn(model_copy, example_inputs)
                 else:
                     optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
-                    with maybe_enable_compiled_autograd(self.args.compiled_autograd):
+                    with maybe_enable_compiled_autograd(
+                        self.args.compiled_autograd,
+                        fullgraph=self.args.nopython,
+                        dynamic=self.args.dynamic_shapes,
+                    ):
                         new_result = optimized_model_iter_fn(model_copy, example_inputs)
             except Exception as e:
                 log.exception("")
@@ -2804,7 +2810,9 @@ class BenchmarkRunner:
                 aot_compilation_time = 0
 
             with maybe_enable_compiled_autograd(
-                self.args.compiled_autograd
+                self.args.compiled_autograd,
+                fullgraph=self.args.nopython,
+                dynamic=self.args.dynamic_shapes,
             ), maybe_snapshot_memory(
                 self.args.snapshot_memory, f"compiled_{self.args.only}"
             ):
@@ -2824,7 +2832,11 @@ class BenchmarkRunner:
                 with torch.profiler.profile(
                     activities=[torch.profiler.ProfilerActivity.CPU]
                 ) as prof:
-                    with maybe_enable_compiled_autograd(self.args.compiled_autograd):
+                    with maybe_enable_compiled_autograd(
+                        self.args.compiled_autograd,
+                        fullgraph=self.args.nopython,
+                        dynamic=self.args.dynamic_shapes,
+                    ):
                         warmup(optimized_model_iter_fn, model, example_inputs, "dynamo")
 
                 events = list(
@@ -3122,6 +3134,12 @@ def parse_args(args=None):
     parser.add_argument("--cosine", action="store_true", help="use cosine similarity")
     parser.add_argument(
         "--freezing", action="store_true", help="turn on freezing", default=False
+    )
+    parser.add_argument(
+        "--inductor-config",
+        "-c",
+        action="append",
+        help="key=value in torch._inductor.config",
     )
     parser.add_argument(
         "--ci", action="store_true", help="Flag to tell that its a CI run"
@@ -3773,6 +3791,8 @@ def run(runner, args, original_dir=None):
         torch.backends.cudnn.benchmark = False
         torch.backends.cuda.matmul.allow_tf32 = False
 
+        torch.backends.mkldnn.deterministic = True
+
         # Remove randomeness when torch manual seed is called
         patch_torch_manual_seed()
 
@@ -4025,6 +4045,18 @@ def run(runner, args, original_dir=None):
         inductor_config.triton.divisible_by_16 = not args.disable_divisible_by_16
         if args.inference:
             inductor_config.freezing = args.freezing
+        if args.inductor_config:
+            for config in args.inductor_config:
+                key, value = config.split("=")
+                typ = type(inductor_config.__getattr__(key))
+                if issubclass(typ, bool):
+                    assert value in ("0", "1", "True", "False")
+                    value = value in ("1", "True")
+                elif issubclass(typ, (str, int, float)):
+                    value = typ(value)
+                else:
+                    raise NotImplementedError(typ)
+                inductor_config.__setattr__(key, value)
 
     runner.setup_amp()
 
