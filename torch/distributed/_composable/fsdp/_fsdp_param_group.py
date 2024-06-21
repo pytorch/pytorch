@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
+
 from typing import Any, cast, Dict, List, NamedTuple, Optional, Set, Tuple
 
 import torch
@@ -10,7 +11,6 @@ from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicat
 from torch.profiler import record_function
 from torch.utils._pytree import tree_flatten, tree_unflatten
 from torch.utils.hooks import RemovableHandle
-
 from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_collectives import (
     AllGatherResult,
@@ -20,7 +20,6 @@ from ._fsdp_collectives import (
 )
 from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo, TrainingState
 from ._fsdp_param import FSDPParam, ParamModuleInfo, ShardedState
-
 
 _ModuleToHandleDict = Dict[nn.Module, RemovableHandle]  # for state dict
 
