@@ -330,11 +330,11 @@ class CppPackedGemmTemplate(CppTemplate):
             n,
             k,
             input_dtype=new_inputs[0].get_dtype(),
+            input2_dtype=new_inputs[3 if int8_gemm else 1].get_dtype(),
             output_dtype=output_dtype,
             compute_dtype=compute_dtype,
             alpha=alpha,
             num_threads=num_threads,
-            input2_dtype=new_inputs[3 if int8_gemm else 1].get_dtype(),
         )
         assert micro_gemm is not None
         _, block_n, _ = micro_gemm.register_blocking
@@ -559,11 +559,11 @@ class CppPackedGemmTemplate(CppTemplate):
             self.n,
             self.k,
             input_dtype=X.get_dtype(),
+            input2_dtype=W.get_dtype(),
             output_dtype=output_dtype,
             compute_dtype=compute_dtype,
             alpha=self.alpha,
             num_threads=self.num_threads,
-            input2_dtype=W.get_dtype(),
         )
         assert micro_gemm is not None
         assert self.register_blocking == micro_gemm.register_blocking

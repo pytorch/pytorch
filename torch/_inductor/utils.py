@@ -1080,9 +1080,9 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
         n,
         k,
         input_dtype=mat1.get_dtype(),
+        input2_dtype=mat2.get_dtype(),
         output_dtype=output_dtype,
         num_threads=parallel_num_threads(),
-        input2_dtype=mat2.get_dtype(),
     )
     # TODO(jgong5): support n % n_block_size != 0
     return (
