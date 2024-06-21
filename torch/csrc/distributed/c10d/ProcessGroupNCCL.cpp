@@ -21,6 +21,7 @@
 #include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
+#include <c10/util/thread_name.h>
 #include <torch/csrc/cuda/nccl.h>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
@@ -396,6 +397,8 @@ std::future<bool> launchAsyncGilCheck() {
   std::future<bool> resultFuture = resultPromise.get_future();
   TORCH_CHECK(get_gil_checker(), "Can't check GIL with null GIL checker");
   std::thread workerThread([promise = std::move(resultPromise)]() mutable {
+    c10::setThreadName("pt_nccl_gil_chk");
+
     try {
       auto& gil_checker = get_gil_checker();
       promise.set_value((*gil_checker)());
@@ -1222,6 +1225,8 @@ int computeDeltaMS(
 }
 
 void ProcessGroupNCCL::heartbeatMonitor() {
+  c10::setThreadName("pt_nccl_heartbt");
+
   uint64_t heartBeatCounter = 0ULL;
   std::string errorMsg;
   std::string exitMsg;
@@ -1481,6 +1486,8 @@ void ProcessGroupNCCL::heartbeatMonitor() {
 }
 
 void ProcessGroupNCCL::ncclCommWatchdog() {
+  c10::setThreadName("pt_nccl_watchdg");
+
   try {
     VLOG(2) << logPrefix() << "Process group watchdog thread started!";
     ncclHeartbeatMonitorThread_ =
@@ -1781,6 +1788,8 @@ void ProcessGroupNCCL::watchdogHandler() {
 }
 
 void ProcessGroupNCCL::runHookLoop() {
+  c10::setThreadName("pt_nccl_runhook");
+
   bool done = false;
   while (!done || !terminateProcessGroup_.load()) {
     std::unique_lock<std::mutex> lock(completedWorkListMutex_);
@@ -2099,7 +2108,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
     // Find a valid, healthy communicator to split from if possible.
     std::lock_guard<std::mutex> lock(options_->split_from->mutex_);
     auto& other_comms = options_->split_from->devNCCLCommMap_;
-    auto dit = other_comms.find(deviceKey);
+    auto dit = other_comms.find(getKeyFromDevice(device));
     if (dit != other_comms.end()) {
       auto& parentComm = dit->second;
       if (parentComm != nullptr && !parentComm->isAborted()) {
