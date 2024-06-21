@@ -656,8 +656,11 @@ class PipelineScheduleMulti(_PipelineSchedule):
                 writer.writerow(self.pipeline_order[rank])
 
     def _validate_schedule(self):
+        # TODO(whc) this should be merged with the logic in test_schedule.py#L453-L554
         def _validate_rank_actions(
-            actions: List[_Action | None], num_stages: int, num_microbatches: int
+            actions: Dict[int, List[_Action | None]],
+            num_stages: int,
+            num_microbatches: int,
         ):
             # We will count all the actions per stage and ensure they happen in a valid order
             # (e.g. F before B before W for a given microbatch)
@@ -669,31 +672,32 @@ class PipelineScheduleMulti(_PipelineSchedule):
                 }
                 for stage_id in range(num_stages)
             }
-            for action in actions:
-                if action is None:
-                    continue
-                assert isinstance(
-                    action, _Action
-                ), f"Got an invalid action: {action}, expected instance of _Action"
-                s_id = action.stage_index
-                ctype = action.computation_type
-                mb_id = action.microbatch_index
-
-                if ctype == F:
-                    stage_actions[s_id][F].add(mb_id)
-                elif ctype == B:
-                    assert (
-                        mb_id in stage_actions[s_id][F]
-                    ), f"Running Backward for stage {s_id}, microbatch {mb_id} without first running Forward"
-                    stage_actions[s_id][B].add(mb_id)
-                elif ctype == W:
-                    assert (
-                        not self.use_full_backward
-                    ), "Schedule contains 'W' actions, but is configured to use full backward"
-                    assert (
-                        mb_id in stage_actions[s_id][B]
-                    ), f"Running Weight for stage {s_id}, microbatch {mb_id} without first running Backward"
-                    stage_actions[s_id][W].add(mb_id)
+            for rank in actions:
+                for action in actions[rank]:
+                    if action is None:
+                        continue
+                    assert isinstance(
+                        action, _Action
+                    ), f"Got an invalid action: {action}, expected instance of _Action"
+                    s_id = action.stage_index
+                    ctype = action.computation_type
+                    mb_id = action.microbatch_index
+                    print(f"processed action stage {s_id} ctype {ctype} mb_id {mb_id}")
+                    if ctype == F:
+                        stage_actions[s_id][F].add(mb_id)
+                    elif ctype == B:
+                        assert (
+                            mb_id in stage_actions[s_id][F]
+                        ), f"Running Backward for stage {s_id}, microbatch {mb_id} without first running Forward"
+                        stage_actions[s_id][B].add(mb_id)
+                    elif ctype == W:
+                        assert (
+                            not self.use_full_backward
+                        ), "Schedule contains 'W' actions, but is configured to use full backward"
+                        assert (
+                            mb_id in stage_actions[s_id][B]
+                        ), f"Running Weight for stage {s_id}, microbatch {mb_id} without first running Backward"
+                        stage_actions[s_id][W].add(mb_id)
 
             for s_id in stage_actions:
                 for ctype in (F, B, W):
@@ -709,11 +713,11 @@ class PipelineScheduleMulti(_PipelineSchedule):
             assert (
                 rank in self.pipeline_order
             ), f"Schedule is missing actions for rank {rank}"
-            # _validate_rank_actions(
-            #     self.pipeline_order[rank],
-            #     self._num_stages,
-            #     self._n_microbatches,
-            # )
+        _validate_rank_actions(
+            self.pipeline_order,
+            self._num_stages,
+            self._n_microbatches,
+        )
 
     def load_csv(self, filename):
         with open(filename, newline="") as csvfile:
