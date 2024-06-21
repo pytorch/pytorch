@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: pt2"]
+import sys
 import textwrap
 import unittest
 
@@ -10,9 +11,17 @@ from torch._inductor.runtime.hints import HalideInputSpec, HalideMeta
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import parallel_num_threads
 
-from torch.testing._internal.common_utils import IS_MACOS
+from torch.testing._internal.common_utils import IS_CI, IS_MACOS, IS_WINDOWS
 from torch.testing._internal.inductor_utils import HAS_CPU
 
+
+if IS_WINDOWS and IS_CI:
+    sys.stderr.write(
+        "Windows CI does not have necessary dependencies for test_torchinductor_dynamic_shapes yet\n"
+    )
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise unittest.SkipTest("requires sympy/functorch/filelock")
 
 try:
     import halide
