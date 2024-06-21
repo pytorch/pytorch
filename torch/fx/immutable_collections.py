@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Type, TypeVar
 
 from torch.utils._pytree import (

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Distributed Collective Communication (c10d)."""
 
 import itertools
@@ -14,6 +15,7 @@ import warnings
 from collections import namedtuple
 from datetime import timedelta
 from typing import Any, Callable, Dict, Optional, Tuple, Union, List, TYPE_CHECKING
+from typing_extensions import deprecated
 
 import torch
 from torch._C._distributed_c10d import (
@@ -110,8 +112,10 @@ except ImportError:
 
 try:
     from torch._C._distributed_c10d import ProcessGroupNCCL
+    from torch._C._distributed_c10d import ProcessGroupCudaP2P
     ProcessGroupNCCL.__module__ = "torch.distributed.distributed_c10d"
-    __all__ += ["ProcessGroupNCCL"]
+    ProcessGroupCudaP2P.__module__ = "torch.distributed.distributed_c10d"
+    __all__ += ["ProcessGroupNCCL", "ProcessGroupCudaP2P"]
 except ImportError:
     _NCCL_AVAILABLE = False
 
@@ -362,11 +366,12 @@ class _reduce_op:
             setattr(self, k, v)
         self.__members__ = ReduceOp.RedOpType.__members__
 
+    @deprecated(
+        "`torch.distributed.reduce_op` is deprecated, "
+        "please use `torch.distributed.ReduceOp` instead",
+        category=FutureWarning,
+    )
     def __getattribute__(self, key):
-        warnings.warn(
-            "torch.distributed.reduce_op is deprecated, please use "
-            "torch.distributed.ReduceOp instead"
-        )
         return object.__getattribute__(self, key)
 
 
@@ -673,7 +678,9 @@ def _get_pg_default_device(group: Optional[ProcessGroup] = None) -> torch.device
         warnings.warn(
             f"You are using a Backend {type(group)} as a ProcessGroup. "
             "This usage is deprecated since PyTorch 2.0. Please use a public API "
-            "of PyTorch Distributed instead."
+            "of PyTorch Distributed instead.",
+            FutureWarning,
+            stacklevel=3,
         )
         # Most users create Gloo with private API for object collectives
         _world.pg_default_device[group] = torch.device("cpu")
@@ -827,13 +834,15 @@ def get_global_rank(group: ProcessGroup, group_rank: int) -> int:
             return rank
     raise ValueError(f"Group rank {group_rank} is not part of group {group}")
 
+
 # TODO: remove this once the ecosystem moves away from it.
+@deprecated(
+    "`torch.distributed.distributed_c10d._get_global_rank` is deprecated, "
+    "please use `torch.distributed.distributed_c10d.get_global_rank` instead",
+    category=FutureWarning,
+)
 def _get_global_rank(group, rank) -> int:
     """Use get_global_rank as this method is deprecated."""
-    warnings.warn(
-        "torch.distributed.distributed_c10d._get_global_rank is deprecated "
-        "please use torch.distributed.distributed_c10d.get_global_rank instead"
-    )
     return get_global_rank(group, rank)
 
 
@@ -1128,7 +1137,7 @@ def get_pg_count() -> int:
     """
     return _world.group_count
 
-def get_node_local_rank() -> int:
+def get_node_local_rank(fallback_rank: Optional[int] = None) -> int:
     """
     Return the local rank of the current process relative to the node.
 
@@ -1140,14 +1149,17 @@ def get_node_local_rank() -> int:
     and communicated via the `LOCAL_RANK` environment variable.
 
     Torchrun will automatically populate `LOCAL_RANK`, but other launchers may not.  If `LOCAL_RANK` is unspecified,
-    this API will raise an exception.
+    this API will fall back to the provided kwarg 'fallback_rank' if specified, otherwise it will raise an error. The
+    intent is to allow writing an application that runs either in single or multi device contexts without error.
 
     """
     if "LOCAL_RANK" in os.environ:
         return int(os.environ["LOCAL_RANK"])
+    elif fallback_rank is not None:
+        return int(fallback_rank)
     raise RuntimeError(
-        "LOCAL_RANK is not in the environment, so `get_node_local_rank` can't be used. "
-        "Consider using torchrun or updating your process launcher to specify LOCAL_RANK."
+        "LOCAL_RANK is not in the environment. Consider passing fallback_rank to allow `get_node_local_rank` to work, "
+        "assuming you are not running in a multi-device context and want the code to run locally instead."
     )
 
 def _set_pg_timeout(timeout: timedelta, group: Optional[ProcessGroup] = None) -> None:
@@ -1372,6 +1384,7 @@ def init_process_group(
     _default_pg_init_method = init_method
 
     old_hook = sys.excepthook
+    excepthook_prefix = f"[rank{get_rank()}]"
 
     def _distributed_excepthook(*args):
         old_stderr = sys.stderr
@@ -1381,8 +1394,7 @@ def init_process_group(
         finally:
             sys.stderr = old_stderr
         msg = buf.getvalue()
-        prefix = f"[rank{get_rank()}]"
-        msg = "\n".join(f"{prefix}: {s}" if s != "" else "" for s in msg.split("\n"))
+        msg = "\n".join(f"{excepthook_prefix}: {s}" if s != "" else "" for s in msg.split("\n"))
         sys.stderr.write(msg)
         sys.stderr.flush()
 
@@ -1441,7 +1453,7 @@ def _shutdown_backend(pg):
         backend = pg._get_backend(torch.device("cuda"))
     except RuntimeError:
         pass
-    if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
+    if is_nccl_available() and isinstance(backend, (ProcessGroupNCCL, ProcessGroupCudaP2P)):
         # explictly call shutdown to ensure that NCCL resources are released
         backend._shutdown()
 
@@ -1659,17 +1671,19 @@ def _new_process_group_helper(
 
         pg._register_backend(torch.device(device), backend_type, backend_class)
 
+    # set group_name and group_dsec to backend
+    assert group_name is not None
+    assert group_desc is not None
+    pg._set_group_name(group_name)
+    pg._set_group_desc(group_desc)
+
     if device_id and pg._get_backend(device_id).supports_splitting:
         eager_backend = pg._get_backend(device_id)
         eager_backend.eager_connect_single_device(device_id)
 
     # update global state
-    assert group_name is not None
-    assert group_desc is not None
     _world.pg_map[pg] = (backend, prefix_store)
     _world.pg_names[pg] = group_name
-    pg._set_group_name(group_name)
-    pg._set_group_desc(group_desc)
     _register_process_group(group_name, pg)
 
     _world.pg_backend_config[pg] = str(backend_config)
@@ -2279,6 +2293,12 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
         work.wait()
 
 @_exception_logger
+@deprecated(
+    "`torch.distributed.all_reduce_coalesced` will be deprecated. If you must "
+    "use it, please revisit our documentation later at "
+    "https://pytorch.org/docs/main/distributed.html#collective-functions",
+    category=FutureWarning,
+)
 def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
     """
     WARNING: at this time individual shape checking is not implemented across nodes.
@@ -2313,11 +2333,6 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
         None, if not async_op or if not part of the group.
 
     """
-    warnings.warn(
-        "torch.distributed.all_reduce_coalesced will be deprecated. If you must "
-        "use it, please revisit our documentation later at "
-        "https://pytorch.org/docs/main/distributed.html#collective-functions"
-    )
     if isinstance(tensors, torch.Tensor):
         tensors = [tensors]
     _check_tensor_list(tensors, "tensor")
@@ -3026,11 +3041,12 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
     """
     Gathers tensors from the whole group in a list.
 
-    Complex tensors are supported.
+    Complex and uneven sized tensors are supported.
 
     Args:
         tensor_list (list[Tensor]): Output list. It should contain
             correctly-sized tensors to be used for output of the collective.
+            Uneven sized tensors are supported.
         tensor (Tensor): Tensor to be broadcast from current process.
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
@@ -3102,6 +3118,8 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
 def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=False):
     """
     Gather tensors from all ranks and put them in a single output tensor.
+
+    This function requires all tensors to be the same size on each process.
 
     Args:
         output_tensor (Tensor): Output tensor to accommodate tensor elements
@@ -3191,6 +3209,11 @@ def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=Fal
 
 
 @_exception_logger
+@deprecated(
+    "`torch.distributed._all_gather_base` is a private function and will be deprecated. "
+    "Please use `torch.distributed.all_gather_into_tensor` instead.",
+    category=FutureWarning,
+)
 def _all_gather_base(output_tensor, input_tensor, group=None, async_op=False):
     """
     Single tensor all gather. Gathers a single tensor from all ranks, and puts them in a single output tensor.
@@ -3212,15 +3235,16 @@ def _all_gather_base(output_tensor, input_tensor, group=None, async_op=False):
         `all_gather_into_tensor` instead.
 
     """
-    warnings.warn(
-        "torch.distributed._all_gather_base is a private function and will be "
-        "deprecated. Please use torch.distributed.all_gather_into_tensor "
-        "instead."
-    )
     return all_gather_into_tensor(output_tensor, input_tensor, group, async_op)
 
 
 @_exception_logger
+@deprecated(
+    "`torch.distributed.all_gather_coalesced` will be deprecated. If you must use it, "
+    "please revisit our documentation later at "
+    "https://pytorch.org/docs/main/distributed.html#collective-functions",
+    category=FutureWarning,
+)
 def all_gather_coalesced(
     output_tensor_lists, input_tensor_list, group=None, async_op=False
 ):
@@ -3267,11 +3291,6 @@ def all_gather_coalesced(
     performance improvements but users of this function should take extra care
     to ensure that each node passes in tensors whose shapes match across nodes.
     """
-    warnings.warn(
-        "torch.distributed.all_gather_coalesced will be deprecated. If you must "
-        "use it, please revisit our documentation later at "
-        "https://pytorch.org/docs/main/distributed.html#collective-functions"
-    )
     # We only check basic compatibility with C++ params here, C++ code will
     # do shape and type checking.
     if _rank_not_in_group(group):
@@ -3325,11 +3344,13 @@ def gather(tensor, gather_list=None, dst=0, group=None, async_op=False):
     """
     Gathers a list of tensors in a single process.
 
+    This function requires all tensors to be the same size on each process.
+
     Args:
         tensor (Tensor): Input tensor.
-        gather_list (list[Tensor], optional): List of appropriately-sized
-            tensors to use for gathered data (default is None, must be specified
-            on the destination rank)
+        gather_list (list[Tensor], optional): List of appropriately,
+            same-sized tensors to use for gathered data
+            (default is None, must be specified on the destination rank)
         dst (int, optional): Destination rank on global process group (regardless of ``group`` argument). (default is 0)
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
@@ -3601,6 +3622,11 @@ def reduce_scatter_tensor(output, input, op=ReduceOp.SUM, group=None, async_op=F
         work.wait()
 
 
+@deprecated(
+    "`torch.distributed._reduce_scatter_base` is a private function and will be deprecated. "
+    "Please use `torch.distributed.reduce_scatter_tensor` instead.",
+    category=FutureWarning,
+)
 def _reduce_scatter_base(output, input, op=ReduceOp.SUM, group=None, async_op=False):
     """
     Reduces, then scatters a flattened tensor to all processes in a group.
@@ -3621,11 +3647,6 @@ def _reduce_scatter_base(output, input, op=ReduceOp.SUM, group=None, async_op=Fa
         `reduce_scatter_tensor` instead.
 
     """
-    warnings.warn(
-        "torch.distributed._reduce_scatter_base is a private function and will "
-        "be deprecated. Please use torch.distributed.reduce_scatter_tensor "
-        "instead."
-    )
     return reduce_scatter_tensor(output, input, op, group, async_op)
 
 
@@ -4093,7 +4114,8 @@ def new_group(ranks=None, timeout=None, backend=None, pg_options=None, use_local
         group_desc (str, optional): a string to describe the process group.
 
     Returns:
-        A handle of distributed group that can be given to collective calls or None if the rank is not part of ``ranks``.
+        A handle of distributed group that can be given to collective calls or
+        GroupMember.NON_GROUP_MEMBER if the rank is not part of ``ranks``.
 
     N.B. use_local_synchronization doesn't work with MPI.
 
