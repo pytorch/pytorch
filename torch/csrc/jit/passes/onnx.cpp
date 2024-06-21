@@ -75,92 +75,6 @@ void checkONNXCompatibility(const c10::FunctionSchema& schema) {
   }
 }
 
-void preprocessCaffe2Ops(Block* block) {
-  for (auto it = block->nodes().begin(), end = block->nodes().end(); it != end;
-       ++it) {
-    for (auto b : it->blocks()) {
-      preprocessCaffe2Ops(b);
-    }
-    if (it->kind().is_caffe2()) {
-      const auto& schema = it->schema();
-      checkONNXCompatibility(schema);
-      std::vector<Value*> origin_inputs;
-      for (Value* v : it->inputs()) {
-        origin_inputs.push_back(v);
-      }
-      it->removeAllInputs();
-      const auto& args = schema.arguments();
-      size_t origin_inputs_index = 0;
-      for (const auto& arg : args) {
-        const auto& type = arg.type();
-        TORCH_INTERNAL_ASSERT(origin_inputs_index < origin_inputs.size());
-        const auto& origin_input = origin_inputs[origin_inputs_index++];
-        if (type->kind() == TypeKind::OptionalType &&
-            origin_input->mustBeNone()) {
-          continue;
-        }
-        if (type->isSubtypeOf(*TensorType::get())) {
-          it->addInput(origin_input);
-        } else if (
-            type->kind() == TypeKind::BoolType ||
-            type->kind() == TypeKind::IntType) {
-          const auto* constant_node = origin_input->node();
-          TORCH_INTERNAL_ASSERT(constant_node->kind() == prim::Constant);
-          it->i_(Symbol::attr(arg.name()), constant_node->i(attr::value));
-        } else if (type->kind() == TypeKind::FloatType) {
-          const auto* constant_node = origin_input->node();
-          TORCH_INTERNAL_ASSERT(constant_node->kind() == prim::Constant);
-          it->f_(Symbol::attr(arg.name()), constant_node->f(attr::value));
-        } else if (type->kind() == TypeKind::StringType) {
-          const auto* constant_node = origin_input->node();
-          TORCH_INTERNAL_ASSERT(constant_node->kind() == prim::Constant);
-          it->s_(Symbol::attr(arg.name()), constant_node->s(attr::value));
-        } else if (type->kind() == TypeKind::ListType) {
-          const auto& list_node = origin_input->node();
-          const auto& elem_type = type->castRaw<ListType>()->getElementType();
-          TORCH_INTERNAL_ASSERT(
-              list_node->kind() == prim::ListConstruct ||
-              list_node->kind() == prim::Constant);
-          if (elem_type->isSubtypeOf(*TensorType::get())) {
-            TORCH_INTERNAL_ASSERT(list_node->kind(), prim::ListConstruct);
-            const auto& tensor_list = origin_input->node()->inputs();
-            for (const auto& t : tensor_list) {
-              it->addInput(t);
-            }
-          } else if (elem_type->kind() == TypeKind::FloatType) {
-            std::vector<double> values;
-            if (list_node->kind() == prim::ListConstruct) {
-              for (const auto* elem_input : list_node->inputs()) {
-                const auto* constant_node = elem_input->node();
-                TORCH_INTERNAL_ASSERT(constant_node->kind() == prim::Constant);
-                values.push_back(constant_node->f(attr::value));
-              }
-            } else { // is a constant list
-              values = list_node->fs(attr::value);
-            }
-            it->fs_(Symbol::attr(arg.name()), values);
-          } else {
-            throw std::runtime_error(
-                "Unhandled scalar arg: " + arg.name() +
-                ", type: " + c10::typeKindToString(elem_type->kind()));
-          }
-        } else {
-          throw std::runtime_error(
-              "Unsupported input type of arg " + arg.name() +
-              " in Caffe2 operator: " + c10::typeKindToString(type->kind()));
-        }
-      }
-    }
-  }
-  EliminateDeadCode(
-      block, true, DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
-}
-
-void PreprocessCaffe2Ops(std::shared_ptr<Graph>& graph) {
-  preprocessCaffe2Ops(graph->block());
-  GRAPH_DUMP("After PreprocessCaffe2Ops: ", graph);
-}
-
 // Transform PythonOps into Nodes that match ONNX semantics.
 std::shared_ptr<Graph> ToONNX(
     std::shared_ptr<Graph>& graph,
@@ -621,10 +535,7 @@ void NodeToONNX(
   };
 
   auto k = old_node->kind();
-  if (k.is_caffe2()) {
-    // Pass on Caffe2 operator, since we already preprocess it
-    cloneNode(old_node);
-  } else if (k == prim::PythonOp) {
+  if (k == prim::PythonOp) {
     callPySymbolicMethod(static_cast<ConcretePythonOp*>(old_node));
   } else {
     callPySymbolicFunction(old_node);

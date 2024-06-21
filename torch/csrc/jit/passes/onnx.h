@@ -24,7 +24,6 @@ TORCH_API void NodeToONNX(
     py::dict& env,
     py::set& values_in_env);
 TORCH_API void RemovePrintOps(std::shared_ptr<Graph>& graph);
-TORCH_API void PreprocessCaffe2Ops(std::shared_ptr<Graph>& graph);
 
 } // namespace jit
 } // namespace torch

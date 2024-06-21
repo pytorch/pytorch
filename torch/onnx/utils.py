@@ -38,7 +38,6 @@ from torch.onnx import (  # noqa: F401
     _constants,
     _exporter_states,
     errors,
-    symbolic_caffe2,
     symbolic_helper,
 )
 from torch.onnx._globals import GLOBALS
@@ -673,7 +672,6 @@ def _optimize_graph(
     _C._jit_pass_prepare_division_for_onnx(graph)
 
     _C._jit_pass_onnx_remove_print(graph)
-    _C._jit_pass_onnx_preprocess_caffe2(graph)
 
     symbolic_helper._quantized_ops.clear()
     # Unpack quantized weights for conv and linear ops and insert into graph.

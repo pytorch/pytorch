@@ -38,7 +38,6 @@ void initONNXBindings(PyObject* module) {
 
   // ONNX specific passes
   m.def("_jit_pass_onnx_remove_print", RemovePrintOps)
-      .def("_jit_pass_onnx_preprocess_caffe2", PreprocessCaffe2Ops)
       .def("_jit_pass_onnx", ToONNX)
       .def(
           "_jit_pass_onnx_assign_output_shape",

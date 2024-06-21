@@ -943,7 +943,7 @@ void GraphEncoder::EncodeNode(
   }
   if (!node->kind().is_onnx()) {
     std::string domain;
-    if (node->kind().is_aten() || node->kind().is_caffe2()) {
+    if (node->kind().is_aten()) {
       domain = node->kind().domainString();
     } else { //  Custom namespace and domain
       domain = node->kind().ns().toUnqualString();
@@ -1180,7 +1180,7 @@ void GraphEncoder::EncodeLocalFunctionOpsetImport(
     std::unordered_set<std::string>& custom_domains) {
   if (!n->kind().is_onnx()) {
     std::string domain;
-    if (n->kind().is_aten() || n->kind().is_caffe2()) {
+    if (n->kind().is_aten()) {
       domain = n->kind().domainString();
     } else { //  Custom namespace and domain
       domain = n->kind().ns().toUnqualString();
