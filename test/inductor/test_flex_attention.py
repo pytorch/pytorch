@@ -972,6 +972,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     def test_logsumexp_is_not_fused(self):
+        from torch.nn.attention._flex_attention import _create_empty_block_sparse_mask
+
         make_tensor = functools.partial(
             torch.randn,
             (B, H, S, D),
@@ -980,10 +982,20 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             requires_grad=True,
         )
         q, k, v = make_tensor(), make_tensor(), make_tensor()
+        empty_sparse_mask = _create_empty_block_sparse_mask(q.device)
 
         @torch.compile
         def func(q, k, v, score_mod):
-            out, lse = flex_attention_hop(q, k, v, score_mod)
+            out, lse = flex_attention_hop(
+                q,
+                k,
+                v,
+                score_mod,
+                empty_sparse_mask.kv_num_blocks,
+                empty_sparse_mask.kv_indices,
+                empty_sparse_mask.q_num_blocks,
+                empty_sparse_mask.q_indices,
+            )
             lse_2 = lse * 2
             return out, lse_2
 
@@ -1056,6 +1068,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.assertEqual(len(cnt.graphs), 1)
         graph = cnt.graphs[0]
         norm_graph = normalize_gm(graph.print_readable(print_output=False))
+
         self.assertExpectedInline(
             norm_graph,
             """\
@@ -1065,13 +1078,21 @@ class GraphModule(torch.nn.Module):
         l_args_1_ = L_args_1_
         l_args_2_ = L_args_2_
 
+        ones: "i32[1]" = torch.ones([1], dtype = torch.int32, device = device(type='cuda', index=0))
+
+        zeros: "i32[1, 1]" = torch.zeros([1, 1], dtype = torch.int32, device = device(type='cuda', index=0))
+
+        ones_1: "i32[1]" = torch.ones([1], dtype = torch.int32, device = device(type='cuda', index=0))
+
+        zeros_1: "i32[1, 1]" = torch.zeros([1, 1], dtype = torch.int32, device = device(type='cuda', index=0))
+
         new_empty: "f64[]" = l_args_0_.new_empty([], requires_grad = True)
         new_empty_1: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
         new_empty_2: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
         new_empty_3: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
         new_empty_4: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
         flex_attention_0 = self.flex_attention_0
-        flex_attention = torch.ops.higher_order.flex_attention(l_args_0_, l_args_1_, l_args_2_, flex_attention_0);  l_args_0_ = l_args_1_ = l_args_2_ = flex_attention_0 = None
+        flex_attention = torch.ops.higher_order.flex_attention(l_args_0_, l_args_1_, l_args_2_, flex_attention_0, ones, zeros, ones_1, zeros_1);  l_args_0_ = l_args_1_ = l_args_2_ = flex_attention_0 = ones = zeros = ones_1 = zeros_1 = None
         out: "f64[2, 2, 8, 4]" = flex_attention[0];  flex_attention = None
         return (out,)
 
@@ -1102,10 +1123,10 @@ class GraphModule(torch.nn.Module):
             joint_graph,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "f64[2, 2, 8, 4]", primals_2: "f64[2, 2, 8, 4]", primals_3: "f64[2, 2, 8, 4]", getitem: "f64[2, 2, 8, 4]", getitem_1: "f32[2, 2, 8]", tangents_1: "f64[2, 2, 8, 4]"):
+    def forward(self, primals_1: "f64[2, 2, 8, 4]", primals_2: "f64[2, 2, 8, 4]", primals_3: "f64[2, 2, 8, 4]", full_default: "i32[1]", full_default_1: "i32[1, 1]", getitem: "f64[2, 2, 8, 4]", getitem_1: "f32[2, 2, 8]", tangents_1: "f64[2, 2, 8, 4]"):
         fw_graph = self.fw_graph
         joint_graph = self.joint_graph
-        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem, getitem_1, tangents_1, fw_graph, joint_graph);  primals_1 = primals_2 = primals_3 = getitem = getitem_1 = tangents_1 = fw_graph = joint_graph = None
+        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem, getitem_1, tangents_1, fw_graph, joint_graph, full_default, full_default_1, full_default, full_default_1);  primals_1 = primals_2 = primals_3 = getitem = getitem_1 = tangents_1 = fw_graph = joint_graph = full_default = full_default_1 = None
         getitem_2: "f64[2, 2, 8, 4]" = flex_attention_backward[0]
         getitem_3: "f64[2, 2, 8, 4]" = flex_attention_backward[1]
         getitem_4: "f64[2, 2, 8, 4]" = flex_attention_backward[2];  flex_attention_backward = None
