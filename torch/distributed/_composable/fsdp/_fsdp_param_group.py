@@ -39,28 +39,37 @@ reference to avoid holding onto memory after forward.
 class FSDPCommContext:
     """This has the communication state shared across FSDP states/parameter groups."""
 
-    def init(self):
-        # Setting the all-gather/reduce-scatter streams to be higher priority
-        # can help avoid some issues where their copies in/out are delayed and
-        # block computation
-        high_priority = -1
+    def __init__(self):
+        # Initialize all streams using default stream at construction time and
+        # set them to new streams during lazy initialization
+        current_stream = torch.cuda.current_stream()
         # All-gather state and copy-in stream allow overlapping the next
         # copy-in with the current all-gather in forward; copy-in overlaps with
         # reduce-scatter in backward without the separate copy-in stream
-        self.all_gather_copy_in_stream = torch.cuda.Stream(priority=high_priority)
+        self.all_gather_copy_in_stream = current_stream
         self.all_gather_state: Optional[AllGatherState] = None
         # All-gather stream allows overlapping next all-gather with current
         # forward compute
-        self.all_gather_stream = torch.cuda.Stream(priority=high_priority)
+        self.all_gather_stream = current_stream
         # Reduce-scatter stream gives separate execution "thread" for post-
         # backward logic like pre/post-gradient division and reduce-scatter
-        self.reduce_scatter_stream = torch.cuda.Stream(priority=high_priority)
+        self.reduce_scatter_stream = current_stream
         # Run the HSDP all-reduces concurrently with all-gather/reduce-scatter
         # since collectives use different network resources and can overlap
         # in the typical intra-node sharding / inter-node replication case
-        self.all_reduce_stream = torch.cuda.Stream()
+        self.all_reduce_stream = current_stream
         # Post-forward order for explicit backward prefetching
         self.post_forward_order: List[FSDPParamGroup] = []  # will cause ref cycles
+
+    def init(self):
+        # Setting the all-gather/reduce-scatter streams to be higher priority
+        # can help avoid some issues where their copies in/out are delayed and
+        # block computation (this is different from high-pri NCCL stream)
+        high_priority = -1
+        self.all_gather_copy_in_stream = torch.cuda.Stream(priority=high_priority)
+        self.all_gather_stream = torch.cuda.Stream(priority=high_priority)
+        self.reduce_scatter_stream = torch.cuda.Stream(priority=high_priority)
+        self.all_reduce_stream = torch.cuda.Stream()
 
     def get_all_gather_streams(
         self, training_state: TrainingState
