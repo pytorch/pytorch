@@ -170,6 +170,8 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
         global _variable, _variable_2
 
         for mode in range(1, 7):
+            torch._dynamo.reset()
+
             _variable = 0
             _variable_2 = 0
 

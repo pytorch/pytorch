@@ -34,36 +34,39 @@ jobs:
       id-token: write
       contents: read
 
-  linux-focal-cuda12_1-py3_10-gcc9-build:
-    name: linux-focal-cuda12.1-py3.10-gcc9
-    uses: ./.github/workflows/_linux-build.yml
+  linux-focal-cuda12_4-py3_10-gcc9-sm86-build:
+    name: linux-focal-cuda12.4-py3.10-gcc9-sm86
+    uses: ./.github/workflows/_linux-build-label.yml
     with:
-      build-environment: linux-focal-cuda12.1-py3.10-gcc9
-      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9
+      build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm86
+      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9
+      cuda-arch-list: 8.6
       test-matrix: |
         { include: [
-          { config: "nogpu_AVX512", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
-          { config: "nogpu_NO_AVX2", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
-          { config: "jit_legacy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 1, num_shards: 5, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 5, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 3, num_shards: 5, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 4, num_shards: 5, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 5, num_shards: 5, runner: "linux.g5.4xlarge.nvidia.gpu" },
         ]}
 
-  linux-focal-cuda12_1-py3_10-gcc9-test:
-    name: linux-focal-cuda12.1-py3.10-gcc9
+  linux-focal-cuda12_4-py3_10-gcc9-sm86-test:
+    name: linux-focal-cuda12.4-py3.10-gcc9-sm86
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-focal-cuda12_1-py3_10-gcc9-build
+      - linux-focal-cuda12_4-py3_10-gcc9-sm86-build
       - target-determination
     with:
-      build-environment: linux-focal-cuda12.1-py3.10-gcc9
-      docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-build.outputs.test-matrix }}
+      build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm86
+      docker-image: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-sm86-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-sm86-build.outputs.test-matrix }}
 
   libtorch-linux-focal-cuda12_1-py3_7-gcc9-debug-build:
     name: libtorch-linux-focal-cuda12.1-py3.7-gcc9-debug
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: libtorch-linux-focal-cuda12.1-py3.7-gcc9
-      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9
+      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9
       build-generates-artifacts: false
       runner: linux.4xlarge
       test-matrix: |
@@ -77,7 +80,32 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-no-ops
-      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9
+      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1 },
+        ]}
+
+  libtorch-linux-focal-cuda12_4-py3_7-gcc9-debug-build:
+    name: libtorch-linux-focal-cuda12.4-py3.7-gcc9-debug
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: libtorch-linux-focal-cuda12.4-py3.7-gcc9
+      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9
+      build-generates-artifacts: false
+      runner: linux.4xlarge
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1 },
+        ]}
+
+  # no-ops builds test USE_PER_OPERATOR_HEADERS=0 where ATen/ops is not generated
+  linux-focal-cuda12_4-py3_10-gcc9-no-ops-build:
+    name: linux-focal-cuda12.4-py3.10-gcc9-no-ops
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-focal-cuda12.4-py3.10-gcc9-no-ops
+      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
@@ -94,12 +122,12 @@ jobs:
           { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
 
-  macos-13-py3-arm64-build:
-    name: macos-13-py3-arm64
+  macos-py3-arm64-build:
+    name: macos-py3-arm64
     uses: ./.github/workflows/_mac-build.yml
     with:
       sync-tag: macos-py3-arm64-build
-      build-environment: macos-13-py3-arm64
+      build-environment: macos-py3-arm64
       runner-type: macos-m1-stable
       build-generates-artifacts: true
       # To match the one pre-installed in the m1 runners
@@ -114,31 +142,30 @@ jobs:
   macos-py3-arm64-mps-test:
     name: macos-py3-arm64-mps
     uses: ./.github/workflows/_mac-test-mps.yml
-    needs: macos-13-py3-arm64-build
-    if: needs.macos-13-py3-arm64-build.outputs.build-outcome == 'success'
+    needs: macos-py3-arm64-build
+    if: needs.macos-py3-arm64-build.outputs.build-outcome == 'success'
     with:
       sync-tag: macos-py3-arm64-mps-test
-      build-environment: macos-13-py3-arm64
+      build-environment: macos-py3-arm64
       # Same as the build job
       python-version: 3.9.12
       test-matrix: |
         { include: [
-          { config: "mps", shard: 1, num_shards: 1, runner: "macos-m1-stable" },
+          { config: "mps", shard: 1, num_shards: 1, runner: "macos-m1-13" },
           { config: "mps", shard: 1, num_shards: 1, runner: "macos-m1-14" },
-
         ]}
 
-  macos-13-py3-arm64-test:
-    name: macos-13-py3-arm64
+  macos-py3-arm64-test:
+    name: macos-py3-arm64
     uses: ./.github/workflows/_mac-test.yml
     needs:
-      - macos-13-py3-arm64-build
+      - macos-py3-arm64-build
       - target-determination
     with:
-      build-environment: macos-13-py3-arm64
+      build-environment: macos-py3-arm64
       # Same as the build job
       python-version: 3.9.12
-      test-matrix: ${{ needs.macos-13-py3-arm64-build.outputs.test-matrix }}
+      test-matrix: ${{ needs.macos-py3-arm64-build.outputs.test-matrix }}
 
   win-vs2019-cpu-py3-build:
     name: win-vs2019-cpu-py3
