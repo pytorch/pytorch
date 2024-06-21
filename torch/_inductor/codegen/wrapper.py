@@ -654,11 +654,9 @@ class WrapperCodeGen(CodeGen):
             # view operation fallbacks cause issues since inductor
             # doesn't know the memory is still needed and might reuse it.
             ending = f".clone(){ending}"
-        
+
         if no_return:
-            self.writeline(
-                f"{self.declare}{kernel_name}({', '.join(args)}){ending}"
-            )
+            self.writeline(f"{self.declare}{kernel_name}({', '.join(args)}){ending}")
         else:
             self.writeline(
                 f"{self.declare}{output_name} = {kernel_name}({', '.join(args)}){ending}"
