@@ -1,4 +1,4 @@
-#include <torch/csrc/distributed/c10d/CUDASymmetricMemory.cuh>
+#include <torch/csrc/distributed/c10d/CUDASymmetricMemory.hpp>
 
 #include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>
