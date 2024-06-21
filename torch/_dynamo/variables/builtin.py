@@ -1546,11 +1546,8 @@ class BuiltinVariable(VariableTracker):
                         f"pending mutation on nn module, so graph breaking at {name!r} call"
                     )
 
-            try:
-                # re-read a pending side effect?
-                return tx.output.side_effects.load_attr(obj, name)
-            except KeyError:
-                pass
+        is tx.output.side_effects.has_pending_mutation_of_attr(obj, name)
+            return tx.output.side_effects.load_attr(obj, name)
 
         if default is not None:
             hasattr_var = self.call_hasattr(tx, obj, name_var)
