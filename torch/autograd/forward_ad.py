@@ -1,9 +1,11 @@
+# mypy: allow-untyped-defs
 import os
-
 from typing import Any, Optional, Tuple
 
 import torch
+
 from .grad_mode import _DecoratorContextManager
+
 
 __all__ = [
     "UnpackedDualTensor",

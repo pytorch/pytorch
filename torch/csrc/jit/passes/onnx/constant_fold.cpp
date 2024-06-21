@@ -64,7 +64,7 @@ void handleNegativeStartEndIndex(
   }
 }
 
-c10::optional<at::Tensor> runTorchSlice_opset9(
+std::optional<at::Tensor> runTorchSlice_opset9(
     const Node* node,
     std::vector<at::Tensor>& inputTensorValues) {
   assert(inputTensorValues.size() == 1);
@@ -101,10 +101,10 @@ c10::optional<at::Tensor> runTorchSlice_opset9(
       return c10::nullopt;
     updated_val = at::narrow(updated_val, axis, start, length);
   }
-  return c10::optional<at::Tensor>(updated_val);
+  return std::optional<at::Tensor>(updated_val);
 }
 
-c10::optional<at::Tensor> runTorchSlice_opset10(
+std::optional<at::Tensor> runTorchSlice_opset10(
     const Node* node,
     std::vector<at::Tensor>& inputTensorValues) {
   const int maxSliceInputCount = 5;
@@ -195,7 +195,7 @@ c10::optional<at::Tensor> runTorchSlice_opset10(
       return c10::nullopt;
     updated_val = at::narrow(updated_val, axis, start, length);
   }
-  return c10::optional<at::Tensor>(updated_val);
+  return std::optional<at::Tensor>(updated_val);
 }
 
 // Refer to AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF
@@ -259,7 +259,7 @@ at::Tensor IntToTensor(int64_t value) {
   return at::squeeze(f_copy, 0);
 }
 
-c10::optional<at::Tensor> runTorchBackendForOnnx(
+std::optional<at::Tensor> runTorchBackendForOnnx(
     const Node* node,
     std::vector<at::Tensor>& inputTensorValues,
     int opset_version) {
@@ -280,10 +280,10 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     }
     updated_val =
         at::cat(at::TensorList(inputTensorValues), node->i(attr::axis));
-    return c10::optional<at::Tensor>(updated_val);
+    return std::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Sqrt) {
     updated_val = at::sqrt(inputTensorValues[0]);
-    return c10::optional<at::Tensor>(updated_val);
+    return std::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Div) {
     // One example shows at::div(CPULongType, CPULongType) = CPUFloatType,
     // So we add a cast below.
@@ -292,16 +292,16 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
         inputTensorValues[1].scalar_type()) {
       updated_val = updated_val.to(inputTensorValues[0].scalar_type());
     }
-    return c10::optional<at::Tensor>(updated_val);
+    return std::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Mul) {
     updated_val = at::mul(inputTensorValues[0], inputTensorValues[1]);
-    return c10::optional<at::Tensor>(updated_val);
+    return std::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Sub) {
     updated_val = at::sub(inputTensorValues[0], inputTensorValues[1]);
-    return c10::optional<at::Tensor>(updated_val);
+    return std::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Add) {
     updated_val = at::add(inputTensorValues[0], inputTensorValues[1]);
-    return c10::optional<at::Tensor>(updated_val);
+    return std::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Unsqueeze) {
     if (opset_version >= ONNX_OPSET_13) {
       assert(inputTensorValues.size() == 2);
@@ -328,7 +328,7 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
       for (int64_t i = 0; i < inputTensorValues[1].sizes()[0]; ++i) {
         updated_val = at::unsqueeze(updated_val, axes[i]);
       }
-      return c10::optional<at::Tensor>(updated_val);
+      return std::optional<at::Tensor>(updated_val);
     } else if (opset_version >= ONNX_OPSET_9) {
       assert(inputTensorValues.size() == 1);
       if (!node->hasAttributeS("axes")) {
@@ -340,7 +340,7 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
       for (auto axis : axesAttr) {
         updated_val = at::unsqueeze(updated_val, axis);
       }
-      return c10::optional<at::Tensor>(updated_val);
+      return std::optional<at::Tensor>(updated_val);
     } else {
       TORCH_WARN(
           "Constant folding - unsupported opset version. "
@@ -373,7 +373,7 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
           updated_val = at::squeeze(updated_val, axes[i]);
         }
       }
-      return c10::optional<at::Tensor>(updated_val);
+      return std::optional<at::Tensor>(updated_val);
     } else if (opset_version >= ONNX_OPSET_9) {
       assert(inputTensorValues.size() == 1);
       updated_val = inputTensorValues[0];
@@ -384,7 +384,7 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
           updated_val = at::squeeze(updated_val, axis);
         }
       }
-      return c10::optional<at::Tensor>(updated_val);
+      return std::optional<at::Tensor>(updated_val);
     } else {
       TORCH_WARN(
           "Constant folding - unsupported opset version. "
@@ -397,13 +397,13 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
       return c10::nullopt;
     }
     updated_val = inputTensorValues[0].permute(node->is(attr::perm));
-    return c10::optional<at::Tensor>(updated_val);
+    return std::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Cast) {
     assert(inputTensorValues.size() == 1);
     if (node->hasAttributeS("to") && ONNXTypeToATenType(node->i(attr::to))) {
       updated_val = inputTensorValues[0].to(
           ONNXTypeToATenType(node->i(attr::to)).value());
-      return c10::optional<at::Tensor>(updated_val);
+      return std::optional<at::Tensor>(updated_val);
     }
     return c10::nullopt;
   } else if (node->kind() == onnx::Reshape) {
@@ -433,11 +433,11 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
         shape[i] = shape_a[i];
       }
     }
-    return c10::optional<at::Tensor>(at::reshape(updated_val, shape));
+    return std::optional<at::Tensor>(at::reshape(updated_val, shape));
   } else if (node->kind() == onnx::Shape) {
     TORCH_INTERNAL_ASSERT(inputTensorValues.size() == 1);
     updated_val = at::_shape_as_tensor(inputTensorValues[0]);
-    return c10::optional<at::Tensor>(updated_val);
+    return std::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::ReduceL1 || node->kind() == onnx::ReduceL2) {
     assert(inputTensorValues.size() == 1);
     if (!node->hasAttributeS("axes")) {
@@ -449,7 +449,7 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     int p = node->kind() == onnx::ReduceL1 ? 1 : 2;
     updated_val = at::norm(
         inputTensorValues[0], p, node->is(attr::axes), node->i(attr::keepdims));
-    return c10::optional<at::Tensor>(updated_val);
+    return std::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::ReduceProd) {
     int64_t rank = inputTensorValues[0].sizes().size();
     std::vector<int64_t> axes;
@@ -469,7 +469,7 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     for (const auto& axis : axes) {
       updated_val = at::prod(updated_val, axis, keepdims);
     }
-    return c10::optional<at::Tensor>(updated_val);
+    return std::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Gather) {
     assert(inputTensorValues.size() == 2);
     // default axis = 0
@@ -503,41 +503,41 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     if (q < 1) {
       updated_val = updated_val.squeeze(axis);
     }
-    return c10::optional<at::Tensor>(updated_val);
+    return std::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Range) {
     updated_val = runTorchArange_opset11(node, inputTensorValues);
-    return c10::optional<at::Tensor>(updated_val);
+    return std::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Where) {
     updated_val = at::where(
         inputTensorValues[0], inputTensorValues[1], inputTensorValues[2]);
-    return c10::optional<at::Tensor>(updated_val);
+    return std::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Equal) {
     updated_val = at::eq(inputTensorValues[0], inputTensorValues[1]);
-    return c10::optional<at::Tensor>(updated_val);
+    return std::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Greater) {
     updated_val = at::greater(inputTensorValues[0], inputTensorValues[1]);
-    return c10::optional<at::Tensor>(updated_val);
+    return std::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Less) {
     updated_val = at::less(inputTensorValues[0], inputTensorValues[1]);
-    return c10::optional<at::Tensor>(updated_val);
+    return std::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Neg) {
     updated_val = at::neg(inputTensorValues[0]);
-    return c10::optional<at::Tensor>(updated_val);
+    return std::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Not) {
     auto ones =
         at::ones(inputTensorValues[0].sizes(), inputTensorValues[0].dtype());
     updated_val = at::ne(inputTensorValues[0], ones);
-    return c10::optional<at::Tensor>(updated_val);
+    return std::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Size) {
     int64_t total_size = 1;
     for (auto size : inputTensorValues[0].sizes()) {
       total_size *= size;
     }
-    return c10::optional<at::Tensor>(IntToTensor(total_size));
+    return std::optional<at::Tensor>(IntToTensor(total_size));
   } else if (node->kind() == onnx::Softmax) {
     int64_t axis = node->hasAttributeS("axis") ? node->i(attr::axis) : -1;
     updated_val = at::softmax(inputTensorValues[0], axis);
-    return c10::optional<at::Tensor>(updated_val);
+    return std::optional<at::Tensor>(updated_val);
   } else {
     return c10::nullopt;
   }

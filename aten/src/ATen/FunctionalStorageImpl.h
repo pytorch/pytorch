@@ -31,6 +31,7 @@ struct ViewMeta {
   ViewMeta(
       std::function<Tensor(const Tensor&, int64_t)> forward,
       std::function<Tensor(const Tensor&, const Tensor&, int64_t)> reverse,
+      bool has_symbolic_inputs,
       bool is_multi_output = false,
       bool is_as_strided = false,
       int64_t out_idx = 0)
@@ -38,7 +39,8 @@ struct ViewMeta {
         reverse_fn(std::move(reverse)),
         out_index(out_idx),
         is_multi_output(is_multi_output),
-        is_as_strided(is_as_strided) {}
+        is_as_strided(is_as_strided),
+        has_symbolic_inputs(has_symbolic_inputs) {}
 
   std::function<Tensor(const Tensor&, int64_t)> forward_fn;
   std::function<Tensor(const Tensor&, const Tensor&, int64_t)> reverse_fn;
@@ -49,6 +51,9 @@ struct ViewMeta {
   bool is_multi_output;
 
   bool is_as_strided;
+
+  // Tells us if this view operation has any symbolic inputs
+  bool has_symbolic_inputs;
 
   // Returns a copy of the current ViewMeta, if out_idx matches the current
   // out_index. Otherwise, returns a new ViewMeta with the same forward/reverse
@@ -105,6 +110,14 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
     frozen_ = true;
   }
 
+  c10::SymInt get_storage_size(bool before) {
+    if (before) {
+      return original_storage_size_;
+    } else {
+      return curr_storage_size_;
+    }
+  }
+
   ~FunctionalStorageImpl() override = default;
 
   void mark_mutation() {
@@ -130,6 +143,15 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
     // mutations under no_grad / inference_mode are technically not hidden from
     // autograd - they change the version counter
     return mutation_counter_ <= mutation_counter_hidden_from_autograd_;
+  }
+
+  void mark_inductor_storage_resize(c10::SymInt new_size) {
+    inductor_storage_resized_ = true;
+    curr_storage_size_ = new_size;
+  }
+
+  bool was_inductor_storage_resized() {
+    return inductor_storage_resized_;
   }
 
  private:
@@ -172,6 +194,13 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
   uint64_t mutation_counter_during_no_grad_or_inference_mode_ = 0;
   uint64_t mutation_counter_ = 0;
   uint64_t mutation_counter_hidden_from_autograd_ = 0;
+
+  // Used to tell if:
+  // (1) There were any storage resizes on a graph input
+  // (2) The original/curr storage size tell us if these resizes result in a nop
+  bool inductor_storage_resized_ = false;
+  c10::SymInt original_storage_size_;
+  c10::SymInt curr_storage_size_;
 };
 
 } // namespace at::functionalization

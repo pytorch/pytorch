@@ -180,6 +180,9 @@ def mock_gh_get_info() -> Any:
     return {
         "closed": False,
         "isCrossRepository": False,
+        "headRefName": "foo",
+        "baseRefName": "bar",
+        "baseRepository": {"defaultBranchRef": {"name": "bar"}},
         "files": {"nodes": [], "pageInfo": {"hasNextPage": False}},
         "changedFiles": 0,
     }
@@ -741,6 +744,30 @@ class TestBypassFailures(TestCase):
         self.assertTrue(len(failed) == 0)
         self.assertTrue(len(ignorable["UNSTABLE"]) == 1)
 
+        # Add another test case where there is no unstable keyword in the job name, but
+        # the job has already been marked as unstable
+        pr = GitHubPR("pytorch", "executorch", 3318)
+        checks = pr.get_checkrun_conclusions()
+        checks = get_classifications(
+            pr.pr_num,
+            pr.project,
+            checks,
+            [],
+        )
+        print(checks)
+        workflow_name = "test-llama-app"
+        job_name = "mobile-job (android)"
+        self.assertTrue(
+            checks[f"Android / {workflow_name} / {job_name}"].classification
+            == "UNSTABLE"
+        )
+        pending, failed, ignorable = categorize_checks(
+            checks, list(checks.keys()), ok_failed_checks_threshold=1
+        )
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 0)
+        self.assertTrue(len(ignorable["UNSTABLE"]) == 1)
+
     def test_get_classifications_broken_trunk(self, *args: Any) -> None:
         # The mock merge base is the actual value returned by gh_fetch_merge_base
         test_cases = [
@@ -749,13 +776,13 @@ class TestBypassFailures(TestCase):
                 # than the one on the base commit. This should still count as broken trunk
                 "pr_num": 104214,
                 "related_failure_count": 0,
-                "unrelated_failure_count": 1,
+                "flaky_or_broken_trunk": 1,
             },
             {
                 # This PR had one broken trunk failure and it used ghstack
                 "pr_num": 105145,
                 "related_failure_count": 0,
-                "unrelated_failure_count": 1,
+                "flaky_or_broken_trunk": 1,
             },
             {
                 # The failure on the merge base was retried successfully and
@@ -764,20 +791,20 @@ class TestBypassFailures(TestCase):
                 # be used to detect broken trunk
                 "pr_num": 107160,
                 "related_failure_count": 0,
-                "unrelated_failure_count": 4,
+                "flaky_or_broken_trunk": 1,
             },
             {
                 # This PR used Dr.CI broken trunk classification
                 "pr_num": 111253,
                 "related_failure_count": 1,
-                "unrelated_failure_count": 2,
+                "flaky_or_broken_trunk": 1,
             },
         ]
 
         for case in test_cases:
             pr_num = case["pr_num"]
             related_failure_count = case["related_failure_count"]
-            unrelated_failure_count = case["unrelated_failure_count"]
+            flaky_or_broken_trunk = case["flaky_or_broken_trunk"]
 
             pr = GitHubPR("pytorch", "pytorch", pr_num)
             checks = pr.get_checkrun_conclusions()
@@ -799,7 +826,7 @@ class TestBypassFailures(TestCase):
             )
             self.assertTrue(len(pending) == 0)
             self.assertTrue(
-                len(failed) == unrelated_failure_count + related_failure_count
+                len(failed) == flaky_or_broken_trunk + related_failure_count
             )
 
     def test_ignore_current(self, *args: Any) -> None:
