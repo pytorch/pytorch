@@ -17,8 +17,7 @@ WORLD_SIZE = 2
 def init_fake_distributed(device="cpu"):
     @torch.no_grad
     def all_gather(t):
-        # clone since all_gather input and output should not be aliases.
-        return torch.cat([t] * WORLD_SIZE, 0).clone()
+        return torch.cat([t] * WORLD_SIZE, 0)
 
     @torch.no_grad
     def reduce_scatter(t):
