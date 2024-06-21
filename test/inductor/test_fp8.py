@@ -22,6 +22,9 @@ torch.set_float32_matmul_precision("high")
 E4M3_MAX_POS = 448.0
 E5M2_MAX_POS = 57344.0
 
+FP16_MAX_POS: float = torch.finfo(torch.float16).max
+EPS: float = 1e-12
+
 
 def _to_fp8_saturated(x: Tensor, float8_dtype: torch.dtype) -> Tensor:
     # The default behavior in PyTorch for casting to `float8_e4m3fn`
@@ -35,6 +38,25 @@ def _to_fp8_saturated(x: Tensor, float8_dtype: torch.dtype) -> Tensor:
     else:
         x = x.clamp(min=-1 * E5M2_MAX_POS, max=E5M2_MAX_POS)
     return x.to(float8_dtype)
+
+
+@torch.no_grad()
+def _amax_to_scale(
+    amax: torch.Tensor, float8_dtype: torch.dtype, orig_dtype: torch.dtype
+) -> torch.Tensor:
+    # To make scale dtype to be fp32 for accuracy
+    amax = amax.float()
+    if float8_dtype == torch.float8_e4m3fn:
+        res = E4M3_MAX_POS / torch.clamp(amax, min=EPS)
+    else:  # e5m2
+        res = E5M2_MAX_POS / torch.clamp(amax, min=EPS)
+
+    # Ensure that the scale is representable in float16,
+    # this helps when amax is small. We are assuming that we don't need
+    # to care about this for float32/bfloat16.
+    if orig_dtype is torch.float16:
+        res = torch.clamp(res, max=FP16_MAX_POS)
+    return res
 
 
 @instantiate_parametrized_tests
@@ -55,7 +77,7 @@ class TestFP8Types(TestCase):
             )
             a_inverse_scale = 1 / a_scale
             b_inverse_scale = 1 / b_scale
-            output, updated_amax = torch._scaled_mm(
+            output = torch._scaled_mm(
                 x,
                 weight,
                 bias=input_bias,
@@ -302,6 +324,67 @@ class TestFP8Types(TestCase):
             f"Benchmark results: Inductor: {compiled_latency}ms, Eager: {eager_latency}ms, "
             f"LN only Inductor: {ln_latency}ms."
         )
+
+
+@instantiate_parametrized_tests
+class TestFP8Lowering(TestCase):
+    @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
+    @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
+    @parametrize("dtype", (torch.bfloat16,))
+    @parametrize("shape", ("16,16,32", "1024,1024,512"))
+    @parametrize("has_bias", (False, True))
+    def test_tensorwise_scaling(self, dtype: torch.dtype, shape: str, has_bias: bool):
+        device = "cuda"
+        dtype_float8 = torch.float8_e4m3fn
+        use_fast_accum = True 
+
+        shape = [int(dim) for dim in shape.split(",")]
+        M, K, N = shape  # Matmul Y = X [M, K] x W [N, K]
+        x = torch.rand(M, K, dtype=dtype, device=device)
+        w = torch.rand(N, K, dtype=dtype, device=device)
+
+        bias = None
+        if has_bias:
+            bias = torch.rand(N, device=device, dtype=torch.bfloat16)
+
+        # quantize weight (prior to inference)
+        weight_amax = torch.max(torch.abs(w))
+        weight_scale = _amax_to_scale(weight_amax, dtype_float8, w.dtype)
+        w_t_fp8 = _to_fp8_saturated(w * weight_scale, dtype_float8).t()
+        w_inverse_scale = weight_scale.reciprocal()
+
+        def linear(x, w_t_fp8, w_inverse_scale, bias):
+            # quantize input x
+            amax = torch.max(torch.abs(x))  # tensor-wise
+            scale = _amax_to_scale(amax, dtype_float8, x.dtype)
+            x_fp8 = _to_fp8_saturated(x * scale, dtype_float8)
+            x_inverse_scale = scale.reciprocal()
+
+            y = torch._scaled_mm(
+                x_fp8,
+                w_t_fp8,
+                x_inverse_scale,
+                w_inverse_scale,
+                bias,
+                out_dtype=dtype,
+                use_fast_accum=use_fast_accum,
+            )
+            return y
+
+        y_eager = linear(
+            x,
+            w_t_fp8,
+            w_inverse_scale,
+            bias,
+        )
+        linear_compiled = torch.compile(linear, backend="inductor", mode="max-autotune")
+        y_compiled = linear_compiled(
+            x,
+            w_t_fp8,
+            w_inverse_scale,
+            bias,
+        )
+        torch.testing.assert_close(y_eager, y_compiled, rtol=5e-1, atol=5e-1)
 
 
 if __name__ == "__main__":
