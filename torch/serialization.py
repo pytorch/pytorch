@@ -1103,16 +1103,6 @@ def load(
             )
     else:
         if pickle_module is None:
-            warnings.warn(
-                "You are using `torch.load` with `weights_only=False`, which uses the default pickle module "
-                "implicitly. It is possible to construct malicious pickle data which will execute arbitrary code "
-                "during unpickling. In a future release, the default value for `weights_only` will be flipped to "
-                " `True`. This limits the functions that could be executed during unpickling to those needed "
-                "to rebuild state_dicts of nn.Module, Optimizers, and LRSchedulers. In particular, tensors, "
-                "primitive types and dictionaries. Arbitrary objects will no longer be allowed to be loaded via "
-                "this mode unless they are allowlisted via `torch.serialization.add_safe_globals`.",
-                FutureWarning,
-            )
             pickle_module = pickle
 
     # make flipping default BC-compatible
