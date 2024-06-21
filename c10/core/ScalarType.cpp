@@ -224,6 +224,8 @@ const std::unordered_map<std::string, ScalarType>& getStringToDtypeMap() {
   auto all_scalar_types = {
       AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_SCALAR_TYPE)};
 
+#undef DEFINE_SCALAR_TYPE
+
   for (auto scalar_type : all_scalar_types) {
     auto names = getDtypeNames(scalar_type);
     result[std::get<0>(names)] = scalar_type;

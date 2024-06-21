@@ -17,6 +17,8 @@ void initializeDtypes() {
   auto all_scalar_types = {
       AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_SCALAR_TYPE)};
 
+#undef DEFINE_SCALAR_TYPE
+
   for (at::ScalarType scalarType : all_scalar_types) {
     auto [primary_name, legacy_name] = c10::getDtypeNames(scalarType);
     PyObject* dtype = THPDtype_New(scalarType, primary_name);
