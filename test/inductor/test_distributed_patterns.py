@@ -78,7 +78,7 @@ def init_fake_distributed():
     m = nn.Linear(20, 10, bias=False)
 
     # Mimics eager 1st iteration
-    m.sharded_weight = nn.Parameter(reduce_scatter(m.weight))  # already sharded after this line
+    m.sharded_weight = nn.Parameter(reduce_scatter(m.weight))
     m.unsharded_weight = nn.Parameter(all_gather(m.sharded_weight))
     m.unsharded_weight.untyped_storage().resize_(0)
     del m.weight
