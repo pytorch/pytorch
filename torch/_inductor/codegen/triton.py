@@ -2401,7 +2401,6 @@ class TritonKernel(SIMDKernel):
             "autotune_local_cache": config.autotune_local_cache,
             "autotune_pointwise": config.triton.autotune_pointwise,
             "autotune_remote_cache": config.autotune_remote_cache,
-            "force_disable_caches": config.force_disable_caches,
             "dynamic_scale_rblock": config.dynamic_scale_rblock,
             "max_autotune": config.max_autotune,
             "max_autotune_pointwise": config.max_autotune_pointwise,

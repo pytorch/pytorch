@@ -145,6 +145,13 @@ def cache_dir() -> str:
 
 
 def default_cache_dir():
+    from torch._inductor import config
+
+    # We can't directly disable Triton's file cache, so we ensure an empty cache
+    # by pointing the default root directory to a temp directory.
+    if config.force_disable_caches:
+        return tempfile.mkdtemp()
+
     sanitized_username = re.sub(r'[\\/:*?"<>|]', "_", getpass.getuser())
     return os.path.join(
         tempfile.gettempdir(),

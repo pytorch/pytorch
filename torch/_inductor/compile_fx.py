@@ -48,7 +48,6 @@ from torch._inductor.debug import save_args_for_compile_fx_inner
 from torch._inductor.utils import (
     BoxedBool,
     count_tangents,
-    fresh_inductor_cache,
     should_assume_input_aligned,
     tensor_is_aligned,
 )
@@ -420,15 +419,6 @@ def get_patched_config_dict(config_patches=None) -> Dict[str, Any]:
         return config.get_config_copy()
 
 
-@functools.wraps
-def with_fresh_cache_if_config(f):
-    if config.force_disable_caches:
-        with fresh_inductor_cache():
-            return f
-    else:
-        return f
-
-
 @DebugContext.wrap
 @torch.utils._python_dispatch._disable_current_modes()
 @time_and_log(attr="compilation time (in seconds)")
@@ -437,7 +427,6 @@ def with_fresh_cache_if_config(f):
 # compile_fx return and we may want to use the _LazyGraphModule for compiling
 # the backward graph as well.
 @_use_lazy_graph_module(dynamo_config.use_lazy_graph_module)
-@with_fresh_cache_if_config
 @dynamo_utils.dynamo_timed(phase_name="inductor_compile", fwd_only=False)
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
@@ -514,11 +503,7 @@ def compile_fx_inner(
 
     fx_graph_remote_cache = should_use_remote_fx_graph_cache()
     inputs_to_check = get_input_idxs_to_check(example_inputs, static_input_idxs)
-    if (
-        not config.force_disable_caches
-        and (config.fx_graph_cache or fx_graph_remote_cache)
-        and not aot_mode
-    ):
+    if (config.fx_graph_cache or fx_graph_remote_cache) and not aot_mode:
         for i, input in enumerate(example_inputs):
             if (
                 isinstance(input, torch.Tensor)
