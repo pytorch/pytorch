@@ -97,7 +97,10 @@ def _clear_safe_globals():
 def _get_user_allowed_globals():
     rc: Dict[str, Any] = {}
     for f in _marked_safe_globals_list:
-        rc[f"{f.__module__}.{f.__name__}"] = f
+        module, name = f.__module__, f.__name__
+        if module == "builtins":
+            module = "__builtin__"
+        rc[f"{module}.{name}"] = f
     return rc
 
 
@@ -196,6 +199,8 @@ class Unpickler:
                 elif full_path in _get_user_allowed_globals():
                     self.append(_get_user_allowed_globals()[full_path])
                 else:
+                    if module == "__builtin__":
+                        full_path = f"builtins.{name}"
                     raise RuntimeError(
                         f"Unsupported global: GLOBAL {full_path} was not an allowed global by default. "
                         "Please use `torch.serialization.add_safe_globals` to allowlist this global "

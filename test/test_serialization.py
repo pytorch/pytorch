@@ -15,6 +15,7 @@ import pickle
 import shutil
 import pathlib
 import platform
+import builtins
 from collections import OrderedDict
 from copy import deepcopy
 from itertools import product
@@ -1040,8 +1041,14 @@ class TestSerialization(TestCase, SerializationMixin):
             self.assertIsNone(torch.load(f, weights_only=False))
             f.seek(0)
             # Safe load should assert
-            with self.assertRaisesRegex(pickle.UnpicklingError, "Unsupported global: GLOBAL __builtin__.print"):
+            with self.assertRaisesRegex(pickle.UnpicklingError, "Unsupported global: GLOBAL builtins.print"):
                 torch.load(f, weights_only=True)
+            try:
+                torch.serialization.add_safe_globals([builtins.print])
+                f.seek(0)
+                torch.load(f, weights_only=True)
+            finally:
+                torch.serialization.clear_safe_globals()
 
     @parametrize('weights_only', (False, True))
     def test_serialization_math_bits(self, weights_only):
