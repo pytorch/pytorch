@@ -3276,19 +3276,18 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
     if isinstance(src, Number):
         src = full_like(self, src)
 
-    if reduce is not None:
-        fallback_result = scatter_fallback(
-            aten.scatter_reduce_.two,
-            self,
-            dim,
-            index,
-            src,
-            reduce=reduce,
-            include_self=include_self,
-        )
+    fallback_result = scatter_fallback(
+        aten.scatter_reduce_.two,
+        self,
+        dim,
+        index,
+        src,
+        reduce=reduce,
+        include_self=include_self,
+    )
 
-        if fallback_result:
-            return fallback_result
+    if fallback_result:
+        return fallback_result
 
     assert isinstance(self, TensorBox)
     assert "int" in str(index.get_dtype())
