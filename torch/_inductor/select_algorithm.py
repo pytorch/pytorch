@@ -102,8 +102,6 @@ class PartialRender:
         return self.code
 
 
-# This is used to store info needed for lowering each subgraph in triton
-# templates
 SubgraphInfo = namedtuple(
     "SubgraphInfo",
     [
@@ -1578,11 +1576,8 @@ class AlgorithmSelectorCache(PersistentCache):
         for choice in top_k:
             result = timings[choice]
             if result:
-                kernel_info = (
-                    choice.debug_extra if hasattr(choice, "debug_extra") else ""
-                )
                 sys.stderr.write(
-                    f"  {choice.name} {result:.4f} ms {best_time / result:.1%} {kernel_info}\n"
+                    f"  {choice.name} {result:.4f} ms {best_time / result:.1%}\n"
                 )
             else:
                 sys.stderr.write(
