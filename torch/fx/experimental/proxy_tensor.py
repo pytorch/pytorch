@@ -50,8 +50,8 @@ if TYPE_CHECKING:
     import types
 
     from torch._ops import OpOverload
-    from torch._prims_common import IntLikeType
     from torch.fx._symbolic_trace import PHBase
+    from torch.types import IntLikeType
 
 __all__ = ["PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpreter", "py_sym_types", "get_innermost_proxy_mode"]
 
@@ -429,17 +429,17 @@ def track_tensor_tree(
         if isinstance(proxy_res, fx.Proxy):
             set_meta(proxy_res, inner_res)
 
-        def get_constant(idx: int) -> Optional[Tensor]:
-            if constant is None:
+        def get_constant(c: Optional[List[Tensor]], idx: int) -> Optional[Tensor]:
+            if c is None:
                 return None
             else:
-                return constant[idx]
+                return c[idx]
 
         # Use an indexer here - if proxy_res is a List then it will unwrap
         # it. If it's a Proxy then it will proxy the getelem.
-        assert not constant or isinstance(constant, list)
+        assert constant is None or isinstance(constant, list)
         for idx, ee in enumerate(inner_res):
-            wrap_with_proxy(ee, proxy_res[idx], get_constant(idx))  # type: ignore[index]
+            wrap_with_proxy(ee, proxy_res[idx], get_constant(constant, idx))  # type: ignore[index]
 
     elif isinstance(inner_res, dict):
         # example use case: triton_kernel_wrapper takes arguments as kwargs
@@ -460,8 +460,8 @@ def track_tensor_tree(
 
     else:
         assert isinstance(proxy_res, Proxy)
-        assert not constant or isinstance(constant, Tensor)
-        wrap_with_proxy(inner_res, proxy_res, typing.cast(Optional[Tensor], constant))
+        assert constant is None or isinstance(constant, Tensor), type(constant)
+        wrap_with_proxy(inner_res, proxy_res, constant)
 
     return inner_res
 
@@ -723,7 +723,7 @@ def proxy_call(
         and out.numel() <= CONSTANT_NUMEL_LIMIT
     ):
         with maybe_disable_fake_tensor_mode():
-            assert isinstance(args[0], Proxy)
+            assert isinstance(args[0], (Proxy, Tensor)), type(args[0])
             constant = args[0].clone()
     elif (
         torch.Tag.nondeterministic_seeded not in func.tags
