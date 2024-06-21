@@ -212,7 +212,7 @@ class Unpickler:
                 if cls is torch.nn.Parameter:
                     self.append(torch.nn.Parameter(*args))
                 elif cls in _get_user_allowed_globals().values():
-                    self.append(cls(*args))
+                    self.append(cls.__new__(cls, *args))
                 else:
                     raise RuntimeError(f"Trying to instantiate unsupported class {cls}")
             elif key[0] == REDUCE[0]:
