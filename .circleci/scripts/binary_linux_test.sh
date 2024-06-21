@@ -100,13 +100,11 @@ elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
     if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
       pkg="$(ls -1 /final_pkgs/torch_no_python* | sort |tail -1)"
       # todo: after folder is populated use the pypi_pkg channel instead
-      # pip install "\$pkg" --index-url "https://download.pytorch.org/whl/\${CHANNEL}/${DESIRED_CUDA}_pypi_pkg"
-      pip install "\$pkg" --index-url "https://download.pytorch.org/whl/\${CHANNEL}/${DESIRED_CUDA}"
+      pip install "\$pkg" --index-url "https://download.pytorch.org/whl/\${CHANNEL}/${DESIRED_CUDA}_pypi_pkg"
       retry pip install -q numpy protobuf typing-extensions
       pkg="$(ls -1 /final_pkgs/torch-* | sort |tail -1)"
       # todo: after folder is populated use the pypi_pkg channel instead
-      # pip install "\$pkg" --index-url "https://download.pytorch.org/whl/\${CHANNEL}/${DESIRED_CUDA}_pypi_pkg"
-      pip install "\$pkg" --index-url "https://download.pytorch.org/whl/\${CHANNEL}/${DESIRED_CUDA}"
+      pip install "\$pkg" --index-url "https://download.pytorch.org/whl/\${CHANNEL}/${DESIRED_CUDA}_pypi_pkg"
       retry pip install -q numpy protobuf typing-extensions
     else
       pip install "\$pkg" --index-url "https://download.pytorch.org/whl/\${CHANNEL}/${DESIRED_CUDA}"
