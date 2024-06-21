@@ -298,6 +298,16 @@ endif()
 
 
 add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
+
+if(CAFFE2_USE_MKL AND BUILD_LIBTORCHLESS)
+
+  # Use the RPATH of the linked libraries
+  set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+  # we need to explicitly link caffe2::mkl in order to have the
+  # correct RPATH in torch_python for the split build
+  target_link_libraries(torch_python PRIVATE caffe2::mkl)
+endif()
+
 add_dependencies(torch_python onnx_proto)
 # Avoid numpy for the DEPLOY build
 if(USE_NUMPY)

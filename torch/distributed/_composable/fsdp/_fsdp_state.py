@@ -14,11 +14,9 @@ from torch.distributed._composable_state import (
 )
 from torch.distributed.utils import _to_kwargs
 from torch.utils._pytree import tree_flatten, tree_map
-
 from ._fsdp_api import MixedPrecisionPolicy
 from ._fsdp_common import _cast_fp_tensor, TrainingState
 from ._fsdp_param_group import FSDPCommContext, FSDPParamGroup
-
 
 if TYPE_CHECKING:
     from ._fsdp_param import FSDPParam
