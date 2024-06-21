@@ -134,13 +134,6 @@ H = 8
 S = 2048
 D = 64
 
-test_input_strides = [
-    ((8*2048*64, 2048*64, 64, 1), 997),                    # offset
-    ((8*64, 64, 4*8*64, 1), 499),                          # transposed dimensions
-    ((2048*(64+1), 4*2048*(64+1), (64+1), 1), 293),        # additional buffer on one dim
-    ((1, 64, (4 + 1)*(8 + 1)*64, 1), 97),                  # additional buffer on multiple dim + shared dimension
-]
-
 
 def query_key_value_clones(
     query: torch.Tensor,
@@ -464,6 +457,14 @@ class TestFlexAttention(InductorTestCase):
         )
 
 
+    test_input_strides = [
+        ((B*S*D     ,S*D        ,D              ,1) ,997),                      # offset
+        ((H*D       ,D          ,B*H*D          ,1) ,499),                      # transposed dimensions
+        ((S*(D+1)   ,B*S*(D+1)  ,(D+1)          ,1) ,293),                      # additional buffer on one dim
+        ((1         ,D          ,(B+1)*(H+1)*D  ,1) ,97),                # additional buffer on multiple dim + shared dimension
+    ]
+
+
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("q_s", test_input_strides)
@@ -482,14 +483,14 @@ class TestFlexAttention(InductorTestCase):
         q_strides, q_offset = q_s
         q_max = [ x*(y-1) for x, y in zip(q_strides, q_shape) ]
         assert sum(q_max) + q_offset < B*H*S*D*2
-        assert q_strides[-1] == 1    
+        assert q_strides[-1] == 1
         q = torch.as_strided(q1, q_shape, q_strides, q_offset)
 
 
-        k_strides, k_offset = k_s    
+        k_strides, k_offset = k_s
         k_max = [ x*(y-1) for x, y in zip(k_strides, k_shape) ]
         assert sum(k_max) + k_offset < B*H*S*D*2
-        assert k_strides[-1] == 1      
+        assert k_strides[-1] == 1
         k = torch.as_strided(k1, k_shape, k_strides, k_offset)
 
 
