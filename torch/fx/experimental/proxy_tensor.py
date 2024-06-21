@@ -105,18 +105,18 @@ def decompose(decomposition_table: Optional[Mapping[OpOverload, Callable]]) -> G
 # ensure we cannot collide with other properties
 proxy_slot = object()
 
-class NoDefault:
+class _NoDefault:
     pass
 
-no_default = NoDefault()
+no_default = _NoDefault()
 
 py_sym_types = (SymInt, SymFloat, SymBool)
 PySymType = Union[SymInt, SymFloat, SymBool]
 
-class HasMeta(Protocol):
+class _HasMeta(Protocol):
     meta: Dict[str, PySymType]
 
-def is_sym_node(node: HasMeta) -> bool:
+def is_sym_node(node: _HasMeta) -> bool:
     assert hasattr(node, 'meta'), "All nodes traced with proxy_tensor should have meta"
     return "val" in node.meta and isinstance(node.meta['val'], py_sym_types)
 
@@ -271,9 +271,8 @@ def get_proxy_slot(
         tracker = tracer.symnode_tracker
 
     if obj not in tracker:
-        if isinstance(default, NoDefault):
+        if isinstance(default, _NoDefault):
             raise RuntimeError(f"{obj} is not tracked with proxy for {tracer}")
-        assert isinstance(default, (_ProxyTensor, Proxy, Tensor))
         return default
     value = tracker[obj]
     res = transform(value)
@@ -378,91 +377,76 @@ def track_tensor(tensor: Tensor, proxy: Proxy, *, constant: Optional[Tensor], tr
     )
     set_proxy_slot(tensor, tracer, _ProxyTensor(proxy, constant))
 
-@overload
+_NestedProxys = Union[Proxy, Sequence["_NestedProxys"], Mapping[object, "_NestedProxys"]]
+_NestedTensors = Union[Tensor, Sequence["_NestedTensors"], Mapping[object, "_NestedTensors"]]
+
 def track_tensor_tree(
         inner_res: T,
-        proxy_res: Proxy,
+        proxy_res: _NestedProxys,
         *,
-        constant: Optional[Tensor],
+        constant: Optional[_NestedTensors],
         tracer: _ProxyTracer
 ) -> T:
-    ...
-
-@overload
-def track_tensor_tree(
-        inner_res: List[T],
-        proxy_res: List[Proxy],
-        *,
-        constant: Optional[List[Tensor]],
-        tracer: _ProxyTracer
-) -> List[T]:
-    ...
-
-def track_tensor_tree(
-        inner_res: object,
-        proxy_res: Union[Proxy, List[Proxy]],
-        *,
-        constant: Optional[Union[Tensor, List[Tensor]]],
-        tracer: _ProxyTracer
-) -> object:
     _set_unbacked_bindings(inner_res, proxy_res)
 
-    def wrap_with_proxy(e: object, proxy: Proxy, constant: Optional[Tensor]) -> None:
+    def wrap_with_proxy(e: object, proxy: _NestedProxys, constant: Optional[_NestedTensors]) -> None:
         if isinstance(e, Tensor):
+            assert isinstance(proxy, Proxy)
+            assert constant is None or isinstance(constant, Tensor)
             track_tensor(e, proxy, tracer=tracer, constant=constant)
             set_meta(proxy, e)
         elif isinstance(e, py_sym_types):
+            assert isinstance(proxy, Proxy)
             # NB: eagerly set meta here, so that the numbering is in order
             set_meta(proxy, e)
             set_proxy_slot(e, tracer, lambda: proxy)
         elif isinstance(e, _AnyScriptObject):
+            assert isinstance(proxy, Proxy)
             set_proxy_slot(e, tracer, proxy)
             set_meta(proxy, e)
+        elif isinstance(e, (tuple, list)):
+            # example use case: allreduce_ returns ([tensor], work)
+            if isinstance(proxy, fx.Proxy):
+                set_meta(proxy, e)
+
+            def get_constant(c: Optional[_NestedTensors], idx: int) -> Optional[_NestedTensors]:
+                if c is None:
+                    return None
+                else:
+                    assert isinstance(c, (list, tuple))
+                    return c[idx]
+
+            for idx, ee in enumerate(e):
+                # Use an indexer here - if proxy is a List then it will unwrap
+                # it. If it's a Proxy then it will proxy the getelem.
+                wrap_with_proxy(ee, proxy[idx], get_constant(constant, idx))  # type: ignore[index]
+
+        elif isinstance(e, dict):
+            # example use case: triton_kernel_wrapper takes arguments as kwargs
+
+            # In theory we could support const-prop when proxy-tensor-tracing
+            # operators that returns dicts of tensors, but we have no use case
+            # for it today (since the only op we currently trace that can
+            # return a dict is triton_kernel_wrapper_functional/mutation,
+            # which does not participate in const-prop)
+            assert constant is None
+
+            # if isinstance(proxy, fx.Proxy):
+            #    # BUG? This is guaranteed to be a no-op
+            #    set_meta(proxy, e)
+
+            for key, val in e.items():
+                wrap_with_proxy(val, proxy[key], None)  # type: ignore[index]
+
         elif isinstance(e, BackwardState):
+            assert isinstance(proxy, Proxy)
             set_meta(proxy, e)
             e.proxy = proxy
         else:
             # intentionally pass on primitives
             pass
 
-    if isinstance(inner_res, (tuple, list)):
-        # example use case: allreduce_ returns ([tensor], work)
-        if isinstance(proxy_res, fx.Proxy):
-            set_meta(proxy_res, inner_res)
-
-        def get_constant(c: Optional[List[Tensor]], idx: int) -> Optional[Tensor]:
-            if c is None:
-                return None
-            else:
-                return c[idx]
-
-        # Use an indexer here - if proxy_res is a List then it will unwrap
-        # it. If it's a Proxy then it will proxy the getelem.
-        assert constant is None or isinstance(constant, list)
-        for idx, ee in enumerate(inner_res):
-            wrap_with_proxy(ee, proxy_res[idx], get_constant(constant, idx))  # type: ignore[index]
-
-    elif isinstance(inner_res, dict):
-        # example use case: triton_kernel_wrapper takes arguments as kwargs
-
-        # In theory we could support const-prop when proxy-tensor-tracing
-        # operators that returns dicts of tensors, but we have no use case
-        # for it today (since the only op we currently trace that can
-        # return a dict is triton_kernel_wrapper_functional/mutation,
-        # which does not participate in const-prop)
-        assert constant is None
-
-        # if isinstance(proxy_res, fx.Proxy):
-        #    # BUG? This is guaranteed to be a no-op
-        #    set_meta(proxy_res, inner_res)
-
-        for key, val in inner_res.items():
-            wrap_with_proxy(val, proxy_res[key], None)  # type: ignore[index]
-
-    else:
-        assert isinstance(proxy_res, Proxy)
-        assert constant is None or isinstance(constant, Tensor), type(constant)
-        wrap_with_proxy(inner_res, proxy_res, constant)
+    wrap_with_proxy(inner_res, proxy_res, constant)
 
     return inner_res
 
@@ -1276,7 +1260,7 @@ class _ModuleNotInstalledAsSubmoduleError(NameError):
     pass
 
 
-class AttrProxy:
+class _AttrProxy:
     def __init__(self, tracer: _ModuleStackTracer, base: Module, path: str) -> None:
         self.__class__ = type(
             base.__class__.__name__,
@@ -1290,22 +1274,22 @@ class AttrProxy:
         tracer.proxy_modules[self] = base
         self.tracer = tracer
 
-    def __getattr__(self, name: str) -> AttrProxy:
+    def __getattr__(self, name: str) -> _AttrProxy:
         assert isinstance(self, Module)
         attr_val = super().__getattr__(name)
-        if isinstance(attr_val, AttrProxy):
+        if isinstance(attr_val, _AttrProxy):
             attr_val = self.tracer.proxy_modules[attr_val]
         elif not isinstance(attr_val, Module):
             return attr_val
-        return AttrProxy(attr_val, self.tracer.proxy_paths[self] + "." + name)
+        return _AttrProxy(self.tracer, attr_val, self.tracer.proxy_paths[self] + "." + name)
 
     @property
-    def _modules(self) -> Dict[str, AttrProxy]:
+    def _modules(self) -> Dict[str, _AttrProxy]:
         assert "_modules" in self.__dict__
         submodules = self.__dict__["_modules"]
         assert isinstance(submodules, dict)
         return {
-            key: AttrProxy(self.tracer, value, self.tracer.proxy_paths[self] + "." + str(key))
+            key: _AttrProxy(self.tracer, value, self.tracer.proxy_paths[self] + "." + str(key))
             for key, value in submodules.items()
         }
 
@@ -1332,8 +1316,8 @@ class _ModuleStackTracer(PythonKeyTracer):
     def __init__(self, scope_root: GraphModule) -> None:
         super().__init__()
         self.scope_root = scope_root
-        self.proxy_paths: WeakKeyDictionary[AttrProxy, str] = WeakKeyDictionary()
-        self.proxy_modules: WeakKeyDictionary[AttrProxy, Module] = WeakKeyDictionary()
+        self.proxy_paths: WeakKeyDictionary[_AttrProxy, str] = WeakKeyDictionary()
+        self.proxy_modules: WeakKeyDictionary[_AttrProxy, Module] = WeakKeyDictionary()
         self.counter = 0
 
         self.module_id_cache = defaultdict(list)
@@ -1348,7 +1332,7 @@ class _ModuleStackTracer(PythonKeyTracer):
         if mod is self.scope_root:
             return ""
 
-        if isinstance(mod, AttrProxy):
+        if isinstance(mod, _AttrProxy):
             return self.proxy_paths[mod]
 
         try:
@@ -1359,9 +1343,9 @@ class _ModuleStackTracer(PythonKeyTracer):
     def getattr(self, attr: str, attr_val: object, parameter_proxy_cache: Dict[str, Proxy]) -> object:
         if not isinstance(attr_val, Module) or isinstance(attr_val, fx.GraphModule):
             return super().getattr(attr, attr_val, parameter_proxy_cache)
-        if isinstance(attr_val, AttrProxy):
+        if isinstance(attr_val, _AttrProxy):
             return attr_val
-        return AttrProxy(self, attr_val, attr)
+        return _AttrProxy(self, attr_val, attr)
 
     def trace(
             self,
@@ -1369,12 +1353,12 @@ class _ModuleStackTracer(PythonKeyTracer):
             concrete_args: Optional[Dict[str, object]]
     ) -> fx.Graph:
         res = super().trace(root, concrete_args)
-        # Since we are making AttrProxy mimic the original
+        # Since we are making _AttrProxy mimic the original
         # submodule, when someone registers a module directly
         # to the tracer while tracing, the proxy object gets registered
         # first. So we need to replace the proxy modules with the real ones
         # This can happen during HOO tracing
-        proxy_module_names_to_be_replaced: List[Tuple[str, AttrProxy]] = []
+        proxy_module_names_to_be_replaced: List[Tuple[str, _AttrProxy]] = []
         for name, module in self.root.named_modules():
             if module in self.proxy_modules:
                 proxy_module_names_to_be_replaced.append((name, module))
@@ -1395,14 +1379,14 @@ class _ModuleStackTracer(PythonKeyTracer):
 
                 mod = getattr(mod, item)
 
-                if not isinstance(mod, (AttrProxy, Module)):
+                if not isinstance(mod, (_AttrProxy, Module)):
                     return False
 
             if not hasattr(mod, target_submod):
                 return False
 
             # At least the leaf module should be proxy type.
-            if not isinstance(getattr(mod, target_submod), AttrProxy):
+            if not isinstance(getattr(mod, target_submod), _AttrProxy):
                 return False
 
             delattr(mod, target_submod)
@@ -1828,7 +1812,7 @@ def get_isolated_graphmodule(
     return gm
 
 
-def _set_unbacked_bindings(out: Union[object, List[object]], out_proxy: Union[Proxy, List[Proxy]]) -> None:
+def _set_unbacked_bindings(out: object, out_proxy: _NestedProxys) -> None:
     """A helper function for setting up unbacked_bindings on the destination FX graph."""
     from .symbolic_shapes import compute_unbacked_bindings
 
