@@ -76,7 +76,6 @@ def mps_ops_grad_modifier(ops):
     XFAILLIST_GRAD = {
 
         # precision issues
-        'digamma': [torch.float32],
         'special.polygammaspecial_polygamma_n_0': [torch.float16],
         'polygammapolygamma_n_0': [torch.float16],
         'nn.functional.binary_cross_entropy': [torch.float16],
@@ -94,8 +93,8 @@ def mps_ops_grad_modifier(ops):
         'cdist': [torch.float32],
         'masked.scatter': [torch.float16, torch.float32],
         'index_fill': [torch.float16, torch.float32],  # missing `aten::_unique`.
+        'linalg.lu_factor': [torch.float16, torch.float32],  # missing `aten::lu_unpack`.
         'aminmax': [torch.float32, torch.float16],
-        'polar': [torch.float32],
 
         # Correctness issues
         'atanh': [torch.float32],
@@ -569,7 +568,6 @@ def mps_ops_modifier(ops):
         'special.ndtr': [torch.uint8],
         'sqrt': [torch.uint8],
         'sub': [torch.uint8],
-        'tanh': [torch.uint8],
         'trapezoid': [torch.uint8],
         'trapz': [torch.uint8],
         'true_divide': [torch.uint8],
@@ -586,28 +584,13 @@ def mps_ops_modifier(ops):
         'square': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
 
         # cpu not giving nan for x/0.0
-        'atan2': [torch.bool, torch.float16, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'atan2': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
 
         # inconsistency errors between cpu and mps, max seen atol is 2
         'nn.functional.interpolatebilinear': [torch.uint8],
     }
 
     MACOS_BEFORE_13_3_XFAILLIST = {
-        # Failure due to precision issues (still present on 13.3+) as well as non-standard behavior of
-        # cpu ops for the negative integers.
-        # Example for torch.polygamma(1, tensor([-0.9, -1.0], dtype=torch.float32)):
-        # - CPU output: tensor([102.668, 1.129e+15])
-        # - MPS output: tensor([102.6681, inf])
-        # In the latter case, inf is probably correct (this is what scipy does).
-        'polygamma': [torch.float32, torch.uint8],
-        'polygammapolygamma_n_0': [torch.float32, torch.int16, torch.int8],
-        'polygammapolygamma_n_2': [torch.float32, torch.int16, torch.int8],
-        'polygammapolygamma_n_1': [torch.float32, torch.int16, torch.int8],
-        'polygammapolygamma_n_3': [torch.float32, torch.int16, torch.int8],
-        'polygammapolygamma_n_4': [torch.float32, torch.int16, torch.int8],
-        'special.polygamma': [torch.float32, torch.int16, torch.int32, torch.int8],
-        'special.polygammaspecial_polygamma_n_0': [torch.float32, torch.int16, torch.int8],
-
         # Failures due to precision issues (due to fast-math). These has been fixed in MacOS 13.3+
         'tan': [torch.float32],
         'cdist': [torch.float32],
@@ -656,20 +639,6 @@ def mps_ops_modifier(ops):
         # Same issue as `argsort` with duplicate indices. This test checks both the sorted values and the indices.
         # The values of the sorted tensor match the CPU, but in case of the returned indices this results in undefined behaviour.
         'sort': [torch.int8, torch.uint8, torch.bool, torch.float16],
-
-        # Failure due to precision issues as well as non-standard behavior of cpu ops for the
-        # negative integers. Example for torch.polygamma(1, tensor([-0.9, -1.0], dtype=torch.float32)):
-        # - CPU output: tensor([102.668, 1.129e+15])
-        # - MPS output: tensor([102.6681, inf])
-        # In the latter case, inf is probably correct (this is what scipy does).
-        'polygamma': [torch.float32, torch.uint8],
-        'polygammapolygamma_n_0': [torch.float32, torch.int16, torch.int8],
-        'polygammapolygamma_n_2': [torch.float32, torch.int16, torch.int8],
-        'polygammapolygamma_n_1': [torch.float32, torch.int16, torch.int8],
-        'polygammapolygamma_n_3': [torch.float32, torch.int16, torch.int8],
-        'polygammapolygamma_n_4': [torch.float32, torch.int16, torch.int8],
-        'special.polygamma': [torch.float32, torch.int16, torch.int32, torch.int8],
-        'special.polygammaspecial_polygamma_n_0': [torch.float32, torch.int16, torch.int8],
     }
 
     MACOS_BEFORE_14_4_XFAILLIST = {
@@ -731,7 +700,6 @@ def mps_ops_modifier(ops):
         'linalg.lstsq': None,
         'linalg.lstsqgrad_oriented': None,
         'linalg.lu': None,
-        'linalg.lu_factor': None,
         'linalg.lu_factor_ex': None,
         'linalg.lu_solve': None,
         'linalg.matrix_norm': [torch.float32],
@@ -1616,6 +1584,14 @@ class TestMPS(TestCaseMPS):
             b = torch.arange(18, dtype=dtype, device=device) / 3 * math.pi
             a = torch.tensor(v, dtype=dtype, device="mps") * b
             self.compare_with_numpy(torch.exp, np.exp, a)
+
+    def test_triu_inf(self, device="mps", dtype=torch.float):
+        for diag in [-1, 0, 1]:
+            mask = torch.full((3, 6, 6), float("-inf"))
+            mask_mps = mask.clone().detach().to('mps')
+            cpu_ref = torch.triu(mask, diagonal=diag)
+            mps_out = torch.triu(mask_mps, diagonal=diag)
+            self.assertEqual(cpu_ref, mps_out)
 
     def test_exp1(self, device="mps", dtype=torch.float):
         input = torch.tensor([-0.1, 1.0, -0.9, 0.1], device=device, dtype=dtype)
