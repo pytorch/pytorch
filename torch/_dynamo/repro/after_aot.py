@@ -244,6 +244,8 @@ isolate_fails_code_str = None
         elif isinstance(arg, torch.Tensor):
             # TODO: improve these names with FQN
             writer.tensor(placeholder, arg)
+        elif isinstance(arg, torch.fx.experimental._backward_state.BackwardState):
+            writer.list(placeholder, arg)
         else:
             raise TypeError(f"arg is neither SymInt/int nor torch.Tensor, {arg}")
 
@@ -266,6 +268,9 @@ def save_graph_repro(
     tracing_mode=None,
     check_str=None,
 ):
+    if any(isinstance(arg, torch.fx.experimental._backward_state.BackwardState) for arg in args):
+        fd.write("Repro is not generated due to existence of BackwardState in graph input")
+        return
     fd.write(
         generate_compiler_repro_string(
             gm,
