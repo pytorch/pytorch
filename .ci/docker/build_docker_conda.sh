@@ -31,7 +31,7 @@ esac
     --build-arg "CUDA_VERSION=${CUDA_VERSION}" \
     --build-arg "DEVTOOLSET_VERSION=9" \
     -t "pytorch/conda-builder:${DOCKER_TAG}" \
-    -f "${TOPDIR}/conda/Dockerfile" \
+    -f "${TOPDIR}/.ci/docker/conda/Dockerfile" \
     ${TOPDIR}
 )
 
