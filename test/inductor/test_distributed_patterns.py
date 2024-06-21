@@ -19,16 +19,20 @@ RESIZE = True
 def init_fake_distributed():
     @torch.no_grad
     def all_gather(t):
-        return torch.cat([t] * WORLD_SIZE, 0)
+        return torch.cat([t] * WORLD_SIZE, 0).clone()
 
     @torch.no_grad
     def reduce_scatter(t):
-        return t.narrow(0, 0, t.size(0) // WORLD_SIZE)
+        return t.narrow(0, 0, t.size(0) // WORLD_SIZE).clone()
 
     def fw_pre_hook(mod, inp):
-        with torch.no_grad():
-            mod.og_weight = mod.weight
-            mod.weight = nn.Parameter(all_gather(mod.weight))
+        if not compiled_autograd.compiled_autograd_enabled:
+            mod.unsharded_weight.untyped_storage().resize_(
+                mod.unsharded_weight.nelement() * mod.unsharded_weight.element_size()
+            )
+        with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(mod.unsharded_weight):
+            torch.ops.fsdp.set_(mod.unsharded_weight, all_gather(mod.sharded_weight))
+        mod.weight = mod.unsharded_weight
 
     # Forward:
     #   Before:
@@ -38,26 +42,17 @@ def init_fake_distributed():
     #     mod.empty_weight  =zero-sized allgather
 
     def fw_post_hook(mod, inp, out):
-        if RESIZE:
-            # Drop the big weight
-            mod.weight.untyped_storage().resize_(0)
-        mod.empty_weight = mod.weight
-        mod.weight = mod.og_weight
-        del mod.og_weight
+        mod.weight = mod.sharded_weight
+        mod.unsharded_weight.untyped_storage().resize_(0)
 
     def bw_pre_hook(mod, gO):
-        if RESIZE:
-            mod.empty_weight.untyped_storage().resize_(
-                WORLD_SIZE * mod.weight.nelement() * mod.weight.element_size()
+        if not compiled_autograd.compiled_autograd_enabled:
+            mod.unsharded_weight.untyped_storage().resize_(
+                mod.unsharded_weight.nelement() * mod.unsharded_weight.element_size()
             )
-        mod.og_weight = mod.weight
-        full_weight = nn.Parameter(all_gather(mod.weight))
-        with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(
-            mod.empty_weight
-        ):
-            mod.empty_weight.copy_(full_weight)
-        mod.weight = mod.empty_weight
-        del mod.empty_weight
+        with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(mod.unsharded_weight):
+            torch.ops.fsdp.set_(mod.unsharded_weight, all_gather(mod.sharded_weight))
+        mod.weight = mod.unsharded_weight
 
     # Backward:
     #   Before:
@@ -69,15 +64,19 @@ def init_fake_distributed():
     def bw_post_hook(mod, gI, gO):
         grad = mod.weight.grad
         new_grad = reduce_scatter(grad)
-        # No need to re-empty the weight here, the graph has been cleared
-        # This removes the last reference to the big Tensor
-        mod.weight = mod.og_weight
-        del mod.og_weight
+        mod.weight = mod.sharded_weight
         mod.weight.grad = new_grad
+        mod.unsharded_weight.untyped_storage().resize_(0)
 
     torch.manual_seed(1234)
     m = nn.Linear(20, 10, bias=False)
-    m.weight = nn.Parameter(reduce_scatter(m.weight))
+
+    # Mimics eager 1st iteration
+    m.sharded_weight = nn.Parameter(reduce_scatter(m.weight))  # already sharded after this line
+    m.unsharded_weight = nn.Parameter(all_gather(m.sharded_weight))
+    m.unsharded_weight.untyped_storage().resize_(0)
+    del m.weight
+
     m.register_full_backward_pre_hook(bw_pre_hook)
     m.register_full_backward_hook(bw_post_hook)
     m.register_forward_pre_hook(fw_pre_hook)
@@ -443,6 +442,7 @@ class DistributedPatternTests(TestCase):
         self._assert_same_grad(inp1, inp2)
         self._assert_same_grad(out1, out2)
 
+    @torch._functorch.config.patch(recompute_views=True)
     def test_fake_distributed_aot_eager(self):
         m1, inp1 = init_fake_distributed()
         out1 = steps(m1, inp1)
