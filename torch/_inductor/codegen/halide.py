@@ -436,11 +436,13 @@ class HalideOverrides(OpOverrides):
 
     @staticmethod
     def isinf(x):
-        return f"hl.is_inf({x})"
+        # workaround https://github.com/halide/Halide/issues/8309
+        return f"hl.is_inf(hl.cast(hl.Float(32), {x}))"
 
     @staticmethod
     def isnan(x):
-        return f"hl.is_nan({x})"
+        # workaround https://github.com/halide/Halide/issues/8309
+        return f"hl.is_nan(hl.cast(hl.Float(32), {x}))"
 
     @staticmethod
     def round(x):
