@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import logging
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
@@ -179,7 +180,6 @@ class CUDATemplateKernel(CUDAKernel):
         wrapper.generate_kernel_call(
             name,
             call_args,
-            device_index=V.graph.scheduler.current_device.index,
             cuda=True,
             triton=False,
             arg_types=arg_types,

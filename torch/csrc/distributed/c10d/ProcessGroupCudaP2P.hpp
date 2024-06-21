@@ -10,6 +10,7 @@ constexpr auto kProcessGroupCudaP2PDefaultTimeout =
 
 namespace c10d {
 
+// NOTE: this class will be be removed soon in favor of SymmetricMemory
 class TORCH_API ProcessGroupCudaP2P : public Backend {
  public:
   struct Options : Backend::Options {
