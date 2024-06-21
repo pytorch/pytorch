@@ -529,7 +529,6 @@ class ScheduleTest(MultiProcContinousTest):
             full_mod.get_submodule(submod_name) for submod_name in submod_names
         ]
 
-
         class CustomState:
             def __init__(self):
                 self.i = 0
@@ -545,6 +544,7 @@ class ScheduleTest(MultiProcContinousTest):
                     self.i += 1
 
                 return dw_runner
+
         cs = CustomState()
 
         # Create a pipeline stage to wrap that submodule
