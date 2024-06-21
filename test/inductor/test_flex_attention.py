@@ -134,6 +134,13 @@ H = 8
 S = 2048
 D = 64
 
+test_input_strides = [
+    ((8*2048*64, 2048*64, 64, 1), 997),                    # offset
+    ((8*64, 64, 4*8*64, 1), 499),                          # transposed dimensions
+    ((2048*(64+1), 4*2048*(64+1), (64+1), 1), 293),        # additional buffer on one dim
+    ((1, 64, (4 + 1)*(8 + 1)*64, 1), 97),                  # additional buffer on multiple dim + shared dimension
+]
+
 
 def query_key_value_clones(
     query: torch.Tensor,
@@ -455,41 +462,44 @@ class TestFlexAttention(InductorTestCase):
             S,
             D,
         )
-    
-        
-    @supported_platform
-    @common_utils.parametrize("dtype", test_dtypes)
-    @common_utils.parametrize("score_mod", [_identity, _causal])
-    def test_strided_inputs(self, dtype: torch.dtype, score_mod: Callable):
-        q_shape = (B, S, H*D)
-        kv_shape = (B, S, H*D)
-        
-        make_q = functools.partial(
-            torch.rand, q_shape, device="cuda", dtype=dtype, requires_grad=False
-        )
-        make_kv = functools.partial(
-            torch.rand, kv_shape, device="cuda", dtype=dtype, requires_grad=False
-        )
-        
-        q = (
-            make_q()
-            .view(B, S, D, H)
-            .transpose(2, 3)
-            .transpose(1, 2)
-        )
-        k = (
-            make_kv()
-            .view(H, B, S, D)
-            .transpose(0, 1)
-        )
-        v = (
-            make_kv()
-            .view(B, S, D, H)
-            .transpose(2, 3)
-            .transpose(1, 2)
-        )
 
-        sdpa_partial = create_attention(score_mod)
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.parametrize("q_s", test_input_strides)
+    @common_utils.parametrize("k_s", test_input_strides)
+    @common_utils.parametrize("v_s", test_input_strides)
+    def test_strided_inputs(self, dtype: torch.dtype, q_s, k_s, v_s):
+        q1 = torch.randn((B*H*S*D*2), dtype=dtype, device="cuda")
+        k1 = torch.randn((B*H*S*D*2), dtype=dtype, device="cuda")
+        v1 = torch.randn((B*H*S*D*2), dtype=dtype, device="cuda")
+
+        q_shape = (B, H, S//2, D)
+        k_shape = (B, H, S, D)
+        v_shape = (B, H, S, D)
+
+
+        q_strides, q_offset = q_s
+        q_max = [ x*(y-1) for x, y in zip(q_strides, q_shape) ]
+        assert sum(q_max) + q_offset < B*H*S*D*2
+        assert q_strides[-1] == 1    
+        q = torch.as_strided(q1, q_shape, q_strides, q_offset)
+
+
+        k_strides, k_offset = k_s    
+        k_max = [ x*(y-1) for x, y in zip(k_strides, k_shape) ]
+        assert sum(k_max) + k_offset < B*H*S*D*2
+        assert k_strides[-1] == 1      
+        k = torch.as_strided(k1, k_shape, k_strides, k_offset)
+
+
+        v_strides, v_offset = v_s
+        v_max = [ x*(y-1) for x, y in zip(v_strides, v_shape)]
+        assert sum(v_max) + v_offset < B*H*S*D*2
+        assert v_strides[-1] == 1
+        v = torch.as_strided(v1, v_shape, v_strides, v_offset)
+
+        sdpa_partial = create_attention(score_mod=_generate_alibi_bias(8))
         compiled_sdpa = torch.compile(sdpa_partial)
         ref_out = sdpa_partial(q, k, v)
         compiled_out = compiled_sdpa(q, k, v)
