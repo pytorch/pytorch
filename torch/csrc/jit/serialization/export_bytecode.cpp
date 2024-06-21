@@ -32,7 +32,7 @@
 
 namespace torch::jit {
 
-static std::vector<Method> gatherGetSetStates(ObjectPtr obj) {
+static std::vector<Method> gatherGetSetStates(const ObjectPtr& obj) {
   std::vector<Method> methods;
   // Use DFS on IValue's to traverse dependencies of module._ivalue and
   // add all setstate/getstates to initial stack.
