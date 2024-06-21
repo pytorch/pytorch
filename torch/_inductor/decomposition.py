@@ -332,9 +332,9 @@ def angle(x):
 
 @register_decomposition([aten.add])
 def add(x, y, *, alpha=None):
-    x_is_complex_tensor = torch.is_tensor(x) and x.is_complex()
-    y_is_complex_tensor = torch.is_tensor(y) and y.is_complex()
-    if not x_is_complex_tensor and not y_is_complex_tensor:
+    if not torch.is_tensor(x) or not torch.is_tensor(y):
+        return NotImplemented
+    if not x.is_complex() and not y.is_complex():
         return NotImplemented
     z = y
     if alpha is not None:
