@@ -74,6 +74,7 @@ def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
         if param.default is inspect.Parameter.empty:
             params.append(f"{schema_type} {name}")
         else:
+            default_repr = None
             if param.default is None or isinstance(param.default, (int, float, bool)):
                 default_repr = str(param.default)
             elif isinstance(param.default, str):
