@@ -51,6 +51,11 @@ try:
 except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
 
+try:
+    from torch.distributed._composable.fsdp import _fsdp_param_group
+except ModuleNotFoundError:
+    _fsdp_param_group = None  # type: ignore[assignment]
+
 log = logging.getLogger(__name__)
 
 supported_ctx_manager_classes = dict.fromkeys(
@@ -126,6 +131,7 @@ tracing_state_functions = {
     torch._utils.is_compiling: True,
     torch.compiler.is_compiling: True,
     torch.compiler.is_dynamo_compiling: True,
+    torch.nn.modules.activation._is_make_fx_tracing: False,
 }
 
 bin_ops = dict.fromkeys(["add", "sub", "mul", "div", "sqrt"])
@@ -203,6 +209,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         from . import (
             DisabledSavedTensorsHooksVariable,
             DualLevelContextManager,
+            FSDPParamGroupUseTrainingStateVariable,
             GradIncrementNestingCtxManagerVariable,
             GradInplaceRequiresGradCtxManagerVariable,
             GradModeVariable,
@@ -299,6 +306,14 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             assert len(args) == 1
             return DisabledSavedTensorsHooksVariable.create(
                 tx, args[0].as_python_constant()
+            )
+        elif (
+            _fsdp_param_group is not None
+            and self.value is _fsdp_param_group.FSDPParamGroup.use_training_state
+        ):
+            assert len(args) == 2
+            return FSDPParamGroupUseTrainingStateVariable.create(
+                tx, args[0], args[1].as_python_constant()
             )
 
         return super().call_function(tx, args, kwargs)
@@ -827,6 +842,30 @@ Either create the tensor outside the compiled region, or do not set the tensor t
                     name = tx.find_symbolic_locals_name(kwargs["out"])
                     if name in tx.symbolic_locals:
                         tx.symbolic_locals[name] = tensor_variable
+                elif (
+                    isinstance(tensor_variable, ConstantVariable)
+                    and tensor_variable.value is None
+                ):
+                    # Handle out-variant custom ops that return None.
+                    if isinstance(kwargs["out"], TensorVariable):
+                        assert "example_value" in kwargs["out"].proxy.node.meta
+                        fake_out = kwargs["out"].proxy.node.meta["example_value"]
+                        if not torch._prims_common.is_contiguous(fake_out):
+                            # It's difficult to handle strides correctly in functionalization
+                            # when calling an out= op with a non-contiguous out argument
+                            unimplemented(
+                                "out= op was called where output tensor was non-contiguous"
+                            )
+                    elif isinstance(kwargs["out"], ListVariable):
+                        for idx, x in enumerate(kwargs["out"].items):
+                            assert "example_value" in x.proxy.node.meta  # type: ignore[attr-defined]
+                            fake_out = x.proxy.node.meta["example_value"]  # type: ignore[attr-defined]
+                            if not torch._prims_common.is_contiguous(fake_out):
+                                # It's difficult to handle strides correctly in functionalization
+                                # when calling an out= op with a non-contiguous out argument
+                                unimplemented(
+                                    "out= op was called where some of the output tensors were non-contiguous"
+                                )
                 else:
                     unimplemented(f"out variant of {type(kwargs['out'])}")
 
@@ -862,6 +901,9 @@ Either create the tensor outside the compiled region, or do not set the tensor t
     @classmethod
     def call_nn_parameter(cls, tx, data=None, requires_grad=True):
         """A call to torch.nn.Parameter() gets lifted to before the graph"""
+        if tx.export:
+            unimplemented("nn parameter construction not supported with export")
+
         if isinstance(requires_grad, variables.VariableTracker):
             try:
                 requires_grad = requires_grad.as_python_constant()

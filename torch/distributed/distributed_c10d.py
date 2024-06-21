@@ -3041,11 +3041,12 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
     """
     Gathers tensors from the whole group in a list.
 
-    Complex tensors are supported.
+    Complex and uneven sized tensors are supported.
 
     Args:
         tensor_list (list[Tensor]): Output list. It should contain
             correctly-sized tensors to be used for output of the collective.
+            Uneven sized tensors are supported.
         tensor (Tensor): Tensor to be broadcast from current process.
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
@@ -3117,6 +3118,8 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
 def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=False):
     """
     Gather tensors from all ranks and put them in a single output tensor.
+
+    This function requires all tensors to be the same size on each process.
 
     Args:
         output_tensor (Tensor): Output tensor to accommodate tensor elements
@@ -3341,11 +3344,13 @@ def gather(tensor, gather_list=None, dst=0, group=None, async_op=False):
     """
     Gathers a list of tensors in a single process.
 
+    This function requires all tensors to be the same size on each process.
+
     Args:
         tensor (Tensor): Input tensor.
-        gather_list (list[Tensor], optional): List of appropriately-sized
-            tensors to use for gathered data (default is None, must be specified
-            on the destination rank)
+        gather_list (list[Tensor], optional): List of appropriately,
+            same-sized tensors to use for gathered data
+            (default is None, must be specified on the destination rank)
         dst (int, optional): Destination rank on global process group (regardless of ``group`` argument). (default is 0)
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
