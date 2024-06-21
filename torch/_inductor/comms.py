@@ -10,6 +10,7 @@ import torch
 from . import config, ir
 from .dependencies import WeakDep
 from .utils import is_collective, is_wait, tuple_sorted
+from .virtualized import V
 
 overlap_log = torch._logging.getArtifactLogger(__name__, "overlap")
 
@@ -142,13 +143,15 @@ def compute_node_users(
 
     name_to_node = snodes[0].scheduler.name_to_fused_node
 
-    def user_to_fused_node(user):
-        name = user.get_name()
-        if user.get_name() == "OUTPUT":
-            return user.node
-        return name_to_node[name]
-
-    return {node: {user_to_fused_node(user) for user in node.users} for node in snodes}
+    return {
+        node: {
+            name_to_node[user.get_name()]
+            for user in node.users
+            if user.get_name() != "OUTPUT"
+            and user.get_name() not in V.graph.removed_operations
+        }
+        for node in snodes
+    }
 
 
 def reorder_compute_for_overlap(
