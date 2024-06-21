@@ -67,10 +67,8 @@ lib = torch.library.Library("fsdp", "FRAGMENT")
 lib.define("set_(Tensor(a!) tensor, Tensor data) -> ()")
 
 @torch.library.impl(lib, "set_", "Meta")
-def set_(tensor, data):
-    tensor.set_(data)
-
 @torch.library.impl(lib, "set_", "CUDA")
+@torch.library.impl(lib, "set_", "CPU")
 def set_(tensor, data):
     tensor.set_(data)
 
