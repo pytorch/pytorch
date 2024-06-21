@@ -209,9 +209,12 @@ class Unpickler:
             elif key[0] == NEWOBJ[0]:
                 args = self.stack.pop()
                 cls = self.stack.pop()
-                if cls is not torch.nn.Parameter:
+                if cls is torch.nn.Parameter:
+                    self.append(torch.nn.Parameter(*args))
+                elif cls in _get_user_allowed_globals().values():
+                    self.append(cls(*args))
+                else:
                     raise RuntimeError(f"Trying to instantiate unsupported class {cls}")
-                self.append(torch.nn.Parameter(*args))
             elif key[0] == REDUCE[0]:
                 args = self.stack.pop()
                 func = self.stack[-1]

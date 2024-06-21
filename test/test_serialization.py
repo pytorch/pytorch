@@ -16,7 +16,7 @@ import shutil
 import pathlib
 import platform
 import builtins
-from collections import OrderedDict
+from collections import namedtuple, OrderedDict
 from copy import deepcopy
 from itertools import product
 
@@ -805,6 +805,8 @@ class serialization_method:
     def __exit__(self, *args, **kwargs):
         torch.save = self.torch_save
 
+Point = namedtuple('Point', ['x', 'y'])
+
 @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
 class TestBothSerialization(TestCase):
     @parametrize("weights_only", (True, False))
@@ -1047,6 +1049,22 @@ class TestSerialization(TestCase, SerializationMixin):
                 torch.serialization.add_safe_globals([builtins.print])
                 f.seek(0)
                 torch.load(f, weights_only=True)
+            finally:
+                torch.serialization.clear_safe_globals()
+    
+    def test_weights_only_allowlist_newobj(self):
+        p = Point(x=1, y=2)
+        with BytesIOContext() as f:
+            torch.save(p, f)
+            f.seek(0)
+            with self.assertRaisesRegex(pickle.UnpicklingError,
+                                        "GLOBAL __main__.Point was not an allowed global by default"):
+                torch.load(f, weights_only=True)
+            f.seek(0)
+            try:
+                torch.serialization.add_safe_globals([Point])
+                loaded_p = torch.load(f, weights_only=True)
+                self.assertEqual(loaded_p, p)
             finally:
                 torch.serialization.clear_safe_globals()
 
