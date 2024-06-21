@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 #include <algorithm>
+#include <memory>
 
 namespace torch::jit {
 
@@ -210,15 +211,15 @@ void ConcreteSourceRangeUnpickler::unpickle() {
 
   const auto& ivalues = ivaluesTuple->elements();
   TORCH_CHECK(
-      ivalues.size(), "Invalid unpickle operation: empty ivalues tuple");
+      !ivalues.empty(), "Invalid unpickle operation: empty ivalues tuple");
   unpickled_records = std::make_shared<SourceRangeRecords>();
   IValue lines;
   if (ivalues[0].isString() &&
       kFormatWithStringTable == ivalues[0].toStringRef()) {
-    deserializer.reset(new SourceRangeDeserializer(ivalues[1]));
+    deserializer = std::make_shared<SourceRangeDeserializer>(ivalues[1]);
     lines = ivalues[2];
   } else {
-    deserializer.reset(new SourceRangeDeserializer());
+    deserializer = std::make_shared<SourceRangeDeserializer>();
     lines = ivaluesTuple;
   }
   for (auto& val : lines.toTuple()->elements()) {
