@@ -35,7 +35,6 @@ b2b_gemm_template = TritonTemplate(
     debug=True,
     source=r"""
 {{def_kernel("A", "B", "C")}}
-    # TODO: change N and P to non-constexpr
     M = {{size("A", 0)}}
     # N = {{size("A", 1)}}
     O = {{size("C", 0)}}
@@ -97,16 +96,20 @@ def can_apply_b2b_gemm(mat1, mat2, mat3) -> bool:
         return False
     if not (len(mat1.shape) == 2 and len(mat2.shape) == 2 and len(mat3.shape) == 2):
         return False
-    # TODO: change to a real-check for size restrictions
-    return mat1.shape[1] == 64 and mat3.shape[1] == 64
+    # TODO: change to a real-check for size restrictions (may consider hardware limit?)
+    return mat1.shape[1] == 32 and mat3.shape[1] == 32
 
 def tuned_b2b_gemm(mat1, mat2, mat3, *, layout=None):
     layout = FixedLayout(mat1.get_device(), mat1.get_dtype(), [mat1.shape[0], mat3.shape[1]])
     choices = []
     # TODO: change N and P to non-constexpr
-    # TODO: add more configs for tuning
+    # Note: the only reason why N and P are hardcoded is because in Triton tl.arange(0, N) only works for tl.constexpr
+    # TODO: add more configs for tuning (shall I also tune num_stages and num_warps?)
     for config in [
-        {"ROW_BLOCK_SIZE": 32, "COL_BLOCK_SIZE": 32, "num_stages": 2, "num_warps": 4, "N": 64, "P": 64}
+        {"ROW_BLOCK_SIZE": 32, "COL_BLOCK_SIZE": 32, "num_stages": 2, "num_warps": 4, "N": 32, "P": 32}
+        {"ROW_BLOCK_SIZE": 32, "COL_BLOCK_SIZE": 128, "num_stages": 2, "num_warps": 4, "N": 32, "P": 32}
+        {"ROW_BLOCK_SIZE": 128, "COL_BLOCK_SIZE": 32, "num_stages": 2, "num_warps": 4, "N": 32, "P": 32}
+        {"ROW_BLOCK_SIZE": 128, "COL_BLOCK_SIZE": 128, "num_stages": 2, "num_warps": 4, "N": 32, "P": 32}
     ]:
         b2b_gemm_template.maybe_append_choice(
             choices,
