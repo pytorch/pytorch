@@ -5284,11 +5284,11 @@ def meta__efficient_attention_backward(
 def meta_scaled_mm(
     self: torch.Tensor,
     mat2: torch.Tensor,
+    scale_a: torch.Tensor,
+    scale_b: torch.Tensor,
     bias: Optional[torch.Tensor] = None,
-    out_dtype: Optional[torch.dtype] = None,
-    scale_a: Optional[torch.Tensor] = None,
-    scale_b: Optional[torch.Tensor] = None,
     scale_result: Optional[torch.Tensor] = None,
+    out_dtype: Optional[torch.dtype] = None,
     use_fast_accum: bool = False,
 ):
     def is_row_major(stride):
@@ -5330,9 +5330,7 @@ def meta_scaled_mm(
         lambda: f"Expected both inputs to be fp8 types but got self.dtype={self.dtype} and mat2.dtype={mat2.dtype}",
     )
     _out_dtype = out_dtype if out_dtype is not None else self.dtype
-    return torch.empty(
-        self.size(0), mat2.size(1), dtype=_out_dtype, device=self.device
-    ), torch.empty((), dtype=torch.float32, device=self.device)
+    return torch.empty(self.size(0), mat2.size(1), dtype=_out_dtype, device=self.device)
 
 
 @register_meta([aten.scatter_reduce.two, aten.scatter_reduce.two_out])

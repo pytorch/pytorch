@@ -298,6 +298,16 @@ endif()
 
 
 add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
+
+if(CAFFE2_USE_MKL AND BUILD_LIBTORCHLESS)
+
+  # Use the RPATH of the linked libraries
+  set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+  # we need to explicitly link caffe2::mkl in order to have the
+  # correct RPATH in torch_python for the split build
+  target_link_libraries(torch_python PRIVATE caffe2::mkl)
+endif()
+
 add_dependencies(torch_python onnx_proto)
 # Avoid numpy for the DEPLOY build
 if(USE_NUMPY)
@@ -309,6 +319,51 @@ if(HAVE_SOVERSION)
   set_target_properties(torch_python PROPERTIES
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
 endif()
+
+# in case of the split build we need to add compile definitions
+if(BUILD_LIBTORCHLESS)
+  if(USE_UCC AND USE_C10D_UCC)
+    target_compile_definitions(torch_python PRIVATE USE_C10D_UCC)
+  endif()
+
+  if(USE_UCC AND USE_C10D_NCCL)
+    target_compile_definitions(torch_python PRIVATE USE_C10D_NCCL)
+  endif()
+
+  if(USE_DISTRIBUTED)
+    target_compile_definitions(torch_python PRIVATE USE_DISTRIBUTED)
+  endif()
+
+  if(USE_MPI AND USE_C10D_MPI)
+    target_compile_definitions(torch_python PRIVATE USE_C10D_MPI)
+  endif()
+
+  if(USE_GLOO AND USE_C10D_GLOO)
+    target_compile_definitions(torch_python PRIVATE USE_C10D_GLOO)
+  endif()
+
+  if(NOT WIN32)
+    target_compile_definitions(torch_python PRIVATE USE_RPC)
+  endif()
+
+  if(USE_TENSORPIPE)
+    target_compile_definitions(torch_python PRIVATE USE_TENSORPIPE)
+  endif()
+
+  set(EXPERIMENTAL_SINGLE_THREAD_POOL "0" CACHE STRING
+  "Experimental option to use a single thread pool for inter- and intra-op parallelism")
+  if("${EXPERIMENTAL_SINGLE_THREAD_POOL}")
+    target_compile_definitions(torch_python PRIVATE "-DAT_EXPERIMENTAL_SINGLE_THREAD_POOL=1")
+  endif()
+
+  if(MSVC AND NOT BUILD_SHARED_LIBS)
+    target_compile_definitions(torch_python PRIVATE "AT_CORE_STATIC_WINDOWS=1")
+  endif()
+
+
+
+endif()
+
 add_dependencies(torch_python torch_python_stubs)
 add_dependencies(torch_python flatbuffers)
 

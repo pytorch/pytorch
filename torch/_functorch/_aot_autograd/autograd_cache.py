@@ -12,7 +12,7 @@ import shutil
 
 from dataclasses import dataclass
 
-from typing import Callable, List, Optional, TYPE_CHECKING
+from typing import Callable, List, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.utils import counters
@@ -121,7 +121,7 @@ def check_cacheable(gm: torch.fx.GraphModule):
     Checks that the graph module only uses supported operators
     """
     nodes = gm.graph.nodes
-    if torch._dynamo.compiled_autograd.compiled_autograd_enabled_count:
+    if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
         raise BypassAOTAutogradCache(
             "Cannot cache a graph with compiled autograd enabled"
         )
@@ -418,13 +418,14 @@ class AOTAutogradCache:
     @staticmethod
     def load(
         dispatch_and_compile: Callable,
-        gm: torch.fx.GraphModule,
+        mod: Union[torch.fx.GraphModule, torch._dynamo.utils.GmWrapper],
         args,
         aot_config: AOTConfig,
     ) -> Callable:
         """
         Load a result from the cache, and reconstruct a runtime wrapper around the object
         """
+        gm = mod.gm if isinstance(mod, torch._dynamo.utils.GmWrapper) else mod
         compiled_fn = None
         cache_key = None
         try:
