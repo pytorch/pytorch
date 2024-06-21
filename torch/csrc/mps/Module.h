@@ -2,8 +2,10 @@
 
 #include <torch/csrc/python_headers.h>
 
-namespace torch::mps {
+namespace torch {
+namespace mps {
 
 PyMethodDef* python_functions();
 
-} // namespace torch::mps
+} // namespace mps
+} // namespace torch

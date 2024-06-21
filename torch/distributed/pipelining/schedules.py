@@ -695,16 +695,19 @@ class PipelineScheduleMulti(_PipelineSchedule):
                     # perform backward computation
                     stage = stage_index_to_stage[stage_index]
                     loss = self._maybe_get_loss(stage, mb_index)
-                    # TODO: update: stage.backward_one_chunk(mb_index, loss=loss, full_backward=self.use_full_backward)
-                    stage.backward_one_chunk(mb_index, loss=loss)
+                    stage.backward_one_chunk(
+                        mb_index, loss=loss, full_backward=self.use_full_backward
+                    )
                     ops.extend(stage.get_bwd_send_ops(mb_index))
                 elif computation_type == _ComputationType.WEIGHT:
+                    # perform weight update
                     if self.use_full_backward:
                         raise ValueError(
                             f"We detected a weight update in the pipeline schedule, but \
                             {self.use_full_backward=}"
                         )
-                    # TODO: update: call backward_weight_one_chunk(mb_index)
+                    stage = stage_index_to_stage[stage_index]
+                    stage.backward_weight_one_chunk(mb_index)
                 else:
                     raise ValueError(f"Unknown computation type {computation_type}")
 

@@ -2,7 +2,8 @@
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_symnode.h>
 
-namespace pybind11::detail {
+namespace pybind11 {
+namespace detail {
 
 bool type_caster<c10::SymInt>::load(py::handle src, bool) {
   if (torch::is_symint(src)) {
@@ -163,4 +164,5 @@ py::handle type_caster<c10::Scalar>::cast(
   }
 }
 
-} // namespace pybind11::detail
+} // namespace detail
+} // namespace pybind11

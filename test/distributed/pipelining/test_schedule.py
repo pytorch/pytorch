@@ -528,6 +528,25 @@ class ScheduleTest(MultiProcContinousTest):
         stage_modules = [
             full_mod.get_submodule(submod_name) for submod_name in submod_names
         ]
+
+
+        class CustomState:
+            def __init__(self):
+                self.i = 0
+
+            def dw_builder(self):
+                """This simulates a function attached to a model with a custom backward.
+                Each call to builder gives a new dw_runner that has some updated state to compute the latest dw.
+                """
+
+                def dw_runner():
+                    # This inner function would be called by PipelineStage during `backward_weight_one_chunk`
+                    print(f"dw called {self.i}th time")
+                    self.i += 1
+
+                return dw_runner
+        cs = CustomState()
+
         # Create a pipeline stage to wrap that submodule
         chunks = 2
         input_args = x.chunk(chunks)[0]
@@ -538,6 +557,7 @@ class ScheduleTest(MultiProcContinousTest):
                 n_stages,
                 self.device,
                 input_args=input_args,
+                dw_builder=cs.dw_builder,
             )
             for stage_module, stage_idx in zip(stage_modules, stage_indices)
         ]

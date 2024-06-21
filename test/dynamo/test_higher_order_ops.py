@@ -45,8 +45,7 @@ def check_dynamic_shape_capture():
 
 
 def count_ops(gm, args, freq, op):
-    actual = [node.target for node in gm.graph.nodes].count(op)
-    assert actual == freq, f"expected={freq}, actual={actual}"
+    assert [node.target for node in gm.graph.nodes].count(op) == freq
     return gm
 
 
@@ -6050,7 +6049,9 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         y = torch.randn(4, 4, requires_grad=True)
 
         fw_compiler = functools.partial(count_ops, freq=1, op=torch.ops.aten.mm.default)
-        bw_compiler = functools.partial(count_ops, freq=2, op=torch.ops.aten.mm.default)
+        bw_compiler = functools.partial(
+            count_ops, freq=3, op=torch.ops.aten.mm.default
+        )  # mm recomputed in the bwd
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x, y)
 
@@ -6073,7 +6074,9 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         y = torch.randn(4, 4, requires_grad=True)
 
         fw_compiler = functools.partial(count_ops, freq=1, op=torch.ops.aten.mm.default)
-        bw_compiler = functools.partial(count_ops, freq=2, op=torch.ops.aten.mm.default)
+        bw_compiler = functools.partial(
+            count_ops, freq=3, op=torch.ops.aten.mm.default
+        )  # mm recomputed in the bwd
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x, y)
 
@@ -6094,9 +6097,8 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         fw_compiler = functools.partial(
             count_ops, freq=1, op=torch.ops.rngprims.philox_rand.default
         )
-        # philox_rand is passed from fwd
         bw_compiler = functools.partial(
-            count_ops, freq=0, op=torch.ops.rngprims.philox_rand.default
+            count_ops, freq=1, op=torch.ops.rngprims.philox_rand.default
         )
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(
@@ -6176,9 +6178,8 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         fw_compiler = functools.partial(
             count_ops, freq=1, op=torch.ops.aten.sigmoid.default
         )
-        # sigmoid passed from fwd
         bw_compiler = functools.partial(
-            count_ops, freq=0, op=torch.ops.aten.sigmoid.default
+            count_ops, freq=1, op=torch.ops.aten.sigmoid.default
         )
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x)

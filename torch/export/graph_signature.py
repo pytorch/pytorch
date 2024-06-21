@@ -3,8 +3,6 @@ import dataclasses
 from enum import auto, Enum
 from typing import Collection, Dict, List, Mapping, Optional, Set, Tuple, Union
 
-from torch._library.fake_class_registry import FakeScriptObject
-
 
 __all__ = [
     "ConstantArgument",
@@ -39,7 +37,6 @@ class SymIntArgument:
 class CustomObjArgument:
     name: str
     class_fqn: str
-    fake_val: Optional[FakeScriptObject] = None
 
 
 @dataclasses.dataclass
