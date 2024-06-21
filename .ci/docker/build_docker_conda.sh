@@ -32,7 +32,7 @@ esac
     --build-arg "DEVTOOLSET_VERSION=9" \
     -t "pytorch/conda-builder:${DOCKER_TAG}" \
     -f "${TOPDIR}/.ci/docker/conda/Dockerfile" \
-    ${TOPDIR}
+    ${TOPDIR}/.ci/docker/
 )
 
 DOCKER_IMAGE="pytorch/conda-builder:${DOCKER_TAG}"
