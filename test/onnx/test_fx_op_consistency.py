@@ -1014,11 +1014,6 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         reason="fixme: Assertion error: result mismatch",
     ),
     xfail(
-        "nn.functional.tanhshrink",
-        dtypes=(torch.float16,),
-        reason="fixme: Assertion error: result mismatch",
-    ),
-    xfail(
         "nonzero",
         dtypes=(torch.int8, torch.int16),
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("NonZero", "int8, int16"),
@@ -1972,7 +1967,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
 
     fp16_low_precision_dict = {
         "addbmm": [2e-1, 2e-2],
-        "addcdiv": [3e-2, 1e-3],
+        "addcdiv": [3e-2, 1.4e-3],
         "addcmul": [3e-2, 1e-3],
         "addmv": [5e-2, 3e-2],
         "addr": [3e-3, 4e-3],

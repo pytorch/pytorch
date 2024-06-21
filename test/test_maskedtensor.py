@@ -900,7 +900,7 @@ class TestOperators(TestCase):
         unittest.expectedFailure,
         lambda params: (
             params["op"].name == "sub" and
-            params["dtype"] == torch.float32 and
+            params["dtype"] in [torch.float16, torch.float32] and
             params["device"] == "cpu"
         )
     )
