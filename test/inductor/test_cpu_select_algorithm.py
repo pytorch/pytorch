@@ -578,6 +578,7 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
         TestSelectAlgorithm.test_quantized_linear_amx
     )
 
+
 instantiate_device_type_tests(TestSelectAlgorithm, globals(), only_for="cpu")
 instantiate_device_type_tests(
     TestSelectAlgorithmDynamicShapes, globals(), only_for="cpu"

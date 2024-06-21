@@ -39,8 +39,6 @@
 #include <ATen/native/Math.h>
 #endif
 
-#include <iostream>
-
 typedef at::Half half;
 typedef at::BFloat16 bfloat16;
 
