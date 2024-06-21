@@ -532,7 +532,14 @@ def flex_attention(*args, **kwargs):
             BLOCKSPARSE_Q=BLOCKSPARSE_Q,
             BLOCKSPARSE_KV=BLOCKSPARSE_KV,
         )
-    inputs_for_autotuning = [query, key, value, logsumexp] + list(other_buffers)
+    inputs_for_autotuning = [
+        query,
+        key,
+        value,
+        logsumexp,
+        sparse_mask_kv_num_blocks,
+        sparse_mask_kv_indices,
+    ] + list(other_buffers)
     return (
         autotune_select_algorithm(
             "flex_attention", choices, inputs_for_autotuning, layout
@@ -984,6 +991,10 @@ def flex_attention_backward(*args, **kwargs):
         grad_out,
         grad_query,
         grad_value,
+        sparse_mask_kv_num_blocks,
+        sparse_mask_kv_indices,
+        sparse_mask_q_num_blocks,
+        sparse_mask_q_indices,
     ] + list(other_buffers)
 
     grad_key = autotune_select_algorithm(
