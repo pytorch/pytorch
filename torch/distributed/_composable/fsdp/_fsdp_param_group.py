@@ -41,8 +41,11 @@ class FSDPCommContext:
 
     def __init__(self):
         # Initialize all streams using default stream at construction time and
-        # set them to new streams during lazy initialization
-        current_stream = torch.cuda.current_stream()
+        # set them to new streams during lazy initialization (use `...` if CUDA
+        # is not available to delay the CUDA requirement to lazy init)
+        current_stream = (
+            torch.cuda.current_stream() if torch.cuda.is_available() else ...
+        )
         # All-gather state and copy-in stream allow overlapping the next
         # copy-in with the current all-gather in forward; copy-in overlaps with
         # reduce-scatter in backward without the separate copy-in stream
@@ -61,7 +64,9 @@ class FSDPCommContext:
         # Post-forward order for explicit backward prefetching
         self.post_forward_order: List[FSDPParamGroup] = []  # will cause ref cycles
 
-    def init(self):
+    def lazy_init(self):
+        if not torch.cuda.is_available():
+            raise RuntimeError("FSDP requires CUDA for streams")
         # Setting the all-gather/reduce-scatter streams to be higher priority
         # can help avoid some issues where their copies in/out are delayed and
         # block computation (this is different from high-pri NCCL streams)

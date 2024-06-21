@@ -138,7 +138,7 @@ class FSDPState(_State):
                 state._fsdp_param_group.lazy_init()
 
     def _init_shared_state(self) -> None:
-        self._comm_ctx.init()
+        self._comm_ctx.lazy_init()
         for state in self._state_ctx.all_states:
             state._state_ctx = self._state_ctx
             state._comm_ctx = self._comm_ctx
