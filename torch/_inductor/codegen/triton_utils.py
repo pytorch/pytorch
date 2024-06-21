@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import sympy
 
 import torch
+from torch._inductor.runtime.triton_heuristics import grid as default_grid
 
 from .. import config
 from ..codecache import CudaKernelParamCache, get_cpp_wrapper_cubin_path_name
@@ -12,6 +13,7 @@ from ..runtime.hints import instance_descriptor
 from ..utils import _type_of, DeferredLineBase
 from ..virtualized import V
 from .common import KernelArgType, SizeArg, TensorArg, WorkspaceArg
+from .cpp_utils import cexpr
 
 
 def signature_of(arg: KernelArgType, *, size_dtype: str) -> str:
@@ -195,3 +197,64 @@ class DeferredCudaKernelLine(DeferredLineBase):
 
     def _new_line(self, line):
         return DeferredCudaKernelLine(self.kernel_name, line, self.keys)
+
+
+class DeferredCudaGridLine(DeferredLineBase):
+    """
+    When using cpp wrapper, CUDA kernel load and launch needs to wait for Triton kernels
+    to be tuned and stored as cubin files, so use a deferred line to backfill those information
+    """
+
+    def __init__(
+        self,
+        kernel_name: str,
+        grid_var: str,
+        grid,
+        autotune_configs,
+    ):
+        super().__init__("")
+        self.kernel_name = kernel_name
+        self.grid_var = grid_var
+        self.grid = grid
+        self.autotune_configs = autotune_configs
+
+    def __call__(self):
+        from .wrapper import SymbolicCallArg
+
+        params = CudaKernelParamCache.get(self.kernel_name)
+        assert (
+            params is not None
+        ), f"{self.kernel_name} not found in CudaKernelParamCache"
+
+        if self.autotune_configs is not None:
+            # This indicates the Triton kernel is a user-defined one.
+            grid = None
+            if len(self.grid) == 1:
+                grid = self.grid[0]
+            else:
+                for i, c in enumerate(self.autotune_configs):
+                    if all(arg == params["meta"][key] for key, arg in c.kwargs.items()):
+                        grid = self.grid[i]
+                        break
+            assert grid is not None
+        else:
+            grid = [
+                e.inner_expr if isinstance(e, SymbolicCallArg) else e for e in self.grid
+            ]
+            grid_fn = default_grid(*grid)
+            block_cfg = {
+                "XBLOCK": params["x_block"],
+                "YBLOCK": params["y_block"],
+                "ZBLOCK": params["z_block"],
+            }
+            grid = grid_fn(block_cfg)
+
+        grid_args_str = ", ".join(
+            [cexpr(V.graph.sizevars.simplify(item)) for item in grid]
+        )
+        return f"Grid {self.grid_var} = Grid({grid_args_str});"
+
+    def _new_line(self, line):
+        return DeferredCudaGridLine(
+            self.kernel_name, self.grid_var, self.grid, self.autotune_configs
+        )
