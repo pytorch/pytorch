@@ -438,7 +438,15 @@ def flex_attention(*args, **kwargs):
         sparse_mask_q_indices,
         *other_buffers,
     ) = args
-    for buf in [query, key, value]:
+    for buf in [
+        query,
+        key,
+        value,
+        sparse_mask_kv_num_blocks,
+        sparse_mask_kv_indices,
+        sparse_mask_q_num_blocks,
+        sparse_mask_q_indices,
+    ]:
         buf.realize()
     placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
@@ -850,7 +858,16 @@ def flex_attention_backward(*args, **kwargs):
         sparse_mask_q_indices,
         *other_buffers,
     ) = args
-    for buf in [query, key, value, grad_out]:
+    for buf in [
+        query,
+        key,
+        value,
+        grad_out,
+        sparse_mask_kv_num_blocks,
+        sparse_mask_kv_indices,
+        sparse_mask_q_num_blocks,
+        sparse_mask_q_indices,
+    ]:
         buf.realize()
 
     device = query.get_device()
