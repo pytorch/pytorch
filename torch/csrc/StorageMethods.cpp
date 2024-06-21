@@ -624,8 +624,7 @@ static PyObject* THPStorage__get_filename(PyObject* self, PyObject* noargs) {
   const c10::DataPtr& data_ptr = self_.data_ptr();
   at::MapAllocator* map_allocator = at::MapAllocator::fromDataPtr(data_ptr);
 
-  if (map_allocator == nullptr ||
-      !(map_allocator->flags() & at::ALLOCATOR_MAPPED_SHARED)) {
+  if (map_allocator == nullptr) {
     Py_RETURN_NONE;
   }
   std::string filename = map_allocator->filename();

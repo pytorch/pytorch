@@ -9,7 +9,8 @@ import unittest
 
 import torch
 from torch._inductor import config, test_operators
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.utils._triton import has_triton
 
 try:
     try:
@@ -169,7 +170,7 @@ buf2.node.kernel = extern_kernels.mm""",
         # intentionally only cleanup on success so debugging test is easier
         shutil.rmtree(filename)
 
-    @unittest.skipIf(not HAS_GPU, "requires GPU")
+    @unittest.skipIf(not TEST_CUDA or not has_triton(), "requires cuda")
     def test_debug_multi_tempalte(self):
         class ToyModel(torch.nn.Module):
             def __init__(self):
@@ -187,9 +188,9 @@ buf2.node.kernel = extern_kernels.mm""",
         with self.assertLogs(
             logging.getLogger("torch._inductor.debug"), level=logging.WARNING
         ), fresh_inductor_cache():
-            m = ToyModel().to(device=GPU_TYPE)
+            m = ToyModel().to(device="cuda:0")
             m = torch.compile(m, mode="max-autotune")
-            input_tensor = torch.randn(100).to(device=GPU_TYPE)
+            input_tensor = torch.randn(100).to(device="cuda:0")
             m(input_tensor)
 
 

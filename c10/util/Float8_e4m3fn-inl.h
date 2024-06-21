@@ -1,7 +1,7 @@
 #pragma once
 
 #include <c10/macros/Macros.h>
-#include <cstdint>
+#include <cstring>
 #include <limits>
 
 C10_CLANG_DIAGNOSTIC_PUSH()

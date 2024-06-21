@@ -30,16 +30,6 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
         keyset: _C.DispatchKeySet
         keyword_only_args: Dict[str, Any]
 
-    def forward_no_grad(*args):
-        metadata = args[-1]
-        args = args[:-1]
-
-        with _C._AutoDispatchBelowAutograd():
-            keyset = metadata.keyset
-            kwargs = metadata.keyword_only_args
-            result = op.redispatch(keyset & _C._after_autograd_keyset, *args, **kwargs)
-            return result
-
     def forward(ctx, *args):
         metadata = args[-1]
         args = args[:-1]
@@ -105,12 +95,7 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
     # The dispatcher passes any keyword-only-args as kwargs and the
     # rest of the args (even if specified as kwargs) as args.
     def autograd_impl(keyset, *args, **keyword_only_args):
-        if _C.is_grad_enabled() and _pytree.tree_any_only(
-            Tensor, lambda x: x.requires_grad, args, not_list_of_tensor
-        ):
-            result = Generated.apply(*args, Metadata(keyset, keyword_only_args))  # type: ignore[attr-defined]
-        else:
-            result = forward_no_grad(*args, Metadata(keyset, keyword_only_args))
+        result = Generated.apply(*args, Metadata(keyset, keyword_only_args))  # type: ignore[attr-defined]
         return result
 
     return autograd_impl

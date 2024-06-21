@@ -234,12 +234,10 @@ def lift_constants_pass(
                 elif isinstance(constant_val, FakeScriptObject):
                     class_fqn = constant_val.script_class_name
                     const_placeholder_node.meta["val"] = CustomObjArgument(
-                        constant_fqn, class_fqn, constant_val
+                        constant_fqn, class_fqn
                     )
                     input_spec_arg = CustomObjArgument(
-                        name=const_placeholder_node.name,
-                        class_fqn=class_fqn,
-                        fake_val=constant_val,
+                        name=const_placeholder_node.name, class_fqn=class_fqn
                     )
                 else:
                     raise SpecViolationError(
@@ -289,17 +287,17 @@ def rewrite_script_object_meta(
         if "val" not in node.meta:
             continue
 
-        old_meta = node.meta["val"]
-
-        if isinstance(old_meta, torch.ScriptObject):
+        if isinstance(node.meta["val"], torch.ScriptObject):
+            old_meta = node.meta["val"]
             class_fqn = old_meta._type().qualified_name()  # type: ignore[attr-defined]
             new_meta = CustomObjArgument(node.name, class_fqn)
             constants[node.name] = old_meta
             node.meta["val"] = new_meta
 
-        elif isinstance(old_meta, FakeScriptObject):
+        elif isinstance(node.meta["val"], FakeScriptObject):
+            old_meta = node.meta["val"]  # type: ignore[assignment]
             class_fqn = old_meta.script_class_name  # type: ignore[attr-defined]
-            new_meta = CustomObjArgument(node.name, class_fqn, old_meta)
+            new_meta = CustomObjArgument(node.name, class_fqn)
             constants[node.name] = old_meta
             node.meta["val"] = new_meta
 
