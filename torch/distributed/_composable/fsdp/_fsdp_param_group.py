@@ -64,7 +64,7 @@ class FSDPCommContext:
     def init(self):
         # Setting the all-gather/reduce-scatter streams to be higher priority
         # can help avoid some issues where their copies in/out are delayed and
-        # block computation (this is different from high-pri NCCL stream)
+        # block computation (this is different from high-pri NCCL streams)
         high_priority = -1
         self.all_gather_copy_in_stream = torch.cuda.Stream(priority=high_priority)
         self.all_gather_stream = torch.cuda.Stream(priority=high_priority)
