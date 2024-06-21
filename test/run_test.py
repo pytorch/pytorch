@@ -752,7 +752,7 @@ def _test_autoload(test_directory, options, enable=True):
 
         assert install_directory, "install_directory must not be empty"
         os.environ["PYTHONPATH"] = os.pathsep.join([install_directory, python_path])
-        os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = str(enable)
+        os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = str(int(enable))
 
         cmd = [sys.executable, "test_autoload.py"]
         return_code = shell(cmd, cwd=test_directory, env=os.environ)

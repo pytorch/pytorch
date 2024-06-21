@@ -8,4 +8,4 @@ import os
 
 def _autoload():
     # Set the environment variable to true in this entrypoint
-    os.environ["IS_CUSTOM_DEVICE_BACKEND_IMPORTED"] = "True"
+    os.environ["IS_CUSTOM_DEVICE_BACKEND_IMPORTED"] = "1"
