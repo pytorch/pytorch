@@ -953,9 +953,9 @@ void InsertObserversHelper::insertObserverFor(
   }
   GRAPH_DEBUG("Inserting observer for:", v->debugName());
   Module observer = observer_module.deepcopy();
-  std::string observer_name = "_observer_" + c10::to_string(uid_++);
+  std::string observer_name = "_observer_" + std::to_string(uid_++);
   while (module.hasattr(observer_name)) {
-    observer_name = "_observer_" + c10::to_string(uid_++);
+    observer_name = "_observer_" + std::to_string(uid_++);
   }
   module.register_module(observer_name, observer);
   observer_name_and_modules.emplace_back(observer_name, observer);

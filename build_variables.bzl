@@ -827,6 +827,7 @@ libtorch_python_core_sources = [
     "torch/csrc/dynamo/guards.cpp",
     "torch/csrc/dynamo/init.cpp",
     "torch/csrc/functorch/init.cpp",
+    "torch/csrc/fx/node.cpp",
     "torch/csrc/mps/Module.cpp",
     "torch/csrc/mtia/Module.cpp",
     "torch/csrc/inductor/aoti_runner/pybind.cpp",
@@ -924,6 +925,7 @@ libtorch_python_distributed_sources = libtorch_python_distributed_core_sources +
     "torch/csrc/distributed/rpc/unpickled_python_call.cpp",
     "torch/csrc/distributed/rpc/unpickled_python_remote_call.cpp",
     "torch/csrc/jit/runtime/register_distributed_ops.cpp",
+    "torch/csrc/distributed/c10d/control_plane/PythonHandlers.cpp",
 ]
 
 def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import itertools
 import logging
@@ -22,6 +23,7 @@ from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy
 
+from .runtime.runtime_utils import is_power_of_2
 from .utils import (
     sympy_index_symbol,
     sympy_index_symbol_with_prefix,
@@ -161,9 +163,9 @@ class SizeVarAllocator:
         if expr.has(ModularIndexing):
             expr = expr.replace(
                 ModularIndexing(
-                    sympy.Wild("base"),
-                    sympy.Wild("divisor"),
-                    sympy.Wild("modulus"),
+                    sympy.Wild("base", integer=True),
+                    sympy.Wild("divisor", integer=True),
+                    sympy.Wild("modulus", integer=True),
                 ),
                 visit_modular_indexing,
             )
@@ -171,8 +173,8 @@ class SizeVarAllocator:
         if expr.has(FloorDiv):
             expr = expr.replace(
                 FloorDiv(
-                    sympy.Wild("base"),
-                    sympy.Wild("divisor"),
+                    sympy.Wild("base", integer=True),
+                    sympy.Wild("divisor", integer=True),
                 ),
                 visit_indexing_div,
             )
@@ -192,7 +194,16 @@ class SizeVarAllocator:
         """
         sizes = list(map(self.simplify, sizes))
 
-        strides = [self.stride_vars(x, index_vars) for x in index_formulas]
+        strides = [
+            # index_formulas may contain boolean expressions (e.g. s0 < 10),
+            # for which "strides" don't make sense so we ignore them here.
+            # NOTE: These expressions may still block merging dims in the sound
+            # substitution test performed in can_merge_dims.
+            self.stride_vars(x, index_vars)
+            if isinstance(x, sympy.Expr)
+            else [0] * len(index_vars)
+            for x in index_formulas
+        ]
         assert len(sizes) == len(strides[0]), (len(sizes), len(strides[0]))
 
         for i in range(len(sizes)):
@@ -344,6 +355,13 @@ class SizeVarAllocator:
         expr = sympy.Eq(numerator % denominator, 0)
         return self.is_expr_static_and_true(expr)  # type: ignore[arg-type]
 
+    # See Note - [On Statically Known]
+    def statically_known_power_of_2(self, expr: Expr) -> bool:
+        """
+        Returns a bool indicating if x is known to be a power of 2.
+        """
+        return isinstance(expr, sympy.Integer) and is_power_of_2(int(expr))
+
     # The guard functions require you to ALREADY KNOW that a particular
     # condition holds.  If you don't know (you want to guard on an expression
     # being a particular value, and then get access to that value), use
@@ -366,7 +384,6 @@ class SizeVarAllocator:
     def guarded_order(self, seq):
         """
         Return the order of a sequence as a permutation of range(len(seq)) and guard on that order not changing.
-        Used for generating block_ptrs.
         """
         seq = [*map(self.remove_precomputed_replacements, seq)]
         seq = [(self.size_hint(var), orig_idx, var) for orig_idx, var in enumerate(seq)]
@@ -735,11 +752,11 @@ def _join_dimensions_cached(expr: Expr) -> Expr:
     """
     assert isinstance(expr, sympy.Add)
 
-    scale = sympy.Wild("scale", exclude=[0])
-    base = sympy.Wild("base")
-    divisor = sympy.Wild("divisor")
-    mod1 = sympy.Wild("modulus")
-    mod2 = sympy.Wild("modulus2")
+    scale = sympy.Wild("scale", exclude=[0], integer=True)
+    base = sympy.Wild("base", integer=True)
+    divisor = sympy.Wild("divisor", integer=True)
+    mod1 = sympy.Wild("modulus", integer=True)
+    mod2 = sympy.Wild("modulus2", integer=True)
     for term1 in expr.args:
         m1 = term1.match(scale * ModularIndexing(base, divisor, mod1))
         if m1:

@@ -59,16 +59,25 @@ namespace at { namespace cuda {
   _(cuLinkAddData)                               \
   _(cuLinkComplete)                              \
   _(cuFuncSetAttribute)                          \
-  _(cuFuncGetAttribute)
+  _(cuFuncGetAttribute)                          \
+
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 12000
+#define AT_FORALL_NVRTC_EXTENDED(_)              \
+  AT_FORALL_NVRTC_BASE(_)                        \
+  _(cuTensorMapEncodeTiled)
+#else
+#define AT_FORALL_NVRTC_EXTENDED(_)              \
+  AT_FORALL_NVRTC_BASE(_)
+#endif
 
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
 #define AT_FORALL_NVRTC(_) \
-  AT_FORALL_NVRTC_BASE(_)  \
+  AT_FORALL_NVRTC_EXTENDED(_)  \
   _(nvrtcGetCUBINSize)     \
   _(nvrtcGetCUBIN)
 #else
 #define AT_FORALL_NVRTC(_) \
-  AT_FORALL_NVRTC_BASE(_)
+  AT_FORALL_NVRTC_EXTENDED(_)
 #endif
 
 #else

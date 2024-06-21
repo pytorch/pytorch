@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import atexit
 import collections
 import contextlib
@@ -22,6 +23,7 @@ import threading
 import time
 import types
 import typing
+import warnings
 import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
@@ -554,12 +556,15 @@ def is_numpy_float_type(value):
     )
 
 
+def is_lru_cache_wrapped_function(value):
+    return isinstance(value, functools._lru_cache_wrapper) and is_function(
+        inspect.getattr_static(value, "__wrapped__")
+    )
+
+
 def is_function_or_wrapper(value):
-    return (
-        is_function(value)
-        or isinstance(value, functools._lru_cache_wrapper)
-        and is_function(inspect.getattr_static(value, "__wrapped__"))
-        or isinstance(value, (torch._ops.OpOverloadPacket, torch._ops.OpOverload))
+    return is_function(value) or isinstance(
+        value, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
     )
 
 
@@ -571,7 +576,6 @@ def is_function(value):
             types.BuiltinFunctionType,
             types.MethodDescriptorType,
             types.WrapperDescriptorType,
-            torch.jit.ScriptFunction,
         ),
     )
 
@@ -581,20 +585,11 @@ def unwrap_if_wrapper(fn):
 
 
 def unwrap_with_attr_name_if_wrapper(fn):
-    # unpack @functools.lru_cache wrapped function
-    if isinstance(fn, functools._lru_cache_wrapper):
-        fn = inspect.getattr_static(fn, "__wrapped__")
-        attr_name = "__wrapped__"
+    # TODO(anijain2305) - Investigate if we can get rid of this function
     # unpack @torch._dynamo.optimize()(fn) wrapped function
-    elif is_function(fn) and inspect.getattr_static(fn, "_torchdynamo_inline", False):
+    if is_function(fn) and inspect.getattr_static(fn, "_torchdynamo_inline", False):
         fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
         attr_name = "_torchdynamo_inline"
-    # unpack torch.jit.script_if_tracing
-    elif is_function(fn) and inspect.getattr_static(
-        fn, "__script_if_tracing_wrapper", False
-    ):
-        fn = inspect.getattr_static(fn, "__original_fn", fn)
-        attr_name = "__original_fn"
     else:
         attr_name = None
     return fn, attr_name
@@ -712,18 +707,15 @@ def record_compilation_metrics(
         name = "compilation_metrics"
     else:
         name = "bwd_compilation_metrics"
-    # Currently only record fwd compilation metrics, will add bwd compilation metrics
-    # after the internal Scuba logging changes finish.
-    if isinstance(compilation_metrics, CompilationMetrics):
-        torch._logging.trace_structured(
-            name,
-            lambda: {
-                k: list(v) if isinstance(v, set) else v
-                for k, v in dataclasses.asdict(compilation_metrics).items()
-            },
-        )
-        if config.log_compilation_metrics:
-            log_compilation_event(compilation_metrics)
+    torch._logging.trace_structured(
+        name,
+        lambda: {
+            k: list(v) if isinstance(v, set) else v
+            for k, v in dataclasses.asdict(compilation_metrics).items()
+        },
+    )
+    if config.log_compilation_metrics:
+        log_compilation_event(compilation_metrics)
 
 
 def set_compilation_metrics_limit(new_size: int) -> None:
@@ -2750,3 +2742,34 @@ class Lit:
 
     def __repr__(self):
         return self.s
+
+
+warn_once_cache: Set[str] = set()
+
+
+def warn_once(msg, stacklevel=1):
+    # Dynamo causes all warnings.warn (in user code and in Dynamo code) to print all the time.
+    # https://github.com/pytorch/pytorch/issues/128427.
+    # warn_once is a workaround: if the msg has been warned on before, then we will not
+    # warn again.
+    # NB: it's totally ok to store a cache of all the strings: this is what warnings.warn does as well.
+    if msg in warn_once_cache:
+        return
+    warn_once_cache.add(msg)
+    warnings.warn(msg, stacklevel=stacklevel + 1)
+
+
+def strip_color_from_string(text):
+    # This regular expression matches ANSI escape codes
+    ansi_escape = re.compile(r"\x1B[@-_][0-?]*[ -/]*[@-~]")
+    return ansi_escape.sub("", text)
+
+
+@contextlib.contextmanager
+def _disable_saved_tensors_hooks_during_tracing():
+    # See NOTE: [Deferring tensor pack/unpack hooks until runtime]
+    try:
+        prior = torch._C._autograd._saved_tensors_hooks_set_tracing(True)
+        yield
+    finally:
+        torch._C._autograd._saved_tensors_hooks_set_tracing(prior)
