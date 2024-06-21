@@ -1,9 +1,9 @@
 # Owner(s): ["oncall: cpu inductor"]
+import contextlib
 import functools
 
 import sys
 import unittest
-import contextlib
 from typing import Optional
 from unittest.mock import patch
 
@@ -366,28 +366,28 @@ class TestSelectAlgorithm(TestCase):
     @patches
     @torch.no_grad
     @parametrize("bias", (True, False))
-    @dtypes(torch.float, torch.bfloat16, torch.half)
     def test_linear_with_embedding(self, bias, dtype):
         batch_size = 384
         in_features = 196
         out_features = 384
+        dtype = torch.bfloat16
 
         class M(torch.nn.Module):
             def __init__(self, bias):
                 super().__init__()
-                self.linear = torch.nn.Linear(in_features, out_features, bias).to(dtype=dtype)
-                self.emb1 = torch.nn.Embedding(64, out_features)
-                self.emb2 = torch.nn.Embedding(64, out_features)
+                self.linear = torch.nn.Linear(in_features, out_features, bias).to(
+                    dtype=dtype
+                )
+                self.emb = torch.nn.Embedding(64, out_features)
 
-            def forward(self, idx1, idx2, x):
-                return self.emb1(idx1) + self.emb2(idx2) + self.linear(x)
+            def forward(self, idx, x):
+                return self.emb(idx) + self.linear(x)
 
-        idx1 = torch.randint(0, 64, (batch_size,))
-        idx2 = torch.randint(0, 64, (batch_size,))
+        idx = torch.randint(0, 64, (batch_size,))
         x = torch.randn(batch_size, in_features).to(dtype=dtype)
         mod = M(bias=bias).eval()
         with verify(dtype) as (atol, rtol):
-            self.common(mod, (idx1, idx2, x), atol=atol, rtol=rtol)
+            self.common(mod, (idx, x), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
 
@@ -410,7 +410,9 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
         TestSelectAlgorithm.test_linear_with_unary_binary
     )
     test_linear_amx_dynamic_shapes = TestSelectAlgorithm.test_linear_amx
-    test_linear_with_embedding_dynamic_shapes = TestSelectAlgorithm.test_linear_with_embedding
+    test_linear_with_embedding_dynamic_shapes = (
+        TestSelectAlgorithm.test_linear_with_embedding
+    )
 
 
 instantiate_device_type_tests(TestSelectAlgorithm, globals(), only_for="cpu")

@@ -1741,7 +1741,6 @@ class Kernel(CodeGen):
                         csevar = V.kernel.cse.generate(
                             V.kernel.compute, v, bounds=bounds
                         )
-                        # csevar = self.cse.generate(self.compute, v, bounds=bounds)
                         csevar.update_on_args(name, args, kwargs)
                         return csevar
 
