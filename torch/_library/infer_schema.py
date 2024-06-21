@@ -74,15 +74,17 @@ def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
         if param.default is inspect.Parameter.empty:
             params.append(f"{schema_type} {name}")
         else:
-            if param.default is not None and not isinstance(
-                param.default, (int, float, bool)
-            ):
+            default_repr = None
+            if param.default is None or isinstance(param.default, (int, float, bool)):
+                default_repr = str(param.default)
+            elif isinstance(param.default, str):
+                default_repr = f'"{param.default}"'
+            else:
                 error_fn(
-                    f"Parameter {name} has an unsupported default value (we only support "
-                    f"int, float, bool, None). Please file an issue on GitHub so we can "
-                    f"prioritize this."
+                    f"Parameter {name} has an unsupported default value type {type(param.default)}. "
+                    f"Please file an issue on GitHub so we can prioritize this."
                 )
-            params.append(f"{schema_type} {name}={param.default}")
+            params.append(f"{schema_type} {name}={default_repr}")
     mutates_args_not_seen = set(mutates_args) - seen_args
     if len(mutates_args_not_seen) > 0:
         error_fn(
