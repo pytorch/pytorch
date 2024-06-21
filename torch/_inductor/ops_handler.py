@@ -109,8 +109,7 @@ class OpsHandler(Protocol[T]):
         evaluates to true.  For example, you would use this if you needed to
         perform an indirect load that may not be valid on some elements;
         without masking, invalid accesses can cause IMAs.  When mask is true,
-        the result is the result of body; otherwise it is other. Here, `other`
-        needs to be a constant.
+        the result is the result of body; otherwise it is other.
 
         Contrast this with ops.where, which can multiplex between two values
         that have been unconditionally computed.

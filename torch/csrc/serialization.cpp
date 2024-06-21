@@ -1,6 +1,5 @@
 #include <torch/csrc/python_headers.h>
 #include <system_error>
-#include <vector>
 
 #include <ATen/ops/from_blob.h>
 #include <c10/core/CPUAllocator.h>
@@ -269,30 +268,32 @@ void THPStorage_writeFileRaw(
     doWrite(fd, data, size_bytes);
   } else {
     size_t buffer_size = std::min(numel, (size_t)5000);
-    std::vector<uint8_t> le_buffer;
-    le_buffer.resize(buffer_size * element_size);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+    std::unique_ptr<uint8_t[]> le_buffer(
+        new uint8_t[buffer_size * element_size]);
     for (size_t i = 0; i < numel; i += buffer_size) {
       size_t to_convert = std::min(numel - i, buffer_size);
+      // NOLINTNEXTLINE(bugprone-branch-clone)
       if (element_size == 2) {
         torch::utils::THP_encodeInt16Buffer(
-            le_buffer.data(),
+            (uint8_t*)le_buffer.get(),
             (const int16_t*)data + i,
             torch::utils::THPByteOrder::THP_LITTLE_ENDIAN,
             to_convert);
       } else if (element_size == 4) {
         torch::utils::THP_encodeInt32Buffer(
-            le_buffer.data(),
+            (uint8_t*)le_buffer.get(),
             (const int32_t*)data + i,
             torch::utils::THPByteOrder::THP_LITTLE_ENDIAN,
             to_convert);
       } else if (element_size == 8) {
         torch::utils::THP_encodeInt64Buffer(
-            le_buffer.data(),
+            (uint8_t*)le_buffer.get(),
             (const int64_t*)data + i,
             torch::utils::THPByteOrder::THP_LITTLE_ENDIAN,
             to_convert);
       }
-      doWrite(fd, le_buffer.data(), to_convert * element_size);
+      doWrite(fd, le_buffer.get(), to_convert * element_size);
     }
   }
 }

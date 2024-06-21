@@ -1,4 +1,3 @@
-#include <c10/macros/Macros.h>
 #include <c10/util/Float8_e5m2fnuz.h>
 
 namespace c10 {

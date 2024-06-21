@@ -440,13 +440,9 @@ class PythonSignature:
 
         if not have_vararg_version:
             return None
-
         # Below are the major changes in vararg vs. regular pyi signatures
         # vararg signatures also omit the asterix
-        assert isinstance(vararg_type, ListType)
-        schema_formals[0] = (
-            "*" + args[0].name + ": " + argument_type_str_pyi(vararg_type.elem)
-        )
+        schema_formals[0] = "*" + args[0].name + ": _int"
 
         returns_str = returns_str_pyi(self)
         # pyi also includes self (with no typing/defaults) for methods
