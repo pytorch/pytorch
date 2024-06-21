@@ -17,6 +17,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
 )
+from torch.testing._internal.common_quantization import _generate_qdq_quantized_model
 
 from torch.testing._internal.common_utils import IS_MACOS, parametrize, TEST_MKL
 
@@ -333,6 +334,157 @@ class TestSelectAlgorithm(TestCase):
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
 
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (32,))
+    @parametrize("in_features", (128,))
+    @parametrize("out_features", (64,))
+    @parametrize("bias", (False, True))
+    @parametrize("input_3d", (False, True))
+    @dtypes(torch.float32, torch.bfloat16)
+    @parametrize(
+        "epilogue",
+        (
+            "none",
+            "relu",
+            "gelu",
+        ),
+    )
+    def test_quantized_linear_with_pointwise(
+        self, batch_size, in_features, out_features, bias, input_3d, dtype, epilogue
+    ):
+        B = (2, batch_size) if input_3d else (batch_size,)
+        input = torch.randn(*B, in_features).to(dtype=torch.float32)
+
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+                self.epilogue = _get_epilogue(epilogue)
+                self.linear2 = torch.nn.Linear(out_features, out_features, bias)
+                self.epilogue2 = _get_epilogue(epilogue)
+
+            def forward(self, x):
+                res = self.epilogue(self.linear(x))
+                res = self.epilogue2(self.linear2(res))
+                return res
+
+        counters.clear()
+        ref_quantized_mod = _generate_qdq_quantized_model(
+            M(bias=bias).eval(),
+            (input,),
+        )
+
+        atol, rtol = 1e-3, 1e-3
+        if dtype == torch.bfloat16:
+            atol, rtol = 5e-2, 5e-2
+
+        with patch.object(
+            select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)
+        ), torch.no_grad(), torch.autocast(
+            "cpu", enabled=(dtype == torch.bfloat16), dtype=dtype
+        ):
+            ref_res = ref_quantized_mod(input)
+            cfn = torch.compile(ref_quantized_mod)
+            res = cfn(input)
+            self.assertEqual(
+                res,
+                ref_res,
+                atol=atol,
+                rtol=rtol,
+                equal_nan=True,
+                exact_dtype=True,
+            )
+            self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 2)
+
+    @inductor_config.patch({"freezing": True})
+    @inductor_config.patch({"fx_graph_cache": False})
+    @inductor_config.patch({"fx_graph_remote_cache": False})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (32,))
+    @parametrize("in_features", (128,))
+    @parametrize("out_features", (64,))
+    @parametrize("bias", (False, True))
+    @parametrize("input_3d", (False, True))
+    @parametrize("int8_mixed_bf16", (False, True))
+    @dtypes(torch.float32, torch.bfloat16)
+    @parametrize(
+        "epilogue",
+        (
+            "none",
+            "relu",
+        ),
+    )
+    def test_quantized_linear_with_pointwise_binary(
+        self,
+        batch_size,
+        in_features,
+        out_features,
+        bias,
+        input_3d,
+        int8_mixed_bf16,
+        dtype,
+        epilogue,
+    ):
+        if not int8_mixed_bf16 and dtype == torch.bfloat16:
+            return
+        B = (2, batch_size) if input_3d else (batch_size,)
+        input = torch.randn(*B, in_features).to(dtype=torch.float32)
+
+        other = torch.randn(*B, out_features).to(dtype=dtype)
+        if input_3d:
+            other2 = torch.randn(*B, out_features).to(dtype=dtype)
+        else:
+            other2 = torch.randn(1, *B, out_features).to(dtype=dtype)
+
+        class M(torch.nn.Module):
+            def __init__(self, bias, input_3d):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+                self.epilogue = _get_epilogue(epilogue)
+                self.linear2 = torch.nn.Linear(out_features, out_features, bias)
+                self.epilogue2 = _get_epilogue(epilogue)
+                self.input_3d = input_3d
+
+            def forward(self, x, other, other2):
+                res = self.epilogue(self.linear(x) + other)
+                if not self.input_3d:
+                    # Avoid hiting qlinear inplace sum fusion
+                    other2 = other2.view(other2.size(1), other2.size(2))
+                res = self.epilogue2(self.linear2(res) + other2)
+                return res
+
+        counters.clear()
+        ref_quantized_mod = _generate_qdq_quantized_model(
+            M(bias=bias, input_3d=input_3d).eval(),
+            (input, other, other2),
+        )
+        atol, rtol = 5e-2, 5e-2
+        with patch.object(
+            select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)
+        ), torch.no_grad(), torch.autocast(
+            "cpu", enabled=int8_mixed_bf16, dtype=torch.bfloat16
+        ):
+            ref_res = ref_quantized_mod(input, other, other2)
+            cfn = torch.compile(ref_quantized_mod)
+            res = cfn(input, other, other2)
+            self.assertEqual(
+                res,
+                ref_res,
+                atol=atol,
+                rtol=rtol,
+                equal_nan=True,
+                exact_dtype=True,
+            )
+            self.assertEqual(
+                counters["inductor"]["select_algorithm_autotune"],
+                2,
+            )
+
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
 class _DynamicShapesTestBase(TestCase):
@@ -350,6 +502,12 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
     )
     test_linear_with_unary_binary_dynamic_shapes = (
         TestSelectAlgorithm.test_linear_with_unary_binary
+    )
+    test_quantized_linear_with_pointwise_dynamic_shapes = (
+        TestSelectAlgorithm.test_quantized_linear_with_pointwise
+    )
+    test_quantized_linear_with_pointwise_binary_dynamic_shapes = (
+        TestSelectAlgorithm.test_quantized_linear_with_pointwise_binary
     )
 
 

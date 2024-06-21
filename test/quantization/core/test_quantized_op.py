@@ -4332,8 +4332,8 @@ class TestQuantizedLinear(TestCase):
                         accum = accum.bfloat16()
                     qy_cpu = qlinear_op(
                         qx_cpu, x_scale, x_zp, qw_packed, w_scales, w_zps,
-                        b, used_y_scale, used_y_zp, output_dtype,
-                        accum, x2_scale, x2_zp, "sum", binary_alpha,
+                        accum, b, used_y_scale, used_y_zp, output_dtype,
+                        x2_scale, x2_zp, "sum", binary_alpha,
                         unary_post_op, unary_post_op_args, post_op_algo
                     )
                     y_ref = y_ref + x2 * binary_alpha
@@ -4350,8 +4350,8 @@ class TestQuantizedLinear(TestCase):
                     binary_alpha = 1.0  # we only support alpha=1.0 now
                     qy_cpu = qlinear_op(
                         qx_cpu, x_scale, x_zp, qw_packed, w_scales, w_zps,
-                        b, used_y_scale, used_y_zp, output_dtype,
-                        x2, 1.0, 0, "add", binary_alpha,
+                        x2, b, used_y_scale, used_y_zp, output_dtype,
+                        1.0, 0, "add", binary_alpha,
                         unary_post_op, unary_post_op_args, post_op_algo
                     )
                     y_ref = y_ref + x2 * binary_alpha
