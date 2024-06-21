@@ -24,6 +24,7 @@ __all__ = [
     "ToFloat",
     "FloatPow",
     "PowByNatural",
+    "Identity",
 ]
 
 
@@ -142,15 +143,15 @@ class FloorDiv(sympy.Function):
         if isinstance(base, FloorDiv):
             return FloorDiv(base.args[0], base.args[1] * divisor)
 
-        # gcd in sympy is over polynomials, so you'll end up with rationals if
-        # you do this.  Don't.
-        """
-        if isinstance(base, sympy.Add):
-            for a in base.args:
-                gcd = sympy.gcd(a, divisor)
-                if gcd == divisor:
-                    return FloorDiv(base - a, divisor) + a / gcd
-        """
+        # Expands (x + y) // b into x // b + y // b.
+        # This only works if floor is an identity, i.e. x / b is an integer.
+        for term in sympy.Add.make_args(base):
+            quotient = term / divisor
+            if quotient.is_integer and isinstance(divisor, sympy.Integer):
+                # NB: this is correct even if the divisor is not an integer, but it
+                # creates rational expressions that cause problems with dynamic
+                # shapes.
+                return FloorDiv(base - term, divisor) + quotient
 
         try:
             gcd = sympy.gcd(base, divisor)
@@ -717,6 +718,21 @@ class ToFloat(sympy.Function):
             return sympy.oo
         if number is -int_oo:
             return -sympy.oo
+
+
+class Identity(sympy.Function):
+    """
+    Prevents expansion and other optimizations
+    """
+
+    def __repr__(self):
+        return f"Identity({self.args[0]})"
+
+    def _eval_is_real(self):
+        return self.args[0].is_real
+
+    def _eval_is_integer(self):
+        return self.args[0].is_integer  # type: ignore[attr-defined]
 
 
 def make_opaque_unary_fn(name):
