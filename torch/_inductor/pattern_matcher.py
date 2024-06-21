@@ -1060,7 +1060,10 @@ class ReplacementPatternEntry(PatternEntry):
             last_node = min(indices, key=operator.itemgetter(0))[1]
 
         def percolate_tags(
-            node: torch.fx.Node, tag_name: str, tag_value: str, input_stops: Set[torch.fx.Node]
+            node: torch.fx.Node,
+            tag_name: str,
+            tag_value: str,
+            input_stops: Set[torch.fx.Node],
         ) -> None:
             queue = [node]
             visited = set()

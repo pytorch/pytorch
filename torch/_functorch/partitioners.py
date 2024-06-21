@@ -106,7 +106,7 @@ class MinCutOptions:
     ban_if_reduction: bool
 
 
-def must_recompute(node):
+def must_recompute(node: fx.Node) -> bool:
     return node.meta.get("recompute", None) == CheckpointPolicy.MUST_RECOMPUTE
 
 
