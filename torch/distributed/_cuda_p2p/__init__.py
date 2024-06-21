@@ -1,13 +1,14 @@
 # mypy: allow-untyped-defs
 from collections import defaultdict
 from contextlib import contextmanager
+
 from functools import partial
 from typing import Callable, cast, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
 import torch.distributed._functional_collectives as funcol
-import torch.distributed.distributed_c10d as c10d
 
+import torch.distributed.distributed_c10d as c10d
 
 if TYPE_CHECKING:
     from torch._C._distributed_c10d import _DistributedBackendOptions, Backend
