@@ -490,11 +490,11 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
                 key,
                 value,
                 fw_graph,
-                *other_buffers,
                 sparse_mask_kv_num_blocks,
                 sparse_mask_kv_indices,
                 sparse_mask_q_num_blocks,
                 sparse_mask_q_indices,
+                 *other_buffers,
             )
 
         ctx.save_for_backward(
