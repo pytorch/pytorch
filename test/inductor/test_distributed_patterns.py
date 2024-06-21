@@ -19,10 +19,12 @@ RESIZE = True
 def init_fake_distributed():
     @torch.no_grad
     def all_gather(t):
+        # clone since all_gather input and output should not be aliases.
         return torch.cat([t] * WORLD_SIZE, 0).clone()
 
     @torch.no_grad
     def reduce_scatter(t):
+        # clone since reduce_scatter input and output should not be aliases.
         return t.narrow(0, 0, t.size(0) // WORLD_SIZE).clone()
 
     def fw_pre_hook(mod, inp):
@@ -39,11 +41,13 @@ def init_fake_distributed():
         mod.weight = mod.unsharded_weight
 
     # Forward:
+    #   mod.sharded_weight = local_shard (always)
     #   Before:
     #     mod.weight = local_shard
+    #     mod.unsharded_weight = zero-sized allgather
     #   After:
     #     mod.weight = local_shard
-    #     mod.empty_weight  =zero-sized allgather
+    #     mod.unsharded_weight = zero-sized allgather
 
     def fw_post_hook(mod, inp, out):
         mod.weight = mod.sharded_weight
@@ -63,11 +67,13 @@ def init_fake_distributed():
         mod.weight = mod.unsharded_weight
 
     # Backward:
+    #   mod.sharded_weight = local_shard (always)
     #   Before:
     #     mod.weight = local_shard
-    #     mod.empty_weight = zero-sized allgather
+    #     mod.unsharded_weight = zero-sized allgather
     #   After:
     #     mod.weight = local_shard
+    #     mod.unsharded_weight = zero-sized allgather
 
     def bw_post_hook(mod, gI, gO):
         grad = mod.weight.grad
