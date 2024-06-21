@@ -2,46 +2,48 @@ import torch
 from torch._dynamo.utils import counters
 from ..pattern_matcher import Arg, CallFunction, Match, register_graph_pattern
 from .split_cat import construct_pattern_matcher_pass
-from ..select_algorithm import TritonTemplate
+from ..select_algorithm import (
+    TritonTemplate,
+    autotune_select_algorithm,
+)
+from ..utils import use_triton_template
 
 aten = torch.ops.aten
 
-# TODO: change to triton template
-kernel_source = """
-@triton.jit
-def gemm_kernel(
-    # pointers to matrices
-    a_ptr,
-    b_ptr,
-    c_ptr,
-    d_ptr,
-    # matrix dimensions
-    M,
-    N: tl.constexpr,  # TODO: get rid of constexpr?
-    O,
-    P: tl.constexpr,
-    # strides
-    stride_am,
-    stride_an,
-    stride_bn,
-    stride_bo,
-    stride_co,
-    stride_cp,
-    stride_dm,
-    stride_dp,
-    # other parameters
-    ROW_BLOCK_SIZE: tl.constexpr,  # row block size for A
-    COL_BLOCK_SIZE: tl.constexpr,  # col block size for B (also the row block size for C)
-):
-    # dram load/store estimations
-    #   (A @ B) @ C
-    #   M * N, N * O, O * P
-    #   baseline
-    #     load = M * N + N * O + M * O + O * P
-    #     store = M * O + M * P
-    #   gemm
-    #     load = M * N + M / m * (N * O + O * P)
-    #     store = M * P
+# dram load/store estimations
+#   (A @ B) @ C
+#   M * N, N * O, O * P
+#   baseline
+#     load = M * N + N * O + M * O + O * P
+#     store = M * O + M * P
+#   gemm
+#     load = M * N + M / m * (N * O + O * P)
+#     store = M * P
+
+def b2b_gemm_grid(m, n, meta):
+    """
+    The CUDA grid size for matmul triton templates.
+    """
+    return (cdiv(m, meta["ROW_BLOCK_SIZE"]) * cdiv(n, meta["COL_BLOCK_SIZE"]), 1, 1)
+
+b2b_gemm_template = TritonTemplate(
+    name="b2b_gemm",
+    grid=b2b_gemm_grid,
+    debug=True,
+    source=r"""
+{{def_kernel("A", "B", "C")}}
+    # TODO: change N and P to non-constexpr
+    M = {{size("A", 0)}}
+    # N = {{size("A", 1)}}
+    O = {{size("C", 0)}}
+    # P = {{size("C", 1)}}
+
+    stride_am = {{stride("A", 0)}}
+    stride_an = {{stride("A", 1)}}
+    stride_bn = {{stride("B", 0)}}
+    stride_bo = {{stride("B", 1)}}
+    stride_co = {{stride("C", 0)}}
+    stride_cp = {{stride("C", 1)}}
 
     # A's row block for this thread
     row_block_id = tl.program_id(axis=0)
@@ -57,26 +59,17 @@ def gemm_kernel(
     acc = tl.zeros((ROW_BLOCK_SIZE, P), dtype=tl.float16)
 
     # A
-    a_ptrs = a_ptr + (
-        offs_row[:, None] * stride_am + tl.arange(0, N)[None, :] * stride_an
-    )
-
+    a_ptrs = a_ptr + (offs_row[:, None] * stride_am + tl.arange(0, N)[None, :] * stride_an)
     a = tl.load(a_ptrs)
 
     for _ in range(num_col_block):
 
         # B
-        b_ptrs = b_ptr + (
-            tl.arange(0, N)[:, None] * stride_bn + offs_col[None, :] * stride_bo
-        )
-
+        b_ptrs = b_ptr + (tl.arange(0, N)[:, None] * stride_bn + offs_col[None, :] * stride_bo)
         b = tl.load(b_ptrs)
 
         # C
-        c_ptrs = c_ptr + (
-            offs_col[:, None] * stride_co + tl.arange(0, P)[None, :] * stride_cp
-        )
-
+        c_ptrs = c_ptr + (offs_col[:, None] * stride_co + tl.arange(0, P)[None, :] * stride_cp)
         c = tl.load(c_ptrs)
 
         # computation (TODO: floating point errors)
@@ -86,25 +79,40 @@ def gemm_kernel(
         offs_col += COL_BLOCK_SIZE
 
     # store
-    d_ptrs = d_ptr + (
-        offs_row[:, None] * stride_dm + tl.arange(0, P)[None, :] * stride_dp
-    )
+    idx_m = offs_row[:, None] * stride_am
+    idx_p = tl.arange(0, P)[None, :] * stride_cp
+    mask = (idx_m < M) & (idx_p < P)
 
-    tl.store(d_ptrs, acc)
-"""
+    {{store_output(("idx_m", "idx_p"), "acc", "mask")}}
+""",
+)
 
 def can_apply_b2b_gemm(mat1, mat2, mat3) -> bool:
-    if not(is_node_meta_valid(mat1) and is_node_meta_valid(mat2) and is_node_meta_valid(mat3)):
+    if not(("val" in mat1.meta) and ("val" in mat2.meta) and ("val" in mat3.meta)):
         return False
     mat1 = mat1.meta["val"]
     mat2 = mat2.meta["val"]
     mat3 = mat3.meta["val"]
-    if not (a.is_cuda and b.is_cuda):
+    if not (mat1.is_cuda and mat2.is_cuda and mat3.is_cuda):
         return False
-    if len(mat1.shape) != 2 or len(mat2.shape) != 2:
+    if not (len(mat1.shape) == 2 and len(mat2.shape) == 2 and len(mat3.shape) == 2):
         return False
-    # TODO: check for size restrictions
-    return True
+    # TODO: change to a real-check for size restrictions
+    return mat1.shape[1] == 64 and mat3.shape[1] == 64
+
+def tuned_b2b_gemm(mat1, mat2, mat3, layout=None):
+    _, _, _, layout, _, _ = mm_args(mat1, mat2, layout=layout)
+    choices = []
+    for config in [
+        {"ROW_BLOCK_SIZE": 32, "COL_BLOCK_SIZE": 32, "num_stages": 2, "num_warps": 4, "N": 64, "P": 64}
+    ]:  # later may add more configs
+        b2b_gemm_template.maybe_append_choice(
+            choices,
+            input_nodes=(mat1, mat2, mat3),
+            layout=layout,
+            **config,
+        )
+    return autotune_select_algorithm("b2b_gemm", choices, [mat1, mat2, mat3], layout)
 
 # currently it matches ((A @ B) @ C)
 # later will change to matching (A @ B) in (epilogue2 ((epilogue1 (A @ B)) @ C)) and inspecting the graph
@@ -114,6 +122,12 @@ def can_apply_b2b_gemm(mat1, mat2, mat3) -> bool:
 )
 def b2b_gemm(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node, mat3: torch.fx.Node):
     print("B2B-GEMM handler called")
-    # if can_apply_b2b_gemm(mat1, mat2, mat3):
-    #     counters["inductor"]["b2b_gemm"] += 1
-    #     lowering to the B2B_GEMM Triton template (not sure how to do this)
+    if can_apply_b2b_gemm(mat1, mat2, mat3):
+        counters["inductor"]["b2b_gemm"] += 1
+        graph = match.graph
+        root_node = match.nodes[-1]
+        with graph.inserting_before(root_node):
+            replacement = graph.call_function(tuned_b2b_gemm, tuple(match.args), match.kwargs)
+            replacement.meta.update(root_node.meta)
+            root_node.replace_all_uses_with(replacement)
+        match.erase_nodes(graph)
