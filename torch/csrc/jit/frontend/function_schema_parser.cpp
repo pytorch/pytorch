@@ -205,8 +205,8 @@ struct SchemaParser {
       return true;
     }
     if (type.kind() == at::OptionalType::Kind) {
-      for (const auto& type : type.containedTypes()) {
-        if (isPossiblyOptionalScalarType(*type))
+      for (const auto& inner : type.containedTypes()) {
+        if (isPossiblyOptionalScalarType(*inner))
           return true;
       }
     }
@@ -239,7 +239,16 @@ struct SchemaParser {
       case TK_IDENT: {
         auto tok = L.next();
         auto text = tok.text();
-        if ("strided" == text) {
+        // NB: float/complex/long are here for BC purposes. Other dtypes
+        // are handled via str2dtype.
+        // Please don't add more cases to this if-else block.
+        if ("float" == text) {
+          return static_cast<int64_t>(at::kFloat);
+        } else if ("complex" == text) {
+          return static_cast<int64_t>(at::kComplexFloat);
+        } else if ("long" == text) {
+          return static_cast<int64_t>(at::kLong);
+        } else if ("strided" == text) {
           return static_cast<int64_t>(at::kStrided);
         } else if ("Mean" == text) {
           return static_cast<int64_t>(at::Reduction::Mean);
