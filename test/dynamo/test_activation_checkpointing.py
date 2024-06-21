@@ -531,9 +531,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
     @requires_cuda
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    @torch._dynamo.config.patch(
-        "_experimental_support_context_fn_in_torch_utils_checkpoint", True
-    )
     def test_compile_selective_checkpoint_must_recompute(self):
         def context_fn_must_recompute_sigmoid():
             no_recompute_list = [
@@ -608,9 +605,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    @torch._dynamo.config.patch(
-        "_experimental_support_context_fn_in_torch_utils_checkpoint", True
-    )
     def test_compile_selective_checkpoint_must_not_recompute_gemm(self):
         def selective_checkpointing_context_fn():
             no_recompute_list = [
@@ -658,9 +652,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
     @requires_cuda
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    @torch._dynamo.config.patch(
-        "_experimental_support_context_fn_in_torch_utils_checkpoint", True
-    )
     def test_compile_selective_checkpoint_tensor_subclass(self):
         def selective_checkpointing_context_fn():
             no_recompute_list = [
@@ -711,9 +702,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
     @requires_cuda
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    @torch._dynamo.config.patch(
-        "_experimental_support_context_fn_in_torch_utils_checkpoint", True
-    )
     def test_compile_selective_checkpoint_custom_rule(self):
         def _get_custom_policy(meta):
             no_recompute_list = [
@@ -779,9 +767,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
     @requires_cuda
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    @torch._dynamo.config.patch(
-        "_experimental_support_context_fn_in_torch_utils_checkpoint", True
-    )
     def test_compile_selective_checkpoint_partial_ctx_fn(self):
         def selective_checkpointing_context_fn(no_recompute_list):
             return create_selective_checkpoint_contexts(
@@ -828,9 +813,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
     @requires_cuda
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    @torch._dynamo.config.patch(
-        "_experimental_support_context_fn_in_torch_utils_checkpoint", True
-    )
     def test_compile_selective_checkpoint_outplace_op(self):
         def selective_checkpointing_context_fn():
             no_recompute_list = [
@@ -880,9 +862,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         "In-place op support in selective checkpointing + torch.compile "
         "requires TorchDispatchMode + torch.compile work to complete"
     )
-    @torch._dynamo.config.patch(
-        "_experimental_support_context_fn_in_torch_utils_checkpoint", True
-    )
     def test_compile_selective_checkpoint_inplace_op(self):
         def selective_checkpointing_context_fn():
             no_recompute_list = [
@@ -930,9 +909,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
     @requires_cuda
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    @torch._dynamo.config.patch(
-        "_experimental_support_context_fn_in_torch_utils_checkpoint", True
-    )
     def test_compile_selective_checkpoint_random_op(self):
         for preserve_rng_state in [True, False]:
 
@@ -991,9 +967,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             self._compare_orig_and_checkpointed_fns(gn, fn, x)
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    @torch._dynamo.config.patch(
-        "_experimental_support_context_fn_in_torch_utils_checkpoint", True
-    )
     def test_compile_selective_checkpoint_invalid_context(self):
         def gn(x, y):
             return torch.sigmoid(torch.matmul(x, y)) * y
