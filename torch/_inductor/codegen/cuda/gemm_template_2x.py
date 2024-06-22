@@ -249,58 +249,19 @@ class CUTLASS2xGemmTemplate(CUTLASSTemplate):
         assert len(layouts) == 2 or len(layouts) == 3
         # Check if A and B are compatible
         A_layout, B_layout = layouts[:2]
-        if len(A_layout.size) < 1:
+        if len(A_layout.size) != 2:
             return False
-        if len(B_layout.size) < 1:
+        if len(A_layout.size) != 2:
             return False
         A_size = [int(i) for i in A_layout.size]
         B_size = [int(i) for i in B_layout.size]
-        if len(A_size) < 2:
-            A_size.insert(0, 1)
-        if len(B_size) < 2:
-            A_size.insert(1, 1)
-        # Are batch dims broadcastable?
-        while len(A_size) < len(B_size):
-            A_size.insert(0, 1)
-        while len(B_size) < len(A_size):
-            B_size.insert(0, 1)
         K = max(A_size[-1], B_size[-2])
         M = A_size[-2]
         N = B_size[-1]
-        if K != A_size[-1] and A_size[-1] != 1:
+        if K != A_size[-1]:
             return False
-        if K != B_size[-2] and B_size[-1] != 1:
+        if K != B_size[-2]:
             return False
-        # check batch dim broadcastable
-        for i in range(len(A_size) - 2):
-            if A_size[i] != B_size[i] and A_size[i] != 1 and B_size[i] != 1:
-                return False
-        if len(layouts) == 3:
-            C_layout = layouts[2]
-            C_size = [int(i) for i in C_layout.size]
-            while len(C_size) < len(A_size):
-                C_size.insert(0, 1)
-            # check batch dims
-            for i in range(len(A_size) - 2):
-                bd = max(A_size[i], B_size[i])
-                if bd != C_size[i] and C_size[i] != 1:
-                    return False
-            if len(C_size) > len(A_size):
-                # This may happen if the last elements of C are contiguous and
-                # their multiplied size equals the last dim size of B
-                if M != C_size[len(A_size) - 2] and C_size[len(A_size) - 2] != 1:
-                    return False
-                remaining_size = 1
-                for i in range(len(A_size) - 1, len(C_size)):
-                    remaining_size *= C_size[i]
-                if N != remaining_size and remaining_size != 1:
-                    return False
-                return True
-            assert len(C_size) == len(A_size)
-            if M != C_size[-2] and C_size[-2] != 1:
-                return False
-            if N != C_size[-1] and C_size[-1] != 1:
-                return False
         return True
 
     @staticmethod
@@ -452,20 +413,6 @@ class CUTLASS2xGemmTemplate(CUTLASSTemplate):
             op_element.alignment = alignment
             return True
 
-    @staticmethod
-    def has_tma_epilogue(  # noqa: F821 # type: ignore[arg-type,name-defined]
-        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined,arg-type] # noqa: F821
-    ) -> bool:  # type: ignore[name-defined]
-        """Helper method: Determine whether a given Cutlass GEMM op has a TMA Epilogue"""
-        assert cutlass_utils.try_import_cutlass()
-        import cutlass_library.library as cutlass_lib
-
-        result = False
-        if op.gemm_kind == cutlass_lib.GemmKind.Universal:
-            epilogue_schedule_str = str(op.epilogue_schedule).split(".")[-1]
-            result = epilogue_schedule_str.lower().startswith("tma")
-        return result
-
     def define_gemm_instance(
         self,
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
@@ -501,48 +448,6 @@ class CUTLASS2xGemmTemplate(CUTLASSTemplate):
             raise RuntimeError("Invalid Gemm config: \n" + op_def)
         op_type = match.groups()[0]
         return op_def, op_type
-
-    @staticmethod
-    def should_swap_XW(
-        bias: IRNode,
-    ) -> bool:
-        """
-        Helper method to determine whether we should do an explicit transpose by switching the order of the
-        matmul operands. This might be neccessary when we can't otherwise arrive at the right memory
-        layout for the given Bias operand.
-
-        Note: This method is a workaround for CUDA Errors that seemingly non-deterministically
-        occurred in practice in some CUTLASS GEMM Kernels with Linear epilogues that have a bias term.
-        it might make sense to check on newer Cutlass releases whether it makes sense to keep
-        returning True in certain cases or whether it becomes unneccessary.
-        """
-        # If bias is row major, swap all M and N dimensions
-        if (
-            bias is not None
-            and len(bias.get_stride()) >= 2
-            and bias.get_stride()[-1] in (0, 1)
-        ):
-            log.debug("GEMM Layout swapped X and W -> explicit transpose")
-            return True
-        return False
-
-    @staticmethod
-    def swap_XW(
-        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
-    ) -> "cutlass_library.gemm_op.GemmOperation":  # type: ignore[name-defined]  # noqa: F821
-        """
-        Swap operands X and W (aka operans A and B) of the GEMM operation. This
-        requires transposing the operands, which is done by swapping the strides.
-        Note that we don't change the apparent external layout, just the operand layout.
-        this is intentional.
-        """
-        new_op = copy.deepcopy(op)
-        new_op.A.layout = CUTLASS2xGemmTemplate.flip_cutlass_layout(new_op.A.layout)
-        new_op.B.layout = CUTLASS2xGemmTemplate.flip_cutlass_layout(new_op.B.layout)
-        new_op.A, new_op.B = new_op.B, new_op.A
-        new_op.C.layout = CUTLASS2xGemmTemplate.flip_cutlass_layout(new_op.C.layout)
-        new_op.D.layout = CUTLASS2xGemmTemplate.flip_cutlass_layout(new_op.D.layout)
-        return new_op
 
     def fix_op_layout(
         self,
@@ -796,33 +701,6 @@ class CUTLASS2xGemmTemplate(CUTLASSTemplate):
             )
             return arguments
 
-        if should_swap_xw:
-            # Swap
-            def clone_with_transposed_stride(node: IRNode) -> IRNode:
-                old_layout = node.get_layout()
-                new_stride = list(old_layout.stride)
-                new_stride[-2], new_stride[-1] = new_stride[-1], new_stride[-2]
-                new_layout = FixedLayout(
-                    old_layout.device,
-                    old_layout.dtype,
-                    list(old_layout.size),
-                    new_stride,
-                    old_layout.offset,
-                )
-                return Buffer(node.get_name(), new_layout)
-
-            new_X = clone_with_transposed_stride(X)
-            new_W = clone_with_transposed_stride(W)
-            new_Bias = clone_with_transposed_stride(Bias)
-            new_Y = clone_with_transposed_stride(Y)
-            options["X"], options["W"], options["Bias"], options["Y"] = (
-                new_W,
-                new_X,
-                new_Bias,
-                new_Y,
-            )
-            options["M"], options["N"] = "N", "M"
-
         epilogue_arguments = self._template_from_string(epilogue_template).render(
             **options
         )
@@ -907,15 +785,6 @@ class CUTLASS2xGemmTemplate(CUTLASSTemplate):
         argument_template: str = GEMM_ARGS_CUTLASS_2X
         should_swap_xw: bool = False
         epilogue_args = f"{{ElementComputeEpilogue({self.alpha}), ElementComputeEpilogue({self.beta})}}"
-        if Bias is not None and self.has_tma_epilogue(op):
-            if (
-                op.epilogue_schedule
-                != cutlass_lib.EpilogueScheduleType.EpilogueTransposed
-                and self.should_swap_XW(Bias)
-            ):
-                # TMA epilogue requires bias vector in column major to get best perf.
-                op = self.swap_XW(op)
-                should_swap_xw = True
 
         instance_definition, instance_type = self.define_gemm_instance(op)
 
