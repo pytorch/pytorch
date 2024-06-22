@@ -58,7 +58,7 @@ _side_effectful_functions: Set[Callable] = {
     _ops.inductor.accumulate_grad_.default,
 } | _side_effectful_need_to_be_preserved_pre_dispatch
 if hasattr(_ops.inductor, "resize_storage_bytes_"):
-    _side_effectful_functions.add(_ops.inductor.resize_storage_bytes_)
+    _side_effectful_functions.add(_ops.inductor.resize_storage_bytes_.default)
 
 
 @compatibility(is_backward_compatible=False)
