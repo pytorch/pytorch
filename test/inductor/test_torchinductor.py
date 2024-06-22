@@ -11392,7 +11392,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
             dim = 1024
 
             @torch.compile(dynamic=False)
-            def f(in1, in2, a, b):
+            def f(in1, in2, a, b, scale_a, scale_b):
                 out = torch.nn.functional.silu(in1) * in2
                 out_row = (out / out.amax(dim=1, keepdim=True)).to(torch.float8_e4m3fn)
                 out_col = (out / out.amax(dim=0, keepdim=True)).to(torch.float8_e4m3fn)
@@ -11402,8 +11402,12 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 out_col = out_col.t().contiguous().t()
 
                 return (
-                    torch._scaled_mm(out_row, a, out_dtype=torch.bfloat16)[0],
-                    torch._scaled_mm(b, out_col, out_dtype=torch.bfloat16)[0],
+                    torch._scaled_mm(
+                        out_row, a, scale_a, scale_b, out_dtype=torch.bfloat16
+                    ),
+                    torch._scaled_mm(
+                        b, out_col, scale_a, scale_b, out_dtype=torch.bfloat16
+                    ),
                 )
 
             in1 = torch.randn((bs, dim), dtype=torch.bfloat16, device=GPU_TYPE)
@@ -11416,9 +11420,12 @@ if HAS_GPU and not TEST_WITH_ASAN:
             b = torch.randn((dim, bs), dtype=torch.bfloat16, device=GPU_TYPE).to(
                 torch.float8_e4m3fn
             )
+            # Scales
+            scale_a = torch.tensor(1.0, device=GPU_TYPE)
+            scale_b = torch.tensor(1.0, device=GPU_TYPE)
 
             # warmup
-            _, (wrapper,) = run_and_get_code(f, in1, in2, a, b)
+            _, (wrapper,) = run_and_get_code(f, in1, in2, a, b, scale_a, scale_b)
 
             # Previously indcutor decide reduction hint for a reduction kernel without considering
             # the pointwise nodes. That will cause the third reduction kernel in this wrapper to be a
@@ -11434,7 +11441,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                     activities=[torch.profiler.ProfilerActivity.CUDA]
                 ) as p:
                     for _ in range(1000):
-                        f(in1, in2, a, b)
+                        f(in1, in2, a, b, scale_a, scale_b)
 
                 print(p.key_averages().table(max_name_column_width=200))
 
