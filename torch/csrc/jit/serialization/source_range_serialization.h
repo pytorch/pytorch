@@ -12,8 +12,7 @@ namespace c10 {
 struct IValue;
 }
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 class Pickler;
 class SourceRangeSerializer;
@@ -64,5 +63,4 @@ class SourceRangeUnpickler {
 TORCH_API void setShouldUseFormatWithStringTable(
     bool should_use_format_with_string_table);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
