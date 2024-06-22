@@ -838,42 +838,24 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         name = "_call_impl"
         fn = getattr(self.value_type, name)
 
-        from torch.nn.utils.parametrize import is_parametrized
-
-        if (
-            not tx.output.side_effects.has_pending_mutation(self)
-            and "forward" not in mod.__dict__
-            and not is_parametrized(mod)
-            and fn is torch.nn.Module._call_impl
-        ):
+        # Check if we can short circuit nn.Module._call_impl to the forward
+        # method.  NB - This is done to reduce the compile time of Dynamo.
+        if fn is torch.nn.Module._call_impl and "forward" not in mod.__dict__:
             forward_method = inspect.getattr_static(mod, "forward")
             if isinstance(forward_method, types.FunctionType):
-                # TODO(anijain2305) - Load this once - should give ~3 seconds on MobileBert
-                import importlib
-
-                module_name = "torch.nn.modules.module"
-                module_source = tx.import_source(module_name)
-                fglobals_value = importlib.import_module(module_name)  # type: ignore[assignment]
-                from .builder import VariableBuilder
-
-                globals_vt = VariableBuilder(tx, module_source)(fglobals_value)
-
-                if not tx.output.side_effects.has_pending_mutation(globals_vt):
-                    # Check if we can take the fast path of directly tracing forward.
-                    if not (
-                        self.var_getattr(tx, "_backward_hooks").realize().len()
-                        or self.var_getattr(tx, "_backward_pre_hooks").realize().len()
-                        or self.var_getattr(tx, "_forward_hooks").realize().len()
-                        or self.var_getattr(tx, "_forward_pre_hooks").realize().len()
-                        or globals_vt.var_getattr(
-                            tx, "_global_backward_pre_hooks"
-                        ).len()
-                        or globals_vt.var_getattr(tx, "_global_backward_hooks").len()
-                        or globals_vt.var_getattr(tx, "_global_forward_hooks").len()
-                        or globals_vt.var_getattr(tx, "_global_forward_pre_hooks").len()
-                    ):
-                        name = "forward"
-                        fn = self.value_type.forward
+                globals_vt = tx.nn_modules_globals_vt
+                if not (
+                    self.var_getattr(tx, "_backward_hooks").realize().len()
+                    or self.var_getattr(tx, "_backward_pre_hooks").realize().len()
+                    or self.var_getattr(tx, "_forward_hooks").realize().len()
+                    or self.var_getattr(tx, "_forward_pre_hooks").realize().len()
+                    or globals_vt.var_getattr(tx, "_global_backward_pre_hooks").len()
+                    or globals_vt.var_getattr(tx, "_global_backward_hooks").len()
+                    or globals_vt.var_getattr(tx, "_global_forward_hooks").len()
+                    or globals_vt.var_getattr(tx, "_global_forward_pre_hooks").len()
+                ):
+                    name = "forward"
+                    fn = self.value_type.forward
 
         if self.source:
             source = AttrSource(AttrSource(self.source, "__class__"), name)
