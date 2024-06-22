@@ -583,6 +583,7 @@ class WrapperCodeGen(CodeGen):
         self.header.splice(import_str)
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_calls.splice(import_str)
+        self.write_get_raw_stream_header_once()
 
     @cache_on_self
     def write_get_raw_stream_header_once(self) -> None:
