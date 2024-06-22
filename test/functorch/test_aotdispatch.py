@@ -1051,7 +1051,7 @@ def forward(self, primals_1, primals_2):
     return [sin, cat]""",
         )
 
-    def test_input_mutation_storage_resize_before_set(self):
+    def test_input_mutation_storage_resize_before_set_(self):
         def f(a):
             with torch.no_grad():
                 torch.ops.inductor.resize_storage_bytes_(a, 0)
