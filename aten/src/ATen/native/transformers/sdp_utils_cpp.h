@@ -359,6 +359,18 @@ inline bool check_grouped_query_attention(sdp_params const& params, bool debug) 
   const auto k_num_heads = params.key.sym_size(1);
   const auto v_num_heads = params.value.sym_size(1);
   const bool same_kv_heads = k_num_heads == v_num_heads;
+  // Check nested tensor
+  if (params.query.is_nested() || params.key.is_nested() || params.value.is_nested()) {
+    if (debug) {
+      TORCH_WARN(
+          "Nested tensor not supported for grouped query attention,",
+          " got query.is_nested(): ", params.query.is_nested(),
+          ", key.is_nested(): ", params.key.is_nested(),
+          ", value.is_nested(): ", params.value.is_nested(),
+          " instead.");
+    }
+    return false;
+  }
   if (!same_kv_heads){
     if (debug) {
       TORCH_WARN(
@@ -378,9 +390,11 @@ inline bool check_grouped_query_attention(sdp_params const& params, bool debug) 
       TORCH_WARN(
           "FlashAttentionV2 only supports grouped query attention, where the number of heads in key/value must divide number of heads in query.",
           "Got input Key sizes(): ",
-          params.key.sizes(),
+          params.key.sym_sizes(),
           ", Value sizes(): ",
-          params.value.sizes(),
+          params.value.sym_sizes(),
+          ", Query sizes(): ",
+          params.query.sym_sizes(),
           " instead.");
     }
     return false;
@@ -392,11 +406,11 @@ inline bool check_grouped_query_attention(sdp_params const& params, bool debug) 
       TORCH_WARN(
           "MemoryEfficient attention requires query, key and value to have the same num_heads but got: ",
           "Query.sizes(): ",
-          params.query.sizes(),
+          params.query.sym_sizes(),
           ", Key sizes(): ",
-          params.key.sizes(),
+          params.key.sym_sizes(),
           ", Value sizes(): ",
-          params.value.sizes(),
+          params.value.sym_sizes(),
           " instead.");
     }
     return false;
@@ -416,19 +430,19 @@ inline bool check_batch_size_and_num_heads_dense(sdp_params const& params, bool 
   bool same_batch_size =
       q_batch_size == k_batch_size && q_batch_size == v_batch_size;
 
-  auto q_num_heads = params.query.sym_size(1);
-  auto k_num_heads = params.key.sym_size(1);
-  auto v_num_heads = params.value.sym_size(1);
+  auto q_num_heads = params.query.sym_size(-3);
+  auto k_num_heads = params.key.sym_size(-3);
+  auto v_num_heads = params.value.sym_size(-3);
   if (!(same_batch_size)){
     if (debug) {
       TORCH_WARN(
           "For dense inputs, both fused kernels require query, key and value to have the same batch_size and num_heads. ",
           "Query.sizes(): ",
-          params.query.sizes(),
+          params.query.sym_sizes(),
           ", Key sizes(): ",
-          params.key.sizes(),
+          params.key.sym_sizes(),
           ", Value sizes(): ",
-          params.value.sizes(),
+          params.value.sym_sizes(),
           " instead. To broadcast dense inputs, try using unsqueeze and expand_to before passing them into the kernel.");
     }
     return false;
