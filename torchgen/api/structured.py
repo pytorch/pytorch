@@ -1,7 +1,6 @@
 from typing import List, Union
 
 from torchgen.api import cpp
-
 from torchgen.api.types import (
     ArgName,
     ArrayRefCType,
@@ -32,6 +31,7 @@ from torchgen.model import (
     Type,
 )
 from torchgen.utils import assert_never
+
 
 # This file describes the translation of JIT schema to the structured functions API.
 # This is similar to native API, but a number of historical problems with native
