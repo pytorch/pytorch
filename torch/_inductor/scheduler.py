@@ -1584,21 +1584,6 @@ class Scheduler:
                 return rename(self.mutation_renames[n])
             return n
 
-        def dep_closure(node_name: str) -> Set[str]:
-            reachable_names = {node_name}
-            node = self.name_to_node[node_name]
-            write_dep = next(iter(node.read_writes.writes))
-            for read_dep in node.read_writes.reads:
-                if (
-                    read_dep.name in self.name_to_node
-                    and isinstance(read_dep, dependencies.MemoryDep)
-                    and isinstance(write_dep, dependencies.MemoryDep)
-                    and read_dep.index == write_dep.index
-                    and read_dep.size == write_dep.size
-                ):
-                    reachable_names.update(dep_closure(read_dep.name))
-            return reachable_names
-
         def add_user(
             used_by_name: str,
             user_node: Union[BaseSchedulerNode, OutputNode],
@@ -1665,13 +1650,12 @@ class Scheduler:
                 node.add_fake_dep(StarDep(alt_name, mode=node_mode))
                 for other_node in name_to_users[alt_name].items:
                     # this node must run after all prior readers
+                    if other_node.get_name() == node.get_name():
+                        continue
+
                     other_name = rename(other_node.get_name())
-                    known_dep_node_names = dep_closure(node.get_name())
-                    if other_name not in known_dep_node_names:
-                        # If this node already directly or indirectly depends on other_node,
-                        # we don't need to insert an extra dep.
-                        node.add_fake_dep(WeakDep(other_name))
-                        add_user(other_name, node, is_weak=True)
+                    node.add_fake_dep(WeakDep(other_name, mutating_buf=node.get_name()))
+                    add_user(other_name, node, is_weak=True)
 
             # add normal non-mutation dependencies
             for read in node.read_writes.reads:
@@ -2388,9 +2372,6 @@ class Scheduler:
         We can fuse them if all the reads of node2 either match
         corresponding writes in node1, or are written by nodes that can
         be scheduled before the fusion of node1 and node2.
-
-        We also disable fusion of a write subsequent to a read if the reads
-        and writes do not align.
         """
         node1_names = node1.get_names()
         computed_deps = set()
@@ -2402,6 +2383,10 @@ class Scheduler:
             for rd in node2.unmet_dependencies:
                 if self.fusable_read_and_write(rd, cd):
                     computed_deps.add(rd)
+
+        for dep in node2.unmet_dependencies:
+            if isinstance(dep, WeakDep) and self.fusable_weak_dep(dep, node1, node2):
+                computed_deps.add(dep)
 
         remaining_deps = {dep.name for dep in node2.unmet_dependencies - computed_deps}
         if remaining_deps & node1_names:
@@ -2416,21 +2401,38 @@ class Scheduler:
                 why("intermediate nodes between node1 & node2")
                 return False
 
-        # similar to can_inplace, if we are going to fuse a write subsequent to a read
-        # require that the indexing and size is the same
-        for write in node2.read_writes.writes:
-            if not isinstance(write, MemoryDep):
-                continue
-            for read in node1.read_writes.reads:
-                if write.name != self.mutation_renames.get(read.name, read.name):
-                    continue
-
-                # bail on StarDep
-                if not self.fusable_read_and_write(read, write):
-                    why("fusing a write into a read with different indexing formula")
-                    return False
-
         return True
+
+    def fusable_weak_dep(
+        self, weak_dep: WeakDep, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        # A weak dep can be fused if and only if the fused operation acts inplace
+        # on the buffer being mutated. i.e. the same index is being read then mutated
+        mutating_writes = [
+            write
+            for write in node2.read_writes.writes
+            if write.name == weak_dep.mutating_buf
+        ]
+        if len(mutating_writes) != 1:
+            return False
+        write = mutating_writes[0]
+        assert isinstance(write, MemoryDep)
+
+        if free_symbol_is_type(write.index, SymT.TMP):
+            return False
+
+        relevant_reads = (
+            read
+            for read in node1.read_writes.reads
+            if self.mutation_renames.get(read.name, read.name) == weak_dep.mutating_buf
+        )
+        return all(
+            isinstance(read, MemoryDep)
+            and not free_symbol_is_type(read.index, SymT.TMP)
+            and read.index == write.index
+            and read.size == write.size
+            for read in relevant_reads
+        )
 
     # StarDep doesn't match MemoryDep, different indices don't match
     # However, broadcasting sometimes strips dimensions, and if that's the case
