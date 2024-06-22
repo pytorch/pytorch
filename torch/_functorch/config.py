@@ -87,6 +87,9 @@ ban_recompute_not_in_allowlist = True
 # the result of reductions is generally very small but recomputing reductions in
 # a fusion can be expensive.
 ban_recompute_reductions = True
+# Prevents the partitioner from ever saving views (i.e. always recompute them).
+# Generally a good idea since views are free to recompute.
+recompute_views = False
 
 # By default, the partitioner is purely trying to optimize for runtime (although
 # it should always use less memory than eager)

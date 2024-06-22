@@ -20,6 +20,7 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import TypeGuard
 from weakref import ReferenceType
 
 import torch
@@ -148,7 +149,7 @@ def unset_fake_temporarily():
             torch._C._set_dispatch_mode(old)
 
 
-def is_fake(x):
+def is_fake(x: object) -> TypeGuard[torch.Tensor]:
     if isinstance(x, FakeTensor):
         return True
     if is_traceable_wrapper_subclass(x):
@@ -849,7 +850,7 @@ def extract_tensor_metadata(t: torch.Tensor) -> "TensorMetadata":
         device=t.device,
         layout=t.layout,
         memory_format=memory_format,
-        storage_offset=t.storage_offset(),  # type: ignore[arg-type]
+        storage_offset=t.storage_offset(),
         # Only set storage_bytes for tensors that have storage (not sparse)
         storage_bytes=t.untyped_storage().nbytes() if not t.is_sparse else None,
         requires_grad=t.requires_grad,

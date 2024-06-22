@@ -237,7 +237,7 @@ class MetaTensorDescriber:
             # NB: We actually don't use storage to do views, but might as well
             # put it in for accuracy
             storage = self.describe_storage(t.untyped_storage(), trace=trace)
-            storage_offset = t.storage_offset()  # type: ignore[assignment]
+            storage_offset = t.storage_offset()
 
         stride = None
         if not (
@@ -1565,7 +1565,7 @@ class MetaConverter:
 
         # Filter out cases we don't support
         # TODO: This can probably be simplified quite a bit
-        if isinstance(t, torch.Tensor) or is_traceable_wrapper_subclass(t):
+        if isinstance(t, torch.Tensor):
             if (
                 # Lazy tensors are not supported.  Note that XLA is
                 # implemented on top of lazy tensor, not excluded here; we
