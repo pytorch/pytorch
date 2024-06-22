@@ -129,7 +129,7 @@ class TestFullyShardCompile(FSDPTest):
 
             return _fn
 
-        def run_all_iters(model, optim, n_iter=10, compiled_autograd_backend=None):
+        def run_iters(model, optim, n_iter=10, compiled_autograd_backend=None):
             torch.manual_seed(42)
             losses = []
             for i in range(n_iter):
@@ -152,10 +152,10 @@ class TestFullyShardCompile(FSDPTest):
         def test_compiled():
             model, optim = model_init_fn()
             # FSDP2 does lazy init using 1st run, so run it once to init using eager mode
-            run_all_iters(model, optim, n_iter=1)
+            run_iters(model, optim, n_iter=1)
 
             model_compiled = torch.compile(model, backend=backend, fullgraph=True)
-            res = run_all_iters(
+            res = run_iters(
                 model_compiled, optim, compiled_autograd_backend=backend
             )
             return res
@@ -163,9 +163,9 @@ class TestFullyShardCompile(FSDPTest):
         def test_eager():
             model, optim = model_init_fn()
             # FSDP2 does lazy init using 1st run, so run it once to init using eager mode
-            run_all_iters(model, optim, n_iter=1)
+            run_iters(model, optim, n_iter=1)
 
-            res = run_all_iters(model, optim)
+            res = run_iters(model, optim)
             return res
 
         losses_compiled = test_compiled()
