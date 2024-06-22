@@ -504,7 +504,7 @@ jobs:
           { config: "default", shard: 5, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
         ]}
 
-  linux-focal-cuda12_4-py3_10-gcc9-experimental-split-build-test:
+  linux-focal-cuda12_1-py3_10-gcc9-experimental-split-build-test:
     name: linux-focal-cuda12.1-py3.10-gcc9-experimental-split-build
     uses: ./.github/workflows/_linux-test.yml
     needs:
