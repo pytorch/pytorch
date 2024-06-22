@@ -25,7 +25,34 @@ class TestScatterOpt(TestCase):
     def do_acc_test(self, f, *args):
         expect = f(*args)
         actual = torch.compile(f)(*args)
-        self.assertTrue(same(expect, actual, tol=1e-3))
+        self.assertTrue(same(expect, actual, tol=1e-3), f"{expect=}\n{actual=}\n")
+
+    def test_3d_tensor(self):
+        L, M, N = 2, 1024, 2048
+
+        def f(x):
+            y = torch.full([L, M, N], 3.14, dtype=torch.float)
+            y.scatter_(2, x.unsqueeze(2), 2.718)
+            return y
+
+        x = torch.randint(0, N, (L, M), dtype=torch.int64)
+        self.do_acc_test(f, x)
+        self.check_metric()
+
+    def test_non_last_dim(self):
+        """
+        Test the case that the scatter dimension is not the last one.
+        """
+        M, N = 1024, 2048
+
+        def f(x):
+            y = torch.full([M, N], 3.14, dtype=torch.float)
+            y.scatter_(0, x.unsqueeze(0), 2.718)
+            return y
+
+        x = torch.randint(0, M, (N,), dtype=torch.int64)
+        self.do_acc_test(f, x)
+        self.check_metric()
 
     def test_nonzero_const_tensor(self):
         M, N = 1024, 2048
