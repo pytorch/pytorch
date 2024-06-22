@@ -584,7 +584,7 @@ class DimensionInfo:
 
     def __init__(self, expr, size, stride):
         super().__init__()
-        if V.graph.sizevars.statically_known_leq(stride, 0):
+        if V.graph.sizevars.statically_known_lt(stride, 0):
             stride = -stride
             expr = -expr
         self.expr = expr
@@ -606,6 +606,35 @@ class DimensionInfo:
                     replacements[sym] = sympy_index_symbol(var.subs_str(replacements))
             expr = sympy_subs(expr, replacements)
         return V.kernel.index_to_str(expr)
+
+
+def eq(left, right):
+    if V.graph.sizevars.statically_known_equals(left, right):
+        return True
+    try:
+        a = V.graph.sizevars.size_hint(left)
+        b = V.graph.sizevars.size_hint(right)
+    except TypeError:  # unbacked symints
+        return False
+    if a == b:
+        V.graph.sizevars.guard_equals(left, right)
+    return a == b
+
+
+def lt(left, right):
+    if V.graph.sizevars.statically_known_lt(left, right):
+        return True
+    try:
+        a = V.graph.sizevars.size_hint(left)
+        b = V.graph.sizevars.size_hint(right)
+    except TypeError:  # unbacked symints
+        gcd = sympy.gcd(left, right)
+        if gcd == left:
+            return left != right
+        return False
+    if a < b:
+        V.graph.sizevars.guard_lt(left, right)
+    return a < b
 
 
 class HalideKernel(SIMDKernel):
@@ -662,8 +691,6 @@ class HalideKernel(SIMDKernel):
         assert not (
             self.index_replacements or self.halide_vars or self.reduction_renames
         )
-        eq = V.graph.sizevars.statically_known_equals
-        lt = V.graph.sizevars.statically_known_lt
         size_hint = functools.partial(V.graph.sizevars.size_hint, fallback=inf)
         indices = dict.fromkeys(map(super().prepare_indexing, indices))
         all_used_symbols = set()
@@ -673,6 +700,11 @@ class HalideKernel(SIMDKernel):
                 [tree.nodes.values() for tree in self.range_trees]
             )
         }
+
+        def simplify(expr):
+            return sympy.simplify(
+                V.graph.sizevars.remove_precomputed_replacements(expr)
+            )
 
         def visit_modular_indexing(base, divisor, modulus):
             if base in sym_to_node:
@@ -727,8 +759,10 @@ class HalideKernel(SIMDKernel):
             divisor = sympy.Integer(1)
             added_sym_size = []
             # decide on a minimal set of symbols and put them in self.halide_vars
-            while handled_count < len(nodes):
-                sizes_to_add = [n.length for n in nodes if eq(n.divisor, divisor)]
+            while handled_count < len(nodes) and not eq(tree.numel, divisor):
+                sizes_to_add = [
+                    simplify(n.length) for n in nodes if eq(n.divisor, divisor)
+                ]
                 handled_count += len(sizes_to_add)
                 assert sizes_to_add, nodes
                 end = divisor * functools.reduce(
@@ -736,7 +770,7 @@ class HalideKernel(SIMDKernel):
                 )
                 sizes_to_add.extend(
                     [
-                        sympy.simplify(n.divisor / divisor)
+                        simplify(n.divisor / divisor)
                         for n in nodes
                         if lt(divisor, n.divisor) and lt(n.divisor, end)
                     ]
@@ -746,7 +780,8 @@ class HalideKernel(SIMDKernel):
                     if eq(next_size, 1):
                         # sizes share no common factors, e.g [2, 21, 42, 441, 889056]
                         # TODO(jansel): we should just prevent fusion in cases that hit this
-                        next_size = sympy.simplify(tree.numel / divisor)
+                        next_size = simplify(tree.numel / divisor)
+                        assert not eq(next_size, 1)
                         sizes_to_add = []
                         handled_count = len(nodes)
                         had_fallback = True
@@ -760,11 +795,13 @@ class HalideKernel(SIMDKernel):
                     divisor *= next_size
                     new_sizes = [n.length for n in nodes if eq(n.divisor, divisor)]
                     handled_count += len(new_sizes)
+                    prior_len = len(sizes_to_add)
                     sizes_to_add = [
                         sympy.simplify(s / next_size)
                         for s in sizes_to_add
                         if not eq(s, next_size)
                     ]
+                    assert len(sizes_to_add) < prior_len or prior_len == 0
                     sizes_to_add.extend(new_sizes)
 
             # create a mapping to the new set of symbols in self.index_replacements

@@ -9,7 +9,6 @@ from torch.nn.parallel import DistributedDataParallel
 
 from .contract import _get_registry, contract
 
-
 _ROOT_MODULE_PREFIX = ""
 
 

@@ -411,6 +411,10 @@ class SizeVarAllocator:
 
     def evaluate_min(self, left: Expr, right: Expr) -> Expr:
         """return the smaller of left and right, and guard on that choice"""
+        if isinstance(left, Expr):
+            left = sympy_subs(left, self.inv_precomputed_replacements)  # type: ignore[arg-type]
+        if isinstance(right, Expr):
+            right = sympy_subs(right, self.inv_precomputed_replacements)  # type: ignore[arg-type]
         try:
             lv = self.size_hint(left)
             rv = self.size_hint(right)
