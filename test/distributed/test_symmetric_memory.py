@@ -6,6 +6,7 @@ import torch.distributed as dist
 from torch._C._distributed_c10d import _SymmetricMemory
 from torch.distributed._symmetric_memory import (
     _fused_all_gather_matmul_fallback,
+    _fused_all_gather_scaled_matmul_fallback,
     _fused_matmul_reduce_scatter_fallback,
     enable_symm_mem_for_group,
     restride_A_for_fused_matmul_reduce_scatter,
@@ -184,6 +185,59 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         assert ag_output_0.stride() == ag_output_1.stride()
         for mm_output_0, mm_output_1 in zip(mm_outputs_0, mm_outputs_1):
             assert torch.allclose(mm_output_0, mm_output_1)
+            assert mm_output_0.stride(), mm_output_1.stride()
+
+        dist.destroy_process_group()
+
+    @skipIfRocm
+    @skip_if_lt_x_gpu(2)
+    @parametrize("gather_dim", [0, 1])
+    def test_fused_all_gather_scaled_matmul(self, gather_dim: int) -> None:
+        self._init_process()
+
+        B = 8
+        M = 64
+        N = 16
+        K = 32
+        group = dist.group.WORLD
+        rank = self.rank
+        world_size = self.world_size
+
+        torch.manual_seed(42 + rank)
+        A_shard = torch.rand(B, M // self.world_size, K, device="cuda").to(
+            torch.float8_e4m3fn
+        )
+        A_scale = torch.tensor(0.1, device="cuda")
+        Bs = [
+            torch.rand(N, K, device="cuda").to(torch.float8_e4m3fn).T for _ in range(3)
+        ]
+        B_scales = [torch.tensor(0.1, device="cuda") for _ in range(3)]
+
+        ag_output_0, mm_outputs_0 = _fused_all_gather_scaled_matmul_fallback(
+            A_shard,
+            Bs,
+            A_scale,
+            B_scales,
+            gather_dim=gather_dim,
+            group_name=group.group_name,
+        )
+        ag_output_1, mm_outputs_1 = torch.ops.symm_mem.fused_all_gather_scaled_matmul(
+            A_shard,
+            Bs,
+            A_scale,
+            B_scales,
+            gather_dim=gather_dim,
+            group_name=group.group_name,
+        )
+
+        assert torch.allclose(
+            ag_output_0.to(torch.bfloat16), ag_output_1.to(torch.bfloat16)
+        )
+        assert ag_output_0.stride() == ag_output_1.stride()
+        for mm_output_0, mm_output_1 in zip(mm_outputs_0, mm_outputs_1):
+            assert torch.allclose(
+                mm_output_0.to(torch.bfloat16), mm_output_1.to(torch.bfloat16)
+            )
             assert mm_output_0.stride(), mm_output_1.stride()
 
         dist.destroy_process_group()
