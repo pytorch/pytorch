@@ -1027,6 +1027,14 @@ class TestConverter(TestCase):
         # Cannot script variable length inputs.
         self._check_equal_ts_ep_converter(func2, tuple(values), ["trace"])
 
+    def test_ts2ep_max(self):
+        class M(torch.nn.Module):
+            def forward(self, x: torch.Tensor):
+                return torch.max(x, dim=0)
+
+        inp = (torch.randn([4, 4]),)
+        self._check_equal_ts_ep_converter(M(), inp, ["script"])
+
 
 if __name__ == "__main__":
     run_tests()
