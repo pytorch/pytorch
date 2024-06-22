@@ -480,7 +480,7 @@ def _init_core_state(
     state._fully_sharded_module_to_handle = _fully_sharded_module_to_handle
     # Invariant: `state.params` contains exactly the `FlatParameter`s of the
     # handles in `state._handle`
-    _handle: FlatParamHandle = None
+    _handle: Optional[FlatParamHandle] = None
     state._handle = _handle
     params: List[FlatParameter] = []
     state.params = params
@@ -874,6 +874,7 @@ def _materialize_meta_module(
         torch.cuda.current_device()
     )
     modules_to_materialize = _get_modules_to_materialize(root_module, ignored_modules)
+    module = None
     try:
         # Assume that each module's `reset_parameters()` only initializes its
         # own parameters and not those of its children

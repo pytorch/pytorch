@@ -696,7 +696,7 @@ class Reduction(Loops):
         numel_hint = V.graph.sizevars.symbolic_hint(sympy_product(ranges))
 
         should_split = (
-            get_device_type(device) == "cuda"
+            is_gpu(get_device_type(device))
             and reduction_type
             not in {
                 "argmax",
@@ -711,9 +711,13 @@ class Reduction(Loops):
             return ReductionHint.DEFAULT, 1
 
         device_interface = get_interface_for_device(get_device_type(device))
-        num_sm = device_interface.Worker.get_device_properties(
-            device
-        ).multi_processor_count
+        device_properties = device_interface.Worker.get_device_properties(device)
+        if get_device_type(device) == "xpu":
+            num_sm = device_properties.gpu_subslice_count
+        else:
+            # default is cuda behavior
+            num_sm = device_properties.multi_processor_count
+
         min_elements_per_thread = 32
         max_elements_per_thread = 512
         threads_per_sm = 2048
