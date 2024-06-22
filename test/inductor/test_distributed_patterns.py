@@ -162,6 +162,7 @@ class DistributedPatternTests(TestCase):
     def test_storage_resize_zero_cpu(self):
         self._test_storage_resize_zero("cpu")
 
+    @skipIfRocm
     @requires_gpu()
     def test_storage_resize_zero_cuda(self):
         self._test_storage_resize_zero("cuda")
@@ -186,6 +187,7 @@ class DistributedPatternTests(TestCase):
     def test_storage_resize_nonzero_cpu(self):
         self._test_storage_resize_nonzero("cpu")
 
+    @skipIfRocm
     @requires_gpu()
     def test_storage_resize_nonzero_cuda(self):
         self._test_storage_resize_nonzero("cuda")

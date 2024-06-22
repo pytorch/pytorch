@@ -1475,7 +1475,10 @@ class GuardBuilder(GuardBuilderBase):
         value = self.get(guard.name)
         t = type(value)
 
-        self.TYPE_MATCH(guard)
+        if not (config.enable_cpp_guard_manager and isinstance(value, dict)):
+            # C++ DICT_LENGTH checks for type
+            self.TYPE_MATCH(guard)
+
         code = list()
         if len(value) == 0:
             code.append(f"not {ref}")
