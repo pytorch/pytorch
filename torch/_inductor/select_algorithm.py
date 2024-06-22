@@ -553,6 +553,7 @@ class TritonTemplateKernel(TritonKernel):
                 call_args,
                 grid=grid,
                 grid_fn=f"{self.grid_fn.__module__}.{self.grid_fn.__name__}",
+                arg_types=arg_types,
                 triton_meta=self.triton_meta,
             )
 
@@ -1608,21 +1609,31 @@ class AlgorithmSelectorCache(PersistentCache):
         # triton templates want the base tensor.
         if isinstance(node, ir.BaseView):
             node = node.unwrap_view()
+        return AlgorithmSelectorCache.generate_example_value(
+            V.graph.sizevars.size_hints(
+                node.get_size(),
+                fallback=config.unbacked_symint_fallback,
+            ),
+            V.graph.sizevars.size_hints(
+                node.get_stride(),
+                fallback=config.unbacked_symint_fallback,
+            ),
+            node.get_device(),
+            node.get_dtype(),
+            node.layout.offset,
+        )
+
+    @staticmethod
+    def generate_example_value(size, stride, device, dtype, extra_size):
         # preserve rng states to avoid the rand_strided call below changes
         # the rng states for the real model code.
         with preserve_rng_state():
             return rand_strided(
-                V.graph.sizevars.size_hints(
-                    node.get_size(),
-                    fallback=config.unbacked_symint_fallback,
-                ),
-                V.graph.sizevars.size_hints(
-                    node.get_stride(),
-                    fallback=config.unbacked_symint_fallback,
-                ),
-                device=node.get_device(),
-                dtype=node.get_dtype(),
-                extra_size=node.layout.offset,
+                size,
+                stride,
+                device=device,
+                dtype=dtype,
+                extra_size=extra_size,
             )
 
     @staticmethod
