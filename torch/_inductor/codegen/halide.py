@@ -719,6 +719,8 @@ class HalideKernel(SIMDKernel):
         for tree in reversed(self.range_trees):
             nodes = [n for n in tree.nodes.values() if n.symbol() in all_used_symbols]
             nodes.sort(key=lambda n: size_hint(n.divisor))
+            if not nodes:
+                nodes.append(tree.lookup(1, tree.numel))
             handled_count = 0
             divisor = sympy.Integer(1)
             added_sym_size = []
@@ -825,7 +827,10 @@ class HalideKernel(SIMDKernel):
         return renames
 
     def codegen_rdom(self, name, vars):
-        rsizes = [f"hl.Range(0, {self.kexpr(size)})" for size in vars.values()]
+        rsizes = [
+            f"hl.Range(0, {self.kexpr(self.rename_indexing(size))})"
+            for size in vars.values()
+        ]
         self.indexing_code.writeline(f"{name} = hl.RDom([{', '.join(rsizes)}])")
         for i, rsym in enumerate(vars.keys()):
             self.indexing_code.writeline(f"{rsym} = {name}[{i}]")
