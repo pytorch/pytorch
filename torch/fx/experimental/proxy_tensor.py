@@ -700,6 +700,9 @@ def proxy_call(
 
     constant = None
 
+    def tensor_numel_in_limit(t: Tensor) -> bool:
+        return t.numel() <= CONSTANT_NUMEL_LIMIT
+
     # If this is a lift, the input tensor is guaranteed to be a
     # constant, so we keep a copy of the original argument along so
     # we can query it if we're asked to item() it at some later point
@@ -714,9 +717,7 @@ def proxy_call(
         torch.Tag.nondeterministic_seeded not in func.tags
         and all_constant
         and any_constant
-        and pytree.tree_all_only(
-            Tensor, lambda t: t.numel() <= CONSTANT_NUMEL_LIMIT, out
-        )
+        and pytree.tree_all_only(Tensor, tensor_numel_in_limit, out)
     ):
         # NB: do NOT include factories as constants
         with maybe_disable_fake_tensor_mode():
@@ -1105,23 +1106,11 @@ class ProxySymDispatchMode(SymDispatchMode):
         finally:
             self.enable_tracing = old
 
-    def _compute_proxy_thunk(self, func: OpOverload, args: Tuple[object, ...], out: PySymType) -> Callable[[], Proxy]:
-        # We want to cache the inputs from *right now* and not what the values
-        # will be sometime in the future when we actually evaluate this
-        # expression - but to be lazy we don't want to actually evaluate the
-        # values yet.  So we need to call get_proxy_slot() *now* but call its
-        # returned callable *later*.
-        def get_proxy_slot_node(obj: PySymType, tracer: _ProxyTracer) -> Callable[[], object]:
-            slot = get_proxy_slot(obj, tracer)
-            return lambda: slot().node
-        lazy_args = tuple(
-            get_proxy_slot_node(a, self.tracer) if isinstance(a, py_sym_types) else (lambda: a)
+    def _compute_proxy(self, func: OpOverload, args: Tuple[object, ...], out: PySymType) -> Proxy:
+        n_args = tuple(
+            get_proxy_slot(a, self.tracer)().node if isinstance(a, py_sym_types) else a
             for a in args
         )
-        return thunkify(self._compute_proxy, func, lazy_args, out)
-
-    def _compute_proxy(self, func: OpOverload, args: Tuple[Callable[[], object], ...], out: PySymType) -> Proxy:
-        n_args = tuple(a() for a in args)
 
         # func doesn't have a __torch_function__ that Proxy can interpose, so
         # we gotta do it manually
@@ -1160,7 +1149,7 @@ class ProxySymDispatchMode(SymDispatchMode):
         # computation.  This could occur if func triggered some guards.
         if isinstance(out, py_sym_types):
             # Delays tracing out the proxies on this op until we actually need it
-            p_out_thunk = self._compute_proxy_thunk(func, args, out)
+            p_out_thunk = thunkify(self._compute_proxy, func=func, args=args, out=out)
             set_proxy_slot(out, self.tracer, p_out_thunk)
 
         return out

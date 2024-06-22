@@ -231,8 +231,6 @@ exclude_patterns = [
     'torch/csrc/dynamo/eval_frame.h',
     'torch/csrc/inductor/**/*',
     'torch/csrc/jit/**/*',
-    'torch/csrc/jit/serialization/import_legacy.cpp',
-    'torch/csrc/jit/serialization/export.cpp',
     'torch/csrc/lazy/**/*',
 ]
 init_command = [
