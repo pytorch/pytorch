@@ -601,6 +601,7 @@ GraphEncoder::GraphEncoder(
   }
 }
 
+// NOLINTBEGIN(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
 void GraphEncoder::TensorTypeToONNXType(
     const TensorTypePtr& tensor_type,
     const std::string& dim_name_prefix,
@@ -637,6 +638,7 @@ void GraphEncoder::TensorTypeToONNXType(
         ATenTypeToOnnxType(tensor_type->scalarType().value()));
   }
 }
+// NOLINTEND(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
 
 void GraphEncoder::EncodeValueInfoType(
     onnx::TypeProto* onnx_type,
@@ -1078,6 +1080,7 @@ void GraphEncoder::AddAttribute(
       ATenAttributeKindToOnnxAttributeType(node->kindOf(name), name));
   switch (node->kindOf(name)) {
     case AttributeKind::f:
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       attr->set_f(node->f(name));
       break;
     case AttributeKind::fs:
