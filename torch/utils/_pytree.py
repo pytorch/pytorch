@@ -699,22 +699,22 @@ class TreeSpec:
         return repr_prefix + repr_suffix
 
     @property
+    @deprecated(
+        "`treespec.context` is private implementation detail. "
+        "It might be changed in the future.",
+        category=FutureWarning,
+    )
     def context(self) -> Context:
-        warnings.warn(
-            "`treespec.context` is private implementation detail. "
-            "It might be changed in the future.",
-            stacklevel=2,
-        )
         return self._context
 
     @property
+    @deprecated(
+        "`treespec.children_specs` is private implementation detail. "
+        "It might be changed in the future. "
+        "Please use `treespec.children()` or `treespec.child(idx)` instead.",
+        category=FutureWarning,
+    )
     def children_specs(self) -> List["TreeSpec"]:
-        warnings.warn(
-            "`treespec.children_specs` is private implementation detail. "
-            "It might be changed in the future. "
-            "Please use `treespec.children()` or `treespec.child(idx)` instead.",
-            stacklevel=2,
-        )
         return self._children_specs
 
     def is_leaf(self) -> bool:
