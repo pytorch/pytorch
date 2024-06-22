@@ -741,9 +741,9 @@ class GraphLowering(torch.fx.Interpreter):
             buffer.name = name
         return name
 
-    def register_list(self, buffer_names: List[str]):
+    def register_list(self, operation_names: List[str]):
         name = self.qualify_name("list_" + "_".join(buffer_names))
-        self.lists[name] = buffer_names
+        self.lists[name] = operation_names
         return name
 
     def register_users_of(self, node_output):

@@ -1129,6 +1129,9 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         self, consumer: BaseSchedulerNode
     ) -> Optional[BaseSchedulerNode]:
         for rd in consumer.read_writes.reads:
+            if rd.name not in self.scheduler.name_to_buf:
+                continue
+
             node_name = self.scheduler.name_to_buf[rd.name].defining_op.get_name()
             if node_name in self.name_to_node:
                 return self.name_to_node[node_name]
@@ -1730,8 +1733,7 @@ class Scheduler:
                     s in unbacked_symbol_to_origin_node
                 ), f"{s} not in {unbacked_symbol_to_origin_node.keys()}"
                 if node := unbacked_symbol_to_origin_node[s]:
-                    for buf in self.name_to_node[node].get_outputs():
-                        buf_name = buf.get_name()
+                    for buf_name in self.name_to_node[node].get_buffer_names():
                         log.debug(
                             "scheduling output %s for unbacked symint %s", buf_name, s
                         )
