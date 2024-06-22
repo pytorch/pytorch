@@ -146,6 +146,7 @@ class BackendFeature(Enum):
     MASKED_SCATTER_WITH_INDEX = auto()
     SCAN = auto()
     TUPLE_REDUCTION = auto()
+    PREFER_STORE_LOOP_ORDER = auto()
 
 
 def get_backend_features(device: Union[torch.device, str]):
