@@ -8,7 +8,6 @@ from .schedules import (
 )
 from .stage import build_stage, PipelineStage
 
-
 __all__ = [
     "Pipe",
     "pipe_split",
