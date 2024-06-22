@@ -48,6 +48,7 @@ from torchgen.model import (
 )
 from torchgen.utils import assert_never
 
+
 # This file describes the translation of JIT schema to the public C++
 # API, which is what people use when they call functions like at::add.
 #
