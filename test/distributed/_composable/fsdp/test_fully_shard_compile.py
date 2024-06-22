@@ -155,9 +155,7 @@ class TestFullyShardCompile(FSDPTest):
             run_iters(model, optim, n_iter=1)
 
             model_compiled = torch.compile(model, backend=backend, fullgraph=True)
-            res = run_iters(
-                model_compiled, optim, compiled_autograd_backend=backend
-            )
+            res = run_iters(model_compiled, optim, compiled_autograd_backend=backend)
             return res
 
         def test_eager():
