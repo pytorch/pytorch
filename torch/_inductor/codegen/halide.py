@@ -421,10 +421,12 @@ class HalideOverrides(OpOverrides):
         uint64 = "hl.cast(hl.UInt(64), {})".format
         int64 = "hl.cast(hl.Int(64), {})".format
         lo = uint64(ops.halide_random_uint(seed, offset))
-        hi = uint64(ops.halide_random_uint(
-            ops.bitwise_xor(seed, ops.constant(0x7777, torch.int32)), offset
-        ))
-        result = f"({lo} | ({hi}) << 32))"
+        hi = uint64(
+            ops.halide_random_uint(
+                ops.bitwise_xor(seed, ops.constant(0x7777, torch.int32)), offset
+            )
+        )
+        result = f"({lo} | ({hi} << 32))"
         size = uint64(f"{int64(high)} - {int64(low)}")
         result = f"{result} % {size}"
         result = f"{int64(result)} + {int64(low)}"

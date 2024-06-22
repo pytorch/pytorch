@@ -5,7 +5,7 @@ import logging
 import operator
 from collections import defaultdict
 from enum import Enum
-from inspect import Parameter, signature, Signature
+from inspect import Parameter, Signature, signature
 from types import MethodType
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
@@ -21,6 +21,7 @@ from torch.export.unflatten import (
 )
 from torch.fx.node import map_aggregate
 from torch.fx.passes.split_module import split_module
+
 from ._backward import _null_coalesce_accumulate, stage_backward
 from ._unflatten import _outline_submodules
 from ._utils import PipeInfo
@@ -1176,7 +1177,8 @@ def annotate_split_points(mod: torch.nn.Module, spec: Dict[str, SplitPoint]):
                 predecessor_module = getattr(predecessor_module, atom)
             except AttributeError as e:
                 raise AttributeError(
-                    f'Specified target {qualname} referenced nonexistent module {".".join(atoms[:i+1])}'
+                    f"Specified target {qualname} referenced "
+                    f'nonexistent module {".".join(atoms[: i + 1])}'
                 ) from e
 
         mod_to_wrap = getattr(predecessor_module, atoms[-1])
