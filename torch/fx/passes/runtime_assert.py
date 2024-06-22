@@ -158,6 +158,7 @@ def insert_deferred_runtime_asserts(
             node.op == "call_function"
             and _is_intermediate_tensor_shape_call(node)
         ):  # use symbols for intermediate shape calls, even if not in runtime asserts
+            sym_expr = _get_sym_val(node)
             needed_symbols.update(sym_expr.free_symbols)
 
     log.debug("needed_symbols = %s", needed_symbols)
@@ -169,11 +170,11 @@ def insert_deferred_runtime_asserts(
     def _sympy_interp(symbol_to_proxy, expr):
         # sympy_interp() with hash consing
         from sympy import Integer, Number, Symbol
-        from sympy.logic.boolalg import Boolean
+        from sympy.logic.boolalg import BooleanAtom
         from torch.utils._sympy.interp import run_sympy_handler, sympy_interp
 
         # base cases, don't cache
-        if isinstance(expr, (Integer, Number, Symbol, Boolean)):
+        if isinstance(expr, (Integer, Number, Symbol, BooleanAtom)):
             return sympy_interp(
                 PythonReferenceAnalysis, symbol_to_proxy, expr
             )
