@@ -3,13 +3,14 @@ from typing import Any, Callable, cast, List, Optional, Union
 
 import torch
 import torch.utils
+from ..._dynamo.utils import counters
 from .. import ir, lowering as L
 
 from ..kernel.mm_common import mm_args
 from ..select_algorithm import DataProcessorTemplateWrapper
 from ..utils import cache_on_self, has_free_symbols, parallel_num_threads
 from ..virtualized import V
-from .cpp_micro_gemm import create_micro_gemm
+from .cpp_micro_gemm import CppMicroGemmAMX, create_micro_gemm, LayoutType
 from .cpp_template import CppTemplate
 
 from .cpp_template_kernel import CppTemplateKernel
@@ -84,15 +85,18 @@ extern "C"
         int64_t k_block_start = 0;
         int64_t k_block_end = K0_blocks;
     {%- endif %}
+        {{ micro_gemm.codegen_init(kernel) }}
         for (int64_t mc = m_block_start; mc < m_block_end; mc += Mc_blocks) {
             const int64_t m_start = mc * M0;
             const int64_t m_end = std::min((mc + Mc_blocks) * M0, M);
             const int64_t m_size = m_end - m_start;
+            {%- if use_local_acc %}
+            {{ kernel.define_buffer(acc_buf_name, ["m_end - m_start", "N0"]) }}
+            {%- endif %}
             for (int64_t nc = n_block_start; nc < n_block_end; ++nc) {
                 const int64_t n_start = nc * N0;
                 const int64_t n_size = N0;
                 {%- if use_local_acc %}
-                {{ kernel.define_buffer(acc_buf_name, ["m_end - m_start", "N0"]) }}
                 {%- set acc = kernel.local_buffers[acc_buf_name] %}
                 {%- else %}
                 {%- set acc = kernel.slice_nd(GemmOut, [("m_start", "m_end"), ("n_start", "n_start + N0")]) %}
@@ -128,6 +132,7 @@ extern "C"
                 }}
             }
         }
+        {{ micro_gemm.codegen_finalize(kernel) }}
     }
 }
 """
@@ -332,6 +337,17 @@ class CppPackedGemmTemplate(CppTemplate):
                 blocked_w = (
                     W.reshape(k, n // block_n, block_n).transpose(0, 1).contiguous()
                 )
+                if micro_gemm.get_b_layout() != LayoutType.NORMAL:
+                    assert (
+                        micro_gemm.get_b_layout() == LayoutType.VNNI2
+                    ), "We only support VNNI2 for now"
+                    assert k % 2 == 0, "k should be even for VNNI2 layout"
+                    blocked_w = (
+                        blocked_w.view(n // block_n, k // 2, 2, block_n)
+                        .transpose(-1, -2)
+                        .contiguous()
+                        .view(n // block_n, k, block_n)
+                    )
                 # normalize stride to be "contiguous_strides" per size
                 # this avoids the problems in L.view during template codegen
                 new_stride = [1]
@@ -462,6 +478,8 @@ class CppPackedGemmTemplate(CppTemplate):
         )
         assert micro_gemm is not None
         assert self.register_blocking == micro_gemm.register_blocking
+        if isinstance(micro_gemm, CppMicroGemmAMX):
+            counters["inductor"]["cpp_micro_gemm_amx_counter"] += 1
 
         options = dict(
             X=X,
