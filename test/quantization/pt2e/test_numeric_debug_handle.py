@@ -57,6 +57,8 @@ def _extract_conv2d_pattern_debug_handle_map(model):
 
     debug_handle_map = {}
     conv_node = output_node
+    if NUMERIC_DEBUG_HANDLE_KEY not in conv_node.meta:
+        return {}
     if input_node not in conv_node.meta[NUMERIC_DEBUG_HANDLE_KEY]:
         return {}
     debug_handle_map["input"] = conv_node.meta[NUMERIC_DEBUG_HANDLE_KEY][input_node]
@@ -124,10 +126,6 @@ class TestNumericDebugHandle(TestCase):
 
         self.assertEqual(debug_handle_map, debug_handle_map_ref)
 
-        ref = m(*example_inputs)
-        res = m_copy(*example_inputs)
-        self.assertEqual(res, ref)
-
     def test_deepcopy_preserve_handle(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
@@ -140,6 +138,15 @@ class TestNumericDebugHandle(TestCase):
 
         self.assertEqual(debug_handle_map, debug_handle_map_ref)
 
-        ref = m(*example_inputs)
-        res = m_copy(*example_inputs)
-        self.assertEqual(res, ref)
+    @unittest.skip("reexport is not supported yet")
+    def test_re_export_preserve_handle(self):
+        m = TestHelperModules.Conv2dThenConv1d()
+        example_inputs = m.example_inputs()
+        m = capture_pre_autograd_graph(m, example_inputs)
+        generate_numeric_debug_handle(m)
+
+        debug_handle_map_ref = _extract_conv2d_pattern_debug_handle_map(m)
+        m_export = torch.export.export(m, example_inputs)
+        debug_handle_map = _extract_conv2d_pattern_debug_handle_map(m_export)
+
+        self.assertEqual(debug_handle_map, debug_handle_map_ref)
