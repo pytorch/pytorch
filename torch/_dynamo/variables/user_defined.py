@@ -908,8 +908,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             out = variables.UserMethodVariable(
                 subobj.__func__, self.var_getattr(tx, "__class__"), source=source
             )
-        elif subobj is torch.nn.Module.parameters:
-            out = variables.GetAttrVariable(self, name, source=self.source)
         elif isinstance(subobj, types.FunctionType) or (
             isinstance(subobj, types.MethodType)
             and isinstance(self.value, torch.nn.Module)
