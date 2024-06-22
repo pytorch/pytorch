@@ -665,10 +665,15 @@ class HalideKernel(SIMDKernel):
         self.has_reduction = self.inside_reduction
         self.buffer_dimensions: Dict[str, List[DimensionInfo]] = {}
         self.buffer_offsets: Dict[str, sympy.Expr] = {}
+        # {h0: size1, h1: size2, ...}
         self.halide_vars: Dict[sympy.Symbol, sympy.Expr] = {}
+        # {x0: h0, x1: h1+10*h2, ...}
         self.index_replacements: Dict[sympy.Expr, sympy.Expr] = {}
+        # {h1: hr1, ...}
         self.reduction_renames: Dict[sympy.Symbol, sympy.Symbol] = {}
+        # {"i": {h0: hi0}, "o": ...}
         self.dom_renames: Dict[str, Dict[sympy.Symbol, sympy.Symbol]] = {}
+        # {"in_ptr0": ["in_ptr0_view0"], ...}
         self.buffer_aliases: Dict[str, List[str]] = defaultdict(list)
 
     def create_cse_var(self, name, bounds=None):
