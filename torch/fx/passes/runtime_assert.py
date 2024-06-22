@@ -119,18 +119,19 @@ def insert_deferred_runtime_asserts(
 
     def _is_intermediate_tensor_shape_call(node: fx.Node) -> bool:
         """
-        Returns true if a size/stride/storage offset call on an intermediate tensor.
-        If so, we can try to compute this from input shapes instead of this call.
+        If a size/stride/storage offset call on an intermediate tensor,
+        we can try to compute the value from input shapes instead.
         """
+        val = None
         if (
             node.target in (
                 torch.ops.aten.sym_size.int,
                 torch.ops.aten.sym_stride.int,
                 torch.ops.aten.storage_offset.default,
             )
-            and node.args[0].op != "placeholder"
+            and node.args[0].op != "placeholder"  # type: ignore[union-attr]
         ):  # export: sym_size.int(node, dim)
-            return True
+            val = _get_sym_val(node)
         if (
             node.target == operator.getitem
             and node.args[0].target in (
@@ -140,8 +141,11 @@ def insert_deferred_runtime_asserts(
             )
             and node.args[0].args[0].op != "placeholder"
         ):  # dynamo export: getitem(size(node), dim)
-            return True
-        return False
+            val = _get_sym_val(node)
+        return (
+            val is not None
+            and not isinstance(val, sympy.Number)
+        )
 
     # Identify what symbols we need to reify.  This isn't strictly needed
     # but helps reduce churn on the graph
@@ -153,8 +157,6 @@ def insert_deferred_runtime_asserts(
         if (
             node.op == "call_function"
             and _is_intermediate_tensor_shape_call(node)
-            and (sym_expr := _get_sym_val(node)) is not None
-            and not isinstance(sym_expr, sympy.Number)
         ):  # use symbols for intermediate shape calls, even if not in runtime asserts
             needed_symbols.update(sym_expr.free_symbols)
 
@@ -167,25 +169,27 @@ def insert_deferred_runtime_asserts(
     def _sympy_interp(symbol_to_proxy, expr):
         # sympy_interp() with hash consing
         from sympy import Integer, Number, Symbol
-        from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
+        from sympy.logic.boolalg import Boolean
         from torch.utils._sympy.interp import run_sympy_handler, sympy_interp
 
-        # base cases
-        if isinstance(expr, (Integer, Number, Symbol, BooleanAtom)):
+        # base cases, don't cache
+        if isinstance(expr, (Integer, Number, Symbol, Boolean)):
             return sympy_interp(
                 PythonReferenceAnalysis, symbol_to_proxy, expr
-            )  # this returns non-proxy object, don't cache
+            )
+        # hash cons
         if expr in symbol_to_proxy:
             return symbol_to_proxy[expr]
 
         # hash cons on arguments
-        fx_args = []
-        for arg in expr.args:
-            if arg in symbol_to_proxy:
-                res = symbol_to_proxy[arg]
-            else:
-                res = _sympy_interp(symbol_to_proxy, arg)
-            fx_args.append(res)
+        fx_args = [
+            (
+                symbol_to_proxy[arg]
+                if arg in symbol_to_proxy
+                else _sympy_interp(symbol_to_proxy, arg)
+            )
+            for arg in expr.args
+        ]
         
         # run expr handler
         symbol_to_proxy[expr] = run_sympy_handler(
@@ -197,9 +201,10 @@ def insert_deferred_runtime_asserts(
         # This is probably unnecessary, but since torch._check() calls for single-symbol bounds
         # like u0 >= 0, 10 >= u0 accumulate range info in the ShapeEnv, and we insert sym_constrain_range calls
         # anyways, we designate these calls as redundant and remove them.
-        if len(expr.args) != 2:
-            return False
-        if expr.func not in (sympy.LessThan, sympy.GreaterThan):
+        if (
+            len(expr.args) != 2
+            or expr.func not in (sympy.LessThan, sympy.GreaterThan)
+        ):
             return False
         lhs, rhs = expr.args
         return (
@@ -321,27 +326,27 @@ def insert_deferred_runtime_asserts(
                 node.op == "call_function"
                 and (sym_expr := _get_sym_val(node)) is not None
             ):
-                if sym_expr in symbol_to_proxy:  # node produces redundant expression
+                if (
+                    sym_expr in symbol_to_proxy  # example value is redundant
+                    or (
+                        _is_intermediate_tensor_shape_call(node)
+                        and not (sym_expr.free_symbols - symbol_to_proxy.keys())
+                    )  # shape call on intermediate tensor, turn into computation on input shapes
+                ):
+                    if _is_intermediate_tensor_shape_call(node):  # reify from input shapes
+                        symbol_to_proxy[sym_expr] = _sympy_interp(symbol_to_proxy, sym_expr)
+                        # won't try DCE-ing tensor compute here
                     hash_node = symbol_to_proxy[sym_expr].node
                     node.replace_all_uses_with(hash_node)
                     gm.graph.erase_node(node)
                     log.debug("CSE node %s -> %s for expr %s", node, hash_node, sym_expr)
-                elif (
-                    _is_intermediate_tensor_shape_call(node)
-                    and not (sym_expr.free_symbols - symbol_to_proxy.keys())
-                    and not isinstance(sym_expr, sympy.Number)
-                ):  # shape call on intermediate tensor, turn into computation on input shapes
-                    symbol_to_proxy[sym_expr] = _sympy_interp(symbol_to_proxy, sym_expr)
-                    hash_node = symbol_to_proxy[sym_expr].node
-                    node.replace_all_uses_with(hash_node)
-                    gm.graph.erase_node(node)
-                    log.debug("CSE node %s -> %s for expr %s", node, hash_node, sym_expr)
-                    # won't try DCE-ing tensor compute here
                 else:
                     symbol_to_proxy[sym_expr] = fx.Proxy(node)
 
             if not any(ras for ras in ras_by_symbol.values()):
-                continue  # if no runtime asserts are present, we only do CSE, don't add refinement calls
+                # if no runtime asserts are present, only do CSE,
+                # don't proceed further and add refinement calls
+                continue
 
             # If the symbol is used, we'll call sym_constrain_range(_for_size) later when we see it anyways,
             # so delete calls before that
@@ -360,7 +365,7 @@ def insert_deferred_runtime_asserts(
                     def unbacked_interp(node, keypath, signature):
                         if keypath == ():
                             return node
-                        if signature in symbol_to_proxy:  # CSE
+                        if signature in symbol_to_proxy:
                             hash_node = symbol_to_proxy[signature].node
                             log.debug("CSE unbacked_bindings node for keypath %s on node %s", keypath, node)
                             return hash_node
