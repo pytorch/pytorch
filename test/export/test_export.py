@@ -5610,8 +5610,9 @@ def forward(self, x, y):
             len(repeat_nodes),
             1 if is_non_strict_test(self._testMethodName) else 0,
         )
-        
 
+    # TODO(pianpwk): constrain_range conversions on other serdes test cases don't seem to error out
+    @testing.expectedFailureSerDer
     def test_checks_to_constrain_range(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):

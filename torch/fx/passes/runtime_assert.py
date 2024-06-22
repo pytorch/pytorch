@@ -190,7 +190,7 @@ def insert_deferred_runtime_asserts(
             )
             for arg in expr.args
         ]
-        
+
         # run expr handler
         symbol_to_proxy[expr] = run_sympy_handler(
             PythonReferenceAnalysis, fx_args, expr
