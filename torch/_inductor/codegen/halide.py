@@ -5,6 +5,7 @@ import dataclasses
 import functools
 import itertools
 import logging
+import math
 import re
 from collections import defaultdict
 from math import inf
@@ -390,19 +391,50 @@ class HalideOverrides(OpOverrides):
 
     @staticmethod
     def rand(seed, offset):
-        raise Unsupported("rand")
+        return f"hl.random_float({seed} ^ {offset})"
 
     @staticmethod
     def randn(seed, offset):
-        raise Unsupported("rand")
+        # Box-Muller transform
+        return ops.mul(
+            ops.sqrt(
+                ops.mul(
+                    ops.constant(-2, torch.float32), ops.log(ops.rand(seed, offset))
+                )
+            ),
+            ops.cos(
+                ops.mul(
+                    ops.constant(2 * math.pi, torch.float32),
+                    ops.rand(
+                        ops.bitwise_xor(seed, ops.constant(0x7777, torch.int32)), offset
+                    ),
+                )
+            ),
+        )
+
+    @staticmethod
+    def halide_random_uint(seed, offset):
+        return f"hl.random_uint({seed} ^ {offset})"
 
     @staticmethod
     def randint64(seed, offset, low, high):
-        raise Unsupported("rand")
+        uint64 = "hl.cast(hl.UInt(64), {})".format
+        int64 = "hl.cast(hl.Int(64), {})".format
+        lo = uint64(ops.halide_random_uint(seed, offset))
+        hi = uint64(ops.halide_random_uint(
+            ops.bitwise_xor(seed, ops.constant(0x7777, torch.int32)), offset
+        ))
+        result = f"({lo} | ({hi}) << 32))"
+        size = uint64(f"{int64(high)} - {int64(low)}")
+        result = f"{result} % {size}"
+        result = f"{int64(result)} + {int64(low)}"
+        return result
 
     @staticmethod
     def load_seed(name, offset):
-        raise Unsupported("rand")
+        seed = ops.load(name, offset)
+        # Halide requires 32-bit seeds
+        return f"hl.cast(hl.Int(32), {seed} ^ ({seed} >> 32))"
 
     @staticmethod
     def rsqrt(x):

@@ -6757,7 +6757,6 @@ class CommonTemplate:
             ],
         )
 
-    @skip_if_halide  # rng
     def test_bernoulli2(self):
         def fn(a):
             return aten.bernoulli(a)
@@ -8050,7 +8049,6 @@ class CommonTemplate:
         result = fn(torch.randn([1, 2, 16, 4]).requires_grad_())
         result.sum().backward()
 
-    @skip_if_halide  # rand
     def test_dropout2(self):
         n = 100000
         weight = torch.ones(
@@ -8107,7 +8105,6 @@ class CommonTemplate:
         self.assertTrue(same(g2, g3))
 
     @config.patch(search_autotune_cache=False)
-    @skip_if_halide  # rand
     def test_dropout3(self):
         m = torch.nn.Sequential(
             torch.nn.Linear(32, 32, bias=False),
@@ -8135,7 +8132,6 @@ class CommonTemplate:
             torch._inductor.metrics.generated_kernel_count, expected_kernel
         )
 
-    @skip_if_halide  # rand
     def test_randint_kernel_count(self):
         @torch._dynamo.optimize_assert("inductor")
         def fn1():
