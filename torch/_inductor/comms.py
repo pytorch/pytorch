@@ -148,7 +148,7 @@ def compute_node_users(
             name_to_node[user.get_name()]
             for user in node.users
             if user.get_name() != "OUTPUT"
-            and user.get_name() not in V.graph.removed_operations
+            and user.get_name() not in V.graph.removed_buffers
         }
         for node in snodes
     }
