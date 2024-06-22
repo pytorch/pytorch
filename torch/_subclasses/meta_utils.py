@@ -4,7 +4,6 @@ from __future__ import annotations
 import contextlib
 
 import dataclasses
-import typing
 import warnings
 import weakref
 from dataclasses import dataclass
