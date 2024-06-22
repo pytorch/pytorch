@@ -645,6 +645,9 @@ class WrapperCodeGen(CodeGen):
         self.generate_extern_kernel_alloc(fallback_kernel, args)
 
     def generate_extern_kernel_alloc(self, extern_kernel, args):
+        # If it's a NoneLayout then the extern_kernel should essentially be
+        # treated as if it doesn't return anything
+        no_return = isinstance(extern_kernel.layout, ir.NoneLayout)
         output_name = extern_kernel.get_name()
         origin_node = extern_kernel.get_origin_node()
         kernel_name = extern_kernel.get_kernel_name()
@@ -653,18 +656,22 @@ class WrapperCodeGen(CodeGen):
             # view operation fallbacks cause issues since inductor
             # doesn't know the memory is still needed and might reuse it.
             ending = f".clone(){ending}"
-        self.writeline(
-            f"{self.declare}{output_name} = {kernel_name}({', '.join(args)}){ending}"
-        )
-        if (
-            self.supports_intermediate_hooks
-            and config.generate_intermediate_hooks
-            and origin_node is not None
-        ):
-            counters["inductor"]["intermediate_hooks"] += 1
+
+        if no_return:
+            self.writeline(f"{self.declare}{kernel_name}({', '.join(args)}){ending}")
+        else:
             self.writeline(
-                f"run_intermediate_hooks({origin_node.name!r}, {output_name})"
+                f"{self.declare}{output_name} = {kernel_name}({', '.join(args)}){ending}"
             )
+            if (
+                self.supports_intermediate_hooks
+                and config.generate_intermediate_hooks
+                and origin_node is not None
+            ):
+                counters["inductor"]["intermediate_hooks"] += 1
+                self.writeline(
+                    f"run_intermediate_hooks({origin_node.name!r}, {output_name})"
+                )
 
     def generate_extern_kernel_out(
         self, kernel: str, out: str, out_view: Optional[str], args: List[str]
@@ -1540,6 +1547,8 @@ class WrapperCodeGen(CodeGen):
 
         layout = buffer.get_layout()
         if isinstance(layout, ir.MutationLayoutSHOULDREMOVE):
+            return
+        if isinstance(layout, ir.NoneLayout):
             return
         if isinstance(layout, ir.NonOwningLayout):
             assert isinstance(
