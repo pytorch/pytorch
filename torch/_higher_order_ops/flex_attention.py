@@ -181,6 +181,7 @@ def trace_flex_attention(
     ] + [torch.zeros((), dtype=torch.int) for _ in range(4)]
     with TransformGetItemToIndex():
         score_graph = reenter_make_fx(score_mod)(*example_vals, *other_buffers)
+    assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
     qualname = proxy_mode.tracer.get_fresh_qualname("sdpa_score")
     proxy_mode.tracer.root.register_module(qualname, score_graph)
     node_args = (query, key, value, score_graph, *other_buffers)
@@ -277,7 +278,7 @@ def flex_attention_fake_tensor_mode(
         logsumexp = query.new_empty(
             batch_size, num_heads, seq_len_q, dtype=torch.float32
         )
-        return torch.empty_like(query, memory_format=torch.contiguous_format), logsumexp
+        return torch.empty_like(query), logsumexp
 
 
 # ---------------------------- Autograd Implementation ----------------------------
@@ -533,6 +534,7 @@ def trace_flex_attention_backward(
     with TransformGetItemToIndex():
         fw_graph = reenter_make_fx(fw_graph)(*fw_example_vals, *other_buffers)
         joint_graph = reenter_make_fx(joint_graph)(*bw_example_vals, *other_buffers)
+    assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
     proxy_mode.tracer.root.register_module("fw_graph", fw_graph)
     proxy_mode.tracer.root.register_module("joint_graph", joint_graph)
     node_args = (
@@ -670,9 +672,9 @@ def flex_attention_backward_fake_tensor_mode(
     *other_buffers: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     with mode:
-        grad_query = torch.empty_like(query, memory_format=torch.contiguous_format)
-        grad_key = torch.empty_like(key, memory_format=torch.contiguous_format)
-        grad_value = torch.empty_like(value, memory_format=torch.contiguous_format)
+        grad_query = torch.empty_like(query)
+        grad_key = torch.empty_like(key)
+        grad_value = torch.empty_like(value)
         return grad_query, grad_key, grad_value
 
 

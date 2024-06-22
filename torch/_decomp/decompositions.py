@@ -16,7 +16,7 @@ from torch import sym_float, sym_int, Tensor
 from torch._decomp import register_decomposition
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._prims_common import (
-    int_like,
+    IntLike,
     NumberType,
     suggest_memory_format,
     TensorLike,
@@ -1417,7 +1417,7 @@ def tensor_split_tensor_indices_or_sections_py_impl(
     )
     if split_dim == 0:
         sections = tensor_indices_or_sections.item()
-        assert isinstance(sections, int_like)
+        assert isinstance(sections, IntLike)
         return self.tensor_split(sections, dim)
     else:
         indices = [i.item() for i in tensor_indices_or_sections]
@@ -2454,7 +2454,7 @@ def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
         return torch.mean(vals, dim=(-3, -1))
 
     def maybe_mask(vals, length, range_max, adaptive, dim):
-        if isinstance(length, int_like):
+        if isinstance(length, IntLike):
             return vals, length
         else:
             # zero-out the things we didn't really want to select
@@ -4770,11 +4770,13 @@ def squeeze_default(self: Tensor, dim: Optional[int] = None):
 
 
 @register_decomposition(torch.ops.aten._weight_norm_interface)
-def _weight_norm_interface(x, y, dim=0):
+def _weight_norm_interface(v, g, dim=0):
     # https://github.com/pytorch/pytorch/blob/852f8526c52190125446adc9a6ecbcc28fb66182/aten/src/ATen/native/WeightNorm.cpp#L58
-    keep_dim = tuple(i for i in range(len(x.shape)) if i != dim)
-    norm = x.norm(2, keep_dim, keepdim=True)
-    return x * (y / norm), norm
+    keep_dim = tuple(i for i in range(len(v.shape)) if i != dim)
+    # align with cuda behavior, keep norm in 'float' when g is 'bfloat16'
+    norm_dtype = torch.float if g.dtype == torch.bfloat16 else None
+    norm = v.norm(2, keep_dim, keepdim=True, dtype=norm_dtype)
+    return v * (g / norm.to(g.dtype)), norm
 
 
 @register_decomposition(aten.isin)

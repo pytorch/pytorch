@@ -22,6 +22,7 @@ from typing import (
     Set,
     Tuple,
     Type,
+    TYPE_CHECKING,
     TypeVar,
     Union,
 )
@@ -157,7 +158,7 @@ def unset_fake_temporarily() -> Generator[Optional[TorchDispatchMode], None, Non
             torch._C._set_dispatch_mode(old)
 
 
-def is_fake(x: object) -> bool:
+def is_fake(x: object) -> TypeGuard[torch.Tensor]:
     if isinstance(x, FakeTensor):
         return True
     if is_traceable_wrapper_subclass(x):
