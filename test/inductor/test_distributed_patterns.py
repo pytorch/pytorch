@@ -460,6 +460,7 @@ class DistributedPatternTests(TestCase):
         # Recompile on grad==None/grad!=None
         self.assertEqual(bw_cnt.frame_count, 2)
 
+    @skipIfRocm
     @requires_gpu()
     @torch._functorch.config.patch(recompute_views=True)
     def test_fake_distributed_inductor(self):
