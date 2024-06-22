@@ -86,7 +86,10 @@ op1.met_dependencies = []
 op1.outputs = [
     buf1: ComputedBuffer
     buf1.layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
-    buf1.users = [   NodeUser(node=ExternKernelSchedulerNode(name='op2'), can_inplace=False, is_weak=False)]
+    buf1.users =
+        [   NodeUser(node=ExternKernelSchedulerNode(name='op2'),
+                     can_inplace=False,
+                     is_weak=False)]
 ]
 op1.group.device = cpu
 op1.group.iteration = ((256,), ())
