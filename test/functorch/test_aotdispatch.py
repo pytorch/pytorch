@@ -950,46 +950,46 @@ def forward(self, primals_1):
     return [sin, primals_1]""",
         )
 
-#     def test_input_mutation_storage_resize_up_down(self):
-#         def f(a):
-#             torch.ops.inductor.resize_storage_bytes_(a, 32)
-#             # float32, 4 bytes per element, 32 bytes == 8 elements
-#             with torch.no_grad():
-#                 a.copy_(torch.ones(8))
-#             out = a.sin()
-#             torch.ops.inductor.resize_storage_bytes_(a, 0)
-#             return out
+    #     def test_input_mutation_storage_resize_up_down(self):
+    #         def f(a):
+    #             torch.ops.inductor.resize_storage_bytes_(a, 32)
+    #             # float32, 4 bytes per element, 32 bytes == 8 elements
+    #             with torch.no_grad():
+    #                 a.copy_(torch.ones(8))
+    #             out = a.sin()
+    #             torch.ops.inductor.resize_storage_bytes_(a, 0)
+    #             return out
 
-#         inp = torch.zeros(8, requires_grad=True)
-#         # Input starts with zero-size-storage
-#         inp.untyped_storage().resize_(0)
+    #         inp = torch.zeros(8, requires_grad=True)
+    #         # Input starts with zero-size-storage
+    #         inp.untyped_storage().resize_(0)
 
-#         fw_graph_cell = [None]
-#         compiled_f = aot_function(
-#             f,
-#             fw_compiler=make_boxed_compiler(
-#                 partial(extract_graph, graph_cell=fw_graph_cell)
-#             ),
-#             bw_compiler=nop,
-#             decompositions={},
-#             keep_inference_input_mutations=True,
-#             dynamic=False,
-#         )
-#         out = compiled_f(inp)
-#         # Final graph has two interesting properties:
-#         # (1) no resizes in the functional graph, since the two resizes cancel out
-#         #     and the final size is zero
-#         # (2) no copy_ in the functional graph, even though we copied data into the input,
-#         #     because the input has no storage at the end of graph execution (so no data to copy)
-#         self.assertExpectedInline(
-#             fw_graph_cell[0].code.strip(),
-#             """\
-# def forward(self, primals_1):
-#     ones = torch.ops.aten.ones.default([8], device = device(type='cpu'), pin_memory = False)
-#     copy = torch.ops.aten.copy.default(primals_1, ones);  primals_1 = ones = None
-#     sin = torch.ops.aten.sin.default(copy)
-#     return [sin, copy]""",
-#         )
+    #         fw_graph_cell = [None]
+    #         compiled_f = aot_function(
+    #             f,
+    #             fw_compiler=make_boxed_compiler(
+    #                 partial(extract_graph, graph_cell=fw_graph_cell)
+    #             ),
+    #             bw_compiler=nop,
+    #             decompositions={},
+    #             keep_inference_input_mutations=True,
+    #             dynamic=False,
+    #         )
+    #         out = compiled_f(inp)
+    #         # Final graph has two interesting properties:
+    #         # (1) no resizes in the functional graph, since the two resizes cancel out
+    #         #     and the final size is zero
+    #         # (2) no copy_ in the functional graph, even though we copied data into the input,
+    #         #     because the input has no storage at the end of graph execution (so no data to copy)
+    #         self.assertExpectedInline(
+    #             fw_graph_cell[0].code.strip(),
+    #             """\
+    # def forward(self, primals_1):
+    #     ones = torch.ops.aten.ones.default([8], device = device(type='cpu'), pin_memory = False)
+    #     copy = torch.ops.aten.copy.default(primals_1, ones);  primals_1 = ones = None
+    #     sin = torch.ops.aten.sin.default(copy)
+    #     return [sin, copy]""",
+    #         )
 
     def test_input_mutation_storage_resize_down_and_set_(self):
         # Meant to mimic ppFSDP
