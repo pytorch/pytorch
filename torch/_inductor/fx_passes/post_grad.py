@@ -218,6 +218,8 @@ def is_valid_mm_plus_mm(match: Match):
 
 
 def scatter_upon_allzero_extra_check(m):
+    if not config.optimize_scatter_upon_const_tensor:
+        return False
     allzero_shape = m.kwargs["shape"]
     selector = m.kwargs["selector"]
     val = m.kwargs["val"]
@@ -257,7 +259,11 @@ def scatter_upon_allzero(match: Match, shape, dtype, selector, val):
 
     def inner_fn(idx):
         selector = selector_loader((idx[0],))
-        return ops.where(selector == ops.index_expr(idx[1], torch.int64), val, 0)
+        return ops.where(
+            selector == ops.index_expr(idx[1], torch.int64),
+            ops.constant(val, dtype),
+            ops.constant(0.0, dtype),
+        )
 
     return ir.Pointwise.create(
         device=selector.get_device(),
