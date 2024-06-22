@@ -2928,10 +2928,10 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         buffers = []
         buffer_names = []
         for i, arg in enumerate(argtypes):
-            if arg.numel:
+            if arg.is_buffer():
                 buffer_names.append(f"hl_buf_{i}")
                 buffers.append(
-                    f"    Halide::Runtime::Buffer {buffer_names[-1]}({arg.halide_type()}, {arg.name}, {arg.numel});"
+                    f"    Halide::Runtime::Buffer {buffer_names[-1]}({arg.halide_type()}, {arg.name}, {', '.join(arg.shape)});"
                 )
             else:
                 assert "*" not in arg.ctype
@@ -2952,26 +2952,10 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
             "\n".join(
                 [
                     cls.glue_template,
-                    f"{cls.cpu_cache_size()}",
                     cpp_compile_command("I", "O"),
                 ]
             ).encode("utf-8")
         )
-
-    @staticmethod
-    @functools.lru_cache(None)
-    def cpu_cache_size():
-        try:
-            cpuinfo = open("/proc/cpuinfo").read()
-        except OSError:
-            return 16777216
-        m = re.search(r"cache size\s*: (\d+) KB", cpuinfo)
-        if m:
-            return int(m.group(1)) * 1024
-        m = re.search(r"cache size\s*: (\d+) MB", cpuinfo)
-        if m:
-            return int(m.group(1)) * 1024 * 1024
-        raise RuntimeError("failed to find 'cache size: ... KB' in /proc/cpuinfo")
 
     @staticmethod
     def _search_for_file(suffix, errmsg):
@@ -3047,7 +3031,6 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         lockfile = str(dirpath / "lock")
         need_compile = not os.path.exists(donefile)
         jobs = []
-
         if need_compile:
             write_atomic(genfile, source_code)
             jobs.append(
@@ -3063,7 +3046,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
                         "-f",
                         "halide_kernel",
                         "-e",
-                        "static_library,h,schedule,pytorch_wrapper",
+                        "static_library,h,schedule",
                         "-p",
                         cls.find_libautoschedule(meta.scheduler),
                         *meta.args(),
