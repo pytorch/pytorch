@@ -180,7 +180,7 @@ class ConstDictVariable(VariableTracker):
             and not isinstance(self.items[Hashable(vt)], variables.DeletedVariable)
         )
 
-    def __len__(self):
+    def len(self):
         # TODO(anijain2305) - Exclude the DeletedVariable.
         return len(self.items)
 
