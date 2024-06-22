@@ -176,8 +176,13 @@ class ConstDictVariable(VariableTracker):
         )
 
     def len(self):
-        # TODO(anijain2305) - Exclude the DeletedVariable.
-        return len(self.items)
+        return len(
+            [
+                x
+                for x in self.items.values()
+                if not isinstance(x, variables.DeletedVariable)
+            ]
+        )
 
     def reconstruct(self, codegen):
         # instructions to load collections.OrderedDict if necessary

@@ -872,12 +872,15 @@ class PythonModuleVariable(VariableTracker):
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             return tx.output.side_effects.load_attr(self, name)
 
-        assert self.source
-        from .builder import VariableBuilder
+        from .builder import SourcelessBuilder, VariableBuilder
 
-        return VariableBuilder(tx, AttrSource(self.source, name))(
-            getattr(self.value, name)
-        )
+        attr_value = getattr(self.value, name)
+
+        if self.source:
+            new_source = AttrSource(self.source, name)
+            return VariableBuilder(tx, new_source)(attr_value)
+        else:
+            return SourcelessBuilder.create(tx, attr_value)
 
 
 class TypingVariable(VariableTracker):
