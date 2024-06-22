@@ -877,22 +877,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             except AttributeError:
                 method = None
 
-            if method is torch.nn.Module.parameters:
-                assert not args or kwargs
-                if tx.output.side_effects.has_pending_mutation(self):
-                    unimplemented("Module.parameters() with pending mutation")
-                install_guard(
-                    self.source.make_guard(GuardBuilder.NN_MODULE_PARAM_NAMES)
-                )
-                items = []
-                for name, value in self.value.named_parameters():
-                    items.append(
-                        VariableBuilder(tx, AttrSource(self.source, name))(value)
-                    )
-                return variables.ListIteratorVariable(
-                    items, mutable_local=MutableLocal()
-                )
-            elif isinstance(method, staticmethod):
+            if isinstance(method, staticmethod):
                 source = AttrSource(
                     AttrSource(AttrSource(self.source, "__class__"), name), "__func__"
                 )
