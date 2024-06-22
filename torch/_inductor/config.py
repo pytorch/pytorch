@@ -867,8 +867,22 @@ cpu_backend = "cpp"
 
 
 class halide:
+    # Base halide target to use for CPU devices
+    cpu_target = "host"
+
+    # Base halide target to use for CUDA devices
+    gpu_target = "host-cuda"
+
+    # Halide autoscheduler to use, choices are:
+    # "Anderson2021" (gpu-only), "Li2018", "Adams2019" (cpu-only), or "Mullapudi2016" (cpu-only)
+    scheduler_cuda = "Li2018"
+    scheduler_cpu = "Adams2019"
+
     # Controls `no_asserts` flag passed to Halide target (warning: can false positive)
     asserts = False
+
+    # Controls `debug` flag passed to Halide target
+    debug = False
 
 
 # create a directory containing lots of debug information
