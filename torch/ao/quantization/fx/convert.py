@@ -75,6 +75,7 @@ from .custom_config import (
 from .lower_to_fbgemm import lower_to_fbgemm
 # importing the lib so that the quantized_decomposed ops are registered
 from ._decomposed import quantized_decomposed_lib  # noqa: F401
+from torch.ao.quantization.pt2e.generate_numeric_debug_handle import NUMERIC_DEBUG_HANDLE_KEY
 import operator
 
 __all__ = [
@@ -226,9 +227,9 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
 
             # remap numeric_debug_handle
             for user_node in node.users:
-                if "numeric_debug_handle" in user_node.meta:
-                    numeric_debug_handle = user_node.meta["numeric_debug_handle"]
-                    user_node.meta["numeric_debug_handle"] = {remap_fn(k): v for k, v in numeric_debug_handle.items()}
+                if NUMERIC_DEBUG_HANDLE_KEY in user_node.meta:
+                    numeric_debug_handle = user_node.meta[NUMERIC_DEBUG_HANDLE_KEY]
+                    user_node.meta[NUMERIC_DEBUG_HANDLE_KEY] = {remap_fn(k): v for k, v in numeric_debug_handle.items()}
             node.replace_all_uses_with(dequantized_node)
             graph.erase_node(node)
     elif is_dynamic:
@@ -334,9 +335,9 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
 
             # remap numeric_debug_handle
             for user_node in node.users:
-                if "numeric_debug_handle" in user_node.meta:
-                    numeric_debug_handle = user_node.meta["numeric_debug_handle"]
-                    user_node.meta["numeric_debug_handle"] = {remap_fn(k): v for k, v in numeric_debug_handle.items()}
+                if NUMERIC_DEBUG_HANDLE_KEY in user_node.meta:
+                    numeric_debug_handle = user_node.meta[NUMERIC_DEBUG_HANDLE_KEY]
+                    user_node.meta[NUMERIC_DEBUG_HANDLE_KEY] = {remap_fn(k): v for k, v in numeric_debug_handle.items()}
             node.replace_all_uses_with(dequantized_node)
             graph.erase_node(node)
     elif dtype == torch.float16:
