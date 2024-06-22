@@ -84,7 +84,15 @@ class SchedulerBuffer:
             result.writeline(f"{name}.aliases = {pformat(self.get_aliases())}")
         if self.get_mutations():
             result.writeline(f"{name}.mutations = {pformat(self.get_mutations())}")
-        result.writeline(f"{name}.users = {pformat(self.users)}")
+
+        if len(self.users) <= 1:
+            result.writeline(f"{name}.users = {self.users}")
+        else:
+            result.writeline(f"{name}.users = [")
+            with result.indent(1):
+                for user in self.users:
+                    result.writeline(f"{user},")
+            result.writeline("]")
         return result.getrawvalue()
 
     def get_name(self) -> str:
@@ -1721,11 +1729,13 @@ class Scheduler:
                 assert (
                     s in unbacked_symbol_to_origin_node
                 ), f"{s} not in {unbacked_symbol_to_origin_node.keys()}"
-                if (node_name := unbacked_symbol_to_origin_node[s]) is not None:
-                    log.debug(
-                        "scheduling output %s for unbacked symint %s", node_name, s
-                    )
-                    add_user(node_name, OutputNode(StarDep(node_name)))
+                if node := unbacked_symbol_to_origin_node[s]:
+                    for buf in self.name_to_node[node].get_outputs():
+                        buf_name = buf.get_name()
+                        log.debug(
+                            "scheduling output %s for unbacked symint %s", buf_name, s
+                        )
+                        add_user(buf_name, OutputNode(StarDep(buf_name)))
 
         # make sure input mutation isn't dead-code-eliminated
         for name in self.mutation_renames:

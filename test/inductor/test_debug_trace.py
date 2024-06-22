@@ -86,10 +86,7 @@ op1.met_dependencies = []
 op1.outputs = [
     buf1: ComputedBuffer
     buf1.layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
-    buf1.users =
-        [   NodeUser(node=ExternKernelSchedulerNode(name='op2'),
-                     can_inplace=False,
-                     is_weak=False)]
+    buf1.users = [NodeUser(node=ExternKernelSchedulerNode(name='op2'), can_inplace=False, is_weak=False)]
 ]
 op1.group.device = cpu
 op1.group.iteration = ((256,), ())
@@ -133,7 +130,7 @@ op0_op1.outputs = [
     buf0.users = [NodeUser(node=SchedulerNode(name='op1'), can_inplace=True, is_weak=False)]
     buf1: ComputedBuffer
     buf1.layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
-    buf1.users = [   NodeUser(node=ExternKernelSchedulerNode(name='op2'), can_inplace=False, is_weak=False)]
+    buf1.users = [NodeUser(node=ExternKernelSchedulerNode(name='op2'), can_inplace=False, is_weak=False)]
 ]
 op0_op1.snodes[0] =
 op0: SchedulerNode(ComputedBuffer)
@@ -169,7 +166,7 @@ op1.met_dependencies = []
 op1.outputs = [
     buf1: ComputedBuffer
     buf1.layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
-    buf1.users = [   NodeUser(node=ExternKernelSchedulerNode(name='op2'), can_inplace=False, is_weak=False)]
+    buf1.users = [NodeUser(node=ExternKernelSchedulerNode(name='op2'), can_inplace=False, is_weak=False)]
 ]
 op1.group.device = cpu
 op1.group.iteration = ((256,), ())
