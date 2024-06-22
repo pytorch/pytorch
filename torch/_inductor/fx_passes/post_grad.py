@@ -217,7 +217,7 @@ def is_valid_mm_plus_mm(match: Match):
     return True
 
 
-def scatter_upon_allzero_extra_check(m):
+def scatter_upon_const_tensor_extra_check(m):
     if not config.optimize_scatter_upon_const_tensor:
         return False
     allzero_shape = m.kwargs["shape"]
@@ -239,14 +239,21 @@ def scatter_upon_allzero_extra_check(m):
 @register_lowering_pattern(
     CallFunction(
         aten.scatter,
-        CallFunction(aten.full, KeywordArg("shape"), 0.0, dtype=KeywordArg("dtype")),
+        CallFunction(
+            aten.full,
+            KeywordArg("shape"),
+            KeywordArg("background_val"),
+            dtype=KeywordArg("dtype"),
+        ),
         1,  # dim
         KeywordArg("selector"),
         KeywordArg("val"),  # scalar value
     ),
-    extra_check=scatter_upon_allzero_extra_check,
+    extra_check=scatter_upon_const_tensor_extra_check,
 )
-def scatter_upon_allzero(match: Match, shape, dtype, selector, val):
+def scatter_upon_const_tensor(
+    match: Match, shape, background_val, dtype, selector, val
+):
     from torch._inductor import lowering, metrics
 
     metrics.num_matches_for_scatter_upon_const_tensor += 1
@@ -262,7 +269,7 @@ def scatter_upon_allzero(match: Match, shape, dtype, selector, val):
         return ops.where(
             selector == ops.index_expr(idx[1], torch.int64),
             ops.constant(val, dtype),
-            ops.constant(0.0, dtype),
+            ops.constant(background_val, dtype),
         )
 
     return ir.Pointwise.create(

@@ -5,6 +5,7 @@ import os
 
 import torch
 from torch import nn
+from torch._dynamo.utils import same
 from torch._inductor import metrics
 from torch._inductor.runtime.runtime_utils import do_bench_gpu as do_bench
 from torch._inductor.test_case import TestCase
@@ -18,8 +19,25 @@ class TestScatterOpt(TestCase):
         super().setUp()
         metrics.reset()
 
-    def check_metric(self, val):
+    def check_metric(self, val=1):
         self.assertEqual(val, metrics.num_matches_for_scatter_upon_const_tensor)
+
+    def do_acc_test(self, f, *args):
+        expect = f(*args)
+        actual = torch.compile(f)(*args)
+        self.assertTrue(same(expect, actual, tol=1e-3))
+
+    def test_nonzero_const_tensor(self):
+        M, N = 1024, 2048
+
+        def f(x):
+            y = torch.full([M, N], 3.14, dtype=torch.float)
+            y.scatter_(1, x.unsqueeze(1), 2.718)
+            return y
+
+        x = torch.randint(0, N, (M,), dtype=torch.int64)
+        self.do_acc_test(f, x)
+        self.check_metric()
 
     def test_cross_entropy_loss(self):
         """
@@ -52,7 +70,7 @@ class TestScatterOpt(TestCase):
             ref_grad, act_grad, atol=1e-3, rtol=1e-3
         ), f"{ref_grad=}\n{act_grad=}"
 
-        self.check_metric(1)
+        self.check_metric()
 
         if DO_PERF_TEST:
             torch.cuda.reset_peak_memory_stats()
