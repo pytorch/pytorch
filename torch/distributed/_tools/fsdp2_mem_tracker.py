@@ -287,7 +287,7 @@ class FSDPMemTracker(MemTracker):
         # We capture memory snapshots before and after ``FSDPParamGroup.pre_backward`` to capture the pre-fetching
         # and unsharding of params. We also initialize ``local_peak`` and ``PEAK_BW`` snapshot for the module.
         @wraps(orig_fsdp_param_group_pre_backward)
-        def inner(*args: Any) -> None:
+        def inner(*args: Any, **kwargs: Any) -> None:
             mod_stat = self.memory_tracking[fsdp_mod]
             snapshot = self.get_tracker_snapshot()
             mod_stat.local_peak = {
@@ -297,7 +297,7 @@ class FSDPMemTracker(MemTracker):
             mod_stat.snapshots.setdefault(_FSDPModState.BEF_PRE_BW, []).append(
                 deepcopy(snapshot)
             )
-            orig_fsdp_param_group_pre_backward(*args)
+            orig_fsdp_param_group_pre_backward(*args, **kwargs)
 
             mod_stat.snapshots.setdefault(_FSDPModState.AFT_PRE_BW, []).append(
                 self.get_tracker_snapshot()
@@ -314,7 +314,7 @@ class FSDPMemTracker(MemTracker):
         # the `unsharded` grads before the post backward and then `sharded` grads and `reduce_scatter`  buffers
         # after the post backward.
         @wraps(orig_fsdp_param_group_post_backward)
-        def inner(*args: Any) -> None:
+        def inner(*args: Any, **kwargs: Any) -> None:
             fsdp_state = fsdp_mod._get_fsdp_state()
             if fsdp_param_group := fsdp_state._fsdp_param_group:
                 for fsdp_param in fsdp_param_group.fsdp_params:
@@ -331,7 +331,7 @@ class FSDPMemTracker(MemTracker):
                 self.get_tracker_snapshot()
             )
 
-            orig_fsdp_param_group_post_backward(*args)
+            orig_fsdp_param_group_post_backward(*args, **kwargs)
 
             if fsdp_param_group := fsdp_state._fsdp_param_group:
                 for fsdp_param in fsdp_param_group.fsdp_params:
