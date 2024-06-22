@@ -901,8 +901,6 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from .builder import VariableBuilder
-
         if name in ["_call_impl", "_wrapped_call_impl"]:
             fn = getattr(self.value_type, name)
             if self.source:
@@ -989,10 +987,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
     def getattr_helper(self, tx, field, name_vt):
         dict_vt = self.var_getattr(tx, field)
-        # print("dict_vt", self.source.name(), field, name_vt.value, id(dict_vt))
-        dict_vt = dict_vt.realize()
-        # print(name_vt.value, dict_vt)
-        return dict_vt.maybe_getitem_const(name_vt)
+        if isinstance(dict_vt, variables.ConstDictVariable):
+            return dict_vt.maybe_getitem_const(name_vt)
+        return None
 
     def manually_trace_nn_module_getattr(self, tx, name):
         """
@@ -1008,7 +1005,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         if out is None:
             out = self.getattr_helper(tx, "_buffers", name_vt)
         if out is None:
-            raise ObservedException("raised exception")
+            raise ObservedException(f"object has no attribute {name}")
         return out
 
 
