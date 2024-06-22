@@ -24,6 +24,7 @@ from torch.ao.quantization.quantizer import (
     QuantizationSpecBase,
 )
 from torch.ao.quantization import ObserverOrFakeQuantize
+from .generate_numeric_debug_handle import NUMERIC_DEBUG_HANDLE_KEY
 
 # TODO: make pt2e folder private?
 __all__ = [
@@ -371,13 +372,13 @@ def _maybe_insert_input_observers_for_node(
         new_args.append(new_arg)
         remap[arg] = new_arg
 
-    if "numeric_debug_handle" in node.meta:
+    if NUMERIC_DEBUG_HANDLE_KEY in node.meta:
 
         def remap_fn(x):
             return remap.get(x, x)
 
-        numeric_debug_handle = node.meta["numeric_debug_handle"]
-        node.meta["numeric_debug_handle"] = {remap_fn(k): v for k, v in numeric_debug_handle.items()}
+        numeric_debug_handle = node.meta[NUMERIC_DEBUG_HANDLE_KEY]
+        node.meta[NUMERIC_DEBUG_HANDLE_KEY] = {remap_fn(k): v for k, v in numeric_debug_handle.items()}
 
     # Clone has a memory_format kwarg, zeros_like has a pin_memory kwarg, and
     # gelu has a has an approximate kwarg that persist in exported graph.

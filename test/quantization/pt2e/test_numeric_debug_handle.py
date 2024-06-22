@@ -4,7 +4,10 @@ import unittest
 
 import torch
 from torch._export import capture_pre_autograd_graph
-from torch.ao.quantization import generate_numeric_debug_handle
+from torch.ao.quantization import (
+    generate_numeric_debug_handle,
+    NUMERIC_DEBUG_HANDLE_KEY,
+)
 from torch.ao.quantization.pt2e.export_utils import _WrapperModule
 from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
 from torch.ao.quantization.quantizer.xnnpack_quantizer import (
@@ -15,6 +18,7 @@ from torch.fx import Node
 from torch.fx.passes.utils.matcher_with_name_node_map_utils import (
     SubgraphMatcherWithNameNodeMap,
 )
+import copy
 from torch.testing._internal.common_quantization import TestHelperModules
 from torch.testing._internal.common_utils import IS_WINDOWS, TestCase
 
@@ -53,18 +57,24 @@ def _extract_conv2d_pattern_debug_handle_map(model):
 
     debug_handle_map = {}
     conv_node = output_node
-    if input_node not in conv_node.meta["numeric_debug_handle"]:
-        return debug_handle_map
-    debug_handle_map["input"] = conv_node.meta["numeric_debug_handle"][input_node]
-    debug_handle_map["weight"] = conv_node.meta["numeric_debug_handle"][weight_node]
+    if input_node not in conv_node.meta[NUMERIC_DEBUG_HANDLE_KEY]:
+        return {}
+    debug_handle_map["input"] = conv_node.meta[NUMERIC_DEBUG_HANDLE_KEY][input_node]
+    if weight_node not in conv_node.meta[NUMERIC_DEBUG_HANDLE_KEY]:
+        return {}
+    debug_handle_map["weight"] = conv_node.meta[NUMERIC_DEBUG_HANDLE_KEY][weight_node]
     if bias_node is not None:
-        debug_handle_map["bias"] = conv_node.meta["numeric_debug_handle"][bias_node]
-    debug_handle_map["output"] = conv_node.meta["numeric_debug_handle"]["output"]
+        if bias_node not in conv_node.meta[NUMERIC_DEBUG_HANDLE_KEY]:
+            return {}
+        debug_handle_map["bias"] = conv_node.meta[NUMERIC_DEBUG_HANDLE_KEY][bias_node]
+    if "output" not in conv_node.meta[NUMERIC_DEBUG_HANDLE_KEY]:
+        return {}
+    debug_handle_map["output"] = conv_node.meta[NUMERIC_DEBUG_HANDLE_KEY]["output"]
     return debug_handle_map
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not yet supported for torch.compile")
-class TestGenerateNumericDebugHandle(TestCase):
+class TestNumericDebugHandle(TestCase):
     def test_simple(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
@@ -73,12 +83,12 @@ class TestGenerateNumericDebugHandle(TestCase):
         unique_ids = set()
         count = 0
         for n in m.graph.nodes:
-            if "numeric_debug_handle" in n.meta:
+            if NUMERIC_DEBUG_HANDLE_KEY in n.meta:
                 for arg in n.args:
                     if isinstance(arg, Node):
-                        unique_ids.add(n.meta["numeric_debug_handle"][arg])
+                        unique_ids.add(n.meta[NUMERIC_DEBUG_HANDLE_KEY][arg])
                         count += 1
-                unique_ids.add(n.meta["numeric_debug_handle"]["output"])
+                unique_ids.add(n.meta[NUMERIC_DEBUG_HANDLE_KEY]["output"])
                 count += 1
         self.assertEqual(len(unique_ids), count)
 
@@ -100,3 +110,36 @@ class TestGenerateNumericDebugHandle(TestCase):
         m = convert_pt2e(m)
         debug_handle_map = _extract_conv2d_pattern_debug_handle_map(m)
         self.assertEqual(debug_handle_map, debug_handle_map_ref)
+
+    def test_copy_preserve_handle(self):
+        m = TestHelperModules.Conv2dThenConv1d()
+        example_inputs = m.example_inputs()
+        m = capture_pre_autograd_graph(m, example_inputs)
+        generate_numeric_debug_handle(m)
+
+        debug_handle_map_ref = _extract_conv2d_pattern_debug_handle_map(m)
+
+        m_copy = copy.copy(m)
+        debug_handle_map = _extract_conv2d_pattern_debug_handle_map(m_copy)
+
+        self.assertEqual(debug_handle_map, debug_handle_map_ref)
+
+        ref = m(*example_inputs)
+        res = m_copy(*example_inputs)
+        self.assertEqual(res, ref)
+
+    def test_deepcopy_preserve_handle(self):
+        m = TestHelperModules.Conv2dThenConv1d()
+        example_inputs = m.example_inputs()
+        m = capture_pre_autograd_graph(m, example_inputs)
+        generate_numeric_debug_handle(m)
+
+        debug_handle_map_ref = _extract_conv2d_pattern_debug_handle_map(m)
+        m_copy = copy.deepcopy(m)
+        debug_handle_map = _extract_conv2d_pattern_debug_handle_map(m_copy)
+
+        self.assertEqual(debug_handle_map, debug_handle_map_ref)
+
+        ref = m(*example_inputs)
+        res = m_copy(*example_inputs)
+        self.assertEqual(res, ref)
