@@ -102,6 +102,8 @@ class PartialRender:
         return self.code
 
 
+# This is used to store info needed for lowering each subgraph in triton
+# templates
 SubgraphInfo = namedtuple(
     "SubgraphInfo",
     [
@@ -551,6 +553,7 @@ class TritonTemplateKernel(TritonKernel):
                 call_args,
                 grid=grid,
                 grid_fn=f"{self.grid_fn.__module__}.{self.grid_fn.__name__}",
+                arg_types=arg_types,
                 triton_meta=self.triton_meta,
             )
 
@@ -1576,8 +1579,11 @@ class AlgorithmSelectorCache(PersistentCache):
         for choice in top_k:
             result = timings[choice]
             if result:
+                kernel_info = (
+                    choice.debug_extra if hasattr(choice, "debug_extra") else ""
+                )
                 sys.stderr.write(
-                    f"  {choice.name} {result:.4f} ms {best_time / result:.1%}\n"
+                    f"  {choice.name} {result:.4f} ms {best_time / result:.1%} {kernel_info}\n"
                 )
             else:
                 sys.stderr.write(
@@ -1603,21 +1609,31 @@ class AlgorithmSelectorCache(PersistentCache):
         # triton templates want the base tensor.
         if isinstance(node, ir.BaseView):
             node = node.unwrap_view()
+        return AlgorithmSelectorCache.generate_example_value(
+            V.graph.sizevars.size_hints(
+                node.get_size(),
+                fallback=config.unbacked_symint_fallback,
+            ),
+            V.graph.sizevars.size_hints(
+                node.get_stride(),
+                fallback=config.unbacked_symint_fallback,
+            ),
+            node.get_device(),
+            node.get_dtype(),
+            node.layout.offset,
+        )
+
+    @staticmethod
+    def generate_example_value(size, stride, device, dtype, extra_size):
         # preserve rng states to avoid the rand_strided call below changes
         # the rng states for the real model code.
         with preserve_rng_state():
             return rand_strided(
-                V.graph.sizevars.size_hints(
-                    node.get_size(),
-                    fallback=config.unbacked_symint_fallback,
-                ),
-                V.graph.sizevars.size_hints(
-                    node.get_stride(),
-                    fallback=config.unbacked_symint_fallback,
-                ),
-                device=node.get_device(),
-                dtype=node.get_dtype(),
-                extra_size=node.layout.offset,
+                size,
+                stride,
+                device=device,
+                dtype=dtype,
+                extra_size=extra_size,
             )
 
     @staticmethod
