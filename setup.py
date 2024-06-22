@@ -344,7 +344,7 @@ cmake_python_include_dir = sysconfig.get_path("include")
 ################################################################################
 
 package_name = os.getenv("TORCH_PACKAGE_NAME", "torch")
-LIBTORCH_PKG_NAME = os.getenv("LIBTORCH_PACKAGE_NAME", "libtorch")
+LIBTORCH_PKG_NAME = os.getenv("LIBTORCH_PACKAGE_NAME", "torch_no_python")
 if BUILD_LIBTORCH_WHL:
     package_name = LIBTORCH_PKG_NAME
 
@@ -971,9 +971,6 @@ def configure_extension_build():
     if BUILD_LIBTORCH_WHL:
         main_libraries = ["torch"]
         main_sources = []
-
-    if cmake_cache_vars["USE_CUDA"]:
-        library_dirs.append(os.path.dirname(cmake_cache_vars["CUDA_CUDA_LIB"]))
 
     if build_type.is_debug():
         if IS_WINDOWS:
