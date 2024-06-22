@@ -908,7 +908,7 @@ def mps_ops_modifier(ops):
             # Error in TestConsistencyCPU.test_output_match_isin_cpu fails for integers,
             # not reproducible in later OS. Added assert to op if used in < 14.0
             'isin': [torch.int64, torch.int32, torch.int16, torch.uint8, torch.int8],
-            'nn.functional.max_pool2d': [torch.int32, torch.int16, torch.uint8],
+            'nn.functional.max_pool2d': [torch.int32, torch.uint8],
         })
 
     UNDEFINED_XFAILLIST = {
