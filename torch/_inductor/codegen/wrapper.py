@@ -1481,7 +1481,7 @@ class WrapperCodeGen(CodeGen):
             elif isinstance(arg, (int, float, bool, SymbolicCallArg)):
                 return str(arg)
             else:
-                return pexpr(V.graph.sizevars.simplify(arg))
+                return self.expr_printer(V.graph.sizevars.simplify(arg))
 
         call_args = [wrap_arg(arg) for arg in call_args]
 
