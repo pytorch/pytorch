@@ -22,6 +22,7 @@ from torch._higher_order_ops.utils import (
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
+    _temp_remove_pre_dispatch_torch_function_mode,
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
     track_tensor_tree,
@@ -40,10 +41,39 @@ def wrap_combine_fn_flat(*args, combine_fn, spec, num_leaves):
     return combined_leaves
 
 
+def check_args(input, combine_fn, leaves, tree, dim):
+    assert len(leaves) >= 1, "expected at least 1 input leaf"
+    assert all(
+        isinstance(x, torch.Tensor) for x in leaves
+    ), "input leaves must be a Tensor"
+    shape = leaves[0].shape
+    ndim = len(shape)
+    dim = utils.canonicalize_dim(ndim, dim)
+
+    for x in leaves[1:]:
+        assert x.shape == shape, "All input tensors must have the same shape"
+
+    out = combine_fn(
+        pytree.tree_unflatten(
+            [e[slice_along_axis(0, 1, stride=None, dim=0)] for e in leaves], tree
+        ),
+        pytree.tree_unflatten(
+            [e[slice_along_axis(0, 1, stride=None, dim=0)] for e in leaves], tree
+        ),
+    )
+
+    out_leaves, tree_out = pytree.tree_flatten(out)
+    assert (
+        tree == tree_out
+    ), "The pytree of the output of the operator needs to match the input pytree"
+
+
 def associative_scan(
     combine_fn: Callable[[pytree.PyTree, pytree.PyTree], pytree.PyTree],
     input: pytree.PyTree,
     dim: int,
+    reverse: bool = False,
+    host_side: bool = False,
 ) -> torch.Tensor:
     r"""
     Performs an inclusive scan with an associative pointwise combine function.
@@ -79,30 +109,148 @@ def associative_scan(
 
     if not torch._dynamo.is_compiling():
         with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
-            return torch.compile(associative_scan, fullgraph=True)(
-                combine_fn, input, dim
-            )
+            if host_side:
+                return torch.compile(associative_scan_host_side, fullgraph=True)(
+                    combine_fn, input, dim, reverse
+                )
+                # return associative_scan_host_side(combine_fn, input, dim, False)
+            else:
+                if reverse:
+                    raise ValueError(
+                        "For the device-side associative scan, the reverse flag has not yet been implemented"
+                    )
+
+                return torch.compile(associative_scan, fullgraph=True)(
+                    combine_fn, input, dim
+                )
 
     leaves, spec = pytree.tree_flatten(input)
 
-    assert len(leaves) >= 1, "expected at least 1 input leaf"
-    assert all(
-        isinstance(x, torch.Tensor) for x in leaves
-    ), "input leaves must be a Tensor"
-    shape = leaves[0].shape
-    ndim = len(shape)
-    dim = utils.canonicalize_dim(ndim, dim)
+    check_args(input, combine_fn, leaves, spec, dim)
 
-    for x in leaves[1:]:
-        assert x.shape == shape, "All input tensors must have the same shape"
+    if reverse and host_side:
+        raise ValueError(
+            "For the device-side associative scan, the reverse flag has not yet been implemented"
+        )
 
     combine_fn = functools.partial(
         wrap_combine_fn_flat, combine_fn=combine_fn, spec=spec, num_leaves=len(leaves)
     )
 
-    result_flat = associative_scan_op(combine_fn, leaves, dim)
+    if host_side:
+        with _set_compilation_env():
+            with torch._dynamo.utils.disable_cache_limit():
+                with _temp_remove_pre_dispatch_torch_function_mode():
+                    return torch.compile(
+                        associative_scan_host_side, backend="eager", fullgraph=True
+                    )(combine_fn, input, dim, reverse)
+    else:
+        result_flat = associative_scan_op(combine_fn, leaves, dim)
 
     return pytree.tree_unflatten(result_flat, spec)
+
+
+def _interleave(a, b, dim):
+    # https://stackoverflow.com/questions/60869537/how-can-i-interleave-5-pytorch-tensors
+    if b_trunc := (a.shape[dim] == b.shape[dim] + 1):
+        pad = [0, 0] * b.ndim
+        pad[
+            (b.ndim - dim - 1) * 2 + 1
+        ] = 1  # +1=always end of dim, pad-order is reversed so start is at end
+        b = torch.nn.functional.pad(b, pad)
+
+    stacked = torch.stack([a, b], dim=dim + 1)
+    interleaved = torch.flatten(stacked, start_dim=dim, end_dim=dim + 1)
+    if b_trunc:
+        # TODO: find torch alternative for slice_along dim for torch.jit.script to work
+        interleaved = interleaved[
+            slice_along_axis(0, b.shape[dim] + a.shape[dim] - 1, dim=dim)
+        ]
+    return interleaved
+
+
+def safe_map(f, *args):
+    args = list(map(list, args))
+    n = len(args[0])
+    for arg in args[1:]:
+        assert len(arg) == n, f"length mismatch: {list(map(len, args))}"
+
+    def nf(a):
+        return f(*a)
+
+    return list(map(nf, zip(*args)))
+
+
+def slice_along_axis(start, end, stride=None, dim=0):
+    return (slice(None),) * dim + (slice(start, end, stride),)
+
+
+def associative_scan_host_side(operator, elems, dim=0, reverse=False):
+    elems_flat, tree = pytree.tree_flatten(elems)
+
+    check_args(elems, operator, elems_flat, tree, dim)
+
+    if reverse:
+        elems_flat = [torch.flip(elem, [dim]) for elem in elems_flat]
+
+    def combine(a_flat, b_flat):
+        # Lower `fn` to operate on flattened sequences of elems.
+        a = pytree.tree_unflatten(a_flat, tree)
+        b = pytree.tree_unflatten(b_flat, tree)
+        c = operator(a, b)
+        c_flat, _ = pytree.tree_flatten(c)
+        return c_flat
+
+    def _scan(elems):
+        """Perform scan on `elems`."""
+        num_elems = elems[0].shape[dim]
+
+        if num_elems < 2:
+            return elems
+
+        # Combine adjacent pairs of elements.
+        reduced_elems = combine(
+            [elem[slice_along_axis(0, -1, stride=2, dim=dim)] for elem in elems],
+            [elem[slice_along_axis(1, None, stride=2, dim=dim)] for elem in elems],
+        )
+
+        # Recursively compute scan for partially reduced tensors.
+        odd_elems = _scan(reduced_elems)
+
+        if num_elems % 2 == 0:
+            even_elems = combine(
+                [e[slice_along_axis(0, -1, dim=dim)] for e in odd_elems],
+                [e[slice_along_axis(2, None, stride=2, dim=dim)] for e in elems],
+            )
+        else:
+            even_elems = combine(
+                odd_elems,
+                [e[slice_along_axis(2, None, stride=2, dim=dim)] for e in elems],
+            )
+
+        # The first element of a scan is the same as the first element
+        # of the original `elems`.
+        even_elems = [
+            torch.cat([elem[slice_along_axis(0, 1, dim=dim)], result], dim=dim)
+            if result.shape.numel() > 0 and elem.shape[dim] > 0
+            else result
+            if result.shape.numel() > 0
+            else elem[
+                slice_along_axis(0, 1, dim=dim)
+            ]  # Jax allows/ignores concat with 0-dim, Pytorch does not
+            for (elem, result) in zip(elems, even_elems)
+        ]
+
+        return list(
+            safe_map(functools.partial(_interleave, dim=dim), even_elems, odd_elems)
+        )
+
+    scans = _scan(elems_flat)
+
+    if reverse:
+        scans = [torch.flip(scanned, [dim]) for scanned in scans]
+
+    return pytree.tree_unflatten(scans, tree)
 
 
 associative_scan_op = HigherOrderOperator("associative_scan")

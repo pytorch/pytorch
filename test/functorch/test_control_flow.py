@@ -8,6 +8,7 @@ import torch.utils._pytree as pytree
 
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import cond, UnsupportedAliasMutationException
+from torch._higher_order_ops.associative_scan import associative_scan
 from torch._higher_order_ops.while_loop import while_loop
 from torch._subclasses.functional_tensor import (
     CppFunctionalizeAPI,
@@ -78,6 +79,36 @@ def _fake_while_loop(cond_fn, body_fn, operands):
     while cond_fn(*operands):
         operands = body_fn(*operands)
     return operands
+
+
+def _fake_associative_scan(combine_fn, input, dim, reverse=False):
+    inp_leaves, spec = pytree.tree_flatten(input)
+    result_flat = []
+    num_leaves = len(inp_leaves)
+    op = reversed if reverse else lambda x: x
+
+    # for inp in inp_leaves:
+    # tmp_res = []
+    for ind in op(range(inp_leaves[0].size(dim))):
+        r = [
+            inp_leaves[leave_ind][(slice(None),) * dim + (ind,)]
+            for leave_ind in range(num_leaves)
+        ]
+        if (ind > 0 and not reverse) or (
+            ind < (inp_leaves[0].size(dim) - 1) and reverse
+        ):
+            r = combine_fn(
+                pytree.tree_unflatten(result_flat[-1], spec),
+                pytree.tree_unflatten(r, spec),
+            )
+        r_flat, _ = pytree.tree_flatten(r)
+        result_flat.append(r_flat)
+    # res_flat = [[e[0] for e in pytree.tree_flatten(el)] for el in tmp_res]
+    results = [
+        torch.stack([e[leave_ind] for e in op(result_flat)], dim)
+        for leave_ind in range(num_leaves)
+    ]
+    return pytree.tree_unflatten(results, spec)
 
 
 def _while_loop_tests():
@@ -430,6 +461,226 @@ class TestControlFlow(TestCase):
         true_outs = fwbw(control_flow.map, f, x, y)
         fake_outs = fwbw(_fake_map, f, x, y)
         self.assertEqual(true_outs, fake_outs)
+
+    def test_associative_scan_host_side_simple(self):
+        def add(x: torch.Tensor, y: torch.Tensor):
+            return x + y
+
+        def mul(x: torch.Tensor, y: torch.Tensor):
+            return x * y
+
+        def f(op, x, dim):
+            result = associative_scan(op, x, dim, host_side=True)
+            return result
+
+        x = torch.randn(3, requires_grad=True)
+        cumsum = associative_scan(add, x, 0, host_side=True)
+        cumsum_exp = _fake_associative_scan(add, x, 0)
+        self.assertEqual(cumsum, cumsum_exp)
+        cumsum_exp_PT = torch.cumsum(x, 0)
+        self.assertEqual(cumsum, cumsum_exp_PT)
+
+        x = torch.randn(3, requires_grad=True)
+        cumsum = associative_scan(add, x, 0, reverse=True, host_side=True)
+        cumsum_exp_wrong = _fake_associative_scan(add, x, 0, reverse=False)
+        self.assertNotEqual(cumsum, cumsum_exp_wrong)
+        cumsum_exp = _fake_associative_scan(add, x, 0, reverse=True)
+        self.assertEqual(cumsum, cumsum_exp)
+
+        x = torch.randn(1, requires_grad=True)
+        cumsum = associative_scan(add, x, 0, host_side=True)
+        cumsum_exp = _fake_associative_scan(add, x, 0)
+        self.assertEqual(cumsum, cumsum_exp)
+        cumsum_exp_PT = torch.cumsum(x, 0)
+        self.assertEqual(cumsum, cumsum_exp_PT)
+
+        with self.assertRaisesRegex(Exception, r"."):
+            cumsum = associative_scan(add, x, 1, host_side=True)
+
+        # Jax Examples
+        x = torch.arange(0, 4)
+        cumsum = associative_scan(add, x, 0, host_side=True)
+        cumsum_exp = _fake_associative_scan(add, x, 0)
+        self.assertEqual(cumsum, torch.tensor([0.0, 1.0, 3.0, 6.0], dtype=torch.int64))
+        self.assertEqual(cumsum, cumsum_exp)
+
+        cumsum = associative_scan(add, x, 0, host_side=True, reverse=True)
+        cumsum_exp = _fake_associative_scan(add, x, 0, reverse=True)
+        self.assertEqual(cumsum, torch.tensor([6.0, 6.0, 5.0, 3.0], dtype=torch.int64))
+        self.assertEqual(cumsum, cumsum_exp)
+        ######################
+
+        x = torch.randn(3, 2, 2, requires_grad=True)
+        gm = make_fx(f)(add, x, 0)
+        self.assertExpectedInline(
+            gm.print_readable(print_output=False).strip(),
+            """\
+class f(torch.nn.Module):
+    def forward(self, op_1, x_1: "f32[3, 2, 2]", dim_1):
+        # No stacktrace found for following nodes
+        _tensor_constant0 = self._tensor_constant0
+        _unsafe_view: "f32[3, 2, 2]" = torch.ops.aten._unsafe_view.default(_tensor_constant0, [3, 2, 2]);  _tensor_constant0 = None
+        return _unsafe_view""",
+        )
+
+        x = torch.randn(3, 2, 2, requires_grad=True)
+        for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
+            cumsum = associative_scan(op, x, 0, host_side=True)
+            cumsum_exp = _fake_associative_scan(op, x, 0)
+            self.assertEqual(cumsum, cumsum_exp)
+            cumsum_exp_PT = op_pt(x, 0)
+            self.assertEqual(cumsum, cumsum_exp_PT)
+
+            cumsum = associative_scan(op, x, 0, host_side=True)
+            cumsum_exp = _fake_associative_scan(op, x, 1)
+            self.assertNotEqual(cumsum, cumsum_exp)
+
+            cumsum = associative_scan(op, x, 1, host_side=True)
+            cumsum_exp = _fake_associative_scan(op, x, 1)
+            self.assertEqual(cumsum, cumsum_exp)
+
+        import random
+
+        num_dims = [random.randint(2, 5) for _ in range(5)]
+        for num_dim in num_dims:
+            shapes = [random.randint(1, 13) for _ in range(num_dim)]
+            x = torch.randn(*shapes, requires_grad=True)
+            for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
+                cumsum = associative_scan(op, x, 0, host_side=True)
+                cumsum_exp = _fake_associative_scan(op, x, 0)
+                self.assertEqual(cumsum, cumsum_exp)
+                cumsum_exp_PT = op_pt(x, 0)
+                self.assertEqual(cumsum, cumsum_exp_PT)
+
+    def test_associative_scan_host_side_autograd(self):
+        def add(x: torch.Tensor, y: torch.Tensor):
+            return x + y
+
+        x = torch.randn(3, 2, 2, requires_grad=True)
+
+        for direction in [False, True]:
+            result = associative_scan(add, x, 0, host_side=True, reverse=direction)
+            expexted_result = _fake_associative_scan(add, x, 0, reverse=direction)
+            self.assertEqual(result, expexted_result)
+
+            grad_out = torch.ones_like(result)
+            grads = torch.autograd.grad(result, (x,), grad_out)
+            expected_grads = torch.autograd.grad(expexted_result, (x,), grad_out)
+            self.assertEqual(expected_grads, grads)
+
+        def f(op, x, dim):
+            result = associative_scan(op, x, dim, host_side=True)
+            result, _ = pytree.tree_flatten(result)
+            grad_out = [torch.ones_like(el) for el in result]
+            return torch.autograd.grad(result, (x,), grad_out)
+
+        gm = make_fx(f)(add, x, 0)
+        self.assertExpectedInline(
+            gm.print_readable(print_output=False).strip(),
+            """\
+class f(torch.nn.Module):
+    def forward(self, op_1, x_1: "f32[3, 2, 2]", dim_1):
+        # No stacktrace found for following nodes
+        _tensor_constant0 = self._tensor_constant0
+        _unsafe_view: "f32[3, 2, 2]" = torch.ops.aten._unsafe_view.default(_tensor_constant0, [3, 2, 2]);  _tensor_constant0 = None
+        ones_like: "f32[3, 2, 2]" = torch.ops.aten.ones_like.default(_unsafe_view, pin_memory = False);  _unsafe_view = None
+        _tensor_constant1 = self._tensor_constant1
+        return (_tensor_constant1,)""",
+        )
+
+    def test_associative_scan_host_side_matmul(self):
+        W = torch.nn.Parameter(torch.randn(2, 2))
+        H = torch.nn.Linear(2, 2)
+
+        def fct(x: torch.Tensor, y: torch.Tensor):
+            return x @ W + H(y)
+
+        x = torch.randn(3, 2, 2, requires_grad=True)
+
+        for direction in [False, True]:
+            result = associative_scan(fct, x, 0, host_side=True, reverse=direction)
+            expexted_result = _fake_associative_scan(fct, x, 0, reverse=direction)
+            self.assertEqual(result, expexted_result)
+
+            grad_out = torch.ones_like(result)
+            grads = torch.autograd.grad(result, (x,), grad_out, retain_graph=True)
+            expected_grads = torch.autograd.grad(
+                expexted_result, (x,), grad_out, retain_graph=True
+            )
+            self.assertEqual(expected_grads, grads)
+
+            grads = torch.autograd.grad(
+                result, (W, H.weight, H.bias), grad_out, retain_graph=True
+            )
+            expected_grads = torch.autograd.grad(
+                expexted_result, (W, H.weight, H.bias), grad_out, retain_graph=True
+            )
+            self.assertEqual(expected_grads, grads)
+
+    def test_associative_scan_host_side_tuple(self):
+        def fct(x, y):
+            return (x[0] + y[1], x[1] / y[0])
+
+        x = torch.randn(3, 2, 2, requires_grad=True)
+        y = torch.randn(3, 2, 2, requires_grad=True)
+        inp = (x, y)
+
+        for direction in [False, True]:
+            result = associative_scan(fct, inp, 0, host_side=True, reverse=direction)
+            expexted_result = _fake_associative_scan(fct, inp, 0, reverse=direction)
+            self.assertEqual(result, expexted_result)
+
+            result_flatten, _ = pytree.tree_flatten(result)
+            grad_out = [torch.ones_like(el) for el in result_flatten]
+
+            grads = torch.autograd.grad(
+                result_flatten, (x,), grad_out, retain_graph=True
+            )
+            expected_grads = torch.autograd.grad(
+                expexted_result, (x,), grad_out, retain_graph=True
+            )
+            self.assertEqual(expected_grads, grads)
+
+    def test_associative_scan_host_side_complex_pytree(self):
+        W = torch.nn.Parameter(torch.randn(2, 2))
+
+        def fct_wrong_pytree(x, y):
+            return {
+                "i": x["i"] * y["j"][0][0],
+                "k": 0.0,
+                "j": ([x["j"][1][0]["o"]], [{"o": torch.sin(x["i"] @ W)}]),
+            }
+
+        def fct(x, y):
+            return {
+                "i": x["i"] * y["j"][0][0],
+                "j": ([x["j"][1][0]["o"]], [{"o": torch.sin(x["i"] @ W)}]),
+            }
+
+        x = torch.randn(3, 2, 2, requires_grad=True)
+        y = torch.randn(3, 2, 2, requires_grad=True)
+        z = torch.randn(3, 2, 2, requires_grad=True)
+        inp = {"i": x, "j": ([y], [{"o": z}])}
+
+        with self.assertRaisesRegex(Exception, r"."):
+            result = associative_scan(fct_wrong_pytree, inp, 0, host_side=True)
+
+        for direction in [False, True]:
+            result = associative_scan(fct, inp, 0, host_side=True, reverse=direction)
+            expexted_result = _fake_associative_scan(fct, inp, 0, reverse=direction)
+            self.assertEqual(result, expexted_result)
+
+            result_flatten, _ = pytree.tree_flatten(result)
+            expected_result_flatten, _ = pytree.tree_flatten(expexted_result)
+            grad_out = [torch.ones_like(el) for el in result_flatten]
+
+            grads = torch.autograd.grad(
+                result_flatten, (x, y, z, W), grad_out, retain_graph=True
+            )
+            expected_grads = torch.autograd.grad(
+                expected_result_flatten, (x, y, z, W), grad_out, retain_graph=True
+            )
+            self.assertEqual(expected_grads, grads)
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
