@@ -10,7 +10,12 @@ from typing import Any, Dict, List
 import torch.nn
 
 from .. import trace_rules, variables
-from ..exc import unimplemented, UnspecializeRestartAnalysis, Unsupported
+from ..exc import (
+    ObservedException,
+    unimplemented,
+    UnspecializeRestartAnalysis,
+    Unsupported,
+)
 from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import GenerationTracker
 from ..source import (
@@ -941,6 +946,29 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 )
 
         return super().call_method(tx, name, args, kwargs)
+
+    def getattr_helper(self, tx, field, name_vt):
+        dict_vt = self.var_getattr(tx, field)
+        if isinstance(dict_vt, variables.ConstDictVariable):
+            return dict_vt.maybe_getitem_const(name_vt)
+        return None
+
+    def manually_trace_nn_module_getattr(self, tx, name):
+        """
+        Dynamo tracing of nn.Module __getattr__ can be expensive if the model
+        has deep submodule hierarchy. Since the __getattr__ is stable, we can
+        directly look into the underlying datastructures. This saves a lot of
+        compilation time.
+        """
+        name_vt = variables.ConstantVariable(name)
+        out = self.getattr_helper(tx, "_parameters", name_vt)
+        if out is None:
+            out = self.getattr_helper(tx, "_modules", name_vt)
+        if out is None:
+            out = self.getattr_helper(tx, "_buffers", name_vt)
+        if out is None:
+            raise ObservedException(f"object has no attribute {name}")
+        return out
 
 
 class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):

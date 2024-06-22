@@ -208,6 +208,12 @@ class ConstDictVariable(VariableTracker):
             unimplemented(f"dict KeyError: {arg.value}")
         return self.items[key]
 
+    def maybe_getitem_const(self, arg: VariableTracker):
+        key = ConstDictVariable._HashableTracker(arg)
+        if key not in self.items:
+            return None
+        return self.items[key]
+
     def call_method(
         self,
         tx,
