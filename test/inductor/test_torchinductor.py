@@ -28,7 +28,6 @@ import numpy as np
 import torch
 
 import torch._dynamo.config as dynamo_config
-import torch._inductor.aoti_eager
 import torch.nn as nn
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.debug_utils import aot_graph_input_parser
@@ -40,16 +39,14 @@ from torch._dynamo.testing import (
     skipIfPy312,
 )
 from torch._dynamo.utils import ifdynstaticdefault
-from torch._inductor.aoti_eager import (
-    aoti_compile_with_persistent_cache,
-    aoti_eager_cache_dir,
-    load_aoti_eager_cache,
-)
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
 from torch._inductor.fx_passes import pad_mm
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     add_scheduler_init_hook,
+    aoti_compile_with_persistent_cache,
+    aoti_eager_cache_dir,
+    load_aoti_eager_cache,
     run_and_get_code,
     run_and_get_cpp_code,
     run_and_get_triton_code,
@@ -772,7 +769,7 @@ class CommonTemplate:
         )
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
-    def test_aoti_eager_support_out(self):
+    def test_eager_aoti_support_out(self):
         ns = "aten"
         op_name = "clamp"
         dispatch_key = "CPU"
@@ -824,44 +821,7 @@ class CommonTemplate:
             self.assertEqual(ref_out_tensor1, res_out_tensor1)
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
-    def test_aoti_eager_support_str(self):
-        ns = "aten"
-        op_name = "div"
-        dispatch_key = "CPU"
-        device = "cpu"
-        if self.device.lower() == "cuda":
-            dispatch_key = "CUDA"
-            device = "cuda"
-
-        a = torch.randn(128, dtype=torch.float, device=device)
-        b = torch.randn(128, dtype=torch.float, device=device)
-        rounding_mode_list = ["trunc", "floor"]
-        with _scoped_library("aten", "IMPL") as torch_compile_op_lib_impl:
-            # Get ref result from eager
-            ref_value_list = []
-            for rounding_mode in rounding_mode_list:
-                ref_value = getattr(torch.ops.aten, op_name)(
-                    a, b, rounding_mode=rounding_mode
-                )
-                ref_value_list.append(ref_value)
-
-            register_ops_with_aoti_compile(
-                ns, [op_name], dispatch_key, torch_compile_op_lib_impl
-            )
-
-            # Invoke the pre-compiled kernel and get result.
-            res_value_list = []
-            for rounding_mode in rounding_mode_list:
-                res_value = getattr(torch.ops.aten, op_name)(
-                    a, b, rounding_mode=rounding_mode
-                )
-                res_value_list.append(res_value)
-
-            for ref_value, res_value in zip(ref_value_list, res_value_list):
-                self.assertEqual(ref_value, res_value)
-
-    @skipCUDAIf(not SM80OrLater, "Requires sm80")
-    def test_aoti_eager_cache_hit(self):
+    def test_eager_aoti_cache_hit(self):
         ns = "aten"
         op_name = "abs"
         dispatch_key = "CPU"
@@ -886,7 +846,7 @@ class CommonTemplate:
 
         # Patch the aoti_compile_with_persistent_cache as None to ensure no new kernel is generated
         with mock.patch(
-            "torch._inductor.aoti_eager.aoti_compile_with_persistent_cache", None
+            "torch._inductor.utils.aoti_compile_with_persistent_cache", None
         ):
             with _scoped_library("aten", "IMPL") as torch_compile_op_lib_impl:
                 # Get ref result from eager
@@ -902,7 +862,7 @@ class CommonTemplate:
                 self.assertEqual(ref_value, res_value)
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
-    def test_aoti_eager_with_persistent_cache(self):
+    def test_eager_aoti_with_persistent_cache(self):
         def fn(a):
             return torch.abs(a)
 
@@ -946,7 +906,7 @@ class CommonTemplate:
         self.assertTrue(kernel_lib_path in kernel_libs_abs_path)
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
-    def test_aoti_eager_with_scalar(self):
+    def test_eager_aoti_with_scalar(self):
         namespace_name = "aten"
         op_name = "add"
         op_overload_name = "Tensor"
@@ -982,18 +942,18 @@ class CommonTemplate:
         self.assertTrue(isinstance(op_info, dict))
         self.assertTrue("meta_info" in op_info)
         self.assertTrue(len(op_info["meta_info"]) == 3)
-        # Scalar Tensor
-        self.assertTrue("scalar_value" not in op_info["meta_info"][0])
         self.assertTrue(op_info["meta_info"][0]["sizes"] == [])
         self.assertTrue(op_info["meta_info"][0]["strides"] == [])
         # Scalar Tensor
-        self.assertTrue("scalar_value" not in op_info["meta_info"][1])
+        self.assertTrue("scalar_value" not in op_info["meta_info"][0])
         self.assertTrue(op_info["meta_info"][1]["sizes"] == [])
         self.assertTrue(op_info["meta_info"][1]["strides"] == [])
+        # Scalar Tensor
+        self.assertTrue("scalar_value" not in op_info["meta_info"][1])
+        self.assertTrue(op_info["meta_info"][2]["sizes"] == [])
+        self.assertTrue(op_info["meta_info"][2]["strides"] == [])
         # Scalar
         self.assertTrue("scalar_value" in op_info["meta_info"][2])
-        self.assertTrue("sizes" not in op_info["meta_info"][2])
-        self.assertTrue("strides" not in op_info["meta_info"][2])
 
         with _scoped_library("aten", "IMPL") as torch_compile_op_lib_impl:
             a = torch.randn(128, device=device)
@@ -1016,7 +976,7 @@ class CommonTemplate:
             self.assertEqual(ref_values, res_values)
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
-    def test_aoti_eager_override_registration(self):
+    def test_eager_aoti_override_registration(self):
         namespace_name = "aten"
         dispatch_key = "CPU"
         device = torch.device("cpu")
@@ -4696,6 +4656,16 @@ class CommonTemplate:
         x = torch.randn(4, dtype=torch.complex64)
 
         self.common(fn, (x,))
+
+    def test_polar(self):
+        def fn(dist, angle):
+            return torch.polar(dist, angle)
+
+        inp = (
+            torch.tensor([1, 2], dtype=torch.float64),
+            torch.tensor([np.pi / 2, 5 * np.pi / 4], dtype=torch.float64),
+        )
+        self.common(fn, (*inp,))
 
     def test_cauchy(self):
         def fn(x, y):
@@ -9821,7 +9791,7 @@ class CommonTemplate:
         # Inductor specializes on the (unguarded) alignment of the initial input.
         # Make sure that for different configurations, nothing breaks.
         for offset in (0, 1, 2, 3, 4):
-            base = torch.randn(64 * 64 + 64, dtype=torch.float32, device=GPU_TYPE)
+            base = torch.randn(64 * 64 + 64, dtype=torch.float32, device=self.device)
             inp = torch.as_strided(base, (64, 64), (64, 1), offset)
             torch._dynamo.reset()
             fn_c = torch.compile(fn)
@@ -9831,8 +9801,10 @@ class CommonTemplate:
             self.assertEqual(ref, res)
 
             for offset2 in (0, 1, 2, 3, 4):
-                base2 = torch.randn(64 * 64 + 64, dtype=torch.float32, device=GPU_TYPE)
-                inp2 = torch.as_strided(base, (64, 64), (64, 1), offset2)
+                base2 = torch.randn(
+                    64 * 64 + 64, dtype=torch.float32, device=self.device
+                )
+                inp2 = torch.as_strided(base2, (64, 64), (64, 1), offset2)
                 ref2 = fn(inp2)
                 res2 = fn_c(inp2)
                 self.assertEqual(ref2, res2)
@@ -9853,7 +9825,7 @@ class CommonTemplate:
         def fn(x: torch.Tensor) -> torch.Tensor:
             return x.sin() + x.cos()
 
-        base = torch.randn(64 * 64 + 64, dtype=torch.float32, device=GPU_TYPE)
+        base = torch.randn(64 * 64 + 64, dtype=torch.float32, device=self.device)
 
         inp1 = torch.as_strided(base, (32, 32), (32, 1), 4)
         inp2 = torch.as_strided(base, (64, 64), (64, 1), 4)
@@ -9898,9 +9870,11 @@ class CommonTemplate:
             ((64, 64), (64, 1), 5),
         ):
             torch.manual_seed(42)
-            base = torch.randn(64 * 64 + 64, dtype=torch.float32, device=GPU_TYPE)
+            base = torch.randn(64 * 64 + 64, dtype=torch.float32, device=self.device)
             torch.manual_seed(42)
-            base_ref = torch.randn(64 * 64 + 64, dtype=torch.float32, device=GPU_TYPE)
+            base_ref = torch.randn(
+                64 * 64 + 64, dtype=torch.float32, device=self.device
+            )
 
             inp = torch.as_strided(base, size, stride, offset)
             inp_ref = torch.as_strided(base_ref, size, stride, offset)
@@ -10167,7 +10141,8 @@ class CommonTemplate:
         self.assertEqual(rot.grad, rot_e.grad)
         self.assertEqual(trans.grad, trans_e.grad)
 
-    @config.patch({"fx_graph_cache": False})
+    # If we serve from the cache, the init hook isn't called
+    @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_inner_fn_str_and_stride(self):
         def f(x):
             x = x + 1
@@ -10653,7 +10628,6 @@ if HAS_GPU and not TEST_WITH_ASAN:
 
             return kernels
 
-        @expectedFailureXPU
         def test_divisible_by_16_covers_numel_args(self):
             torch._dynamo.reset()
 

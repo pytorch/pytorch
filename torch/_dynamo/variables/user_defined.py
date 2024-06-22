@@ -941,8 +941,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
         ):
             if source:
-                install_guard(source.make_guard(GuardBuilder.HASATTR))
-                return VariableBuilder(tx, source)(subobj)
+                return variables.LazyVariableTracker.create(subobj, source)
             elif ConstantVariable.is_literal(subobj):
                 return ConstantVariable.create(subobj)
             elif (
@@ -955,7 +954,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return SourcelessBuilder.create(tx, subobj)
 
         if (
-            name not in getattr(value, "__dict__", {})
+            subobj is not NO_SUCH_SUBOBJ
+            and name not in getattr(value, "__dict__", {})
             and (
                 type(value).__module__.startswith("torch.")
                 or isinstance(subobj, re.Pattern)
