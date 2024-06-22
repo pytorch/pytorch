@@ -317,7 +317,6 @@ class VariableBuilder:
 
         cached_vt = self.tx.output.variable_tracker_cache.lookup(value, self.source)
         if cached_vt:
-            # print("Found", self.source.name())
             return cached_vt
 
         vt = self._wrap(value)
