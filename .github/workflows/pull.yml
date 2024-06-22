@@ -451,7 +451,7 @@ jobs:
       docker-image-name: pytorch-linux-focal-py3-clang9-android-ndk-r21e
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
 
   linux-jammy-py3_8-gcc11-mobile-lightweight-dispatch-build:
