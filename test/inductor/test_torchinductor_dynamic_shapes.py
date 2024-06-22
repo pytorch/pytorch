@@ -142,26 +142,40 @@ class TestInductorDynamic(TestCase):
         TestCase.tearDown(self)
         torch._dynamo.reset()
 
-    @torch._inductor.config.patch({"enable_dynamic_constant_fold_uniform_value": True})
     def test_constant_fold_uniform_value_dynamic(self, device):
-        def fn(x: torch.Tensor):
-            _, length = x.shape
-            mask = torch.ones((1, length), device=x.device, dtype=x.dtype)
-            mask = 1 - mask
-            return x + mask
+        def full_add_zero(x):
+            a = torch.full(x.shape, 1, dtype=x.dtype, device=x.device)
+            b = a - 1
+            return x + b
+
+        def full_mul_one(x):
+            a = torch.full(x.shape, -1, dtype=x.dtype, device=x.device)
+            b = 2 + a
+            return x * b
+
+        def full_view_op(x):
+            a = torch.ones([1], dtype=x.dtype, device=x.device)
+            a = a[:, None]
+            return x * a
+
+        fns = (full_add_zero, full_mul_one, full_view_op)
 
         x = torch.randn((2, 4), device=device)
 
-        ref = fn(x)
-        actual, source_codes = run_and_get_code(self.compile_fn(fn), x)
+        for dynamic in [False, True]:
+            for fn in fns:
+                ref = fn(x)
+                actual, source_codes = run_and_get_code(
+                    torch.compile(fn, dynamic=dynamic), x
+                )
 
-        # due to constant folding, fn returns x directly.
-        if device == "cpu":
-            FileCheck().check_not("cpp_fused").run(source_codes[0])
-        else:
-            FileCheck().check_not("triton.jit").run(source_codes[0])
+                # due to constant folding, fn returns x directly.
+                if device == "cpu":
+                    FileCheck().check_not("cpp_fused").run(source_codes[0])
+                else:
+                    FileCheck().check_not("triton.jit").run(source_codes[0])
 
-        self.assertEqual(ref, actual)
+                self.assertEqual(ref, actual)
 
     def test_arange_dynamic(self, device):
         def fn(a):

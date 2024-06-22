@@ -395,9 +395,6 @@ compute_all_bounds = False
 # constant folding on the joint graph
 joint_graph_constant_folding = True
 
-# support dynamic shape derivation in constant_fold_uniform_value
-enable_dynamic_constant_fold_uniform_value = False
-
 # Enable indirect_indexing asserts for decompositions and lowerings
 debug_index_asserts = False
 
