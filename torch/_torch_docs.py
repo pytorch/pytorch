@@ -5,6 +5,7 @@ import re
 
 import torch._C
 from torch._C import _add_docstr as add_docstr
+from typing import Dict
 
 
 def parse_kwargs(desc):
@@ -169,7 +170,7 @@ rocm_fp16_notes = {
 :ref:`different precision<fp16_on_mi200>` for backward."""
 }
 
-reproducibility_notes = {
+reproducibility_notes: Dict[str, str] = {
     "forward_reproducibility_note": """This operation may behave nondeterministically when given tensors on \
 a CUDA device. See :doc:`/notes/randomness` for more information.""",
     "backward_reproducibility_note": """This operation may produce nondeterministic gradients when given tensors on \

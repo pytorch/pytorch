@@ -699,6 +699,9 @@ def proxy_call(
 
     constant = None
 
+    def tensor_numel_in_limit(t: Tensor) -> bool:
+        return t.numel() <= CONSTANT_NUMEL_LIMIT
+
     # If this is a lift, the input tensor is guaranteed to be a
     # constant, so we keep a copy of the original argument along so
     # we can query it if we're asked to item() it at some later point
@@ -713,9 +716,7 @@ def proxy_call(
         torch.Tag.nondeterministic_seeded not in func.tags
         and all_constant
         and any_constant
-        and pytree.tree_all_only(
-            Tensor, lambda t: t.numel() <= CONSTANT_NUMEL_LIMIT, out
-        )
+        and pytree.tree_all_only(Tensor, tensor_numel_in_limit, out)
     ):
         # NB: do NOT include factories as constants
         with maybe_disable_fake_tensor_mode():
