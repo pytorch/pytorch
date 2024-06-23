@@ -865,6 +865,9 @@ class cuda:
 # Backend to use for CPU codegen either "cpp" or "halide" (experimental)
 cpu_backend = "cpp"
 
+# Backend to use for CUDA codegen either "triton" or "halide" (experimental)
+cuda_backend = "triton"
+
 
 class halide:
     # Base halide target to use for CPU devices
@@ -875,7 +878,7 @@ class halide:
 
     # Halide autoscheduler to use, choices are:
     # "Anderson2021" (gpu-only), "Li2018", "Adams2019" (cpu-only), or "Mullapudi2016" (cpu-only)
-    scheduler_cuda = "Li2018"
+    scheduler_cuda = "Anderson2021"
     scheduler_cpu = "Adams2019"
 
     # Controls `no_asserts` flag passed to Halide target (warning: can false positive)
@@ -883,6 +886,10 @@ class halide:
 
     # Controls `debug` flag passed to Halide target
     debug = False
+
+    # Enable (or fallback on) scan kernels such as cumsum
+    # Halide autoschedulers struggle with these kernels
+    scan_kernels = False
 
 
 # create a directory containing lots of debug information

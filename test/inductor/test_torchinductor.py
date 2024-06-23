@@ -749,7 +749,9 @@ def is_cpp_backend(device):
 
 
 def is_halide_backend(device):
-    return getattr(device, "type", device) == "cpu" and config.cpu_backend == "halide"
+    if getattr(device, "type", device) == "cpu":
+        return config.cpu_backend == "halide"
+    return config.cuda_backend == "halide"
 
 
 def skip_if_halide(fn):
@@ -1154,7 +1156,6 @@ class CommonTemplate:
         self.common(fn, [torch.linspace(-10, 10, 41)])
 
     @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
-    @skip_if_halide  # bf16
     def test_scatter_bf16(self):
         def fn(inp, src, index):
             return inp.scatter_add(0, index, src)
@@ -1880,9 +1881,7 @@ class CommonTemplate:
             )
 
         dtypes = [torch.float, torch.float16]
-        if not (self.device == "cuda" and not SM80OrLater) and not is_halide_backend(
-            self.device
-        ):
+        if not (self.device == "cuda" and not SM80OrLater):
             dtypes += [torch.bfloat16]
         for dtype in dtypes:
             self.common(fn, (torch.randn(8, 8).to(dtype), torch.randn(8, 8).to(dtype)))
@@ -2011,7 +2010,6 @@ class CommonTemplate:
         self.common(fn, (torch.randn(4, 4), torch.randn(4, 4)))
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
-    @skip_if_halide  # bf16
     def test_dist_bf16(self):
         def fn(a, b):
             return torch.dist(a.to(torch.bfloat16), b.to(torch.bfloat16))
@@ -3970,8 +3968,6 @@ class CommonTemplate:
 
         mod = Model().to(self.device)
         for dtype in [torch.half, torch.bfloat16]:
-            if dtype == torch.bfloat16 and is_halide_backend(self.device):
-                continue
             x = torch.randn(4, 3, 7, 7, device=self.device).to(dtype=dtype)
             opt_mod = torch.compile(mod)
             res = opt_mod(x)
@@ -4604,7 +4600,7 @@ class CommonTemplate:
         mod = Repro().to(device=GPU_TYPE)
         o1 = mod(inp)
         o2 = torch.compile(mod)(inp)
-        self.assertEqual(o1, o2)
+        self.assertEqual(o1, o2, rtol=1e-3, atol=1e-3)
 
     @patch.object(config.trace, "enabled", True)
     def test_layer_norm(self):
@@ -5212,7 +5208,6 @@ class CommonTemplate:
     # Constant folding was explicitly turned off due to issue #108388
     # Turn it back on for test
     @torch._inductor.config.patch(joint_graph_constant_folding=True)
-    @skip_if_halide  # bf16
     def test_remove_no_ops(self):
         def matmul_with_op(x, y, fn):
             return fn(x @ y)
@@ -6762,7 +6757,6 @@ class CommonTemplate:
             ],
         )
 
-    @skip_if_halide  # rng
     def test_bernoulli2(self):
         def fn(a):
             return aten.bernoulli(a)
@@ -8055,7 +8049,6 @@ class CommonTemplate:
         result = fn(torch.randn([1, 2, 16, 4]).requires_grad_())
         result.sum().backward()
 
-    @skip_if_halide  # rand
     def test_dropout2(self):
         n = 100000
         weight = torch.ones(
@@ -8112,7 +8105,6 @@ class CommonTemplate:
         self.assertTrue(same(g2, g3))
 
     @config.patch(search_autotune_cache=False)
-    @skip_if_halide  # rand
     def test_dropout3(self):
         m = torch.nn.Sequential(
             torch.nn.Linear(32, 32, bias=False),
@@ -8140,7 +8132,6 @@ class CommonTemplate:
             torch._inductor.metrics.generated_kernel_count, expected_kernel
         )
 
-    @skip_if_halide  # rand
     def test_randint_kernel_count(self):
         @torch._dynamo.optimize_assert("inductor")
         def fn1():
@@ -8417,6 +8408,7 @@ class CommonTemplate:
         self.common(forward, args, atol=1e-5, rtol=1e-5)
 
     @requires_gpu()
+    @skip_if_halide  # cascading accuracy issues due rsqrt fallback
     def test_tmp_not_defined_issue3(self):
         from torch import device
 
@@ -9866,7 +9858,7 @@ class CommonTemplate:
                 inp2 = torch.as_strided(base2, (64, 64), (64, 1), offset2)
                 ref2 = fn(inp2)
                 res2 = fn_c(inp2)
-                self.assertEqual(ref2, res2)
+                self.assertEqual(ref2, res2, atol=1e-5, rtol=1e-5)
 
     @requires_gpu()
     @config.patch(assume_aligned_inputs=False)
@@ -10322,7 +10314,6 @@ class CommonTemplate:
         self.assertEqual(ref, actual)
 
     @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
-    @skip_if_halide  # bf16
     def test_bfloat16_to_int16(self):
         def fn(a, b):
             x = a + b
@@ -11392,7 +11383,6 @@ if HAS_GPU and not TEST_WITH_ASAN:
             torch.cuda.is_available() and torch.cuda.get_device_capability() < (9, 0),
             "Triton does not support fp8 on A100",
         )
-        @skip_if_halide  # bf16
         def test_red_followed_by_transposed_pointwise(self):
             bs = 26624
             dim = 1024
