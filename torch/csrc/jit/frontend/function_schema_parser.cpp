@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 
 #include <ATen/core/Reduction.h>
+#include <ATen/core/jit_type.h>
 #include <ATen/core/type_factory.h>
 #include <c10/util/Optional.h>
 #include <torch/csrc/jit/frontend/lexer.h>
@@ -185,7 +186,8 @@ struct SchemaParser {
       name = L.expect(TK_IDENT).text();
       if (L.nextIf('=')) {
         // NB: this means we have to unswizzle default too
-        default_value = parseDefaultValue(*fake_type, fake_type->kind(), N);
+        default_value =
+            parseDefaultValue(*fake_type, fake_type->kind(), *real_type, N);
       }
     }
     return Argument(
@@ -197,11 +199,29 @@ struct SchemaParser {
         !is_return && kwarg_only,
         std::move(alias_info));
   }
-  IValue parseSingleConstant(const c10::Type& type, TypeKind kind) {
+
+  bool isPossiblyOptionalScalarType(const c10::Type& type) {
+    if (type.kind() == at::ScalarTypeType::Kind) {
+      return true;
+    }
+    if (type.kind() == at::OptionalType::Kind) {
+      for (const auto& inner : type.containedTypes()) {
+        if (isPossiblyOptionalScalarType(*inner))
+          return true;
+      }
+    }
+    return false;
+  }
+
+  IValue parseSingleConstant(
+      const c10::Type& type,
+      TypeKind kind,
+      const c10::Type& real_type) {
     if (kind == c10::TypeKind::DynamicType) {
       return parseSingleConstant(
-          type, type.expectRef<c10::DynamicType>().dynamicKind());
+          type, type.expectRef<c10::DynamicType>().dynamicKind(), real_type);
     }
+    const auto& str2dtype = c10::getStringToDtypeMap();
     switch (L.cur().kind) {
       case TK_TRUE:
         L.next();
@@ -219,6 +239,9 @@ struct SchemaParser {
       case TK_IDENT: {
         auto tok = L.next();
         auto text = tok.text();
+        // NB: float/complex/long are here for BC purposes. Other dtypes
+        // are handled via str2dtype.
+        // Please don't add more cases to this if-else block.
         if ("float" == text) {
           return static_cast<int64_t>(at::kFloat);
         } else if ("complex" == text) {
@@ -231,6 +254,10 @@ struct SchemaParser {
           return static_cast<int64_t>(at::Reduction::Mean);
         } else if ("contiguous_format" == text) {
           return static_cast<int64_t>(c10::MemoryFormat::Contiguous);
+        } else if (
+            isPossiblyOptionalScalarType(real_type) &&
+            str2dtype.count(text) > 0) {
+          return static_cast<int64_t>(str2dtype.at(text));
         } else {
           throw ErrorReport(L.cur().range) << "invalid numeric default value";
         }
@@ -277,12 +304,15 @@ struct SchemaParser {
             << "lists are only supported for float, int and complex types";
     }
   }
-  IValue parseConstantList(const c10::Type& type, TypeKind kind) {
+  IValue parseConstantList(
+      const c10::Type& type,
+      TypeKind kind,
+      const c10::Type& real_type) {
     auto tok = L.expect('[');
     std::vector<IValue> vs;
     if (L.cur().kind != ']') {
       do {
-        vs.push_back(parseSingleConstant(type, kind));
+        vs.push_back(parseSingleConstant(type, kind, real_type));
       } while (L.nextIf(','));
     }
     L.expect(']');
@@ -296,6 +326,7 @@ struct SchemaParser {
   IValue parseDefaultValue(
       const c10::Type& arg_type,
       TypeKind kind,
+      const c10::Type& real_type,
       std::optional<int32_t> arg_N) {
     auto range = L.cur().range;
     switch (kind) {
@@ -311,7 +342,7 @@ struct SchemaParser {
       case TypeKind::BoolType:
       case TypeKind::FloatType:
       case TypeKind::ComplexType:
-        return parseSingleConstant(arg_type, kind);
+        return parseSingleConstant(arg_type, kind, real_type);
         break;
       case TypeKind::DeviceObjType: {
         auto device_text =
@@ -321,20 +352,24 @@ struct SchemaParser {
       }
       case TypeKind::ListType: {
         auto elem_type = arg_type.containedType(0);
+        auto real_elem_type = real_type.containedType(0);
         if (L.cur().kind == TK_IDENT) {
           return parseTensorDefault(range);
         } else if (arg_N && L.cur().kind != '[') {
-          IValue v = parseSingleConstant(*elem_type, elem_type->kind());
+          IValue v = parseSingleConstant(
+              *elem_type, elem_type->kind(), *real_elem_type);
           std::vector<IValue> repeated(*arg_N, v);
           return convertToList(*elem_type, elem_type->kind(), range, repeated);
         } else {
-          return parseConstantList(*elem_type, elem_type->kind());
+          return parseConstantList(
+              *elem_type, elem_type->kind(), *real_elem_type);
         }
       } break;
       case TypeKind::DynamicType:
         return parseDefaultValue(
             arg_type,
             arg_type.expectRef<c10::DynamicType>().dynamicKind(),
+            real_type,
             arg_N);
       default:
         throw ErrorReport(range) << "unexpected type, file a bug report";
