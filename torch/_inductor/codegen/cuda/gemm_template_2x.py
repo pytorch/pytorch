@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import copy
-import enum
 import logging
 import re
 from typing import Dict, List, Optional, Tuple, Union
@@ -432,7 +431,6 @@ class CUTLASS2xGemmTemplate(CUTLASSTemplate):
         """
         assert cutlass_utils.try_import_cutlass()
         import cutlass_library.gemm_operation as cutlass_gemm_op
-        import cutlass_library.library as cutlass_lib
 
         emitter = cutlass_gemm_op.EmitGemmInstance()
         op_def = emitter.emit(op)
@@ -557,7 +555,9 @@ class CUTLASS2xGemmTemplate(CUTLASSTemplate):
         op = copy.deepcopy(op)
 
         # Set output layout.
-        op.D.layout = CUTLASS2xGemmTemplate.cutlass_layout(self.output_node.get_layout())
+        op.D.layout = CUTLASS2xGemmTemplate.cutlass_layout(
+            self.output_node.get_layout()
+        )
 
         # Filter ops by alignments and set alignments.
         if not (
@@ -739,7 +739,6 @@ class CUTLASS2xGemmTemplate(CUTLASSTemplate):
 
         assert cutlass_utils.try_import_cutlass()
         import cutlass_library.gemm_operation as cutlass_gemm_op
-        import cutlass_library.library as cutlass_lib
 
         assert isinstance(
             op, cutlass_gemm_op.GemmOperation
