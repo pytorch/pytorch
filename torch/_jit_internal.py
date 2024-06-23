@@ -40,7 +40,7 @@ import torch
 # This is needed. `torch._jit_internal` is imported before `torch.distributed.__init__`.
 # Explicitly ask to import `torch.distributed.__init__` first.
 # Otherwise, "AttributeError: module 'torch' has no attribute 'distributed'" is raised.
-import torch.distributed as dist
+import torch.distributed.rpc
 import torch.package._mangling as package_mangling
 from torch._awaits import _Await
 from torch._C import _Await as CAwait, Future as CFuture
@@ -1088,7 +1088,7 @@ def is_await(ann) -> bool:
     return get_origin(ann) is _Await
 
 
-if dist.rpc.is_available():
+if torch.distributed.rpc.is_available():
     from torch._C._distributed_rpc import PyRRef
     from torch.distributed.rpc import RRef
 
