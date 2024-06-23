@@ -491,6 +491,9 @@ inductor_one_sample = {
     ("nn.functional.grid_sample", "cuda"): {f16},
     ("nn.functional.group_norm", "cuda"): {f16},
     ("nn.functional.hinge_embedding_loss", "cuda"): {f16},
+    # Enabling all tests for this test fails randomly
+    # See https://github.com/pytorch/pytorch/issues/129238
+    ("nn.functional.huber_loss", "cuda"): {f16},
     ("nn.functional.interpolate.bicubic", "cuda"): {f16},
     ("nn.functional.interpolate.bilinear", "cuda"): {f16},
     ("nn.functional.interpolate.trilinear", "cuda"): {f16},
