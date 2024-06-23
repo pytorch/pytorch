@@ -118,6 +118,10 @@ if [[ "$PACKAGE_TYPE" == libtorch ]]; then
   cd /tmp/libtorch
 fi
 
+if [[ "$GPU_ARCH_TYPE" == xpu ]]; then
+  source /opt/intel/oneapi/pytorch-gpu-dev-0.5/oneapi-vars.sh
+fi
+
 # Test the package
 /builder/check_binary.sh
 
