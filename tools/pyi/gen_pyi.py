@@ -1182,7 +1182,7 @@ def gen_pyi(
             "is_mkldnn": ["is_mkldnn: _bool"],
             "is_vulkan": ["is_vulkan: _bool"],
             "is_ipu": ["is_ipu: _bool"],
-            "storage_offset": ["def storage_offset(self) -> _int: ..."],
+            "storage_offset": ["def storage_offset(self) -> Union[_int, SymInt]: ..."],
             "to": [
                 (
                     f"def to(self, {args}, non_blocking: _bool = False, copy: _bool = False, *, "
@@ -1200,7 +1200,7 @@ def gen_pyi(
             ],
             "set_": [
                 "def set_(self, storage: Union[Storage, TypedStorage, UntypedStorage], "
-                "offset: _int, size: _symsize, stride: _symsize) -> Tensor: ...",
+                "offset: IntLike, size: _symsize, stride: _symsize) -> Tensor: ...",
                 "def set_(self, storage: Union[Storage, TypedStorage, UntypedStorage]) -> Tensor: ...",
             ],
             "split": [

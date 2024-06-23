@@ -90,6 +90,9 @@ class _Unassigned:
 
 _UNASSIGNED = _Unassigned()
 
+py_sym_types = (SymInt, SymFloat, SymBool)
+PySymType = Union[SymInt, SymFloat, SymBool]
+
 DimList = List
 
 pytree = torch.utils._pytree
@@ -154,7 +157,7 @@ def is_fake(x: object) -> TypeGuard[Tensor]:
     if isinstance(x, FakeTensor):
         return True
     if is_traceable_wrapper_subclass(x):
-        attrs, _ = type(x).__tensor_flatten__(x)  # type: ignore[arg-type]
+        attrs, _ = type(x).__tensor_flatten__(x)
         flattened_tensors = [getattr(x, attr) for attr in attrs]
         # need to recurse because we could have nested subclasses
         all_fake = all(is_fake(x) for x in flattened_tensors)
@@ -658,11 +661,11 @@ class FakeTensor(Tensor):
                 )
             else:
                 device = torch.device(f"{device.type}:0")
-        self.fake_device = device  # type: ignore[attr-defined]
-        self.fake_mode = fake_mode  # type: ignore[attr-defined]
-        self.constant = constant  # type: ignore[attr-defined]
+        self.fake_device = device
+        self.fake_mode = fake_mode
+        self.constant = constant
         assert not isinstance(real_tensor, FakeTensor)
-        self.real_tensor = real_tensor  # type: ignore[attr-defined]
+        self.real_tensor = real_tensor
         self.nonzero_memo = None
         self.item_memo = None
         self.unique_memo = None
@@ -768,7 +771,7 @@ class FakeTensor(Tensor):
 
         assert not fake_mode.in_kernel_invocation
 
-        with fake_mode:  # type: ignore[attr-defined]
+        with fake_mode:
             return func(*args, **kwargs)
 
     @staticmethod
@@ -872,8 +875,8 @@ class TensorMetadata:
     device: torch.device
     layout: torch.layout
     memory_format: Optional[torch.memory_format]
-    storage_offset: int
-    storage_bytes: Optional[int]
+    storage_offset: IntLikeType
+    storage_bytes: Optional[IntLikeType]
     requires_grad: bool
     is_quantized: bool
     is_conj: bool
@@ -884,15 +887,15 @@ class TensorMetadata:
     dense_dim: Optional[int]
     sparse_dim: Optional[int]
 
-    def flatten(self, out: List[object], state: _FlattenState) -> None:
+    def flatten(self, out: List[object], state: _CacheKeyState) -> None:
         out.append(self.dtype)
         state.flatten_args(out, self.shape)
         state.flatten_args(out, self.stride)
         out.append(self.device)
         out.append(self.layout)
         out.append(self.memory_format)
-        out.append(self.storage_offset)
-        out.append(self.storage_bytes)
+        state.flatten_arg(out, self.storage_offset)
+        state.flatten_arg(out, self.storage_bytes)
         out.append(self.requires_grad)
         out.append(self.is_quantized)
         out.append(self.is_conj)
@@ -919,7 +922,7 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
         device=t.device,
         layout=t.layout,
         memory_format=memory_format,
-        storage_offset=t.storage_offset(),  # type: ignore[arg-type]
+        storage_offset=t.storage_offset(),
         # Only set storage_bytes for tensors that have storage (not sparse)
         storage_bytes=t.untyped_storage().nbytes() if not t.is_sparse else None,
         requires_grad=t.requires_grad,
@@ -988,8 +991,19 @@ class DispatchCacheInfo:
 
 
 @dataclass
-class _FlattenState:
+class _CacheKeyState:
+    """
+    State used while building our cache key.
+    """
+
     fake_mode: FakeTensorMode
+    # We track the SymNodes so when we get the output we can see if it exactly
+    # matches one of the inputs so we can uncache it properly.
+    sym_node_lookup: Dict[int, int]  # id(SymNode) -> index
+
+    def __init__(self, fake_mode: FakeTensorMode) -> None:
+        self.fake_mode = fake_mode
+        self.sym_node_lookup = {}
 
     def flatten_args(
         self, out: List[object], args: Union[Mapping[str, object], Iterable[object]]
@@ -1006,42 +1020,52 @@ class _FlattenState:
             return
 
         for arg in args:
-            if isinstance(arg, FakeTensor):
-                if not self.fake_mode.is_our_fake(arg):
-                    raise _BypassDispatchCache("not our fake")
-                if arg._has_symbolic_sizes_strides:
-                    raise _BypassDispatchCache("symbolic shape")
-                if arg.constant is not None:
-                    raise _BypassDispatchCache("constant attribute")
-                if arg.is_sparse:
-                    raise _BypassDispatchCache("sparse tensor")
-                if arg.layout in [
-                    torch.sparse_csr,
-                    torch.sparse_csc,
-                    torch.sparse_bsr,
-                    torch.sparse_bsc,
-                ]:
-                    # Does this subsume arg.is_sparse?
-                    raise _BypassDispatchCache("sparse tensor layout")
-                # sparse tensors don't have storage, so check is after
-                if isinstance(arg.untyped_storage().nbytes(), SymInt):
-                    raise _BypassDispatchCache("symbolic nbytes")
-                if is_sparse_compressed(arg):
-                    raise _BypassDispatchCache("sparse compressed tensor")
-                t = extract_tensor_metadata(arg)
-                t.flatten(out, self)
-            elif isinstance(arg, Tensor):
-                raise _BypassDispatchCache("non-fake tensor")
-            elif isinstance(arg, (SymBool, SymInt, SymFloat)):
-                raise _BypassDispatchCache("symbolic shape")
-            elif isinstance(arg, (list, tuple, dict)):
-                self.flatten_args(out, arg)
-            else:
-                # It's important to capture the type of the arg since, e.g., 1 and 1.0
-                # hash to the same value, but can produce different dtypes for the
-                # output tensor.
-                out.append(type(arg))
-                out.append(arg)
+            self.flatten_arg(out, arg)
+
+    def flatten_arg(self, out: List[object], arg: object) -> None:
+        if isinstance(arg, FakeTensor):
+            if not self.fake_mode.is_our_fake(arg):
+                raise _BypassDispatchCache("not our fake")
+            # if arg._has_symbolic_sizes_strides:
+            #    raise _BypassDispatchCache("symbolic shape")
+            if arg.constant is not None:
+                raise _BypassDispatchCache("constant attribute")
+            if arg.is_sparse:
+                raise _BypassDispatchCache("sparse tensor")
+            if arg.layout in [
+                torch.sparse_csr,
+                torch.sparse_csc,
+                torch.sparse_bsr,
+                torch.sparse_bsc,
+            ]:
+                # Does this subsume arg.is_sparse?
+                raise _BypassDispatchCache("sparse tensor layout")
+            # sparse tensors don't have storage, so check is after
+            if isinstance(arg.untyped_storage().nbytes(), SymInt):
+                raise _BypassDispatchCache("symbolic nbytes")
+            if is_sparse_compressed(arg):
+                raise _BypassDispatchCache("sparse compressed tensor")
+            t = extract_tensor_metadata(arg)
+            t.flatten(out, self)
+        elif isinstance(arg, Tensor):
+            raise _BypassDispatchCache("non-fake tensor")
+        elif isinstance(arg, py_sym_types):
+            self.flatten_sym_node(out, arg)
+        elif isinstance(arg, (list, tuple, dict)):
+            self.flatten_args(out, arg)
+        else:
+            # It's important to capture the type of the arg since, e.g., 1 and 1.0
+            # hash to the same value, but can produce different dtypes for the
+            # output tensor.
+            out.append(type(arg))
+            out.append(arg)
+
+    def flatten_sym_node(self, out: List[object], arg: PySymType) -> None:
+        key = id(arg.node)
+        if key not in self.sym_node_lookup:
+            self.sym_node_lookup[key] = len(out)
+        out.append(type(arg))
+        out.append(arg.node)
 
 
 # We keep one instantiation of `fake_tensor_converter` active
@@ -1274,8 +1298,9 @@ class FakeTensorMode(TorchDispatchMode):
         and cache the result (if the result is eligible for caching).
         """
         output: object = _UNASSIGNED
+        state = _CacheKeyState(self)
         try:
-            key = self._cache_key(func, args, kwargs)
+            key = self._cache_key(state, func, args, kwargs)
             entry = FakeTensorMode.cache.get(key, None)
             if entry is not None:
                 output = self._output_from_cache_entry(entry, func, args)
@@ -1287,7 +1312,7 @@ class FakeTensorMode(TorchDispatchMode):
             else:
                 self._validate_cache_key(func, args, kwargs)
                 output = self._dispatch_impl(func, types, args, kwargs)
-                entry = self._make_cache_entry(key, func, args, kwargs, output)
+                entry = self._make_cache_entry(state, key, func, args, kwargs, output)
                 FakeTensorMode.cache[key] = entry
                 FakeTensorMode.cache_misses += 1
         except _BypassDispatchCache as e:
@@ -1300,6 +1325,7 @@ class FakeTensorMode(TorchDispatchMode):
 
     def _cache_key(
         self,
+        state: _CacheKeyState,
         func: OpOverload,
         args: Sequence[object],
         kwargs: Mapping[str, object],
@@ -1325,7 +1351,6 @@ class FakeTensorMode(TorchDispatchMode):
             self.shape_env.settings if self.shape_env else None,
         ]
         # Translate any FakeTensor args to metadata.
-        state = _FlattenState(self)
         if args:
             state.flatten_args(key_values, args)
         if kwargs:
@@ -1376,6 +1401,7 @@ class FakeTensorMode(TorchDispatchMode):
 
     def _make_cache_entry(
         self,
+        state: _CacheKeyState,
         key: _DispatchCacheKey,
         func: OpOverload,
         args: Sequence[object],
@@ -1428,6 +1454,17 @@ class FakeTensorMode(TorchDispatchMode):
             view_idx = idxs[0]
 
         metadata = extract_tensor_metadata(output)
+
+        # Look through the metadata to see if we have any SymNodes hiding in there.
+        out_state = _CacheKeyState(self)
+        flat_metadata: List[object] = []
+        metadata.flatten(flat_metadata, out_state)
+        for idx, e in enumerate(flat_metadata):
+            if isinstance(e, py_sym_types):
+                # There's a SymNode in the output - does it map exactly to one of our inputs?
+                if id(e.node) in state.sym_node_lookup:
+                    raise RuntimeError("TODO: sym stuff")
+
         entry = _DispatchCacheEntry(
             inplace_idx=None, metadata=metadata, view_idx=view_idx
         )
