@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
     TEST_XPU,
     TestCase,
 )
+from torch.utils.checkpoint import checkpoint_sequential
 
 if not TEST_XPU:
     print("XPU not available, skipping tests", file=sys.stderr)
@@ -437,6 +438,20 @@ class TestXpuAutocast(TestCase):
     def test_autocast_torch_expect_builtin_promote(self):
         for op, args, out_type in self.autocast_lists.torch_expect_builtin_promote:
             self._run_autocast_outofplace(op, args, torch.float32, out_type=out_type)
+
+    def test_autocast_checkpointing(self):
+        model = torch.nn.Sequential(
+            torch.nn.Linear(8, 8), torch.nn.Linear(8, 8), torch.nn.Linear(8, 8)
+        ).xpu()
+        input = torch.rand(
+            (8, 8), device="xpu", dtype=torch.float16, requires_grad=True
+        )
+        for reentrant in (True, False):
+            with torch.autocast("xpu"):
+                output = checkpoint_sequential(model, 2, input, use_reentrant=reentrant)
+            self.assertTrue(output.requires_grad)
+            self.assertTrue(output.dtype is torch.float16)
+            output.sum().backward()
 
     def test_xpu_autocast_dtype(self):
         dtype = torch.get_autocast_dtype("xpu")
