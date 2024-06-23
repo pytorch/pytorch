@@ -1477,7 +1477,6 @@ exclude_patterns = [
     'torch/linalg/__init__.py',
     'torch/monitor/__init__.py',
     'torch/nested/__init__.py',
-    'torch/nn/functional.py',
     'torch/nn/intrinsic/__init__.py',
     'torch/nn/intrinsic/modules/__init__.py',
     'torch/nn/intrinsic/modules/fused.py',
