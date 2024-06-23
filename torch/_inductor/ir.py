@@ -3919,7 +3919,7 @@ class ConcatKernel(NopKernel):
             inputs=[],
         )
         kernel = StorageBox(concat_kernel)
-        buffer_names = []
+        op_names = []
         for i in range(len(inputs)):
             input_buffer = cls.realize_into(
                 inputs[i],
@@ -3939,12 +3939,10 @@ class ConcatKernel(NopKernel):
                 and is_gpu(inputs[i].get_device().type)
                 and not is_dynamic(input_buffer)
             ):
-                buffer_names.append(input_buffer.get_name())
+                op_names.append(input_buffer.get_operation_name())
 
-        if len(buffer_names) > 1 and V.graph.has_feature(
-            device, BackendFeature.FOREACH
-        ):
-            V.graph.register_list(buffer_names)
+        if len(op_names) > 1 and V.graph.has_feature(device, BackendFeature.FOREACH):
+            V.graph.register_list(op_names)
 
         concat_kernel.name = V.graph.register_buffer(concat_kernel)
         concat_kernel.inputs = cls.unwrap_storage(concat_kernel.inputs)

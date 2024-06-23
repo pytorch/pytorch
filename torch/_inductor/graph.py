@@ -742,7 +742,7 @@ class GraphLowering(torch.fx.Interpreter):
         return name
 
     def register_list(self, operation_names: List[str]):
-        name = self.qualify_name("list_" + "_".join(buffer_names))
+        name = self.qualify_name("list_" + "_".join(operation_names))
         self.lists[name] = operation_names
         return name
 
