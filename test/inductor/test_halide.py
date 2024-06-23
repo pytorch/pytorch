@@ -41,6 +41,7 @@ make_halide = config.patch(
     {
         "cpu_backend": "halide",
         "cuda_backend": "halide",
+        "halide.scan_kernels": True,
     }
 )
 
