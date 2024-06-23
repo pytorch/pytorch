@@ -275,24 +275,17 @@ class CUTLASS2xGemmTemplate(CUTLASSTemplate):
         self.alpha = alpha
         self.beta = beta
         assert len(input_nodes) == 2 or len(input_nodes) == 3
-        # FIXME: uncomment this!
-        # assert self._are_inputs_layout_compatible(
-        #    [node.get_layout() for node in input_nodes]
-        # )
+        assert self._are_inputs_layout_compatible(
+            [node.get_layout() for node in input_nodes]
+        )
 
     def _are_inputs_layout_compatible(self, layouts: List[Layout]) -> bool:
         """
-        Evaluates whether input layouts are compatible for General Matrix Multiply (GEMM).
-
-        This function checks compatibility of A, B, and possibly C operand layouts for
-        a General Matrix Multiply (GEMM) operation, expressed as 'alpha * matmul(A, B) + beta * C'.
-        It verifies requirements such as matching data types, minimum rank, and suitability
-        for broadcasting, as defined by PyTorch operations like `torch.matmul`, `torch.aten.mm`,
-        `addmm`, `bmm`, `baddbmm`, etc.
+        Evaluates whether input layouts are compatible for set of operations supported by this class.
 
         Args:
-            layouts (List[Layout]): List containing 2 or 3 Layout objects representing
-                                    the input matrices A, B, and possibly C.
+            layouts (List[Layout]): List containing Layout objects representing
+                                    the input matrices.
 
         Returns:
             bool: True if layouts are GEMM compatible, otherwise False.
@@ -309,7 +302,7 @@ class CUTLASS2xGemmTemplate(CUTLASSTemplate):
         K = max(A_size[-1], B_size[-2])
         M = A_size[-2]
         N = B_size[-1]
-        if K != A_size[-1]:
+        if K != A_size[-1] and K != 2 * A_size[-2]:
             return False
         if K != B_size[-2]:
             return False
