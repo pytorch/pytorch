@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 from itertools import chain, count
-from typing import Optional, TYPE_CHECKING
+from typing import Any, List, Optional, TYPE_CHECKING
 
 import sympy
 
@@ -14,7 +14,11 @@ from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .codegen_device_driver import cuda_kernel_driver, cuda_kernel_header
 from .cpp_utils import DTYPE_TO_CPP
 from .cpp_wrapper_cpu import CppWrapperCpu
-from .triton_utils import DeferredCudaGridLine, DeferredCudaKernelLine
+from .triton_utils import (
+    DeferredCudaDefaultGrid,
+    DeferredCudaGridLine,
+    DeferredCudaKernelLine,
+)
 
 if TYPE_CHECKING:
     from ..graph import GraphLowering
@@ -75,9 +79,8 @@ class CppWrapperCuda(CppWrapperCpu):
         return super().generate(is_inference)
 
     def generate_user_defined_triton_kernel(
-        self, kernel_name: str, grid, configs, args, triton_meta, raw_args
+        self, kernel_name: str, grid: List[Any], configs, args, triton_meta, raw_args
     ):
-        assert len(grid) != 0
         arg_types = [
             arg.get_dtype() if hasattr(arg, "get_dtype") else type(arg)
             for arg in raw_args
@@ -86,6 +89,7 @@ class CppWrapperCuda(CppWrapperCpu):
             kernel_name,
             args,
             arg_types=arg_types,
+            raw_args=raw_args,
             grid=grid,
             cuda=True,
             triton=True,
@@ -155,6 +159,19 @@ class CppWrapperCuda(CppWrapperCpu):
 
         return ", ".join(new_args)
 
+    def generate_default_grid(
+        self, kernel_name: str, grid: List[Any], cuda: bool = True
+    ):
+        """
+        Generate grid configs for launching a CUDA kernel using the grid
+        function from triton_heuristics. Because its computation needs
+        to read kernel config after autotune, it is done in a deferred way
+        using DeferredCudaDefaultGrid.
+        """
+        if not cuda:
+            return grid
+        return DeferredCudaDefaultGrid(kernel_name, grid)
+
     def generate_kernel_call(
         self,
         kernel_name: str,
@@ -175,8 +192,18 @@ class CppWrapperCuda(CppWrapperCpu):
 
         if not cuda:
             # Even in CppWrapperCuda, we may see cpp kernels
-            return super().generate_kernel_call(
-                kernel_name, call_args, grid, device_index, cuda, triton, arg_types
+            super().generate_kernel_call(
+                kernel_name,
+                call_args,
+                grid,
+                device_index,
+                cuda,
+                triton,
+                arg_types,
+                raw_args,
+                grid_fn,
+                triton_meta,
+                autotune_configs,
             )
 
         device_index, call_args = self.prepare_triton_kernel_call(
@@ -205,9 +232,6 @@ class CppWrapperCuda(CppWrapperCpu):
             else self.write_get_raw_stream(device_index, V.graph)
         )
 
-        assert isinstance(
-            grid, (list, tuple)
-        ), f"expected grid to be a list or tuple but got: {grid=}"
         grid_var = f"{kernel_name}_grid_{next(self.grid_id)}"
         self.writeline(
             DeferredCudaGridLine(kernel_name, grid_var, grid, autotune_configs)

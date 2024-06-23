@@ -199,6 +199,39 @@ class DeferredCudaKernelLine(DeferredLineBase):
         return DeferredCudaKernelLine(self.kernel_name, line, self.keys)
 
 
+class DeferredCudaDefaultGrid:
+    """
+    A marker to
+    """
+
+    def __init__(
+        self,
+        kernel_name: str,
+        grid,
+    ):
+        self.kernel_name = kernel_name
+        self.grid = grid
+
+    def __call__(self):
+        from .wrapper import SymbolicCallArg
+
+        params = CudaKernelParamCache.get(self.kernel_name)
+        assert (
+            params is not None
+        ), f"{self.kernel_name} not found in CudaKernelParamCache"
+
+        grid = [
+            e.inner_expr if isinstance(e, SymbolicCallArg) else e for e in self.grid
+        ]
+        grid_fn = default_grid(*grid)
+        block_cfg = {
+            "XBLOCK": params["x_block"],
+            "YBLOCK": params["y_block"],
+            "ZBLOCK": params["z_block"],
+        }
+        return grid_fn(block_cfg)
+
+
 class DeferredCudaGridLine(DeferredLineBase):
     """
     When using cpp wrapper, CUDA kernel load and launch needs to wait for Triton kernels
@@ -219,8 +252,6 @@ class DeferredCudaGridLine(DeferredLineBase):
         self.autotune_configs = autotune_configs
 
     def __call__(self):
-        from .wrapper import SymbolicCallArg
-
         params = CudaKernelParamCache.get(self.kernel_name)
         assert (
             params is not None
@@ -237,18 +268,12 @@ class DeferredCudaGridLine(DeferredLineBase):
                         grid = self.grid[i]
                         break
             assert grid is not None
+        elif isinstance(self.grid, DeferredCudaDefaultGrid):
+            grid = self.grid()
         else:
-            grid = [
-                e.inner_expr if isinstance(e, SymbolicCallArg) else e for e in self.grid
-            ]
-            grid_fn = default_grid(*grid)
-            block_cfg = {
-                "XBLOCK": params["x_block"],
-                "YBLOCK": params["y_block"],
-                "ZBLOCK": params["z_block"],
-            }
-            grid = grid_fn(block_cfg)
+            grid = self.grid
 
+        assert len(grid) != 0, "Grid can't be empty"
         grid_args_str = ", ".join(
             [cexpr(V.graph.sizevars.simplify(item)) for item in grid]
         )
