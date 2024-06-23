@@ -1,0 +1,120 @@
+name: Retrieval PyTorch Tests for Target Determination
+
+on:
+  workflow_call:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  llm-retrieval:
+    runs-on: linux.4xlarge
+    continue-on-error: true
+    steps:
+      - name: Clone PyTorch
+        uses: actions/checkout@v3
+        with:
+          repository: pytorch/pytorch
+          fetch-depth: 0
+          path: pytorch
+
+      - name: Setup Linux
+        uses: ./pytorch/.github/actions/setup-linux
+
+      - name: Clone CodeLlama
+        uses: actions/checkout@v3
+        with:
+          repository: osalpekar/codellama
+          ref: main
+          path: codellama
+
+      - name: Clone Target Determination Code
+        uses: actions/checkout@v3
+        with:
+          repository: osalpekar/llm-target-determinator
+          ref: v0.0.2
+          path: llm-target-determinator
+
+      - name: Setup Conda
+        uses: conda-incubator/setup-miniconda@v2.1.1
+        with:
+          miniconda-version: "py39_4.12.0"
+          python-version: 3.9
+
+      - name: Install Requirements
+        shell: bash -l {0}
+        run: |
+          set -euxo pipefail
+          conda create \
+            --yes \
+            --quiet \
+            --name "tdenv" \
+            "python=3.9"
+          conda activate tdenv
+          cd "${GITHUB_WORKSPACE}/llm-target-determinator"
+          pip install -r requirements.txt
+          cd ../codellama
+          pip install -e .
+
+      - name: Fetch CodeLlama Checkpoint
+        shell: bash -l {0}
+        run: |
+          set -euxo pipefail
+          conda activate tdenv
+          cd codellama/
+          mkdir "CodeLlama-7b-Python"
+          aws s3 cp "s3://target-determinator-assets/CodeLlama-7b-Python" "CodeLlama-7b-Python" --recursive --no-progress
+
+      - name: Fetch indexes
+        uses: nick-fields/retry@v2.8.2
+        with:
+          max_attempts: 3
+          retry_wait_seconds: 10
+          timeout_minutes: 5
+          shell: bash
+          command: |
+            set -euxo pipefail
+            python3 -m pip install awscli==1.29.40
+            cd "${GITHUB_WORKSPACE}"/llm-target-determinator/assets
+            aws s3 cp "s3://target-determinator-assets/indexes/latest" . --recursive
+
+            unzip -o indexer-files\*.zip
+            rm indexer-files*.zip
+
+      - name: Run Retriever
+        id: run_retriever
+        continue-on-error: true  # ghstack not currently supported due to problems getting git diff
+        shell: bash -l {0}
+        run: |
+          set -euxo pipefail
+          conda activate tdenv
+          cd "${GITHUB_WORKSPACE}"/llm-target-determinator
+          torchrun \
+            --standalone \
+            --nnodes=1 \
+            --nproc-per-node=1 \
+            retriever.py \
+            --experiment-name indexer-files \
+            --pr-parse-format GITDIFF
+          cd assets
+          zip -r mappings.zip mappings
+
+      - name: Upload results to s3
+        uses: seemethere/upload-artifact-s3@v5
+        if: ${{ steps.run_retriever.outcome == 'success' }}
+        with:
+          name: llm_results
+          retention-days: 14
+          if-no-files-found: warn
+          path: llm-target-determinator/assets/mappings.zip
+        env:
+          AWS_ACCESS_KEY_ID: ""
+          AWS_SECRET_ACCESS_KEY: ""
+          AWS_SESSION_TOKEN: ""
+          AWS_DEFAULT_REGION: ""
+          AWS_REGION: ""
+
+      - name: Teardown Linux
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        if: always()
