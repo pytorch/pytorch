@@ -2,10 +2,10 @@
 """Adds docstrings to functions defined in the torch._C module."""
 
 import re
+from typing import Dict
 
 import torch._C
 from torch._C import _add_docstr as add_docstr
-from typing import Dict
 
 
 def parse_kwargs(desc):
