@@ -1645,6 +1645,7 @@ class HalideScheduling(SIMDScheduling):
             [
                 BackendFeature.TUPLE_REDUCTION,
                 BackendFeature.PREFER_STORE_LOOP_ORDER,
+                BackendFeature.REDUCE_TO_SINGLE_ELEMENT,
             ]
         )
         if config.halide.scan_kernels:
