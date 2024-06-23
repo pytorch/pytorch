@@ -1249,39 +1249,9 @@ class _ModuleNotInstalledAsSubmoduleError(NameError):
     pass
 
 
+# Base class for inline _ModuleStackTracer.__init__.AttrProxy
 class _AttrProxy:
-    def __init__(self, tracer: _ModuleStackTracer, base: Module, path: str) -> None:
-        # Warning: We blow away our own attributes here to mimic the base class
-        # - so don't expect `self.x` to do anything useful.
-        self.__class__ = type(
-            base.__class__.__name__,
-            (self.__class__, base.__class__),
-            {},
-        )
-        self.__dict__ = base.__dict__
-        self.__class__.__module__ = base.__class__.__module__
-        self.__class__.__qualname__ = base.__class__.__qualname__
-        tracer.proxy_paths[self] = path
-        tracer.proxy_modules[self] = base
-
-    def _getattr_helper(self, tracer: _ModuleStackTracer, name: str) -> _AttrProxy:
-        assert isinstance(self, Module)
-        attr_val = super().__getattr__(name)  # type: ignore[misc]
-        if isinstance(attr_val, _AttrProxy):
-            attr_val = tracer.proxy_modules[attr_val]
-        elif not isinstance(attr_val, Module):
-            return attr_val
-        return _AttrProxy(tracer, attr_val, tracer.proxy_paths[self] + "." + name)
-
-    def _modules_helper(self, tracer: _ModuleStackTracer) -> Dict[str, _AttrProxy]:
-        assert "_modules" in self.__dict__
-        submodules = self.__dict__["_modules"]
-        assert isinstance(submodules, dict)
-        return {
-            key: _AttrProxy(tracer, value, tracer.proxy_paths[self] + "." + str(key))
-            for key, value in submodules.items()
-        }
-
+    pass
 
 class _ModuleStackTracer(PythonKeyTracer):
     r"""Customized version of PythonKeyTracer that retains module stack
@@ -1319,14 +1289,40 @@ class _ModuleStackTracer(PythonKeyTracer):
         tracer = self
 
         class AttrProxy(_AttrProxy):
-            def __getattr__(self, name: str) -> _AttrProxy:
-                return self._getattr_helper(tracer, name)
+            def __init__(self, base: Module, path: str) -> None:
+                # Warning: We blow away our own attributes here to mimic the base class
+                # - so don't expect `self.x` to do anything useful.
+                self.__class__ = type(
+                    base.__class__.__name__,
+                    (self.__class__, base.__class__),
+                    {},
+                )
+                self.__dict__ = base.__dict__
+                self.__class__.__module__ = base.__class__.__module__
+                self.__class__.__qualname__ = base.__class__.__qualname__
+                tracer.proxy_paths[self] = path
+                tracer.proxy_modules[self] = base
+
+            def __getattr__(self, name: str) -> AttrProxy:
+                assert isinstance(self, Module)
+                attr_val = super().__getattr__(name)  # type: ignore[misc]
+                if isinstance(attr_val, AttrProxy):
+                    attr_val = tracer.proxy_modules[attr_val]
+                elif not isinstance(attr_val, Module):
+                    return attr_val
+                return AttrProxy(attr_val, tracer.proxy_paths[self] + "." + name)
 
             @property
-            def _modules(self) -> Dict[str, _AttrProxy]:
-                return self._modules_helper(tracer)
+            def _modules(self) -> Dict[str, AttrProxy]:
+                assert "_modules" in self.__dict__
+                submodules = self.__dict__["_modules"]
+                assert isinstance(submodules, dict)
+                return {
+                    key: AttrProxy(value, tracer.proxy_paths[self] + "." + str(key))
+                    for key, value in submodules.items()
+                }
 
-        self.make_proxy = lambda base, path: AttrProxy(self, base, path)
+        self.proxy_type = AttrProxy
 
     def path_of_module(self, mod: Module) -> str:
         """
@@ -1349,7 +1345,7 @@ class _ModuleStackTracer(PythonKeyTracer):
             return super().getattr(attr, attr_val, parameter_proxy_cache)
         if isinstance(attr_val, _AttrProxy):
             return attr_val
-        return self.make_proxy(attr_val, attr)
+        return self.proxy_type(attr_val, attr)
 
     def trace(
             self,
