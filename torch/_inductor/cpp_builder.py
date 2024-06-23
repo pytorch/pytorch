@@ -197,28 +197,6 @@ def _remove_dir(path_dir):
         os.rmdir(path_dir)
 
 
-def run_command_line(cmd_line, cwd=None):
-    cmd = shlex.split(cmd_line)
-    try:
-        status = subprocess.check_output(args=cmd, cwd=cwd, stderr=subprocess.STDOUT)
-    except subprocess.CalledProcessError as e:
-        output = e.output.decode("utf-8")
-        openmp_problem = "'omp.h' file not found" in output or "libomp" in output
-        if openmp_problem and sys.platform == "darwin":
-            instruction = (
-                "\n\nOpenMP support not found. Please try one of the following solutions:\n"
-                "(1) Set the `CXX` environment variable to a compiler other than Apple clang++/g++ "
-                "that has builtin OpenMP support;\n"
-                "(2) install OpenMP via conda: `conda install llvm-openmp`;\n"
-                "(3) install libomp via brew: `brew install libomp`;\n"
-                "(4) manually setup OpenMP and set the `OMP_PREFIX` environment variable to point to a path"
-                " with `include/omp.h` under it."
-            )
-            output += instruction
-        raise exc.CppCompileError(cmd, output) from e
-    return status
-
-
 class BuildOptionsBase:
     """
     This is the Base class for store cxx build options, as a template.
@@ -1008,6 +986,38 @@ class CppBuilder:
             3. Final target file: output_dir/name.ext
     """
 
+    def __run_command_line(self, cmd_line, cwd=None):
+        cmd = shlex.split(cmd_line)
+        try:
+            status = subprocess.check_output(
+                args=cmd, cwd=cwd, stderr=subprocess.STDOUT
+            )
+        except subprocess.CalledProcessError as e:
+            output = e.output.decode("utf-8")
+            openmp_problem = "'omp.h' file not found" in output or "libomp" in output
+            if openmp_problem and sys.platform == "darwin":
+                instruction = (
+                    "\n\nOpenMP support not found. Please try one of the following solutions:\n"
+                    "(1) Set the `CXX` environment variable to a compiler other than Apple clang++/g++ "
+                    "that has builtin OpenMP support;\n"
+                    "(2) install OpenMP via conda: `conda install llvm-openmp`;\n"
+                    "(3) install libomp via brew: `brew install libomp`;\n"
+                    "(4) manually setup OpenMP and set the `OMP_PREFIX` environment variable to point to a path"
+                    " with `include/omp.h` under it."
+                )
+                output += instruction
+
+            if config.is_fbcode():
+                fb_code_debug = (
+                    f"\n\nfb_code_debug: \n"
+                    f"cwd: {os.getcwd()}\n"
+                    f"use_absolute_path: {self._use_absolute_path}\n"
+                    f"aot_mode: {self._aot_mode}\n"
+                )
+                output += fb_code_debug
+            raise exc.CppCompileError(cmd, output) from e
+        return status
+
     def __get_python_module_ext(self) -> str:
         SHARED_LIB_EXT = ".pyd" if _IS_WINDOWS else ".so"
         return SHARED_LIB_EXT
@@ -1187,7 +1197,7 @@ class CppBuilder:
                 # To compatible to fb_code, output to FileName.
                 current_working_directory = os.getcwd()
 
-        status = run_command_line(build_cmd, cwd=current_working_directory)
+        status = self.__run_command_line(build_cmd, cwd=current_working_directory)
 
         _remove_dir(_build_tmp_dir)
         return status, self._target_file
