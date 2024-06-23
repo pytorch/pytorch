@@ -3861,6 +3861,22 @@ class CommonTemplate:
             atol = 1e-05
             rtol = 1.3e-06
         self.common(fn, (x, w), atol=atol, rtol=rtol)
+        
+    def test_conv3d(self):
+        m = torch.nn.Sequential(
+            torch.nn.Conv3d(3, 3, kernel_size=7)
+            ToTuple(),
+        )
+
+        self.common(
+            m,
+            (
+                torch.randn([1, 3, 8, 16, 32]),
+                torch.randn([3, 3, 7, 7, 7]),
+            ),
+            atol=6e-5,
+            rtol=0.001,
+        )
 
     def test_conv2d_channels_last(self):
         if self.device == GPU_TYPE:
