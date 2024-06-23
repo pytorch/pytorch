@@ -1038,14 +1038,11 @@ class TestConverter(TestCase):
                     torch.max(x, dim=0),
                     torch.topk(x, 3),
                     torch.sort(x, dim=0),
-                    self.pool(y)
+                    self.pool(y),
                 )
 
-        inp = (
-            torch.randn([4, 4]),
-            torch.randn([1, 1, 10, 10])
-        )
-        self._check_equal_ts_ep_converter(M(), inp, ["script"])
+        inp = (torch.randn([4, 4]), torch.randn([1, 1, 10, 10]))
+        self._check_equal_ts_ep_converter(M(), inp)
 
 
 if __name__ == "__main__":
