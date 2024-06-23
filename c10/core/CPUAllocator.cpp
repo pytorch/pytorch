@@ -194,13 +194,16 @@ REGISTER_ALLOCATOR(DeviceType::CPU, &g_mobile_cpu_allocator);
 #else
 
 // Global default CPU Allocator
-static DefaultCPUAllocator g_cpu_alloc;
-
-at::Allocator* GetDefaultCPUAllocator() {
-  return &g_cpu_alloc;
+DefaultCPUAllocator& getCpuAlloc() {
+  static DefaultCPUAllocator cpuAlloc;
+  return cpuAlloc;
 }
 
-REGISTER_ALLOCATOR(DeviceType::CPU, &g_cpu_alloc);
+at::Allocator* GetDefaultCPUAllocator() {
+  return &getCpuAlloc();
+}
+
+REGISTER_ALLOCATOR(DeviceType::CPU, &getCpuAlloc());
 
 #endif /* C10_Mobile */
 

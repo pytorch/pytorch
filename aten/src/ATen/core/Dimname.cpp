@@ -4,7 +4,10 @@
 
 namespace at {
 
-static Symbol kWildcard = Symbol::dimname("*");
+Symbol& getWildcard() {
+  static Symbol wildcard = Symbol::dimname("*");
+  return wildcard;
+}
 
 std::ostream& operator<<(std::ostream& out, const Dimname& dimname) {
   if (dimname.type() == NameType::WILDCARD) {
@@ -45,7 +48,7 @@ static void check_valid_identifier(const std::string& name) {
 
 Dimname Dimname::fromSymbol(Symbol name) {
   TORCH_INTERNAL_ASSERT(name.is_dimname());
-  if (name == kWildcard) {
+  if (name == getWildcard()) {
     return Dimname::wildcard();
   }
   check_valid_identifier(name.toUnqualString());
@@ -53,7 +56,7 @@ Dimname Dimname::fromSymbol(Symbol name) {
 }
 
 Dimname Dimname::wildcard() {
-  static Dimname result(kWildcard, NameType::WILDCARD);
+  static Dimname result(getWildcard(), NameType::WILDCARD);
   return result;
 }
 

@@ -10,7 +10,7 @@
 
 namespace at {
 
-extern const std::string kParamCommsCallName = "record_param_comms";
+static constexpr char kRecordParamComms[] = "record_param_comms";
 
 namespace {
 
@@ -714,7 +714,7 @@ uint64_t RecordFunction::currentThreadId() {
 void RecordFunction::before(const char* name, int64_t sequence_nr) {
   fn_ = name;
   sequence_nr_ = sequence_nr;
-  is_nccl_meta_ = (std::strcmp(name, kParamCommsCallName.c_str()) == 0);
+  is_nccl_meta_ = (std::strcmp(name, kRecordParamComms.c_str()) == 0);
 
 #ifndef NDEBUG
     inputs_valid_ = true;
@@ -724,7 +724,7 @@ void RecordFunction::before(const char* name, int64_t sequence_nr) {
 }
 
 void RecordFunction::before(std::string name, int64_t sequence_nr) {
-  is_nccl_meta_ = (name == kParamCommsCallName);
+  is_nccl_meta_ = (name == kRecordParamComms.c_str());
   fn_ = std::move(name);
   sequence_nr_ = sequence_nr;
 
@@ -740,7 +740,7 @@ void RecordFunction::before(
     int64_t sequence_nr) {
   sequence_nr_ = sequence_nr;
   fn_ = schema;
-  is_nccl_meta_ = (schema.get().name() == kParamCommsCallName);
+  is_nccl_meta_ = (schema.get().name() == kRecordParamComms.c_str());
 
 #ifndef NDEBUG
     inputs_valid_ = true;
