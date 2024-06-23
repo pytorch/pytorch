@@ -41,7 +41,6 @@ make_halide = config.patch(
     {
         "cpu_backend": "halide",
         "cuda_backend": "halide",
-        "fallback_random": True,  # TODO(jansel): support random
     }
 )
 
