@@ -35,7 +35,7 @@ def requires_subclass_dispatch(args, fw_metadata: ViewAndMutationMeta) -> bool:
     return any_subclass_args or any_subclass_outputs
 
 
-def create_subclass_metadata(a, start_idx, *, is_runtime: bool = False):
+def create_subclass_metadata(a, start_idx):
     if not is_traceable_wrapper_subclass(a):
         return None, start_idx + 1
 
@@ -44,7 +44,7 @@ def create_subclass_metadata(a, start_idx, *, is_runtime: bool = False):
     attrs = {}
     for key in inner_keys:
         new_subclass_meta, new_start_idx = create_subclass_metadata(
-            getattr(a, key), new_start_idx, is_runtime=is_runtime
+            getattr(a, key), new_start_idx
         )
         attrs[key] = new_subclass_meta
 
@@ -57,52 +57,35 @@ def create_subclass_metadata(a, start_idx, *, is_runtime: bool = False):
             outer_size=a.size(),
             outer_stride=a.stride(),
             original_subclass=a,
-            is_runtime=is_runtime,
         ),
         new_start_idx,
     )
 
 
-def compare_subclass_metadata_creation(
-    subclass_meta1: Optional[SubclassCreationMeta],
-    subclass_meta2: Optional[SubclassCreationMeta],
-):
-    if type(subclass_meta1) != type(subclass_meta2):
-        return False
-
-    if subclass_meta1 is None:
-        return True
-
-    assert isinstance(subclass_meta1, SubclassCreationMeta)
-    assert isinstance(subclass_meta2, SubclassCreationMeta)
-
-    if type(subclass_meta1.original_subclass) != type(subclass_meta2.original_subclass):
-        return False
-
-    for attr in subclass_meta1.attrs:
-        if attr not in subclass_meta2.attrs:
-            return False
-        if not compare_subclass_metadata_creation(
-            subclass_meta1.attrs[attr], subclass_meta2.attrs[attr]
-        ):
-            return False
-    return True
+# Given a real tensor subclass, returns a nested list of Plain tensor types
+def get_types_for_subclass(tensor_subclass):
+    if not is_traceable_wrapper_subclass(tensor_subclass):
+        return ["Tensor"]
+    inner_keys, _ = tensor_subclass.__tensor_flatten__()
+    result = []
+    for key in inner_keys:
+        inner_tensor = getattr(tensor_subclass, key)
+        result.extend(get_types_for_subclass(inner_tensor))
+    return result
 
 
 # Given a flat list of arguments, some of which may be tensor subclasses,
 # computes metadata about "how to reconstruct the current list of subclasses,
 # if we were given their flattened dense tensors instead"
 def create_subclass_meta(
-    curr_args: Union[List[Any], Tuple[Any, ...]], *, is_runtime: bool = False
+    curr_args: Union[List[Any], Tuple[Any, ...]]
 ) -> List[Union[int, SubclassCreationMeta]]:
     idx = 0
     infos: List[Union[int, SubclassCreationMeta]] = []
     for a in curr_args:
         if isinstance(a, Tensor) and is_traceable_wrapper_subclass(a):
             start_idx = idx
-            subclass_meta, _ = create_subclass_metadata(
-                a, start_idx, is_runtime=is_runtime
-            )
+            subclass_meta, _ = create_subclass_metadata(a, start_idx)
             infos.append(subclass_meta)
             cnt = subclass_meta.arg_count
         else:

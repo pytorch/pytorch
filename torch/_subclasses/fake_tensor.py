@@ -168,10 +168,10 @@ def is_fake(x):
     if isinstance(x, FakeTensor):
         return True
     if is_traceable_wrapper_subclass(x):
-        plain_tensors = get_plain_tensors(x)
-        all_fake = all(is_fake(x) for x in plain_tensors)
-        all_fake = all(is_fake(x) for x in plain_tensors)
-        any_fake = any(is_fake(x) for x in plain_tensors)
+        attrs, _ = type(x).__tensor_flatten__(x)
+        flattened_tensors = [getattr(x, attr) for attr in attrs]
+        all_fake = all(is_fake(x) for x in flattened_tensors)
+        any_fake = any(is_fake(x) for x in flattened_tensors)
         assert all_fake == any_fake, "got mixed fake and real tensors!"
         return all_fake
     elif isinstance(x, torch.Tensor) and torch._is_functional_tensor(x):

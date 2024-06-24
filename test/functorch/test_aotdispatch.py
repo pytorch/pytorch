@@ -81,9 +81,9 @@ from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
 
 USE_TORCHVISION = False
 try:
-    import torchvision
+    # import torchvision
 
-    USE_TORCHVISION = True
+    USE_TORCHVISION = False
 except ImportError:
     warnings.warn(
         "Couldn't import torchvision. Some of our tests use it, try "

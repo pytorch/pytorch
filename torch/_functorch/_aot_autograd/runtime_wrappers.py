@@ -30,6 +30,7 @@ from torch._subclasses import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
 from .. import config
 from .collect_metadata_analysis import run_functionalized_fw_and_collect_metadata
 
@@ -52,8 +53,7 @@ from .schemas import (
 )
 
 from .subclass_utils import (
-    compare_subclass_metadata_creation,
-    create_subclass_meta,
+    get_types_for_subclass,
     requires_subclass_dispatch,
     unwrap_tensor_subclasses,
     wrap_tensor_subclasses,
@@ -1739,23 +1739,38 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 # so I can use aot_dispatch_subclass_wrapper() here.
                 if CompiledFunction.maybe_subclass_metadata is not None:
                     tangents = all_args[tangents_start_idx:tangents_end_idx]
-                    runtime_subclass_tangent_meta = create_subclass_meta(
-                        tangents, is_runtime=True
-                    )
-                    if len(runtime_subclass_tangent_meta) != len(
+
+                    def get_types_for_tangents(tangents):
+                        infos = []
+                        idx = 0
+                        for a in tangents:
+                            if isinstance(a, Tensor) and is_traceable_wrapper_subclass(
+                                a
+                            ):
+                                infos.append(get_types_for_subclass(a))
+                            else:
+                                infos.append(idx)
+                            idx += 1
+                        return infos
+
+                    runtime_subclass_info = get_types_for_tangents(tangents)
+
+                    if len(runtime_subclass_info) != len(
                         CompiledFunction.metadata.subclass_tangent_meta
                     ):
                         raise RuntimeError(
                             "The grad inputs should be same number as forward output tangents"
                         )
                     for a, b in zip(
-                        runtime_subclass_tangent_meta,
+                        runtime_subclass_info,
                         CompiledFunction.metadata.subclass_tangent_meta,
                     ):
-                        if isinstance(a, SubclassCreationMeta) and isinstance(
-                            b, SubclassCreationMeta
+                        # Types should match between runtime and traced tangents.
+                        # TODO (tmanlaibaatar) Should actually call coerce_runtime_tangent
+                        if isinstance(a, List) and (
+                            isinstance(b, SubclassCreationMeta) and b.subclass_type
                         ):
-                            if not compare_subclass_metadata_creation(a, b):
+                            if not a == b.subclass_type:
                                 raise RuntimeError(
                                     "The grad inputs should be same tensor subclass type as forward output"
                                 )
