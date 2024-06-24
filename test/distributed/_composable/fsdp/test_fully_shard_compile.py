@@ -15,7 +15,7 @@ from torch.distributed._composable.fsdp._fsdp_param_group import FSDPParamGroup
 from torch.distributed._tensor import init_device_mesh
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, MLP
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -203,6 +203,7 @@ class TestFullyShardCompile(FSDPTest):
 
         return model_init_fn, input_creation_fn
 
+    @skipIfRocm
     @skip_if_lt_x_gpu(2)
     def test_simple_mlp_fullgraph_backend_aot_eager(self):
         self._test_traceable_fsdp(
@@ -210,6 +211,7 @@ class TestFullyShardCompile(FSDPTest):
         )
 
     @unittest.expectedFailure
+    @skipIfRocm
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_simple_mlp_fullgraph_backend_inductor(self):
@@ -244,6 +246,7 @@ class TestFullyShardCompile(FSDPTest):
 
         return model_init_fn, input_creation_fn
 
+    @skipIfRocm
     @skip_if_lt_x_gpu(2)
     def test_transformer_fullgraph_backend_aot_eager(self):
         self._test_traceable_fsdp(
@@ -251,6 +254,7 @@ class TestFullyShardCompile(FSDPTest):
         )
 
     @unittest.expectedFailure
+    @skipIfRocm
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_transformer_fullgraph_backend_inductor(self):
