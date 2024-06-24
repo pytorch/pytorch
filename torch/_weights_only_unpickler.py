@@ -23,6 +23,7 @@
 # weights = torch.load(buf, weights_only = True)
 
 import functools as _functools
+from _compat_pickle import IMPORT_MAPPING, NAME_MAPPING
 from collections import Counter, OrderedDict
 from pickle import (
     APPEND,
@@ -171,6 +172,7 @@ class Unpickler:
         self.readline = file.readline
         self.read = file.read
         self.memo: Dict[int, Any] = {}
+        self.proto: int = -1
 
     def load(self):
         """Read a pickled object representation from the open file.
@@ -190,11 +192,14 @@ class Unpickler:
             # Risky operators
             if key[0] == GLOBAL[0]:
                 module = readline()[:-1].decode("utf-8")
-                # Patch since torch.save default protocol is 2
-                # but __builtin__ was renamed builtins in python>=3.0
-                if module == "__builtin__":
-                    module = "builtins"
                 name = readline()[:-1].decode("utf-8")
+                # Patch since torch.save default protocol is 2
+                # users will be running this code in python > 3
+                if self.proto == 2:
+                    if (module, name) in NAME_MAPPING:
+                        module, name = NAME_MAPPING[(module, name)]
+                    elif module in IMPORT_MAPPING:
+                        module = IMPORT_MAPPING[module]
                 full_path = f"{module}.{name}"
                 if full_path in _get_allowed_globals():
                     self.append(_get_allowed_globals()[full_path])
@@ -348,7 +353,7 @@ class Unpickler:
             # First and last deserializer ops
             elif key[0] == PROTO[0]:
                 # Read and ignore proto version
-                read(1)[0]
+                self.proto = read(1)[0]
             elif key[0] == STOP[0]:
                 rc = self.stack.pop()
                 return rc
