@@ -3888,39 +3888,31 @@ class CppScheduling(BaseScheduling):
                             global_buffer_layout.stride[size_offset:],
                         )
 
-                        def try_get_existing_local_buffer(
-                            local_buffer_layout, buffer_mappers
-                        ):
-                            for buffer_mapper in buffer_mappers:
-                                if (
-                                    local_buffer_layout
-                                    == buffer_mapper.local_buf.layout
-                                ):
-                                    return buffer_mapper.local_buf
-                            return None
+                        def try_share_local_buffer(local_buffer_layout, buffer_mappers):
+                            shared_buffers = [
+                                buffer_mapper.local_buf
+                                for buffer_mapper in buffer_mappers
+                                if local_buffer_layout == buffer_mapper.local_buf.layout
+                            ]
+                            return shared_buffers[0] if shared_buffers else None
 
-                        if local_buffer_shared := try_get_existing_local_buffer(
+                        local_buf_prefix = "local_buffer_data"
+                        # Share existing local buffer
+                        local_buffer_used = try_share_local_buffer(
                             local_buffer_layout, buffer_mappers
-                        ):
-                            # Sharing existing local buffer
-                            buffer_mappers.append(
-                                BufferMapper(
-                                    local_buffer_shared,
-                                    global_buf=global_buffer,
-                                )
+                        )
+                        if not local_buffer_used:
+                            # Create new local buffer
+                            local_buffer_used = ir.Buffer(
+                                f"{local_buf_prefix}_{len(buffer_mappers)}",
+                                local_buffer_layout,
                             )
-                        else:
-                            # Creating new local buffer
-                            local_buf_prefix = "local_buffer_data"
-                            buffer_mappers.append(
-                                BufferMapper(
-                                    local_buf=ir.Buffer(
-                                        f"{local_buf_prefix}_{len(buffer_mappers)}",
-                                        local_buffer_layout,
-                                    ),
-                                    global_buf=global_buffer,
-                                )
+                        buffer_mappers.append(
+                            BufferMapper(
+                                local_buf=local_buffer_used,
+                                global_buf=global_buffer,
                             )
+                        )
 
             with LocalBufferContext(kernel_group.args) as scope:
                 if len(buffer_mappers) > 0:

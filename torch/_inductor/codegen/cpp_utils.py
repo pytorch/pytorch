@@ -350,7 +350,7 @@ class LocalizeBufferHandler(V.WrapperHandler):  # type: ignore[name-defined]
     def __init__(
         self,
         inner,
-        global_to_local,
+        global_to_local: Dict[str, ir.Buffer],
         rewrite_index: Callable[["LocalizeBufferHandler", sympy.Expr, str], sympy.Expr],
     ):
         super().__init__(inner)
