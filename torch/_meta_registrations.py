@@ -3646,6 +3646,50 @@ def meta_relu_(self):
 
 @register_meta([aten.index_put.default, aten._unsafe_index_put.default])
 def meta_index_put(self, indices, values, accumulate=False):
+    if not isinstance(indices, tuple):
+        indices = (indices,)
+
+    torch._check(
+        len(indices) > 0,
+        lambda: "Passing an empty index list to torch.index_put() is not valid syntax",
+    )
+    torch._check(
+        self.device == values.device,
+        lambda: "Tensor and value must be on the same device",
+    )
+
+    for tensor in indices:
+        if tensor is not None:
+            dtype = tensor.dtype
+            torch._check(
+                dtype in [torch.long, torch.int64, torch.bool, torch.uint8],
+                lambda: "tensors used as indices must be long, int, byte or bool tensors",
+            )
+
+    torch._check(
+        self.dim() >= len(indices),
+        lambda: f"too many indices for tensor of dimension {self.dim()} (got {len(indices)})",
+    )
+    torch._check(
+        not indices.empty or utils.is_expandable_to(values.size(), self.size()),
+        lambda: (
+            f"shape mismatch: value tensor of shape {values.size()} "
+            f"cannot be broadcast to indexing result of shape {self.size()}"
+        ),
+    )
+    torch._check(
+        not accumulate,
+        lambda: "index_put does not support accumulate=true",
+    )
+    torch._check(
+        values.dtype == self.dtype,
+        lambda: "dtype mismatch between tensor and value",
+    )
+    torch._check(
+        values.shape == self.shape[: len(indices)],
+        lambda: "shape mismatch between value and indexed tensor",
+    )
+
     return torch.empty_like(self)
 
 
