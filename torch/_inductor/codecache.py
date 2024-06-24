@@ -2282,7 +2282,9 @@ class AotCodeCompiler:
             (
                 object_output_name,
                 object_output_dir,
-            ) = get_name_and_dir_from_output_file_path(input_path)
+            ) = get_name_and_dir_from_output_file_path(
+                file_path=input_path, specified_dir=specified_output_path
+            )
             object_builder = CppBuilder(
                 name=object_output_name,
                 sources=input_path,
@@ -2368,7 +2370,9 @@ class AotCodeCompiler:
                 use_absolute_path=use_absolute_path,
             )
             """
-            output_name, output_dir = get_name_and_dir_from_output_file_path(output_so)
+            output_name, output_dir = get_name_and_dir_from_output_file_path(
+                file_path=output_so, specified_dir=specified_output_path
+            )
             so_builder = CppBuilder(
                 name=output_name,
                 sources=[output_o, consts_o],
