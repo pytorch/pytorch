@@ -3802,9 +3802,9 @@ class ShapeEnv:
                 concrete_val = self.evaluate_expr(sympy.Eq(expr1, expr2))
                 if not concrete_val:
                     raise ConstraintViolationError(
-                        f"{src1.name()} = {expr1.xreplace(self.var_to_val)}"
+                        f"{src1.name()} = {expr1 if isinstance(expr1, int) else expr1.xreplace(self.var_to_val)}"
                         " is not equal to "
-                        f"{src2.name()} = {expr2.xreplace(self.var_to_val)}"
+                        f"{src2.name()} = {expr2 if isinstance(expr2, int) else expr2.xreplace(self.var_to_val)}"
                     )
 
             for src, root, fn in equalities_inputs.derived_equalities:
