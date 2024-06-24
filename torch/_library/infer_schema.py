@@ -58,10 +58,25 @@ def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
             annotation_type = convert_type_string(annotation_type)
 
         if annotation_type not in SUPPORTED_PARAM_TYPES.keys():
-            error_fn(
-                f"Parameter {name} has unsupported type {param.annotation}. "
-                f"The valid types are: {SUPPORTED_PARAM_TYPES.keys()}."
-            )
+            print(annotation_type)
+            # __origin__ attribute is only available from Python 3.8 onwards.
+            if getattr(annotation_type, '__origin__', None) is tuple:
+                list_type = tuple_to_list(annotation_type)
+                example_type_str = "\n\n"
+                # Only suggest the list type if this type is supported.
+                if list_type in SUPPORTED_PARAM_TYPES.keys():
+                    example_type_str = f"For example, {list_type}.\n\n"
+                error_fn(
+                    f"Parameter {name} has unsupported type {param.annotation}. "
+                    f"Tuple type annotation is not supported. Please try to use a List instead. "
+                    f"{example_type_str}"
+                    f"The valid types are: {SUPPORTED_PARAM_TYPES.keys()}."
+                )
+            else:
+                error_fn(
+                    f"Parameter {name} has unsupported type {param.annotation}. "
+                    f"The valid types are: {SUPPORTED_PARAM_TYPES.keys()}."
+                )
 
         schema_type = SUPPORTED_PARAM_TYPES[annotation_type]
         if name in mutates_args:
@@ -186,3 +201,16 @@ def supported_param(param: inspect.Parameter) -> bool:
         inspect.Parameter.POSITIONAL_OR_KEYWORD,
         inspect.Parameter.KEYWORD_ONLY,
     )
+
+def tuple_to_list(tuple_type):
+    """
+    Convert `tuple_type` into a list type with the same type arguments. Assumes that `tuple_type` is typing.Tuple type.
+    """
+    type_args = getattr(tuple_type, '__args__', None)
+    if type_args is None:
+        # Handle the case of an empty tuple type
+        list_type = typing.List
+    else:
+        # General case: create a List with the same type arguments
+        list_type = typing.List[type_args[0]] if len(type_args) == 1 else typing.List[typing.Union[tuple(type_args)]]
+    return list_type
