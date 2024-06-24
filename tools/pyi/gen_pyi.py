@@ -1086,12 +1086,12 @@ def gen_pyi(
                 "def __init__(self, other: Tensor) -> None: ...",
                 f"def __init__(self, size: _size, *, {DEVICE_PARAM}) -> None: ...",
             ],
-            "as_subclass": ["def as_subclass(self, cls: _Type[S]) -> S: ..."],
+            "as_subclass": ["def as_subclass(self, cls: Type[S]) -> S: ..."],
             "_make_subclass": [
                 "@staticmethod    \ndef _make_subclass({}) -> S: ...".format(
                     ", ".join(
                         [
-                            "cls: _Type[S]",
+                            "cls: Type[S]",
                             "data: Tensor",
                             "require_grad: _bool = False",
                             "dispatch_strides: _bool = False",
