@@ -818,7 +818,6 @@ def forward(self, primals_1):
 
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/127470")
     def test_nested_subclasses_complicated_inps(self):
-        @torch.compile(backend="aot_eager")
         def f(x, y, z):
             temp = x + y
             temp_plain = x.a + y.b
@@ -829,10 +828,21 @@ def forward(self, primals_1):
         x2 = x.clone().detach().requires_grad_()
         xx = TwoTensor(x, x2)
         xx2 = xx.clone().detach().requires_grad_()
+
         x_nested = TwoTensor(xx, xx2)
+        x_nested_compile = x_nested.clone().detach().requires_grad_()
+
         y_nested = x_nested.clone().detach().requires_grad_()
+        y_nested_compile = y_nested.clone().detach().requires_grad_()
+
         z = x.clone().detach().requires_grad_()
-        out = f(x_nested, y_nested, z)
+        z_compile = z.clone().detach().requires_grad_()
+
+        out_eager = f(x_nested, y_nested, z)
+        compiled_f = torch.compile(f, backend="aot_eager")
+        out = compiled_f(x_nested_compile, y_nested_compile, z_compile)
+        self.assertTrue(torch.allclose(out_eager, out))
+
         self.assertTrue(isinstance(out, TwoTensor))
         self.assertTrue(isinstance(out.a, TwoTensor))
         self.assertTrue(isinstance(out.b, TwoTensor))
@@ -842,13 +852,20 @@ def forward(self, primals_1):
         self.assertTrue(isinstance(out.b.b, torch.Tensor))
 
         out.sum().backward()
-        self.assertTrue(isinstance(x_nested.grad, TwoTensor))
-        self.assertTrue(isinstance(x_nested.grad.a, TwoTensor))
-        self.assertTrue(isinstance(x_nested.grad.b, TwoTensor))
+        out_eager.sum().backward()
 
-        self.assertTrue(isinstance(y_nested.grad, TwoTensor))
-        self.assertTrue(isinstance(y_nested.grad.a, TwoTensor))
-        self.assertTrue(isinstance(y_nested.grad.b, TwoTensor))
+        self.assertTrue(isinstance(x_nested_compile.grad, TwoTensor))
+        self.assertTrue(isinstance(x_nested_compile.grad.a, TwoTensor))
+        self.assertTrue(isinstance(x_nested_compile.grad.b, TwoTensor))
+
+        self.assertTrue(isinstance(y_nested_compile.grad, TwoTensor))
+        self.assertTrue(isinstance(y_nested_compile.grad.a, TwoTensor))
+        self.assertTrue(isinstance(y_nested_compile.grad.b, TwoTensor))
+
+        self.assertTrue(torch.allclose(x_nested_compile.grad.a.a, x_nested.grad.a.a))
+        self.assertTrue(torch.allclose(x_nested_compile.grad.a.b, x_nested.grad.a.b))
+        self.assertTrue(torch.allclose(y_nested_compile.grad.a.a, y_nested.grad.a.a))
+        self.assertTrue(torch.allclose(y_nested_compile.grad.a.b, y_nested.grad.a.b))
 
     def test_outputs_are_aliased(self):
         # Tensor, None, int
