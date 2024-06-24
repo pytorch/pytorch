@@ -203,7 +203,9 @@ def get_safe_globals() -> List[Any]:
 
 def add_safe_globals(safe_globals: List[Any]) -> None:
     """
-    Marks the given globals as safe for ``weights_only`` load.
+    Marks the given globals as safe for ``weights_only`` load. For example, functions
+    added to this list can be called during unpickling, classes could be instantiated
+    and have state set.
 
     Args:
         safe_globals (List[Any]): list of globals to mark as safe
