@@ -117,10 +117,12 @@ static void multi_tensor_apply_for_fused_optimizer(
                                      atIndex:d * kmaxTensors + tensor_loc];
             [computeEncoder useResource:getMTLBufferStorage(tensor_lists[d][tensor_index]) usage:MTLResourceUsageRead | MTLResourceUsageWrite];
         }
-        [tensorArgumentEncoder setBuffer:getMTLBufferStorage(state_steps[tensor_index])
-                           offset:state_steps[tensor_index].storage_offset() * state_steps[tensor_index].element_size()
-                          atIndex:depth * kmaxTensors + tensor_loc];
-        [computeEncoder useResource:getMTLBufferStorage(state_steps[tensor_index]) usage:MTLResourceUsageRead];
+        if (state_steps.size() > 0){
+          [tensorArgumentEncoder setBuffer:getMTLBufferStorage(state_steps[tensor_index])
+                             offset:state_steps[tensor_index].storage_offset() * state_steps[tensor_index].element_size()
+                            atIndex:depth * kmaxTensors + tensor_loc];
+          [computeEncoder useResource:getMTLBufferStorage(state_steps[tensor_index]) usage:MTLResourceUsageRead];
+        }
         metadata_arguments.numels[tensor_loc] = tensor_lists[0][tensor_index].numel();
 
         tensor_loc++;
@@ -166,11 +168,12 @@ static void multi_tensor_apply_for_fused_optimizer(
                                               atIndex:d * kmaxTensors + 0];
                       [computeEncoder useResource:getMTLBufferStorage(tensor_lists[d][tensor_index]) usage:MTLResourceUsageWrite | MTLResourceUsageRead];
                   }
-                  [tensorArgumentEncoder setBuffer:getMTLBufferStorage(state_steps[tensor_index])
-                                    offset:state_steps[tensor_index].storage_offset() * state_steps[tensor_index].element_size()
-                                    atIndex:depth * kmaxTensors + 0];
-                  [computeEncoder useResource:getMTLBufferStorage(state_steps[tensor_index]) usage:MTLResourceUsageRead];
-
+                  if (state_steps.size() > 0){
+                    [tensorArgumentEncoder setBuffer:getMTLBufferStorage(state_steps[tensor_index])
+                                      offset:state_steps[tensor_index].storage_offset() * state_steps[tensor_index].element_size()
+                                      atIndex:depth * kmaxTensors + 0];
+                    [computeEncoder useResource:getMTLBufferStorage(state_steps[tensor_index]) usage:MTLResourceUsageRead];
+                  }
                   tensor_loc = 1;
                 }
             }
