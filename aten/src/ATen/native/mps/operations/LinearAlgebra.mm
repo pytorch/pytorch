@@ -17,10 +17,14 @@
 #include <ATen/ops/addr_native.h>
 #include <ATen/ops/baddbmm_native.h>
 #include <ATen/ops/bmm_native.h>
+#include <ATen/ops/linalg_lu_factor_native.h>
 #include <ATen/ops/linalg_solve_triangular_native.h>
 #include <ATen/ops/mm_native.h>
+#include <ATen/ops/stack.h>
 #include <ATen/ops/triangular_solve_native.h>
 #endif
+
+#include <algorithm>
 
 namespace at::native {
 namespace mps {
@@ -126,6 +130,116 @@ bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output)
 }
 
 } // anonymous namespace
+
+static void linalg_lu_factor_out_mps_impl(const Tensor& A, bool pivot, Tensor& LU, Tensor& pivots) {
+  using namespace mps;
+
+  TORCH_CHECK(!c10::isComplexType(A.scalar_type()) && !c10::isComplexType(LU.scalar_type()),
+              "linalg.lu_factor(): MPS doesn't support complex types.");
+  TORCH_CHECK(pivot, "linalg.lu_factor(): MPS doesn't allow pivot == False.");
+
+  Tensor A_t = A;
+  uint64_t aRows = A_t.size(-2);
+  uint64_t aCols = A_t.size(-1);
+  uint64_t aElemSize = A_t.element_size();
+  uint64_t numPivots = std::min(aRows, aCols);
+  std::vector<int64_t> pivot_sizes(A_t.sizes().begin(), A_t.sizes().end() - 2);
+  pivot_sizes.push_back(numPivots);
+  resize_output(pivots, pivot_sizes);
+
+  if (A_t.numel() == 0) {
+    return;
+  }
+
+  Tensor A_ = A_t.dim() > 3 ? A_t.flatten(0, -3) : A_t;
+
+  uint64_t batchSize = A_.dim() > 2 ? A_.size(0) : 1;
+  std::vector<Tensor> status_tensors;
+  std::vector<Tensor> pivots_list;
+
+  status_tensors.reserve(batchSize);
+  pivots_list.reserve(batchSize);
+  for (C10_UNUSED const auto i : c10::irange(batchSize)) {
+    status_tensors.push_back(at::zeros(1, kInt, c10::nullopt, kMPS, c10::nullopt));
+    pivots_list.push_back(at::zeros(numPivots, kInt, c10::nullopt, kMPS, c10::nullopt));
+  }
+
+  // Since the MPSMatrixDecompositionLU functions in-place if the result matrix completely aliases the source matrix,
+  // We copy LU from A as the new A.
+  resize_output(LU, A_.sizes());
+  if (!LU.is_same(A_)) {
+    A_ = LU.copy_(A_);
+  } else {
+    A_ = LU;
+  }
+
+  TORCH_INTERNAL_ASSERT(A_.is_contiguous())
+
+  id<MTLBuffer> aBuffer = getMTLBufferStorage(A_);
+
+  MPSStream* mpsStream = getCurrentMPSStream();
+  id<MTLDevice> device = MPSDevice::getInstance()->device();
+
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
+      MPSMatrixDecompositionLU* filter = [[[MPSMatrixDecompositionLU alloc] initWithDevice:device
+                                                                                      rows:aRows
+                                                                                   columns:aCols] autorelease];
+
+      MPSMatrixDescriptor* sourceMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:aRows
+                                                                                    columns:aCols
+                                                                                   matrices:batchSize
+                                                                                   rowBytes:aCols * aElemSize
+                                                                                matrixBytes:aRows * aCols * aElemSize
+                                                                                   dataType:getMPSDataType(A_)];
+      MPSMatrixDescriptor* pivotsMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:1
+                                                                                    columns:numPivots
+                                                                                   matrices:1
+                                                                                   rowBytes:numPivots * sizeof(uint32_t)
+                                                                                matrixBytes:numPivots * sizeof(uint32_t)
+                                                                                   dataType:MPSDataTypeUInt32];
+
+      for (const auto i : c10::irange(batchSize)) {
+        const uint64_t aBatchOffset = i * aRows * aCols;
+        MPSMatrix* sourceMatrix = [[[MPSMatrix alloc] initWithBuffer:aBuffer
+                                                              offset:(A_.storage_offset() + aBatchOffset) * aElemSize
+                                                          descriptor:sourceMatrixDesc] autorelease];
+        MPSMatrix* pivotIndices = [[[MPSMatrix alloc] initWithBuffer:getMTLBufferStorage(pivots_list[i])
+                                                              offset:0
+                                                          descriptor:pivotsMatrixDesc] autorelease];
+        MPSMatrix* solutionMatrix = [[[MPSMatrix alloc] initWithBuffer:aBuffer
+                                                                offset:(A_.storage_offset() + aBatchOffset) * aElemSize
+                                                            descriptor:sourceMatrixDesc] autorelease];
+        id<MTLBuffer> statusBuffer = getMTLBufferStorage(status_tensors[i]);
+        [filter encodeToCommandBuffer:commandBuffer
+                         sourceMatrix:sourceMatrix
+                         resultMatrix:solutionMatrix
+                         pivotIndices:pivotIndices
+                               status:statusBuffer];
+      }
+    }
+  });
+  auto stacked_pivots = A_.dim() > 2 ? at::stack(pivots_list) : pivots_list[0];
+  if (A_t.dim() > 3) {
+    resize_output(LU, A_t.sizes());
+    pivots.copy_(stacked_pivots.view(pivot_sizes));
+  } else {
+    pivots.copy_(stacked_pivots);
+  }
+  pivots += 1; // PyTorch's `pivots` is 1-index.
+
+  for (const auto i : c10::irange(status_tensors.size())) {
+    int status = status_tensors[i].item<int>();
+    TORCH_CHECK(
+        status == 0,
+        "lu_factor(): LU factorization failure at the ",
+        i + 1,
+        " sample with status: ",
+        status,
+        ". See https://developer.apple.com/documentation/metalperformanceshaders/mpsmatrixdecompositionstatus for details.");
+  }
+}
 
 static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& output) {
   using namespace mps;
@@ -751,6 +865,18 @@ TORCH_IMPL_FUNC(triangular_solve_mps_out)
   mps::linalg_solve_triangular_mps_impl(A, self, upper, transpose, /*left=*/true, unitriangular, out);
   result.resize_(out.sizes());
   result.copy_(out);
+}
+
+std::tuple<Tensor&, Tensor&> linalg_lu_factor_out_mps(const Tensor& A, bool pivot, Tensor& LU, Tensor& pivots) {
+  mps::linalg_lu_factor_out_mps_impl(A, pivot, LU, pivots);
+  return std::tie(LU, pivots);
+}
+
+std::tuple<Tensor, Tensor> linalg_lu_factor_mps(const Tensor& A, bool pivot) {
+  Tensor LU = at::empty({0}, A.options());
+  Tensor pivots = at::empty({0}, A.options().dtype(kInt));
+  mps::linalg_lu_factor_out_mps_impl(A, pivot, LU, pivots);
+  return std::make_tuple(std::move(LU), std::move(pivots));
 }
 
 } // namespace at::native

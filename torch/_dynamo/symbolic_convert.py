@@ -993,11 +993,7 @@ class InstructionTranslatorBase(
     def LOAD_CONST(self, inst):
         self.push(self._load_const(inst))
 
-    def LOAD_GLOBAL(self, inst):
-        if sys.version_info >= (3, 11):
-            if inst.arg % 2:
-                self.PUSH_NULL(inst)
-
+    def _load_global(self, inst):
         name = inst.argval
 
         if self.exec_recorder:
@@ -1019,6 +1015,13 @@ class InstructionTranslatorBase(
 
         source = GlobalSource(name)
         self.push(VariableBuilder(self, source)(value))
+
+    def LOAD_GLOBAL(self, inst):
+        if sys.version_info >= (3, 11) and sys.version_info < (3, 13) and inst.arg % 2:
+            self.PUSH_NULL(inst)
+        self._load_global(inst)
+        if sys.version_info >= (3, 13) and inst.arg % 2:
+            self.PUSH_NULL(inst)
 
     def STORE_GLOBAL(self, inst):
         value = self.pop()
@@ -1540,7 +1543,10 @@ class InstructionTranslatorBase(
     def LOAD_METHOD(self, inst):
         self._load_attr(inst)
         obj = self.pop()
-        if sys.version_info >= (3, 11):
+        if sys.version_info >= (3, 13):
+            self.push(obj)
+            self.PUSH_NULL(inst)
+        elif sys.version_info >= (3, 11):
             # always follow the NULL + fn convention, since if obj
             # is actually a method, self is already bound to it, so it
             # doesn't need to be passed in as an arg.
@@ -2972,14 +2978,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             global_source = GetItemSource(globals_source, name)  # type: ignore[assignment]
         return fglobals_value, fglobals_vt, global_source
 
-    def LOAD_GLOBAL(self, inst):
+    def _load_global(self, inst):
         if self.output.global_scope is self.f_globals:
-            super().LOAD_GLOBAL(inst)
+            super()._load_global(inst)
         else:
-            if sys.version_info >= (3, 11):
-                if inst.arg % 2:
-                    self.PUSH_NULL(inst)
-
             name = inst.argval
 
             _, fglobals_vt, global_source = self.get_globals_source_and_value(name)
