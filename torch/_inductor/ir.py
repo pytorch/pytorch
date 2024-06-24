@@ -5297,6 +5297,12 @@ class FallbackKernel(ExternKernelAlloc):
             self.mutation_names.append(tensor_args[0].get_name())
             return
 
+        if self.op_overload is torch.ops.fsdp.split_with_sizes_copy.default:
+            _, kwargs = self.unflatten_args(self.inputs, self.constant_args)
+            for tensor_arg in kwargs["out"]:
+                self.mutation_names.append(tensor_arg.get_name())
+            return
+
         if schema.is_mutable and not can_auto_functionalize(kernel):
             raise NotImplementedError(
                 f"NYI: Can't generate FallbackKernel for {kernel}"
@@ -5470,7 +5476,6 @@ class FallbackKernel(ExternKernelAlloc):
         return self.alias_names
 
     def get_mutation_names(self):
-        assert len(self.mutation_names) <= 1
         return self.mutation_names
 
     # ProxyExecutor Design Note
