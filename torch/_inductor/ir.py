@@ -4669,19 +4669,23 @@ class UserDefinedTritonKernel(ExternKernel):
             kernel, configs, self.kwargs
         )
 
-        args = self.codegen_kwargs()
-        raw_args = list(self.kwargs.values())
+        args = []
+        raw_args = []
+        for k in self.ordered_kwargs_for_cpp_kernel:
+            v = self.get_kwargs_value(k)
+            args.append(V.graph.wrapper_code.val_to_arg_str(v))
+            raw_args.append(v)
 
         if V.graph.cpp_wrapper:
             # in C++ wrapper, we don't pass constexpr args, as they don't
             # get added as parameters to the PTX code compiled from the
             # user-defined Triton kernel (only non-constexpr args do)
             args = [arg for i, arg in enumerate(args) if i not in kernel.constexprs]
-            # Unify raw_args computation between cpp wrapper and python wrapper
-            raw_args = []
-            for i, arg_name in enumerate(self.ordered_kwargs_for_cpp_kernel):
-                if i not in kernel.constexprs:
-                    raw_args.append(self.get_kwargs_value(arg_name))
+            raw_args = [
+                raw_arg
+                for i, raw_arg in enumerate(raw_args)
+                if i not in kernel.constexprs
+            ]
 
         # Call to kernel
         self.codegen_comment(wrapper)
