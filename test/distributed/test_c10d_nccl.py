@@ -614,14 +614,12 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         original_tensor = tensor.clone()
         ng = c10d.new_group([0])
 
-        # rank 0 hasn't split yet, but rank 1 did for the
-        # nocolor... so split count matches rank count coincidentally
-        # in each of the proceses this test spawned!
-        self.assertEqual(backend.comm_split_count(), self.rank)
+        # comm split happens eagerly since device_id is passed to init_process_group.
+        self.assertEqual(backend.comm_split_count(), 1)
         if self.rank == 0:
             dist.broadcast(tensor, 0, group=ng)
 
-        # now everyone has split because rank 0 has performed a comm
+        # no additional comm split happens after a collective.
         self.assertEqual(backend.comm_split_count(), 1)
         self.assertEqual(tensor, original_tensor)
 
