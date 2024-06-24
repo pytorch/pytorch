@@ -1,9 +1,6 @@
-#include <ATen/Dispatch.h>
-#include <ATen/OpMathType.h>
-#include <ATen/core/Tensor.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/mps/operations/MultiTensorApply.h>
-#include <c10/util/Exception.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
