@@ -19,12 +19,11 @@ from torch.distributed.pipelining import (
     ScheduleInterleaved1F1B,
     ScheduleLoopedBFS,
 )
-from torch.distributed.pipelining.stage import _PipelineStageBase
-
-from torch.distributed.pipelining.utils import (
+from torch.distributed.pipelining.schedules import (
     format_pipeline_order,
     validate_pipeline_order,
 )
+from torch.distributed.pipelining.stage import _PipelineStageBase
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
     MultiProcContinousTest,
