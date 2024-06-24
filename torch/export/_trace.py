@@ -554,7 +554,7 @@ def _export_to_torch_ir(
     return gm_torch_level
 
 
-def post_process_aot_autograd(mod, gm, graph_signature, fake_args, fake_kwargs, fake_params_buffers, pre_dispatch):
+def post_process_aot_autograd(mod, gm, flat_args, graph_signature, pre_dispatch):
     # TODO unfortunately preserving graph-level metadata is not
     # working well with aot_export. So we manually copy it.
     # (The node-level meta is addressed above.)
@@ -603,7 +603,6 @@ def post_process_aot_autograd(mod, gm, graph_signature, fake_args, fake_kwargs, 
         + len(graph_signature.buffers)
         + len(graph_signature.input_tokens)
     )
-    flat_args, _ = pytree.tree_flatten((fake_args, fake_kwargs))
     for node in gm.graph.nodes:
         if node.op == "placeholder":
             if index >= total_non_user_inputs:
@@ -680,17 +679,6 @@ def post_process_aot_autograd(mod, gm, graph_signature, fake_args, fake_kwargs, 
     constants = rewrite_script_object_meta(gm)
     constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
 
-    # Prettify names for placeholder nodes.
-    placeholder_naming_pass(
-        gm,
-        export_graph_signature,
-        mod,
-        fake_args,
-        fake_kwargs,
-        fake_params_buffers,
-        constants,
-    )
-
     return ATenExportArtifact(
         gm,
         export_graph_signature,
@@ -743,8 +731,26 @@ def _export_to_aten_ir(
             pre_dispatch=pre_dispatch,
             kwargs=fake_kwargs,
         )
-    
-    return post_process_aot_autograd(mod, gm, graph_signature, fake_args, pre_dispatch=pre_dispatch)
+
+    flat_args, _ = pytree.tree_flatten((fake_args, fake_kwargs))
+
+    aten_export_artifact = post_process_aot_autograd(
+        mod, gm, flat_args, graph_signature, pre_dispatch=pre_dispatch
+    )
+
+    # Prettify names for placeholder nodes.
+    placeholder_naming_pass(
+        aten_export_artifact.gm,
+        aten_export_artifact.export_graph_signature,
+        mod,
+        fake_args,
+        fake_kwargs,
+        fake_params_buffers,
+        aten_export_artifact.constants,
+    )
+
+    return aten_export_artifact
+
 
 def _get_params_buffers(mod: torch.nn.Module) -> Dict[str, torch.Tensor]:
     params_buffers: Dict[str, torch.Tensor] = {}
@@ -972,6 +978,43 @@ def _log_export_wrapper(fn):
     return wrapper
 
 
+def extract_param_buffer_metadata_from_gm(gm):
+    params_buffers_to_node_meta = {}
+    for node in gm.graph.nodes:
+        target = node.target
+        meta = node.meta
+        if node.op == "call_module":
+            submodule = getattr(gm, target)
+            if isinstance(submodule, torch.nn.Module):
+                for name, _ in submodule.named_parameters(
+                    recurse=True, remove_duplicate=False
+                ):
+                    params_buffers_to_node_meta[target + "." + name] = meta
+
+                for name, _ in submodule.named_buffers(
+                    recurse=True, remove_duplicate=False
+                ):
+                    params_buffers_to_node_meta[target + "." + name] = meta
+
+        if node.op == "get_attr":
+            submodule = getattr(gm, target)
+            if not isinstance(submodule, torch.fx.GraphModule):
+                params_buffers_to_node_meta[target] = meta
+
+        # If the call_function uses param as input, we also need to update params' meta
+        # with this call_function node's meta.
+        # This is basically the same flow as torch.fx.traceback.preserve_meta()
+        if node.op == "call_function" and not isinstance(
+            node.target, torch._ops.HigherOrderOperator
+        ):
+            for arg in node._input_nodes:
+                if arg.op == "get_attr":
+                    for entry in torch.fx.proxy._COPY_META_FIELDS:
+                        if entry in meta:
+                            params_buffers_to_node_meta[arg.target][entry] = meta[entry]
+    return params_buffers_to_node_meta
+
+
 def _process_jit_trace_inputs_for_export(example_inputs, example_kwarg_inputs):
     if not isinstance(example_inputs, (tuple, list, dict)):
         example_inputs = (example_inputs,)
@@ -1115,39 +1158,7 @@ def _strict_export(
     # When aot_export lifts the params, we lose metadata (e.g. source_fn_stack, stack_trace)
     # from the param nodes as they are treated as fresh inputs
     # Therefore, we manually extract them before calling into aot_export
-    params_buffers_to_node_meta = {}
-    for node in gm_torch_level.graph.nodes:
-        target = node.target
-        meta = node.meta
-        if node.op == "call_module":
-            submodule = getattr(gm_torch_level, target)
-            if isinstance(submodule, torch.nn.Module):
-                for name, _ in submodule.named_parameters(
-                    recurse=True, remove_duplicate=False
-                ):
-                    params_buffers_to_node_meta[target + "." + name] = meta
-
-                for name, _ in submodule.named_buffers(
-                    recurse=True, remove_duplicate=False
-                ):
-                    params_buffers_to_node_meta[target + "." + name] = meta
-
-        if node.op == "get_attr":
-            submodule = getattr(gm_torch_level, target)
-            if not isinstance(submodule, torch.fx.GraphModule):
-                params_buffers_to_node_meta[target] = meta
-
-        # If the call_function uses param as input, we also need to update params' meta
-        # with this call_function node's meta.
-        # This is basically the same flow as torch.fx.traceback.preserve_meta()
-        if node.op == "call_function" and not isinstance(
-            node.target, torch._ops.HigherOrderOperator
-        ):
-            for arg in node._input_nodes:
-                if arg.op == "get_attr":
-                    for entry in torch.fx.proxy._COPY_META_FIELDS:
-                        if entry in meta:
-                            params_buffers_to_node_meta[arg.target][entry] = meta[entry]
+    params_buffers_to_node_meta = extract_param_buffer_metadata_from_gm(gm_torch_level)
 
     # Fix the graph output signature to be tuple if scalar
     out_spec = orig_out_spec = gm_torch_level._out_spec
