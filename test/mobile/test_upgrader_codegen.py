@@ -6,10 +6,10 @@ from pathlib import Path
 
 from torch.jit.generate_bytecode import generate_upgraders_bytecode
 from torch.testing._internal.common_utils import run_tests, TestCase
-
 from torchgen.operator_versions.gen_mobile_upgraders import sort_upgrader, write_cpp
 
-pytorch_caffe2_dir = Path(__file__).resolve().parents[2]
+
+pytorch_caffe2_dir = Path(__file__).absolute().parents[2]
 
 
 class TestLiteScriptModule(TestCase):

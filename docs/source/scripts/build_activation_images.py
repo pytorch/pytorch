@@ -15,7 +15,7 @@ matplotlib.use("Agg")
 
 
 # Create a directory for the images, if it doesn't exist
-ACTIVATION_IMAGE_PATH = Path(__file__).parent / "activation_images"
+ACTIVATION_IMAGE_PATH = Path(__file__).absolute().parent / "activation_images"
 
 if not ACTIVATION_IMAGE_PATH.exists():
     ACTIVATION_IMAGE_PATH.mkdir()

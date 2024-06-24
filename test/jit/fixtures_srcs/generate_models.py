@@ -5,11 +5,12 @@ import zipfile
 from pathlib import Path
 from typing import Set
 
-import torch
-
 # Use asterisk symbol so developer doesn't need to import here when they add tests for upgraders.
 from test.jit.fixtures_srcs.fixtures_src import *  # noqa: F403
+
+import torch
 from torch.jit.mobile import _export_operator_list, _load_for_lite_interpreter
+
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -110,7 +111,7 @@ Get the path to `test/jit/fixtures`, where all test models for operator changes
 
 
 def get_fixtures_path() -> Path:
-    pytorch_dir = Path(__file__).resolve().parents[3]
+    pytorch_dir = Path(__file__).absolute().parents[3]
     fixtures_path = pytorch_dir / "test" / "jit" / "fixtures"
     return fixtures_path
 

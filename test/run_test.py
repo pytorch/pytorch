@@ -38,7 +38,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_SLOW_GRADCHECK,
 )
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+REPO_ROOT = pathlib.Path(__file__).absolute().parent.parent
 
 # using tools/ to optimize test run.
 sys.path.insert(0, str(REPO_ROOT))
