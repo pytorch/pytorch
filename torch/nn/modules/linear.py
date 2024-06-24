@@ -3,10 +3,10 @@ import math
 from typing import Any
 
 import torch
-from torch import dtype, Tensor
+from torch import Tensor
 from torch.nn import functional as F, init
 from torch.nn.parameter import Parameter, UninitializedParameter
-from torch.types import Device
+from torch.types import Device, Dtype
 from .lazy import LazyModuleMixin
 from .module import Module
 
@@ -100,17 +100,16 @@ class Linear(Module):
         out_features: int,
         bias: bool = True,
         device: Device = None,
-        dtype: dtype = None
+        dtype: Dtype = None
     ) -> None:
-        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
         self.weight = Parameter(
-            torch.empty((out_features, in_features), **factory_kwargs)
+            torch.empty((out_features, in_features), device=device, dtype=dtype)
         )
         if bias:
-            self.bias = Parameter(torch.empty(out_features, **factory_kwargs))
+            self.bias = Parameter(torch.empty(out_features, device=device, dtype=dtype))
         else:
             self.register_parameter("bias", None)
         self.reset_parameters()
