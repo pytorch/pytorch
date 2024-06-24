@@ -1357,10 +1357,11 @@ main()
         1. `run_with_rng_state` only shows up in the backward graph (this op is inserted by the partitioner).
         2. The Dynamo graph captured by Compiled Autograd looks like:
         ```
-         ===== Compiled autograd graph =====
-        <eval_with_key>.15 class CompiledAutograd(torch.nn.Module):
-            def forward(self, inputs, sizes, hooks):
+        ===== __compiled_fn_3 =====
+        torch/fx/_lazy_graph_module.py class GraphModule(torch.nn.Module):
+            def forward(self, L_inputs_ : list):
                 ...
+                # File: <eval_with_key>.15:23 in forward, code: run_with_rng_state = torch.ops.higher_order.run_with_rng_state(getitem_8, torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default, getitem_3, getitem_4, getitem_4, 0.0, True);  getitem_8 = None
                 run_with_rng_state = torch.ops.higher_order.run_with_rng_state(getitem_8, torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default, getitem_3, getitem_4, getitem_4, 0.0, True);  getitem_8 = None
                 ...
         ```
