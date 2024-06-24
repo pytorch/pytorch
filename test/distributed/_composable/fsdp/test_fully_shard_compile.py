@@ -168,7 +168,10 @@ class TestFullyShardCompile(FSDPTest):
 
         losses_compiled = test_compiled()
         losses_eager = test_eager()
-        for loss_compiled, loss_eager in zip(losses_compiled, losses_eager):
+        for i, (loss_compiled, loss_eager) in enumerate(
+            zip(losses_compiled, losses_eager)
+        ):
+            print(f"i: {i}, loss_compiled: {loss_compiled}, loss_eager: {loss_eager}")
             self.assertTrue(
                 torch.allclose(
                     torch.tensor(loss_compiled),
@@ -259,6 +262,15 @@ class TestFullyShardCompile(FSDPTest):
     def test_transformer_fullgraph_backend_aot_eager(self):
         self._test_traceable_fsdp(
             *self._create_transformer_factory_fns(), "aot_eager", fullgraph=True
+        )
+
+    @skipIfRocm
+    @skip_if_lt_x_gpu(2)
+    def test_transformer_fullgraph_backend_aot_eager_decomp_partition(self):
+        self._test_traceable_fsdp(
+            *self._create_transformer_factory_fns(),
+            "aot_eager_decomp_partition",
+            fullgraph=True,
         )
 
     @unittest.expectedFailure
