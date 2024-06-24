@@ -52,8 +52,8 @@ def is_exception_branch(branch: str) -> bool:
 
 def get_workflow_type(issue: Issue, username: str) -> Tuple[str, str]:
     formatted_username = (
-        "@" + username
-    )  # Add the @ symbol to match the format in the issue body
+        f"@{username}"  # Add the @ symbol to match the format in the issue body
+    )
 
     try:
         user_list = issue.get_comments()[0].body.split()
