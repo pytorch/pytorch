@@ -5635,7 +5635,7 @@ class TestNestedTensorSubclass(TestCase):
         PADDING_VAL = 4.2
         expected_padded = nt._values.new_full((7, 8, *post_seq_len_shape), PADDING_VAL)
         for i, component in enumerate(nt.unbind()):
-            expected_padded[i, :component.shape[0]].copy_(component)
+            expected_padded[i, : component.shape[0]].copy_(component)
 
         padded = nt.to_padded_tensor(PADDING_VAL)
         self.assertEqual(expected_padded, padded)
@@ -5688,7 +5688,8 @@ class TestNestedTensorSubclass(TestCase):
             # NB: sum_S must be specified to use the lowering for dense -> jagged
             # and get full fusion
             return torch.nested.nested_tensor_from_padded(
-                padded, nt.offsets(), sum_S=nt.values().shape[0])
+                padded, nt.offsets(), sum_S=nt.values().shape[0]
+            )
 
         expected_output = f(nt)
         if requires_grad:
@@ -5700,10 +5701,9 @@ class TestNestedTensorSubclass(TestCase):
         if requires_grad:
             compiled_output.backward(torch.ones_like(compiled_output))
             compiled_grad = nt.grad.clone().detach()
-            nt.grad = None
+            self.assertEqual(compiled_grad, expected_grad, rtol=1e-3, atol=1e-3)
 
         self.assertEqual(compiled_output, expected_output, rtol=1e-3, atol=1e-3)
-        self.assertEqual(compiled_grad, expected_grad, rtol=1e-3, atol=1e-3)
 
         # TODO: Verify that computation fusion happens
 
