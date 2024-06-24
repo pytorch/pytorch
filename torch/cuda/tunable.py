@@ -285,8 +285,8 @@ def tune_gemm_in_file(filename: str) -> None:
                     torch.mm(matA, matB)
                 elif op_sig == "GemmStridedBatchedTunableOp":
                     [n,m,k,_,b] = untuned_gemm[1].split('_')[1:]
-                    matA = torch.rand(int(b),int(m),int(k), dtype=dtype, device='cuda')
-                    matB = torch.rand(int(b),int(k),int(n), dtype=dtype, device='cuda')
+                    matA = torch.rand(int(b),int(k),int(m), dtype=dtype, device='cuda') if transB else torch.rand(int(b),int(m),int(k), dtype=dtype, device='cuda')
+                    matB = torch.rand(int(b),int(n),int(k), dtype=dtype, device='cuda') if transA else torch.rand(int(b),int(k),int(n), dtype=dtype, device='cuda')
                     matA = matA.transpose(1,2) if transB else matA
                     matB = matB.transpose(1,2) if transA else matB
                     torch.bmm(matA, matB)
