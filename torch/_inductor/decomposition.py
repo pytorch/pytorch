@@ -83,7 +83,14 @@ inductor_decompositions = get_decompositions(
         quantized.linear_dynamic_fp16_unpacked_weight,
     ]
 )
+
+exclude_decomps = set(
+    [
+        aten.split_with_sizes_copy.out,
+    ]
+)
 decompositions = {**core_aten_decompositions(), **inductor_decompositions}
+decompositions = {k: v for k, v in decompositions.items() if k not in exclude_decomps}
 
 # Remove unwanted decompositions included via the core ATen decompositions from
 # the Inductor decomp table.
