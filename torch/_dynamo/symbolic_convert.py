@@ -102,7 +102,7 @@ from .variables.misc import (
     PythonModuleVariable,
     UnknownVariable,
 )
-from .variables.nn_module import NNModuleVariable
+from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
 from .variables.user_defined import (
     RemovableHandleVariable,
@@ -415,11 +415,22 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 if push:
                     self.push(value)
                 self.jump(inst)
+        elif isinstance(value, UnspecializedNNModuleVariable):
+            mod = value.value
+            if truth_fn(mod):
+                if push:
+                    self.push(value)
+                self.jump(inst)
         elif isinstance(value, UserDefinedObjectVariable):
-            x = value.var_getattr(self, "__bool__")
-            # if __bool__ is missing, trying __len__ to infer a truth value.
-            if isinstance(x, GetAttrVariable):
+            try:
+                x = value.var_getattr(self, "__bool__")
+            except exc.ObservedException:
+                # if __bool__ is missing, trying __len__ to infer a truth value.
                 x = value.var_getattr(self, "__len__")
+            else:
+                if isinstance(x, GetAttrVariable):
+                    # if __bool__ is missing, trying __len__ to infer a truth value.
+                    x = value.var_getattr(self, "__len__")
 
             # __bool__ or __len__ is function
             if isinstance(x, UserMethodVariable):
@@ -2294,6 +2305,7 @@ class InstructionTranslatorBase(
         self.nn_module_stack: Dict[str, Tuple[str, Type[Any]]] = {}
         # Flag to indicate whether tracing is used for export.
         self.export = export
+        self.one_graph = False
 
         self.current_speculation = None
 
@@ -2849,6 +2861,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         self.symbolic_result = None
         self.closure_cells = closure_cells
         self.nn_module_stack = parent.nn_module_stack.copy()
+        self.one_graph = parent.one_graph
 
     @property
     def fake_mode(self):
