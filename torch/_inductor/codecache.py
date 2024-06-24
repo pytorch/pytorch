@@ -2623,6 +2623,7 @@ class CppCodeCache:
                 output_name,
                 input_path,
                 output_dir,
+                output_path,
                 compile_command,
             )
 
@@ -2651,7 +2652,9 @@ class CppCodeCache:
         return cls.load_async(source_code, cuda)()
 
 
-def _worker_compile_cpp_new(lock_path, name, source, output_dir, args: dict[str, Any]):
+def _worker_compile_cpp_new(
+    lock_path, name, source, output_dir, output_path, args: dict[str, Any]
+):
     from filelock import FileLock
 
     from torch._inductor.cpp_builder import CppBuilder, CppTorchCudaOptions
@@ -2668,7 +2671,7 @@ def _worker_compile_cpp_new(lock_path, name, source, output_dir, args: dict[str,
         if not os.path.exists(cpp_builder.get_target_file_path()):
             if config.is_fbcode():
                 cmd = cpp_builder.get_command_line()
-                compile_file(source, output_dir, shlex.split(cmd))
+                compile_file(source, output_path, shlex.split(cmd))
             else:
                 cpp_builder.build()
 
