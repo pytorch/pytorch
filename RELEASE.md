@@ -290,7 +290,7 @@ After the final RC is created. The following tasks should be performed :
 
 * Create validation issue for the release, see for example [Validations for 2.1.2 release](https://github.com/pytorch/pytorch/issues/114904) and perform required validations.
 
-* Run performance tests in [benchmark repository](https://github.com/pytorch/benchmark). Make sure there are no prerformance regressions.
+* Run performance tests in [benchmark repository](https://github.com/pytorch/benchmark). Make sure there are no performance regressions.
 
 * Prepare and stage PyPI binaries for promotion. This is done with this script:
 [`pytorch/builder:release/pypi/promote_pypi_to_staging.sh`](https://github.com/pytorch/builder/blob/main/release/pypi/promote_pypi_to_staging.sh)
@@ -429,12 +429,12 @@ need to support these particular versions of software.
 
 ## Operating Systems
 Supported OS flavors are summarized in the table below:
-| Operating System family | Architectrue | Notes |
+| Operating System family | Architecture | Notes |
 | --- | --- | --- |
 | Linux | aarch64, x86_64 | Wheels are manylinux2014 compatible, i.e. they should be runnable on any Linux system with glibc-2.17 or above. |
 | MacOS | arm64 | Builds should be compatible with MacOS 11 (Big Sur) or newer, but are actively tested against MacOS 14 (Sonoma). |
 | MacOS | x86_64 | Requires MacOS Catalina or above, not supported after 2.2, see https://github.com/pytorch/pytorch/issues/114602 |
-| Windows | x86_64 | Buils are compatible with Windows-10 or newer. |
+| Windows | x86_64 | Builds are compatible with Windows-10 or newer. |
 
 # Submitting Tutorials
 
