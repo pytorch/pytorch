@@ -1365,34 +1365,42 @@ main()
                     getitem_8,
                     torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default,
                     getitem_3, getitem_4, getitem_4, 0.0, True,
-                );  getitem_8 = None
+                )
                 ...
         ```
-        3. We want to preserve this `run_with_rng_state` op when going through AOTAutograd. TODO add more comment
+        3. We want to preserve this `run_with_rng_state` op when going through AOTAutograd. We do it by having special handling
+        in `run_with_rng_state` op's py_functionalize_impl.
         """
 
-        # BAD CASE: compiled autograd (i.e. has `run_with_rng_state` in Dynamo graph)
-        compiler_fn = make_compiler_fn(fullgraph=True)
+        def _run_with_rng_state_op_check(inductor_post_grad_graph):
+            # Checks that `run_with_rng_state` op exists in Compiled Autograd's Inductor post-grad graph.
+            op_set = {node.target for node in inductor_post_grad_graph.nodes}
+            if torch.ops.higher_order.run_and_save_rng_state not in op_set:
+                # This is backward graph, so check existence of `run_with_rng_state` op
+                self.assertTrue(torch.ops.higher_order.run_with_rng_state in op_set)
 
-        def make_compiler_fn_with_op_check():
-            def _compiler_fn(gm):
-                self.assertTrue(
-                    any(
-                        node.target is torch.ops.higher_order.run_with_rng_state
-                        for node in gm.graph.nodes
+        with torch._inductor.config.patch(
+            post_grad_custom_post_pass=_run_with_rng_state_op_check
+        ):
+            compiler_fn = make_compiler_fn(fullgraph=True)
+
+            def make_compiler_fn_with_op_check():
+                def _compiler_fn(gm):
+                    # Checks that `run_with_rng_state` op exists in Compiled Autograd's Dynamo graph.
+                    self.assertTrue(
+                        any(
+                            node.target is torch.ops.higher_order.run_with_rng_state
+                            for node in gm.graph.nodes
+                        )
                     )
-                )
-                return compiler_fn(gm)
+                    return compiler_fn(gm)
 
-            return _compiler_fn
+                return _compiler_fn
 
-        compiler_fn_with_op_check = make_compiler_fn_with_op_check()
-        self.check_output_and_recompiles(
-            f, compiler_fn=compiler_fn_with_op_check, compile_fn=False
-        )
-
-        # GOOD CASE: no compiled autograd (i.e. no `run_with_rng_state` in Dynamo graph)
-        # f()
+            compiler_fn_with_op_check = make_compiler_fn_with_op_check()
+            self.check_output_and_recompiles(
+                f, compiler_fn=compiler_fn_with_op_check, compile_fn=False
+            )
 
     def test_autograd_cpp_node(self):
         cpp_source = """
