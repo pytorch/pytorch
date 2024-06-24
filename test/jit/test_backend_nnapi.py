@@ -41,7 +41,7 @@ Inherits most tests from TestNNAPI, which loads Android NNAPI models
 without the delegate API.
 """
 # First skip is needed for IS_WINDOWS or IS_MACOS to skip the tests.
-torch_root = Path(__file__).resolve().parents[2]
+torch_root = Path(__file__).absolute().parents[2]
 lib_path = torch_root / "build" / "lib" / "libnnapi_backend.so"
 
 

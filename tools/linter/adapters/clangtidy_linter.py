@@ -180,7 +180,7 @@ def check_file(
 
         for match in RESULTS_RE.finditer(proc.stdout.decode()):
             # Convert the reported path to an absolute path.
-            abs_path = str(Path(match["file"]).resolve())
+            abs_path = str(Path(match["file"]).absolute())
             message = LintMessage(
                 path=abs_path,
                 name=match["code"],
@@ -260,7 +260,7 @@ def main() -> None:
         print(json.dumps(err_msg._asdict()), flush=True)
         sys.exit(0)
 
-    abs_build_dir = Path(args.build_dir).resolve()
+    abs_build_dir = Path(args.build_dir).absolute()
 
     # Get the absolute path to clang-tidy and use this instead of the relative
     # path such as .lintbin/clang-tidy. The problem here is that os.chdir is

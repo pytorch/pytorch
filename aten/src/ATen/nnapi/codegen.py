@@ -231,7 +231,7 @@ def main(argv):
                 )
             )
 
-    out_dir = pathlib.Path(__file__).parent
+    out_dir = pathlib.Path(__file__).absolute().parent
 
     (out_dir / "nnapi_wrapper.h").write_text(
         PREFIX
