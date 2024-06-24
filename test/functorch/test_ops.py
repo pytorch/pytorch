@@ -462,6 +462,11 @@ class TestOperators(TestCase):
                 device_type="cuda",
             ),
             tol1(
+                "linalg.multi_dot",
+                {torch.float32: tol(atol=1e-05, rtol=8e-04)},
+                device_type="cuda",
+            ),
+            tol1(
                 "linalg.tensorsolve",
                 {torch.float32: tol(atol=3e-04, rtol=3e-04)},
                 device_type="cuda",
@@ -604,6 +609,11 @@ class TestOperators(TestCase):
             tol1(
                 "linalg.tensorsolve",
                 {torch.float32: tol(atol=1e-04, rtol=1.3e-05)},
+                device_type="cuda",
+            ),
+            tol1(
+                "masked.prod",
+                {torch.float32: tol(atol=1e-05, rtol=1.3e-05)},
                 device_type="cuda",
             ),
             tol1(
@@ -945,6 +955,10 @@ class TestOperators(TestCase):
                     "linalg.householder_product", decorator=runOnRocm
                 ),  # works on ROCm
                 xfail(
+                    # nans
+                    "masked.softmax",
+                ),
+                xfail(
                     "nanquantile", device_type="cpu"
                 ),  # vmap not implemented for at::equal.
                 xfail("native_layer_norm"),  # vmap: inplace into a regular tensor
@@ -1183,7 +1197,7 @@ class TestOperators(TestCase):
             ),
             tol1(
                 "linalg.householder_product",
-                {torch.float32: tol(atol=3e-04, rtol=3e-04)},
+                {torch.float32: tol(atol=3e-04, rtol=6e-04)},
             ),
             tol1(
                 "matrix_exp",

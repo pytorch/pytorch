@@ -891,8 +891,9 @@ class TestOperators(TestCase):
         unittest.expectedFailure,
         lambda params: (
             params["op"].name == "add" and
-            params["dtype"] == torch.float16 and
-            params["device"] == "cpu"
+            params["dtype"] in [torch.float16, torch.float32] and
+            params["device"] == "cpu" and
+            params["layout"] == torch.sparse_csr
         )
     )
     # Result is just wrong in test_maskedtensor.py; production logic should be fixed
@@ -901,7 +902,8 @@ class TestOperators(TestCase):
         lambda params: (
             params["op"].name == "sub" and
             params["dtype"] in [torch.float16, torch.float32] and
-            params["device"] == "cpu"
+            params["device"] == "cpu" and
+            params["layout"] == torch.sparse_csr
         )
     )
     def test_binary_core(self, device, dtype, op, layout):

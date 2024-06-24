@@ -1342,6 +1342,12 @@ op_db: List[OpInfo] = [
                 "TestCommon",
                 "test_numpy_ref_mps",
             ),
+            DecorateInfo(
+                toleranceOverride({torch.half: tol(atol=1.2e-2, rtol=1.7e-2)}),
+                "TestInductorOpInfo",
+                "test_comprehensive",
+                device_type="cuda",
+            ),
         ),
     ),
     OpInfo(

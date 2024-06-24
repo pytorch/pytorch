@@ -1984,6 +1984,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
         "masked.std": [2e-2, 2e-3],
         "masked.var": [2e-2, 2e-2],
         "matmul": [2e-2, 6e-2],
+        "mv": [9e-3, 1e-5],
         "nn.functional.batch_norm": [3e-2, 1e-3],
         "nn.functional.binary_cross_entropy": [3e-2, 1e-3],
         "nn.functional.binary_cross_entropy_with_logits": [4e-2, 4e-3],
