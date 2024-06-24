@@ -430,6 +430,7 @@ class TestSelectAlgorithm(TestCase):
                 exact_dtype=True,
             )
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 2)
+            self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 0)
 
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
