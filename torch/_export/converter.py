@@ -427,8 +427,12 @@ class TS2FXGraphConverter:
         # TODO: covnert sourceRange() into stack_trace
         # fx_node.meta["stack_trace"] = node.sourceRange()
 
-        output_name = node.output().debugName()
-        self.name_to_node[output_name] = fx_node
+        outs = tuple(node.outputs())
+        if len(outs) == 1:
+            output_name = node.output().debugName()
+            self.name_to_node[output_name] = fx_node
+        elif len(outs) > 1:
+            raise RuntimeError("Number of outputs > 1 is not supported yet")
 
     def convert_prim_TupleConstruct(self, node: torch._C.Node):
         self._convert_prim_iterator(node)
@@ -620,8 +624,12 @@ class TS2FXGraphConverter:
 
         cond_node = self.fx_graph.call_function(torch.cond, args, {})
 
-        output_name = node.output().debugName()
-        self.name_to_node[output_name] = cond_node
+        outs = tuple(node.outputs())
+        if len(outs) == 1:
+            output_name = node.output().debugName()
+            self.name_to_node[output_name] = cond_node
+        elif len(outs) > 1:
+            raise RuntimeError("Number of outputs > 1 is not supported yet")
 
     def convert_aten_Bool(self, node: torch._C.Node):
         self._convert_as_noop(node)
@@ -660,6 +668,14 @@ class TS2FXGraphConverter:
         fx_node = self.fx_graph.call_method(target, args)
         output_name = node.output().debugName()
         self.name_to_node[output_name] = fx_node
+
+    def convert_prim_Uninitialized(self, node: torch._C.Node):
+        # `prim::Uninitialized` is inserted by the compiler when it can prove
+        # the value will never be used. It can be introduced by exceptions,
+        # breaks, continues, and returns.
+        # So we add a dummy constant to the graph.
+        output_name = node.output().debugName()
+        self.constant_map[output_name] = torch.Tensor()
 
     def _convert_standard_operators(self, node: torch._C.Node):
         target = kind_to_standard_operators[node.kind()]
@@ -704,10 +720,10 @@ class TS2FXGraphConverter:
                 )
             else:
                 raise ValueError(f"Output {output_name} not found")
-
-        self.fx_graph.output(
-            args[0]
-        )  # Get rid of an extra list wrapped around final output.
+        if args:
+            self.fx_graph.output(
+                args[0]
+            )  # Get rid of an extra list wrapped around final output.
 
 
 class TS2EPConverter:
