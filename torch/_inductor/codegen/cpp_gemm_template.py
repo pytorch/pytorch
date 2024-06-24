@@ -228,9 +228,15 @@ class CppPackedGemmTemplate(CppTemplate):
             L1_cache_size = (
                 torch._C._cpu._L1_cache_size()
             )  # per core cache size in Bytes
+            assert (
+                L1_cache_size > 0
+            ), f"Expect L1_cache_size > 0 but got {L1_cache_size}"
             L2_cache_size = (
                 torch._C._cpu._L2_cache_size()
             )  # per core cache size in Bytes
+            assert (
+                L2_cache_size > 0
+            ), f"Expect L2_cache_size > 0 but got {L2_cache_size}"
             num_byte = torch.tensor([], dtype=self.layout.dtype).element_size()
 
             size_cache_B = K0 * Kc_blocks * N0 * num_byte
