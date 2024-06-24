@@ -3656,7 +3656,10 @@ class TritonTemplateBuffer(TemplateBuffer):
             ), f"Mutated inputs are only allowed for {allowed_set} but got {current_node}"
             device = self.inputs[0].get_device()
             self.outputs.extend(
-                [MutationOutput(NoneLayout(device), buf) for buf in mutated_inputs]
+                [
+                    MutationOutput(NoneLayout(device), buf, self)
+                    for buf in mutated_inputs
+                ]
             )
 
     def get_outputs(self) -> List[ir.Buffer]:
