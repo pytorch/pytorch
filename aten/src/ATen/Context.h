@@ -188,6 +188,8 @@ class TORCH_API Context {
   void setBenchmarkLimitCuDNN(int);
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool);
+  bool deterministicMkldnn() const;
+  void setDeterministicMkldnn(bool);
   bool userEnabledNNPACK() const;
   void setUserEnabledNNPACK(bool e);
 
@@ -358,6 +360,7 @@ class TORCH_API Context {
   c10::once_flag thp_init;
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
+  bool deterministic_mkldnn = false;
   bool _deterministic_algorithms = false;
   bool _deterministic_algorithms_warn_only = false;
   bool _deterministic_fill_uninitialized_memory = true;

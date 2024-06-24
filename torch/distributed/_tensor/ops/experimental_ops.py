@@ -2,17 +2,19 @@
 # implement matrix related ops for distributed tensor
 from typing import List
 
-try:
-    import numpy as np
-except ModuleNotFoundError:
-    np = None  # type: ignore[assignment]
-
 import torch
 from torch.distributed._tensor._op_schema import OpSchema, OutputSharding
 from torch.distributed._tensor.ops.utils import register_prop_rule
 from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
 
+
 aten = torch.ops.aten
+
+
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None  # type: ignore[assignment]
 
 
 @register_prop_rule(aten.slice_backward.default)
