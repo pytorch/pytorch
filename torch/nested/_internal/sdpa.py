@@ -13,8 +13,8 @@ from torch.backends.cuda import (
     mem_efficient_sdp_enabled,
     SDPAParams,
 )
-from torch.nested._internal.nested_tensor import nested_view_from_values_offsets
 from torch.nn.attention import SDPBackend
+
 from .nested_tensor import NestedTensor
 
 log = logging.getLogger(__name__)
@@ -630,6 +630,7 @@ def jagged_scaled_dot_product_attention(
         and isinstance(key, NestedTensor)
         and isinstance(value, NestedTensor)
     )
+    from torch.nested._internal.nested_tensor import nested_view_from_values_offsets
 
     # Special path for non-ragged sequence length (e.g. for SAM where we have a ragged
     # second batch dim instead). For this case, we can just send the dense buffers through
@@ -691,7 +692,6 @@ def jagged_scaled_dot_product_attention(
             False,
             scale=og_scale,
         )
-        from torch.nested._internal.nested_tensor import nested_view_from_values_offsets
 
         # Reshape output to convert nnz to batch_size and seq_len
         attention = nested_view_from_values_offsets(
@@ -734,8 +734,6 @@ def jagged_scaled_dot_product_attention(
             scale=scale,
         )
 
-        from torch.nested._internal.nested_tensor import nested_view_from_values_offsets
-
         # Reshape output to convert nnz to batch_size and seq_len
         return nested_view_from_values_offsets(
             attention.squeeze(0),
@@ -776,10 +774,7 @@ def jagged_scaled_dot_product_attention(
             query, key, value, attn_mask, dropout_p, is_causal, scale=scale
         )[0]
 
-        from torch.nested._internal.nested_tensor import (
-            _load_val_from_tensor,
-            nested_view_from_values_offsets,
-        )
+        from torch.nested._internal.nested_tensor import _load_val_from_tensor
 
         # convert strided layout Nested Tensor back to jagged layout Nested Tensor
         attn_out = attn_out.transpose(1, 2).contiguous().values()
