@@ -3643,7 +3643,7 @@ class TritonTemplateBuffer(TemplateBuffer):
         super().__init__(layout, inputs, make_kernel_render)
         self.debug_extra = debug_extra
         self.mutated_inputs = mutated_inputs
-        self.outputs: List[ir.Buffer] = [self]
+        self.outputs: List[Buffer] = [self]
         if mutated_inputs is not None:
             # Ensure that the mutated inputs are only allowed for certain nodes
             allowed_set = {
@@ -3662,7 +3662,7 @@ class TritonTemplateBuffer(TemplateBuffer):
                 ]
             )
 
-    def get_outputs(self) -> List[ir.Buffer]:
+    def get_outputs(self) -> List[Buffer]:
         return self.outputs
 
     def __str__(self):
@@ -4996,13 +4996,13 @@ class SetSourceTensorKernel(ExternKernelAlloc):
         V.graph.never_reuse_buffers.add(storage_tensor.get_name())
         V.graph.never_reuse_buffers.add(self.get_name())
         device = storage_tensor.get_device()
-        self.outputs: List[ir.Buffer] = [
+        self.outputs: List[Buffer] = [
             self,
             MutationOutput(NoneLayout(device), self_tensor, self),
             MutationOutput(NoneLayout(device), storage_tensor, self),
         ]
 
-    def get_outputs(self) -> List[ir.Buffer]:
+    def get_outputs(self) -> List[Buffer]:
         return self.outputs
 
     def get_inputs_that_alias_output(self):
@@ -5294,7 +5294,7 @@ class FallbackKernel(ExternKernelAlloc):
         # abi-compatible mode, where we retrieve outputs by pass each individual
         # output through the abi-compatible interface.
         self.outputs: Sequence[Any] = []
-        self.mutation_outputs: List[ir.Buffer] = []
+        self.mutation_outputs: List[Buffer] = []
         self.use_runtime_dispatch = False
         self.unbacked_bindings = unbacked_bindings
 
@@ -5382,7 +5382,7 @@ class FallbackKernel(ExternKernelAlloc):
         for info, arg in torch._library.utils.zip_schema(schema, args, kwargs):
             handle_aliasing_and_mutation(info, arg)
 
-    def get_outputs(self) -> List[ir.Buffer]:
+    def get_outputs(self) -> List[Buffer]:
         return [self, *self.mutation_outputs]
 
     def codegen_unbacked_symbol_defs(self, wrapper):
