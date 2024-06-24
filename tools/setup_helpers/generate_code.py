@@ -44,7 +44,9 @@ def generate_code(
     autograd_gen_dir = os.path.join(install_dir, "autograd", "generated")
     for d in (autograd_gen_dir, python_install_dir):
         os.makedirs(d, exist_ok=True)
-    autograd_dir = os.fspath(pathlib.Path(__file__).absolute().parent.parent / "autograd")
+    autograd_dir = os.fspath(
+        pathlib.Path(__file__).absolute().parent.parent / "autograd"
+    )
 
     if subset == "pybindings" or not subset:
         gen_autograd_python(
