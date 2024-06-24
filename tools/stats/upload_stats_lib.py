@@ -3,13 +3,13 @@ import io
 import json
 import os
 import zipfile
-
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import boto3  # type: ignore[import]
 import requests
 import rockset  # type: ignore[import]
+
 
 PYTORCH_REPO = "https://api.github.com/repos/pytorch/pytorch"
 S3_RESOURCE = boto3.resource("s3")

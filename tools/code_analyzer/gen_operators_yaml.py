@@ -2,9 +2,9 @@
 import argparse
 import json
 import sys
+import yaml
 from typing import Any, Dict, List, Optional
 
-import yaml
 from gen_op_registration_allowlist import (
     canonical_name,
     gen_transitive_closure,
@@ -16,6 +16,7 @@ from torchgen.selective_build.operator import (
     SelectiveBuildOperator,
 )
 from torchgen.selective_build.selector import merge_kernel_metadata
+
 
 # Generate YAML file containing the operators used for a specific PyTorch model.
 # ------------------------------------------------------------------------------

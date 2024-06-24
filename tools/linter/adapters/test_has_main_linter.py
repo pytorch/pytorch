@@ -15,6 +15,7 @@ from typing import List, NamedTuple, Optional
 import libcst as cst
 import libcst.matchers as m
 
+
 LINTER_CODE = "TEST_HAS_MAIN"
 
 

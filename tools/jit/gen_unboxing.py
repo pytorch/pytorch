@@ -3,10 +3,9 @@ import argparse
 import os
 import pathlib
 import sys
+import yaml
 from dataclasses import dataclass
 from typing import List, Literal, Sequence, Union
-
-import yaml
 
 from torchgen.api import cpp, unboxing
 from torchgen.api.translate import translate

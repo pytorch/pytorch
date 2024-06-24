@@ -3,6 +3,7 @@ import functools
 import json
 import os
 import pathlib
+import yaml
 from collections import defaultdict, namedtuple, OrderedDict
 from dataclasses import dataclass, field
 from typing import (
@@ -18,8 +19,6 @@ from typing import (
     TypeVar,
     Union,
 )
-
-import yaml
 
 import torchgen.api.dispatcher as dispatcher
 import torchgen.api.meta as meta

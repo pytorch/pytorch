@@ -7,7 +7,6 @@ from typing import Dict, Optional
 from setuptools import distutils  # type: ignore[import]
 
 from .setup_helpers.cmake import CMake, USE_NINJA
-
 from .setup_helpers.env import check_negative_env_flag, IS_64BIT, IS_WINDOWS
 
 

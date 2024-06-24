@@ -2,9 +2,9 @@ import argparse
 import os
 import pathlib
 import sys
+import yaml
 from typing import Any, cast, Optional
 
-import yaml
 
 try:
     # use faster C loader if available

@@ -14,6 +14,7 @@ from tools.stats.upload_stats_lib import (
 )
 from tools.stats.upload_test_stats import process_xml_element
 
+
 TESTCASE_TAG = "testcase"
 SEPARATOR = ";"
 

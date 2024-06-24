@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Set, Tuple
 import requests
 from setuptools import distutils  # type: ignore[import]
 
+
 ALL_SKIPPED_THRESHOLD = 100
 SIMILARITY_THRESHOLD = 0.75
 FAILURE_CHAIN_THRESHOLD = 2

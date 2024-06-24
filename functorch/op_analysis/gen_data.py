@@ -1,7 +1,6 @@
 import csv
-from collections import defaultdict
-
 import yaml
+from collections import defaultdict
 
 import torch
 

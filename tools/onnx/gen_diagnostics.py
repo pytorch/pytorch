@@ -17,12 +17,12 @@ import os
 import string
 import subprocess
 import textwrap
-from typing import Any, Mapping, Sequence
-
 import yaml
+from typing import Any, Mapping, Sequence
 
 from torchgen import utils as torchgen_utils
 from torchgen.yaml_utils import YamlLoader
+
 
 _RULES_GENERATED_COMMENT = """\
 GENERATED CODE - DO NOT EDIT DIRECTLY

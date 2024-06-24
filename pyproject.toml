@@ -20,8 +20,8 @@ target-version = ["py38", "py39", "py310", "py311"]
 
 
 [tool.isort]
-src_paths = ["caffe2", "torch", "torchgen", "functorch", "test"]
-extra_standard_library = ["typing_extensions"]
+src_paths = ["caffe2", "torch", "torchgen", "functorch", "tools", "test"]
+extra_standard_library = ["typing_extensions", "json", "yaml", "tomllib"]
 skip_gitignore = true
 skip_glob = ["third_party/*"]
 atomic = true
@@ -34,8 +34,8 @@ include_trailing_comma = true
 
 
 [tool.usort.known]
-first_party = ["caffe2", "torch", "torchgen", "functorch", "test"]
-standard_library = ["typing_extensions"]
+first_party = ["caffe2", "torch", "torchgen", "functorch", "tools", "test"]
+standard_library = ["typing_extensions", "json", "yaml", "tomllib"]
 
 
 [tool.ruff]

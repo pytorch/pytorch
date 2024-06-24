@@ -5,10 +5,8 @@ import fnmatch
 import pathlib
 import subprocess
 import textwrap
-
-from typing import Any, Dict, List
-
 import yaml
+from typing import Any, Dict, List
 
 
 REPO_ROOT = pathlib.Path(__file__).parent.parent.parent

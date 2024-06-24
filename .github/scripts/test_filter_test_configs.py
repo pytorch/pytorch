@@ -3,10 +3,10 @@
 import json
 import os
 import tempfile
+import yaml
 from typing import Any, Dict, List
 from unittest import main, mock, TestCase
 
-import yaml
 from filter_test_configs import (
     filter,
     filter_selected_test_configs,

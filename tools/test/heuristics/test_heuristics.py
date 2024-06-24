@@ -7,6 +7,7 @@ import unittest
 from typing import Any, Dict, List, Set
 from unittest import mock
 
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent.parent
 sys.path.append(str(REPO_ROOT))
 from tools.test.heuristics.test_interface import TestTD
@@ -22,6 +23,7 @@ from tools.testing.target_determination.heuristics.previously_failed_in_pr impor
     get_previous_failures,
 )
 from tools.testing.test_run import TestRun
+
 
 sys.path.remove(str(REPO_ROOT))
 
