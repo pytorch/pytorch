@@ -736,7 +736,9 @@ def _export_to_aten_ir(
             replace_set_grad_with_hop_pass,
         )
 
-        gm = replace_set_grad_with_hop_pass(gm, export_graph_signature)
+        gm, export_graph_signature = replace_set_grad_with_hop_pass(
+            gm, export_graph_signature
+        )
 
     # Remove nn_module_stack, stack_trace metadata from all placeholders/inputs nodes.
     for _mod in gm.modules():
