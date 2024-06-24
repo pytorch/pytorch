@@ -782,10 +782,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         accessed_bytes = 1 * 8 * 1024 * 64 * torch.float32.itemsize
         num_accesses = 4  # q, k, v reads, one output.
         # TODO: Get rid of this fudge factor
-        # We need this fudge factor for now, since
-        # 1. For some reason the attention output is counted even though it's DCE'd
-        # 2. We also write the extraneous logsumexp
-        num_accesses += 2
+        # We need this fudge factor for now as we write the extraneous logsumexp
+        num_accesses += 1
         self.assertLess(metrics.num_bytes_accessed, accessed_bytes * num_accesses)
 
     @supported_platform

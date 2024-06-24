@@ -949,7 +949,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             binary_attr == "sum"
         ), "For now, only post op sum is supported in QConvPointWiseBinaryPT2E."
 
-        V.graph.mark_buffer_mutated(qaccum)
+        V.graph.mark_buffer_mutated(qaccum.get_name())
         packed = QConvPointWiseBinaryPT2E(
             layout=NoneLayout(qaccum.get_device()),
             inputs=inputs,

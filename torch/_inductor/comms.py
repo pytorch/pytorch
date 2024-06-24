@@ -61,8 +61,10 @@ def raise_comms(
         if is_collective(snode.node):
             cur_comms.append(snode)
         else:
+            for comm in cur_comms:
+                assert len(inverse_users[comm]) > 0
             while len(cur_comms) > 0 and any(
-                comm in node_users[snode] for comm in cur_comms
+                snode in inverse_users[comm] for comm in cur_comms
             ):
                 comm = cur_comms.pop(0)
                 new_order_reversed.append(comm)

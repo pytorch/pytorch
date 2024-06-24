@@ -4805,7 +4805,7 @@ class UserDefinedTritonKernel(ExternKernel):
 
         super().__init__(
             None,
-            NoneLayout(device),  # type: ignore[arg-type]
+            NoneLayout(self.device),  # type: ignore[arg-type]
             inputs,
             tuple(constant_args),
             kwargs,
@@ -4924,7 +4924,7 @@ class InplaceCopyFallback(ExternKernel):
                 "aoti_torch_copy_" if config.abi_compatible else "at::_ops::copy_::call"
             ),
         )
-        V.graph.mark_buffer_mutated(dst.get_name())
+        V.graph.mark_buffer_mutated(inputs[0].get_name())
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
 
