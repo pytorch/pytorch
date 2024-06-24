@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import dataclasses
 import inspect
 import logging
@@ -16,6 +17,7 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
+
 
 log = logging.getLogger("torch._dynamo")
 

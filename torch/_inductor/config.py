@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import os  # noqa: C101
 import sys
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
@@ -9,11 +10,16 @@ def is_fbcode():
     return not hasattr(torch.version, "git_version")
 
 
+def fx_graph_remote_cache_default():
+    if os.environ.get("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE") == "1":
+        return True
+    if os.environ.get("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE") == "0":
+        return False
+    return None
+
+
 # add some debug printouts
 debug = False
-
-# add inf and NaN checkers
-debug_check_inf_and_nan = False
 
 # Whether to disable a progress bar for autotuning
 disable_progress = True
@@ -24,8 +30,11 @@ verbose_progress = False
 # use fx aot graph codegen cache
 fx_graph_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE") == "1"
 
-# use fx aot graph codegen cache
-fx_graph_remote_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE") == "1"
+# use remote fx aot graph codegen cache
+# False: Disables the cache
+# True: Enables the cache
+# None: Not set -- Off for OSS, JustKnobs based for internal
+fx_graph_remote_cache: Optional[bool] = fx_graph_remote_cache_default()
 
 # enable autotune local cache
 autotune_local_cache = True
@@ -173,7 +182,7 @@ force_fuse_int_mm_with_mul = False
 # for pattern torch.mm(a, b.to(dtype)) with cuda tensors,
 # enable torch._inductor.kernel.mm.tuned_mixed_mm fused kernel.
 # Autotune will compare perf with normal cast->then->mm option
-use_mixed_mm = False
+use_mixed_mm = True
 
 # enable runtime numeric check for pre/post grad fx passes
 # floating point provides limited accuracy (about 7 decimal digits for single precision
@@ -187,11 +196,20 @@ fx_passes_numeric_check: Dict[str, Any] = {
     "requires_optimizer": True,
 }
 
-# for pattern torch.mm(a, b.to(dtype)) with cuda tensors, always use
-# torch._inductor.kernel.mm.tuned_mixed_mm's fused kernel.
-# Autotune will not compare with normal cast->then->mm option.
-# (if force_mixed_mm is true, the use_mixed_mm flag will be ignored)
-force_mixed_mm = False
+# mixed_mm_choice can be used to control the behaviour for pattern torch.mm(a, b.to(dtype)) with cuda tensors.
+# The fallback aten implementation is normal cast->then->mm option.
+# If mixed_mm_choice is "default": this flag will be ignored.
+# If mixed_mm_choice is "triton":
+# - Always use torch._inductor.kernel.mm.tuned_mixed_mm's fused kernel.
+# - Autotune will not compare with fallback.
+# If mixed_mm_choice is "aten": always use the fallback aten implementation.
+# If mixed_mm_choice is "heuristic":
+# - Enables the heuristic.
+# - If the heuristic decides to add a config, it will add the config as the first choice.
+# - If autotune is disabled, this config will always be chosen.
+# - If autotune is enabled, it will also compare with fallback aten implementation and fused kernel.
+# The use_mixed_mm flag will be ignored if mixed_mm_choice != "default".
+mixed_mm_choice = "heuristic"
 
 # enable reordering pass for increasing overlap between compute and communication
 reorder_for_compute_comm_overlap = False
@@ -387,7 +405,9 @@ developer_warnings = is_fbcode() or is_nightly_or_source
 # The multiprocessing start method to use for inductor workers in the codecache.
 # "subprocess", "fork", or "spawn"
 def decide_worker_start_method():
-    start_method = os.environ.get("TORCHINDUCTOR_WORKER_START", "fork")
+    start_method = os.environ.get(
+        "TORCHINDUCTOR_WORKER_START", "fork" if is_fbcode() else "subprocess"
+    )
     assert start_method in [
         "subprocess",
         "fork",
@@ -429,12 +449,14 @@ def decide_compile_threads():
     Here are the precedence to decide compile_threads
     1. User can override it by TORCHINDUCTOR_COMPILE_THREADS.  One may want to disable async compiling by
        setting this to 1 to make pdb happy.
-    2. Set to 1 if it's win32 platform or it's a fbcode build
+    2. Set to 1 if it's win32 platform
     3. decide by the number of CPU cores
     """
     if "TORCHINDUCTOR_COMPILE_THREADS" in os.environ:
         return int(os.environ["TORCHINDUCTOR_COMPILE_THREADS"])
-    elif sys.platform == "win32" or is_fbcode():
+    elif sys.platform == "win32":
+        return 1
+    elif is_fbcode() and worker_start_method != "subprocess":
         return 1
     else:
         cpu_count = (
@@ -473,8 +495,7 @@ shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "1") == "1"
 
 # Control if we will do padding for pointwise/reductions
 comprehensive_padding = (
-    os.environ.get("TORCHINDUCTOR_COMPREHENSIVE_PADDING", "0" if is_fbcode() else "1")
-    == "1"
+    os.environ.get("TORCHINDUCTOR_COMPREHENSIVE_PADDING", "1") == "1"
 )
 pad_channels_last = False
 
@@ -674,6 +695,11 @@ class triton:
     # max autotune gemm with cublasLt
     autotune_cublasLt = True
 
+    # Tune the generated Triton kernels at compile time instead of first time they run
+    autotune_at_compile_time = (
+        os.environ.get("TORCHINDUCTOR_TRITON_AUTOTUNE_AT_COMPILE_TIME", "0") == "1"
+    )
+
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = True
     tiling_prevents_reduction_fusion = True
@@ -806,8 +832,8 @@ class cuda:
     # Path to CUDA NVCC.
     # NVCC search order:
     # 1) cuda_cxx set in this config
-    # 2）CUDACXX environment variable
-    # 3）CUDA_HOME environment variable
+    # 2) CUDACXX environment variable
+    # 3) CUDA_HOME environment variable
     # 4) default system search PATH.
     cuda_cxx: Optional[str] = None
 
@@ -834,6 +860,29 @@ class cuda:
     # caused by the op ordering of the "pingpong" memory access
     # pattern used by some Cutlass Kernels.
     cutlass_op_denylist_regex: Optional[str] = "pingpong"
+
+
+# Backend to use for CPU codegen either "cpp" or "halide" (experimental)
+cpu_backend = "cpp"
+
+
+class halide:
+    # Base halide target to use for CPU devices
+    cpu_target = "host"
+
+    # Base halide target to use for CUDA devices
+    gpu_target = "host-cuda"
+
+    # Halide autoscheduler to use, choices are:
+    # "Anderson2021" (gpu-only), "Li2018", "Adams2019" (cpu-only), or "Mullapudi2016" (cpu-only)
+    scheduler_cuda = "Li2018"
+    scheduler_cpu = "Adams2019"
+
+    # Controls `no_asserts` flag passed to Halide target (warning: can false positive)
+    asserts = False
+
+    # Controls `debug` flag passed to Halide target
+    debug = False
 
 
 # create a directory containing lots of debug information

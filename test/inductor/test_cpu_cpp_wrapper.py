@@ -9,7 +9,7 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
 )
-from torch.testing._internal.common_utils import IS_MACOS, slowTest
+from torch.testing._internal.common_utils import IS_MACOS, slowTest, TEST_WITH_ROCM
 from torch.testing._internal.inductor_utils import HAS_CPU
 
 
@@ -68,7 +68,17 @@ test_failures_cpp_wrapper = {
         ("cpp_wrapper",), is_skip=True
     ),
 }
-
+if TEST_WITH_ROCM:
+    test_failures_cpp_wrapper.update(
+        {
+            "test_linear_packed": test_torchinductor.TestFailure(
+                ("cpp_wrapper"), is_skip=True
+            ),
+            "test_linear_packed_dynamic_shapes": test_torchinductor.TestFailure(
+                ("cpp_wrapper"), is_skip=True
+            ),
+        }
+    )
 if config.abi_compatible:
     xfail_list = [
         "test_conv2d_binary_inplace_fusion_failed_cpu",
@@ -85,7 +95,9 @@ if config.abi_compatible:
         "test_qconv2d_relu_cpu",
         "test_qlinear_cpu",
         "test_qlinear_add_cpu",
+        "test_qlinear_add_relu_cpu",
         "test_qlinear_dequant_promotion_cpu",
+        "test_qlinear_gelu_cpu",
         "test_qlinear_relu_cpu",
     ]
     for test_name in xfail_list:
@@ -221,6 +233,7 @@ if RUN_CPU:
         BaseTest("test_int_div", "", test_cpu_repro.CPUReproTests()),
         BaseTest("test_linear1"),
         BaseTest("test_linear2"),
+        BaseTest("test_polar"),
         BaseTest(
             "test_linear_binary",
             "",
@@ -228,7 +241,16 @@ if RUN_CPU:
             torch.backends.mkldnn.is_available()
             and torch.ops.mkldnn._is_mkldnn_bf16_supported(),
         ),
-        BaseTest("test_linear_packed", "", test_cpu_repro.CPUReproTests()),
+        BaseTest(
+            "test_linear_packed",
+            "",
+            test_cpu_repro.CPUReproTests(),
+            torch.backends.mkldnn.is_available()
+            and (
+                torch.ops.mkldnn._is_mkldnn_bf16_supported()
+                or torch.ops.mkldnn._is_mkldnn_fp16_supported()
+            ),
+        ),
         BaseTest(
             "test_lstm_packed_change_input_sizes",
             "cpu",
@@ -239,7 +261,8 @@ if RUN_CPU:
         BaseTest("test_multihead_attention", "cpu", test_cpu_repro.CPUReproTests()),
         BaseTest(
             "test_multi_threading",
-            code_string_count={"py::gil_scoped_release release;": 1},
+            # Two threads compile, so we expect the output code to be printed twice.
+            code_string_count={"py::gil_scoped_release release;": 2},
         ),
         BaseTest("test_profiler_mark_wrapper_call"),
         BaseTest(

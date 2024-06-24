@@ -1,10 +1,10 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import inspect
 import warnings
 from typing import Any, Callable, cast, Optional, Sequence, Tuple
 
 import torch
-
 import torch.distributed._tensor._dispatch as op_dispatch
 import torch.distributed._tensor.random as random
 import torch.nn as nn
@@ -86,16 +86,21 @@ class _ToTorchTensor(torch.autograd.Function):
         )
         tensor_stride = tuple(tensor_stride)
         grad_placements = grad_placements or dtensor_spec.placements
+        grad_spec = DTensorSpec(
+            mesh,
+            grad_placements,
+            tensor_meta=TensorMeta(
+                shape=dtensor_meta.shape,
+                stride=tensor_stride,
+                dtype=dtensor_meta.dtype,
+            ),
+        )
 
         return (
             DTensor(
                 grad_output,
-                mesh,
-                grad_placements,
-                shape=dtensor_meta.shape,
-                dtype=dtensor_meta.dtype,
+                grad_spec,
                 requires_grad=grad_output.requires_grad,
-                stride=tensor_stride,
             ),
             None,
         )
@@ -146,17 +151,23 @@ class _FromTorchTensor(torch.autograd.Function):
                     input = input.contiguous()
                     mesh_broadcast(input, device_mesh, mesh_dim=idx)
 
+        dist_spec = DTensorSpec(
+            device_mesh,
+            placements,
+            tensor_meta=TensorMeta(
+                tensor_shape,
+                tensor_stride,
+                input.dtype,
+            ),
+        )
+
         # We want a fresh Tensor object that shares memory with the input tensor
         dist_tensor = DTensor(
             input.view_as(input),
-            device_mesh,
-            placements,
-            shape=tensor_shape,
-            dtype=input.dtype,
+            dist_spec,
             # requires_grad of the dist tensor depends on if input
             # requires_grad or not
             requires_grad=input.requires_grad,
-            stride=tensor_stride,
         )
         return dist_tensor
 
@@ -202,13 +213,9 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
     def __new__(
         cls,
         local_tensor: torch.Tensor,
-        device_mesh: DeviceMesh,
-        placements: Tuple[Placement, ...],
+        spec: DTensorSpec,
         *,
-        shape: torch.Size,
-        dtype: torch.dtype,
         requires_grad: bool,
-        stride: Tuple[int, ...],
     ) -> "DTensor":
         """
         Construct a DTensor from a local tensor, device mesh, and placement and
@@ -228,19 +235,18 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
 
         # new method instruct wrapper tensor from local_tensor and add
         # placement spec, it does not do actual distribution
+        assert spec.tensor_meta is not None, "TensorMeta should not be None!"
         r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
             cls,
-            shape,
-            strides=stride,
-            dtype=dtype,
+            spec.tensor_meta.shape,
+            strides=spec.tensor_meta.stride,
+            dtype=local_tensor.dtype,
             device=local_tensor.device,
             layout=local_tensor.layout,
             requires_grad=requires_grad,
         )
 
-        tensor_meta = TensorMeta(shape, stride, dtype)
-        # deepcopy and set spec
-        r._spec = DTensorSpec(device_mesh, placements, tensor_meta=tensor_meta)
+        r._spec = spec
         r._local_tensor = local_tensor
         return r
 
@@ -264,14 +270,20 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         ), "Expecting spec to be not None from `__tensor_flatten__` return value!"
         local_tensor = inner_tensors["_local_tensor"]
         spec, requires_grad = flatten_spec
-        return DTensor(
-            local_tensor,
+        unflatten_tensor_meta = TensorMeta(
+            shape=outer_size,
+            stride=outer_stride,
+            dtype=spec.tensor_meta.dtype,
+        )
+        unflatten_spec = DTensorSpec(
             spec.mesh,
             spec.placements,
-            shape=outer_size,
-            dtype=spec.tensor_meta.dtype,
+            tensor_meta=unflatten_tensor_meta,
+        )
+        return DTensor(
+            local_tensor,
+            unflatten_spec,
             requires_grad=requires_grad,
-            stride=outer_stride,
         )
 
     def __coerce_tangent_metadata__(self):
@@ -282,10 +294,11 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         ]
         return self.redistribute(device_mesh=self.device_mesh, placements=placements)
 
-    def __coerce_same_metadata_as_tangent__(self, metadata_tensor):
+    def __coerce_same_metadata_as_tangent__(self, flatten_spec):
+        (spec, _) = flatten_spec  # Result of tensor_flatten()
         return self.redistribute(
             device_mesh=self.device_mesh,
-            placements=metadata_tensor.placements,
+            placements=spec.placements,
         )
 
     @classmethod
@@ -406,6 +419,9 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         .. note:: `to_local` is differentiable, the `requires_grad` of the local tensor returned
             will depend on if the `DTensor` requires_grad or not.
         """
+        if not torch.is_grad_enabled():
+            return self._local_tensor
+
         if grad_placements is not None and not isinstance(grad_placements, tuple):
             grad_placements = tuple(grad_placements)
         return _ToTorchTensor.apply(
@@ -515,6 +531,38 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         .. note:: placements is a read-only property, it can not be set.
         """
         return self._spec.placements
+
+    def __create_write_items__(self, fqn: str, object: Any):
+        from torch.distributed.checkpoint.planner_helpers import (
+            _create_write_items_for_dtensor,
+        )
+
+        if hasattr(self._local_tensor, "__create_write_items__"):
+            return self._local_tensor.__create_write_items__(fqn, object)  # type: ignore[attr-defined]
+        elif isinstance(self._local_tensor, torch.Tensor):
+            return [_create_write_items_for_dtensor(fqn, object)]
+        else:
+            raise RuntimeError("Unsupported tensor type!")
+
+    def __create_chunk_list__(self):
+        from torch.distributed.checkpoint.planner_helpers import (
+            _create_chunk_from_dtensor,
+        )
+
+        if hasattr(self._local_tensor, "__create_chunk_list__"):
+            return self._local_tensor.__create_chunk_list__()  # type: ignore[attr-defined]
+        elif isinstance(self._local_tensor, torch.Tensor):
+            return [_create_chunk_from_dtensor(self)]
+        else:
+            raise RuntimeError("Unsupported tensor type!")
+
+    def __get_tensor_shard__(self, index):
+        if hasattr(self._local_tensor, "__get_tensor_shard__"):
+            return self._local_tensor.__get_tensor_shard__(index)  # type: ignore[attr-defined]
+        elif isinstance(self._local_tensor, torch.Tensor):
+            return self.to_local()
+        else:
+            raise RuntimeError("Unsupported tensor type!")
 
 
 def distribute_tensor(
@@ -638,14 +686,19 @@ def distribute_tensor(
     assert local_tensor is not None, "distributing a tensor should not be None"
     # detach the local tensor passed to DTensor since after the construction
     # of DTensor, autograd would work on top of DTensor instead of local tensor
+    spec = DTensorSpec(
+        mesh=device_mesh,
+        placements=placements,
+        tensor_meta=TensorMeta(
+            shape=tensor.size(),
+            stride=tensor.stride(),
+            dtype=tensor.dtype,
+        ),
+    )
     return DTensor(
         local_tensor.requires_grad_(tensor.requires_grad),
-        device_mesh,
-        placements,
-        shape=tensor.size(),
-        dtype=tensor.dtype,
+        spec,
         requires_grad=tensor.requires_grad,
-        stride=tensor.stride(),
     )
 
 

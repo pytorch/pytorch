@@ -831,65 +831,75 @@ enum class ScalingType {
   RowWise,
   Error
 };
+/*
+ * Scaling Type Determination:
+ * ---------------------------
+ * Conditions and corresponding Scaling Types:
+ *
+ * - If scale_a.numel() == 1 && scale_b.numel() == 1:
+ *   - Returns TensorWise.
+ *
+ * - Else if scale_a.dim() == 1 && scale_a.size(0) == dim_m && scale_b.size(0) == dim_n:
+ *   - Returns RowWise.
+ *
+ * - Otherwise:
+ *   - Returns Error.
+ */
 
 // Validates the scale tensors to scaled_mm
 // And returns the type of scaling/which kernel to use
 ScalingType get_scaling_type(
-    const c10::optional<at::Tensor>& scale_a,
-    const c10::optional<at::Tensor>& scale_b,
+    const at::Tensor& scale_a,
+    const at::Tensor& scale_b,
     int64_t dim_m,
     int64_t dim_n) {
+  // Both Per-Tensor and Row-wise scaling expect fp32 tensors
   TORCH_CHECK(
-      scale_a.has_value() == scale_b.has_value(),
-      "Both scale_a and scale_b must be present or absent.");
+      scale_a.scalar_type() == kFloat && scale_b.scalar_type() == kFloat,
+      "Both scale_a and scale_b must be float (fp32) tensors.");
 
-  if (scale_a.has_value()) {
-    // Both Per-Tensor and Row-wise scaling expect fp32 tensors
-    TORCH_CHECK(
-        scale_a->scalar_type() == kFloat && scale_b->scalar_type() == kFloat,
-        "Both scale_a and scale_b must be float (fp32) tensors.");
 
-    // Check the singluar scale case for per-tensor scaling
-    if (scale_a->numel() == 1 && scale_b->numel() == 1) {
-      return ScalingType::TensorWise;
-    } else if (scale_a->dim() == 1 && scale_a->size(0) == dim_m) {
+  // Check the singluar scale case for per-tensor scaling
+  if (scale_a.numel() == 1 && scale_b.numel() == 1) {
+    return ScalingType::TensorWise;
+  } else if (scale_a.dim() == 1 && scale_a.size(0) == dim_m) {
 // Check the per-row scaling case
 #if !defined(USE_ROCM) && !defined(_MSC_VER) || \
     (defined(USE_ROCM) && ROCM_VERSION >= 60000)
-      TORCH_CHECK(
-          scale_a->dim() == 1 && scale_b->dim() == 1,
-          "Both scale_a and scale_b must be 1-dimensional tensors");
-      TORCH_CHECK(
-          scale_b->size(0) == dim_n,
-          "For row-wise scaling, scale_b must have size ",
-          dim_n,
-          " but got ",
-          scale_b->size(0),
-          ".");
-      TORCH_CHECK(
-          scale_a->is_contiguous() && scale_b->is_contiguous(),
-          "Both scale_a and scale_b must be contiguous.");
-       return ScalingType::RowWise;
+    TORCH_CHECK(
+        scale_a.dim() == 1 && scale_b.dim() == 1,
+        "Both scale_a and scale_b must be 1-dimensional tensors");
+    TORCH_CHECK(
+        scale_b.size(0) == dim_n,
+        "For row-wise scaling, scale_b must have size ",
+        dim_n,
+        " but got ",
+        scale_b.size(0),
+        ".");
+    TORCH_CHECK(
+        scale_a.is_contiguous() && scale_b.is_contiguous(),
+        "Both scale_a and scale_b must be contiguous.");
+    return ScalingType::RowWise;
 #else
-      TORCH_CHECK(false, "Per-row scaling is not supported for this platform!");
-      return ScalingType::Error;
+    TORCH_CHECK(false, "Per-row scaling is not supported for this platform!");
+    return ScalingType::Error;
 #endif // !defined(USE_ROCM) && !defined(_MSC_VER) || (defined(USE_ROCM) &&
        // ROCM_VERSION >= 60000)
-    } else {
-      TORCH_CHECK(
-          false,
-          "For row-wise scaling, scale_a must be size ",
-          dim_m,
-          " but got ",
-          scale_a->numel(),
-          " and scale_b must be size ",
-          dim_n,
-          " but got ",
-          scale_b->numel(),
-          ".");
-      // Unreachable
-      return ScalingType::RowWise;
-    }
+  } else {
+    // Prettier Error Case messaging
+    TORCH_CHECK(
+        false,
+        "For row-wise scaling, scale_a must be size ",
+        dim_m,
+        " but got ",
+        scale_a.numel(),
+        " and scale_b must be size ",
+        dim_n,
+        " but got ",
+        scale_b.numel(),
+        ".");
+    // Unreachable
+    return ScalingType::RowWise;
   }
   return ScalingType::Error;
 }
@@ -914,17 +924,16 @@ ScalingType get_scaling_type(
 //    - `scale_result`: a scalar tensor with the scale of the output, only utilized if the output is a float8 type
 //    - `use_fast_accum`: if true, enables fast float8 accumulation
 //    - `out`: a reference to the output tensor
-//    - `amax`: a reference to the amax tensor of the output, only mutated if the output is a float8 type and will be updated inplace
 
-std::tuple<Tensor&, Tensor&>
+Tensor&
 _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
+          const Tensor& scale_a,
+          const Tensor& scale_b,
           const std::optional<at::Tensor>& bias,
-          std::optional<c10::ScalarType> out_dtype,
-          const std::optional<at::Tensor>& scale_a,
-          const std::optional<at::Tensor>& scale_b,
           const std::optional<at::Tensor>& scale_result,
+          std::optional<c10::ScalarType> out_dtype,
           bool use_fast_accum,
-          Tensor& out, Tensor& amax) {
+          Tensor& out) {
   // Check sizes
   bool allowed_device = _scaled_mm_allowed_device();
   TORCH_CHECK(allowed_device, "torch._scaled_mm is only supported on CUDA devices with compute capability >= 9.0 or 8.9, or ROCm MI300+");
@@ -954,7 +963,6 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
        mat2.sizes()[1], " must be divisible by 16");
   // Check types
   TORCH_CHECK(!out_dtype || *out_dtype == out.scalar_type(), "out_dtype must match output matrix type");
-  TORCH_CHECK(amax.scalar_type() == kFloat, "amax must be a float scalar");
   TORCH_CHECK(isFloat8Type(mat1.scalar_type()), "Expected mat1 to be Float8 matrix got ", mat1.scalar_type());
   TORCH_CHECK(isFloat8Type(mat2.scalar_type()), "Expected mat2 to be Float8 matrix got ", mat2.scalar_type());
   // Type restrictions imposed by CuBLASLt as of CUDA-12.1
@@ -972,19 +980,17 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   }
   {
     auto bias_ = bias.value_or(Tensor());
-    auto scale_a_ = scale_a.value_or(Tensor());
-    auto scale_b_ = scale_b.value_or(Tensor());
     auto scale_result_ = scale_result.value_or(Tensor());
-    TensorArg targs[]{{out, "out", 0}, {amax, "amax", 1}, {mat1, "mat1", 2}, {mat2, "mat2", 3},
-                      {bias_, "bias", 4}, {scale_a_, "scale_a", 5}, {scale_b_, "scale_b", 6},
-                      {scale_result_, "scale_result", 7}};
+
+    TensorArg targs[]{{out, "out", 0}, {mat1, "mat1", 1}, {mat2, "mat2", 2},
+                      {bias_, "bias", 3}, {scale_a, "scale_a", 4}, {scale_b, "scale_b", 5},
+                      {scale_result_, "scale_result", 6}};
     checkAllSameGPU(__func__, targs);
   }
   // Validation checks have passed lets resize the output to actual size
   IntArrayRef mat1_sizes = mat1.sizes();
   IntArrayRef mat2_sizes = mat2.sizes();
   at::native::resize_output(out, {mat1_sizes[0], mat2_sizes[1]});
-  at::native::resize_output(amax, {});
 
   // We are doing row-wise scaling
   if (scaling_choice == ScalingType::RowWise) {
@@ -992,17 +998,21 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
     at::cuda::detail::f8f8bf16_rowwise(
         mat1,
         mat2,
-        scale_a.value(),
-        scale_b.value(),
+        scale_a,
+        scale_b,
         bias,
         use_fast_accum,
         out);
-    return {out, amax};
+    return out;
   }
 
   cublasCommonArgs args(mat1, mat2, out);
   const auto out_dtype_ = args.result->scalar_type();
   TORCH_CHECK(args.transa == 't' && args.transb == 'n', "Only multiplication of row-major and column-major matrices is supported by cuBLASLt");
+
+  // Some scaled_gemms require an amax to populate lets create one here
+  Tensor amax = at::empty({0}, mat1.options().dtype(ScalarType::Float));
+
 #ifdef USE_ROCM
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
   if (tuning_ctx->IsTunableOpEnabled()) {
@@ -1045,11 +1055,11 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
       params.n = args.n;
       params.k = args.k;
       params.a = args.mata->data_ptr();
-      params.a_scale_ptr = scale_a ? scale_a->data_ptr() : nullptr;
+      params.a_scale_ptr = scale_a.data_ptr();
       params.lda = args.lda;
       params.a_dtype = args.mata->scalar_type();
       params.b = args.matb->data_ptr();
-      params.b_scale_ptr = scale_b ? scale_b->data_ptr() : nullptr;
+      params.b_scale_ptr = scale_b.data_ptr();
       params.ldb = args.ldb;
       params.b_dtype = args.matb->scalar_type();
       params.bias_ptr = bias ? bias->data_ptr(): nullptr;
@@ -1094,11 +1104,11 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
         args.n,
         args.k,
         args.mata->data_ptr(),
-        scale_a ? scale_a->data_ptr() : nullptr,
+        scale_a.data_ptr(),
         args.lda,
         args.mata->scalar_type(),
         args.matb->data_ptr(),
-        scale_b ? scale_b->data_ptr() : nullptr,
+        scale_b.data_ptr(),
         args.ldb,
         args.matb->scalar_type(),
         bias ? bias->data_ptr(): nullptr,
@@ -1115,26 +1125,20 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
         use_fast_accum);
   }
 
-#if defined(USE_ROCM) && ROCM_VERSION >= 60000 && ROCM_VERSION < 60200
-  // ROCm's hipBLASLt does not support amax before 6.2, so calculate separately
-  amax = at::max(at::abs(out.to(kFloat)));
-#endif
-
-  return {out, amax};
+  return out;
 }
 
-std::tuple<Tensor, Tensor>
+Tensor
 _scaled_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
+          const Tensor& scale_a,
+          const Tensor& scale_b,
           const std::optional<at::Tensor>& bias,
-          std::optional<c10::ScalarType> out_dtype,
-          const std::optional<at::Tensor>& scale_a,
-          const std::optional<at::Tensor>& scale_b,
           const std::optional<at::Tensor>& scale_result,
+          std::optional<c10::ScalarType> out_dtype,
           bool use_fast_accum) {
   const auto out_dtype_ = out_dtype.value_or(mat_a.scalar_type());
   Tensor out = at::empty({0}, mat_a.options().dtype(out_dtype_));
-  Tensor amax = at::empty({0}, mat_a.options().dtype(ScalarType::Float));
-  return _scaled_mm_out_cuda(mat_a, mat_b, bias, out_dtype, scale_a, scale_b, scale_result, use_fast_accum, out, amax);
+  return _scaled_mm_out_cuda(mat_a, mat_b, scale_a, scale_b, bias, scale_result, out_dtype, use_fast_accum, out);
 }
 
 } // namespace at::native

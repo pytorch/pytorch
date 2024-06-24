@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Tracing.
 
 This module contains functionality to support the JIT's tracing frontend, notably:
@@ -654,7 +655,12 @@ def analyze_ts_result_with_export_result(export, trace):
         if type(orig) != type(loaded):
             return False
 
-        if isinstance(orig, torch.Tensor):
+        if isinstance(orig, torch._subclasses.FakeTensor):
+            # Skip for FakeTensor.
+            return True
+        elif isinstance(orig, torch.Tensor):
+            if orig.dtype != loaded.dtype:
+                return False
             if not torch.allclose(orig, loaded):
                 return False
         else:
@@ -1039,6 +1045,15 @@ def trace(
 
         def _log_exportability(func_to_export, export_func, export_args, export_type):
             try:
+                traced_result = func_to_export(*export_args)
+            except Exception as e:
+                _ = e
+                log_torch_jit_trace_exportability(
+                    "trace", str(export_type), str(_ExportOutcome.SUCCESS), "succeeded"
+                )
+                return
+
+            try:
                 ep_module = export_func(func_to_export, export_args)
             except Exception as e:
                 log_torch_jit_trace_exportability(
@@ -1054,15 +1069,6 @@ def trace(
             except Exception as e:
                 log_torch_jit_trace_exportability(
                     "trace", str(export_type), str(_ExportOutcome.FAILED_TO_RUN), str(e)
-                )
-                return
-
-            try:
-                traced_result = func_to_export(*export_args)
-            except Exception as e:
-                _ = e
-                log_torch_jit_trace_exportability(
-                    "trace", str(export_type), str(_ExportOutcome.SUCCESS), "succeeded"
                 )
                 return
 

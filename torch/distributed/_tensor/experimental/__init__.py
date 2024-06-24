@@ -1,8 +1,10 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from contextlib import contextmanager
 
 from torch.distributed._tensor.api import DTensor
 from torch.distributed._tensor.experimental.local_map import local_map
+
 
 __all__ = ["local_map", "implicit_replication"]
 

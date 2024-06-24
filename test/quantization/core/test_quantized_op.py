@@ -23,7 +23,7 @@ hu.assert_deadline_disabled()
 
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_utils import TestCase
-from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN, IS_MACOS, BUILD_WITH_CAFFE2, IS_SANDCASTLE
+from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN, IS_MACOS, IS_SANDCASTLE
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM, skipIfNoQNNPACK, skipIfNoONEDNN
 from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine, supported_qengines, override_qengines, _snr
@@ -4052,6 +4052,7 @@ class TestQuantizedLinear(TestCase):
            use_channelwise=st.sampled_from([False]))  # channelwise currently not supported for qlinear cudnn
     @skipIfNoFBGEMM
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
+    @unittest.skipIf(TEST_CUDNN and torch.backends.cudnn.version() == 90100, "expected failure on cuDNN 9.1.0")
     @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
     @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
     # TODO: check with yang regarding CUDNN flags
@@ -4456,54 +4457,7 @@ class TestQuantizedEmbeddingOps(TestCase):
             self.assertEqual(unpacked_weight.q_per_channel_scales(), qweight.q_per_channel_scales())
             self.assertEqual(unpacked_weight.q_per_channel_zero_points(), qweight.q_per_channel_zero_points())
 
-        # compare against C2 to ensure numerical equivalency.
-        from caffe2.python import core, workspace
-        conversion_op = "FloatToFused8BitRowwiseQuantized" if data_type == torch.float32 else "HalfFloatToFused8BitRowwiseQuantized"
-        reverse_conversion_op = None
-        if bit_rate == 4:
-            conversion_op = "FloatToFused4BitRowwiseQuantized" if data_type == torch.float32 else "HalfToFused4BitRowwiseQuantized"
-            reverse_conversion_op = "Fused4BitRowwiseQuantizedToFloat"
-        elif bit_rate == 2:
-            conversion_op = "FloatToFused2BitRowwiseQuantized" if data_type == torch.float32 else "HalfToFused2BitRowwiseQuantized"
-            reverse_conversion_op = "Fused2BitRowwiseQuantizedToFloat"
 
-        def get_c2_weights(weights, engine_str):
-            workspace.ResetWorkspace()
-
-            workspace.FeedBlob("weights", weights)
-            workspace.RunOperatorOnce(
-                core.CreateOperator(
-                    conversion_op, ["weights"], ["quantized_weights"], engine=engine_str
-                )
-            )
-            emb_q = workspace.FetchBlob("quantized_weights")
-            if bit_rate == 4 or bit_rate == 2:
-                workspace.RunOperatorOnce(
-                    core.CreateOperator(
-                        reverse_conversion_op, ["quantized_weights"], ["dequantized_weights"]
-                    )
-                )
-                dequantized_data = torch.from_numpy(workspace.FetchBlob("dequantized_weights"))
-            else:
-                dequantized_data = torch.ops._caffe2.Fused8BitRowwiseQuantizedToFloat(
-                    torch.tensor(emb_q)
-                )
-            return torch.from_numpy(emb_q), dequantized_data
-
-        if optimized_qparams:
-            engine = "GREEDY"
-        else:
-            engine = ""
-
-        # C2 quantization needs the memory format of Tensor to be `continuous`, otherwise it will
-        # throw exceptions. torch.clone() will make the memory format to be `continuous`
-        c2_copy = torch.clone(weights)
-        w_packed_c2, w_unpacked_c2 = get_c2_weights(c2_copy, engine)
-
-        # Compare packed weights against C2.
-        np.testing.assert_allclose(w_packed.numpy(), w_packed_c2.numpy(), atol=1e-6, rtol=1e-6)
-        # Compare unpacked weights against C2
-        np.testing.assert_allclose(w_unpacked.numpy(), w_unpacked_c2.numpy(), atol=1e-6, rtol=1e-6)
 
 
     def _test_embedding_bag_unpack_fn(self, pack_fn, unpack_fn, num_embeddings, embedding_dim, bit_rate,
@@ -4522,47 +4476,6 @@ class TestQuantizedEmbeddingOps(TestCase):
         for weight in split_weights:
             self._test_embedding_bag_unpack_impl(pack_fn, unpack_fn, bit_rate, optimized_qparams, weight)
 
-
-    """ Tests the correctness of the embedding_bag_8bit pack/unpack op against C2 """
-    @unittest.skipIf(not BUILD_WITH_CAFFE2, "Test needs Caffe2")
-    @given(num_embeddings=st.integers(10, 100),
-           embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
-           num_batches=st.integers(1, 5),
-           data_type=st.sampled_from([np.float32, np.float16]),)
-    def test_embedding_bag_byte_unpack(self, num_embeddings, embedding_dim, num_batches, data_type):
-        pack_fn = torch.ops.quantized.embedding_bag_byte_prepack
-        unpack_fn = torch.ops.quantized.embedding_bag_byte_unpack
-
-        self._test_embedding_bag_unpack_fn(
-            pack_fn, unpack_fn, num_embeddings, embedding_dim, 8, False, num_batches, data_type=data_type)
-
-    """ Tests the correctness of the embedding_bag_4bit pack/unpack op against C2 """
-    @unittest.skipIf(not BUILD_WITH_CAFFE2, "Test needs Caffe2")
-    @given(num_embeddings=st.integers(10, 100),
-           embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
-           optimized_qparams=st.booleans(),
-           data_type=st.sampled_from([np.float32, np.float16]),)
-    def test_embedding_bag_4bit_unpack(self, num_embeddings, embedding_dim, optimized_qparams, data_type):
-        pack_fn = torch.ops.quantized.embedding_bag_4bit_prepack
-        unpack_fn = torch.ops.quantized.embedding_bag_4bit_unpack
-
-        # 4bit and 2bit quantization right now only works for 2D Tensor so we set the num_batches to 1
-        self._test_embedding_bag_unpack_fn(
-            pack_fn, unpack_fn, num_embeddings, embedding_dim, 4, optimized_qparams, 1, data_type=data_type)
-
-    """ Tests the correctness of the embedding_bag_2bit pack/unpack op against C2 """
-    @unittest.skipIf(not BUILD_WITH_CAFFE2, "Test needs Caffe2")
-    @given(num_embeddings=st.integers(10, 100),
-           embedding_dim=st.integers(5, 50).filter(lambda x: x % 8 == 0),
-           optimized_qparams=st.booleans(),
-           data_type=st.sampled_from([np.float32, np.float16]),)
-    def test_embedding_bag_2bit_unpack(self, num_embeddings, embedding_dim, optimized_qparams, data_type):
-        pack_fn = torch.ops.quantized.embedding_bag_2bit_prepack
-        unpack_fn = torch.ops.quantized.embedding_bag_2bit_unpack
-
-        # 4bit and 2bit quantization right now only works for 2D Tensor so we set the num_batches to 1
-        self._test_embedding_bag_unpack_fn(
-            pack_fn, unpack_fn, num_embeddings, embedding_dim, 2, optimized_qparams, 1, data_type=data_type)
 
 
     def embedding_bag_rowwise_offsets_run(

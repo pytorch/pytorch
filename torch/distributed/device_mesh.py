@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
 import math
@@ -5,10 +6,9 @@ import threading
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
-
 from torch.distributed import is_available
+from torch.utils._typing_utils import not_none
 
-from ..utils._typing_utils import not_none
 
 __all__ = ["init_device_mesh", "DeviceMesh"]
 
@@ -62,6 +62,9 @@ else:
         def __init__(self) -> None:
             self.mesh_stack: List[DeviceMesh] = []
             self.child_to_parent_mapping: Dict[DeviceMesh, DeviceMesh] = {}
+            self.mesh_dim_group_options: Dict[
+                int, Tuple[str, Optional[ProcessGroup.Options]]
+            ] = {}
 
         def get_current_mesh(self) -> "DeviceMesh":
             if len(self.mesh_stack) == 0:
@@ -154,6 +157,14 @@ else:
                     f"Available mesh dimensions are: mesh_dim_names={device_mesh.mesh_dim_names}",
                 )
             return not_none(device_mesh.mesh_dim_names.index(mesh_dim_name))
+
+        def _set_mesh_dim_group_options(
+            self,
+            dim: int,
+            backend: str,
+            pg_options: Optional[ProcessGroup.Options] = None,
+        ) -> None:
+            self.mesh_dim_group_options[dim] = (backend, pg_options)
 
     _mesh_resources: _MeshEnv = _MeshEnv()
 
@@ -312,10 +323,24 @@ else:
                     for dim_mesh in pg_ranks_by_dim:
                         subgroup_ranks = dim_mesh.tolist()
 
+                        # Respect dim group options specified via _MeshEnv.set_dim_group_options().
+                        # Inherit from the parent group if no options are specified for the group.
+                        if dim in _mesh_resources.mesh_dim_group_options:
+                            (
+                                backend,
+                                pg_options,
+                            ) = _mesh_resources.mesh_dim_group_options[dim]
+                        else:
+                            backend, pg_options = None, None
+
                         # We temporarily revert the re-use subgroup, since it breaks two internal tests.
                         # Temporarily reverting to resolve test timeout while root-causing.
                         # TODO: Add two tests to cover internal tests scenarios and re-enable reuse subgroup if exists.
-                        dim_group = new_group(ranks=subgroup_ranks)
+                        dim_group = new_group(
+                            ranks=subgroup_ranks,
+                            backend=backend,
+                            pg_options=pg_options,
+                        )
 
                         # only add to dim_groups if the current rank in the subgroup
                         if self.get_rank() in subgroup_ranks:
@@ -445,48 +470,50 @@ else:
             submesh = _mesh_resources.create_child_mesh(self, mesh_dim_names)
             return submesh
 
-        def get_group(
-            self, mesh_dim: Optional[Union[int, str]] = None
-        ) -> Union[ProcessGroup, List[ProcessGroup]]:
+        def get_group(self, mesh_dim: Optional[Union[int, str]] = None) -> ProcessGroup:
             """
-            Returns a list of ProcessGroups corresponding to the mesh dimensions, or
-            returns a single ProcessGroup if mesh_dim is specified or the given mesh has
-            only one mesh dimension.
+            Returns the single ProcessGroup specified by mesh_dim, or, if mesh_dim is not specified and the
+            DeviceMesh is 1-dimensional, returns the only ProcessGroup in the mesh.
 
             Args:
                 mesh_dim (str/int, optional): it can be the name of the mesh dimension or the index
                 of the mesh dimension. Default is None.
 
             Returns:
-                A list of :class:`ProcessGroup` object when `mesh_dim` is not specified for
-                a DeviceMesh with more than 1 dimension; otherwise, returns a single
-                :class:`ProcessGroup` object.
+                A :class:`ProcessGroup` object.
             """
             if not hasattr(self, "_dim_group_infos"):
                 raise RuntimeError("DeviceMesh process groups not initialized!")
 
-            if self.mesh.ndim == 1:
-                return not_none(
-                    _find_pg_by_ranks_and_tag(*self._dim_group_infos[0][:2])
+            if self.mesh.ndim > 1 and mesh_dim is None:
+                raise RuntimeError(
+                    f"Found the DeviceMesh have {self.mesh.ndim} dimensions",
+                    "Optional kwarg `mesh_dim` needs to be specified when device_mesh.ndim > 1.",
+                    "If you want to get the list of all the ProcessGroups in the DeviceMesh,"
+                    "please use `get_all_groups()` instead.",
                 )
 
-            if mesh_dim is not None:
-                if isinstance(mesh_dim, str):
-                    mesh_dim = _mesh_resources.get_mesh_dim_by_name(self, mesh_dim)
-                return not_none(
-                    _find_pg_by_ranks_and_tag(*self._dim_group_infos[mesh_dim][:2])
-                )
+            if self.mesh.ndim == 1 and mesh_dim is None:
+                mesh_dim = 0
             else:
-                dim_groups = []
-                for ith_dim in range(self.mesh.ndim):
-                    dim_groups.append(
-                        not_none(
-                            _find_pg_by_ranks_and_tag(
-                                *self._dim_group_infos[ith_dim][:2]
-                            )
-                        )
-                    )
-                return dim_groups
+                mesh_dim = (
+                    _mesh_resources.get_mesh_dim_by_name(self, mesh_dim)
+                    if isinstance(mesh_dim, str)
+                    else mesh_dim
+                )
+
+            return not_none(
+                _find_pg_by_ranks_and_tag(*self._dim_group_infos[mesh_dim][:2])  # type: ignore[index]
+            )
+
+        def get_all_groups(self) -> List[ProcessGroup]:
+            """
+            Returns a list of ProcessGroups for all mesh dimensions.
+
+            Returns:
+                A list of :class:`ProcessGroup` object.
+            """
+            return [self.get_group(i) for i in range(self.mesh.ndim)]
 
         @staticmethod
         def from_group(

@@ -289,6 +289,9 @@ test_python_shard() {
 
   # Bare --include flag is not supported and quoting for lint ends up with flag not being interpreted correctly
   # shellcheck disable=SC2086
+
+  # modify LD_LIBRARY_PATH to ensure it has the conda env.
+  # This set of tests has been shown to be buggy without it for the split-build
   time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS" --verbose $PYTHON_TEST_EXTRA_OPTION
 
   assert_git_not_dirty
@@ -347,17 +350,31 @@ test_inductor_distributed() {
   assert_git_not_dirty
 }
 
-test_inductor() {
-  python tools/dynamo/verify_dynamo.py
-  python test/run_test.py --inductor --include test_modules test_ops test_ops_gradients test_torch --verbose
-  # Do not add --inductor for the following inductor unit tests, otherwise we will fail because of nested dynamo state
-  python test/run_test.py --include inductor/test_torchinductor inductor/test_torchinductor_opinfo inductor/test_aot_inductor --verbose
+test_inductor_shard() {
+  if [[ -z "$NUM_TEST_SHARDS" ]]; then
+    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
+    exit 1
+  fi
 
+  python tools/dynamo/verify_dynamo.py
+  python test/run_test.py --inductor \
+    --include test_modules test_ops test_ops_gradients test_torch \
+    --shard "$1" "$NUM_TEST_SHARDS" \
+    --verbose
+
+  # Do not add --inductor for the following inductor unit tests, otherwise we will fail because of nested dynamo state
+  python test/run_test.py \
+    --include inductor/test_torchinductor inductor/test_torchinductor_opinfo inductor/test_aot_inductor \
+    --shard "$1" "$NUM_TEST_SHARDS" \
+    --verbose
+}
+
+test_inductor_aoti() {
   # docker build uses bdist_wheel which does not work with test_aot_inductor
   # TODO: need a faster way to build
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
-      BUILD_AOT_INDUCTOR_TEST=1 python setup.py develop
-      CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_aoti_inference
+    BUILD_AOT_INDUCTOR_TEST=1 python setup.py develop
+    CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_aoti_inference
   fi
 }
 
@@ -368,7 +385,7 @@ test_inductor_cpp_wrapper_abi_compatible() {
 
   echo "Testing Inductor cpp wrapper mode with TORCHINDUCTOR_ABI_COMPATIBLE=1"
   # cpu stack allocation causes segfault and needs more investigation
-  python test/run_test.py --include inductor/test_cpu_cpp_wrapper
+  PYTORCH_TESTING_DEVICE_ONLY_FOR="" python test/run_test.py --include inductor/test_cpu_cpp_wrapper
   python test/run_test.py --include inductor/test_cuda_cpp_wrapper
 
   TORCHINDUCTOR_CPP_WRAPPER=1 python benchmarks/dynamo/timm_models.py --device cuda --accuracy --amp \
@@ -548,6 +565,11 @@ test_single_dynamo_benchmark() {
 test_inductor_micro_benchmark() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   python benchmarks/gpt_fast/benchmark.py --output "${TEST_REPORTS_DIR}/gpt_fast_benchmark.csv"
+}
+
+test_inductor_halide() {
+  python test/run_test.py --include inductor/test_halide.py --verbose
+  assert_git_not_dirty
 }
 
 test_dynamo_benchmark() {
@@ -1169,15 +1191,21 @@ test_executorch() {
 
   pushd /executorch
 
-  # NB: We need to build ExecuTorch runner here and not inside the Docker image
-  # because it depends on PyTorch
+  export PYTHON_EXECUTABLE=python
+  export EXECUTORCH_BUILD_PYBIND=ON
+  export CMAKE_ARGS="-DEXECUTORCH_BUILD_XNNPACK=ON -DEXECUTORCH_BUILD_KERNELS_QUANTIZED=ON"
+
+  # NB: We need to rebuild ExecuTorch runner here because it depends on PyTorch
+  # from the PR
   # shellcheck disable=SC1091
-  source .ci/scripts/utils.sh
-  build_executorch_runner "cmake"
+  source .ci/scripts/setup-linux.sh cmake
+
+  echo "Run ExecuTorch unit tests"
+  pytest -v -n auto
+  # shellcheck disable=SC1091
+  LLVM_PROFDATA=llvm-profdata-12 LLVM_COV=llvm-cov-12 bash test/run_oss_cpp_tests.sh
 
   echo "Run ExecuTorch regression tests for some models"
-  # NB: This is a sample model, more can be added here
-  export PYTHON_EXECUTABLE=python
   # TODO(huydhn): Add more coverage here using ExecuTorch's gather models script
   # shellcheck disable=SC1091
   source .ci/scripts/test.sh mv3 cmake xnnpack-quantization-delegation ''
@@ -1237,11 +1265,10 @@ elif [[ "$TEST_CONFIG" == distributed ]]; then
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     test_rpc
   fi
-elif [[ "$TEST_CONFIG" == deploy ]]; then
-  checkout_install_torchdeploy
-  test_torch_deploy
 elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
   test_inductor_distributed
+elif [[ "${TEST_CONFIG}" == *inductor-halide* ]]; then
+  test_inductor_halide
 elif [[ "${TEST_CONFIG}" == *inductor-micro-benchmark* ]]; then
   test_inductor_micro_benchmark
 elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
@@ -1286,10 +1313,14 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
 elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper_abi_compatible* ]]; then
   install_torchvision
   test_inductor_cpp_wrapper_abi_compatible
-elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 ]]; then
+elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
-  test_inductor
+  test_inductor_shard 1
+  test_inductor_aoti
   test_inductor_distributed
+elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" -gt 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  install_torchvision
+  test_inductor_shard "${SHARD_NUMBER}"
 elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   test_dynamo_shard 1
