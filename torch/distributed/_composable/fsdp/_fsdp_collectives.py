@@ -102,6 +102,20 @@ def split_with_sizes_copy(
     )
 
 
+@torch.library.impl(lib, "split_with_sizes_copy", "Functionalize")
+def split_with_sizes_copy_functionalize(
+    all_gather_output: torch.Tensor,
+    all_gather_input_split_sizes: List[int],
+    dim: int,
+    out: List[torch.Tensor],
+) -> None:
+    ag_output_elem = torch._from_functional_tensor(all_gather_output)
+    out_elem = [torch._from_functional_tensor(x) for x in out]
+    torch.split_with_sizes_copy(
+        ag_output_elem, all_gather_input_split_sizes, dim=dim, out=out_elem
+    )
+
+
 lib.define(
     "chunk_cat(Tensor[] tensors, int dim, int num_chunks, *, Tensor(a!) out) -> ()"
 )
