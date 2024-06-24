@@ -109,11 +109,14 @@ def _make_grads(
                     )
                 out_is_cpp_nested = False
             else:
+                # circular import
+                from torch.nested._internal.nested_tensor import NestedTensor
+
                 assert isinstance(out, torch.Tensor)
                 out_dtype = out.dtype
                 out_is_nested = out.is_nested
                 out_is_cpp_nested = out_is_nested and not isinstance(
-                    out, torch.nested._internal.nested_tensor.NestedTensor
+                    out, NestedTensor
                 )
                 if not out_is_cpp_nested:
                     out_size = out.shape
