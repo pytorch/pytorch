@@ -401,6 +401,12 @@ debug_index_asserts = False
 is_nightly_or_source = "dev" in torch.__version__ or "git" in torch.__version__
 developer_warnings = is_fbcode() or is_nightly_or_source
 
+# This pattern matches a special usage of scatter
+# 1. It's applied to a constant tensor
+# 2. The index tensor has size 1 in the scatter dimension
+# Such pattern generates a sparse matrix when the const tensor is all-zero.
+# We can lower this pattern to a pointwise kernel for more fusion opportunities
+# and saving memory footprint.
 optimize_scatter_upon_const_tensor = (
     os.environ.get("TORCHINDUCTOR_OPTIMIZE_SCATTER_UPON_CONST_TENSOR", "1") == "1"
 )
@@ -699,6 +705,11 @@ class triton:
     # max autotune gemm with cublasLt
     autotune_cublasLt = True
 
+    # Tune the generated Triton kernels at compile time instead of first time they run
+    autotune_at_compile_time = (
+        os.environ.get("TORCHINDUCTOR_TRITON_AUTOTUNE_AT_COMPILE_TIME", "0") == "1"
+    )
+
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = True
     tiling_prevents_reduction_fusion = True
@@ -859,6 +870,29 @@ class cuda:
     # caused by the op ordering of the "pingpong" memory access
     # pattern used by some Cutlass Kernels.
     cutlass_op_denylist_regex: Optional[str] = "pingpong"
+
+
+# Backend to use for CPU codegen either "cpp" or "halide" (experimental)
+cpu_backend = "cpp"
+
+
+class halide:
+    # Base halide target to use for CPU devices
+    cpu_target = "host"
+
+    # Base halide target to use for CUDA devices
+    gpu_target = "host-cuda"
+
+    # Halide autoscheduler to use, choices are:
+    # "Anderson2021" (gpu-only), "Li2018", "Adams2019" (cpu-only), or "Mullapudi2016" (cpu-only)
+    scheduler_cuda = "Li2018"
+    scheduler_cpu = "Adams2019"
+
+    # Controls `no_asserts` flag passed to Halide target (warning: can false positive)
+    asserts = False
+
+    # Controls `debug` flag passed to Halide target
+    debug = False
 
 
 # create a directory containing lots of debug information

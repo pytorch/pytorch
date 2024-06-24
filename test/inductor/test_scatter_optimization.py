@@ -66,6 +66,30 @@ class TestScatterOpt(TestCase):
         self.do_acc_test(f, x)
         self.check_metric()
 
+    def test_can_not_optimize_due_to_dense(self):
+        M, N = 1024, 2048
+
+        def f(x):
+            y = torch.full([M, N], 0, dtype=torch.float)
+            y.scatter_(1, x, 0.618)
+            return y
+
+        x = torch.randint(0, N, (M, N // 2), dtype=torch.int64)
+        self.do_acc_test(f, x)
+        self.check_metric(0)
+
+    def test_can_not_optimize_due_to_non_const(self):
+        M, N = 1024, 2048
+
+        def f(x, y):
+            y.scatter_(1, x, 0.618)
+            return y
+
+        x = torch.randint(0, N, (M, N // 2), dtype=torch.int64)
+        y = torch.randn([M, N])
+        self.do_acc_test(f, x, y)
+        self.check_metric(0)
+
     def test_cross_entropy_loss(self):
         """
         Match full+scatter in CEL and replaces it with a pointwise.
