@@ -244,6 +244,10 @@ at::Tensor unbind_backward_nested(
     const Tensor& nt_sizes,
     int64_t dim,
     const at::TensorOptions& options);
+at::Tensor unbind_backward_nested_jagged(
+    const variable_list& grads,
+    const Tensor& self,
+    int64_t dim);
 at::Tensor unsqueeze_to(const at::Tensor& self, c10::SymIntArrayRef sym_sizes);
 at::Tensor unsqueeze_to(
     const at::Tensor& self,
