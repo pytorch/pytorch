@@ -1,19 +1,17 @@
 import functools
 import pickle
-from typing import Dict, Callable, Optional, TypeVar, Generic, Iterator
+from typing import Callable, Dict, Generic, Iterable, Iterator, Optional, TypeVar
 
-from torch.utils.data.datapipes._typing import _DataPipeMeta, _IterDataPipeMeta
+from torch.utils._import_utils import import_dill
 from torch.utils.data.datapipes._hook_iterator import _SnapshotState
+from torch.utils.data.datapipes._typing import _DataPipeMeta, _IterDataPipeMeta
 from torch.utils.data.datapipes.utils.common import (
     _deprecation_warning,
     _iter_deprecated_functional_names,
     _map_deprecated_functional_names,
 )
 from torch.utils.data.dataset import Dataset, IterableDataset
-from torch.utils._import_utils import import_dill
 
-dill = import_dill()
-HAS_DILL = dill is not None
 
 __all__ = [
     "DataChunk",
@@ -25,11 +23,15 @@ __all__ = [
 T = TypeVar('T')
 T_co = TypeVar('T_co', covariant=True)
 
-UNTRACABLE_DATAFRAME_PIPES = ['batch',  # As it returns DataChunks
-                              'groupby',   # As it returns DataChunks
-                              '_dataframes_as_tuples',  # As it unpacks DF
-                              'trace_as_dataframe',  # As it used to mark DF for tracing
-                              ]
+dill = import_dill()
+HAS_DILL = dill is not None
+
+UNTRACABLE_DATAFRAME_PIPES = [
+    'batch',  # As it returns DataChunks
+    'groupby',   # As it returns DataChunks
+    '_dataframes_as_tuples',  # As it unpacks DF
+    'trace_as_dataframe',  # As it used to mark DF for tracing
+]
 
 
 class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
@@ -336,7 +338,6 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
         return list(super().__dir__()) + list(self.functions.keys())
 
 
-
 class _DataPipeSerializationWrapper:
     def __init__(self, datapipe):
         self._datapipe = datapipe
@@ -389,16 +390,16 @@ class _MapDataPipeSerializationWrapper(_DataPipeSerializationWrapper, MapDataPip
 
 
 class DataChunk(list, Generic[T]):
-    def __init__(self, items):
+    def __init__(self, items: Iterable[T]) -> None:
         super().__init__(items)
         self.items = items
 
-    def as_str(self, indent=''):
+    def as_str(self, indent: str = '') -> str:
         res = indent + "[" + ", ".join(str(i) for i in iter(self)) + "]"
         return res
 
     def __iter__(self) -> Iterator[T]:
         yield from super().__iter__()
 
-    def raw_iterator(self) -> T:  # type: ignore[misc]
+    def raw_iterator(self) -> Iterator[T]:  # type: ignore[misc]
         yield from self.items

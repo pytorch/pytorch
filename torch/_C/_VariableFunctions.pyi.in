@@ -3,25 +3,33 @@
 # mypy: allow-untyped-defs
 
 import builtins
+from types import EllipsisType
 from typing import (
     Any,
     Callable,
     ContextManager,
     Iterator,
-    List,
     Literal,
     NamedTuple,
-    Optional,
-    overload,
     Sequence,
-    Tuple,
     TypeVar,
-    Union,
+    overload,
 )
 
 import torch
-from torch import contiguous_format, Generator, inf, memory_format, strided, SymInt, Tensor
+from torch import (
+    Generator,
+    SymInt,
+    Tensor,
+    contiguous_format,
+    inf,
+    memory_format,
+    strided,
+)
+from torch._prims_common import DeviceLikeType
 from torch.types import (
+    Device,
+    Number,
     _bool,
     _complex,
     _device,
@@ -31,11 +39,7 @@ from torch.types import (
     _layout,
     _qscheme,
     _size,
-    Device,
-    Number,
 )
-
-from torch._prims_common import DeviceLikeType
 
 ${function_hints}
 
