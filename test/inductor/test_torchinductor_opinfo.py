@@ -439,7 +439,6 @@ inductor_one_sample = {
     "nn.functional.gaussian_nll_loss": {f16},
     "nn.functional.grid_sample": {f32, f64},
     "nn.functional.interpolate.area": {f16},
-    "nn.functional.max_pool2d": {f16, f32, f64, i32, i64},
     "nn.functional.nll_loss": {f16, f32, f64},
     "normal": {f16, f32, f64},
     "put": {f16, f32, f64},
