@@ -538,7 +538,7 @@ def _get_torch_related_args(include_pytorch: bool, aot_mode: bool):
     libraries = []
 
     if aot_mode:
-        if sys.platform == "linux" and not config.is_fbcode():
+        if sys.platform != "darwin" and not config.is_fbcode():
             libraries.append("torch")
             libraries.append("torch_cpu")
             # libraries.append("torch_python")
