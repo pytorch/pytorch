@@ -1,10 +1,10 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
-import itertools
 from typing import cast, List, Optional, Sequence, Tuple
 
 import torch
-
-from torch.distributed._tensor.op_schema import (
+from torch.distributed._tensor._op_schema import (
+    _is_inplace_op,
     OpSchema,
     OpStrategy,
     OutputSharding,
@@ -16,17 +16,17 @@ from torch.distributed._tensor.op_schema import (
 from torch.distributed._tensor.ops.common_rules import pointwise_rule
 from torch.distributed._tensor.ops.embedding_ops import _MaskPartial
 from torch.distributed._tensor.ops.utils import (
-    generate_redistribute_costs,
+    expand_to_full_mesh_op_strategy,
     is_tensor_dim_sharded,
+    is_tensor_evenly_shardable,
     is_tensor_partial,
-    is_tensor_shardable,
     normalize_dim,
     register_op_strategy,
     register_prop_rule,
 )
 from torch.distributed._tensor.placement_types import (
-    _Partial,
     DTensorSpec,
+    Partial,
     Placement,
     Replicate,
     Shard,
@@ -102,7 +102,7 @@ def equal_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
             output_spec = DTensorSpec(
                 mesh=arg_spec.mesh,
                 placements=tuple(
-                    Replicate() if isinstance(p, _Partial) else p
+                    Replicate() if isinstance(p, Partial) else p
                     for p in arg_spec.placements
                 ),
             )
@@ -153,7 +153,7 @@ def create_like_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
             output_spec = DTensorSpec(
                 mesh=arg_spec.mesh,
                 placements=tuple(
-                    Replicate() if isinstance(p, _Partial) else p
+                    Replicate() if isinstance(p, Partial) else p
                     for p in arg_spec.placements
                 ),
             )
@@ -173,22 +173,49 @@ def create_like_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
         aten.new_full.default,
         aten.new_ones.default,
         aten.new_zeros.default,
-        aten.new_empty_strided.default,  # TODO: re-think new_empty_strided
+        aten.new_empty_strided.default,
     ],
     schema_info=RuntimeSchemaInfo(1, ["dtype"]),
 )
 def new_factory_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
-    # TODO: maybe we should generate all possible shardings intead of just stay
-    # replicated for new factory methods
+    # Currently there are two strategies:
+    # 1. let the output be replicated
+    # 2. let the output follow the input if input and output have the same shape
     input_strategy = op_schema.args_schema[0]
-    new_factory_strategy = OpStrategy([])
     assert isinstance(input_strategy, OpStrategy)
+    input_shape = input_strategy.shape
+    output_shape = op_schema.args_schema[1]
+    assert isinstance(output_shape, list)
+
+    new_factory_strategy = OpStrategy([])
     for arg_strategy in input_strategy.strategies:
         input_spec = arg_strategy.output_spec
         replica_spec = DTensorSpec(mesh, tuple([Replicate()] * mesh.ndim))
         new_factory_strategy.strategies.append(
-            PlacementStrategy(output_specs=replica_spec, input_specs=(input_spec,))
+            PlacementStrategy(
+                output_specs=replica_spec,
+                input_specs=(input_spec,),
+                redistribute_cost=[[0.0] * mesh.ndim],
+            )
         )
+
+        if tuple(input_shape) == tuple(output_shape) and input_spec.is_sharded():
+            # NOTE: for new_empty_strided, currently the non-replicate sharding
+            #       is supported only when the shape is evenly shardable
+            if (
+                op_schema.op == aten.new_empty_strided.default
+                and not is_tensor_evenly_shardable(input_shape, input_spec)
+            ):
+                continue
+
+            new_factory_strategy.strategies.append(
+                PlacementStrategy(
+                    output_specs=input_spec,
+                    input_specs=(input_spec,),
+                    # encouraging new tensor placement to be the same as input
+                    redistribute_cost=[[-0.1] * mesh.ndim],
+                )
+            )
 
     return new_factory_strategy
 
@@ -219,8 +246,8 @@ def gen_slice_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
         op_schema.args_schema + defaults[len(op_schema.args_schema) :]
     )
     assert isinstance(input_strategy, OpStrategy)
-    input_shape = input_strategy.output_shape
-    input_ndim = input_strategy.output_ndim
+    input_shape = input_strategy.shape
+    input_ndim = input_strategy.ndim
     assert isinstance(dim, int)
     if start is None:
         start = 0
@@ -293,7 +320,7 @@ def gen_slice_scatter_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> Strateg
 
     input_strategy = op_schema.args_schema[0]
     assert isinstance(input_strategy, OpStrategy)
-    input_ndim = input_strategy.output_ndim
+    input_ndim = input_strategy.ndim
     slice_dim = (
         cast(int, op_schema.args_schema[2]) if len(op_schema.args_schema) > 2 else 0
     )
@@ -333,68 +360,68 @@ def replica_only_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType
     return OpStrategy([PlacementStrategy(replicate_spec)])
 
 
+@register_op_strategy(
+    [aten.scatter_.value, aten.scatter.value, aten.scatter_.src, aten.scatter.src],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def scatter_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
+    input_strategy = cast(OpStrategy, op_schema.args_schema[0])
+    single_mesh_dim_strategies = []
+
+    # placement list stores placements of [output, input, index, src]
+    # first we always have replicate all for inputs and output
+    if len(op_schema.args_strategy) < 3:
+        # scatter_.src/scatter.src with src be float number instead of tensor
+        all_replicate: List[Placement] = [Replicate()] * 3
+    else:
+        all_replicate = [Replicate()] * 4
+    single_mesh_dim_strategies.append(all_replicate)
+
+    # TODO: see if we can support input sharding pattern
+    inplace_op = _is_inplace_op(op_schema.op)
+
+    op_strategy = expand_to_full_mesh_op_strategy(
+        mesh, op_schema, single_mesh_dim_strategies, inplace_op=inplace_op
+    )
+    return op_strategy
+
+
 @register_op_strategy(aten.gather.default)
 def gather_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     input_strategy = cast(OpStrategy, op_schema.args_schema[0])
     dim = cast(int, op_schema.args_schema[1])
     index_strategy = cast(OpStrategy, op_schema.args_schema[2])
 
-    input_shape = input_strategy.output_shape
-    index_shape = index_strategy.output_shape
+    input_shape = input_strategy.shape
+    index_shape = index_strategy.shape
 
-    all_mesh_dim_strategies = []
+    single_mesh_dim_strategies = []
 
-    for mesh_dim in range(mesh.ndim):
-        single_mesh_dim_strategies = []
+    # placement list stores placements of [output, input, index]
+    # first we always have replicate all for inputs and output
+    all_replicate: List[Placement] = [Replicate()] * 3
+    single_mesh_dim_strategies.append(all_replicate)
 
-        # placement list stores placements of [output, input, index]
-        # first we always have replicate all for inputs and output
-        all_replicate: List[Placement] = [Replicate()] * 3
-        single_mesh_dim_strategies.append(all_replicate)
+    # input sharding, input sharded, index accepts mask partial, output follows index
+    # this only works when the input is sharded on the gather dimension, and
+    # index has size 1 on the gather dimension
+    if index_shape[dim] == 1:
+        index_partial_placement = _MaskPartial(logical_dim_size=input_shape[dim])
+        input_sharding = [
+            index_partial_placement,
+            Shard(dim),
+            index_partial_placement,
+        ]
+        single_mesh_dim_strategies.append(input_sharding)
 
-        # input sharding, input sharded, index accepts mask partial, output follows index
-        # this only works when the input is sharded on the gather dimension, and
-        # index has size 1 on the gather dimension
-        if index_shape[dim] == 1:
-            index_partial_placement = _MaskPartial(logical_dim_size=input_shape[dim])
-            input_sharding = [
-                index_partial_placement,
-                Shard(dim),
-                index_partial_placement,
-            ]
-            single_mesh_dim_strategies.append(input_sharding)
+    # index sharding, input replicated, index sharded, output follows index
+    # this only works when the sharding dimension is the gather dimension
+    index_sharding = [Shard(dim), Replicate(), Shard(dim)]
+    single_mesh_dim_strategies.append(index_sharding)
 
-        # index sharding, input replicated, index sharded, output follows index
-        # this only works when the sharding dimension is the gather dimension
-        index_sharding = [Shard(dim), Replicate(), Shard(dim)]
-        single_mesh_dim_strategies.append(index_sharding)
-
-        all_mesh_dim_strategies.append(single_mesh_dim_strategies)
-
-    strategy_combs = itertools.product(*all_mesh_dim_strategies)
-
-    all_strategies = []
-    for strategy_comb in strategy_combs:
-        spec_list = []
-        for specs in zip(*strategy_comb):
-            spec_list.append(DTensorSpec(mesh, tuple(specs)))
-
-        if is_tensor_shardable(input_shape, spec_list[1]) and is_tensor_shardable(
-            index_shape, spec_list[2]
-        ):
-            input_spec, index_spec = spec_list[1:]
-            redistribute_cost = [
-                generate_redistribute_costs(input_strategy, input_spec),
-                generate_redistribute_costs(index_strategy, index_spec),
-            ]
-            strat = PlacementStrategy(
-                output_specs=spec_list[0],
-                input_specs=spec_list[1:],
-                redistribute_cost=redistribute_cost,
-            )
-            all_strategies.append(strat)
-
-    return OpStrategy(all_strategies)
+    return expand_to_full_mesh_op_strategy(
+        mesh, op_schema, single_mesh_dim_strategies, input_index=1
+    )
 
 
 def _derive_follow_placements_from_tuple_strategy(
@@ -478,7 +505,7 @@ def stack_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     assert isinstance(input_tuple_strategy, TupleStrategy), f"{input_tuple_strategy}"
     first_input_strategy = input_tuple_strategy.childs[0]
     assert isinstance(first_input_strategy, OpStrategy), f"{first_input_strategy}"
-    common_input_ndim = first_input_strategy.output_ndim
+    common_input_ndim = first_input_strategy.ndim
     dim = cast(int, args_schema[1]) if len(args_schema) > 1 else 0
     # normalize the dim to be within the common input ndim
     dim = normalize_dim(dim, common_input_ndim)
@@ -486,7 +513,6 @@ def stack_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     follow_placements = _derive_follow_placements_from_tuple_strategy(
         input_tuple_strategy
     )
-    follow_placements = normalize_shard_for_stack(follow_placements, dim)
 
     # create op strategy base on the follow placements
     op_strategy = OpStrategy([])
@@ -495,6 +521,9 @@ def stack_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
         DTensorSpec(mesh, tuple(follow_placements))
         for _ in range(len(input_tuple_strategy.childs))
     )
+
+    follow_placements = normalize_shard_for_stack(follow_placements, dim)
+
     op_strategy.strategies.append(
         PlacementStrategy(
             output_specs=DTensorSpec(mesh, tuple(follow_placements)),
@@ -511,7 +540,7 @@ def cat_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     assert isinstance(input_tuple_strategy, TupleStrategy), f"{input_tuple_strategy}"
     first_input_strategy = input_tuple_strategy.childs[0]
     assert isinstance(first_input_strategy, OpStrategy), f"{first_input_strategy}"
-    common_input_ndim = first_input_strategy.output_ndim
+    common_input_ndim = first_input_strategy.ndim
     dim = cast(int, args_schema[1]) if len(args_schema) > 1 else 0
     # normalize the dim to be within the common input ndim
     dim = normalize_dim(dim, common_input_ndim)
@@ -585,7 +614,7 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
     #   2. Other dimensions of values_spec can remain sharded if they are so.
     # For indices:
     #   Indices can be either sharded or replicated. All index tensors need to be sharded
-    #   in a compatible way, following the pointwise rule (including resolving _Partial
+    #   in a compatible way, following the pointwise rule (including resolving Partial
     #   into either sharded or replicated)
 
     values_spec, multi_indices_spec = op_schema.args_schema
@@ -655,7 +684,7 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
                 )
             if isinstance(ip, Shard):
                 return Shard(ip.dim + insert_dim)
-            # _Partial or Replicated
+            # Partial or Replicated
             return vp
 
         value_placements = tuple(
@@ -709,13 +738,13 @@ def split_rule(op_schema: OpSchema) -> OutputSharding:
     dim = cast(int, op_schema.args_schema[2]) if len(op_schema.args_schema) > 2 else 0
     dim = normalize_dim(dim, ndim)
 
-    # TODO: tensor to split cannot have _Partial
+    # TODO: tensor to split cannot have Partial
     # in its placements for now. Will need to
     # support in future.
     if input_spec.sums:
         raise NotImplementedError(
             f"splitting distributed tensor with "
-            f"_Partial placement is not implemented!\n"
+            f"Partial placement is not implemented!\n"
             f"DTensorSpec={input_spec}"
         )
 

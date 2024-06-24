@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import logging
 from contextlib import contextmanager
 
@@ -11,6 +12,7 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 from torch.fx.node import has_side_effect
 from torch.utils import _pytree as pytree
+
 
 log = logging.getLogger(__name__)
 
@@ -113,6 +115,8 @@ call_torchbind.py_impl(DispatchKey.Autograd)(
 
 @call_torchbind.py_functionalize_impl
 def call_torchbind_func(ctx, *args, **kwargs):
-    args = ctx.unwrap_tensors(args)
-    with ctx.redispatch_to_next():
-        return ctx.wrap_tensors(call_torchbind(*args, **kwargs))
+    from torch._higher_order_ops.effects import handle_effects
+
+    return handle_effects(
+        ctx.mode._allow_token_discovery, ctx.mode._tokens, call_torchbind, args, kwargs
+    )

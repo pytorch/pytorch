@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import operator
 from collections import deque
 from typing import Dict, List, Set, NamedTuple, Tuple, Deque
@@ -259,7 +260,7 @@ def get_device_to_partitions_mapping(
     # Find devices for all the partitions without a device
     found_device = True
     for partition in no_device_partitions:
-        device_to_left_mem_bytes = dict(sorted(device_to_left_mem_bytes.items(), key=lambda item: item[1]))
+        device_to_left_mem_bytes = dict(sorted(device_to_left_mem_bytes.items(), key=operator.itemgetter(1)))
         found_device = find_device_for(partition)
         if not found_device:
             break

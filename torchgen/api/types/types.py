@@ -15,9 +15,7 @@ Add new types to `types_base.py` if they are basic and not attached to ATen/c10.
 from dataclasses import dataclass
 from typing import Dict
 
-from torchgen.model import BaseTy, ScalarType
-
-from .types_base import (
+from torchgen.api.types.types_base import (
     BaseCppType,
     BaseCType,
     boolT,
@@ -30,6 +28,7 @@ from .types_base import (
     longT,
     shortT,
 )
+from torchgen.model import BaseTy, ScalarType
 
 
 TENSOR_LIST_LIKE_CTYPES = [

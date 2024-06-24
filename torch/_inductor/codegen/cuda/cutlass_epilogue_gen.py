@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import Dict, List
 from unittest.mock import patch
 
@@ -15,7 +16,7 @@ _MAGIC_SYMPY_ERROR_STRING = "[!sympy: unsupported expr!]"
 
 def _arg_str(a):
     if isinstance(a, sympy.Expr):
-        # If this return value containting the _MAGIC_SYMPY_ERROR_STRING
+        # If this return value containing the _MAGIC_SYMPY_ERROR_STRING
         # is used as part of the final generated C++ code,
         # a CUTLASSEVTOpNotImplementedError is raised to indicate that
         # the op could not be converted to a valid EVT expression.

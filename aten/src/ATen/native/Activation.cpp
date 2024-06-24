@@ -572,7 +572,7 @@ inline void _rrelu_with_noise_train(
     const Tensor& noise,
     const Scalar& lower_,
     const Scalar& upper_,
-    c10::optional<Generator> generator) {
+    std::optional<Generator> generator) {
   using opmath_t = at::opmath_type<scalar_t>;
   opmath_t lower = lower_.to<opmath_t>();
   opmath_t upper = upper_.to<opmath_t>();
@@ -603,8 +603,9 @@ Tensor& rrelu_with_noise_out_cpu(const Tensor& self,
     const Scalar& lower,
     const Scalar& upper,
     bool training,
-    c10::optional<Generator> generator,
+    std::optional<Generator> generator,
     Tensor& output) {
+  TORCH_CHECK(self.sym_sizes() == noise.sym_sizes(), "noise tensor shape must match self tensor shape. Got self.shape = ", self.sym_sizes(), " noise.shape = ", noise.sym_sizes());
   if (training) {
     AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, self.scalar_type(), "rrelu_with_noise_out_cpu", [&] {
       _rrelu_with_noise_train<scalar_t>(output, self.contiguous(), noise, lower, upper, generator);
@@ -625,7 +626,7 @@ Tensor rrelu_with_noise_cpu(
     const Scalar& lower,
     const Scalar& upper,
     bool training,
-    c10::optional<Generator> generator) {
+    std::optional<Generator> generator) {
   auto output = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   return at::native::rrelu_with_noise_out_cpu(
       self, noise, lower, upper, training, std::move(generator), output);
@@ -637,7 +638,7 @@ Tensor& rrelu_with_noise_cpu_(
     const Scalar& lower,
     const Scalar& upper,
     bool training,
-    c10::optional<Generator> generator) {
+    std::optional<Generator> generator) {
   return at::native::rrelu_with_noise_out_cpu(
       self, noise, lower, upper, training, std::move(generator), self);
 }
@@ -660,12 +661,12 @@ Tensor rrelu_with_noise_backward(
   }
 }
 
-Tensor rrelu(const Tensor & self, const Scalar& lower, const Scalar& upper, bool training, c10::optional<Generator> generator) {
+Tensor rrelu(const Tensor & self, const Scalar& lower, const Scalar& upper, bool training, std::optional<Generator> generator) {
   TORCH_CHECK(lower.to<double>() <= upper.to<double>(), "Lower bound should be less than or equal to the upper bound")
   return at::rrelu_with_noise(self, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT), lower, upper, training, std::move(generator));
 }
 
-Tensor & rrelu_(Tensor & self, const Scalar& lower, const Scalar& upper, bool training, c10::optional<Generator> generator) {
+Tensor & rrelu_(Tensor & self, const Scalar& lower, const Scalar& upper, bool training, std::optional<Generator> generator) {
   TORCH_CHECK(lower.to<double>() <= upper.to<double>(), "Lower bound should be less than or equal to the upper bound")
   return at::rrelu_with_noise_(self, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT), lower, upper, training, std::move(generator));
 }
