@@ -1,11 +1,11 @@
 # Little stub file to get BUILD.bazel to play along
 
-import os.path
+import pathlib
 import sys
 
 
-root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.insert(0, root)
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[3 - 1]
+sys.path.insert(0, str(REPO_ROOT))
 
 import torchgen.gen
 

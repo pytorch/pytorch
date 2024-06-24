@@ -7,6 +7,7 @@ import copy
 import glob
 import io
 import os
+import pathlib
 import re
 import subprocess
 import sys
@@ -25,7 +26,8 @@ except ImportError:
     from yaml import Loader  # type: ignore[assignment, misc]
 
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+sys.path.append(str(REPO_ROOT))
 
 CPP_H_NAME = "spv.h"
 CPP_SRC_NAME = "spv.cpp"

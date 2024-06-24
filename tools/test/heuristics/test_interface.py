@@ -4,8 +4,9 @@ import unittest
 from typing import Any, Dict, List
 
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent.parent
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[4 - 1]
 sys.path.append(str(REPO_ROOT))
+
 import tools.testing.target_determination.heuristics.interface as interface
 from tools.testing.test_run import TestRun
 

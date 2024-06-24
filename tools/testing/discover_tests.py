@@ -8,7 +8,7 @@ from typing import List, Optional, Union
 CPP_TEST_PREFIX = "cpp"
 CPP_TEST_PATH = "build/bin"
 CPP_TESTS_DIR = os.path.abspath(os.getenv("CPP_TESTS_DIR", default=CPP_TEST_PATH))
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+REPO_ROOT = Path(__file__).resolve().parents[3 - 1]
 
 
 def parse_test_module(test: str) -> str:

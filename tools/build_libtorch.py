@@ -1,13 +1,13 @@
 import argparse
+import pathlib
 import sys
-from os.path import abspath, dirname
 
 
-# By appending pytorch_root to sys.path, this module can import other torch
+# By appending REPO_ROOT to sys.path, this module can import other torch
 # modules even when run as a standalone script. i.e., it's okay either you
 # do `python build_libtorch.py` or `python -m tools.build_libtorch`.
-pytorch_root = dirname(dirname(abspath(__file__)))
-sys.path.append(pytorch_root)
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+sys.path.append(str(REPO_ROOT))
 
 from tools.build_pytorch_libs import build_caffe2
 from tools.setup_helpers.cmake import CMake

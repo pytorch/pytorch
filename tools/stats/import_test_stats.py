@@ -9,7 +9,7 @@ from typing import Any, Callable, cast, Dict, List, Optional, Union
 from urllib.request import urlopen
 
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[3 - 1]
 
 
 def get_disabled_issues() -> List[str]:

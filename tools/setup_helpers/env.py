@@ -15,7 +15,7 @@ IS_CONDA = (
     or "Continuum" in sys.version
     or any(x.startswith("CONDA") for x in os.environ)
 )
-CONDA_DIR = os.path.join(os.path.dirname(sys.executable), "..")
+CONDA_DIR = os.path.dirname(os.path.dirname(sys.executable))
 
 IS_64BIT = struct.calcsize("P") == 8
 

@@ -9,7 +9,7 @@ import yaml
 from typing import Any, Dict, List
 
 
-REPO_ROOT = pathlib.Path(__file__).parent.parent.parent
+REPO_ROOT = pathlib.Path(__file__).parents[3 - 1]
 CONFIG_YML = REPO_ROOT / ".circleci" / "config.yml"
 WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
 

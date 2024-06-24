@@ -8,8 +8,9 @@ from typing import Any, Dict, List, Set
 from unittest import mock
 
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent.parent
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[4 - 1]
 sys.path.append(str(REPO_ROOT))
+
 from tools.test.heuristics.test_interface import TestTD
 from tools.testing.target_determination.determinator import TestPrioritizations
 from tools.testing.target_determination.heuristics.filepath import (

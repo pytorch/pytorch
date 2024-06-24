@@ -7,8 +7,9 @@ from typing import Any, Dict
 from unittest import mock
 
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[3 - 1]
 sys.path.insert(0, str(REPO_ROOT))
+
 from tools.stats.upload_metrics import add_global_metric, emit_metric
 from tools.stats.upload_stats_lib import BATCH_SIZE, upload_to_rockset
 

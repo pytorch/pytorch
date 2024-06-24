@@ -21,7 +21,7 @@ TOKEN = os.environ["GITHUB_TOKEN"]
 if not TOKEN:
     raise Exception("GITHUB_TOKEN is not set")  # noqa: TRY002
 
-REPO_ROOT = Path(__file__).parent.parent.parent
+REPO_ROOT = Path(__file__).parents[3 - 1]
 
 # Query for all PRs instead of just closed/merged because it's faster
 GRAPHQL_ALL_PRS_BY_UPDATED_AT = """

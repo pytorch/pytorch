@@ -14,7 +14,7 @@ except ImportError:
     HAS_JSON5 = False
 
 
-ROOT_FOLDER = Path(__file__).absolute().parent.parent
+ROOT_FOLDER = Path(__file__).resolve().parent.parent
 VSCODE_FOLDER = ROOT_FOLDER / ".vscode"
 RECOMMENDED_SETTINGS = VSCODE_FOLDER / "settings_recommended.json"
 SETTINGS = VSCODE_FOLDER / "settings.json"

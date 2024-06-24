@@ -8,7 +8,7 @@ from tools.stats.import_test_stats import get_disabled_tests, get_slow_tests
 from tools.testing.test_run import ShardedTest, TestRun
 
 
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+REPO_ROOT = Path(__file__).resolve().parents[3 - 1]
 
 IS_MEM_LEAK_CHECK = os.getenv("PYTORCH_TEST_CUDA_MEM_LEAK_CHECK", "0") == "1"
 BUILD_ENVIRONMENT = os.getenv("BUILD_ENVIRONMENT", "")

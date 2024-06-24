@@ -12,6 +12,10 @@ try:
 except ImportError:
     from yaml import SafeLoader as YamlLoader  # type: ignore[assignment, misc]
 
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[3 - 1]
+sys.path.insert(0, str(REPO_ROOT))
+
 NATIVE_FUNCTIONS_PATH = "aten/src/ATen/native/native_functions.yaml"
 TAGS_PATH = "aten/src/ATen/native/tags.yaml"
 
@@ -106,8 +110,6 @@ def get_selector(
     operators_yaml_path: Optional[str],
 ) -> Any:
     # cwrap depends on pyyaml, so we can't import it earlier
-    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    sys.path.insert(0, root)
     from torchgen.selective_build.selector import SelectiveBuilder
 
     assert not (

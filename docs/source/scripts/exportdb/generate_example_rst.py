@@ -12,7 +12,7 @@ from torch.export import export
 
 
 PWD = Path(__file__).absolute().parent
-ROOT = Path(__file__).absolute().parent.parent.parent.parent
+ROOT = Path(__file__).absolute().parents[4 - 1]
 SOURCE = ROOT / Path("source")
 EXPORTDB_SOURCE = SOURCE / Path("generated") / Path("exportdb")
 

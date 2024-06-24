@@ -7,7 +7,7 @@ from collections import defaultdict
 from typing import Dict, List, Tuple
 
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[3 - 1]
 try:
     # using tools/ to optimize test run.
     sys.path.append(str(REPO_ROOT))
