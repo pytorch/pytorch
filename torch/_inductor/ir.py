@@ -4668,29 +4668,13 @@ class UserDefinedTritonKernel(ExternKernel):
         new_name, triton_meta = wrapper.define_user_defined_triton_kernel(
             kernel, configs, self.kwargs
         )
-
-        args = []
-        raw_args = []
-        for k in self.ordered_kwargs_for_cpp_kernel:
-            v = self.get_kwargs_value(k)
-            args.append(V.graph.wrapper_code.val_to_arg_str(v))
-            raw_args.append(v)
-
-        if V.graph.cpp_wrapper:
-            # in C++ wrapper, we don't pass constexpr args, as they don't
-            # get added as parameters to the PTX code compiled from the
-            # user-defined Triton kernel (only non-constexpr args do)
-            args = [arg for i, arg in enumerate(args) if i not in kernel.constexprs]
-            raw_args = [
-                raw_arg
-                for i, raw_arg in enumerate(raw_args)
-                if i not in kernel.constexprs
-            ]
-
+        raw_args = [
+            self.get_kwargs_value(k) for k in self.ordered_kwargs_for_cpp_kernel
+        ]
         # Call to kernel
         self.codegen_comment(wrapper)
         wrapper.generate_user_defined_triton_kernel(
-            new_name, self.grid, configs, args, triton_meta, raw_args
+            new_name, raw_args, self.grid, configs, triton_meta, kernel.constexprs
         )
 
     def should_allocate(self):
