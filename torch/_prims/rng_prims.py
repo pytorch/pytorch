@@ -250,8 +250,12 @@ def register_run_with_rng_state_op():
 
     @run_with_rng_state.py_impl(FunctionalTensorMode)
     def impl_functional_tensor_mode(mode, rng_state, op, *args, **kwargs):
-        with mode:
-            return op(*args, **kwargs)
+        unwrapped_args = mode.unwrap_tensors(args)
+        unwrapped_kwargs = mode.unwrap_tensors(kwargs)
+
+        with mode.redispatch_to_next():
+            out = run_with_rng_state(*unwrapped_args, **unwrapped_kwargs)
+            return mode.wrap_tensors(out)
 
     return run_with_rng_state
 

@@ -1361,11 +1361,14 @@ main()
         torch/fx/_lazy_graph_module.py class GraphModule(torch.nn.Module):
             def forward(self, L_inputs_ : list):
                 ...
-                # File: <eval_with_key>.15:23 in forward, code: run_with_rng_state = torch.ops.higher_order.run_with_rng_state(getitem_8, torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default, getitem_3, getitem_4, getitem_4, 0.0, True);  getitem_8 = None
-                run_with_rng_state = torch.ops.higher_order.run_with_rng_state(getitem_8, torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default, getitem_3, getitem_4, getitem_4, 0.0, True);  getitem_8 = None
+                run_with_rng_state = torch.ops.higher_order.run_with_rng_state(
+                    getitem_8,
+                    torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default,
+                    getitem_3, getitem_4, getitem_4, 0.0, True,
+                );  getitem_8 = None
                 ...
         ```
-        3. We want to preserve this `run_with_rng_state` op when going through AOTAutograd. What should we write in this op's `impl_functional_tensor_mode` to achieve it?
+        3. We want to preserve this `run_with_rng_state` op when going through AOTAutograd. TODO add more comment
         """
 
         compiler_fn = make_compiler_fn(fullgraph=True)
