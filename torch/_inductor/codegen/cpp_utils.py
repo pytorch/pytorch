@@ -360,11 +360,7 @@ class LocalizeBufferHandler(V.WrapperHandler):  # type: ignore[name-defined]
     def localize(self, name: str, index: sympy.Expr):
         if self.global_to_local and name in self.global_to_local:
             assert self.rewrite_index is not None
-            index = self.rewrite_index(
-                self,
-                index,
-                name,
-            )
+            index = self.rewrite_index(self, index, name)
             name = self.global_to_local[name].get_name()
         return name, index
 
