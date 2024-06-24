@@ -548,7 +548,7 @@ if(USE_CUDA)
     set(DELAY_LOAD_FLAGS "")
   endif()
 
-  target_link_libraries(caffe2_nvrtc ${CUDA_CUDA_LIB} ${CUDA_NVRTC_LIB} ${DELAY_LOAD_FLAGS})
+  target_link_libraries(caffe2_nvrtc PRIVATE caffe2::nvrtc ${DELAY_LOAD_FLAGS})
   install(TARGETS caffe2_nvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
   if(USE_NCCL)
     list(APPEND Caffe2_GPU_SRCS
@@ -750,6 +750,9 @@ if(BUILD_LIBTORCHLESS)
     find_library(TORCH_XPU_LIB torch_xpu PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
   endif()
   add_subdirectory(../torch torch)
+  # ---[ Torch python bindings build
+  set(TORCH_PYTHON_COMPILE_OPTIONS ${TORCH_PYTHON_COMPILE_OPTIONS} PARENT_SCOPE)
+  set(TORCH_PYTHON_LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS} PARENT_SCOPE)
 else()
   set(TORCH_LIB torch)
   set(TORCH_CPU_LIB torch_cpu)
@@ -1270,12 +1273,10 @@ install(FILES
   ${PROJECT_BINARY_DIR}/TorchConfig.cmake
   DESTINATION share/cmake/Torch)
 
-
 # ---[ Torch python bindings build
 add_subdirectory(../torch torch)
 set(TORCH_PYTHON_COMPILE_OPTIONS ${TORCH_PYTHON_COMPILE_OPTIONS} PARENT_SCOPE)
 set(TORCH_PYTHON_LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS} PARENT_SCOPE)
-
 # ==========================================================
 # END formerly-libtorch flags
 # ==========================================================
