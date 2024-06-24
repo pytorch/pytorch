@@ -86,7 +86,7 @@ def get_nccl_submodule_version() -> str:
     from pathlib import Path
 
     nccl_version_mk = (
-        Path(__file__).absolute().parents[3 - 1]
+        Path(__file__).absolute().parents[2]
         / "third_party"
         / "nccl"
         / "nccl"

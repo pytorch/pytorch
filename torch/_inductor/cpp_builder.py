@@ -527,7 +527,7 @@ def _setup_standard_sys_libs(
 def _cpp_prefix_path() -> str:
     from torch._inductor.codecache import write  # TODO
 
-    path = Path(Path(__file__).parent).parent / "codegen/cpp_prefix.h"
+    path = Path(Path(__file__).absolute().parent).parent / "codegen/cpp_prefix.h"
     with path.open() as f:
         content = f.read()
         _, filename = write(
