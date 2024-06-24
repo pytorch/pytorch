@@ -948,7 +948,6 @@ class CppTorchCudaOptions(CppTorchOptions):
 
 def get_name_and_dir_from_output_file_path(
     file_path: str,
-    specified_dir: str = "",
 ):
     """
     This function help prepare parameters to new cpp_builder.
@@ -966,9 +965,6 @@ def get_name_and_dir_from_output_file_path(
     name_and_ext = os.path.basename(file_path)
     name, ext = os.path.splitext(name_and_ext)
     dir = os.path.dirname(file_path)
-
-    if len(specified_dir) != 0:
-        dir = specified_dir
 
     return name, dir
 
@@ -1182,36 +1178,26 @@ class CppBuilder:
         return self._target_file
 
     def build(self) -> Tuple[int, str]:
+        """
+        It is must need a temperary directory to store object files in Windows.
+        After build completed, delete the temperary directory to save disk space.
+        """
+        _create_if_dir_not_exist(self._output_dir)
+        _build_tmp_dir = os.path.join(
+            self._output_dir, f"{self._name}_{_BUILD_TEMP_DIR}"
+        )
+        _create_if_dir_not_exist(_build_tmp_dir)
+
         build_cmd = self.get_command_line()
 
-        if _IS_WINDOWS:
-            """
-            It is must need a temperary directory to store object files in Windows.
-            After build completed, delete the temperary directory to save disk space.
-            """
-            _create_if_dir_not_exist(self._output_dir)
-            _build_tmp_dir = os.path.join(
-                self._output_dir, f"{self._name}_{_BUILD_TEMP_DIR}"
-            )
-            _create_if_dir_not_exist(_build_tmp_dir)
+        # To compatible to Windows output: FileName.
+        current_working_directory = _build_tmp_dir
+        if config.is_fbcode():
+            if not (self._aot_mode and not self._use_absolute_path):
+                # To compatible to fb_code, output to FileName.
+                current_working_directory = os.getcwd()
 
-            # To compatible to Windows output: FileName.
-            current_working_directory = _build_tmp_dir
+        status = self.__run_command_line(build_cmd, cwd=current_working_directory)
 
-            """
-            if config.is_fbcode():
-                if not (self._aot_mode and not self._use_absolute_path):
-                    # To compatible to fb_code, output to FileName.
-                    current_working_directory = os.getcwd()
-            """
-
-            status = self.__run_command_line(build_cmd, cwd=current_working_directory)
-
-            _remove_dir(_build_tmp_dir)
-
-        else:
-            _create_if_dir_not_exist(self._output_dir)
-
-            status = self.__run_command_line(build_cmd, cwd=self._output_dir)
-
+        _remove_dir(_build_tmp_dir)
         return status, self._target_file
