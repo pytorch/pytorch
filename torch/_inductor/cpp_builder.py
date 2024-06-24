@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import List, Sequence, Tuple, Union
 
 import torch
+from torch._dynamo.utils import dynamo_timed
 from torch._inductor import config, exc
 from torch._inductor.codecache import (
     _get_python_include_dirs,
@@ -1188,6 +1189,7 @@ class CppBuilder:
     def get_target_file_path(self):
         return self._target_file
 
+    @dynamo_timed
     def build(self) -> Tuple[int, str]:
         """
         It is must need a temperary directory to store object files in Windows.

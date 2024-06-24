@@ -2666,8 +2666,11 @@ def _worker_compile_cpp_new(lock_path, name, source, output_dir, args: dict[str,
 
     with FileLock(lock_path, timeout=LOCK_TIMEOUT):
         if not os.path.exists(cpp_builder.get_target_file_path()):
-            # compile_file(input_path, output_path, shlex.split(cmd))
-            cpp_builder.build()
+            if config.is_fbcode():
+                cmd = cpp_builder.get_command_line()
+                compile_file(source, output_dir, shlex.split(cmd))
+            else:
+                cpp_builder.build()
 
 
 """
@@ -3078,11 +3081,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         command_line = dummy_builder.get_command_line()
         return sha256_hash(
             "\n".join(
-                [
-                    cls.glue_template,
-                    f"{cls.cpu_cache_size()}",
-                    command_line
-                ]
+                [cls.glue_template, f"{cls.cpu_cache_size()}", command_line]
             ).encode("utf-8")
         )
 
