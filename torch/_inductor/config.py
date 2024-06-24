@@ -697,10 +697,7 @@ class triton:
 
     # Tune the generated Triton kernels at compile time instead of first time they run
     autotune_at_compile_time = (
-        os.environ.get(
-            "TORCHINDUCTOR_TRITON_AUTOTUNE_AT_COMPILE_TIME", "0" if is_fbcode() else "1"
-        )
-        == "1"
+        os.environ.get("TORCHINDUCTOR_TRITON_AUTOTUNE_AT_COMPILE_TIME", "0") == "1"
     )
 
     # should we stop a fusion to allow better tiling?
