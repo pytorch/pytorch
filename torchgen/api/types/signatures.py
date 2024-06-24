@@ -1,7 +1,7 @@
 from dataclasses import dataclass
-
 from typing import Iterator, List, Optional, Sequence, Set, Tuple, Union
 
+from torchgen.api.types.types_base import Binding, CType, Expr
 from torchgen.model import (
     BackendIndex,
     FunctionSchema,
@@ -9,8 +9,6 @@ from torchgen.model import (
     NativeFunctionsGroup,
     NativeFunctionsViewGroup,
 )
-
-from .types_base import Binding, CType, Expr
 
 
 @dataclass(frozen=True)
