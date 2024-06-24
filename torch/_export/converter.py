@@ -214,15 +214,12 @@ class TS2FXGraphConverter:
         name_to_param_map: Dict[str, torch.Tensor],
         name_to_buffer_map: Dict[str, torch.Tensor],
         name_to_non_tensor_attr_map: Dict[str, Any],
-        module_names: set[str],
         blocks_to_lifted_attrs: Dict[torch._C.Block, Set[str]],
     ):
-        print(f"ts_graph:{ts_graph}")
         self.ts_graph = ts_graph
         self.name_to_param_map = name_to_param_map
         self.name_to_buffer_map = name_to_buffer_map
         self.name_to_tensor_constants: Dict[str, torch.Tensor] = {}
-        self.module_names = module_names
 
         self.fx_graph: torch.fx.Graph = torch.fx.Graph()
         self.input_specs: List[InputSpec] = []
@@ -350,7 +347,6 @@ class TS2FXGraphConverter:
                 fx_node = self.fx_graph.placeholder(normalized_name)
 
             self.name_to_node[name] = fx_node
-            print(f"self.name_to_node:{self.name_to_node}")
 
     def convert_aten_tensor(self, node: torch._C.Node):
         """aten::tensor creates a constant tensor ad-hoc --> GetAttr"""
@@ -413,7 +409,6 @@ class TS2FXGraphConverter:
 
         attr_name = node.s("name")
         if attr_name in self.name_to_non_tensor_attr_map:
-            print(f"self.name_to_non_tensor_attr_map:{self.name_to_non_tensor_attr_map}")
             constant = self.name_to_non_tensor_attr_map[attr_name]
             self.constant_map[output_name] = constant
         else:
@@ -430,25 +425,6 @@ class TS2FXGraphConverter:
             # If so, we manually insert get_attr fx node.
             if fx_node_name not in self.name_to_node and fx_node_name in self.name_to_buffer_map:
                 self.name_to_node[fx_node_name] = self.fx_graph.get_attr(fx_node_name)
-
-    def _contain_module_name():
-        return
-
-    # def convert_prim_GetAttr(self, node: torch._C.Node):
-    #     def get_attr(name: str):
-    #         if name in self.attribute_map:
-    #             return self.attribute_map[name]
-    #         else:
-    #             raise ValueError(f"Attribute {name} not found")
-    #     output_name = node.output().debugName()
-
-    #     attr_name = node.s("name")
-    #     input_name = node.input().debugName()
-
-    #     root_attr_name = get_attr(input_name)
-    #     self.attribute_map[output_name] = (
-    #         f"{root_attr_name}.{attr_name}" if root_attr_name else attr_name
-    #     )
 
     def convert_prim_SetAttr(self, node: torch._C.Node):
         attr_name = node.s("name")
@@ -789,7 +765,7 @@ class TS2EPConverter:
             else dict()
         )
         self.name_to_non_tensor_attr_map: Dict[str, Any] = {}
-        self.module_names: set[str] = set()
+        self.module_names = {}
         self.get_attributes()
 
     def convert(self) -> ExportedProgram:
@@ -800,7 +776,6 @@ class TS2EPConverter:
             self.name_to_param_map,
             self.name_to_buffer_map,
             self.name_to_non_tensor_attr_map,
-            self.module_names,
             blocks_to_lifted_attrs,
         )
         gm = graph_converter.convert()
@@ -839,10 +814,14 @@ class TS2EPConverter:
         for node in self.ts_graph.nodes():
             if node.kind() == "prim::GetAttr":
                 attr_name = node.s("name")
-                constant = getattr(self.ts_model, attr_name)
-                if isinstance(constant, torch.Tensor):
-                    self.name_to_buffer_map[attr_name] = constant
-                elif isinstance(constant, torch.nn.Module):
-                    self.module_names.add(attr_name)
+                input_name = node.input().debugName()
+                if input_name in self.module_names:
+                    value = getattr(self.module_names[input_name], attr_name)
                 else:
-                    self.name_to_non_tensor_attr_map[attr_name] = constant
+                    value = getattr(self.ts_model, attr_name)
+                if isinstance(value, torch.Tensor):
+                    self.name_to_buffer_map[attr_name] = value
+                elif isinstance(value, torch.nn.Module):
+                    self.module_names[attr_name] = value
+                else:
+                    self.name_to_non_tensor_attr_map[attr_name] = value

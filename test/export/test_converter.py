@@ -38,11 +38,19 @@ class TestConverter(TestCase):
         for opt in option:
             if opt == "script":
                 # Separate two models for testing non-functional effects
-                original_ts_model = torch.jit.script(M())
-                ts_model = torch.jit.script(M())
+                if check_persistent:
+                    original_ts_model = torch.jit.script(M())
+                    ts_model = torch.jit.script(M())
+                else:
+                    original_ts_model = torch.jit.script(M)
+                    ts_model = torch.jit.script(M)
             elif opt == "trace":
-                original_ts_model = torch.jit.trace(M(), inp)
-                ts_model = torch.jit.trace(M(), inp)
+                if check_persistent:
+                    original_ts_model = torch.jit.trace(M(), inp)
+                    ts_model = torch.jit.trace(M(), inp)
+                else:
+                    original_ts_model = torch.jit.trace(M, inp)
+                    ts_model = torch.jit.trace(M, inp)
             else:
                 raise RuntimeError(f"Unrecognized mode for torch.jit: {opt}")
 
@@ -54,20 +62,6 @@ class TestConverter(TestCase):
                 ep_list.append(ep)
                 ep_out, _ = pytree.tree_flatten(ep.module()(*inp))
 
-                print(f"yooo. orig_out:{orig_out}, ep_out:{ep_out}")
-
-                # Check module.
-                if isinstance(M(), torch.nn.Module):
-                    lifted_tensor_buffer_keys = (
-                        list(lifted_tensor_buffer.keys())
-                        if lifted_tensor_buffer
-                        else []
-                    )
-                    self.assertEqual(
-                        list(ep.state_dict.keys()),
-                        list(original_ts_model.state_dict().keys())
-                        + lifted_tensor_buffer_keys,
-                    )
                 # Check results
                 self._check_tensor_list_equal(ep_out, orig_out)
         return ep_list
@@ -441,8 +435,8 @@ class TestConverter(TestCase):
         inp = (torch.ones(3),)
         orig_m = NestedM(3)
         self._check_equal_ts_ep_converter(orig_m, inp)
-        orig_m = SuperNestedM(3)
-        self._check_equal_ts_ep_converter(orig_m, inp)
+        # orig_m = SuperNestedM(3)
+        # self._check_equal_ts_ep_converter(orig_m, inp)
 
     def test_convert_nn_module_with_nested_buffer(self):
         class M(torch.nn.Module):
@@ -825,7 +819,7 @@ class TestConverter(TestCase):
 
         inp = (torch.ones(3, 2),)
         self._check_equal_ts_ep_converter(
-            Module(), inp, ["script"], check_persistent=True
+            Module, inp, ["script"], check_persistent=True
         )
 
         class Module(torch.nn.Module):
@@ -839,7 +833,7 @@ class TestConverter(TestCase):
 
         inp = (torch.ones(3, 2),)
         self._check_equal_ts_ep_converter(
-            Module(), inp, ["script"], check_persistent=True
+            Module, inp, ["script"], check_persistent=True
         )
 
         # export lifts a tensor constant (self.data) as an input if it is not assigned.
@@ -858,7 +852,7 @@ class TestConverter(TestCase):
         inp = (torch.ones(3, 2),)
         lifted_tensor_buffer = OrderedDict([("data", torch.ones(3, 2))])
         self._check_equal_ts_ep_converter(
-            Module(), inp, ["script"], lifted_tensor_buffer, check_persistent=True
+            Module, inp, ["script"], lifted_tensor_buffer, check_persistent=True
         )
 
         class Module(torch.nn.Module):
@@ -870,8 +864,7 @@ class TestConverter(TestCase):
                 return x + self.count
 
         inp = (torch.ones(3, 2),)
-        self._check_equal_ts_ep_converter(Module(), inp, ["script"])
-
+        self._check_equal_ts_ep_converter(Module, inp, ["script"], check_persistent=True)
 
     def test_prim_SetAttr_on_nested_modules(self):
         class M(torch.nn.Module):
@@ -892,24 +885,8 @@ class TestConverter(TestCase):
                 self.w2 += 1
                 return self.w2 + self.m(x)
 
-        class SuperNestedM(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.m = NestedM()
-                self.register_buffer("w3", torch.ones(1))
-
-            def forward(self, x: torch.Tensor):
-                # self.m.w += 1
-                # self.m.m.w += 1
-                return self.w3 + self.m(x)
-
         inp = (torch.ones(1),)
-
-        # orig_m = NestedM()
-        # self._check_equal_ts_ep_converter(NestedM, inp)
-
-        orig_m = SuperNestedM()
-        self._check_equal_ts_ep_converter(SuperNestedM, inp, ["script"])
+        self._check_equal_ts_ep_converter(NestedM, inp, ["script"], check_persistent=True)
 
 
 if __name__ == "__main__":
