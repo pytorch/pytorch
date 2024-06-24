@@ -6,7 +6,6 @@ import unittest
 from collections import defaultdict
 
 import yaml
-
 from tools.autograd import gen_autograd_functions, load_derivatives
 
 from torchgen import dest
