@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Union
 import torch
 import torch.distributed as dist
 from torch.profiler import record_function
+from ._utils import format_pipeline_order
 
 from .microbatch import merge_chunks, split_args_kwargs_into_chunks, TensorChunkSpec
 from .stage import _PipelineStageBase
@@ -660,71 +661,78 @@ class PipelineScheduleMulti(_PipelineSchedule):
         next_rank: int = (self.rank + 1) % self.pp_group_size
 
         for time_step, action in enumerate(self.pipeline_order[self.rank]):
-            prev_rank_ops = self.pipeline_order[prev_rank]
-            next_rank_ops = self.pipeline_order[next_rank]
-            ops: List[dist.P2POp] = []
-            if action is not None:
-                computation_type, mb_index, stage_index = action
-                if computation_type == _ComputationType.FORWARD:
-                    # perform forward computation
-                    stage = stage_index_to_stage[stage_index]
-                    output = stage.forward_one_chunk(
-                        mb_index, arg_mbs[mb_index], kwarg_mbs[mb_index]
-                    )
-                    self._maybe_compute_loss(stage, output, target_mbs, mb_index)
-                    ops.extend(stage.get_fwd_send_ops(mb_index))
-                elif computation_type == _ComputationType.BACKWARD:
-                    # perform backward computation
-                    stage = stage_index_to_stage[stage_index]
-                    loss = self._maybe_get_loss(stage, mb_index)
-                    stage.backward_one_chunk(mb_index, loss=loss)
-                    ops.extend(stage.get_bwd_send_ops(mb_index))
-                else:
-                    raise ValueError(f"Unknown computation type {computation_type}")
+            try:
+                prev_rank_ops = self.pipeline_order[prev_rank]
+                next_rank_ops = self.pipeline_order[next_rank]
+                ops: List[dist.P2POp] = []
+                if action is not None:
+                    computation_type, mb_index, stage_index = action
+                    if computation_type == _ComputationType.FORWARD:
+                        # perform forward computation
+                        stage = stage_index_to_stage[stage_index]
+                        output = stage.forward_one_chunk(
+                            mb_index, arg_mbs[mb_index], kwarg_mbs[mb_index]
+                        )
+                        self._maybe_compute_loss(stage, output, target_mbs, mb_index)
+                        ops.extend(stage.get_fwd_send_ops(mb_index))
+                    elif computation_type == _ComputationType.BACKWARD:
+                        # perform backward computation
+                        stage = stage_index_to_stage[stage_index]
+                        loss = self._maybe_get_loss(stage, mb_index)
+                        stage.backward_one_chunk(mb_index, loss=loss)
+                        ops.extend(stage.get_bwd_send_ops(mb_index))
+                    else:
+                        raise ValueError(f"Unknown computation type {computation_type}")
 
-            # Look at the neighboring ranks for this current timestep and determine whether
-            # this current rank needs to do any recv communication
-            prev_rank_action = None
-            if time_step < len(prev_rank_ops):
-                prev_rank_action = prev_rank_ops[time_step]
-            if prev_rank_action is not None:
-                computation_type, mb_index, stage_index = prev_rank_action
-                # Only handle sends for the forward from a previous rank
-                if computation_type == _ComputationType.FORWARD:
-                    # If not the last stage, then receive fwd activations
-                    if stage_index != self._num_stages - 1:
-                        # TODO: We are assuming that stage will always receive from stage-1
-                        # however that is not necessarily true of get_fwd_recv_ops
-                        stage = stage_index_to_stage[stage_index + 1]
-                        ops.extend(stage.get_fwd_recv_ops(mb_index))
-                elif computation_type == _ComputationType.BACKWARD:
-                    # Previous rank doing backward has no influence for the current rank forward recv
-                    pass
-                else:
-                    raise ValueError(f"Unknown computation type {computation_type}")
+                # Look at the neighboring ranks for this current timestep and determine whether
+                # this current rank needs to do any recv communication
+                prev_rank_action = None
+                if time_step < len(prev_rank_ops):
+                    prev_rank_action = prev_rank_ops[time_step]
+                if prev_rank_action is not None:
+                    computation_type, mb_index, stage_index = prev_rank_action
+                    # Only handle sends for the forward from a previous rank
+                    if computation_type == _ComputationType.FORWARD:
+                        # If not the last stage, then receive fwd activations
+                        if stage_index != self._num_stages - 1:
+                            # TODO: We are assuming that stage will always receive from stage-1
+                            # however that is not necessarily true of get_fwd_recv_ops
+                            stage = stage_index_to_stage[stage_index + 1]
+                            ops.extend(stage.get_fwd_recv_ops(mb_index))
+                    elif computation_type == _ComputationType.BACKWARD:
+                        # Previous rank doing backward has no influence for the current rank forward recv
+                        pass
+                    else:
+                        raise ValueError(f"Unknown computation type {computation_type}")
 
-            next_rank_action = None
-            if time_step < len(next_rank_ops):
-                next_rank_action = next_rank_ops[time_step]
-            if next_rank_action is not None:
-                computation_type, mb_index, stage_index = next_rank_action
-                # Only handle receives for the backwards from a next rank
-                if computation_type == _ComputationType.FORWARD:
-                    # Next rank doing forward has no influence for the current rank backward recv
-                    pass
-                elif computation_type == _ComputationType.BACKWARD:
-                    # If not the first stage, then receive bwd gradients
-                    if stage_index != 0:
-                        # TODO: We are assuming that stage will always receive from stage+1
-                        # however that is not necessarily true of get_bwd_recv_ops
-                        stage = stage_index_to_stage[stage_index - 1]
-                        ops.extend(stage.get_bwd_recv_ops(mb_index))
-                else:
-                    raise ValueError(f"Unknown computation type {computation_type}")
+                next_rank_action = None
+                if time_step < len(next_rank_ops):
+                    next_rank_action = next_rank_ops[time_step]
+                if next_rank_action is not None:
+                    computation_type, mb_index, stage_index = next_rank_action
+                    # Only handle receives for the backwards from a next rank
+                    if computation_type == _ComputationType.FORWARD:
+                        # Next rank doing forward has no influence for the current rank backward recv
+                        pass
+                    elif computation_type == _ComputationType.BACKWARD:
+                        # If not the first stage, then receive bwd gradients
+                        if stage_index != 0:
+                            # TODO: We are assuming that stage will always receive from stage+1
+                            # however that is not necessarily true of get_bwd_recv_ops
+                            stage = stage_index_to_stage[stage_index - 1]
+                            ops.extend(stage.get_bwd_recv_ops(mb_index))
+                    else:
+                        raise ValueError(f"Unknown computation type {computation_type}")
 
-            # do the communication
-            if ops:
-                _batch_p2p(ops).wait()
+                # do the communication
+                if ops:
+                    _batch_p2p(ops).wait()
+            except Exception as e:
+                logger.error(
+                    "Exception in rank %s at time step %s", self.rank, time_step
+                )
+                logger.error("%s", format_pipeline_order(self.pipeline_order))
+                raise e
         # Return losses if there is a container passed in
         self._update_losses(self._stages, losses)
 
