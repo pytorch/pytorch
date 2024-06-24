@@ -421,6 +421,7 @@ def get_patched_config_dict(config_patches=None) -> Dict[str, Any]:
 
 
 def with_fresh_cache_if_config(fn):
+    @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         if config.force_disable_caches:
             # Don't delete the cache dir because it has to survive beyond the

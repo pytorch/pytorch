@@ -64,9 +64,5 @@ def _set_triton_ptxas_path() -> None:
 
 def _worker_compile_triton(load_kernel: Callable[[], Any], extra_env: Dict[str, str]):
     _set_triton_ptxas_path()
-
-    # Set any provided env vars
-    for k, v in extra_env.items():
-        os.environ[k] = v
-
+    os.environ.update(extra_env)
     load_kernel().precompile(warm_cache_only=True)
