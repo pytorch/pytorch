@@ -231,7 +231,7 @@ def foreach_reduce(
     orig_dtype: torch.dtype,
     reduce_dtype: Optional[torch.dtype],
     device: torch.device,
-    reduce_scatter_reduce_op: Optional[dist.ReduceOp],
+    reduce_scatter_reduce_op: Optional[Union[dist.ReduceOp, dist.ReduceOp.RedOpType]],
     all_reduce_group: Optional[dist.ProcessGroup],  # not `None` iff HSDP
     all_reduce_stream: torch.cuda.Stream,
     all_reduce_grads: bool,
