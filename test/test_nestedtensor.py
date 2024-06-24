@@ -565,7 +565,7 @@ class TestNestedTensor(TestCase):
 
         # Jagged <-> strided
         new_layout = torch.jagged if layout == torch.strided else torch.strided
-        new_layout_nt = nt.to(layout=new_layout)
+        new_layout_nt = torch._to_copy(nt, layout=new_layout)
         self.assertIs(new_layout_nt.layout, new_layout)
         self.assertEqual(new_layout_nt.device, nt.device)
         self.assertEqual(new_layout_nt.size(2), nt.size(2))
