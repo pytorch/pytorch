@@ -44,11 +44,6 @@ from torch._subclasses.meta_utils import (
     MetaConverter,
 )
 from torch._utils import render_call
-from torch.fx.experimental.symbolic_shapes import (
-    ShapeEnv,
-    StatefulSymbolicContext,
-    SymbolicContext,
-)
 from torch.fx.immutable_collections import immutable_dict
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -67,8 +62,11 @@ if TYPE_CHECKING:
 
     from torch._guards import Source
     from torch._ops import OpOverload
+    from torch.fx.experimental.symbolic_shapes import (
+        ShapeEnv,
+        SymbolicContext,
+    )
     from torch.types import IntLikeType
-
 
 log = logging.getLogger(__name__)
 
@@ -153,7 +151,7 @@ def is_fake(x: object) -> TypeGuard[Tensor]:
     if isinstance(x, FakeTensor):
         return True
     if is_traceable_wrapper_subclass(x):
-        attrs, _ = type(x).__tensor_flatten__(x)  # type: ignore[arg-type]
+        attrs, _ = type(x).__tensor_flatten__(x)
         flattened_tensors = [getattr(x, attr) for attr in attrs]
         # need to recurse because we could have nested subclasses
         all_fake = all(is_fake(x) for x in flattened_tensors)
@@ -318,6 +316,7 @@ class FakeTensorConverter:
             if tracing_context := torch._guards.TracingContext.try_get():
                 if t in tracing_context.tensor_to_context:
                     symbolic_context = tracing_context.tensor_to_context[t]
+                    from torch.fx.experimental.symbolic_shapes import StatefulSymbolicContext
                     assert isinstance(symbolic_context, StatefulSymbolicContext)
                     source = symbolic_context.tensor_source
 
@@ -657,11 +656,11 @@ class FakeTensor(Tensor):
                 )
             else:
                 device = torch.device(f"{device.type}:0")
-        self.fake_device = device  # type: ignore[attr-defined]
-        self.fake_mode = fake_mode  # type: ignore[attr-defined]
-        self.constant = constant  # type: ignore[attr-defined]
+        self.fake_device = device
+        self.fake_mode = fake_mode
+        self.constant = constant
         assert not isinstance(real_tensor, FakeTensor)
-        self.real_tensor = real_tensor  # type: ignore[attr-defined]
+        self.real_tensor = real_tensor
         self.nonzero_memo = None
         self.item_memo = None
         self.unique_memo = None
@@ -767,7 +766,7 @@ class FakeTensor(Tensor):
 
         assert not fake_mode.in_kernel_invocation
 
-        with fake_mode:  # type: ignore[attr-defined]
+        with fake_mode:
             return func(*args, **kwargs)
 
     @staticmethod
@@ -892,6 +891,9 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
     if is_sparse_any(t) or not t.is_contiguous(memory_format=memory_format):
         memory_format = None
 
+    storage_offset = t.storage_offset()
+    assert isinstance(storage_offset, int)
+
     return TensorMetadata(
         dtype=t.dtype,
         shape=t.shape,
@@ -899,7 +901,7 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
         device=t.device,
         layout=t.layout,
         memory_format=memory_format,
-        storage_offset=t.storage_offset(),  # type: ignore[arg-type]
+        storage_offset=storage_offset,
         # Only set storage_bytes for tensors that have storage (not sparse)
         storage_bytes=t.untyped_storage().nbytes() if not t.is_sparse else None,
         requires_grad=t.requires_grad,
