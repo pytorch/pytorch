@@ -10,7 +10,6 @@ from torch._ops import HigherOrderOperator
 
 from torch._prims_common import CUDARngStateHelper, make_contiguous_strides_for
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch._subclasses.functional_tensor import FunctionalTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -248,14 +247,14 @@ def register_run_with_rng_state_op():
         with mode:
             return op(*args, **kwargs)
 
-    @run_with_rng_state.py_impl(FunctionalTensorMode)
-    def impl_functional_tensor_mode(mode, rng_state, op, *args, **kwargs):
-        unwrapped_args = mode.unwrap_tensors(args)
-        unwrapped_kwargs = mode.unwrap_tensors(kwargs)
+    @run_with_rng_state.py_functionalize_impl
+    def impl_functional(ctx, rng_state, op, *args, **kwargs):
+        unwrapped_args = ctx.unwrap_tensors(args)
+        unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
 
-        with mode.redispatch_to_next():
-            out = run_with_rng_state(*unwrapped_args, **unwrapped_kwargs)
-            return mode.wrap_tensors(out)
+        with ctx.redispatch_to_next():
+            out = run_with_rng_state(rng_state, op, *unwrapped_args, **unwrapped_kwargs)
+            return ctx.wrap_tensors(out)
 
     return run_with_rng_state
 
