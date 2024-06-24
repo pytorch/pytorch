@@ -1237,6 +1237,11 @@ class CheckpointPolicy(enum.Enum):
     PREFER_RECOMPUTE = 3
 
 
+def _policy_from_bool(b):
+    # For backward compatability
+    return CheckpointPolicy.MUST_SAVE if b else CheckpointPolicy.PREFER_RECOMPUTE
+
+
 SAC_IGNORED_OPS = {
     # AC inserts different number of detach during forward and recompute.
     torch.ops.aten.detach.default,
@@ -1260,6 +1265,9 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
         kwargs = {} if kwargs is None else kwargs
         policy = self.policy_fn(SelectiveCheckpointContext(is_recompute=False),
                                 func, *args, **kwargs)
+        if isinstance(policy, bool):
+            policy = _policy_from_bool(policy)
+
         is_compiling = _is_compiling(func, args, kwargs)
 
         if is_compiling and policy == CheckpointPolicy.MUST_SAVE:
@@ -1287,6 +1295,9 @@ class _CachedTorchDispatchMode(TorchDispatchMode):
         kwargs = {} if kwargs is None else kwargs
         policy = self.policy_fn(SelectiveCheckpointContext(is_recompute=True),
                                 func, *args, **kwargs)
+        if isinstance(policy, bool):
+            policy = _policy_from_bool(policy)
+
         is_compiling = _is_compiling(func, args, kwargs)
 
         if policy in (CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_SAVE) or is_compiling:
