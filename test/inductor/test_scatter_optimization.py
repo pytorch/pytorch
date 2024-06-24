@@ -37,7 +37,10 @@ class TestScatterOpt(TestCase):
 
         x = torch.randint(0, N, (L, M), dtype=torch.int64)
         self.do_acc_test(f, x)
-        self.check_metric()
+        expected_num_bytes = (
+            L * M * N * torch.float.itemsize + L * M * torch.int64.itemsize
+        )
+        self.assertEqual(metrics.num_bytes_accessed, expected_num_bytes)
 
     def test_non_last_dim(self):
         """
@@ -52,7 +55,8 @@ class TestScatterOpt(TestCase):
 
         x = torch.randint(0, M, (N,), dtype=torch.int64)
         self.do_acc_test(f, x)
-        self.check_metric()
+        expected_num_bytes = M * N * torch.float.itemsize + N * torch.int64.itemsize
+        self.assertEqual(metrics.num_bytes_accessed, expected_num_bytes)
 
     def test_nonzero_const_tensor(self):
         M, N = 1024, 2048
@@ -64,7 +68,8 @@ class TestScatterOpt(TestCase):
 
         x = torch.randint(0, N, (M,), dtype=torch.int64)
         self.do_acc_test(f, x)
-        self.check_metric()
+        expected_num_bytes = M * N * torch.float.itemsize + M * torch.int64.itemsize
+        self.assertEqual(metrics.num_bytes_accessed, expected_num_bytes)
 
     def test_can_not_optimize_due_to_dense(self):
         M, N = 1024, 2048
@@ -76,7 +81,12 @@ class TestScatterOpt(TestCase):
 
         x = torch.randint(0, N, (M, N // 2), dtype=torch.int64)
         self.do_acc_test(f, x)
-        self.check_metric(0)
+        expected_num_bytes = M * N * torch.float.itemsize + M * (N // 2) * (
+            torch.int64.itemsize + torch.float.itemsize
+        )
+        # Use assertGreaterEqual rather than assertEqual due to the issue related
+        # to StarDep mentioned here: https://github.com/pytorch/pytorch/pull/129043#discussion_r1651699706
+        self.assertGreaterEqual(metrics.num_bytes_accessed, expected_num_bytes)
 
     def test_can_not_optimize_due_to_non_const(self):
         M, N = 1024, 2048
@@ -85,10 +95,26 @@ class TestScatterOpt(TestCase):
             y.scatter_(1, x, 0.618)
             return y
 
-        x = torch.randint(0, N, (M, N // 2), dtype=torch.int64)
+        x = torch.randint(0, N, (M, 1), dtype=torch.int64)
         y = torch.randn([M, N])
         self.do_acc_test(f, x, y)
-        self.check_metric(0)
+
+        # The generate code is quite in-efficient.
+        # There are 3 kernels
+        # 1. copy from arg to buf
+        # 2. scatter upon buf
+        # 3. copy buf back to arg
+        # Link to the wrapper: https://gist.github.com/shunting314/d43b74e680b3e5b514f7c28160c39f40
+        expected_num_bytes = 4 * M * N * torch.float.itemsize + M * (
+            torch.int64.itemsize + torch.float.itemsize
+        )
+        self.assertGreaterEqual(metrics.num_bytes_accessed, expected_num_bytes)
+
+        # the second kernel and third kernel are both mutation kernel. So we
+        # overestimated the memory accessed
+        # Update the test once the overestimiation is fixed.
+        over_estimate = M * torch.float.itemsize + M * N * torch.float.itemsize
+        self.assertEqual(metrics.num_bytes_accessed, expected_num_bytes + over_estimate)
 
     def test_cross_entropy_loss(self):
         """
