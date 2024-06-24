@@ -1290,9 +1290,9 @@ def forward(self, arg0_1):
         self.assertExpectedInline(
             fw_graph.code.strip(),
             """\
-def forward(self, primals_1):
-    view = torch.ops.aten.view.default(primals_1, [-1]);  primals_1 = None
-    return [view]""",
+def forward(self, arg0_1):
+    view = torch.ops.aten.view.default(arg0_1, [-1]);  arg0_1 = None
+    return (view,)""",
         )
 
     def test_input_output_view_mutate_multiple(self):
@@ -1942,12 +1942,11 @@ def forward(self, primals_1):
         self.assertExpectedInline(
             fw_graph.code.strip(),
             """\
-def forward(self, primals_1, primals_2):
-    view = torch.ops.aten.view.default(primals_1, [3, 3]);  primals_1 = None
-    t = torch.ops.aten.t.default(view);  view = None
-    view_1 = torch.ops.aten.view.default(primals_2, [3, 3]);  primals_2 = None
-    view_2 = torch.ops.aten.view.default(t, [3, 3])
-    return [t, view_1, view_2]""",
+def forward(self, arg0_1, arg1_1):
+    t = torch.ops.aten.t.default(arg0_1);  arg0_1 = None
+    view = torch.ops.aten.view.default(arg1_1, [3, 3]);  arg1_1 = None
+    view_1 = torch.ops.aten.view.default(t, [3, 3])
+    return (t, view, view_1)""",
         )
 
     def test_view_detach(self):
@@ -3627,6 +3626,7 @@ def forward(self, tangents_1):
         # since they are the only ones that will get reconstructed.
         def wrapper(g, *args, **kwargs):
             outs = g(*args, **kwargs)
+            outs = list(outs)
             for i in output_view_indices:
                 outs[i] = NoViewReplayTensor(outs[i])
             return outs
