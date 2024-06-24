@@ -41,7 +41,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
 from functools import partial, wraps
-from itertools import product, chain
+from itertools import chain, product
 from pathlib import Path
 from statistics import mean
 from typing import (
@@ -63,38 +63,31 @@ import expecttest
 import numpy as np
 
 import __main__  # type: ignore[import]
+
 import torch
 import torch.backends.cudnn
 import torch.backends.mkl
 import torch.backends.mps
 import torch.backends.xnnpack
 import torch.cuda
+import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._C import ScriptDict, ScriptList  # type: ignore[attr-defined]
 from torch._utils_internal import get_writable_path
-from torch.nn import (
-    ModuleDict,
-    ModuleList,
-    ParameterDict,
-    ParameterList,
-    Sequential,
-)
-from torch.onnx import (
-    register_custom_op_symbolic,
-    unregister_custom_op_symbolic,
-)
+from torch.nn import ModuleDict, ModuleList, ParameterDict, ParameterList, Sequential
+from torch.onnx import register_custom_op_symbolic, unregister_custom_op_symbolic
 from torch.testing import make_tensor
 from torch.testing._comparison import (
     BooleanPair,
     NonePair,
+    not_close_error_metas,
     NumberPair,
     Pair,
     TensorLikePair,
 )
-from torch.testing._comparison import not_close_error_metas
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.utils._import_utils import _check_module_exists
-import torch.utils._pytree as pytree
+
 
 try:
     import pytest
@@ -1327,6 +1320,7 @@ TestEnvironment.def_flag("TEST_WITH_TORCHDYNAMO", env_var="PYTORCH_TEST_WITH_DYN
 
 if TEST_WITH_TORCHDYNAMO:  # noqa: F821
     import torch._dynamo
+
     # Do not spend time on helper functions that are called with different inputs
     torch._dynamo.config.accumulated_cache_size_limit = 8
     # Do not log compilation metrics from unit tests
@@ -3052,8 +3046,8 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         return crow_indices.to(device=device)
 
     def genSparseCompressedTensor(self, size, nnz, *, layout, device, dtype, index_dtype, blocksize=(), dense_dims=0):
-        from operator import mul
         from functools import reduce
+        from operator import mul
         sparse_dim = 2
         assert all(size[d] > 0 for d in range(len(size))) or nnz == 0, 'invalid arguments'
         assert len(size) >= sparse_dim
@@ -3975,8 +3969,8 @@ class TestCaseBase(TestCase):
 
 
 def download_file(url, binary=True):
+    from urllib import error, request
     from urllib.parse import urlsplit
-    from urllib import request, error
 
     filename = os.path.basename(urlsplit(url)[2])
     data_dir = get_writable_path(os.path.join(os.path.dirname(__file__), 'data'))

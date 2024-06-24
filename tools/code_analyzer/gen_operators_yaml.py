@@ -5,9 +5,9 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import yaml
 from typing import Any
 
+import yaml
 from gen_op_registration_allowlist import (
     canonical_name,
     gen_transitive_closure,

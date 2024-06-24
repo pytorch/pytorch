@@ -1,7 +1,7 @@
 import io
 import sys
-import yaml
 
+import yaml
 from android_api_module import AndroidAPIModule
 from builtin_ops import TSBuiltinOpsModule, TSCollectionOpsModule
 from math_ops import (

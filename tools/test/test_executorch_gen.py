@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+
 import yaml
 
 from torchgen.executorch.model import ETKernelIndex, ETKernelKey

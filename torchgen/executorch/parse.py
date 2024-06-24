@@ -1,6 +1,7 @@
-import yaml
 from collections import defaultdict, namedtuple
 from typing import Any, Dict, List, Optional, Set, Tuple
+
+import yaml
 
 from torchgen.executorch.model import ETKernelIndex, ETKernelKey
 from torchgen.gen import LineLoader, parse_native_yaml

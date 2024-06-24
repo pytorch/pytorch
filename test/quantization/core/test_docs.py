@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: quantization"]
 
-import re
 import contextlib
+import re
 from pathlib import Path
 
 import torch
