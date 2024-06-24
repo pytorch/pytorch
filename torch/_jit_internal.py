@@ -36,11 +36,11 @@ from typing import (
 )
 
 import torch
-import torch.package._mangling as package_mangling
 from torch._awaits import _Await
 from torch._C import _Await as CAwait, Future as CFuture
 from torch._sources import fake_range, get_source_lines_and_file, parse_def
 from torch.futures import Future
+from torch.package import _mangling as package_mangling
 
 
 IS_PY39_PLUS: Final[bool] = sys.version_info >= (3, 9)
@@ -1190,10 +1190,10 @@ def is_await(ann) -> bool:
 
 
 # Put the import here to avoid circular imports
-import torch.distributed as dist
+from torch.distributed.rpc import is_available as is_rpc_available
 
 
-if dist.rpc.is_available():
+if is_rpc_available():
     from torch._C._distributed_rpc import PyRRef
     from torch.distributed.rpc import RRef
 
