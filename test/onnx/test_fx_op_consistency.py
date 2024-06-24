@@ -1020,7 +1020,7 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
     ),
     xfail(
         "nonzero",
-        dtypes=(torch.int8, torch.int16),
+        dtypes=(torch.int8, torch.int16, torch.int64, torch.float16),
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("NonZero", "int8, int16"),
     ),
     xfail(
