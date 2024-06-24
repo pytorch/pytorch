@@ -536,8 +536,16 @@ def _get_torch_related_args(include_pytorch: bool, aot_mode: bool):
     ]
     libraries_dirs = [TORCH_LIB_PATH]
     libraries = []
-    if sys.platform != "darwin" and not config.is_fbcode():
-        libraries = ["torch", "torch_cpu"]
+
+    if aot_mode:
+        if sys.platform == "linux" and not config.is_fbcode():
+            libraries.append("torch")
+            libraries.append("torch_cpu")
+            # libraries.append("torch_python")
+
+    if include_pytorch and not config.is_fbcode():
+        libraries.append("torch")
+        libraries.append("torch_cpu")
         if not aot_mode:
             libraries.append("torch_python")
 
@@ -552,7 +560,7 @@ def _get_torch_related_args(include_pytorch: bool, aot_mode: bool):
     return include_dirs, libraries_dirs, libraries
 
 
-def _get_python_related_args():
+def _get_python_related_args(include_pytorch: bool, aot_mode: bool):
     python_include_dirs = _get_python_include_dirs()
     python_include_path = sysconfig.get_path(
         "include", scheme="nt" if _IS_WINDOWS else "posix_prefix"
@@ -560,11 +568,13 @@ def _get_python_related_args():
     if python_include_path is not None:
         python_include_dirs.append(python_include_path)
 
+    python_lib_path = []
     if _IS_WINDOWS:
         python_path = os.path.dirname(sys.executable)
-        python_lib_path = [os.path.join(python_path, "libs")]
+        python_lib_path.append(os.path.join(python_path, "libs"))
     else:
-        python_lib_path = [sysconfig.get_config_var("LIBDIR")]
+        if include_pytorch:
+            python_lib_path.append(sysconfig.get_config_var("LIBDIR"))
 
     if config.is_fbcode():
         python_include_dirs.append(build_paths.python())
@@ -696,7 +706,9 @@ def get_cpp_torch_options(
         torch_libraries,
     ) = _get_torch_related_args(include_pytorch=include_pytorch, aot_mode=aot_mode)
 
-    python_include_dirs, python_libraries_dirs = _get_python_related_args()
+    python_include_dirs, python_libraries_dirs = _get_python_related_args(
+        include_pytorch, aot_mode
+    )
 
     (
         omp_cflags,
@@ -856,9 +868,8 @@ def get_cpp_torch_cuda_options(cuda: bool, aot_mode: bool = False):
                     libraries += ["c10_cuda", "cuda", "torch_cuda"]
 
     if aot_mode:
-        if config.is_fbcode():
-            cpp_prefix_include_dir = [f"{os.path.dirname(cpp_prefix_path())}"]
-            include_dirs += cpp_prefix_include_dir
+        cpp_prefix_include_dir = [f"{os.path.dirname(cpp_prefix_path())}"]
+        include_dirs += cpp_prefix_include_dir
 
         if cuda and torch.version.hip is None:
             _transform_cuda_paths(libraries_dirs)

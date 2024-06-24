@@ -1929,6 +1929,9 @@ def get_include_and_linking_paths(
         # (later on, we copy the include paths from cpp_extensions into our remote dir)
         ipaths.append("include")
 
+    if aot_mode:
+        ipaths += [os.path.dirname(cpp_prefix_path())]
+
     static_link_libs = []
     if aot_mode and cuda and config.is_fbcode():
         # For Meta internal cuda-12, it is recommended to static link cudart
