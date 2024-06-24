@@ -65,7 +65,7 @@ def _calculate_shape(
 
 
 def _make_grads(
-    outputs: Sequence[torch.Tensor],
+    outputs: Sequence[Union[torch.Tensor, graph.GradientEdge]],
     grads: Sequence[_OptionalTensor],
     is_grads_batched: bool,
 ) -> Tuple[_OptionalTensor, ...]:
@@ -378,13 +378,14 @@ def grad(
     if allow_unused is None:
         allow_unused = materialize_grads
     if is_tensor_like(outputs) or isinstance(outputs, graph.GradientEdge):
-        t_outputs = cast(_TensorOrTensorsOrGradEdge, (outputs,))
+        outputs = cast(_TensorOrTensorsOrGradEdge, (outputs,))
     else:
-        t_outputs = tuple(outputs)
+        outputs = tuple(outputs)
     if is_tensor_like(inputs) or isinstance(inputs, graph.GradientEdge):
         inputs = cast(_TensorOrTensorsOrGradEdge, (inputs,))
     else:
         inputs = tuple(inputs)
+    t_outputs = tuple(i for i in outputs if is_tensor_like(i))
     t_inputs = tuple(i for i in inputs if is_tensor_like(i))
     overridable_args = t_outputs + t_inputs
     if has_torch_function(overridable_args):

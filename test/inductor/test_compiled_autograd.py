@@ -1440,6 +1440,7 @@ known_failing_tests = {
     "test_grad_materialize_grads",  # RuntimeError: compiled_autograd does not support create_graph
     "test_grad_nonleaf",  # RuntimeError: compiled_autograd does not support create_graph
     "test_grad_nonleaf_many_outputs",  # RuntimeError: compiled_autograd does not support create_graph
+    "test_gradient_edge_output",  # RuntimeError: trying to backward through the graph a second time
     "test_hessian_vector",  # RuntimeError: compiled_autograd does not support create_graph
     "test_hook_closure_cycle_use_custom_function_True_use_tensor_hook_False",  # AttributeError: type object
     "test_hook_closure_cycle_use_custom_function_True_use_tensor_hook_True",  # AttributeError: type object
