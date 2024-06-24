@@ -166,6 +166,26 @@ c10::intrusive_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
 
 PyObject* THPEngineClass = nullptr;
 
+
+inline static Edge parseGradientEdge(PyObject* obj, int64_t index) {
+  PyObject* grad_fn = PyTuple_GetItem(obj, 0);
+  auto output_nr = THPUtils_unpackLong(PyTuple_GetItem(obj, 1));
+  std::shared_ptr<torch::autograd::Node> grad_fn_sp;
+  if (THPFunction_Check(grad_fn)) {
+    grad_fn_sp = ((THPFunction*)grad_fn)->cdata.lock();
+  } else if (THPCppFunction_Check(grad_fn)) {
+    grad_fn_sp = ((THPCppFunction*)grad_fn)->cdata;
+  } else {
+  TORCH_CHECK(
+    false,
+    "GradientEdge's first object must be an autograd.graph.Node "
+    "but got ",
+    THPUtils_typename(grad_fn));
+  }
+  return Edge(grad_fn_sp, output_nr);
+}
+
+
 // Implementation of torch._C._EngineBase.run_backward
 PyObject* THPEngine_run_backward(
     PyObject* self,
@@ -254,19 +274,7 @@ PyObject* THPEngine_run_backward(
           "with your use case.");
       gradient_edge = torch::autograd::impl::gradient_edge(mb_output.value());
     } else if (PyObject_IsInstance(_tensor, THPGradientEdgeClass)) {
-      // TODO: deduplicate parsing of the GradientEdge
-      PyObject* grad_fn = PyTuple_GetItem(_tensor, 0);
-      auto output_nr = THPUtils_unpackLong(PyTuple_GetItem(_tensor, 1));
-      std::shared_ptr<torch::autograd::Node> grad_fn_sp;
-      if (THPFunction_Check(grad_fn)) {
-        grad_fn_sp = ((THPFunction*)grad_fn)->cdata.lock();
-      } else if (THPCppFunction_Check(grad_fn)) {
-        grad_fn_sp = ((THPCppFunction*)grad_fn)->cdata;
-      } else {
-        TORCH_CHECK(
-            false, "GradientEdge must contain a valid autograd function");
-      }
-      gradient_edge = Edge(grad_fn_sp, output_nr);
+      gradient_edge = parseGradientEdge(_tensor, i);
     } else {
       TORCH_CHECK(
           false,
@@ -355,23 +363,7 @@ PyObject* THPEngine_run_backward(
           output_edges.emplace_back(grad_fn, output_nr);
         }
       } else if (PyObject_IsInstance(input, THPGradientEdgeClass)) {
-        auto node = PyTuple_GetItem(input, 0);
-        bool isTHPFunction = THPFunction_Check(node);
-        bool isTHPCppFunction = THPCppFunction_Check(node);
-        TORCH_CHECK(
-            isTHPFunction || isTHPCppFunction,
-            "GradientEdge first object must be an autograd.graph.Node "
-            "but got ",
-            THPUtils_typename(node));
-        std::shared_ptr<torch::autograd::Node> node_sp;
-        if (isTHPFunction) {
-          node_sp = ((THPFunction*)node)->cdata.lock();
-        } else {
-          node_sp = ((torch::autograd::THPCppFunction*)node)->cdata;
-        }
-
-        auto output_nr = THPUtils_unpackUInt32(PyTuple_GetItem(input, 1));
-        output_edges.emplace_back(node_sp, output_nr);
+        output_edges.emplace_back(parseGradientEdge(input, i));
       } else {
         TORCH_CHECK(
             false,

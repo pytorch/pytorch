@@ -191,7 +191,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
           [](const torch::autograd::InputMetadata& m) {
             PyObject* raw_obj =
                 (PyObject*)torch::getTHPDtype(m.dtype().toScalarType());
-            return py::reinterpret_steal<py::object>(raw_obj);
+            return py::reinterpret_borrow<py::object>(raw_obj);
           })
       .def("shape", &torch::autograd::InputMetadata::shape_as_dim_vector)
       .def(
