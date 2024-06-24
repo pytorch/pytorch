@@ -207,6 +207,19 @@ def add_safe_globals(safe_globals: List[Any]) -> None:
 
     Args:
         safe_globals (List[Any]): list of globals to mark as safe
+
+    Example:
+        >>> # xdoctest: +SKIP("makes cwd dirty")
+        >>> class MyTensor(torch.Tensor):
+        ...     pass
+        >>> t = MyTensor(torch.randn(2, 3))
+        >>> torch.save(t, 'my_tensor.pt')
+        # Running `torch.load('my_tensor.pt', weights_only=True)` will fail with
+        # Unsupported global: GLOBAL __main__.MyTensor was not an allowed global by default.
+        >>> torch.serialization.add_safe_globals([MyTensor])
+        >>> torch.load('my_tensor.pt', weights_only=True)
+        # MyTensor([[-0.5024, -1.8152, -0.5455],
+        #          [-0.8234,  2.0500, -0.3657]])
     """
     _weights_only_unpickler._add_safe_globals(safe_globals)
 
