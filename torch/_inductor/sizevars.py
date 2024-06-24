@@ -23,6 +23,7 @@ from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy
 
+from .runtime.runtime_utils import is_power_of_2
 from .utils import (
     sympy_index_symbol,
     sympy_index_symbol_with_prefix,
@@ -354,6 +355,13 @@ class SizeVarAllocator:
         expr = sympy.Eq(numerator % denominator, 0)
         return self.is_expr_static_and_true(expr)  # type: ignore[arg-type]
 
+    # See Note - [On Statically Known]
+    def statically_known_power_of_2(self, expr: Expr) -> bool:
+        """
+        Returns a bool indicating if x is known to be a power of 2.
+        """
+        return isinstance(expr, sympy.Integer) and is_power_of_2(int(expr))
+
     # The guard functions require you to ALREADY KNOW that a particular
     # condition holds.  If you don't know (you want to guard on an expression
     # being a particular value, and then get access to that value), use
@@ -376,7 +384,6 @@ class SizeVarAllocator:
     def guarded_order(self, seq):
         """
         Return the order of a sequence as a permutation of range(len(seq)) and guard on that order not changing.
-        Used for generating block_ptrs.
         """
         seq = [*map(self.remove_precomputed_replacements, seq)]
         seq = [(self.size_hint(var), orig_idx, var) for orig_idx, var in enumerate(seq)]
@@ -404,8 +411,22 @@ class SizeVarAllocator:
 
     def evaluate_min(self, left: Expr, right: Expr) -> Expr:
         """return the smaller of left and right, and guard on that choice"""
-        lv = self.size_hint(left)
-        rv = self.size_hint(right)
+        try:
+            lv = self.size_hint(left)
+            rv = self.size_hint(right)
+        except TypeError:  # unbacked symints
+            if left == right or self.statically_known_leq(left, right):
+                return left
+            if self.statically_known_leq(right, left):
+                return right
+            gcd = sympy.gcd(left, right)
+            if left == gcd:  # handle `min(10*u0, u0)` etc
+                return left
+            if right == gcd:
+                return right
+            raise TypeError(
+                f"evaluate_min({left}, {right}) with unbacked symints"
+            ) from None
         if lv <= rv:
             self.guard_leq(left, right)
             return left
@@ -441,7 +462,10 @@ class SizeVarAllocator:
             return expr
         free_symbols = expr.free_symbols
         if not free_symbols:
-            return int(expr)  # type: ignore[return-value]
+            try:
+                return int(expr)  # type: ignore[return-value]
+            except TypeError:
+                return expr  # inf/nan/I
         expr = self.remove_precomputed_replacements(expr)
         return sympy_subs(expr, self.var_to_val)
 

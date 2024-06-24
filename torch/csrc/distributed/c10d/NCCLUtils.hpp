@@ -672,7 +672,16 @@ struct NCCLTraceBuffer {
         std::move(end),
         c10::getTime(),
         timeout_ms.count(),
-        isP2P};
+        isP2P,
+        std::nullopt,
+        std::nullopt,
+        std::nullopt,
+        {},
+        {},
+        {},
+        {},
+        {},
+        false};
 
     for (const auto& input : inputs) {
       c10::IntArrayRef sizes = input.sizes();

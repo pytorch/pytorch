@@ -111,11 +111,6 @@ class WorkerServerTest(TestCase):
                 "POST", "/handler/dump_nccl_trace_pickle?includecollectives=true"
             )
             self.assertEqual(resp.status, 200)
-            # good key and value
-            resp = pool.request(
-                "POST", "/handler/dump_nccl_trace_pickle?includestacktraces=true"
-            )
-            self.assertEqual(resp.status, 200)
             # multiple good keys and values
             resp = pool.request(
                 "POST",
@@ -133,6 +128,12 @@ class WorkerServerTest(TestCase):
         self.assertEqual(out.status_code, 200)
 
         server.shutdown()
+
+    def test_dump_traceback(self) -> None:
+        with local_worker_server() as pool:
+            resp = pool.request("POST", "/handler/dump_traceback")
+            self.assertEqual(resp.status, 200)
+            self.assertIn(b"in test_dump_traceback\n", resp.data)
 
 
 if __name__ == "__main__":
