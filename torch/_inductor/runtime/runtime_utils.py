@@ -87,35 +87,40 @@ def do_bench(fn, fn_args, fn_kwargs, **kwargs):
         return do_bench_gpu(lambda: fn(*fn_args, **fn_kwargs), **kwargs)
 
 
-def do_bench_gpu(*args, **kwargs):
+def do_bench_gpu(
+    fn, warmup=25, rep=100, fast_flush=True, quantiles=(0.5,), return_mode="mean"
+):
     @functools.lru_cache(None)
-    def load_triton():
-        try:
-            # NB: Lazily load triton, as importing triton is slow
-            # see https://github.com/openai/triton/issues/1599
-            from triton.testing import do_bench as triton_do_bench
-        except ImportError as exc:
-            raise NotImplementedError("requires Triton") from exc
+    def get_cache_size():
+        device = torch.cuda.current_device()
+        properties = torch.cuda.get_device_properties(device)
+        return properties.l2CacheSize
 
-        # triton PR https://github.com/openai/triton/pull/1513 change the
-        # quantile fields name from 'percentiles' to 'quantiles'
-        # and change the default value from (0.5, 0.2, 0.8) to None.
-        # This may break inductor since a caller expects a tuple may get a item.
-        #
-        # Add a wrapper to maintain the same behavior for inductor.
-        # Maybe we should have own implementation of this function?
-        return triton_do_bench, (
-            "quantiles"
-            if inspect.signature(triton_do_bench).parameters.get("quantiles")
-            is not None
-            else "percentiles"
+    cache = torch.empty(int(get_cache_size() // 4), dtype=torch.int, device="cuda")
+
+    benchmarking_iters = 10
+    event_pairs = [
+        (
+            torch.cuda.Event(enable_timing=True),
+            torch.cuda.Event(enable_timing=True),
         )
+        for _ in range(benchmarking_iters)
+    ]
 
-    triton_do_bench, quantile_field_name = load_triton()
+    for start_event, end_event in event_pairs:
+        cache.zero_()
+        start_event.record()
+        fn()
+        end_event.record()
+    torch.cuda.synchronize()
 
-    if quantile_field_name not in kwargs:
-        kwargs[quantile_field_name] = (0.5, 0.2, 0.8)
-    return triton_do_bench(*args, **kwargs)[0]
+    # explicitly clean up the cache, since having this stick around can
+    # mess with memory compression calculations during benchmarking
+    del cache
+
+    timings = [event_pair[0].elapsed_time(event_pair[1]) for event_pair in event_pairs]
+    timing = min(timings)
+    return timing
 
 
 def do_bench_cpu(fn, warmup=5, times=20):
