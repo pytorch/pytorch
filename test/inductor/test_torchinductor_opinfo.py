@@ -444,7 +444,6 @@ inductor_one_sample = {
     "normal": {f16, f32, f64},
     "put": {f16, f32, f64},
     "rot90": {b8, f16, f32, f64, i32, i64},
-    "scatter": {b8, i64},
     "take": {b8, f16, f32, f64, i32, i64},
     ("__rdiv__", "cuda"): {f16},
     ("__rmod__", "cuda"): {f16, i64},
