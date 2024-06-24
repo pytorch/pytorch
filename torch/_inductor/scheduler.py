@@ -447,6 +447,7 @@ class BaseSchedulerNode:
 
         if only_once and self.written:
             return
+        assert self.node is not None
         origins = self.node.get_origins()
         out_lines = []
 
@@ -1120,8 +1121,9 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
     def get_consumer_subnode_for(
         self, producer: BaseSchedulerNode
     ) -> Optional[BaseSchedulerNode]:
-        if producer.get_name() in self.read_to_node:
-            return self.read_to_node[producer.get_name()]
+        for buf in producer.get_outputs():
+            if buf.get_name() in self.read_to_node:
+                return self.read_to_node[buf.get_name()]
 
         return None
 
@@ -1248,7 +1250,8 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                 for read in node.read_writes.reads:
                     self.read_to_node[read.name] = node
 
-                self.name_to_node[node.get_name()] = node
+                for name in node.get_operation_names():
+                    self.name_to_node[name] = node
         else:
             self.scheduler = scheduler
             self.snodes = nodes
@@ -1283,7 +1286,8 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             self.ancestors.update(other_node.ancestors)
 
             self.name_to_node = foreach_node.name_to_node
-            self.name_to_node[other_node.get_name()] = other_node
+            for name in other_node.get_operation_names():
+                self.name_to_node[name] = other_node
 
         self.group = (nodes[0].get_device(), ((sympy.Expr("foreach"),),))
 
@@ -1732,8 +1736,8 @@ class Scheduler:
                 assert (
                     s in unbacked_symbol_to_origin_node
                 ), f"{s} not in {unbacked_symbol_to_origin_node.keys()}"
-                if node := unbacked_symbol_to_origin_node[s]:
-                    for buf_name in self.name_to_node[node].get_buffer_names():
+                if r := unbacked_symbol_to_origin_node[s]:
+                    for buf_name in self.name_to_node[r].get_buffer_names():
                         log.debug(
                             "scheduling output %s for unbacked symint %s", buf_name, s
                         )
