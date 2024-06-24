@@ -44,7 +44,7 @@ def create_subclass_meta(
     idx = 0
     infos: List[Union[int, SubclassCreationMeta]] = []
     for a in curr_args:
-        if isinstance(a, Tensor) and is_traceable_wrapper_subclass(a):
+        if is_traceable_wrapper_subclass(a):
             attrs, meta = a.__tensor_flatten__()  # type: ignore[attr-defined]
             a = typing.cast(Tensor, a)
             start_idx = idx

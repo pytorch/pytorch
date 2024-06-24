@@ -48,12 +48,12 @@ NumberType: TypeAlias = Union[bool, int, float, complex]
 RealNumberType: TypeAlias = Union[bool, int, float]
 
 Number = (bool, int, float, complex, torch.SymInt, torch.SymFloat, torch.SymBool)
-# I don't call it Integral because numbers.Integral includes bool, but int_like
+# I don't call it Integral because numbers.Integral includes bool, but IntLike
 # does not
 Dim = int
-int_like = (int, torch.SymInt)
-float_like = (float, torch.SymFloat)
-bool_like = (bool, torch.SymBool)
+IntLike = (int, torch.SymInt)
+FloatLike = (float, torch.SymFloat)
+BoolLike = (bool, torch.SymBool)
 IntWithoutSymInt = int
 FloatWithoutSymFloat = float
 DeviceLikeType: TypeAlias = Union[str, torch.device, int]
@@ -96,17 +96,6 @@ TensorSequenceType: TypeAlias = Union[List[TensorLikeType], Tuple[TensorLikeType
 TensorOrNumberLikeType: TypeAlias = Union[TensorLikeType, NumberType]
 
 CustomOutParamAnnotation = "__custom_out_param__"
-
-
-def is_symbolic(a: object) -> bool:
-    if isinstance(a, (torch.SymInt, torch.SymFloat, torch.SymBool)):
-        return True
-    elif isinstance(a, (list, tuple)):
-        return any(is_symbolic(x) for x in a)
-    elif isinstance(a, dict):
-        return any(is_symbolic(x) for x in a.values())
-    else:
-        return False
 
 
 def same_shape(a: ShapeType, b: ShapeType, *, allow_rhs_unbacked=False) -> bool:
@@ -1737,7 +1726,7 @@ def set_correction(
     elif correction is None and unbiased is not None:
         correction = 0.0 if unbiased is False else 1.0
     # NB: we don't actually support symint here, but it's harmless to accept
-    if not isinstance(correction, (int_like, float_like)):
+    if not isinstance(correction, (IntLike, FloatLike)):
         raise ValueError("correction argument should be integer or float")
     if correction < 0:
         raise ValueError("correction argument should be non-negative")
@@ -1841,9 +1830,6 @@ def are_strides_like_channels_last(
     else:
         return False
 
-    # assert isinstance(strides, (List, Tuple))
-    # for x in strides:
-    #     assert isinstance(x, int), f"type is {type(x)}"
     if strides[1] == 0:
         return False
 
@@ -1865,8 +1851,6 @@ def suggest_memory_format(x: TensorLikeType) -> torch.memory_format:
     if x.layout != torch.strided:
         return torch.contiguous_format
 
-    # TODO: this is needed for *some* test (but I don't remember which one)
-    # if not is_symbolic(x.shape) and are_strides_like_channels_last(x.shape, x.stride()):
     if are_strides_like_channels_last(x.shape, x.stride()):
         return torch.channels_last if x.ndim == 4 else torch.channels_last_3d
 

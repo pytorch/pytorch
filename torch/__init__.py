@@ -22,11 +22,10 @@ import platform
 import sys
 import textwrap
 import threading
-from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional, Set, Tuple, Type, TYPE_CHECKING, Union
 
 if TYPE_CHECKING:
-    from .types import IntLike
+    from .types import IntLikeType
 
 
 # multipy/deploy is setting this import before importing torch, this is the most
@@ -53,7 +52,6 @@ if _running_with_deploy():
     __version__ = "torch-deploy-1.8"
 else:
     from torch.torch_version import __version__ as __version__
-
 
 __all__ = [
     "BoolStorage",
@@ -275,38 +273,6 @@ def _preload_cuda_deps(lib_folder, lib_name):
 
 # See Note [Global dependencies]
 def _load_global_deps() -> None:
-    LIBTORCH_PKG_NAME = "libtorchsplit"
-
-    def find_package_path(package_name):
-        spec = importlib.util.find_spec(package_name)
-        if spec:
-            # The package might be a namespace package, so get_data may fail
-            try:
-                loader = spec.loader
-                if loader is not None:
-                    file_path = loader.get_filename()  # type: ignore[attr-defined]
-                    return os.path.dirname(file_path)
-            except AttributeError:
-                pass
-        return None
-
-    def load_shared_libraries(library_path):
-        lib_dir = os.path.join(library_path, "lib")
-        if not os.path.exists(lib_dir):
-            return
-
-        # Find all shared library files with the appropriate extension
-        library_files = [f for f in os.listdir(lib_dir) if f.endswith(lib_ext)]
-        if not library_files:
-            return
-
-        for lib_file in library_files:
-            lib_path = os.path.join(lib_dir, lib_file)
-            try:
-                ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
-            except OSError as err:
-                print(f"Failed to load {lib_path}: {err}")
-
     if _running_with_deploy() or platform.system() == "Windows":
         return
 
@@ -316,11 +282,6 @@ def _load_global_deps() -> None:
     here = os.path.abspath(__file__)
     global_deps_lib_path = os.path.join(os.path.dirname(here), "lib", lib_name)
 
-    split_build_lib_name = LIBTORCH_PKG_NAME
-    library_path = find_package_path(split_build_lib_name)
-
-    if library_path:
-        global_deps_lib_path = os.path.join(library_path, "lib", lib_name)
     try:
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
     except OSError as err:
@@ -347,10 +308,6 @@ def _load_global_deps() -> None:
         for lib_folder, lib_name in cuda_libs.items():
             _preload_cuda_deps(lib_folder, lib_name)
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
-
-    if library_path:
-        # loading libtorch_global_deps first due its special logic
-        load_shared_libraries(library_path)
 
 
 if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv("TORCH_USE_RTLD_GLOBAL")) and (
@@ -505,7 +462,7 @@ class SymInt:
     def __add__(self, other) -> "SymInt":
         raise TypeError("type stub not overridden")
 
-    def __mod__(self, other: "IntLike") -> "SymInt":
+    def __mod__(self, other: "IntLikeType") -> "SymInt":
         raise TypeError("type stub not overridden")
 
     def __mul__(self, other) -> "SymInt":
@@ -541,11 +498,12 @@ class SymInt:
     def __neg__(self):
         raise TypeError("type stub not overridden")
 
-    def __sub__(self, other: "IntLike") -> "SymInt":
+    def __sub__(self, other: "IntLikeType") -> "SymInt":
         raise TypeError("type stub not overridden")
 
     def __repr__(self):
-        return str(self.node)
+        # Don't add extra info here - see SymNode.__repr__()
+        return repr(self.node)
 
     def __hash__(self) -> builtins.int:
         if self.node.is_nested_int():
@@ -650,7 +608,8 @@ class SymFloat:
         raise TypeError("type stub not overridden")
 
     def __repr__(self):
-        return self.node.str()
+        # Don't add extra info here - see SymNode.__repr__()
+        return repr(self.node)
 
 
 class SymBool:
@@ -708,40 +667,14 @@ class SymBool:
         raise TypeError("type stub not overridden")
 
     def __repr__(self):
-        return str(self.node)
+        # Don't add extra info here - see SymNode.__repr__()
+        return repr(self.node)
 
     def __hash__(self):
         if self.node.is_constant():
             return hash(self.node.bool_())
         else:
             raise TypeError("unhashable type: SymBool")
-
-
-@dataclass
-class _SymExprHash:
-    """
-    Hash for a py_sym_types that will use the underlying sympy expression
-    """
-
-    sym_obj: Union[SymInt, SymFloat, SymBool]
-
-    def __hash__(self) -> builtins.int:
-        return hash(
-            (
-                type(self.sym_obj),
-                self.sym_obj.node.expr,
-                id(self.sym_obj.node.shape_env),
-            )
-        )
-
-    def __eq__(self, value) -> builtins.bool:
-        if not isinstance(value, _SymExprHash):
-            return False
-        self_node = self.sym_obj.node
-        value_node = value.sym_obj.node
-        return self_node.expr == value_node.expr and id(self_node.shape_env) == id(
-            value_node.shape_env
-        )
 
 
 def sym_not(a):
@@ -1993,7 +1926,7 @@ from torch._compile import _disable_dynamo  # usort: skip
 ################################################################################
 
 # needs to be after the above ATen bindings so we can overwrite from Python side
-from torch import _VF as _VF, functional as functional  # usort: skip
+from torch import functional as functional  # usort: skip
 from torch.functional import *  # usort: skip # noqa: F403
 
 ################################################################################
@@ -2044,7 +1977,6 @@ from torch import (
     backends as backends,
     cpu as cpu,
     cuda as cuda,
-    distributed as distributed,
     distributions as distributions,
     fft as fft,
     futures as futures,
@@ -2091,7 +2023,7 @@ def compiled_with_cxx11_abi() -> builtins.bool:
     return _C._GLIBCXX_USE_CXX11_ABI
 
 
-from torch import _library as _library, _ops as _ops
+import torch._library
 
 # Import the ops "namespace"
 from torch._classes import classes as classes

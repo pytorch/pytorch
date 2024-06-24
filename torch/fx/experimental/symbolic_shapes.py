@@ -54,13 +54,12 @@ from torch.fx.experimental.recording import (
     replay_shape_env_events,
     shape_env_check_state_equal
 )
-from torch.fx.experimental.sym_node import SymNode, SymTypes
+from torch.fx.experimental.sym_node import SymNode, SymTypes, guard_size_oblivious
 from torch._logging import trace_structured, structured
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import SymBool, SymFloat, SymInt
 from torch._guards import ShapeGuard, Source, TracingContext
-from torch.types import IntLike
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._sympy.functions import (
     FloorDiv, Mod, PythonMod, IsNonOverlappingAndDenseIndicator, CleanDiv, FloorToInt, CeilToInt
@@ -213,7 +212,7 @@ def has_hint(a: Scalar) -> bool:
         return a.node.has_hint()
     return True
 
-def is_concrete_int(a: IntLike) -> bool:
+def is_concrete_int(a: Union[int, SymInt]) -> bool:
     r""" Utility to check if underlying object
     in SymInt is concrete value. Also returns
     true if integer is passed in.
@@ -235,21 +234,6 @@ def is_concrete_int(a: IntLike) -> bool:
 # So make sure only type checker evaluates this alias.
 # Xref: https://www.internalfb.com/diff/D53324783
 SympyBoolean: TypeAlias = "sympy.logic.boolalg.Boolean"
-
-def guard_size_oblivious(expr: Union[torch.SymBool, bool]) -> bool:
-    """
-    Perform a guard on a symbolic boolean expression in a size oblivious way.
-    This is typically used when a non-oblivious test would result in a guard
-    on a data dependent value of which we don't know the value of at compile time.
-    When a guard is tested this way, we may diverge in behavior from how regular
-    PyTorch semantics would treat it.  For more information, see
-    https://github.com/pytorch/pytorch/pull/118579
-    """
-    if isinstance(expr, torch.SymBool):
-        return expr.node.guard_size_oblivious("", 0)
-    else:
-        assert isinstance(expr, bool)
-        return expr
 
 def check_consistent(new, old) -> None:
     """
@@ -1018,6 +1002,8 @@ class DimDynamic(Enum):
     DUCK = 1
     # Treat the dimension statically based on its hint
     STATIC = 2
+    # Treat the dimension as a size-like unbacked
+    SIZE_LIKE_UNBACKED = 3
 
 
 # NB: These constraints affect both clients and backends: given some
@@ -1471,7 +1457,12 @@ class RuntimeAssert:
     stack: str = field(repr=False)
 
 
-class ShapeGuardPrinter(StrPrinter):
+# Used for printing SymExprs in compile_fx
+class SymExprPrinter(StrPrinter):
+    pass
+
+
+class ShapeGuardPrinter(SymExprPrinter):
     def __init__(
         self,
         symbol_to_source,
@@ -3434,6 +3425,12 @@ class ShapeEnv:
     ) -> "sympy.Expr":
         """Create a new symbol which is tracked by this ShapeEnv
         """
+        if dynamic_dim is DimDynamic.SIZE_LIKE_UNBACKED:
+            r = self.create_unbacked_symint().node.expr
+            self._constrain_range_for_size(r)
+            # TODO: maybe put the hint somewhere
+            return r
+
         # check if constraint_dim is actually static integer
         if isinstance(constraint_dim, StrictMinMaxConstraint) and constraint_dim.vr.lower == constraint_dim.vr.upper:
             dynamic_dim = DimDynamic.STATIC
@@ -4239,6 +4236,13 @@ class ShapeEnv:
         if produced_guards:
             return " and ".join(produced_guards)
         return None
+
+    def evaluate_symexpr(self, code):
+        """
+        To be used by compile_fx to evaluate symexprs
+        """
+        args = {str(e): val for e, val in self.var_to_val.items()}
+        return eval(code, SYMPY_INTERP, args)
 
     def evaluate_guards_expression(self, code, args):
         """
