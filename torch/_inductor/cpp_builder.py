@@ -550,6 +550,10 @@ def _get_torch_related_args(include_pytorch: bool, aot_mode: bool):
             if not aot_mode:
                 libraries.append("torch_python")
 
+    if not include_pytorch and aot_mode and not config.is_fbcode():
+        cpp_prefix_include_dir = [f"{os.path.dirname(cpp_prefix_path())}"]
+        include_dirs += cpp_prefix_include_dir
+
     if _IS_WINDOWS:
         libraries.append("sleef")
 
@@ -868,12 +872,8 @@ def get_cpp_torch_cuda_options(cuda: bool, aot_mode: bool = False):
                 else:
                     libraries += ["c10_cuda", "cuda", "torch_cuda"]
 
-    if aot_mode:
-        cpp_prefix_include_dir = [f"{os.path.dirname(cpp_prefix_path())}"]
-        include_dirs += cpp_prefix_include_dir
-
-        if cuda and torch.version.hip is None:
-            _transform_cuda_paths(libraries_dirs)
+    if cuda and torch.version.hip is None:
+        _transform_cuda_paths(libraries_dirs)
 
     if config.is_fbcode():
         if torch.version.hip is not None:
