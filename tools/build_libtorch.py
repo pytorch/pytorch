@@ -6,7 +6,7 @@ import sys
 # By appending REPO_ROOT to sys.path, this module can import other torch
 # modules even when run as a standalone script. i.e., it's okay either you
 # do `python build_libtorch.py` or `python -m tools.build_libtorch`.
-REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+REPO_ROOT = pathlib.Path(__file__).absolute().parent.parent
 sys.path.append(str(REPO_ROOT))
 
 from tools.build_pytorch_libs import build_caffe2

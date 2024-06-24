@@ -174,7 +174,7 @@ class CMake:
                 toolset_expr = ",".join([f"{k}={v}" for k, v in toolset_dict.items()])
                 args.append("-T" + toolset_expr)
 
-        base_dir = str(pathlib.Path(__file__).resolve().parents[3 - 1])
+        base_dir = str(pathlib.Path(__file__).absolute().parents[2])
         install_dir = os.path.join(base_dir, "torch")
 
         _mkdir_p(install_dir)

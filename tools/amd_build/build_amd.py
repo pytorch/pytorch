@@ -7,7 +7,7 @@ import pathlib
 import sys
 
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[3 - 1]
+REPO_ROOT = pathlib.Path(__file__).absolute().parents[2]
 sys.path.append(str(REPO_ROOT / "torch" / "utils"))
 
 from hipify import hipify_python  # type: ignore[import]
