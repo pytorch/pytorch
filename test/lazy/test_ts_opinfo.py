@@ -4,9 +4,10 @@ import functools
 import itertools
 import os
 import pathlib
-import yaml
 from typing import Sequence
 from unittest import skip
+
+import yaml
 
 import torch
 import torch._lazy

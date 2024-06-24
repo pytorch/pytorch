@@ -12,6 +12,7 @@ from collections import defaultdict
 from enum import Enum
 from pathlib import Path
 from typing import Any, Iterable, NamedTuple
+
 from yaml import dump, load
 
 

@@ -17,8 +17,9 @@ import os
 import string
 import subprocess
 import textwrap
-import yaml
 from typing import Any, Mapping, Sequence
+
+import yaml
 
 from torchgen import utils as torchgen_utils
 from torchgen.yaml_utils import YamlLoader

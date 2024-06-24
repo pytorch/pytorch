@@ -3,8 +3,9 @@
 import os
 import re
 import textwrap
-import yaml
 from collections import namedtuple
+
+import yaml
 
 import torch
 from torch.testing._internal.common_utils import run_tests, TestCase

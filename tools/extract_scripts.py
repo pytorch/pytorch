@@ -5,10 +5,11 @@ from __future__ import annotations
 import argparse
 import re
 import sys
-import yaml
 from pathlib import Path
 from typing import Any, Dict
 from typing_extensions import TypedDict  # Python 3.11+
+
+import yaml
 
 
 Step = Dict[str, Any]

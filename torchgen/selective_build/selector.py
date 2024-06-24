@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-import yaml
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+import yaml
+
+from torchgen.model import NativeFunction
 from torchgen.selective_build.operator import (
     merge_debug_info,
     merge_operator_dicts,

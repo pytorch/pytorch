@@ -6,13 +6,15 @@ import argparse
 import json
 import os
 import sys
-import yaml
 from functools import reduce
 from typing import Any
+
+import yaml
 
 from tools.lite_interpreter.gen_selected_mobile_ops_header import (
     write_selected_mobile_ops,
 )
+
 from torchgen.selective_build.selector import (
     combine_selective_builders,
     SelectiveBuilder,

@@ -4,9 +4,10 @@ import argparse
 import os
 import pathlib
 import re
-import yaml
 from collections import Counter, defaultdict, namedtuple
 from typing import Sequence
+
+import yaml
 
 import torchgen.api.dispatcher as dispatcher
 import torchgen.dest as dest

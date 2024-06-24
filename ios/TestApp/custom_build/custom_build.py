@@ -1,5 +1,4 @@
 import yaml
-
 from torchvision import models
 
 import torch

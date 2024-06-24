@@ -7,9 +7,10 @@ import os
 import re
 import sys
 import warnings
-import yaml
 from collections import namedtuple
 from os.path import abspath, exists
+
+import yaml
 
 import torch
 from torch._dynamo.testing import collect_results, reduce_to_scalar_loss
