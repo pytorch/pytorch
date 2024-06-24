@@ -3,11 +3,9 @@ import inspect
 import itertools
 import logging
 
-import torch
 from torch._ops import HigherOrderOperator
-from torch.utils.checkpoint import checkpoint
+from torch.utils.checkpoint import checkpoint, CheckpointPolicy
 
-import torch._dynamo.config
 
 log = logging.getLogger(__name__)
 
@@ -144,15 +142,14 @@ class TagActivationCheckpoint(HigherOrderOperator):
         unique_graph_id = next(uid)
         for node in gmod.graph.nodes:
             if node.op in ("call_function", "call_method", "call_module"):
-                node.meta["recompute"] = unique_graph_id
+                node.meta["ac_graph_id"] = unique_graph_id
+                node.meta["recompute"] = CheckpointPolicy.PREFER_RECOMPUTE
         return gmod
 
     def __call__(self, gmod, *args, **kwargs):
         import torch.fx.traceback as fx_traceback
         from torch.fx import Interpreter
         if "_checkpoint_context_fn" in gmod.meta:
-            assert torch._dynamo.config._experimental_support_context_fn_in_torch_utils_checkpoint, \
-                "Passing context_fn to torch.utils.checkpoint is currently not supported under torch.compile"
             log.warning("""
 Detected that context_fn is passed to torch.utils.checkpoint under torch.compile.
 Please make sure the checkpointed region does not contain in-place ops (e.g. torch.relu_).
