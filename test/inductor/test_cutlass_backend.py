@@ -1,5 +1,8 @@
 # Owner(s): ["module: inductor"]
+import contextlib
+import io
 import logging
+import math
 import os
 import unittest
 from typing import Callable, List, Optional
@@ -568,11 +571,20 @@ class TestCutlassBackend(TestCase):
                 "cuda.cutlass_dir": _CUTLASS_DIR,
                 "cuda.cutlass_max_profiling_configs": 2,
                 "use_mixed_mm": True,
+                "autotune_local_cache": True,
             }
         ):
             Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
             Y = mm(a, b)
             torch.testing.assert_close(Y_compiled, Y)
+        cache = torch._inductor.codecache.LocalCache().lookup("mixed_mm")
+        for key, value in cache.items():
+            if "high" in value:
+                for kernel, time in value["high"].items():
+                    if kernel.startswith("cutlass_gemm") and not math.isinf(time):
+                        # There is at least one CUTLASS kernel generated.
+                        return
+        assert False
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
