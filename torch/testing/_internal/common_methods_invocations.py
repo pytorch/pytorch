@@ -16690,7 +16690,12 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            supports_autograd=True,
            sample_inputs_func=sample_inputs_view_reshape,
-           error_inputs_func=error_inputs_view_reshape),
+           error_inputs_func=error_inputs_view_reshape,
+           skips=(
+               # RuntimeError: view size is not compatible with input tensor's size and stride
+               # (at least one dimension spans across two contiguous subspaces). Use .reshape(...) instead.
+               DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+           )),
     UnaryUfuncInfo('neg',
                    aliases=('negative', ),
                    ref=np.negative,
