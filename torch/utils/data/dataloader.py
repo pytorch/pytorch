@@ -1257,6 +1257,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 ) from e
             if isinstance(e, queue.Empty):
                 return (False, None)
+
             import errno
             import tempfile
 
