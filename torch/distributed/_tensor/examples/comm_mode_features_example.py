@@ -255,6 +255,50 @@ class CommDebugModeExample:
         print(comm_mode.generate_module_tracing_table())
         comm_mode.log_module_tracing_table_to_file()
 
+    def test_MLP_operation_tracing(self) -> None:
+        """
+        Example code to demonstrate CommModeDebug's module level tracing using a MLP model.
+        Prints a table of module level collective tracing information and logs table to output.txt
+
+        Expected Output
+        Global
+        *c10d_functional.all_reduce: 1
+        MLPModule
+            *c10d_functional.all_reduce: 1
+            MLPModule.net1
+            MLPModule.relu
+            MLPModule.net2
+            *c10d_functional.all_reduce: 1
+        """
+
+        device_mesh = DeviceMesh(
+            self.device_type,
+            torch.arange(0, NUM_DEVICES),
+        )
+        inp_size = [8, 10]
+        rng_seed = 0
+        torch.manual_seed(rng_seed)
+        inp = torch.rand(*inp_size, device=self.device_type)
+        model = MLPModule(self.device_type)
+
+        LR = 0.25
+
+        parallelize_plan = {
+            "net1": ColwiseParallel(),
+            "net2": RowwiseParallel(),
+        }
+
+        model = parallelize_module(model, device_mesh, parallelize_plan)
+
+        comm_mode = CommDebugMode()
+
+        with comm_mode:
+            output_tp = model(inp)
+            output_tp.sum().backward()
+
+        # print the module level collective tracing information
+        print(comm_mode.generate_operation_tracing_table())
+
 
 def run_example(world_size: int, rank: int, example_name: str) -> None:
     # set manual seed
@@ -267,6 +311,7 @@ def run_example(world_size: int, rank: int, example_name: str) -> None:
         "MLPStacked_distributed_sharding_display": instantiated_test.test_MLPStacked_distributed_sharding_display,
         "MLP_module_tracing": instantiated_test.test_MLP_module_tracing,
         "transformer_module_tracing": instantiated_test.test_transformer_module_tracing,
+        "MLP_operation_tracing": instantiated_test.test_MLP_operation_tracing,
     }
 
     name_to_example_code[example_name]()

@@ -1,9 +1,11 @@
 # mypy: allow-untyped-defs
+import copy
 import re
 from collections import defaultdict
 from typing import Any, Dict
 
 import torch
+
 from torch.autograd.graph import register_multi_grad_hook
 from torch.distributed._tensor.api import DTensor
 from torch.nn.modules.module import (
@@ -14,9 +16,10 @@ from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten
 from torch.utils.module_tracker import ModuleTracker
 
-
 funcol_native = torch.ops._c10d_functional
 funcol_py = torch.ops.c10d_functional
+from torch._guards import detect_fake_mode
+
 funcol_autograd = torch.ops._c10d_functional_autograd
 c10d_ops = torch.ops.c10d
 
@@ -144,6 +147,8 @@ class CommDebugMode(TorchDispatchMode):
         self.comm_registry.add(torch.ops._dtensor.shard_dim_alltoall)
         self.advanced_module_tracker = CommModeModuleTracker()
 
+        self.unprocessed_args = {}
+
     def generate_module_tracing_table(self):
         """
         Inspired by flop counter, generates a detailed table displaying collective tracing
@@ -163,6 +168,48 @@ class CommDebugMode(TorchDispatchMode):
                     table += (
                         f"\033[1;33m{collective_indent}*{collective}: {count}\033[0m\n"
                     )
+
+        return table
+
+    def generate_operation_tracing_table(self):
+        """
+        Generates detailed table displaying operations and collective tracing information
+        on a module level
+        """
+
+        table = ""
+        for fqn in self.advanced_module_tracker.module_depth_dict:
+            indent = "  " * (self.advanced_module_tracker.module_depth_dict[fqn])
+            table += f"{indent}{fqn}\n"
+
+            indent += " "
+            bw = False
+
+            if fqn in self.comm_module_operation_counts:
+                table += f"{indent} FORWARD PASS\n"
+                for operation in self.comm_module_operation_counts[fqn][
+                    "operations_list"
+                ]:
+                    # checks to see where backward pass of a module occurs
+                    if not bw and operation["is_bw"]:
+                        bw = True
+                        table += f"\n{indent} BACKWARD PASS\n"
+                    collective_indent = "  " * (
+                        (self.advanced_module_tracker.module_depth_dict[fqn]) + 2
+                    )
+
+                    # prints the operations in the respective sub-module
+                    operation_name = operation["name"]
+                    table += f"\033[1;33m{collective_indent}*{operation_name} \033[0m\n"
+
+                    if len(operation["input_shape"]):
+                        collective_indent = "  " * (
+                            (self.advanced_module_tracker.module_depth_dict[fqn]) + 3
+                        )
+                        operation_shape = operation["input_shape"]
+                        operation_sharding = operation["input_sharding"]
+                        table += f"\033[1;31m{collective_indent}shape: {operation_shape} \033[0m\n"
+                        table += f"\033[1;31m{collective_indent}sharding: {operation_sharding} \033[0m\n"
 
         return table
 
@@ -193,6 +240,11 @@ class CommDebugMode(TorchDispatchMode):
         self.comm_counts.clear()
         self.comm_module_counts.clear()
         self.comm_module_operation_counts.clear()
+        self.unprocessed_args.clear()
+        self.unprocessed_args = {
+            "input_shape": [],
+            "input_sharding": [],
+        }
 
         super().__enter__()
         self.advanced_module_tracker.__enter__()
@@ -222,12 +274,24 @@ class CommDebugMode(TorchDispatchMode):
         # run **before** subclasses get a chance to run.
         # Returning NotImplemented here gives us a chance to let DTensor
         # run and desugar into comms ops, before CommDebugMode sees them.
+        # print(func, detect_fake_mode(args), types)
+        _mode_key = torch._C._TorchDispatchModeKey.FAKE
+        # print(func, args)
 
         if any(t == DTensor for t in types):
+            for ele in args:
+                if isinstance(ele, DTensor):
+                    self.unprocessed_args["input_shape"].append(ele.shape)
+                    self.unprocessed_args["input_sharding"].append(ele.placements)
+            # self.unprocessed_args = copy.deepcopy(args)
+            # print(args)
             return NotImplemented
         kwargs = kwargs if kwargs else {}
         out = func(*args, **kwargs)
         func_packet = func._overloadpacket
+
+        if detect_fake_mode(args):
+            return out
         # We have many tests that use CommDebugMode to verify the occurrence of
         # collectives. These tests do so by querying comm_counts with legacy
         # funcol ops as key. For the purpose of native funcol migration, we
@@ -235,11 +299,6 @@ class CommDebugMode(TorchDispatchMode):
         # the need to modify all tests to accommodate the two implementations,
         # we make CommDebugMode translate native funcol ops into legacy funcol
         # ops until the migration finishes.
-
-        operation_dict = 
-        # add operations to current module
-        if self.advanced_module_tracker.name not in self.comm_module_operation_counts:
-
 
         if func_packet in self.comm_registry or func_packet in c10d_collective_ops:
             if func_packet in NATIVE_TO_PY_MAPPING:
@@ -260,5 +319,32 @@ class CommDebugMode(TorchDispatchMode):
                     if par not in self.comm_module_counts:
                         self.comm_module_counts[par] = defaultdict(int)
                     self.comm_module_counts[par][func_packet] += 1
+
+        # print(operation_dict)
+        if self.advanced_module_tracker.name not in self.comm_module_operation_counts:
+            # dictionary should hold module input and output shape, operations list and collective counter
+            self.comm_module_operation_counts[self.advanced_module_tracker.name] = {
+                "operations_list": []
+            }
+
+        # sets up operation-level collective count
+        operation_dict = {}
+        operation_dict["name"] = func
+
+        # the unprocessed_args from previous func with dTensor's are saved and copied here
+        operation_dict["input_shape"] = copy.deepcopy(
+            self.unprocessed_args["input_shape"]
+        )
+        operation_dict["input_sharding"] = copy.deepcopy(
+            self.unprocessed_args["input_sharding"]
+        )
+        self.unprocessed_args["input_shape"].clear()
+        self.unprocessed_args["input_sharding"].clear()
+
+        # tracks if the operation is part of the backward pass
+        operation_dict["is_bw"] = self.advanced_module_tracker.is_bw
+        self.comm_module_operation_counts[self.advanced_module_tracker.name][
+            "operations_list"
+        ].append(operation_dict)
 
         return out
