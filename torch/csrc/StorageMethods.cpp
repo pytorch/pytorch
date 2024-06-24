@@ -94,7 +94,13 @@ static PyObject* THPStorage_copy_(
   TORCH_CHECK(
       !invalid, "Attempted to call copy_() on an invalid python storage.")
 
-  TORCH_CHECK(self_.nbytes() == src.nbytes(), "size does not match");
+  TORCH_CHECK(
+      self_.nbytes() == src.nbytes(),
+      "size does not match, self was ",
+      self_.nbytes(),
+      " bytes but src was ",
+      src.nbytes(),
+      " bytes");
 
   at::storage_copy(self_, src, non_blocking);
 
@@ -618,7 +624,8 @@ static PyObject* THPStorage__get_filename(PyObject* self, PyObject* noargs) {
   const c10::DataPtr& data_ptr = self_.data_ptr();
   at::MapAllocator* map_allocator = at::MapAllocator::fromDataPtr(data_ptr);
 
-  if (map_allocator == nullptr) {
+  if (map_allocator == nullptr ||
+      !(map_allocator->flags() & at::ALLOCATOR_MAPPED_SHARED)) {
     Py_RETURN_NONE;
   }
   std::string filename = map_allocator->filename();

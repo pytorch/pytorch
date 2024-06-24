@@ -77,9 +77,9 @@ warp_shuffle_meta(uint32_t meta_ab, bool transposed = false) {
       uint8b_t(meta_ab >> (8 * (thread_left + 2)))};
   // shfl t0-t4 / t1-t5
   stage0_data[0] =
-      __shfl_xor_sync(0xffffffff, stage0_data[0], transposed ? 1 : 4);
+      uint8b_t(__shfl_xor_sync(0xffffffff, stage0_data[0], transposed ? 1 : 4));
   stage0_data[1] =
-      __shfl_xor_sync(0xffffffff, stage0_data[1], transposed ? 1 : 4);
+      uint8b_t(__shfl_xor_sync(0xffffffff, stage0_data[1], transposed ? 1 : 4));
 
   uint16_t line0 = int(uint8b_t(meta_ab >> (8 * (1 - thread_left))))
       << ((1 - thread_left) * 8);
@@ -229,24 +229,24 @@ struct KernelTypes {
       // We know that col0 is always packed to position 0 if it's there
       // and col1 is packed to pos 0 or 1 (depending if col0 is selected)
       if (isSelected(1)) {
-        packValue(0, 1);
+        packValue(uint2b_t(0), uint2b_t(1));
       }
       if (isSelected(0)) {
-        packValue(0, 0);
+        packValue(uint2b_t(0), uint2b_t(0));
       }
       if (isSelected(0) && isSelected(1)) {
-        packValue(1, 1);
+        packValue(uint2b_t(1), uint2b_t(1));
       }
       // Process cols 2/3
       // same sort of heuristic
       if (isSelected(2)) {
-        packValue(1, 2);
+        packValue(uint2b_t(1), uint2b_t(2));
       }
       if (isSelected(3)) {
-        packValue(1, 3);
+        packValue(uint2b_t(1), uint2b_t(3));
       }
       if (isSelected(2) && isSelected(3)) {
-        packValue(0, 2);
+        packValue(uint2b_t(0), uint2b_t(2));
       }
       int add_mask = (col0_from | (col1_from << 2)) << (8 * row + meta_pos);
       meta |= add_mask;

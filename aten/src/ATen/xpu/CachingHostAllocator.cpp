@@ -20,7 +20,7 @@ struct XPUCachingHostAllocatorImpl
   }
 
   void record_stream(
-      c10::optional<std::vector<XPUEvent>>& events,
+      std::optional<std::vector<XPUEvent>>& events,
       XPUStream stream) override {
     XPUEvent event;
     event.record(stream);

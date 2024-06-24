@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import itertools
 import operator
 from dataclasses import dataclass
@@ -971,7 +972,7 @@ def _annotate_cat(
 
         if cat_node.target != torch.ops.aten.cat.default:
             # TODO: change this to AnnotationException
-            raise Exception(
+            raise Exception(  # noqa: TRY002
                 f"Expected cat node: torch.ops.aten.cat.default, but found {cat_node.target}"
                 " please check if you are calling the correct capture API"
             )

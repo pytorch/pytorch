@@ -19,7 +19,7 @@ namespace jit {
  */
 TORCH_API std::map<std::string, at::Tensor> _load_parameters(
     std::istream& in,
-    c10::optional<at::Device> device = c10::nullopt);
+    std::optional<at::Device> device = c10::nullopt);
 
 /**
  * Loads named parameters from the serialized data in @p filename.
@@ -28,7 +28,7 @@ TORCH_API std::map<std::string, at::Tensor> _load_parameters(
  */
 TORCH_API std::map<std::string, at::Tensor> _load_parameters(
     const std::string& filename,
-    c10::optional<at::Device> device = c10::nullopt);
+    std::optional<at::Device> device = c10::nullopt);
 
 // NOTE: Please prefer using _load_parameters over using the function below.
 TORCH_API std::map<std::string, at::Tensor> mobile_module_to_parameter_map(

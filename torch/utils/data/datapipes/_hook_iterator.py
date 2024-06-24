@@ -1,8 +1,9 @@
-import inspect
+# mypy: allow-untyped-defs
 import functools
+import inspect
 from enum import Enum
 
-import torch.autograd
+import torch
 
 
 class _SnapshotState(Enum):
@@ -34,9 +35,7 @@ def _strip_datapipe_from_name(name: str) -> str:
 def _generate_input_args_string(obj):
     """Generate a string for the input arguments of an object."""
     signature = inspect.signature(obj.__class__)
-    input_param_names = set()
-    for param_name in signature.parameters.keys():
-        input_param_names.add(param_name)
+    input_param_names = set(signature.parameters.keys())
     result = []
     for name, value in inspect.getmembers(obj):
         if name in input_param_names:
