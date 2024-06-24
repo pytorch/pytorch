@@ -29,7 +29,7 @@ c10d_functional = torch.ops.c10d_functional
 
 class PrintModuleParamaterShardingTest(DTensorTestBase):
     # checks if parameter / sharding info is the same as ground truth
-    def same_set_of_keys(self, dict1, dict2):
+    def check_same_set_of_keys(self, dict1, dict2):
         """
         Used to ensure the comm_mode parameter/sharding dictionaries contain the same information produced by the
         ground truth
@@ -108,8 +108,10 @@ class PrintModuleParamaterShardingTest(DTensorTestBase):
         module_parameters_dict, module_sharding_dict = self.ground_truth(model)
 
         # checks if parameter / sharding info is the same as ground truth
-        self.same_set_of_keys(module_parameters_dict, comm_mode.get_parameter_info())
-        self.same_set_of_keys(module_sharding_dict, comm_mode.get_sharding_info())
+        self.check_same_set_of_keys(
+            module_parameters_dict, comm_mode.get_parameter_info()
+        )
+        self.check_same_set_of_keys(module_sharding_dict, comm_mode.get_sharding_info())
 
     @with_comms
     def test_MLPStacked_distributed_sharding_display(self):
@@ -162,8 +164,10 @@ class PrintModuleParamaterShardingTest(DTensorTestBase):
 
         module_parameters_dict, module_sharding_dict = self.ground_truth(model2)
 
-        self.same_set_of_keys(module_parameters_dict, comm_mode.get_parameter_info())
-        self.same_set_of_keys(module_sharding_dict, comm_mode.get_sharding_info())
+        self.check_same_set_of_keys(
+            module_parameters_dict, comm_mode.get_parameter_info()
+        )
+        self.check_same_set_of_keys(module_sharding_dict, comm_mode.get_sharding_info())
         self.assertEqual(len(comm_mode.get_sharding_info()), 8)
 
     @with_comms
