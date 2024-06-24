@@ -15,8 +15,7 @@ class WaitCounterImpl : public facebook::data_preproc::WaitCounterUs {
 };
 } // namespace detail
 
-WaitCounterHandle::WaitCounterHandle(std::string_view key)
-    : impl_(std::make_shared<detail::WaitCounterImpl>(key)) {}
+WaitCounterHandle::WaitCounterHandle(std::string_view key) : impl_(std::make_shared<detail::WaitCounterImpl>(key)) {}
 
 void WaitCounterHandle::start(std::chrono::steady_clock::time_point now) {
   impl_->start(now);
