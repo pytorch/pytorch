@@ -219,7 +219,6 @@ class TestFullyShardCompile(FSDPTest):
             fullgraph=True,
         )
 
-    @unittest.expectedFailure
     @skipIfRocm
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
