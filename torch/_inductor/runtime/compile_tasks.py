@@ -52,7 +52,7 @@ def _set_triton_ptxas_path() -> None:
     if os.environ.get("TRITON_PTXAS_PATH") is not None:
         return
     ptxas_path = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "bin", "ptxas")
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), "bin", "ptxas")
     )
     if not os.path.exists(ptxas_path):
         return

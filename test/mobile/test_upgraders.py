@@ -10,7 +10,7 @@ import torch.utils.bundled_inputs
 from torch.jit.mobile import _load_for_lite_interpreter
 from torch.testing._internal.common_utils import run_tests, TestCase
 
-pytorch_test_dir = Path(__file__).resolve().parents[1]
+pytorch_test_dir = Path(__file__).resolve().parent.parent
 
 
 class TestLiteScriptModule(TestCase):

@@ -2,12 +2,12 @@
 
 import os
 import re
-import yaml
 import textwrap
-import torch
-
-from torch.testing._internal.common_utils import TestCase, run_tests
+import yaml
 from collections import namedtuple
+
+import torch
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 path = os.path.dirname(os.path.realpath(__file__))

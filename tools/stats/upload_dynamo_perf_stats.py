@@ -1,10 +1,12 @@
+from __future__ import annotations
+
 import argparse
 import csv
 import os
 import re
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Dict, List
+from typing import Any
 
 from tools.stats.upload_stats_lib import download_s3_artifacts, unzip, upload_to_rockset
 
@@ -23,7 +25,7 @@ def upload_dynamo_perf_stats_to_rockset(
     workflow_run_attempt: int,
     head_branch: str,
     match_filename: str,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     match_filename_regex = re.compile(match_filename)
     perf_stats = []
     with TemporaryDirectory() as temp_dir:

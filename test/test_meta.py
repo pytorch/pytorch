@@ -1,55 +1,67 @@
 # Owner(s): ["module: decompositions"]
 
+import atexit
+import copy
 import itertools
-import torch
 import os
-import numpy as np
+import re
+import sys
+import unittest
+import warnings
+import weakref
+import yaml
+from collections import defaultdict
+from collections.abc import Iterable
 from enum import Enum
-from torch.overrides import resolve_name
-from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
-from torch.utils import _pytree as pytree
-from torch._subclasses.meta_utils import MetaConverter, assert_metadata_eq, is_sparse_any
+from functools import partial, wraps
+
+import numpy as np
+
+import torch
 import torch.utils._python_dispatch
 from torch._dispatch.python import enable_python_dispatcher
 from torch._ops import OpOverload, OpOverloadPacket
+from torch._subclasses.meta_utils import (
+    assert_metadata_eq,
+    is_sparse_any,
+    MetaConverter,
+)
+from torch.overrides import resolve_name
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import unMarkDynamoStrictTest
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyCPU,
+    onlyCUDA,
+    OpDTypes,
+    ops,
+)
+from torch.testing._internal.common_methods_invocations import (
+    binary_ufuncs,
+    foreach_binary_op_db,
+    foreach_other_op_db,
+    foreach_pointwise_op_db,
+    foreach_reduce_op_db,
+    foreach_unary_op_db,
+    op_db,
+)
 from torch.testing._internal.common_utils import (
-    TestCase,
+    dtype_abbrs,
+    parametrize,
+    run_tests,
     skipIfCrossRef,
     skipIfTorchDynamo,
     suppress_warnings,
     TEST_WITH_ASAN,
     TEST_WITH_TORCHDYNAMO,
-    run_tests,
-    dtype_abbrs,
-    parametrize
+    TestCase,
+    unMarkDynamoStrictTest,
 )
-from torch.testing._internal.common_device_type import (
-    ops,
-    instantiate_device_type_tests,
-    onlyCUDA,
-    onlyCPU,
-    OpDTypes,
-)
-from torch.testing._internal.common_methods_invocations import (
-    binary_ufuncs, op_db, foreach_unary_op_db, foreach_binary_op_db,
-    foreach_pointwise_op_db, foreach_reduce_op_db, foreach_other_op_db)
 from torch.testing._internal.opinfo.core import S, SampleInput
-from torchgen.yaml_utils import YamlLoader
+from torch.utils import _pytree as pytree
+from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 from torchgen.model import OperatorName
+from torchgen.yaml_utils import YamlLoader
 
-import copy
-import sys
-import yaml
-import atexit
-import re
-from collections import defaultdict
-from collections.abc import Iterable
-import unittest
-import warnings
-import weakref
-from functools import partial, wraps
 
 bf16 = torch.bfloat16
 f64 = torch.float64
@@ -1413,7 +1425,9 @@ class TestMeta(TestCase):
     @onlyCPU
     @parametrize("output_mask", list(itertools.product([True, False], [True, False], [True, False])))
     def test_layer_norm_backward(self, output_mask):
-        from torch.testing._internal.common_methods_invocations import sample_inputs_layer_norm
+        from torch.testing._internal.common_methods_invocations import (
+            sample_inputs_layer_norm,
+        )
 
         device = "meta"
         dtype = torch.float32
@@ -1446,7 +1460,9 @@ class TestMeta(TestCase):
     @onlyCPU
     @parametrize("output_mask", list(itertools.product([True, False], [True, False], [True, False])))
     def test_group_norm_backward(self, output_mask):
-        from torch.testing._internal.common_methods_invocations import sample_inputs_group_norm
+        from torch.testing._internal.common_methods_invocations import (
+            sample_inputs_group_norm,
+        )
 
         # input, (args) num_groups, (kwargs) weight, bias eps
         device = "meta"
@@ -1477,7 +1493,9 @@ class TestMeta(TestCase):
     @onlyCPU
     @parametrize("output_mask", list(itertools.product([True], [True, False], [True, False])))
     def test_batch_norm_backward(self, output_mask):
-        from torch.testing._internal.common_methods_invocations import sample_inputs_batch_norm
+        from torch.testing._internal.common_methods_invocations import (
+            sample_inputs_batch_norm,
+        )
 
         # input, (args) num_groups, (kwargs) weight, bias eps
         device = "meta"
