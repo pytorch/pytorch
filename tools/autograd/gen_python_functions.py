@@ -35,9 +35,10 @@ from __future__ import annotations
 
 import itertools
 import re
-import yaml
 from collections import defaultdict
 from typing import Callable, Iterable, Sequence
+
+import yaml
 
 from torchgen.api import cpp
 from torchgen.api.python import (

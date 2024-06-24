@@ -5,7 +5,6 @@ build script to create a tailored build which only contains these used ops.
 """
 
 import yaml
-
 from torchvision import models
 
 import torch

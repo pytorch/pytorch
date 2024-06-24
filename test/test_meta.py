@@ -9,13 +9,13 @@ import sys
 import unittest
 import warnings
 import weakref
-import yaml
 from collections import defaultdict
 from collections.abc import Iterable
 from enum import Enum
 from functools import partial, wraps
 
 import numpy as np
+import yaml
 
 import torch
 import torch.utils._python_dispatch

@@ -11,9 +11,10 @@ and it will directly output root ops as the allowlist.
 from __future__ import annotations
 
 import argparse
-import yaml
 from collections import defaultdict
 from typing import Dict, Set
+
+import yaml
 
 
 DepGraph = Dict[str, Set[str]]

@@ -16,7 +16,6 @@ import os
 import re
 import time
 import urllib.parse
-import yaml
 from collections import defaultdict
 from dataclasses import dataclass
 from functools import lru_cache
@@ -35,6 +34,7 @@ from typing import (
 )
 from warnings import warn
 
+import yaml
 from github_utils import (
     gh_fetch_json_list,
     gh_fetch_merge_base,
