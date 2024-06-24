@@ -11,7 +11,6 @@ from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Union
 import torch
 import torch.distributed as dist
 from torch.profiler import record_function
-from ._utils import format_pipeline_order
 
 from .microbatch import merge_chunks, split_args_kwargs_into_chunks, TensorChunkSpec
 from .stage import _PipelineStageBase
@@ -96,7 +95,6 @@ def format_pipeline_order(pipeline_order: Dict[int, List[Optional[_Action]]]) ->
 
 
 def validate_pipeline_order(
-    self,
     pipeline_order: Dict[int, List[Optional[_Action]]],
     num_microbatches: int,
     num_stages: int,
@@ -191,7 +189,7 @@ def validate_pipeline_order(
                 )
 
         if len(error_msg) != 0:
-            self.fail(f"Error at timestep {timestep}: " + ",".join(error_msg))
+            raise RuntimeError(f"Error at timestep {timestep}: " + ",".join(error_msg))
 
 
 class _PipelineSchedule(ABC):
