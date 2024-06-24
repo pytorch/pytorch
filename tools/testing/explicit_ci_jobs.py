@@ -12,7 +12,7 @@ from typing import Any
 import yaml
 
 
-REPO_ROOT = pathlib.Path(__file__).parents[3 - 1]
+REPO_ROOT = pathlib.Path(__file__).absolute().parents[2]
 CONFIG_YML = REPO_ROOT / ".circleci" / "config.yml"
 WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
 

@@ -8,7 +8,7 @@ import unittest
 from collections import defaultdict
 
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[3 - 1]
+REPO_ROOT = pathlib.Path(__file__).absolute().parents[2]
 try:
     # using tools/ to optimize test run.
     sys.path.append(str(REPO_ROOT))

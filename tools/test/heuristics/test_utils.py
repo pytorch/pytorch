@@ -6,7 +6,7 @@ import unittest
 from typing import Any
 
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[4 - 1]
+REPO_ROOT = pathlib.Path(__file__).absolute().parents[3]
 sys.path.append(str(REPO_ROOT))
 
 import tools.testing.target_determination.heuristics.utils as utils
