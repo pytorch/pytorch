@@ -652,6 +652,8 @@ def register_onednn_fusion_ops():
                     torch.tensor(w_zp_tensor, dtype=torch.int32), name=w_zp.get_name()
                 )
 
+            bias_dtype = None if bias is None else bias.get_dtype()
+
             choices: List[ChoiceCaller] = []
             if use_max_autotune():
                 *_, layout, x, packed_weight = mm_args(
@@ -728,6 +730,10 @@ def register_onednn_fusion_ops():
                             # Step 2: add Bias if applicable
                             if bias is not None:
                                 _bias = bias_loader(weight_compens_index)
+                                nonlocal bias_dtype
+                                assert bias_dtype in [torch.float32, torch.bfloat16]
+                                if bias_dtype == torch.bfloat16:
+                                    _bias = ops.to_dtype(_bias, torch.float32)
                                 temp = ops.add(temp, _bias)
 
                             return temp
@@ -790,44 +796,33 @@ def register_onednn_fusion_ops():
                         return output_buf
 
                     assert x.get_dtype() == torch.uint8
-                    if bias is None:
-                        CppPackedGemmTemplate.add_choices(
-                            choices,
-                            layout,
-                            [x, x_scale, x_zp, packed_weight, w_scale, w_zp],
-                            epilogue_creator=epilogue_creator,
-                        )
-                    else:
-                        CppPackedGemmTemplate.add_choices(
-                            choices,
-                            layout,
-                            [x, x_scale, x_zp, packed_weight, w_scale, w_zp, bias],
-                            has_bias=True,
-                            epilogue_creator=epilogue_creator,
-                        )
+                    CppPackedGemmTemplate.add_choices(
+                        choices,
+                        layout,
+                        [x, x_scale, x_zp, packed_weight, w_scale, w_zp]
+                        if bias is None
+                        else [x, x_scale, x_zp, packed_weight, w_scale, w_zp, bias],
+                        has_bias=bias is not None,
+                        epilogue_creator=epilogue_creator,
+                    )
             if len(choices) == 0 or use_aten_gemm_kernels():
+                kwargs = dict(
+                    output_scale=o_scale,
+                    output_zero_point=o_zero_point,
+                    output_dtype=output_dtype,
+                    post_op_name=attr,
+                    post_op_args=scalars,
+                    post_op_algorithm=algorithm,
+                )
+                if bias is None:
+                    kwargs["bias"] = None
                 choices.append(
                     aten_mkldnn_qlinear_unary.bind(
-                        (x, x_scale, x_zp, packed_weight, w_scale, w_zp),
+                        (x, x_scale, x_zp, packed_weight, w_scale, w_zp)
+                        if bias is None
+                        else (x, x_scale, x_zp, packed_weight, w_scale, w_zp, bias),
                         layout,
-                        bias=None,
-                        output_scale=o_scale,
-                        output_zero_point=o_zero_point,
-                        output_dtype=output_dtype,
-                        post_op_name=attr,
-                        post_op_args=scalars,
-                        post_op_algorithm=algorithm,
-                    )
-                    if bias is None
-                    else aten_mkldnn_qlinear_unary.bind(
-                        (x, x_scale, x_zp, packed_weight, w_scale, w_zp, bias),
-                        layout,
-                        output_scale=o_scale,
-                        output_zero_point=o_zero_point,
-                        output_dtype=output_dtype,
-                        post_op_name=attr,
-                        post_op_args=scalars,
-                        post_op_algorithm=algorithm,
+                        **kwargs,
                     )
                 )
             assert packed_weight.get_name() in V.graph.constants
@@ -924,6 +919,7 @@ def register_onednn_fusion_ops():
                         x2.get_dtype() == output_dtype
                     ), "dtype of accum for qlinear post op sum should be the same as output"
             x2_dtype = x2.get_dtype()
+            bias_dtype = bias.get_dtype() if bias is not None else None
             choices: List[ChoiceCaller] = []
             if use_max_autotune():
                 *_, layout, x, packed_weight, x2 = mm_args(
@@ -1009,6 +1005,10 @@ def register_onednn_fusion_ops():
                             # Step 2: add Bias if applicable
                             if bias is not None:
                                 _bias = bias_loader(weight_compens_index)
+                                nonlocal bias_dtype
+                                assert bias_dtype in [torch.float32, torch.bfloat16]
+                                if bias_dtype == torch.bfloat16:
+                                    _bias = ops.to_dtype(_bias, torch.float32)
                                 temp = ops.add(temp, _bias)
 
                             # Step 3: Binary add
@@ -1080,53 +1080,42 @@ def register_onednn_fusion_ops():
 
                         return output_buf
 
-                    if bias is None:
-                        assert x.get_dtype() == torch.uint8
-                        CppPackedGemmTemplate.add_choices(
-                            choices,
-                            layout,
-                            [x, x_scale, x_zp, packed_weight, w_scale, w_zp, x2],
-                            epilogue_creator=epilogue_creator,
-                        )
-                    else:
-                        CppPackedGemmTemplate.add_choices(
-                            choices,
-                            layout,
-                            [x, x_scale, x_zp, packed_weight, w_scale, w_zp, x2, bias],
-                            has_bias=True,
-                            epilogue_creator=epilogue_creator,
-                        )
+                    CppPackedGemmTemplate.add_choices(
+                        choices,
+                        layout,
+                        [x, x_scale, x_zp, packed_weight, w_scale, w_zp, x2]
+                        if bias is None
+                        else [x, x_scale, x_zp, packed_weight, w_scale, w_zp, x2, bias],
+                        has_bias=bias is not None,
+                        epilogue_creator=epilogue_creator,
+                        # Reorder bias and x2
+                        input_indices=[0, 1, 2, 3, 4, 5, 7, 6]
+                        if bias is not None
+                        else None,
+                    )
+
             if len(choices) == 0 or use_aten_gemm_kernels():
+                kwargs = dict(
+                    output_scale=o_scale,
+                    output_zero_point=o_zero_point,
+                    output_dtype=output_dtype,
+                    other_scale=x2_scale,
+                    other_zp=x2_zp,
+                    binary_post_op=binary_attr,
+                    binary_alpha=alpha,
+                    unary_post_op=unary_attr,
+                    unary_post_op_args=unary_scalars,
+                    unary_post_op_algorithm=unary_algorithmm,
+                )
+                if bias is None:
+                    kwargs["bias"] = None
                 choices.append(
                     aten_mkldnn_qlinear_binary.bind(
-                        (x, x_scale, x_zp, packed_weight, w_scale, w_zp, x2),
+                        (x, x_scale, x_zp, packed_weight, w_scale, w_zp, x2)
+                        if bias is None
+                        else (x, x_scale, x_zp, packed_weight, w_scale, w_zp, x2, bias),
                         layout,
-                        bias=None,
-                        output_scale=o_scale,
-                        output_zero_point=o_zero_point,
-                        output_dtype=output_dtype,
-                        other_scale=x2_scale,
-                        other_zp=x2_zp,
-                        binary_post_op=binary_attr,
-                        binary_alpha=alpha,
-                        unary_post_op=unary_attr,
-                        unary_post_op_args=unary_scalars,
-                        unary_post_op_algorithm=unary_algorithmm,
-                    )
-                    if bias is None
-                    else aten_mkldnn_qlinear_binary.bind(
-                        (x, x_scale, x_zp, packed_weight, w_scale, w_zp, x2, bias),
-                        layout,
-                        output_scale=o_scale,
-                        output_zero_point=o_zero_point,
-                        output_dtype=output_dtype,
-                        other_scale=x2_scale,
-                        other_zp=x2_zp,
-                        binary_post_op=binary_attr,
-                        binary_alpha=alpha,
-                        unary_post_op=unary_attr,
-                        unary_post_op_args=unary_scalars,
-                        unary_post_op_algorithm=unary_algorithmm,
+                        **kwargs,
                     )
                 )
             assert packed_weight.get_name() in V.graph.constants

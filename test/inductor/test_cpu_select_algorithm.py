@@ -430,10 +430,9 @@ class TestSelectAlgorithm(TestCase):
                 exact_dtype=True,
             )
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 2)
+            self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 0)
 
     @inductor_config.patch({"freezing": True})
-    @inductor_config.patch({"fx_graph_cache": False})
-    @inductor_config.patch({"fx_graph_remote_cache": False})
     @patches
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
@@ -468,9 +467,10 @@ class TestSelectAlgorithm(TestCase):
         input = torch.randn(*B, in_features).to(dtype=torch.float32)
 
         other = torch.randn(*B, out_features).to(dtype=dtype)
-        other2 = torch.randn(*B, out_features).to(dtype=dtype)
-        if not input_3d:
-            # Avoid hiting qlinear inplace sum fusion
+        # Avoid hiting qlinear inplace sum fusion
+        if input_3d:
+            other2 = torch.randn(B[0] * B[1], out_features).to(dtype=dtype)
+        else:
             other2 = torch.randn(1, *B, out_features).to(dtype=dtype)
 
         class M(torch.nn.Module):
@@ -484,8 +484,10 @@ class TestSelectAlgorithm(TestCase):
 
             def forward(self, x, other, other2):
                 res = self.epilogue(self.linear(x) + other)
-                if not self.input_3d:
-                    # Avoid hiting qlinear inplace sum fusion
+                # Avoid hiting qlinear inplace sum fusion
+                if self.input_3d:
+                    other2 = other2.view(2, other2.size(0) // 2, other2.size(1))
+                else:
                     other2 = other2.view(other2.size(1), other2.size(2))
                 res = self.epilogue2(self.linear2(res) + other2)
                 return res
@@ -515,6 +517,10 @@ class TestSelectAlgorithm(TestCase):
             self.assertEqual(
                 counters["inductor"]["select_algorithm_autotune"],
                 2,
+            )
+            self.assertEqual(
+                counters["inductor"]["cpp_epilogue_fusion_counter"],
+                0,
             )
 
 
