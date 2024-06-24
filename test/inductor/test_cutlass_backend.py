@@ -1,6 +1,4 @@
 # Owner(s): ["module: inductor"]
-import contextlib
-import io
 import logging
 import math
 import os
