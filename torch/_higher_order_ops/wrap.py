@@ -5,6 +5,7 @@ import logging
 
 from torch._ops import HigherOrderOperator
 from torch.utils.checkpoint import checkpoint, CheckpointPolicy
+from torch._logging import warning_once
 
 
 log = logging.getLogger(__name__)
@@ -150,7 +151,7 @@ class TagActivationCheckpoint(HigherOrderOperator):
         import torch.fx.traceback as fx_traceback
         from torch.fx import Interpreter
         if "_checkpoint_context_fn" in gmod.meta:
-            log.warning("""
+            warning_once(log, """
 Detected that context_fn is passed to torch.utils.checkpoint under torch.compile.
 Please make sure the checkpointed region does not contain in-place ops (e.g. torch.relu_).
 """)
