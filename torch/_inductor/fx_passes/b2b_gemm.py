@@ -1,15 +1,12 @@
 import torch
 from ..._dynamo.utils import counters
+from ..ir import FixedLayout
 from ..pattern_matcher import Arg, CallFunction, Match, register_graph_pattern, PatternMatcherPass
-from .split_cat import construct_pattern_matcher_pass
 from ..select_algorithm import (
     TritonTemplate,
     autotune_select_algorithm,
 )
-from ..utils import use_triton_template
-from ..kernel.mm_common import mm_args
 from ..utils import ceildiv
-from ..ir import FixedLayout
 
 aten = torch.ops.aten
 
@@ -27,7 +24,11 @@ def b2b_gemm_grid(m, n, meta):
     """
     The CUDA grid size for matmul triton templates.
     """
-    return (ceildiv(m, meta["ROW_BLOCK_SIZE"]) * ceildiv(n, meta["COL_BLOCK_SIZE"]), 1, 1)
+    return (
+        ceildiv(m, meta["ROW_BLOCK_SIZE"]) * ceildiv(n, meta["COL_BLOCK_SIZE"]),
+        1,
+        1,
+    )
 
 b2b_gemm_template = TritonTemplate(
     name="b2b_gemm",
@@ -87,7 +88,7 @@ b2b_gemm_template = TritonTemplate(
 )
 
 def can_apply_b2b_gemm(mat1, mat2, mat3) -> bool:
-    if not(("val" in mat1.meta) and ("val" in mat2.meta) and ("val" in mat3.meta)):
+    if not (("val" in mat1.meta) and ("val" in mat2.meta) and ("val" in mat3.meta)):
         return False
     mat1 = mat1.meta["val"]
     mat2 = mat2.meta["val"]
@@ -100,16 +101,46 @@ def can_apply_b2b_gemm(mat1, mat2, mat3) -> bool:
     return mat1.shape[1] == 32 and mat3.shape[1] == 32
 
 def tuned_b2b_gemm(mat1, mat2, mat3, *, layout=None):
-    layout = FixedLayout(mat1.get_device(), mat1.get_dtype(), [mat1.shape[0], mat3.shape[1]])
+    layout = FixedLayout(
+        mat1.get_device(), mat1.get_dtype(), [mat1.shape[0], mat3.shape[1]]
+    )
     choices = []
     # TODO: change N and P to non-constexpr
     # Note: the only reason why N and P are hardcoded is because in Triton tl.arange(0, N) only works for tl.constexpr
     # TODO: add more configs for tuning (shall I also tune num_stages and num_warps?)
     for config in [
-        {"ROW_BLOCK_SIZE": 32, "COL_BLOCK_SIZE": 32, "num_stages": 2, "num_warps": 4, "N": 32, "P": 32},
-        {"ROW_BLOCK_SIZE": 32, "COL_BLOCK_SIZE": 128, "num_stages": 2, "num_warps": 4, "N": 32, "P": 32},
-        {"ROW_BLOCK_SIZE": 128, "COL_BLOCK_SIZE": 32, "num_stages": 2, "num_warps": 4, "N": 32, "P": 32},
-        {"ROW_BLOCK_SIZE": 128, "COL_BLOCK_SIZE": 128, "num_stages": 2, "num_warps": 4, "N": 32, "P": 32},
+        {
+            "ROW_BLOCK_SIZE": 32,
+            "COL_BLOCK_SIZE": 32,
+            "num_stages": 2,
+            "num_warps": 4,
+            "N": 32,
+            "P": 32,
+        },
+        {
+            "ROW_BLOCK_SIZE": 32,
+            "COL_BLOCK_SIZE": 128,
+            "num_stages": 2,
+            "num_warps": 4,
+            "N": 32,
+            "P": 32,
+        },
+        {
+            "ROW_BLOCK_SIZE": 128,
+            "COL_BLOCK_SIZE": 32,
+            "num_stages": 2,
+            "num_warps": 4,
+            "N": 32,
+            "P": 32,
+        },
+        {
+            "ROW_BLOCK_SIZE": 128,
+            "COL_BLOCK_SIZE": 128,
+            "num_stages": 2,
+            "num_warps": 4,
+            "N": 32,
+            "P": 32,
+        },
     ]:
         b2b_gemm_template.maybe_append_choice(
             choices,
@@ -131,7 +162,9 @@ B2B_GEMM_PASS = PatternMatcherPass(
     CallFunction(aten.mm, CallFunction(aten.mm, Arg(), Arg()), Arg()),
     pass_dict=B2B_GEMM_PASS,
 )
-def b2b_gemm(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node, mat3: torch.fx.Node):
+def b2b_gemm(
+    match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node, mat3: torch.fx.Node
+):
     print("B2B-GEMM handler called")
     if can_apply_b2b_gemm(mat1, mat2, mat3):
         counters["inductor"]["b2b_gemm"] += 1
@@ -139,7 +172,9 @@ def b2b_gemm(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node, mat3: torch
         root_node = match.nodes[-1]
         with graph.inserting_before(root_node):
             tuned_b2b_gemm._inductor_lowering_function = True
-            replacement = graph.call_function(tuned_b2b_gemm, tuple(match.args), match.kwargs)
+            replacement = graph.call_function(
+                tuned_b2b_gemm, tuple(match.args), match.kwargs
+            )
             replacement.meta.update(root_node.meta)
             root_node.replace_all_uses_with(replacement)
         match.erase_nodes(graph)
