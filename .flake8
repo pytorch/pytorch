@@ -1,0 +1,76 @@
+[flake8]
+# NOTE: **Mirror any changes** to this file the [tool.ruff] config in pyproject.toml
+# before we can fully move to use ruff
+enable-extensions = G
+select = B,C,E,F,G,P,SIM1,T4,W,B9,TOR0,TOR1,TOR2,TOR9
+max-line-length = 120
+# C408 ignored because we like the dict keyword argument syntax
+# E501 is not flexible enough, we're using B950 instead
+ignore =
+    E203,E305,E402,E501,E721,E741,F405,F841,F999,W503,W504,C408,E302,W291,E303,
+    # shebang has extra meaning in fbcode lints, so I think it's not worth trying
+    # to line this up with executable bit
+    EXE001,
+    # these ignores are from flake8-bugbear; please fix!
+    B007,B008,B017,B019,B023,B028,B903,B904,B905,B906,B907
+    # these ignores are from flake8-comprehensions; please fix!
+    C407,
+    # these ignores are from flake8-logging-format; please fix!
+    G100,G101,G200
+    # these ignores are from flake8-simplify. please fix or ignore with commented reason
+    SIM105,SIM108,SIM110,SIM111,SIM113,SIM114,SIM115,SIM116,SIM117,SIM118,SIM119,SIM12,
+    # flake8-simplify code styles
+    SIM102,SIM103,SIM106,SIM112,
+    # TorchFix codes that don't make sense for PyTorch itself:
+    # removed and deprecated PyTorch functions.
+    TOR001,TOR101,
+    # TODO(kit1980): fix all TOR102 issues
+    # `torch.load` without `weights_only` parameter is unsafe
+    TOR102,
+    # TODO(kit1980): resolve all TOR003 issues
+    # pass `use_reentrant` explicitly to `checkpoint`.
+    TOR003
+per-file-ignores =
+    __init__.py: F401
+    test/**: F821
+    test/**/__init__.py: F401,F821
+    torch/utils/cpp_extension.py: B950
+    torchgen/api/types/__init__.py: F401,F403
+    torchgen/executorch/api/types/__init__.py: F401,F403
+    test/dynamo/test_higher_order_ops.py: B950
+    torch/testing/_internal/dynamo_test_failures.py: B950
+    # TOR901 is only for test, we want to ignore it for everything else.
+    # It's not easy to configure this without affecting other per-file-ignores,
+    # so we explicitly list every file where it's violated outside of test.
+    torch/__init__.py: F401,TOR901
+    torch/_custom_op/impl.py: TOR901
+    torch/_export/serde/upgrade.py: TOR901
+    torch/_functorch/vmap.py: TOR901
+    torch/_inductor/test_operators.py: TOR901
+    torch/_library/abstract_impl.py: TOR901
+    torch/_meta_registrations.py: TOR901
+    torch/_prims/__init__.py: F401,TOR901
+    torch/_prims/rng_prims.py: TOR901
+    torch/ao/quantization/fx/_decomposed.py: TOR901
+    torch/distributed/_functional_collectives.py: TOR901
+    torch/distributed/_spmd/data_parallel.py: TOR901
+    torch/distributed/_tensor/_collective_utils.py: TOR901
+optional-ascii-coding = True
+exclude =
+    ./.git,
+    ./build_test_custom_build,
+    ./build,
+    ./caffe2,
+    ./docs/caffe2,
+    ./docs/cpp/src,
+    ./docs/src,
+    ./functorch/docs,
+    ./functorch/examples,
+    ./functorch/notebooks,
+    ./scripts,
+    ./test/generated_type_hints_smoketest.py,
+    ./third_party,
+    ./torch/include,
+    ./torch/lib,
+    ./venv,
+    *.pyi
