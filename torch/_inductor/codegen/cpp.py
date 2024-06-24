@@ -3887,23 +3887,28 @@ class CppScheduling(BaseScheduling):
                             global_buffer_layout.size[size_offset:],
                             global_buffer_layout.stride[size_offset:],
                         )
-                        if any(
-                            local_buffer_layout == buffer_mapper.local_buf.layout
-                            for buffer_mapper in buffer_mappers
+
+                        def try_get_existing_local_buffer(
+                            local_buffer_layout, buffer_mappers
                         ):
-                            # Sharing existing local buffer
                             for buffer_mapper in buffer_mappers:
                                 if (
                                     local_buffer_layout
                                     == buffer_mapper.local_buf.layout
                                 ):
-                                    buffer_mappers.append(
-                                        BufferMapper(
-                                            buffer_mapper.local_buf,
-                                            global_buf=global_buffer,
-                                        )
-                                    )
-                                    break
+                                    return buffer_mapper.local_buf
+                            return None
+
+                        if local_buffer_shared := try_get_existing_local_buffer(
+                            local_buffer_layout, buffer_mappers
+                        ):
+                            # Sharing existing local buffer
+                            buffer_mappers.append(
+                                BufferMapper(
+                                    local_buffer_shared,
+                                    global_buf=global_buffer,
+                                )
+                            )
                         else:
                             # Creating new local buffer
                             local_buf_prefix = "local_buffer_data"
