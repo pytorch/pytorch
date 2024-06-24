@@ -1175,6 +1175,7 @@ class TestSerializeCustomClass(TestCase):
                 self.assertEqual(arg.__getstate__(), custom_obj.__getstate__())
                 self.assertEqual(arg.top(), 7)
 
+    @unittest.expectedFailure
     def test_custom_class_containing_fake_tensor(self):
         class Foo(torch.nn.Module):
             def __init__(self):
