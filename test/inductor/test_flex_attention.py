@@ -457,7 +457,7 @@ class TestFlexAttention(InductorTestCase):
         )
 
     test_input_strides = [
-        ((B * S * D, S * D, D, 1), 997),  # offset
+        ((H * S * D, S * D, D, 1), 997),  # offset
         ((H * D, D, B * H * D, 1), 499),  # transposed dimensions
         (
             (S * (D + 1), B * S * (D + 1), (D + 1), 1),
