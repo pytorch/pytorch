@@ -554,7 +554,7 @@ class ParameterList(Module):
     and will be visible by all :class:`~torch.nn.Module` methods.
 
     Note that the constructor, assigning an element of the list, the
-    :meth:`~torch.nn.ParameterDict.append` method and the :meth:`~torch.nn.ParameterDict.extend`
+    :meth:`~torch.nn.ParameterList.append` method and the :meth:`~torch.nn.ParameterList.extend`
     method will convert any :class:`~torch.Tensor` into :class:`~torch.nn.Parameter`.
 
     Args:
