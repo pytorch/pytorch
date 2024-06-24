@@ -28,10 +28,9 @@ import torch
 import torch._logging
 import torch.fx
 from torch._decomp import get_decompositions
-from torch._dynamo.utils import defake, dynamo_timed
+from torch._dynamo.utils import dynamo_timed
 from torch._logging import LazyString, trace_structured
 from torch._prims_common import make_channels_last_strides_for
-from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
@@ -91,7 +90,7 @@ from .utils import (
     maybe_get_suppress_shape_guards_ctx,
     should_assume_input_aligned,
 )
-from .virtualized import NullHandler, V
+from .virtualized import V
 
 if TYPE_CHECKING:
     from torch._higher_order_ops.effects import _EffectType
@@ -1527,93 +1526,12 @@ class GraphLowering(torch.fx.Interpreter):
 
     def codegen_with_cpp_wrapper(self):
         """
-        For CPU, the cpp wrapper codegen is done in one pass.
-        For GPU, the cpp wrapper codegen is done in two steps: JIT-compile the model with python
-        wrapper code and run it to generate autotuned kernel binaries in the first pass; and then
-        generate cpp wrapper code and compile it to a dynamic library in the second pass.
+        For GPU, Triton kernels are autotuned and stored as cubin files
         """
         if "cuda" in self.device_types:
-            # first pass
-            self.cpp_wrapper = False
-            # Although triton.store_cubin was set in compile_fx, the backward pass didn't pick
-            # that up. In theory it should work by only setting triton.store_cubin to True here,
-            # but that will cause a problem when use_runtime_constant_folding is set.
-            with config.patch({"triton.store_cubin": True}):
-                compiled = self.compile_to_module().call
-
-            if not config.triton.autotune_at_compile_time:
-
-                def materialize(x):
-                    if isinstance(x, (torch.SymInt, torch.SymFloat)):
-                        # Need concrete value to run dynamic shapes and tune the result
-                        return x.node.hint
-                    elif isinstance(x, FakeTensor):
-                        return defake(x)
-                    else:
-                        assert isinstance(
-                            x, torch.Tensor
-                        ), "Unknown type when creating real inputs" + str(type(x))
-                        return x
-
-                tracing_context = torch._guards.TracingContext.try_get()
-                if tracing_context is not None and not isinstance(
-                    V.real_inputs, NullHandler
-                ):
-                    if tracing_context.output_strides:
-                        tracing_context.output_strides.clear()
-
-                    params_flat = [
-                        param
-                        for param in tracing_context.params_flat  # type: ignore[union-attr]
-                        if param is not None
-                    ]
-                    real_inputs = [
-                        materialize(x)
-                        for x in itertools.chain(params_flat, V.real_inputs)
-                    ]
-                else:
-                    # In the backward pass, V.real_inputs is not set.
-                    # Generating random inputs based on self.example_inputs sometimes can be problematic,
-                    # e.g. illegal memory access. A comprehensive fix is to autotune in a separate process.
-                    real_inputs = [
-                        materialize(x)
-                        for x in (
-                            self.example_inputs
-                            if isinstance(V.real_inputs, NullHandler)
-                            else V.real_inputs
-                        )
-                    ]
-
-                if self.mutated_inputs:
-                    from .compile_fx import clone_preserve_strides
-
-                    mutated_input_idxs = [
-                        idx
-                        for idx, name in enumerate(self.graph_inputs)
-                        if name in self.mutated_inputs
-                        and isinstance(real_inputs[idx], torch.Tensor)
-                    ]
-                    for idx in mutated_input_idxs:
-                        # clone mutated Tensor inputs to avoid mutating them in
-                        # the first pass of the CPP wrapper-based compilation, as
-                        # this will lead to a side effect on the example inputs:
-                        # e.g. if torch.compile(f)(x) if called on input-mutating
-                        # f, the inputs x will be mutated twice in the process:
-                        # once here, and again when running the compiled model;
-                        # this will also lead to a numerically incorrect output
-                        real_inputs[idx] = clone_preserve_strides(real_inputs[idx])
-
-                with torch.utils._python_dispatch._disable_current_modes():
-                    compiled(real_inputs)
-                del real_inputs
-
-            # second pass
-            self.cpp_wrapper = True
-            self.removed_buffers.clear()
-            self.inplaced_to_remove.clear()
-            V.graph.sizevars.precomputed_replacements.clear()
-            V.graph.sizevars.inv_precomputed_replacements.clear()
-            with config.patch({"triton.autotune_at_compile_time": False}):
+            with config.patch(
+                {"triton.store_cubin": True, "triton.autotune_at_compile_time": True}
+            ):
                 return self.codegen()
         else:
             # cpu

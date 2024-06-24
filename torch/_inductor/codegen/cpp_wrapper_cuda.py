@@ -19,6 +19,7 @@ from .triton_utils import (
     DeferredCudaGridLine,
     DeferredCudaKernelLine,
 )
+from .wrapper import user_defined_kernel_grid_fn_code
 
 if TYPE_CHECKING:
     from ..graph import GraphLowering
@@ -59,12 +60,6 @@ class CppWrapperCuda(CppWrapperCpu):
         )
         return name
 
-    def define_kernel(
-        self, name: str, kernel: str, metadata: Optional[str] = None, cuda=True
-    ):
-        if not cuda:
-            return super().define_kernel(name, kernel, metadata, cuda)
-
     def generate(self, is_inference):
         self.prefix.writeline("\n")
         if not V.graph.aot_mode:
@@ -78,6 +73,19 @@ class CppWrapperCuda(CppWrapperCpu):
             self.prefix.writeline("\n")
         return super().generate(is_inference)
 
+    def define_kernel(
+        self,
+        kernel_name: str,
+        kernel_body: str,
+        metadata: Optional[str] = None,
+        cuda=True,
+    ):
+        """
+        Override the default value of argument 'cuda' to True here. define_kernel can still be
+        called with cuda=False because of a mix of cpu kernels and triton kernels.
+        """
+        return super().define_kernel(kernel_name, kernel_body, metadata, cuda)
+
     def generate_user_defined_triton_kernel(
         self, kernel_name: str, grid: List[Any], configs, args, triton_meta, raw_args
     ):
@@ -85,6 +93,24 @@ class CppWrapperCuda(CppWrapperCpu):
             arg.get_dtype() if hasattr(arg, "get_dtype") else type(arg)
             for arg in raw_args
         ]
+
+        # Similar to WrapperCodeGen.generate_user_defined_triton_kernel but only insert
+        # into the autotune code block here
+        grid_fn, code = user_defined_kernel_grid_fn_code(
+            kernel_name, configs, grid, wrapper=self
+        )
+        super().generate_kernel_call(
+            kernel_name,
+            args,
+            grid_fn=grid_fn,
+            arg_types=arg_types,
+            raw_args=raw_args,
+            cuda=True,
+            triton=True,
+        )
+
+        # super().generate_kernel_call only generates the autotune code block.
+        # Calling self.generate_kernel_call generates the real kernel call in cpp.
         self.generate_kernel_call(
             kernel_name,
             args,
@@ -159,18 +185,15 @@ class CppWrapperCuda(CppWrapperCpu):
 
         return ", ".join(new_args)
 
-    def generate_default_grid(
-        self, kernel_name: str, grid: List[Any], cuda: bool = True
-    ):
+    def generate_default_grid(self, kernel_name: str, grid_args: List[Any]):
         """
         Generate grid configs for launching a CUDA kernel using the grid
         function from triton_heuristics. Because its computation needs
         to read kernel config after autotune, it is done in a deferred way
         using DeferredCudaDefaultGrid.
         """
-        if not cuda:
-            return grid
-        return DeferredCudaDefaultGrid(kernel_name, grid)
+        super().generate_default_grid(kernel_name, grid_args)
+        return DeferredCudaDefaultGrid(kernel_name, grid_args)
 
     def generate_kernel_call(
         self,
@@ -186,24 +209,27 @@ class CppWrapperCuda(CppWrapperCpu):
         triton_meta=None,
         autotune_configs=None,
     ):
-        assert arg_types is not None and len(call_args) == len(
-            arg_types
-        ), "call_args and arg_types do not match"
+        """
+        Override the default value of argument 'cuda' to True here. generate_kernel_call can still be
+        called with cuda=False because of a mix of cpu kernels and triton kernels.
+        """
+        # Call parent class to create the autotune code block
+        super().generate_kernel_call(
+            kernel_name,
+            call_args,
+            grid,
+            device_index,
+            cuda,
+            triton,
+            arg_types,
+            raw_args,
+            grid_fn,
+            triton_meta,
+            autotune_configs,
+        )
         if not cuda:
-            # Even in CppWrapperCuda, we may see cpp kernels
-            return super().generate_kernel_call(
-                kernel_name,
-                call_args,
-                grid,
-                device_index,
-                cuda,
-                triton,
-                arg_types,
-                raw_args,
-                grid_fn,
-                triton_meta,
-                autotune_configs,
-            )
+            # Next steps are irrelevant for CPU kernels
+            return
 
         device_index, call_args = self.prepare_triton_kernel_call(
             device_index, call_args

@@ -93,7 +93,8 @@ class CppWrapperCpu(WrapperCodeGen):
                 Only valid when cuda == True.
         """
         if cuda:
-            return super().generate_kernel_call(
+            # Call parent class because we need to create the autotune code block
+            super().generate_kernel_call(
                 kernel_name,
                 call_args,
                 grid,
@@ -912,9 +913,18 @@ class CppWrapperCpu(WrapperCodeGen):
         self.prefix = cached_dtypes_buffer
 
     def define_kernel(
-        self, name: str, kernel: str, metadata: Optional[str] = None, cuda=False
+        self,
+        kernel_name: str,
+        kernel_body: str,
+        metadata: Optional[str] = None,
+        cuda=False,
     ):
-        self.header.splice(f"\n{kernel}\n")
+        if cuda:
+            # Call the Python wrapper codegen to create the autotune code block
+            super().define_kernel(kernel_name, kernel_body, metadata, cuda)
+        else:
+            # No autotune for cpu kernels, simply write out the kernel body as a function
+            self.header.splice(f"\n{kernel_body}\n")
 
     def codegen_scalar_to_tensor(self, output: str):
         name = f"scalar_to_tensor_{next(self.scalar_to_tensor_id)}"
@@ -1460,9 +1470,6 @@ class CppWrapperCpu(WrapperCodeGen):
         self.wrapper_call.writeline(
             'RECORD_FUNCTION("inductor_wrapper_call", c10::ArrayRef<c10::IValue>());'
         )
-
-    def write_triton_header_once(self):
-        pass
 
     def generate_start_graph(self):
         pass

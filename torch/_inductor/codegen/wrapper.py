@@ -180,8 +180,8 @@ def user_defined_kernel_grid_fn_code(
         # Grid contains ints/Expr, so utilize wrapper's expr printer for codegen
         sympy_grid = tuple(_convert_to_sympy_expr(g) for g in grid)
         return (
-            wrapper.codegen_shape_tuple(sympy_grid),
-            wrapper.codegen_shape_tuple(
+            wrapper.codegen_python_shape_tuple(sympy_grid),
+            wrapper.codegen_python_shape_tuple(
                 tuple(wrapper.generate_example_arg_value(g) for g in sympy_grid)
             )
             if config.triton.autotune_at_compile_time
@@ -584,9 +584,12 @@ class WrapperCodeGen(CodeGen):
             triton_heuristics.__name__,
             V.graph.device_ops.import_get_raw_stream_as("get_raw_stream"),
         )
-        self.header.splice(import_str)
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_calls.splice(import_str)
+            if V.graph.cpp_wrapper:
+                # For cpp wrapper, we only need to generate the autotune code block in python
+                return
+        self.header.splice(import_str)
 
     def add_meta_once(self, meta: TritonMetaParams) -> str:
         meta = repr(meta)
@@ -878,7 +881,9 @@ class WrapperCodeGen(CodeGen):
         )
         scope = dict()  # type: ignore[var-annotated]
         tuning_code = (
-            self.kernel_autotune_defs.getvalue() + self.kernel_autotune_calls.getvalue()
+            self.kernel_autotune_defs.getvalue()
+            + "\n"
+            + self.kernel_autotune_calls.getvalue()
         )
         if output_code_log.level == logging.DEBUG:
             # Save the autotuning code block into a file
@@ -894,7 +899,11 @@ class WrapperCodeGen(CodeGen):
                 file_path,
             )
         # Execute the code to autotune kernels
-        exec(tuning_code, scope)
+        try:
+            exec(tuning_code, scope)
+        except Exception as e:
+            print(tuning_code)
+            raise RuntimeError(f"Failed to run autotuning code block: {e}") from e
 
     def memory_plan(self):
         from .memory_planning import MemoryPlanner
@@ -1174,13 +1183,21 @@ class WrapperCodeGen(CodeGen):
             )
 
     def define_kernel(
-        self, name: str, kernel: str, metadata: Optional[str] = None, cuda=True
+        self,
+        kernel_name: str,
+        kernel_body: str,
+        metadata: Optional[str] = None,
+        cuda=True,
     ):
-        metadata_comment = f"{metadata}\n" if metadata else ""
-        body = f"\n\n{metadata_comment}{name} = {kernel}"
-        self.header.splice(body)
+        #
+        metadata_comment = metadata.replace("\n", "\n#") if metadata else ""
+        body = f"\n\n{metadata_comment}\n{kernel_name} = {kernel_body}"
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_defs.splice(body)
+            if V.graph.cpp_wrapper:
+                # For cpp wrapper, we only need to generate the autotune code block in python
+                return
+        self.header.splice(body)
 
     def define_user_defined_triton_kernel(self, kernel, configs, kwargs):
         from torch.utils._triton import patch_triton_dtype_repr
@@ -1571,14 +1588,6 @@ class WrapperCodeGen(CodeGen):
             call_args_str = ", ".join(call_args_str)
             stream_name = self.write_get_raw_stream(device_index, V.graph)
             if triton:
-                if grid is None:
-                    grid_str = grid_fn
-                else:
-                    grid_str = ", ".join(pexpr(item) for item in grid)
-                    grid_str = f"{grid_fn}({grid_str})"
-                self.writeline(
-                    f"{kernel_name}.run({call_args_str}, grid={grid_str}, stream={stream_name})"
-                )
                 if (
                     config.triton.autotune_at_compile_time
                     and kernel_name not in self.kernel_autotun_names
@@ -1635,6 +1644,19 @@ class WrapperCodeGen(CodeGen):
                         f"del {', '.join(arg for arg in tensor_args.values())}\n",
                     )
                     self.kernel_autotun_names.add(kernel_name)
+
+                if config.triton.autotune_at_compile_time and V.graph.cpp_wrapper:
+                    # For cpp wrapper, we only need to generate the autotune code block in python
+                    return
+
+                if grid is None:
+                    grid_str = grid_fn
+                else:
+                    grid_str = ", ".join(pexpr(item) for item in grid)
+                    grid_str = f"{grid_fn}({grid_str})"
+                self.writeline(
+                    f"{kernel_name}.run({call_args_str}, grid={grid_str}, stream={stream_name})"
+                )
             else:
                 stream_ptr = f"c_void_p({stream_name})"
                 self.writeline(
@@ -1653,7 +1675,7 @@ class WrapperCodeGen(CodeGen):
     def enter_context(self, ctx):
         self.lines.append(LineContext(ctx))
 
-    def val_to_arg_str(self, s, type_=None):
+    def val_to_arg_str_python(self, s, type_=None):
         from torch.utils._triton import dtype_to_string, has_triton_package
 
         if has_triton_package():
@@ -1681,6 +1703,9 @@ class WrapperCodeGen(CodeGen):
             return dtype_to_string(s)
         else:
             return repr(s)
+
+    def val_to_arg_str(self, s, type_=None):
+        return self.val_to_arg_str_python(s, type_)
 
     # The following methods are for memory management
     def make_buffer_allocation(self, buffer):

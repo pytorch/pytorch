@@ -212,6 +212,11 @@ class DeferredCudaDefaultGrid:
         self.kernel_name = kernel_name
         self.grid = grid
 
+    def __iter__(self):
+        # DeferredCudaDefaultGrid can be passed to the base class, WrapperCodeGen,
+        # to genrete the autotune code block, and thus we need this iterator
+        return iter(self.grid)
+
     def __call__(self):
         from .wrapper import SymbolicCallArg
 
