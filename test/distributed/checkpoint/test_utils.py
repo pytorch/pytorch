@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
+from unittest.mock import MagicMock
 
 import torch
 
@@ -121,6 +122,14 @@ class TestMedatadaIndex(TestCase):
 
         with self.assertRaisesRegex(ValueError, "Could not find shard"):
             find_state_dict_object(state_dict, MetadataIndex("st", [1]))
+
+
+class TestTensorProperties(TestCase):
+    def test_create_from_tensor_correct_device(self):
+        t = torch.randn([10, 2], device="cpu")
+        t.is_pinned = MagicMock(return_value=True)
+        TensorProperties.create_from_tensor(t)
+        t.is_pinned.assert_called_with(device=torch.device("cpu"))
 
 
 if __name__ == "__main__":
