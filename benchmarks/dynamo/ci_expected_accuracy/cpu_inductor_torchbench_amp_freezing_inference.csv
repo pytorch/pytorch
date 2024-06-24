@@ -82,6 +82,22 @@ detectron2_fcos_r_50_fpn,pass,23
 
 
 
+detectron2_maskrcnn_r_101_c4,fail_accuracy,57
+
+
+
+detectron2_maskrcnn_r_101_fpn,fail_accuracy,63
+
+
+
+detectron2_maskrcnn_r_50_c4,fail_accuracy,57
+
+
+
+detectron2_maskrcnn_r_50_fpn,fail_accuracy,63
+
+
+
 dlrm,pass,0
 
 
@@ -279,6 +295,10 @@ speech_transformer,pass,10
 
 
 squeezenet1_1,pass,0
+
+
+
+stable_diffusion_unet,pass_due_to_skip,0
 
 
 
