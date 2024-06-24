@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import logging
 import os
@@ -11,7 +12,6 @@ import sympy
 
 import torch
 from ... import config
-from ...config import cuda as inductor_cuda_config
 from ...ir import Layout
 
 from ...runtime.runtime_utils import cache_dir
@@ -57,7 +57,7 @@ def try_import_cutlass() -> bool:
     # TODO(ipiszy): remove this hack when CUTLASS solves Python scripts packaging structure issues.
 
     cutlass_py_full_path = os.path.abspath(
-        os.path.join(inductor_cuda_config.cutlass_dir, "python/cutlass_library")
+        os.path.join(config.cuda.cutlass_dir, "python/cutlass_library")
     )
     tmp_cutlass_py_full_path = os.path.abspath(
         os.path.join(cache_dir(), "torch_cutlass_library")

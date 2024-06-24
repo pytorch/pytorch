@@ -17,6 +17,7 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
+
 from functorch.experimental.control_flow import cond
 from torch._dynamo import config
 from torch._dynamo.exc import UserError
@@ -1508,6 +1509,30 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         graph, guards = torch._dynamo.export(model)(inp)
         self.assertEqual(model(inp), graph(inp))
 
+    def test_export_with_constant_in_unspecialized_nn_module(self):
+        class Module(torch.nn.Module):
+            def __init__(self, y):
+                super().__init__()
+                self.y = y
+
+            @torch._dynamo.assume_constant_result
+            def check(self):
+                return self.y[0].item() == 1
+
+            def forward(self, x):
+                # This line leads to module obj being tracked as UnspecializedNNModuleVariable in dynamo
+                self.device = x.device
+
+                if self.check():
+                    return x + 1
+                else:
+                    return x + 2
+
+        model = Module(torch.tensor([1]))
+        inp = torch.ones(3, 4)
+        graph, _ = torch._dynamo.export(model)(inp)
+        self.assertEqual(model(inp), graph(inp))
+
     def test_export_decomp(self):
         def f(x):
             return x.t() + x.t()
@@ -2471,7 +2496,7 @@ def forward(self, x):
         mod = Mod()
         torch._dynamo.export(mod)(y)
 
-        with self.assertRaisesRegex(ConstraintViolationError, "dimx = None  # 3"):
+        with self.assertRaisesRegex(ConstraintViolationError, "dimx = 3"):
             torch._dynamo.export(mod, dynamic_shapes=({0: torch.export.Dim("dimx")},))(
                 y
             )
@@ -3072,6 +3097,20 @@ def forward(self, x):
             gm, _ = torch._dynamo.export(f, aten_graph=True)(*example_inputs)
             self.assertEqual(gm(*example_inputs), f(*example_inputs))
 
+    @unittest.expectedFailure  # TODO: Not sure why dynamo creates a new inputs for self.a
+    def test_sum_param(self):
+        # Setting a new attribute inside forward()
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.randn(3, 2)
+
+            def forward(self, x):
+                self.b = 2
+                return x.sum() + self.a.sum() + self.b
+
+        torch._dynamo.export(Foo())(torch.randn(3, 2))
+
     def test_mixed_real_and_fake_inputs(self):
         class _TestPattern(torch.nn.Module):
             def __init__(self):
@@ -3434,7 +3473,6 @@ class GraphModule(torch.nn.Module):
         ]
         false_guard_code = [
             "Ne(cast_symbool_to_symint_guardless(L['pred']), 1)",
-            "-9223372036854775808 <= cast_symbool_to_symint_guardless(L['pred'])",
         ]
         test_symbool_guards(
             f,

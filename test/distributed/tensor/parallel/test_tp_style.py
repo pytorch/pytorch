@@ -168,6 +168,29 @@ class TensorParallelStyleTest(DTensorTestBase):
             # no comm in bwd
             self.assertEqual(comm_mode.get_total_counts(), 1)
 
+        sharded_row_parallel = RowwiseParallel(
+            input_layouts=Replicate(), output_layouts=Shard(1)
+        )
+
+        rowwise_mod = parallelize_module(deepcopy(model), mesh, sharded_row_parallel)
+
+        inp_indices = torch.arange(8, device=self.device_type)
+        with comm_mode:
+            out = rowwise_mod(inp_indices)
+            # ensure output shard on the last dim
+            self.assertEqual(out.shape, (8, 16 // self.world_size))
+            # reduce scatter in fwd
+            self.assertEqual(comm_mode.get_total_counts(), 1)
+            self.assertEqual(
+                comm_mode.get_comm_counts()[c10d_functional.reduce_scatter_tensor], 1
+            )
+            out.sum().backward()
+            # allgather comm in bwd
+            self.assertEqual(comm_mode.get_total_counts(), 2)
+            self.assertEqual(
+                comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 1
+            )
+
     @with_comms
     def test_prepare_module_input(self):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
@@ -289,6 +312,18 @@ class TensorParallelStyleTest(DTensorTestBase):
             output = test_kwonly_mod(
                 x=torch.randn(1, 8, device=self.device_type),
                 z=torch.ones(1, 8, device=self.device_type),
+            )
+
+        self.assertEqual(comm_mode.get_total_counts(), 2)
+        self.assertEqual(output.shape, (1 * self.world_size, 8))
+
+        # test the case where x is a DTensor
+        x_dt = DTensor.from_local(
+            torch.randn(1, 8, device=self.device_type), mesh, [Shard(0)]
+        )
+        with comm_mode:
+            output = test_kwonly_mod(
+                x=x_dt, z=torch.ones(1, 8, device=self.device_type)
             )
 
         self.assertEqual(comm_mode.get_total_counts(), 2)

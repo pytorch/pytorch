@@ -497,7 +497,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
                 a_float32 = torch.rand((8, 8), device="cuda")
                 b_float32 = torch.rand((8, 8), device="cuda")
 
-                with torch.cuda.amp.autocast(dtype=torch.torch.float64):
+                with torch.cuda.amp.autocast(dtype=torch.float64):
                     c_float64 = torch.mm(a_float32, b_float32)
                 return c_float64
 
@@ -796,7 +796,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.dtype, real_dtype)
 
         self.assertEqual(exported.device.index, 0)
-        self.assertEqual(exported.dtype, torch.torch.float16)
+        self.assertEqual(exported.dtype, torch.float16)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_autocast_arguments_binding(self):
@@ -1340,6 +1340,30 @@ class GraphModule(torch.nn.Module):
             torch._dynamo.graph_break()
             with ctx:
                 x = x + 1
+            return x
+
+        x = torch.zeros(10, requires_grad=False)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(fn(x).requires_grad, opt_fn(x).requires_grad)
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_inactive_context_graph_break_local_nullctx2(self):
+        import contextlib
+
+        # test with nullcontext where graph break happens
+        # in an inlined function that returns something
+        def gn():
+            torch._dynamo.graph_break()
+            return [0, 1, 2]
+
+        def fn(x):
+            x = x + 1
+            ctx = contextlib.nullcontext()
+            lst = gn()
+            with ctx:
+                x = x + lst[1]
             return x
 
         x = torch.zeros(10, requires_grad=False)

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import functools
@@ -5,6 +6,7 @@ import logging
 from typing import cast, List, Optional, Sequence, Tuple, TYPE_CHECKING, TypedDict
 
 import torch
+
 from .. import config, ir
 
 from ..lowering import (
@@ -245,11 +247,11 @@ def conv_layout(
             ir.ir_node_to_tensor(x, guard_shape=True),
             ir.ir_node_to_tensor(weight, guard_shape=True),
             ir.ir_node_to_tensor(bias, guard_shape=True),
-            stride,
-            tuple(V.graph.sizevars.size_hint(p) for p in padding),  # type: ignore[arg-type]
+            V.graph.sizevars.size_hints(stride),  # type: ignore[arg-type]
+            V.graph.sizevars.size_hints(padding),  # type: ignore[arg-type]
             dilation,
             transposed,
-            tuple(V.graph.sizevars.size_hint(p) for p in output_padding),  # type: ignore[arg-type]
+            V.graph.sizevars.size_hints(output_padding),  # type: ignore[arg-type]
             groups,
         )
         sizes = ir.convert_shape_to_inductor(output.size())
@@ -276,12 +278,7 @@ def convert_1x1_conv_to_mm(x, weight, bias):
         weight = L[aten.squeeze](weight, dim=-1)
     weight = L[aten.permute](weight, [1, 0])
 
-    if x.get_size()[0] != 1:
-        x = ir.ExternKernel.require_stride_order(x, channels_last_order(rank))
-    else:
-        x.realize()
-        x.freeze_layout()
-
+    x = ir.ExternKernel.require_stride_order(x, channels_last_order(rank))
     x_permute = list(range(rank))
     x_permute.append(x_permute.pop(1))
     x = L[aten.permute](x, x_permute)
@@ -362,7 +359,7 @@ def convolution(
         and not transposed
         and is_zeros(output_padding)
         and groups == 1
-        and sympy_product(x.get_size()) > 0
+        and V.graph.sizevars.statically_known_gt(sympy_product(x.get_size()), 0)
     ):
         return convert_1x1_conv_to_mm(x, weight, bias)
 

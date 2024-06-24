@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import builtins
 import copy
 import functools
@@ -10,6 +11,7 @@ import operator
 import os
 import os.path
 import re
+import sys
 import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
@@ -32,7 +34,7 @@ from .runtime_utils import (
     ceildiv,
     conditional_product,
     create_bandwidth_info_str,
-    do_bench,
+    do_bench_gpu,
     dynamo_timed,
     get_first_attr,
     get_max_y_grid,
@@ -48,6 +50,7 @@ except ImportError:
 
 if triton is not None:
     from triton import Config
+    from triton.compiler import CompiledKernel
     from triton.runtime.autotuner import OutOfResources
     from triton.runtime.jit import KernelInterface
 
@@ -123,6 +126,33 @@ def disable_pointwise_autotuning(inductor_meta):
     if inductor_meta.get("are_deterministic_algorithms_enabled"):
         return True
     return not inductor_meta.get("autotune_pointwise", True)
+
+
+def _dump_launch_params(args, kwargs, launcher, kernel_name):
+    call_args = []
+    call_kwargs = {}
+    for arg in args:
+        if isinstance(arg, (int, bool)):
+            call_args.append(str(arg))
+        else:
+            call_args.append("T")
+    for k, v in kwargs.items():
+        if isinstance(arg, (int, bool)):
+            call_kwargs[k] = v
+        else:
+            call_kwargs[k] = v
+    for k, v in launcher.config.kwargs.items():
+        call_kwargs[k] = v
+    call_kwargs["num_warps"] = launcher.config.num_warps
+    call_kwargs["num_stages"] = launcher.config.num_stages
+    args_str = ""
+    args_str += ", ".join(call_args)
+    for k, v in call_kwargs.items():
+        args_str += f", {k}={v}"
+
+    abs_path = os.path.abspath(sys.argv[0])
+    with open(f"{abs_path}.launch_params", "a") as f:
+        f.write(f"{kernel_name} | {args_str}\n")
 
 
 class CachingAutotuner(KernelInterface):
@@ -291,6 +321,11 @@ class CachingAutotuner(KernelInterface):
                     if new_config in seen_configs:
                         continue
                     seen_configs.add(new_config)
+                    log.debug(
+                        "Dynamically scale down RBLOCK from TritonConfig(%s) and get a new TritonConfig(%s)",
+                        triton_config,
+                        new_config,
+                    )
                     self.launchers.append(
                         self._precompile_config(new_config, warm_cache_only)[1]
                     )
@@ -419,8 +454,8 @@ class CachingAutotuner(KernelInterface):
         scope = {
             "grid_meta": cfg.kwargs,
             "bin": binary,
-            "launch_enter_hook": binary.launch_enter_hook,
-            "launch_exit_hook": binary.launch_exit_hook,
+            "launch_enter_hook": CompiledKernel.launch_enter_hook,
+            "launch_exit_hook": CompiledKernel.launch_exit_hook,
             "metadata": binary.packed_metadata
             if hasattr(binary, "packed_metadata")
             else binary.metadata,
@@ -628,7 +663,7 @@ class CachingAutotuner(KernelInterface):
                 stream=stream,
             )
 
-        return do_bench(kernel_call, rep=40, fast_flush=True)
+        return do_bench_gpu(kernel_call, rep=40, fast_flush=True)
 
     def clone_args(self, *args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:
         from ..compile_fx import clone_preserve_strides
@@ -715,7 +750,6 @@ class CachingAutotuner(KernelInterface):
             # User defined triton kernels will have arbitrary kwarg names
             "meta": launcher.config.kwargs,
         }
-
         from torch._inductor.codecache import CudaKernelParamCache
 
         binary = (
@@ -804,9 +838,9 @@ class CachingAutotuner(KernelInterface):
                 {**dict(zip(self.arg_names, args)), **launcher.config.kwargs, **kwargs}
             )
 
-        # guard the record function and only call it if profiling is currently
-        # in progress, to reduce latency when profiler is not turned on. Note that
-        # the "if" statement (instead of, say, a contextlib.nullcontext) is intentional;
+        if os.environ.get("TORCHINDUCTOR_DUMP_LAUNCH_PARAMS", 0) == "1":
+            _dump_launch_params(args, kwargs, launcher, self.fn.__name__)
+
         # it is faster than entering and exiting a context manager, even if the context
         # manager is a nullcontext.
         if autograd_profiler._is_profiler_enabled:
@@ -998,7 +1032,7 @@ def should_use_remote_autotune_cache(inductor_meta):
     if inductor_meta.get("is_hip"):
         return False
 
-    from triton.runtime.fb_memcache import MEMCACHE_VERSION
+    from triton.fb.fb_memcache import MEMCACHE_VERSION
 
     return MEMCACHE_VERSION >= torch._utils_internal.justknobs_getval_int(
         "pytorch/remote_cache:autotune_memcache_version"
@@ -1042,11 +1076,17 @@ def cached_autotune(
 
                 try:
                     if inductor_meta.get("is_fbcode"):
-                        remote_cache = triton.runtime.fb_memcache.FbMemcacheRemoteAutotuneCacheBackend(
-                            key
+                        import triton.fb.fb_memcache
+
+                        remote_cache = (
+                            triton.fb.fb_memcache.FbMemcacheRemoteAutotuneCacheBackend(
+                                key
+                            )
                         )
                     else:
-                        remote_cache = triton.runtime.cache.RedisRemoteCacheBackend(key)
+                        from torch._inductor.remote_cache import RedisRemoteCacheBackend
+
+                        remote_cache = RedisRemoteCacheBackend(key)
                 except Exception:
                     remote_cache = None
                     log.warning("Unable to create a remote cache", exc_info=True)
@@ -1058,17 +1098,18 @@ def cached_autotune(
                 )
 
         best_config = None
-        if cache_filename is not None and os.path.exists(cache_filename):
-            with open(cache_filename) as fd:
-                best_config = json.loads(fd.read())
-        elif remote_cache is not None and remote_cache_key is not None:
-            best_config = remote_cache.get(remote_cache_key)
+        if not inductor_meta.get("force_disable_caches", False):
+            if cache_filename is not None and os.path.exists(cache_filename):
+                with open(cache_filename) as fd:
+                    best_config = json.loads(fd.read())
+            elif remote_cache is not None and remote_cache_key is not None:
+                best_config = remote_cache.get(remote_cache_key)
 
-        best_config = load_cached_autotuning(
-            best_config, configs_hash, configs, inductor_meta
-        )
-        if best_config:
-            configs = [best_config]
+            best_config = load_cached_autotuning(
+                best_config, configs_hash, configs, inductor_meta
+            )
+            if best_config:
+                configs = [best_config]
 
         def save_cache_hook(cfg, time_taken_ns, found_by_coordesc=False):
             data = {
@@ -1451,12 +1492,32 @@ def _reduction_configs(
     assert len(size_hints) == 2
     rnumel = size_hints[-1]
 
+    MAX_RBLOCK = 2048
+    if (
+        size_hints[0] >= 1024
+        and inductor_meta.get("num_load", 0) + inductor_meta.get("num_reduction", 0)
+        >= 10
+    ):
+        # A heuristics to reduce RBLOCK if a kernel potentially need many registers.
+        # Consider load and reduction since load need move data into registers and
+        # reduction needs an accumulator.
+        #
+        # The magic numbers are a bit arbitrary.
+        #
+        # We cannot rely on dynamically scaling down RBLOCK later, since sometimes
+        # triton makes it to use less registers with worse perf. Check:
+        # https://github.com/pytorch/pytorch/issues/126463
+        #
+        # The heuristic is a very simple one since registers can be reused. But
+        # hopefully it can be a good enough indicator.
+        MAX_RBLOCK = 1024
+
     contiguous_config = triton_config_reduction(
-        size_hints, 1, (rnumel if 256 <= rnumel < 2048 else 2048)
+        size_hints, 1, (rnumel if 256 <= rnumel < MAX_RBLOCK else MAX_RBLOCK)
     )
     outer_config = triton_config_reduction(size_hints, 64, 8)
     tiny_config = triton_config_reduction(
-        size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, min(rnumel, 2048)
+        size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, min(rnumel, MAX_RBLOCK)
     )
     if inductor_meta.get("max_autotune") or inductor_meta.get("max_autotune_pointwise"):
         pass  # skip all these cases
@@ -1683,7 +1744,7 @@ def grid(*numels):
         max_y_grid = get_max_y_grid()
         if znumel is None:
             div = ceildiv(y_grid, max_y_grid)
-            y_grid = y_grid // div
+            y_grid = ceildiv(y_grid, div)
             z_grid = div
         else:
             z_grid = get_grid_dim(znumel, meta.get("ZBLOCK", None))

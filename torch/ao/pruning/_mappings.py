@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 __all__ = [
     "get_static_sparse_quantized_mapping",
     "get_dynamic_sparse_quantized_mapping",

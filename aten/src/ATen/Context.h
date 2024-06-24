@@ -59,7 +59,7 @@ class TORCH_API Context {
     }
   }
   const AcceleratorHooksInterface& getAcceleratorHooksInterface(
-      c10::optional<c10::DeviceType> opt_device_type = c10::nullopt) {
+      std::optional<c10::DeviceType> opt_device_type = c10::nullopt) {
     c10::DeviceType device_type = opt_device_type.has_value()
         ? opt_device_type.value()
         : at::getAccelerator(true).value();
@@ -188,6 +188,8 @@ class TORCH_API Context {
   void setBenchmarkLimitCuDNN(int);
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool);
+  bool deterministicMkldnn() const;
+  void setDeterministicMkldnn(bool);
   bool userEnabledNNPACK() const;
   void setUserEnabledNNPACK(bool e);
 
@@ -358,6 +360,7 @@ class TORCH_API Context {
   c10::once_flag thp_init;
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
+  bool deterministic_mkldnn = false;
   bool _deterministic_algorithms = false;
   bool _deterministic_algorithms_warn_only = false;
   bool _deterministic_fill_uninitialized_memory = true;
@@ -385,8 +388,11 @@ class TORCH_API Context {
       ? at::LinalgBackend::Cusolver
       : at::LinalgBackend::Default;
   at::BlasBackend blas_preferred_backend =
-      (c10::utils::check_env("TORCH_BLAS_PREFER_CUBLASLT") == true ||
-       c10::utils::check_env("TORCH_BLAS_PREFER_HIPBLASLT") == true)
+#ifdef USE_ROCM
+      (c10::utils::check_env("TORCH_BLAS_PREFER_HIPBLASLT") != false)
+#else
+      (c10::utils::check_env("TORCH_BLAS_PREFER_CUBLASLT") == true)
+#endif
       ? at::BlasBackend::Cublaslt
       : at::BlasBackend::Cublas;
 #ifdef C10_MOBILE
@@ -395,7 +401,7 @@ class TORCH_API Context {
   bool release_original_weights = false;
 #endif
   bool display_vmap_fallback_warnings_ = false;
-  c10::optional<at::QEngine> quantized_engine = c10::nullopt;
+  std::optional<at::QEngine> quantized_engine = c10::nullopt;
   bool enable_sparse_tensor_invariant_checks = false;
   bool allow_fp16_reduction_cpu = false;
 

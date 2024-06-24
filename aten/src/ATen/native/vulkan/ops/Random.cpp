@@ -16,7 +16,7 @@ Tensor& uniform_(
     Tensor& self,
     const double from,
     const double to,
-    const c10::optional<at::Generator> /* not implemented */) {
+    const std::optional<at::Generator> /* not implemented */) {
   TORCH_CHECK(
       self.is_vulkan(),
       "Vulkan: In-place operator is only supported on Vulkan tensors.");
@@ -59,11 +59,11 @@ Tensor& uniform_(
 
 Tensor rand_like(
     const at::Tensor& input_arg,
-    const c10::optional<c10::ScalarType> /* not implemented */,
-    const c10::optional<c10::Layout> /* not implemented */,
-    const c10::optional<c10::Device> /* not implemented */,
-    const c10::optional<bool> /* not implemented */,
-    const c10::optional<c10::MemoryFormat> /* not implemented */) {
+    const std::optional<c10::ScalarType> /* not implemented */,
+    const std::optional<c10::Layout> /* not implemented */,
+    const std::optional<c10::Device> /* not implemented */,
+    const std::optional<bool> /* not implemented */,
+    const std::optional<c10::MemoryFormat> /* not implemented */) {
   // Returns a tensor with the same size as input that is filled with random
   // numbers from a uniform distribution on the interval [0,1). To match the CPU
   // implementation, we simplify the range to [0,1] and tolerate the small
@@ -75,7 +75,7 @@ Tensor& normal_(
     Tensor& self,
     const double mean,
     const double std,
-    const c10::optional<at::Generator> /* not implemented */) {
+    const std::optional<at::Generator> /* not implemented */) {
   TORCH_CHECK(
       self.is_vulkan(),
       "Vulkan: In-place operator is only supported on Vulkan tensors.");
@@ -120,11 +120,11 @@ Tensor& normal_(
 
 Tensor randn_like(
     const at::Tensor& input_arg,
-    const c10::optional<c10::ScalarType> /* not implemented */,
-    const c10::optional<c10::Layout> /* not implemented */,
-    const c10::optional<c10::Device> /* not implemented */,
-    const c10::optional<bool> /* not implemented */,
-    const c10::optional<c10::MemoryFormat> /* not implemented */) {
+    const std::optional<c10::ScalarType> /* not implemented */,
+    const std::optional<c10::Layout> /* not implemented */,
+    const std::optional<c10::Device> /* not implemented */,
+    const std::optional<bool> /* not implemented */,
+    const std::optional<c10::MemoryFormat> /* not implemented */) {
   // Returns a tensor with the same size as input that is filled with random
   // numbers from a normal distribution with mean 0 and standard deviation 1.
   return input_arg.clone().detach().normal_(0.0, 1.0);

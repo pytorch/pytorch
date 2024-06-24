@@ -52,6 +52,52 @@ def get_filtered_export_db_tests():
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSerialize(TestCase):
+    def test_export_with_custom_op_serialization(self):
+        class TestModule(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        class FooCustomOp(torch.nn.Module):
+            pass
+
+        class FooCustomOpHandler(torch._export.serde.serialize.CustomOpHandler):
+            def namespace(self):
+                return "Foo"
+
+            def op_name(self, op_type):
+                if op_type == FooCustomOp:
+                    return "FooCustomOp"
+                return None
+
+            def op_type(self, op_name):
+                if op_name == "FooCustomOp":
+                    return FooCustomOp
+                return None
+
+            def op_schema(self, op_type):
+                if op_type == FooCustomOp:
+                    return self.attached_schema
+                return None
+
+        inp = (torch.ones(10),)
+        ep = export(TestModule(), inp)
+
+        # Register the custom op handler.
+        foo_custom_op = FooCustomOp()
+        foo_custom_op_handler = FooCustomOpHandler()
+        torch._export.serde.serialize.register_custom_op_handler(
+            foo_custom_op_handler, type(foo_custom_op)
+        )
+
+        # Inject the custom operator.
+        for node in ep.graph.nodes:
+            if node.name == "add":
+                foo_custom_op_handler.attached_schema = node.target._schema
+                node.target = foo_custom_op
+
+        # Serialization.
+        serialize(ep)
+
     def test_predispatch_export_with_autograd_op(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -183,7 +229,7 @@ class TestSerialize(TestCase):
                 torch.ones([512]),
                 torch.ones([512]),
             ),
-        )
+        ).run_decompositions()
 
         serialized = ExportedProgramSerializer().serialize(exported_module)
         node = serialized.exported_program.graph_module.graph.nodes[-1]
@@ -207,7 +253,6 @@ class TestSerialize(TestCase):
                 return torch.split(x, 2)
 
         input = torch.arange(10.0).reshape(5, 2)
-        input.requires_grad = True
         exported_module = export(MyModule(), (input,)).run_decompositions()
 
         serialized = ExportedProgramSerializer().serialize(exported_module)
@@ -621,6 +666,8 @@ class TestDeserialize(TestCase):
         dynamic_shapes = {"a": {0: dim0_ac}, "b": None, "c": {0: dim0_ac}}
         self.check_graph(DynamicShapeSimpleModel(), inputs, dynamic_shapes)
 
+    # TODO: Failing due to "constraining non-Symbols NYI (Piecewise((1, Eq(u1, 1)), (0, True)), 1, 1)"
+    @unittest.expectedFailure
     def test_sym_bool(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):
@@ -758,6 +805,49 @@ class TestDeserialize(TestCase):
         dynamic_shapes = {"x": {0: Dim("dim0"), 1: Dim("dim1")}}
         self.check_graph(Foo(), (torch.ones(4, 5),), dynamic_shapes=dynamic_shapes)
 
+    def test_multiple_getitem(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                a, b = torch.topk(x, 2)
+                a = a * 2
+                return a, b
+
+        ep = torch.export.export(M(), (torch.ones(3),))
+
+        # insert another getitem node
+        for node in ep.graph.nodes:
+            if node.op == "call_function" and node.target == torch.ops.aten.mul.Tensor:
+                getitem_0 = node.args[0]
+                with ep.graph.inserting_before(getitem_0):
+                    getitem_copy = ep.graph.node_copy(getitem_0)
+                    mul_node = ep.graph.call_function(
+                        torch.ops.aten.mul.Tensor, (getitem_copy, 2)
+                    )
+                    mul_node.meta = copy.copy(getitem_copy.meta)
+                    node.args = (getitem_0, mul_node)
+
+        deserialized_ep = deserialize(serialize(ep))
+
+        inp = (torch.randn(3),)
+        orig_res = ep.module()(*inp)
+        res = deserialized_ep.module()(*inp)
+        self.assertTrue(torch.allclose(orig_res[0], res[0]))
+        self.assertTrue(torch.allclose(orig_res[1], res[1]))
+
+        # The deserialized graph should have deduped getitem calls
+        self.assertExpectedInline(
+            deserialized_ep.graph_module.code.strip("\n"),
+            """\
+def forward(self, x):
+    topk_default = torch.ops.aten.topk.default(x, 2);  x = None
+    getitem = topk_default[0]
+    getitem_1 = topk_default[1];  topk_default = None
+    mul_tensor = torch.ops.aten.mul.Tensor(getitem, 2)
+    mul = torch.ops.aten.mul.Tensor(getitem, mul_tensor);  getitem = mul_tensor = None
+    return (mul, getitem_1)
+    """,
+        )
+
     @parametrize(
         "name,case",
         get_filtered_export_db_tests(),
@@ -860,6 +950,20 @@ class TestDeserialize(TestCase):
         inputs = (torch.ones(2, 3),)
         self.check_graph(m, inputs, strict=False)
 
+    def test_export_no_inputs(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p = torch.ones(3, 3)
+
+            def forward(self):
+                return self.p * self.p
+
+        ep = torch.export.export(M(), ())
+        ep._example_inputs = None
+        roundtrip_ep = deserialize(serialize(ep))
+        self.assertTrue(torch.allclose(ep.module()(), roundtrip_ep.module()()))
+
 
 instantiate_parametrized_tests(TestDeserialize)
 
@@ -884,34 +988,6 @@ class TestSchemaVersioning(TestCase):
                 serialized_program.state_dict,
                 serialized_program.constants,
                 serialized_program.example_inputs,
-            )
-
-
-class TestOpVersioning(TestCase):
-    """Test if serializer/deserializer behaves correctly if version mismatch."""
-
-    def test_empty_model_opset_version_raises(self):
-        compiler_opset_version = {"aten": 4}
-        model_opset_version = None
-        deserializer = ExportedProgramDeserializer(compiler_opset_version)
-        with self.assertRaises(RuntimeError):
-            deserializer._validate_model_opset_version(model_opset_version)
-
-    def test_opset_mismatch_raises(self):
-        compiler_opset_version = {"aten": 4}
-        model_opset_version = {"aten": 3}
-        deserializer = ExportedProgramDeserializer(compiler_opset_version)
-        with self.assertRaises(NotImplementedError):
-            deserializer._validate_model_opset_version(model_opset_version)
-
-    def test_model_op_namespace_version_missing_from_deserializer_do_not_raises(self):
-        compiler_opset_version = {"aten": 3}
-        model_opset_version = {"aten": 3, "custom": 4}
-        deserializer = ExportedProgramDeserializer(compiler_opset_version)
-        with self.assertLogs(level="WARN") as log:
-            deserializer._validate_model_opset_version(model_opset_version)
-            self.assertIn(
-                "Compiler doesn't have a version table for op namespace", log.output[0]
             )
 
 

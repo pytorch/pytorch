@@ -13,6 +13,7 @@ from typing import Dict, List
 
 import torch
 from torch import sym_float, sym_int
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config, polyfill, variables
 from ..exc import (
@@ -712,6 +713,20 @@ class BuiltinVariable(VariableTracker):
                 tx, [v.realize() for v in args], kwargs
             )
 
+        if inspect.isclass(fn) and issubclass(fn, Exception):
+
+            def create_exception_class_object(tx, args, kwargs):
+                if fn is AssertionError and not all(
+                    isinstance(x, variables.ConstantVariable)
+                    and isinstance(x.value, str)
+                    for x in args
+                ):
+                    unimplemented("assert with non-string message")
+
+                return variables.ExceptionVariable(fn, args, **kwargs)
+
+            return create_exception_class_object
+
         if obj.can_insert_in_graph() and not (
             fn is operator.getitem
             and not issubclass(arg_types[0], variables.TensorVariable)
@@ -787,27 +802,29 @@ class BuiltinVariable(VariableTracker):
 
                 def constant_fold_handler(tx, args, kwargs):
                     # fast path
-                    return builder(
-                        tx,
-                        fn(
+                    try:
+                        res = fn(
                             *[x.as_python_constant() for x in args],
-                        ),
-                    )
+                        )
+                    except Exception as exc:
+                        unimplemented(f"constant fold exception: {repr(exc)}")
+                    return builder(tx, res)
 
             else:
 
                 def constant_fold_handler(tx, args, kwargs):
                     # path with a runtime check
                     if check_unspec_or_constant_args(args, kwargs):
-                        return builder(
-                            tx,
-                            fn(
+                        try:
+                            res = fn(
                                 *[x.as_python_constant() for x in args],
                                 **{
                                     k: v.as_python_constant() for k, v in kwargs.items()
                                 },
-                            ),
-                        )
+                            )
+                        except Exception as exc:
+                            unimplemented(f"constant fold exception: {repr(exc)}")
+                        return builder(tx, res)
 
             handlers.append(constant_fold_handler)
 
@@ -1127,6 +1144,14 @@ class BuiltinVariable(VariableTracker):
         )
         return pos_method.call_function(tx, [], {})
 
+    def call_index(self, tx, arg: "VariableTracker"):
+        if isinstance(arg, variables.TensorVariable):
+            unimplemented("unsupported index(tensor)")
+
+        arg = guard_if_dyn(arg)
+        constant_value = operator.index(arg)
+        return variables.ConstantVariable.create(constant_value)
+
     def call_round(self, tx, arg, *args, **kwargs):
         # Call arg.__round__()
         round_method = BuiltinVariable(getattr).call_function(
@@ -1185,8 +1210,10 @@ class BuiltinVariable(VariableTracker):
                         obj.source.make_guard(GuardBuilder.TUPLE_ITERATOR_LEN)
                     )
                 else:
-                    if getattr(obj, "source", False) and isinstance(
-                        obj, ConstDictVariable
+                    if (
+                        getattr(obj, "source", False)
+                        and isinstance(obj, ConstDictVariable)
+                        and not istype(obj, SetVariable)
                     ):
                         tx.output.guard_on_key_order.add(obj.source.name())
 
@@ -1213,9 +1240,15 @@ class BuiltinVariable(VariableTracker):
 
     def call_callable(self, tx, arg):
         from .functions import BaseUserFunctionVariable
+        from .nn_module import NNModuleVariable
 
         if isinstance(
-            arg, (variables.UserDefinedClassVariable, BaseUserFunctionVariable)
+            arg,
+            (
+                variables.UserDefinedClassVariable,
+                BaseUserFunctionVariable,
+                NNModuleVariable,
+            ),
         ):
             return variables.ConstantVariable.create(True)
         elif isinstance(arg, UserDefinedVariable):
@@ -1360,7 +1393,17 @@ class BuiltinVariable(VariableTracker):
             def _tensor_isinstance(tensor_var, tensor_type):
                 def check_type(ty):
                     if ty not in tensortype_to_dtype:
-                        return issubclass(arg.python_type(), ty)
+                        example_val = arg.as_proxy().node.meta["example_value"]
+                        if (
+                            is_traceable_wrapper_subclass(example_val)
+                            and ty is torch.nn.parameter.Parameter
+                        ):
+                            # N.B: we are calling isinstance directly on the example value.
+                            # torch.nn.Parameter has a meta-class that overrides __isinstance__,
+                            # the isinstance check here allows us to invoke that logic.
+                            return isinstance(example_val, ty)
+                        else:
+                            return issubclass(arg.python_type(), ty)
 
                     dtypes = tensortype_to_dtype[ty]
                     return arg.dtype in dtypes
@@ -1398,10 +1441,15 @@ class BuiltinVariable(VariableTracker):
 
     def call_issubclass(self, tx, left_ty, right_ty):
         """Checks if first arg is subclass of right arg"""
-        left_ty = left_ty.as_python_constant()
-        right_ty = right_ty.as_python_constant()
+        try:
+            left_ty_py = left_ty.as_python_constant()
+            right_ty_py = right_ty.as_python_constant()
+        except NotImplementedError:
+            unimplemented(
+                f"call_issubclass args not constant left_ty: {left_ty}, right_ty: {right_ty}"
+            )
 
-        return variables.ConstantVariable(issubclass(left_ty, right_ty))
+        return variables.ConstantVariable(issubclass(left_ty_py, right_ty_py))
 
     def call_super(self, tx, a, b):
         return variables.SuperVariable(a, b)
@@ -1418,6 +1466,8 @@ class BuiltinVariable(VariableTracker):
     def call_hasattr(self, tx, obj, attr):
         if attr.is_python_constant():
             name = attr.as_python_constant()
+            if isinstance(obj, variables.BuiltinVariable):
+                return variables.ConstantVariable(hasattr(obj.fn, name))
             return obj.call_hasattr(tx, name)
 
     def call_map(self, tx, fn, seq):
@@ -1507,11 +1557,8 @@ class BuiltinVariable(VariableTracker):
                         f"pending mutation on nn module, so graph breaking at {name!r} call"
                     )
 
-            try:
-                # re-read a pending side effect?
-                return tx.output.side_effects.load_attr(obj, name)
-            except KeyError:
-                pass
+        if tx.output.side_effects.has_pending_mutation_of_attr(obj, name):
+            return tx.output.side_effects.load_attr(obj, name)
 
         if default is not None:
             hasattr_var = self.call_hasattr(tx, obj, name_var)
@@ -1568,7 +1615,7 @@ class BuiltinVariable(VariableTracker):
             ) and trace_rules.is_aten_op_or_tensor_method(member):
                 return TorchInGraphFunctionVariable(member, **options)
         elif isinstance(obj, (PythonModuleVariable, DummyModule)):
-            if obj.is_torch:
+            if obj.is_torch or name not in obj.value.__dict__:
                 member = getattr(obj.value, name)
             else:
                 member = obj.value.__dict__[name]
@@ -1594,7 +1641,6 @@ class BuiltinVariable(VariableTracker):
         if isinstance(
             obj,
             (
-                variables.DataClassVariable,
                 variables.CustomizedDictVariable,
                 variables.PlacementVariable,
                 variables.UserDefinedObjectVariable,
@@ -1663,6 +1709,9 @@ class BuiltinVariable(VariableTracker):
                     return out
 
             tx.output.side_effects.store_attr(obj, name, val)
+            if name == "_grad":
+                tx.output.side_effects.store_attr(obj, "grad", val)
+
             return val
         elif isinstance(obj, variables.UserDefinedObjectVariable):
             unimplemented(
@@ -1798,6 +1847,12 @@ class BuiltinVariable(VariableTracker):
             nn_mod_variable = args[0]
             mod = tx.output.get_submodule(nn_mod_variable.module_key)
             return variables.ConstantVariable.create(id(mod))
+        elif len(args) == 1 and isinstance(
+            args[0], variables.UserDefinedObjectVariable
+        ):
+            install_guard(args[0].source.make_guard(GuardBuilder.ID_MATCH))
+            constant_result = id(args[0].value)
+            return variables.ConstantVariable.create(constant_result)
         else:
             unimplemented(f"call_id with args {args}")
 

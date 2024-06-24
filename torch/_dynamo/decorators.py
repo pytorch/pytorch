@@ -1,3 +1,5 @@
+# mypy: allow-untyped-defs
+# ruff: noqa: TCH004
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -74,22 +76,12 @@ def assume_constant_result(fn):
 
 def allow_in_graph(fn):
     """
-    Customize which functions TorchDynamo will include in the generated
-    graph. Similar to `torch.fx.wrap()`.
-    ::
+    Tells the compiler frontend (Dynamo) to skip symbolic introspection of the function
+    and instead directly write it to the graph when encountered.
 
-        torch._dynamo.allow_in_graph(my_custom_function)
+    See :func:`torch.compiler.allow_in_graph`'s docstring for the full documentation
 
-        @torch._dynamo.optimize(...)
-        def fn(a):
-            x = torch.add(x, 1)
-            x = my_custom_function(x)
-            x = torch.add(x, 1)
-            return x
-
-        fn(...)
-
-    Will capture a single graph containing `my_custom_function()`.
+    WARNING: this API can be a footgun, please read the documentation carefully.
     """
     if isinstance(fn, (list, tuple)):
         return [allow_in_graph(x) for x in fn]
@@ -190,6 +182,30 @@ class _DimRange:
     dim: int
     min: int
     max: int
+
+
+@forbid_in_graph
+def mark_unbacked(t, index):
+    """
+    Mark a tensor as having an unbacked dim.  This changes the semantics of operations,
+    we will always report the size does not equal zero/one, we will turn asserts
+    on this index into runtime asserts, and if you try to get the real value we will
+    raise an exception.  In other words, we will treat this dimension as if it was
+    data dependent (we do not know anything about its value.)
+    """
+    # You could have copied the mark_dynamic behavior but I'm not convinced
+    # it's what you want
+    assert not is_traceable_wrapper_subclass(t), "not implemented yet"
+
+    if isinstance(index, int):
+        if not hasattr(t, "_dynamo_unbacked_indices"):
+            t._dynamo_unbacked_indices = set()
+        t._dynamo_unbacked_indices.add(index)
+        return
+
+    assert isinstance(index, (list, tuple))
+    for i in index:
+        mark_unbacked(t, i)
 
 
 @forbid_in_graph

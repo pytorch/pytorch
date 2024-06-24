@@ -11,8 +11,6 @@ from functools import partial
 from itertools import product
 from typing import Any, Callable, Iterable, List, Optional, Tuple, Union
 
-from torchgen.utils import dataclass_repr
-
 import torch
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
@@ -25,6 +23,7 @@ from torch.testing._internal.common_dtype import (
     floating_and_complex_types,
     floating_and_complex_types_and,
     floating_types,
+    get_all_dtypes,
 )
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
@@ -34,6 +33,8 @@ from torch.testing._internal.common_utils import (
     TrackedInputIter,
 )
 from torch.testing._internal.opinfo import utils
+
+from torchgen.utils import dataclass_repr
 
 # Reasonable testing sizes for dimensions
 L = 20
@@ -726,6 +727,9 @@ class OpInfo:
     # dtypes this function is expected to work with on ROCM
     dtypesIfROCM: _dispatch_dtypes = None
 
+    # dtypes this function is expected to work with on XPU
+    dtypesIfXPU: _dispatch_dtypes = None
+
     # backward dtypes this function is expected to work with
     backward_dtypes: _dispatch_dtypes = None
 
@@ -890,7 +894,12 @@ class OpInfo:
 
         assert self.dtypes is not None, f"OpInfo for {self.name} has no dtypes!"
 
-        dtypes_args = (self.dtypes, self.dtypesIfCUDA, self.dtypesIfROCM)
+        dtypes_args = (
+            self.dtypes,
+            self.dtypesIfCUDA,
+            self.dtypesIfROCM,
+            self.dtypesIfXPU,
+        )
 
         # Validates the dtypes are generated from the dispatch-related functions
         for dtype_list in dtypes_args:
@@ -958,6 +967,9 @@ class OpInfo:
             set(self.dtypesIfROCM)
             if self.dtypesIfROCM is not None
             else self.dtypesIfCUDA
+        )
+        self.dtypesIfXPU = (
+            set(self.dtypesIfXPU) if self.dtypesIfXPU is not None else self.dtypesIfCUDA
         )
 
         # NOTE: if the op is unspecified it is assumed to be under the torch namespace
@@ -1345,6 +1357,8 @@ class OpInfo:
         device_type = torch.device(device_type).type
         if device_type == "cuda":
             return self.dtypesIfROCM if TEST_WITH_ROCM else self.dtypesIfCUDA
+        if device_type == "xpu":
+            return self.dtypesIfXPU
         return self.dtypes
 
     def supported_backward_dtypes(self, device_type):
@@ -2630,6 +2644,7 @@ class ShapeFuncInfo(OpInfo):
         dtypes=floating_types(),
         dtypesIfCUDA=None,
         dtypesIfROCM=None,
+        dtypesIfXPU=None,
         sample_inputs_func=None,
         **kwargs,
     ):
@@ -2638,6 +2653,7 @@ class ShapeFuncInfo(OpInfo):
             dtypes=dtypes,
             dtypesIfCUDA=dtypesIfCUDA,
             dtypesIfROCM=dtypesIfROCM,
+            dtypesIfXPU=dtypesIfXPU,
             sample_inputs_func=sample_inputs_func,
             **kwargs,
         )
@@ -2707,7 +2723,18 @@ def get_foreach_method_names(name):
 
 @dataclass
 class ForeachFuncInfo(OpInfo):
-    """Early version of a specialized OpInfo for foreach functions"""
+    """Early version of a specialized OpInfo for foreach functions
+
+    The main differences from the parent class are (a) `dtypes`, `dtypesIfCUDA`, and `dtypesIfROCM`
+    are set to `get_all_dtypes(include_qint=False)`, and (b) the following arguments.
+
+    ``supports_alpha_param=True`` means that the function supports a python scalar (``numbers.Number``)
+    as the last keyword argument such as `_foreach_add`.
+    ``supports_scalar_self_arg=True`` means that the function can take a python scalar as its first argument.
+    Currently only `_foreach_pow` supports this.
+    ``backward_requires_result=True``, which could sound self-explanatory, means that the function uses
+    the forward result for its backward computation.
+    """
 
     supports_alpha_param: bool = False
     supports_scalar_self_arg: bool = False
@@ -2729,6 +2756,8 @@ class ForeachFuncInfo(OpInfo):
             assert torch_ref_method is None
             foreach_method = foreach_method_inplace
             torch_ref_method = torch_ref_inplace
+
+        self.dtypes = _dispatch_dtypes(get_all_dtypes(include_qint=False))
 
         self.op = foreach_method
         self.method_variant = foreach_method

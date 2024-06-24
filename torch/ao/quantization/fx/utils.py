@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import copy
 import torch
 import torch.nn as nn
@@ -756,7 +757,7 @@ def _reroute_tuple_getitem_pattern(graph: Graph):
         last_getitem_index = last_getitem.args[1]
         new_input = first_tuple.args[0][last_getitem_index]  # type: ignore[index]
         for user in list(last_getitem.users.keys()):
-            user.replace_input_with(last_getitem, new_input)  # type: ignore[arg-type]
+            user.replace_input_with(last_getitem, new_input)
 
 def _get_observer_from_activation_post_process(
     activation_post_process: Union[ObserverBase, FakeQuantizeBase],
@@ -837,7 +838,7 @@ def _qconfig_satisfies_dtype_config_constraints(
             suggestion_str = (
                 "Please use torch.ao.quantization.get_default_qconfig_mapping or "
                 "torch.ao.quantization.get_default_qat_qconfig_mapping. Example:\n"
-                "    qconfig_mapping = get_default_qconfig_mapping(\"fbgemm\")\n"
+                '    qconfig_mapping = get_default_qconfig_mapping("fbgemm")\n'
                 "    model = prepare_fx(model, qconfig_mapping, example_inputs)"
             )
             if not isinstance(activation_post_process, FixedQParamsObserver) and \
