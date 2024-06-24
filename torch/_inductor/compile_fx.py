@@ -43,11 +43,12 @@ from torch._inductor.cudagraph_utils import (
     get_placeholders,
     log_cudagraph_skip_and_bump_counter,
 )
-
 from torch._inductor.debug import save_args_for_compile_fx_inner
+from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import (
     BoxedBool,
     count_tangents,
+    fresh_inductor_cache,
     should_assume_input_aligned,
     tensor_is_aligned,
 )
@@ -419,6 +420,20 @@ def get_patched_config_dict(config_patches=None) -> Dict[str, Any]:
         return config.get_config_copy()
 
 
+def with_fresh_cache_if_config(fn):
+    def wrapper(*args, **kwargs):
+        if config.force_disable_caches:
+            # Don't delete the cache dir because it has to survive beyond the
+            # compile_fx call. Let's put the temp dirs under the default cache
+            # dir so they're easier to locate.
+            with fresh_inductor_cache(dir=cache_dir(), delete=False):
+                return fn(*args, **kwargs)
+        else:
+            return fn(*args, **kwargs)
+
+    return wrapper
+
+
 @DebugContext.wrap
 @torch.utils._python_dispatch._disable_current_modes()
 @time_and_log(attr="compilation time (in seconds)")
@@ -427,6 +442,7 @@ def get_patched_config_dict(config_patches=None) -> Dict[str, Any]:
 # compile_fx return and we may want to use the _LazyGraphModule for compiling
 # the backward graph as well.
 @_use_lazy_graph_module(dynamo_config.use_lazy_graph_module)
+@with_fresh_cache_if_config
 @dynamo_utils.dynamo_timed(phase_name="inductor_compile", fwd_only=False)
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
@@ -503,7 +519,11 @@ def compile_fx_inner(
 
     fx_graph_remote_cache = should_use_remote_fx_graph_cache()
     inputs_to_check = get_input_idxs_to_check(example_inputs, static_input_idxs)
-    if (config.fx_graph_cache or fx_graph_remote_cache) and not aot_mode:
+    if (
+        not config.force_disable_caches
+        and (config.fx_graph_cache or fx_graph_remote_cache)
+        and not aot_mode
+    ):
         for i, input in enumerate(example_inputs):
             if (
                 isinstance(input, torch.Tensor)
@@ -1285,6 +1305,7 @@ def compile_fx(
         with config.patch(
             {
                 "cpp_wrapper": False,
+                "triton.autotune_at_compile_time": True,
                 "triton.autotune_cublasLt": False,
                 "triton.cudagraphs": False,
                 "triton.store_cubin": True,

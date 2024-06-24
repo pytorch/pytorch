@@ -27,30 +27,23 @@ disable_progress = True
 # Whether to enable printing the source code for each future
 verbose_progress = False
 
-# Force disabled all inductor level caching -- This will override any other caching flag
-force_disable_caches = os.environ.get("TORCHINDUCTOR_FORCE_DISABLE_CACHES") == "1"
-_enable_caches = not force_disable_caches
-
 # use fx aot graph codegen cache
-fx_graph_cache = (
-    _enable_caches and os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE") == "1"
-)
+fx_graph_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE") == "1"
 
 # use remote fx aot graph codegen cache
 # False: Disables the cache
 # True: Enables the cache
 # None: Not set -- Off for OSS, JustKnobs based for internal
-fx_graph_remote_cache: Optional[bool] = (
-    _enable_caches and fx_graph_remote_cache_default()
-)
+fx_graph_remote_cache: Optional[bool] = fx_graph_remote_cache_default()
 
 # enable autotune local cache
-autotune_local_cache = _enable_caches
+autotune_local_cache = True
 
 # enable autotune remote cache
-autotune_remote_cache = (
-    _enable_caches and os.environ.get("TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE") == "1"
-)
+autotune_remote_cache = os.environ.get("TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE") == "1"
+
+# Force disabled all inductor level caching -- This will override any other caching flag
+force_disable_caches = os.environ.get("TORCHINDUCTOR_FORCE_DISABLE_CACHES") == "1"
 
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
@@ -285,9 +278,7 @@ autotune_fallback_to_aten = (
 unbacked_symint_fallback = 8192
 
 # enable searching global and local cache regardless of `max_autotune`
-search_autotune_cache = (
-    _enable_caches and os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
-)
+search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
 
 save_args = os.environ.get("TORCHINDUCTOR_SAVE_ARGS") == "1"
 
@@ -703,6 +694,11 @@ class triton:
 
     # max autotune gemm with cublasLt
     autotune_cublasLt = True
+
+    # Tune the generated Triton kernels at compile time instead of first time they run
+    autotune_at_compile_time = (
+        os.environ.get("TORCHINDUCTOR_TRITON_AUTOTUNE_AT_COMPILE_TIME", "0") == "1"
+    )
 
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = True

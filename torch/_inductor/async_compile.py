@@ -35,7 +35,6 @@ from torch._inductor.runtime.compile_tasks import (
     _set_triton_ptxas_path,
     _worker_compile_triton,
 )
-from torch._inductor.runtime.runtime_utils import cache_dir
 
 from torch.hub import _Faketqdm, tqdm
 
@@ -131,13 +130,6 @@ class AsyncCompile:
     @functools.lru_cache(1)
     def process_pool() -> AnyPool:
         assert config.compile_threads > 1
-
-        # Establish the cache directory before starting any subprocesses so they'll
-        # all see the same location. This is mostly important for disabling the
-        # Triton cache. Normally, each subprocess could just recompute the cache
-        # location. But when 'disabling' the triton cache, we'll create a new tmp dir.
-        cache_dir()
-
         pool: AnyPool
         if config.worker_start_method == "subprocess":
             # Wrapper around ProcessPoolExecutor forks in a new process we control
@@ -180,11 +172,16 @@ class AsyncCompile:
 
         kernel = TritonCodeCache.load(kernel_name, source_code)
         if config.compile_threads > 1:
+            # We want to support changing these env vars after (and while) the
+            # process pool is running, so pass them to the subprocess to reset.
+            env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
+            extra_env = {v: os.environ.get(v, "") for v in env_vars if v in os.environ}
             return TritonFuture(
                 kernel,
                 self.process_pool().submit(
                     _worker_compile_triton,
                     kernel._reload_in_subproc,
+                    extra_env,
                 ),
             )
         else:

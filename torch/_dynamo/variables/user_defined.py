@@ -954,7 +954,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return SourcelessBuilder.create(tx, subobj)
 
         if (
-            name not in getattr(value, "__dict__", {})
+            subobj is not NO_SUCH_SUBOBJ
+            and name not in getattr(value, "__dict__", {})
             and (
                 type(value).__module__.startswith("torch.")
                 or isinstance(subobj, re.Pattern)
