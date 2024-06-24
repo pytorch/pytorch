@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import collections
 import functools
 import warnings
@@ -79,7 +80,7 @@ class autocast:
             loss.backward()
             optimizer.step()
 
-    See the :ref:`CUDA Automatic Mixed Precision examples<amp-examples>` for usage (along with gradient scaling)
+    See the :ref:`Automatic Mixed Precision examples<amp-examples>` for usage (along with gradient scaling)
     in more complex scenarios (e.g., gradient penalty, multiple models/losses, custom autograd functions).
 
     :class:`autocast` can also be used as a decorator, e.g., on the ``forward`` method of your model::

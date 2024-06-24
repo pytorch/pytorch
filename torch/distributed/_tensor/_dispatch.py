@@ -6,7 +6,6 @@ import warnings
 from typing import cast, Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING
 
 import torch
-
 import torch.distributed as dist
 import torch.distributed._tensor.api as dtensor
 import torch.distributed._tensor.random as random
@@ -26,6 +25,7 @@ from torch.distributed._tensor._tp_conv import (
 from torch.distributed._tensor._utils import try_find_mesh_from_args
 from torch.distributed._tensor.placement_types import DTensorSpec, Replicate, TensorMeta
 from torch.distributed._tensor.random import is_rng_supported_mesh
+
 
 if TYPE_CHECKING:
     from torch.distributed.device_mesh import DeviceMesh
@@ -395,16 +395,7 @@ class OpDispatcher:
                 assert isinstance(
                     spec, DTensorSpec
                 ), f"output spec does not match with output! Expected DTensorSpec, got {spec}."
-                assert spec.tensor_meta is not None
-                return dtensor.DTensor(
-                    res,
-                    spec.mesh,
-                    spec.placements,
-                    shape=spec.tensor_meta.shape,
-                    dtype=spec.tensor_meta.dtype,
-                    requires_grad=res.requires_grad,
-                    stride=spec.tensor_meta.stride,
-                )
+                return dtensor.DTensor(res, spec, requires_grad=res.requires_grad)
             else:
                 # if output does not have a DTensorSpec due to specific ops, it must be a scalar tensor
                 assert res.ndim == 0, "output tensor should be scalar!"

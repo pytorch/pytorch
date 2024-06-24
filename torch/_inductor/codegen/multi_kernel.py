@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import logging
 import os
 from typing import Any, List
@@ -145,23 +146,19 @@ class MultiKernelState:
 {subkernel_hashes}
 def run(multi_kernel_call, {', '.join(get_all_kernel_argdefs(kernels))}, {', '.join(get_numel_argdefs(kernels[0]))}, grid, stream):
 {kernel_call_def_code}
-    multi_kernel_call.run_with_argless_kernels([call0, call1])
-        """  # noqa: B950 line too long
-        wrapper.header.splice(
-            f"""
-        {multi_kernel_name} = async_compile.multi_kernel({multi_kernel_name!r}, [
-            {", ".join(kernel_names)},
-        ],
-            '''
-        """
-        )
-        wrapper.header.splice(src_code)
-        wrapper.header.splice(
-            """
-            '''
-        )
-        """
-        )
+    multi_kernel_call.run_with_argless_kernels([call0, call1])"""  # noqa: B950 line too long
+
+        multi_kernel_compile = f"""
+{multi_kernel_name} = async_compile.multi_kernel({multi_kernel_name!r}, [
+    {", ".join(kernel_names)},
+],
+'''
+{src_code}
+'''
+)"""
+        wrapper.header.splice(multi_kernel_compile)
+        if config.triton.autotune_at_compile_time:
+            wrapper.kernel_autotune_defs.splice(multi_kernel_compile)
 
         return multi_kernel_name
 
@@ -197,11 +194,12 @@ class MultiKernel:
         for the multi-kernel.
         """
         assert kernel_name == self.kernel_name
-        call_args_list, arg_types = zip(
-            *[kernel.get_call_args() for kernel in self.kernels]
-        )
-        call_args_list = list(call_args_list)
-        arg_types_list = list(arg_types)
+        call_args_list = []
+        arg_types_list = []
+        for kernel in self.kernels:
+            _, call_args, _, arg_types = kernel.args.python_argdefs()
+            call_args_list.append(call_args)
+            arg_types_list.append(arg_types)
 
         all_call_args, arg_types = get_all_call_args(call_args_list, arg_types_list)
         grid: List[Any] = []
@@ -222,12 +220,10 @@ class MultiKernel:
         )
 
         grid = V.graph.wrapper_code.generate_default_grid(kernel_name, grid)
-        current_device = V.graph.scheduler.get_current_device_or_throw()
         V.graph.wrapper_code.generate_kernel_call(
             kernel_name,
             final_call_args,
             grid,
-            current_device.index,
             arg_types=arg_types,
         )
 
