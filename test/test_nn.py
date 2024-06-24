@@ -11137,7 +11137,7 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @skipCUDAIfRocm(msg="skipped Cudnn test on ROCm")
-    @skipCUDAIfCudnnVersionLessThan(7600)
+    @skipCUDAIfCudnnVersionLessThan(8000)
     def test_ctc_loss_cudnn_tensor(self, device):
         batch_size = 16
         input_length = 30
