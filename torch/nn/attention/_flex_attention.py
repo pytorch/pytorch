@@ -39,11 +39,16 @@ def _identity(
     return score
 
 
+_DEFAULT_BLOCKSPARSE_SIZE = 128
+
+
 class _BlockSparseMask:
     kv_num_blocks: torch.Tensor
     kv_indices: torch.Tensor
     q_num_blocks: torch.Tensor
     q_indices: torch.Tensor
+    BLOCKSPARSE_KV: int
+    BLOCKSPARSE_Q: int
 
     def __init__(
         self,
@@ -51,24 +56,28 @@ class _BlockSparseMask:
         kv_indices,
         q_num_blocks,
         q_indices,
+        BLOCKSPARSE_KV=_DEFAULT_BLOCKSPARSE_SIZE,
+        BLOCKSPARSE_Q=_DEFAULT_BLOCKSPARSE_SIZE,
     ):
         self.kv_num_blocks = kv_num_blocks
         self.kv_indices = kv_indices
         self.q_num_blocks = q_num_blocks
         self.q_indices = q_indices
+        self.BLOCKSPARSE_KV = BLOCKSPARSE_KV
+        self.BLOCKSPARSE_Q = BLOCKSPARSE_Q
 
 
 def _create_block_sparse_mask(
     mask: torch.Tensor,
-    q_block_size: int,
-    kv_block_size: int,
+    BLOCKSPARSE_Q: int = _DEFAULT_BLOCKSPARSE_SIZE,
+    BLOCKSPARSE_KV: int = _DEFAULT_BLOCKSPARSE_SIZE,
 ):
     assert mask.dtype == torch.bool
     q_len, kv_len = mask.shape
-    assert q_len % q_block_size == 0
-    assert kv_len % kv_block_size == 0
+    assert q_len % BLOCKSPARSE_Q == 0
+    assert kv_len % BLOCKSPARSE_KV == 0
     mask = mask.view(
-        q_len // q_block_size, q_block_size, kv_len // kv_block_size, kv_block_size
+        q_len // BLOCKSPARSE_Q, BLOCKSPARSE_Q, kv_len // BLOCKSPARSE_KV, BLOCKSPARSE_KV
     )
 
     mask = mask.permute(0, 2, 1, 3)
@@ -84,15 +93,22 @@ def _create_block_sparse_mask(
         kv_indices=kv_indices.to(torch.int32).to(mask.device).contiguous(),
         q_num_blocks=q_num_blocks.to(torch.int32).to(mask.device).contiguous(),
         q_indices=q_indices.to(torch.int32).to(mask.device).contiguous(),
+        BLOCKSPARSE_KV=BLOCKSPARSE_KV,
+        BLOCKSPARSE_Q=BLOCKSPARSE_Q,
     )
 
 
-def _create_empty_block_sparse_mask(device):
+def _create_empty_block_sparse_mask(query, key, value):
+    device = query.device
+    kv_len = key.size()[-2]
+    q_len = query.size()[-2]
     return _BlockSparseMask(
         kv_num_blocks=torch.ones([1], dtype=torch.int32, device=device),
         kv_indices=torch.zeros([1, 1], dtype=torch.int32, device=device),
         q_num_blocks=torch.ones([1], dtype=torch.int32, device=device),
         q_indices=torch.zeros([1, 1], dtype=torch.int32, device=device),
+        BLOCKSPARSE_KV=kv_len,
+        BLOCKSPARSE_Q=q_len,
     )
 
 
@@ -152,7 +168,7 @@ def _flex_attention(
     """
 
     if block_sparse_mask is None:
-        block_sparse_mask = _create_empty_block_sparse_mask(query.device)
+        block_sparse_mask = _create_empty_block_sparse_mask(query, key, value)
     if torch.compiler.is_dynamo_compiling():
         # mark head_dim always to be static
         for x in [query, key, value]:
@@ -166,6 +182,8 @@ def _flex_attention(
             block_sparse_mask.kv_indices,
             block_sparse_mask.q_num_blocks,
             block_sparse_mask.q_indices,
+            block_sparse_mask.BLOCKSPARSE_KV,
+            block_sparse_mask.BLOCKSPARSE_Q,
         )
         return out
 
@@ -191,6 +209,8 @@ def _flex_attention(
                     block_sparse_mask.kv_indices,
                     block_sparse_mask.q_num_blocks,
                     block_sparse_mask.q_indices,
+                    block_sparse_mask.BLOCKSPARSE_KV,
+                    block_sparse_mask.BLOCKSPARSE_Q,
                 )
                 return out
 

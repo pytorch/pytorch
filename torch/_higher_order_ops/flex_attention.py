@@ -56,6 +56,8 @@ class FlexAttentionHOP(HigherOrderOperator):
         sparse_mask_kv_indices: torch.Tensor,
         sparse_mask_q_num_blocks: torch.Tensor,
         sparse_mask_q_indices: torch.Tensor,
+        BLOCKSPARSE_KV: int,
+        BLOCKSPARSE_Q: int,
         *other_buffers: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         if not all(isinstance(buf, torch.Tensor) for buf in other_buffers):
@@ -69,6 +71,8 @@ class FlexAttentionHOP(HigherOrderOperator):
             sparse_mask_kv_indices,
             sparse_mask_q_num_blocks,
             sparse_mask_q_indices,
+            BLOCKSPARSE_KV,
+            BLOCKSPARSE_Q,
             *other_buffers,
         )
 
@@ -95,6 +99,8 @@ class FlexAttentionBackwardHOP(HigherOrderOperator):
         sparse_mask_kv_indices: torch.Tensor,
         sparse_mask_q_num_blocks: torch.Tensor,
         sparse_mask_q_indices: torch.Tensor,
+        BLOCKSPARSE_KV: int,
+        BLOCKSPARSE_Q: int,
         *other_buffers: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         if not all(isinstance(buf, torch.Tensor) for buf in other_buffers):
@@ -112,6 +118,8 @@ class FlexAttentionBackwardHOP(HigherOrderOperator):
             sparse_mask_kv_indices,
             sparse_mask_q_num_blocks,
             sparse_mask_q_indices,
+            BLOCKSPARSE_KV,
+            BLOCKSPARSE_Q,
             *other_buffers,
         )
 
@@ -129,6 +137,8 @@ def math_attention(
     sparse_mask_kv_indices: torch.Tensor,
     sparse_mask_q_num_blocks: torch.Tensor,
     sparse_mask_q_indices: torch.Tensor,
+    BLOCKSPARSE_KV: int,
+    BLOCKSPARSE_Q: int,
     *other_buffers: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Eager implementation
@@ -183,6 +193,8 @@ def sdpa_dense(
     sparse_mask_kv_indices: torch.Tensor,
     sparse_mask_q_num_blocks: torch.Tensor,
     sparse_mask_q_indices: torch.Tensor,
+    BLOCKSPARSE_KV: int,
+    BLOCKSPARSE_Q: int,
     *other_buffers: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     out, lse = math_attention(
@@ -194,6 +206,8 @@ def sdpa_dense(
         sparse_mask_kv_indices,
         sparse_mask_q_num_blocks,
         sparse_mask_q_indices,
+        BLOCKSPARSE_KV,
+        BLOCKSPARSE_Q,
         *other_buffers,
     )
     out = out.contiguous()
@@ -210,6 +224,8 @@ def trace_flex_attention(
     sparse_mask_kv_indices: torch.Tensor,
     sparse_mask_q_num_blocks: torch.Tensor,
     sparse_mask_q_indices: torch.Tensor,
+    BLOCKSPARSE_KV: int,
+    BLOCKSPARSE_Q: int,
     *other_buffers: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Traces the flex_attention operator with the given score_mod function and other_buffers.
@@ -227,6 +243,8 @@ def trace_flex_attention(
         sparse_mask_kv_indices,
         sparse_mask_q_num_blocks,
         sparse_mask_q_indices,
+        BLOCKSPARSE_KV,
+        BLOCKSPARSE_Q,
         *other_buffers,
     )
     example_vals = [
@@ -245,6 +263,8 @@ def trace_flex_attention(
         sparse_mask_kv_indices,
         sparse_mask_q_num_blocks,
         sparse_mask_q_indices,
+        BLOCKSPARSE_KV,
+        BLOCKSPARSE_Q,
         *other_buffers,
     )
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)
@@ -267,6 +287,8 @@ def flex_attention_proxy_torch_dispatch_mode(
     sparse_mask_kv_indices: torch.Tensor,
     sparse_mask_q_num_blocks: torch.Tensor,
     sparse_mask_q_indices: torch.Tensor,
+    BLOCKSPARSE_KV: int,
+    BLOCKSPARSE_Q: int,
     *other_buffers: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     assert mode is not None, "Mode should always be enabled for python fallback key"
@@ -281,6 +303,8 @@ def flex_attention_proxy_torch_dispatch_mode(
             sparse_mask_kv_indices,
             sparse_mask_q_num_blocks,
             sparse_mask_q_indices,
+            BLOCKSPARSE_KV,
+            BLOCKSPARSE_Q,
             *other_buffers,
         )
     else:
@@ -293,6 +317,8 @@ def flex_attention_proxy_torch_dispatch_mode(
             sparse_mask_kv_indices,
             sparse_mask_q_num_blocks,
             sparse_mask_q_indices,
+            BLOCKSPARSE_KV,
+            BLOCKSPARSE_Q,
             *other_buffers,
         )
 
@@ -308,6 +334,8 @@ def flex_attention_functionalize(
     sparse_mask_kv_indices: torch.Tensor,
     sparse_mask_q_num_blocks: torch.Tensor,
     sparse_mask_q_indices: torch.Tensor,
+    BLOCKSPARSE_KV: int,
+    BLOCKSPARSE_Q: int,
     *other_buffers: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Defines the functionalization rules for the flex_attention operator.
@@ -358,6 +386,8 @@ def flex_attention_functionalize(
             sparse_mask_kv_indices_unwrapped,
             sparse_mask_q_num_blocks_unwrapped,
             sparse_mask_q_indices_unwrapped,
+            BLOCKSPARSE_KV,
+            BLOCKSPARSE_Q,
             *other_buffers_unwrapped,
         )
     return ctx.wrap_tensors(out)  # type: ignore[return-value, arg-type]
@@ -374,6 +404,8 @@ def flex_attention_fake_tensor_mode(
     sparse_mask_kv_indices: torch.Tensor,
     sparse_mask_q_num_blocks: torch.Tensor,
     sparse_mask_q_indices: torch.Tensor,
+    BLOCKSPARSE_KV: int,
+    BLOCKSPARSE_Q: int,
     *other_buffers: Tuple[torch.Tensor, ...],
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     with mode:
@@ -476,6 +508,8 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         sparse_mask_kv_indices: torch.Tensor,
         sparse_mask_q_num_blocks: torch.Tensor,
         sparse_mask_q_indices: torch.Tensor,
+        BLOCKSPARSE_KV: int,
+        BLOCKSPARSE_Q: int,
         *other_buffers,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         any_buffer_requires_grad = any(buffer.requires_grad for buffer in other_buffers)
@@ -484,6 +518,8 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         ), "Captured buffers that require grad are not yet supported."
         ctx._fw_graph = fw_graph
         ctx._joint_graph = joint_graph
+        ctx._BLOCKSPARSE_KV = BLOCKSPARSE_KV
+        ctx._BLOCKSPARSE_Q = BLOCKSPARSE_Q
         with torch._C._AutoDispatchBelowAutograd():
             out, logsumexp = flex_attention(
                 query,
@@ -494,6 +530,8 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
                 sparse_mask_kv_indices,
                 sparse_mask_q_num_blocks,
                 sparse_mask_q_indices,
+                BLOCKSPARSE_KV,
+                BLOCKSPARSE_Q,
                 *other_buffers,
             )
 
@@ -528,8 +566,10 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         ) = fw_args
         fw_graph = ctx._fw_graph
         joint_graph = ctx._joint_graph
+        BLOCKSPARSE_KV = ctx._BLOCKSPARSE_KV
+        BLOCKSPARSE_Q = ctx._BLOCKSPARSE_Q
         # We have asserted that other_buffers do not require grad in the forward
-        none_grads = [None] * (6 + len(other_buffers))
+        none_grads = [None] * (8 + len(other_buffers))
         grad_query, grad_key, grad_value = flex_attention_backward(
             query,
             key,
@@ -543,6 +583,8 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
             sparse_mask_kv_indices,
             sparse_mask_q_num_blocks,
             sparse_mask_q_indices,
+            BLOCKSPARSE_KV,
+            BLOCKSPARSE_Q,
             *other_buffers,
         )
         return grad_query, grad_key, grad_value, *none_grads
@@ -558,6 +600,8 @@ def flex_attention_autograd(
     sparse_mask_kv_indices: torch.Tensor,
     sparse_mask_q_num_blocks: torch.Tensor,
     sparse_mask_q_indices: torch.Tensor,
+    BLOCKSPARSE_KV: int,
+    BLOCKSPARSE_Q: int,
     *other_buffers: Tuple[torch.Tensor, ...],
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     with TransformGetItemToIndex():
@@ -581,6 +625,8 @@ def flex_attention_autograd(
             sparse_mask_kv_indices,
             sparse_mask_q_num_blocks,
             sparse_mask_q_indices,
+            BLOCKSPARSE_KV,
+            BLOCKSPARSE_Q,
             *other_buffers,
         )
     return out, logsumexp
@@ -603,6 +649,8 @@ def sdpa_dense_backward(
     sparse_mask_kv_indices: torch.Tensor,
     sparse_mask_q_num_blocks: torch.Tensor,
     sparse_mask_q_indices: torch.Tensor,
+    BLOCKSPARSE_KV: int,
+    BLOCKSPARSE_Q: int,
     *other_buffers: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     working_precision = torch.float64 if query.dtype == torch.float64 else torch.float32
@@ -681,6 +729,8 @@ def trace_flex_attention_backward(
     sparse_mask_kv_indices: torch.Tensor,
     sparse_mask_q_num_blocks: torch.Tensor,
     sparse_mask_q_indices: torch.Tensor,
+    BLOCKSPARSE_KV: int,
+    BLOCKSPARSE_Q: int,
     *other_buffers: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """We already have the forward graph and joint graph from the forward pass, so we create a proxy attach both graphs"""
@@ -697,6 +747,8 @@ def trace_flex_attention_backward(
         sparse_mask_kv_indices,
         sparse_mask_q_num_blocks,
         sparse_mask_q_indices,
+        BLOCKSPARSE_KV,
+        BLOCKSPARSE_Q,
         *other_buffers,
     )
 
@@ -722,6 +774,8 @@ def trace_flex_attention_backward(
         sparse_mask_kv_indices,
         sparse_mask_q_num_blocks,
         sparse_mask_q_indices,
+        BLOCKSPARSE_KV,
+        BLOCKSPARSE_Q,
         *other_buffers,
     )
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)
@@ -752,6 +806,8 @@ def flex_attention_backward_proxy_torch_dispatch_mode(
     sparse_mask_kv_indices: torch.Tensor,
     sparse_mask_q_num_blocks: torch.Tensor,
     sparse_mask_q_indices: torch.Tensor,
+    BLOCKSPARSE_KV,
+    BLOCKSPARSE_Q,
     *other_buffers: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     assert mode is not None, "Mode should always be enabled for python fallback key"
@@ -770,6 +826,8 @@ def flex_attention_backward_proxy_torch_dispatch_mode(
             sparse_mask_kv_indices,
             sparse_mask_q_num_blocks,
             sparse_mask_q_indices,
+            BLOCKSPARSE_KV,
+            BLOCKSPARSE_Q,
             *other_buffers,
         )
     else:
@@ -786,6 +844,8 @@ def flex_attention_backward_proxy_torch_dispatch_mode(
             sparse_mask_kv_indices,
             sparse_mask_q_num_blocks,
             sparse_mask_q_indices,
+            BLOCKSPARSE_KV,
+            BLOCKSPARSE_Q,
             *other_buffers,
         )
 
@@ -805,6 +865,8 @@ def flex_attention_backward_functionalize(
     sparse_mask_kv_indices: torch.Tensor,
     sparse_mask_q_num_blocks: torch.Tensor,
     sparse_mask_q_indices: torch.Tensor,
+    BLOCKSPARSE_KV: int,
+    BLOCKSPARSE_Q: int,
     *other_buffers: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Defines the functionalization rules for the flex_attention operator.
@@ -852,6 +914,8 @@ def flex_attention_backward_functionalize(
             sparse_mask_kv_indices_unwrapped,
             sparse_mask_q_num_blocks_unwrapped,
             sparse_mask_q_indices_unwrapped,
+            BLOCKSPARSE_KV,
+            BLOCKSPARSE_Q,
             *other_buffers_unwrapped,
         )
 
@@ -873,6 +937,8 @@ def flex_attention_backward_fake_tensor_mode(
     sparse_mask_kv_indices: torch.Tensor,
     sparse_mask_q_num_blocks: torch.Tensor,
     sparse_mask_q_indices: torch.Tensor,
+    BLOCKSPARSE_KV: int,
+    BLOCKSPARSE_Q: int,
     *other_buffers: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     with mode:

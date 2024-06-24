@@ -72,7 +72,7 @@ def index_to_other_buffers(cnt: int, graph_type: SubgraphType) -> int:
     # is seen cnt = 5 and the start of the index_buffers is at args[8]
     # thus we add 3 from the current cnt
     if graph_type == SubgraphType.FWD:
-        return cnt + 3
+        return cnt + 5
 
     # Current bwd_args = [
     #   q, k, v, out, lse, grad_out, fw_graph, joint_graph,
@@ -84,11 +84,11 @@ def index_to_other_buffers(cnt: int, graph_type: SubgraphType) -> int:
     # ]
     # We have 5 dummy values but the start of other_buffers is at index 12
     if graph_type == SubgraphType.JOINT_FWD:
-        return cnt + 7
+        return cnt + 9
 
     # Same bwd args but now with 6 dummy values while other_buffers still start at 12
     if graph_type == SubgraphType.JOINT_BWD:
-        return cnt + 6
+        return cnt + 8
 
 
 def build_subgraph_buffer(
@@ -436,6 +436,8 @@ def flex_attention(*args, **kwargs):
         sparse_mask_kv_indices,
         sparse_mask_q_num_blocks,
         sparse_mask_q_indices,
+        BLOCKSPARSE_KV,
+        BLOCKSPARSE_Q,
         *other_buffers,
     ) = args
     for buf in [
@@ -490,13 +492,6 @@ def flex_attention(*args, **kwargs):
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function
     # We do need to explicitly pass it in for autotuning though.
-
-    q_len = query.get_size()[-2]
-    kv_len = key.get_size()[-2]
-    sparse_mask_q_blocks = sparse_mask_kv_indices.get_size()[0]
-    sparse_mask_kv_blocks = sparse_mask_q_indices.get_size()[0]
-    BLOCKSPARSE_Q = q_len // sparse_mask_q_blocks
-    BLOCKSPARSE_KV = kv_len // sparse_mask_kv_blocks
 
     for BLOCK_M, BLOCK_N, num_warps, num_stages in configs:
         if BLOCKSPARSE_KV % BLOCK_N != 0 or BLOCKSPARSE_Q % BLOCK_M != 0:
@@ -863,6 +858,8 @@ def flex_attention_backward(*args, **kwargs):
         sparse_mask_kv_indices,
         sparse_mask_q_num_blocks,
         sparse_mask_q_indices,
+        BLOCKSPARSE_KV,
+        BLOCKSPARSE_Q,
         *other_buffers,
     ) = args
     for buf in [
@@ -931,13 +928,6 @@ def flex_attention_backward(*args, **kwargs):
                 for w in [4, 8]:
                     for s in [1, 3, 4, 5]:
                         configs.append((BLOCK1, BLOCK2, w, s))
-
-    q_len = query.get_size()[-2]
-    kv_len = key.get_size()[-2]
-    sparse_mask_q_blocks = sparse_mask_kv_indices.get_size()[0]
-    sparse_mask_kv_blocks = sparse_mask_q_indices.get_size()[0]
-    BLOCKSPARSE_Q = q_len // sparse_mask_q_blocks
-    BLOCKSPARSE_KV = kv_len // sparse_mask_kv_blocks
 
     for BLOCK1, BLOCK2, num_warps, num_stages in configs:
         if (
