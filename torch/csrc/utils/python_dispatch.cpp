@@ -21,6 +21,7 @@
 #include <c10/util/flat_hash_map.h>
 #include <pybind11/operators.h>
 #include <pybind11/stl.h>
+#include <torch/csrc/inductor/aoti_eager/kernel_holder.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_raii.h>
 
@@ -29,9 +30,7 @@
 
 namespace py = pybind11;
 
-namespace torch {
-namespace impl {
-namespace dispatch {
+namespace torch::impl::dispatch {
 
 // NB: I'd like to index this on OperatorHandle, but I can't, as I can't
 // guarantee that the main interpreter has finish doing all registrations before
@@ -256,7 +255,7 @@ void initDispatchBindings(PyObject* module) {
       .def("debug", &c10::OperatorHandle::debug)
       .def(
           "redispatch_boxed",
-          [](py::object self,
+          [](const py::object& self,
              c10::DispatchKeySet keyset,
              py::args args,
              const py::kwargs& kwargs) {
@@ -374,6 +373,32 @@ void initDispatchBindings(PyObject* module) {
           py::arg("name"),
           py::arg("dispatch") = "",
           py::arg("debug") = "impl_t_t")
+      .def(
+          "impl_with_aoti_compile",
+          [](const py::object& self,
+             const char* ns,
+             const char* op_name_with_overload,
+             c10::DispatchKey dispatch) {
+            HANDLE_TH_ERRORS
+            std::string reg_op_name =
+                std::string(ns).append("::").append(op_name_with_overload);
+
+            auto& lib = self.cast<torch::Library&>();
+            lib.impl(
+                reg_op_name.c_str(),
+                torch::dispatch(
+                    dispatch,
+                    CppFunction::makeFromBoxedFunctor(
+                        std::make_unique<
+                            torch::inductor::AOTIPythonKernelHolder>(
+                            dispatch, ns, op_name_with_overload))),
+                register_or_verify());
+            END_HANDLE_TH_ERRORS_PYBIND
+          },
+          "",
+          py::arg("ns"),
+          py::arg("op_name_with_overload"),
+          py::arg("dispatch"))
       .def(
           "impl",
           [](const py::object& self,
@@ -516,6 +541,16 @@ void initDispatchBindings(PyObject* module) {
             c10::Dispatcher::singleton().findOp(torch::jit::parseName(name));
         TORCH_CHECK(op, "operator ", name, " does not exist");
         return op->hasKernelForDispatchKey(dispatch);
+      });
+
+  m.def(
+      // Returns whether or not the kernel for this dispatach key is a
+      // fallthrough kernel
+      "_dispatch_kernel_for_dispatch_key_is_fallthrough",
+      [](const char* name, c10::DispatchKey dispatch) -> bool {
+        auto op =
+            c10::Dispatcher::singleton().findOp(torch::jit::parseName(name));
+        return op->isKernelFallthroughKernel(dispatch);
       });
 
   m.def(
@@ -784,14 +819,14 @@ void initDispatchBindings(PyObject* module) {
         auto op_names =
             c10::Dispatcher::singleton().getRegistrationsForDispatchKey(k);
         for (auto& op : op_names) {
-          std::cout << op << std::endl;
+          std::cout << op << '\n';
         }
       },
       py::arg("dispatch_key") = static_cast<const char*>(""));
 
   m.def(
       "_parse_dispatch_key",
-      [](const char* dispatch_key) -> c10::optional<c10::DispatchKey> {
+      [](const char* dispatch_key) -> std::optional<c10::DispatchKey> {
         try {
           return c10::parseDispatchKey(dispatch_key);
         } catch (const c10::Error& err) {
@@ -938,6 +973,4 @@ void python_op_registration_trampoline_impl(
   pushPyOutToStack(op, stack, obj, "PythonKernelHolder");
 }
 
-} // namespace dispatch
-} // namespace impl
-} // namespace torch
+} // namespace torch::impl::dispatch

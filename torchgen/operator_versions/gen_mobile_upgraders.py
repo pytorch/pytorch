@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 import os
 from enum import Enum
+from operator import itemgetter
 from pathlib import Path
 from typing import Any, Dict, List
 
 import torch
 from torch.jit.generate_bytecode import generate_upgraders_bytecode
-
 from torchgen.code_template import CodeTemplate
 from torchgen.operator_versions.gen_mobile_upgraders_constant import (
     MOBILE_UPGRADERS_HEADER_DESCRIPTION,
@@ -263,7 +263,7 @@ def construct_version_maps(
     upgrader_bytecode_function_to_index_map: Dict[str, Any]
 ) -> str:
     version_map = torch._C._get_operator_version_map()
-    sorted_version_map_ = sorted(version_map.items(), key=lambda item: item[0])  # type: ignore[no-any-return]
+    sorted_version_map_ = sorted(version_map.items(), key=itemgetter(0))  # type: ignore[no-any-return]
     sorted_version_map = dict(sorted_version_map_)
 
     operator_list_in_version_map_part = []

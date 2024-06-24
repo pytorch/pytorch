@@ -46,7 +46,7 @@ at::Tensor PackedLinearWeight::apply_dynamic_impl(
 
   // TODO: contiguous is called for further jit optimizations.
   auto input_contig = input.contiguous();
-  const auto* input_ptr = input_contig.data_ptr<float>();
+  const auto* input_ptr = input_contig.const_data_ptr<float>();
 
   TORCH_CHECK(
       input.dim() >= 2,
@@ -269,7 +269,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(
   TORCH_CHECK(bias_vec.dim() == 1, "bias should be a vector (1D Tensor)");
 
   auto bias_contig = bias_vec.contiguous();
-  const float* bias_ptr = bias_contig.data_ptr<float>();
+  const float* bias_ptr = bias_contig.const_data_ptr<float>();
 
   // Calculate statistics for quantization of input Tensor
   // TODO: optimized kernel
@@ -410,7 +410,7 @@ at::Tensor& PackedLinearWeightFp16::apply_dynamic_impl(
     const at::Tensor& input,
     at::Tensor& output) {
   const at::Tensor input_contig = input.contiguous();
-  const float* input_ptr = input_contig.data_ptr<float>();
+  const float* input_ptr = input_contig.const_data_ptr<float>();
 
   auto& packed_weight_fp16 = *w;
 
@@ -483,7 +483,7 @@ at::Tensor& PackedLinearWeightFp16::apply_dynamic_relu_out(
   return apply_dynamic_impl<true>(input, output);
 }
 
-void PackedLinearWeightFp16::set_bias(c10::optional<at::Tensor> bias) {
+void PackedLinearWeightFp16::set_bias(std::optional<at::Tensor> bias) {
   bias_ = std::move(bias);
 }
 

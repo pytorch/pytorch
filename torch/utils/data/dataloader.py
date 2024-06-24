@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 r"""Definition of the DataLoader and associated iterators that subclass _BaseDataLoaderIter.
 
 To support these two classes, in `./_utils` we define many utility methods and
@@ -8,34 +9,34 @@ in `./_utils/worker.py`.
 import functools
 import itertools
 import logging
+import multiprocessing as python_multiprocessing
 import os
 import queue
 import threading
 import warnings
+from typing import Any, Callable, Generic, Iterable, List, Optional, TypeVar, Union
 
-from typing import Any, Callable, Iterable, TypeVar, Generic, List, Optional, Union
-
-import multiprocessing as python_multiprocessing
 import torch
 import torch.distributed as dist
-import torch.multiprocessing as multiprocessing
 import torch.utils.data.graph_settings
-
 from torch._utils import ExceptionWrapper
+from torch.utils.data.datapipes.datapipe import (
+    _IterDataPipeSerializationWrapper,
+    _MapDataPipeSerializationWrapper,
+)
 
 from . import (
+    _utils,
+    BatchSampler,
+    Dataset,
+    IterableDataset,
     IterDataPipe,
     MapDataPipe,
-    IterableDataset,
+    RandomSampler,
     Sampler,
     SequentialSampler,
-    RandomSampler,
-    BatchSampler,
-    Dataset,)
+)
 
-from torch.utils.data.datapipes.datapipe import _IterDataPipeSerializationWrapper, _MapDataPipeSerializationWrapper
-
-from . import _utils
 
 __all__ = [
     "DataLoader",
@@ -395,13 +396,13 @@ class DataLoader(Generic[T_co]):
         if multiprocessing_context is not None:
             if self.num_workers > 0:
                 if isinstance(multiprocessing_context, str):
-                    valid_start_methods = multiprocessing.get_all_start_methods()
+                    valid_start_methods = torch.multiprocessing.get_all_start_methods()
                     if multiprocessing_context not in valid_start_methods:
                         raise ValueError(
                             'multiprocessing_context option '
                             f'should specify a valid start method in {valid_start_methods!r}, but got '
                             f'multiprocessing_context={multiprocessing_context!r}')
-                    multiprocessing_context = multiprocessing.get_context(multiprocessing_context)
+                    multiprocessing_context = torch.multiprocessing.get_context(multiprocessing_context)
 
                 if not isinstance(multiprocessing_context, python_multiprocessing.context.BaseContext):
                     raise TypeError('multiprocessing_context option should be a valid context '
@@ -521,11 +522,9 @@ class DataLoader(Generic[T_co]):
                 "DataLoader is not able to compute a suggested max number of worker in current system.")
 
             warn_msg = (
-                "This DataLoader will create {} worker processes in total. {} "
+                f"This DataLoader will create {num_worker_created} worker processes in total. {suggested_max_worker_msg} "
                 "Please be aware that excessive worker creation might get DataLoader running slow or even freeze, "
-                "lower the worker number to avoid potential slowness/freeze if necessary.").format(
-                    num_worker_created,
-                    suggested_max_worker_msg)
+                "lower the worker number to avoid potential slowness/freeze if necessary.")
             return warn_msg
 
         if not self.num_workers or self.num_workers == 0:
@@ -633,9 +632,8 @@ class _BaseDataLoaderIter:
             if self._dataset_kind == _DatasetKind.Iterable and \
                     self._IterableDataset_len_called is not None and \
                     self._num_yielded > self._IterableDataset_len_called:
-                warn_msg = ("Length of IterableDataset {} was reported to be {} (when accessing len(dataloader)), but {} "
-                            "samples have been fetched. ").format(self._dataset, self._IterableDataset_len_called,
-                                                                  self._num_yielded)
+                warn_msg = (f"Length of IterableDataset {self._dataset} was reported to be {self._IterableDataset_len_called}"
+                            f"(when accessing len(dataloader)), but {self._num_yielded} samples have been fetched. ")
                 if self._num_workers > 0:
                     warn_msg += ("For multiprocessing data-loading, this could be caused by not properly configuring the "
                                  "IterableDataset replica at each worker. Please see "
@@ -997,7 +995,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         assert self._prefetch_factor > 0
 
         if loader.multiprocessing_context is None:
-            multiprocessing_context = multiprocessing
+            multiprocessing_context = torch.multiprocessing
         else:
             multiprocessing_context = loader.multiprocessing_context
 
@@ -1146,8 +1144,10 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 raise RuntimeError(f'DataLoader worker (pid(s) {pids_str}) exited unexpectedly') from e
             if isinstance(e, queue.Empty):
                 return (False, None)
-            import tempfile
+
             import errno
+            import tempfile
+
             try:
                 # Raise an exception if we are this close to the FDs limit.
                 # Apparently, trying to open only one file is not a sufficient

@@ -14,10 +14,14 @@ from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
 from torch._inductor import config
 from torch._inductor.compile_fx import compile_fx_inner
+from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.utils import run_and_get_code
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    SM80OrLater,
+)
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     freeze_rng_state,
@@ -26,12 +30,14 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
 )
 
+from torch.testing._internal.inductor_utils import skipCUDAIf
+
 try:
     try:
         import triton
         from triton import language as tl
     except ImportError:
-        raise unittest.SkipTest("requires triton")  # noqa: TRY200
+        raise unittest.SkipTest("requires triton")  # noqa: B904
 
     try:
         from . import test_torchinductor
@@ -381,12 +387,8 @@ class CudaReproTests(TestCase):
         https://github.com/pytorch/torchdynamo/issues/1670
         """
         from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
-        from torch._inductor.triton_heuristics import (
-            CachingAutotuner,
-            grid,
-            HeuristicType,
-        )
-        from torch._inductor.utils import instance_descriptor
+        from torch._inductor.runtime.hints import HeuristicType, instance_descriptor
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner, grid
 
         def autotune(configs, meta):
             def decorator(fn):
@@ -409,7 +411,7 @@ class CudaReproTests(TestCase):
             ],
             meta={
                 "signature": {0: "*fp32", 1: "*fp32", 2: "i32"},
-                "device": 0,
+                "device": DeviceProperties.create(torch.device("cuda")),
                 "configs": [instance_descriptor(divisible_by_16=(0, 1), equal_to_1=())],
                 "constants": {},
             },
@@ -420,8 +422,8 @@ class CudaReproTests(TestCase):
             block_start = pid * XBLOCK
             offsets = block_start + tl.arange(0, XBLOCK)
             mask = offsets < xnumel
-            x = tl.load(in_out_ptr0 + offsets, mask=mask)
-            y = tl.load(in_ptr0 + offsets, mask=mask)
+            x = tl.load(in_out_ptr0 + offsets, mask=mask, other=0.0)
+            y = tl.load(in_ptr0 + offsets, mask=mask, other=0.0)
             output = x + y
             tl.store(in_out_ptr0 + offsets, output, mask=mask)
 
@@ -1137,6 +1139,151 @@ class CudaReproTests(TestCase):
         ]
         fn(*args)
         torch.cuda.synchronize()  # shake out Triton Error [CUDA]: misaligned address
+
+    @skipIfRocm
+    def test_non_commutative_scan_op(self):
+        from torch._higher_order_ops.associative_scan import associative_scan
+
+        a = torch.randn(1024, 8192, dtype=torch.float64, device="cuda")
+        b = torch.randn(1024, 8192, dtype=torch.float64, device="cuda")
+
+        def baseline(v, u):
+            A = []
+            A.append(b[:, 0])
+            for i in range(1, v.shape[1]):
+                A.append(a[:, i] * A[i - 1] + b[:, i])
+            return torch.stack(A, dim=1)
+
+        def combine_fn(i, j):
+            ia, ib = i
+            ja, jb = j
+            return ia * ja, ib * ja + jb
+
+        @torch.compile
+        def compiled_scan(a, b):
+            return associative_scan(combine_fn, (a, b), dim=-1)[1]
+
+        out1 = baseline(a, b)
+        out2 = compiled_scan(a, b)
+        self.assertEqual(out1, out2)
+
+    def test_dynamic_persistent_reductions(self):
+        @torch.compile(dynamic=True)
+        def inner_reduce(x):
+            assert x.shape[1] <= 1024
+            return x.sum(1)
+
+        a = torch.randn(50, 600, device="cuda")
+        out, code = run_and_get_code(inner_reduce, a)
+        self.assertEqual(inner_reduce(a), out)
+        self.assertTrue("for roffset" not in code)
+
+        @torch.compile(dynamic=True)
+        def outer_reduce(x):
+            assert x.shape[0] <= 64
+            return x.sum(0)
+
+        out, code = run_and_get_code(outer_reduce, a)
+        self.assertEqual(outer_reduce(a), out)
+        self.assertTrue("for roffset" not in code)
+
+    def test_epilogue_fusion_with_view(self):
+        class ToyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1)
+                self.linear = torch.nn.Linear(262144, 100)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = x.view(x.size(0), -1)
+                return self.relu(self.linear(x))
+
+        m = ToyModel().to(device="cuda:0")
+        input_tensor = torch.randn(32, 3, 64, 64).to(device="cuda:0")
+        from torch._inductor.utils import fresh_inductor_cache
+
+        with fresh_inductor_cache():
+            cm = torch.compile(m, mode="max-autotune")
+            out = cm(input_tensor)
+            out2 = m(input_tensor)
+            self.assertEqual(out, out2, atol=1e-3, rtol=1e-3)
+
+    def test_reflection_pad_loop_order(self):
+        def fn(x, y):
+            a = torch.nn.functional.pad(x, (5, 5, 5, 5), mode="reflect")
+            b = torch.nn.functional.pad(y, (5, 5, 5, 5), mode="reflect")
+            return a + b
+
+        cfn = torch.compile(fn)
+        a = torch.rand((10, 10, 10), device="cuda")
+        b = torch.rand((10, 10, 10), device="cuda")
+        expect = fn(a, b)
+        actual, code = run_and_get_code(cfn, a, b)
+        self.assertEqual(expect, actual)
+
+        # Expect the code iterates in contiguous order, and is not tiled
+        kernel_code = "\n".join(code[0].split("\n")[50:64])
+        self.assertExpectedInline(
+            kernel_code,
+            """\
+@triton.jit
+def triton_(in_ptr0, in_ptr1, out_ptr0, xnumel, XBLOCK : tl.constexpr):
+    xnumel = 4000
+    xoffset = tl.program_id(0) * XBLOCK
+    xindex = xoffset + tl.arange(0, XBLOCK)[:]
+    xmask = xindex < xnumel
+    x0 = xindex % 20
+    x1 = (xindex // 20) % 20
+    x2 = (xindex // 400)
+    x3 = xindex
+    tmp0 = tl.load(in_ptr0 + (99 + ((-1)*(tl_math.abs((-9) + (tl_math.abs((-5) + x0))))) + ((-10)*(tl_math.abs((-9) + (tl_math.abs((-5) + x1))))) + (100*x2)), xmask, eviction_policy='evict_last')
+    tmp1 = tl.load(in_ptr1 + (99 + ((-1)*(tl_math.abs((-9) + (tl_math.abs((-5) + x0))))) + ((-10)*(tl_math.abs((-9) + (tl_math.abs((-5) + x1))))) + (100*x2)), xmask, eviction_policy='evict_last')
+    tmp2 = tmp0 + tmp1
+    tl.store(out_ptr0 + (x3), tmp2, xmask)""",  # noqa: B950
+        )
+
+    @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    def test_int64_index_intermediate(self):
+        def foo(inp):
+            view_23 = torch.ops.aten.view.default(inp, [-1, 8192, 8192])
+            split_1 = torch.ops.aten.split.Tensor(view_23, 1024, 1)
+            view_23 = None
+            getitem_17 = split_1[0]
+            getitem_18 = split_1[1]
+            getitem_19 = split_1[2]
+            getitem_20 = split_1[3]
+            getitem_21 = split_1[4]
+            getitem_22 = split_1[5]
+            getitem_23 = split_1[6]
+            getitem_24 = split_1[7]
+            split_1 = None
+            cat_1 = torch.ops.aten.cat.default(
+                [
+                    getitem_17,
+                    getitem_18,
+                    getitem_19,
+                    getitem_20,
+                    getitem_21,
+                    getitem_22,
+                    getitem_23,
+                    getitem_24,
+                ]
+            )
+            getitem_17 = (
+                getitem_18
+            ) = (
+                getitem_19
+            ) = getitem_20 = getitem_21 = getitem_22 = getitem_23 = getitem_24 = None
+            return cat_1
+
+        for mark_dynamic in [False, True]:
+            inp = torch.rand((65536, 8192), dtype=torch.bfloat16, device="cuda")
+            if mark_dynamic:
+                torch._dynamo.mark_dynamic(inp, 0)
+            foo_c = torch.compile(foo)
+            torch.testing.assert_allclose(foo(inp), foo_c(inp))
 
 
 if __name__ == "__main__":

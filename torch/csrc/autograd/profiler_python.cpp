@@ -3,7 +3,6 @@
 #include <atomic>
 #include <cstdint>
 #include <deque>
-#include <iostream>
 #include <limits>
 #include <memory>
 #include <queue>
@@ -20,7 +19,6 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
-#include <c10/util/StringUtil.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/python_variable.h>
@@ -220,7 +218,7 @@ struct ExtendedPyCallConfig {
 
   struct Cache {
     // `nn.Module.forward` or `optim.Optimizer._optimizer_step_code`
-    c10::optional<CodeLocation> location_;
+    std::optional<CodeLocation> location_;
     ska::flat_hash_map<key_t, ClsAndParameters> cls_and_parameters_;
     ska::flat_hash_map<cls_t, at::StringView> cls_names_;
   };
@@ -300,7 +298,7 @@ class ValueCache {
         load<C>(callsite.value_)};
   }
 
-  c10::optional<TensorMetadata> recordIfTensor(py::handle p);
+  std::optional<TensorMetadata> recordIfTensor(py::handle p);
   std::vector<std::pair<std::string, TensorMetadata>> unpackTensorMap(
       const py::dict& tensor_map);
   void trimPrefixes();
@@ -348,9 +346,9 @@ TensorMetadata toTensorMetadata(PyObject* self) {
       m.layout_ == at::kStrided ? t.strides().vec() : std::vector<int64_t>()};
 }
 
-c10::optional<TensorMetadata> ValueCache::recordIfTensor(py::handle p) {
+std::optional<TensorMetadata> ValueCache::recordIfTensor(py::handle p) {
   return THPVariable_CheckExact(p.ptr())
-      ? c10::optional<TensorMetadata>{toTensorMetadata(p.ptr())}
+      ? std::optional<TensorMetadata>{toTensorMetadata(p.ptr())}
       : c10::nullopt;
 }
 

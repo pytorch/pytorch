@@ -68,6 +68,7 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
     ${TORCH_ROOT}/third_party/onnx
     ${TORCH_ROOT}/third_party/flatbuffers/include
     ${TORCH_ROOT}/third_party/kineto/libkineto/include
+    ${TORCH_ROOT}/third_party/cpp-httplib
 
     ${TORCH_SRC_DIR}/csrc
     ${TORCH_SRC_DIR}/csrc/api/include
@@ -77,8 +78,10 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
 list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${LIBSHM_SRCDIR})
 
 set(TORCH_PYTHON_LINK_LIBRARIES
-    python::python
+    Python::Module
     pybind::pybind11
+    opentelemetry::api
+    httplib
     shm
     fmt::fmt-header-only
     ATEN_CPU_FILES_GEN_LIB)
@@ -215,7 +218,7 @@ add_custom_command(
     "${TORCH_SRC_DIR}/_C/_VariableFunctions.pyi"
     "${TORCH_SRC_DIR}/nn/functional.pyi"
     COMMAND
-    "${PYTHON_EXECUTABLE}" -mtools.pyi.gen_pyi
+    "${Python_EXECUTABLE}" -mtools.pyi.gen_pyi
       --native-functions-path "aten/src/ATen/native/native_functions.yaml"
       --tags-path "aten/src/ATen/native/tags.yaml"
       --deprecated-functions-path "tools/autograd/deprecated.yaml"
@@ -237,7 +240,7 @@ add_custom_command(
     OUTPUT
     "${TORCH_SRC_DIR}/utils/data/datapipes/datapipe.pyi"
     COMMAND
-    "${PYTHON_EXECUTABLE}" ${TORCH_SRC_DIR}/utils/data/datapipes/gen_pyi.py
+    "${Python_EXECUTABLE}" ${TORCH_SRC_DIR}/utils/data/datapipes/gen_pyi.py
     DEPENDS
     "${TORCH_SRC_DIR}/utils/data/datapipes/datapipe.pyi.in"
     ${datapipe_files}
@@ -295,9 +298,20 @@ endif()
 
 
 add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
+
+if(CAFFE2_USE_MKL AND BUILD_LIBTORCHLESS)
+
+  # Use the RPATH of the linked libraries
+  set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+  # we need to explicitly link caffe2::mkl in order to have the
+  # correct RPATH in torch_python for the split build
+  target_link_libraries(torch_python PRIVATE caffe2::mkl)
+endif()
+
+add_dependencies(torch_python onnx_proto)
 # Avoid numpy for the DEPLOY build
 if(USE_NUMPY)
-  target_link_libraries(torch_python PRIVATE numpy::numpy)
+  target_link_libraries(torch_python PRIVATE Python::NumPy)
   target_compile_definitions(torch_python PRIVATE USE_NUMPY)
 endif()
 
@@ -305,6 +319,51 @@ if(HAVE_SOVERSION)
   set_target_properties(torch_python PROPERTIES
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
 endif()
+
+# in case of the split build we need to add compile definitions
+if(BUILD_LIBTORCHLESS)
+  if(USE_UCC AND USE_C10D_UCC)
+    target_compile_definitions(torch_python PRIVATE USE_C10D_UCC)
+  endif()
+
+  if(USE_UCC AND USE_C10D_NCCL)
+    target_compile_definitions(torch_python PRIVATE USE_C10D_NCCL)
+  endif()
+
+  if(USE_DISTRIBUTED)
+    target_compile_definitions(torch_python PRIVATE USE_DISTRIBUTED)
+  endif()
+
+  if(USE_MPI AND USE_C10D_MPI)
+    target_compile_definitions(torch_python PRIVATE USE_C10D_MPI)
+  endif()
+
+  if(USE_GLOO AND USE_C10D_GLOO)
+    target_compile_definitions(torch_python PRIVATE USE_C10D_GLOO)
+  endif()
+
+  if(NOT WIN32)
+    target_compile_definitions(torch_python PRIVATE USE_RPC)
+  endif()
+
+  if(USE_TENSORPIPE)
+    target_compile_definitions(torch_python PRIVATE USE_TENSORPIPE)
+  endif()
+
+  set(EXPERIMENTAL_SINGLE_THREAD_POOL "0" CACHE STRING
+  "Experimental option to use a single thread pool for inter- and intra-op parallelism")
+  if("${EXPERIMENTAL_SINGLE_THREAD_POOL}")
+    target_compile_definitions(torch_python PRIVATE "-DAT_EXPERIMENTAL_SINGLE_THREAD_POOL=1")
+  endif()
+
+  if(MSVC AND NOT BUILD_SHARED_LIBS)
+    target_compile_definitions(torch_python PRIVATE "AT_CORE_STATIC_WINDOWS=1")
+  endif()
+
+
+
+endif()
+
 add_dependencies(torch_python torch_python_stubs)
 add_dependencies(torch_python flatbuffers)
 
@@ -343,7 +402,7 @@ endif()
 
 target_compile_definitions(torch_python PRIVATE "-DTHP_BUILD_MAIN_LIB")
 
-target_link_libraries(torch_python PRIVATE torch_library ${TORCH_PYTHON_LINK_LIBRARIES})
+target_link_libraries(torch_python PRIVATE ${TORCH_LIB} ${TORCH_PYTHON_LINK_LIBRARIES})
 
 target_compile_definitions(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_DEFINITIONS})
 
@@ -358,7 +417,9 @@ endif()
 
 if(BUILD_ONEDNN_GRAPH)
   target_compile_definitions(torch_python PRIVATE "-DBUILD_ONEDNN_GRAPH")
-  target_compile_definitions(torch_cpu PRIVATE "-DBUILD_ONEDNN_GRAPH")
+  if(NOT BUILD_LIBTORCHLESS)
+    target_compile_definitions(torch_cpu PRIVATE "-DBUILD_ONEDNN_GRAPH")
+  endif()
 endif()
 
 if(NOT TORCH_PYTHON_LINK_FLAGS STREQUAL "")
@@ -378,7 +439,7 @@ add_custom_command(
   OUTPUT ${TORCH_SRC_DIR}/version.py
   COMMAND "${CMAKE_COMMAND}" -E touch "${TOOLS_PATH}/generate_torch_version.py"
   COMMAND
-    "${PYTHON_EXECUTABLE}" "${TOOLS_PATH}/generate_torch_version.py"
+    "${Python_EXECUTABLE}" "${TOOLS_PATH}/generate_torch_version.py"
       --is-debug=${TORCH_VERSION_DEBUG}
       --cuda-version=${CUDA_VERSION}
       --hip-version=${HIP_VERSION}
@@ -400,7 +461,11 @@ if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
           ${TORCH_SRC_DIR}/csrc/jit/backends/nnapi/nnapi_backend_preprocess.cpp
           )
   # Pybind11 requires explicit linking of the torch_python library
-  target_link_libraries(nnapi_backend PRIVATE torch torch_python pybind::pybind11)
+  if(BUILD_LIBTORCHLESS)
+    target_link_libraries(nnapi_backend PRIVATE ${TORCH_LIB} torch_python pybind::pybind11)
+  else()
+    target_link_libraries(nnapi_backend PRIVATE torch torch_python pybind::pybind11)
+  endif()
 endif()
 
 set(TORCH_PYTHON_COMPILE_OPTIONS ${TORCH_PYTHON_COMPILE_OPTIONS} PARENT_SCOPE)
