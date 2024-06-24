@@ -453,7 +453,8 @@ class UntypedStorage(torch._C.StorageBase, _StorageBase):
         """Returns the file name associated with this storage.
 
         The file name will be a string if the storage is on CPU and was created via
-        :meth:`~torch.from_file()` with ``shared`` as ``True``. This attribute is ``None`` otherwise."""
+        :meth:`~torch.from_file()` with ``shared`` as ``True``. This attribute is ``None`` otherwise.
+        """
         return self._get_filename()
 
     @_share_memory_lock_protected
