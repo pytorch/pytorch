@@ -5,7 +5,7 @@ from typing import Any, Dict
 
 import torch
 from torch.distributed._tensor import DeviceMesh
-from torch.distributed._tensor.api import DTensor
+from torch.distributed._tensor.api import distribute_tensor, DTensor
 from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
@@ -251,6 +251,7 @@ class PrintModuleParamaterShardingTest(DTensorTestBase):
         inp_size = [8, 8]
 
         inp = torch.randint(model_args.vocab_size, inp_size, device=self.device_type)
+        inp = distribute_tensor(inp, device_mesh=device_mesh)
 
         comm_mode = CommDebugMode()
         with comm_mode:
