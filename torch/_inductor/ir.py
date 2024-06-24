@@ -3477,16 +3477,9 @@ class ComputedBuffer(OperationBuffer):
             ]
             index_formulas += extra_indexing_expr
 
-        reads_bufs = [
-            V.graph.name_to_buffer[reads_name]
-            if reads_name in V.graph.name_to_buffer.keys()
-            else None
-            for reads_name in body.reads_name2expr.keys()
-        ]
-        memory_addrs = [
-            *body.reads_name2expr.values(),
-            *body.writes_name2expr.values(),
-        ]
+        memory_addrs = [*body.writes_name2expr.values()]
+        if not V.graph.has_feature(self, BackendFeature.PREFER_STORE_LOOP_ORDER):
+            memory_addrs.extend(body.reads_name2expr.values())
 
         def simplify_and_reorder(x_vars, support_vars, sizes):
             sizes, reindex0, reindex1 = self._apply_loop_reordering(
@@ -3499,10 +3492,6 @@ class ComputedBuffer(OperationBuffer):
                 sizes,
                 index_prevent_reordering(index_formulas, x_vars, sizes),
             )
-            x_vars = prune(x_vars)
-            # sizes, reindex1, prune = _simplify_loops(x_vars, sizes, index_formulas)
-            # x_vars = prune(x_vars)
-            # sizes, reindex2 = self._apply_loop_reordering(x_vars, sizes, memory_addrs)
             reindex = fuse_reindexing(reindex1, reindex2)
             return sizes, reindex, reindex1
 
@@ -4044,8 +4033,11 @@ class ExternKernel(InputsKernel):
         ordered_kwargs_for_cpp_kernel=(),
         op_overload=None,
     ):
-        Buffer.__init__(self, name, layout)
-        InputsKernel.__init__(self, inputs)
+        super().__init__(
+            name,
+            layout,
+            inputs,
+        )
         self.constant_args = constant_args
         self.kwargs = kwargs if kwargs else {}
         self.output_view = output_view
@@ -4718,12 +4710,16 @@ class MutationOutput(Buffer):
     An output buffer that represents the mutation of a pre-existing buffer
     """
 
-    def __init__(self, layout, mutated_node):
+    def __init__(self, layout, mutated_node, mutating_node: Operation):
         super().__init__(name=None, layout=layout)
         mutated_node_name = mutated_node.get_name()
         V.graph.mark_buffer_mutated(mutated_node_name)
         self.mutation_names = [mutated_node_name]
+        self.mutating_node: Operation = mutating_node
         self.name = V.graph.register_buffer(self)
+
+    def get_defining_op(self) -> Operation:
+        return self.mutating_node
 
     def get_mutation_names(self):
         return self.mutation_names
@@ -4824,7 +4820,8 @@ class UserDefinedTritonKernel(ExternKernel):
         ]
 
         self.outputs: List[Buffer] = [
-            MutationOutput(NoneLayout(self.device), buf) for buf in self.mutable_args
+            MutationOutput(NoneLayout(self.device), buf, self)
+            for buf in self.mutable_args
         ]
         V.graph.register_operation(self)
 
@@ -4852,19 +4849,19 @@ def mark_node_as_mutating(cur_buffer, *mutated_nodes: IRNode):
 class MutationOperation(InputsKernel):
     # TODO: Remove this, and use MutationOutput directly
     def __init__(self, layout, mutated_node, node_doing_mutating):
-        super().__init__(inputs=[node_doing_mutating])
+        super().__init__(None, layout, inputs=[node_doing_mutating])
         self.device = node_doing_mutating.get_device()
-        self.outputs = [MutationOutput(layout, mutated_node)]
+        self.outputs = [MutationOutput(layout, mutated_node, self)]
         V.graph.register_operation(self)
 
     def get_device(self):
         return self.device
 
+    def get_outputs(self) -> List[ir.Buffer]:
+        return self.outputs
+
     def should_allocate(self):
         return False
-
-    def get_read_writes(self):
-        return self.read_writes
 
     def is_no_op(self):
         return True
@@ -6481,15 +6478,18 @@ class LoopBody:
         assert self.indexing is not None
         return self.indexing[name]
 
-    def __call__(self, *indices):
-        index = list(itertools.chain.from_iterable(indices))
+    def indexing_from_args(self, indices):
+        index = [*itertools.chain.from_iterable(indices)]
         assert len(index) == len(self.var_ranges), (index, self.var_ranges)
         assert all(v not in self.var_ranges for v in index)
         replacements = dict(zip(self.var_ranges.keys(), index))
-        self.indexing = {
+        return {
             name: sympy_subs(expr, replacements)
             for name, expr in self.indexing_exprs.items()
         }
+
+    def __call__(self, *indices):
+        self.indexing = self.indexing_from_args(indices)
         result = self.root_block()
         self.indexing = None
         return result
