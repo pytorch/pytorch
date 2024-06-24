@@ -1985,12 +1985,12 @@ class Scheduler:
 
             triton_choices = 0
 
-            for choice, unfused_time in choice_timings.items():
+            for choice, unfused_time in sorted(choice_timings.items(), key=lambda x: x[1]):
                 if not isinstance(choice, torch._inductor.ir.TritonTemplateCallerBase):
                     continue
 
                 if unfused_time >= ms1 + ms2:
-                    continue
+                    break
 
                 triton_choices += 1
                 if triton_choices > config.max_epilogue_benchmarked_choices:
