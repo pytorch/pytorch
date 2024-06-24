@@ -4795,7 +4795,7 @@ class UserDefinedTritonKernel(ExternKernel):
 
         super().__init__(
             None,
-            NoneLayout(device),  # type: ignore[arg-type]
+            NoneLayout(self.device),  # type: ignore[arg-type]
             inputs,
             tuple(constant_args),
             kwargs,
