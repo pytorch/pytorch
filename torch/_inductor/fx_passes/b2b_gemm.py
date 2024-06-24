@@ -1,6 +1,6 @@
 import torch
 from ..._dynamo.utils import counters
-from ..pattern_matcher import Arg, CallFunction, Match, register_graph_pattern
+from ..pattern_matcher import Arg, CallFunction, Match, register_graph_pattern, PatternMatcherPass
 from .split_cat import construct_pattern_matcher_pass
 from ..select_algorithm import (
     TritonTemplate,
@@ -119,12 +119,17 @@ def tuned_b2b_gemm(mat1, mat2, mat3, *, layout=None):
         )
     return autotune_select_algorithm("b2b_gemm", choices, [mat1, mat2, mat3], layout)
 
+B2B_GEMM_PASS = PatternMatcherPass(
+    prevent_match_across_mutations=True,
+    pass_name="b2b_gemm_pass",
+)
+
 # currently it matches ((A @ B) @ C)
 # TODO: later will change to matching (A @ B) in (epilogue2 ((epilogue1 (A @ B)) @ C)) and inspecting the graph
-# TODO: match more cases
+# TODO: match more cases such as bmm and addmm
 @register_graph_pattern(
     CallFunction(aten.mm, CallFunction(aten.mm, Arg(), Arg()), Arg()),
-    pass_dict=construct_pattern_matcher_pass("b2b_gemm_pass"),
+    pass_dict=B2B_GEMM_PASS,
 )
 def b2b_gemm(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node, mat3: torch.fx.Node):
     print("B2B-GEMM handler called")

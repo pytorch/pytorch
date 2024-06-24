@@ -49,6 +49,7 @@ from .micro_pipeline_tp import patterns as micro_pipeline_tp_patterns
 from .pre_grad import is_same_dict, save_inductor_dict
 from .reinplace import reinplace_inplaceable_ops
 from .split_cat import POST_GRAD_PATTERNS
+from .b2b_gemm import B2B_GEMM_PASS
 
 if TYPE_CHECKING:
     from sympy import Expr
@@ -108,6 +109,8 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 optimus_scuba_log[
                     f"{pattern_matcher_pass.pass_name}_post_grad"
                 ] = upload_graph(gm.graph)
+        if config.b2b_gemm_pass:
+            B2B_GEMM_PASS.apply(gm.graph)
 
     if config._micro_pipeline_tp:
         micro_pipeline_tp_patterns.apply(gm)
@@ -144,7 +147,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 @init_once_fakemode
 def lazy_init():
     if torch._C._has_mkldnn:
-        from . import b2b_gemm
         from . import decompose_mem_bound_mm  # noqa: F401
         from .mkldnn_fusion import _mkldnn_fusion_init
 

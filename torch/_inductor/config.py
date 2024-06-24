@@ -98,6 +98,9 @@ epilogue_fusion_first = False
 # enable pattern match+replace optimizations
 pattern_matcher = True
 
+# set to True to enable the back-to-back GEMM pass
+b2b_gemm_pass = False
+
 # register custom graph optimization pass hook. so far, pre/post passes are
 # only applied before/after pattern_matcher in post_grad_passes.
 #
@@ -167,7 +170,7 @@ pre_grad_fusion_options: Dict[str, Dict[str, Any]] = {
 
 # Post grad fusion and options, set to empty dict to disable fusion.
 # Call `torch._inductor.fx_passes.group_batch_fusion.list_group_batch_fusions(False)` to see available fusions.
-post_grad_fusion_options: Dict[str, Dict[str, Any]] = {"b2b_gemm_pass": {}}
+post_grad_fusion_options: Dict[str, Dict[str, Any]] = {}
 
 # enable reordering pass for improving memory locality
 reorder_for_locality = True
