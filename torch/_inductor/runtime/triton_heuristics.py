@@ -780,7 +780,6 @@ class CachingAutotuner(KernelInterface):
             # skip triton template
             return launcher
 
-        cloned_args, _ = self.clone_args(*args)
         config2launcher = {launcher.config: launcher}
 
         def benchmark_one_config(config):
@@ -788,7 +787,7 @@ class CachingAutotuner(KernelInterface):
                 _, launcher = self._precompile_config(config, False)
             config2launcher[config] = launcher
 
-            out = self.bench(launcher, *cloned_args, **kwargs)
+            out = self.bench(launcher, *args, **kwargs)
             log.debug(
                 "COORDESC: %s: %f, nreg %d, nspill %d, #shared-mem %d",
                 launcher.config,
