@@ -195,10 +195,12 @@ flex_attention_template = TritonTemplate(
     MATMUL_PRECISION = Q.dtype.element_ty
 
     start_m = tl.program_id(0)
-    off_hz = tl.program_id(1)
+    off_z = tl.program_id(1) // H
+    off_h = tl.program_id(1) % H
 
-    q_offset = off_hz * stride_qh
-    kv_offset = off_hz * stride_kh
+    q_offset = off_z * stride_qz + off_h * stride_qh
+    k_offset = off_z * stride_kz + off_h * stride_kh
+    v_offset = off_z * stride_vz + off_h * stride_vh
     Q_block_ptr = tl.make_block_ptr(
         base=Q + q_offset,
         shape=(Q_LEN, BLOCK_DMODEL),
@@ -208,7 +210,7 @@ flex_attention_template = TritonTemplate(
         order=(1, 0)
     )
     K_block_ptr = tl.make_block_ptr(
-        base=K + kv_offset,
+        base=K + k_offset,
         shape=(BLOCK_DMODEL, KV_LEN),
         strides=(stride_kk, stride_kn),
         offsets=(0, 0),
@@ -216,7 +218,7 @@ flex_attention_template = TritonTemplate(
         order=(0, 1)
     )
     V_block_ptr = tl.make_block_ptr(
-        base=V + kv_offset,
+        base=V + v_offset,
         shape=(KV_LEN, BLOCK_DMODEL),
         strides=(stride_vk, stride_vn),
         offsets=(0, 0),
@@ -251,8 +253,8 @@ flex_attention_template = TritonTemplate(
             subgraph_number=0,
             output_name="post_mod_scores",
             score="qk",
-            b="off_hz // H",
-            h="off_hz % H",
+            b="off_z",
+            h="off_h",
             m="m",
             n="n",
             out="qk"
@@ -300,6 +302,7 @@ flex_attention_template = TritonTemplate(
 
     # TODO dont want to write this if we dont require grad
     if OUTPUT_LOGSUMEXP:
+        off_hz = tl.program_id(1)
         l_ptrs = LSE + off_hz * Q_LEN + offs_m
         lse = m_i + tl.math.log2(l_i)
         tl.store(l_ptrs, lse)
