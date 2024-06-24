@@ -958,8 +958,12 @@ class OpDTypes(Enum):
     unsupported_backward = 3  # Test only unsupported backward dtypes
     any_one = 4  # Test precisely one supported dtype
     none = 5  # Instantiate no dtype variants (no dtype kwarg needed)
-    any_common_cpu_cuda_one = 6  # Test precisely one supported dtype that is common to both cuda and cpu
-    any_common_cpu_xpu_one = 7  # Test precisely one supported dtype that is common to both xpu and cpu
+    any_common_cpu_cuda_one = (
+        6  # Test precisely one supported dtype that is common to both cuda and cpu
+    )
+    any_common_cpu_xpu_one = (
+        7  # Test precisely one supported dtype that is common to both xpu and cpu
+    )
 
 
 # Arbitrary order
