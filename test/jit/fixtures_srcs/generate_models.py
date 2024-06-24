@@ -4,6 +4,7 @@ import sys
 import zipfile
 from pathlib import Path
 from typing import Set
+
 # Use asterisk symbol so developer doesn't need to import here when they add tests for upgraders.
 from test.jit.fixtures_srcs.fixtures_src import *  # noqa: F403
 
