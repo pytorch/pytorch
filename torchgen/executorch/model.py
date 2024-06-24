@@ -17,6 +17,7 @@ from torchgen.model import (
 )
 from torchgen.utils import assert_never
 
+
 KERNEL_KEY_VERSION = 1
 
 
