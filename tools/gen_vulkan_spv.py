@@ -12,10 +12,11 @@ import re
 import subprocess
 import sys
 import textwrap
-import yaml
 from dataclasses import dataclass
 from itertools import product
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
+
+import yaml
 from yaml.constructor import ConstructorError
 from yaml.nodes import MappingNode
 

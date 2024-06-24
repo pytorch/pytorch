@@ -6,7 +6,7 @@ from typing import Dict, List, Set
 
 # <project folder>
 HOME_DIR = os.environ["HOME"]
-TOOLS_FOLDER = pathlib.Path(__file__).resolve().parents[3 - 1]
+TOOLS_FOLDER = str(pathlib.Path(__file__).resolve().parents[3 - 1])
 
 
 # <profile folder>

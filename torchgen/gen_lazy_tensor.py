@@ -1,7 +1,6 @@
 import argparse
 import os
 import pathlib
-import yaml
 from collections import namedtuple
 from typing import (
     Any,
@@ -15,6 +14,8 @@ from typing import (
     Type,
     Union,
 )
+
+import yaml
 
 import torchgen.dest as dest
 from torchgen.api.lazy import setValueT
