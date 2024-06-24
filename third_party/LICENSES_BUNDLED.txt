@@ -1,4 +1,4 @@
-The Pytorch repository and source distributions bundle several libraries that are 
+The PyTorch repository and source distributions bundle several libraries that are 
 compatibly licensed.  We list these here.
 
 Name: DCGM
@@ -77,6 +77,11 @@ Name: colorama
 License: BSD-3-Clause
 Files: third_party/kineto/libkineto/third_party/dynolog/third_party/DCGM/testing/python3/libs_3rdparty/colorama
   For details, see: third_party/kineto/libkineto/third_party/dynolog/third_party/DCGM/testing/python3/libs_3rdparty/colorama/LICENSE.txt
+
+Name: cpp-httplib
+License: MIT
+Files: third_party/cpp-httplib
+  For details, see: third_party/cpp-httplib/LICENSE
 
 Name: cpplint
 License: BSD-3-Clause
@@ -168,12 +173,12 @@ Files: third_party/flatbuffers
 
 Name: fmt
 License: MIT with exception
-Files: third_party/fmt,
-     third_party/kineto/libkineto/third_party/dynolog/third_party/fmt,
-     third_party/kineto/libkineto/third_party/fmt
-  For details, see: third_party/fmt/LICENSE,
-     third_party/kineto/libkineto/third_party/dynolog/third_party/fmt/LICENSE.rst,
-     third_party/kineto/libkineto/third_party/fmt/LICENSE.rst
+Files: third_party/kineto/libkineto/third_party/dynolog/third_party/fmt,
+     third_party/kineto/libkineto/third_party/fmt,
+     third_party/fmt
+  For details, see: third_party/kineto/libkineto/third_party/dynolog/third_party/fmt/LICENSE.rst,
+     third_party/kineto/libkineto/third_party/fmt/LICENSE.rst,
+     third_party/fmt/LICENSE
 
 Name: foxi
 License: MIT
@@ -259,7 +264,7 @@ Files: third_party/fbgemm/third_party/hipify_torch
   For details, see: third_party/fbgemm/third_party/hipify_torch/LICENSE.txt
 
 Name: hungarian
-License: Apache-2.0
+License: Permissive (free to use)
 Files: third_party/opentelemetry-cpp/tools/vcpkg/ports/hungarian
   For details, see: third_party/opentelemetry-cpp/tools/vcpkg/ports/hungarian/LICENSE.txt
 
@@ -359,7 +364,7 @@ Files: third_party/opentelemetry-cpp/third_party/opentracing-cpp
   For details, see: third_party/opentelemetry-cpp/third_party/opentracing-cpp/LICENSE
 
 Name: pdcurses
-License: Apache-2.0
+License: Public Domain for core
 Files: third_party/opentelemetry-cpp/tools/vcpkg/ports/pdcurses
   For details, see: third_party/opentelemetry-cpp/tools/vcpkg/ports/pdcurses/LICENSE
 
@@ -420,7 +425,7 @@ Files: third_party/python-peachpy
   For details, see: third_party/python-peachpy/LICENSE.rst
 
 Name: sigslot
-License: Apache-2.0
+License: Public Domain
 Files: third_party/opentelemetry-cpp/tools/vcpkg/ports/sigslot
   For details, see: third_party/opentelemetry-cpp/tools/vcpkg/ports/sigslot/LICENSE
 
