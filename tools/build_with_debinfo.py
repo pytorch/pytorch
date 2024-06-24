@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 from typing import Any, List, Optional, Tuple
 
-PYTORCH_ROOTDIR = Path(__file__).resolve().parent.parent
+PYTORCH_ROOTDIR = Path(__file__).absolute().parent.parent
 TORCH_DIR = PYTORCH_ROOTDIR / "torch"
 TORCH_LIB_DIR = TORCH_DIR / "lib"
 BUILD_DIR = PYTORCH_ROOTDIR / "build"
