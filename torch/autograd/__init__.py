@@ -75,6 +75,7 @@ def _make_grads(
             from torch.fx.experimental.symbolic_shapes import expect_true, sym_eq
 
             first_grad = grad if not is_grads_batched else grad[0]
+            out_size = None
 
             if isinstance(out, graph.GradientEdge):
                 out_metadata = out.node._input_metadata(out.output_nr)
@@ -94,12 +95,13 @@ def _make_grads(
             # TODO: We can remove this conditional once we uniformly use
             # singleton int to represent jagged dimension, so that size() call
             # on nested tensor works.
-            if out_is_nested or first_grad.is_nested:
+            if out_is_nested and out_metadata.is_cpp_nested_tensor():
                 shape_matches = torch.is_same_size(out, first_grad)
             else:
                 # We need to do a regular size check, without going through
                 # the operator, to be able to handle unbacked symints
                 # (expect_true ensures we can deal with unbacked)
+                assert out_size is not None
                 shape_matches = expect_true(sym_eq(out_size, first_grad.size()))
 
             if not shape_matches:
@@ -304,7 +306,7 @@ def backward(
 
 
 def grad(
-    outputs: _TensorOrTensors,
+    outputs: _TensorOrTensorsOrGradEdge,
     inputs: _TensorOrTensorsOrGradEdge,
     grad_outputs: Optional[_TensorOrTensors] = None,
     retain_graph: Optional[bool] = None,
@@ -335,7 +337,7 @@ def grad(
         ``torch.autograd.backward``.
 
     Args:
-        outputs (sequence of Tensor): outputs of the differentiated function.
+        outputs (sequence of Tensor or GradientEdge): outputs of the differentiated function.
         inputs (sequence of Tensor or GradientEdge): Inputs w.r.t. which the gradient will be
             returned (and not accumulated into ``.grad``).
         grad_outputs (sequence of Tensor): The "vector" in the vector-Jacobian product.
@@ -392,7 +394,7 @@ def grad(
         return handle_torch_function(
             grad,
             overridable_args,
-            t_outputs,
+            outputs,
             inputs,
             grad_outputs=grad_outputs,
             retain_graph=retain_graph,
@@ -410,9 +412,9 @@ def grad(
             "parts of the graph, please use torch.autograd.backward."
         )
 
-    grad_outputs_ = _tensor_or_tensors_to_tuple(grad_outputs, len(t_outputs))
+    grad_outputs_ = _tensor_or_tensors_to_tuple(grad_outputs, len(outputs))
     grad_outputs_ = _make_grads(
-        t_outputs, grad_outputs_, is_grads_batched=is_grads_batched
+        outputs, grad_outputs_, is_grads_batched=is_grads_batched
     )
 
     if retain_graph is None:
@@ -425,7 +427,7 @@ def grad(
 
         def vjp(gO):
             return _engine_run_backward(
-                t_outputs,
+                outputs,
                 gO,
                 retain_graph,
                 create_graph,
@@ -439,7 +441,7 @@ def grad(
         )
     else:
         result = _engine_run_backward(
-            t_outputs,
+            outputs,
             grad_outputs_,
             retain_graph,
             create_graph,
