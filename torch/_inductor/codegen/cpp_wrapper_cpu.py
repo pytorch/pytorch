@@ -22,7 +22,6 @@ from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import IndentedBuffer
 from .cpp_utils import (
     cexpr,
-    CppPrinter,
     DEVICE_TO_ATEN,
     DTYPE_TO_ATEN,
     DTYPE_TO_CPP,
@@ -70,20 +69,6 @@ class CppWrapperCpu(WrapperCodeGen):
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
         self.expr_printer = cexpr
-
-        # CppPrinter sometimes calls at::native functions which causes problems in
-        # the ABI-compatible mode. Currently we are hitting this problem when codegen
-        # Grid computation expressions, but we my need to fix other size computation
-        # as well.
-        class GridExprCppPrinter(CppPrinter):
-            def _print_FloorDiv(self, expr):
-                x, div = expr.args
-                x = self.paren(self.doprint(x))
-                div = self.paren(self.doprint(div))
-                assert expr.is_integer, "Expect integers in GridExprPrinter"
-                return f"({x}/{div})"
-
-        self.grid_expr_printer = GridExprCppPrinter().doprint
 
     def generate_kernel_call(
         self,
