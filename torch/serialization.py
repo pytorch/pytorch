@@ -203,7 +203,9 @@ def get_safe_globals() -> List[Any]:
 
 def add_safe_globals(safe_globals: List[Any]) -> None:
     """
-    Marks the given globals as safe for ``weights_only`` load.
+    Marks the given globals as safe for ``weights_only`` load. For example, functions
+    added to this list can be called during unpickling, classes could be instantiated
+    and have state set.
 
     Args:
         safe_globals (List[Any]): list of globals to mark as safe
@@ -977,7 +979,7 @@ def load(
     map_location: MAP_LOCATION = None,
     pickle_module: Any = None,
     *,
-    weights_only: bool = False,
+    weights_only: Optional[bool] = None,
     mmap: Optional[bool] = None,
     **pickle_load_args: Any,
 ) -> Any:
@@ -1103,18 +1105,21 @@ def load(
             )
     else:
         if pickle_module is None:
-            warnings.warn(
-                "You are using `torch.load` with `weights_only=False` (the current default value), which uses "
-                "the default pickle module implicitly. It is possible to construct malicious pickle data "
-                "which will execute arbitrary code during unpickling. In a future release, the default value "
-                "for `weights_only` will be flipped to `True`. This limits the functions that could be executed "
-                "during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless "
-                "they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. "
-                "We recommend you start setting `weights_only=True` for any use case where you don't have full "
-                "control of the loaded file. Please open an issue on GitHub for any issues related to this "
-                "experimental feature.",
-                FutureWarning,
-            )
+            if weights_only is None:
+                warnings.warn(
+                    "You are using `torch.load` with `weights_only=False` (the current default value), which uses "
+                    "the default pickle module implicitly. It is possible to construct malicious pickle data "
+                    "which will execute arbitrary code during unpickling (See "
+                    "https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). "
+                    "In a future release, the default value for `weights_only` will be flipped to `True`. This "
+                    "limits the functions that could be executed during unpickling. Arbitrary objects will no "
+                    "longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the "
+                    "user via `torch.serialization.add_safe_globals`. We recommend you start setting "
+                    "`weights_only=True` for any use case where you don't have full control of the loaded file. "
+                    "Please open an issue on GitHub for any issues related to this experimental feature.",
+                    FutureWarning,
+                )
+                weights_only = False
             pickle_module = pickle
 
     # make flipping default BC-compatible
