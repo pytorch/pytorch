@@ -1,7 +1,9 @@
+from __future__ import annotations
+
 import pathlib
 import sys
 import unittest
-from typing import Any, Dict
+from typing import Any
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[4 - 1]
@@ -16,14 +18,14 @@ sys.path.remove(str(REPO_ROOT))
 
 class TestHeuristicsUtils(unittest.TestCase):
     def assertDictAlmostEqual(
-        self, first: Dict[TestRun, Any], second: Dict[TestRun, Any]
+        self, first: dict[TestRun, Any], second: dict[TestRun, Any]
     ) -> None:
         self.assertEqual(first.keys(), second.keys())
         for key in first.keys():
             self.assertAlmostEqual(first[key], second[key])
 
     def test_normalize_ratings(self) -> None:
-        ratings: Dict[TestRun, float] = {
+        ratings: dict[TestRun, float] = {
             TestRun("test1"): 1,
             TestRun("test2"): 2,
             TestRun("test3"): 4,

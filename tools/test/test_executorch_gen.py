@@ -1,8 +1,9 @@
+from __future__ import annotations
+
 import os
 import tempfile
 import unittest
 import yaml
-from typing import Dict
 
 from torchgen.executorch.model import ETKernelIndex, ETKernelKey
 from torchgen.gen import LineLoader
@@ -344,7 +345,7 @@ class TestGenFunctionsDeclarations(unittest.TestCase):
             valid_tags=set(),
         )
 
-        backend_indices: Dict[DispatchKey, Dict[OperatorName, BackendMetadata]] = {
+        backend_indices: dict[DispatchKey, dict[OperatorName, BackendMetadata]] = {
             DispatchKey.CPU: {},
             DispatchKey.QuantizedCPU: {},
         }

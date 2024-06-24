@@ -142,7 +142,7 @@ def check_rocm():
     return rocm_ver if torch.version.hip else "None"
 
 
-def check_dynamo(backend, device, err_msg):
+def check_dynamo(backend, device, err_msg) -> None:
     import torch
 
     if device == "cuda" and not torch.cuda.is_available():
@@ -204,7 +204,7 @@ _SANITY_CHECK_ARGS = (
 )
 
 
-def main():
+def main() -> None:
     python_ver = check_python()
     torch_ver = check_torch()
     cuda_ver = check_cuda()

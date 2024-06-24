@@ -1,11 +1,14 @@
 # Generates RegisterCodegenUnboxedKernels.cpp, UnboxingFunctions.h and UnboxingFunctions.cpp.
+
+from __future__ import annotations
+
 import argparse
 import os
 import pathlib
 import sys
 import yaml
 from dataclasses import dataclass
-from typing import List, Literal, Sequence, Union
+from typing import Literal, Sequence, TYPE_CHECKING
 
 from torchgen.api import cpp, unboxing
 from torchgen.api.translate import translate
@@ -14,8 +17,11 @@ from torchgen.api.unboxing import convert_arguments
 from torchgen.context import method_with_native_function
 from torchgen.gen import cpp_string, get_custom_build_selector, parse_native_yaml
 from torchgen.model import Argument, NativeFunction, NativeFunctionsGroup, Variant
-from torchgen.selective_build.selector import SelectiveBuilder
 from torchgen.utils import FileManager, make_file_manager, mapMaybe, Target
+
+
+if TYPE_CHECKING:
+    from torchgen.selective_build.selector import SelectiveBuilder
 
 
 # Generates UnboxingFunctions.h & UnboxingFunctions.cpp.
@@ -155,7 +161,7 @@ def gen_unboxing(
     cpu_fm: FileManager,
     selector: SelectiveBuilder,
 ) -> None:
-    def key_func(fn: Union[NativeFunction, NativeFunctionsGroup]) -> str:
+    def key_func(fn: NativeFunction | NativeFunctionsGroup) -> str:
         return fn.root_name
 
     selected_op_num: int = len(selector.operators)
@@ -194,7 +200,7 @@ def gen_unboxing(
     )
 
 
-def main(args: List[str]) -> None:
+def main(args: list[str]) -> None:
     parser = argparse.ArgumentParser(description="Generate unboxing source files")
     parser.add_argument(
         "-s",

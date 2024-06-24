@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 import argparse
 import os
 import pathlib
 import sys
 import yaml
-from typing import Any, cast, Optional
+from typing import Any, cast
 
 
 try:
@@ -22,10 +24,10 @@ TAGS_PATH = "aten/src/ATen/native/tags.yaml"
 
 def generate_code(
     gen_dir: pathlib.Path,
-    native_functions_path: Optional[str] = None,
-    tags_path: Optional[str] = None,
-    install_dir: Optional[str] = None,
-    subset: Optional[str] = None,
+    native_functions_path: str | None = None,
+    tags_path: str | None = None,
+    install_dir: str | None = None,
+    subset: str | None = None,
     disable_autograd: bool = False,
     force_schema_registration: bool = False,
     operator_selector: Any = None,
@@ -106,8 +108,8 @@ def get_selector_from_legacy_operator_selection_list(
 
 
 def get_selector(
-    selected_op_list_path: Optional[str],
-    operators_yaml_path: Optional[str],
+    selected_op_list_path: str | None,
+    operators_yaml_path: str | None,
 ) -> Any:
     # cwrap depends on pyyaml, so we can't import it earlier
     from torchgen.selective_build.selector import SelectiveBuilder
