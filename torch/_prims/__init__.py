@@ -20,7 +20,7 @@ from torch._prims_common import (
     Dim,
     DimsSequenceType,
     DimsType,
-    int_like,
+    IntLike,
     Number,
     NumberType,
     RETURN_TYPE,

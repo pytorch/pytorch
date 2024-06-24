@@ -645,7 +645,7 @@ class DistributedDataParallel(Module, Joinable):
     ):
         super().__init__()
         Joinable.__init__(self)
-        self.logger = None
+        self.logger: Optional[dist.Logger] = None
         if bool(delay_all_reduce_named_params is not None) != bool(
             param_to_hook_all_reduce is not None
         ):

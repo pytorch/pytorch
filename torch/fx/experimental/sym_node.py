@@ -133,12 +133,10 @@ class SymNode:
             and self._expr == other._expr
             and id(self.shape_env) == id(other.shape_env)
             and self.pytype == other.pytype
-            and self._hint == other._hint
-            and self.constant == other.constant
         )
 
     def __hash__(self) -> int:
-        return hash((self._expr, self.pytype, self._hint, self.constant))
+        return hash((self._expr, self.pytype))
 
     @property
     def expr(self):
@@ -253,6 +251,11 @@ class SymNode:
         return self.str()
 
     def __repr__(self):
+        # NOTE: This seems wrong because it skips a whole lot of information -
+        # but it's used in GraphModule.recompile() when printing out the
+        # pythonic representation of a graph. This seems unfortunate -
+        # GraphModule should probably have its own mechanism for converting
+        # values to representation.
         return self.str()
 
     # These methods call the metaprogrammed methods, they're hand written
