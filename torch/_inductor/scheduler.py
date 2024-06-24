@@ -1876,10 +1876,9 @@ class Scheduler:
         return backend.benchmark_fused_nodes(nodes)
 
     def finalize_multi_template_buffers(self) -> None:
-        def replace_buffer(
+        def replace_operation_buffer(
             orig_node: ir.MultiTemplateBuffer, new_node: ir.OperationBuffer
         ) -> None:
-            # XXX: need to handle graph.operations?
             replaced_name = new_node.name
             orig_name = orig_node.get_name()
             assert isinstance(orig_name, str) and isinstance(replaced_name, str)
@@ -1891,6 +1890,10 @@ class Scheduler:
             V.graph.buffers.remove(new_node)
             V.graph.buffers[orig] = new_node
             V.graph.name_to_buffer[orig_name] = new_node
+
+            orig = V.graph.operations.remove(orig_node)
+            V.graph.operations.remove(new_node)
+            V.graph.operations[orig] = new_node
 
         for i, node in enumerate(self.nodes):
             if isinstance(node, SchedulerNode) and isinstance(
@@ -1913,7 +1916,7 @@ class Scheduler:
                 assert isinstance(out_buffer, ir.OperationBuffer)
 
                 out_buffer.layout = multi_node.layout
-                replace_buffer(multi_node, out_buffer)
+                replace_operation_buffer(multi_node, out_buffer)
                 new_scheduler_node = self.create_scheduler_node(out_buffer)
 
                 self.nodes[i] = new_scheduler_node
@@ -1923,6 +1926,7 @@ class Scheduler:
                 for new_out, old_out in zip(
                     new_scheduler_node.get_outputs(), node.get_outputs()
                 ):
+                    self.name_to_buf[old_out.get_name()] = new_out
                     new_out.users = old_out.users
 
                 new_scheduler_node.min_order = node.min_order
@@ -2626,7 +2630,7 @@ class Scheduler:
         for out_buf in V.kernel.store_buffer_names:
             users = self.name_to_buf[out_buf].users
             assert users is not None
-            users = {user.get_name() for user in users}
+            users = {user.get_name() for user in users if not user.is_weak}
             if users.issubset(fused_node_names):
                 names_to_remove.append(out_buf)
 
