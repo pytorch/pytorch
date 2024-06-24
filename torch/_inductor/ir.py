@@ -4857,7 +4857,7 @@ class MutationOperation(InputsKernel):
     def get_device(self):
         return self.device
 
-    def get_outputs(self) -> List[ir.Buffer]:
+    def get_outputs(self) -> List[Buffer]:
         return self.outputs
 
     def should_allocate(self):
