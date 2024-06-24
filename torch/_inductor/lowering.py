@@ -3272,6 +3272,10 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
         len(aten.scatter_reduce_.overloads()) == 1
         and "two" in aten.scatter_reduce_.overloads()
     ), "aten.scatter_reduce_.two is not the unique overload of aten.scatter_reduce_"
+
+    if isinstance(src, Number):
+        src = full_like(self, src)
+
     fallback_result = scatter_fallback(
         aten.scatter_reduce_.two,
         self,
