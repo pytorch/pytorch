@@ -1,6 +1,7 @@
 import csv
-import yaml
 from collections import defaultdict
+
+import yaml
 
 import torch
 

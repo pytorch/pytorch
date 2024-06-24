@@ -2,8 +2,9 @@ import argparse
 import os
 import pathlib
 import sys
-import yaml
 from typing import Any, cast, Optional
+
+import yaml
 
 
 try:
@@ -32,6 +33,7 @@ def generate_code(
 ) -> None:
     from tools.autograd.gen_annotated_fn_args import gen_annotated
     from tools.autograd.gen_autograd import gen_autograd, gen_autograd_python
+
     from torchgen.selective_build.selector import SelectiveBuilder
 
     # Build ATen based Variable classes
@@ -110,6 +112,9 @@ def get_selector(
     operators_yaml_path: Optional[str],
 ) -> Any:
     # cwrap depends on pyyaml, so we can't import it earlier
+    REPO_ROOT = pathlib.Path(__file__).resolve().parents[3 - 1]
+    sys.path.insert(0, str(REPO_ROOT))
+
     from torchgen.selective_build.selector import SelectiveBuilder
 
     assert not (
