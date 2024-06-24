@@ -24,7 +24,7 @@ from typing import (
     Set,
     SupportsIndex,
     Tuple,
-    Type,
+    Type as _Type,
     TypeVar,
     Union,
     overload,
@@ -35,12 +35,17 @@ from typing_extensions import ParamSpec, Self
 import numpy
 
 import torch
-from torch import inf, SymInt, Tensor
+from torch import SymInt, Tensor, inf
+from torch._prims_common import DeviceLikeType
 from torch.autograd.graph import Node as _Node
 from torch.package import PackageExporter
-from torch.storage import UntypedStorage, TypedStorage
+from torch.storage import TypedStorage, UntypedStorage
 from torch.types import (
+    Device,
+    Number,
+    Storage,
     _bool,
+    _bytes,
     _complex,
     _device,
     _dispatchkey,
@@ -50,17 +55,23 @@ from torch.types import (
     _layout,
     _qscheme,
     _size,
-    Device,
-    Number,
-    Storage,
+    _str,
 )
-
-from torch._prims_common import DeviceLikeType
 from torch.utils._python_dispatch import TorchDispatchMode
 
-# This module is defined in torch/csrc/Module.cpp
+from . import (
+    _aoti,
+    _cpu,
+    _functorch,
+    _lazy,
+    _lazy_ts_backend,
+    _nn,
+    _onnx,
+    _VariableFunctions,
+    _verbose,
+)
 
-from . import _functorch, _lazy, _lazy_ts_backend, _nn, _onnx, _VariableFunctions, _cpu, _aoti, _verbose
+# This module is defined in torch/csrc/Module.cpp
 
 K = TypeVar("K")
 T = TypeVar("T")
@@ -1105,7 +1116,7 @@ class Module: ...
 def _initExtension(shm_manager_path: str) -> None: ...  # THPModule_initExtension
 def _autograd_init() -> _bool: ...  # THPAutograd_initExtension
 def _add_docstr(obj: T, doc_obj: str) -> T: ...  # THPModule_addDocStr
-def _init_names(arg: Sequence[Type]) -> None: ...  # THPModule_initNames
+def _init_names(arg: Sequence[_Type]) -> None: ...  # THPModule_initNames
 def _has_distributed() -> _bool: ...  # THPModule_hasDistributed
 def _set_default_tensor_type(type) -> None: ...  # THPModule_setDefaultTensorType
 def _set_default_dtype(d: _dtype) -> None: ...  # THPModule_setDefaultDtype
@@ -1235,13 +1246,13 @@ def _log_api_usage_metadata(event: str, metadata_map: Dict[str, str]) -> None: .
 def _demangle(str) -> str: ...  # c10::demangle
 def _disabled_torch_function_impl(
     func: Callable,
-    types: Iterable[Type],
+    types: Iterable[_Type],
     args: Tuple,
     kwargs: Dict,
 ) -> Any: ...  # THPModule_disable_torch_function
 def _disabled_torch_dispatch_impl(
     func: Callable,
-    types: Iterable[Type],
+    types: Iterable[_Type],
     args: Tuple,
     kwargs: Dict,
 ) -> Any: ...  # THPModule_disable_dispatch_function
@@ -1455,7 +1466,7 @@ def _get_privateuse1_backend_name() -> str: ...
 class Generator:
     device: _device
     def __init__(self, device: Optional[DeviceLikeType] = None) -> None: ...
-    def __reduce__(self) -> Tuple[Type[Generator], Tuple[_device], Tuple[_int, Optional[_int], Tensor]]: ...
+    def __reduce__(self) -> Tuple[_Type[Generator], Tuple[_device], Tuple[_int, Optional[_int], Tensor]]: ...
     def __setstate__(self, state: Tuple[_int, Optional[_int], Tensor]) -> None: ...
     def get_state(self) -> Tensor: ...
     def set_state(self, _new_state: Tensor) -> Generator: ...
@@ -2145,6 +2156,28 @@ class InferredType:
     def reason(self) -> str: ...
 
 R = TypeVar("R", bound=JitType)
+
+class Type(JitType):
+    def str(self) -> _str: ...
+    def containedTypes(self) -> List[JitType]: ...
+    def kind(self) -> _str: ...
+    def dim(self) -> Optional[_int]: ...
+    def undefined(self) -> Optional[_bool]: ...
+    def sizes(self) -> Optional[List[_int]]: ...
+    def symbol_sizes(self) -> Optional[List[_int]]: ...
+    def with_sizes(self, other: Optional[List[Optional[_int]]]) -> Optional[TensorType]: ...
+    def varyingSizes(self) -> Optional[List[Optional[_int]]]: ...
+    def strides(self) -> Optional[List[_int]]: ...
+    def contiguous(self) -> Self: ...
+    def scalarType(self) -> Optional[_str]: ...
+    def device(self) -> Optional[_device]: ...
+    def dtype(self) -> Optional[_dtype]: ...
+    def __eq__(self, other: object) -> _bool: ...
+    __hash__ = None  # type: ignore[assignment]
+    def is_interface_type(self) -> _bool: ...
+    def requires_grad(self) -> _bool: ...
+    @property
+    def annotation_string(self) -> _str: ...
 
 class AnyType(JitType):
     @staticmethod
