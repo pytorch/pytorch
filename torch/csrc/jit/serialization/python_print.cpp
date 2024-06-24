@@ -1677,7 +1677,7 @@ uint64_t PythonPrint::minVersion() const {
   return pImpl->min_version_;
 }
 
-static std::vector<IValue> traverseIValueAndGetObjects(IValue ivalue) {
+static std::vector<IValue> traverseIValueAndGetObjects(const IValue& ivalue) {
   std::vector<IValue> result;
   std::vector<IValue> stack;
   stack.emplace_back(ivalue);
