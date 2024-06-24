@@ -64,7 +64,7 @@ try:
     from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
 
     HAS_TORCHREC = True
-except ImportError:
+except (ImportError, AttributeError):
     HAS_TORCHREC = False
 
 try:
@@ -1045,21 +1045,6 @@ def forward(self, p_linear_weight, p_linear_bias, x):
                 "dy - 6 = 6" not in exc.args[0]
             )  # don't suggest fix for non-root dim
 
-    def test_keep_composite_ops(self):
-        class Foo(torch.nn.Module):
-            def forward(self, x):
-                y = x.view((x.shape[0] * 2, int(x.shape[1] / 2)))
-                return x.cos() + y.cos().sum()
-
-        dimx = torch.export.Dim("dim")
-        example_args = (torch.randn(2, 2),)
-        gm = torch.export._trace._export(
-            Foo(),
-            example_args,
-            dynamic_shapes=({0: dimx},),
-            _preserve_ops=[torch.ops.aten.sym_size.int],
-        ).module()
-
     def test_keep_composite_ops_linear_convd(self):
         class MyLinear(torch.nn.Module):
             def __init__(self):
@@ -1083,13 +1068,14 @@ def forward(self, p_linear_weight, p_linear_bias, x):
                 x_linear = self.linear(x_conv)
                 return x_linear.cos() + y_conv_1d.sum()
 
-        ep = torch.export._trace._export(
-            Foo(),
-            (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50)),
-            _preserve_ops=testing.COMPOSITE_OPS_THAT_CAN_BE_PRESERVED,
+        ep = torch.export.export(
+            Foo(), (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50))
+        )
+        ep_has_linear_convd = ep.run_decompositions(
+            decomp_table={}, _preserve_ops=testing.COMPOSITE_OPS_THAT_CAN_BE_PRESERVED
         )
         self.assertExpectedInline(
-            str(ep.graph_module.code).strip(),
+            str(ep_has_linear_convd.graph_module.code).strip(),
             """\
 def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_weight, c_linear_bias, x, y):
     conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
@@ -1097,6 +1083,48 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
     linear = torch.ops.aten.linear.default(conv2d, c_linear_weight, c_linear_bias);  conv2d = c_linear_weight = c_linear_bias = None
     cos = torch.ops.aten.cos.default(linear);  linear = None
     sum_1 = torch.ops.aten.sum.default(conv1d);  conv1d = None
+    add = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
+    return (add,)""",
+        )
+
+        ep_has_convd = ep.run_decompositions(
+            decomp_table=None,
+            _preserve_ops=[
+                torch.ops.aten.conv2d.default,
+                torch.ops.aten.conv1d.default,
+            ],
+        )
+        self.assertExpectedInline(
+            str(ep_has_convd.graph_module.code).strip(),
+            """\
+def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_weight, c_linear_bias, x, y):
+    conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
+    conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
+    view = torch.ops.aten.view.default(conv2d, [31680, 98]);  conv2d = None
+    permute = torch.ops.aten.permute.default(c_linear_weight, [1, 0]);  c_linear_weight = None
+    addmm = torch.ops.aten.addmm.default(c_linear_bias, view, permute);  c_linear_bias = view = permute = None
+    view_1 = torch.ops.aten.view.default(addmm, [20, 33, 48, 20]);  addmm = None
+    cos = torch.ops.aten.cos.default(view_1);  view_1 = None
+    sum_1 = torch.ops.aten.sum.dim_IntList(conv1d, []);  conv1d = None
+    add = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
+    return (add,)""",
+        )
+
+        ep_has_convd = ep_has_convd.run_decompositions(
+            decomp_table=None, _preserve_ops=[torch.ops.aten.conv2d.default]
+        )
+        self.assertExpectedInline(
+            str(ep_has_convd.graph_module.code).strip(),
+            """\
+def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_weight, c_linear_bias, x, y):
+    conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
+    convolution = torch.ops.aten.convolution.default(y, p_conv1d_weight, p_conv1d_bias, [1], [0], [1], False, [0], 1);  y = p_conv1d_weight = p_conv1d_bias = None
+    view = torch.ops.aten.view.default(conv2d, [31680, 98]);  conv2d = None
+    permute = torch.ops.aten.permute.default(c_linear_weight, [1, 0]);  c_linear_weight = None
+    addmm = torch.ops.aten.addmm.default(c_linear_bias, view, permute);  c_linear_bias = view = permute = None
+    view_1 = torch.ops.aten.view.default(addmm, [20, 33, 48, 20]);  addmm = None
+    cos = torch.ops.aten.cos.default(view_1);  view_1 = None
+    sum_1 = torch.ops.aten.sum.dim_IntList(convolution, []);  convolution = None
     add = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
     return (add,)""",
         )

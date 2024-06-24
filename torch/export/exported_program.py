@@ -6,6 +6,7 @@ import re
 import types
 import warnings
 from collections import namedtuple
+from contextlib import contextmanager
 from typing import (
     Any,
     Callable,
@@ -34,6 +35,7 @@ if TYPE_CHECKING:
 
 import torch
 import torch.utils._pytree as pytree
+from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.export._tree_utils import is_equivalent, reorder_kwargs
 from torch.fx._compatibility import compatibility
 
@@ -116,6 +118,130 @@ def _fx_collection_equivalence_fn(
         return spec1_context == spec2_context
 
     return spec1_type is spec2_type and spec1_context == spec2_context
+
+
+def _skip_autograd_kernel(*args, **kwargs):
+    kernel = kwargs["kernel"]
+    del kwargs["kernel"]
+    with torch._C._AutoDispatchBelowAutograd():
+        result = kernel(*args, **kwargs)
+        # TODO (tmanlaibaatar) Remove this as it is copied from torch/_higher_order_ops/utils.py
+        # Ideally it should re-use the custom op autograd error directly
+        flat_operands = pytree.arg_tree_leaves(*args)
+        if torch.is_grad_enabled() and any(
+            f.requires_grad for f in flat_operands if isinstance(f, torch.Tensor)
+        ):
+            err_fn = torch._C._functions.DelayedError(
+                f"Autograd not implemented for {str(kernel)}",
+                1,
+            )
+
+            def fake_requires_grad(tensor):
+                if torch.is_floating_point(tensor) or torch.is_complex(tensor):
+                    tensor = tensor.detach()
+                    tensor.requires_grad = True
+                return tensor
+
+            return pytree.tree_map_only(
+                torch.Tensor, lambda x: err_fn(fake_requires_grad(x)), result
+            )
+        return result
+
+
+def _register_cia_to_meta(*args, **kwargs):
+    kernel = kwargs["kernel"]
+    del kwargs["kernel"]
+    if torch._C._dispatch_has_kernel_for_dispatch_key(
+        kernel.name(), torch._C.DispatchKey.CompositeImplicitAutograd
+    ):
+        return kernel._op_dk(
+            torch._C.DispatchKey.CompositeImplicitAutograd, *args, **kwargs
+        )
+    else:
+        return NotImplemented
+
+
+@contextmanager
+def override_composite_implicit_decomp(ops_to_preserve):
+    # This function overrides CompositeImplicitAutograd decomp for
+    # functional composite ops that user specified. Ideally we want to not-decompose
+    # ALL composite ops but today's C++ functinalization relies on
+    # the fact that it is working with the opset after decomp is run.
+    # Hence we can only do it for functional ops. One caveat is that
+    # there are some composite ops that lie about their schema (claimed to be
+    # functional but not really aka dropout), for these cases, we just decompose.
+    saved_tables = {}
+    patched_ops = set()
+    for op_overload in ops_to_preserve:
+        # Our strategy for deciding if we can preserve CIA is following:
+        # 1. The op should be known statically that it is functional
+        # 2. If it is maybe aliasing, we decompose because we must know if an op
+        #    is mutating or aliasing.
+        # TODO (tmanlaibaatar) make this utility function and share it with functional_tensor
+        # decomp part.
+        def can_preserve(op_overload):
+            if op_overload in FunctionalTensor.maybe_aliasing_or_mutating_ops:
+                return False
+            if op_overload in FunctionalTensor.metadata_fns:
+                return False
+
+            alias_info = len(
+                [i for i in op_overload._schema.arguments if i.alias_info is not None]
+            )
+
+            is_mutating_or_aliasing = alias_info != 0 or op_overload._schema.is_mutable
+
+            if is_mutating_or_aliasing:
+                return False
+
+            if not torch._C._dispatch_has_kernel(op_overload.name()):
+                return False
+
+            if not torch._C._dispatch_has_kernel_for_dispatch_key(
+                op_overload.name(), torch._C.DispatchKey.CompositeImplicitAutograd
+            ):
+                return False
+
+            return True
+
+        if not can_preserve(op_overload):
+            # TODO (tmanlaibaatar) Better error message
+            raise RuntimeError(
+                f"We can't preserve {op_overload} in export, because it doesn't pass our safety check."
+            )
+
+        saved_tables[op_overload] = op_overload.py_kernels.copy()
+        patched_ops.add(op_overload)
+        for override_dispatch_key in [
+            torch._C.DispatchKey.AutogradCPU,
+            torch._C.DispatchKey.AutogradCUDA,
+            torch._C.DispatchKey.AutogradMeta,
+        ]:
+            if override_dispatch_key not in op_overload.py_kernels:
+                # conv1d, conv2d, conv3d don't work with default Autograd key
+                op_overload.py_impl(override_dispatch_key)(
+                    functools.partial(_skip_autograd_kernel, kernel=op_overload)
+                )
+        if torch._C.DispatchKey.CompositeImplicitAutograd in op_overload.py_kernels:
+            del op_overload.py_kernels[torch._C.DispatchKey.CompositeImplicitAutograd]
+
+        def _(*args, **kwargs):
+            return NotImplemented
+
+        op_overload.py_impl(torch._C.DispatchKey.CompositeImplicitAutograd)(_)
+
+        # For fake tensor prop, we do want to register meta kernel directly
+        if torch._C.DispatchKey.Meta not in op_overload.py_kernels:
+            op_overload.py_impl(torch._C.DispatchKey.Meta)(
+                functools.partial(_register_cia_to_meta, kernel=op_overload)
+            )
+    try:
+        yield
+    finally:
+        for op in patched_ops:
+            op.py_kernels.clear()
+            op.py_kernels.update(saved_tables[op])
+            op._dispatch_cache.clear()
 
 
 def _rename_without_collisions(
@@ -526,7 +652,9 @@ class ExportedProgram:
 
     @_disable_prexisiting_fake_mode
     def run_decompositions(
-        self, decomp_table: Optional[Dict[torch._ops.OperatorBase, Callable]] = None
+        self,
+        decomp_table: Optional[Dict[torch._ops.OperatorBase, Callable]] = None,
+        _preserve_ops: Optional[List[torch._ops.OpOverload]] = None,
     ) -> "ExportedProgram":
         """
         Run a set of decompositions on the exported program and returns a new
@@ -554,6 +682,9 @@ class ExportedProgram:
         if decomp_table is None:
             decomp_table = core_aten_decompositions()
 
+        if _preserve_ops is None:
+            _preserve_ops = []
+
         old_placeholders = _get_placeholders(self.graph_module)
         fake_args = [node.meta["val"] for node in old_placeholders]
 
@@ -563,7 +694,9 @@ class ExportedProgram:
         # TODO(zhxhchen17) Return the new graph_signature directly.
         from torch.export._trace import _ignore_backend_decomps
 
-        with _ignore_backend_decomps():
+        with _ignore_backend_decomps(), override_composite_implicit_decomp(
+            _preserve_ops
+        ):
             gm, graph_signature = aot_export_module(
                 self.graph_module,
                 fake_args,
