@@ -41,7 +41,9 @@ def get_llvm_tool_path() -> str:
 
 def get_pytorch_folder() -> str:
     # TOOLS_FOLDER in oss: pytorch/tools/code_coverage
-    return os.path.abspath(os.environ.get("PYTORCH_FOLDER", str(TOOLS_FOLDER.parent.parent)))
+    return os.path.abspath(
+        os.environ.get("PYTORCH_FOLDER", os.path.dirname(os.path.dirname(TOOLS_FOLDER)))
+    )
 
 
 def detect_compiler_type() -> Optional[CompilerType]:
