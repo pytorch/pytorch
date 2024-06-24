@@ -71,7 +71,7 @@ from torch.testing._internal.common_utils import (
     xfail_inherited_tests,
     xfailIfTorchDynamo,
 )
-from torch.testing._internal.custom_tensor import CustomTensor
+from torch.testing._internal.custom_tensor import ConstantExtraMetadataTensor
 from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.optests import (
     _test_aot_autograd_forwards_backwards_helper,
@@ -805,16 +805,16 @@ def forward(self, primals_1):
             return x * x_elem * x_elem_elem * x_elem_metadata
 
         a = torch.ones(4, requires_grad=True)
-        custom_a = CustomTensor(a)
+        custom_a = ConstantExtraMetadataTensor(a)
         custom_a.constant_attribute = 6
-        custom_aa = CustomTensor(custom_a)
+        custom_aa = ConstantExtraMetadataTensor(custom_a)
         custom_aa.constant_attribute = 4
         out = f(custom_aa)
 
         out.sum().backward()
 
-        self.assertTrue(isinstance(custom_aa.grad, CustomTensor))
-        self.assertTrue(isinstance(custom_aa.grad.elem, CustomTensor))
+        self.assertTrue(isinstance(custom_aa.grad, ConstantExtraMetadataTensor))
+        self.assertTrue(isinstance(custom_aa.grad.elem, ConstantExtraMetadataTensor))
 
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/127470")
     def test_nested_subclasses_complicated_inps(self):

@@ -6,7 +6,7 @@ from torch.utils._python_dispatch import return_and_correct_aliasing
 
 
 # A simple tensor subclass that holds a tensor with custom metadata and custom method
-class CustomTensor(torch.Tensor):
+class ConstantExtraMetadataTensor(torch.Tensor):
     @staticmethod
     def __new__(cls, elem):
         shape = elem.shape
@@ -37,7 +37,7 @@ class CustomTensor(torch.Tensor):
     def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
         assert meta is not None
         elem = inner_tensors["elem"]
-        out = CustomTensor(elem)
+        out = ConstantExtraMetadataTensor(elem)
         out.constant_attribute = meta
         return out
 
@@ -45,25 +45,23 @@ class CustomTensor(torch.Tensor):
     def __torch_dispatch__(cls, func, types, args, kwargs):
         if kwargs is None:
             kwargs = {}
-        args_inner = pytree.tree_map_only(CustomTensor, lambda x: x.elem, args)
+        args_inner = pytree.tree_map_only(
+            ConstantExtraMetadataTensor, lambda x: x.elem, args
+        )
 
-        kwargs_inner = pytree.tree_map_only(CustomTensor, lambda x: x.elem, kwargs)
+        kwargs_inner = pytree.tree_map_only(
+            ConstantExtraMetadataTensor, lambda x: x.elem, kwargs
+        )
 
         out_inner = func(*args_inner, **kwargs_inner)
         out_inner_flat, spec = pytree.tree_flatten(out_inner)
         # for aten ops that return non-tensors, just assume that
         # our cust inner tensors return the same value
         out_flat = [
-            CustomTensor(o_inner) if isinstance(o_inner, torch.Tensor) else o_inner
+            ConstantExtraMetadataTensor(o_inner)
+            if isinstance(o_inner, torch.Tensor)
+            else o_inner
             for o_inner in out_inner_flat
         ]
         out = pytree.tree_unflatten(out_flat, spec)
         return return_and_correct_aliasing(func, args, kwargs, out)
-
-
-class CustomTensorMode(torch.utils._python_dispatch.TorchDispatchMode):
-    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        out = func(*args, **kwargs)
-        if torch._subclasses.fake_tensor._is_tensor_constructor(func):
-            out = CustomTensor(out, out.clone())
-        return out
