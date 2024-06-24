@@ -3786,7 +3786,7 @@ class InputsKernel(OperationBuffer):
         return dependencies.StarDep(x.get_name())
 
     def get_read_writes(self):
-        reads = set()
+        reads: Set[Dep] = set()
         StarDep = dependencies.StarDep
         for input in self.inputs:
             if isinstance(input, list):
@@ -3794,7 +3794,7 @@ class InputsKernel(OperationBuffer):
             else:
                 reads.add(StarDep(input.get_name()))
 
-        writes = {StarDep(buf.get_name()) for buf in self.get_outputs()}
+        writes: Set[Dep] = {StarDep(buf.get_name()) for buf in self.get_outputs()}
 
         return dependencies.ReadWrites(
             reads=reads,
@@ -4851,7 +4851,7 @@ class MutationOperation(InputsKernel):
     def __init__(self, layout, mutated_node, node_doing_mutating):
         super().__init__(None, layout, inputs=[node_doing_mutating])
         self.device = node_doing_mutating.get_device()
-        self.outputs = [MutationOutput(layout, mutated_node, self)]
+        self.outputs: List[Buffer] = [MutationOutput(layout, mutated_node, self)]
         V.graph.register_operation(self)
 
     def get_device(self):
