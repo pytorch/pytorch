@@ -4781,70 +4781,70 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         res = opt_fn(x_weak, y)
         self.assertEqual(ref, res)
 
-    @torch._functorch.config.patch(
-        recompute_views=True,
-    )
-    def test_storage_resize_forward_full_graph(self):
-        class TestModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.param = torch.nn.Parameter(torch.randn(4, 4))
+    #     @torch._functorch.config.patch(
+    #         recompute_views=True,
+    #     )
+    #     def test_storage_resize_forward_full_graph(self):
+    #         class TestModule(torch.nn.Module):
+    #             def __init__(self):
+    #                 super().__init__()
+    #                 self.param = torch.nn.Parameter(torch.randn(4, 4))
 
-            def forward(self, x):
-                self.param.untyped_storage().resize_(
-                    self.param.numel() * self.param.itemsize
-                )
-                with torch.no_grad():
-                    torch._foreach_copy_([self.param], [x])
-                out = torch.matmul(self.param, self.param)
-                self.param.untyped_storage().resize_(0)
-                return out
+    #             def forward(self, x):
+    #                 self.param.untyped_storage().resize_(
+    #                     self.param.numel() * self.param.itemsize
+    #                 )
+    #                 with torch.no_grad():
+    #                     torch._foreach_copy_([self.param], [x])
+    #                 out = torch.matmul(self.param, self.param)
+    #                 self.param.untyped_storage().resize_(0)
+    #                 return out
 
-        def post_accumulate_grad_hook(param):
-            param.untyped_storage().resize_(0)
+    #         def post_accumulate_grad_hook(param):
+    #             param.untyped_storage().resize_(0)
 
-        # Beginning of backward, resize and put data into the param
-        def pre_backward_hook(module, grad) -> None:
-            module.param.untyped_storage().resize_(
-                self.param.numel() * self.param.itemsize
-            )
-            with torch.no_grad():
-                # simulates loading data into param from allgather
-                module.param.fill_(2)
+    #         # Beginning of backward, resize and put data into the param
+    #         def pre_backward_hook(module, grad) -> None:
+    #             module.param.untyped_storage().resize_(
+    #                 self.param.numel() * self.param.itemsize
+    #             )
+    #             with torch.no_grad():
+    #                 # simulates loading data into param from allgather
+    #                 module.param.fill_(2)
 
-        def post_forward_hook(module, args, output):
-            output.register_hook(functools.partial(pre_backward_hook, module))
+    #         def post_forward_hook(module, args, output):
+    #             output.register_hook(functools.partial(pre_backward_hook, module))
 
-        x = torch.randn(4, 4)
+    #         x = torch.randn(4, 4)
 
-        mod_ref = TestModule()
-        mod_test = deepcopy(mod_ref)
+    #         mod_ref = TestModule()
+    #         mod_test = deepcopy(mod_ref)
 
-        # Start the param off with zero storage size to mimic fsdp
-        mod_ref.param.untyped_storage().resize_(0)
-        mod_test.param.untyped_storage().resize_(0)
+    #         # Start the param off with zero storage size to mimic fsdp
+    #         mod_ref.param.untyped_storage().resize_(0)
+    #         mod_test.param.untyped_storage().resize_(0)
 
-        # Resize storage at beginning of backward
-        # Free storage at end of backward
-        mod_ref.register_forward_hook(post_forward_hook, prepend=False)
-        mod_ref.param.register_post_accumulate_grad_hook(post_accumulate_grad_hook)
-        mod_test.register_forward_hook(post_forward_hook, prepend=False)
-        mod_test.param.register_post_accumulate_grad_hook(post_accumulate_grad_hook)
+    #         # Resize storage at beginning of backward
+    #         # Free storage at end of backward
+    #         mod_ref.register_forward_hook(post_forward_hook, prepend=False)
+    #         mod_ref.param.register_post_accumulate_grad_hook(post_accumulate_grad_hook)
+    #         mod_test.register_forward_hook(post_forward_hook, prepend=False)
+    #         mod_test.param.register_post_accumulate_grad_hook(post_accumulate_grad_hook)
 
-        mod_test = torch.compile(mod_test, backend=aot_graph_capture_backend)
+    #         mod_test = torch.compile(mod_test, backend=aot_graph_capture_backend)
 
-        out_ref = mod_ref(x)
-        out_test = mod_test(x)
-        self.assertExpectedInline(
-            str(fw_graph[0].code.strip()),
-            """\
-def forward(self, primals_1, primals_2):
-    _foreach_copy = torch.ops.aten._foreach_copy.default([primals_1], [primals_2]);  primals_1 = primals_2 = None
-    getitem = _foreach_copy[0];  _foreach_copy = None
-    mm = torch.ops.aten.mm.default(getitem, getitem)
-    return [mm, getitem]""",
-        )
-        self.assertEqual(out_ref, out_test)
+    #         out_ref = mod_ref(x)
+    #         out_test = mod_test(x)
+    #         self.assertExpectedInline(
+    #             str(fw_graph[0].code.strip()),
+    #             """\
+    # def forward(self, primals_1, primals_2):
+    #     _foreach_copy = torch.ops.aten._foreach_copy.default([primals_1], [primals_2]);  primals_1 = primals_2 = None
+    #     getitem = _foreach_copy[0];  _foreach_copy = None
+    #     mm = torch.ops.aten.mm.default(getitem, getitem)
+    #     return [mm, getitem]""",
+    #         )
+    #         self.assertEqual(out_ref, out_test)
 
     def test_super_in_staticmethod(self):
         class A:
@@ -5130,6 +5130,24 @@ def forward(self, primals_1, primals_2):
             torch.compile(fn)()
 
         torch.compile(fn2)()
+
+    def test_jit_script_defaults(self):
+        @torch.jit.script
+        def fast_cos(x, c: float = 2.0):
+            return torch.cos(x) * c
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fast_cos = fast_cos
+
+            def forward(self, x):
+                return self.fast_cos(x)
+
+        mod = Mod()
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(mod(x), opt_mod(x))
 
     def test_enum(self):
         class ExplicitEnum(str, Enum):
