@@ -8,6 +8,7 @@ import torch._dynamo
 import torch._dynamo.test_case
 
 import torch._functorch._aot_autograd
+from torch._dynamo import config as dynamo_config
 from torch._dynamo.utils import counters
 from torch._functorch import config as functorch_config
 from torch._functorch._aot_autograd.autograd_cache import (
@@ -142,6 +143,51 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
 
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @dynamo_config.patch("compiled_autograd", True)
+    def test_compiled_autograd_bypass(self):
+        def fn(a, b):
+            out = a.cos() + b
+            loss = out.sum()
+            ga, gb = torch.autograd.grad(loss, inputs=[a, b])
+
+        a = torch.randn(25, requires_grad=True)
+        b = torch.randn(25, requires_grad=True)
+        a2 = a.detach().clone().requires_grad_(True)
+        b2 = b.detach().clone().requires_grad_(True)
+        compiled_fn = torch.compile(fn, backend="inductor")
+        self.assertEqual(fn(a, b), compiled_fn(a2, b2))
+        self.assertEqual(
+            counters["aot_autograd"]["autograd_cache_miss"], 1
+        )  # from compiled forward
+        self.assertEqual(
+            counters["aot_autograd"]["autograd_cache_bypass"], 1
+        )  # from compiled autograd
+
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @dynamo_config.patch("compiled_autograd", True)
+    def test_inference_graph_cache_hit_with_compiled_autograd_enabled(self):
+        def fn(a, b):
+            out = a.cos() + b
+            return out.sum()
+
+        a = torch.randn(25)
+        b = torch.randn(25)
+        compiled_fn = torch.compile(fn, backend="inductor")
+        self.assertEqual(fn(a, b), compiled_fn(a, b))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+        # Clear dynamo and run again. Should be a cache hit.
+        counters.clear()
+        self._clear_dynamo_and_codecache()
+        self.assertEqual(fn(a, b), compiled_fn(a, b))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
+
     @inductor_config.patch({"fx_graph_cache": True})
     @functorch_config.patch({"enable_autograd_cache": True})
     def test_autograd_lazy_backward(self):
@@ -241,9 +287,10 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
     @largeTensorTest("64GB", device=GPU_TYPE)
     @parametrize("device", (GPU_TYPE,))
     @parametrize("dtype", (torch.float16, torch.bfloat16))
+    @parametrize("requires_grad", (True, False))
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
-    def test_autograd_inductor_guards(self, device, dtype):
+    def test_autograd_inductor_guards(self, device, dtype, requires_grad):
         """
         Tests that functions that would add inductor guards are cached properly
         """
@@ -268,8 +315,12 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
         )
         expected_hits = expected_misses = expected_saves = 0
         for a_shape, b_shape in shapes:
-            a = torch.rand(a_shape, device=device, dtype=dtype)
-            b = torch.rand(b_shape, device=device, dtype=dtype)
+            a = torch.rand(
+                a_shape, device=device, dtype=dtype, requires_grad=requires_grad
+            )
+            b = torch.rand(
+                b_shape, device=device, dtype=dtype, requires_grad=requires_grad
+            )
 
             # AVOID a dynamo reset here. We expect guards to have been
             # added that will be violated with the new shape. We should
@@ -281,17 +332,28 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
             # Once we allow tensors with symints as part of the cache key calculation, it will
             # instead cache miss because of guard failure.
             expected_misses += 1
-            expected_saves += 1
+
             self.assertEqual(
                 counters["aot_autograd"]["autograd_cache_miss"], expected_misses
             )
             self.assertEqual(
                 counters["aot_autograd"]["autograd_cache_hit"], expected_hits
             )
+            # Because dynamic shapes are enabled, we expect backwards to be compiled ahead of time
+            # So we should see a cache save here
+            expected_saves += 1
             self.assertEqual(
                 counters["aot_autograd"]["autograd_cache_saved"], expected_saves
             )
+            if requires_grad:
+                res1[0].sum().backward()
+                # No extra saves
+                self.assertEqual(
+                    counters["aot_autograd"]["autograd_cache_saved"], expected_saves
+                )
 
+            a2 = a.detach().clone().requires_grad_(requires_grad)
+            b2 = b.detach().clone().requires_grad_(requires_grad)
             # A second call should hit. (First reset so in-memory guards
             # don't prevent compilation).
 
@@ -299,7 +361,7 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
             # This should populate guards to dynamo's cache, so that a subsequent run with a different
             # shape will still trigger a second call to autograd_cache.
             self._clear_dynamo_and_codecache()
-            res2 = compiled_fn(a, b)
+            res2 = compiled_fn(a2, b2)
             expected_hits += 1
             self.assertEqual(
                 counters["aot_autograd"]["autograd_cache_miss"], expected_misses
@@ -311,6 +373,9 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
                 counters["aot_autograd"]["autograd_cache_saved"], expected_saves
             )
             self.assertEqual(res1, res2)
+            if requires_grad:
+                res2[0].sum().backward()
+                self.assertEqual(a.grad, a2.grad)
 
 
 @inductor_config.patch("fx_graph_cache", True)

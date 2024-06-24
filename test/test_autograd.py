@@ -9342,6 +9342,63 @@ for shape in [(1,), ()]:
             out = Func.apply(a)
         out.backward()
 
+    def test_unpack_hooks_exec_count(self):
+        def f(x, y):
+            return x * y
+
+        pack_count = 0
+        unpack_count = 0
+
+        def pack_hook(x):
+            nonlocal pack_count
+            pack_count += 1
+            return x
+
+        # unpack hook shouldn't run during compilation, while we trace the forward
+        def unpack_hook(x):
+            nonlocal unpack_count
+            unpack_count += 1
+            return x
+
+        x = torch.ones(4, requires_grad=True)
+        y = torch.ones(4, requires_grad=False)
+        with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
+            out_test = f(x, y)
+            self.assertEqual(pack_count, 1)
+            self.assertEqual(unpack_count, 0)
+            out_test.sum().backward()
+            self.assertEqual(pack_count, 1)
+            self.assertEqual(unpack_count, 1)
+
+    def test_save_tensor_hook_version_counter_not_shared(self):
+        class Test(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x.sin()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (x,) = ctx.saved_tensors
+                before = a._version
+                x.add_(1)
+                self.assertEqual(a._version, before)
+                return grad_output
+
+        a = torch.tensor(1.0, requires_grad=True)
+        a_replacement = a.clone()
+
+        def pack_hook(x):
+            return a_replacement
+
+        def unpack_hook(x):
+            return x
+
+        with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
+            b = Test.apply(a)
+
+        b.backward()
+
     def test_save_on_cpu_and_checkpoint(self):
         a = torch.randn(2, 2, requires_grad=True)
 
@@ -13252,6 +13309,17 @@ class TestSelectiveActivationCheckpoint(TestCase):
             out = checkpoint(fn, x, y, use_reentrant=False, context_fn=context_fn)
             return out
 
+        def policy_fn_bool(ctx, op, *args, **kwargs):
+            return op == torch.ops.aten.mm.default
+
+        def fn_sac3(x, y):
+            context_fn = functools.partial(
+                create_selective_checkpoint_contexts,
+                policy_fn_bool,
+            )
+            out = checkpoint(fn, x, y, use_reentrant=False, context_fn=context_fn)
+            return out
+
         act_mem_noac = get_act_mem(lambda: fn(x, y))
         bw_flops_noac = get_bw_flops(lambda: fn(x, y))
 
@@ -13275,6 +13343,103 @@ class TestSelectiveActivationCheckpoint(TestCase):
 
         self.assertEqual(act_mem_sac2, 1.0)
         self.assertEqual(bw_flops_sac2, 2.0)
+
+        act_mem_sac3 = get_act_mem(lambda: fn_sac3(x, y))
+        bw_flops_sac3 = get_bw_flops(lambda: fn_sac3(x, y))
+
+        self.assertEqual(act_mem_sac3, 1.0)
+        self.assertEqual(bw_flops_sac3, 2.0)
+
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
+    def test_output_already_has_autograd_meta(self):
+        # View of tensor of non-differentiable dtype still has AutogradMeta
+        def fn(x, y):
+            return x.view(-1), y.sin().cos()
+
+        x = torch.tensor([1, 2, 3], dtype=torch.int64)
+        y = torch.randn(3, requires_grad=True)
+
+        context_fn = functools.partial(
+            create_selective_checkpoint_contexts,
+            [
+                torch.ops.aten.view.default,
+            ],
+        )
+        out = checkpoint(fn, x, y, use_reentrant=False, context_fn=context_fn)
+        out[1].sum().backward()
+
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
+    def test_subclass_dispatching_sizes(self):
+        # Test that we ignore ops that grab metadata like torch.ops.aten.sym_size.default
+        # Caching such metadata ops can be problematic when the following are satisfied:
+        #
+        # 1. size/strides are dispatched upon
+        # 2. our policy saves sizes
+        ta = torch.randn(6, 2)
+
+        class CustomSizeDynamicShapesTensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls, inner):
+                return torch.Tensor._make_wrapper_subclass(
+                    # TODO: right now, _make_wrapper_subclass's dynamic shape interaction is not great.
+                    # Calling the overload that has kwargs causes us to go down the first overload path,
+                    # which will **always** specialize sizes.
+                    # We should probably eventually fix this so that the first overload can just handle dynamic shapes.
+                    cls,
+                    inner.size(),
+                    inner.stride(),
+                    None,
+                    None,
+                    inner.dtype,
+                    inner.layout,
+                    inner.device,
+                    False,
+                    inner.requires_grad,
+                    "sizes",
+                )
+
+            def __init__(self, inner):
+                self.inner = inner
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                if kwargs is None:
+                    kwargs = {}
+                args_inner = torch.utils._pytree.tree_map_only(
+                    cls, lambda x: x.inner, args
+                )
+                out_inner = func(*args_inner, **kwargs)
+                return torch.utils._pytree.tree_map_only(
+                    torch.Tensor, lambda x: cls(x), out_inner
+                )
+
+        def policy_fn(ctx, op, *args, **kwargs):
+            if op is torch.ops.aten.sym_size.default:
+                # Silently ignored!
+                return CheckpointPolicy.MUST_SAVE
+            else:
+                return CheckpointPolicy.PREFER_RECOMPUTE
+
+        def fn(x):
+            # We avoid the following case
+            #
+            # saved     :[4, 3], [], [], [4, 3], [4, 3], [4, 3], [12]
+            # forward   :sum   ,sum,mul, mul   , mul   ,view   , view
+            # recompute :sum   ,sum,mul, view  , view
+            #
+            # Views save the shape of their input, so we expect the second
+            # view to save 12, but because during AC packing during forward
+            # saves the shapes of the input for metadata checks later,
+            # we would save the wrong shape during the recompute.
+            view_out = (x * x.sum()).view(-1).view(4, 3)
+            self.assertEqual(view_out.grad_fn._saved_self_sym_sizes, [12])
+            return view_out.exp()
+
+        x = torch.randn(4, 3, requires_grad=True)
+        x_wrapper = CustomSizeDynamicShapesTensor(x)
+        context_fn = functools.partial(create_selective_checkpoint_contexts, policy_fn)
+        out = checkpoint(fn, x_wrapper, use_reentrant=False, context_fn=context_fn)
+        out.sum().backward()
 
     def test_bad_inputs(self):
         bad_op_list1 = [2]
@@ -13333,39 +13498,64 @@ class TestSelectiveActivationCheckpoint(TestCase):
 
     @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
     def test_storage_lifetime(self):
-        # The storage object saved by SAC survives as long as the graph is alive
-        # graph -> the saved variable hooks -> recompute_context -> storage
-        # However, we make sure to eagerly free any cached objects upon use.
+        from torch.utils._python_dispatch import _get_current_dispatch_mode
+        from torch.utils.checkpoint import (
+            _CachedTorchDispatchMode,
+            _CachingTorchDispatchMode,
+        )
+
         def policy_fn(ctx, op, *args, **kwargs):
-            if op == torch.ops.aten.sin.default:
-                return CheckpointPolicy.MUST_SAVE
-            else:
-                return CheckpointPolicy.PREFER_RECOMPUTE
+            return CheckpointPolicy.MUST_SAVE
 
         ref = None
 
-        # This hook fires after unpack is triggered.
-        def hook(x):
-            self.assertIsNone(ref())
-
         def fn(x):
             nonlocal ref
-            # IMPORTANT: the tensor object saved is the same exact tensor
-            # object as the output only when the tensor does not require grad.
-            # Detach, so we can conveniently access the reference here.
-            sin_out = x.detach().sin()
-            ref = weakref.ref(sin_out)
+
+            self.assertIsInstance(
+                _get_current_dispatch_mode(),
+                (_CachingTorchDispatchMode, _CachedTorchDispatchMode),
+            )
 
             out = x.cos().exp()
-            out.register_hook(hook)
-            return out.cos()
 
-        x = torch.randn(3, requires_grad=True)
-        context_fn = functools.partial(create_selective_checkpoint_contexts, policy_fn)
-        out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
-        self.assertIsNotNone(ref())
-        out.sum().backward()
-        self.assertIsNone(ref())
+            if isinstance(_get_current_dispatch_mode(), _CachingTorchDispatchMode):
+                raw_val = (
+                    _get_current_dispatch_mode()
+                    .storage[torch.ops.aten.exp.default][0]
+                    .val
+                )
+                # ref should've been detached
+                # to avoid graph -> the saved variable hooks -> recompute_context -> storage -> graph
+                self.assertFalse(raw_val.requires_grad)
+                ref = weakref.ref(raw_val)
+
+            # Careful for early-stop
+            return out.sin()
+
+        with disable_gc():
+            # Case 1: If graph goes away without backward, make sure there's no reference cycle
+            #         keeping storage alive.
+            x = torch.randn(3, requires_grad=True)
+            context_fn = functools.partial(
+                create_selective_checkpoint_contexts, policy_fn
+            )
+            out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
+            self.assertIsNotNone(ref())
+            del out
+            self.assertIsNone(ref())
+
+            # Case 2: After backward, even if retain_graph=True, the storage should go away
+            x = torch.randn(3, requires_grad=True)
+            context_fn = functools.partial(
+                create_selective_checkpoint_contexts, policy_fn
+            )
+            out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
+            self.assertIsNotNone(ref())
+            out.sum().backward(retain_graph=True)
+            # The dispatch mode's storage should still be alive, but the entries should've
+            # been cleared.
+            self.assertIsNone(ref())
 
     @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
     def test_version_counter(self):
