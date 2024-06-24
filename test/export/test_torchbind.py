@@ -714,7 +714,7 @@ def forward(self, token, p_linear_weight, p_linear_bias, tq, x):
     getitem_8 = with_effects_4[0];  with_effects_4 = None
     add_2 = torch.ops.aten.add.Tensor(getitem_7, 0);  getitem_7 = None
     add_3 = torch.ops.aten.add.Tensor(add_2, x);  add_2 = x = None
-    return (getitem_8, add_3, add_1, tq)""",
+    return (getitem_8, add_3, add_1, tq)""",  # noqa: B950
         )
         self.assertEqual(tq.size(), 2)
         self.assertTrue(tq.pop() is a)
