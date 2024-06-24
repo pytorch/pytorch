@@ -27,7 +27,7 @@ except ImportError:
     from yaml import Loader  # type: ignore[assignment, misc]
 
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+REPO_ROOT = pathlib.Path(__file__).absolute().parent.parent
 sys.path.append(str(REPO_ROOT))
 
 CPP_H_NAME = "spv.h"

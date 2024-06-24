@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: quantization"]
 
-import contextlib
 import re
+import contextlib
 from pathlib import Path
 
 import torch
@@ -50,7 +50,7 @@ class TestQuantizationDocs(QuantizationTestCase):
                 "been updated to have the correct relative path between "
                 "test_docs.py and the docs."
             )
-            pytorch_root = core_dir.parents[3 - 1]
+            pytorch_root = core_dir.parents[2]
             return pytorch_root / path_from_pytorch
 
         path_to_file = get_correct_path(path_from_pytorch)

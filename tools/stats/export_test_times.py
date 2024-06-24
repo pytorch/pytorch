@@ -2,7 +2,7 @@ import pathlib
 import sys
 
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[3 - 1]
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.append(str(REPO_ROOT))
 
 from tools.stats.import_test_stats import get_test_class_times, get_test_times

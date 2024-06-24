@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Set
 from unittest import mock
 
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[4 - 1]
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 sys.path.append(str(REPO_ROOT))
 
 from tools.test.heuristics.test_interface import TestTD
