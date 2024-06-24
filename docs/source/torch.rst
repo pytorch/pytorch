@@ -140,6 +140,28 @@ Indexing, Slicing, Joining, Mutating Ops
     vstack
     where
 
+.. _accelerators:
+
+Accelerators
+----------------------------------
+An accelerator is a specialized device designed to significantly enhace performance
+through parallel computation. It empolys a Stream/Event system to synchronize and
+control asynchronous operations effectively. Every accelerator should incorporate
+the concepts of `Device`, `Stream`, and `Event`. In PyTorch, `Accelerators` is mutually
+exclusive with all other accelerators.
+
+Device
+~~~~~~~~~~~~~~~~~~~~~~~~
+A host system can have multiple same types of accelerators. Stream and Events are in association with Device.
+
+Stream
+~~~~~~~~~~~~~~~~~~~~~~~~
+A first in first out (FIFO) queue of executing the respective tasks.
+
+Event
+~~~~~~~~~~~~~~~~~~~~~~~~
+Query and record Stream status to identify/control dependencies across Stream and measure timing.
+
 .. _generators:
 
 Generators
