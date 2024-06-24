@@ -5,6 +5,7 @@ from typing import Any, cast, Iterable, List, NoReturn, Optional, Union
 
 import torch
 import torch.nn as nn
+from torch.distributed import _make_nccl_premul_sum
 from torch.distributed._composable import contract
 from torch.distributed._tensor import DeviceMesh
 
@@ -328,6 +329,21 @@ class FSDPModule:
                 to wait all-gather streams on.
         """
         self._get_fsdp_state()._state_ctx.post_optim_event = event
+
+    def set_reduce_scatter_divide_factor(self, factor: float) -> None:
+        """
+        Sets a custom divide factor for the reduce-scatter. This becomes a
+        custom reduce op using NCCL's PreMulSum, which allows multiplying by
+        the factor before reduction.
+
+        Args:
+            factor (float): Custom divide factor.
+        """
+        state = self._get_fsdp_state()
+        if (fsdp_param_group := state._fsdp_param_group) is not None:
+            mul_factor = 1.0 / float(factor)
+            reduce_op = _make_nccl_premul_sum(mul_factor)
+            fsdp_param_group.reduce_scatter_reduce_op = reduce_op
 
     def _get_fsdp_state(self) -> FSDPState:
         if (state := _get_module_fsdp_state(cast(nn.Module, self))) is None:
