@@ -1264,43 +1264,38 @@ class DeviceCachingAllocator {
       });
     }
 
-    // Skip unmapped expandable segments when reapplying checkpoints
-    if (block->mapped) {
-      block->allocated = true;
-      block->requested_size = orig_size;
+    block->allocated = true;
+    block->requested_size = orig_size;
 
-      block->context_when_allocated = std::move(context);
-      record_trace(
-          TraceEntry::ALLOC,
-          int64_t(block->ptr),
-          orig_size,
-          block->stream,
-          block->device,
-          block->context_when_allocated);
+    block->context_when_allocated = std::move(context);
+    record_trace(
+        TraceEntry::ALLOC,
+        int64_t(block->ptr),
+        orig_size,
+        block->stream,
+        block->device,
+        block->context_when_allocated);
 
-      // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-      bool inserted = active_blocks.insert(block).second;
-      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
+    bool inserted = active_blocks.insert(block).second;
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
 
-      for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
-        increase_stat(stats.allocation[stat_type], 1);
-        increase_stat(stats.allocated_bytes[stat_type], block->size);
-        increase_stat(stats.active[stat_type], 1);
-        increase_stat(stats.active_bytes[stat_type], block->size);
-        increase_stat(stats.requested_bytes[stat_type], block->requested_size);
-      });
-      if (block->size >= CUDAAllocatorConfig::max_split_size())
-        increase_stat(stats.oversize_allocations, 1);
+    for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
+      increase_stat(stats.allocation[stat_type], 1);
+      increase_stat(stats.allocated_bytes[stat_type], block->size);
+      increase_stat(stats.active[stat_type], 1);
+      increase_stat(stats.active_bytes[stat_type], block->size);
+      increase_stat(stats.requested_bytes[stat_type], block->requested_size);
+    });
+    if (block->size >= CUDAAllocatorConfig::max_split_size())
+      increase_stat(stats.oversize_allocations, 1);
 
-      c10::reportMemoryUsageToProfiler(
-          block->ptr,
-          static_cast<int64_t>(block->size),
-          stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)]
-              .current,
-          stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)]
-              .current,
-          c10::Device(c10::DeviceType::CUDA, device));
-    }
+    c10::reportMemoryUsageToProfiler(
+        block->ptr,
+        static_cast<int64_t>(block->size),
+        stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
+        stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
+        c10::Device(c10::DeviceType::CUDA, device));
 
     return block;
   }
@@ -1548,6 +1543,16 @@ class DeviceCachingAllocator {
 
     // allocate all blocks in the segment
     for (size_t i = 0; i < segment_len; ++i) {
+      // The last block in every expandable segment is the remaining amount of
+      // available unmapped virtual address space. We shouldn't change it but
+      // instead check it is correctly formed then skip over allocating it.
+      if (i == segment_len - 1 && curr_block->expandable_segment_) {
+        TORCH_CHECK(curr_block->next == nullptr);
+        TORCH_CHECK(curr_block->mapped == false);
+        TORCH_CHECK(curr_block->allocated == false);
+        continue;
+      }
+
       auto& block_state = segment.blocks.at(i);
       AllocParams params(
           block_state.device,
@@ -1562,14 +1567,9 @@ class DeviceCachingAllocator {
 
       // splitting a block depends on `max_split_size`, which may have changed
       // between whe checkpoint was taken and now, so we make sure to recreate
-      // the behavior from the checkpoint. Prevent an edge case with expandable
-      // segments where it splits a block to create a size zero block. This
-      // isn't already prevented by the check for not splitting the last block
-      // in a segment because the last block in an expandable segment is the
-      // unmapped block that holds enough virtual address space to map the
-      // entire physical memory of the GPU.
-      bool split = (i + 1) < segment.blocks.size() &&
-          curr_block->size - block_state.size > 0;
+      // the behavior from the checkpoint. Keep splitting as long as there is
+      // space in the block.
+      bool split = curr_block->size - block_state.size > 0;
 
       // curr_block will become next pointer if it is split, so reassign with
       // the returned value
