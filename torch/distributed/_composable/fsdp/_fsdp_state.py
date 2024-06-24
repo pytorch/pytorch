@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
+import logging
 
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
@@ -19,6 +20,8 @@ from ._fsdp_param_group import FSDPCommContext, FSDPParamGroup
 
 if TYPE_CHECKING:
     from ._fsdp_param import FSDPParam
+
+logger = logging.getLogger("torch.distributed._composable.fsdp")
 
 
 class FSDPStateContext:
@@ -83,6 +86,7 @@ class FSDPState(_State):
         self._lazy_init()
         if self._state_ctx.iter_forward_root is not None:
             return args, kwargs
+        logger.debug("FSDP::root_pre_forward")
         self._state_ctx.iter_forward_root = self
         with torch.profiler.record_function("FSDP::root_pre_forward"):
             # Wait for optimizer before implicitly prefetched all-gathers
@@ -226,6 +230,7 @@ class FSDPState(_State):
         return grad
 
     def _root_post_backward_final_callback(self) -> None:
+        logger.debug("FSDP::root_post_backward")
         with torch.profiler.record_function("FSDP::root_post_backward_callback"):
             for state in self._state_ctx.all_states:
                 if state._fsdp_param_group and state._fsdp_param_group.is_unsharded:
