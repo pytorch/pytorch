@@ -4,7 +4,11 @@ import functools
 from typing import Dict, List, Optional, TYPE_CHECKING
 
 import torch
-from torch._dynamo.external_utils import call_backward, call_hook
+from torch._dynamo.external_utils import (
+    call_backward,
+    call_hook,
+    FakeCompiledAutogradEngine,
+)
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.utils import counters, lazy_format_graph_code, set_locals_to_steal
 from torch._logging import getArtifactLogger, trace_structured
@@ -255,6 +259,12 @@ class AutogradCompilerInstance:
         return []
 
     def end_capture(self, outputs):
+        self.fx_tracer.create_proxy(
+            "call_function",
+            FakeCompiledAutogradEngine._exec_final_callbacks_stub,
+            (),
+            {},
+        )
         self.stack.close()
         self.fx_tracer.create_node(
             "output",
@@ -286,10 +296,15 @@ class AutogradCompilerInstance:
         )
 
         def runtime_wrapper(compiled_fn, inputs, sizes, hooks):
-            for i in runtime_inputs_to_move:
-                inputs[i] = inputs[i].cuda()
+            global in_compiled_autograd_region
+            try:
+                in_compiled_autograd_region = True
+                for i in runtime_inputs_to_move:
+                    inputs[i] = inputs[i].pin_memory().cuda(non_blocking=True)
 
-            return compiled_fn(inputs, sizes, hooks)
+                return compiled_fn(inputs, sizes, hooks)
+            finally:
+                in_compiled_autograd_region = False
 
         return runtime_wrapper, self.compiler_fn(graph)
 
@@ -338,22 +353,11 @@ class AutogradCompilerInstance:
         set_stack_trace(new_stack_trace)
 
 
+# state of the autograd engine dispatch, kept in sync by enable/disable context managers
 compiled_autograd_enabled = False
 
-# We may have code like:
-# with enable(compiler_fn):
-#   ...
-#   with disable():
-#     ...
-#   ...
-# The disable() call just want to disable compiled autograd temporarily.
-# But overall the feature is enabled.
-#
-# The code covered by the disable context manager has no way to know if
-# compiled autograd is overall eanbled. Use another variable
-# compiled_autograd_enabled_count to indicate how many times compiled
-# autograd has been enabled in the call stack for this purpose.
-compiled_autograd_enabled_count = 0
+# global flag to check if we are processing graphs produced from a compiled autograd graph
+in_compiled_autograd_region = False
 
 
 @contextlib.contextmanager
@@ -363,14 +367,12 @@ def enable(compiler_fn):
     )
     if snapshot_verbose_logging_enabled():
         torch._C._dynamo.compiled_autograd.set_verbose_logger(cpp_verbose_log_fn)
-    global compiled_autograd_enabled, compiled_autograd_enabled_count
+    global compiled_autograd_enabled
     compiled_autograd_enabled = True
-    compiled_autograd_enabled_count += 1
     try:
         with torch.autograd.set_multithreading_enabled(False):
             yield
     finally:
-        compiled_autograd_enabled_count -= 1
         if not prior:
             compiled_autograd_enabled = False
         torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
@@ -392,6 +394,6 @@ def disable():
 # return to starting state of a new process
 def reset() -> None:
     compiled_autograd_enable = False
-    assert compiled_autograd_enabled_count == 0
+    assert not in_compiled_autograd_region
     torch._C._dynamo.compiled_autograd.set_autograd_compiler(None)
     torch._C._dynamo.compiled_autograd.set_verbose_logger(None)
