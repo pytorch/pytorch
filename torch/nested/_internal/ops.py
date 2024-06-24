@@ -480,6 +480,17 @@ def _nested_jagged_to_strided(func, *args, **kwargs):
 
     inp: NestedTensor = new_kwargs.pop("input")
 
+    # TODO: Figure out a better way to accomplish this?
+    if torch._subclasses.fake_tensor.is_fake(inp):
+        # NB: NST is not supported in PT2. Calling this op with garbage will hit the
+        # fake tensor unsupported impl and graph break.
+        return torch._nested_view_from_buffer(
+            inp._values.view(-1),
+            nested_size=inp._values,
+            nested_strides=inp._values,
+            offsets=inp._values,
+        )
+
     # Create a new C++ NT from the Python NestedTensor
     # Start by creating metadata needed by C++ NT
     ragged_source = inp.lengths() if inp.lengths() is not None else inp.offsets().diff()
