@@ -69,18 +69,13 @@ class TensorArg:
     name: str
     buffer: str
     dtype: torch.dtype
-    offset: sympy.Expr = sympy.Integer(0)  # c++ only
-    alias_of: Optional[str] = None  # halide only
+    offset: sympy.Expr = sympy.Integer(0)
 
 
 @dataclasses.dataclass
 class SizeArg:
     name: str
     expr: sympy.Expr
-
-    @property
-    def alias_of(self):
-        return None
 
 
 @dataclasses.dataclass
