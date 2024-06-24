@@ -666,7 +666,10 @@ from a multi-output view call"
         )
         user_outs = pytree.tree_map(from_fun, f_output_tangents)
 
-        if torch._dynamo.config.inline_inbuilt_nn_modules:
+        if (
+            torch._dynamo.config.inline_inbuilt_nn_modules
+            or torch._dynamo.compiled_autograd.in_compiled_autograd_region
+        ):
             static_parameter_input_indices = [
                 i
                 for i, arg in enumerate(flat_args)

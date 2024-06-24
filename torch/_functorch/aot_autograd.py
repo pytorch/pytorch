@@ -580,8 +580,10 @@ def create_aot_dispatcher_function(
 
                 output_and_mutation_safe = not any(
                     x.requires_grad
-                    # view operations preserve requires_grad even in no_grad.
-                    # Do not count aliases of inputs with requires_grad as reason to make a training graph.
+                    # view-type operations preserve requires_grad even in no_grad.
+                    # Do not count aliases of inputs with requires_grad as reason to make a training graph,
+                    # as AOTAutograd will perform view-replay to regenerate the view outputs at runtime,
+                    # setting their grad_fn properly.
                     and not (
                         x.output_type
                         in (OutputType.alias_of_input, OutputType.is_input)
@@ -609,9 +611,8 @@ def create_aot_dispatcher_function(
                     if req_subclass_dispatch:
                         fw_metadata = run_functionalized_fw_and_collect_metadata(
                             flat_fn,
-                            keep_input_mutations=aot_config.keep_inference_input_mutations
-                            and not needs_autograd,
-                            is_train=needs_autograd,
+                            keep_input_mutations=aot_config.keep_inference_input_mutations,
+                            is_train=False,
                             pre_dispatch=aot_config.pre_dispatch,
                         )(*fake_flat_args)
                     else:
@@ -619,14 +620,14 @@ def create_aot_dispatcher_function(
                             input_info=fw_metadata.input_info,
                             output_info=fw_metadata.output_info,
                             num_intermediate_bases=fw_metadata.num_intermediate_bases,
-                            keep_input_mutations=aot_config.keep_inference_input_mutations
-                            and not needs_autograd,
+                            keep_input_mutations=aot_config.keep_inference_input_mutations,
                             traced_tangents=fw_metadata.traced_tangents,
                             subclass_inp_meta=fw_metadata.subclass_inp_meta,
                             subclass_fw_graph_out_meta=fw_metadata.subclass_fw_graph_out_meta,
                             subclass_tangent_meta=fw_metadata.subclass_tangent_meta,
-                            is_train=needs_autograd,
+                            is_train=False,
                             tokens=fw_metadata.tokens,
+                            static_parameter_indices=fw_metadata.static_parameter_indices,
                         )
 
         if fw_metadata.num_intermediate_bases > 0:
