@@ -1108,9 +1108,8 @@ def load(
                 "the default pickle module implicitly. It is possible to construct malicious pickle data "
                 "which will execute arbitrary code during unpickling. In a future release, the default value "
                 "for `weights_only` will be flipped to `True`. This limits the functions that could be executed "
-                "during unpickling to those needed to rebuild state_dicts of nn.Module, Optimizers, and LRSchedulers. "
-                "Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly "
-                "allowlisted by the user via `torch.serialization.add_safe_globals`.",
+                "during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless "
+                "they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`.",
                 FutureWarning,
             )
             pickle_module = pickle
