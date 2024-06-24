@@ -538,17 +538,17 @@ def _get_torch_related_args(include_pytorch: bool, aot_mode: bool):
     libraries_dirs = [TORCH_LIB_PATH]
     libraries = []
 
-    if aot_mode:
-        if sys.platform != "darwin" and not config.is_fbcode():
+    if sys.platform != "darwin" and not config.is_fbcode():
+        if aot_mode:
             libraries.append("torch")
             libraries.append("torch_cpu")
             # libraries.append("torch_python")
 
-    if include_pytorch and not config.is_fbcode():
-        libraries.append("torch")
-        libraries.append("torch_cpu")
-        if not aot_mode:
-            libraries.append("torch_python")
+        if include_pytorch:
+            libraries.append("torch")
+            libraries.append("torch_cpu")
+            if not aot_mode:
+                libraries.append("torch_python")
 
     if _IS_WINDOWS:
         libraries.append("sleef")
