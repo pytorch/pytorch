@@ -332,10 +332,10 @@ def angle(x):
 
 @register_decomposition([aten.add])
 def add(x, y, *, alpha=None):
-    # Require both x and y to be tensors and at least one of them is complex typed.
-    if (not torch.is_tensor(x) or not torch.is_tensor(y)) or (
-        not x.is_complex() and not y.is_complex()
-    ):
+    # Require both x and y to be complex tensors.
+    x_is_complex_tensor = torch.is_tensor(x) and x.is_complex()
+    y_is_complex_tensor = torch.is_tensor(y) and y.is_complex()
+    if not x_is_complex_tensor or not y_is_complex_tensor:
         return NotImplemented
     z = y
     if alpha is not None:
@@ -361,18 +361,8 @@ def add(x, y, *, alpha=None):
         reshaped_tensor = tensor.view(new_shape)
         return reshaped_tensor
 
-    def reshape_tensor_real(tensor):
-        tensor_unsqueezed = tensor.unsqueeze(-1)
-        zeros = torch.zeros_like(tensor_unsqueezed)
-        return torch.cat((tensor_unsqueezed, zeros), dim=-1)
-
-    def reshape_tensor(tensor, real_type):
-        if tensor.is_complex():
-            return reshape_tensor_complex(tensor.view(real_type))
-        return reshape_tensor_real(tensor.view(real_type))
-
-    x_reshaped = reshape_tensor(x, x.real.dtype)
-    z_reshaped = reshape_tensor(z, y.real.dtype)
+    x_reshaped = reshape_tensor_complex(x.view(x.real.dtype))
+    z_reshaped = reshape_tensor_complex(z.view(y.real.dtype))
     result = torch.flatten(x_reshaped + z_reshaped, start_dim=-2).view(complex_type)
     return result
 
