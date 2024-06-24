@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import textwrap
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Tuple, Union
+from typing import Sequence
 
 from torchgen.api.types import DispatcherSignature
 from torchgen.api.types.signatures import CppSignature, CppSignatureGroup
@@ -69,7 +71,7 @@ base_type_to_callsite_expr = {
 
 
 # convert args to C types, names in declarations, and expressions in function bodies
-def convert_arg_type_and_name(typ: Type, name: str) -> Tuple[List[str], List[str], List[str], List[str]]:  # type: ignore[return]
+def convert_arg_type_and_name(typ: Type, name: str) -> tuple[list[str], list[str], list[str], list[str]]:  # type: ignore[return]
     if isinstance(typ, BaseType):
         if typ.name in base_type_to_c_type:
             return (
@@ -167,12 +169,12 @@ def convert_arg_type_and_name(typ: Type, name: str) -> Tuple[List[str], List[str
         )
 
 
-def zip_type_and_name(types: List[str], names: List[str]) -> List[str]:
+def zip_type_and_name(types: list[str], names: list[str]) -> list[str]:
     return [typ + " " + name for typ, name in zip(types, names)]
 
 
 # Generate argument declarations and callsite expressions
-def gen_arguments(flat_arguments: Sequence[Argument]) -> Tuple[List[str], List[str]]:
+def gen_arguments(flat_arguments: Sequence[Argument]) -> tuple[list[str], list[str]]:
     types = []
     new_names = []
     callsite_exprs = []
@@ -189,7 +191,7 @@ def gen_arguments(flat_arguments: Sequence[Argument]) -> Tuple[List[str], List[s
 # Return values are passed out as pointer arguments because all the C shim functions
 # are expected to return AOTITorchError.
 # Generate returns as declarations and callsite expressions
-def gen_returns(schema: FunctionSchema) -> Tuple[List[str], List[str]]:
+def gen_returns(schema: FunctionSchema) -> tuple[list[str], list[str]]:
     types = []
     names = []
     for idx, ret in enumerate(schema.returns):
@@ -222,7 +224,7 @@ def gen_returns(schema: FunctionSchema) -> Tuple[List[str], List[str]]:
             ret_pointer_can_be_null = True
             break
 
-    callsite_exprs: List[str] = []
+    callsite_exprs: list[str] = []
     for idx, ret in enumerate(schema.returns):
         tmp = "tmp_result" if len(names) == 1 else f"std::get<{idx}>(tmp_result)"
         assert isinstance(ret.type, BaseType)
@@ -236,12 +238,12 @@ def gen_returns(schema: FunctionSchema) -> Tuple[List[str], List[str]]:
 
 
 # gen.py generates header first and then src, so caching the result here to avoid duplicate work
-declaration_definition_cache: Dict[Tuple[str, str, str], Tuple[str, str]] = {}
+declaration_definition_cache: dict[tuple[str, str, str], tuple[str, str]] = {}
 
 
 def gen_declaration_and_definition(
     schema: FunctionSchema, device: str, backend_call: str
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
     func_name = schema.name.unambiguous_name()
 
     global declaration_definition_cache
@@ -254,7 +256,7 @@ def gen_declaration_and_definition(
         args, callsite_exprs = gen_arguments(
             [*schema.arguments.out, *schema.arguments.flat_non_out]
         )
-        ret_assignments: List[str] = []
+        ret_assignments: list[str] = []
     else:
         args, callsite_exprs = gen_arguments(schema.arguments.flat_all)
         # ignore return values for inplace ops
@@ -284,7 +286,7 @@ def gen_declaration_and_definition(
 
 
 def gen_static_dispatch_backend_call_signature(
-    sig: Union[CppSignature, DispatcherSignature],
+    sig: CppSignature | DispatcherSignature,
     f: NativeFunction,
 ) -> CppSignature:
     sig = DispatcherSignature.from_schema(f.func)
@@ -310,10 +312,10 @@ def gen_static_dispatch_backend_call(
 
 def get_backend_index_for_aoti(
     func: NativeFunction,
-    func_group_mapping: Dict[OperatorName, NativeFunctionsGroup],
+    func_group_mapping: dict[OperatorName, NativeFunctionsGroup],
     dispatch_key: DispatchKey,
-    backend_indices: Dict[DispatchKey, BackendIndex],
-) -> Optional[BackendIndex]:
+    backend_indices: dict[DispatchKey, BackendIndex],
+) -> BackendIndex | None:
     backend_index = None
     if backend_indices[dispatch_key].has_kernel(func) or (
         func.structured_delegate is not None
@@ -341,10 +343,10 @@ def get_backend_index_for_aoti(
 
 def get_header_for_aoti(
     func: NativeFunction,
-    func_group_mapping: Dict[OperatorName, NativeFunctionsGroup],
+    func_group_mapping: dict[OperatorName, NativeFunctionsGroup],
     dispatch_key: DispatchKey,
-    backend_indices: Dict[DispatchKey, BackendIndex],
-) -> Optional[str]:
+    backend_indices: dict[DispatchKey, BackendIndex],
+) -> str | None:
     backend_index = get_backend_index_for_aoti(
         func, func_group_mapping, dispatch_key, backend_indices
     )
@@ -365,11 +367,11 @@ def get_fallback_op_name(func: NativeFunction) -> str:
 
 def gen_c_shim(
     func: NativeFunction,
-    func_group_mapping: Dict[OperatorName, NativeFunctionsGroup],
+    func_group_mapping: dict[OperatorName, NativeFunctionsGroup],
     dispatch_key: DispatchKey,
-    backend_indices: Dict[DispatchKey, BackendIndex],
+    backend_indices: dict[DispatchKey, BackendIndex],
     header: bool,
-) -> Optional[str]:
+) -> str | None:
     backend_index = get_backend_index_for_aoti(
         func, func_group_mapping, dispatch_key, backend_indices
     )
@@ -399,16 +401,16 @@ def gen_c_shim(
 
 @dataclass(frozen=True)
 class ShimGenerator:
-    func_group_mapping: Dict[OperatorName, NativeFunctionsGroup]
+    func_group_mapping: dict[OperatorName, NativeFunctionsGroup]
     dispatch_key: DispatchKey
-    backend_indices: Dict[DispatchKey, BackendIndex]
+    backend_indices: dict[DispatchKey, BackendIndex]
     header: bool  # True to generate .h and False to generate .cpp
 
     @method_with_native_function
     def __call__(
         self,
         func: NativeFunction,
-    ) -> Optional[str]:
+    ) -> str | None:
         result = gen_c_shim(
             func,
             self.func_group_mapping,
@@ -421,9 +423,9 @@ class ShimGenerator:
 
 def gen_aoti_c_shim(
     native_functions: Sequence[NativeFunction],
-    func_group_mapping: Dict[OperatorName, NativeFunctionsGroup],
+    func_group_mapping: dict[OperatorName, NativeFunctionsGroup],
     dispatch_key: DispatchKey,
-    backend_indices: Dict[DispatchKey, BackendIndex],
+    backend_indices: dict[DispatchKey, BackendIndex],
     header: bool,
     includes: str = "",
 ) -> str:

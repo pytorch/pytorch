@@ -402,7 +402,9 @@ class NamespaceHelper:
     } // namespace torch
     """
 
-    def __init__(self, namespace_str: str, entity_name: str = "", max_level: int = 2):
+    def __init__(
+        self, namespace_str: str, entity_name: str = "", max_level: int = 2
+    ) -> None:
         # cpp_namespace can be a colon joined string such as torch::lazy
         cpp_namespaces = namespace_str.split("::")
         assert (
@@ -454,7 +456,7 @@ class NamespaceHelper:
 class OrderedSet(Generic[T]):
     storage: Dict[T, Literal[None]]
 
-    def __init__(self, iterable: Optional[Iterable[T]] = None):
+    def __init__(self, iterable: Optional[Iterable[T]] = None) -> None:
         if iterable is None:
             self.storage = {}
         else:
