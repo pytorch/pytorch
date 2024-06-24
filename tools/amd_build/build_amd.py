@@ -5,7 +5,6 @@ import argparse
 import os
 import sys
 
-
 sys.path.append(
     os.path.realpath(
         os.path.join(
@@ -15,7 +14,6 @@ sys.path.append(
 )
 
 from hipify import hipify_python  # type: ignore[import]
-
 
 parser = argparse.ArgumentParser(
     description="Top-level script for HIPifying, filling in most common parameters"

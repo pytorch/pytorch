@@ -18,7 +18,6 @@ from tools.stats.upload_stats_lib import (
     upload_workflow_stats_to_s3,
 )
 
-
 REGEX_JOB_INFO = r"(.*) \/ .*test \(([^,]*), .*\)"
 
 

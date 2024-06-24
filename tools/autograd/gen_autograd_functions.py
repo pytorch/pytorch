@@ -43,7 +43,6 @@ from torchgen.utils import FileManager
 
 from .gen_inplace_or_view_type import VIEW_FUNCTIONS
 
-
 FUNCTION_DECLARATION = CodeTemplate(
     """\
 #ifdef _WIN32
