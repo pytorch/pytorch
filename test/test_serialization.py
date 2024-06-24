@@ -835,13 +835,7 @@ class TestBothSerialization(TestCase):
         with AlwaysWarnTypedStorageRemoval(True), warnings.catch_warnings(record=True) as w:
             with tempfile.NamedTemporaryFile() as f_new, tempfile.NamedTemporaryFile() as f_old:
                 test(f_new, f_old)
-            if weights_only:
-                self.assertTrue(len(w) == 0, msg=f"Expected no warnings but got {[str(x) for x in w]}")
-            else:
-                num_warnings = 2 if torch._dynamo.is_compiling() else 1
-                self.assertTrue(len(w) == num_warnings, msg=f"Expected one warning but got {[str(x) for x in w]}")
-                self.assertEqual(w[0].category, FutureWarning)
-
+            self.assertTrue(len(w) == 0, msg=f"Expected no warnings but got {[str(x) for x in w]}")
 
 class TestOldSerialization(TestCase, SerializationMixin):
     # unique_key is necessary because on Python 2.7, if a warning passed to
