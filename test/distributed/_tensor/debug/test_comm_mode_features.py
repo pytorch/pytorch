@@ -90,8 +90,6 @@ class PrintModuleParamaterShardingTest(DTensorTestBase):
         inp = torch.rand(*inp_size, device=self.device_type)
         model = MLPModule(self.device_type)
 
-        LR = 0.25
-
         parallelize_plan = {
             "net1": ColwiseParallel(),
             "net2": RowwiseParallel(),
@@ -128,8 +126,6 @@ class PrintModuleParamaterShardingTest(DTensorTestBase):
         torch.manual_seed(0)
         inp = torch.rand(*inp_size, device=self.device_type)
         model = MLPModule(self.device_type)
-
-        LR = 0.25
 
         parallelize_plan = {
             "net1": ColwiseParallel(),
@@ -185,8 +181,6 @@ class PrintModuleParamaterShardingTest(DTensorTestBase):
         inp = torch.rand(*inp_size, device=self.device_type)
         model = MLPModule(self.device_type)
 
-        LR = 0.25
-
         parallelize_plan = {
             "net1": ColwiseParallel(),
             "net2": RowwiseParallel(),
@@ -231,8 +225,6 @@ class PrintModuleParamaterShardingTest(DTensorTestBase):
         inp = torch.rand(*inp_size, device=self.device_type)
         model = MLPModule(self.device_type)
 
-        LR = 0.25
-
         parallelize_plan = {
             "net1": ColwiseParallel(),
             "net2": RowwiseParallel(),
@@ -248,7 +240,7 @@ class PrintModuleParamaterShardingTest(DTensorTestBase):
             self.assertEqual(comm_mode.comm_module_counts, {})
             output_tp = model(inp)
 
-        model_args = ModelArgs()
+        model_args = ModelArgs(dropout_p=0.0)
         model2 = Transformer(model_args).to(device=self.device_type)
         model2 = Transformer.parallelize(model2, device_mesh, is_seq_parallel)
 
