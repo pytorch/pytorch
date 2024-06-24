@@ -1373,6 +1373,7 @@ main()
 
         # BAD CASE: compiled autograd (i.e. has `run_with_rng_state` in Dynamo graph)
         compiler_fn = make_compiler_fn(fullgraph=True)
+
         def make_compiler_fn_with_op_check():
             def _compiler_fn(gm):
                 self.assertTrue(
@@ -1382,7 +1383,9 @@ main()
                     )
                 )
                 return compiler_fn(gm)
+
             return _compiler_fn
+
         compiler_fn_with_op_check = make_compiler_fn_with_op_check()
         self.check_output_and_recompiles(
             f, compiler_fn=compiler_fn_with_op_check, compile_fn=False
