@@ -2,7 +2,6 @@ import argparse
 import collections
 import importlib
 import sys
-
 from pprint import pformat
 from typing import Dict, List, Sequence
 from unittest.mock import Mock, patch
@@ -20,9 +19,9 @@ from torchgen.api.python import (
     returns_structseq_pyi,
 )
 from torchgen.gen import parse_native_yaml, parse_tags_yaml
-
 from torchgen.model import _TorchDispatchModeKey, DispatchKey, Variant
 from torchgen.utils import FileManager
+
 
 """
 This module implements generation of type stubs for PyTorch,
