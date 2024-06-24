@@ -536,6 +536,8 @@ def add_workflow_conclusions(
                 if workflow_conclusion == "CANCELLED" and workflow_name in workflows:
                     continue
 
+                # Only keep the latest workflow run for each workflow, heuristically,
+                # it's the run with largest run ID
                 if (
                     workflow_id not in workflows
                     or workflows[workflow_id].run_id < workflow_run_id

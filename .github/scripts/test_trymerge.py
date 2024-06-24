@@ -1041,7 +1041,7 @@ class TestGitHubPRGhstackDependencies(TestCase):
         )
 
     @skip(
-        reason="This test is run against a mutalbe PR that has changed, so it no longer works. The test should be changed"
+        reason="This test is run against a mutable PR that has changed, so it no longer works. The test should be changed"
     )
     @mock.patch("trymerge.read_merge_rules")
     @mock.patch("trymerge.GitRepo")
