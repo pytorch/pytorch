@@ -11,7 +11,7 @@
 namespace torch {
 namespace monitor {
 namespace detail {
-  class WaitCounterImpl;
+class WaitCounterImpl;
 }
 
 // A handle to a wait counter.
@@ -35,18 +35,15 @@ class WaitCounterHandle {
 } // namespace monitor
 } // namespace torch
 
-#define STATIC_WAIT_COUNTER(_key)                                           \
-  []() {                                                                    \
-    static torch::monitor::WaitCounterHandle handle(#_key);                 \
-    return handle;                                                          \
+#define STATIC_WAIT_COUNTER(_key)                           \
+  []() {                                                    \
+    static torch::monitor::WaitCounterHandle handle(#_key); \
+    return handle;                                          \
   }()
 
-#define STATIC_SCOPED_WAIT_COUNTER(_name)                                   \
-  auto C10_ANONYMOUS_VARIABLE(SCOPED_WAIT_COUNTER) =                        \
-      STATIC_WAIT_COUNTER(_name);                                           \
-  STATIC_WAIT_COUNTER(_name).start();                                       \
-  auto guard = c10::make_scope_exit(                                        \
-    [&]() {                                                                 \
-      STATIC_WAIT_COUNTER(_name).stop();                                    \
-    }                                                                       \
-  );
+#define STATIC_SCOPED_WAIT_COUNTER(_name)            \
+  auto C10_ANONYMOUS_VARIABLE(SCOPED_WAIT_COUNTER) = \
+      STATIC_WAIT_COUNTER(_name);                    \
+  STATIC_WAIT_COUNTER(_name).start();                \
+  auto guard =                                       \
+      c10::make_scope_exit([&]() { STATIC_WAIT_COUNTER(_name).stop(); });
