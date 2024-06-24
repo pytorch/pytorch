@@ -360,13 +360,12 @@ class LocalizeBufferHandler(V.WrapperHandler):  # type: ignore[name-defined]
     def localize(self, name: str, index: sympy.Expr):
         if self.global_to_local and name in self.global_to_local:
             assert self.rewrite_index is not None
-            global_buf_name = name
-            name = self.global_to_local[global_buf_name].get_name()
             index = self.rewrite_index(
                 self,
                 index,
-                global_buf_name,
+                name,
             )
+            name = self.global_to_local[name].get_name()
         return name, index
 
     def load(self, name: str, index: sympy.Expr):
@@ -404,11 +403,9 @@ class LocalBufferContext:
         self.exit_stack = contextlib.ExitStack()
         # map local buffer name to local buffer
         self.local_buffers: Dict[str, ir.Buffer] = {}
-        # map local buffer name to global buffers and one local buffer
-        # may be shared with multi global buffers
-        self.local_to_global: Dict[str, List[ir.Buffer]] = {}
-        # map global buffer name to local buffer and one global buffer
-        # must be corresponding to one local buffer
+        # map global buffer name to global buffer
+        self.global_buffers: Dict[str, ir.Buffer] = {}
+        # map global buffer name to local buffer
         self.global_to_local: Dict[str, ir.Buffer] = {}
 
     def __enter__(self):
@@ -455,11 +452,13 @@ class LocalBufferContext:
         if local_buffer.get_name() not in self.local_buffers:
             self.local_buffers[local_buffer.get_name()] = local_buffer
         if global_buffer:
-            if local_buffer.get_name() not in self.local_to_global:
-                self.local_to_global[local_buffer.get_name()] = []
-            self.local_to_global[local_buffer.get_name()].append(global_buffer)
-            assert global_buffer.get_name() not in self.global_to_local
-            self.global_to_local[global_buffer.get_name()] = local_buffer
+            global_buffer_name = global_buffer.get_name()
+            assert (
+                global_buffer_name not in self.global_buffers
+                and global_buffer_name not in self.global_to_local
+            )
+            self.global_buffers[global_buffer_name] = global_buffer
+            self.global_to_local[global_buffer_name] = local_buffer
 
             def should_allocate():
                 assert isinstance(global_buffer, ir.Buffer)
@@ -513,10 +512,9 @@ class LocalBufferContext:
         The the data access of `local_buf` is assumed to be contiguous with the
         same order as the `global_buf`.
         """
-        for local_buffer_name, global_buffers in self.local_to_global.items():
-            local_buffer = self.local_buffers[local_buffer_name]
-            for global_buffer in global_buffers:
-                assert len(global_buffer.get_size()) == len(local_buffer.get_size())
+        for global_buffer_name, global_buffer in self.global_buffers.items():
+            local_buffer = self.global_to_local[global_buffer_name]
+            assert len(global_buffer.get_size()) == len(local_buffer.get_size())
         assert len(nodes) > 0
 
         def wrap_inner_fn_for_node(node: ir.IRNode):

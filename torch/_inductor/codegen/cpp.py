@@ -75,6 +75,7 @@ from .cpp_utils import (
     value_to_cpp,
 )
 
+_IS_WINDOWS = sys.platform == "win32"
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 
 NATIVE_OMP_RTYPES = {"+", "*", "^", "||", "min", "max"}
@@ -2030,7 +2031,7 @@ class CppKernel(Kernel):
                 ):
                     # Allocate local buffer
                     local_buffers = V.local_buffer_context.local_buffers
-                    for local_buffer in list(local_buffers.values()):
+                    for local_buffer in local_buffers.values():
                         # For dynamic size, rename s to ks
                         local_buf_size = sympy_product(
                             [
@@ -3855,8 +3856,8 @@ class CppScheduling(BaseScheduling):
                 call_ranges = tuple(group) + tuple(reduction_group)
                 return call_ranges
 
-            LocalBuffer = namedtuple("LocalBuffer", ["local_buf", "global_buf"])
-            local_buffers: List[LocalBuffer] = []
+            BufferMapper = namedtuple("BufferMapper", ["local_buf", "global_buf"])
+            buffer_mappers: List[BufferMapper] = []
             if all(
                 len(get_call_ranges(_node)) == node.outer_loop_fusion_depth + 1
                 for _node in node.get_outer_nodes()
@@ -3887,28 +3888,29 @@ class CppScheduling(BaseScheduling):
                             global_buffer_layout.stride[size_offset:],
                         )
                         if any(
-                            local_buffer_layout == local_buf_pair.local_buf.layout
-                            for local_buf_pair in local_buffers
+                            local_buffer_layout == buffer_mapper.local_buf.layout
+                            for buffer_mapper in buffer_mappers
                         ):
-                            # Can share same local buffer between global buffers
-                            for local_buf_pair in local_buffers:
+                            # Sharing existing local buffer
+                            for buffer_mapper in buffer_mappers:
                                 if (
                                     local_buffer_layout
-                                    == local_buf_pair.local_buf.layout
+                                    == buffer_mapper.local_buf.layout
                                 ):
-                                    local_buffers.append(
-                                        LocalBuffer(
-                                            local_buf_pair.local_buf,
+                                    buffer_mappers.append(
+                                        BufferMapper(
+                                            buffer_mapper.local_buf,
                                             global_buf=global_buffer,
                                         )
                                     )
                                     break
                         else:
+                            # Creating new local buffer
                             local_buf_prefix = "local_buffer_data"
-                            local_buffers.append(
-                                LocalBuffer(
+                            buffer_mappers.append(
+                                BufferMapper(
                                     local_buf=ir.Buffer(
-                                        f"{local_buf_prefix}_{len(local_buffers)}",
+                                        f"{local_buf_prefix}_{len(buffer_mappers)}",
                                         local_buffer_layout,
                                     ),
                                     global_buf=global_buffer,
@@ -3916,10 +3918,10 @@ class CppScheduling(BaseScheduling):
                             )
 
             with LocalBufferContext(kernel_group.args) as scope:
-                if len(local_buffers) > 0:
-                    for local_buffer in local_buffers:
+                if len(buffer_mappers) > 0:
+                    for buffer_mapper in buffer_mappers:
                         scope.add_local_buffer(
-                            local_buffer.local_buf, local_buffer.global_buf
+                            buffer_mapper.local_buf, buffer_mapper.global_buf
                         )
                 for _node in node.get_outer_nodes():
                     assert isinstance(_node, (FusedSchedulerNode, SchedulerNode))
@@ -4093,6 +4095,9 @@ class KernelGroup:
         args_num = len(arg_defs)
         return args_num
 
+    def get_export_declaration(self):
+        return "__declspec(dllexport)" if _IS_WINDOWS else ""
+
     def codegen_group(self, name=None) -> str:
         self.stack.close()
         if not self.scheduled_nodes:
@@ -4112,7 +4117,10 @@ class KernelGroup:
         kernel_name = str(Placeholder.DESCRIPTIVE_NAME) if name is None else name
         arg_defs, _, _ = self.args.cpp_argdefs()
         arg_defs = ",\n".ljust(25).join(arg_defs)
-        code.writeline(f'extern "C" void {kernel_decl_name}({arg_defs})')
+        func_export_decl = self.get_export_declaration()
+        code.writeline(
+            f'extern "C" {func_export_decl} void {kernel_decl_name}({arg_defs})'
+        )
 
         # 3. Function body
         with code.indent():
