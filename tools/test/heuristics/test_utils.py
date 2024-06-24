@@ -9,6 +9,7 @@ sys.path.append(str(REPO_ROOT))
 import tools.testing.target_determination.heuristics.utils as utils
 from tools.testing.test_run import TestRun
 
+
 sys.path.remove(str(REPO_ROOT))
 
 

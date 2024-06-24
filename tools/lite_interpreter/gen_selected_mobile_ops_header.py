@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 import argparse
 import os
-from typing import Set
-
 import yaml
+from typing import Set
 
 from torchgen.code_template import CodeTemplate
 from torchgen.selective_build.selector import SelectiveBuilder
+
 
 # Safely load fast C Yaml loader/dumper if they are available
 try:

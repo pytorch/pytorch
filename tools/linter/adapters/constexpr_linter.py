@@ -6,9 +6,9 @@ import argparse
 import json
 import logging
 import sys
-
 from enum import Enum
 from typing import NamedTuple, Optional
+
 
 CONSTEXPR = "constexpr char"
 CONSTEXPR_MACRO = "CONSTEXPR_EXCEPT_WIN_CUDA char"

@@ -6,6 +6,7 @@ import unittest
 from collections import defaultdict
 from typing import Dict, List, Tuple
 
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 try:
     # using tools/ to optimize test run.

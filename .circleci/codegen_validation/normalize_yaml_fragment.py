@@ -2,8 +2,8 @@
 
 import os
 import sys
-
 import yaml
+
 
 # Need to import modules that lie on an upward-relative path
 sys.path.append(os.path.join(sys.path[0], ".."))

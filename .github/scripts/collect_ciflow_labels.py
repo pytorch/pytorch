@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 import sys
+import yaml
 from pathlib import Path
 from typing import Any, cast, Dict, List, Set
 
-import yaml
 
 GITHUB_DIR = Path(__file__).parent.parent
 

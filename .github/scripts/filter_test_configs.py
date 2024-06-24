@@ -7,13 +7,13 @@ import re
 import subprocess
 import sys
 import warnings
+import yaml
 from enum import Enum
 from functools import lru_cache
 from logging import info
 from typing import Any, Callable, Dict, List, Optional, Set
 from urllib.request import Request, urlopen
 
-import yaml
 
 REENABLE_TEST_REGEX = "(?i)(Close(d|s)?|Resolve(d|s)?|Fix(ed|es)?) (#|https://github.com/pytorch/pytorch/issues/)([0-9]+)"
 

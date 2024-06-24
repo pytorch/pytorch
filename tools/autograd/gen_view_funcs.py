@@ -29,6 +29,7 @@ from .gen_inplace_or_view_type import (
     use_derived,
 )
 
+
 FUNCTION_DECLARATION = CodeTemplate(
     """\
 #define ${uppercase_op}_AVAILABLE

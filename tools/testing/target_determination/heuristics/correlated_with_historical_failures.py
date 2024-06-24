@@ -4,12 +4,10 @@ from tools.stats.import_test_stats import (
     ADDITIONAL_CI_FILES_FOLDER,
     TEST_FILE_RATINGS_FILE,
 )
-
 from tools.testing.target_determination.heuristics.interface import (
     HeuristicInterface,
     TestPrioritizations,
 )
-
 from tools.testing.target_determination.heuristics.utils import (
     get_ratings_for_tests,
     normalize_ratings,

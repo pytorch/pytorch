@@ -2,7 +2,6 @@ import argparse
 import datetime
 import json
 import os
-
 import time
 import urllib.parse
 from typing import Any, Callable, cast, Dict, List, Optional, Set
@@ -10,6 +9,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from tools.stats.upload_stats_lib import upload_to_s3
+
 
 FILTER_OUT_USERS = {
     "pytorchmergebot",

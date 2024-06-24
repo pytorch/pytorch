@@ -24,8 +24,7 @@ from torchgen.api.types import (
     OptionalCType,
     symIntArrayRefT,
     SymIntT,
-    # See Note [Nested Arg Types]
-    tensorT,
+    tensorT,  # See Note [Nested Arg Types]
 )
 from torchgen.code_template import CodeTemplate
 from torchgen.context import with_native_function
@@ -45,6 +44,7 @@ from .gen_trace_type import (
     tie_return_values,
     type_wrapper_name,
 )
+
 
 # See NOTE [ Autograd View Variables ] in variable.h for details.
 # If you update list VIEW_FUNCTIONS or RETURNS_VIEWS_OF_INPUT,

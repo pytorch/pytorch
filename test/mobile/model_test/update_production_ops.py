@@ -4,8 +4,8 @@ Specify the file path in the first argument. The results will be dump to model_o
 """
 
 import sys
-
 import yaml
+
 
 root_operators = {}
 traced_operators = {}

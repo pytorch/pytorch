@@ -2,10 +2,10 @@
 
 import textwrap
 import unittest
+import yaml
 from typing import cast
 
 import expecttest
-import yaml
 
 import torchgen.dest as dest
 import torchgen.gen as gen

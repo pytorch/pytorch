@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 
 import sys
-
-from pathlib import Path
-
 import yaml
+from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent

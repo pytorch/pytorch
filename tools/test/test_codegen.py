@@ -1,14 +1,12 @@
 import dataclasses
 import typing
 import unittest
+import yaml
 from collections import defaultdict
 from typing import Dict, List
 
-import yaml
-
-from tools.autograd import gen_autograd_functions, load_derivatives
-
 import torchgen.model
+from tools.autograd import gen_autograd_functions, load_derivatives
 from torchgen import dest
 from torchgen.api.types import CppSignatureGroup, DispatcherSignature
 from torchgen.context import native_function_manager

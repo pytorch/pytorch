@@ -8,23 +8,24 @@ import glob
 import io
 import os
 import re
-import sys
-from itertools import product
-
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import subprocess
+import sys
 import textwrap
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
-
 import yaml
+from dataclasses import dataclass
+from itertools import product
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from yaml.constructor import ConstructorError
 from yaml.nodes import MappingNode
+
 
 try:
     from yaml import CLoader as Loader
 except ImportError:
     from yaml import Loader  # type: ignore[assignment, misc]
+
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 CPP_H_NAME = "spv.h"
 CPP_SRC_NAME = "spv.cpp"

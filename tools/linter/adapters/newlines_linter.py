@@ -5,9 +5,9 @@ import argparse
 import json
 import logging
 import sys
-
 from enum import Enum
 from typing import List, NamedTuple, Optional
+
 
 NEWLINE = 10  # ASCII "\n"
 CARRIAGE_RETURN = 13  # ASCII "\r"
