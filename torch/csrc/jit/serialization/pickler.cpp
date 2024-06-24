@@ -65,25 +65,27 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
   } else if (ivalue.isNone()) {
     push<PickleOpCode>(PickleOpCode::NONE);
   } else if (ivalue.isIntList()) {
-    pushSpecializedList(ivalue, "build_intlist", [=](const IValue& ivalue) {
+    pushSpecializedList(ivalue, "build_intlist", [this](const IValue& ivalue) {
       for (const int64_t item : ivalue.toIntVector()) {
         pushInt(item);
       }
     });
   } else if (ivalue.isTensorList()) {
-    pushSpecializedList(ivalue, "build_tensorlist", [=](const IValue& ivalue) {
-      for (const at::Tensor& item : ivalue.toTensorVector()) {
-        pushIValue(item);
-      }
-    });
+    pushSpecializedList(
+        ivalue, "build_tensorlist", [this](const IValue& ivalue) {
+          for (const at::Tensor& item : ivalue.toTensorVector()) {
+            pushIValue(item);
+          }
+        });
   } else if (ivalue.isDoubleList()) {
-    pushSpecializedList(ivalue, "build_doublelist", [=](const IValue& ivalue) {
-      for (double item : ivalue.toDoubleVector()) {
-        pushDouble(item);
-      }
-    });
+    pushSpecializedList(
+        ivalue, "build_doublelist", [this](const IValue& ivalue) {
+          for (double item : ivalue.toDoubleVector()) {
+            pushDouble(item);
+          }
+        });
   } else if (ivalue.isBoolList()) {
-    pushSpecializedList(ivalue, "build_boollist", [=](const IValue& ivalue) {
+    pushSpecializedList(ivalue, "build_boollist", [this](const IValue& ivalue) {
       for (bool item : ivalue.toBoolList()) {
         pushBool(item);
       }
@@ -601,7 +603,7 @@ void Pickler::startTypeTag() {
   }
 }
 namespace {
-c10::optional<std::string> type_printer(const c10::Type& type) {
+std::optional<std::string> type_printer(const c10::Type& type) {
   if (auto dyn = type.castRaw<c10::DynamicType>()) {
     return dyn->fallback()->annotation_str(type_printer);
   }
@@ -638,7 +640,7 @@ void Pickler::pushDict(const IValue& ivalue) {
   push<PickleOpCode>(PickleOpCode::EMPTY_DICT);
 
   static_assert(
-      std::is_unsigned<decltype(dict.size())>::value,
+      std::is_unsigned_v<decltype(dict.size())>,
       "Expected size to be non-negative.");
   push<PickleOpCode>(PickleOpCode::MARK);
 

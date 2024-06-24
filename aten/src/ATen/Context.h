@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/BlasBackend.h>
 #include <ATen/CPUGeneratorImpl.h>
 #include <ATen/DeviceAccelerator.h>
 #include <ATen/LinalgBackend.h>
@@ -11,9 +12,9 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/detail/HIPHooksInterface.h>
 #include <ATen/detail/IPUHooksInterface.h>
+#include <ATen/detail/MAIAHooksInterface.h>
 #include <ATen/detail/MPSHooksInterface.h>
 #include <ATen/detail/MTIAHooksInterface.h>
-#include <ATen/detail/ORTHooksInterface.h>
 #include <ATen/detail/PrivateUse1HooksInterface.h>
 #include <ATen/detail/XPUHooksInterface.h>
 #include <c10/core/QEngine.h>
@@ -58,7 +59,7 @@ class TORCH_API Context {
     }
   }
   const AcceleratorHooksInterface& getAcceleratorHooksInterface(
-      c10::optional<c10::DeviceType> opt_device_type = c10::nullopt) {
+      std::optional<c10::DeviceType> opt_device_type = c10::nullopt) {
     c10::DeviceType device_type = opt_device_type.has_value()
         ? opt_device_type.value()
         : at::getAccelerator(true).value();
@@ -122,6 +123,9 @@ class TORCH_API Context {
   static bool hasCuSOLVER() {
     return detail::getCUDAHooks().hasCuSOLVER();
   }
+  static bool hasCuBLASLt() {
+    return detail::getCUDAHooks().hasCuBLASLt();
+  }
   static bool hasHIP() {
     return detail::getHIPHooks().hasHIP();
   }
@@ -140,8 +144,8 @@ class TORCH_API Context {
   static bool hasLazy() {
     return c10::impl::hasDeviceGuardImpl(c10::DeviceType::Lazy);
   }
-  static bool hasORT() {
-    return c10::impl::hasDeviceGuardImpl(c10::DeviceType::ORT);
+  static bool hasMAIA() {
+    return c10::impl::hasDeviceGuardImpl(c10::DeviceType::MAIA);
   }
   // defined in header so that getNonVariableType has ability to inline
   // call_once check. getNonVariableType is called fairly frequently
@@ -184,6 +188,8 @@ class TORCH_API Context {
   void setBenchmarkLimitCuDNN(int);
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool);
+  bool deterministicMkldnn() const;
+  void setDeterministicMkldnn(bool);
   bool userEnabledNNPACK() const;
   void setUserEnabledNNPACK(bool e);
 
@@ -212,6 +218,9 @@ class TORCH_API Context {
 
   at::LinalgBackend linalgPreferredBackend() const;
   void setLinalgPreferredBackend(at::LinalgBackend);
+
+  at::BlasBackend blasPreferredBackend() const;
+  void setBlasPreferredBackend(at::BlasBackend);
 
   // Note [Enabling Deterministic Operations]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -351,6 +360,7 @@ class TORCH_API Context {
   c10::once_flag thp_init;
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
+  bool deterministic_mkldnn = false;
   bool _deterministic_algorithms = false;
   bool _deterministic_algorithms_warn_only = false;
   bool _deterministic_fill_uninitialized_memory = true;
@@ -377,13 +387,21 @@ class TORCH_API Context {
       c10::utils::check_env("TORCH_LINALG_PREFER_CUSOLVER") == true
       ? at::LinalgBackend::Cusolver
       : at::LinalgBackend::Default;
+  at::BlasBackend blas_preferred_backend =
+#ifdef USE_ROCM
+      (c10::utils::check_env("TORCH_BLAS_PREFER_HIPBLASLT") != false)
+#else
+      (c10::utils::check_env("TORCH_BLAS_PREFER_CUBLASLT") == true)
+#endif
+      ? at::BlasBackend::Cublaslt
+      : at::BlasBackend::Cublas;
 #ifdef C10_MOBILE
   bool release_original_weights = true;
 #else
   bool release_original_weights = false;
 #endif
   bool display_vmap_fallback_warnings_ = false;
-  c10::optional<at::QEngine> quantized_engine = c10::nullopt;
+  std::optional<at::QEngine> quantized_engine = c10::nullopt;
   bool enable_sparse_tensor_invariant_checks = false;
   bool allow_fp16_reduction_cpu = false;
 
@@ -449,8 +467,8 @@ static inline bool hasMPS() {
   return globalContext().hasMPS();
 }
 
-static inline bool hasORT() {
-  return globalContext().hasORT();
+static inline bool hasMAIA() {
+  return globalContext().hasMAIA();
 }
 
 static inline bool hasXPU() {

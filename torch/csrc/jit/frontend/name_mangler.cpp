@@ -21,7 +21,7 @@ c10::QualifiedName NameMangler::mangle(const c10::QualifiedName& name) {
       // Append the part of the name up to the end of the prefix
       newAtomPrefix.append(atom, 0, pos);
       newAtomPrefix.append(manglePrefix);
-      atom = newAtomPrefix + c10::to_string(mangleIndex_++);
+      atom = newAtomPrefix + std::to_string(mangleIndex_++);
       // increment mangleIndex_ until the type is not defined
       return c10::QualifiedName(atoms);
     }
@@ -29,7 +29,7 @@ c10::QualifiedName NameMangler::mangle(const c10::QualifiedName& name) {
 
   // Otherwise add a mangle namespace right before the basename
   TORCH_INTERNAL_ASSERT(!atoms.empty());
-  atoms.insert(atoms.end() - 1, manglePrefix + c10::to_string(mangleIndex_++));
+  atoms.insert(atoms.end() - 1, manglePrefix + std::to_string(mangleIndex_++));
   return c10::QualifiedName(atoms);
 }
 

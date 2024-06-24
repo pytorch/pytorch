@@ -5,20 +5,21 @@ import unittest
 from unittest import mock
 
 import torch
+from torch._inductor.runtime.hints import TRITON_MAX_BLOCK
 
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import IS_LINUX
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 try:
     import triton
 except ImportError:
     if __name__ == "__main__":
         sys.exit(0)
-    raise unittest.SkipTest("requires triton")  # noqa: TRY200
+    raise unittest.SkipTest("requires triton")  # noqa: B904
 
 from torch._inductor import config
-from torch._inductor.coordinate_descent_tuner import CoordescTuner
+from torch._inductor.runtime.coordinate_descent_tuner import CoordescTuner
 
 config.benchmark_kernel = True
 config.coordinate_descent_tuning = True
@@ -88,7 +89,7 @@ class TestCoordinateDescentTuner(TestCase):
         with mock.patch.object(
             CoordescTuner, "compare_config", mock_compare_config_prefer_larger_XBLOCK
         ):
-            x = torch.ones(2, 256).cuda()
+            x = torch.ones(2, 256).to(GPU_TYPE)
             expected = f(x)
             # the first call get correct result when cache miss. Don't know why yet
             _ = torch.compile(f)(x)
@@ -104,7 +105,7 @@ class TestCoordinateDescentTuner(TestCase):
 
         tuner = CoordescTuner(size_hints=size_hints)
 
-        max_block = config.triton.max_block
+        max_block = TRITON_MAX_BLOCK
         self.assertFalse(tuner.value_too_large("XBLOCK", max_block["X"]))
         self.assertTrue(tuner.value_too_large("XBLOCK", max_block["X"] * 2))
         self.assertFalse(tuner.value_too_large("RBLOCK", max_block["R"]))
@@ -112,5 +113,5 @@ class TestCoordinateDescentTuner(TestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA:
+    if IS_LINUX and HAS_GPU:
         run_tests()

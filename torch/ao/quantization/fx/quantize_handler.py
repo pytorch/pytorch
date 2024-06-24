@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from abc import ABC
 from typing import Callable, Dict, List, Optional, Type
 
