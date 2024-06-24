@@ -38,7 +38,9 @@ _ShapeorNestedShape = Union[_size, Sequence[_size], torch.Tensor]
 
 
 def _calculate_shape(
-    output: torch.Tensor, grad: torch.Tensor, is_grads_batched: bool
+    output: Union[torch.Tensor, graph.GradientEdge],
+    grad: torch.Tensor,
+    is_grads_batched: bool,
 ) -> Tuple[_ShapeorNestedShape, _ShapeorNestedShape]:
     # is_same_size ensures that both tensors are either nested or non nested
     # circular import
@@ -65,12 +67,13 @@ def _calculate_shape(
 
 
 def _make_grads(
-    outputs: Sequence[Union[torch.Tensor, graph.GradientEdge]],
+    outputs: Union[Sequence[torch.Tensor], Sequence[graph.GradientEdge]],
     grads: Sequence[_OptionalTensor],
     is_grads_batched: bool,
 ) -> Tuple[_OptionalTensor, ...]:
     new_grads: List[_OptionalTensor] = []
     for out, grad in zip(outputs, grads):
+        out = cast(Union[torch.Tensor, graph.GradientEdge], out)
         if isinstance(grad, torch.Tensor):
             from torch.fx.experimental.symbolic_shapes import expect_true, sym_eq
 
@@ -86,16 +89,22 @@ def _make_grads(
                     raise RuntimeError(
                         "Cpp NestedTensor are not supported with GradientEdge"
                     )
+                out_is_cpp_nested = False
             else:
+                assert isinstance(out, torch.Tensor)
                 out_dtype = out.dtype
                 out_is_nested = out.is_nested
-                if not out_is_nested:
-                    out_size = out.size()
+                out_is_cpp_nested = out_is_nested and not isinstance(
+                    out, torch.nested._internal.nested_tensor.NestedTensor
+                )
+                if not out_is_cpp_nested:
+                    out_size = out.shape
 
             # TODO: We can remove this conditional once we uniformly use
             # singleton int to represent jagged dimension, so that size() call
             # on nested tensor works.
-            if out_is_nested and out_metadata.is_cpp_nested_tensor():
+            if out_is_cpp_nested:
+                assert isinstance(out, torch.Tensor)
                 shape_matches = torch.is_same_size(out, first_grad)
             else:
                 # We need to do a regular size check, without going through
@@ -105,6 +114,7 @@ def _make_grads(
                 shape_matches = expect_true(sym_eq(out_size, first_grad.size()))
 
             if not shape_matches:
+                out = cast(Union[torch.Tensor, graph.GradientEdge], out)
                 out_shape, grad_shape = _calculate_shape(
                     out, first_grad, is_grads_batched
                 )
@@ -380,7 +390,9 @@ def grad(
     if allow_unused is None:
         allow_unused = materialize_grads
     if is_tensor_like(outputs) or isinstance(outputs, graph.GradientEdge):
-        outputs = cast(_TensorOrTensorsOrGradEdge, (outputs,))
+        outputs = cast(
+            Union[Sequence[torch.Tensor], Sequence[graph.GradientEdge]], (outputs,)
+        )
     else:
         outputs = tuple(outputs)
     if is_tensor_like(inputs) or isinstance(inputs, graph.GradientEdge):
