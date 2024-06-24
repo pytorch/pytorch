@@ -752,7 +752,9 @@ class OutputGraph:
         **options,
     ):
         if is_dynamic_nn_module(target, self.root_tx.export):
-            return variables.UnspecializedNNModuleVariable(target, **options)
+            # Instead of returning UnspecializedNNModuleVariable, call
+            # VariableBuilder so that it is tracked for mutation.
+            return VariableBuilder(self.current_tx, **options)(target)
 
         options = dict(options)
         assert "source" in options
@@ -1290,7 +1292,9 @@ class OutputGraph:
 
         graph_code_log.debug(
             "%s",
-            lazy_format_graph_code(name, gm, include_stride=True, include_device=True),
+            lazy_format_graph_code(
+                name, gm, include_stride=True, include_device=True, colored=True
+            ),
         )
         torch._logging.trace_structured(
             "dynamo_output_graph",
@@ -1680,7 +1684,7 @@ err_epilogue = (
     "(and fall back to eager-mode PyTorch) on all ops "
     "that have do not have the 'pt2_compliant_tag'. "
     "Please see the following doc for how to mark this op as PT2 compliant "
-    "https://pytorch.org/docs/main/notes/custom_operators.html"
+    "https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html"
 )
 
 

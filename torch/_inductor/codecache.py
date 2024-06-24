@@ -46,6 +46,7 @@ from typing import (
     TYPE_CHECKING,
     Union,
 )
+from typing_extensions import TypeAlias
 
 import torch
 from torch._dynamo.utils import counters, dynamo_timed
@@ -419,7 +420,7 @@ def _ident(x: Any) -> Any:
     return x
 
 
-def extract_tensor_metadata_for_cache_key(t):
+def extract_tensor_metadata_for_cache_key(device_map, t):
     """
     Extracts the tensor metadata and removes fields of the TensorMetadata
     that are not needed for caching
@@ -427,18 +428,30 @@ def extract_tensor_metadata_for_cache_key(t):
     meta = extract_tensor_metadata(t)
     if not hasattr(t, "_is_inductor_static"):
         meta = dataclasses.replace(meta, storage_offset=0, storage_bytes=None)
+
+    # The pickle implementation avoids serializing the same object more than once.
+    # That behavior means the byte stream we create to hash will vary if, for example,
+    # we see two tensor objects with the same device, but the torch.device object is
+    # actually the same object vs. merely equivalent. We want to produce the same hash
+    # value in either situation, so we memoize the device objects and always reference
+    # the same object for a given device. It's possible other metadata fields deserve
+    # the same treatment, but so far we've only observed this issue with the device.
+    if meta.device not in device_map:
+        device_map[meta.device] = meta.device
+    meta = dataclasses.replace(meta, device=device_map[meta.device])
+
     return meta
 
 
-def _reduce_fake_tensor(t):
+def _reduce_fake_tensor(device_map, t):
     """
     See FxGraphCachePickler. Custom reducer to pickle FakeTensors.
     """
-    metadata = extract_tensor_metadata_for_cache_key(t)
+    metadata = extract_tensor_metadata_for_cache_key(device_map, t)
     return (_ident, (metadata,))
 
 
-def _reduce_tensor(t):
+def _reduce_tensor(device_map, t):
     """
     See FxGraphCachePickler. Custom reducer to pickle Tensors.
     If we see tensors, we know they're constants stored as attributes on
@@ -465,7 +478,7 @@ def _reduce_tensor(t):
             f"FX graph cache handling of a large constant took {elapsed:.1}s. Please file an issue."
         )
 
-    metadata = extract_tensor_metadata_for_cache_key(t)
+    metadata = extract_tensor_metadata_for_cache_key(device_map, t)
     return (_ident, (TensorMetadataAndValues(metadata, values),))
 
 
@@ -495,9 +508,13 @@ class FxGraphCachePickler(pickle.Pickler):
     data that allow us to compute a stable, but safe hash.
     """
 
+    # See extract_tensor_metadata_for_cache_key. Whenever we extract metadata during
+    # pickling, we make sure devices always reference the same torch.device object.
+    _device_map: Dict[torch.device, torch.device] = {}
+
     dispatch_table = copyreg.dispatch_table.copy()
-    dispatch_table[FakeTensor] = _reduce_fake_tensor
-    dispatch_table[torch.Tensor] = _reduce_tensor
+    dispatch_table[FakeTensor] = functools.partial(_reduce_fake_tensor, _device_map)
+    dispatch_table[torch.Tensor] = functools.partial(_reduce_tensor, _device_map)
     dispatch_table[torch.SymInt] = _reduce_symint
     dispatch_table[
         torch.fx.experimental._backward_state.BackwardState
@@ -538,9 +555,12 @@ class FxGraphCachePickler(pickle.Pickler):
 
         def get_str(obj) -> str:
             if isinstance(obj, torch.Tensor):
-                return str(extract_tensor_metadata_for_cache_key(obj))
+                return str(extract_tensor_metadata_for_cache_key(cls._device_map, obj))
             elif isinstance(obj, bytes):
                 return "<bytes>"
+            elif type(obj) in cls.dispatch_table:
+                # Run the reducer on the object
+                return str(cls.dispatch_table[type(obj)](obj)[1])
             else:
                 return str(obj)
 
@@ -785,8 +805,8 @@ class FxGraphCache:
     def _lookup_graph(
         key: str,
         example_inputs: List[torch.Tensor],
-        local,
-        remote_cache,
+        local: bool,
+        remote_cache: Optional[Any],
     ) -> Optional[CompiledFxGraph]:
         """
         Lookup a compiled graph in the cache by key. On a hit, return the
@@ -855,10 +875,10 @@ class FxGraphCache:
         # See _save_graph(); we don't store the callable in the cache entry so
         # recreate it here from the PyCodeCache disk cache.
         artifact_path = get_path(graph.cache_key, "py")[2]
+        code = graph.source_code
         if not os.path.exists(artifact_path):
             counters["inductor"]["fxgraph_lookup_write_file"] += 1
             Path(os.path.dirname(artifact_path)).mkdir(parents=True, exist_ok=True)
-            code = graph.source_code
             cpp_pp = cpp_prefix_path()
             if os.path.basename(cpp_pp) in code:
                 if cpp_pp in code:
@@ -898,6 +918,11 @@ class FxGraphCache:
         # graph was compiled for this cache entry. Pretending these counters
         # were incremented normally is useful for testing with the cache enabled.
         metrics.CachedMetricsHelper.apply_deltas(graph.metrics_deltas)
+
+        from .graph import GraphLowering
+
+        GraphLowering.save_output_code(code)
+        output_code_log.debug("Output code: \n%s", code)
 
         return graph
 
@@ -1021,7 +1046,7 @@ class FxGraphCache:
                 cache_id = "fx-graph-v1"
                 try:
                     if config.is_fbcode():
-                        from triton.runtime.fb_memcache import (
+                        from triton.fb.fb_memcache import (
                             FbMemcacheRemoteFxGraphCacheBackend,
                         )
 
@@ -1037,6 +1062,7 @@ class FxGraphCache:
             compiled_graph = FxGraphCache._lookup_graph(
                 key, example_inputs, local, remote_cache
             )
+
             if compiled_graph is None:
                 log.debug("fx graph cache miss for key %s", key)
                 counters["inductor"]["fxgraph_cache_miss"] += 1
@@ -1054,6 +1080,7 @@ class FxGraphCache:
             else:
                 log.debug("fx graph cache hit for key %s", key)
                 counters["inductor"]["fxgraph_cache_hit"] += 1
+            compiled_graph._fx_graph_cache_key = key
         except BypassFxGraphCache:
             counters["inductor"]["fxgraph_cache_bypass"] += 1
             if not compiled_graph:
@@ -1070,6 +1097,9 @@ class FxGraphCache:
             shutil.rmtree(FxGraphCache._get_tmp_dir())
         except FileNotFoundError:
             pass
+
+
+_StrideExprStr: TypeAlias = str
 
 
 @dataclasses.dataclass
@@ -1089,7 +1119,7 @@ class CompiledFxGraph:
     mutated_input_idxs: Set[int]
     constants: Dict[str, torch.Tensor]
     torchbind_constants: Dict[str, torch._C.ScriptObject]
-    output_strides: Optional[List[Optional[Tuple[int, ...]]]]
+    output_strides: Optional[List[Optional[Tuple[_StrideExprStr, ...]]]]
     disabled_cudagraphs_reason: Optional[str]
     metrics_deltas: metrics.CachedMetricsDeltas
     # This is a string representation of an expression we serialize
@@ -1100,12 +1130,13 @@ class CompiledFxGraph:
     guards_expr: Optional[str]
 
     _boxed_call: Optional[bool] = None
+    _fx_graph_cache_key: Optional[str] = None
 
     def __init__(
         self,
         current_callable: Optional[Callable[..., Any]],
         graph: GraphLowering,
-        output_strides: List[Optional[Tuple[int, ...]]],
+        output_strides: List[Optional[Tuple[_StrideExprStr, ...]]],
         disabled_cudagraphs_reason: Optional[str],
         metrics_deltas: metrics.CachedMetricsDeltas,
     ):
@@ -1275,7 +1306,7 @@ class VecISA:
 #include <ATen/cpu/vec/vec.h>
 #endif
 
-__attribute__((aligned(64))) float in_out_ptr0[16] = {0.0};
+alignas(64) float in_out_ptr0[16] = {0.0};
 
 extern "C" void __avx_chk_kernel() {
     auto tmp0 = at::vec::Vectorized<float>(1);
@@ -1305,18 +1336,11 @@ cdll.LoadLibrary("__lib_path__")
     def __hash__(self) -> int:
         return hash(str(self))
 
-    @functools.lru_cache(None)  # noqa: B019
-    def __bool__(self) -> bool:
+    def check_build(self, code) -> bool:
         from torch._inductor.cpp_builder import CppBuilder, CppTorchOptions
 
-        if config.cpp.vec_isa_ok is not None:
-            return config.cpp.vec_isa_ok
-
-        if config.is_fbcode():
-            return True
-
         key, input_path = write(
-            VecISA._avx_code,
+            code,
             "cpp",
             extra=_get_isa_dry_compile_fingerprint(self._arch_flags),
         )
@@ -1338,8 +1362,6 @@ cdll.LoadLibrary("__lib_path__")
                 output_path = x86_isa_help_builder.get_target_file_path()
                 if not os.path.isfile(output_path):
                     status, target_file = x86_isa_help_builder.build()
-                    if status:
-                        return False
 
                 # Check build result
                 subprocess.check_call(
@@ -1355,6 +1377,16 @@ cdll.LoadLibrary("__lib_path__")
                 return False
 
             return True
+
+    @functools.lru_cache(None)  # noqa: B019
+    def __bool__(self) -> bool:
+        if config.cpp.vec_isa_ok is not None:
+            return config.cpp.vec_isa_ok
+
+        if config.is_fbcode():
+            return True
+
+        return self.check_build(VecISA._avx_code)
 
 
 @dataclasses.dataclass
@@ -1390,11 +1422,51 @@ class VecAVX512(VecISA):
 
 
 @dataclasses.dataclass
+class VecAMX(VecAVX512):
+    _arch_flags = VecAVX512._arch_flags + " -mamx-tile -mamx-bf16 -mamx-int8"
+
+    def __str__(self) -> str:
+        return super().__str__() + " amx_tile"
+
+    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+
+    _amx_code = """
+#include <cstdint>
+#include <immintrin.h>
+
+struct amx_tilecfg {
+  uint8_t palette_id;
+  uint8_t start_row;
+  uint8_t reserved_0[14];
+  uint16_t colsb[16];
+  uint8_t rows[16];
+};
+
+extern "C" void __amx_chk_kernel() {
+  amx_tilecfg cfg = {0};
+  _tile_loadconfig(&cfg);
+  _tile_zero(0);
+  _tile_dpbf16ps(0, 1, 2);
+  _tile_dpbusd(0, 1, 2);
+}
+"""
+
+    @functools.lru_cache(None)  # noqa: B019
+    def __bool__(self) -> bool:
+        if super().__bool__():
+            if config.is_fbcode():
+                return False
+            if self.check_build(VecAMX._amx_code) and torch.cpu._init_amx():
+                return True
+        return False
+
+
+@dataclasses.dataclass
 class VecAVX2(VecISA):
     _bit_width = 256
     _macro = ["CPU_CAPABILITY_AVX2"]
     _arch_flags = (
-        "-mavx2 -mfma" if not _IS_WINDOWS else "/arch:AVX2"
+        "-mavx2 -mfma -mf16c" if not _IS_WINDOWS else "/arch:AVX2"
     )  # TODO: use cflags
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
@@ -1454,40 +1526,17 @@ def x86_isa_checker() -> List[str]:
 
     avx2 = torch.cpu._is_cpu_support_avx2()
     avx512 = torch.cpu._is_cpu_support_avx512()
+    amx_tile = torch.cpu._is_cpu_support_amx_tile()
 
     _check_and_append_supported_isa(supported_isa, avx2, "avx2")
     _check_and_append_supported_isa(supported_isa, avx512, "avx512")
+    _check_and_append_supported_isa(supported_isa, amx_tile, "amx_tile")
 
     return supported_isa
 
 
 invalid_vec_isa = InvalidVecISA()
-supported_vec_isa_list = [VecAVX512(), VecAVX2(), VecNEON()]
-
-
-def get_isa_from_cpu_capability(
-    capability: str | None, vec_isa_list: List[VecISA], invalid_vec_isa: InvalidVecISA
-):
-    # VSX is not supported in inductor
-    capability_to_isa_str = {
-        "default": "INVALID_VEC_ISA",
-        "neon": "asimd",
-        "zvector": "zvector",
-        "avx2": "avx2",
-        "avx512": "avx512",
-    }
-    if capability in capability_to_isa_str.keys():
-        isa_str = capability_to_isa_str[capability]
-        if isa_str == "INVALID_VEC_ISA":
-            return invalid_vec_isa
-        for vec_isa in vec_isa_list:
-            if isa_str == str(vec_isa):
-                return vec_isa
-
-    if capability:
-        warnings.warn(f"ignoring invalid value for ATEN_CPU_CAPABILITY {capability}")
-
-    return vec_isa_list[0]
+supported_vec_isa_list = [VecAMX(), VecAVX512(), VecAVX2(), VecNEON()]
 
 
 # Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
@@ -1495,14 +1544,15 @@ def get_isa_from_cpu_capability(
 # we only cache some key isa information.
 @functools.lru_cache(None)
 def valid_vec_isa_list() -> List[VecISA]:
+    isa_list: List[VecISA] = []
     if sys.platform == "darwin" and platform.processor() == "arm":
-        return [VecNEON()]
+        isa_list.append(VecNEON())
 
-    cur_os = sys.platform
-    if cur_os != "linux" and cur_os != "win32":
-        return []
+    if sys.platform not in ["linux", "win32"]:
+        return isa_list
 
-    if platform.machine() == "s390x":
+    arch = platform.machine()
+    if arch == "s390x":
         with open("/proc/cpuinfo") as _cpu_info:
             while True:
                 line = _cpu_info.readline()
@@ -1513,14 +1563,19 @@ def valid_vec_isa_list() -> List[VecISA]:
                 if featuresmatch:
                     for group in featuresmatch.groups():
                         if re.search(r"[\^ ]+vxe[\$ ]+", group):
-                            return [VecZVECTOR()]
-        return []
+                            isa_list.append(VecZVECTOR())
+                            break
+    elif arch == "aarch64":
+        isa_list.append(VecNEON())
+    elif arch in ["x86_64", "AMD64"]:
+        """
+        arch value is x86_64 on Linux, and the value is AMD64 on Windows.
+        """
+        _cpu_supported_x86_isa = x86_isa_checker()
+        for isa in supported_vec_isa_list:
+            if all(flag in _cpu_supported_x86_isa for flag in str(isa).split()) and isa:
+                isa_list.append(isa)
 
-    isa_list = []
-    _cpu_supported_isa = x86_isa_checker()
-    for isa in supported_vec_isa_list:
-        if str(isa) in _cpu_supported_isa and isa:
-            isa_list.append(isa)
     return isa_list
 
 
@@ -1532,13 +1587,10 @@ def pick_vec_isa() -> VecISA:
     if not _valid_vec_isa_list:
         return invalid_vec_isa
 
-    # If the simdlen is None, set simdlen based on the environment ATEN_CPU_CAPABILITY
-    # to control CPU vec ISA
-
+    # If the simdlen is None, it indicates determine the vectorization length automatically
     if config.cpp.simdlen is None:
-        return get_isa_from_cpu_capability(
-            os.getenv("ATEN_CPU_CAPABILITY"), _valid_vec_isa_list, invalid_vec_isa
-        )
+        assert _valid_vec_isa_list
+        return _valid_vec_isa_list[0]
 
     for isa in _valid_vec_isa_list:
         if config.cpp.simdlen == isa.bit_width():
@@ -2555,11 +2607,14 @@ class CppPythonBindingsCodeCache(CppCodeCache):
 
         #ifndef _MSC_VER
         #if __cplusplus < 202002L
-        // C++20 earlier code
+        // C++20 (earlier) code
         // https://en.cppreference.com/w/cpp/language/attributes/likely
         #define likely(x)       __builtin_expect(!!(x), 1)
         #define unlikely(x)     __builtin_expect(!!(x), 0)
         #endif
+        #else
+        #define likely(x) (x)
+        #define unlikely(x) (x)
         #endif
 
         // This is defined in guards.cpp so we don't need to import PyTorch headers that are slooow.

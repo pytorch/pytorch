@@ -6,9 +6,8 @@ __all__ = ["svd_lowrank", "pca_lowrank"]
 from typing import Optional, Tuple
 
 import torch
-from torch import Tensor
-from . import _linalg_utils as _utils
-from .overrides import handle_torch_function, has_torch_function
+from torch import _linalg_utils as _utils, Tensor
+from torch.overrides import handle_torch_function, has_torch_function
 
 
 def get_approximate_basis(

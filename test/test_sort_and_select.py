@@ -32,9 +32,6 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
-# TODO: remove this
-SIZE = 100
-
 
 class TestSortAndSelect(TestCase):
     def assertIsOrdered(self, order, x, mxx, ixx, task):
@@ -476,6 +473,7 @@ class TestSortAndSelect(TestCase):
             sortKVal, sortKInd = topKViaSort(t, k, dim, dir)
             compareTensors(t, sortKVal, sortKInd, topKVal, topKInd, dim)
 
+        SIZE = 100
         t = torch.rand(
             random.randint(1, SIZE),
             random.randint(1, SIZE),
