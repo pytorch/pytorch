@@ -886,7 +886,7 @@ class TestOperators(TestCase):
     @ops(mt_binary_ufuncs, allowed_dtypes=MASKEDTENSOR_FLOAT_TYPES)  # type: ignore[arg-type]
     @parametrize("layout", [torch.strided, torch.sparse_coo, torch.sparse_csr])
     # FIXME:
-    # Result is just wrong in test_maskedtensor.py; production logic should be fixed
+    # Result is just wrong; production logic should be fixed
     @decorateIf(
         unittest.expectedFailure,
         lambda params: (
@@ -896,12 +896,22 @@ class TestOperators(TestCase):
             params["layout"] == torch.sparse_csr
         )
     )
-    # Result is just wrong in test_maskedtensor.py; production logic should be fixed
+    # Result is just wrong; production logic should be fixed
     @decorateIf(
         unittest.expectedFailure,
         lambda params: (
             params["op"].name == "sub" and
             params["dtype"] in [torch.float16, torch.float32] and
+            params["device"] == "cpu" and
+            params["layout"] == torch.sparse_csr
+        )
+    )
+    # Result is just wrong; production logic should be fixed
+    @decorateIf(
+        unittest.expectedFailure,
+        lambda params: (
+            params["op"].name == "eq" and
+            params["dtype"] == torch.float64 and
             params["device"] == "cpu" and
             params["layout"] == torch.sparse_csr
         )

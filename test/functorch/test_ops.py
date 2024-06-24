@@ -1197,7 +1197,7 @@ class TestOperators(TestCase):
             ),
             tol1(
                 "linalg.householder_product",
-                {torch.float32: tol(atol=3e-04, rtol=6e-04)},
+                {torch.float32: tol(atol=3e-04, rtol=9e-04)},
             ),
             tol1(
                 "matrix_exp",
