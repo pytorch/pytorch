@@ -32,7 +32,12 @@ from torch._dynamo.utils import (
 )
 from torch._functorch import config as functorch_config
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
-from torch._inductor.codecache import code_hash, CompiledFxGraph, FxGraphCache
+from torch._inductor.codecache import (
+    _StrideExprStr,
+    code_hash,
+    CompiledFxGraph,
+    FxGraphCache,
+)
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
     get_placeholders,
@@ -51,7 +56,7 @@ from torch._logging import trace_structured
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import compile_time_strobelight_meta
-from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymExprPrinter
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
 from .._dynamo.backends.common import aot_autograd
@@ -201,11 +206,19 @@ def _unlift_graph(mod, gm, graph_signature):
 
     outputs = list(gm.graph.nodes)[-1].args[0]
     mutated_outputs = []
-    for out in outputs:
-        if out.name in graph_signature.buffers_to_mutate:
-            mutated_outputs.append(graph_signature.buffers_to_mutate[out.name])
-        else:
-            mutated_outputs.append(None)
+    buffer_mutations = graph_signature.buffers_to_mutate
+    user_input_mutations = graph_signature.user_inputs_to_mutate
+    output_tokens = graph_signature.output_tokens
+    for idx, out in enumerate(outputs):
+        value = None
+
+        if idx < len(buffer_mutations) + len(user_input_mutations) + len(output_tokens):
+            if out.name in buffer_mutations:
+                value = buffer_mutations[out.name]
+            elif out.name in user_input_mutations:
+                value = user_input_mutations[out.name]
+
+        mutated_outputs.append(value)
 
     unlifted_gm = _unlift(
         gm,
@@ -384,8 +397,8 @@ def fake_tensor_prop(
 
 
 def should_use_remote_fx_graph_cache():
-    if config.fx_graph_remote_cache:
-        return True
+    if config.fx_graph_remote_cache is not None:
+        return config.fx_graph_remote_cache
     if not config.is_fbcode():
         return False
     if torch.version.hip is not None:
@@ -544,7 +557,21 @@ def compile_fx_inner(
     context = torch._guards.TracingContext.try_get()
     if context is not None and context.output_strides is not None:
         assert len(context.output_strides) == 0
-        context.output_strides.extend(compiled_graph.output_strides)
+        shape_env = _shape_env_from_inputs(example_inputs)
+        for exprs in compiled_graph.output_strides:
+            if exprs is None:
+                context.output_strides.append(None)
+            else:
+                context.output_strides.append(
+                    tuple(
+                        (
+                            shape_env.evaluate_symexpr(e)
+                            if shape_env is not None
+                            else int(e)
+                        )
+                        for e in exprs
+                    )
+                )
 
     if aot_mode:
         return compiled_graph
@@ -748,7 +775,11 @@ def fx_codegen_and_compile(
         post_grad_graphs_log.debug(
             "%s",
             lazy_format_graph_code(
-                "AFTER POST GRAD", gm, include_stride=True, include_device=True
+                "AFTER POST GRAD",
+                gm,
+                include_stride=True,
+                include_device=True,
+                colored=True,
             ),
         )
         trace_structured(
@@ -810,19 +841,19 @@ def fx_codegen_and_compile(
         metrics_helper = metrics.CachedMetricsHelper()
         with V.set_graph_handler(graph):
             graph.run(*example_inputs)
-            output_strides: List[Optional[Tuple[int, ...]]] = []
+            output_strides: List[Optional[Tuple[_StrideExprStr, ...]]] = []
             if graph.graph_outputs is not None:
                 # We'll put the output strides in the compiled graph so we
                 # can later return them to the caller via TracingContext
+                p = SymExprPrinter()
                 for out in graph.graph_outputs:
                     if (
                         hasattr(out, "layout")
                         and len(free_unbacked_symbols(out.layout.stride)) == 0
                     ):
+                        # Convert to string for eval on the load path
                         output_strides.append(
-                            tuple(
-                                V.graph.sizevars.size_hint(s) for s in out.layout.stride
-                            )
+                            tuple(p.doprint(s) for s in out.layout.stride)
                         )
                     else:
                         output_strides.append(None)
@@ -1269,6 +1300,7 @@ def compile_fx(
         with config.patch(
             {
                 "cpp_wrapper": False,
+                "triton.autotune_at_compile_time": True,
                 "triton.autotune_cublasLt": False,
                 "triton.cudagraphs": False,
                 "triton.store_cubin": True,
