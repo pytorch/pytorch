@@ -213,12 +213,53 @@ class CppPackedGemmTemplate(CppTemplate):
 
     @cache_on_self
     def cache_blocking(self) -> GemmBlocking:
-        # TODO(jgong5): improve cache blocking with CPU info
+        def get_cache_blocking(register_blocking, thread_blocking):
+            M0 = register_blocking.block_m
+            N0 = register_blocking.block_n
+            K0 = register_blocking.block_k
+
+            Mc_blocks = thread_blocking.block_m
+            Kc_blocks = thread_blocking.block_k
+
+            # TODO: tune the factor here
+            L1_limit_factor = 1
+            L2_limit_factor = 0.5
+
+            L1_cache_size = (
+                torch._C._cpu._L1_cache_size()
+            )  # per core cache size in Bytes
+            L2_cache_size = (
+                torch._C._cpu._L2_cache_size()
+            )  # per core cache size in Bytes
+            num_byte = torch.tensor([], dtype=self.layout.dtype).element_size()
+
+            size_cache_B = K0 * Kc_blocks * N0 * num_byte
+
+            import math
+
+            def round_down(f):
+                return math.floor(f)
+
+            if size_cache_B > L1_cache_size:
+                Kc_blocks = round_down(
+                    L1_cache_size * L1_limit_factor / (K0 * N0 * num_byte)
+                )
+
+            size_cache_A = M0 * Mc_blocks * K0 * Kc_blocks * num_byte
+            if size_cache_A > L2_cache_size:
+                Mc_blocks = round_down(
+                    L2_cache_size * L2_limit_factor / (M0 * Kc_blocks * K0 * num_byte)
+                )
+            return Mc_blocks, Kc_blocks
+
         assert (
             not self.is_dynamic_M
         ), "Unable to determine cache blocking for dynamic M."
+        register_blocking = self.register_blocking
         thread_blocking = self.thread_blocking()
-        return GemmBlocking(thread_blocking.block_m, 1, thread_blocking.block_k)
+
+        Mc_blocks, Kc_blocks = get_cache_blocking(register_blocking, thread_blocking)
+        return GemmBlocking(Mc_blocks, 1, Kc_blocks)
 
     @staticmethod
     def add_choices(
