@@ -1111,8 +1111,8 @@ def load(
                 "during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless "
                 "they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. "
                 "We recommend you start setting `weights_only=True` for any use case where you don't have full "
-                "control of the loaded file, do open an issue on GitHub for any issues related to this experimental "
-                "feature.",
+                "control of the loaded file. Please open an issue on GitHub for any issues related to this "
+                "experimental feature.",
                 FutureWarning,
             )
             pickle_module = pickle
