@@ -1,11 +1,10 @@
 import argparse
 import os
 import pathlib
+import yaml
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Sequence, TextIO, Tuple, Union
-
-import yaml
 
 # Parse native_functions.yaml into a sequence of NativeFunctions and Backend Indices.
 from torchgen import dest

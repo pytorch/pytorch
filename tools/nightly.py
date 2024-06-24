@@ -56,6 +56,7 @@ from typing import (
     TypeVar,
 )
 
+
 LOGGER: Optional[logging.Logger] = None
 URL_FORMAT = "{base_url}/{platform}/{dist_name}.tar.bz2"
 DATETIME_FORMAT = "%Y-%m-%d_%Hh%Mm%Ss"

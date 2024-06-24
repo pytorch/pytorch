@@ -9,8 +9,8 @@ from collections import defaultdict
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, Iterable, NamedTuple, Optional
-
 from yaml import dump, load
+
 
 # Safely load fast C Yaml loader/dumper if they are available
 try:

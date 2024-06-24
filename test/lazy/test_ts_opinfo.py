@@ -4,10 +4,9 @@ import functools
 import itertools
 import os
 import pathlib
+import yaml
 from typing import Sequence
 from unittest import skip
-
-import yaml
 
 import torch
 import torch._lazy
@@ -20,9 +19,9 @@ from torch.testing._internal.common_device_type import (
     ops,
 )
 from torch.testing._internal.common_methods_invocations import op_db
-
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.jit_utils import JitTestCase
+
 
 torch._lazy.ts_backend.init()
 

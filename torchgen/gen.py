@@ -3,6 +3,7 @@ import functools
 import json
 import os
 import pathlib
+import yaml
 from collections import defaultdict, namedtuple, OrderedDict
 from dataclasses import dataclass, field
 from typing import (
@@ -18,8 +19,6 @@ from typing import (
     TypeVar,
     Union,
 )
-
-import yaml
 
 import torchgen.api.dispatcher as dispatcher
 import torchgen.api.meta as meta
@@ -2720,7 +2719,7 @@ def get_torchgen_root() -> pathlib.Path:
     If you're depending on torchgen out-of-tree, you can use the root to figure
     out the path to native_functions.yaml
     """
-    return pathlib.Path(__file__).parent.resolve()
+    return pathlib.Path(__file__).resolve().parent
 
 
 def main() -> None:

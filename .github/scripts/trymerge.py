@@ -16,6 +16,7 @@ import os
 import re
 import time
 import urllib.parse
+import yaml
 from collections import defaultdict
 from dataclasses import dataclass
 from functools import lru_cache
@@ -34,7 +35,6 @@ from typing import (
 )
 from warnings import warn
 
-import yaml
 from github_utils import (
     gh_fetch_json_list,
     gh_fetch_merge_base,
@@ -45,7 +45,6 @@ from github_utils import (
     gh_update_pr_state,
     GitHubComment,
 )
-
 from gitutils import (
     are_ghstack_branches_in_sync,
     get_git_remote_name,
@@ -61,6 +60,7 @@ from label_utils import (
     LABEL_ERR_MSG,
 )
 from trymerge_explainer import get_revert_message, TryMergeExplainer
+
 
 # labels
 MERGE_IN_PROGRESS_LABEL = "merging"

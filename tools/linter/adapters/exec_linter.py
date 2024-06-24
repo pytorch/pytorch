@@ -6,9 +6,9 @@ import json
 import logging
 import os
 import sys
-
 from enum import Enum
 from typing import NamedTuple, Optional
+
 
 LINTER_CODE = "EXEC"
 

@@ -4,7 +4,7 @@ import pathlib
 import sys
 
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[3 - 1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from tools.stats.import_test_stats import (
@@ -18,13 +18,13 @@ from tools.stats.import_test_stats import (
     get_test_times,
 )
 from tools.stats.upload_metrics import emit_metric
-
 from tools.testing.discover_tests import TESTS
 from tools.testing.target_determination.determinator import (
     AggregatedHeuristics,
     get_test_prioritizations,
     TestPrioritizations,
 )
+
 
 sys.path.remove(str(REPO_ROOT))
 

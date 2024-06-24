@@ -7,20 +7,20 @@ import os
 import re
 import sys
 import warnings
+import yaml
 from collections import namedtuple
 from os.path import abspath, exists
 
-import yaml
-
 import torch
+from torch._dynamo.testing import collect_results, reduce_to_scalar_loss
+from torch._dynamo.utils import clone_inputs
+
 
 try:
     from .common import BenchmarkRunner, main
 except ImportError:
     from common import BenchmarkRunner, main
 
-from torch._dynamo.testing import collect_results, reduce_to_scalar_loss
-from torch._dynamo.utils import clone_inputs
 
 # We are primarily interested in tf32 datatype
 torch.backends.cuda.matmul.allow_tf32 = True

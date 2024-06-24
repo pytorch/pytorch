@@ -3,10 +3,10 @@ import inspect
 import os
 import time
 import uuid
-
 from decimal import Decimal
 from typing import Any, Dict
 from warnings import warn
+
 
 # boto3 is an optional dependency. If it's not installed,
 # we'll just not emit the metrics.

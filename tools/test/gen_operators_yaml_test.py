@@ -5,7 +5,6 @@ import argparse
 import json
 import unittest
 from collections import defaultdict
-
 from unittest.mock import Mock, patch
 
 from gen_operators_yaml import (

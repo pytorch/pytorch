@@ -5,6 +5,7 @@ from typing import Dict, IO, List, Set, Tuple
 from ..oss.utils import get_pytorch_folder
 from ..util.setting import SUMMARY_FOLDER_DIR, TestList, TestStatusType
 
+
 CoverageItem = Tuple[str, float, int, int]
 
 

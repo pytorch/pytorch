@@ -5,9 +5,11 @@ build script to create a tailored build which only contains these used ops.
 """
 
 import yaml
+
 from torchvision import models
 
 import torch
+
 
 # Download and trace the model.
 model = models.mobilenet_v2(weights=models.MobileNet_V2_Weights.IMAGENET1K_V1)

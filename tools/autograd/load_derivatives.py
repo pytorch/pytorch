@@ -3,13 +3,11 @@
 # Each autograd function is represented by `DifferentiabilityInfo` containing
 # a list of `Derivative`. See `torchgen.api.autograd` for the data models.
 import re
+import yaml
 from collections import defaultdict
 from typing import Any, Counter, Dict, List, Match, Optional, Sequence, Set, Tuple
 
-import yaml
-
 from torchgen.api import cpp
-
 from torchgen.api.autograd import (
     Derivative,
     DifferentiabilityInfo,
@@ -49,6 +47,7 @@ from torchgen.model import (
 )
 from torchgen.utils import concatMap, IDENT_REGEX, split_name_params
 from torchgen.yaml_utils import YamlLoader
+
 
 DerivativeRet = Tuple[Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]], Set[str]]
 

@@ -5,7 +5,8 @@ import sys
 import warnings
 from typing import Any, Dict, List, Set
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[3 - 1]
 
 # These tests are slow enough that it's worth calculating whether the patch
 # touched any related files first. This list was manually generated, but for every

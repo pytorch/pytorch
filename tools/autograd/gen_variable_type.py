@@ -38,7 +38,6 @@ from torchgen.api.autograd import (
     NativeFunctionWithDifferentiabilityInfo,
     SavedAttribute,
 )
-
 from torchgen.api.types import (
     ArrayRefCType,
     BaseCppType,
@@ -102,6 +101,7 @@ from .gen_trace_type import (
     tie_return_values,
     type_wrapper_name,
 )
+
 
 # We don't set or modify grad_fn on these methods. Generally, they return
 # tensors that have requires_grad=False. In-place functions listed here will
