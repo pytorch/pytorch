@@ -1,5 +1,17 @@
 # mypy: allow-untyped-defs
-import builtins
+
+# In some cases, these basic types are shadowed by corresponding
+# top-level values.  The underscore variants let us refer to these
+# types.  See https://github.com/python/mypy/issues/4146 for why these
+# workarounds is necessary
+from builtins import (  # noqa: F401
+    bool as _bool,
+    bytes as _bytes,
+    complex as _complex,
+    float as _float,
+    int as _int,
+    str as _str,
+)
 from typing import Any, List, Optional, Sequence, Tuple, TYPE_CHECKING, Union
 
 import torch
@@ -20,21 +32,12 @@ _TensorOrTensorsOrGradEdge = Union[
     Sequence["GradientEdge"],
 ]
 
-# In some cases, these basic types are shadowed by corresponding
-# top-level values.  The underscore variants let us refer to these
-# types.  See https://github.com/python/mypy/issues/4146 for why these
-# workarounds is necessary
-_int = builtins.int
-_float = builtins.float
-_bool = builtins.bool
-_complex = builtins.complex
-
 _dtype = torch.dtype
 _device = torch.device
 _qscheme = torch.qscheme
-_size = Union[torch.Size, List[_int], Tuple[_int, ...]]
 _layout = torch.layout
-_dispatchkey = Union[str, torch._C.DispatchKey]
+_size = Union[torch.Size, List[_int], Tuple[_int, ...]]
+_dispatchkey = Union[_str, torch._C.DispatchKey]
 
 # Meta-type for "numeric" things; matches our docs
 Number = Union[_int, _float, _bool]
@@ -42,7 +45,7 @@ Number = Union[_int, _float, _bool]
 # Meta-type for "device-like" things.  Not to be confused with 'device' (a
 # literal device object).  This nomenclature is consistent with PythonArgParser.
 # None means use the default device (typically CPU)
-Device = Optional[Union[_device, str, _int]]
+Device = Optional[Union[_device, _str, _int]]
 del Optional
 
 # Storage protocol implemented by ${Type}StorageBase classes
@@ -54,10 +57,10 @@ class Storage:
     dtype: torch.dtype
     _torch_load_uninitialized: _bool
 
-    def __deepcopy__(self, memo) -> "Storage":
+    def __deepcopy__(self, memo: dict) -> "Storage":
         raise NotImplementedError
 
-    def _new_shared(self, int) -> "Storage":
+    def _new_shared(self, size: _int) -> "Storage":
         raise NotImplementedError
 
     def _write_file(
@@ -89,7 +92,7 @@ class Storage:
 
     def from_file(
         self,
-        filename: str,
+        filename: _str,
         shared: _bool = False,
         nbytes: _int = 0,
     ) -> "Storage":
