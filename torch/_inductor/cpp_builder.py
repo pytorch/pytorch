@@ -17,7 +17,7 @@ import sys
 import sysconfig
 import warnings
 from pathlib import Path
-from typing import List, Sequence, Tuple, Union
+from typing import List, Optional, Sequence, Tuple, Union
 
 import torch
 from torch._inductor import config, exc
@@ -540,20 +540,6 @@ def _setup_standard_sys_libs(
     return cflags, include_dirs, passthough_args
 
 
-@functools.lru_cache
-def _cpp_prefix_path() -> str:
-    from torch._inductor.codecache import write  # TODO
-
-    path = Path(Path(__file__).parent).parent / "codegen/cpp_prefix.h"
-    with path.open() as f:
-        content = f.read()
-        _, filename = write(
-            content,
-            "h",
-        )
-    return filename
-
-
 def _get_build_args_of_chosen_isa(vec_isa: VecISA):
     macros = []
     build_flags = []
@@ -734,7 +720,7 @@ def _get_openmp_args(cpp_compiler):
             fb_openmp_extra_flags = f"-Wp,-fopenmp {openmp_lib}"
             passthough_args.append(fb_openmp_extra_flags)
 
-            libs.append("omp")
+            # libs.append("omp")
         else:
             if _is_clang(cpp_compiler):
                 # TODO: fix issue, can't find omp.h
@@ -940,13 +926,17 @@ def get_cpp_torch_cuda_options(cuda: bool, aot_mode: bool = False):
     libraries: List[str] = []
     passthough_args: List[str] = []
 
+    """
     if (
         config.is_fbcode()
         and "CUDA_HOME" not in os.environ
         and "CUDA_PATH" not in os.environ
     ):
         os.environ["CUDA_HOME"] = build_paths.cuda()
+    """
+    from torch._inductor.codecache import _set_gpu_runtime_env, cpp_prefix_path
 
+    _set_gpu_runtime_env()
     from torch.utils import cpp_extension
 
     include_dirs = cpp_extension.include_paths(cuda)
@@ -971,8 +961,9 @@ def get_cpp_torch_cuda_options(cuda: bool, aot_mode: bool = False):
                     libraries += ["c10_cuda", "cuda", "torch_cuda"]
 
     if aot_mode:
-        cpp_prefix_include_dir = [f"{os.path.dirname(_cpp_prefix_path())}"]
-        include_dirs += cpp_prefix_include_dir
+        if config.is_fbcode():
+            cpp_prefix_include_dir = [f"{os.path.dirname(cpp_prefix_path())}"]
+            include_dirs += cpp_prefix_include_dir
 
         if cuda and torch.version.hip is None:
             _transform_cuda_paths(libraries_dirs)
@@ -1061,15 +1052,24 @@ class CppTorchCudaOptions(CppTorchOptions):
 
 
 def get_name_and_dir_from_output_file_path(
-    aot_mode: bool, use_absolute_path: bool, file_path: str
+    file_path: str,
 ):
+    """
+    This function help prepare parameters to new cpp_builder.
+    Example:
+        input_code: /tmp/tmpof1n5g7t/5c/c5crkkcdvhdxpktrmjxbqkqyq5hmxpqsfza4pxcf3mwk42lphygc.cpp
+        name, dir = get_name_and_dir_from_output_file_path(input_code)
+    Run result:
+        name = c5crkkcdvhdxpktrmjxbqkqyq5hmxpqsfza4pxcf3mwk42lphygc
+        dir = /tmp/tmpof1n5g7t/5c/
+    put 'name' and 'dir' to CppBuilder's 'name' and 'output_dir'.
+    CppBuilder --> get_target_file_path will format output path accoding OS:
+    Linux: /tmp/tmppu87g3mm/zh/czhwiz4z7ca7ep3qkxenxerfjxy42kehw6h5cjk6ven4qu4hql4i.so
+    Windows: [Windows temp path]/tmppu87g3mm/zh/czhwiz4z7ca7ep3qkxenxerfjxy42kehw6h5cjk6ven4qu4hql4i.dll
+    """
     name_and_ext = os.path.basename(file_path)
     name, ext = os.path.splitext(name_and_ext)
     dir = os.path.dirname(file_path)
-
-    if config.is_fbcode():
-        if not (aot_mode and not use_absolute_path):
-            dir = "."
     return name, dir
 
 
@@ -1124,11 +1124,16 @@ class CppBuilder:
         # Code start here, initial self internal veriables firstly.
         self._compiler = BuildOption.get_compiler()
         self._use_absolute_path = BuildOption.get_use_absolute_path()
+        self._aot_mode = BuildOption.get_aot_mode()
 
+        """
+        TODO: validate and remove:
         if len(output_dir) == 0:
             self._output_dir = os.path.dirname(os.path.abspath(__file__))
         else:
             self._output_dir = output_dir
+        """
+        self._output_dir = output_dir
 
         self._compile_only = BuildOption.get_compile_only()
         file_ext = (
@@ -1142,7 +1147,7 @@ class CppBuilder:
             sources = [sources]
 
         if config.is_fbcode():
-            if BuildOption.get_aot_mode() and not self._use_absolute_path:
+            if self._aot_mode and not self._use_absolute_path:
                 inp_name = sources
                 # output process @ get_name_and_dir_from_output_file_path
             else:
@@ -1243,7 +1248,11 @@ class CppBuilder:
     def get_target_file_path(self):
         return self._target_file
 
-    def build(self) -> Tuple[int, str]:
+    def build(
+        self,
+        fb_input_path: Optional[str] = None,
+        fb_output_path: Optional[str] = None,
+    ) -> str:
         """
         It is must need a temperary directory to store object files in Windows.
         After build completed, delete the temperary directory to save disk space.
@@ -1255,8 +1264,14 @@ class CppBuilder:
         _create_if_dir_not_exist(_build_tmp_dir)
 
         build_cmd = self.get_command_line()
+        if config.is_fbcode():
+            from torch._inductor.codecache import compile_file
 
-        status = run_command_line(build_cmd, cwd=_build_tmp_dir)
+            # compile_file(input_path, output_path, shlex.split(cmd))
+
+            compile_file(fb_input_path, fb_output_path, shlex.split(build_cmd))
+        else:
+            status = run_command_line(build_cmd, cwd=_build_tmp_dir)
 
         _remove_dir(_build_tmp_dir)
-        return status, self._target_file
+        return self._target_file

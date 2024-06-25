@@ -113,7 +113,7 @@ cdll.LoadLibrary("__lib_path__")
                 # Check if the output file exist, and compile when not.
                 output_path = x86_isa_help_builder.get_target_file_path()
                 if not os.path.isfile(output_path):
-                    status, target_file = x86_isa_help_builder.build()
+                    x86_isa_help_builder.build()
 
                 # Check build result
                 subprocess.check_call(
