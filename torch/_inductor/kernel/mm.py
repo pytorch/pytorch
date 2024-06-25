@@ -8,6 +8,7 @@ from torch._inductor.codegen.cpp_gemm_template import CppPackedGemmTemplate
 from torch._inductor.virtualized import V
 from .. import config as inductor_config
 from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
+from ..codegen.cuda.gemm_template_2x import CUTLASS2xGemmTemplate
 from ..codegen.wrapper import WrapperCodeGen
 from ..ir import FlexibleLayout
 from ..lowering import register_lowering
@@ -490,6 +491,9 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
 
     if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
         CUTLASSGemmTemplate.add_cutlass_gemm_choices(
+            choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
+        )
+        CUTLASS2xGemmTemplate.add_cutlass_gemm_choices(
             choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
         )
 

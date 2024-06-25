@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import logging
+import math
 import os
 import unittest
 from typing import Callable, List, Optional
@@ -34,6 +35,7 @@ HAS_CUDA = HAS_CUDA and not torch.version.hip
 SM75OrLater = SM75OrLater and not torch.version.hip
 SM80OrLater = SM80OrLater and not torch.version.hip
 SM90OrLater = SM90OrLater and not torch.version.hip
+SM80 = SM80OrLater and torch.cuda.get_device_capability() == (8, 0)
 
 
 def _get_path_without_sccache() -> str:
@@ -533,7 +535,7 @@ class TestCutlassBackend(TestCase):
             torch.testing.assert_close(Y_compiled, Y)
 
     # TODO: Enable dynamic test cases when dynamic support is added.
-    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @unittest.skipIf(not SM80, "need sm_80 exactly")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     @parametrize("dynamic", (False,))
     @parametrize("max_autotune_gemm_backends", ("CUTLASS", "CUTLASS,Triton,ATen"))
@@ -557,8 +559,9 @@ class TestCutlassBackend(TestCase):
         # layouts for this operation, thus the transpose of tensor b.
         # Also, for CUTLASS alignment requirements, number of columns
         # of the first tensor has to be divisible by 16.
-        a = torch.randn(100, 16).cuda().half()
-        b = torch.randint(0, 5, (100, 16), dtype=torch.int8).cuda().T
+        m, n, k = 100, 16, 100
+        a = torch.randn(m, k).cuda().half()
+        b = torch.randint(0, 5, (n, k), dtype=torch.int8).cuda().T
 
         with config.patch(
             {
@@ -568,11 +571,23 @@ class TestCutlassBackend(TestCase):
                 "cuda.cutlass_dir": _CUTLASS_DIR,
                 "cuda.cutlass_max_profiling_configs": 2,
                 "use_mixed_mm": True,
+                "autotune_local_cache": True,
             }
         ):
             Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
             Y = mm(a, b)
             torch.testing.assert_close(Y_compiled, Y)
+
+        cache = torch._inductor.codecache.LocalCache().lookup("mixed_mm")
+        high = cache[
+            f"[('cuda', 'torch.float16', {m}, {k}, {k}, 1, 0), "
+            f"('cuda', 'torch.int8', {k}, {n}, 1, {k}, 0)]"
+        ]["high"]
+        cutlass_kernels_count = 0
+        for kernel, time in high.items():
+            if kernel.startswith("cutlass_gemm") and not math.isinf(time):
+                cutlass_kernels_count += 1
+        assert cutlass_kernels_count > 0
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
