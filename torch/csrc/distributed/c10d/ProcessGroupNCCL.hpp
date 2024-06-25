@@ -688,6 +688,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       OpType opType,
       int p2pRank = 0,
       bool isSendRecvSelf = false,
+      std::optional<const std::string> streamKey = c10::nullopt,
       bool onlyCached = false);
 
   // Wrapper method which can be overridden for tests.

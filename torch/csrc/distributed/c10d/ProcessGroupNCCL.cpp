@@ -1993,6 +1993,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
     OpType opType,
     int p2pRank,
     bool isSendRecvSelf,
+    std::optional<const std::string> streamKey,
     bool onlyCached) {
   // Sanity check
   if (deviceKey.empty()) {
@@ -2000,6 +2001,14 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
         DistBackendError,
         "Not able to create/get the NCCL Communicator since "
         "the GPU devices are not known");
+  }
+  if (!streamKey) {
+    streamKey.emplace(deviceKey);
+  }
+  if (streamKey->empty()) {
+    C10_THROW_ERROR(
+        DistBackendError,
+        "Not able to create/get the NCCL Communication Stream since streamKey was empty");
   }
   if (bound_device_id_) {
     if (*bound_device_id_ != device) {
@@ -2179,14 +2188,14 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
     C10D_NCCL_CHECK(ncclGroupStart(), c10::nullopt);
   }
 
-  ncclStreams_.emplace(deviceKey, std::move(streamVal));
+  ncclStreams_.emplace(streamKey, std::move(streamVal));
 
   // Note: these events are created with the (default) cudaEventDisableTiming
   // flag This flag provides the best performance when used with
   // cudaStreamWaitEvent() and cudaEventQuery(). Since we here don't measure the
   // performance using cudaEvent, this should be set.
   // TODO(kwen2501): is ncclEvents_ used anywhere else?
-  ncclEvents_.emplace(deviceKey, at::cuda::CUDAEvent(cudaEventDisableTiming));
+  ncclEvents_.emplace(streamKey, at::cuda::CUDAEvent(cudaEventDisableTiming));
 
   // Record the communicators based on ncclUniqueId.
   ncclIdToCommMap_.emplace(buildNcclUniqueIdStr(ncclID), ncclComm);
@@ -2898,17 +2907,25 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   }
 
   auto device = getDevice(tensor);
-  std::string key = getKeyFromDevice(device);
+
+  // Note on keys
+  // devKey identifies this gpu device and is used for accessing a nccl Communicator for this PG per device
+  // p2pKey identifies a pair of ranks doing p2p comms, and is used for accessing a unique nccl stream per pair so that
+  // p2p comms between different pairs can overlap.
+  // Historically, different nccl communicators were also used for pairs of p2p ranks, but this is unnecessary. 
+  std::string devKey = getKeyFromDevice(device);
+  std::string p2pKey = getKeySendRecv(rank_, peer);
   int p2pRank = rank_;
   int p2pTargetRank = peer;
   bool isSendRecvSelf = false;
   // For batch_isend_irecv, ncclGroupStart() would be called upfront
   bool batchP2P = ncclActiveGroupCounter_ > 0;
 
-  // If an existing communicator exists, we want to use it (for batch or
-  // non-batch  P2P)
+  // If an existing communicator exists for this PG, we want to use it (for batch or
+  // non-batch P2P)
+  // Note: even if we find a cached nccl communicator, we'll still create a new stream for the streamkey if needed.
   auto ncclComm = getNCCLComm(
-      key, device, opType, p2pRank, isSendRecvSelf, /*onlyCached*/ true);
+      devKey, device, opType, p2pRank, isSendRecvSelf, /*streamKey*/p2pKey,/*onlyCached*/ true);
 
   if (!batchP2P && !ncclComm) {
     // We create special 2-rank communicators for each pair of send/recv rank if
@@ -2919,7 +2936,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
 
     // TODO(whc) - unclear why we special-case batchP2P to avoid this path, but
     // I preserved this existing special case.
-    key = getKeySendRecv(rank_, peer);
     p2pRank = rank_ <= peer ? 0 : 1;
     isSendRecvSelf = rank_ == peer;
     p2pTargetRank = isSendRecvSelf ? 0 : 1 - p2pRank;
@@ -2938,7 +2954,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
         "To avoid this, please pass a device_id to init_process_group to eagerly initialize communicators, "
         "or call a collective operation on this process group before the first P2P operation to lazily initialize.");
 
-    ncclComm = getNCCLComm(key, device, opType, p2pRank, isSendRecvSelf);
+    // Both the communicator and the stream are keyed against the p2p rank pair in this fallback case
+    ncclComm = getNCCLComm(p2pKey, device, opType, p2pRank, isSendRecvSelf);
   }
   // Bump the logical operation counter regardless of whether this op is
   // coalesced or individual
@@ -2960,9 +2977,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   }
 
   // Used many times below, so we stash the unordered_map lookup
-  auto ncclStream = ncclStreams_.at(key);
+  auto ncclStream = ncclStreams_.at(p2pKey);
   // First let NCCL streams wait for input tensors allocation streams
-  syncStream(device, ncclEvents_[key], ncclStream);
+  syncStream(device, ncclEvents_[p2pKey], ncclStream);
 
   // Work itself will create the CUDA events on all GPUs of tensors
   c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> work;
