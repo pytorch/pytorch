@@ -28,7 +28,9 @@ disable_progress = True
 verbose_progress = False
 
 # use fx aot graph codegen cache
-fx_graph_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE") == "1"
+fx_graph_cache = (
+    os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE", "0" if is_fbcode() else "1") == "1"
+)
 
 # use remote fx aot graph codegen cache
 # False: Disables the cache
@@ -696,9 +698,7 @@ class triton:
     autotune_cublasLt = True
 
     # Tune the generated Triton kernels at compile time instead of first time they run
-    autotune_at_compile_time = (
-        os.environ.get("TORCHINDUCTOR_TRITON_AUTOTUNE_AT_COMPILE_TIME", "0") == "1"
-    )
+    autotune_at_compile_time = False
 
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = True
@@ -860,29 +860,6 @@ class cuda:
     # caused by the op ordering of the "pingpong" memory access
     # pattern used by some Cutlass Kernels.
     cutlass_op_denylist_regex: Optional[str] = "pingpong"
-
-
-# Backend to use for CPU codegen either "cpp" or "halide" (experimental)
-cpu_backend = "cpp"
-
-
-class halide:
-    # Base halide target to use for CPU devices
-    cpu_target = "host"
-
-    # Base halide target to use for CUDA devices
-    gpu_target = "host-cuda"
-
-    # Halide autoscheduler to use, choices are:
-    # "Anderson2021" (gpu-only), "Li2018", "Adams2019" (cpu-only), or "Mullapudi2016" (cpu-only)
-    scheduler_cuda = "Li2018"
-    scheduler_cpu = "Adams2019"
-
-    # Controls `no_asserts` flag passed to Halide target (warning: can false positive)
-    asserts = False
-
-    # Controls `debug` flag passed to Halide target
-    debug = False
 
 
 # create a directory containing lots of debug information
