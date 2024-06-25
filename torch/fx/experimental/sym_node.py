@@ -8,6 +8,7 @@ This file does three things:
 As this file is imported from within torch/__init__.py we do not want it to depend on SymPy
 to avoid having to load SymPy at import time, as doing so is *very* slow.
 """
+from __future__ import annotations
 
 import builtins
 import itertools
@@ -15,8 +16,9 @@ import logging
 import math
 import operator
 import sys
+from dataclasses import dataclass
 from functools import lru_cache, update_wrapper
-from typing import FrozenSet, Optional, Type, TYPE_CHECKING, Union
+from typing import Optional, Type, TYPE_CHECKING, Union
 
 import torch
 
@@ -122,21 +124,28 @@ class SymNode:
             fx_node if self.shape_env._translation_validation_enabled else None
         )
 
-    def with_shape_env(self, shape_env: "ShapeEnv") -> "SymNode":
+    def with_shape_env(self, shape_env: ShapeEnv) -> SymNode:
         return SymNode(
             self._expr, shape_env, self.pytype, self._hint, self.constant, self.fx_node
         )
 
     def __eq__(self, other: object) -> bool:
+        # Do you want pointer equality or value equality? The caller needs to be specific.
+        raise TypeError("unhashable type: SymNode")
+
+    def __hash__(self) -> int:
+        # Do you want pointer hashing or value hashing? The caller needs to be specific.
+        raise TypeError("unhashable type: SymNode")
+
+    def _value_eq(self, other: SymNode) -> bool:
         return (
-            isinstance(other, SymNode)
-            and self._expr == other._expr
-            and id(self.shape_env) == id(other.shape_env)
+            self._expr == other._expr
+            and self.shape_env == other.shape_env
             and self.pytype == other.pytype
         )
 
-    def __hash__(self) -> int:
-        return hash((self._expr, self.pytype))
+    def _value_hash(self) -> int:
+        return hash((self._expr, self.shape_env, self.pytype))
 
     @property
     def expr(self):
@@ -260,121 +269,121 @@ class SymNode:
 
     # These methods call the metaprogrammed methods, they're hand written
     # here so we get good stack traces
-    def abs(self) -> "SymNode":
+    def abs(self) -> SymNode:
         return self._abs()  # type: ignore[attr-defined]
 
-    def pos(self) -> "SymNode":
+    def pos(self) -> SymNode:
         return self._pos()  # type: ignore[attr-defined]
 
-    def round(self, ndigits=None) -> "SymNode":
+    def round(self, ndigits=None) -> SymNode:
         return self._round(ndigits)  # type: ignore[attr-defined]
 
-    def trunc(self) -> "SymNode":
+    def trunc(self) -> SymNode:
         return self._trunc()  # type: ignore[attr-defined]
 
-    def add(self, other) -> "SymNode":
+    def add(self, other) -> SymNode:
         return self._add(other)  # type: ignore[attr-defined]
 
-    def sub(self, other) -> "SymNode":
+    def sub(self, other) -> SymNode:
         return self._sub(other)  # type: ignore[attr-defined]
 
-    def mul(self, other) -> "SymNode":
+    def mul(self, other) -> SymNode:
         return self._mul(other)  # type: ignore[attr-defined]
 
-    def mod(self, other) -> "SymNode":
+    def mod(self, other) -> SymNode:
         return self._mod(other)  # type: ignore[attr-defined]
 
-    def float_pow(self, other) -> "SymNode":
+    def float_pow(self, other) -> SymNode:
         return self._float_pow(other)  # type: ignore[attr-defined]
 
-    def pow_by_natural(self, other) -> "SymNode":
+    def pow_by_natural(self, other) -> SymNode:
         return self._pow_by_natural(other)  # type: ignore[attr-defined]
 
-    def and_(self, other) -> "SymNode":
+    def and_(self, other) -> SymNode:
         return self._and_(other)  # type: ignore[attr-defined]
 
-    def or_(self, other) -> "SymNode":
+    def or_(self, other) -> SymNode:
         return self._or_(other)  # type: ignore[attr-defined]
 
-    def float_truediv(self, other) -> "SymNode":
+    def float_truediv(self, other) -> SymNode:
         return self._float_truediv(other)  # type: ignore[attr-defined]
 
-    def int_truediv(self, other) -> "SymNode":
+    def int_truediv(self, other) -> SymNode:
         return self._int_truediv(other)  # type: ignore[attr-defined]
 
-    def int_floordiv(self, other) -> "SymNode":
+    def int_floordiv(self, other) -> SymNode:
         return self._int_floordiv(other)  # type: ignore[attr-defined]
 
-    def lshift(self, other) -> "SymNode":
+    def lshift(self, other) -> SymNode:
         return self._lshift(other)  # type: ignore[attr-defined]
 
-    def rshift(self, other) -> "SymNode":
+    def rshift(self, other) -> SymNode:
         return self._rshift(other)  # type: ignore[attr-defined]
 
-    def sym_not(self) -> "SymNode":  # noqa: F811
+    def sym_not(self) -> SymNode:  # noqa: F811
         return self._sym_not()  # type: ignore[attr-defined]
 
-    def eq(self, other) -> "SymNode":
+    def eq(self, other) -> SymNode:
         return self._eq(other)  # type: ignore[attr-defined]
 
-    def ne(self, other) -> "SymNode":
+    def ne(self, other) -> SymNode:
         return self._ne(other)  # type: ignore[attr-defined]
 
-    def gt(self, other) -> "SymNode":
+    def gt(self, other) -> SymNode:
         return self._gt(other)  # type: ignore[attr-defined]
 
-    def lt(self, other) -> "SymNode":
+    def lt(self, other) -> SymNode:
         return self._lt(other)  # type: ignore[attr-defined]
 
-    def le(self, other) -> "SymNode":
+    def le(self, other) -> SymNode:
         return self._le(other)  # type: ignore[attr-defined]
 
-    def ge(self, other) -> "SymNode":
+    def ge(self, other) -> SymNode:
         return self._ge(other)  # type: ignore[attr-defined]
 
-    def floor(self) -> "SymNode":
+    def floor(self) -> SymNode:
         return self._floor()  # type: ignore[attr-defined]
 
-    def is_integer(self) -> "SymNode":
+    def is_integer(self) -> SymNode:
         return self._is_integer()  # type: ignore[attr-defined]
 
-    def sym_float(self) -> "SymNode":  # noqa: F811
+    def sym_float(self) -> SymNode:  # noqa: F811
         return self._sym_float()  # type: ignore[attr-defined]
 
-    def sym_int(self) -> "SymNode":
+    def sym_int(self) -> SymNode:
         return self._sym_int()  # type: ignore[attr-defined]
 
-    def ceil(self) -> "SymNode":
+    def ceil(self) -> SymNode:
         return self._ceil()  # type: ignore[attr-defined]
 
-    def neg(self) -> "SymNode":
+    def neg(self) -> SymNode:
         return self._neg()  # type: ignore[attr-defined]
 
-    def sym_min(self, other) -> "SymNode":  # noqa: F811
+    def sym_min(self, other) -> SymNode:  # noqa: F811
         return self._sym_min(other)  # type: ignore[attr-defined]
 
-    def sym_max(self, other) -> "SymNode":  # noqa: F811
+    def sym_max(self, other) -> SymNode:  # noqa: F811
         return self._sym_max(other)  # type: ignore[attr-defined]
 
-    def sym_ite(self, then_val, else_val) -> "SymNode":
+    def sym_ite(self, then_val, else_val) -> SymNode:
         return self._sym_ite(then_val, else_val)  # type: ignore[attr-defined]
 
-    def is_contiguous(self, sizes, strides) -> "SymNode":
+    def is_contiguous(self, sizes, strides) -> SymNode:
         return self._is_contiguous(sizes, strides)  # type: ignore[attr-defined]
 
-    def is_channels_last_contiguous_2d(self, sizes, strides) -> "SymNode":
+    def is_channels_last_contiguous_2d(self, sizes, strides) -> SymNode:
         return self._is_channels_last_contiguous_2d(sizes, strides)  # type: ignore[attr-defined]
 
-    def is_channels_last_contiguous_3d(self, sizes, strides) -> "SymNode":
+    def is_channels_last_contiguous_3d(self, sizes, strides) -> SymNode:
         return self._is_channels_last_contiguous_3d(sizes, strides)  # type: ignore[attr-defined]
 
-    def is_channels_last_strides_2d(self, sizes, strides) -> "SymNode":
+    def is_channels_last_strides_2d(self, sizes, strides) -> SymNode:
         return self._is_channels_last_strides_2d(sizes, strides)  # type: ignore[attr-defined]
 
-    def is_channels_last_strides_3d(self, sizes, strides) -> "SymNode":
+    def is_channels_last_strides_3d(self, sizes, strides) -> SymNode:
         return self._is_channels_last_strides_3d(sizes, strides)  # type: ignore[attr-defined]
 
-    def is_non_overlapping_and_dense_indicator(self, sizes, strides) -> "SymNode":
+    def is_non_overlapping_and_dense_indicator(self, sizes, strides) -> SymNode:
         return self._is_non_overlapping_and_dense_indicator(sizes, strides)  # type: ignore[attr-defined]
 
     # Make C++ happy
@@ -388,7 +397,7 @@ class SymNode:
     def truediv(self, other):
         return self.float_truediv(other)
 
-    def floordiv(self, other) -> "SymNode":
+    def floordiv(self, other) -> SymNode:
         return self.int_floordiv(other)
 
     # We didn't bind integer pow in C++
@@ -500,12 +509,20 @@ class SymNode:
     def is_constant(self):
         return False
 
-    def symbols(self) -> FrozenSet["SymNode"]:
-        return frozenset(
-            SymNode(atom, self.shape_env, self.pytype, None)
-            for atom in self._expr.atoms()
-            if atom.is_symbol
-        )
+
+@dataclass(frozen=True)
+class SymNodeValueHash:
+    """
+    A wrapper for SymNode that provides value equality and hashing.
+    """
+
+    node: SymNode
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, SymNodeValueHash) and self.node._value_eq(other.node)
+
+    def __hash__(self) -> int:
+        return self.node._value_hash()
 
 
 # TODO: this probably needs the sizes-strides eval functions

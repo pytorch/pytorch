@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import copy
 import contextlib
+
+import copy
 import functools
 import logging
 import os
@@ -46,7 +47,7 @@ from torch._subclasses.meta_utils import (
     MetaConverter,
 )
 from torch._utils import render_call
-from torch.fx.experimental.sym_node import guard_size_oblivious, SymNode
+from torch.fx.experimental.sym_node import guard_size_oblivious
 from torch.fx.immutable_collections import immutable_dict
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -900,13 +901,13 @@ class TensorMetadata:
     """
 
     dtype: torch.dtype
-    shape: Tuple[Union[IntLikeType, _DispatchCacheEntrySymNode], ...]
-    stride: Tuple[Union[IntLikeType, _DispatchCacheEntrySymNode], ...]
+    shape: Tuple[Union[IntLikeType, _PySymInputStub, _SymIntOutputStub], ...]
+    stride: Tuple[Union[IntLikeType, _PySymInputStub, _SymIntOutputStub], ...]
     device: torch.device
     layout: torch.layout
     memory_format: Optional[torch.memory_format]
-    storage_offset: Union[IntLikeType, _DispatchCacheEntrySymNode]
-    storage_bytes: Optional[Union[IntLikeType, _DispatchCacheEntrySymNode]]
+    storage_offset: Union[IntLikeType, _PySymInputStub, _SymIntOutputStub]
+    storage_bytes: Optional[Union[IntLikeType, _PySymInputStub, _SymIntOutputStub]]
     requires_grad: bool
     is_quantized: bool
     is_conj: bool
@@ -925,7 +926,11 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
     memory_format: Optional[torch.memory_format] = suggest_memory_format(t)
     # Don't call is_contiguous() on a Tensor which has symbolic sizes or things
     # will go badly (guards will be messed up?)
-    if t._has_symbolic_sizes_strides or is_sparse_any(t) or not t.is_contiguous(memory_format=memory_format):
+    if (
+        t._has_symbolic_sizes_strides
+        or is_sparse_any(t)
+        or not t.is_contiguous(memory_format=memory_format)
+    ):
         memory_format = None
 
     storage_offset = t.storage_offset()
@@ -973,13 +978,51 @@ class _DispatchCacheKey:
 
 
 @dataclass
-class _DispatchCacheEntrySymNode:
-    ty: Type
-    node: SymNode
-    path: Optional[pytree.KeyPath]
+class _PySymInputStub:
+    """
+    Represents a SymInt in the cached key. Needed because SymInt doesn't
+    support __eq__ or __hash__ directly.
+    """
+
+    value: PySymType
 
     def __repr__(self) -> str:
-        return f"_DispatchCacheEntrySymNode({self.ty}, {self.node}, {self.path})"
+        return f"_PySymInputStub({self.value!r})"
+
+    def __eq__(self, other: object) -> bool:
+        return (
+            isinstance(other, _PySymInputStub)
+            and type(self.value) == type(other.value)
+            and self.value.node._value_eq(other.value.node)
+        )
+
+    def __hash__(self) -> int:
+        return self.value.node._value_hash()
+
+
+@dataclass
+class _SymIntOutputStub:
+    """
+    Represents a SymInt in the cached output. If `key_path` is non-None then
+    it's the location in the cache key of a _PySymInputStub to copy the SymInt
+    from.
+    """
+
+    value: SymInt
+    key_path: Optional[pytree.KeyPath]
+
+    def __repr__(self) -> str:
+        return f"_SymIntOutputStub({self.value}, {self.key_path})"
+
+    def __eq__(self, other: object) -> bool:
+        return (
+            isinstance(other, _SymIntOutputStub)
+            and type(self.value) == type(other.value)
+            and self.value.node._value_eq(other.value.node)
+        )
+
+    def __hash__(self) -> int:
+        return self.value.node._value_hash()
 
 
 @dataclass(frozen=True)
@@ -1320,7 +1363,7 @@ class FakeTensorMode(TorchDispatchMode):
         def replace_syms(path: pytree.KeyPath, value: object) -> object:
             if isinstance(value, py_sym_types):
                 state.sym_node_lookup[id(value.node)] = path
-                return (type(value), value.node)
+                return _PySymInputStub(value)
             return value
 
         key_values = pytree.tree_map_with_path(replace_syms, key_values)
@@ -1478,14 +1521,11 @@ class FakeTensorMode(TorchDispatchMode):
 
         # Look through the metadata to see if we have any SymNodes hiding in there.
         def replace_syms(path: pytree.KeyPath, value: object) -> object:
-            if isinstance(value, py_sym_types):
-                # There's a SymNode in the output. Does it map to an input SymNode?
-                if id(value.node) in state.sym_node_lookup:
-                    return _DispatchCacheEntrySymNode(
-                        type(value), value.node, state.sym_node_lookup[id(value.node)]
-                    )
-                else:
-                    return _DispatchCacheEntrySymNode(type(value), value.node, None)
+            if isinstance(value, SymInt):
+                # There's a SymInt in the output. Does it map to an input node?
+                return _SymIntOutputStub(
+                    value, state.sym_node_lookup.get(id(value.node), None)
+                )
             return value
 
         metadata = pytree.tree_map_with_path(replace_syms, metadata)
@@ -1535,30 +1575,42 @@ class FakeTensorMode(TorchDispatchMode):
 
         assert not metadata.is_sparse
 
-        def check_value(
-            value: Union[IntLikeType, _DispatchCacheEntrySymNode]
-        ) -> IntLikeType:
+        def check_value_opt(
+            value: Optional[Union[IntLikeType, _PySymInputStub, _SymIntOutputStub]]
+        ) -> Optional[IntLikeType]:
             if value is None:
                 return None
-            elif isinstance(value, _DispatchCacheEntrySymNode):
-                if value.path is None:
-                    # It's important for this to not return the cached SymNode - so that anyone looking at the 'id' won't see it as the same as before...
-                    return value.ty(copy.copy(value.node))
-                else:
-                    ty, node = pytree.key_get(key.key, value.path)
-                    return ty(node)
             else:
+                return check_value(value)
+
+        def check_value(
+            value: Union[IntLikeType, _PySymInputStub, _SymIntOutputStub]
+        ) -> Union[IntLikeType]:
+            if isinstance(value, _SymIntOutputStub):
+                if value.key_path is None:
+                    # It's important for this to not return the cached SymNode -
+                    # so that observers won't see a shared node.
+                    res = value.value
+                    return type(res)(copy.copy(res.node))
+                else:
+                    res = pytree.key_get(key.key, value.key_path)
+                    assert isinstance(res, _PySymInputStub) and isinstance(
+                        res.value, SymInt
+                    )
+                    return res.value
+            else:
+                assert not isinstance(value, _PySymInputStub)
                 return value
 
         def check_list(
-            value: Sequence[Union[IntLikeType, _DispatchCacheEntrySymNode]]
+            value: Sequence[Union[IntLikeType, _PySymInputStub, _SymIntOutputStub]]
         ) -> Tuple[IntLikeType, ...]:
             return tuple(check_value(v) for v in value)
 
         shape = check_list(metadata.shape)
         stride = check_list(metadata.stride)
         storage_offset = check_value(metadata.storage_offset)
-        storage_bytes = check_value(metadata.storage_bytes)
+        storage_bytes = check_value_opt(metadata.storage_bytes)
 
         maybe_suppress: Callable[[], typing.ContextManager] = contextlib.nullcontext
         if self.shape_env is not None:
