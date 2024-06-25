@@ -41,8 +41,11 @@ static_weight_shapes = True
 # Applies CSE to the graph before partitioning
 cse = True
 
+
+enable_autograd_cache = os.environ.get("ENABLE_AOT_AUTOGRAD_CACHE", "0") == "1"
+
 # When AOTAutograd regenerates aliased graph outputs,
-# attempte to use functionalization's view-replay logic
+# attempt to use functionalization's view-replay logic
 # before falling back to the autograd engine's view replay or as_strided.
 # This can have some perf implications
 # (although for many models this will not matter).
@@ -59,7 +62,10 @@ cse = True
 # or default config to true and fix relevant bugs
 from torch._inductor.config import is_fbcode
 
-view_replay_for_aliased_outputs = not is_fbcode()
+# View replay is currently not compatible with AOTAutogradCache, since
+# FunctionalTensors are not serializable. We'll need to make them
+# serializable before enabling warm cache with this config turned on.
+view_replay_for_aliased_outputs = (not is_fbcode()) and (not enable_autograd_cache)
 
 # Restricts the amount of computation AOTAutograd can do.
 # NB: We have essentially disabled this heuristic now. However, this is kept
@@ -176,7 +182,6 @@ fake_tensor_propagate_real_tensors = False
 # Supported formats are defined here https://graphviz.org/docs/outputs/
 torch_compile_graph_format = os.environ.get("TORCH_COMPILE_GRAPH_FORMAT", "svg")
 
-enable_autograd_cache = os.environ.get("ENABLE_AOT_AUTOGRAD_CACHE", "0") == "1"
 
 # Error on BypassAOTAutogradCache instead of just a warning
 # Used for tests
