@@ -62,9 +62,9 @@ def check_args(input, combine_fn, leaves, tree, dim):
     )
 
     out_leaves, tree_out = pytree.tree_flatten(out)
-    # assert (
-    #     tree == tree_out
-    # ), "The pytree of the output of the operator needs to match the input pytree"
+    assert (
+        tree == tree_out
+    ), "The pytree of the output of the operator needs to match the input pytree"
 
 
 def associative_scan(
@@ -72,7 +72,7 @@ def associative_scan(
     input: pytree.PyTree,
     dim: int,
     reverse: bool = False,
-    host_side: bool = False,
+    generic_scan: bool = False,
 ) -> torch.Tensor:
     r"""
     Performs an inclusive scan with an associative pointwise combine function.
@@ -92,8 +92,15 @@ def associative_scan(
             This function must be pure, pointwise, and satisfy the associative property.
         input (torch.Tensor): The input tensor, or nested pytree of tensors.
             All inputs are expected to have the same shape.
-        dim (int): the dimension to scan over
-
+        dim (int): The dimension to scan over
+        reverse (bool): A boolean stating if the scan should be reversed with respect to the dimension.
+        generic_scan (bool): A boolean stating whether a generic scan mode should be used. 
+            If the generic scan mode is ``not used``, there are restrictions on the operations allowed
+            within the ``combine_fn``. For example, only pointwise functions are currently allowed.
+            If the generic scan mode is ``used``, the restrictions on the combine_fn are less strict, 
+            for example also non-pointwise operations are allowed. 
+            However, the non-generic scan mode utilizes efficient ``tl.associative_scan`` calls and is thus
+            more efficient as the generic scan mode.
 
     Example::
 
@@ -108,9 +115,10 @@ def associative_scan(
 
     if not torch._dynamo.is_compiling():
         with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
-            return torch.compile(associative_scan, fullgraph=True)(
-                    combine_fn, input, dim, reverse, host_side
-                )
+            # return torch.compile(associative_scan, fullgraph=True)(
+            #         combine_fn, input, dim, reverse, generic_scan
+            #     )
+            pass
 
     leaves, spec = pytree.tree_flatten(input)
 
@@ -119,7 +127,7 @@ def associative_scan(
     if reverse:
         leaves = [torch.flip(elem, [dim]) for elem in leaves]
 
-    if host_side:
+    if generic_scan:
         result_flat = associative_scan_host_side(combine_fn, leaves, dim, spec)
     else:
         combine_fn = functools.partial(

@@ -470,41 +470,41 @@ class TestControlFlow(TestCase):
             return x * y
 
         def f(op, x, dim):
-            result = associative_scan(op, x, dim, host_side=True)
+            result = associative_scan(op, x, dim, generic_scan=True)
             return result
 
         x = torch.arange(5)
-        cumsum = associative_scan(add, x, 0, host_side=True)
+        cumsum = associative_scan(add, x, 0, generic_scan=True)
         cumsum_exp = _fake_associative_scan(add, x, 0)
         self.assertEqual(cumsum, cumsum_exp)
         cumsum_exp_PT = torch.cumsum(x, 0)
         self.assertEqual(cumsum, cumsum_exp_PT)
 
         x = torch.randn(3, requires_grad=True)
-        cumsum = associative_scan(add, x, 0, reverse=True, host_side=True)
+        cumsum = associative_scan(add, x, 0, reverse=True, generic_scan=True)
         cumsum_exp_wrong = _fake_associative_scan(add, x, 0, reverse=False)
         self.assertNotEqual(cumsum, cumsum_exp_wrong)
         cumsum_exp = _fake_associative_scan(add, x, 0, reverse=True)
         self.assertEqual(cumsum, cumsum_exp)
 
         x = torch.randn(1, requires_grad=True)
-        cumsum = associative_scan(add, x, 0, host_side=True)
+        cumsum = associative_scan(add, x, 0, generic_scan=True)
         cumsum_exp = _fake_associative_scan(add, x, 0)
         self.assertEqual(cumsum, cumsum_exp)
         cumsum_exp_PT = torch.cumsum(x, 0)
         self.assertEqual(cumsum, cumsum_exp_PT)
 
         with self.assertRaisesRegex(Exception, r"."):
-            cumsum = associative_scan(add, x, 1, host_side=True)
+            cumsum = associative_scan(add, x, 1, generic_scan=True)
 
         # Jax Examples
         x = torch.arange(0, 4)
-        cumsum = associative_scan(add, x, 0, host_side=True)
+        cumsum = associative_scan(add, x, 0, generic_scan=True)
         cumsum_exp = _fake_associative_scan(add, x, 0)
         self.assertEqual(cumsum, torch.tensor([0.0, 1.0, 3.0, 6.0], dtype=torch.int64))
         self.assertEqual(cumsum, cumsum_exp)
 
-        cumsum = associative_scan(add, x, 0, host_side=True, reverse=True)
+        cumsum = associative_scan(add, x, 0, generic_scan=True, reverse=True)
         cumsum_exp = _fake_associative_scan(add, x, 0, reverse=True)
         self.assertEqual(cumsum, torch.tensor([6.0, 6.0, 5.0, 3.0], dtype=torch.int64))
         self.assertEqual(cumsum, cumsum_exp)
@@ -525,17 +525,17 @@ class f(torch.nn.Module):
 
         x = torch.randn(3, 2, 2, requires_grad=True)
         for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
-            cumsum = associative_scan(op, x, 0, host_side=True)
+            cumsum = associative_scan(op, x, 0, generic_scan=True)
             cumsum_exp = _fake_associative_scan(op, x, 0)
             self.assertEqual(cumsum, cumsum_exp)
             cumsum_exp_PT = op_pt(x, 0)
             self.assertEqual(cumsum, cumsum_exp_PT)
 
-            cumsum = associative_scan(op, x, 0, host_side=True)
+            cumsum = associative_scan(op, x, 0, generic_scan=True)
             cumsum_exp = _fake_associative_scan(op, x, 1)
             self.assertNotEqual(cumsum, cumsum_exp)
 
-            cumsum = associative_scan(op, x, 1, host_side=True)
+            cumsum = associative_scan(op, x, 1, generic_scan=True)
             cumsum_exp = _fake_associative_scan(op, x, 1)
             self.assertEqual(cumsum, cumsum_exp)
 
@@ -546,7 +546,7 @@ class f(torch.nn.Module):
             shapes = [random.randint(1, 13) for _ in range(num_dim)]
             x = torch.randn(*shapes, requires_grad=True)
             for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
-                cumsum = associative_scan(op, x, 0, host_side=True)
+                cumsum = associative_scan(op, x, 0, generic_scan=True)
                 cumsum_exp = _fake_associative_scan(op, x, 0)
                 self.assertEqual(cumsum, cumsum_exp)
                 cumsum_exp_PT = op_pt(x, 0)
@@ -559,7 +559,7 @@ class f(torch.nn.Module):
         x = torch.randn(3, 2, 2, requires_grad=True)
 
         for direction in [False, True]:
-            result = associative_scan(add, x, 0, host_side=True, reverse=direction)
+            result = associative_scan(add, x, 0, generic_scan=True, reverse=direction)
             expexted_result = _fake_associative_scan(add, x, 0, reverse=direction)
             self.assertEqual(result, expexted_result)
 
@@ -569,7 +569,7 @@ class f(torch.nn.Module):
             self.assertEqual(expected_grads, grads)
 
         def f(op, x, dim):
-            result = associative_scan(op, x, dim, host_side=True)
+            result = associative_scan(op, x, dim, generic_scan=True)
             result, _ = pytree.tree_flatten(result)
             grad_out = [torch.ones_like(el) for el in result]
             return torch.autograd.grad(result, (x,), grad_out)
@@ -598,7 +598,7 @@ class f(torch.nn.Module):
         x = torch.randn(3, 2, 2, requires_grad=True)
 
         for direction in [False, True]:
-            result = associative_scan(fct, x, 0, host_side=True, reverse=direction)
+            result = associative_scan(fct, x, 0, generic_scan=True, reverse=direction)
             expexted_result = _fake_associative_scan(fct, x, 0, reverse=direction)
             self.assertEqual(result, expexted_result)
 
@@ -629,7 +629,7 @@ class f(torch.nn.Module):
             x = torch.randn(3, 2, 2, requires_grad=True, device=device)
 
             for direction in [False, True]:
-                result = associative_scan(fct, x, 0, host_side=True, reverse=direction)
+                result = associative_scan(fct, x, 0, generic_scan=True, reverse=direction)
                 expexted_result = _fake_associative_scan(fct, x, 0, reverse=direction)
                 self.assertEqual(result, expexted_result)
                 self.assertEqual(result.device.type, device.type)
@@ -660,7 +660,7 @@ class f(torch.nn.Module):
         inp = (x, y)
 
         for direction in [False, True]:
-            result = associative_scan(fct, inp, 0, host_side=True, reverse=direction)
+            result = associative_scan(fct, inp, 0, generic_scan=True, reverse=direction)
             expexted_result = _fake_associative_scan(fct, inp, 0, reverse=direction)
             self.assertEqual(result, expexted_result)
 
@@ -697,10 +697,10 @@ class f(torch.nn.Module):
         inp = {"i": x, "j": ([y], [{"o": z}])}
 
         with self.assertRaisesRegex(Exception, r"."):
-            result = associative_scan(fct_wrong_pytree, inp, 0, host_side=True)
+            result = associative_scan(fct_wrong_pytree, inp, 0, generic_scan=True)
 
         for direction in [False, True]:
-            result = associative_scan(fct, inp, 0, host_side=True, reverse=direction)
+            result = associative_scan(fct, inp, 0, generic_scan=True, reverse=direction)
             expexted_result = _fake_associative_scan(fct, inp, 0, reverse=direction)
             self.assertEqual(result, expexted_result)
 
