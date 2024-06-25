@@ -864,6 +864,7 @@ def fx_codegen_and_compile(
                     else:
                         output_strides.append(None)
 
+            _check_triton_bf16_support(graph)
             compiled_fn = graph.compile_to_fn()
             num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
             metrics.num_bytes_accessed += num_bytes
@@ -1634,3 +1635,34 @@ def handle_dynamo_export_graph(
         return codegen.process_outputs(compiled_fn(*codegen.process_inputs(*args)))
 
     return wrapper
+
+
+def _check_triton_bf16_support(graph: GraphLowering) -> None:
+    def warn_and_skip(device) -> None:
+        from torch._dynamo.exc import SkipFrame
+
+        device_props = torch.cuda.get_device_properties(device)
+        warnings.warn(
+            f"{device_props.name} does not support bfloat16 compilation natively, skipping"
+        )
+        raise SkipFrame("BF16 is not supported")
+
+    for inp in graph.graph_inputs.values():
+        device = getattr(inp, "get_device", lambda: torch.device("meta"))()
+        if device.type != "cuda" or inp.get_dtype() != torch.bfloat16:
+            continue
+        # Print warning and skip frame if attempting to compile for bfloat16
+        # on device without hardware support for dtype
+        if torch.cuda.is_bf16_supported(including_emulation=False):
+            return
+        warn_and_skip(device)
+
+    for out in graph.graph_outputs:
+        device = getattr(out, "get_device", lambda: torch.device("meta"))()
+        if device.type != "cuda" or out.get_dtype() != torch.bfloat16:
+            continue
+        # Print warning and skip frame if attempting to compile for bfloat16
+        # on device without hardware support for dtype
+        if torch.cuda.is_bf16_supported(including_emulation=False):
+            return
+        warn_and_skip(device)
