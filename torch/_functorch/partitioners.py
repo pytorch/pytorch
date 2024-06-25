@@ -107,17 +107,16 @@ class MinCutOptions:
 
 
 def must_recompute(node: fx.Node) -> bool:
-    return node.meta.get("recompute", None) == CheckpointPolicy.MUST_RECOMPUTE
-
-
-def prefer_recompute(node: fx.Node) -> bool:
-    return node.meta.get("recompute", None) == CheckpointPolicy.PREFER_RECOMPUTE
+    return node.meta.get("recompute", None) in [
+        CheckpointPolicy.MUST_RECOMPUTE,
+        CheckpointPolicy.PREFER_RECOMPUTE,
+    ]
 
 
 def has_recomputable_ops(fx_g: fx.GraphModule) -> bool:
     found = False
     for node in fx_g.graph.nodes:
-        if prefer_recompute(node):
+        if must_recompute(node):
             return True
     return False
 
@@ -125,7 +124,7 @@ def has_recomputable_ops(fx_g: fx.GraphModule) -> bool:
 def has_recomputable_rng_ops(fx_g: fx.GraphModule) -> bool:
     for node in fx_g.graph.nodes:
         if (
-            prefer_recompute(node)
+            must_recompute(node)
             and hasattr(node.target, "tags")
             and torch.Tag.nondeterministic_seeded in node.target.tags
         ):
@@ -649,7 +648,7 @@ def functionalize_rng_ops(
     recomputable_rng_ops_map = dict()
     for node in joint_module.graph.nodes:
         if (
-            prefer_recompute(node)
+            must_recompute(node)
             and hasattr(node.target, "tags")
             and torch.Tag.nondeterministic_seeded in node.target.tags
         ):
@@ -746,10 +745,10 @@ def cleanup_recompute_tags(joint_module: fx.GraphModule) -> fx.GraphModule:
     non-recomputable to allow for that.
     """
     for node in joint_module.graph.nodes:
-        if prefer_recompute(node):
+        if must_recompute(node):
             for user in node.users:
                 if (
-                    prefer_recompute(user)
+                    must_recompute(user)
                     and user.meta["ac_graph_id"] > node.meta["ac_graph_id"]
                 ):
                     node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
@@ -809,12 +808,12 @@ def solve_min_cut(
             return False
         if node.target == operator.getitem:
             return False
+        if node.meta.get("recompute", None) == CheckpointPolicy.MUST_SAVE:
+            return True
         if config.recompute_views and op_types.is_view(node):
             return False
         if node.target in [aten.lift_fresh_copy.default, aten.lift_fresh.default]:
             return False
-        if node.meta.get("recompute", None) == CheckpointPolicy.MUST_SAVE:
-            return True
 
         if min_cut_options.ban_if_not_in_allowlist:
             if not op_types.is_recomputable(node):
@@ -895,7 +894,7 @@ def solve_min_cut(
             return False
         # This bans recomputation of the node unless we've been forced not to by
         # user annotation
-        if prefer_recompute(node):
+        if must_recompute(node):
             return False
 
         if "val" in node.meta and isinstance(node.meta["val"], torch.SymFloat):

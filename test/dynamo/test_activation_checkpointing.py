@@ -110,7 +110,7 @@ def op_count(gm):
 
 def _get_custom_policy(no_recompute_list=None, must_recompute_list=None):
     def _custom_policy(ctx, func, *args, **kwargs):
-        if func in no_recompute_list:
+        if no_recompute_list is not None and func in no_recompute_list:
             return CheckpointPolicy.MUST_SAVE
         if must_recompute_list is not None and func in must_recompute_list:
             return CheckpointPolicy.MUST_RECOMPUTE
@@ -532,21 +532,17 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
     @requires_cuda
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     def test_compile_selective_checkpoint_must_recompute(self):
-        def context_fn_must_recompute_sigmoid():
-            no_recompute_list = [
-                torch.ops.aten.mm.default,
-            ]
+        def context_fn_must_recompute_mm():
             must_recompute_list = [
-                torch.ops.aten.sigmoid.default,
+                torch.ops.aten.mm.default,
             ]
             return create_selective_checkpoint_contexts(
                 _get_custom_policy(
-                    no_recompute_list=no_recompute_list,
                     must_recompute_list=must_recompute_list,
                 ),
             )
 
-        def context_fn_let_partitioner_decide_on_sigmoid():
+        def context_fn_no_recompute_mm():
             no_recompute_list = [
                 torch.ops.aten.mm.default,
             ]
@@ -577,7 +573,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             fw_compiler = functools.partial(
                 count_ops,
                 freq=1,
-                op=torch.ops.aten.sigmoid.default,
+                op=torch.ops.aten.mm.default,
             )
 
             backend = aot_autograd(
@@ -588,19 +584,19 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             self._validate(fn, backend, x)
 
         _test(
-            context_fn=context_fn_must_recompute_sigmoid,
+            context_fn=context_fn_must_recompute_mm,
             bw_compiler=functools.partial(
                 count_ops,
-                freq=1,  # sigmoid should be recomputed
-                op=torch.ops.aten.sigmoid.default,
+                freq=3,  # 1 matmul recompute and 2 bwd mm ops per fwd matmul, so 1 + 2 * 1 = 3)
+                op=torch.ops.aten.mm.default,
             ),
         )
         _test(
-            context_fn=context_fn_let_partitioner_decide_on_sigmoid,
+            context_fn=context_fn_no_recompute_mm,
             bw_compiler=functools.partial(
                 count_ops,
-                freq=0,  # sigmoid should not be recomputed
-                op=torch.ops.aten.sigmoid.default,
+                freq=2,  # 2 bwd mm ops per fwd matmul
+                op=torch.ops.aten.mm.default,
             ),
         )
 
