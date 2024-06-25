@@ -172,9 +172,6 @@ def has_proxy_slot(obj: Tensor, tracer: _ProxyTracer) -> bool:
     return bool(get_proxy_slot(obj, tracer, False, lambda _: True))
 
 
-class ProxyUnknown(Protocol):
-    pass
-
 _PySymProxyType = Callable[[], Proxy]
 
 
