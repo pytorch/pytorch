@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import functools
 import os
-import pathlib
 import sys
 import warnings
+from pathlib import Path
 from types import ModuleType
 from typing import Any, Callable
 
@@ -52,7 +52,7 @@ def _reload_python_module(key, path):
 def _set_triton_ptxas_path() -> None:
     if os.environ.get("TRITON_PTXAS_PATH") is not None:
         return
-    ptxas = pathlib.Path(__file__).absolute().parents[1] / "bin" / "ptxas"
+    ptxas = Path(__file__).absolute().parents[1] / "bin" / "ptxas"
     if not ptxas.exists():
         return
     if ptxas.is_file() and os.access(ptxas, os.X_OK):

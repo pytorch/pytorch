@@ -1,9 +1,9 @@
-import pathlib
 import sys
 import unittest
+from pathlib import Path
 
 
-REPO_ROOT = pathlib.Path(__file__).absolute().parents[2]
+REPO_ROOT = Path(__file__).absolute().parents[2]
 try:
     # using tools/ to optimize test run.
     sys.path.append(str(REPO_ROOT))

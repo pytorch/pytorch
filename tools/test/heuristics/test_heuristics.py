@@ -3,14 +3,14 @@ from __future__ import annotations
 
 import io
 import json
-import pathlib
 import sys
 import unittest
+from pathlib import Path
 from typing import Any
 from unittest import mock
 
 
-REPO_ROOT = pathlib.Path(__file__).absolute().parents[3]
+REPO_ROOT = Path(__file__).absolute().parents[3]
 sys.path.append(str(REPO_ROOT))
 
 from tools.test.heuristics.test_interface import TestTD
