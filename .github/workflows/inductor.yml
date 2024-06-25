@@ -48,7 +48,8 @@ jobs:
       cuda-arch-list: '8.6'
       test-matrix: |
         { include: [
-          { config: "inductor", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "inductor_distributed", shard: 1, num_shards: 1, runner: "linux.g5.12xlarge.nvidia.gpu" },
           { config: "inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "inductor_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
@@ -90,7 +91,8 @@ jobs:
       cuda-arch-list: '8.6'
       test-matrix: |
         { include: [
-          { config: "inductor", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
         ]}
 
   linux-focal-cuda12_1-py3_12-gcc9-inductor-test:
@@ -101,6 +103,26 @@ jobs:
       build-environment: linux-focal-cuda12.1-py3.12-gcc9-sm86
       docker-image: ${{ needs.linux-focal-cuda12_1-py3_12-gcc9-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_12-gcc9-inductor-build.outputs.test-matrix }}
+
+  linux-jammy-cpu-py3_12-inductor-halide-build:
+    name: linux-jammy-cpu-py3.12-gcc11-inductor-halide
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-jammy-py3.12-gcc11
+      docker-image-name: pytorch-linux-jammy-py3.12-halide
+      test-matrix: |
+        { include: [
+          { config: "inductor-halide", shard: 1, num_shards: 1, runner: "linux.12xlarge" },
+        ]}
+
+  linux-jammy-cpu-py3_12-inductor-halide-test:
+    name: linux-jammy-cpu-py3.12-gcc11-inductor-halide
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-jammy-cpu-py3_12-inductor-halide-build
+    with:
+      build-environment: linux-jammy-py3.12-gcc11
+      docker-image: ${{ needs.linux-jammy-cpu-py3_12-inductor-halide-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cpu-py3_12-inductor-halide-build.outputs.test-matrix }}
 
   linux-focal-cuda12_4-py3_10-gcc9-inductor-build:
     # Should be synced with the one in inductor-periodic.yml but this only runs inductor_timm

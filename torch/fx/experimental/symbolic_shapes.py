@@ -158,7 +158,7 @@ def lru_cache(maxsize):
 @lru_cache(None)
 def uninteresting_files() -> Set[str]:
     import torch._inductor.sizevars
-    import torch._library.abstract_impl
+    import torch._library.fake_impl
     import torch._subclasses.meta_utils
     import torch._subclasses.fake_tensor
     mods = [
@@ -168,7 +168,7 @@ def uninteresting_files() -> Set[str]:
         torch.fx.interpreter,
         torch,
         torch._inductor.sizevars,
-        torch._library.abstract_impl,
+        torch._library.fake_impl,
         torch._subclasses.meta_utils,
         torch._subclasses.fake_tensor,
     ]
@@ -1017,6 +1017,8 @@ class DimDynamic(Enum):
     DUCK = 1
     # Treat the dimension statically based on its hint
     STATIC = 2
+    # Treat the dimension as a size-like unbacked
+    SIZE_LIKE_UNBACKED = 3
 
 
 # NB: These constraints affect both clients and backends: given some
@@ -1470,7 +1472,12 @@ class RuntimeAssert:
     stack: str = field(repr=False)
 
 
-class ShapeGuardPrinter(StrPrinter):
+# Used for printing SymExprs in compile_fx
+class SymExprPrinter(StrPrinter):
+    pass
+
+
+class ShapeGuardPrinter(SymExprPrinter):
     def __init__(
         self,
         symbol_to_source,
@@ -3433,6 +3440,12 @@ class ShapeEnv:
     ) -> "sympy.Expr":
         """Create a new symbol which is tracked by this ShapeEnv
         """
+        if dynamic_dim is DimDynamic.SIZE_LIKE_UNBACKED:
+            r = self.create_unbacked_symint().node.expr
+            self._constrain_range_for_size(r)
+            # TODO: maybe put the hint somewhere
+            return r
+
         # check if constraint_dim is actually static integer
         if isinstance(constraint_dim, StrictMinMaxConstraint) and constraint_dim.vr.lower == constraint_dim.vr.upper:
             dynamic_dim = DimDynamic.STATIC
@@ -3789,9 +3802,9 @@ class ShapeEnv:
                 concrete_val = self.evaluate_expr(sympy.Eq(expr1, expr2))
                 if not concrete_val:
                     raise ConstraintViolationError(
-                        f"{src1.name()} = {expr1.xreplace(self.var_to_val)}"
+                        f"{src1.name()} = {expr1 if isinstance(expr1, int) else expr1.xreplace(self.var_to_val)}"
                         " is not equal to "
-                        f"{src2.name()} = {expr2.xreplace(self.var_to_val)}"
+                        f"{src2.name()} = {expr2 if isinstance(expr2, int) else expr2.xreplace(self.var_to_val)}"
                     )
 
             for src, root, fn in equalities_inputs.derived_equalities:
@@ -4239,6 +4252,13 @@ class ShapeEnv:
             return " and ".join(produced_guards)
         return None
 
+    def evaluate_symexpr(self, code):
+        """
+        To be used by compile_fx to evaluate symexprs
+        """
+        args = {str(e): val for e, val in self.var_to_val.items()}
+        return eval(code, SYMPY_INTERP, args)
+
     def evaluate_guards_expression(self, code, args):
         """
         Expected to be used with produce_guards_expression(). Evaluates an expression
@@ -4458,11 +4478,7 @@ class ShapeEnv:
                 # Skip var_ranges logic for SingletonInt which is only used
                 # for jagged layout NestedTensors today
                 continue
-            try:
-                vr = var_ranges[k]
-            except KeyError:
-                log.warning("%s is not in var_ranges, defaulting to unknown range.", k)
-                vr = self._default_unspecified_value_range()
+            vr = var_ranges[k]
             if size_oblivious and k in self.size_like:
                 lower = max(2, vr.lower)
                 # Clamping size-oblivious to some quantity below sys.maxsize

@@ -1,19 +1,19 @@
 # mypy: allow-untyped-defs
+import re
 from collections import defaultdict
 from typing import Any, Dict
 
 import torch
 from torch.autograd.graph import register_multi_grad_hook
 from torch.distributed._tensor.api import DTensor
-
 from torch.nn.modules.module import (
     register_module_forward_hook,
     register_module_forward_pre_hook,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
-
 from torch.utils._pytree import tree_flatten
 from torch.utils.module_tracker import ModuleTracker
+
 
 funcol_native = torch.ops._c10d_functional
 funcol_py = torch.ops.c10d_functional
@@ -160,7 +160,7 @@ class CommDebugMode(TorchDispatchMode):
                         (self.advanced_module_tracker.module_depth_dict[fqn]) + 1
                     )
                     table += (
-                        f"\033[1;33m{collective_indent}{collective}: {count}\033[0m\n"
+                        f"\033[1;33m{collective_indent}*{collective}: {count}\033[0m\n"
                     )
 
         return table
@@ -198,6 +198,15 @@ class CommDebugMode(TorchDispatchMode):
     def __exit__(self, *args):
         self.advanced_module_tracker.__exit__()
         super().__exit__(*args)
+
+    def log_module_tracing_table_to_file(self):
+        # ansi_escape is used to remove ANSI escape sequences in table used to make terminal output more readable
+
+        ansi_escape = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
+        table = ansi_escape.sub("", self.generate_module_tracing_table())
+
+        with open("output.txt", "w") as log_file:
+            log_file.write(table)
 
     def print_paramater_info(self):
         self.advanced_module_tracker.print_paramater_info()
