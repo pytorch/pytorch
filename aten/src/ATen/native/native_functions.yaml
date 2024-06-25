@@ -3061,6 +3061,18 @@
   dispatch:
     CompositeExplicitAutograd: _unsafe_index
 
+# Used by inductor to generate masked loads
+# Note that we don't support boolean indexing, to avoid dynamic output shapes
+- func: _unsafe_masked_index(Tensor self, Tensor mask, Tensor?[] indices, Scalar fill) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: _unsafe_masked_index
+
+- func: _unsafe_masked_index_put_accumulate(Tensor self, Tensor mask, Tensor?[] indices, Tensor values) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: _unsafe_masked_index_put_accumulate
+
 - func: index_copy.out(Tensor self, int dim, Tensor index, Tensor source, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
   variants: function
