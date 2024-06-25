@@ -13,7 +13,11 @@ import torch._C
 import torch._numpy as tnp
 import torch.utils._pytree as pytree
 from .. import config, variables
-from ..bytecode_transformation import create_call_function, create_instruction
+from ..bytecode_transformation import (
+    add_push_null_call_function_ex,
+    create_call_function,
+    create_instruction,
+)
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
@@ -51,13 +55,13 @@ class SuperVariable(VariableTracker):
         self.specialized = specialized  # directly get attr from self.typevar if true
 
     def reconstruct(self, codegen):
-        codegen(variables.BuiltinVariable(super))
+        codegen.add_push_null(lambda: codegen(variables.BuiltinVariable(super)))
         codegen(self.typevar)
         if self.objvar is not None:
             codegen(self.objvar)
-            codegen.extend_output(create_call_function(2, True))
+            codegen.extend_output(create_call_function(2, False))
         else:
-            codegen.extend_output(create_call_function(1, True))
+            codegen.extend_output(create_call_function(1, False))
 
     def _resolved_getattr_and_source(self, tx, name):
         assert self.objvar, "1-arg super not implemented"
@@ -204,9 +208,11 @@ class ExceptionVariable(VariableTracker):
         self.args = args
 
     def reconstruct(self, codegen):
-        codegen.load_import_from("builtins", self.exc_type.__name__)
+        codegen.add_push_null(
+            lambda: codegen.load_import_from("builtins", self.exc_type.__name__)
+        )
         codegen.foreach(self.args)
-        codegen.call_function(len(self.args), True)
+        codegen.call_function(len(self.args), False)
 
 
 class UnknownVariable(VariableTracker):
@@ -1064,10 +1070,14 @@ class StringFormatVariable(VariableTracker):
         return f"{self.__class__.__name__}({self.format_string!r}, {self.sym_args!r}, {self.sym_kwargs!r})"
 
     def reconstruct(self, codegen):
-        if sys.version_info >= (3, 11):
-            codegen.append_output(create_instruction("PUSH_NULL"))
-        codegen.append_output(codegen.create_load_const(self.format_string))
-        codegen.append_output(codegen.create_load_attr("format"))
+        codegen.extend_output(
+            add_push_null_call_function_ex(
+                [
+                    codegen.create_load_const(self.format_string),
+                    codegen.create_load_attr("format"),
+                ]
+            )
+        )
         codegen(variables.TupleVariable(self.sym_args))
         kwargs = {
             variables.ConstantVariable.create(k): v for k, v in self.sym_kwargs.items()
@@ -1158,9 +1168,11 @@ class StopIterationVariable(VariableTracker):
         self.args = args
 
     def reconstruct(self, codegen):
-        codegen.load_import_from("builtins", "StopIteration")
+        codegen.add_push_null(
+            lambda: codegen.load_import_from("builtins", "StopIteration")
+        )
         codegen.foreach(self.args)
-        codegen.call_function(len(self.args), True)
+        codegen.call_function(len(self.args), False)
 
 
 class ConstantLikeVariable(VariableTracker):
