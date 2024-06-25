@@ -15613,6 +15613,7 @@
   dispatch:
     CPU: _fused_sgd_kernel_cpu_
     CUDA: _fused_sgd_kernel_cuda_
+    MPS: _fused_sgd_kernel_mps_
   autogen: _fused_sgd, _fused_sgd.out
 
 - func: _fused_sgd_.tensor_lr(Tensor(a!)[] self, Tensor(b!)[] grads, Tensor(c!)[] momentum_buffer_list, *, float weight_decay, float momentum, Tensor lr, float dampening, bool nesterov, bool maximize, bool is_first_step, Tensor? grad_scale=None, Tensor? found_inf=None) -> ()
@@ -15623,6 +15624,7 @@
   dispatch:
     CPU: _fused_sgd_kernel_cpu_
     CUDA: _fused_sgd_kernel_cuda_
+    MPS: _fused_sgd_kernel_mps_
   autogen: _fused_sgd.tensor_lr, _fused_sgd.tensor_lr_out
 
 - func: _fused_adagrad_(Tensor(a!)[] self, Tensor(b!)[] grads, Tensor(c!)[] state_sums, Tensor(d!)[] state_steps, *, float lr, float lr_decay, float weight_decay, float eps, bool maximize, Tensor? grad_scale=None, Tensor? found_inf=None) -> ()
