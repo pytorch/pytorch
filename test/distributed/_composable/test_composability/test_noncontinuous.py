@@ -29,7 +29,6 @@ from torch.distributed.checkpoint.state_dict import (
     get_optimizer_state_dict,
     set_optimizer_state_dict,
 )
-from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import (
     _get_module_fsdp_state,
@@ -78,6 +77,7 @@ LR = 3e-5
 c10d_ops = torch.ops.c10d
 funcol = torch.ops.c10d_functional
 
+
 def init_model(device_type, model_parallel_size=TP_DEGREE):
     torch.manual_seed(0)
     model = MLPModule(device_type)
@@ -105,6 +105,7 @@ def init_model(device_type, model_parallel_size=TP_DEGREE):
     twod_model = DDP(twod_model, process_group=dp_pg)
     return model, twod_model, dp_pg
 
+
 class SimpleModel(nn.Module):
     def __init__(self):
         super().__init__()
@@ -121,6 +122,7 @@ class SimpleModel(nn.Module):
 
     def get_input(self):
         return torch.rand(4, 5, device="cuda")
+
 
 class SimpleModelUneven(nn.Module):
     def __init__(self):
@@ -141,6 +143,7 @@ class SimpleModelUneven(nn.Module):
 
     def get_input(self):
         return torch.rand(4, 5, device="cuda")
+
 
 class TestFullyShard2DTraining(FSDPTest):
     @property
@@ -490,6 +493,7 @@ class Test2dParallelIntegration(DTensorTestBase):
 
         # TODO: Add save/load of 2D verification.
 
+
 # TODO: add additional tests for multi_param_group, optim_in_backward,
 # and fsdp_nested.
 class TestNew2dParallelTraining(DTensorTestBase):
@@ -521,9 +525,7 @@ class TestNew2dParallelTraining(DTensorTestBase):
                 "net1": ColwiseParallel(),
                 "net2": RowwiseParallel(),
             }
-            parallelize_module(
-                SimpleModel().cuda(), mesh_2d["tp"], parallelize_plan
-            )
+            parallelize_module(SimpleModel().cuda(), mesh_2d["tp"], parallelize_plan)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -843,6 +845,7 @@ class TestNew2dParallelStateDict(DTensorTestBase):
                     )
                 else:
                     self.assertEqual(new_state, state)
+
 
 instantiate_parametrized_tests(TestNew2dParallelStateDict)
 
