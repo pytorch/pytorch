@@ -4,6 +4,7 @@ import unittest
 
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+from torch._inductor import config
 from torch._inductor.codecache import HalideCodeCache
 from torch._inductor.runtime.hints import HalideInputSpec, HalideMeta
 from torch._inductor.test_case import run_tests, TestCase
@@ -21,25 +22,36 @@ except ImportError:
     HAS_HALIDE = False
 
 
+try:
+    from . import test_torchinductor
+except ImportError:
+    import test_torchinductor
+
+
+make_halide = config.patch(
+    cpu_backend="halide",
+    fallback_random=True,  # TODO(jansel): support random
+)
+
+
 @unittest.skipUnless(HAS_HALIDE, "requires halide")
 class HalideTests(TestCase):
     def test_codecache(self):
         fn = HalideCodeCache.generate_halide(
             HalideMeta(
                 argtypes=[
-                    HalideInputSpec(ctype="float*", name="in_ptr0", numel="1024L"),
-                    HalideInputSpec(ctype="float*", name="in_ptr1", numel="1024L"),
+                    HalideInputSpec(ctype="float*", name="in_ptr0", shape=["1024L"]),
+                    HalideInputSpec(ctype="float*", name="in_ptr1", shape=["1024L"]),
                     HalideInputSpec(
                         ctype="float*",
                         name="out_ptr0",
-                        numel="1024L",
+                        shape=["1024L"],
                     ),
                 ],
                 target="host",
                 scheduler="Mullapudi2016",
                 scheduler_flags={
                     "parallelism": parallel_num_threads(),
-                    "last_level_cache_size": HalideCodeCache.cpu_cache_size(),
                 },
             ),
             textwrap.dedent(
@@ -81,6 +93,10 @@ class HalideTests(TestCase):
         fn(a, b, c)
         self.assertEqual(c, a + b)
 
+
+if test_torchinductor.HAS_CPU and HAS_HALIDE:
+    SweepInputsCpuHalideTest = make_halide(test_torchinductor.SweepInputsCpuTest)
+    CpuHalideTests = make_halide(test_torchinductor.CpuTests)
 
 if __name__ == "__main__":
     if HAS_CPU and not IS_MACOS and HAS_HALIDE:
