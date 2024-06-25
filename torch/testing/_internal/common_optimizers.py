@@ -385,8 +385,6 @@ def optim_error_inputs_func_adagrad(device, dtype):
     return error_inputs
 
 
-# TODO: consider tensor LR! See multi_tensor_optimizer_configs in test_optim.py --> tensor LR should work
-# with all implementation code paths...
 def optim_inputs_func_adam(device, dtype=None):
     cuda_supported_configs = [
         OptimizerInput(params=None, kwargs={"capturable": True}, desc="capturable"),
@@ -405,6 +403,9 @@ def optim_inputs_func_adam(device, dtype=None):
     total = [
         OptimizerInput(params=None, kwargs={}, desc="default"),
         OptimizerInput(params=None, kwargs={"lr": 0.01}, desc="non-default lr"),
+        OptimizerInput(
+            params=None, kwargs={"lr": torch.tensor(0.01)}, desc="tensor lr"
+        ),
         OptimizerInput(
             params=None, kwargs={"weight_decay": 0.1}, desc="nonzero weight_decay"
         ),

@@ -15586,6 +15586,7 @@
   dispatch:
     CPU: _fused_adam_kernel_cpu_
     CUDA: _fused_adam_kernel_cuda_
+    MPS: _fused_adam_kernel_mps_
   autogen: _fused_adam.tensor_lr, _fused_adam.tensor_lr_out
 
 - func: _fused_adamw_(Tensor(a!)[] self, Tensor(b!)[] grads, Tensor(c!)[] exp_avgs, Tensor(d!)[] exp_avg_sqs, Tensor(e!)[] max_exp_avg_sqs, Tensor[] state_steps, *, float lr, float beta1, float beta2, float weight_decay, float eps, bool amsgrad, bool maximize, Tensor? grad_scale=None, Tensor? found_inf=None) -> ()
@@ -15605,6 +15606,7 @@
   dispatch:
     CPU: _fused_adamw_kernel_cpu_
     CUDA: _fused_adamw_kernel_cuda_
+    MPS: _fused_adamw_kernel_mps_
   autogen: _fused_adamw.tensor_lr, _fused_adamw.tensor_lr_out
 
 - func: _fused_sgd_(Tensor(a!)[] self, Tensor(b!)[] grads, Tensor(c!)[] momentum_buffer_list, *, float weight_decay, float momentum, float lr, float dampening, bool nesterov, bool maximize, bool is_first_step, Tensor? grad_scale=None, Tensor? found_inf=None) -> ()
