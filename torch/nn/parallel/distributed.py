@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import copy
 import functools
 import inspect
@@ -11,14 +12,18 @@ from collections import defaultdict, deque
 from contextlib import contextmanager
 from dataclasses import dataclass, fields, is_dataclass
 from enum import auto, Enum
-from typing import Any, Callable, List, Optional, Tuple, Type
+from typing import Any, Callable, List, Optional, Tuple, Type, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
+from torch._utils import _get_device_index
 from torch.autograd import Function, Variable
 from torch.distributed.algorithms.join import Join, Joinable, JoinHook
 from torch.utils._pytree import tree_flatten, tree_unflatten
-from torch.utils.hooks import RemovableHandle
+
+from ..modules import Module
+from .scatter_gather import gather, scatter_kwargs
+
 
 RPC_AVAILABLE = False
 if dist.is_available():
@@ -35,14 +40,12 @@ if dist.is_available():
         _to_kwargs,
         _verify_param_shape_across_processes,
     )
-if torch.distributed.rpc.is_available():
+if dist.rpc.is_available():
     RPC_AVAILABLE = True
     from torch.distributed.rpc import RRef
 
-from torch._utils import _get_device_index
-
-from ..modules import Module
-from .scatter_gather import gather, scatter_kwargs  # noqa: F401
+if TYPE_CHECKING:
+    from torch.utils.hooks import RemovableHandle
 
 __all__ = ["DistributedDataParallel"]
 
@@ -242,9 +245,11 @@ class _DDPSink(Function):
         # None and are not filled with zeros.
         ctx.set_materialize_grads(False)
         ctx.ddp_weakref = ddp_weakref
-        ret = tuple(
-            inp.clone() if isinstance(inp, torch.Tensor) else inp for inp in inputs
-        )
+        ret = inputs
+        if ddp_weakref()._ddp_sink_clone:
+            ret = tuple(
+                inp.clone() if isinstance(inp, torch.Tensor) else inp for inp in inputs
+            )
         return ret
 
     @staticmethod
@@ -544,7 +549,8 @@ class DistributedDataParallel(Module, Joinable):
                        multiple buckets so that gradient reduction of each
                        bucket can potentially overlap with backward computation.
                        :attr:`bucket_cap_mb` controls the bucket size in
-                       MegaBytes (MB). (default: 25)
+                       MebiBytes (MiB). If ``None``, a default size of 25 MiB
+                       will be used. (default: ``None``)
         find_unused_parameters (bool): Traverse the autograd graph from all
                                tensors contained in the return value of the
                                wrapped module's ``forward`` function. Parameters
@@ -627,7 +633,7 @@ class DistributedDataParallel(Module, Joinable):
         dim=0,
         broadcast_buffers=True,
         process_group=None,
-        bucket_cap_mb=25,
+        bucket_cap_mb=None,
         find_unused_parameters=False,
         check_reduction=False,
         gradient_as_bucket_view=False,
@@ -734,11 +740,8 @@ class DistributedDataParallel(Module, Joinable):
                     ValueError,
                     "DistributedDataParallel device_ids and output_device arguments "
                     "only work with single-device/multiple-device GPU modules or CPU modules, "
-                    "but got device_ids {}, output_device {}, and module parameters {}.".format(
-                        device_ids,
-                        output_device,
-                        {p.device for p in self._module_parameters},
-                    ),
+                    f"but got device_ids {device_ids}, output_device {output_device}, "
+                    f"and module parameters {({p.device for p in self._module_parameters})}.",
                 )
 
             self.device_ids = None
@@ -770,7 +773,9 @@ class DistributedDataParallel(Module, Joinable):
             # do not receive gradients.
             warnings.warn(
                 "The `check_reduction` argument in `DistributedDataParallel` "
-                "module is deprecated. Please avoid using it."
+                "module is deprecated. Please avoid using it.",
+                FutureWarning,
+                stacklevel=2,
             )
 
         # Check that a module does not have Uninitialized parameters
@@ -785,14 +790,21 @@ class DistributedDataParallel(Module, Joinable):
         self.broadcast_bucket_size = int(250 * 1024 * 1024)
 
         # reduction bucket size
+        if bucket_cap_mb is None:
+            # default case (bucket cap is 25 MiB)
+            bucket_cap_mb = 25
+            self.bucket_bytes_cap_default = True
+        else:
+            self.bucket_bytes_cap_default = False
         self.bucket_bytes_cap = int(bucket_cap_mb * 1024 * 1024)
+
         # Whether to perform input tensor CPU to GPU copies on a side-stream
         self.use_side_stream_for_tensor_copies = (
             os.environ.get("PYTORCH_DDP_USE_SIDE_STREAM", "1") == "1"
         )
 
         # Initialize gradient buffers and register all reduce hook
-        self._delay_grad_buffer = None
+        self._delay_grad_buffer: Optional[torch.Tensor] = None
         self._delay_grad_views: List[torch.Tensor] = []
         self._delay_all_reduce_all_params = False
         if len(self._delay_all_reduce_params) != 0:
@@ -890,11 +902,20 @@ class DistributedDataParallel(Module, Joinable):
         if self._use_python_reducer:
             torch._inductor.config._fuse_ddp_communication = True
             torch._inductor.config._fuse_ddp_bucket_size = bucket_cap_mb
+            # Directly adding this to the trace rule will disturb the users
+            # who are using DDPOptimizer.
+            torch._dynamo.trace_rules.LEGACY_MOD_INLINELIST.add(
+                "torch.nn.parallel.distributed"
+            )
+            torch._dynamo.trace_rules.get_legacy_mod_inlinelist.cache_clear()
         self._force_to_disable_cpp_reducer = (
             optimize_ddp == "python_reducer_without_compiled_forward"
         )
         if self._use_python_reducer:
             self._register_accum_grad_hook()
+
+        # Whether or not DDPSink performs a clone.
+        self._ddp_sink_clone = True
 
     def _register_accum_grad_hook(self):
         import torch.distributed._functional_collectives as fcol
@@ -919,6 +940,8 @@ class DistributedDataParallel(Module, Joinable):
                 param.grad.copy_(gradient)
 
         for index, param in enumerate(self._module_parameters):
+            if not param.requires_grad:
+                continue
             self._accum_grad_hooks.append(
                 param.register_post_accumulate_grad_hook(
                     functools.partial(
@@ -946,7 +969,7 @@ class DistributedDataParallel(Module, Joinable):
         # 1. Create gradient buffer
         device = torch.device("cpu") if device_ids is None else device_ids[0]
         self._delay_grad_buffer = torch.zeros(
-            sum([p.numel() for p in self._delay_all_reduce_params]),
+            sum(p.numel() for p in self._delay_all_reduce_params),
             device=device,
         )
 
@@ -1142,10 +1165,13 @@ class DistributedDataParallel(Module, Joinable):
         if static_graph is True or self.find_unused_parameters is False:
             bucket_size_limits = [sys.maxsize]
         else:
-            bucket_size_limits = [
-                dist._DEFAULT_FIRST_BUCKET_BYTES,
-                self.bucket_bytes_cap,
-            ]
+            if self.bucket_bytes_cap_default:
+                bucket_size_limits = [
+                    dist._DEFAULT_FIRST_BUCKET_BYTES,
+                    self.bucket_bytes_cap,
+                ]
+            else:
+                bucket_size_limits = [self.bucket_bytes_cap]
         (
             bucket_indices,
             per_bucket_size_limits,
@@ -1181,7 +1207,9 @@ class DistributedDataParallel(Module, Joinable):
             param_to_name_mapping,
             # User can set dist._DEFAULT_FIRST_BUCKET_BYTES to tune DDP first
             # bucket.
-            dist._DEFAULT_FIRST_BUCKET_BYTES,
+            dist._DEFAULT_FIRST_BUCKET_BYTES
+            if self.bucket_bytes_cap_default
+            else self.bucket_bytes_cap,
         )
 
         self.logger = dist.Logger(self.reducer)
@@ -1570,7 +1598,9 @@ class DistributedDataParallel(Module, Joinable):
                 treespec,
                 output_is_rref,
             ) = _tree_flatten_with_rref(output)
-            output_placeholders = [None for _ in range(len(output_tensor_list))]
+            output_placeholders: List[Optional[torch.Tensor]] = [
+                None for _ in range(len(output_tensor_list))
+            ]
             # Do not touch tensors that have no grad_fn, which can cause issues
             # such as https://github.com/pytorch/pytorch/issues/60733
             for i, output in enumerate(output_tensor_list):
@@ -1968,13 +1998,6 @@ class DistributedDataParallel(Module, Joinable):
             >>> ddp.register_comm_hook(state=None, hook=encode_and_decode)
         """
         self._check_comm_hook(hook)
-        if hook.__name__ in ["bf16_compress_hook", "fp16_compress_hook"]:
-            # If we pass None, then the hook will try to get the world size
-            # by calling `dist.group.WORLD.size()`, which causes compilation
-            # errors. So we pre-decode the process group and pass it to the
-            # hook.
-            if state is None:
-                state = dist.group.WORLD
         assert self.logger is not None
         self.logger._set_comm_hook_name(hook.__qualname__)
         self._comm_hooks.append((hook, state))
@@ -2363,3 +2386,16 @@ class DistributedDataParallel(Module, Joinable):
         if not _rank_not_in_group(new_process_group):
             self.process_group = new_process_group
             self.reducer._update_process_group(new_process_group)
+
+    def _set_ddp_sink_clone(self, val: bool):
+        """
+        Sets whether or not DDPSink should clone the output tensors or not.
+        The default is True since if the loss is modified in place we run
+        into the view is modified in-place error.
+
+        Although, cloning the tensors can add significant memory and
+        performance hit if the number and size of tensors are large. As
+        a result, this can be set to False if you are not modifying the
+        loss in place.
+        """
+        self._ddp_sink_clone = val

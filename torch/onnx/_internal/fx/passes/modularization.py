@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import abc
@@ -54,13 +55,16 @@ class _ModuleMeta:
         _raw_meta: The raw meta '(module_name, node.meta["nn_module_stack"][module_name])'.
     """
 
-    _module_class: Final[Optional[type]]
-    _module_name: Final[str]
-    _raw_meta: Final[Tuple[Any, Any]]
+    _module_class: Final[Optional[Union[type, str]]]  # type: ignore[misc]
+    _module_name: Final[str]  # type: ignore[misc]
+    _raw_meta: Final[Tuple[Any, Any]]  # type: ignore[misc]
 
     @_beartype.beartype
     def __init__(
-        self, module_name: str, module_class: Optional[type], raw_meta: Tuple[Any, Any]
+        self,
+        module_name: str,
+        module_class: Optional[Union[type, str]],
+        raw_meta: Tuple[Any, Any],
     ):
         self._module_name = module_name
         self._module_class = module_class
@@ -86,9 +90,10 @@ class _ModuleMeta:
         """
         if self._module_class is None:
             return ""
-        return (
-            self._module_class.__module__ + "_" + self._module_class.__name__
-        ).replace(".", "_")
+        mod_cls = self._module_class
+        if isinstance(mod_cls, type):
+            mod_cls = mod_cls.__module__ + "." + mod_cls.__qualname__
+        return mod_cls.replace(".", "_")
 
     @property
     def module_class_name(self) -> str:
@@ -98,7 +103,9 @@ class _ModuleMeta:
         """
         if self._module_class is None:
             return ""
-        return self._module_class.__name__
+        if isinstance(self._module_class, type):
+            return self._module_class.__name__
+        return self._module_class
 
     @property
     def module_name(self) -> str:
@@ -204,7 +211,7 @@ class _ModuleStackMeta:
             }
     """
 
-    _module_stack: Final[List[_ModuleMeta]]
+    _module_stack: Final[List[_ModuleMeta]]  # type: ignore[misc]
 
     @_beartype.beartype
     def __init__(
@@ -327,7 +334,7 @@ class _ModuleStackMeta:
         return self.top().qualified_module_class_name
 
     @property
-    def module_class(self) -> Optional[type]:
+    def module_class(self) -> Optional[Union[type, str]]:
         """Returns the module class of the top module."""
         return self.top()._module_class
 

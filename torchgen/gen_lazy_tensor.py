@@ -18,22 +18,21 @@ from typing import (
 import yaml
 
 import torchgen.dest as dest
-
 from torchgen.api.lazy import setValueT
 from torchgen.api.types import BaseCppType
 from torchgen.dest.lazy_ir import GenLazyIR, GenLazyNativeFuncDefinition, GenTSLazyIR
 from torchgen.gen import get_grouped_native_functions, parse_native_yaml
-
-from torchgen.model import NativeFunction, NativeFunctionsGroup, OperatorName
-from torchgen.selective_build.selector import SelectiveBuilder
-from torchgen.utils import FileManager, NamespaceHelper
-from torchgen.yaml_utils import YamlLoader
-from .gen_backend_stubs import (
+from torchgen.gen_backend_stubs import (
     error_on_missing_kernels,
     gen_dispatcher_registrations,
     gen_dispatchkey_nativefunc_headers,
     parse_backend_yaml,
 )
+from torchgen.model import NativeFunction, NativeFunctionsGroup, OperatorName
+from torchgen.selective_build.selector import SelectiveBuilder
+from torchgen.utils import FileManager, NamespaceHelper
+from torchgen.yaml_utils import YamlLoader
+
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
@@ -138,7 +137,7 @@ def validate_shape_inference_header(
         decl for decl in expected_shape_infr_decls if decl not in shape_infr_decl_lines
     ]
     if missing_decls:
-        raise Exception(
+        raise Exception(  # noqa: TRY002
             f"""Missing shape inference function.\n
 Please add declare this function in {shape_inference_hdr}:\n
 and implement it in the corresponding shape_inference.cpp file.\n
@@ -153,19 +152,19 @@ at::Tensor to_meta(const at::Tensor& tensor) {
   // undefined tensors can't be converted to the meta device, since they don't have sizes/strides
   if (!tensor.defined()) return tensor;
   auto out = at::native::empty_strided_meta_symint(tensor.sym_sizes(), tensor.sym_strides(), \
-/*dtype=*/c10::make_optional(tensor.scalar_type()), /*layout=*/c10::make_optional(tensor.layout()), \
-/*device=*/c10::make_optional(c10::Device(c10::kMeta)), /*pin_memory=*/c10::nullopt);
+/*dtype=*/std::make_optional(tensor.scalar_type()), /*layout=*/std::make_optional(tensor.layout()), \
+/*device=*/std::make_optional(c10::Device(c10::kMeta)), /*pin_memory=*/std::nullopt);
   // needs to handle wrapped numbers, so dtype promotion works properly.
   if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
     out.unsafeGetTensorImpl()->set_wrapped_number(true);
   }
   return out;
 }
-c10::optional<at::Tensor> to_meta(const c10::optional<at::Tensor>& tensor) {
+std::optional<at::Tensor> to_meta(const std::optional<at::Tensor>& tensor) {
   if (tensor.has_value()) {
     return to_meta(*tensor);
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 std::vector<at::Tensor> to_meta(at::ITensorListRef t_list) {

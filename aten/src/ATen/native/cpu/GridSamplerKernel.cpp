@@ -588,7 +588,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
   template<bool input_requires_grad>
   inline void backward(TensorAccessor<scalar_t, 3>* gInp_slice_ptr,
                        TensorAccessor<scalar_t, 3>& gGrid_slice,
-                       const TensorAccessor<scalar_t, 3>& gOut_slice,
+                       const TensorAccessor<const scalar_t, 3>& gOut_slice,
                        const TensorAccessor<const scalar_t, 3>& inp_slice,
                        int64_t offset, const Vec& grid_x, const Vec& grid_y,
                        int64_t len) const {
@@ -762,7 +762,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Nearest,
   template<bool input_requires_grad>
   inline void backward(TensorAccessor<scalar_t, 3>* gInp_slice_ptr,
                        TensorAccessor<scalar_t, 3>& gGrid_slice,
-                       const TensorAccessor<scalar_t, 3>& gOut_slice,
+                       const TensorAccessor<const scalar_t, 3>& gOut_slice,
                        const TensorAccessor<const scalar_t, 3>& /*inp_slice*/,
                        int64_t offset, const Vec& grid_x, const Vec& grid_y,
                        int64_t len) const {
@@ -950,7 +950,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
   template<bool input_requires_grad>
   inline void backward(TensorAccessor<scalar_t, 3>* gInp_slice_ptr,
                       TensorAccessor<scalar_t, 3>& gGrid_slice,
-                      const TensorAccessor<scalar_t, 3>& gOut_slice,
+                      const TensorAccessor<const scalar_t, 3>& gOut_slice,
                       const TensorAccessor<const scalar_t, 3>& inp_slice,
                       int64_t offset, const Vec& grid_x, const Vec& grid_y,
                       int64_t len) const {
@@ -1276,7 +1276,7 @@ void grid_sampler_2d_backward_cpu_kernel_impl(
     auto gGrid_acc = grad_grid.accessor<scalar_t, 4>();
     auto inp_acc = input.accessor<const scalar_t, 4>();
     auto grid_acc = grid.accessor<const scalar_t, 4>();
-    auto gOut_acc = grad_output.accessor<scalar_t, 4>();
+    auto gOut_acc = grad_output.accessor<const scalar_t, 4>();
     if (input_requires_grad) {
       auto gInp_acc = grad_input.accessor<scalar_t, 4>();
       if (align_corners) {

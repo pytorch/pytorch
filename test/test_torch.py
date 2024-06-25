@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Owner(s): ["module: tests"]
 
 import torch
@@ -29,6 +30,8 @@ from itertools import product, combinations, permutations, chain
 from functools import partial
 from torch import multiprocessing as mp
 from torch.testing import make_tensor
+from torch.testing._internal.common_optimizers import (
+    optim_db, optims, _get_optim_inputs_including_global_cliquey_kwargs)
 
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, run_tests, IS_JETSON,
@@ -38,8 +41,8 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
-    skipIfNotRegistered, bytes_to_scalar, parametrize, skipIfMps, noncontiguous_like,
-    AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO)
+    bytes_to_scalar, parametrize, skipIfMps, noncontiguous_like,
+    AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO, xfailIfTorchDynamo)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
@@ -47,8 +50,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA, onlyCPU,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
-    skipMeta,
-    PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes,
+    skipMeta, PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes,
     get_all_device_types, skipXLA)
 from typing import Tuple
 import torch.backends.quantized
@@ -4375,6 +4377,9 @@ else:
                 getattr(x, op)(*args)
 
     # FIXME: move to an elementwise ternary test suite and make this an OpInfo test
+    # https://github.com/pytorch/pytorch/issues/126474
+    @xfailIfTorchDynamo
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/126474")
     @dtypes(torch.double)
     def test_ternary_op_mem_overlap(self, device, dtype):
         if device == "cpu" and TEST_WITH_TORCHINDUCTOR:
@@ -5878,8 +5883,13 @@ else:
 
                 self.assertEqual(c, s, atol=atol, rtol=1e-05)
 
-    # Compares no scaling + no autocasting against scaling + autocasting.
-    def _grad_scaling_autocast_test(self, *, device="cuda", atol=1e-3, optimizer_ctor=torch.optim.SGD, optimizer_kwargs=None):
+    @onlyNativeDeviceTypes
+    @parametrize("foreach, fused", [(None, None), (True, None), (None, True)])
+    @optims(
+        [optim for optim in optim_db if optim.optim_cls in [torch.optim.AdamW, torch.optim.Adam, torch.optim.SGD]],
+        dtypes=[torch.float32]
+    )
+    def test_grad_scaling_autocast(self, device, dtype, optim_info, foreach, fused):
         try_pickle = False
 
         def run(device, data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
@@ -5903,6 +5913,9 @@ else:
                         optimizer.step()
             return scaler
 
+        optimizer_ctor = optim_info.optim_cls
+
+        # Compares no scaling + no autocasting against scaling + autocasting.
         # NOTE(mkozuki): With current way of testing, `torch.optim.Adam` is failing in spite of `foreach` and `fused`.
         #   Giving some flexibility to this test might help.
         context = contextlib.nullcontext
@@ -5912,73 +5925,51 @@ else:
         with context():
             # sets atol=1e-3 because we're comparing pure fp32 arithmetic vs a mixture of fp16 and fp32
             self._run_scaling_case(
-                device, run, unskipped=3, skipped=1, atol=atol, optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs,
+                device, run, unskipped=3, skipped=1, atol=1e-3,
+                optimizer_ctor=optimizer_ctor, optimizer_kwargs={"foreach": foreach, "fused": fused},
             )
             # this will be picked up by try_pickle within run():
             try_pickle = True
             self._run_scaling_case(
-                device, run, unskipped=3, skipped=1, atol=atol, optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs,
+                device, run, unskipped=3, skipped=1, atol=1e-3,
+                optimizer_ctor=optimizer_ctor, optimizer_kwargs={"foreach": foreach, "fused": fused},
             )
-
-    @onlyNativeDeviceTypes
-    def test_grad_scaling_autocast(self, device):
-        device = torch.device(device)
-        for optimizer_ctor in (torch.optim.SGD, torch.optim.Adam, torch.optim.AdamW):
-            self._grad_scaling_autocast_test(device=device.type, optimizer_ctor=optimizer_ctor)
-
-    @onlyNativeDeviceTypes
-    def test_grad_scaling_autocast_foreach(self, device):
-        device = torch.device(device)
-        for optimizer_ctor in (torch.optim.SGD, torch.optim.Adam, torch.optim.AdamW):
-            self._grad_scaling_autocast_test(device=device.type, optimizer_ctor=optimizer_ctor, optimizer_kwargs={"foreach": True})
-
-    @onlyCUDA
-    def test_grad_scaling_autocast_fused(self, device):
-        device = torch.device(device)
-        for optimizer_ctor in (torch.optim.Adam, torch.optim.AdamW):
-            self._grad_scaling_autocast_test(device=device.type, optimizer_ctor=optimizer_ctor, optimizer_kwargs={"fused": True})
 
     # Make sure that the parameters become nonsense when scaled gradients are finite
     # but they get invalidated before `optimizer.step`, after `GradScaler.unscale_`
 
     @onlyNativeDeviceTypes
-    def test_params_invalidated_with_grads_invalidated_between_unscale_and_step(self, device):
-        device = torch.device(device)
-        for optimizer_ctor, optimizer_kwargs in product(
-            (torch.optim.Adam, torch.optim.AdamW),
-            (
-                {"foreach": False, "fused": False},
-                {"foreach": True, "fused": False},
-                {"foreach": False, "fused": True},
-            ),
-        ):
-            if device.type != "cuda":
-                optimizer_kwargs['fused'] = False
-            with self.subTest(optimizer=optimizer_ctor, optimizer_kwargs=optimizer_kwargs):
-                self._test_grads_invalidated_between_unscale_and_step(device.type, optimizer_ctor, optimizer_kwargs)
+    @optims(
+        [optim for optim in optim_db if optim.optim_cls in [torch.optim.AdamW, torch.optim.Adam, torch.optim.SGD]],
+        dtypes=[torch.float32]
+    )
+    def test_params_invalidated_with_grads_invalidated_between_unscale_and_step(self, device, dtype, optim_info):
+        optimizer_ctor = optim_info.optim_cls
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
+            device, dtype, optim_info, skip=("differentiable",))
 
-    def _test_grads_invalidated_between_unscale_and_step(self, device, optimizer_ctor, optimizer_kwargs):
-        model, _, optimizer, _, data, loss_fn, _ = _create_scaling_case(
-            device, optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs,
-        )
-        scaler = torch.GradScaler(device=device, init_scale=128.0)
+        for optim_input in all_optim_inputs:
+            model, _, optimizer, _, data, loss_fn, _ = _create_scaling_case(
+                device, optimizer_ctor=optimizer_ctor, optimizer_kwargs=optim_input.kwargs,
+            )
+            scaler = torch.GradScaler(device=device, init_scale=128.0)
 
-        for input, target in data:
-            optimizer.zero_grad()
-            with torch.autocast(device_type=device, dtype=torch.half):
-                output = model(input)
-                loss = loss_fn(output, target)
-            scaler.scale(loss).backward()
-            scaler.unscale_(optimizer)
+            for input, target in data:
+                optimizer.zero_grad()
+                with torch.autocast(device_type=device, dtype=torch.half):
+                    output = model(input)
+                    loss = loss_fn(output, target)
+                scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
 
-            # deliberately break grads
-            for j, param in enumerate(model.parameters()):
-                param.grad.copy_(torch.inf if j % 2 else torch.nan)
+                # deliberately break grads
+                for j, param in enumerate(model.parameters()):
+                    param.grad.copy_(torch.inf if j % 2 else torch.nan)
 
-            scaler.step(optimizer)
-            scaler.update()
+                scaler.step(optimizer)
+                scaler.update()
 
-        self.assertTrue(all((p.isnan().any() or p.isinf().any()) for p in model.parameters()))
+            self.assertTrue(all((p.isnan().any() or p.isinf().any()) for p in model.parameters()))
 
     @onlyNativeDeviceTypes
     def test_grad_scale_will_not_overflow(self, device):
@@ -6165,7 +6156,7 @@ else:
     @onlyNativeDeviceTypes
     def test_grad_scaler_pass_itself(self, device):
         device = torch.device(device)
-        GradScaler = torch.cuda.amp.GradScaler if "cuda" == device.type else torch.cpu.amp.GradScaler
+        GradScaler = partial(torch.amp.GradScaler, device=device.type)
 
         class _PlaceHolderOptimizer(torch.optim.Optimizer):
             tester = self
@@ -6178,7 +6169,7 @@ else:
 
         class Optimizer1(_PlaceHolderOptimizer):
             def step(self, closure=None, *, grad_scaler=None):
-                self.tester.assertTrue(isinstance(grad_scaler, GradScaler))
+                self.tester.assertTrue(isinstance(grad_scaler, torch.amp.GradScaler))
                 self.tester.assertFalse(hasattr(self, "grad_scale"))
                 self.tester.assertFalse(hasattr(self, "found_inf"))
 
@@ -6201,6 +6192,17 @@ else:
             scaler.step(o1)
         scaler.step(o2)
         scaler.update()
+
+    @onlyNativeDeviceTypes
+    def test_grad_scaler_deprecated_warning(self, device):
+        device = torch.device(device)
+        GradScaler = torch.cuda.amp.GradScaler if "cuda" == device.type else torch.cpu.amp.GradScaler
+
+        with self.assertWarnsRegex(
+            FutureWarning,
+            rf"`torch.{device.type}.amp.GradScaler\(args...\)` is deprecated.",
+        ):
+            _ = GradScaler(init_scale=2.0)
 
     @dtypesIfCUDA(torch.float, torch.double, torch.half)
     @dtypesIfCPU(torch.float, torch.double, torch.bfloat16, torch.half)
@@ -7396,6 +7398,26 @@ class TestTorch(TestCase):
     def test_invalid_generator_raises(self):
         self.assertRaises(RuntimeError, lambda: torch.Generator('opengl'))
 
+    def test_pickle_generator(self) -> None:
+        devices = ['cpu']
+        if torch.cuda.is_available():
+            devices += ['cuda']
+
+        for device in devices:
+            with self.subTest(device=device):
+                generator = torch.Generator(device=device).manual_seed(12345)
+                if device != "cpu":
+                    generator.set_offset(100)
+                torch.randn((100, 100), generator=generator, device=device)  # progress the RNG state
+
+                reserialized: torch.Generator = pickle.loads(pickle.dumps(generator))
+
+                self.assertEqual(generator.device, reserialized.device)
+                self.assertEqual(generator.initial_seed(), reserialized.initial_seed())
+                if device != "cpu":
+                    self.assertEqual(generator.get_offset(), reserialized.get_offset())
+                torch.testing.assert_close(generator.get_state(), reserialized.get_state())
+
     def _sobol_reference_samples(self, scramble: bool) -> torch.Tensor:
         if not scramble:
             # theoretical values from Joe Kuo 2010
@@ -7501,6 +7523,20 @@ class TestTorch(TestCase):
 
     def test_sobolengine_fast_forward_scrambled(self):
         self.test_sobolengine_fast_forward(scramble=True)
+
+    def test_sobolengine_default_dtype(self):
+        engine = torch.quasirandom.SobolEngine(dimension=3, scramble=True, seed=123456)
+        # Check that default dtype is correctly handled
+        self.assertEqual(engine.draw(n=5).dtype, torch.float32)
+        with set_default_dtype(torch.float64):
+            engine = torch.quasirandom.SobolEngine(dimension=3, scramble=True, seed=123456)
+            # Check that default dtype is correctly handled (when set to float64)
+            self.assertEqual(engine.draw(n=5).dtype, torch.float64)
+            # Check that explicitly passed dtype is adhered to
+            self.assertEqual(engine.draw(n=5, dtype=torch.float32).dtype, torch.float32)
+            # Reinitialize the engine and check that first draw dtype is correctly handled
+            engine = torch.quasirandom.SobolEngine(dimension=3, scramble=True, seed=123456)
+            self.assertEqual(engine.draw(n=5, dtype=torch.float32).dtype, torch.float32)
 
     @skipIfTorchDynamo("np.float64 restored as float32 after graph break.")
     def test_sobolengine_distribution(self, scramble=False):
@@ -8049,7 +8085,7 @@ class TestTorch(TestCase):
             assert_with_filename(fname)
 
         if IS_FILESYSTEM_UTF8_ENCODING:
-            with TemporaryDirectoryName(suffix='中文') as dname, TemporaryFileName(dir=dname) as fname:
+            with TemporaryDirectoryName(suffix='\u4e2d\u6587') as dname, TemporaryFileName(dir=dname) as fname:
                 assert_with_filename(fname)
 
     def test_torch_from_file(self):
@@ -8080,7 +8116,7 @@ class TestTorch(TestCase):
             assert_with_filename(fname)
 
         if IS_FILESYSTEM_UTF8_ENCODING:
-            with TemporaryDirectoryName(suffix='中文') as dname, TemporaryFileName(dir=dname) as fname:
+            with TemporaryDirectoryName(suffix='\u4e2d\u6587') as dname, TemporaryFileName(dir=dname) as fname:
                 assert_with_filename(fname)
 
     def test_print(self):
@@ -8362,7 +8398,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     def test_iter(self) -> None:
         x = torch.randn(5, 5)
         for i, sub in enumerate(x):
-            self.assertEqual(sub, x[i])
+            self.assertEqual(sub, x[i])  # noqa: PLR1736
 
         x = torch.tensor([])
         self.assertEqual(list(x), [])
@@ -8595,21 +8631,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     def test_allow_tensor_metadata_change(self):
         a = torch.ones(2, 3)
         # Metadata changes are allowed on view tensors that are created from detach().
-
-    @skipIfNotRegistered("LayerNorm", "Skipping as LayerNorm is not registered")
-    def test_c10_layer_norm(self):
-        # test that we can call c10 ops and they return a reasonable result
-        X = torch.rand(5, 5, dtype=torch.float)
-        weight = torch.rand(*X.size()[1:], dtype=torch.float)
-        bias = torch.rand(*X.size()[1:], dtype=torch.float)
-        epsilon = 1e-4
-
-        expected_norm = torch.nn.functional.layer_norm(
-            X, X.size()[1:], weight=weight, bias=bias, eps=epsilon)
-        actual_norm, actual_mean, actual_stdev = \
-            torch.ops._caffe2.LayerNorm(torch.tensor(X), torch.tensor(
-                weight), torch.tensor(bias), 1, epsilon, True)
-        torch.testing.assert_close(expected_norm, actual_norm)
 
     def test_memory_format(self):
         def test_helper(x, memory_format):
@@ -8850,7 +8871,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         out = torch.empty(4, 3, 16, 16, device='meta', dtype=torch.double)
         self.assertExpectedRaisesInline(
             RuntimeError, lambda: torch._C._nn.upsample_nearest2d(x, (16, 16), out=out),
-            """Expected out tensor to have dtype float, but got double instead"""
+            """Expected out tensor to have dtype torch.float32 but got torch.float64 instead"""
         )
 
         # Complain if out device mismatch
@@ -8860,7 +8881,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         if not TEST_WITH_TORCHINDUCTOR:
             self.assertExpectedRaisesInline(
                 RuntimeError, lambda: torch._C._nn.upsample_nearest2d(x, (16, 16), out=out),
-                """Expected out tensor to have device meta, but got cpu instead"""
+                """Attempting to copy from device meta to device cpu, but cross-device copies are not allowed!"""
             )
 
     def test_add_meta_scalar(self):
@@ -9129,8 +9150,8 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         for seed, expected_initial_seed in test_cases:
             torch.manual_seed(seed)
             actual_initial_seed = torch.initial_seed()
-            msg = "expected initial_seed() = {:x} after calling manual_seed({:x}), but got {:x} instead".format(
-                expected_initial_seed, seed, actual_initial_seed)
+            msg = (f"expected initial_seed() = {expected_initial_seed:x} "
+                   f"after calling manual_seed({seed:x}), but got {actual_initial_seed:x} instead")
             self.assertEqual(expected_initial_seed, actual_initial_seed, msg=msg)
         for invalid_seed in [min_int64 - 1, max_uint64 + 1]:
             with self.assertRaisesRegex(RuntimeError, r'Overflow when unpacking long'):
@@ -9402,6 +9423,23 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             for expect, t in zip(expects, out):
                 self.assertTrue(expect.eq(t).all().item())
 
+            if not torch.cuda.is_available():
+                continue
+
+            # Test with cuda graph
+            out = [torch.zeros_like(v) for v in views]
+            for expect, t in zip(expects, out):
+                if expect.numel() != 0:
+                    self.assertFalse(expect.eq(t).all().item())
+
+            g = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(g):
+                torch.split_with_sizes_copy(x, split_sizes, dim=dim, out=out)
+
+            g.replay()
+            for expect, t in zip(expects, out):
+                self.assertTrue(expect.eq(t).all().item())
+
     def test_type(self):
         x = torch.randn(3, 3).double()
         self.assertEqual(x.type('torch.FloatTensor').dtype, torch.float32)
@@ -9526,8 +9564,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         device_set = {'cpu', 'cpu:0', 'cuda', 'cuda:0', 'cuda:1', 'cuda:10', 'cuda:100'}
         device_hash_set = set()
-        for device in device_set:
-            device_hash_set.add(hash(torch.device(device)))
+        device_hash_set.update(hash(torch.device(device)) for device in device_set)
         self.assertEqual(len(device_set), len(device_hash_set))
 
         def get_expected_device_repr(device):
@@ -9766,8 +9803,13 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         # Direct construction not OK
         self.assertRaises(RuntimeError, lambda: torch._C.TensorBase())
 
-        # But construction of subclass is OK
-        class T(torch._C.TensorBase):
+        # Subclassing it directly no OK
+        with self.assertRaisesRegex(RuntimeError, "Cannot subclass"):
+            class Tfail(torch._C.TensorBase):
+                pass
+
+        # Doing so with Tensor is ok though
+        class T(torch.Tensor):
             pass
 
         T()
@@ -9786,7 +9828,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         # OK to call super().__new__, see
         # https://github.com/pytorch/pytorch/issues/57421
-        class TestTensor(torch._C.TensorBase):
+        class TestTensor(torch.Tensor):
             @staticmethod
             def __new__(cls, x, *args, **kwargs):
                 return super().__new__(cls, x, *args, **kwargs)
@@ -9986,7 +10028,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
     def test_tensor_slot_dealloc(self):
 
-        class SlotTensor1(torch._C.TensorBase):
+        class SlotTensor1(torch.Tensor):
             __slots__ = ['slot1']
 
         class SlotTensor2(SlotTensor1):
@@ -10049,7 +10091,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     def test_tensor_finalizer_dealloc(self):
         m = [False]
 
-        class FinalizerTensor(torch._C.TensorBase):
+        class FinalizerTensor(torch.Tensor):
             def __del__(self):
                 m[0] = True
 
@@ -10187,7 +10229,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         m1 = [False]
         m2 = [False]
 
-        class SlotTensor1(torch._C.TensorBase):
+        class SlotTensor1(torch.Tensor):
             __slots__ = ['slot1']
 
             def __del__(self):
@@ -10567,12 +10609,9 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             if t1.is_floating_point():
                 t3 = t1.clone().detach().requires_grad_(True)
                 out = t3 * 2
-                with self.assertRaisesRegex(RuntimeError, "Expected single reference to a's"):
-                    torch.utils.swap_tensors(t3, t2)
-                del out
-                # Now succeeds
                 torch.utils.swap_tensors(t3, t2)
-                torch.utils.swap_tensors(t1, t2)
+                with self.assertRaisesRegex(RuntimeError, "AccumulateGrad node that was poisoned by swap_tensors"):
+                    out.sum().backward()
 
             wr = weakref.ref(t1)
             with self.assertRaisesRegex(RuntimeError, "has weakref"):

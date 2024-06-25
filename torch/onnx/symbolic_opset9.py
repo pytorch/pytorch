@@ -1,8 +1,10 @@
+# mypy: allow-untyped-defs
 """This file exports ONNX ops for opset 9.
 
 Opset 9 is supported by ONNX release 1.4.1
 release on 01/23/19
 """
+
 from __future__ import annotations
 
 import builtins
@@ -343,6 +345,20 @@ def reshape_as(g: jit_utils.GraphContext, self, other):
 @_onnx_symbolic("aten::add")
 @_beartype.beartype
 def add(g: jit_utils.GraphContext, self, other, alpha=None):
+    """
+    This function takes the add function and returns the corresponding ONNX operator.
+
+    This function is not meant to be called directly by the user.
+
+    Args:
+        g (GraphContext): The graph context.
+        self (Tensor): The first operand.
+        other (Tensor): The second operand.
+        alpha (float, optional): The scaling factor for the second operand. Defaults to None.
+
+    Returns:
+        ONNX operator.
+    """
     if symbolic_helper._is_value(self) and symbolic_helper._is_tensor_list(self):
         return symbolic_helper._onnx_opset_unsupported_detailed(
             "Add", 9, 11, "Add between list of tensors not supported", self
@@ -355,6 +371,21 @@ def add(g: jit_utils.GraphContext, self, other, alpha=None):
 @_onnx_symbolic("aten::sub")
 @_beartype.beartype
 def sub(g: jit_utils.GraphContext, self, other, alpha=None):
+    """
+    Consumes sub function and returns the corresponding ONNX operator.
+
+    This function is not meant to be called directly by the user.
+
+    Args:
+        g (GraphContext): The graph context.
+        self (Tensor): The first operand.
+        other (Tensor): The second operand.
+        alpha (Optional[Tensor]): A scaling factor to apply to the second operand.
+            If `alpha` is not provided, it defaults to 1.
+
+    Returns:
+        ONNX operator
+    """
     if alpha and symbolic_helper._scalar(symbolic_helper._maybe_get_scalar(alpha)) != 1:
         other = g.op("Mul", other, alpha)
     return g.op("Sub", self, other)
@@ -521,6 +552,16 @@ def reciprocal(g: jit_utils.GraphContext, self):
 @symbolic_helper.parse_args("v", "i")
 @_beartype.beartype
 def cat(g: jit_utils.GraphContext, tensor_list, dim):
+    """Implement concatenation of pytorch tensors in ONNX along the specified `dim` dimension.
+
+    Parameters:
+        g (jit_utils.GraphContext): Graph context.
+        tensor_list (List[torch.Tensor]): List of tensors to concatenate.
+        dim (int): Dimension along which to concatenate the tensors.
+
+    Returns:
+        ONNX graph node representing the concatenated tensor.
+    """
     tensors = symbolic_helper._unpack_list(tensor_list)
     # torch.cat ignores empty tensors such as `torch.Tensor([])`
     # These needs to be removed as input from ONNX's concat too, otherwise shape inference
@@ -746,6 +787,16 @@ def atan2(g: jit_utils.GraphContext, self, other):
 @symbolic_helper.quantized_args(True, scale=1.0 / 256.0, zero_point=0)
 @_beartype.beartype
 def sigmoid(g: jit_utils.GraphContext, self):
+    """Converts the corresponding PyTorch function into ONNX operators.
+
+    It is not meant to be called directly by a user.
+
+    Args:
+        g (jit_utils.GraphContext): Graph context.
+        self (Tensor): the input tensor.
+    Returns:
+        ONNX operator
+    """
     return g.op("Sigmoid", self)
 
 
@@ -790,36 +841,18 @@ def _reduce_with_dtype(onnx_op: str, name: str, allow_multi_dim_support: bool = 
 @symbolic_helper.parse_args("v", "i", "none")
 @_beartype.beartype
 def cumsum(g: jit_utils.GraphContext, input, dim, dtype):
-    if symbolic_helper.is_caffe2_aten_fallback():
-        if dtype.node().kind() != "prim::Constant":
-            return symbolic_helper._unimplemented("cumsum", "dtype", dtype)
-        return g.at("cumsum", input, dim_i=dim)
-
     symbolic_helper._onnx_opset_unsupported("cumsum", 9, 11, input)
 
 
 @_onnx_symbolic("aten::_sample_dirichlet")
 @_beartype.beartype
 def _sample_dirichlet(g: jit_utils.GraphContext, self, generator):
-    if symbolic_helper.is_caffe2_aten_fallback():
-        if not symbolic_helper._is_none(generator):
-            return symbolic_helper._unimplemented(
-                "_sample_dirichlet", "We are not able to export generator", self
-            )
-        return g.at("_sample_dirichlet", self)
     return symbolic_helper._onnx_unsupported("_sample_dirichlet", self)
 
 
 @_onnx_symbolic("aten::_standard_gamma")
 @_beartype.beartype
 def _standard_gamma(g: jit_utils.GraphContext, self, generator):
-    if symbolic_helper.is_caffe2_aten_fallback():
-        if not symbolic_helper._is_none(generator):
-            return symbolic_helper._unimplemented(
-                "_standard_gamma", "not able to export generator", self
-            )
-        return g.at("_standard_gamma", self)
-
     return symbolic_helper._onnx_unsupported("_standard_gamma", self)
 
 
@@ -849,6 +882,7 @@ def numpy_T(g: jit_utils.GraphContext, input):
 @symbolic_helper.quantized_args(True)
 @_beartype.beartype
 def expand(g: jit_utils.GraphContext, self, size, implicit):
+    """Implement the expand function for a pytorch tensor in ONNX according to specified `size`"""
     size = symbolic_helper._maybe_get_const(size, "is")
     if not symbolic_helper._is_value(size):
         size = g.op("Constant", value_t=torch.LongTensor(size))
@@ -955,19 +989,6 @@ def embedding_bag(
         return symbolic_helper._onnx_unsupported(
             "embedding_bag with per_sample_weights"
         )
-    if symbolic_helper.is_caffe2_aten_fallback():
-        return g.at(
-            "embedding_bag",
-            embedding_matrix,
-            indices,
-            offsets,
-            outputs=4,
-            scale_grad_by_freq_i=scale_grad_by_freq,
-            mode_i=mode,
-            sparse_i=sparse,
-            include_last_offset_i=include_last_offset,
-            padding_idx_i=padding_idx,
-        )
 
     return symbolic_helper._onnx_unsupported("embedding_bag", embedding_matrix)
 
@@ -1000,10 +1021,6 @@ def transpose(g: jit_utils.GraphContext, self, dim0, dim1):
         axes = list(range(rank))
         axes[dim0], axes[dim1] = axes[dim1], axes[dim0]
         return g.op("Transpose", self, perm_i=axes)
-    elif symbolic_helper.is_caffe2_aten_fallback():
-        # if we don't have dim information we cannot
-        # output a permute so use ATen instead
-        return g.at("transpose", self, overload_name="int", dim0_i=dim0, dim1_i=dim1)
     else:
         raise errors.SymbolicValueError(
             "Unsupported: ONNX export of transpose for tensor of unknown rank.",
@@ -1132,6 +1149,10 @@ def unbind(g: jit_utils.GraphContext, self, dim=0, _outputs=None):
 @symbolic_helper.parse_args("v", "i", "v")
 @_beartype.beartype
 def select(g: jit_utils.GraphContext, self, dim, index):
+    """Implement the select functionality for a pytorch tensor in ONNX.
+
+    Selects elements from the input tensor along the specified `dim` dimension based on the `index` tensor.
+    """
     index = symbolic_helper._maybe_get_scalar(index)
     if (not symbolic_helper._is_value(index)) and (index < 0):
         if index == -1:
@@ -1417,29 +1438,39 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
     ]
     # ensure last pooling starts inside
     ceiled_output_dim = [
-        ceiled_output_dim[i] - 1
-        if (((ceiled_output_dim[i] - 1) * stride[i]) >= (dim[i] + padding[i]))
-        else ceiled_output_dim[i]
+        (
+            ceiled_output_dim[i] - 1
+            if (((ceiled_output_dim[i] - 1) * stride[i]) >= (dim[i] + padding[i]))
+            else ceiled_output_dim[i]
+        )
         for i in range(0, len(ceiled_output_dim))
     ]
     padding_ceil = [
-        0
-        if (stride[i] == 1)
-        else (
-            kernel_size[i]
-            - (dim[i] + 2 * padding[i] - ((ceiled_output_dim[i] - 1) * stride[i] + 1))
+        (
+            0
+            if (stride[i] == 1)
+            else (
+                kernel_size[i]
+                - (
+                    dim[i]
+                    + 2 * padding[i]
+                    - ((ceiled_output_dim[i] - 1) * stride[i] + 1)
+                )
+            )
         )
         for i in range(0, len(padding))
     ]
     # ensure padding is not > kernel_size
     padding_ceil = [
         (
-            int(padding_ceil[i])
-            if padding_ceil[i] < kernel_size[i] - 1
-            else int(kernel_size[i] - 1)
+            (
+                int(padding_ceil[i])
+                if padding_ceil[i] < kernel_size[i] - 1
+                else int(kernel_size[i] - 1)
+            )
+            if ((padding_ceil[i] + 2 * padding[i]) >= (kernel_size[i]))
+            else int(padding_ceil[i])
         )
-        if ((padding_ceil[i] + 2 * padding[i]) >= (kernel_size[i]))
-        else int(padding_ceil[i])
         for i in range(0, len(padding_ceil))
     ]
     return padding_ceil
@@ -2861,16 +2892,6 @@ def layer_norm(
     eps: float,
     cudnn_enable: bool,
 ) -> _C.Value:
-    if symbolic_helper.is_caffe2_aten_fallback():
-        return g.at(
-            "layer_norm",
-            input,
-            weight,
-            bias,
-            normalized_shape_i=normalized_shape,
-            eps_f=eps,
-            cudnn_enable_i=cudnn_enable,
-        )
     normalized, _, _ = native_layer_norm(g, input, normalized_shape, weight, bias, eps)
     return normalized
 
@@ -2977,8 +2998,6 @@ def instance_norm(
 @symbolic_helper.parse_args("v", "i", "i", "i")
 @_beartype.beartype
 def unfold(g: jit_utils.GraphContext, input, dimension, size, step):
-    if symbolic_helper.is_caffe2_aten_fallback():
-        return g.at("unfold", input, dimension_i=dimension, size_i=size, step_i=step)
     sizes = symbolic_helper._get_tensor_sizes(input)
     # FIXME(justinchuby): Get rid of the try catch here to improve readability
     try:
@@ -3053,9 +3072,6 @@ def index_put(g: jit_utils.GraphContext, self, indices_list_value, values, accum
         indices_list = symbolic_helper._unpack_list(indices_list_value)
     else:
         indices_list = [indices_list_value]
-    if symbolic_helper.is_caffe2_aten_fallback():
-        args = [self] + indices_list + [values, accumulate]
-        return g.at("index_put", *args)
 
     accumulate = symbolic_helper._parse_arg(accumulate, "b")
 
@@ -3070,16 +3086,6 @@ def index_put(g: jit_utils.GraphContext, self, indices_list_value, values, accum
 @_beartype.beartype
 def index_fill(g: jit_utils.GraphContext, self, dim, index, value):
     dim_value = symbolic_helper._parse_arg(dim, "i")
-    if symbolic_helper.is_caffe2_aten_fallback():
-        return g.at(
-            "index_fill",
-            self,
-            index,
-            value,
-            overload_name="int_Scalar",
-            dim_i=dim_value,
-        )
-
     expanded_index_shape, expanded_index = symbolic_helper._index_fill_reshape_helper(
         g, self, dim, index
     )
@@ -3094,8 +3100,6 @@ def index_fill(g: jit_utils.GraphContext, self, dim, index, value):
 @_beartype.beartype
 def index_copy(g: jit_utils.GraphContext, self, dim, index, source):
     dim_value = symbolic_helper._parse_arg(dim, "i")
-    if symbolic_helper.is_caffe2_aten_fallback():
-        return g.at("index_copy", self, index, source, dim_i=dim_value)
     expanded_index_shape, expanded_index = symbolic_helper._index_fill_reshape_helper(
         g, self, dim, index
     )
@@ -3154,10 +3158,6 @@ def type_as(g: jit_utils.GraphContext, self, other):
             to_i=other_dtype.onnx_type(),
         )
 
-    if symbolic_helper.is_caffe2_aten_fallback():
-        # We don't know the type of other, bail by emitting ATen
-        return g.at("type_as", self, other)
-
     raise errors.SymbolicValueError(
         "Unsupported: ONNX export of type_as for tensor "
         "of unknown dtype. Please check if the dtype of the "
@@ -3170,8 +3170,6 @@ def type_as(g: jit_utils.GraphContext, self, other):
 @symbolic_helper.parse_args("v", "v", "i", "f")
 @_beartype.beartype
 def cosine_similarity(g: jit_utils.GraphContext, x1, x2, dim, eps):
-    if symbolic_helper.is_caffe2_aten_fallback():
-        return g.at("cosine_similarity", x1, x2, dim_i=dim, eps_f=eps)
     cross = symbolic_helper._reducesum_helper(
         g, mul(g, x1, x2), axes_i=[dim], keepdims_i=0
     )
@@ -3450,50 +3448,28 @@ def norm(g: jit_utils.GraphContext, self, p, dim, keepdim, dtype=None):
 @symbolic_helper.parse_args("v", "v", "v", "i")
 @_beartype.beartype
 def conv_tbc(g: jit_utils.GraphContext, input, weight, bias, pad):
-    if symbolic_helper.is_caffe2_aten_fallback():
-        return g.at("conv_tbc", input, weight, bias, pad_i=pad)
-    else:
-        # input must have 3 dimensions, see:
-        # https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/ConvolutionTBC.cpp#L8-L10
-        # input = (time, batch, in_channels)
-        # weight = (kernel_width, in_channels, out_channels)
-        # bias = (out_channels,)
-        input = g.op("Transpose", input, perm_i=[1, 2, 0])
-        weight = g.op("Transpose", weight, perm_i=[2, 1, 0])
-        conv = conv1d(g, input, weight, bias, [1], [pad], [1], 1)
-        return g.op("Transpose", conv, perm_i=[2, 0, 1])
+    # input must have 3 dimensions, see:
+    # https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/ConvolutionTBC.cpp#L8-L10
+    # input = (time, batch, in_channels)
+    # weight = (kernel_width, in_channels, out_channels)
+    # bias = (out_channels,)
+    input = g.op("Transpose", input, perm_i=[1, 2, 0])
+    weight = g.op("Transpose", weight, perm_i=[2, 1, 0])
+    conv = conv1d(g, input, weight, bias, [1], [pad], [1], 1)
+    return g.op("Transpose", conv, perm_i=[2, 0, 1])
 
 
 @_onnx_symbolic("aten::_unique")
 @symbolic_helper.parse_args("v", "i", "i")
 @_beartype.beartype
 def _unique(g: jit_utils.GraphContext, input, sorted, return_inverse):
-    if symbolic_helper.is_caffe2_aten_fallback():
-        return g.at(
-            "_unique",
-            input,
-            sorted_i=sorted,
-            return_inverse_i=return_inverse,
-            outputs=2,
-        )
-    else:
-        return symbolic_helper._onnx_unsupported("_unique", input)
+    return symbolic_helper._onnx_unsupported("_unique", input)
 
 
 @_onnx_symbolic("aten::_unique2")
 @symbolic_helper.parse_args("v", "i", "i", "i")
 @_beartype.beartype
 def _unique2(g: jit_utils.GraphContext, input, sorted, return_inverse, return_counts):
-    if symbolic_helper.is_caffe2_aten_fallback():
-        return g.at(
-            "_unique2",
-            input,
-            sorted_i=sorted,
-            return_inverse_i=return_inverse,
-            return_counts_i=return_counts,
-            outputs=3,
-        )
-
     symbolic_helper._onnx_opset_unsupported("_unique2", 9, 11, input)
 
 
@@ -4081,6 +4057,7 @@ def alias(g: jit_utils.GraphContext, self):
 @symbolic_helper.parse_args("v", "i")
 @_beartype.beartype
 def unsqueeze(g: jit_utils.GraphContext, self, dim):
+    """Implement unsqueezing a pytorch tensor in ONNX by inserting a new dimension at the specified `dim`"""
     # Handle negative dim
     if dim < 0:
         rank = symbolic_helper._get_tensor_rank(self)
@@ -4906,11 +4883,8 @@ def _dim_arange(g: jit_utils.GraphContext, like, dim):
     stop = g.op(
         "Gather", like_shape, g.op("Constant", value_t=torch.tensor(dim)), axis_i=0
     )
-    if symbolic_helper.is_caffe2_aten_fallback():
-        return g.op("_caffe2::Range", stop)
-    else:
-        # aten::arange(Scalar end, ScalarType dtype, Layout, Device, bool pin_memory)
-        return arange(g, stop, 4, None, None, None)
+    # aten::arange(Scalar end, ScalarType dtype, Layout, Device, bool pin_memory)
+    return arange(g, stop, 4, None, None, None)
 
 
 @_onnx_symbolic("aten::detach")
@@ -5476,9 +5450,6 @@ def logsumexp(g: jit_utils.GraphContext, input, dim, keepdim):
 @_onnx_symbolic("aten::arange")
 @_beartype.beartype
 def arange(g: jit_utils.GraphContext, *args):
-    if symbolic_helper.is_caffe2_aten_fallback():
-        return g.at("arange", *args)
-
     @_beartype.beartype
     def _get_arange_dtype(dtype):
         dtype = symbolic_helper._maybe_get_const(dtype, "i")
@@ -5580,6 +5551,10 @@ def lift(g: jit_utils.GraphContext, self):
 @_onnx_symbolic("aten::masked_fill")
 @_beartype.beartype
 def masked_fill(g: jit_utils.GraphContext, self, mask, value):
+    """Implement the masked_fill functionality available for a pytorch tensor in ONNX.
+
+    Fills elements of the input tensor with `value` where `mask` is True.
+    """
     mask = g.op("Cast", mask, to_i=_C_onnx.TensorProtoDataType.BOOL)
     value = symbolic_helper._maybe_get_scalar(value)
     return g.op("Where", mask, symbolic_helper._if_scalar_type_as(value, self), self)
@@ -5594,9 +5569,6 @@ def masked_fill_(g: jit_utils.GraphContext, self, mask, value):
 @_onnx_symbolic("aten::index")
 @_beartype.beartype
 def index(g: jit_utils.GraphContext, self, index):
-    if symbolic_helper.is_caffe2_aten_fallback():
-        return g.at("index", self, index, overload_name="Tensor")
-
     if symbolic_helper._is_packed_list(index):
         indices = symbolic_helper._unpack_list(index)
     else:
@@ -6012,17 +5984,6 @@ def gelu(g: jit_utils.GraphContext, self: torch._C.Value, approximate: str = "no
 def group_norm(
     g: jit_utils.GraphContext, input, num_groups, weight, bias, eps, cudnn_enabled
 ):
-    if symbolic_helper.is_caffe2_aten_fallback():
-        return g.at(
-            "group_norm",
-            input,
-            weight,
-            bias,
-            num_groups_i=num_groups,
-            eps_f=eps,
-            cudnn_enabled_i=cudnn_enabled,
-        )
-
     channel_size = symbolic_helper._get_tensor_dim_size(input, 1)
     if channel_size is not None:
         assert channel_size % num_groups == 0
@@ -6098,9 +6059,6 @@ def _weight_norm(g: jit_utils.GraphContext, weight_v, weight_g, dim):
         norm_v = norm(g, weight_v, 2, axes, 1)
         div = g.op("Div", weight_v, norm_v)
         return g.op("Mul", div, weight_g)
-    if symbolic_helper.is_caffe2_aten_fallback():
-        return g.at("_weight_norm", weight_v, weight_g, dim_i=dim)
-
     raise errors.SymbolicValueError(
         "Unsupported: ONNX export of _weight_norm for tensor of unknown rank.",
         weight_v,
@@ -6737,6 +6695,7 @@ def prim_device(g: jit_utils.GraphContext, *inputs, **kwargs) -> None:
 def prim_loop(g: jit_utils.GraphContext, *inputs, **attrs) -> List[_C.Value]:
     node = g.original_node
     env = g.env
+    values_in_env = g.values_in_env
     params_dict = g.params_dict
 
     operator_export_type = GLOBALS.operator_export_type
@@ -6771,6 +6730,7 @@ def prim_loop(g: jit_utils.GraphContext, *inputs, **attrs) -> List[_C.Value]:
             new_block_context.block,
             operator_export_type,
             env,
+            values_in_env,
             False,
         )
     fixed_outputs = torch._C._jit_pass_fixup_onnx_controlflow_node(
@@ -6790,6 +6750,7 @@ def prim_if(g: jit_utils.GraphContext, *inputs, **attrs) -> List[_C.Value]:
     n = g.original_node
     block = g.block
     env = g.env
+    values_in_env = g.values_in_env
     params_dict = g.params_dict
 
     operator_export_type = GLOBALS.operator_export_type
@@ -6833,6 +6794,7 @@ def prim_if(g: jit_utils.GraphContext, *inputs, **attrs) -> List[_C.Value]:
             block,
             operator_export_type,
             env,
+            values_in_env,
             True,
         )
         if_output_list = list(n.outputs())
@@ -6860,6 +6822,7 @@ def prim_if(g: jit_utils.GraphContext, *inputs, **attrs) -> List[_C.Value]:
                 new_block_context.block,
                 operator_export_type,
                 env,
+                values_in_env,
                 False,
             )
         fixed_outputs = torch._C._jit_pass_fixup_onnx_controlflow_node(
@@ -6930,8 +6893,11 @@ def onnx_placeholder(g: jit_utils.GraphContext, *inputs, **attrs):
     node = g.original_node
     block = g.block
     env = g.env
+    values_in_env = g.values_in_env
 
-    return torch._C._jit_onnx_convert_pattern_from_subblock(block, node, env)
+    return torch._C._jit_onnx_convert_pattern_from_subblock(
+        block, node, env, values_in_env
+    )
 
 
 @_onnx_symbolic("aten::resolve_conj")

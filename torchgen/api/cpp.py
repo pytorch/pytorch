@@ -48,6 +48,7 @@ from torchgen.model import (
 )
 from torchgen.utils import assert_never
 
+
 # This file describes the translation of JIT schema to the public C++
 # API, which is what people use when they call functions like at::add.
 #
@@ -312,7 +313,7 @@ def return_names(f: NativeFunction, *, fallback_name: str = "result") -> Sequenc
 JIT_TO_CPP_DEFAULT = {
     "False": "false",
     "True": "true",
-    "None": "c10::nullopt",  # UGH this one is type directed
+    "None": "::std::nullopt",  # UGH this one is type directed
     "Mean": "at::Reduction::Mean",
     "[]": "{}",
     "contiguous_format": "MemoryFormat::Contiguous",
@@ -347,7 +348,7 @@ def default_expr(d: str, t: Type, *, symint: bool) -> str:
 
     if isinstance(t, OptionalType):
         if d == "None":
-            return "c10::nullopt"
+            return "::std::nullopt"
 
         return default_expr(d, t.elem, symint=symint)
 

@@ -10,6 +10,7 @@
 #pragma once
 
 #include <ATen/cuda/tunable/Tunable.h>
+#include <ATen/cuda/Sleep.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 
 #ifndef _WIN32
@@ -62,7 +63,7 @@ class TunableOp {
         result = ResultEntry::Default();
       }
       if (result == ResultEntry::Null()) {
-        TUNABLE_LOG("no result, using default");
+        TUNABLE_LOG2("no result, using default");
         result = ResultEntry::Default();
       }
       auto iter = ops_.find(result);
@@ -87,88 +88,120 @@ class TunableOp {
     }
 
   private:
-    static void WarmUp(Callable<ParamsT> *op, ParamsT* param, size_t num_iter) {
+    static void WarmUp(Callable<ParamsT> *op, const std::vector<ParamsT*> &param, size_t num_iter, size_t &offset) {
+      TuningContext* ctx = getTuningContext();
+      bool do_flush = ctx->IsICacheFlushEnabled();
       for (size_t i = 0; i < num_iter; i++) {
-        TORCH_CHECK(op->Call(param) == OK);
+        if (do_flush) {
+          at::cuda::flush_icache();
+        }
+        TORCH_CHECK(op->Call(param[(i+offset++)%param.size()]) == OK);
       }
     }
 
-    static double Profile(Callable<ParamsT> *op, ParamsT* param, size_t num_iter) {
+    static double Profile(Callable<ParamsT> *op, const std::vector<ParamsT*> &param, size_t num_iter, size_t &offset) {
+      TuningContext* ctx = getTuningContext();
+      bool do_flush = ctx->IsICacheFlushEnabled();
       TimerT timer{};
       timer.Start();
       for (size_t i = 0; i < num_iter; i++) {
-        TORCH_CHECK(op->Call(param) == OK);
+        if (do_flush) {
+          at::cuda::flush_icache();
+        }
+        TORCH_CHECK(op->Call(param[(i+offset++)%param.size()]) == OK);
       }
       timer.End();
       return timer.Duration() / num_iter;
     }
 
   protected:
-    bool IsNumericsCheckEnabled() {
-      static const char *env = getenv("PYTORCH_TUNABLEOP_NUMERICAL_CHECK");
-      if (env != nullptr && strcmp(env, "0") == 0) {
-        return false;
-      }
-      return true;
-    }
-
     virtual ResultEntry FindFastest(const ParamsT* params) {
       TuningContext* ctx = getTuningContext();
       auto op_sig = Signature();
       auto params_sig = params->Signature();
-      TUNABLE_LOG("finding fastest for ", op_sig, '(', params_sig, ')', " out of ", op_names_.size(), " candidates");
+      TUNABLE_LOG2("finding fastest for ", op_sig, '(', params_sig, ')', " out of ", op_names_.size(), " candidates");
       auto min_duration_ms = std::numeric_limits<double>::infinity();
       std::string id_name = "Default";
+      ParamsT* reference_params = nullptr;
 
       // calcaulte a reference answer for numerical check
-      ParamsT* reference_params = params->DeepCopy();
-      TORCH_CHECK(ops_[ResultEntry::Default()]->Call(reference_params) == OK);
+      if (ctx->IsNumericsCheckEnabled()) {
+        reference_params = params->DeepCopy(false);
+        TORCH_CHECK(ops_[ResultEntry::Default()]->Call(reference_params) == OK);
+      }
 
-      // need a copy of params to reuse
-      ParamsT* reusable_params = params->DeepCopy();
+      // need copies of params to reuse
+      // make as many copies as will fill the requested rotating buffer size, if requested
+      // rotating_size guaranteed to be >= 0 even though GetRotatingBufferSize() returns int
+      size_t rotating_size = ctx->GetRotatingBufferSize();
+      bool use_buffer_rotation = (rotating_size > 0);
+      size_t param_size = params->GetSize(use_buffer_rotation);
+      size_t param_count = (rotating_size / param_size) + 1;
+      constexpr size_t MB = 1024*1024;
+      if (use_buffer_rotation) {
+        TUNABLE_LOG2("Rotating buffer ", rotating_size/MB, " MiB. ",
+            "Needed Size: ", param_size/MB, " MiB. ",
+            "Needed number of param copies: ", param_count);
+      }
+      TORCH_CHECK(param_count > 0);
+
+      std::vector<ParamsT*> reusable_params(param_count);
+      for (size_t i = 0; i < param_count; i++) {
+        reusable_params[i] = params->DeepCopy(use_buffer_rotation);
+      }
+
+      // for rotating buffer
+      size_t offset = 0;
 
       for (size_t i = 0; i < op_names_.size(); i++) {
         auto* candidate = ops_[op_names_[i]].get(); // borrow pointer
-        auto status = candidate->Call(reusable_params);
-        if (status != OK) {
-          TUNABLE_LOG("├──unsupported id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
-          continue;
-        }
 
-        if (IsNumericsCheckEnabled()) {
-          ParamsT* numerical_params = params->DeepCopy();
-          WarmUp(candidate, numerical_params, 1);
+        if (ctx->IsNumericsCheckEnabled()) {
+          ParamsT* numerical_params = params->DeepCopy(false);
+          auto status = candidate->Call(numerical_params);
+          if (status != OK) {
+            TUNABLE_LOG3("├──unsupported id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
+            continue;
+          }
           status = reference_params->NumericalCheck(numerical_params);
           numerical_params->Delete();
           if (status != OK) {
-            TUNABLE_LOG("├──numerics check failed for id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
+            TUNABLE_LOG3("├──numerics check failed for id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
+            continue;
+          }
+        }
+        else {
+          auto status = candidate->Call(reusable_params[0]);
+          if (status != OK) {
+            TUNABLE_LOG3("├──unsupported id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
             continue;
           }
         }
 
         // collect a small profile
         constexpr const int approx_num_iter = 3;
-        auto approx_duration = Profile(candidate, reusable_params, approx_num_iter);
+        auto approx_duration = Profile(candidate, reusable_params, approx_num_iter, offset);
         // bail if too slow
         if (approx_duration > 2 * min_duration_ms) {
-          TUNABLE_LOG("├──skip slow instance id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
+          TUNABLE_LOG3("├──skip slow instance id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
           continue;
         }
 
         // for warmup does user set max duration, max iters, or both?
+        // warmup is allowed to be skipped by setting either iterations or duration to 0
         double max_warmup_duration = ctx->GetMaxWarmupDurationMs();
         int max_warmup_iter = ctx->GetMaxWarmupIterations();
         int warmup_iter = 1; // default
-        if (max_warmup_duration > 0) {
+        if (max_warmup_duration >= 0) {
           int duration_iters = max_warmup_duration / approx_duration;
-          if (max_warmup_iter > 0) {
+          if (max_warmup_iter >= 0) {
             warmup_iter = std::min(max_warmup_iter, duration_iters);
           }
           else {
             warmup_iter = duration_iters;
           }
         }
-        else if (max_warmup_iter > 0) {
+        else if (max_warmup_iter >= 0) {
           warmup_iter = max_warmup_iter;
         }
 
@@ -188,27 +221,34 @@ class TunableOp {
         else if (max_tuning_iter > 0) {
           tuning_iter = max_tuning_iter;
         }
+        // tuning must run at least 1 iteration
+        tuning_iter = std::max(1, tuning_iter);
 
         // do the full warmup followed by tuning
         double warmup_ms = warmup_iter * approx_duration;
         double tuning_ms = tuning_iter * approx_duration;
-        TUNABLE_LOG("├──tuning using "
+        TUNABLE_LOG3("├──tuning using "
             "warmup iters ", warmup_iter, " [", warmup_ms, " ms] "
             "and tuning iters ", tuning_iter, " [", tuning_ms, " ms] ",
             "instance id=", i, ", ", op_sig, "(", params_sig, ") ", op_names_[i]);
-        WarmUp(candidate, reusable_params, warmup_iter);
-        auto duration_ms = Profile(candidate, reusable_params, tuning_iter);
+        TUNABLE_LOG3("├──offset at ", offset);
+        WarmUp(candidate, reusable_params, warmup_iter, offset);
+        auto duration_ms = Profile(candidate, reusable_params, tuning_iter, offset);
         if (duration_ms < min_duration_ms) {
-          TUNABLE_LOG("├──found better instance id=", i, ". " , duration_ms, "ms. ", op_names_[i]);
+          TUNABLE_LOG3("├──found better instance id=", i, ". " , duration_ms, "ms. ", op_names_[i]);
           min_duration_ms = duration_ms;
           id_name = op_names_[i];
         }
       }
 
-      reusable_params->Delete();
-      reference_params->Delete();
+      for (size_t i = 0; i < reusable_params.size(); i++) {
+        reusable_params[i]->Delete();
+      }
+      if (reference_params) {
+        reference_params->Delete();
+      }
 
-      TUNABLE_LOG("└──found fastest for ", op_sig, '(', params_sig, ") ", id_name);
+      TUNABLE_LOG2("└──found fastest for ", op_sig, '(', params_sig, ") ", id_name);
       return ResultEntry(id_name, min_duration_ms);
     }
 

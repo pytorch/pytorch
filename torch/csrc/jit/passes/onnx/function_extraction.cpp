@@ -58,8 +58,8 @@ struct FunctionExtractor {
         scope_ctx_map& scope_ctxs);
     void DebugPrint() const;
     void SetAttrName(Node* ref_n, Symbol attr, const std::string& name);
-    c10::optional<std::string> FindAttrName(Node* ref_n, Symbol attr);
-    c10::optional<std::string> FindAttrName(Node* ref_const_n);
+    std::optional<std::string> FindAttrName(Node* ref_n, Symbol attr);
+    std::optional<std::string> FindAttrName(Node* ref_const_n);
 
     ScopePtr scope_key_;
     scope_ctx_map scope_ctxs_;
@@ -76,10 +76,10 @@ struct FunctionExtractor {
   using func_ctx_map = std::unordered_map<ScopePtr, FunctionCtxPtr>;
 
   static bool IsValidScope(ScopePtr s);
-  static c10::optional<ScopePtr> InferScope(Node* n);
+  static std::optional<ScopePtr> InferScope(Node* n);
   static bool IsAncestor(ScopePtr parent, ScopePtr child);
-  static c10::optional<ScopePtr> FindCommonAncestor(ScopePtr a, ScopePtr b);
-  static c10::optional<ScopePtr> FindCommonAncestor(const scope_list& scopes);
+  static std::optional<ScopePtr> FindCommonAncestor(ScopePtr a, ScopePtr b);
+  static std::optional<ScopePtr> FindCommonAncestor(const scope_list& scopes);
   std::shared_ptr<Graph> ConstructFuncGraph(FunctionContext& ctx);
 
   void ConvertScopeToFunction(
@@ -219,7 +219,7 @@ void FunctionExtractor::FunctionContext::SetAttrName(
   auto n_attr_it = node_attr_to_name_[n_in_def][attr.toUnqualString()] = name;
 }
 
-c10::optional<std::string> FunctionExtractor::FunctionContext::FindAttrName(
+std::optional<std::string> FunctionExtractor::FunctionContext::FindAttrName(
     Node* ref_n,
     Symbol attr) {
   auto v_it =
@@ -297,7 +297,7 @@ bool FunctionExtractor::IsAncestor(ScopePtr parent, ScopePtr child) {
   return false;
 }
 
-c10::optional<ScopePtr> FunctionExtractor::FindCommonAncestor(
+std::optional<ScopePtr> FunctionExtractor::FindCommonAncestor(
     ScopePtr a,
     ScopePtr b) {
   if (!IsValidScope(a) || !IsValidScope(b)) {
@@ -330,13 +330,13 @@ c10::optional<ScopePtr> FunctionExtractor::FindCommonAncestor(
   return c10::nullopt;
 }
 
-c10::optional<ScopePtr> FunctionExtractor::FindCommonAncestor(
+std::optional<ScopePtr> FunctionExtractor::FindCommonAncestor(
     const scope_list& scopes) {
   if (scopes.empty()) {
     return c10::nullopt;
   }
 
-  c10::optional<ScopePtr> common_ancestor = scopes.at(0);
+  std::optional<ScopePtr> common_ancestor = scopes.at(0);
   for (const auto& scope : scopes) {
     common_ancestor = FindCommonAncestor(common_ancestor.value(), scope);
     if (!common_ancestor.has_value()) {
@@ -347,7 +347,7 @@ c10::optional<ScopePtr> FunctionExtractor::FindCommonAncestor(
   return common_ancestor;
 }
 
-c10::optional<ScopePtr> FunctionExtractor::InferScope(Node* n) {
+std::optional<ScopePtr> FunctionExtractor::InferScope(Node* n) {
   // The scope of node n is assigned based on the following rules.
   // 1. If all uses of outputs of n belongs to the same scope,
   //    assign that scope, otherwise

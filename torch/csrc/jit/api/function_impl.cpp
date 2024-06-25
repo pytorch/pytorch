@@ -28,7 +28,7 @@ c10::FunctionSchema defaultSchemaFor(const GraphFunction& function) {
   for (const auto i : c10::irange(num_inputs)) {
     const Value* v = g.inputs().at(i);
     std::string name = v->hasDebugName() ? v->debugNameBase()
-                                         : ("argument_" + c10::to_string(i));
+                                         : ("argument_" + std::to_string(i));
     args.emplace_back(std::move(name), unshapedType(g.inputs()[i]->type()));
   }
   for (const auto i : c10::irange(g.outputs().size())) {
@@ -116,8 +116,8 @@ GraphFunction::SpecializationKey GraphFunction::currentSpecialization() const {
   // disabling autodiff pass for mobile build since autocast APIs don't exist
   return SpecializationKey::AutocastOff;
 #else
-  bool cpu_enabled = at::autocast::is_cpu_enabled();
-  bool gpu_enabled = at::autocast::is_enabled();
+  bool cpu_enabled = at::autocast::is_autocast_enabled(at::kCPU);
+  bool gpu_enabled = at::autocast::is_autocast_enabled(at::kCUDA);
   if (cpu_enabled && gpu_enabled) {
     return SpecializationKey::CpuGpuAutocastOn;
   } else if (!cpu_enabled && !gpu_enabled) {

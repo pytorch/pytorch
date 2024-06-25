@@ -36,10 +36,8 @@ class StatefulDataLoader : public DataLoaderBase<
 
   /// Constructs the `StatefulDataLoader` from a `dataset` and some `options`.
   StatefulDataLoader(Dataset dataset, DataLoaderOptions options)
-      : super(
-            std::move(options),
-            std::make_unique<Dataset>(std::move(dataset))) {
-    for (const auto w : c10::irange(this->options_.workers)) {
+      : super(options, std::make_unique<Dataset>(std::move(dataset))) {
+    for ([[maybe_unused]] const auto _ : c10::irange(this->options_.workers)) {
       // As opposed to the stateless case, here all worker threads access the
       // same underlying dataset.
       this->workers_.emplace_back(

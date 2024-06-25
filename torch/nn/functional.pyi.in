@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import (
     Any,
     Callable,
@@ -298,6 +299,12 @@ def layer_norm(
     weight: Optional[Tensor] = ...,
     bias: Optional[Tensor] = ...,
     eps: float = ...,
+) -> Tensor: ...
+def rms_norm(
+    input: Tensor,
+    normalized_shape: Sequence[int],
+    weight: Optional[Tensor] = ...,
+    eps: Optional[float] = ...,
 ) -> Tensor: ...
 def group_norm(
     input: Tensor,

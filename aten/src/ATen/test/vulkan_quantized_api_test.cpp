@@ -136,7 +136,7 @@ inline std::vector<c10::IValue> callOpByName(
     const char* func_name,
     const char* overload_name,
     Args... args) {
-  const c10::optional<c10::OperatorHandle> op_handle =
+  const std::optional<c10::OperatorHandle> op_handle =
       c10::Dispatcher::singleton().findSchema({func_name, overload_name});
   assert(op_handle.has_value());
   return callOpByHandle(op_handle.value(), std::forward<Args>(args)...);
@@ -3763,6 +3763,68 @@ TEST_F(VulkanAPITest, gelu_quint8_self) {
   test_gelu({200, 20}, c10::ScalarType::QUInt8, true);
   test_gelu({200, 20, 10}, c10::ScalarType::QUInt8, true);
   test_gelu({200, 20, 30, 10}, c10::ScalarType::QUInt8, true);
+}
+
+void test_relu(
+    const at::IntArrayRef input_shape,
+    const c10::ScalarType dtype,
+    bool inplace) {
+  const auto in_cpu = produce_random_tensor(input_shape);
+
+  const auto input_quant_params = compute_quant_params(in_cpu, dtype);
+  double scale = std::get<0>(input_quant_params);
+  scale = safe_downcast<float>(scale);
+  int zero_point = std::get<1>(input_quant_params);
+
+  auto in_cpu_quantized =
+      at::quantize_per_tensor(in_cpu, scale, zero_point, dtype);
+
+  auto in_vk_quantized =
+      at::quantize_per_tensor(in_cpu.vulkan(), scale, zero_point, dtype);
+
+  const auto out_cpu_quantized =
+      inplace ? at::relu_(in_cpu_quantized) : at::relu(in_cpu_quantized);
+
+  const auto out_vk_quantized =
+      inplace ? at::relu_(in_vk_quantized) : at::relu(in_vk_quantized);
+
+  const auto out_cpu_deq = at::dequantize(out_cpu_quantized);
+  const auto out_vk_deq = at::dequantize(out_vk_quantized);
+  const auto out_vk_deq_cpu = out_vk_deq.cpu();
+
+  const auto check =
+      almostEqual(out_vk_deq_cpu, out_cpu_deq, safe_downcast<float>(scale));
+
+  if (!check) {
+    showRtol(out_cpu_deq, out_vk_deq_cpu);
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, relu_qint8) {
+  test_relu({200, 20}, c10::ScalarType::QInt8, false);
+  test_relu({200, 20, 10}, c10::ScalarType::QInt8, false);
+  test_relu({200, 20, 30, 10}, c10::ScalarType::QInt8, false);
+}
+
+TEST_F(VulkanAPITest, relu_qint8_inplace) {
+  test_relu({4, 1, 4}, c10::ScalarType::QInt8, true);
+  test_relu({200, 20}, c10::ScalarType::QInt8, true);
+  test_relu({200, 20, 10}, c10::ScalarType::QInt8, true);
+  test_relu({200, 20, 30, 10}, c10::ScalarType::QInt8, true);
+}
+
+TEST_F(VulkanAPITest, relu_quint8) {
+  test_relu({200, 20}, c10::ScalarType::QUInt8, false);
+  test_relu({200, 20, 10}, c10::ScalarType::QUInt8, false);
+  test_relu({200, 20, 30, 10}, c10::ScalarType::QUInt8, false);
+}
+
+TEST_F(VulkanAPITest, relu_quint8_inplace) {
+  test_relu({4, 1, 4}, c10::ScalarType::QUInt8, true);
+  test_relu({200, 20}, c10::ScalarType::QUInt8, true);
+  test_relu({200, 20, 10}, c10::ScalarType::QUInt8, true);
+  test_relu({200, 20, 30, 10}, c10::ScalarType::QUInt8, true);
 }
 
 } // namespace

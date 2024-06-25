@@ -21,6 +21,47 @@ namespace at::native {
 
 namespace {
 
+// out = val * a + b
+// is_b_stride_zero: If the stride of b is 0 (mask broadcasting case),
+//                take b as a scalar pointer.
+template <bool is_b_stride_zero, typename T1, typename T2>
+inline void _scale_attn_mask_fusion_kernel(
+    T1* a,
+    T2* b,
+    const int& size,
+    T1* out,
+    T1& val) {
+  const auto vec_size1 = at::vec::Vectorized<T1>::size();
+  const auto vec_size2 = at::vec::Vectorized<T2>::size();
+  constexpr int64_t T1_n =
+      (vec_size2 == vec_size1 * 2 && is_reduced_floating_point_v<T2>) ? 2 : 1;
+  constexpr int64_t T2_n = 1;
+  auto vec_scale = at::vec::VectorizedN<T1, T1_n>(val);
+  int64_t i = 0;
+  for (; i < size - (size % vec_size2); i += vec_size2) {
+    auto a_n = at::vec::VectorizedN<T1, T1_n>::loadu(a + i);
+    at::vec::VectorizedN<T2, T2_n> b_n;
+    if constexpr(is_b_stride_zero) {
+      b_n = at::vec::VectorizedN<T2, T2_n>((T1)b[0]);
+    } else {
+      b_n = at::vec::VectorizedN<T2, T2_n>::loadu(b + i);
+    }
+    auto b_n_convert = at::vec::convert<T1, T1_n, T2, T2_n, true>(b_n);
+    auto res = a_n * vec_scale + b_n_convert;
+    res.store(out + i);
+  }
+  for (; i < size; i++) {
+    auto tmp0 = a[i];
+    T1 tmp1;
+    if constexpr(is_b_stride_zero) {
+      tmp1 = (T1)b[0];
+    } else {
+      tmp1 = (T1)b[i];
+    }
+    out[i] = tmp0 * val + tmp1;
+  }
+}
+
 // 1) out = exp(a - val)
 // 2) val = sum(out)
 template <typename T1, typename T2>
@@ -142,7 +183,7 @@ void reshape_attn_mask_to_4d(
                 .expand({attn_mask_size_0, attn_mask_size_1, qSize, kvSize});
 }
 
-template <typename scalar_t, int64_t q_split_size, int64_t kv_split_size>
+template <typename scalar_t, typename mask_t, int64_t q_split_size, int64_t kv_split_size>
 void cpu_flash_attention(
     const Tensor& output,
     const Tensor& logsumexp,
@@ -151,8 +192,8 @@ void cpu_flash_attention(
     const at::Tensor& v,
     double dropout_p,
     bool is_causal,
-    c10::optional<Tensor> attn_mask,
-    c10::optional<double> scale) {
+    std::optional<Tensor> attn_mask,
+    std::optional<double> scale) {
   // Query (Batch x Num_heads  x Q_seq_len  x Dim_per_head)
   //    -> (Batch x Q_seq_len  x Num_heads  x Dim_per_head)
   // Key   (Batch x Num_heads  x KV_seq_len x Dim_per_head)
@@ -180,9 +221,6 @@ void cpu_flash_attention(
 
   bool has_attn_mask = attn_mask.has_value() && attn_mask.value().numel();
   if (has_attn_mask) {
-    if (is_reduced_type) {
-      attn_mask.value() = attn_mask.value().to(at::kFloat);
-    }
     reshape_attn_mask_to_4d(attn_mask.value(), batchSize, num_head, qSize, kvSize);
   }
 
@@ -211,7 +249,13 @@ void cpu_flash_attention(
       ? attn_mask.value().stride(1)
       : 0;
   int64_t mStrideM =
-      has_attn_mask ? attn_mask.value().stride(2) : 0;
+      (has_attn_mask && attn_mask.value().size(2) > 1)
+      ? attn_mask.value().stride(2)
+      : 0;
+  int64_t mStrideN =
+      (has_attn_mask && attn_mask.value().size(3) > 1)
+      ? attn_mask.value().stride(3)
+      : 0;
 
   int64_t qSplitSize = q_split_size > qSize ? qSize : q_split_size;
   int64_t kvSplitSize = kv_split_size > kvSize ? kvSize : kv_split_size;
@@ -235,8 +279,8 @@ void cpu_flash_attention(
   const scalar_t* q_data = query.const_data_ptr<scalar_t>();
   const scalar_t* k_data = key.const_data_ptr<scalar_t>();
   const scalar_t* v_data = value.const_data_ptr<scalar_t>();
-  const accum_t* mask_data = has_attn_mask
-      ? attn_mask.value().const_data_ptr<accum_t>()
+  mask_t* mask_data = has_attn_mask
+      ? attn_mask.value().data_ptr<mask_t>()
       : nullptr;
   scalar_t* out_data = output.data_ptr<scalar_t>();
   accum_t* lse_data = logsumexp.data_ptr<accum_t>();
@@ -298,15 +342,23 @@ void cpu_flash_attention(
         // qk <- qk * scaling + attn_mask
         if (has_attn_mask) {
           for (int64_t row = 0; row < qBlockSize; ++row) {
-            at::vec::map2<accum_t>(
-                [scaling_factor](Vec x, Vec y) {
-                  return x * Vec(scaling_factor) + y;
-                },
+            if (mStrideN == 0) {
+              _scale_attn_mask_fusion_kernel</*is_stride_0*/ true>(
                 qk_data + row * kvBlockSize,
+                mask_data + i * mStrideB + j * mStrideH +
+                    (m + row) * mStrideM,
+                kvBlockSize,
+                qk_data + row * kvBlockSize,
+                scaling_factor);
+            } else {
+              _scale_attn_mask_fusion_kernel</*is_stride_0*/ false>(
                 qk_data + row * kvBlockSize,
                 mask_data + i * mStrideB + j * mStrideH +
                     (m + row) * mStrideM + n,
-                kvBlockSize);
+                kvBlockSize,
+                qk_data + row * kvBlockSize,
+                scaling_factor);
+            }
           }
         }
         // Update coefficients with Softmax
@@ -387,7 +439,7 @@ void cpu_flash_attention(
 
 }
 
-template <typename scalar_t, int64_t q_split_size, int64_t kv_split_size>
+template <typename scalar_t, typename mask_t, int64_t q_split_size, int64_t kv_split_size>
 void cpu_flash_attention_backward(
     const at::Tensor& grad_q,
     const at::Tensor& grad_k,
@@ -400,8 +452,8 @@ void cpu_flash_attention_backward(
     const at::Tensor& logsumexp,
     double dropout_p,
     bool is_causal,
-    c10::optional<Tensor> attn_mask,
-    c10::optional<double> scale) {
+    std::optional<Tensor> attn_mask,
+    std::optional<double> scale) {
   constexpr bool is_reduced_type = is_reduced_floating_point_v<scalar_t>;
   using accum_t = at::opmath_type<scalar_t>;
   using Vec = vec::Vectorized<accum_t>;
@@ -422,9 +474,6 @@ void cpu_flash_attention_backward(
 
   bool has_attn_mask = attn_mask.has_value() && attn_mask.value().numel();
   if (has_attn_mask) {
-    if (is_reduced_type) {
-      attn_mask.value() = attn_mask.value().to(at::kFloat);
-    }
     reshape_attn_mask_to_4d(attn_mask.value(), batchSize, num_head, qSize, kvSize);
   }
 
@@ -453,7 +502,13 @@ void cpu_flash_attention_backward(
       ? attn_mask.value().stride(1)
       : 0;
   int64_t mStrideM =
-      has_attn_mask ? attn_mask.value().stride(2) : 0;
+      (has_attn_mask && attn_mask.value().size(2) > 1)
+      ? attn_mask.value().stride(2)
+      : 0;
+  int64_t mStrideN =
+      (has_attn_mask && attn_mask.value().size(3) > 1)
+      ? attn_mask.value().stride(3)
+      : 0;
 
   int64_t grad_qStrideB = grad_q.stride(0);
   int64_t grad_qStrideM = grad_q.stride(1);
@@ -493,15 +548,15 @@ void cpu_flash_attention_backward(
   scalar_t* grad_q_data = grad_q.data_ptr<scalar_t>();
   scalar_t* grad_k_data = grad_k.data_ptr<scalar_t>();
   scalar_t* grad_v_data = grad_v.data_ptr<scalar_t>();
-  scalar_t* grad_out_data = grad_out.data_ptr<scalar_t>();
-  scalar_t* q_data = query.data_ptr<scalar_t>();
-  scalar_t* k_data = key.data_ptr<scalar_t>();
-  scalar_t* v_data = value.data_ptr<scalar_t>();
-  accum_t* mask_data = has_attn_mask
-      ? attn_mask.value().data_ptr<accum_t>()
+  const scalar_t* grad_out_data = grad_out.const_data_ptr<scalar_t>();
+  const scalar_t* q_data = query.const_data_ptr<scalar_t>();
+  const scalar_t* k_data = key.const_data_ptr<scalar_t>();
+  const scalar_t* v_data = value.const_data_ptr<scalar_t>();
+  mask_t* mask_data = has_attn_mask
+      ? attn_mask.value().data_ptr<mask_t>()
       : nullptr;
-  scalar_t* out_data = out.data_ptr<scalar_t>();
-  accum_t* lse_data = logsumexp.data_ptr<accum_t>();
+  const scalar_t* out_data = out.const_data_ptr<scalar_t>();
+  const accum_t* lse_data = logsumexp.const_data_ptr<accum_t>();
   accum_t* buf_data = buf.data_ptr<accum_t>();
   scalar_t* buf_reduced_data = is_reduced_type ? buf_reduced.data_ptr<scalar_t>() : nullptr;
 
@@ -554,16 +609,25 @@ void cpu_flash_attention_backward(
             kvBlockSize);
           // attn <- attn + mask
           if (has_attn_mask) {
+            accum_t one = accum_t(1);
             for (const auto row : c10::irange(qBlockSize)) {
-              at::vec::map2<accum_t>(
-                  [](Vec x, Vec y) {
-                    return x + y;
-                  },
+              if (mStrideN == 0) {
+                _scale_attn_mask_fusion_kernel</*is_stride_0*/ true>(
                   attn_data + row * kvBlockSize,
+                  mask_data + i * mStrideB + j * mStrideH +
+                      (m + row) * mStrideM,
+                  kvBlockSize,
+                  attn_data + row * kvBlockSize,
+                  one);
+              } else {
+                _scale_attn_mask_fusion_kernel</*is_stride_0*/ false>(
                   attn_data + row * kvBlockSize,
                   mask_data + i * mStrideB + j * mStrideH +
                       (m + row) * mStrideM + n,
-                  kvBlockSize);
+                  kvBlockSize,
+                  attn_data + row * kvBlockSize,
+                  one);
+              }
             }
           }
           // restore self attention after softmax from logsumexp
@@ -686,6 +750,21 @@ void cpu_flash_attention_backward(
   });
 }
 
+#define AT_DISPATCH_MASK_TYPES(TYPE, NAME, ...)            \
+  AT_DISPATCH_SWITCH(                                      \
+      TYPE,                                                \
+      NAME,                                                \
+      AT_PRIVATE_CASE_TYPE_USING_HINT(                     \
+          at::ScalarType::Bool, mask_t, __VA_ARGS__)       \
+      AT_PRIVATE_CASE_TYPE_USING_HINT(                     \
+          at::ScalarType::Float, mask_t, __VA_ARGS__)      \
+      AT_PRIVATE_CASE_TYPE_USING_HINT(                     \
+          at::ScalarType::Double, mask_t, __VA_ARGS__)     \
+      AT_PRIVATE_CASE_TYPE_USING_HINT(                     \
+          at::ScalarType::BFloat16, mask_t, __VA_ARGS__)   \
+      AT_PRIVATE_CASE_TYPE_USING_HINT(                     \
+          at::ScalarType::Half, mask_t, __VA_ARGS__))
+
 void flash_attention_kernel_impl(
     const Tensor& output,
     const Tensor& logsumexp,
@@ -694,23 +773,41 @@ void flash_attention_kernel_impl(
     const at::Tensor& value,
     double dropout_p,
     bool is_causal,
-    c10::optional<Tensor> attn_mask,
-    c10::optional<double> scale) {
+    std::optional<Tensor> attn_mask,
+    std::optional<double> scale) {
   auto q_seq_len = query.size(2);
 
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, query.scalar_type(), "flash_attention", [&] {
-    if (q_seq_len >= 768) {
-      cpu_flash_attention<scalar_t, 256, 512>(
-        output, logsumexp, query, key, value,
-        dropout_p, is_causal, attn_mask, scale);
-    } else if (q_seq_len >= 192) {
-      cpu_flash_attention<scalar_t, 64, 512>(
-        output, logsumexp, query, key, value,
-        dropout_p, is_causal, attn_mask, scale);
+    if (!attn_mask.has_value()) {
+      if (q_seq_len >= 768) {
+        cpu_flash_attention<scalar_t, scalar_t, 256, 512>(
+          output, logsumexp, query, key, value,
+          dropout_p, is_causal, attn_mask, scale);
+      } else if (q_seq_len >= 192) {
+        cpu_flash_attention<scalar_t, scalar_t, 64, 512>(
+          output, logsumexp, query, key, value,
+          dropout_p, is_causal, attn_mask, scale);
+      } else {
+        cpu_flash_attention<scalar_t, scalar_t, 32, 512>(
+          output, logsumexp, query, key, value,
+          dropout_p, is_causal, attn_mask, scale);
+      }
     } else {
-      cpu_flash_attention<scalar_t, 32, 512>(
-        output, logsumexp, query, key, value,
-        dropout_p, is_causal, attn_mask, scale);
+      AT_DISPATCH_MASK_TYPES(attn_mask.value().scalar_type(), "flash_attention_mask", [&]() {
+        if (q_seq_len >= 768) {
+          cpu_flash_attention<scalar_t, mask_t, 256, 512>(
+            output, logsumexp, query, key, value,
+            dropout_p, is_causal, attn_mask, scale);
+        } else if (q_seq_len >= 192) {
+          cpu_flash_attention<scalar_t, mask_t, 64, 512>(
+            output, logsumexp, query, key, value,
+            dropout_p, is_causal, attn_mask, scale);
+        } else {
+          cpu_flash_attention<scalar_t, mask_t, 32, 512>(
+            output, logsumexp, query, key, value,
+            dropout_p, is_causal, attn_mask, scale);
+        }
+      });
     }
   });
 }
@@ -727,8 +824,8 @@ void flash_attention_backward_kernel_impl(
     const at::Tensor& logsumexp,
     double dropout_p,
     bool is_causal,
-    c10::optional<Tensor> attn_mask,
-    c10::optional<double> scale) {
+    std::optional<Tensor> attn_mask,
+    std::optional<double> scale) {
   // make sure grad_out has no zero strides (broadcasted dimensions)
   // since we are going to call gemm next
   // zero stride in leading dimension would lead to slow impl for gemm
@@ -736,21 +833,43 @@ void flash_attention_backward_kernel_impl(
   auto q_seq_len = query.size(1);
 
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, query.scalar_type(), "flash_attention_backward", [&] {
-    if (q_seq_len >= 768) {
-      cpu_flash_attention_backward<scalar_t, 256, 512>(
-        grad_q, grad_k, grad_v, grad_out_contig,
-        query, key, value, out, logsumexp,
-        dropout_p, is_causal, attn_mask, scale);
-    } else if (q_seq_len >= 192) {
-      cpu_flash_attention_backward<scalar_t, 64, 512>(
-        grad_q, grad_k, grad_v, grad_out_contig,
-        query, key, value, out, logsumexp,
-        dropout_p, is_causal, attn_mask, scale);
+    if (!attn_mask.has_value() || !attn_mask.value().defined()) {
+      using accum_t = at::opmath_type<scalar_t>;
+      if (q_seq_len >= 768) {
+        cpu_flash_attention_backward<scalar_t, accum_t, 256, 512>(
+          grad_q, grad_k, grad_v, grad_out_contig,
+          query, key, value, out, logsumexp,
+          dropout_p, is_causal, attn_mask, scale);
+      } else if (q_seq_len >= 192) {
+        cpu_flash_attention_backward<scalar_t, accum_t, 64, 512>(
+          grad_q, grad_k, grad_v, grad_out_contig,
+          query, key, value, out, logsumexp,
+          dropout_p, is_causal, attn_mask, scale);
+      } else {
+        cpu_flash_attention_backward<scalar_t, accum_t, 32, 512>(
+          grad_q, grad_k, grad_v, grad_out_contig,
+          query, key, value, out, logsumexp,
+          dropout_p, is_causal, attn_mask, scale);
+      }
     } else {
-      cpu_flash_attention_backward<scalar_t, 32, 512>(
-        grad_q, grad_k, grad_v, grad_out_contig,
-        query, key, value, out, logsumexp,
-        dropout_p, is_causal, attn_mask, scale);
+      AT_DISPATCH_MASK_TYPES(attn_mask.value().scalar_type(), "flash_attention_mask_backward", [&]() {
+        if (q_seq_len >= 768) {
+          cpu_flash_attention_backward<scalar_t, mask_t, 256, 512>(
+            grad_q, grad_k, grad_v, grad_out_contig,
+            query, key, value, out, logsumexp,
+            dropout_p, is_causal, attn_mask, scale);
+        } else if (q_seq_len >= 192) {
+          cpu_flash_attention_backward<scalar_t, mask_t, 64, 512>(
+            grad_q, grad_k, grad_v, grad_out_contig,
+            query, key, value, out, logsumexp,
+            dropout_p, is_causal, attn_mask, scale);
+        } else {
+          cpu_flash_attention_backward<scalar_t, mask_t, 32, 512>(
+            grad_q, grad_k, grad_v, grad_out_contig,
+            query, key, value, out, logsumexp,
+            dropout_p, is_causal, attn_mask, scale);
+        }
+      });
     }
   });
 }

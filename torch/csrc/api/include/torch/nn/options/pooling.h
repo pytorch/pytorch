@@ -32,7 +32,7 @@ struct AvgPoolOptions {
   /// if specified, it will be used as divisor, otherwise size of the pooling
   /// region will be used.
 
-  TORCH_ARG(c10::optional<int64_t>, divisor_override) = c10::nullopt;
+  TORCH_ARG(std::optional<int64_t>, divisor_override) = c10::nullopt;
 };
 
 /// `AvgPoolOptions` specialized for the `AvgPool1d` module.
@@ -401,7 +401,7 @@ struct MaxUnpoolFuncOptions {
   TORCH_ARG(ExpandingArray<D>, padding) = 0;
 
   /// the targeted output size
-  TORCH_ARG(c10::optional<std::vector<int64_t>>, output_size) = c10::nullopt;
+  TORCH_ARG(std::optional<std::vector<int64_t>>, output_size) = c10::nullopt;
 };
 
 /// `MaxUnpoolFuncOptions` specialized for
@@ -450,12 +450,12 @@ struct FractionalMaxPoolOptions {
   TORCH_ARG(ExpandingArray<D>, kernel_size);
 
   /// the target output size of the image
-  TORCH_ARG(c10::optional<ExpandingArray<D>>, output_size) = c10::nullopt;
+  TORCH_ARG(std::optional<ExpandingArray<D>>, output_size) = c10::nullopt;
 
   /// If one wants to have an output size as a ratio of the input size, this
   /// option can be given. This has to be a number or tuple in the range (0, 1)
   using ExpandingArrayDouble = torch::ExpandingArray<D, double>;
-  TORCH_ARG(c10::optional<ExpandingArrayDouble>, output_ratio) = c10::nullopt;
+  TORCH_ARG(std::optional<ExpandingArrayDouble>, output_ratio) = c10::nullopt;
 
   TORCH_ARG(torch::Tensor, _random_samples) = Tensor();
 };

@@ -194,17 +194,17 @@ TEST(IRTest, OperatorMap) {
   ASSERT_FALSE(op_map.contains(*op6));
   op_map.insert(op1, 1);
   ASSERT_TRUE(op_map.contains(*op1));
-  c10::optional<int> o1 = op_map.find(*op1);
+  std::optional<int> o1 = op_map.find(*op1);
   ASSERT_TRUE(o1.has_value());
-  c10::optional<int> o2 = op_map.find(*op2);
+  std::optional<int> o2 = op_map.find(*op2);
   ASSERT_TRUE(o2.has_value());
-  c10::optional<int> o3 = op_map.find(*op3);
+  std::optional<int> o3 = op_map.find(*op3);
   ASSERT_FALSE(o3.has_value());
-  c10::optional<int> o4 = op_map.find(*op4);
+  std::optional<int> o4 = op_map.find(*op4);
   ASSERT_TRUE(o4.has_value());
-  c10::optional<int> o5 = op_map.find(*op5);
+  std::optional<int> o5 = op_map.find(*op5);
   ASSERT_TRUE(o5.has_value());
-  c10::optional<int> o6 = op_map.find(*op6);
+  std::optional<int> o6 = op_map.find(*op6);
   ASSERT_FALSE(o6.has_value());
 }
 

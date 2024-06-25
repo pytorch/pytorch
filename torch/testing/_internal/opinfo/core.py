@@ -11,8 +11,6 @@ from functools import partial
 from itertools import product
 from typing import Any, Callable, Iterable, List, Optional, Tuple, Union
 
-from torchgen.utils import dataclass_repr
-
 import torch
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
@@ -25,6 +23,7 @@ from torch.testing._internal.common_dtype import (
     floating_and_complex_types,
     floating_and_complex_types_and,
     floating_types,
+    get_all_dtypes,
 )
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
@@ -34,6 +33,8 @@ from torch.testing._internal.common_utils import (
     TrackedInputIter,
 )
 from torch.testing._internal.opinfo import utils
+
+from torchgen.utils import dataclass_repr
 
 # Reasonable testing sizes for dimensions
 L = 20
@@ -726,6 +727,9 @@ class OpInfo:
     # dtypes this function is expected to work with on ROCM
     dtypesIfROCM: _dispatch_dtypes = None
 
+    # dtypes this function is expected to work with on XPU
+    dtypesIfXPU: _dispatch_dtypes = None
+
     # backward dtypes this function is expected to work with
     backward_dtypes: _dispatch_dtypes = None
 
@@ -774,12 +778,22 @@ class OpInfo:
     # (e.g. functions like ones, zeros, methods like view, permute)
     supports_varargs: bool = False
 
-    # Whether the operation avoids materializing COW tensor inputs
-    supports_cow_input_no_materialize: bool = True
+    # Whether the forward operation avoids materializing COW tensor inputs
+    supports_cow_input_no_materialize_forward: bool = True
 
-    # If `supports_cow_input_no_materialize == True`, this list contains the arg
-    # indices or kwarg names of inputs that are expected to materialize
-    allow_cow_input_materialize: List[Union[int, str]] = None
+    # Whether the backward operation avoids materializing COW tensor inputs
+    supports_cow_input_no_materialize_backward: bool = True
+
+    # Whether to skip the backward part of the COW tensor input test
+    skip_cow_input_backward: bool = False
+
+    # If `supports_cow_input_no_materialize_forward == True`, this list contains
+    # the arg indices or kwarg names of inputs that are expected to materialize
+    allow_cow_input_materialize_forward: List[Union[int, str]] = None
+
+    # If `supports_cow_input_no_materialize_backward == True`, this list contains
+    # the arg indices or kwarg names of inputs that are expected to materialize
+    allow_cow_input_materialize_backward: List[Union[int, str]] = None
 
     # wrapper function for gradcheck
     gradcheck_wrapper: Callable = lambda op, *args, **kwargs: op(*args, **kwargs)
@@ -880,7 +894,12 @@ class OpInfo:
 
         assert self.dtypes is not None, f"OpInfo for {self.name} has no dtypes!"
 
-        dtypes_args = (self.dtypes, self.dtypesIfCUDA, self.dtypesIfROCM)
+        dtypes_args = (
+            self.dtypes,
+            self.dtypesIfCUDA,
+            self.dtypesIfROCM,
+            self.dtypesIfXPU,
+        )
 
         # Validates the dtypes are generated from the dispatch-related functions
         for dtype_list in dtypes_args:
@@ -948,6 +967,9 @@ class OpInfo:
             set(self.dtypesIfROCM)
             if self.dtypesIfROCM is not None
             else self.dtypesIfCUDA
+        )
+        self.dtypesIfXPU = (
+            set(self.dtypesIfXPU) if self.dtypesIfXPU is not None else self.dtypesIfCUDA
         )
 
         # NOTE: if the op is unspecified it is assumed to be under the torch namespace
@@ -1335,6 +1357,8 @@ class OpInfo:
         device_type = torch.device(device_type).type
         if device_type == "cuda":
             return self.dtypesIfROCM if TEST_WITH_ROCM else self.dtypesIfCUDA
+        if device_type == "xpu":
+            return self.dtypesIfXPU
         return self.dtypes
 
     def supported_backward_dtypes(self, device_type):
@@ -2620,6 +2644,7 @@ class ShapeFuncInfo(OpInfo):
         dtypes=floating_types(),
         dtypesIfCUDA=None,
         dtypesIfROCM=None,
+        dtypesIfXPU=None,
         sample_inputs_func=None,
         **kwargs,
     ):
@@ -2628,6 +2653,7 @@ class ShapeFuncInfo(OpInfo):
             dtypes=dtypes,
             dtypesIfCUDA=dtypesIfCUDA,
             dtypesIfROCM=dtypesIfROCM,
+            dtypesIfXPU=dtypesIfXPU,
             sample_inputs_func=sample_inputs_func,
             **kwargs,
         )
@@ -2695,33 +2721,33 @@ def get_foreach_method_names(name):
     return op, inplace_op, ref, ref_inplace
 
 
+@dataclass
 class ForeachFuncInfo(OpInfo):
-    """Early version of a specialized OpInfo for foreach functions"""
+    """Early version of a specialized OpInfo for foreach functions
 
-    def __init__(
-        self,
-        name,
-        sample_inputs_func,
-        *,
-        dtypes=floating_and_complex_types(),
-        dtypesIfCUDA=floating_and_complex_types_and(torch.half),
-        dtypesIfROCM=None,
-        supports_alpha_param=False,
-        supports_autograd=True,
-        supports_inplace_autograd=True,
-        supports_scalar_self_arg=False,
-        supports_forward_ad=True,
-        backward_requires_result=False,
-        supports_out=True,
-        **kwargs,
-    ):
+    The main differences from the parent class are (a) `dtypes`, `dtypesIfCUDA`, and `dtypesIfROCM`
+    are set to `get_all_dtypes(include_qint=False)`, and (b) the following arguments.
+
+    ``supports_alpha_param=True`` means that the function supports a python scalar (``numbers.Number``)
+    as the last keyword argument such as `_foreach_add`.
+    ``supports_scalar_self_arg=True`` means that the function can take a python scalar as its first argument.
+    Currently only `_foreach_pow` supports this.
+    ``backward_requires_result=True``, which could sound self-explanatory, means that the function uses
+    the forward result for its backward computation.
+    """
+
+    supports_alpha_param: bool = False
+    supports_scalar_self_arg: bool = False
+    backward_requires_result: bool = False
+
+    def __post_init__(self):
         (
             foreach_method,
             foreach_method_inplace,
             torch_ref_method,
             torch_ref_inplace,
-        ) = get_foreach_method_names(name)
-        if not supports_out:
+        ) = get_foreach_method_names(self.name)
+        if not self.supports_out:
             # note(crcrpar): `foreach_method` for `"zero"` is `None` but `None` would call
             # `_getattr_qual` in `OpInfo.__post_init__` which should fail since `_foreach_zero`
             # is not defined at the moment. Thus to skip the qualification, set a similar torch
@@ -2730,29 +2756,18 @@ class ForeachFuncInfo(OpInfo):
             assert torch_ref_method is None
             foreach_method = foreach_method_inplace
             torch_ref_method = torch_ref_inplace
-        super().__init__(
-            name="_foreach_" + name,
-            op=foreach_method,
-            ref=torch_ref_method,
-            method_variant=foreach_method,
-            inplace_variant=foreach_method_inplace,
-            dtypes=dtypes,
-            dtypesIfCUDA=dtypesIfCUDA,
-            dtypesIfROCM=dtypesIfROCM,
-            sample_inputs_func=sample_inputs_func,
-            supports_autograd=supports_autograd,
-            supports_forward_ad=supports_forward_ad,
-            supports_out=supports_out,
-            **kwargs,
-        )
-        self.supports_scalar_self_arg = supports_scalar_self_arg
 
+        self.dtypes = _dispatch_dtypes(get_all_dtypes(include_qint=False))
+
+        self.op = foreach_method
+        self.method_variant = foreach_method
+        self.ref = torch_ref_method
+        self.inplace_variant = foreach_method_inplace
         self.ref_inplace = torch_ref_inplace
-        self.supports_alpha_param = supports_alpha_param
-        self.backward_requires_result = backward_requires_result
         self.has_no_in_place = self.inplace_variant is None
-        self.supports_inplace_autograd = supports_inplace_autograd
 
+        name = self.name
+        self.name = f"_foreach_{name}"
         if name == "norm":
             self.ref = torch.linalg.vector_norm
         elif name == "minimum":
@@ -2763,6 +2778,9 @@ class ForeachFuncInfo(OpInfo):
             # because maximum ref does not support inplace or scalar
             self.ref = torch.clamp_min
             self.ref_inplace = torch.Tensor.clamp_min_
+
+        # The following sets `dtypesIfCUDA` and `dtypesIfROCM` accordingly.
+        super().__post_init__()
 
     def sample_zero_size_inputs(self, device, dtype, requires_grad=False, **kwargs):
         if not hasattr(self.sample_inputs_func, "sample_zero_size_tensor_inputs"):

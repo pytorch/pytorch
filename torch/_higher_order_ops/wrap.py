@@ -1,13 +1,17 @@
+# mypy: allow-untyped-defs
 import inspect
+import itertools
 import logging
 
 import torch
-from torch._ops import HigherOrderOperator
-from torch.utils.checkpoint import checkpoint, uid
 import torch._dynamo.config
+from torch._ops import HigherOrderOperator
+from torch.utils.checkpoint import checkpoint
+
 
 log = logging.getLogger(__name__)
 
+uid = itertools.count(1)
 
 
 # Used for testing the HigherOrderOperator mechanism
@@ -28,7 +32,9 @@ class Wrap(HigherOrderOperator):
 
         return wrapper()
 
+
 wrap = Wrap()
+
 
 class WrapWithSetGradEnabled(HigherOrderOperator):
     def __init__(self):
@@ -44,9 +50,12 @@ class WrapWithSetGradEnabled(HigherOrderOperator):
         def wrapper():
             with torch.set_grad_enabled(enable_grad):
                 return wrapped_func(*args, **kwargs)
+
         return wrapper()
 
+
 wrap_with_set_grad_enabled = WrapWithSetGradEnabled()
+
 
 class WrapActivationCheckpoint(HigherOrderOperator):
     """
@@ -65,6 +74,7 @@ class WrapActivationCheckpoint(HigherOrderOperator):
     that duplication/recomputation is done as a compiler pass in the
     partitioners. See TagActivationCheckpoint for more information.
     """
+
     def __init__(self):
         super().__init__("wrap_activation_checkpoint")
 
@@ -74,13 +84,16 @@ class WrapActivationCheckpoint(HigherOrderOperator):
         # version of checkpointing.
         import torch.fx.traceback as fx_traceback
         from torch.fx import Interpreter
+
         kwargs["use_reentrant"] = False
         kwargs["preserve_rng_state"] = False
         # Using interpreter allows preservation of metadata through torch.compile stack.
         with fx_traceback.preserve_node_meta():
             return checkpoint(Interpreter(function).run, *args, **kwargs)
 
+
 wrap_activation_checkpoint = WrapActivationCheckpoint()
+
 
 class TagActivationCheckpoint(HigherOrderOperator):
     """
@@ -133,8 +146,12 @@ class TagActivationCheckpoint(HigherOrderOperator):
         # `preserve_rng_state` is not a regular kwarg
         checkpoint_keys.add("preserve_rng_state")
 
-        checkpoint_kwargs = {name: kwargs[name] for name in kwargs.keys() if name in checkpoint_keys}
-        gmod_kwargs = {name: kwargs[name] for name in kwargs.keys() if name not in checkpoint_keys}
+        checkpoint_kwargs = {
+            name: kwargs[name] for name in kwargs.keys() if name in checkpoint_keys
+        }
+        gmod_kwargs = {
+            name: kwargs[name] for name in kwargs.keys() if name not in checkpoint_keys
+        }
         return checkpoint_kwargs, gmod_kwargs
 
     def tag_nodes(self, gmod):
@@ -147,13 +164,17 @@ class TagActivationCheckpoint(HigherOrderOperator):
     def __call__(self, gmod, *args, **kwargs):
         import torch.fx.traceback as fx_traceback
         from torch.fx import Interpreter
+
         if "_checkpoint_context_fn" in gmod.meta:
-            assert torch._dynamo.config._experimental_support_context_fn_in_torch_utils_checkpoint, \
-                "Passing context_fn to torch.utils.checkpoint is currently not supported under torch.compile"
-            log.warning("""
+            assert (
+                torch._dynamo.config._experimental_support_context_fn_in_torch_utils_checkpoint
+            ), "Passing context_fn to torch.utils.checkpoint is currently not supported under torch.compile"
+            log.warning(
+                """
 Detected that context_fn is passed to torch.utils.checkpoint under torch.compile.
 Please make sure the checkpointed region does not contain in-place ops (e.g. torch.relu_).
-""")
+"""
+            )
             # use_reentrant is set to False because this op is going to be traced.
             # And we ensure that AOT Autograd traces through the non reentrant
             # version of checkpointing.
@@ -179,5 +200,6 @@ Please make sure the checkpointed region does not contain in-place ops (e.g. tor
             # (for details on in-place op issue, run `test_compile_selective_checkpoint_inplace_op` unit test)
             with fx_traceback.preserve_node_meta():
                 return Interpreter(gmod).run(*args)
+
 
 tag_activation_checkpoint = TagActivationCheckpoint()

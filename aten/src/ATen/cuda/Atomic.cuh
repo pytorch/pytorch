@@ -334,7 +334,13 @@ static inline __device__ void gpuAtomicAddNoReturn(double *address, double val) 
 
 /* Special case fp32 atomic. */
 #if defined(USE_ROCM)
-static inline __device__ void gpuAtomicAddNoReturn(float *address, float val) { atomicAddNoRet(address, val); }
+static inline __device__ void gpuAtomicAddNoReturn(float *address, float val) {
+#if defined(__gfx908__)
+  atomicAddNoRet(address, val);
+#else
+  (void)unsafeAtomicAdd(address, val);
+#endif
+}
 #else
 static inline __device__ void gpuAtomicAddNoReturn(float *address, float val) { gpuAtomicAdd(address, val); }
 #endif

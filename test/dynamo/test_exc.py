@@ -47,7 +47,7 @@ from user code:
     def test_internal_error_suppress_errors(self, records):
         def fn001(x):
             def f(ctx):
-                raise AssertionError()
+                raise AssertionError
 
             comptime(f)
 
@@ -62,7 +62,7 @@ WON'T CONVERT fn001 test_exc.py line N
 ========== TorchDynamo Stack Trace ==========
 Traceback (most recent call last):
   File "test_exc.py", line N, in f
-    raise AssertionError()
+    raise AssertionError
 AssertionError:
 
 from user code:
@@ -84,7 +84,7 @@ from user code:
     def test_not_implemented_error(self, records):
         def fn001(x):
             def f(ctx):
-                raise NotImplementedError()
+                raise NotImplementedError
 
             # Ensure graph break is not possible
             for i in range(3):
@@ -101,7 +101,7 @@ WON'T CONVERT fn001 test_exc.py line N
 due to:
 Traceback (most recent call last):
   File "test_exc.py", line N, in f
-    raise NotImplementedError()
+    raise NotImplementedError
 torch._dynamo.exc.InternalTorchDynamoError:
 
 from user code:
@@ -109,7 +109,6 @@ from user code:
     comptime(f)""",
         )
 
-    @unittest.expectedFailure
     @torch._dynamo.config.patch(inject_BUILD_SET_unimplemented_TESTING_ONLY=True)
     @make_logging_test(dynamo=logging.DEBUG)
     def test_unsupported_error(self, records):
@@ -129,7 +128,7 @@ from user code:
             # NB: avoid decorator, as 3.11 changed the line number attributed
             # in this situation
             def f(ctx):
-                raise AssertionError()
+                raise AssertionError
 
             comptime(f)
 
@@ -254,7 +253,6 @@ Target Expressions:
   ==> (>= 0 s1)
   ==> (>= 0 s2)
   ==> (>= 0 s3)
-  ==> (>= 9223372036854775806 s0)
 
 Failed Source Expressions:
   ==> (== (+ L['shape'][0] L['shape'][1] L['shape'][2]) L['x'].size()[0])""",
@@ -288,14 +286,14 @@ Failure occurred while running node:
 Model:
   ==> L['shape'][0]: 1
   ==> L['shape'][1]: 1
-  ==> L['shape'][2]: 2
+  ==> L['shape'][2]: 0
   ==> L['x'].size()[0]: 3
   ==> L['x'].storage_offset(): 0
   ==> L['x'].stride()[0]: 1
   ==> s0: 3
   ==> s1: 1
   ==> s2: 1
-  ==> s3: 2
+  ==> s3: 0
 
 Assertions:
   ==> (== 0 L['x'].storage_offset())
@@ -319,10 +317,6 @@ Target Expressions:
   ==> (== L['shape'][2] s3)
   ==> (== L['x'].size()[0] s0)
   ==> (> s0 0)
-  ==> (>= 9223372036854775806 s0)
-  ==> (>= 9223372036854775807 s1)
-  ==> (>= 9223372036854775807 s2)
-  ==> (>= 9223372036854775807 s3)
 
 Failed Source Expressions:
   ==> (== (+ L['shape'][0] L['shape'][1] L['shape'][2]) L['x'].size()[0])""",

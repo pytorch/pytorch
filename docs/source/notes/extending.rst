@@ -4,6 +4,18 @@ Extending PyTorch
 In this note we'll cover ways of extending :mod:`torch.nn`,
 :mod:`torch.autograd`, :mod:`torch`, and writing custom C++ extensions.
 
+Adding new operators
+--------------------
+
+PyTorch offers a large library of operators that work on Tensors (e.g. :func:`torch.add`,
+:func:`torch.sum`, etc). However, you may wish to bring a new custom operation to PyTorch
+and have it behave like PyTorch's built-in operators. In order to do so, you must
+register the custom operation with PyTorch via the Python :ref:`torch-library-docs` or C++ TORCH_LIBRARY
+APIs.
+
+
+Please see :ref:`custom-ops-landing-page` for more details.
+
 .. _extending-autograd:
 
 Extending :mod:`torch.autograd`
@@ -968,13 +980,3 @@ Which prints the following, with extra comments::
   Dispatch Log: aten.mul.Tensor(*(tensor([1., 1., 1., 1., 1., 1., 1., 1., 1., 1.]), 2), **{})
   Dispatch Log: aten.detach.default(*(tensor([2., 2., 2., 2., 2., 2., 2., 2., 2., 2.]),), **{})
   Dispatch Log: aten.detach.default(*(tensor([2., 2., 2., 2., 2., 2., 2., 2., 2., 2.]),), **{})
-
-
-Writing custom C++ extensions
------------------------------
-
-See this
-`PyTorch tutorial <https://pytorch.org/tutorials/advanced/cpp_extension.html>`_
-for a detailed explanation and examples.
-
-Documentations are available at :doc:`../cpp_extension`.

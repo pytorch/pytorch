@@ -1,6 +1,6 @@
+# mypy: allow-untyped-defs
 import collections
 import contextlib
-import cProfile
 import dataclasses
 import functools
 import itertools
@@ -14,9 +14,9 @@ import subprocess
 from typing import Any, Dict, List, Optional
 from unittest.mock import patch
 
-from functorch.compile import draw_graph, get_aot_graph_name, get_graph_being_compiled
-
 import torch
+
+from functorch.compile import draw_graph, get_aot_graph_name, get_graph_being_compiled
 from torch import fx as fx
 
 from torch._dynamo.repro.after_aot import save_graph_repro, wrap_compiler_debug
@@ -328,16 +328,17 @@ class DebugContext:
         if not self._path:
             return
         assert new_path.endswith(".debug"), new_path
-        if os.path.exists(new_path):
-            shutil.rmtree(new_path)
+        from filelock import FileLock
+
         try:
-            shutil.copytree(self._path, new_path)
-            self._path = new_path
+            with FileLock(f"{new_path}.lock"):
+                if os.path.exists(new_path):
+                    shutil.rmtree(new_path)
+                shutil.copytree(self._path, new_path)
         except OSError:
             log.warning(
                 "Failed to copy debug files from %s to %s", self._path, new_path
             )
-            pass
 
     def fopen(self, filename: str, write_mode: str = "w", *args, **kwargs):
         assert self._path
@@ -387,9 +388,6 @@ class DebugContext:
             self._setup_log_capture("debug.log", logging.DEBUG)
         if config.trace.info_log:
             self._setup_log_capture("info.log", logging.INFO)
-        if config.trace.compile_profile:
-            self._prof = cProfile.Profile()
-            self._prof.enable()
 
     def _setup_log_capture(self, filename: str, level: int):
         log = logging.getLogger("torch._inductor")

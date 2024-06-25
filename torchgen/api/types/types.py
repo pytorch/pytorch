@@ -15,9 +15,7 @@ Add new types to `types_base.py` if they are basic and not attached to ATen/c10.
 from dataclasses import dataclass
 from typing import Dict
 
-from torchgen.model import BaseTy, ScalarType
-
-from .types_base import (
+from torchgen.api.types.types_base import (
     BaseCppType,
     BaseCType,
     boolT,
@@ -30,11 +28,12 @@ from .types_base import (
     longT,
     shortT,
 )
+from torchgen.model import BaseTy, ScalarType
 
 
 TENSOR_LIST_LIKE_CTYPES = [
     "at::TensorList",
-    "const c10::List<c10::optional<at::Tensor>> &",
+    "const c10::List<::std::optional<at::Tensor>> &",
     "const at::ITensorListRef &",
 ]
 
@@ -133,10 +132,10 @@ class OptionalCType(CType):
 
     def cpp_type(self, *, strip_ref: bool = False) -> str:
         # Do not pass `strip_ref` recursively.
-        return f"c10::optional<{self.elem.cpp_type()}>"
+        return f"::std::optional<{self.elem.cpp_type()}>"
 
     def cpp_type_registration_declarations(self) -> str:
-        return f"c10::optional<{self.elem.cpp_type_registration_declarations()}>"
+        return f"::std::optional<{self.elem.cpp_type_registration_declarations()}>"
 
     def remove_const_ref(self) -> "CType":
         return OptionalCType(self.elem.remove_const_ref())

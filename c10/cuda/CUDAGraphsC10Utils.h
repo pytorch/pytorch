@@ -17,7 +17,6 @@ using MempoolId_t = std::pair<CaptureId_t, CaptureId_t>;
 
 // RAII guard for "cudaStreamCaptureMode", a thread-local value
 // that controls the error-checking strictness of a capture.
-#if !defined(USE_ROCM) || ROCM_VERSION >= 50300
 struct C10_CUDA_API CUDAStreamCaptureModeGuard {
   CUDAStreamCaptureModeGuard(cudaStreamCaptureMode desired)
       : strictness_(desired) {
@@ -30,9 +29,7 @@ struct C10_CUDA_API CUDAStreamCaptureModeGuard {
  private:
   cudaStreamCaptureMode strictness_;
 };
-#endif
 
-#if !defined(USE_ROCM) || ROCM_VERSION >= 50300
 // Protects against enum cudaStreamCaptureStatus implementation changes.
 // Some compilers seem not to like static_assert without the messages.
 static_assert(
@@ -44,16 +41,11 @@ static_assert(
 static_assert(
     int(cudaStreamCaptureStatus::cudaStreamCaptureStatusInvalidated) == 2,
     "unexpected int(cudaStreamCaptureStatusInvalidated) value");
-#endif
 
 enum class CaptureStatus : int {
-#if !defined(USE_ROCM) || ROCM_VERSION >= 50300
   None = int(cudaStreamCaptureStatus::cudaStreamCaptureStatusNone),
   Active = int(cudaStreamCaptureStatus::cudaStreamCaptureStatusActive),
   Invalidated = int(cudaStreamCaptureStatus::cudaStreamCaptureStatusInvalidated)
-#else
-  None = 0
-#endif
 };
 
 inline std::ostream& operator<<(std::ostream& os, CaptureStatus status) {
@@ -61,14 +53,12 @@ inline std::ostream& operator<<(std::ostream& os, CaptureStatus status) {
     case CaptureStatus::None:
       os << "cudaStreamCaptureStatusNone";
       break;
-#if !defined(USE_ROCM) || ROCM_VERSION >= 50300
     case CaptureStatus::Active:
       os << "cudaStreamCaptureStatusActive";
       break;
     case CaptureStatus::Invalidated:
       os << "cudaStreamCaptureStatusInvalidated";
       break;
-#endif
     default:
       TORCH_INTERNAL_ASSERT(
           false, "Unknown CUDA graph CaptureStatus", int(status));
@@ -78,14 +68,10 @@ inline std::ostream& operator<<(std::ostream& os, CaptureStatus status) {
 
 // Use this version where you're sure a CUDA context exists already.
 inline CaptureStatus currentStreamCaptureStatusMayInitCtx() {
-#if !defined(USE_ROCM) || ROCM_VERSION >= 50300
   cudaStreamCaptureStatus is_capturing{cudaStreamCaptureStatusNone};
   C10_CUDA_CHECK(
       cudaStreamIsCapturing(c10::cuda::getCurrentCUDAStream(), &is_capturing));
   return CaptureStatus(is_capturing);
-#else
-  return CaptureStatus::None;
-#endif
 }
 
 } // namespace c10::cuda

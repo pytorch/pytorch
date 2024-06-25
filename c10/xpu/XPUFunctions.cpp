@@ -2,8 +2,6 @@
 #include <c10/util/Exception.h>
 #include <c10/xpu/XPUFunctions.h>
 
-#include <sys/wait.h>
-#include <unistd.h>
 #include <vector>
 
 namespace c10::xpu {
@@ -53,10 +51,20 @@ inline void initGlobalDevicePoolState() {
     return;
   }
 
+#ifdef _WIN32
+  // default context feature is disabled by default on Windows.
+  std::vector<sycl::device> deviceList;
+  for (auto it = gDevicePool.devices.begin(); it != gDevicePool.devices.end();
+       ++it) {
+    deviceList.push_back(*(*it));
+  }
+  gDevicePool.context = std::make_unique<sycl::context>(deviceList);
+#else
   // The default context is utilized for each Intel GPU device, allowing the
   // retrieval of the context from any GPU device.
   gDevicePool.context = std::make_unique<sycl::context>(
       gDevicePool.devices[0]->get_platform().ext_oneapi_get_default_context());
+#endif
 }
 
 inline void initDevicePoolCallOnce() {
@@ -78,12 +86,17 @@ void initDeviceProperties(DeviceProp* device_prop, int device) {
       ? raw_device.get_info<intel::info::device::property>()                 \
       : default_value;
 
+#define ASSIGN_DEVICE_ASPECT(member) \
+  device_prop->has_##member = raw_device.has(sycl::aspect::member);
+
   AT_FORALL_XPU_DEVICE_PROPERTIES(ASSIGN_DEVICE_PROP);
 
   device_prop->platform_name =
       raw_device.get_info<device::platform>().get_info<platform::name>();
 
   AT_FORALL_XPU_EXT_DEVICE_PROPERTIES(ASSIGN_EXT_DEVICE_PROP);
+
+  AT_FORALL_XPU_DEVICE_ASPECT(ASSIGN_DEVICE_ASPECT);
   return;
 }
 
