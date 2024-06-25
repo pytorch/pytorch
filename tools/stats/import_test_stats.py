@@ -37,7 +37,7 @@ FILE_CACHE_LIFESPAN_SECONDS = datetime.timedelta(hours=3).seconds
 
 
 def fetch_and_cache(
-    dirpath: str | pathlib.Path,
+    dirpath: str | Path,
     name: str,
     url: str,
     process_fn: Callable[[dict[str, Any]], dict[str, Any]],
