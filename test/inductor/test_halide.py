@@ -120,8 +120,9 @@ class HalideTests(TestCase):
         self.assertEqual(c, a + b)
 
 
-SweepInputsCpuHalideTest = make_halide(test_torchinductor.SweepInputsCpuTest)
-CpuHalideTests = make_halide(test_torchinductor.CpuTests)
+if test_torchinductor.HAS_CPU and HAS_HALIDE:
+    SweepInputsCpuHalideTest = make_halide(test_torchinductor.SweepInputsCpuTest)
+    CpuHalideTests = make_halide(test_torchinductor.CpuTests)
 
 if test_torchinductor.HAS_GPU:
     SweepInputsGPUHalideTest = make_halide(test_torchinductor.SweepInputsGPUTest)

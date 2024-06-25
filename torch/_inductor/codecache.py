@@ -3157,14 +3157,13 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
                         "-f",
                         "halide_kernel",
                         "-e",
-                        "static_library,h,schedule",
+                        "static_library,h,schedule,conceptual_stmt",
                         "-p",
                         cls.find_libautoschedule(meta.scheduler),
                         *meta.args(),
                     ],
                 )
             )
-
         binding_types = [
             arg.bindings_type() for arg in meta.argtypes if arg.alias_of is None
         ]
