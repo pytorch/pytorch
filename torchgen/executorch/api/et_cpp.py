@@ -15,6 +15,14 @@ from torchgen.api.types import (
     VectorCType,
     voidT,
 )
+from torchgen.executorch.api.types import (
+    ArrayRefCType,
+    BaseTypeToCppMapping,
+    OptionalCType,
+    scalarT,
+    tensorListT,
+    tensorT,
+)
 from torchgen.model import (
     Argument,
     Arguments,
@@ -29,14 +37,7 @@ from torchgen.model import (
     Type,
 )
 from torchgen.utils import assert_never
-from .types import (
-    ArrayRefCType,
-    BaseTypeToCppMapping,
-    OptionalCType,
-    scalarT,
-    tensorListT,
-    tensorT,
-)
+
 
 """
 This file describes the translation of JIT schema to the public C++ API, which is what people use when they call

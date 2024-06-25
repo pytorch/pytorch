@@ -21,6 +21,13 @@ on:
         default: 210
         type: number
         description: timeout for the job
+      use_split_build:
+        description: |
+          [Experimental] Build a libtorch only wheel and build pytorch such that
+          are built from the libtorch wheel.
+        required: false
+        type: boolean
+        default: false
       ALPINE_IMAGE:
         required: false
         type: string
@@ -110,6 +117,7 @@ jobs:
       PR_NUMBER: ${{ github.event.pull_request.number }}
       PYTORCH_FINAL_PACKAGE_DIR: /artifacts
       SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+      USE_SPLIT_BUILD: ${{ inputs.use_split_build }}
     steps:
       - name: Make the env permanent during this workflow (but not the secrets)
         shell: bash
@@ -137,6 +145,7 @@ jobs:
             echo "PR_NUMBER=${{ env.PR_NUMBER }}"
             echo "PYTORCH_FINAL_PACKAGE_DIR=${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
             echo "SHA1=${{ env.SHA1 }}"
+            echo "USE_SPLIT_BUILD=${{ env.use_split_build }}"
           } >> "${GITHUB_ENV} }}"
 
       - name: List the env
@@ -246,6 +255,7 @@ jobs:
             -e PYTORCH_ROOT \
             -e SKIP_ALL_TESTS \
             -e PYTORCH_EXTRA_INSTALL_REQUIREMENTS \
+            -e USE_SPLIT_BUILD \
             --tty \
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \

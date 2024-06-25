@@ -128,7 +128,7 @@ def is_available() -> bool:
         return torch._C._cuda_getDeviceCount() > 0
 
 
-def is_bf16_supported():
+def is_bf16_supported(including_emulation: bool = True):
     r"""Return a bool indicating if the current CUDA/ROCm device supports dtype bfloat16."""
     # Check for ROCm, if true return true, no ROCM_VERSION check required,
     # since it is supported on AMD GPU archs.
@@ -146,6 +146,9 @@ def is_bf16_supported():
         and torch.cuda.get_device_properties(device).major >= 8
     ):
         return True
+
+    if not including_emulation:
+        return False
 
     # Finally try to create a bfloat16 device.
     return _check_bf16_tensor_supported(device)
