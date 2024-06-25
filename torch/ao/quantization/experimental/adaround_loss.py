@@ -9,6 +9,9 @@ ADAROUND_ZETA: float = 1.1
 ADAROUND_GAMMA: float = -0.1
 
 
+__all__ = ["AdaptiveRoundingLoss"]
+
+
 class AdaptiveRoundingLoss(torch.nn.Module):
     """
     Adaptive Rounding Loss functions described in https://arxiv.org/pdf/2004.10568.pdf
