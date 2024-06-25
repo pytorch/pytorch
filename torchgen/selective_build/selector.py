@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 
 import yaml
 
-from torchgen.model import NativeFunction
 from torchgen.selective_build.operator import (
     merge_debug_info,
     merge_operator_dicts,

@@ -26,6 +26,8 @@ from typing import (
 )
 from typing_extensions import ParamSpec, Self, TypeAlias
 
+import numpy
+
 import torch
 from torch import SymInt, Tensor, inf
 from torch._C import (
