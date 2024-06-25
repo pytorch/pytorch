@@ -2,28 +2,19 @@
 
 import copy
 import functools
+import io
+from copy import deepcopy
 from typing import List, Type
+
 import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
 import torch.nn as nn
-from torch.distributed._composable import checkpoint, replicate
-from torch.distributed._composable.fsdp import CPUOffloadPolicy, fully_shard
-from torch.distributed._tensor import DTensor, init_device_mesh
-from torch.distributed._tensor.debug.comm_mode import CommDebugMode
-from torch.distributed.checkpoint.state_dict import (
-    get_model_state_dict,
-    get_optimizer_state_dict,
-)
-from torch.distributed.device_mesh import DeviceMesh
-import io
-from copy import deepcopy
-
-import torch
-import torch.distributed as dist
-import torch.nn as nn
 
 import torch.nn.functional as F
+from torch.distributed._composable import checkpoint, replicate
+from torch.distributed._composable.fsdp import CPUOffloadPolicy
+from torch.distributed._composable.fsdp.fully_shard import fully_shard
 from torch.distributed._tensor import (
     DeviceMesh,
     DTensor,
@@ -32,14 +23,17 @@ from torch.distributed._tensor import (
     Replicate,
     Shard,
 )
+from torch.distributed._tensor.debug.comm_mode import CommDebugMode
 from torch.distributed.checkpoint.state_dict import (
+    get_model_state_dict,
     get_optimizer_state_dict,
     set_optimizer_state_dict,
 )
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp._common_utils import (
     _get_module_fsdp_state,
     clean_tensor_name,
+    FullyShardedDataParallel as FSDP,
 )
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
 from torch.distributed.tensor.parallel import (
@@ -75,22 +69,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     with_comms,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
-import copy
-
-import torch
-import torch.distributed as dist
-import torch.nn as nn
-from torch.distributed._composable.fsdp.fully_shard import (
-    fully_shard,
-)
-from torch.distributed._tensor import DTensor
-from torch.distributed.device_mesh import init_device_mesh
-from torch.nn.parallel import DistributedDataParallel as DDP
-
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-)
 
 
 # Tensor-Parallel degree
