@@ -58,9 +58,8 @@ def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
             annotation_type = convert_type_string(annotation_type)
 
         if annotation_type not in SUPPORTED_PARAM_TYPES.keys():
-            print(annotation_type)
             # __origin__ attribute is only available from Python 3.8 onwards.
-            if getattr(annotation_type, '__origin__', None) is tuple:
+            if getattr(annotation_type, "__origin__", None) is tuple:
                 list_type = tuple_to_list(annotation_type)
                 example_type_str = "\n\n"
                 # Only suggest the list type if this type is supported.
@@ -202,15 +201,21 @@ def supported_param(param: inspect.Parameter) -> bool:
         inspect.Parameter.KEYWORD_ONLY,
     )
 
-def tuple_to_list(tuple_type):
+
+def tuple_to_list(tuple_type: typing.Type[typing.Tuple]) -> typing.Type[typing.List]:
     """
     Convert `tuple_type` into a list type with the same type arguments. Assumes that `tuple_type` is typing.Tuple type.
     """
-    type_args = getattr(tuple_type, '__args__', None)
+    type_args = getattr(tuple_type, "__args__", None)
     if type_args is None:
         # Handle the case of an empty tuple type
         list_type = typing.List
     else:
         # General case: create a List with the same type arguments
-        list_type = typing.List[type_args[0]] if len(type_args) == 1 else typing.List[typing.Union[tuple(type_args)]]
+
+        list_type = (
+            typing.List[type_args[0]]  # type: ignore[valid-type]
+            if len(type_args) == 1
+            else typing.List[typing.Union[tuple(type_args)]]  # type: ignore[misc]
+        )
     return list_type
