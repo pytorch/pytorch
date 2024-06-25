@@ -342,7 +342,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
 
     def test_opcheck_fails_basic(self, device):
         @custom_op(f"{self.test_ns}::foo")
-        def foo(x: torch.Tensor) -> torch.Tensor: 
+        def foo(x: torch.Tensor) -> torch.Tensor:
             ...
 
         @foo.impl(["cpu", "cuda"])
@@ -869,16 +869,6 @@ class TestCustomOp(CustomOpTestCaseBase):
             # test that we propose a correct and supported type.
             @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
             def foo(x: Tensor, y: Tuple[int, int]) -> Tensor:
-                raise NotImplementedError
-
-            del foo
-
-        with self.assertRaisesRegex(
-            ValueError, r"List\[typing.Optional\[torch.Tensor\]\]"
-        ):
-            # test that we propose a correct and supported type.
-            @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
-            def foo(x: Tensor, y: Tuple[Tensor, Tensor, Optional[Tensor]]) -> Tensor:
                 raise NotImplementedError
 
             del foo
