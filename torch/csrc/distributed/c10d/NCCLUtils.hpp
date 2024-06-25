@@ -190,7 +190,7 @@ DEFINE_CONSTANT(version_val, "2.2");
 DEFINE_CONSTANT(pg_config_key, "pg_config");
 DEFINE_CONSTANT(record_id_key, "record_id");
 DEFINE_CONSTANT(pg_id_key, "pg_id");
-DEFINE_CONSTANT(pg_name_key, "pg_name");
+DEFINE_CONSTANT(pg_name_key, "process_group");
 DEFINE_CONSTANT(collective_seq_id_key, "collective_seq_id");
 DEFINE_CONSTANT(p2p_seq_id_key, "p2p_seq_id");
 DEFINE_CONSTANT(is_p2p_key, "is_p2p");
@@ -875,7 +875,9 @@ struct NCCLTraceBuffer {
           ? int64_t(*e.time_discovered_started_)
           : 0;
       j[time_discovered_completed_key_str] =
-          e.time_discovered_completed_.has_value() ? int64_t(*e.duration_) : 0;
+          e.time_discovered_completed_.has_value()
+          ? int64_t(*e.time_discovered_completed_)
+          : 0;
       j[retired_key_str] = e.retired_;
       j[timeout_key_str] = e.timeout_ms_;
       j[is_p2p_key_str] = e.isP2P_;
@@ -1086,3 +1088,4 @@ struct NCCLTraceBuffer {
 } // namespace c10d
 
 #endif // USE_C10D_NCCL
+  
