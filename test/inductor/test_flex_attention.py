@@ -514,6 +514,89 @@ class TestFlexAttention(InductorTestCase):
         )
 
     @supported_platform
+    def test_create_block_sparse_mask_is_compiled(self):
+        make_tensor = functools.partial(
+            torch.randn,
+            (B, H, S, D),
+            dtype=torch.float32,
+            device="cuda",
+            requires_grad=True,
+        )
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
+
+        @torch.compile
+        def func(q, k, v):
+            block_sparse_mask = _create_block_sparse_mask(
+                torch.tril(
+                    torch.ones(
+                        q.shape[-2], k.shape[-2], dtype=torch.bool, device=q.device
+                    )
+                ),
+                128,
+                128,
+            )
+
+            out = _flex_attention(
+                q,
+                k,
+                v,
+                _causal,
+                block_sparse_mask,
+            )
+            return out
+
+        _, code = run_and_get_code(func, q, k, v)
+        # Ensure _create_block_sparse_mask is compiled and generates 5 kernels,
+        # flex_attention generates 1 kernel.
+        FileCheck().check_count(".run(", 6, True).run(code[0])
+
+    @supported_platform
+    def test_block_sparse_mask_is_reused(self):
+        make_tensor = functools.partial(
+            torch.randn,
+            (B, H, S, D),
+            dtype=torch.float32,
+            device="cuda",
+            requires_grad=True,
+        )
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
+        k2 = k + 1
+        v2 = v + 1
+
+        @torch.compile
+        def func(q, k, v, k2, v2):
+            block_sparse_mask = _create_block_sparse_mask(
+                torch.tril(
+                    torch.ones(
+                        q.shape[-2], k.shape[-2], dtype=torch.bool, device=q.device
+                    )
+                ),
+                128,
+                128,
+            )
+
+            q = _flex_attention(
+                q,
+                k,
+                v,
+                _causal,
+                block_sparse_mask,
+            )
+            out = _flex_attention(
+                q,
+                k2,
+                v2,
+                _causal,
+                block_sparse_mask,
+            )
+            return out
+
+        _, code = run_and_get_code(func, q, k, v, k2, v2)
+        # Ensure _create_block_sparse_mask is compiled and generates 5 kernels,
+        # 2 flex_attention generates 2 kernels.
+        FileCheck().check_count(".run(", 7, True).run(code[0])
+
+    @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
     def test_skip_odd_keys(self, dtype: torch.dtype):
         def score_mod(score, b, h, q, kv):
