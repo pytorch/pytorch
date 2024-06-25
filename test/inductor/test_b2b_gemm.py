@@ -18,8 +18,8 @@ class B2BGEMMTest(TestCase):
         B = torch.randn((32, 256), device="cuda", dtype=torch.float16)
         C = torch.randn((256, 32), device="cuda", dtype=torch.float16)
         res, (code,) = run_and_get_code(f_opt, A, B, C)
-        self.assertEqual(torch.allclose(f(A, B, C), res, atol=0.5, rtol=0.01), True)
-        self.assertEqual("B2B_GEMM_TRITON_ENTRANCE" in code, True)
+        self.assertTrue(torch.allclose(f(A, B, C), res, atol=0.3, rtol=0.01))
+        self.assertTrue("B2B_GEMM_TRITON_ENTRANCE" in code)
 
     @torch._inductor.config.patch(b2b_gemm_pass=True)
     def test_b2b_gemm_unsupported_size(self):
@@ -33,8 +33,8 @@ class B2BGEMMTest(TestCase):
         B = torch.randn((64, 256), device="cuda", dtype=torch.float16)
         C = torch.randn((256, 64), device="cuda", dtype=torch.float16)
         res, (code,) = run_and_get_code(f_opt, A, B, C)
-        self.assertEqual(torch.allclose(f(A, B, C), res, atol=0.5, rtol=0.01), True)
-        self.assertEqual("B2B_GEMM_TRITON_ENTRANCE" in code, False)
+        self.assertTrue(torch.allclose(f(A, B, C), res, atol=0.3, rtol=0.01))
+        self.assertTrue("B2B_GEMM_TRITON_ENTRANCE" not in code)
 
 
 if __name__ == "__main__":

@@ -106,9 +106,8 @@ B2B_GEMM_PASS = PatternMatcherPass(
 )
 
 
-def can_apply_b2b_gemm(
-    mat1: torch.fx.Node, mat2: torch.fx.Node, mat3: torch.fx.Node
-) -> bool:
+def can_apply_b2b_gemm(match: Match) -> bool:
+    mat1, mat2, mat3 = match.args
     if not (("val" in mat1.meta) and ("val" in mat2.meta) and ("val" in mat3.meta)):
         return False
     mat1 = mat1.meta["val"]
@@ -184,23 +183,23 @@ def tuned_b2b_gemm(mat1, mat2, mat3, *, layout=None):
 
 # currently it matches ((A @ B) @ C)
 # TODO: later will change to matching (A @ B) in (epilogue2 ((epilogue1 (A @ B)) @ C)) and inspecting the graph
-# TODO: match more cases such as bmm and addmm
+# TODO: match more cases such as bmm and addmm, and (A @ (B @ C)), etc.
 @register_graph_pattern(
     CallFunction(aten.mm, CallFunction(aten.mm, Arg(), Arg()), Arg()),
+    extra_check=can_apply_b2b_gemm,
     pass_dict=B2B_GEMM_PASS,
 )
 def b2b_gemm(
     match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node, mat3: torch.fx.Node
 ) -> None:
-    if can_apply_b2b_gemm(mat1, mat2, mat3):
-        counters["inductor"]["b2b_gemm"] += 1
-        graph = match.graph
-        root_node = match.nodes[-1]
-        with graph.inserting_before(root_node):
-            tuned_b2b_gemm._inductor_lowering_function = True  # type: ignore[attr-defined]
-            replacement = graph.call_function(
-                tuned_b2b_gemm, tuple(match.args), match.kwargs
-            )
-            replacement.meta.update(root_node.meta)
-            root_node.replace_all_uses_with(replacement)
-        match.erase_nodes(graph)
+    counters["inductor"]["b2b_gemm"] += 1
+    graph = match.graph
+    root_node = match.nodes[-1]
+    with graph.inserting_before(root_node):
+        tuned_b2b_gemm._inductor_lowering_function = True  # type: ignore[attr-defined]
+        replacement = graph.call_function(
+            tuned_b2b_gemm, tuple(match.args), match.kwargs
+        )
+        replacement.meta.update(root_node.meta)
+        root_node.replace_all_uses_with(replacement)
+    match.erase_nodes(graph)
