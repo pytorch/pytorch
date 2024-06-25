@@ -17,6 +17,10 @@
 #include <c10/util/irange.h>
 #include <c10/util/CallOnce.h>
 
+#if AT_CUDNN_ENABLED()
+#include <ATen/cudnn/cudnn-wrapper.h>
+#endif
+
 #include <c10/core/SymInt.h>
 #include <c10/util/string_view.h>
 
@@ -49,8 +53,12 @@ namespace {
 // TODO(eqy): more benchmarking to determine whether this should include sm86/89
 // Needs to be kept in-sync with test_fused_chocie in test_transformers.py
 bool check_prefer_cudnn_attention() {
+#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 90000
   auto dprops = at::cuda::getCurrentDeviceProperties();
   return dprops->major >= 9;
+#else
+  return false;
+#endif
 }
 
 // flash_attention V2 is universally faster than efficient_attention and Math
