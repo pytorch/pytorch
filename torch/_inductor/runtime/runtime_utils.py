@@ -107,6 +107,9 @@ def do_bench_gpu(
         for _ in range(benchmarking_iters)
     ]
 
+    temp_cache = torch.empty(int((get_cache_size() * 100) // 4), dtype=torch.int, device="cuda")
+    temp_cache.zero_()
+    del temp_cache
     for start_event, end_event in event_pairs:
         cache.zero_()
         start_event.record()
