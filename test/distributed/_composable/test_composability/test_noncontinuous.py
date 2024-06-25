@@ -30,10 +30,10 @@ from torch.distributed.checkpoint.state_dict import (
     set_optimizer_state_dict,
 )
 from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import (
     _get_module_fsdp_state,
     clean_tensor_name,
-    FullyShardedDataParallel as FSDP,
 )
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
 from torch.distributed.tensor.parallel import (
