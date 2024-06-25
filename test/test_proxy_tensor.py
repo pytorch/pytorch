@@ -2064,7 +2064,6 @@ out_symbolic_tensor_failures = {
     xfail('scatter', ''),
     xfail('take_along_dim', ''),
     xfail('triangular_solve', ''),
-    xfail('view_copy', ''),
 
     # SymIntArrayRef expected to contain only concrete
     xfail('ones', ''),

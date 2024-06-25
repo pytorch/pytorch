@@ -16694,7 +16694,9 @@ op_db: List[OpInfo] = [
            skips=(
                # RuntimeError: view size is not compatible with input tensor's size and stride
                # (at least one dimension spans across two contiguous subspaces). Use .reshape(...) instead.
-               DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+               DecorateInfo(
+                   unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"
+               ),
            )),
     UnaryUfuncInfo('neg',
                    aliases=('negative', ),
@@ -19297,7 +19299,13 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_squeeze,
            skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),)),
+               DecorateInfo(
+                   unittest.expectedFailure,
+                   'TestJit',
+                   'test_variant_consistency_jit',
+                   dtypes=(torch.float32,),
+               ),
+           )),
     UnaryUfuncInfo(
         'fill',
         ref=_fill_np,
@@ -19424,6 +19432,12 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_unsqueeze,
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestDTensorOps', 'test_dtensor_op_db'),
+               DecorateInfo(
+                   unittest.expectedFailure,
+                   'TestJit',
+                   'test_variant_consistency_jit',
+                   dtypes=(torch.float32,),
+               ),
            )),
     BinaryUfuncInfo('xlogy',
                     aliases=('special.xlogy',),
@@ -19491,7 +19505,13 @@ op_db: List[OpInfo] = [
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestDTensorOps', 'test_dtensor_op_db'),
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_jit_alias_remapping'),
-           )),
+               DecorateInfo(
+                   unittest.expectedFailure,
+                   'TestJit',
+                   'test_variant_consistency_jit',
+                   dtypes=(torch.float32,)
+                ),
+            )),
     OpInfo('T',
            op=lambda x: x.T,
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.chalf),
