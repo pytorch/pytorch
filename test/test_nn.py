@@ -8484,20 +8484,21 @@ class TestNNDeviceType(NNTestCase):
 
 
     @unittest.skipIf(not TEST_NUMPY, "numpy not found")
-    def test_pad_symmetric_2D(self):
+    def test_pad_symmetric(self):
         """Test support for symetric padding."""        
         for pad_list in [ [(6, 6), (6, 6)],
                           [(5, 6), (6, 5)],
                           [(6, 5), (5, 6)],
                           [(5, 5), (5, 5)],
                           [(7, 7), (7, 7)]]:
-            for size in [(1, 3, 3), (1, 4, 4), (1, 2, 2), (1, 1, 1), (1, 2, 1), (1, 2, 1)]:
+            for size in [(1, 3, 3), (1, 4, 4), (1, 2, 2), (1, 1, 1), (1, 2, 1),
+                         (1, 1, 2), (1, 2, 3, 3)]:
                 array = np.random.randint(0, 9, size=size)
                 # torch expects a flat tuple of padding values.
                 th_sym_array_compatible = tuple(p for pad_tuple in pad_list for p in pad_tuple)
                 my_pad = F.pad(torch.from_numpy(array), th_sym_array_compatible, mode="symmetric")
                 # numpy expects padding information for every dimension.
-                np_pad = np.pad(array, [(0, 0)] + pad_list, mode="symmetric")
+                np_pad = np.pad(array, [(0, 0)]*(len(size) - 2) + pad_list, mode="symmetric")
                 assert np.allclose(my_pad.numpy(), np_pad)
 
 
