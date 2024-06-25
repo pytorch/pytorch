@@ -9,7 +9,7 @@ from typing import Dict, List
 
 import common
 import pandas as pd
-import torchtext
+import torchtext.models
 from torchtext.functional import to_tensor
 from tqdm import tqdm
 

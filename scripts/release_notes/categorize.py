@@ -48,7 +48,11 @@ class Categorizer:
         self.category = category
 
     def categorize(self):
+        existing_categories = {commit.category for commit in self.commits.commits}
+        common.categories += existing_categories - set(common.categories)
+
         commits = self.commits.filter(category=self.category)
+        # raise RuntimeError(f'categories {set(commit.category for commit in commits)}')
         total_commits = len(self.commits.commits)
         already_done = total_commits - len(commits)
         i = 0
