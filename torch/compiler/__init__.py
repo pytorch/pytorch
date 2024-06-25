@@ -31,7 +31,7 @@ def reset() -> None:
 
     torch._dynamo.reset()
 
-def allow_in_graph(fn):
+def allow_in_graph(fn=None, *, fakemode_fallback_fn=None):
     """
     Tells the compiler frontend (Dynamo) to skip symbolic introspection of the function
     and instead directly write it to the graph when encountered.
@@ -72,7 +72,9 @@ def allow_in_graph(fn):
     compilation stack (AOTAutograd and Inductor) but there is a Dynamo bug that prevents it from
     symbolically introspecting the function properly (or if your code is in C/C++ and
     therefore cannot be introspected with Dynamo), then one can decorate said function
-    with :func:`allow_in_graph` to bypass Dynamo.
+    with :func:`allow_in_graph` to bypass Dynamo. The parameter ``fakemode_fallback_fn`` is
+    used when ``fn`` fails to execute successfully in FakeTensorMode. In this case, Dynamo will
+    run ``fakemode_fallback_fn`` to obtain the outputs of ``fn``.
 
     We require that ``fn`` adhere to the following restrictions. Failure to adhere
     results in undefined behavior:
@@ -84,31 +86,50 @@ def allow_in_graph(fn):
     - all Tensors used inside of ``fn`` must be passed directly as inputs to ``fn``
       (as opposed to being captured variables).
 
+    If ``fakemode_fallback_fn`` is not None, its signature must match that of ``fn``. Users
+    must also ensure that the outputs of ``fakemode_fallback_fn`` in FakeTensorMode are
+    identical to those of ``fn``.
+
     Args:
         fn: A callable representing the function to be included in the graph.
             If ``fn`` is a list or tuple of callables it recursively applies
             :func:`allow_in_graph()` to each function and returns a new list or
             tuple containing the modified functions.
 
+        fakemode_fallback_fn:  If not None, Dynamo will use this callable to obtain the fake
+        value of this node. Additionally, fn must be a callable when ``fakemode_fallback_fn``
+        is not None.
+
     Example::
 
+        def alternate_fn(x):
+            return x
+
+        def fn_fail_in_fake_mode(x):
+            if x.sum() > 0:
+                return torch.sigmoid(x)
+            else:
+                return torch.relu(x)
+
         torch.compiler.allow_in_graph(my_custom_function)
+        torch.compiler.allow_in_graph(fn_fail_in_fake_mode, fakemode_fallback_fn=alternate_fn)
 
         @torch.compile(...)
         def fn(a):
             x = torch.add(x, 1)
             x = my_custom_function(x)
+            x = fn_fail_in_fake_mode(x)
             x = torch.add(x, 1)
             return x
 
         fn(...)
 
-    Will capture a single graph containing ``my_custom_function()``.
+    Will capture a single graph containing ``my_custom_function()`` and ``fn_fail_in_fake_mode()``.
 
     """
     import torch._dynamo
 
-    return torch._dynamo.allow_in_graph(fn)
+    return torch._dynamo.allow_in_graph(fn, fakemode_fallback_fn=fakemode_fallback_fn)
 
 
 def list_backends(exclude_tags=("debug", "experimental")) -> List[str]:

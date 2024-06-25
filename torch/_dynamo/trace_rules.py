@@ -2910,6 +2910,51 @@ def is_aten_op_or_tensor_method(obj):
     )
 
 
+class FunctionIdMap:
+    """
+    Similar to the `FunctionIdSet` class above. Track a map of `id()`s of
+    objects which are either allowed or not allowed to go into the generated
+    FX graph.  Use to test for torch.*, numpy.*, builtins.*, etc.
+
+    Support user modification to permit customization of what can be
+    added to the graph and what will cause a graph break.
+
+    If the corresponding value (which is also a `Callable`) in the map is not
+    None, dynamo will instead use this value during the execution of
+    FakeTensorMode.
+    """
+
+    function_ids_mapping: Optional[Dict[int, Optional[Callable]]] = None
+
+    def __init__(self, lazy_initializer: Callable[[], Dict[int, Optional[Callable]]]):
+        self.lazy_initializer = lazy_initializer
+
+    def __call__(self):
+        if self.function_ids_mapping is None:
+            value = self.lazy_initializer()
+            self.function_ids_mapping = value
+
+        return self.function_ids_mapping
+
+    def update(self, from_idx: int, to_callable: Optional[Callable]):
+        function_ids_mapping = self()  # lazy init
+        function_ids_mapping.update({from_idx: to_callable})
+
+    def remove(self, idx: int):
+        function_ids_mapping = self()
+        if idx in function_ids_mapping:
+            del function_ids_mapping[idx]
+
+    def __contains__(self, idx: int):
+        return idx in self()
+
+
+@FunctionIdMap
+def _allowed_callable_ids() -> Dict[int, Optional[Callable]]:
+    rv: Dict[int, Optional[Callable]] = {}
+    return rv
+
+
 class FunctionIdSet:
     """
     Track a set of `id()`s of objects which are either allowed or not
@@ -2953,12 +2998,6 @@ class FunctionIdSet:
 
     def __contains__(self, idx: int):
         return idx in self()
-
-
-@FunctionIdSet
-def _allowed_callable_ids() -> Dict[int, str]:
-    rv: Dict[int, str] = {}
-    return rv
 
 
 @FunctionIdSet

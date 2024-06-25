@@ -1890,9 +1890,22 @@ def run_node(tracer, node, args, kwargs, nnmodule):
         def make_error_message(e):
             return f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n" + str(e)
 
+        def any_fake(args, kwargs):
+            if any(is_fake(arg) for arg in args):
+                return True
+            return any(is_fake(arg) for _, arg in kwargs.items())
+
         try:
             if op == "call_function":
-                return node.target(*args, **kwargs)
+                from torch._dynamo.trace_rules import _allowed_callable_ids
+
+                alternate_target = _allowed_callable_ids().get(id(node.target), None)
+                actual_target = (
+                    node.target
+                    if (alternate_target is None or not any_fake(args, kwargs))
+                    else alternate_target
+                )
+                return actual_target(*args, **kwargs)
             elif op == "call_method":
                 return getattr(args[0], node.target)(*args[1:], **kwargs)
             elif op == "call_module":

@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 # ruff: noqa: TCH004
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import Callable, TYPE_CHECKING
 
 import torch
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -74,7 +74,7 @@ def assume_constant_result(fn):
     return fn
 
 
-def allow_in_graph(fn):
+def allow_in_graph(fn=None, *, fakemode_fallback_fn=None):
     """
     Tells the compiler frontend (Dynamo) to skip symbolic introspection of the function
     and instead directly write it to the graph when encountered.
@@ -83,12 +83,29 @@ def allow_in_graph(fn):
 
     WARNING: this API can be a footgun, please read the documentation carefully.
     """
+    # Decorator mode
+    if fn is None:
+
+        def inner(fn: Callable):
+            if fn is None:
+                raise RuntimeError("fn can't be None")
+            return allow_in_graph(fn, fakemode_fallback_fn=fakemode_fallback_fn)
+
+        return inner
+
     if isinstance(fn, (list, tuple)):
         return [allow_in_graph(x) for x in fn]
     assert callable(fn), "allow_in_graph expects a callable"
     if trace_rules.lookup_callable(fn) != variables.TorchInGraphFunctionVariable:
         trace_rules._disallowed_callable_ids.remove(id(fn))
-        trace_rules._allowed_callable_ids.add(id(fn))
+        assert fakemode_fallback_fn is None or callable(
+            fakemode_fallback_fn
+        ), "fakemode_fallback_fn expects None or a callable"
+        if fakemode_fallback_fn is not None:
+            assert callable(
+                fn
+            ), "allow_in_graph expects ``fn`` a callable when ``fakemode_fallback_fn`` is not None"
+        trace_rules._allowed_callable_ids.update(id(fn), fakemode_fallback_fn)
     return fn
 
 

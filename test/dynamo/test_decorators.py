@@ -15,6 +15,13 @@ def my_custom_function(x):
     return x + 1
 
 
+def custom_fn_fail_in_fake_mode(x):
+    if x.sum() > 0:
+        return torch.sigmoid(x)
+    else:
+        return torch.relu(x)
+
+
 class DecoratorTests(torch._dynamo.test_case.TestCase):
     def test_disallow_in_graph(self):
         cnts = torch._dynamo.testing.CompileCounter()
@@ -198,6 +205,28 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.allow_in_graph(my_custom_function)
         fn(torch.randn(10))
         torch._dynamo.disallow_in_graph(my_custom_function)
+
+        # check for no graph break
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 5)
+
+    def test_allow_in_graph_with_fakemode_fallback_fn(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch._dynamo.optimize(cnts)
+        def fn(a):
+            x = torch.add(a, 1)
+            x = torch.add(x, 1)
+            x = custom_fn_fail_in_fake_mode(x)
+            x = torch.add(x, 1)
+            x = torch.add(x, 1)
+            return x
+
+        torch._dynamo.allow_in_graph(
+            custom_fn_fail_in_fake_mode, fakemode_fallback_fn=my_custom_function
+        )
+        fn(torch.randn(10))
+        torch._dynamo.disallow_in_graph(custom_fn_fail_in_fake_mode)
 
         # check for no graph break
         self.assertEqual(cnts.frame_count, 1)
