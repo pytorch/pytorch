@@ -432,9 +432,9 @@ def linear_backward_default(func, *args, **kwargs):
 
     check_ragged_dim_same(func, inp, "self", grad_output, "grad_output")
     ds = NestedTensor(
-        torch.mm(grad_output._values, weight), **extract_kwargs(grad_output)
+        torch.matmul(grad_output._values, weight), **extract_kwargs(grad_output)
     )
-    dw = torch.mm(grad_output._values.T, inp._values)
+    dw = torch.matmul(grad_output._values.transpose(-2, -1), inp._values)
     db = None  # NYI: gradient for bias, need to reduce over ragged dim
     return (ds, dw, db)
 
@@ -470,6 +470,17 @@ register_jagged_func(
     ],
     "self: jt_all",
 )(jagged_unary_pointwise)
+
+
+@register_jagged_func(torch.ops.aten.zero_.default, "self: jt_all")
+def zero__default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+    func(inp._values)
+    return inp
 
 
 @register_jagged_func(
