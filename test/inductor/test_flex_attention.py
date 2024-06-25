@@ -18,6 +18,7 @@ from torch._inductor.utils import run_and_get_code
 from torch.nn.attention._flex_attention import (
     _causal,
     _compose,
+    _create_empty_block_sparse_mask,
     _flex_attention,
     _generate_alibi_bias,
     _identity,
@@ -897,18 +898,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("score_mod", [_identity, _causal])
     def test_logsumexp_correctness(self, dtype, score_mod):
-        @torch.compile
-        def sdpa_hop(q, k, v, score_mod):
-            return flex_attention_hop(q, k, v, score_mod)
-
-        @torch.compile(backend="aot_eager")
-        def eager_sdpa_hop(q, k, v, score_mod):
-            """The main entrypoint for FlexAttention doesnt return LSE.
-            Besides dropping LSE it also ensures that the hop is compiled with aot-eager
-            backend. We need to replicate this.
-            """
-            return flex_attention_hop(q, k, v, score_mod)
-
         make_tensor = functools.partial(
             torch.randn,
             (B, H, S, D),
@@ -917,11 +906,50 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             requires_grad=True,
         )
         q, k, v = make_tensor(), make_tensor(), make_tensor()
+        block_mask = _create_empty_block_sparse_mask(q, k, v)
+
+        @torch.compile
+        def sdpa_hop(q, k, v, score_mod, block_mask):
+            return flex_attention_hop(
+                q,
+                k,
+                v,
+                score_mod,
+                block_mask.kv_num_blocks,
+                block_mask.kv_indices,
+                block_mask.q_num_blocks,
+                block_mask.q_indices,
+                block_mask.BLOCKSPARSE_KV,
+                block_mask.BLOCKSPARSE_Q,
+            )
+
+        @torch.compile(backend="aot_eager")
+        def eager_sdpa_hop(q, k, v, score_mod, block_mask):
+            """The main entrypoint for FlexAttention doesnt return LSE.
+            Besides dropping LSE it also ensures that the hop is compiled with aot-eager
+            backend. We need to replicate this.
+            """
+            return flex_attention_hop(
+                q,
+                k,
+                v,
+                score_mod,
+                block_mask.kv_num_blocks,
+                block_mask.kv_indices,
+                block_mask.q_num_blocks,
+                block_mask.q_indices,
+                block_mask.BLOCKSPARSE_KV,
+                block_mask.BLOCKSPARSE_Q,
+            )
 
         ref_out, ref_lse = eager_sdpa_hop(
-            q.to(torch.float64), k.to(torch.float64), v.to(torch.float64), score_mod
+            q.to(torch.float64),
+            k.to(torch.float64),
+            v.to(torch.float64),
+            score_mod,
+            block_mask,
         )
-        compiled_out, compiled_lse = sdpa_hop(q, k, v, score_mod)
+        compiled_out, compiled_lse = sdpa_hop(q, k, v, score_mod, block_mask)
 
         # Comparing LSE for the ref and the compiled version
         # The compiled uses a change of base trick to more efficiently compute the LSE
@@ -959,21 +987,31 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             requires_grad=True,
         )
         q, k, v = make_tensor(), make_tensor(), make_tensor()
+        block_mask = _create_empty_block_sparse_mask(q, k, v)
 
         @torch.compile
-        def func(q, k, v, score_mod):
-            _, lse = flex_attention_hop(q, k, v, score_mod)
+        def func(q, k, v, score_mod, block_mask):
+            _, lse = flex_attention_hop(
+                q,
+                k,
+                v,
+                score_mod,
+                block_mask.kv_num_blocks,
+                block_mask.kv_indices,
+                block_mask.q_num_blocks,
+                block_mask.q_indices,
+                block_mask.BLOCKSPARSE_KV,
+                block_mask.BLOCKSPARSE_Q,
+            )
             lse_2 = lse * 2
             return lse_2
 
-        _, code = run_and_get_code(func, q, k, v, _identity)
+        _, code = run_and_get_code(func, q, k, v, _identity, block_mask)
         # Ensure that two kernels are generated
         FileCheck().check_count(".run(", 2, True).run(code[0])
 
     @supported_platform
     def test_logsumexp_is_not_fused(self):
-        from torch.nn.attention._flex_attention import _create_empty_block_sparse_mask
-
         make_tensor = functools.partial(
             torch.randn,
             (B, H, S, D),
@@ -982,24 +1020,26 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             requires_grad=True,
         )
         q, k, v = make_tensor(), make_tensor(), make_tensor()
-        empty_sparse_mask = _create_empty_block_sparse_mask(q.device)
+        block_mask = _create_empty_block_sparse_mask(q, k, v)
 
         @torch.compile
-        def func(q, k, v, score_mod):
+        def func(q, k, v, score_mod, block_mask):
             out, lse = flex_attention_hop(
                 q,
                 k,
                 v,
                 score_mod,
-                empty_sparse_mask.kv_num_blocks,
-                empty_sparse_mask.kv_indices,
-                empty_sparse_mask.q_num_blocks,
-                empty_sparse_mask.q_indices,
+                block_mask.kv_num_blocks,
+                block_mask.kv_indices,
+                block_mask.q_num_blocks,
+                block_mask.q_indices,
+                block_mask.BLOCKSPARSE_KV,
+                block_mask.BLOCKSPARSE_Q,
             )
             lse_2 = lse * 2
             return out, lse_2
 
-        _, code = run_and_get_code(func, q, k, v, _identity)
+        _, code = run_and_get_code(func, q, k, v, _identity, block_mask)
         # Ensure that two kernels are generated
         FileCheck().check_count(".run(", 2, True).run(code[0])
 

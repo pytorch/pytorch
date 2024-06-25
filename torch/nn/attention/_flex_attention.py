@@ -69,8 +69,8 @@ class _BlockSparseMask:
 
 def _create_block_sparse_mask(
     mask: torch.Tensor,
-    BLOCKSPARSE_Q: int = _DEFAULT_BLOCKSPARSE_SIZE,
     BLOCKSPARSE_KV: int = _DEFAULT_BLOCKSPARSE_SIZE,
+    BLOCKSPARSE_Q: int = _DEFAULT_BLOCKSPARSE_SIZE,
 ):
     assert mask.dtype == torch.bool
     q_len, kv_len = mask.shape
