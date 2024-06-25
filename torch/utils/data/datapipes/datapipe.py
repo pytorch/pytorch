@@ -1,6 +1,6 @@
 import functools
 import pickle
-from typing import Callable, Dict, Generic, Iterable, Iterator, Optional, TypeVar
+from typing import Callable, Dict, Iterable, Iterator, List, Optional, TypeVar
 
 from torch.utils._import_utils import import_dill
 from torch.utils.data.datapipes._hook_iterator import _SnapshotState
@@ -389,7 +389,7 @@ class _MapDataPipeSerializationWrapper(_DataPipeSerializationWrapper, MapDataPip
         return self._datapipe[idx]
 
 
-class DataChunk(list, Generic[T]):
+class DataChunk(List[T]):
     def __init__(self, items: Iterable[T]) -> None:
         super().__init__(items)
         self.items = items
@@ -401,5 +401,5 @@ class DataChunk(list, Generic[T]):
     def __iter__(self) -> Iterator[T]:
         yield from super().__iter__()
 
-    def raw_iterator(self) -> Iterator[T]:  # type: ignore[misc]
+    def raw_iterator(self) -> Iterator[T]:
         yield from self.items

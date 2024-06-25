@@ -4,9 +4,20 @@
 # Note that, for mypy, .pyi file takes precedent over .py file, such that we must define the interface for other
 # classes/objects here, even though we are not injecting extra code into them at the moment.
 
-from typing import Any, Callable, Dict, Generic, Iterator, List, Literal, Optional, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Generic,
+    Iterator,
+    List,
+    Literal,
+    Optional,
+    TypeVar,
+    Union,
+)
 
-from torch.utils.data import Dataset, default_collate, IterableDataset
+from torch.utils.data import Dataset, IterableDataset, default_collate
 from torch.utils.data.datapipes._hook_iterator import _SnapshotState
 from torch.utils.data.datapipes._typing import _DataPipeMeta, _IterDataPipeMeta
 
@@ -69,10 +80,10 @@ class DFIterDataPipe(IterDataPipe):
     def __iter__(self): ...
 
 class _DataPipeSerializationWrapper:
-    def __init__(self, datapipe): ...
+    def __init__(self, datapipe) -> None: ...
     def __getstate__(self): ...
     def __setstate__(self, state): ...
-    def __len__(self): ...
+    def __len__(self) -> int: ...
 
 class _IterDataPipeSerializationWrapper(_DataPipeSerializationWrapper, IterDataPipe):
     def __iter__(self): ...
@@ -80,14 +91,8 @@ class _IterDataPipeSerializationWrapper(_DataPipeSerializationWrapper, IterDataP
 class _MapDataPipeSerializationWrapper(_DataPipeSerializationWrapper, MapDataPipe):
     def __getitem__(self, idx): ...
 
-class DataChunk(list, Generic[T]):
-    def __init__(self, items):
-        super().__init__(items)
-        self.items = items
-    def as_str(self, indent: str = "") -> str:
-        res = indent + "[" + ", ".join(str(i) for i in iter(self)) + "]"
-        return res
-    def __iter__(self) -> Iterator[T]:
-        yield from super().__iter__()
-    def raw_iterator(self) -> T:  # type: ignore[misc]
-        yield from self.items
+class DataChunk(List[T]):
+    def __init__(self, items: Iterable[T]) -> None: ...
+    def as_str(self, indent: str = "") -> str: ...
+    def __iter__(self) -> Iterator[T]: ...
+    def raw_iterator(self) -> Iterator[T]: ...
