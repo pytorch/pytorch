@@ -19,6 +19,7 @@ from typing import (
     Union,
     overload,
 )
+from typing_extensions import Self
 
 from torch import (
     Generator,

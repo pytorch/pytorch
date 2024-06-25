@@ -1014,16 +1014,16 @@ def returns_structseq_pyi(signature: PythonSignature) -> tuple[str, str] | None:
         structseq_def_lines = [
             f"class {structseq_name}({seq_type}):",
         ]
-        for name, typ in zip(field_names, python_returns):
+        for name, ret_type in zip(field_names, python_returns):
             structseq_def_lines.extend(
                 [
                     "    @property",
-                    f"    def {name}(self) -> {typ}: ...",
+                    f"    def {name}(self) -> {ret_type}: ...",
                 ]
             )
         structseq_def_lines.extend(
             [
-                f"    def __new__(cls, sequence: {seq_type}): ...",
+                f"    def __new__(cls, sequence: {seq_type}) -> Self: ...",
                 f"    n_fields: Final[_int] = {len(field_names)}",
                 f"    n_sequeunce_fields: Final[_int] = {len(field_names)}",
                 "    n_unnamed_fields: Final[_int] = 0",
@@ -1039,7 +1039,7 @@ def returns_structseq_pyi(signature: PythonSignature) -> tuple[str, str] | None:
         #     "    def values(self) -> Tensor: ...\n"
         #     "    @property\n"
         #     "    def indices(self) -> Tensor: ...\n"
-        #     "    def __new__(cls, sequence: tuple[Tensor, Tensor]): ...\n"
+        #     "    def __new__(cls, sequence: tuple[Tensor, Tensor]) -> Self: ...\n"
         #     "    n_fields: Final[_int] = 2",
         #     "    n_sequeunce_fields: Final[_int] = 2",
         #     "    n_unnamed_fields: Final[_int] = 0",
