@@ -2466,6 +2466,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
 
   // `getKeyFromDevice` is how we get keys for both collectives and batch P2P
   const auto key = getKeyFromDevice(device);
+  // TODO(whc) unclear if/why we do not want to use the pair-wise stream and communicator for batched/collective PGs.
+  // it seems the current code explicitly avoids this, but i don't understand why that's even safe.
   auto ncclStream = ncclStreams_.at(key);
 
   // Create Work object
