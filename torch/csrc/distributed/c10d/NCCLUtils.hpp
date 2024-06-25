@@ -1027,21 +1027,18 @@ struct NCCLTraceBuffer {
     result[version_key_str] = version_val_str;
     result[pg_config_key_str] = getPgConfigJson();
 
-    if (ncclDumpMap.has_value()) {
-      for (const auto& [ncclId, ncclDump] : ncclDumpMap.value()) {
-        auto inner_map = std::map<std::string, std::string>();
-        for (const auto& [key, value] : ncclDump) {
-          inner_map[key] = value;
-        }
-        result[ncclId] = inner_map;
-      }
-    }
+    // collective trace
     if (includeCollectives) {
       auto entries = getCollectiveTraceJson(onlyActive);
       if (entries.size() > 0) {
         result[entries_key_str] = entries;
       }
     }
+
+    if (ncclDumpMap.has_value()) {
+      result[nccl_comm_key_str] = ncclDumpMap.value();
+    }
+
     return result.dump();
   }
 
@@ -1085,3 +1082,4 @@ struct NCCLTraceBuffer {
 } // namespace c10d
 
 #endif // USE_C10D_NCCL
+  

@@ -382,7 +382,7 @@ std::string dump_nccl_trace_helper(
     bool json) {
   if (json) {
     return NCCLTraceBuffer::get()->dump_json(
-        c10::nullopt, includeCollectives, onlyActive);
+        std::nullopt, includeCollectives, onlyActive);
   }
   return NCCLTraceBuffer::get()->dump(
       c10::nullopt, includeCollectives, includeStackTraces, onlyActive);
@@ -4489,4 +4489,3 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
 } // namespace c10d
 
 #endif // USE_C10D_NCCL
-  
