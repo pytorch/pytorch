@@ -159,7 +159,7 @@ class BaseTorchVariable(VariableTracker):
             name = f"torch_obj_{id(self.value)}"
         unique_var_name = "__" + re.sub(r"[^a-zA-Z0-9_]+", "_", name)
         codegen.extend_output(
-            codegen.setup_globally_cached(unique_var_name, self.value, False)
+            codegen.setup_globally_cached(unique_var_name, self.value)
         )
 
     def as_proxy(self):
@@ -842,6 +842,30 @@ Either create the tensor outside the compiled region, or do not set the tensor t
                     name = tx.find_symbolic_locals_name(kwargs["out"])
                     if name in tx.symbolic_locals:
                         tx.symbolic_locals[name] = tensor_variable
+                elif (
+                    isinstance(tensor_variable, ConstantVariable)
+                    and tensor_variable.value is None
+                ):
+                    # Handle out-variant custom ops that return None.
+                    if isinstance(kwargs["out"], TensorVariable):
+                        assert "example_value" in kwargs["out"].proxy.node.meta
+                        fake_out = kwargs["out"].proxy.node.meta["example_value"]
+                        if not torch._prims_common.is_contiguous(fake_out):
+                            # It's difficult to handle strides correctly in functionalization
+                            # when calling an out= op with a non-contiguous out argument
+                            unimplemented(
+                                "out= op was called where output tensor was non-contiguous"
+                            )
+                    elif isinstance(kwargs["out"], ListVariable):
+                        for idx, x in enumerate(kwargs["out"].items):
+                            assert "example_value" in x.proxy.node.meta  # type: ignore[attr-defined]
+                            fake_out = x.proxy.node.meta["example_value"]  # type: ignore[attr-defined]
+                            if not torch._prims_common.is_contiguous(fake_out):
+                                # It's difficult to handle strides correctly in functionalization
+                                # when calling an out= op with a non-contiguous out argument
+                                unimplemented(
+                                    "out= op was called where some of the output tensors were non-contiguous"
+                                )
                 else:
                     unimplemented(f"out variant of {type(kwargs['out'])}")
 
@@ -877,6 +901,9 @@ Either create the tensor outside the compiled region, or do not set the tensor t
     @classmethod
     def call_nn_parameter(cls, tx, data=None, requires_grad=True):
         """A call to torch.nn.Parameter() gets lifted to before the graph"""
+        if tx.export:
+            unimplemented("nn parameter construction not supported with export")
+
         if isinstance(requires_grad, variables.VariableTracker):
             try:
                 requires_grad = requires_grad.as_python_constant()
@@ -942,10 +969,10 @@ Either create the tensor outside the compiled region, or do not set the tensor t
 
         # construct the nn.Parmeter before the graph save it to varname
         cg = PyCodegen(tx)
-        cg.load_import_from("torch.nn", "Parameter")
+        cg.add_push_null(lambda: cg.load_import_from("torch.nn", "Parameter"))
         cg(data.source)
         cg(variables.ConstantVariable(requires_grad))
-        cg.call_function(2, True)
+        cg.call_function(2, False)
         cg.store(varname)
         tx.output.pregraph_bytecode.extend(cg.get_instructions())
 
