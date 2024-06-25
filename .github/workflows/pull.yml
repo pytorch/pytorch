@@ -39,7 +39,7 @@ jobs:
     name: get-label-type
     uses: ./.github/workflows/_runner-determinator.yml
     with:
-      user_name: ${{ github.actor }}
+      user_name: ${{ github.triggering_actor }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
 
   linux-jammy-py3_8-gcc11-build:
