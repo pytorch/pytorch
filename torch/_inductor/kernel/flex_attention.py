@@ -4,6 +4,9 @@
 import logging
 from enum import auto, Enum
 from typing import Any, List, Tuple
+from torch._inductor.virtualized import V
+import sympy
+from ..runtime.runtime_utils import next_power_of_2
 
 import torch
 from .. import config
@@ -195,10 +198,12 @@ flex_attention_template = TritonTemplate(
     MATMUL_PRECISION = Q.dtype.element_ty
 
     start_m = tl.program_id(0)
-    off_hz = tl.program_id(1)
+    off_z = tl.program_id(1) // H
+    off_h = tl.program_id(1) % H
 
-    q_offset = off_hz * stride_qh
-    kv_offset = off_hz * stride_kh
+    q_offset = off_z * stride_qz + off_h * stride_qh
+    k_offset = off_z * stride_kz + off_h * stride_kh
+    v_offset = off_z * stride_vz + off_h * stride_vh
     Q_block_ptr = tl.make_block_ptr(
         base=Q + q_offset,
         shape=(Q_LEN, BLOCK_DMODEL),
@@ -208,7 +213,7 @@ flex_attention_template = TritonTemplate(
         order=(1, 0)
     )
     K_block_ptr = tl.make_block_ptr(
-        base=K + kv_offset,
+        base=K + k_offset,
         shape=(BLOCK_DMODEL, KV_LEN),
         strides=(stride_kk, stride_kn),
         offsets=(0, 0),
@@ -216,7 +221,7 @@ flex_attention_template = TritonTemplate(
         order=(0, 1)
     )
     V_block_ptr = tl.make_block_ptr(
-        base=V + kv_offset,
+        base=V + v_offset,
         shape=(KV_LEN, BLOCK_DMODEL),
         strides=(stride_vk, stride_vn),
         offsets=(0, 0),
@@ -251,8 +256,8 @@ flex_attention_template = TritonTemplate(
             subgraph_number=0,
             output_name="post_mod_scores",
             score="qk",
-            b="off_hz // H",
-            h="off_hz % H",
+            b="off_z",
+            h="off_h",
             m="m",
             n="n",
             out="qk"
@@ -300,11 +305,56 @@ flex_attention_template = TritonTemplate(
 
     # TODO dont want to write this if we dont require grad
     if OUTPUT_LOGSUMEXP:
+        off_hz = tl.program_id(1)
         l_ptrs = LSE + off_hz * Q_LEN + offs_m
         lse = m_i + tl.math.log2(l_i)
         tl.store(l_ptrs, lse)
  """,
 )
+
+def _use_flex_decoding(query):
+    # Decide which kernel to use, return true if use flex decoding kernel. 
+    return V.graph.sizevars.evaluate_expr(sympy.Lt(query.get_size()[-2], 32+1))
+    
+
+def filtered_configs(
+    b: int, 
+    h: int, 
+    m: int, 
+    d: int, 
+    n: int, 
+    configs: List[Tuple[int, int, int, int]],
+):
+    """ Filter out configs that are too large for input size"""
+    min_block_size = 32
+    m = max(
+        next_power_of_2(
+            V.graph.sizevars.size_hint(
+                m, fallback=torch._inductor.config.unbacked_symint_fallback  # type: ignore[arg-type]
+            )
+        ),
+        min_block_size,
+    )
+
+    n = max(
+        next_power_of_2(
+            V.graph.sizevars.size_hint(
+                n, fallback=torch._inductor.config.unbacked_symint_fallback  # type: ignore[arg-type]
+            )
+        ),
+        min_block_size,
+    )
+
+    filtered_configs = []
+
+    for BLOCK_M, BLOCK_N, num_warps, num_stages  in configs:
+        # shrink configs for small inputs 
+        BLOCK_M = max(min(BLOCK_M, m), min_block_size)
+        BLOCK_N = max(min(BLOCK_N, n), min_block_size)
+        if (BLOCK_M, BLOCK_N, num_warps, num_stages) not in filtered_configs:
+            filtered_configs.append((BLOCK_M, BLOCK_N, num_warps, num_stages))
+
+    return filtered_configs
 
 
 _h100_default_config = {
@@ -335,6 +385,7 @@ _a100_default_config = {
 def _get_default_config_fwd(query) -> Tuple[int, int, int, int]:
     dtype = query.get_dtype()
     head_dim = query.get_size()[-1]
+    query_len = query.get_size()[-2]
     default_config = None
 
     if head_dim <= 256 and torch.cuda.get_device_capability() >= (9, 0):  # H100
@@ -377,6 +428,7 @@ def _get_default_config_bwd(query) -> Tuple[int, int, int, int]:
         return (16, 16, 4, 1)
 
 
+from torch._inductor.kernel.flex_decoding import create_flex_decoding_kernel
 # TODO: We probably also need a layout constraint?
 @register_lowering(torch.ops.higher_order.flex_attention, type_promotion_kind=None)
 def flex_attention(*args, **kwargs):
@@ -402,6 +454,9 @@ def flex_attention(*args, **kwargs):
         query.get_size(),
         query.get_stride(),
     )
+
+    if _use_flex_decoding(query):
+        return create_flex_decoding_kernel(subgraph_buffer, layout, query, key, value, subgraph, *other_buffers)
     # see NOTE:[TritonTemplates with multiple outputs]
     logsumexp_shape = query.get_size()[:-1]  # [B, H, M]
     logsumexp = empty_strided(
@@ -425,7 +480,14 @@ def flex_attention(*args, **kwargs):
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function
     # We do need to explicitly pass it in for autotuning though.
-    for BLOCK_M, BLOCK_N, num_warps, num_stages in configs:
+    for BLOCK_M, BLOCK_N, num_warps, num_stages in filtered_configs(
+            b=query.get_size()[0], 
+            h=query.get_size()[1], 
+            m=query.get_size()[-2], 
+            d=query.get_size()[-1], 
+            n=key.get_size()[-2], 
+            configs=configs,
+    ):
         flex_attention_template.maybe_append_choice(
             choices=choices,
             input_nodes=[query, key, value, logsumexp],
