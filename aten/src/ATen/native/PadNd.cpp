@@ -23,6 +23,7 @@
 #include <ATen/ops/replication_pad2d.h>
 #include <ATen/ops/replication_pad3d.h>
 #include <ATen/ops/_pad_symmetric.h>
+#include <ATen/ops/_pad_symmetric_native.h>
 #include <ATen/ops/cat.h>
 #endif
 
@@ -293,11 +294,10 @@ Tensor _pad_symmetric_1d(Tensor signal, pair<c10::SymInt, c10::SymInt> pad_tuple
     }
 }
 
-
 /**
  * Pads a given signal symmetrically along multiple dimensions.
  */
-Tensor _pad_symmetric_symint(Tensor signal, c10::SymIntArrayRef pad)
+Tensor _pad_symmetric_symint(const Tensor &self, c10::SymIntArrayRef pad)
 {
     std::vector<std::pair<c10::SymInt, c10::SymInt>> pad_lists;
     for (size_t i = 0; i < pad.size(); i += 2) {
@@ -305,18 +305,19 @@ Tensor _pad_symmetric_symint(Tensor signal, c10::SymIntArrayRef pad)
     }
 
     auto pad_dims = pad_lists.size();
-    if (signal.dim() < pad_dims)
+    Tensor output = self;
+    if (static_cast<long unsigned int>(output.dim()) < pad_dims)
     {
         throw std::invalid_argument("not enough dimensions to pad.");
     }
 
-    auto dims = signal.dim() - 1;
+    auto dims = output.dim() - 1;
     reverse(pad_lists.begin(), pad_lists.end());
-    for (int pos = 0; pos < pad_dims; pos++)
+    for (auto pos = 0; pos < static_cast<int>(pad_dims); pos++)
     {
         int current_axis = dims - pos;
-        signal = _pad_symmetric_1d(signal, pad_lists[pos], current_axis);
+        output = _pad_symmetric_1d(output, pad_lists[pos], current_axis);
     }
-    return signal;
+    return output;
 }
 } // namespace at::native
