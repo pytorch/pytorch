@@ -22,7 +22,7 @@ class TestConverter(TestCase):
         M,
         inp,
         option: Union[List[str]] = None,
-        lifted_tensor_buffer: Optional[OrderedDict[str, torch.Tensor]] = None,
+        # lifted_tensor_buffer: Optional[OrderedDict[str, torch.Tensor]] = None,
         check_persistent=False,
     ) -> ExportedProgram:
         # By default, it tests both jit.trace and jit.script.
@@ -851,9 +851,8 @@ class TestConverter(TestCase):
                 return x + self.data
 
         inp = (torch.ones(3, 2),)
-        lifted_tensor_buffer = OrderedDict([("data", torch.ones(3, 2))])
         self._check_equal_ts_ep_converter(
-            Module, inp, ["script"], lifted_tensor_buffer, check_persistent=True
+            Module, inp, ["script"], check_persistent=True
         )
 
         class Module(torch.nn.Module):
