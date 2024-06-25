@@ -86,7 +86,7 @@ def all_gather_copy_in_cuda(
 
 
 lib.define(
-    "split_with_sizes_copy(Tensor all_gather_output, SymInt[] all_gather_input_split_sizes, int dim=0, *, Tensor(a!)[] out) -> ()"
+    "split_with_sizes_copy(Tensor all_gather_output, SymInt[] all_gather_input_split_sizes, int dim=0, *, Tensor(a!)[] ret) -> ()"
 )
 
 
@@ -96,35 +96,18 @@ def split_with_sizes_copy(
     all_gather_output: torch.Tensor,
     all_gather_input_split_sizes: List[int],
     dim: int,
-    out: List[torch.Tensor],
+    ret: List[torch.Tensor],
 ) -> None:
     torch.split_with_sizes_copy(
-        all_gather_output, all_gather_input_split_sizes, dim=dim, out=out
+        all_gather_output, all_gather_input_split_sizes, dim=dim, out=ret
     )
-
-
-@torch.library.impl(lib, "split_with_sizes_copy", "Functionalize")
-def split_with_sizes_copy_functionalize(
-    all_gather_output: torch.Tensor,
-    all_gather_input_split_sizes: List[int],
-    dim: int,
-    out: List[torch.Tensor],
-) -> None:
-    ag_output_elem = torch._from_functional_tensor(all_gather_output)
-    out_elem = [torch._from_functional_tensor(x) for x in out]
-    with torch._C._ExcludeDispatchKeyGuard(
-        torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
-    ):
-        torch.ops.fsdp.split_with_sizes_copy(
-            ag_output_elem, all_gather_input_split_sizes, dim=dim, out=out_elem
-        )
 
 
 torch.fx.node.has_side_effect(torch.ops.fsdp.split_with_sizes_copy.default)
 
 
 lib.define(
-    "chunk_cat(Tensor[] tensors, int dim, int num_chunks, *, Tensor(a!) out) -> ()"
+    "chunk_cat(Tensor[] tensors, int dim, int num_chunks, *, Tensor(a!) ret) -> ()"
 )
 
 
@@ -134,9 +117,9 @@ def chunk_cat(
     tensors: List[torch.Tensor],
     dim: int,
     num_chunks: int,
-    out: torch.Tensor,
+    ret: torch.Tensor,
 ) -> None:
-    torch._chunk_cat(tensors, dim, num_chunks, out=out)
+    torch._chunk_cat(tensors, dim, num_chunks, out=ret)
 
 
 @torch.no_grad()
@@ -239,7 +222,7 @@ def foreach_all_gather_copy_out(
     else:
         out = [t.view(world_size, -1) for t in gen]
     torch.ops.fsdp.split_with_sizes_copy(
-        all_gather_output, all_gather_input_split_sizes, dim=1, out=out
+        all_gather_output, all_gather_input_split_sizes, dim=1, ret=out
     )
 
 
@@ -374,7 +357,7 @@ def foreach_reduce_scatter_copy_in(
 ) -> None:
     reduce_scatter_input = reduce_scatter_input.view(world_size, -1)
     torch.ops.fsdp.chunk_cat(
-        unsharded_grads, dim=0, num_chunks=world_size, out=reduce_scatter_input
+        unsharded_grads, dim=0, num_chunks=world_size, ret=reduce_scatter_input
     )
 
 

@@ -5297,6 +5297,23 @@ class FallbackKernel(ExternKernelAlloc):
             self.mutation_names.append(tensor_args[0].get_name())
             return
 
+        # args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
+
+        # def collect_mutation_names(arg):
+        #     if isinstance(arg, (list, tuple)):
+        #         for tensor_arg in arg:
+        #             collect_mutation_names(tensor_arg)
+        #     elif isinstance(arg, (TensorBox, BaseView)):
+        #         self.mutation_names.append(arg.get_name())
+        #     else:
+        #         raise NotImplementedError(
+        #             f"NYI: Unsupported out= arg type: {type(arg)}"
+        #         )
+
+        # if "out" in kwargs:
+        #     collect_mutation_names(kwargs["out"])
+        #     return
+
         if schema.is_mutable and not can_auto_functionalize(kernel):
             raise NotImplementedError(
                 f"NYI: Can't generate FallbackKernel for {kernel}"
