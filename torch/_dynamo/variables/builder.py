@@ -1925,8 +1925,10 @@ def wrap_fx_proxy_cls(
             example_value = wrap_to_fake_tensor_and_record(
                 example_value, tx=tx, **kwargs
             )
-        if isinstance(example_value, torch.Tensor) and (
-            maybe_get_fake_mode(example_value) is not tx.fake_mode
+        if (
+            isinstance(example_value, torch.Tensor)
+            and example_value.device.type != "meta"
+            and (maybe_get_fake_mode(example_value) is not tx.fake_mode)
         ):
             raise InternalTorchDynamoError(
                 "`example_value` needs to be a `FakeTensor`"
