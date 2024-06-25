@@ -2,16 +2,21 @@
 # run time cuda tests, but with the allocator using expandable segments
 
 import os
+import pathlib
 import subprocess
 import sys
 
 import torch
 
 from torch.testing._internal.common_cuda import IS_JETSON, IS_WINDOWS
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+
+sys.path.insert(0, str(REPO_ROOT))
 from tools.stats.import_test_stats import get_disabled_tests
 
 if torch.cuda.is_available() and not IS_JETSON and not IS_WINDOWS:
-    get_disabled_tests('.')
+    get_disabled_tests(".")
 
     env = os.environ.copy()
     env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
