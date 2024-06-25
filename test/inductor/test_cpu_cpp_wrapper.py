@@ -233,6 +233,7 @@ if RUN_CPU:
         BaseTest("test_int_div", "", test_cpu_repro.CPUReproTests()),
         BaseTest("test_linear1"),
         BaseTest("test_linear2"),
+        BaseTest("test_polar"),
         BaseTest(
             "test_linear_binary",
             "",
@@ -240,7 +241,16 @@ if RUN_CPU:
             torch.backends.mkldnn.is_available()
             and torch.ops.mkldnn._is_mkldnn_bf16_supported(),
         ),
-        BaseTest("test_linear_packed", "", test_cpu_repro.CPUReproTests()),
+        BaseTest(
+            "test_linear_packed",
+            "",
+            test_cpu_repro.CPUReproTests(),
+            torch.backends.mkldnn.is_available()
+            and (
+                torch.ops.mkldnn._is_mkldnn_bf16_supported()
+                or torch.ops.mkldnn._is_mkldnn_fp16_supported()
+            ),
+        ),
         BaseTest(
             "test_lstm_packed_change_input_sizes",
             "cpu",
@@ -251,7 +261,8 @@ if RUN_CPU:
         BaseTest("test_multihead_attention", "cpu", test_cpu_repro.CPUReproTests()),
         BaseTest(
             "test_multi_threading",
-            code_string_count={"py::gil_scoped_release release;": 1},
+            # Two threads compile, so we expect the output code to be printed twice.
+            code_string_count={"py::gil_scoped_release release;": 2},
         ),
         BaseTest("test_profiler_mark_wrapper_call"),
         BaseTest(

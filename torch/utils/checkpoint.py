@@ -32,6 +32,7 @@ __all__ = [
     "CheckpointPolicy",
     "SelectiveCheckpointContext",
     "create_selective_checkpoint_contexts",
+    "SAC_IGNORED_OPS",
 ]
 
 _DEFAULT_DETERMINISM_MODE = "default"
@@ -1162,9 +1163,15 @@ class _VersionWrapper:
         return self.val
 
 
-def _maybe_detach(x):
-    if isinstance(x, torch.Tensor) and x.requires_grad:
-        # NB: Ensure the original tensor object is saved when x does not require grad
+def _maybe_detach(x, any_ret_has_alias_info):
+    # We detach for two separate reasons:
+    # - For view ops, we need to ensure that when the tensor is returned from
+    #   CachedDispatchMode, as_view sees that the AutogradMeta is nullptr
+    # - Avoid reference cycles
+    # For case 1, it is not enough to check whether x has differentiable dtype
+    # because non-differentiable dtype can have non-nullptr AutogradMeta, e.g.
+    # when the tensor is a view.
+    if isinstance(x, torch.Tensor) and (x.is_floating_point() or x.is_complex() or any_ret_has_alias_info):
         with torch._C._SetExcludeDispatchKeyGuard(torch._C.DispatchKey.ADInplaceOrView, False):
             # Ensure that view performed beneath autograd properly propagates
             # version counter. TODO: Use reentrant_dispatch instead of
@@ -1230,6 +1237,21 @@ class CheckpointPolicy(enum.Enum):
     PREFER_RECOMPUTE = 3
 
 
+def _policy_from_bool(b):
+    # For backward compatability
+    return CheckpointPolicy.MUST_SAVE if b else CheckpointPolicy.PREFER_RECOMPUTE
+
+
+SAC_IGNORED_OPS = {
+    # AC inserts different number of detach during forward and recompute.
+    torch.ops.aten.detach.default,
+    # AC's determinism check invokes additional metadata ops during forward.
+    # With subclasses involved, these metadata ops become dispatchable, this
+    # can result in incorrectness if these ops are selected cached.
+    torch.ops.prim.device.default,
+} | set(torch._subclasses.functional_tensor.FunctionalTensor.metadata_fns)
+
+
 class _CachingTorchDispatchMode(TorchDispatchMode):
     # Used together with _CachedTorchDispatchMode to implement SAC.
     def __init__(self, policy_fn, storage):
@@ -1237,12 +1259,15 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
         self.storage = storage
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        if func is torch.ops.aten.detach.default:
+        if func in SAC_IGNORED_OPS:
             return func(*args, **kwargs)
 
         kwargs = {} if kwargs is None else kwargs
         policy = self.policy_fn(SelectiveCheckpointContext(is_recompute=False),
                                 func, *args, **kwargs)
+        if isinstance(policy, bool):
+            policy = _policy_from_bool(policy)
+
         is_compiling = _is_compiling(func, args, kwargs)
 
         if is_compiling and policy == CheckpointPolicy.MUST_SAVE:
@@ -1250,8 +1275,10 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
 
         out = func(*args, **kwargs)
 
+        any_ret_has_alias_info = any(ret.alias_info is not None for ret in func._schema.returns)
+
         if policy in (CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_SAVE) or is_compiling:
-            self.storage[func].append(tree_map(lambda x: _VersionWrapper(_maybe_detach(x)), out))
+            self.storage[func].append(tree_map(lambda x: _VersionWrapper(_maybe_detach(x, any_ret_has_alias_info)), out))
         return out
 
 class _CachedTorchDispatchMode(TorchDispatchMode):
@@ -1262,12 +1289,15 @@ class _CachedTorchDispatchMode(TorchDispatchMode):
         self.allow_cache_entry_mutation = allow_cache_entry_mutation
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        if func is torch.ops.aten.detach.default:
+        if func in SAC_IGNORED_OPS:
             return func(*args, **kwargs)
 
         kwargs = {} if kwargs is None else kwargs
         policy = self.policy_fn(SelectiveCheckpointContext(is_recompute=True),
                                 func, *args, **kwargs)
+        if isinstance(policy, bool):
+            policy = _policy_from_bool(policy)
+
         is_compiling = _is_compiling(func, args, kwargs)
 
         if policy in (CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_SAVE) or is_compiling:
