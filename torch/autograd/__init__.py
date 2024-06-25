@@ -115,9 +115,7 @@ def _make_grads(
                 assert isinstance(out, torch.Tensor)
                 out_dtype = out.dtype
                 out_is_nested = out.is_nested
-                out_is_cpp_nested = out_is_nested and not isinstance(
-                    out, NestedTensor
-                )
+                out_is_cpp_nested = out_is_nested and not isinstance(out, NestedTensor)
                 if not out_is_cpp_nested:
                     out_size = out.shape
 
