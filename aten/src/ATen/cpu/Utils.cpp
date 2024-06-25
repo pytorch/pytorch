@@ -1,10 +1,10 @@
+#include <cassert>
 #include <ATen/cpu/Utils.h>
 #if !defined(__s390x__ ) && !defined(__powerpc__)
 #include <cpuinfo.h>
 #endif
 #if defined(__linux__)
 #include <sys/syscall.h>
-#include <cassert>
 #include <unistd.h>
 #endif
 
@@ -76,7 +76,7 @@ bool init_amx() {
 #endif
 }
 
-uint32_t get_cache_size(int level) {
+static uint32_t get_cache_size(int level) {
 #if !defined(__s390x__) && !defined(__powerpc__)
   if (!cpuinfo_initialize()) {
     return 0;
