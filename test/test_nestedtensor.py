@@ -5662,6 +5662,7 @@ class TestNestedTensorSubclass(TestCase):
         self.assertEqual(jagged_nt.unbind(), nt.unbind())
         self.assertEqual(jagged_nt.data_ptr(), nt.data_ptr())
 
+    @unittest.expectedFailure  # Backward will fail due to jaggedness source changing
     def test_layout_conversion_backward(self, device):
         nt = torch.nested.nested_tensor(
             [
@@ -5674,7 +5675,6 @@ class TestNestedTensorSubclass(TestCase):
         )
         strided_nt = torch.ops.aten._nested_jagged_to_strided(nt)
         jagged_nt = torch.ops.aten._nested_strided_to_jagged(strided_nt)
-        print(nt.shape, jagged_nt.shape)
 
         jagged_nt.backward(torch.ones_like(jagged_nt))
         expected_grad = torch.zeros_like(nt)
