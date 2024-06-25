@@ -2,6 +2,7 @@
 #include <ATen/TracerMode.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <c10/core/ScalarType.h>
+#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/FunctionsManual.h>
 #include <torch/csrc/autograd/VariableTypeUtils.h>
@@ -10,7 +11,6 @@
 #include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/autograd/generated/ViewFuncs.h>
 #include <torch/library.h>
-#include <optional>
 
 #include <utility>
 
