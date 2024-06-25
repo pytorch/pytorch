@@ -398,7 +398,8 @@ std::string dump_nccl_trace(
 }
 
 std::string dump_nccl_trace_json(bool includeCollectives, bool onlyActive) {
-  return dump_nccl_trace_helper(includeCollectives, false /* includeStackTraces */, onlyActive, true);
+  return dump_nccl_trace_helper(
+      includeCollectives, false /* includeStackTraces */, onlyActive, true);
 }
 
 std::optional<std::function<void(std::function<void(const std::string&)>)>>&

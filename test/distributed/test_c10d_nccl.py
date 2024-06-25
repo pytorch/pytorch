@@ -3579,7 +3579,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
                 self.assertIsNotNone(s)
                 self.assertTrue(s <= f)
             # we don't collect stack traces in JSON at the moment
-            if get_json == False:
+            if not get_json:
                 self.assertIn("test_c10d_nccl.py", str(last["frames"]))
             self.assertEqual(last["input_sizes"], ((3, 4),))
             self.assertEqual(last["input_dtypes"], ["Float"])

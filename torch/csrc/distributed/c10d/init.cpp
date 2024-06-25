@@ -3208,22 +3208,18 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       [](std::optional<bool> includeCollectives,
          std::optional<bool> onlyActive) {
         return py::bytes(::c10d::dump_nccl_trace_json(
-            includeCollectives.value_or(true), nlyActive.value_or(false)));
-
-      
- 
-      ::arg("includeCollectives") = std::optional<bool>(),
- 
-      ::arg("onlyActive") = std::optional<bool>(),
- 
-      (
+            includeCollectives.value_or(true), onlyActive.value_or(false)));
+      },
+      py::arg("includeCollectives") = std::optional<bool>(),
+      py::arg("onlyActive") = std::optional<bool>(),
+      R"(
       Arguments:
             includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
             onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
       Returns:
             Stringified json work traces.
             Default settings return everything - i.e. contains NCCL comm dumps and collective traces.
-    )");
+      )");
   module.def(
       "_dump_nccl_trace",
       [](std::optional<bool> includeCollectives,
@@ -3276,4 +3272,3 @@ PyMethodDef* python_functions() {
 }
 
 } // namespace torch::distributed::c10d
-  
