@@ -739,7 +739,7 @@ def clear_inductor_caches():
 
 
 @contextlib.contextmanager
-def fresh_inductor_cache(cache_entries=None, dir=None, delete=True):
+def fresh_inductor_cache(cache_entries=None):
     """
     Contextmanager that provides a clean tmp cachedir for inductor.
 
@@ -748,7 +748,7 @@ def fresh_inductor_cache(cache_entries=None, dir=None, delete=True):
     """
     clear_inductor_caches()
 
-    inductor_cache_dir = tempfile.mkdtemp(dir=dir)
+    inductor_cache_dir = tempfile.mkdtemp()
     try:
         with mock.patch.dict(
             os.environ, {"TORCHINDUCTOR_CACHE_DIR": inductor_cache_dir}
@@ -767,8 +767,7 @@ def fresh_inductor_cache(cache_entries=None, dir=None, delete=True):
                                 if ".lock" not in f
                             }
                         )
-        if delete:
-            shutil.rmtree(inductor_cache_dir)
+        shutil.rmtree(inductor_cache_dir)
     except Exception:
         log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
         raise
