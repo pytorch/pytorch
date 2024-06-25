@@ -28,7 +28,9 @@ disable_progress = True
 verbose_progress = False
 
 # use fx aot graph codegen cache
-fx_graph_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE") == "1"
+fx_graph_cache = (
+    os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE", "0" if is_fbcode() else "1") == "1"
+)
 
 # use remote fx aot graph codegen cache
 # False: Disables the cache
@@ -449,12 +451,14 @@ def decide_compile_threads():
     Here are the precedence to decide compile_threads
     1. User can override it by TORCHINDUCTOR_COMPILE_THREADS.  One may want to disable async compiling by
        setting this to 1 to make pdb happy.
-    2. Set to 1 if it's win32 platform or it's a fbcode build
+    2. Set to 1 if it's win32 platform
     3. decide by the number of CPU cores
     """
     if "TORCHINDUCTOR_COMPILE_THREADS" in os.environ:
         return int(os.environ["TORCHINDUCTOR_COMPILE_THREADS"])
-    elif sys.platform == "win32" or is_fbcode():
+    elif sys.platform == "win32":
+        return 1
+    elif is_fbcode() and worker_start_method != "subprocess":
         return 1
     else:
         cpu_count = (
@@ -692,6 +696,9 @@ class triton:
 
     # max autotune gemm with cublasLt
     autotune_cublasLt = True
+
+    # Tune the generated Triton kernels at compile time instead of first time they run
+    autotune_at_compile_time = False
 
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = True
