@@ -23,7 +23,7 @@ except unittest.SkipTest:
     raise
 
 
-def filesize(filename: pathlib.Path):
+def filesize(filename: Path):
     assert filename.exists(), f"{filename} is missing"
     return os.stat(filename).st_size
 
