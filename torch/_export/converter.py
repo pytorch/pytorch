@@ -403,22 +403,23 @@ class TS2FXGraphConverter:
                 return self.attribute_map[name]
             else:
                 raise ValueError(f"Attribute {name} not found")
+
         output_name = node.output().debugName()
 
         attr_name = node.s("name")
         input_name = node.input().debugName()
 
         root_attr_name = get_attr(input_name)
-        fx_node_name = (
-            f"{root_attr_name}.{attr_name}" if root_attr_name else attr_name
-        )
+        fx_node_name = f"{root_attr_name}.{attr_name}" if root_attr_name else attr_name
         self.attribute_map[output_name] = fx_node_name
 
         # ts graph does not lift attributes as input nodes. So attribute may
         # be ignored by name may have not been converted by convert_graph_inputs().
         # If so, we manually insert get_attr fx node.
-        if fx_node_name not in self.name_to_node and fx_node_name in self.name_to_buffer_map:
-            # print(f"reach here, fx_node_name: {fx_node_name}")
+        if (
+            fx_node_name not in self.name_to_node
+            and fx_node_name in self.name_to_buffer_map
+        ):
             self.name_to_node[fx_node_name] = self.fx_graph.get_attr(fx_node_name)
 
     def convert_prim_SetAttr(self, node: torch._C.Node):
@@ -758,9 +759,6 @@ class TS2EPConverter:
             if isinstance(ts_model, torch.jit.ScriptModule)
             else dict()
         )
-        self.constant_map: Dict[str, Any] = {}
-        self.module_fqn: Dict[str, str] = {}
-        self.name_to_modules: Dict[str, torch.nn.Module] = {}
 
         self.lift_tensor_constants_to_buffer()
 
@@ -808,6 +806,7 @@ class TS2EPConverter:
         # torchscript does not lift tensor constants to buffers. So we cannot access tensor
         # constants during `graph_converter.convert()`.
         attribute_map = {}
+
         def get_attr(fqn: str):
             name = fqn.split(".")
             v = self.ts_model
@@ -826,7 +825,9 @@ class TS2EPConverter:
                 input_name = node.input().debugName()
 
                 root_attr_name = attribute_map[input_name]
-                attr_fqn = f"{root_attr_name}.{attr_name}" if root_attr_name else attr_name
+                attr_fqn = (
+                    f"{root_attr_name}.{attr_name}" if root_attr_name else attr_name
+                )
                 value = get_attr(attr_fqn)
 
                 attribute_map[output_name] = attr_fqn

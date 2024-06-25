@@ -1,8 +1,7 @@
 # Owner(s): ["oncall: export"]
 
 import unittest
-from collections import OrderedDict
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Tuple, Union
 
 import torch
 
@@ -22,7 +21,6 @@ class TestConverter(TestCase):
         M,
         inp,
         option: Union[List[str]] = None,
-        # lifted_tensor_buffer: Optional[OrderedDict[str, torch.Tensor]] = None,
         check_persistent=False,
     ) -> ExportedProgram:
         # By default, it tests both jit.trace and jit.script.
@@ -56,7 +54,6 @@ class TestConverter(TestCase):
 
             for _ in range(num_iterations):
                 orig_out, _ = pytree.tree_flatten(original_ts_model(*inp))
-
 
                 ep = TS2EPConverter(ts_model, inp).convert()
                 ep_list.append(ep)
@@ -864,7 +861,9 @@ class TestConverter(TestCase):
                 return x + self.count
 
         inp = (torch.ones(3, 2),)
-        self._check_equal_ts_ep_converter(Module, inp, ["script"], check_persistent=True)
+        self._check_equal_ts_ep_converter(
+            Module, inp, ["script"], check_persistent=True
+        )
 
     def test_prim_SetAttr_on_nested_modules(self):
         class M(torch.nn.Module):
@@ -886,7 +885,9 @@ class TestConverter(TestCase):
                 return self.w2 + self.m(x)
 
         inp = (torch.ones(1),)
-        self._check_equal_ts_ep_converter(NestedM, inp, ["script"], check_persistent=True)
+        self._check_equal_ts_ep_converter(
+            NestedM, inp, ["script"], check_persistent=True
+        )
 
 
 if __name__ == "__main__":
