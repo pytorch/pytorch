@@ -63,7 +63,7 @@ log = logging.getLogger(__name__)
 # correctness checks struggle with fp16/tf32
 VERIFY: Dict[str, Any] = dict()
 PRINT_AUTOTUNE = True
-DEBUG = False
+DEBUG = True
 
 
 class KernelNamespace:
@@ -1438,6 +1438,9 @@ class AlgorithmSelectorCache(PersistentCache):
                 torch.testing.assert_close(out_extern, expected, **VERIFY)
             if torch.cuda.is_available():
                 torch.cuda.synchronize()  # shake out any CUDA errors
+            if torch.xpu.is_available():
+                torch.xpu.synchronize()  # shake out any CUDA errors
+
             return result
 
         def benchmark_in_current_process(choices):

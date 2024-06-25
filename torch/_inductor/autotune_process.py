@@ -37,6 +37,8 @@ from torch._inductor.codecache import (
     get_hash,
     PyCodeCache,
 )
+from torch._inductor.utils import is_gpu 
+from torch._dynamo.device_interface import get_interface_for_device
 
 if TYPE_CHECKING:
     from multiprocessing.process import BaseProcess
@@ -517,7 +519,8 @@ class BenchmarkRequest:
         *input_tensors: torch.Tensor,
         output_tensor: Optional[torch.Tensor] = None,
     ) -> float:
-        debug = log.isEnabledFor(logging.DEBUG)
+        # debug = log.isEnabledFor(logging.DEBUG)
+        debug = True
         if debug:
             start_ts = time.time()
 
@@ -584,18 +587,28 @@ class GPUDeviceBenchmarkRequest(BenchmarkRequest):
             tensor.device.index
             for tensor in [*input_tensors, output_tensor]
             if isinstance(tensor, torch.Tensor)
-            and tensor.is_cuda
+            and is_gpu(tensor.device.type)
             and tensor.device.index is not None
         }
+        device_type_set = {
+            tensor.device.type
+            for tensor in [*input_tensors, output_tensor]
+            if isinstance(tensor, torch.Tensor)
+            and is_gpu(tensor.device.type)
+        }
+        assert len(device_type_set) == 1
+        device_type = device_type_set.pop()
+
+        device_interface= get_interface_for_device(device_type)
         assert len(device_idx_set) <= 1, f"Can not mix devices {device_idx_set}"
         if len(device_idx_set) == 1:
             device_idx = next(iter(device_idx_set))
         else:
-            device_idx = torch.cuda.current_device()
+            device_idx = device_interface.current_device()
 
-        with torch.cuda.device(device_idx):
+        with device_interface.device(device_idx):
             out = do_bench_gpu(fn)
-            torch.cuda.synchronize()  # shake out any CUDA errors
+            device_interface.synchronize()  # shake out any CUDA errors
 
         return out
 
@@ -644,8 +657,7 @@ class TritonBenchmarkRequest(GPUDeviceBenchmarkRequest):
 
         if "warmup" in inspect.signature(run_method).parameters:
             warmup_arg["warmup"] = False
-
-        from torch._C import _cuda_getCurrentRawStream as get_raw_stream
+        device_interface= get_interface_for_device(self.output_tensor_meta.device.type)
 
         if torch.version.hip and self.matrix_instr_nonkdim != 0:
             return functools.partial(
@@ -655,7 +667,7 @@ class TritonBenchmarkRequest(GPUDeviceBenchmarkRequest):
                 *self.extra_args,
                 grid=self.grid,
                 **warmup_arg,
-                stream=get_raw_stream(self.output_tensor_meta.device.index),
+                stream=device_interface.get_raw_stream(self.output_tensor_meta.device.index),
             )
         else:
             return functools.partial(
@@ -665,7 +677,7 @@ class TritonBenchmarkRequest(GPUDeviceBenchmarkRequest):
                 *self.extra_args,
                 grid=self.grid,
                 **warmup_arg,
-                stream=get_raw_stream(self.output_tensor_meta.device.index),
+                stream=device_interface.get_raw_stream(self.output_tensor_meta.device.index),
             )
 
     def precompile(self):

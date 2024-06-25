@@ -8,6 +8,7 @@ from typing import Callable, List, Optional
 import torch
 from torch import multiprocessing as mp, nn
 from torch._dynamo import reset
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.testing import rand_strided, reset_rng_state
 from torch._inductor import config
@@ -35,7 +36,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
 )
 
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_GPU, GPU_TYPE, HAS_CUDA
 
 torch.set_float32_matmul_precision("high")
 if HAS_CUDA:
@@ -69,7 +70,7 @@ class FailChoiceCaller(ChoiceCaller):
 @instantiate_parametrized_tests
 class TestMaxAutotune(TestCase):
     def _create_buffer(self, name, shape):
-        return Buffer(name, FixedLayout(torch.device("cuda:0"), torch.float32, shape))
+        return Buffer(name, FixedLayout(torch.device(GPU_TYPE), torch.float32, shape))
 
     def test_benchmark_choice_in_subproc(self):
         gm = make_fx(
@@ -84,7 +85,7 @@ class TestMaxAutotune(TestCase):
             buf3 = self._create_buffer("mat3", (2, 3))
             buf4 = self._create_buffer("mat4", (3, 2))
 
-            layout = FixedLayout(torch.device("cuda:0"), torch.float32, (2, 2))
+            layout = FixedLayout(torch.device(GPU_TYPE), torch.float32, (2, 2))
 
             mat1 = AlgorithmSelectorCache.benchmark_example_value(buf1)
             mat2 = AlgorithmSelectorCache.benchmark_example_value(buf2)
@@ -122,7 +123,7 @@ class TestMaxAutotune(TestCase):
             buf3 = self._create_buffer("mat3", (2, 3))
             buf4 = self._create_buffer("mat4", (3, 2))
 
-            layout = FixedLayout(torch.device("cuda:0"), torch.float32, (2, 2))
+            layout = FixedLayout(torch.device(GPU_TYPE), torch.float32, (2, 2))
 
             mat1 = AlgorithmSelectorCache.benchmark_example_value(buf1)
             mat2 = AlgorithmSelectorCache.benchmark_example_value(buf2)
@@ -157,10 +158,10 @@ class TestMaxAutotune(TestCase):
         def mm_plus_mm(a, b, c, d):
             return a @ b + c @ d
 
-        a = torch.randn(m, k).cuda()
-        b = torch.randn(k, n).cuda()
-        c = torch.randn(m, k).cuda()
-        d = torch.randn(k, n).cuda()
+        a = torch.randn(m, k).to(GPU_TYPE)
+        b = torch.randn(k, n).to(GPU_TYPE)
+        c = torch.randn(m, k).to(GPU_TYPE)
+        d = torch.randn(k, n).to(GPU_TYPE)
 
         with config.patch(
             {
@@ -181,10 +182,10 @@ class TestMaxAutotune(TestCase):
         def mm_plus_mm(a, b, c, d):
             return a @ b + c @ d
 
-        a = torch.randn(m, k).cuda()
-        b = torch.randn(k, n).cuda()
-        c = torch.randn(m, k).cuda()
-        d = torch.randn(k, n).cuda()
+        a = torch.randn(m, k).to(GPU_TYPE)
+        b = torch.randn(k, n).to(GPU_TYPE)
+        c = torch.randn(m, k).to(GPU_TYPE)
+        d = torch.randn(k, n).to(GPU_TYPE)
 
         with config.patch({"max_autotune": True}):
             torch.compile(mm_plus_mm, dynamic=dynamic)(a, b, c, d)
@@ -199,8 +200,8 @@ class TestMaxAutotune(TestCase):
             a = torch.sin(a)
             return a @ b
 
-        a = torch.randn(100, 10).cuda()
-        b = torch.randn(10, 100).cuda()
+        a = torch.randn(100, 10).to(GPU_TYPE)
+        b = torch.randn(10, 100).to(GPU_TYPE)
 
         with config.patch({"max_autotune": True, "autotune_in_subproc": True}):
             torch.compile(mm, dynamic=dynamic)(a, b)
@@ -215,8 +216,8 @@ class TestMaxAutotune(TestCase):
             a = torch.sin(a)
             return a @ b
 
-        a = torch.randn(0, 10).cuda()
-        b = torch.randn(10, 100).cuda()
+        a = torch.randn(0, 10).to(GPU_TYPE)
+        b = torch.randn(10, 100).to(GPU_TYPE)
 
         with config.patch({"max_autotune": True}):
             torch.compile(mm, dynamic=dynamic)(a, b)
@@ -230,8 +231,8 @@ class TestMaxAutotune(TestCase):
             a = torch.sin(a)
             return a @ b
 
-        a = torch.randn(100, 10).cuda()
-        b = torch.randn(10, 100).cuda()
+        a = torch.randn(100, 10).to(GPU_TYPE)
+        b = torch.randn(10, 100).to(GPU_TYPE)
 
         class Model(torch.nn.Module):
             def forward(self, x, y):
@@ -240,8 +241,8 @@ class TestMaxAutotune(TestCase):
         def f(x, y):
             return Model()(x, y)
 
-        x = torch.randn(100, 100).cuda()
-        y = torch.randn(100, 100).cuda()
+        x = torch.randn(100, 100).to(GPU_TYPE)
+        y = torch.randn(100, 100).to(GPU_TYPE)
 
         cache = {}
         num_get = 0
@@ -375,9 +376,9 @@ class TestMaxAutotune(TestCase):
         def addmm(x, a, b):
             return torch.addmm(x, a, b)
 
-        x = torch.randn(100).cuda()
-        a = torch.randn(100, 10).cuda()
-        b = torch.randn(10, 100).cuda()
+        x = torch.randn(100).to(GPU_TYPE)
+        a = torch.randn(100, 10).to(GPU_TYPE)
+        b = torch.randn(10, 100).to(GPU_TYPE)
         with config.patch({"max_autotune": True, "autotune_in_subproc": True}):
             Y_compiled = torch.compile(addmm, dynamic=dynamic)(x, a, b)
             Y = addmm(x, a, b)
@@ -392,9 +393,9 @@ class TestMaxAutotune(TestCase):
         def addmm(x, a, b):
             return torch.addmm(x, a, b)
 
-        x = torch.randn(100).cuda()
-        a = torch.randn(0, 10).cuda()
-        b = torch.randn(10, 100).cuda()
+        x = torch.randn(100).to(GPU_TYPE)
+        a = torch.randn(0, 10).to(GPU_TYPE)
+        b = torch.randn(10, 100).to(GPU_TYPE)
         with config.patch({"max_autotune": True}):
             torch.compile(addmm, dynamic=dynamic)(x, a, b)
 
@@ -404,7 +405,7 @@ class TestMaxAutotune(TestCase):
         conv1x1 = (
             torch.nn.Conv2d(in_channels=3, out_channels=16, kernel_size=1)
             .to(memory_format=torch.channels_last)
-            .cuda()
+            .to(GPU_TYPE)
         )
 
         # Example input tensor: batch size = 4, channels = 3, height = 32, width = 32
@@ -412,7 +413,7 @@ class TestMaxAutotune(TestCase):
         input_tensor = (
             torch.randn(4, 3, 32, 32)
             .contiguous(memory_format=torch.channels_last)
-            .cuda()
+            .to(GPU_TYPE)
         )
 
         with config.patch(
@@ -437,7 +438,7 @@ class TestMaxAutotune(TestCase):
             return (a @ b) @ c
 
         fn_c = torch.compile(mode="max-autotune-no-cudagraphs")(fn)
-        inputs = [torch.rand([256, 256], device="cuda") for _ in range(3)]
+        inputs = [torch.rand([256, 256], device=GPU_TYPE) for _ in range(3)]
         from torch._dynamo.utils import counters
 
         self.assertEqual(fn(*inputs), fn_c(*inputs), atol=1e-2, rtol=1e-2)
@@ -458,7 +459,7 @@ class TestMaxAutotune(TestCase):
             return (a @ b) @ c
 
         fn_c = torch.compile()(fn)
-        inputs = [torch.rand([256, 256], device="cuda") for _ in range(3)]
+        inputs = [torch.rand([256, 256], device=GPU_TYPE) for _ in range(3)]
         from torch._dynamo.utils import counters
 
         self.assertEqual(fn(*inputs), fn_c(*inputs), atol=1e-2, rtol=1e-2)
@@ -482,7 +483,7 @@ class TestMaxAutotune(TestCase):
             buf4 = x**2
             return buf0, buf1, buf2, buf3, buf4
 
-        inputs = (torch.rand([256, 256], device="cuda"), torch.tensor(3, device="cuda"))
+        inputs = (torch.rand([256, 256], device=GPU_TYPE), torch.tensor(3, device=GPU_TYPE))
         torch._export.aot_compile(fn, args=inputs)
 
     @config.patch(autotune_local_cache=False, autotune_remote_cache=False)
@@ -494,7 +495,7 @@ class TestMaxAutotune(TestCase):
             return (a @ b) @ c
 
         fn_c = torch.compile(mode="max-autotune-no-cudagraphs")(fn)
-        inputs = [torch.rand([256, 256], device="cuda") for _ in range(3)]
+        inputs = [torch.rand([256, 256], device=GPU_TYPE) for _ in range(3)]
 
         self.assertEqual(fn(*inputs), fn_c(*inputs), atol=1e-2, rtol=1e-2)
 
@@ -513,9 +514,9 @@ class TestMaxAutotune(TestCase):
             )
 
         args = [
-            torch.randn(4, 4, device="cuda"),
-            torch.randn(4, 4, device="cuda"),
-            torch.randn(4, 4, device="cuda"),
+            torch.randn(4, 4, device=GPU_TYPE),
+            torch.randn(4, 4, device=GPU_TYPE),
+            torch.randn(4, 4, device=GPU_TYPE),
         ]
         with config.patch(
             {
@@ -543,8 +544,8 @@ class TestMaxAutotune(TestCase):
         M1 = 8
         K = 4
         N = 3
-        w = torch.rand(N, K).cuda().half()
-        b = torch.rand(N).cuda().half()
+        w = torch.rand(N, K).to(GPU_TYPE).half()
+        b = torch.rand(N).to(GPU_TYPE).half()
 
         with config.patch(
             {
@@ -557,14 +558,14 @@ class TestMaxAutotune(TestCase):
                 fn, fullgraph=True, dynamic=True, mode="max-autotune-no-cudagraphs"
             )
 
-            x0 = torch.rand(K, M0).cuda().half()
-            mul0 = torch.rand(M0, N).cuda().half()
+            x0 = torch.rand(K, M0).to(GPU_TYPE).half()
+            mul0 = torch.rand(M0, N).to(GPU_TYPE).half()
             y0 = compiled_fn(x0, w, b, mul0)
             y0_expected = fn(x0, w, b, mul0)
             torch.testing.assert_close(y0, y0_expected)
 
-            x1 = torch.rand(K, M1).cuda().half()
-            mul1 = torch.rand(M1, N).cuda().half()
+            x1 = torch.rand(K, M1).to(GPU_TYPE).half()
+            mul1 = torch.rand(M1, N).to(GPU_TYPE).half()
             y1 = compiled_fn(x1, w, b, mul1)
             y1_expected = fn(x1, w, b, mul1)
             torch.testing.assert_close(y1, y1_expected)
@@ -574,7 +575,7 @@ class TestMaxAutotune(TestCase):
         fallback_random=True,
         max_autotune_gemm=True,
     )
-    @parametrize("device", ("cpu", "cuda"))
+    @parametrize("device", ("cpu", GPU_TYPE))
     def test_matmul_dropout(self, device):
         def fwd(a, b):
             x = a @ b
@@ -604,11 +605,11 @@ class TestMaxAutotune(TestCase):
         max_autotune_gemm=True,
     )
     @unittest.skipIf(
-        torch.cuda.device_count() < 2, "Need at least 2 devices for this test"
+        get_interface_for_device(GPU_TYPE).device_count() < 2, "Need at least 2 devices for this test"
     )
     def test_autotune_device_guard(self):
-        x = torch.randn(1024, 1024, device="cuda:1")
-        y = torch.randn(1024, 1024, device="cuda:1")
+        x = torch.randn(1024, 1024, device=f"{GPU_TYPE}:1")
+        y = torch.randn(1024, 1024, device=f"{GPU_TYPE}:1")
 
         def f(x, y):
             return x @ y
@@ -620,8 +621,8 @@ class TestMaxAutotune(TestCase):
 
     @config.patch(max_autotune=True)
     def test_empty_conv_input(self, kernel_size=3):
-        x = torch.randn(0, 256, 14, 14, device="cuda")
-        weight = torch.randn(256, 256, kernel_size, kernel_size, device="cuda")
+        x = torch.randn(0, 256, 14, 14, device=GPU_TYPE)
+        weight = torch.randn(256, 256, kernel_size, kernel_size, device=GPU_TYPE)
 
         def f(x, weight):
             return torch.convolution(
@@ -652,7 +653,7 @@ class TestMaxAutotune(TestCase):
         """
         conv = nn.Conv2d(
             3, 64, kernel_size=(1, 1), stride=(1, 1), padding=(0, 0), bias=False
-        ).to(device="cuda")
+        ).to(device=GPU_TYPE)
 
         @torch.compile
         def f(x, y, z):
@@ -663,11 +664,11 @@ class TestMaxAutotune(TestCase):
             return x
 
         x = torch.randn(4, 3, 224, 224).to(
-            memory_format=torch.channels_last, device="cuda"
+            memory_format=torch.channels_last, device=GPU_TYPE
         )
         for _ in range(2):
-            y = torch.randint(0, 10, (224,)).to(device="cuda")
-            z = torch.randint(0, 10, (224,)).to(device="cuda")
+            y = torch.randint(0, 10, (224,)).to(device=GPU_TYPE)
+            z = torch.randint(0, 10, (224,)).to(device=GPU_TYPE)
             f(x, y, z)
 
     def test_non_contiguous_input_mm(self):
@@ -676,9 +677,9 @@ class TestMaxAutotune(TestCase):
         Check https://github.com/pytorch/pytorch/issues/125437 for more details.
         """
         x = rand_strided(
-            (50257, 32768), (1, 50304), dtype=torch.bfloat16, device="cuda"
+            (50257, 32768), (1, 50304), dtype=torch.bfloat16, device=GPU_TYPE
         )
-        y = rand_strided((32768, 768), (768, 1), dtype=torch.bfloat16, device="cuda")
+        y = rand_strided((32768, 768), (768, 1), dtype=torch.bfloat16, device=GPU_TYPE)
 
         @torch.compile(mode="max-autotune")
         def f(x, y):
@@ -689,11 +690,11 @@ class TestMaxAutotune(TestCase):
         self.assertTrue(torch.allclose(ref, act, atol=1e-2, rtol=1e-2))
 
     def test_non_contiguous_input_addmm(self):
-        b = torch.randn((768), dtype=torch.bfloat16, device="cuda")
+        b = torch.randn((768), dtype=torch.bfloat16, device=GPU_TYPE)
         x = rand_strided(
-            (50257, 32768), (1, 50304), dtype=torch.bfloat16, device="cuda"
+            (50257, 32768), (1, 50304), dtype=torch.bfloat16, device=GPU_TYPE
         )
-        y = rand_strided((32768, 768), (768, 1), dtype=torch.bfloat16, device="cuda")
+        y = rand_strided((32768, 768), (768, 1), dtype=torch.bfloat16, device=GPU_TYPE)
 
         @torch.compile(mode="max-autotune")
         def f(x, y):
@@ -705,10 +706,10 @@ class TestMaxAutotune(TestCase):
 
     def test_non_contiguous_input_bmm(self):
         x = rand_strided(
-            (1, 50257, 32768), (0, 1, 50304), dtype=torch.bfloat16, device="cuda"
+            (1, 50257, 32768), (0, 1, 50304), dtype=torch.bfloat16, device=GPU_TYPE
         )
         y = rand_strided(
-            (1, 32768, 768), (0, 768, 1), dtype=torch.bfloat16, device="cuda"
+            (1, 32768, 768), (0, 768, 1), dtype=torch.bfloat16, device=GPU_TYPE
         )
 
         @torch.compile(mode="max-autotune")
@@ -720,11 +721,11 @@ class TestMaxAutotune(TestCase):
         self.assertTrue(torch.allclose(ref, act, atol=1e-2, rtol=1e-2))
 
     def test_non_contiguous_input_mm_plus_mm(self):
-        x1 = rand_strided((50257, 32768), (1, 50304), device="cuda")
-        y1 = rand_strided((32768, 768), (768, 1), device="cuda")
+        x1 = rand_strided((50257, 32768), (1, 50304), device=GPU_TYPE)
+        y1 = rand_strided((32768, 768), (768, 1), device=GPU_TYPE)
 
-        x2 = rand_strided((50257, 32768), (1, 50304), device="cuda")
-        y2 = rand_strided((32768, 768), (768, 1), device="cuda")
+        x2 = rand_strided((50257, 32768), (1, 50304), device=GPU_TYPE)
+        y2 = rand_strided((32768, 768), (768, 1), device=GPU_TYPE)
 
         @torch.compile(mode="max-autotune")
         def f(x1, y1, x2, y2):
@@ -740,8 +741,8 @@ class TestMaxAutotune(TestCase):
         autotune_fallback_to_aten=False,
     )
     def test_no_valid_choices(self):
-        a = torch.zeros([2, 2], device="cuda")
-        b = torch.zeros([2, 2], device="cuda")
+        a = torch.zeros([2, 2], device=GPU_TYPE)
+        b = torch.zeros([2, 2], device=GPU_TYPE)
         with self.assertRaises(BackendCompilerFailed) as context:
             torch.compile(lambda a, b: a.matmul(b))(a, b)
         self.assertIn("NoValidChoicesError", str(context.exception))
@@ -761,8 +762,8 @@ class TestMaxAutotune(TestCase):
             timings = lookup(self, *args, **kwargs)
             return {choice: float("inf") for choice in timings.keys()}
 
-        a = torch.zeros([16, 16], device="cuda")
-        b = torch.zeros([16, 16], device="cuda")
+        a = torch.zeros([16, 16], device=GPU_TYPE)
+        b = torch.zeros([16, 16], device=GPU_TYPE)
         with patch.object(AlgorithmSelectorCache, "lookup", mock_lookup), config.patch(
             benchmark_epilogue_fusion=multi_template
         ):
@@ -869,5 +870,5 @@ if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu
 
     # Set env to make it work in CI.
-    if HAS_CUDA and HAS_CPU and is_big_gpu(0):
+    if HAS_GPU and HAS_CPU and is_big_gpu(0):
         run_tests()
