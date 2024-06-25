@@ -184,7 +184,7 @@ flex_attention_template = TritonTemplate(
     name="flex_attention",
     grid=flex_attention_grid,
     source=r"""
-{{def_kernel("Q", "K", "V", "LSE", "SM_KV_NUM_BLKS", "SM_KV_IDX")}}
+{{def_kernel("Q", "K", "V", "LSE", "SPARSE_KV_NUM_BLKS", "SPARSE_KV_IDX")}}
     # Sub notation for this kernel:
     # Q: Query, K: Key, V: Value
     # M: Number of queries, N: Number of keys/values, D: Model dimension
@@ -233,11 +233,11 @@ flex_attention_template = TritonTemplate(
     k_offset = off_z * stride_kz + off_h * stride_kh
     v_offset = off_z * stride_vz + off_h * stride_vh
 
-    SM_Z = {{size("SM_KV_NUM_BLKS", 0)}}
-    SM_H = {{size("SM_KV_NUM_BLKS", 1)}}
+    SPARSE_Z = {{size("SPARSE_KV_NUM_BLKS", 0)}}
+    SPARSE_H = {{size("SPARSE_KV_NUM_BLKS", 1)}}
 
-    sm_idx_z = off_z % SM_Z
-    sm_idx_h = off_h % SM_H
+    sparse_idx_z = off_z % SPARSE_Z
+    sparse_idx_h = off_h % SPARSE_H
 
     BLOCKSPARSE_Q_MULTIPLE: tl.constexpr = (BLOCKSPARSE_Q // BLOCK_M)
     BLOCKSPARSE_KV_MULTIPLE: tl.constexpr = (BLOCKSPARSE_KV // BLOCK_N)
@@ -245,13 +245,13 @@ flex_attention_template = TritonTemplate(
     BLOCKSPARSE_Q_LEN: tl.constexpr = Q_LEN // BLOCKSPARSE_Q
     BLOCKSPARSE_KV_LEN: tl.constexpr = KV_LEN // BLOCKSPARSE_KV
 
-    # SM_KV_IDX and SM_KV_NUM_BLKS are always contiguous.
-    sm_hz_offset = sm_idx_z * SM_H + sm_idx_h
-    sm_kv_num_blks_offset = sm_hz_offset * BLOCKSPARSE_Q_LEN + start_m // BLOCKSPARSE_Q_MULTIPLE
-    sm_kv_idx_offset = sm_hz_offset * BLOCKSPARSE_Q_LEN * BLOCKSPARSE_KV_LEN + (start_m // BLOCKSPARSE_Q_MULTIPLE) * BLOCKSPARSE_KV_LEN  # noqa: B950
-    kv_indices = SM_KV_IDX + sm_kv_idx_offset
+    # SPARSE_KV_IDX and SPARSE_KV_NUM_BLKS are always contiguous.
+    sparse_hz_offset = sparse_idx_z * SPARSE_H + sparse_idx_h
+    sparse_kv_num_blks_offset = sparse_hz_offset * BLOCKSPARSE_Q_LEN + start_m // BLOCKSPARSE_Q_MULTIPLE
+    sparse_kv_idx_offset = sparse_hz_offset * BLOCKSPARSE_Q_LEN * BLOCKSPARSE_KV_LEN + (start_m // BLOCKSPARSE_Q_MULTIPLE) * BLOCKSPARSE_KV_LEN  # noqa: B950
+    kv_indices = SPARSE_KV_IDX + sparse_kv_idx_offset
     kv_start = tl.load(kv_indices) * BLOCKSPARSE_KV # first kv block we're loading
-    sm_kv_num_blocks = tl.load(SM_KV_NUM_BLKS + sm_kv_num_blks_offset)
+    sparse_kv_num_blocks = tl.load(SPARSE_KV_NUM_BLKS + sparse_kv_num_blks_offset)
 
     Q_block_ptr = tl.make_block_ptr(
         base=Q + q_offset,
@@ -292,7 +292,7 @@ flex_attention_template = TritonTemplate(
 
     # loop over k, v and update accumulator
     lo = 0
-    hi = sm_kv_num_blocks * BLOCKSPARSE_KV_MULTIPLE
+    hi = sparse_kv_num_blocks * BLOCKSPARSE_KV_MULTIPLE
 
     for start_n in range(0, hi):
         # -- load k, v --
@@ -589,7 +589,7 @@ flex_attention_backward_template = TritonTemplate(
     name="flex_attention_backward",
     grid=flex_attention_backward_grid,
     source=r"""
-{{def_kernel("Q", "K", "V", "OUT", "LSE", "DELTA", "DO", "DQ", "DV", "SM_KV_NUM_BLKS", "SM_KV_IDX", "SM_Q_NUM_BLKS", "SM_Q_IDX")}}
+{{def_kernel("Q", "K", "V", "OUT", "LSE", "DELTA", "DO", "DQ", "DV", "SPARSE_KV_NUM_BLKS", "SPARSE_KV_IDX", "SPARSE_Q_NUM_BLKS", "SPARSE_Q_IDX")}}
     # Sub notation for this kernel:
     # Q: Query, K: Key, V: Value
     # OUT: Forward output, LSE: logsumexp (logsumexp is always stored in fp32 regardless of the input dtype)
@@ -637,11 +637,11 @@ flex_attention_backward_template = TritonTemplate(
     off_z = off_hz // H # batch idx
     off_h = off_hz % H # head idx
 
-    SM_Z = {{size("SM_KV_NUM_BLKS", 0)}}
-    SM_H = {{size("SM_KV_NUM_BLKS", 1)}}
+    SM_Z = {{size("SPARSE_KV_NUM_BLKS", 0)}}
+    SM_H = {{size("SPARSE_KV_NUM_BLKS", 1)}}
 
-    sm_idx_z = off_z % SM_Z
-    sm_idx_h = off_h % SM_H
+    sparse_idx_z = off_z % SM_Z
+    sparse_idx_h = off_h % SM_H
 
     off_chz = (off_hz * Q_LEN).to(tl.int64)
     q_adj = (stride_qh * (off_hz % H) + stride_qz * (off_hz // H)).to(tl.int64)
@@ -670,13 +670,13 @@ flex_attention_backward_template = TritonTemplate(
         BLOCKSPARSE_Q_LEN = Q_LEN // BLOCKSPARSE_Q
         BLOCKSPARSE_KV_LEN = KV_LEN // BLOCKSPARSE_KV
 
-        # SM_KV_IDX and SM_KV_NUM_BLKS are always contiguous.
-        sm_hz_offset = sm_idx_z * SM_H + sm_idx_h
-        sm_kv_num_blks_offset = sm_hz_offset * BLOCKSPARSE_Q_LEN + off_pid // BLOCKSPARSE_Q_MULTIPLE
-        sm_kv_idx_offset = sm_hz_offset * BLOCKSPARSE_Q_LEN * BLOCKSPARSE_KV_LEN + (off_pid // BLOCKSPARSE_Q_MULTIPLE) * BLOCKSPARSE_KV_LEN  # noqa: B950
-        kv_indices = SM_KV_IDX + sm_kv_idx_offset
+        # SPARSE_KV_IDX and SPARSE_KV_NUM_BLKS are always contiguous.
+        sparse_hz_offset = sparse_idx_z * SM_H + sparse_idx_h
+        sparse_kv_num_blks_offset = sparse_hz_offset * BLOCKSPARSE_Q_LEN + off_pid // BLOCKSPARSE_Q_MULTIPLE
+        sparse_kv_idx_offset = sparse_hz_offset * BLOCKSPARSE_Q_LEN * BLOCKSPARSE_KV_LEN + (off_pid // BLOCKSPARSE_Q_MULTIPLE) * BLOCKSPARSE_KV_LEN  # noqa: B950
+        kv_indices = SPARSE_KV_IDX + sparse_kv_idx_offset
         kv_start = tl.load(kv_indices) * BLOCKSPARSE_KV # first kv block we're loading
-        sm_kv_num_blocks = tl.load(SM_KV_NUM_BLKS + sm_kv_num_blks_offset)
+        sparse_kv_num_blocks = tl.load(SPARSE_KV_NUM_BLKS + sparse_kv_num_blks_offset)
 
         start_m2 = off_pid * BLOCK_M2
 
@@ -699,7 +699,7 @@ flex_attention_backward_template = TritonTemplate(
         tl.static_assert(BLOCK_M2 % BLOCK_N2 == 0)
 
         curr_n = start_n2
-        hi = sm_kv_num_blocks * BLOCKSPARSE_KV_MULTIPLE
+        hi = sparse_kv_num_blocks * BLOCKSPARSE_KV_MULTIPLE
         for start_n in range(0, hi):
             offs_n2= curr_n + tl.arange(0, BLOCK_N2)
             kT = tl.load(kT_ptrs)
@@ -768,13 +768,13 @@ flex_attention_backward_template = TritonTemplate(
         BLOCKSPARSE_Q_LEN = Q_LEN // BLOCKSPARSE_Q
         BLOCKSPARSE_KV_LEN = KV_LEN // BLOCKSPARSE_KV
 
-        # SM_Q_IDX and SM_Q_NUM_BLKS are always contiguous.
-        sm_hz_offset = sm_idx_z * SM_H + sm_idx_h
-        sm_q_num_blks_offset = sm_hz_offset * BLOCKSPARSE_KV_LEN + pid // BLOCKSPARSE_KV_MULTIPLE
-        sm_q_idx_offset = sm_hz_offset * BLOCKSPARSE_Q_LEN * BLOCKSPARSE_KV_LEN + (pid // BLOCKSPARSE_KV_MULTIPLE) * BLOCKSPARSE_Q_LEN  # noqa: B950
-        q_indices = SM_Q_IDX + sm_q_idx_offset
+        # SPARSE_Q_IDX and SPARSE_Q_NUM_BLKS are always contiguous.
+        sparse_hz_offset = sparse_idx_z * SM_H + sparse_idx_h
+        sparse_q_num_blks_offset = sparse_hz_offset * BLOCKSPARSE_KV_LEN + pid // BLOCKSPARSE_KV_MULTIPLE
+        sparse_q_idx_offset = sparse_hz_offset * BLOCKSPARSE_Q_LEN * BLOCKSPARSE_KV_LEN + (pid // BLOCKSPARSE_KV_MULTIPLE) * BLOCKSPARSE_Q_LEN  # noqa: B950
+        q_indices = SPARSE_Q_IDX + sparse_q_idx_offset
         q_start = tl.load(q_indices) * BLOCKSPARSE_Q # first q block we're loading
-        sm_q_num_blocks = tl.load(SM_Q_NUM_BLKS + sm_q_num_blks_offset)
+        sparse_q_num_blocks = tl.load(SPARSE_Q_NUM_BLKS + sparse_q_num_blks_offset)
 
         start_n1 = pid * BLOCK_N1
         start_m1 = q_start
@@ -796,7 +796,7 @@ flex_attention_backward_template = TritonTemplate(
         tl.static_assert(BLOCK_N1 % BLOCK_M1 == 0)
 
         curr_m = start_m1
-        hi = sm_q_num_blocks * BLOCKSPARSE_Q_MULTIPLE
+        hi = sparse_q_num_blocks * BLOCKSPARSE_Q_MULTIPLE
         for start_m in range(0, hi):
             qT = tl.load(qT_ptrs)
             # Load LSE before computing qk to reduce pipeline stall.
