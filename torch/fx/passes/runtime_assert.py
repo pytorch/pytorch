@@ -70,10 +70,10 @@ def insert_deferred_runtime_asserts(
         # something with _w, but not w ...
 
         # turns into ->
-        s0 = x.shape[0]
-        s1 = y.shape[0]
         _w0 = 2 * s0
         _w = _w0 * s1
+        
+        # where s0, s1 are either SymInt graph inputs, or the result of added size calls
 
     Redundant torch._check or torch.ops.aten._assert_scalar.default calls that assert
     the same expression, and redundant constrain_range calls are also deduplicated.
@@ -171,7 +171,7 @@ def insert_deferred_runtime_asserts(
         # sympy_interp() with hash consing
         from sympy import Integer, Number, Symbol
         from sympy.logic.boolalg import BooleanAtom
-        from torch.utils._sympy.interp import run_sympy_handler, sympy_interp
+        from torch.utils._sympy.interp import _run_sympy_handler, sympy_interp
 
         # base cases, don't cache
         if isinstance(expr, (Integer, Number, Symbol, BooleanAtom)):
@@ -193,7 +193,7 @@ def insert_deferred_runtime_asserts(
         ]
 
         # run expr handler
-        symbol_to_proxy[expr] = run_sympy_handler(
+        symbol_to_proxy[expr] = _run_sympy_handler(
             PythonReferenceAnalysis, fx_args, expr
         )
         return symbol_to_proxy[expr]

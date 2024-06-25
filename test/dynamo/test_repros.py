@@ -994,7 +994,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertExpectedInline(cnt.op_count, """10""")
         else:
             self.assertExpectedInline(cnt.frame_count, """4""")
-            self.assertExpectedInline(cnt.op_count, """14""")
+            self.assertExpectedInline(cnt.op_count, """12""")
 
     def test_boxes_len(self):
         def fn(boxes):
@@ -1010,7 +1010,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertExpectedInline(cnt.op_count, """1""")
         else:
             self.assertExpectedInline(cnt.frame_count, """1""")
-            self.assertExpectedInline(cnt.op_count, """6""")
+            self.assertExpectedInline(cnt.op_count, """4""")
 
     def _reformer(self, nopython):
         input = torch.randn([1, 64, 256])
@@ -1244,7 +1244,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 self.assertExpectedInline(cnt.op_count, """4""")
         else:
             self.assertExpectedInline(cnt.frame_count, """2""")
-            self.assertExpectedInline(cnt.op_count, """35""")
+            self.assertExpectedInline(cnt.op_count, """22""")
 
     def test_hf_t5_forward(self):
         input = torch.randn([1, 2048, 512])
@@ -1605,7 +1605,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertExpectedInline(cnt.op_count, """14""")
         else:
             self.assertExpectedInline(cnt.frame_count, """1""")
-            self.assertExpectedInline(cnt.op_count, """27""")
+            self.assertExpectedInline(cnt.op_count, """16""")
 
     def test_recursive_map(self):
         # https://github.com/pytorch/torchdynamo/issues/132

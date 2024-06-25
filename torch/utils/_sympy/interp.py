@@ -106,7 +106,7 @@ def handlers():
 ASSOCIATIVE_OPS = {"minimum", "maximum", "mul", "add", "and_", "or_"}
 
 
-def run_sympy_handler(analysis, args, expr, index_dtype=torch.int64):
+def _run_sympy_handler(analysis, args, expr, index_dtype=torch.int64):
     # Special cases
     if isinstance(expr, sympy.Pow) and isinstance(
         expr.args[1], sympy.core.numbers.Half
@@ -177,7 +177,7 @@ def sympy_interp(
         return env[expr]
 
     # Recursive case
-    return run_sympy_handler(
+    return _run_sympy_handler(
         analysis,
         [sympy_interp(analysis, env, arg) for arg in expr.args],
         expr,

@@ -587,7 +587,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
                 b = b + x * i
             return b
 
-        self._common(fn, 1, ifdynstaticdefault(2, 7))
+        self._common(fn, 1, ifdynstaticdefault(2, 3))
 
 
 if __name__ == "__main__":
