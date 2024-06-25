@@ -391,12 +391,12 @@ class _MapDataPipeSerializationWrapper(_DataPipeSerializationWrapper, MapDataPip
 
 class DataChunk(List[T]):
     def __init__(self, items: Iterable[T]) -> None:
+        items = list(items)
         super().__init__(items)
         self.items = items
 
     def as_str(self, indent: str = '') -> str:
-        res = indent + "[" + ", ".join(str(i) for i in iter(self)) + "]"
-        return res
+        return indent + "[" + ", ".join(str(i) for i in iter(self)) + "]"
 
     def __iter__(self) -> Iterator[T]:
         yield from super().__iter__()
