@@ -1,0 +1,29 @@
+tracking_issue: 24422
+ciflow_tracking_issue: 64124
+ciflow_push_tags:
+- ciflow/binaries
+- ciflow/binaries_conda
+- ciflow/binaries_libtorch
+- ciflow/binaries_wheel
+- ciflow/inductor
+- ciflow/inductor-perf-compare
+- ciflow/inductor-micro-benchmark
+- ciflow/inductor-cu124
+- ciflow/linux-aarch64
+- ciflow/mps
+- ciflow/nightly
+- ciflow/periodic
+- ciflow/rocm
+- ciflow/slow
+- ciflow/trunk
+- ciflow/unstable
+- ciflow/xpu
+- ciflow/torchbench
+retryable_workflows:
+- pull
+- trunk
+- linux-binary
+- windows-binary
+labeler_config: labeler.yml
+label_to_label_config: label_to_label.yml
+mergebot: True
