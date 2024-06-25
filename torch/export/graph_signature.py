@@ -108,8 +108,15 @@ class OutputSpec:
 
     def __post_init__(self):
         assert isinstance(
-            self.arg, (TensorArgument, SymIntArgument, ConstantArgument, TokenArgument)
-        )
+            self.arg,
+            (
+                TensorArgument,
+                SymIntArgument,
+                ConstantArgument,
+                TokenArgument,
+                CustomObjArgument,
+            ),
+        ), self.arg
 
 
 def _sig_to_specs(
@@ -369,6 +376,8 @@ class ExportGraphSignature:
                 user_outputs.append(s.arg.name)
             elif isinstance(s.arg, ConstantArgument):
                 user_outputs.append(s.arg.value)
+            elif isinstance(s.arg, CustomObjArgument):
+                user_outputs.append(s.arg.name)
             else:
                 raise RuntimeError(f"{s.arg} is not a valid user output")
         return tuple(user_outputs)
