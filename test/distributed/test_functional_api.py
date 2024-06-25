@@ -443,6 +443,10 @@ def with_comms(func=None):
 
     @wraps(func)
     def wrapper(self, *args, **kwargs):
+        global BACKEND
+
+        if "BACKEND" in os.environ:
+            BACKEND = os.environ["BACKEND"]
         if BACKEND == dist.Backend.NCCL and torch.cuda.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
         self.dist_init()
@@ -457,6 +461,7 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
         super().setUp()
         os.environ["WORLD_SIZE"] = str(self.world_size)
         os.environ["BACKEND"] = dist.Backend.NCCL
+        BACKEND = dist.Backend.NCCL
         self._spawn_processes()
 
     @property

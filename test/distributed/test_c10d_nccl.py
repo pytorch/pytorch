@@ -575,6 +575,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         self._check_nccl_timeout(timedelta(seconds=252))
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_comm_split_optimization(self):
         # Test the optimization of new groups that contain all world
         # ranks use the "transparent" `ncclCommSplit` optimization.
