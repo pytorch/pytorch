@@ -928,6 +928,14 @@ class CppWrapperCpu(WrapperCodeGen):
         dtype_str = str(dtype).split(".")[-1]
         writer = indented_buffer or self
         writer.writeline(f"{DTYPE_TO_CPP[dtype]} {scalar};")
+
+        # follow example in generate_c_shim_extern_kernel_call
+        # only need convert_arrayref_tensor_to_tensor for ArrayRefTensors
+        if isinstance(tensor, str) and tensor.startswith(
+                    ("buf", "arg", "wrap_with_raii_handle_if_needed")
+                ):
+            tensor = f"convert_arrayref_tensor_to_tensor({tensor})"
+
         writer.writeline(
             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_{dtype_str}({tensor}, &{scalar}));"
         )
@@ -1561,10 +1569,7 @@ class CppWrapperCpu(WrapperCodeGen):
             )
             device_type, device_id = device_str.split(",")
             device_idx = "this->device_idx_" if V.graph.aot_mode else device_id
-            if (
-                buffer_if_can_stack_allocate is not None
-                and len(buffer_if_can_stack_allocate.get_size()) > 0
-            ):
+            if buffer_if_can_stack_allocate is not None:
                 self.stack_allocated_buffers[name] = buffer_if_can_stack_allocate
                 cpp_type = DTYPE_TO_CPP[dtype]
                 numel = buffer_if_can_stack_allocate.get_numel()
