@@ -1161,8 +1161,12 @@ class RemovableHandleVariable(VariableTracker):
     def reconstruct(self, codegen):
         if self.idx == self.REMOVED:
             # Hook has already been removed, return a dummy handle
-            codegen.load_import_from("torch._dynamo.utils", "invalid_removeable_handle")
-            codegen.extend_output(create_call_function(0, True))
+            codegen.add_push_null(
+                lambda: codegen.load_import_from(
+                    "torch._dynamo.utils", "invalid_removeable_handle"
+                )
+            )
+            codegen.extend_output(create_call_function(0, False))
             return
         # unreachable due to codegen.add_cache() when the hook is installed
         super().reconstruct(codegen)
