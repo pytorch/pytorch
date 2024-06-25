@@ -80,6 +80,8 @@ class SymmetricMemoryAllocator : public c10::intrusive_ptr_target {
   virtual bool is_rendezvous_completed(void* ptr) = 0;
 };
 
+C10_EXPORT bool is_finalizing();
+
 C10_EXPORT void register_allocator(
     c10::DeviceType device_type,
     c10::intrusive_ptr<SymmetricMemoryAllocator> allocator);

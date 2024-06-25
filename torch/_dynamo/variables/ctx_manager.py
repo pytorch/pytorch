@@ -88,9 +88,7 @@ class ContextWrappingVariable(VariableTracker):
         )
 
     def reconstruct(self, codegen):
-        if sys.version_info >= (3, 11):
-            codegen.append_output(create_instruction("PUSH_NULL"))
-        self.reconstruct_type(codegen)
+        codegen.add_push_null(lambda: self.reconstruct_type(codegen))
         target_values = self.target_values
         if not target_values:
             target_values = ()
@@ -387,10 +385,10 @@ class CatchWarningsCtxManagerVariable(ContextWrappingVariable):
         return variables.ConstantVariable.create(ctx_val.__enter__())
 
     def reconstruct(self, cg):
-        cg.load_import_from("warnings", "catch_warnings")
+        cg.add_push_null(lambda: cg.load_import_from("warnings", "catch_warnings"))
         cg.foreach(self.catch_warnings_args.values())
         keys = tuple(self.catch_warnings_args.keys())
-        cg.extend_output(cg.create_call_function_kw(len(keys), keys, True))
+        cg.extend_output(cg.create_call_function_kw(len(keys), keys, False))
 
 
 class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
@@ -843,6 +841,62 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
         )
 
 
+class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FSDP_TRAINING_STATE)
+
+    @staticmethod
+    def create(tx, param_group_var, target_value, **kwargs):
+        var = FSDPParamGroupUseTrainingStateVariable(
+            param_group_var=param_group_var,
+            target_values=[target_value],
+            initial_values=[param_group_var.value._training_state],
+            **kwargs,
+        )
+        return var
+
+    def __init__(self, param_group_var, target_values, initial_values=None, **kwargs):
+        super().__init__(
+            target_values=target_values, initial_values=initial_values, **kwargs
+        )
+        self.param_group_var = param_group_var
+        install_guard(self._guards_singleton)
+
+    def enter(self, tx):
+        self._call_func(tx, self.target_values)
+        return variables.ConstantVariable.create(None)
+
+    def exit(self, tx, *args):
+        self._call_func(tx, self.initial_values)
+        return variables.ConstantVariable.create(None)
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ):
+        self._call_func(tx, self.initial_values)  # undo eager initialization
+        return super().call_function(tx, args, kwargs)
+
+    def _call_func(self, tx, values):
+        assert len(values) == 1
+        value = values[0]
+        if self.param_group_var.value._training_state != value:
+            self.param_group_var.call_method(
+                tx,
+                "__setattr__",
+                (
+                    variables.ConstantVariable.create("_training_state"),
+                    variables.EnumVariable(value),
+                ),
+                {},
+            )
+            self.param_group_var.value._training_state = value
+
+    def module_name(self):
+        return "torch.distributed._composable.fsdp._fsdp_param_group.FSDPParamGroup"
+
+    def fn_name(self):
+        return "use_training_state"
+
+
 class StreamVariable(VariableTracker):
     def __init__(self, proxy, value, device, **kwargs):
         if proxy is not None and "example_value" in proxy.node.meta:
@@ -913,9 +967,7 @@ class StreamVariable(VariableTracker):
         # design, to unblock current work, we lift the stream into a global and then codegen bytecode to load it from there.
         prefix = f"_stream_{self.device}"
         name = codegen.tx.output.install_global_by_id(prefix, self.value)
-        codegen.append_output(
-            codegen.create_load_global(name, push_null=False, add=True)
-        )
+        codegen.append_output(codegen.create_load_global(name, add=True))
 
 
 class EventVariable(VariableTracker):
@@ -982,7 +1034,8 @@ class WithExitFunctionVariable(VariableTracker):
         if codegen.tx.output.partial_convert:
             if sys.version_info >= (3, 11):
                 codegen.append_output(create_instruction("PUSH_NULL"))
-                codegen.append_output(create_instruction("SWAP", arg=2))
+                if sys.version_info < (3, 13):
+                    codegen.append_output(create_instruction("SWAP", arg=2))
             codegen.extend_output(
                 [codegen.create_load_const(val) for val in self.ctx.target_values]
             )
