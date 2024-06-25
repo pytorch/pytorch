@@ -1517,12 +1517,16 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             out = foo(inp).detach()
             out2 = foo(inp).detach()
 
-            with self.assertRaisesRegex(Exception, "overwritten by a subsequent forward run."):
+            with self.assertRaisesRegex(
+                Exception, "overwritten by a subsequent forward run."
+            ):
                 out + out
 
             foo(inp)
 
-            with self.assertRaisesRegex(Exception, "overwritten by a subsequent forward run."):
+            with self.assertRaisesRegex(
+                Exception, "overwritten by a subsequent forward run."
+            ):
                 out2 + out2
 
         @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
