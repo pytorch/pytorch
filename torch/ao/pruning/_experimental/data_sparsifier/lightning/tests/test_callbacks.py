@@ -1,22 +1,30 @@
 # mypy: allow-untyped-defs
-from torch.ao.pruning._experimental.data_sparsifier.data_norm_sparsifier import DataNormSparsifier
-from torch.ao.pruning._experimental.data_scheduler.base_data_scheduler import BaseDataScheduler
-import torch
-import torch.nn as nn
-from typing import List
-from torch.ao.pruning._experimental.data_sparsifier.lightning.callbacks.data_sparsity import (
-    PostTrainingDataSparsity,
-    TrainingAwareDataSparsity
-)
-from torch.ao.pruning._experimental.data_sparsifier.lightning.callbacks._data_sparstity_utils import _get_valid_name
-from torch.ao.pruning._experimental.data_sparsifier.base_data_sparsifier import SUPPORTED_TYPES
-from torch.testing._internal.common_utils import TestCase
-from torch.testing._internal.common_utils import run_tests
 import importlib
+import math
 import unittest
 import warnings
-import math
+from typing import List
+
+import torch
+import torch.nn as nn
+from torch.ao.pruning._experimental.data_scheduler.base_data_scheduler import (
+    BaseDataScheduler,
+)
+from torch.ao.pruning._experimental.data_sparsifier.base_data_sparsifier import (
+    SUPPORTED_TYPES,
+)
+from torch.ao.pruning._experimental.data_sparsifier.data_norm_sparsifier import (
+    DataNormSparsifier,
+)
+from torch.ao.pruning._experimental.data_sparsifier.lightning.callbacks._data_sparstity_utils import (
+    _get_valid_name,
+)
+from torch.ao.pruning._experimental.data_sparsifier.lightning.callbacks.data_sparsity import (
+    PostTrainingDataSparsity,
+    TrainingAwareDataSparsity,
+)
 from torch.nn.utils.parametrize import is_parametrized
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class DummyModel(nn.Module):
@@ -45,26 +53,40 @@ def _make_lightning_module(iC: int, oC: List[int]):
     return DummyLightningModule(iC, oC)
 
 
-
 class StepSLScheduler(BaseDataScheduler):
-    """The sparsity param of each data group is multiplied by gamma every step_size epochs.
-    """
-    def __init__(self, data_sparsifier, schedule_param='sparsity_level',
-                 step_size=1, gamma=2, last_epoch=-1, verbose=False):
+    """The sparsity param of each data group is multiplied by gamma every step_size epochs."""
 
+    def __init__(
+        self,
+        data_sparsifier,
+        schedule_param="sparsity_level",
+        step_size=1,
+        gamma=2,
+        last_epoch=-1,
+        verbose=False,
+    ):
         self.gamma = gamma
         self.step_size = step_size
         super().__init__(data_sparsifier, schedule_param, last_epoch, verbose)
 
     def get_schedule_param(self):
         if not self._get_sp_called_within_step:
-            warnings.warn("To get the last learning rate computed by the scheduler, "
-                          "please use `get_last_lr()`.", UserWarning)
+            warnings.warn(
+                "To get the last learning rate computed by the scheduler, "
+                "please use `get_last_lr()`.",
+                UserWarning,
+            )
         data_groups = self.data_sparsifier.data_groups
         if (self.last_epoch == 0) or (self.last_epoch % self.step_size != 0):
-            return {name: config[self.schedule_param] for name, config in data_groups.items()}
+            return {
+                name: config[self.schedule_param]
+                for name, config in data_groups.items()
+            }
 
-        return {name: config[self.schedule_param] * self.gamma for name, config in data_groups.items()}
+        return {
+            name: config[self.schedule_param] * self.gamma
+            for name, config in data_groups.items()
+        }
 
 
 class TestPostTrainingCallback(TestCase):
@@ -99,15 +121,21 @@ class TestPostTrainingCallback(TestCase):
             assert (1.0 - mask.float().mean()) > 0.0
 
             # make sure that non-zero values in data after squash mask are equal to original values
-            sparsified_data = callback.data_sparsifier.get_data(name=valid_name, return_original=False)
-            assert torch.all(sparsified_data[sparsified_data != 0] == param[sparsified_data != 0])
+            sparsified_data = callback.data_sparsifier.get_data(
+                name=valid_name, return_original=False
+            )
+            assert torch.all(
+                sparsified_data[sparsified_data != 0] == param[sparsified_data != 0]
+            )
 
-    @unittest.skipIf(not importlib.util.find_spec("pytorch_lightning"), "No pytorch_lightning")
+    @unittest.skipIf(
+        not importlib.util.find_spec("pytorch_lightning"), "No pytorch_lightning"
+    )
     def test_post_training_callback(self):
         sparsifier_args = {
-            'sparsity_level': 0.5,
-            'sparse_block_shape': (1, 4),
-            'zeros_per_block': 4
+            "sparsity_level": 0.5,
+            "sparse_block_shape": (1, 4),
+            "zeros_per_block": 4,
         }
         callback = PostTrainingDataSparsity(DataNormSparsifier, sparsifier_args)
         pl_module = _make_lightning_module(100, [128, 256, 16])
@@ -119,7 +147,10 @@ class TestTrainingAwareCallback(TestCase):
     """Class to test in-training version of lightning callback
     Simulates model training and makes sure that each hook is doing what is expected
     """
-    def _check_on_train_start(self, pl_module, callback, sparsifier_args, scheduler_args):
+
+    def _check_on_train_start(
+        self, pl_module, callback, sparsifier_args, scheduler_args
+    ):
         """Makes sure that the data_sparsifier and data_scheduler objects are being created
         correctly.
         Basically, confirms that the input args and sparsifier/scheduler args are in-line.
@@ -128,7 +159,9 @@ class TestTrainingAwareCallback(TestCase):
         callback.on_train_start(42, pl_module)  # 42 is a dummy value
 
         # sparsifier and scheduler instantiated
-        assert callback.data_scheduler is not None and callback.data_sparsifier is not None
+        assert (
+            callback.data_scheduler is not None and callback.data_sparsifier is not None
+        )
 
         # data sparsifier args are correct
         for key, value in sparsifier_args.items():
@@ -181,25 +214,25 @@ class TestTrainingAwareCallback(TestCase):
         data_sparsifier_state_dict = callback.data_sparsifier.state_dict()
 
         # compare container objects
-        container_obj1 = data_sparsifier_state_dict['_container']
-        container_obj2 = callback.data_sparsifier_state_dict['_container']
+        container_obj1 = data_sparsifier_state_dict["_container"]
+        container_obj2 = callback.data_sparsifier_state_dict["_container"]
         assert len(container_obj1) == len(container_obj2)
         for key, value in container_obj2.items():
             assert key in container_obj1
             assert torch.all(value == container_obj1[key])
 
         # compare state objects
-        state_obj1 = data_sparsifier_state_dict['state']
-        state_obj2 = callback.data_sparsifier_state_dict['state']
+        state_obj1 = data_sparsifier_state_dict["state"]
+        state_obj2 = callback.data_sparsifier_state_dict["state"]
         assert len(state_obj1) == len(state_obj2)
         for key, value in state_obj2.items():
             assert key in state_obj1
-            assert 'mask' in value and 'mask' in state_obj1[key]
-            assert torch.all(value['mask'] == state_obj1[key]['mask'])
+            assert "mask" in value and "mask" in state_obj1[key]
+            assert torch.all(value["mask"] == state_obj1[key]["mask"])
 
         # compare data_groups dict
-        data_grp1 = data_sparsifier_state_dict['data_groups']
-        data_grp2 = callback.data_sparsifier_state_dict['data_groups']
+        data_grp1 = data_sparsifier_state_dict["data_groups"]
+        data_grp2 = callback.data_sparsifier_state_dict["data_groups"]
         assert len(data_grp1) == len(data_grp2)
         for key, value in data_grp2.items():
             assert key in data_grp1
@@ -226,7 +259,9 @@ class TestTrainingAwareCallback(TestCase):
 
             # check sparsity levels of scheduler
             log_last_sl = math.log(last_sl[valid_name])
-            log_actual_sl = math.log(base_sl[valid_name] * (data_scheduler.gamma ** last_epoch))
+            log_actual_sl = math.log(
+                base_sl[valid_name] * (data_scheduler.gamma**last_epoch)
+            )
             assert log_last_sl == log_actual_sl
 
     def _check_on_train_end(self, pl_module, callback):
@@ -241,23 +276,22 @@ class TestTrainingAwareCallback(TestCase):
             valid_name = _get_valid_name(name)
             assert not is_parametrized(callback.data_sparsifier._continer, valid_name)
 
-    @unittest.skipIf(not importlib.util.find_spec("pytorch_lightning"), "No pytorch_lightning")
+    @unittest.skipIf(
+        not importlib.util.find_spec("pytorch_lightning"), "No pytorch_lightning"
+    )
     def test_train_aware_callback(self):
         sparsifier_args = {
-            'sparsity_level': 0.5,
-            'sparse_block_shape': (1, 4),
-            'zeros_per_block': 4
+            "sparsity_level": 0.5,
+            "sparse_block_shape": (1, 4),
+            "zeros_per_block": 4,
         }
-        scheduler_args = {
-            'gamma': 2,
-            'step_size': 1
-        }
+        scheduler_args = {"gamma": 2, "step_size": 1}
 
         callback = TrainingAwareDataSparsity(
             data_sparsifier_class=DataNormSparsifier,
             data_sparsifier_args=sparsifier_args,
             data_scheduler_class=StepSLScheduler,
-            data_scheduler_args=scheduler_args
+            data_scheduler_args=scheduler_args,
         )
 
         pl_module = _make_lightning_module(100, [128, 256, 16])
