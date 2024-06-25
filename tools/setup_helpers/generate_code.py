@@ -1,7 +1,7 @@
 import argparse
 import os
-import pathlib
 import sys
+from pathlib import Path
 from typing import Any, cast, Optional
 
 import yaml
@@ -42,9 +42,7 @@ def generate_code(
     autograd_gen_dir = os.path.join(install_dir, "autograd", "generated")
     for d in (autograd_gen_dir, python_install_dir):
         os.makedirs(d, exist_ok=True)
-    autograd_dir = os.fspath(
-        pathlib.Path(__file__).absolute().parent.parent / "autograd"
-    )
+    autograd_dir = os.fspath(Path(__file__).absolute().parent.parent / "autograd")
 
     if subset == "pybindings" or not subset:
         gen_autograd_python(
@@ -111,7 +109,7 @@ def get_selector(
     operators_yaml_path: Optional[str],
 ) -> Any:
     # cwrap depends on pyyaml, so we can't import it earlier
-    REPO_ROOT = pathlib.Path(__file__).absolute().parents[2]
+    REPO_ROOT = Path(__file__).absolute().parents[2]
     sys.path.insert(0, str(REPO_ROOT))
 
     from torchgen.selective_build.selector import SelectiveBuilder
@@ -138,7 +136,7 @@ def main() -> None:
     parser.add_argument(
         "--gen-dir",
         type=pathlib.Path,
-        default=pathlib.Path("."),
+        default=Path("."),
         help="Root directory where to install files. Defaults to the current working directory.",
     )
     parser.add_argument(
