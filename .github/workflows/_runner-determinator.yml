@@ -26,7 +26,7 @@ on:
 
 jobs:
   runner-determinator:
-    runs-on: linux.4xlarge
+    runs-on: ubuntu-latest
     outputs:
       label-type: ${{ steps.set-condition.outputs.label-type }}
     env:
