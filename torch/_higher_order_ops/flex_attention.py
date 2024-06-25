@@ -357,6 +357,10 @@ def flex_attention_functionalize(
     assert isinstance(query_unwrapped, torch.Tensor)
     assert isinstance(key_unwrapped, torch.Tensor)
     assert isinstance(value_unwrapped, torch.Tensor)
+    assert isinstance(sparse_mask_kv_num_blocks_unwrapped, torch.Tensor)
+    assert isinstance(sparse_mask_kv_indices_unwrapped, torch.Tensor)
+    assert isinstance(sparse_mask_q_num_blocks_unwrapped, torch.Tensor)
+    assert isinstance(sparse_mask_q_indices_unwrapped, torch.Tensor)
     assert isinstance(other_buffers_unwrapped, tuple)
     assert all(isinstance(item, torch.Tensor) for item in other_buffers_unwrapped)
 
@@ -894,6 +898,10 @@ def flex_attention_backward_functionalize(
     assert isinstance(out_unwrapped, torch.Tensor)
     assert isinstance(logsumexp_unwrapped, torch.Tensor)
     assert isinstance(grad_out_unwrapped, torch.Tensor)
+    assert isinstance(sparse_mask_kv_num_blocks_unwrapped, torch.Tensor)
+    assert isinstance(sparse_mask_kv_indices_unwrapped, torch.Tensor)
+    assert isinstance(sparse_mask_q_num_blocks_unwrapped, torch.Tensor)
+    assert isinstance(sparse_mask_q_indices_unwrapped, torch.Tensor)
     assert isinstance(other_buffers_unwrapped, tuple)
     assert all(isinstance(item, torch.Tensor) for item in other_buffers_unwrapped)
 
