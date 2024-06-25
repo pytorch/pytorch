@@ -455,21 +455,7 @@ class LocalBufferContext:
             )
             self.global_buffers[global_buffer_name] = global_buffer
             self.global_to_local[global_buffer_name] = local_buffer
-
-            def should_allocate():
-                assert isinstance(global_buffer, ir.Buffer)
-                # Never resue this buffer, sinice it's not real allocated.
-                V.graph.never_reuse_buffers.add(global_buffer.get_name())
-                # Mark this buffer as freed, so that we don't free it later.
-                V.graph.wrapper_code.freed.add(global_buffer.get_name())
-                # Avoid allocation of this Global Buffer
-                return False
-
-            assert isinstance(global_buffer, ir.Buffer)
-            # Patch the should_allocate of global buffer to avoid allocation
-            self.exit_stack.enter_context(
-                patch.object(global_buffer, "should_allocate", should_allocate)
-            )
+            V.graph.removed_buffers.add(global_buffer_name)
 
     def localize_function(
         self,
