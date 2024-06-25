@@ -978,6 +978,9 @@ class DeferredLineBase:
 
 @functools.lru_cache(None)
 def is_big_gpu(index) -> bool:
+    if torch.xpu.is_available():
+        return True
+
     min_sms = 68  # 3080
     avail_sms = torch.cuda.get_device_properties(index).multi_processor_count
     if avail_sms < min_sms:
@@ -1003,6 +1006,12 @@ def _use_template_for_cuda(layout, allowed_layout_dtypes: List[torch.dtype]) -> 
         and is_big_gpu(layout.device.index or 0)
     )
 
+def _use_template_for_xpu(layout, allowed_layout_dtypes: List[torch.dtype]) -> bool:
+    return (
+        use_max_autotune()
+        and layout.device.type == "xpu"
+        and layout.dtype in allowed_layout_dtypes
+    )
 
 def _use_autotune_backend(backend: str) -> bool:
     return backend.upper() in [
@@ -1014,7 +1023,7 @@ def use_triton_template(layout, *, enable_int32=False):
     layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
     if enable_int32:
         layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
-    return _use_template_for_cuda(layout, layout_dtypes) and _use_autotune_backend(
+    return (_use_template_for_cuda(layout, layout_dtypes) or _use_template_for_xpu(layout, layout_dtypes)) and _use_autotune_backend(
         "TRITON"
     )
 
