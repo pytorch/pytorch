@@ -7,10 +7,11 @@ that opens libneuralnetworks.so with dlopen and finds the functions
 we need with dlsym.  We also generate a "check" wrapper that checks
 return values and throws C++ exceptions on errors.
 """
-import pathlib
+
 import re
 import sys
 import textwrap
+from pathlib import Path
 
 
 PREFIX = """\
@@ -231,7 +232,7 @@ def main(argv):
                 )
             )
 
-    out_dir = pathlib.Path(__file__).absolute().parent
+    out_dir = Path(__file__).absolute().parent
 
     (out_dir / "nnapi_wrapper.h").write_text(
         PREFIX
