@@ -21,7 +21,7 @@ TAGS_PATH = "aten/src/ATen/native/tags.yaml"
 
 
 def generate_code(
-    gen_dir: pathlib.Path,
+    gen_dir: Path,
     native_functions_path: str | None = None,
     tags_path: str | None = None,
     install_dir: str | None = None,
@@ -137,7 +137,7 @@ def main() -> None:
     parser.add_argument("--tags-path")
     parser.add_argument(
         "--gen-dir",
-        type=pathlib.Path,
+        type=Path,
         default=Path("."),
         help="Root directory where to install files. Defaults to the current working directory.",
     )
