@@ -412,8 +412,8 @@ def _decompose_exported_program(
             gm,
             new_graph_signature,
             mod,
-            fake_args_unwrapped,
-            {},
+            fake_args_unwrapped[0],
+            fake_args_unwrapped[1],
             fake_params_buffers,
             constants,
         )
@@ -464,7 +464,6 @@ def _decompose_exported_program(
             range_constraints=new_range_constraints,
             module_call_graph=copy.deepcopy(ep.module_call_graph),
             example_inputs=ep.example_inputs,
-            verifier=ep.verifier,
             constants=ep.constants,
         )
         return exported_program
@@ -641,7 +640,6 @@ def _decompose_exported_program(
         range_constraints=new_range_constraints,
         module_call_graph=copy.deepcopy(ep.module_call_graph),
         example_inputs=ep.example_inputs,
-        verifier=ep.verifier,
         constants=ep.constants,
     )
     return exported_program

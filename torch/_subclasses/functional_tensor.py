@@ -299,10 +299,6 @@ class FunctionalTensorMode(TorchDispatchMode):
         # discovery. This flag distinguishes between the two stages.
         self._allow_token_discovery = _allow_token_discovery
 
-        # Pre-Dispatch functionalization is only relevant when we are exporting
-        if self.pre_dispatch:
-            assert self.export
-
     # No-op if FunctionalTensorMode is already in use
     def __enter__(self):
         def _get_prev_mode():
@@ -367,7 +363,7 @@ class FunctionalTensorMode(TorchDispatchMode):
                     # TODO (tmanlaibaatar) check if the op is PT2 compliant
                     warnings.warn(
                         f"At pre-dispatch tracing, we assume that any custom op marked with "
-                        f"CompositeImplicitAutograd and functional are safe to not decompose. "
+                        f"CompositeImplicitAutograd and have functional schema are safe to not decompose. "
                         f"Found {func} to be one such op."
                     )
                 return False

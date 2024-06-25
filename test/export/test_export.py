@@ -1440,7 +1440,14 @@ def forward(self, x):
             (torch.ones(2, 2),),
         )
         ep_for_inference = ep_for_training.run_decompositions()
-        self.assertExpectedInline(str(ep_for_inference.code).strip(), """""")
+        self.assertExpectedInline(str(ep_for_inference.graph_module.code).strip(), """\
+def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
+    add = torch.ops.aten.add.Tensor(b_buffer, 5);  b_buffer = None
+    permute = torch.ops.aten.permute.default(p_linear_weight, [1, 0]);  p_linear_weight = None
+    addmm = torch.ops.aten.addmm.default(p_linear_bias, x, permute);  p_linear_bias = x = permute = None
+    sum_1 = torch.ops.aten.sum.dim_IntList(add, [])
+    add_1 = torch.ops.aten.add.Tensor(addmm, sum_1);  addmm = sum_1 = None
+    return (add, add_1)""")
 
     def test_derived_dim_out_of_order_simplified_repeat_non_derived(self):
         class Foo(torch.nn.Module):
