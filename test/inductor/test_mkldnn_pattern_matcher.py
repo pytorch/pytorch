@@ -455,10 +455,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             # 1 kernel for "to_lowp", 2 kernels for unary ops
             self.assertEqual(metrics.generated_kernel_count, 3)
 
-    @skipIfNoDynamoSupport
-    @skipIfNoONEDNN
-    @skipIfRocm
-    def test_conv_transpose2d_unary(self):
+    def _test_conv_transpose_unary_base(self, dim=4):
         class M(torch.nn.Module):
             def __init__(
                 self,
@@ -466,13 +463,18 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 **kwargs,
             ):
                 super().__init__()
-                self.conv_transpose2d = torch.nn.ConvTranspose2d(
-                    3, 16, 3, stride=2, padding=1
-                )
+                if dim == 4:
+                    self.conv_transpose = torch.nn.ConvTranspose2d(
+                        3, 16, 3, stride=2, padding=1
+                    )
+                else:
+                    self.conv_transpose = torch.nn.ConvTranspose3d(
+                        3, 16, 3, stride=2, padding=1
+                    )
                 self.unary_fn = unary_fn
 
             def forward(self, x):
-                x = self.conv_transpose2d(x)
+                x = self.conv_transpose(x)
                 return self.unary_fn(x)
 
         dtypes = [
@@ -483,15 +485,19 @@ class TestPatternMatcher(TestPatternMatcherBase):
         if torch.ops.mkldnn._is_mkldnn_fp16_supported():
             dtypes.append(torch.float16)
 
+        cl_format = torch.channels_last if dim == 4 else torch.channels_last_3d
         options = itertools.product(
             unary_list,
-            [torch.contiguous_format, torch.channels_last],
+            [torch.contiguous_format, cl_format],
             dtypes,
         )
 
         for unary_fn, memory_format, dtype in options:
             metrics.reset()
-            x_shape = (1, 3, 28, 28)
+            if dim == 4:
+                x_shape = (1, 3, 28, 28)
+            else:
+                x_shape = (1, 3, 17, 28, 28)
             mod = M(unary_fn).eval()
 
             v = torch.randn(x_shape, dtype=torch.float32).to(
@@ -508,6 +514,18 @@ class TestPatternMatcher(TestPatternMatcherBase):
             self._test_common(mod, (v,), 2, match_nodes, check_autocast=dtype)
             generated_kernel_count = cal_conv_generated_kernel_number(mod, v, dtype)
             self.assertEqual(metrics.generated_kernel_count, generated_kernel_count)
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_conv_transpose2d_unary_cpu(self):
+        self._test_conv_transpose_unary_base(dim=4)
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_conv_transpose3d_unary_cpu(self):
+        self._test_conv_transpose_unary_base(dim=5)
 
     def _test_conv_binary_base(self, dim=4):
         assert dim == 4 or dim == 5
