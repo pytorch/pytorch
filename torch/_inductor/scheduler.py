@@ -1767,27 +1767,27 @@ class Scheduler:
         """
         Remove any nodes without users
         """
-        again = True  # repeat until a fixed point
-        while again:
-            updated_nodes = []
-            for node in self.nodes:
+        # self.nodes is in topological order, so by iterating in reverse order
+        # we have visited (and potentially removed) all users before visiting a
+        # given node.
+        updated_nodes = []
+        for node in reversed(self.nodes):
 
-                def can_eliminate_user(user: NodeUser) -> bool:
-                    return user.is_weak or user.get_name() in V.graph.removed_buffers
+            def can_eliminate_user(user: NodeUser) -> bool:
+                return user.is_weak or user.get_name() in V.graph.removed_buffers
 
-                can_eliminate = not node.has_side_effects() and all(
-                    can_eliminate_user(u) for u in node.users
-                )
+            can_eliminate = not node.has_side_effects() and all(
+                can_eliminate_user(u) for u in node.users
+            )
 
-                if not can_eliminate:
-                    updated_nodes.append(node)
-                else:
-                    # dead code
-                    log.debug("removed dead node: %s", node.get_name())
-                    V.graph.removed_buffers.add(node.get_name())
+            if not can_eliminate:
+                updated_nodes.append(node)
+            else:
+                # dead code
+                log.debug("removed dead node: %s", node.get_name())
+                V.graph.removed_buffers.add(node.get_name())
 
-            again = len(self.nodes) > len(updated_nodes)
-            self.nodes = updated_nodes
+        self.nodes = list(reversed(updated_nodes))
 
         # Prune any WeakDeps no longer needed
         for node in self.nodes:
