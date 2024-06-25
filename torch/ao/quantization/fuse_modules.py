@@ -1,15 +1,17 @@
 # mypy: allow-untyped-defs
 import copy
+from typing import List, Optional
 
 import torch.nn as nn
 
-from torch.ao.quantization.fuser_method_mappings import get_fuser_method
 # for backward compatibility
-from torch.ao.quantization.fuser_method_mappings import fuse_conv_bn  # noqa: F401
-from torch.ao.quantization.fuser_method_mappings import fuse_conv_bn_relu  # noqa: F401
+from torch.ao.quantization.fuser_method_mappings import (  # noqa: F401  # noqa: F401
+    fuse_conv_bn,
+    fuse_conv_bn_relu,
+    get_fuser_method,
+)
 from torch.nn.utils.parametrize import type_before_parametrizations
 
-from typing import List, Optional
 
 __all__ = [
     "fuse_known_modules",
@@ -17,23 +19,26 @@ __all__ = [
     "fuse_modules_qat",
 ]
 
+
 # Generalization of getattr
 def _get_module(model, submodule_key):
-    tokens = submodule_key.split('.')
+    tokens = submodule_key.split(".")
     cur_mod = model
     for s in tokens:
         cur_mod = getattr(cur_mod, s)
     return cur_mod
 
+
 # Generalization of setattr
 def _set_module(model, submodule_key, module):
-    tokens = submodule_key.split('.')
+    tokens = submodule_key.split(".")
     sub_tokens = tokens[:-1]
     cur_mod = model
     for s in sub_tokens:
         cur_mod = getattr(cur_mod, s)
 
     setattr(cur_mod, tokens[-1], module)
+
 
 def fuse_known_modules(mod_list, is_qat, additional_fuser_method_mapping=None):
     r"""Return a list of known fuse modules.
@@ -54,7 +59,7 @@ def fuse_known_modules(mod_list, is_qat, additional_fuser_method_mapping=None):
     fuser_method = get_fuser_method(types, additional_fuser_method_mapping)
     if fuser_method is None:
         raise NotImplementedError(f"Cannot fuse modules: {types}")
-    new_mod : List[Optional[nn.Module]] = [None] * len(mod_list)
+    new_mod: List[Optional[nn.Module]] = [None] * len(mod_list)
     fused = fuser_method(is_qat, *mod_list)
     # NOTE: forward hooks not processed in the two following for loops will be lost after the fusion
     # Move pre forward hooks of the base module to resulting fused module
@@ -74,10 +79,19 @@ def fuse_known_modules(mod_list, is_qat, additional_fuser_method_mapping=None):
 
     return new_mod
 
-def _fuse_modules_helper(model, modules_to_fuse, is_qat, fuser_func=fuse_known_modules, fuse_custom_config_dict=None):
+
+def _fuse_modules_helper(
+    model,
+    modules_to_fuse,
+    is_qat,
+    fuser_func=fuse_known_modules,
+    fuse_custom_config_dict=None,
+):
     if fuse_custom_config_dict is None:
         fuse_custom_config_dict = {}
-    additional_fuser_method_mapping = fuse_custom_config_dict.get("additional_fuser_method_mapping", {})
+    additional_fuser_method_mapping = fuse_custom_config_dict.get(
+        "additional_fuser_method_mapping", {}
+    )
     mod_list = []
     for item in modules_to_fuse:
         mod_list.append(_get_module(model, item))
@@ -89,20 +103,39 @@ def _fuse_modules_helper(model, modules_to_fuse, is_qat, fuser_func=fuse_known_m
     for i, item in enumerate(modules_to_fuse):
         _set_module(model, item, new_mod_list[i])
 
-def _fuse_modules(model, modules_to_fuse, is_qat, inplace=False, fuser_func=fuse_known_modules, fuse_custom_config_dict=None):
+
+def _fuse_modules(
+    model,
+    modules_to_fuse,
+    is_qat,
+    inplace=False,
+    fuser_func=fuse_known_modules,
+    fuse_custom_config_dict=None,
+):
     if not inplace:
         model = copy.deepcopy(model)
 
     if all(isinstance(module_element, str) for module_element in modules_to_fuse):
         # Handle case of modules_to_fuse being a list
-        _fuse_modules_helper(model, modules_to_fuse, is_qat, fuser_func, fuse_custom_config_dict)
+        _fuse_modules_helper(
+            model, modules_to_fuse, is_qat, fuser_func, fuse_custom_config_dict
+        )
     else:
         # Handle case of modules_to_fuse being a list of lists
         for module_list in modules_to_fuse:
-            _fuse_modules_helper(model, module_list, is_qat, fuser_func, fuse_custom_config_dict)
+            _fuse_modules_helper(
+                model, module_list, is_qat, fuser_func, fuse_custom_config_dict
+            )
     return model
 
-def fuse_modules(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_modules, fuse_custom_config_dict=None):
+
+def fuse_modules(
+    model,
+    modules_to_fuse,
+    inplace=False,
+    fuser_func=fuse_known_modules,
+    fuse_custom_config_dict=None,
+):
     r"""Fuse a list of modules into a single module.
 
     Fuses only the following sequence of modules:
@@ -163,9 +196,17 @@ def fuse_modules(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_mo
         is_qat=False,
         inplace=inplace,
         fuser_func=fuser_func,
-        fuse_custom_config_dict=fuse_custom_config_dict)
+        fuse_custom_config_dict=fuse_custom_config_dict,
+    )
 
-def fuse_modules_qat(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_modules, fuse_custom_config_dict=None):
+
+def fuse_modules_qat(
+    model,
+    modules_to_fuse,
+    inplace=False,
+    fuser_func=fuse_known_modules,
+    fuse_custom_config_dict=None,
+):
     """QAT version for `fuse_modules`."""
     return _fuse_modules(
         model,
@@ -173,4 +214,5 @@ def fuse_modules_qat(model, modules_to_fuse, inplace=False, fuser_func=fuse_know
         is_qat=True,
         inplace=inplace,
         fuser_func=fuser_func,
-        fuse_custom_config_dict=fuse_custom_config_dict)
+        fuse_custom_config_dict=fuse_custom_config_dict,
+    )
