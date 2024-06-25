@@ -987,7 +987,7 @@ def load(
     map_location: MAP_LOCATION = None,
     pickle_module: Any = None,
     *,
-    weights_only: Optional[bool] = None,
+    weights_only: bool = False,
     mmap: Optional[bool] = None,
     **pickle_load_args: Any,
 ) -> Any:
@@ -1097,11 +1097,6 @@ def load(
         " with `weights_only` please check the recommended steps in the following error message."
         " WeightsUnpickler error: "
     )
-    if weights_only is None:
-        weights_only, warn_weights_only = False, True
-    else:
-        warn_weights_only = False
-
     # Add ability to force safe only weight loads via environment variable
     if os.getenv("TORCH_FORCE_WEIGHTS_ONLY_LOAD", "0").lower() in [
         "1",
@@ -1118,20 +1113,6 @@ def load(
             )
     else:
         if pickle_module is None:
-            if warn_weights_only:
-                warnings.warn(
-                    "You are using `torch.load` with `weights_only=False` (the current default value), which uses "
-                    "the default pickle module implicitly. It is possible to construct malicious pickle data "
-                    "which will execute arbitrary code during unpickling (See "
-                    "https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). "
-                    "In a future release, the default value for `weights_only` will be flipped to `True`. This "
-                    "limits the functions that could be executed during unpickling. Arbitrary objects will no "
-                    "longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the "
-                    "user via `torch.serialization.add_safe_globals`. We recommend you start setting "
-                    "`weights_only=True` for any use case where you don't have full control of the loaded file. "
-                    "Please open an issue on GitHub for any issues related to this experimental feature.",
-                    FutureWarning,
-                )
             pickle_module = pickle
 
     # make flipping default BC-compatible
