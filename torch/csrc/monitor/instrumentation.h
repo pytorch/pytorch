@@ -41,9 +41,7 @@ class WaitCounterHandle {
     return handle;                                          \
   }()
 
-#define STATIC_SCOPED_WAIT_COUNTER(_name)            \
-  auto C10_ANONYMOUS_VARIABLE(SCOPED_WAIT_COUNTER) = \
-      STATIC_WAIT_COUNTER(_name);                    \
-  STATIC_WAIT_COUNTER(_name).start();                \
-  auto guard =                                       \
+#define STATIC_SCOPED_WAIT_COUNTER(_name)    \
+  STATIC_WAIT_COUNTER(_name).start();        \
+  auto C10_ANONYMOUS_VARIABLE(SCOPE_GUARD) = \
       c10::make_scope_exit([&]() { STATIC_WAIT_COUNTER(_name).stop(); });
