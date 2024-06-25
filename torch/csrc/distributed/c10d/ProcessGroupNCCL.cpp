@@ -1992,13 +1992,22 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
     at::Device& device,
     OpType opType,
     int p2pRank,
-    bool isSendRecvSelf) {
+    bool isSendRecvSelf,
+    std::optional<const std::string> streamKey) {
   // Sanity check
   if (deviceKey.empty()) {
     C10_THROW_ERROR(
         DistBackendError,
         "Not able to create/get the NCCL Communicator since "
         "the GPU devices are not known");
+  }
+  if (!streamKey) {
+    streamKey.emplace(deviceKey);
+  }
+  if (streamKey->empty()) {
+    C10_THROW_ERROR(
+        DistBackendError,
+        "Not able to create/get the NCCL Communication Stream since streamKey was empty");
   }
   if (bound_device_id_) {
     if (*bound_device_id_ != device) {
@@ -2175,14 +2184,14 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
     C10D_NCCL_CHECK(ncclGroupStart(), c10::nullopt);
   }
 
-  ncclStreams_.emplace(deviceKey, std::move(streamVal));
+  ncclStreams_.emplace(streamKey, std::move(streamVal));
 
   // Note: these events are created with the (default) cudaEventDisableTiming
   // flag This flag provides the best performance when used with
   // cudaStreamWaitEvent() and cudaEventQuery(). Since we here don't measure the
   // performance using cudaEvent, this should be set.
   // TODO(kwen2501): is ncclEvents_ used anywhere else?
-  ncclEvents_.emplace(deviceKey, at::cuda::CUDAEvent(cudaEventDisableTiming));
+  ncclEvents_.emplace(streamKey, at::cuda::CUDAEvent(cudaEventDisableTiming));
 
   // Record the communicators based on ncclUniqueId.
   ncclIdToCommMap_.emplace(buildNcclUniqueIdStr(ncclID), ncclComm);
