@@ -7,17 +7,18 @@ import sympy
 
 from torch import dtype as torch_dtype
 from torch._inductor.codecache import get_cpp_wrapper_cubin_path_name
-from torch._inductor.runtime.triton_heuristics import grid as default_grid
 
 from .. import config
-from ..codecache import CudaKernelParamCache
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .codegen_device_driver import cuda_kernel_driver, cuda_kernel_header
 from .cpp_utils import DTYPE_TO_CPP
 from .cpp_wrapper_cpu import CppWrapperCpu
-from .triton_utils import DeferredCudaKernelLine
-from .wrapper import SymbolicCallArg
+from .triton_utils import (
+    DeferredCudaDefaultGrid,
+    DeferredCudaGridLine,
+    DeferredCudaKernelLine,
+)
 
 if TYPE_CHECKING:
     from ..graph import GraphLowering
@@ -78,7 +79,13 @@ class CppWrapperCuda(CppWrapperCpu):
         return super().generate(is_inference)
 
     def generate_user_defined_triton_kernel(
-        self, kernel_name, raw_args, grid, configs, triton_meta, constexprs
+        self,
+        kernel_name: str,
+        raw_args: List[Any],
+        grid: List[Any],
+        configs,
+        triton_meta,
+        constexprs,
     ):
         # in C++ wrapper, we don't pass constexpr args, as they don't
         # get added as parameters to the PTX code compiled from the
@@ -86,20 +93,6 @@ class CppWrapperCuda(CppWrapperCpu):
         raw_args = [
             raw_arg for i, raw_arg in enumerate(raw_args) if i not in constexprs
         ]
-
-        assert len(grid) != 0
-        if len(grid) == 1:
-            grid_decision = grid[0]
-        else:
-            meta = CudaKernelParamCache.get(kernel_name)
-            assert meta is not None
-            grid_decision = None
-            for i, c in enumerate(configs):
-                if all(arg == meta["meta"][key] for key, arg in c.kwargs.items()):
-                    grid_decision = grid[i]
-                    break
-            assert grid_decision is not None
-
         args = [self.val_to_arg_str(v) for v in raw_args]
         arg_types = [
             arg.get_dtype() if hasattr(arg, "get_dtype") else type(arg)
@@ -109,10 +102,12 @@ class CppWrapperCuda(CppWrapperCpu):
             kernel_name,
             args,
             arg_types=arg_types,
-            grid=grid_decision,
+            raw_args=raw_args,
+            grid=grid,
             cuda=True,
             triton=True,
             triton_meta=triton_meta,
+            autotune_configs=configs,
         )
 
     @functools.lru_cache(None)  # noqa: B019
@@ -177,30 +172,22 @@ class CppWrapperCuda(CppWrapperCpu):
 
         return ", ".join(new_args)
 
-    def generate_default_grid(self, name: str, grid: List[Any], cuda: bool = True):
+    def generate_default_grid(
+        self, kernel_name: str, grid: List[Any], cuda: bool = True
+    ):
         """
         Generate grid configs for launching a CUDA kernel using the grid
-        function from triton_heuristics.
+        function from triton_heuristics. Because its computation needs
+        to read kernel config after autotune, it is done in a deferred way
+        using DeferredCudaDefaultGrid.
         """
         if not cuda:
             return grid
-        assert isinstance(grid, list), f"expected {grid=} to be a list"
-        grid = [e.inner_expr if isinstance(e, SymbolicCallArg) else e for e in grid]
-        grid_fn = default_grid(*grid)
-        params = CudaKernelParamCache.get(name)
-        assert (
-            params is not None
-        ), f"cuda kernel parameters for {name} should already exist at this moment, only found {CudaKernelParamCache.get_keys()}"
-        block_cfg = {
-            "XBLOCK": params["x_block"],
-            "YBLOCK": params["y_block"],
-            "ZBLOCK": params["z_block"],
-        }
-        return grid_fn(block_cfg)
+        return DeferredCudaDefaultGrid(kernel_name, grid)
 
     def generate_kernel_call(
         self,
-        kernel_name,
+        kernel_name: str,
         call_args,
         grid=None,
         device_index=None,
@@ -210,15 +197,25 @@ class CppWrapperCuda(CppWrapperCpu):
         raw_args=None,
         grid_fn: str = "grid",
         triton_meta=None,
+        autotune_configs=None,
     ):
         assert arg_types is not None and len(call_args) == len(
             arg_types
         ), "call_args and arg_types do not match"
-
         if not cuda:
             # Even in CppWrapperCuda, we may see cpp kernels
             return super().generate_kernel_call(
-                kernel_name, call_args, grid, device_index, cuda, triton, arg_types
+                kernel_name,
+                call_args,
+                grid,
+                device_index,
+                cuda,
+                triton,
+                arg_types,
+                raw_args,
+                grid_fn,
+                triton_meta,
+                autotune_configs,
             )
 
         device_index, call_args = self.prepare_triton_kernel_call(
@@ -246,32 +243,25 @@ class CppWrapperCuda(CppWrapperCpu):
             if V.graph.aot_mode
             else self.write_get_raw_stream(device_index, V.graph)
         )
-        grid_name = f"{kernel_name}_grid_{next(self.grid_id)}"
-        assert isinstance(
-            grid, (list, tuple)
-        ), f"expected grid to be a list or tuple but got: {grid=}"
 
-        grid = [V.graph.sizevars.simplify(item) for item in grid]
-        grid_uses_symbolic_shapes = any(item.free_symbols for item in grid)
-        grid_args = [self.expr_printer(item) for item in grid]
-        grid_args_str = ", ".join(grid_args)
-        self.writeline(f"Grid {grid_name} = Grid({grid_args_str});")
+        grid_var = f"{kernel_name}_grid_{next(self.grid_id)}"
+        self.writeline(
+            DeferredCudaGridLine(kernel_name, grid_var, grid, autotune_configs)
+        )
 
-        if grid_uses_symbolic_shapes:
-            self.writeline(f"if ({grid_name}.is_non_zero()) {{")
+        self.writeline(f"if ({grid_var}.is_non_zero()) {{")
         self.writeline(
             DeferredCudaKernelLine(
                 kernel_name,
                 "launchKernel({}, {}, {}, {},".format(
                     kernel_var_name,
-                    f"{grid_name}.grid_x",
-                    f"{grid_name}.grid_y",
-                    f"{grid_name}.grid_z",
+                    f"{grid_var}.grid_x",
+                    f"{grid_var}.grid_y",
+                    f"{grid_var}.grid_z",
                 )
                 + "%s, %s,"
                 + f"{kernel_args_var}, {stream});",
                 ("num_warps", "shared_mem"),
             ),
         )
-        if grid_uses_symbolic_shapes:
-            self.writeline("}")
+        self.writeline("}")
