@@ -231,12 +231,13 @@ flex_attention_template = TritonTemplate(
     BLOCKSPARSE_Q_LEN: tl.constexpr = Q_LEN // BLOCKSPARSE_Q
     BLOCKSPARSE_KV_LEN: tl.constexpr = KV_LEN // BLOCKSPARSE_KV
 
+    # SM_KV_IDX and SM_KV_NUM_BLKS are always contiguous.
     sm_hz_offset = sm_idx_z * SM_H + sm_idx_h
-    indices_offset = sm_hz_offset * BLOCKSPARSE_Q_LEN * BLOCKSPARSE_KV_LEN + (start_m // BLOCKSPARSE_Q_MULTIPLE) * BLOCKSPARSE_KV_LEN
-    block_q_index = sm_hz_offset * BLOCKSPARSE_Q_LEN + start_m // BLOCKSPARSE_Q_MULTIPLE
-    kv_indices = SM_KV_IDX + indices_offset
+    sm_kv_num_blks_offset = sm_hz_offset * BLOCKSPARSE_Q_LEN + start_m // BLOCKSPARSE_Q_MULTIPLE
+    sm_kv_idx_offset = sm_hz_offset * BLOCKSPARSE_Q_LEN * BLOCKSPARSE_KV_LEN + (start_m // BLOCKSPARSE_Q_MULTIPLE) * BLOCKSPARSE_KV_LEN
+    kv_indices = SM_KV_IDX + sm_kv_idx_offset
     kv_start = tl.load(kv_indices) * BLOCKSPARSE_KV # first kv block we're loading
-    sbm_kv_num_blocks = tl.load(SM_KV_NUM_BLKS + block_q_index)
+    sm_kv_num_blocks = tl.load(SM_KV_NUM_BLKS + sm_kv_num_blks_offset)
 
     Q_block_ptr = tl.make_block_ptr(
         base=Q + q_offset,
@@ -277,7 +278,7 @@ flex_attention_template = TritonTemplate(
 
     # loop over k, v and update accumulator
     lo = 0
-    hi = sbm_kv_num_blocks * BLOCKSPARSE_KV_MULTIPLE
+    hi = sm_kv_num_blocks * BLOCKSPARSE_KV_MULTIPLE
 
     for start_n in range(0, hi):
         # -- load k, v --
@@ -325,7 +326,6 @@ flex_attention_template = TritonTemplate(
         m_i = m_i_new
 
         # update pointers
-        # if start_n < hi - 1:
         indices_idx = start_n // BLOCKSPARSE_KV_MULTIPLE
 
         cur_block = tl.load(kv_indices + indices_idx)
@@ -654,12 +654,13 @@ flex_attention_backward_template = TritonTemplate(
         BLOCKSPARSE_Q_LEN = Q_LEN // BLOCKSPARSE_Q
         BLOCKSPARSE_KV_LEN = KV_LEN // BLOCKSPARSE_KV
 
+        # SM_KV_IDX and SM_KV_NUM_BLKS are always contiguous.
         sm_hz_offset = sm_idx_z * SM_H + sm_idx_h
-        indices_offset = sm_hz_offset * BLOCKSPARSE_Q_LEN * BLOCKSPARSE_KV_LEN + (off_pid // BLOCKSPARSE_Q_MULTIPLE) * BLOCKSPARSE_KV_LEN
-        block_q_index = sm_hz_offset * BLOCKSPARSE_Q_LEN + off_pid // BLOCKSPARSE_Q_MULTIPLE
-        kv_indices = SM_KV_IDX + indices_offset
+        sm_kv_num_blks_offset = sm_hz_offset * BLOCKSPARSE_Q_LEN + off_pid // BLOCKSPARSE_Q_MULTIPLE
+        sm_kv_idx_offset = sm_hz_offset * BLOCKSPARSE_Q_LEN * BLOCKSPARSE_KV_LEN + (off_pid // BLOCKSPARSE_Q_MULTIPLE) * BLOCKSPARSE_KV_LEN
+        kv_indices = SM_KV_IDX + sm_kv_idx_offset
         kv_start = tl.load(kv_indices) * BLOCKSPARSE_KV # first kv block we're loading
-        sbm_kv_num_blocks = tl.load(SM_KV_NUM_BLKS + block_q_index)
+        sm_kv_num_blocks = tl.load(SM_KV_NUM_BLKS + sm_kv_num_blks_offset)
 
         start_m2 = off_pid * BLOCK_M2
 
@@ -682,7 +683,7 @@ flex_attention_backward_template = TritonTemplate(
         tl.static_assert(BLOCK_M2 % BLOCK_N2 == 0)
 
         curr_n = start_n2
-        hi = sbm_kv_num_blocks * BLOCKSPARSE_KV_MULTIPLE
+        hi = sm_kv_num_blocks * BLOCKSPARSE_KV_MULTIPLE
         for start_n in range(0, hi):
             offs_n2= curr_n + tl.arange(0, BLOCK_N2)
             kT = tl.load(kT_ptrs)
@@ -751,12 +752,13 @@ flex_attention_backward_template = TritonTemplate(
         BLOCKSPARSE_Q_LEN = Q_LEN // BLOCKSPARSE_Q
         BLOCKSPARSE_KV_LEN = KV_LEN // BLOCKSPARSE_KV
 
+        # SM_Q_IDX and SM_Q_NUM_BLKS are always contiguous.
         sm_hz_offset = sm_idx_z * SM_H + sm_idx_h
-        indices_offset = sm_hz_offset * BLOCKSPARSE_Q_LEN * BLOCKSPARSE_KV_LEN + (pid // BLOCKSPARSE_KV_MULTIPLE) * BLOCKSPARSE_Q_LEN
-        block_kv_index = sm_hz_offset * BLOCKSPARSE_KV_LEN + pid // BLOCKSPARSE_KV_MULTIPLE
-        q_indices = SM_Q_IDX + indices_offset
+        sm_q_num_blks_offset = sm_hz_offset * BLOCKSPARSE_KV_LEN + pid // BLOCKSPARSE_KV_MULTIPLE
+        sm_q_idx_offset = sm_hz_offset * BLOCKSPARSE_Q_LEN * BLOCKSPARSE_KV_LEN + (pid // BLOCKSPARSE_KV_MULTIPLE) * BLOCKSPARSE_Q_LEN
+        q_indices = SM_Q_IDX + sm_q_idx_offset
         q_start = tl.load(q_indices) * BLOCKSPARSE_Q # first q block we're loading
-        sbm_q_num_blocks = tl.load(SM_Q_NUM_BLKS + block_kv_index)
+        sm_q_num_blocks = tl.load(SM_Q_NUM_BLKS + sm_q_num_blks_offset)
 
         start_n1 = pid * BLOCK_N1
         start_m1 = q_start
@@ -778,7 +780,7 @@ flex_attention_backward_template = TritonTemplate(
         tl.static_assert(BLOCK_N1 % BLOCK_M1 == 0)
 
         curr_m = start_m1
-        hi = sbm_q_num_blocks * BLOCKSPARSE_Q_MULTIPLE
+        hi = sm_q_num_blocks * BLOCKSPARSE_Q_MULTIPLE
         for start_m in range(0, hi):
             qT = tl.load(qT_ptrs)
             # Load LSE before computing qk to reduce pipeline stall.
