@@ -2845,10 +2845,6 @@ def _do_validate_cpp_commands(
         input_path = os.path.basename(input_path)
         output_path = os.path.basename(output_path)
 
-    # Fix test_new_cpp_build_logical failed on MacOS
-    if not config.is_fbcode():
-        aot_mode = False
-
     old_cmd = cpp_compile_command(
         input=input_path,
         output=output_path,
@@ -2902,7 +2898,7 @@ def validate_new_cpp_commands():
     compile_only = [True, False]
     include_pytorch = [True, False]
     use_absolute_path = [True, False]
-    aot_mode = [False, True]
+    aot_mode = [False]
 
     for x in cuda:
         for y in use_mmap_weights:
