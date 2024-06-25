@@ -89,6 +89,9 @@ class HalidePrinter(PythonPrinter):
     def cast_float(expr):
         return f"hl.cast(hl.Float(32), {expr})"
 
+    def _print_Float(self, expr):
+        return f"hl.f32({expr})"
+
     def _print_floor(self, expr):
         assert len(expr.args) == 1
         return self.cast_index(f"hl.floor({self._print(expr.args[0])})")
@@ -269,11 +272,13 @@ class HalideOverrides(OpOverrides):
     @staticmethod
     def minimum(a, b):
         # return f"hl.min({a}, {b})"  <== handles nan wrong
+        b = f"hl.cast({a.name}.type(), {b})"
         return f"hl.select(({a}<{b})|hl.is_nan({a}), {a}, {b}) if {a.name}.type().is_float() else hl.min({a}, {b})"
 
     @staticmethod
     def maximum(a, b):
         # return f"hl.max({a}, {b})"  <== handles nan wrong
+        b = f"hl.cast({a.name}.type(), {b})"
         return f"hl.select(({a}>{b})|hl.is_nan({a}), {a}, {b}) if {a.name}.type().is_float() else hl.max({a}, {b})"
 
     @staticmethod
@@ -557,7 +562,7 @@ class HalideCSEVariable(CSEVariable):
 
     def index_str(self, dims):
         if len(dims) == 0:
-            return self.name
+            return f"{self.name}[()]"
         # Reversed since Halide is column major
         return f"{self.name}[{', '.join(map(str, dims))}]"
 
@@ -1121,11 +1126,11 @@ class HalideKernel(SIMDKernel):
             index_str = ", ".join(d.index_str(zero_vars=True) for d in dims)
             value_str = str(value)
 
+        dtype = V.graph.get_dtype(name)
         if mode is None:
-            dtype = V.graph.get_dtype(name)
             line = f"{var}[{index_str},] = hl.cast({halide_type(dtype)}, {value_str})"
         elif mode == "atomic_add":
-            line = f"{var}[{index_str},] += {value_str}"
+            line = f"{var}[{index_str},] += hl.cast({halide_type(dtype)}, {value_str})"
         else:
             raise NotImplementedError(f"store mode={mode}")
         self.body.writeline(DeferredLine(name, line))
@@ -1384,10 +1389,7 @@ class HalideKernel(SIMDKernel):
         def update_index(m):
             var = self.cse.varname_map[m.group(1)]
             assert var.used_dims is not None, var
-            if var.used_dims:
-                return str(var)
-            else:
-                return var.name  # a constant doesn't need to be wrapped in func
+            return str(var)
 
         for line in self.body._lines:
             if isinstance(line, str):
