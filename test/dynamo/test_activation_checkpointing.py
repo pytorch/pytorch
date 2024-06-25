@@ -554,10 +554,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
         def _test(context_fn, bw_compiler):
             def gn(x):
-                # NOTE: Normally in this case, sigmoid doesn't need to be recomputed
-                # (because we always have its output which is the program output).
-                # But here we show that we can force its recomputation by using
-                # a custom policy (CheckpointPolicy.MUST_RECOMPUTE) for sigmoid ops.
                 return torch.sigmoid(torch.matmul(x, x))
 
             def fn(x):
