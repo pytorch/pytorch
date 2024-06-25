@@ -625,8 +625,8 @@ std::tuple<at::Tensor, at::Tensor> pre_process_group_query_attention_input(
   if (all_equal){
     return std::make_tuple(key, value);
   }
-  auto repeat_key_shape = query.sym_size(1) / key.sym_size(1);
-  auto repeat_value_shape = query.sym_size(1) / value.sym_size(1);
+  auto repeat_key_shape = query.sym_size(-3) / key.sym_size(-3);
+  auto repeat_value_shape = query.sym_size(-3) / value.sym_size(-3);
   // std::cout << "Repeat key shape: " << repeat_key_shape << std::endl;
   // std::cout << "Repeat value shape: " << typeid(repeat_value_shape).name() << std::endl;
   at::Tensor key_repeated = key.repeat_interleave_symint(repeat_key_shape, -3);
