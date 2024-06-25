@@ -443,19 +443,20 @@ class LocalBufferContext:
         self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
 
     def add_local_buffer(
-        self, local_buffer: ir.Buffer, global_buffer: Optional[ir.Buffer] = None
+        self, local_buffer: ir.Buffer, global_buffers: Optional[List[ir.Buffer]] = None
     ):
-        if local_buffer.get_name() not in self.local_buffers:
-            self.local_buffers[local_buffer.get_name()] = local_buffer
-        if global_buffer:
-            global_buffer_name = global_buffer.get_name()
-            assert (
-                global_buffer_name not in self.global_buffers
-                and global_buffer_name not in self.global_to_local
-            )
-            self.global_buffers[global_buffer_name] = global_buffer
-            self.global_to_local[global_buffer_name] = local_buffer
-            V.graph.removed_buffers.add(global_buffer_name)
+        assert local_buffer.get_name() not in self.local_buffers
+        self.local_buffers[local_buffer.get_name()] = local_buffer
+        if global_buffers:
+            for global_buffer in global_buffers:
+                global_buffer_name = global_buffer.get_name()
+                assert (
+                    global_buffer_name not in self.global_buffers
+                    and global_buffer_name not in self.global_to_local
+                )
+                self.global_buffers[global_buffer_name] = global_buffer
+                self.global_to_local[global_buffer_name] = local_buffer
+                V.graph.removed_buffers.add(global_buffer_name)
 
     def localize_function(
         self,
@@ -494,9 +495,6 @@ class LocalBufferContext:
         The the data access of `local_buf` is assumed to be contiguous with the
         same order as the `global_buf`.
         """
-        for global_buffer_name, global_buffer in self.global_buffers.items():
-            local_buffer = self.global_to_local[global_buffer_name]
-            assert len(global_buffer.get_size()) == len(local_buffer.get_size())
         assert len(nodes) > 0
 
         def wrap_inner_fn_for_node(node: ir.IRNode):

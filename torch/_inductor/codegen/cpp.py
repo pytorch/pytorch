@@ -7,7 +7,6 @@ import logging
 import math
 import re
 import sys
-from collections import namedtuple
 from copy import copy, deepcopy
 from enum import Enum
 from typing import Any, cast, Dict, List, Optional, Sequence, Set, Tuple, Union
@@ -3856,8 +3855,9 @@ class CppScheduling(BaseScheduling):
                 call_ranges = tuple(group) + tuple(reduction_group)
                 return call_ranges
 
-            BufferMapper = namedtuple("BufferMapper", ["local_buf", "global_buf"])
-            buffer_mappers: List[BufferMapper] = []
+            local_buffers: List[ir.Buffer] = []
+            # Map local buffer name to a list of global buffers
+            local_to_global_buffers: Dict[str, List[ir.Buffer]] = {}
             if all(
                 len(get_call_ranges(_node)) == node.outer_loop_fusion_depth + 1
                 for _node in node.get_outer_nodes()
@@ -3888,37 +3888,37 @@ class CppScheduling(BaseScheduling):
                             global_buffer_layout.stride[size_offset:],
                         )
 
-                        def try_share_local_buffer(local_buffer_layout, buffer_mappers):
+                        def try_share_local_buffer(local_buffer_layout, local_buffers):
                             shared_buffers = [
-                                buffer_mapper.local_buf
-                                for buffer_mapper in buffer_mappers
-                                if local_buffer_layout == buffer_mapper.local_buf.layout
+                                local_buf
+                                for local_buf in local_buffers
+                                if local_buffer_layout == local_buf.layout
                             ]
                             return shared_buffers[0] if shared_buffers else None
 
                         local_buf_prefix = "local_buffer_data"
                         # Share existing local buffer
                         local_buffer_used = try_share_local_buffer(
-                            local_buffer_layout, buffer_mappers
+                            local_buffer_layout, local_buffers
                         )
                         if not local_buffer_used:
                             # Create new local buffer
                             local_buffer_used = ir.Buffer(
-                                f"{local_buf_prefix}_{len(buffer_mappers)}",
+                                f"{local_buf_prefix}_{len(local_buffers)}",
                                 local_buffer_layout,
                             )
-                        buffer_mappers.append(
-                            BufferMapper(
-                                local_buf=local_buffer_used,
-                                global_buf=global_buffer,
-                            )
+                            local_buffers.append(local_buffer_used)
+                            local_to_global_buffers[local_buffer_used.name] = []
+                        local_to_global_buffers[local_buffer_used.name].append(
+                            global_buffer,
                         )
 
             with LocalBufferContext(kernel_group.args) as scope:
-                if len(buffer_mappers) > 0:
-                    for buffer_mapper in buffer_mappers:
+                if len(local_buffers) > 0:
+                    for local_buffer in local_buffers:
+                        assert local_buffer.name is not None
                         scope.add_local_buffer(
-                            buffer_mapper.local_buf, buffer_mapper.global_buf
+                            local_buffer, local_to_global_buffers[local_buffer.name]
                         )
                 for _node in node.get_outer_nodes():
                     assert isinstance(_node, (FusedSchedulerNode, SchedulerNode))
