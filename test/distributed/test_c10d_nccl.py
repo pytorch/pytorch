@@ -3518,7 +3518,8 @@ class NCCLTraceTest(NCCLTraceTestBase):
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize("timing_enabled", [True, False])
     @parametrize("include_collectives", [True, False])
-    def test_short(self, timing_enabled, include_collectives):
+    @parametrize("get_json", [True, False])
+    def test_short(self, timing_enabled, include_collectives, get_json):
         if self.rank == self.MAIN_PROCESS_RANK:
             return
         pg = self._create_process_group_nccl()
@@ -3534,13 +3535,25 @@ class NCCLTraceTest(NCCLTraceTestBase):
         # gah ok so now the duration_ms is populated best-effort since it can only happen outside "dump()" api
         time.sleep(1)
         if include_collectives:
-            t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
+            if get_json:
+                t = json.loads(torch._C._distributed_c10d._dump_nccl_trace_json())
+            else:
+                t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         else:
-            t = pickle.loads(
-                torch._C._distributed_c10d._dump_nccl_trace(
-                    includeCollectives=False, includeStackTraces=None, onlyActive=None
+            if get_json:
+                t = json.loads(
+                    torch._C._distributed_c10d._dump_nccl_trace_json(
+                        includeCollectives=False
+                    )
                 )
-            )
+            else:
+                t = pickle.loads(
+                    torch._C._distributed_c10d._dump_nccl_trace(
+                        includeCollectives=False,
+                        includeStackTraces=None,
+                        onlyActive=None,
+                    )
+                )
         ver = t["version"]
         self.assertEqual(ver, "2.2")
         pg_config = t["pg_config"]
@@ -3565,7 +3578,9 @@ class NCCLTraceTest(NCCLTraceTestBase):
             if timing_enabled:
                 self.assertIsNotNone(s)
                 self.assertTrue(s <= f)
-            self.assertIn("test_c10d_nccl.py", str(last["frames"]))
+            # we don't collect stack traces in JSON at the moment
+            if not get_json:
+                self.assertIn("test_c10d_nccl.py", str(last["frames"]))
             self.assertEqual(last["input_sizes"], ((3, 4),))
             self.assertEqual(last["input_dtypes"], ["Float"])
             self.assertEqual(last["output_sizes"], ((3, 4),))
@@ -3585,6 +3600,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
                 self.assertTrue("duration_ms" not in last)
         else:
             self.assertTrue("entries" not in t)
+        dist.destroy_process_group()
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -3658,6 +3674,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         self.assertEqual(last["output_dtypes"], ["Float"])
         self.assertEqual(last["timeout_ms"], 600000)
         self.assertEqual(last["collective_seq_id"] - first["collective_seq_id"], 9)
+        dist.destroy_process_group()
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")

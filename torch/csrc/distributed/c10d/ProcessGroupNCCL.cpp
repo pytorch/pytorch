@@ -342,10 +342,11 @@ void cacheAllocatorDeregisterHook(
 }
 
 #if defined(IS_NCCLX) && defined(NCCL_COMM_DUMP)
-std::string dump_nccl_trace(
+std::string dump_nccl_trace_helper(
     bool includeCollectives,
     bool includeStackTraces,
-    bool onlyActive) {
+    bool onlyActive,
+    bool json) {
   std::unordered_map<
       std::string /* ncclUniqueID */,
       std::unordered_map<std::string, std::string> /* dump from this comm */>
@@ -365,19 +366,41 @@ std::string dump_nccl_trace(
     std::string ncclUniqueIDStr = buildNcclUniqueIdStr(ncclComm->getNcclId());
     ncclDumpMap[ncclUniqueIDStr] = ncclComm->ncclCommDump();
   }
+  if (json) {
+    return NCCLTraceBuffer::get()->dump_json(
+        ncclDumpMap, includeCollectives, onlyActive);
+  }
   return NCCLTraceBuffer::get()->dump(
       ncclDumpMap, includeCollectives, includeStackTraces, onlyActive);
 }
 
 #else
-std::string dump_nccl_trace(
+std::string dump_nccl_trace_helper(
     bool includeCollectives,
     bool includeStackTraces,
-    bool onlyActive) {
+    bool onlyActive,
+    bool json) {
+  if (json) {
+    return NCCLTraceBuffer::get()->dump_json(
+        c10::nullopt, includeCollectives, onlyActive);
+  }
   return NCCLTraceBuffer::get()->dump(
       c10::nullopt, includeCollectives, includeStackTraces, onlyActive);
 }
 #endif
+
+std::string dump_nccl_trace(
+    bool includeCollectives,
+    bool includeStackTraces,
+    bool onlyActive) {
+  return dump_nccl_trace_helper(
+      includeCollectives, includeStackTraces, onlyActive, false);
+}
+
+std::string dump_nccl_trace_json(bool includeCollectives, bool onlyActive) {
+  return dump_nccl_trace_helper(
+      includeCollectives, false /* includeStackTraces */, onlyActive, true);
+}
 
 std::optional<std::function<void(std::function<void(const std::string&)>)>>&
 get_cpp_trace_dumper() {
@@ -4463,3 +4486,4 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
 } // namespace c10d
 
 #endif // USE_C10D_NCCL
+  
