@@ -1,8 +1,8 @@
 #include <ATen/DeviceAccelerator.h>
+#include <c10/util/Optional.h>
 #include <fmt/core.h>
 #include <sys/types.h>
 #include <torch/csrc/python_headers.h>
-#include <optional>
 
 #ifndef _MSC_VER
 #include <sys/socket.h>
@@ -815,6 +815,25 @@ PyObject* THPModule_deterministicCuDNN(PyObject* _unused, PyObject* noargs) {
     Py_RETURN_FALSE;
 }
 
+PyObject* THPModule_setDeterministicMkldnn(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      PyBool_Check(arg),
+      "set_deterministic_mkldnn expects a bool, "
+      "but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setDeterministicMkldnn(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPModule_deterministicMkldnn(PyObject* _unused, PyObject* noargs) {
+  if (at::globalContext().deterministicMkldnn())
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+}
+
 PyObject* THPModule_setDeterministicAlgorithms(
     PyObject* _unused,
     PyObject* args,
@@ -1347,6 +1366,14 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      THPModule_setDeterministicCuDNN,
      METH_O,
      nullptr},
+    {"_get_mkldnn_deterministic",
+     THPModule_deterministicMkldnn,
+     METH_NOARGS,
+     nullptr},
+    {"_set_mkldnn_deterministic",
+     THPModule_setDeterministicMkldnn,
+     METH_O,
+     nullptr},
     {"_get_deterministic_algorithms",
      THPModule_deterministicAlgorithms,
      METH_NOARGS,
@@ -1817,7 +1844,7 @@ Call this whenever a new thread is created in order to propagate values from
             transposed_,
             output_padding_,
             std::move(groups_),
-            std::nullopt);
+            c10::nullopt);
       },
       py::arg("input"),
       py::arg("weight"),
@@ -1842,7 +1869,7 @@ Call this whenever a new thread is created in order to propagate values from
          at::SymIntArrayRef output_padding_,
          c10::SymInt groups_,
          std::optional<std::vector<c10::SymInt>> bias_sizes_opt) {
-        c10::OptionalArrayRef<c10::SymInt> ref = std::nullopt;
+        c10::OptionalArrayRef<c10::SymInt> ref = c10::nullopt;
         if (bias_sizes_opt) {
           ref = (*bias_sizes_opt);
         }
@@ -2031,7 +2058,7 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def(
       "_get_accelerator",
-      [](std::optional<bool> check = std::nullopt) {
+      [](std::optional<bool> check = c10::nullopt) {
         return c10::Device(
             at::getAccelerator(check.value_or(false))
                 .value_or(c10::DeviceType::CPU),

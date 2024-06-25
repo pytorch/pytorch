@@ -150,7 +150,7 @@ TORCH_API Module getInvokedModule(Module& module, Node* n, Value* self);
 
 // Given an CallMethod node, get the module instance corresponding
 // to the instance Value if the instance is a module, otherwise return
-// std::nullopt
+// c10::nullopt
 std::optional<Module> getInvokedModuleOpt(
     const Module& module,
     Node* n,

@@ -6,7 +6,7 @@
 
 #include <ATen/ATen.h>
 #include <c10/cuda/CUDAStream.h>
-#include <optional>
+#include <c10/util/Optional.h>
 
 #include <cstddef>
 #include <vector>
@@ -17,10 +17,10 @@ namespace autograd {
 struct TORCH_CUDA_CU_API Scatter : public Node {
   explicit Scatter(
       std::vector<at::Device> devices,
-      std::optional<std::vector<int64_t>> chunk_sizes = std::nullopt,
+      std::optional<std::vector<int64_t>> chunk_sizes = c10::nullopt,
       int64_t dim = 0,
       std::optional<std::vector<std::optional<at::cuda::CUDAStream>>> streams =
-          std::nullopt,
+          c10::nullopt,
       bool unsqueeze_scalars = false);
   ~Scatter() override;
 
