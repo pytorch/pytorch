@@ -13309,6 +13309,17 @@ class TestSelectiveActivationCheckpoint(TestCase):
             out = checkpoint(fn, x, y, use_reentrant=False, context_fn=context_fn)
             return out
 
+        def policy_fn_bool(ctx, op, *args, **kwargs):
+            return op == torch.ops.aten.mm.default
+
+        def fn_sac3(x, y):
+            context_fn = functools.partial(
+                create_selective_checkpoint_contexts,
+                policy_fn_bool,
+            )
+            out = checkpoint(fn, x, y, use_reentrant=False, context_fn=context_fn)
+            return out
+
         act_mem_noac = get_act_mem(lambda: fn(x, y))
         bw_flops_noac = get_bw_flops(lambda: fn(x, y))
 
@@ -13332,6 +13343,12 @@ class TestSelectiveActivationCheckpoint(TestCase):
 
         self.assertEqual(act_mem_sac2, 1.0)
         self.assertEqual(bw_flops_sac2, 2.0)
+
+        act_mem_sac3 = get_act_mem(lambda: fn_sac3(x, y))
+        bw_flops_sac3 = get_bw_flops(lambda: fn_sac3(x, y))
+
+        self.assertEqual(act_mem_sac3, 1.0)
+        self.assertEqual(bw_flops_sac3, 2.0)
 
     @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
     def test_output_already_has_autograd_meta(self):
