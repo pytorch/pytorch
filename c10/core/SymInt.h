@@ -5,7 +5,7 @@
 #include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
-#include <optional>
+#include <c10/util/Optional.h>
 
 #include <cstdint>
 #include <iterator>
@@ -231,7 +231,7 @@ class C10_API SymInt {
 
   std::optional<int64_t> maybe_as_int() const {
     if (!is_heap_allocated()) {
-      return std::make_optional(data_);
+      return c10::make_optional(data_);
     }
     auto* node = toSymNodeImplUnowned();
     if (auto c = node->constant_int()) {

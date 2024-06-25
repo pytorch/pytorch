@@ -1,10 +1,10 @@
 #pragma once
 
 #include <c10/core/Device.h>
+#include <c10/util/Optional.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/types.h>
-#include <optional>
 
 #include <iosfwd>
 #include <memory>
@@ -76,27 +76,27 @@ class TORCH_API InputArchive final {
   /// is not specified, the module is loaded to the original device.
   void load_from(
       const std::string& filename,
-      std::optional<torch::Device> device = std::nullopt);
+      std::optional<torch::Device> device = c10::nullopt);
 
   /// Loads the `InputArchive` from a serialized representation stored in the
   /// given `stream`. Storage are remapped using device option. If device
   /// is not specified, the module is loaded to the original device.
   void load_from(
       std::istream& stream,
-      std::optional<torch::Device> device = std::nullopt);
+      std::optional<torch::Device> device = c10::nullopt);
 
   // Loads given the specified flat array.
   void load_from(
       const char* data,
       size_t size,
-      std::optional<torch::Device> device = std::nullopt);
+      std::optional<torch::Device> device = c10::nullopt);
 
   // Loads given the specified read and size functions.
   void load_from(
       const std::function<size_t(uint64_t pos, void* buf, size_t nbytes)>&
           read_func,
       const std::function<size_t(void)>& size_func,
-      std::optional<torch::Device> device = std::nullopt);
+      std::optional<torch::Device> device = c10::nullopt);
 
   // Returns the vector of keys in the input archive.
   std::vector<std::string> keys();
