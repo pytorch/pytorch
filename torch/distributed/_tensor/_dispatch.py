@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import contextlib
 import functools
+import logging
 import operator
 import warnings
 from typing import cast, Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING
@@ -36,6 +37,7 @@ except ImportError:
     from torch.utils import _pytree as pytree  # type: ignore[no-redef]
 
 aten = torch.ops.aten
+logger = logging.getLogger(__name__)
 
 
 def decompose_handler(
@@ -107,6 +109,26 @@ class OpDispatcher:
         """
         Main dispatching logic
         """
+        if logger.isEnabledFor(logging.DEBUG):
+            tensor_args = ""
+            for idx, arg in enumerate(args):
+                if not isinstance(arg, torch.Tensor):
+                    continue
+                if hasattr(arg, "_spec"):
+                    tensor_args += f"\n  arg_{idx} (dtensor): {arg.shape=} {arg._spec=}"
+                else:
+                    tensor_args += f"\n  arg_{idx} (tensor): {arg.shape=}"
+
+            for key, arg in kwargs.items():
+                if not isinstance(arg, torch.Tensor):
+                    continue
+                if hasattr(arg, "_spec"):
+                    tensor_args += f"\n  arg_{key} (dtensor): {arg.shape=} {arg._spec=}"
+                else:
+                    tensor_args += f"\n  arg_{key} (tensor): {arg.shape=}"
+
+            logger.debug("Dispatching op_call: %s%s", op_call, tensor_args)
+
         # operators that does not need to go through sharding propagation
         if op_call in self._custom_op_handlers:
             return self._custom_op_handlers[op_call](op_call, args, kwargs)  # type: ignore[operator]
@@ -116,6 +138,7 @@ class OpDispatcher:
 
         self.sharding_propagator.propagate(op_info)
         output_sharding = op_info.output_sharding
+        logger.debug("output_sharding for %s: %s", op_call, output_sharding)
         assert output_sharding is not None, "output sharding should not be None"
 
         mesh = op_info.mesh
