@@ -270,40 +270,41 @@ class RingAttentionTest(DTensorTestBase):
         args = ModelArgs()
 
         model = Transformer(args).to(dtype).to(self.device_type)
-
-        model = parallelize_module(
-            module=model,
-            device_mesh=device_mesh,
-            parallelize_plan={
-                f"layers.{i}.attention": AttentionContextParallel()
-                for i in range(args.n_layers)
-            },
-        )
+        callers = [l.attention for l in model.layers]
+        enable_context_parallel(2, callers, device_mesh)
 
         seq = torch.randint(
             args.vocab_size, (bs, args.max_seq_len), device=self.device_type
         )
 
-        with CommDebugMode() as comm_mode:
-            out = model(seq)
-        self.assertDictEqual(
-            comm_mode.get_comm_counts(),
-            {
-                c10d_functional.all_to_all_single: (self.world_size - 1)
-                * args.n_layers,
-            },
-        )
+        with context_parallelism_buffers(
+            cp_rank=device_mesh.get_local_rank(),
+            cp_world_size=device_mesh.size(),
+            buffers=[seq, model.pos],
+            seq_dims=[1, 0],
+            keep_orig_buffers=[False, True],
+        ):
+            with CommDebugMode() as comm_mode:
+                out = model(seq)
 
-        with CommDebugMode() as comm_mode:
-            out.sum().backward()
-        self.assertDictEqual(
-            comm_mode.get_comm_counts(),
-            {
-                c10d_functional.all_to_all_single: (self.world_size - 1)
-                * 2
-                * args.n_layers,
-            },
-        )
+            self.assertDictEqual(
+                comm_mode.get_comm_counts(),
+                {
+                    c10d_functional.all_to_all_single: (self.world_size - 1)
+                    * args.n_layers,
+                },
+            )
+
+            with CommDebugMode() as comm_mode:
+                out.sum().backward()
+            self.assertDictEqual(
+                comm_mode.get_comm_counts(),
+                {
+                    c10d_functional.all_to_all_single: (self.world_size - 1)
+                    * 2
+                    * args.n_layers,
+                },
+            )
 
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(
@@ -395,6 +396,57 @@ class RingAttentionTest(DTensorTestBase):
         )
 
         out.sum().backward()
+
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
+    )
+    @with_comms
+    @sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION])
+    def test_context_parallel_apis(self) -> None:
+        device_mesh = DeviceMesh(
+            self.device_type,
+            torch.arange(0, self.world_size),
+        )
+        dtype = torch.bfloat16
+        bs = 2
+        args = ModelArgs()
+
+        model = Transformer(args).to(dtype).to(self.device_type)
+
+        model = parallelize_module(
+            module=model,
+            device_mesh=device_mesh,
+            parallelize_plan={
+                f"layers.{i}.attention": AttentionContextParallel()
+                for i in range(args.n_layers)
+            },
+        )
+
+        seq = torch.randint(
+            args.vocab_size, (bs, args.max_seq_len), device=self.device_type
+        )
+
+        with CommDebugMode() as comm_mode:
+            out = model(seq)
+        self.assertDictEqual(
+            comm_mode.get_comm_counts(),
+            {
+                c10d_functional.all_to_all_single: (self.world_size - 1)
+                * args.n_layers,
+            },
+        )
+
+        with CommDebugMode() as comm_mode:
+            out.sum().backward()
+        self.assertDictEqual(
+            comm_mode.get_comm_counts(),
+            {
+                c10d_functional.all_to_all_single: (self.world_size - 1)
+                * 2
+                * args.n_layers,
+            },
+        )
 
 
 instantiate_parametrized_tests(RingAttentionTest)
