@@ -83,6 +83,7 @@ core_sources_common = [
     "torch/csrc/jit/runtime/vararg_functions.cpp",
     "torch/csrc/jit/mobile/promoted_prim_ops.cpp",
     "torch/csrc/jit/mobile/prim_ops_registery.cpp",
+    "torch/csrc/monitor/instrumentation.cpp",
     "torch/csrc/profiler/util.cpp",
 ]
 
@@ -112,7 +113,6 @@ libtorch_profiler_sources = [
     "torch/csrc/profiler/perf.cpp",
     "torch/csrc/monitor/counters.cpp",
     "torch/csrc/monitor/events.cpp",
-    "torch/csrc/monitor/instrumentation.cpp",
 ]
 
 libtorch_edge_profiler_sources = libtorch_profiler_sources + [
