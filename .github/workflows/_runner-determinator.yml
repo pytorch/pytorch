@@ -121,7 +121,7 @@ jobs:
                       user_set = {
                           usr.strip("\n\t ") for usr in first_comment.split()
                       }
-                      if any(map(uc: uc in user_set, user_check)):
+                      if any(map(lambda uc: uc in user_set, user_check)):
                           MESSAGE = f"LF Workflows are enabled for {', '.join(username_check)}. Using LF runners."
                           return WORKFLOW_LABEL_LF, MESSAGE
                       else:
