@@ -3864,7 +3864,7 @@ class CommonTemplate:
         
     def test_conv3d(self):
         m = torch.nn.Sequential(
-            torch.nn.Conv3d(3, 3, kernel_size=7)
+            torch.nn.Conv3d(3, 3, kernel_size=7),
             ToTuple(),
         )
 
