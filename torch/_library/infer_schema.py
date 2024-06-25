@@ -97,6 +97,7 @@ def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
                     params.append(f"{schema_type} {name}={param.default}")
             else:
                 params.append(f"{schema_type} {name}=None")
+
     mutates_args_not_seen = set(mutates_args) - seen_args
     if len(mutates_args_not_seen) > 0:
         error_fn(

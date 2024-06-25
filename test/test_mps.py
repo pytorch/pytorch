@@ -93,6 +93,7 @@ def mps_ops_grad_modifier(ops):
         'cdist': [torch.float32],
         'masked.scatter': [torch.float16, torch.float32],
         'index_fill': [torch.float16, torch.float32],  # missing `aten::_unique`.
+        'linalg.lu_factor': [torch.float16, torch.float32],  # missing `aten::lu_unpack`.
         'aminmax': [torch.float32, torch.float16],
 
         # Correctness issues
@@ -142,6 +143,10 @@ def mps_ops_grad_modifier(ops):
 
         # round not working properly for float16
         'round': [torch.float16],
+
+        # atomic operation in backward pass
+        '_unsafe_masked_index': [torch.float16],
+        '_unsafe_masked_index_put_accumulate': [torch.float16],
     }
 
     MACOS_12_3_XFAILLIST_GRAD = {
@@ -357,6 +362,7 @@ def mps_ops_modifier(ops):
         '__rdiv__',
         '__rmatmul__',
         '_chunk_cat',
+        '_unsafe_masked_index',
         'acos',
         'acosh',
         'all',
@@ -699,7 +705,6 @@ def mps_ops_modifier(ops):
         'linalg.lstsq': None,
         'linalg.lstsqgrad_oriented': None,
         'linalg.lu': None,
-        'linalg.lu_factor': None,
         'linalg.lu_factor_ex': None,
         'linalg.lu_solve': None,
         'linalg.matrix_norm': [torch.float32],
@@ -731,9 +736,6 @@ def mps_ops_modifier(ops):
         'nn.functional.interpolatearea': None,
         'nn.functional.interpolatebicubic': None,
         'nn.functional.interpolatetrilinear': None,
-        # TODO: max_pool2d for integral types fails the numerical test
-        'nn.functional.max_pool2d': (integral_types() if product_version < 14.0 else
-                                     [torch.int64, torch.int32, torch.int16, torch.int8]),
         'nn.functional.max_unpool1dgrad': None,
         'nn.functional.max_unpool2dgrad': None,
         'nn.functional.max_unpool3dgrad': None,
@@ -883,6 +885,9 @@ def mps_ops_modifier(ops):
 
         # round not working properly for float16
         'round': [torch.float16],
+
+        # atomic operations not supported
+        '_unsafe_masked_index_put_accumulate': [torch.bool, torch.int8, torch.uint8, torch.float16, torch.int16, torch.int64],
     }
 
     if product_version < 14.0:
@@ -911,6 +916,7 @@ def mps_ops_modifier(ops):
             # Error in TestConsistencyCPU.test_output_match_isin_cpu fails for integers,
             # not reproducible in later OS. Added assert to op if used in < 14.0
             'isin': [torch.int64, torch.int32, torch.int16, torch.uint8, torch.int8],
+            'nn.functional.max_pool2d': [torch.uint8],
         })
 
     UNDEFINED_XFAILLIST = {
@@ -7823,7 +7829,6 @@ class TestMPS(TestCaseMPS):
         x.backward(torch.randn_like(x))
         torch.mps.synchronize()
 
-    @unittest.expectedFailure
     def test_mps_allocator_module(self):
         # first garbage collect and empty the cached blocks
         gc.collect()
@@ -9162,8 +9167,8 @@ class TestLinalgMPS(TestCaseMPS):
                 b, n_bit=4, q_group_size=q_group
             )
             b_int4pack = torch._convert_weight_to_int4pack(
-                b_int32.cpu(), inner_k_tiles
-            ).to(device="mps")
+                b_int32, inner_k_tiles
+            )
 
             return b_int4pack, b_scales_and_zeros
 
