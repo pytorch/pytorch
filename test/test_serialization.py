@@ -15,7 +15,7 @@ import pickle
 import shutil
 import pathlib
 import platform
-from collections import OrderedDict
+from collections import namedtuple, OrderedDict
 from copy import deepcopy
 from itertools import product
 
@@ -804,6 +804,17 @@ class serialization_method:
     def __exit__(self, *args, **kwargs):
         torch.save = self.torch_save
 
+Point = namedtuple('Point', ['x', 'y'])
+
+class ClassThatUsesBuildInstruction:
+    def __init__(self, num):
+        self.num = num
+
+    def __reduce_ex__(self, proto):
+        # Third item, state here will cause pickle to push a BUILD instruction
+        return ClassThatUsesBuildInstruction, (self.num,), {'foo': 'bar'}
+
+
 @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
 class TestBothSerialization(TestCase):
     @parametrize("weights_only", (True, False))
@@ -1048,6 +1059,55 @@ class TestSerialization(TestCase, SerializationMixin):
                 torch.load(f, weights_only=True)
             finally:
                 torch.serialization.clear_safe_globals()
+
+    def test_weights_only_safe_globals_newobj(self):
+        # This will use NEWOBJ
+        p = Point(x=1, y=2)
+        with BytesIOContext() as f:
+            torch.save(p, f)
+            f.seek(0)
+            with self.assertRaisesRegex(pickle.UnpicklingError,
+                                        "GLOBAL __main__.Point was not an allowed global by default"):
+                torch.load(f, weights_only=True)
+            f.seek(0)
+            try:
+                torch.serialization.add_safe_globals([Point])
+                loaded_p = torch.load(f, weights_only=True)
+                self.assertEqual(loaded_p, p)
+            finally:
+                torch.serialization.clear_safe_globals()
+
+    def test_weights_only_safe_globals_build(self):
+        counter = 0
+
+        def fake_set_state(obj, *args):
+            nonlocal counter
+            counter += 1
+
+        c = ClassThatUsesBuildInstruction(2)
+        with BytesIOContext() as f:
+            torch.save(c, f)
+            f.seek(0)
+            with self.assertRaisesRegex(pickle.UnpicklingError,
+                                        "GLOBAL __main__.ClassThatUsesBuildInstruction was not an allowed global by default"):
+                torch.load(f, weights_only=True)
+            try:
+                torch.serialization.add_safe_globals([ClassThatUsesBuildInstruction])
+                # Test dict update path
+                f.seek(0)
+                loaded_c = torch.load(f, weights_only=True)
+                self.assertEqual(loaded_c.num, 2)
+                self.assertEqual(loaded_c.foo, 'bar')
+                # Test setstate path
+                ClassThatUsesBuildInstruction.__setstate__ = fake_set_state
+                f.seek(0)
+                loaded_c = torch.load(f, weights_only=True)
+                self.assertEqual(loaded_c.num, 2)
+                self.assertEqual(counter, 1)
+                self.assertFalse(hasattr(loaded_c, 'foo'))
+            finally:
+                torch.serialization.clear_safe_globals()
+                ClassThatUsesBuildInstruction.__setstate__ = None
 
     @parametrize('weights_only', (False, True))
     def test_serialization_math_bits(self, weights_only):
