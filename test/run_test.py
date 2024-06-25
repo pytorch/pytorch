@@ -556,9 +556,7 @@ def try_set_cpp_stack_traces(env, command, set=True):
     # Don't do it for macos inductor tests as it makes them
     # segfault for some reason
     if not (
-        IS_MACOS
-        and len(command) >= 2
-        and command[2].startswith(INDUCTOR_TEST_PREFIX)
+        IS_MACOS and len(command) >= 2 and command[2].startswith(INDUCTOR_TEST_PREFIX)
     ):
         env = env or {}
         env["TORCH_SHOW_CPP_STACKTRACES"] = "1"
@@ -631,17 +629,22 @@ def run_test_retries(
             # Rerunning the previously failing test succeeded, so now we can
             # skip it and move on
             sc_command = f"--scs={stepcurrent_key}"
-            print_to_file("Test succeeeded in new process, continuing with the rest of the tests")
+            print_to_file(
+                "Test succeeeded in new process, continuing with the rest of the tests"
+            )
         elif num_failures[current_failure] >= 3:
             if not continue_through_error:
                 print_to_file("Stopping at first consistent failure")
                 break
             sc_command = f"--scs={stepcurrent_key}"
-            print_to_file("Test failed consistently, continuing with the rest of the tests due to continue-through-error being set")
+            print_to_file(
+                "Test failed consistently, "
+                "continuing with the rest of the tests due to continue-through-error being set"
+            )
         else:
             env = try_set_cpp_stack_traces(env, command, set=True)
             sc_command = f"--rs={stepcurrent_key}"
-            print_to_file("Retrying...")
+            print_to_file("Retrying single test...")
         print_items = []  # do not continue printing them, massive waste of space
 
     consistent_failures = [x[1:-1] for x in num_failures.keys() if num_failures[x] >= 3]
