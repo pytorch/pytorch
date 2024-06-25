@@ -86,6 +86,7 @@ jobs:
 
       - name: configure aws credentials
         uses: aws-actions/configure-aws-credentials@v3
+        continue-on-error: true
         with:
           role-to-assume: arn:aws:iam::749337293305:role/upload_to_ossci_raw_job_status
           aws-region: us-east-1
