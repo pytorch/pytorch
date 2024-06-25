@@ -940,8 +940,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
             orig_args = (a, b, c, d)
 
             compiled_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
-            # Inductor doesn't support mutable List[Tensor] codegen for now
-            torch.compile(f, backend="aot_eager", fullgraph=True)(*compiled_args)
+            torch.compile(f, backend="inductor", fullgraph=True)(*compiled_args)
 
             eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
             f(*eager_args)
