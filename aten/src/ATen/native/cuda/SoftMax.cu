@@ -863,8 +863,8 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
             auto max_elements_per_smem = (at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock -
               smem_reduction_sz) / sizeof(scalar_t);
 
-            bool can_use_smem = dim_size < max_elements_per_smem;
-            can_use_smem &= !(reinterpret_cast<const uintptr_t>(input_ptr) % ALIGN_BYTES);
+            bool can_use_smem = (size_t) dim_size < max_elements_per_smem;
+            can_use_smem &= !(reinterpret_cast<uintptr_t>(input_ptr) % ALIGN_BYTES);
             can_use_smem &= (!(reinterpret_cast<uintptr_t>(output_ptr) % ALIGN_BYTES));
             can_use_smem &= !(dim_size % ILP);
 
@@ -899,8 +899,8 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
             auto max_elements_per_smem = (at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock -
               smem_reduction_sz) / sizeof(scalar_t);
 
-            bool can_use_smem = dim_size < max_elements_per_smem;
-            can_use_smem &= !(reinterpret_cast<const uintptr_t>(input_ptr) % ALIGN_BYTES);
+            bool can_use_smem = (size_t) dim_size < max_elements_per_smem;
+            can_use_smem &= !(reinterpret_cast<uintptr_t>(input_ptr) % ALIGN_BYTES);
             can_use_smem &= (!(reinterpret_cast<uintptr_t>(output_ptr) % ALIGN_BYTES));
             can_use_smem &= !(dim_size % ILP);
 
@@ -1113,7 +1113,7 @@ TORCH_IMPL_FUNC(softmax_backward_cuda_out)
   host_softmax_backward<SoftMaxBackwardEpilogue, false>(tmp, output, dim, half_to_float, grad_input);
 }
 
-Tensor masked_softmax_cuda(const Tensor& input_, const Tensor& mask_, const c10::optional<int64_t> dim_, const c10::optional<int64_t> mask_type_) {
+Tensor masked_softmax_cuda(const Tensor& input_, const Tensor& mask_, const std::optional<int64_t> dim_, const std::optional<int64_t> mask_type_) {
   Tensor output = at::empty_like(input_, input_.options());
   TORCH_CHECK(mask_.scalar_type() == ScalarType::Bool, "Mask should be a boolean tensor");
 
@@ -1211,7 +1211,7 @@ Tensor masked_softmax_backward_cuda(
     const Tensor& grad_,
     const Tensor& output_,
     const Tensor& mask_,
-    const c10::optional<int64_t> dim_) {
+    const std::optional<int64_t> dim_) {
   Tensor grad_input = at::empty_like(grad_, grad_.options());
   if (grad_.numel() == 0) {
     return grad_input;

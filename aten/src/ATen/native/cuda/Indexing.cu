@@ -22,6 +22,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_assert_async.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/zeros_like.h>
@@ -334,14 +335,8 @@ static ReduceMaximum reduce_maximum;
 static Tensor wrapIndexOnce(const Tensor & index, int64_t dim, int64_t dim_size, bool check_range=true) {
 //we don't need to check range in backward - if there were out of bounds indices forward should already have errored out
   if (index.numel() != 0 && check_range) {
-    auto max_idx = index.max().item<int64_t>();
-    auto min_idx = index.min().item<int64_t>();
-    if (max_idx >= dim_size) {
-      TORCH_CHECK_INDEX(false, "index ", max_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
-    }
-    if (min_idx < -dim_size) {
-      TORCH_CHECK_INDEX(false, "index ", min_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
-    }
+    at::_assert_async(index.max() < dim_size);
+    at::_assert_async(index.min() >= -dim_size);
   }
   return index.remainder(dim_size);
 }
@@ -431,7 +426,7 @@ int64_t largestIndex(const Tensor &self) {
   return result;
 }
 
-void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Tensor>>& indices, const Tensor & value, bool accumulate, bool unsafe) {
+void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Tensor>>& indices, const Tensor & value, bool accumulate, bool unsafe) {
   TORCH_CHECK(!indices.empty() || is_expandable_to(value.sizes(), self.sizes()), "shape mismatch: value tensor of shape ", value.sizes(),
              " cannot be broadcast to indexing result of shape ", self.sizes());
   if (indices.size() > (size_t)self.dim()) {
@@ -508,25 +503,11 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
       if (sliceSize == 1) {
         // This implementation is faster with high amounts of duplicates but could overflow
         // if FP16 / BF16 is used
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16,
-        expandedValue.scalar_type(), "indexing_backward_kernel_stride_1", [&] {
-          indexing_backward_kernel_stride_1<scalar_t><<<grid, block, 0, stream>>>(
-            sorted_indices.const_data_ptr<int64_t>(),
-            orig_indices.const_data_ptr<int64_t>(),
-            expandedValue.const_data_ptr<scalar_t>(),
-            src_.mutable_data_ptr<scalar_t>(),
-            num_indices,
-            sliceSize,
-            strideBefore,
-            nElemBefore,
-            accumulate);
-          C10_CUDA_KERNEL_LAUNCH_CHECK();
-        });
-      } else {
-        if (sliceSize <= warp_size) {
-          AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16,
-          expandedValue.scalar_type(), "indexing_backward_kernel_small_stride", [&] {
-            indexing_backward_kernel_small_stride<scalar_t><<<grid, block, 0, stream>>>(
+        AT_DISPATCH_V2(
+          expandedValue.scalar_type(),
+          "indexing_backward_kernel_stride_1",
+          AT_WRAP([&] {
+            indexing_backward_kernel_stride_1<scalar_t><<<grid, block, 0, stream>>>(
               sorted_indices.const_data_ptr<int64_t>(),
               orig_indices.const_data_ptr<int64_t>(),
               expandedValue.const_data_ptr<scalar_t>(),
@@ -537,10 +518,42 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
               nElemBefore,
               accumulate);
             C10_CUDA_KERNEL_LAUNCH_CHECK();
-            });
+          }),
+          AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
+          AT_EXPAND(AT_FLOAT8_TYPES),
+          kComplexHalf,
+          kHalf,
+          kBool,
+          kBFloat16);
+      } else {
+        if (sliceSize <= warp_size) {
+          AT_DISPATCH_V2(
+            expandedValue.scalar_type(),
+            "indexing_backward_kernel_small_stride",
+            AT_WRAP([&] {
+              indexing_backward_kernel_small_stride<scalar_t><<<grid, block, 0, stream>>>(
+                sorted_indices.const_data_ptr<int64_t>(),
+                orig_indices.const_data_ptr<int64_t>(),
+                expandedValue.const_data_ptr<scalar_t>(),
+                src_.mutable_data_ptr<scalar_t>(),
+                num_indices,
+                sliceSize,
+                strideBefore,
+                nElemBefore,
+                accumulate);
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
+            }),
+            AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
+            AT_EXPAND(AT_FLOAT8_TYPES),
+            kComplexHalf,
+            kHalf,
+            kBool,
+            kBFloat16);
         } else {
-            AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16,
-            expandedValue.scalar_type(), "indexing_backward", [&] {
+          AT_DISPATCH_V2(
+            expandedValue.scalar_type(),
+            "indexing_backward",
+            AT_WRAP([&] {
               indexing_backward_kernel<scalar_t, UNROLL><<<grid, block, 0, stream>>>(
                 sorted_indices.const_data_ptr<int64_t>(),
                 orig_indices.const_data_ptr<int64_t>(),
@@ -552,7 +565,13 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
                 nElemBefore,
                 accumulate);
               C10_CUDA_KERNEL_LAUNCH_CHECK();
-            });
+            }),
+            AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
+            AT_EXPAND(AT_FLOAT8_TYPES),
+            kComplexHalf,
+            kHalf,
+            kBool,
+            kBFloat16);
           }
         }
 
@@ -566,7 +585,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
 
 REGISTER_CUDA_DISPATCH(index_put_with_sort_stub, &index_put_with_sort_kernel);
 
-void index_put_with_sort_quantized(Tensor & self, const c10::List<c10::optional<Tensor>>& indices, const Tensor & value, double scale, int zero_point, bool unsafe) {
+void index_put_with_sort_quantized(Tensor & self, const c10::List<std::optional<Tensor>>& indices, const Tensor & value, double scale, int zero_point, bool unsafe) {
   if (indices.size() > (size_t)self.dim()) {
     TORCH_CHECK_INDEX(false, "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   }
@@ -866,7 +885,7 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
   TORCH_CHECK(index.dim() <= MAX_TENSORINFO_DIMS, "tensor has too many (>", MAX_TENSORINFO_DIMS, ") dims");
 
   if (globalContext().deterministicAlgorithms()){
-    torch::List<c10::optional<Tensor>> indices;
+    torch::List<std::optional<Tensor>> indices;
     indices.reserve(dim + 1);
     for (const auto i: c10::irange(dim)) {
       indices.emplace_back();

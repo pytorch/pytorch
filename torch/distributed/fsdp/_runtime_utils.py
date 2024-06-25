@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import logging
 from enum import auto, Enum
@@ -37,6 +38,7 @@ from torch.distributed.utils import (
     _to_kwargs,
 )
 from torch.utils import _pytree as pytree
+
 
 logger = logging.getLogger(__name__)
 
@@ -387,7 +389,7 @@ def _pre_forward(
         if handle and handle._offload_params and handle.flat_param._cpu_grad is None:
             handle.flat_param._cpu_grad = torch.zeros_like(
                 handle.flat_param._local_shard, device=torch.device("cpu")
-            ).pin_memory()
+            ).pin_memory(device=state.compute_device)
 
         should_cast_forward_inputs = (
             state._handle and not state._handle._force_full_precision
@@ -416,7 +418,12 @@ def _pre_forward_unshard(
     handle._needs_pre_forward_unshard = False
     # Don't wait during trace
     if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
-        state._device_handle.current_stream().wait_stream(state._unshard_stream)
+        current_stream = state._device_handle.current_stream()
+        if state._unshard_event is not None:
+            current_stream.wait_event(state._unshard_event)
+            state._unshard_event = None
+        else:
+            current_stream.wait_stream(state._unshard_stream)
     with torch.profiler.record_function(
         "FullyShardedDataParallel._pre_forward_prefetch"
     ):
@@ -1385,7 +1392,9 @@ def _register_pre_backward_hooks(
     def _register_hook(t: torch.Tensor) -> torch.Tensor:
         if t.requires_grad:
             t.register_hook(
-                functools.partial(_pre_backward_hook, state, module, handle)
+                torch.utils.hooks.unserializable_hook(
+                    functools.partial(_pre_backward_hook, state, module, handle)
+                )
             )
             if handle:
                 handle._needs_pre_backward_unshard = True

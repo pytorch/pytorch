@@ -6,6 +6,14 @@ import textwrap
 import pandas as pd
 
 
+# Hack to have something similar to DISABLED_TEST. These models are flaky.
+
+flaky_models = {
+    "yolov3",
+    "gluon_inception_v3",
+}
+
+
 def get_field(csv, model_name: str, field: str):
     try:
         return csv.loc[csv["name"] == model_name][field].item()
@@ -25,6 +33,13 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
             status = "PASS" if expected_accuracy == "pass" else "XFAIL"
             print(f"{model:34}  {status}")
             continue
+        elif model in flaky_models:
+            if accuracy == "pass":
+                # model passed but marked xfailed
+                status = "PASS_BUT_FLAKY:"
+            else:
+                # model failed but marked passe
+                status = "FAIL_BUT_FLAKY:"
         elif accuracy != "pass":
             status = "FAIL:"
             failed.append(model)

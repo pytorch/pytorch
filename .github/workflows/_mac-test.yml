@@ -24,11 +24,6 @@ on:
         default: "3.8"
         description: |
           The python version to be used. Will be 3.8 by default
-      arch:
-        required: true
-        type: string
-        description: |
-          Contains the architecture to run the tests with
       timeout-minutes:
         required: false
         type: number
@@ -44,7 +39,7 @@ jobs:
     # Also ensure that we always run with the right architecture
     defaults:
       run:
-        shell: arch -arch ${{ inputs.arch }} bash -e -l {0}
+        shell: bash -e -l {0}
     strategy:
       matrix: ${{ fromJSON(inputs.test-matrix) }}
       fail-fast: false
@@ -132,12 +127,6 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           test-matrix: ${{ inputs.test-matrix }}
           job-name: ${{ steps.get-job-id.outputs.job-name }}
-
-      - name: Pre-process arm64 wheels
-        if: inputs.build-environment == 'macos-12-py3-arm64'
-        run: |
-          # As wheels are cross-compiled they are reported as x86_64 ones
-          ORIG_WHLNAME=$(ls -1 dist/*.whl); ARM_WHLNAME=${ORIG_WHLNAME/x86_64/arm64}; mv "${ORIG_WHLNAME}" "${ARM_WHLNAME}"
 
       - name: Set Test step time
         id: test-timeout

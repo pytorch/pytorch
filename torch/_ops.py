@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import contextlib
 import ctypes
 import importlib
@@ -381,6 +382,9 @@ class HigherOrderOperator(OperatorBase):
     def __str__(self):
         return f"{self.name()}"
 
+    # def __repr__(self):
+    #     return f"torch.ops._higher_order_ops.{self._name}"
+
     def name(self):
         return self._name
 
@@ -412,14 +416,22 @@ def key_extractor(tensors, key_mask):
 
 
 # Mode stack for PreDispatchKey
-# it should always have two keys with
+# it should always have three keys with
 # priority given to FunctionalTensorMode and
 # then ProxyTorchDispatchMode. It means that
 # slot 0 belongs to ProxyTorchDispatchMode and
 # slot 1 belongs to FunctionalTensorMode.
+#
+# SchemaCheckMode is separate from the other 2,
+# and is only valid when the stack is empty.
+# SchemaCheckMode is for testing purposes, and
+# is meant to run in eager mode on concrete inputs,
+# checking for incorrect schemas in regards to
+# aliasing or mutating ops.
 class _ModeStackStateForPreDispatch:
     def __init__(self):
         self.__infra_modes = [None, None]
+        self._schema_check_mode = None
 
     def set(self, index, mode):
         assert index < len(self.__infra_modes)
@@ -430,27 +442,35 @@ class _ModeStackStateForPreDispatch:
         return self.__infra_modes[index]
 
     def count(self):
-        return len([i for i in self.__infra_modes if i is not None])
+        return len([i for i in self.__infra_modes if i is not None]) + int(
+            self._schema_check_mode is not None
+        )
 
 
 _mode_stack_state_for_pre_dispatch = _ModeStackStateForPreDispatch()
 
 
-def unset_mode_pre_dispatch(mode_key):
+def unset_mode_pre_dispatch(mode_key, schema_check=False):
     current_mode_stack_pre_dispatch = mode_stack_state_for_pre_dispatch()
-    assert mode_key in (
+    assert mode_key is None or mode_key in (
         torch._C._TorchDispatchModeKey.PROXY,
         torch._C._TorchDispatchModeKey.FUNCTIONAL,
     )
+    if schema_check:
+        assert mode_key is None
 
     def _unset_mode():
         if mode_key == torch._C._TorchDispatchModeKey.PROXY:
             current_mode = current_mode_stack_pre_dispatch.get(0)
             mode_stack_state_for_pre_dispatch().set(0, None)
             return current_mode
-        else:
+        elif mode_key == torch._C._TorchDispatchModeKey.FUNCTIONAL:
             current_mode = current_mode_stack_pre_dispatch.get(1)
             mode_stack_state_for_pre_dispatch().set(1, None)
+            return current_mode
+        else:
+            current_mode = mode_stack_state_for_pre_dispatch()._schema_check_mode
+            mode_stack_state_for_pre_dispatch()._schema_check_mode = None
             return current_mode
 
     current_mode = _unset_mode()
@@ -470,12 +490,27 @@ def unset_mode_pre_dispatch(mode_key):
 
 def _set_mode_pre_dispatch(mode):
     from torch._subclasses.functional_tensor import FunctionalTensorMode
+    from torch._subclasses.schema_check_mode import SchemaCheckMode
     from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 
-    assert isinstance(mode, (FunctionalTensorMode, ProxyTorchDispatchMode))
+    assert isinstance(
+        mode,
+        (
+            FunctionalTensorMode,
+            ProxyTorchDispatchMode,
+            SchemaCheckMode,
+        ),
+    )
 
     previous_mode_stack_len = _len_torch_dispatch_stack_pre_dispatch()
-    if isinstance(mode, FunctionalTensorMode):
+    if isinstance(mode, SchemaCheckMode):
+        current_mode = mode_stack_state_for_pre_dispatch()._schema_check_mode
+        if previous_mode_stack_len > 0:
+            raise AssertionError(
+                "SchemaCheckMode for pre-dispatch must be used exclusively, found other modes on the stack"
+            )
+        mode_stack_state_for_pre_dispatch()._schema_check_mode = mode
+    elif isinstance(mode, FunctionalTensorMode):
         current_mode = mode_stack_state_for_pre_dispatch().get(1)
         assert current_mode is None
         mode_stack_state_for_pre_dispatch().set(1, mode)
@@ -501,9 +536,10 @@ def _pop_mode_from_pre_dispatch():
     if pre_dispatch_len == 0:
         raise AssertionError("Trying to pop empty mode stack")
 
+    if mode_stack._schema_check_mode is not None:
+        return unset_mode_pre_dispatch(None, schema_check=True)
     if mode_stack.get(1) is not None:
         return unset_mode_pre_dispatch(torch._C._TorchDispatchModeKey.FUNCTIONAL)
-
     if mode_stack.get(0) is not None:
         return unset_mode_pre_dispatch(torch._C._TorchDispatchModeKey.PROXY)
 
@@ -519,19 +555,23 @@ def _get_dispatch_mode_pre_dispatch(mode_key):
     )
     if mode_key == torch._C._TorchDispatchModeKey.PROXY:
         return mode_stack_state_for_pre_dispatch().get(0)
-    return mode_stack_state_for_pre_dispatch().get(1)
+    else:
+        return mode_stack_state_for_pre_dispatch().get(1)
 
 
 def _get_current_dispatch_mode_pre_dispatch():
-    stack_len = mode_stack_state_for_pre_dispatch().count()
-    if stack_len == 2:
-        return mode_stack_state_for_pre_dispatch().get(1)
-    if stack_len == 1:
-        return (
-            mode_stack_state_for_pre_dispatch().get(1)
-            if mode_stack_state_for_pre_dispatch().get(1) is not None
-            else mode_stack_state_for_pre_dispatch().get(0)
-        )
+    if mode_stack_state_for_pre_dispatch()._schema_check_mode is not None:
+        return mode_stack_state_for_pre_dispatch()._schema_check_mode
+    else:
+        stack_len = mode_stack_state_for_pre_dispatch().count()
+        if stack_len == 2:
+            return mode_stack_state_for_pre_dispatch().get(1)
+        if stack_len == 1:
+            return (
+                mode_stack_state_for_pre_dispatch().get(1)
+                if mode_stack_state_for_pre_dispatch().get(1) is not None
+                else mode_stack_state_for_pre_dispatch().get(0)
+            )
     return None
 
 
@@ -807,6 +847,7 @@ class TorchBindOpOverload(OpOverload):
             DispatchKey.AutogradCPU,
             DispatchKey.AutogradCUDA,
             DispatchKey.ADInplaceOrView,
+            DispatchKey.BackendSelect,
             DispatchKey.PythonTLSSnapshot,
             DispatchKey.PythonDispatcher,
         ]
@@ -889,8 +930,13 @@ class TorchBindOpOverload(OpOverload):
                 )
 
             raise RuntimeError(
-                f"Cannot handle FakeScriptObject with python dispatcher with dispatch key {handler}."
-                f"Please implement it by annotating a python callable with py_impl({handler})."
+                f"Torchbind op {self} received a FakeScriptObject input when dispatching {handler}."
+                f" but no python implementation is found."
+                f" Please file an issue on this when you encounter this error."
+                f" This error can happen when you export or compile the model."
+                f" It can still happpen even if a C++ implementation for {dispatch_key}. "
+                f" has been registered. That's because FakeScriptObject purely lives in python and cannot work "
+                f" with a C++ implementation."
             )
 
         assert isinstance(handler, Callable)  # type: ignore[arg-type]
@@ -1119,8 +1165,10 @@ class _OpNamespace(types.ModuleType):
         # for overloads and raise an exception if there are more than one.
         namespace_name = self.name
         qualified_op_name = f"{namespace_name}::{op_name}"
+        module_name = self.__module__ + "." + namespace_name
+
         try:
-            op, overload_names = torch._C._jit_get_operation(qualified_op_name)
+            op, overload_names = _get_packet(qualified_op_name, module_name)
             if op is None:
                 raise AttributeError(
                     f"'_OpNamespace' '{self.name}' object has no attribute '{op_name}'"
@@ -1132,10 +1180,7 @@ class _OpNamespace(types.ModuleType):
                 f"'_OpNamespace' '{self.name}' object has no attribute '{op_name}'"
             ) from e
 
-        # let the script frontend know that op is identical to the builtin op
-        # with qualified_op_name
-        torch.jit._builtins._register_builtin(op, qualified_op_name)
-        op.__module__ = self.__module__ + "." + namespace_name
+        op.__module__ = module_name
         opoverloadpacket = OpOverloadPacket(
             qualified_op_name, op_name, op, overload_names
         )
@@ -1145,6 +1190,23 @@ class _OpNamespace(types.ModuleType):
         setattr(self, op_name, opoverloadpacket)
         self._dir.append(op_name)
         return opoverloadpacket
+
+
+def _get_packet(qualname, op_module):
+    op, overload_names = torch._C._jit_get_operation(qualname)
+    if op is not None:
+        # let the script frontend know that op is identical to the builtin op
+        # with qualified_op_name
+        torch.jit._builtins._register_builtin(op, qualname)
+        op.__module__ = op_module
+    return op, overload_names
+
+
+def _refresh_packet(packet):
+    op, overload_names = _get_packet(packet._qualified_op_name, packet._op.__module__)
+    assert op is not None
+    packet._op = op
+    packet._overload_names = overload_names
 
 
 class _PyOpNamespace(_OpNamespace):
@@ -1238,4 +1300,4 @@ class _Ops(types.ModuleType):
 
 
 # The ops "namespace"
-ops = _Ops()
+ops: _Ops = _Ops()

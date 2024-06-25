@@ -10,6 +10,7 @@ from typing import List
 from unittest.mock import patch
 
 import numpy as np
+
 import torch
 import torch._dynamo
 import torch._dynamo.logging
@@ -80,6 +81,38 @@ def get_model(
     device, bsz=20, in_feat=10, hidden_feat=5000, out_feat=5, ctx_manager=None
 ):
     m = ToyModel(
+        in_feat=in_feat,
+        hidden_feat=hidden_feat,
+        out_feat=out_feat,
+        ctx_manager=ctx_manager,
+    ).to(device)
+    m.apply(init_weights)
+    inputs = torch.rand(bsz, in_feat).to(device)
+    outputs = m(inputs)
+    return m, inputs, outputs
+
+
+class MutatingModel(nn.Module):
+    def __init__(self, in_feat=10, hidden_feat=5000, out_feat=5, ctx_manager=None):
+        super().__init__()
+        self.ctx_manager = ctx_manager
+        self.net = nn.Sequential(
+            *[nn.Linear(in_feat, hidden_feat), nn.ReLU()]
+            + [nn.Linear(hidden_feat, hidden_feat), nn.ReLU()]
+            + [nn.Linear(hidden_feat, hidden_feat), nn.ReLU()]
+            + [nn.Linear(hidden_feat, out_feat), nn.ReLU()]
+        )
+        self.state = 1
+
+    def forward(self, inputs):
+        self.state = 2
+        return self.net(inputs) * self.state
+
+
+def get_mutating_model(
+    device, bsz=20, in_feat=10, hidden_feat=5000, out_feat=5, ctx_manager=None
+):
+    m = MutatingModel(
         in_feat=in_feat,
         hidden_feat=hidden_feat,
         out_feat=out_feat,
@@ -484,6 +517,26 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             self.assertTrue(same(correct_outputs, outputs))
 
     @skip_if_lt_x_gpu(1)
+    def test_fsdp_setattr(self):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            # Test with basic FSDP wrapping (outer wrap around whole model)
+            m, inputs, correct_outputs = get_mutating_model(f"cuda:{self.rank}")
+            fsdp_m = FSDP(m, use_orig_params=True)
+            prof = torch._dynamo.utils.CompileProfiler()
+            fsdp_m = torch.compile(fsdp_m, backend=prof, fullgraph=False)
+            outputs = fsdp_m(inputs)
+            self.assertTrue(same(correct_outputs, outputs))
+            FileCheck().check("Torchdynamo Profiler Report").check(
+                "Graph Breaks"
+            ).check_not(
+                "setattr(FSDPManagedNNModuleVariable(MutatingModel), state, ...)"
+            ).check_not(
+                "setattr(FSDPManagedNNModuleVariable(FullyShardedDataParallel), _is_root, ...)"
+            ).run(
+                prof.report()
+            )
+
+    @skip_if_lt_x_gpu(1)
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_fsdp_inductor(self):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
@@ -577,6 +630,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     # TODO(whc) Investigate why cudagraphs breaks inductor+fsdp for hf_bert
     @patch.object(torch._inductor.config.triton, "cudagraphs", False)
     @patch.object(torch._inductor.config, "fallback_random", True)
+    @patch.object(torch._dynamo.config, "guard_nn_modules", True)
     def test_hf_bert_fsdp_activation_checkpointing(self):
         from transformers.models.bert.modeling_bert import BertLayer
 
@@ -1081,16 +1135,13 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
             # far from an exhaustive check of all the expected guards, just check a couple of them.
             FileCheck().check("""local "L['self']" TYPE_MATCH""").check(
-                """local "L['self']" ID_MATCH"""
-            ).check(f"""{expected_guard_source} "L['self'].net" TYPE_MATCH""").check(
-                f"""{expected_guard_source} "L['self'].net" ID_MATCH"""
+                f"""{expected_guard_source} "L['self']._modules['net']" TYPE_MATCH"""
             ).check(
-                f"""{expected_guard_source} "L['self'].net[0]" TYPE_MATCH"""
-            ).check(
-                f"""{expected_guard_source} "L['self'].net[0]" ID_MATCH"""
+                f"""{expected_guard_source} "L['self']._modules['net']._modules['0']" TYPE_MATCH"""
             ).run(
                 GUARDS_FILE.getvalue()
             )
+
             self.assertTrue(same(correct_outputs, outputs))
 
     def test_fsdp_skip_register_attr_or_module(self):
@@ -1177,6 +1228,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         fsdp_out = fsdp_model(inp)
         self.assertEqual(local_out, fsdp_out)
 
+    @patch.object(config, "guard_nn_modules", True)
     def test_fsdp_dup_tensors_diff_source(self):
         """
         Tests that FSDP-managed modules' parameters and buffers with different

@@ -1,14 +1,13 @@
+# mypy: allow-untyped-defs
 from typing import Any, cast, List
 
 import torch
 import torch.distributed as dist
 from torch._utils import _get_device_module
-
 from torch.distributed._shard.metadata import ShardMetadata
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._tensor import DTensor
 from torch.distributed._tensor._utils import compute_local_shape_and_global_offset
-
 from torch.utils._pytree import tree_map_only
 
 from .metadata import (
@@ -32,6 +31,7 @@ from .resharding import (
     _check_shard_metadata_pair_overlap,
     _shards_get_overlap_region_wrt_saved_tensor,
 )
+
 
 __all__: List[str] = ["create_read_items_for_chunk_list"]
 
@@ -217,8 +217,9 @@ def _create_default_metadata_only_plan(state_dict: STATE_DICT_TYPE) -> SavePlan:
 
 
 def _create_write_items(fqn: str, object: Any) -> List[WriteItem]:
-    if isinstance(object, DTensor):
-        return [_create_write_items_for_dtensor(fqn, object)]
+    if hasattr(object, "__create_write_items__"):
+        # DTensor implements _Checkpointable
+        return object.__create_write_items__(fqn, object)
     elif isinstance(object, ShardedTensor):
         return [
             _create_write_item_for_shard(fqn, object, shard.metadata)
@@ -242,8 +243,9 @@ def _create_chunk_from_dtensor(tensor: DTensor) -> ChunkStorageMetadata:
 
 
 def _create_chunk_list(tensor: torch.Tensor) -> List[ChunkStorageMetadata]:
-    if isinstance(tensor, DTensor):
-        local_chunks = [_create_chunk_from_dtensor(tensor)]
+    if hasattr(tensor, "__create_chunk_list__"):
+        # DTensor implements _Checkpointable
+        local_chunks = tensor.__create_chunk_list__()  # type: ignore[attr-defined]
     elif isinstance(tensor, ShardedTensor):
         local_chunks = [
             _chunk_for_shard(shard.metadata) for shard in tensor.local_shards()

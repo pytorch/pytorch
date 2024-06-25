@@ -132,6 +132,8 @@ struct P2pState {
   uint32_t signals1[kMaxAllReduceBlocks][kMaxDevices];
 };
 
+static_assert(sizeof(P2pState) <= kP2pStateSize);
+
 template <uint32_t kWorldSize, bool kAligned>
 static __global__ void oneShotAllReduceKernel(
     at::BFloat16* input,
@@ -504,7 +506,8 @@ at::Tensor IntraNodeComm::oneShotAllReduce(
     at::cuda::CUDAStream& stream) {
   checkInput(input, rank_);
 
-  const size_t numelPerWarp = kBytesPerThread / input.element_size() * kWarpSize;
+  const size_t numelPerWarp =
+      kBytesPerThread / input.element_size() * kWarpSize;
   const size_t N_aligned = alignUp(input.numel(), numelPerWarp);
   const bool isAligned = (N_aligned == static_cast<size_t>(input.numel()));
   TORCH_CHECK(N_aligned <= bufferSize_ / input.element_size());
@@ -521,7 +524,7 @@ at::Tensor IntraNodeComm::oneShotAllReduce(
   const bool fuseInputCopy = isAligned && blocks.x < kMaxAllReduceBlocks;
   if (!fuseInputCopy) {
     AT_CUDA_CHECK(cudaMemcpyAsync(
-        buffers_[rank_],
+        symmetricMemory_->get_buffer_ptrs_dev()[rank_],
         input.data_ptr(),
         input.numel() * input.element_size(),
         cudaMemcpyDeviceToDevice,
@@ -581,7 +584,7 @@ at::Tensor IntraNodeComm::twoShotAllReduce(
 
   at::cuda::OptionalCUDAGuard guard(input.get_device());
   AT_CUDA_CHECK(cudaMemcpyAsync(
-      buffers_[rank_],
+      symmetricMemory_->get_buffer_ptrs_dev()[rank_],
       input.data_ptr(),
       input.numel() * input.element_size(),
       cudaMemcpyDeviceToDevice,
@@ -631,7 +634,7 @@ at::Tensor IntraNodeComm::hybridCubeMeshAllReduce(
 
   at::cuda::OptionalCUDAGuard guard(input.get_device());
   AT_CUDA_CHECK(cudaMemcpyAsync(
-      buffers_[rank_],
+      symmetricMemory_->get_buffer_ptrs_dev()[rank_],
       input.data_ptr(),
       input.numel() * input.element_size(),
       cudaMemcpyDeviceToDevice,
@@ -732,7 +735,8 @@ static __global__ void barrierKernel(
   }
 }
 
-void IntraNodeComm::barrier(c10::optional<std::vector<int64_t>> ranks) {
+void IntraNodeComm::barrier(std::optional<std::vector<int64_t>> ranks) {
+  barrierReady_.block(at::cuda::getCurrentCUDAStream());
   if (!ranks.has_value()) {
     ranks = std::vector<int64_t>(worldSize_);
     std::iota(ranks->begin(), ranks->end(), 0);
@@ -745,44 +749,15 @@ void IntraNodeComm::barrier(c10::optional<std::vector<int64_t>> ranks) {
   barrierKernel<<<1, kWarpSize, 0, at::cuda::getCurrentCUDAStream()>>>(
       reinterpret_cast<P2pState**>(p2pStatesDev_), mask, rank_, worldSize_);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
+  barrierReady_.record();
 }
 
-void IntraNodeComm::put(const at::Tensor& tensor, int64_t offset) {
-  TORCH_CHECK(
-      tensor.is_non_overlapping_and_dense(),
-      "IntraNodeComm::put(): tensor must be non-overlapping and dense");
-  size_t sz = tensor.numel() * tensor.element_size();
-  TORCH_CHECK(
-      offset + sz <= bufferSize_,
-      "IntraNodeComm::put(): offset + tensor size exceeded "
-      "p2p buffer size");
-  // This results in "Memcpy PtoP" which does not use SMs for copying
-  AT_CUDA_CHECK(cudaMemcpyAsync(
-      static_cast<char*>(buffers_[rank_]) + offset,
-      static_cast<char*>(tensor.data_ptr()),
-      sz,
-      cudaMemcpyDeviceToDevice,
-      at::cuda::getCurrentCUDAStream()));
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
-}
-
-void IntraNodeComm::get(size_t rank, at::Tensor tensor, int64_t offset) {
-  TORCH_CHECK(
-      tensor.is_non_overlapping_and_dense(),
-      "IntraNodeComm::get(): tensor must be non-overlapping and dense");
-  size_t sz = tensor.numel() * tensor.element_size();
-  TORCH_CHECK(
-      offset + sz <= bufferSize_,
-      "IntraNodeComm::get(): offset + tensor size exceeded "
-      "p2p buffer size");
-  // This results in "Memcpy PtoP" which does not use SMs for copying
-  AT_CUDA_CHECK(cudaMemcpyAsync(
-      static_cast<char*>(tensor.data_ptr()),
-      static_cast<char*>(buffers_[rank]) + offset,
-      sz,
-      cudaMemcpyDeviceToDevice,
-      at::cuda::getCurrentCUDAStream()));
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
+at::Tensor IntraNodeComm::getBuffer(
+    size_t rank,
+    const std::vector<int64_t>& sizes,
+    c10::ScalarType dtype,
+    int64_t storageOffset) {
+  return symmetricMemory_->get_buffer(rank, sizes, dtype, storageOffset);
 }
 
 } // namespace intra_node_comm

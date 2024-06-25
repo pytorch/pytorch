@@ -13,7 +13,7 @@ namespace mkldnn {
 
 struct ContextConv final {
   ideep::tensor weight_packed_;
-  c10::optional<at::Tensor> at_bias_;
+  std::optional<at::Tensor> at_bias_;
   std::vector<int64_t> padding_;
   std::vector<int64_t> stride_;
   std::vector<int64_t> dilation_;
@@ -24,7 +24,7 @@ struct ContextConv final {
 
   ContextConv(
       ideep::tensor&& weight_packed,
-      c10::optional<at::Tensor> at_bias,
+      std::optional<at::Tensor> at_bias,
       std::vector<int64_t> padding,
       std::vector<int64_t> stride,
       std::vector<int64_t> dilation,

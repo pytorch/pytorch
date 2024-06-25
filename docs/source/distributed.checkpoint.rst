@@ -29,6 +29,15 @@ The entrypoints to load and save a checkpoint are the following:
 .. autofunction::  load
 .. autofunction::  load_state_dict
 
+The following module is also useful for additional customization of the staging mechanisms used for asynchronous checkpointing (`torch.distributed.checkpoint.async_save`):
+
+.. automodule:: torch.distributed.checkpoint.staging
+
+.. autoclass:: torch.distributed.checkpoint.staging.AsyncStager
+  :members:
+
+.. autoclass:: torch.distributed.checkpoint.staging.BlockingAsyncStager
+  :members:
 
 In addition to the above entrypoints, `Stateful` objects, as described below, provide additional customization during saving/loading
 .. automodule:: torch.distributed.checkpoint.stateful

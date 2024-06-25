@@ -10,10 +10,6 @@ from typing import Callable
 import onnx
 import parameterized
 import pytorch_test_common
-
-import torch
-import torch.onnx
-import torch.utils.cpp_extension
 import torchvision
 from autograd_helper import CustomFunction as CustomFunction2
 from pytorch_test_common import (
@@ -21,12 +17,15 @@ from pytorch_test_common import (
     skipIfUnsupportedMaxOpsetVersion,
     skipIfUnsupportedMinOpsetVersion,
 )
+
+import torch
+import torch.onnx
+import torch.utils.cpp_extension
 from torch.onnx import _constants, OperatorExportTypes, TrainingMode, utils
 from torch.onnx._globals import GLOBALS
 from torch.onnx.symbolic_helper import _unpack_list, parse_args
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import skipIfNoCaffe2, skipIfNoLapack
-from verify import verify
+from torch.testing._internal.common_utils import skipIfNoLapack
 
 
 def _remove_test_environment_prefix_from_scope_name(scope_name: str) -> str:
@@ -1359,6 +1358,8 @@ class TestUtilityFuns(_BaseTestCase):
         iter = graph.nodes()
         self.assertEqual(next(iter).kind(), "custom_namespace::custom_op")
 
+    # gelu is exported as onnx::Gelu for opset >= 20
+    @skipIfUnsupportedMaxOpsetVersion(19)
     def test_custom_opsets_gelu(self):
         self.addCleanup(torch.onnx.unregister_custom_op_symbolic, "::gelu", 9)
 
@@ -1383,6 +1384,8 @@ class TestUtilityFuns(_BaseTestCase):
         self.assertEqual(graph.opset_import[1].domain, "com.microsoft")
         self.assertEqual(graph.opset_import[1].version, 1)
 
+    # gelu is exported as onnx::Gelu for opset >= 20
+    @skipIfUnsupportedMaxOpsetVersion(19)
     def test_register_aten_custom_op_symbolic(self):
         self.addCleanup(torch.onnx.unregister_custom_op_symbolic, "aten::gelu", 9)
 
@@ -1622,25 +1625,6 @@ class TestUtilityFuns(_BaseTestCase):
                 graph_input_params,
                 "Graph parameter names does not match model parameters.",
             )
-
-    @skipIfNoCaffe2
-    def test_modifying_params(self):
-        class MyModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.param = torch.nn.Parameter(torch.tensor([2.0]))
-
-            def forward(self, x):
-                y = x * x
-                self.param.data.add_(1.0)
-                return y
-
-        x = torch.tensor([1, 2])
-        # Move import to local as caffe2 backend requires additional build flag,
-        # and is only used in this test case.
-        import caffe2.python.onnx.backend as backend
-
-        verify(MyModel(), x, backend, do_constant_folding=False)
 
     def test_fuse_conv_bn(self):
         class Fuse(torch.nn.Module):
