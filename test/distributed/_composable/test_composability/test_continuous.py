@@ -1,28 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
-import torch
-import torch.distributed as dist
-import torch.nn as nn
-from torch.distributed._composable.fsdp import fully_shard
-from torch.distributed._tensor import DTensor, init_device_mesh
-
-import torch
-import torch.distributed as dist
-import torch.nn as nn
-
-from torch.distributed._tensor import (
-    DTensor,
-    init_device_mesh,
-)
-
-from torch.nn.parallel import DistributedDataParallel as DDP
-
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-)
-import copy
 import os
 import sys
 import tempfile
@@ -30,11 +8,13 @@ import tempfile
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._composable.fsdp.fully_shard import (
     fully_shard,
     MixedPrecisionPolicy,
 )
-from torch.distributed._tensor import DTensor
+from torch.distributed._tensor import DTensor, init_device_mesh
+
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.pipelining import PipelineStage
 from torch.distributed.pipelining.schedules import (
@@ -43,12 +23,12 @@ from torch.distributed.pipelining.schedules import (
     ScheduleGPipe,
 )
 from torch.nn.parallel import DistributedDataParallel as DDP
-
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
     MultiProcContinousTest,
     requires_nccl,
 )
+
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
