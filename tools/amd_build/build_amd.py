@@ -3,11 +3,11 @@
 
 import argparse
 import os
-import pathlib
 import sys
+from pathlib import Path
 
 
-REPO_ROOT = pathlib.Path(__file__).parents[2].resolve()
+REPO_ROOT = Path(__file__).parents[2].resolve()
 sys.path.append(str(REPO_ROOT / "torch" / "utils"))
 
 from hipify import hipify_python  # type: ignore[import]

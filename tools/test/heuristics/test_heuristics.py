@@ -1,14 +1,14 @@
 # For testing specific heuristics
 import io
 import json
-import pathlib
 import sys
 import unittest
+from pathlib import Path
 from typing import Any, Dict, List, Set
 from unittest import mock
 
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.append(str(REPO_ROOT))
 
 from tools.test.heuristics.test_interface import TestTD
