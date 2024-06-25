@@ -133,7 +133,10 @@ class DeviceProperties(typing.NamedTuple):
 class HalideInputSpec(typing.NamedTuple):
     ctype: str
     name: str
-    numel: Optional[str] = None
+    shape: Optional[List[str]] = None
+    stride: Optional[List[str]] = None
+    offset: Optional[str] = None
+    alias_of: Optional[str] = None
 
     def bindings_type(self):
         if self.ctype == "half*":
@@ -145,12 +148,19 @@ class HalideInputSpec(typing.NamedTuple):
             return "halide_type_t(halide_type_float, 16)"  # half not defined
         return f"halide_type_of<{self.ctype.replace('*', '')}>()"
 
+    def is_scalar(self):
+        return self.shape is None
+
+    def is_buffer(self):
+        return self.shape is not None
+
 
 class HalideMeta(typing.NamedTuple):
     argtypes: List[HalideInputSpec]
     target: str
     scheduler: str
     scheduler_flags: Dict[str, Union[int, str]]
+    cuda_device: Optional[int] = None
 
     def args(self):
         """Command line args to pass to halide generator"""
@@ -158,3 +168,6 @@ class HalideMeta(typing.NamedTuple):
         for k, v in self.scheduler_flags.items():
             args.append(f"autoscheduler.{k}={v}")
         return args
+
+    def is_cuda(self):
+        return self.cuda_device is not None
