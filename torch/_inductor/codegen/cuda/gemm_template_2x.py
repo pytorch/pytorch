@@ -31,33 +31,49 @@ GEMM_TEMPLATE = r"""
 // When workspace_size is not a nullptr, populates requested workspace_size and returns.
 // Otherwise, computes the Gemm kernel using the given workspace ptr.
 extern "C" {
-{{kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y], names_str="X, W, Bias, Y",
- input_reorder=input_reorder)}} {
+{{kernel_call_signature}} {
   try {
   int64_t B = {{kernel.size(Y, 0, -3, default_value=1)}};
   int64_t M = {{kernel.size(X, -2)}};
-  int64_t K = {{kernel.size(X, -1)}};
+  int64_t K = {{kernel.size(W, -2)}};
   int64_t N = {{kernel.size(W, -1)}};
   using ElementComputeEpilogue = {{instance_type}}::ElementAccumulator;
   using coord_t = cutlass::gemm::GemmCoord::Index;
+  static cutlass::KernelHardwareInfo hw_info;
+  if (hw_info.sm_count == 0) {
+    hw_info.sm_count = cutlass::KernelHardwareInfo::query_device_multiprocessor_count(0);
+    CUTLASS_TRACE_HOST("Query result for SM count per device: " << hw_info.sm_count);
+  }
   {{instance_type}}::Arguments arguments;
-  {{template.render_gemm_arguments(argument_template, epilogue_template, should_swap_xw,
-                                    X, W, Bias, Y, alpha, beta, kernel, epilogue_args)}}
+  {{template.render_gemm_arguments(instance_type, argument_template, epilogue_template, should_swap_xw,
+                                    X, W, Bias, Meta, Y, alpha, beta, kernel, epilogue_args)}}
   {{instance_type}} gemm_op;
   if (workspace_size) {
     *workspace_size = gemm_op.get_workspace_size(arguments);
     return 0;
   }
 
+  // check for null pointers after workspace size, since querying workspace size doesn't require valid data pointers
+#ifndef CUTLASS_BACKEND_DISABLE_CHECKS
   {{kernel.check_not_null(X)}}
   {{kernel.check_not_null(W)}}
   {{kernel.check_not_null(Bias)}}
+  {{kernel.check_not_null(Meta)}}
   {{kernel.check_not_null(Y)}}
-
   {
     auto status = gemm_op.can_implement(arguments);
     CUTLASS_CHECK(status);
   }
+#endif
+#ifdef CUTLASS_DEBUG_TRACE_LEVEL
+#if CUTLASS_DEBUG_TRACE_LEVEL == 1
+  {
+    // Print the maximum number of active blocks per SM for the kernel if CUTLASS_DEBUG_TRACE_LEVEL == 1
+    // we don't need a print statement, it's happening inside the function.
+    gemm_op.maximum_active_blocks();
+  }
+#endif
+#endif
   {
     auto status = gemm_op.initialize(arguments, workspace, stream);
     CUTLASS_CHECK(status);
@@ -111,6 +127,41 @@ GEMM_ARGS_CUTLASS_2X = r"""
     row_stride_w,  // typename LayoutB::Stride::LongIndex ldb
     row_stride_bias,  // typename LayoutC::Stride::LongIndex ldc
     row_stride_y,  // typename LayoutC::Stride::LongIndex ldd
+  };
+"""
+
+GEMM_ARGS_SPARSE_CUTLASS_2X = r"""
+  using TensorRefA = cutlass::TensorRef<{{instance_type}}::ElementA,
+                                        {{instance_type}}::LayoutA>;
+  using TensorRefB = cutlass::TensorRef<{{instance_type}}::ElementB,
+                                        {{instance_type}}::LayoutB>;
+  using TensorRefC = cutlass::TensorRef<{{instance_type}}::ElementC,
+                                        {{instance_type}}::LayoutC>;
+  using TensorRefE = cutlass::TensorRef<{{instance_type}}::ElementE,
+                                        {{instance_type}}::LayoutE>;
+  // Note that "X" and "W" names may be misleading here.  Namely, for
+  // sparse GEMM, the first argument is always sparse, while typically
+  // weight matrix, implied by name "W" will be sparse in
+  // applications.  Thus, just remember that here: "X" refers to first
+  // argument, that is sparse, and "W" to second, that is dense.
+  TensorRefA X_ref({{template.cutlass_type_cast(X, kernel.ptr(X))}}, {{kernel.row_or_column_stride(X)}});
+  TensorRefB W_ref({{template.cutlass_type_cast(W, kernel.ptr(W))}}, {{kernel.row_or_column_stride(W)}});
+  TensorRefC Y_ref({{template.cutlass_type_cast(Y, kernel.ptr(Y))}}, {{kernel.row_or_column_stride(Y)}});
+  TensorRefE Meta_ref({{template.cutlass_sparse_meta_type_cast(Meta, kernel.ptr(Meta))}},
+                      TensorRefE::Layout::packed({ {{kernel.size(Meta, 0)}}, {{kernel.size(Meta, 1)}} }));
+  // Initialize GemmSparse arguments.
+  arguments = {
+    {
+      static_cast<coord_t>({{M}}),
+      static_cast<coord_t>({{N}}),
+      static_cast<coord_t>(K),
+    },  // GemmCoord problem_size
+    X_ref,  // TensorRef<ElementA const, LayoutA> ref_A
+    W_ref,  // TensorRef<ElementB const, LayoutB> ref_B
+    Y_ref,  // TensorRef<ElementC const, LayoutC> ref_C
+    Y_ref,  // TensorRef<ElementC, LayoutC> ref_D
+    Meta_ref,  // TensorRef<ElementE const, LayoutE> ref_E
+    {ElementComputeEpilogue({{alpha}}), ElementComputeEpilogue({{beta}})},  // typename EpilogueOutputOp::Params epilogue,
   };
 """
 
@@ -230,17 +281,11 @@ class CUTLASS2xGemmTemplate(CUTLASSTemplate):
 
     def _are_inputs_layout_compatible(self, layouts: List[Layout]) -> bool:
         """
-        Evaluates whether input layouts are compatible for General Matrix Multiply (GEMM).
-
-        This function checks compatibility of A, B, and possibly C operand layouts for
-        a General Matrix Multiply (GEMM) operation, expressed as 'alpha * matmul(A, B) + beta * C'.
-        It verifies requirements such as matching data types, minimum rank, and suitability
-        for broadcasting, as defined by PyTorch operations like `torch.matmul`, `torch.aten.mm`,
-        `addmm`, `bmm`, `baddbmm`, etc.
+        Evaluates whether input layouts are compatible for set of operations supported by this class.
 
         Args:
-            layouts (List[Layout]): List containing 2 or 3 Layout objects representing
-                                    the input matrices A, B, and possibly C.
+            layouts (List[Layout]): List containing Layout objects representing
+                                    the input matrices.
 
         Returns:
             bool: True if layouts are GEMM compatible, otherwise False.
@@ -257,7 +302,7 @@ class CUTLASS2xGemmTemplate(CUTLASSTemplate):
         K = max(A_size[-1], B_size[-2])
         M = A_size[-2]
         N = B_size[-1]
-        if K != A_size[-1]:
+        if K != A_size[-1] and K != 2 * A_size[-2]:
             return False
         if K != B_size[-2]:
             return False
@@ -327,6 +372,7 @@ class CUTLASS2xGemmTemplate(CUTLASSTemplate):
                 #include "cutlass/gemm/gemm.h"
                 #include "cutlass/gemm/device/gemm_universal.h"
                 #include "cutlass/gemm/device/gemm_universal_adapter.h"
+                #include "cutlass/gemm/device/gemm_sparse.h"
                 #include "cutlass/gemm/kernel/gemm_universal.hpp"
                 #include "cutlass/gemm/collective/collective_builder.hpp"
                 #include "cutlass/epilogue/collective/collective_builder.hpp"
@@ -335,6 +381,7 @@ class CUTLASS2xGemmTemplate(CUTLASSTemplate):
                 #include "cutlass/epilogue/thread/activation.h"
                 #include "cutlass/gemm/dispatch_policy.hpp"
                 #include "cutlass/gemm/kernel/tile_scheduler.hpp"
+                #include "cutlass/tensor_ref.h"
                 #include "cutlass/util/distribution.h"
                 #include "cutlass/util/packed_stride.hpp"
                 #include "cutlass/util/tensor_view_io.h"
@@ -431,13 +478,18 @@ class CUTLASS2xGemmTemplate(CUTLASSTemplate):
         """
         assert cutlass_utils.try_import_cutlass()
         import cutlass_library.gemm_operation as cutlass_gemm_op
+        import cutlass_library.library as cutlass_lib
 
-        emitter = cutlass_gemm_op.EmitGemmInstance()
+        if op.gemm_kind == cutlass_lib.GemmKind.Sparse:
+            emitter = cutlass_gemm_op.EmitSparseGemmInstance()
+        else:
+            emitter = cutlass_gemm_op.EmitGemmInstance()
         op_def = emitter.emit(op)
         op_def = op_def.replace(
             "cutlass::gemm::device::Gemm", "cutlass::gemm::device::GemmUniversal"
         )
-        op_def = op_def.replace("false,", "")
+        if op.gemm_kind != cutlass_lib.GemmKind.Sparse:
+            op_def = op_def.replace("false,", "")
         pattern = re.compile(r"\s*using\s(.*?)\s=")
         decl = op_def.split("\n")[2]
 
@@ -521,14 +573,25 @@ class CUTLASS2xGemmTemplate(CUTLASSTemplate):
         ):
             return None
 
-        # Only keep GemmUniversal kernels
+        # Only keep GemmUniversal and GemmSparse kernels
         if op.gemm_kind not in {
             cutlass_lib.GemmKind.Universal,
+            cutlass_lib.GemmKind.Sparse,
         }:
             return None
-        # Filter ops by dtypes.
+
         X = self.input_nodes[0]
         W = self.input_nodes[1]
+
+        # Filter ops according to the shape match.
+        if op.gemm_kind == cutlass_lib.GemmKind.Sparse:
+            if X.layout.size[1] * 2 != W.layout.size[0]:
+                return None
+        else:
+            if X.layout.size[1] != W.layout.size[0]:
+                return None
+
+        # Filter ops by dtypes.
         accumulator_torch_dtype = cutlass_utils.get_accumulator_dtype(
             [X.get_dtype(), W.get_dtype()],
         )
@@ -543,6 +606,15 @@ class CUTLASS2xGemmTemplate(CUTLASSTemplate):
             )
         ):
             return None
+
+        # SparseGemm in CUTLASS has specific alignment check that for
+        # small k could make some of the choices throw kMisalignedOperand
+        # CUTLASS error when run, see:
+        # https://github.com/NVIDIA/cutlass/blob/e01b9b5029b7caca5a43c29f7d2714d7cf1dcae8/include/cutlass/gemm/kernel/sparse_gemm.h#L198-L200  # noqa: B950
+        # So, let's skip these choices if that would be the case.
+        if op.gemm_kind == cutlass_lib.GemmKind.Sparse:
+            if (X.layout.size[1] * 2) % op.tile_description.tile_shape[2] != 0:
+                return None
 
         # Filter ops by input layouts.
         if not (
@@ -582,7 +654,9 @@ class CUTLASS2xGemmTemplate(CUTLASSTemplate):
                 return None
 
         # Set bias layout and alignment.
-        if len(self.input_nodes) >= 3 and self.input_nodes[2] is not None:
+        if op.gemm_kind == cutlass_lib.GemmKind.Sparse:
+            op.C.layout = op.D.layout
+        elif len(self.input_nodes) >= 3 and self.input_nodes[2] is not None:
             Bias = self.input_nodes[2]
             bias_layout = CUTLASS2xGemmTemplate.cutlass_layout(Bias.get_layout())
             if op.gemm_kind != cutlass_lib.GemmKind.Universal:
@@ -645,12 +719,14 @@ class CUTLASS2xGemmTemplate(CUTLASSTemplate):
 
     def render_gemm_arguments(
         self,
+        instance_type: str,
         argument_template: str,
         epilogue_template: str,
         should_swap_xw: bool,
         X: IRNode,
         W: IRNode,
         Bias: IRNode,
+        Meta: IRNode,
         Y: IRNode,
         alpha: float,
         beta: float,
@@ -661,6 +737,7 @@ class CUTLASS2xGemmTemplate(CUTLASSTemplate):
         Render the Cutlass CUDA C++ code required for passing arguments to the GEMM operation.
 
         Args:
+            instance_type (str): GEMM instance type.
             argument_template (str): Template for the GEMM operation arguments.
             epilogue_template (str): Template for the epilogue arguments.
             should_swap_xw (bool): Determines whether X, W operands should be swapped. If True, applies an explicit
@@ -668,6 +745,7 @@ class CUTLASS2xGemmTemplate(CUTLASSTemplate):
             X (IRNode): The X input tensor.
             W (IRNode): The W input tensor.
             Bias (IRNode): The bias tensor.
+            Meta (IRNode): The meta tensor.
             Y (IRNode): The output tensor.
             alpha (float): Scaling factor for the product of the inputs.
             beta (float): Scaling factor for the output tensor.
@@ -682,12 +760,14 @@ class CUTLASS2xGemmTemplate(CUTLASSTemplate):
         before the function call.
         """
         options = dict(
+            instance_type=instance_type,
             alpha=alpha,
             beta=beta,
             X=X,
             W=W,
             Y=Y,
             Bias=Bias,
+            Meta=Meta,
             template=self,
             kernel=kernel,
             M="M",
@@ -696,7 +776,7 @@ class CUTLASS2xGemmTemplate(CUTLASSTemplate):
         )
 
         if epilogue_template is None:
-            arguments = self._template_from_string(GEMM_ARGS_CUTLASS_2X).render(
+            arguments = self._template_from_string(argument_template).render(
                 split_k=1, **options
             )
             return arguments
@@ -739,6 +819,7 @@ class CUTLASS2xGemmTemplate(CUTLASSTemplate):
 
         assert cutlass_utils.try_import_cutlass()
         import cutlass_library.gemm_operation as cutlass_gemm_op
+        import cutlass_library.library as cutlass_lib
 
         assert isinstance(
             op, cutlass_gemm_op.GemmOperation
@@ -751,7 +832,12 @@ class CUTLASS2xGemmTemplate(CUTLASSTemplate):
         Y = self.output_node
         if template_buffer_node is not None:
             Y = template_buffer_node
-        Bias = None if len(self.input_nodes) == 2 else self.input_nodes[2]
+        if op.gemm_kind == cutlass_lib.GemmKind.Sparse:
+            Bias = None
+            Meta = self.input_nodes[2]
+        else:
+            Bias = None if len(self.input_nodes) == 2 else self.input_nodes[2]
+            Meta = None
 
         # to make op mutable without affecting others
         op = copy.deepcopy(op)
@@ -765,8 +851,8 @@ class CUTLASS2xGemmTemplate(CUTLASSTemplate):
         # Important: This step also populates Kernel name to node mapping data structures,
         # which are required further below ( for example by CutlassEVTEpilogueArgumentFormatter and
         # the template renderer )
-        inputs = [X, W, Bias]
-        names = ["X", "W", "Bias"] + ["Y"]
+        inputs = [X, W, Bias, Meta]
+        names = ["X", "W", "Bias", "Meta"] + ["Y"]
         names_str = ",".join(names)
         if self.input_reorder is not None:
             input_reorder = self.input_reorder
@@ -781,7 +867,10 @@ class CUTLASS2xGemmTemplate(CUTLASSTemplate):
 
         op = self.fix_op_layout(op, X, W, Bias, Y)
         epilogue_template: Optional[str] = None
-        argument_template: str = GEMM_ARGS_CUTLASS_2X
+        if op.gemm_kind == cutlass_lib.GemmKind.Sparse:
+            argument_template = GEMM_ARGS_SPARSE_CUTLASS_2X
+        else:
+            argument_template = GEMM_ARGS_CUTLASS_2X
         should_swap_xw: bool = False
         epilogue_args = f"{{ElementComputeEpilogue({self.alpha}), ElementComputeEpilogue({self.beta})}}"
 
@@ -795,6 +884,7 @@ class CUTLASS2xGemmTemplate(CUTLASSTemplate):
             Y=Y,
             kernel_call_signature=kernel_call_signature,
             Bias=Bias,
+            Meta=Meta,
             epilogue_template=epilogue_template,
             argument_template=argument_template,
             should_swap_xw=should_swap_xw,

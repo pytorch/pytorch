@@ -110,12 +110,17 @@ mm_template = TritonTemplate(
 
 aten_mm = ExternKernelChoice(torch.mm, "at::mm_out")
 
-
 aten_addmm = ExternKernelChoice(
     torch.addmm, "at::addmm_out", op_overload=aten.addmm.default
 )
 
 aten__int_mm = ExternKernelChoice(torch._int_mm, "at::_int_mm")
+
+aten__sparse_semi_structured_mm = ExternKernelChoice(
+    torch._sparse_semi_structured_mm,
+    "at::_sparse_semi_structured_mm",
+    has_out_variant=False,
+)
 
 
 def _is_int8_mat(mat):
@@ -388,6 +393,51 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             beta=beta,
         )
         return fallback_choice.output_node()
+
+
+@register_lowering(aten._sparse_semi_structured_mm, type_promotion_kind=None)
+def tuned_sparse_semi_structured_mm(
+    mat1, mat1_meta, mat2, *, out_dtype=None, layout=None
+):
+    from torch._inductor.select_algorithm import realize_inputs
+
+    mat1, mat1_meta, mat2 = realize_inputs(mat1, mat1_meta, mat2)
+    m1, k1 = mat1.get_size()
+    m2, _ = mat1_meta.get_size()
+    k2, n = mat2.get_size()
+    m = V.graph.sizevars.guard_equals(m1, m2)
+    k = V.graph.sizevars.guard_equals(2 * k1, k2)
+
+    if layout is None:
+        from torch._inductor.ir import FixedLayout
+
+        layout = FixedLayout(
+            mat2.get_device(),
+            out_dtype if out_dtype else mat2.get_dtype(),
+            [m, n],
+            [n, 1],
+        )
+    else:
+        assert out_dtype is None, "out_dtype is ignored if layout is specified."
+
+    choices = (
+        [
+            aten__sparse_semi_structured_mm.bind(
+                (mat1, mat1_meta, mat2), layout, out_dtype=out_dtype
+            )
+        ]
+        if use_aten_gemm_kernels()
+        else []
+    )
+
+    if m * n != 0 and use_cutlass_template(layout, m, n, k):
+        CUTLASS2xGemmTemplate.add_cutlass_gemm_choices(
+            choices, layout, [mat1, mat2, mat1_meta], fuseable=True, non_fuseable=True
+        )
+
+    return autotune_select_algorithm(
+        "sparse_semi_structured_mm", choices, [mat1, mat1_meta, mat2], layout
+    )
 
 
 def fallback_mixed_mm(mat1, mat2, *, out):
