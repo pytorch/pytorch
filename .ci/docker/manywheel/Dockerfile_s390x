@@ -88,3 +88,6 @@ COPY --from=python             /opt/python                           /opt/python
 COPY --from=python             /opt/_internal                        /opt/_internal
 COPY --from=python             /opt/python/cp39-cp39/bin/auditwheel  /usr/local/bin/auditwheel
 COPY --from=patchelf           /usr/local/bin/patchelf               /usr/local/bin/patchelf
+
+ENTRYPOINT []
+CMD ["/bin/bash"]
