@@ -7,56 +7,76 @@ import torch
 # Hence we need to include it here to make sure it is resolved before
 # they are used in the modules.
 import torch.ao.nn.quantizable
-
 from torch.nn.modules.pooling import MaxPool2d
 
-from .activation import ReLU6, Hardswish, ELU, LeakyReLU, Sigmoid, Softmax, MultiheadAttention, PReLU
-from .dropout import Dropout
+from .activation import (
+    ELU,
+    Hardswish,
+    LeakyReLU,
+    MultiheadAttention,
+    PReLU,
+    ReLU6,
+    Sigmoid,
+    Softmax,
+)
 from .batchnorm import BatchNorm2d, BatchNorm3d
-from .normalization import LayerNorm, GroupNorm, InstanceNorm1d, \
-    InstanceNorm2d, InstanceNorm3d
-from .conv import Conv1d, Conv2d, Conv3d
-from .conv import ConvTranspose1d, ConvTranspose2d, ConvTranspose3d
-from .linear import Linear
+from .conv import (
+    Conv1d,
+    Conv2d,
+    Conv3d,
+    ConvTranspose1d,
+    ConvTranspose2d,
+    ConvTranspose3d,
+)
+from .dropout import Dropout
 from .embedding_ops import Embedding, EmbeddingBag
+from .functional_modules import FloatFunctional, FXFloatFunctional, QFunctional
+from .linear import Linear
+from .normalization import (
+    GroupNorm,
+    InstanceNorm1d,
+    InstanceNorm2d,
+    InstanceNorm3d,
+    LayerNorm,
+)
 from .rnn import LSTM
 
-from .functional_modules import FloatFunctional, FXFloatFunctional, QFunctional
 
 __all__ = [
-    'BatchNorm2d',
-    'BatchNorm3d',
-    'Conv1d',
-    'Conv2d',
-    'Conv3d',
-    'ConvTranspose1d',
-    'ConvTranspose2d',
-    'ConvTranspose3d',
-    'DeQuantize',
-    'ELU',
-    'Embedding',
-    'EmbeddingBag',
-    'GroupNorm',
-    'Hardswish',
-    'InstanceNorm1d',
-    'InstanceNorm2d',
-    'InstanceNorm3d',
-    'LayerNorm',
-    'LeakyReLU',
-    'Linear',
-    'LSTM',
-    'MultiheadAttention',
-    'Quantize',
-    'ReLU6',
-    'Sigmoid',
-    'Softmax',
-    'Dropout',
-    'PReLU',
+    "BatchNorm2d",
+    "BatchNorm3d",
+    "Conv1d",
+    "Conv2d",
+    "Conv3d",
+    "ConvTranspose1d",
+    "ConvTranspose2d",
+    "ConvTranspose3d",
+    "DeQuantize",
+    "ELU",
+    "Embedding",
+    "EmbeddingBag",
+    "GroupNorm",
+    "Hardswish",
+    "InstanceNorm1d",
+    "InstanceNorm2d",
+    "InstanceNorm3d",
+    "LayerNorm",
+    "LeakyReLU",
+    "Linear",
+    "LSTM",
+    "MultiheadAttention",
+    "Quantize",
+    "ReLU6",
+    "Sigmoid",
+    "Softmax",
+    "Dropout",
+    "PReLU",
     # Wrapper modules
-    'FloatFunctional',
-    'FXFloatFunctional',
-    'QFunctional',
+    "FloatFunctional",
+    "FXFloatFunctional",
+    "QFunctional",
 ]
+
 
 class Quantize(torch.nn.Module):
     r"""Quantizes an incoming tensor
@@ -88,24 +108,34 @@ class Quantize(torch.nn.Module):
     def __init__(self, scale, zero_point, dtype, factory_kwargs=None):
         factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
         super().__init__()
-        self.register_buffer('scale', torch.tensor([scale], **factory_kwargs))
-        self.register_buffer('zero_point',
-                             torch.tensor([zero_point], dtype=torch.long,
-                                          **{k: v for k, v in factory_kwargs.items() if k != 'dtype'}))
+        self.register_buffer("scale", torch.tensor([scale], **factory_kwargs))
+        self.register_buffer(
+            "zero_point",
+            torch.tensor(
+                [zero_point],
+                dtype=torch.long,
+                **{k: v for k, v in factory_kwargs.items() if k != "dtype"},
+            ),
+        )
         self.dtype = dtype
 
     def forward(self, X):
-        return torch.quantize_per_tensor(X, float(self.scale),
-                                         int(self.zero_point), self.dtype)
+        return torch.quantize_per_tensor(
+            X, float(self.scale), int(self.zero_point), self.dtype
+        )
 
     @staticmethod
     def from_float(mod, use_precomputed_fake_quant=False):
-        assert hasattr(mod, 'activation_post_process')
+        assert hasattr(mod, "activation_post_process")
         scale, zero_point = mod.activation_post_process.calculate_qparams()
-        return Quantize(scale.float().item(), zero_point.long().item(), mod.activation_post_process.dtype)
+        return Quantize(
+            scale.float().item(),
+            zero_point.long().item(),
+            mod.activation_post_process.dtype,
+        )
 
     def extra_repr(self):
-        return f'scale={self.scale}, zero_point={self.zero_point}, dtype={self.dtype}'
+        return f"scale={self.scale}, zero_point={self.zero_point}, dtype={self.dtype}"
 
 
 class DeQuantize(torch.nn.Module):

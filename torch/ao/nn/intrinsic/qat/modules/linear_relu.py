@@ -1,8 +1,9 @@
 # mypy: allow-untyped-defs
 import torch
-import torch.ao.nn.qat as nnqat
 import torch.ao.nn.intrinsic as nni
+import torch.ao.nn.qat as nnqat
 import torch.nn.functional as F
+
 
 class LinearReLU(nnqat.Linear, nni._FusedModule):
     r"""
@@ -29,8 +30,7 @@ class LinearReLU(nnqat.Linear, nni._FusedModule):
     """
     _FLOAT_MODULE = nni.LinearReLU  # type: ignore[assignment]
 
-    def __init__(self, in_features, out_features, bias=True,
-                 qconfig=None):
+    def __init__(self, in_features, out_features, bias=True, qconfig=None):
         super().__init__(in_features, out_features, bias, qconfig)
 
     def forward(self, input):
@@ -41,7 +41,9 @@ class LinearReLU(nnqat.Linear, nni._FusedModule):
         return super().from_float(mod, use_precomputed_fake_quant)
 
     def to_float(self):
-        linear = torch.nn.Linear(self.in_features, self.out_features, self.bias is not None)
+        linear = torch.nn.Linear(
+            self.in_features, self.out_features, self.bias is not None
+        )
         linear.weight = torch.nn.Parameter(self.weight.detach())
         if self.bias is not None:
             linear.bias = torch.nn.Parameter(self.bias.detach())
