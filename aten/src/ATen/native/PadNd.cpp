@@ -264,7 +264,9 @@ Tensor _pad_symmetric_1d(Tensor signal, pair<c10::SymInt, c10::SymInt> pad_tuple
     auto padr = pad_tuple.second;
     auto dimlen = signal.size(dim);
     // If the padding is greater than the dimension length,
-    // pad recursively until we have enough values.
+    // currently we pad recursively until we have enough values.
+    // "circular"-mode raises an error when trying to wrap around more than once
+    // we could do that here as well for consistency.
     if (padl > dimlen || padr > dimlen)
     {
         if (padl > dimlen)
