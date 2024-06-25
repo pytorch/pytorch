@@ -152,7 +152,7 @@ jobs:
                           MESSAGE_KEY: f"Failed to get issue. Falling back to meta runners. Exception: {e}",
                       }
 
-              if not args.silent
+              if not args.silent:
                   print(output[MESSAGE_KEY], sys.stderr)
 
               json_output = json.dumps(output)
