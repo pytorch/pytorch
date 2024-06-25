@@ -170,9 +170,12 @@ class SubclassCreationMeta:
     # In the inner graph that only takes in dense tensor inputs,
     # this maps to the first index of "tensors that should go in this subclass wrapper"
     flat_tensor_start_idx: int
-    # The number of tensors that live in this subclass wrapper
+    # arg_count is inclusive of the arg_counts of any
+    # inner tensor subclasses: If I have a TwoTensor and
+    # both of its inner elements are TwoTensors, then the
+    # arg_count of the outer-most sublass will be 4
     arg_count: int
-    # meta and inner_keys are produced by the subclass's __tensor_flatten__.
+    # meta and attrs are produced by the subclass's __tensor_flatten__.
     # We need to keep them around along with outer_size / outer_stride to plumb them
     # into __tensor_unflatten__
     attrs: Dict[str, Union["SubclassCreationMeta", None]]

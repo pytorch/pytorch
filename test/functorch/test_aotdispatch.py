@@ -827,9 +827,9 @@ def forward(self, primals_1):
         ):
             new_out.sum().backward()
 
+    @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/127470")
     def test_custom_tensor_metadata(self):
-        @torch.compile
         def f(x):
             x_elem = x.elem
             x_elem_elem = x_elem.elem
@@ -841,12 +841,22 @@ def forward(self, primals_1):
         custom_a.constant_attribute = 6
         custom_aa = ConstantExtraMetadataTensor(custom_a)
         custom_aa.constant_attribute = 4
-        out = f(custom_aa)
+
+        custom_aa_compile = custom_aa.clone().detach().requires_grad_()
+        custom_aa_compile.elem.constant_attribute = 6
+        out_eager = f(custom_aa)
+
+        compiled_f = torch.compile(f, backend="aot_eager")
+        out = compiled_f(custom_aa_compile)
+
+        self.assertTrue(torch.allclose(out_eager, out))
 
         out.sum().backward()
 
-        self.assertTrue(isinstance(custom_aa.grad, ConstantExtraMetadataTensor))
-        self.assertTrue(isinstance(custom_aa.grad.elem, ConstantExtraMetadataTensor))
+        self.assertTrue(isinstance(custom_aa_compile.grad, ConstantExtraMetadataTensor))
+        self.assertTrue(
+            isinstance(custom_aa_compile.grad.elem, ConstantExtraMetadataTensor)
+        )
 
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/127470")
     def test_nested_subclasses_complicated_inps(self):
@@ -898,6 +908,44 @@ def forward(self, primals_1):
         self.assertTrue(torch.allclose(x_nested_compile.grad.a.b, x_nested.grad.a.b))
         self.assertTrue(torch.allclose(y_nested_compile.grad.a.a, y_nested.grad.a.a))
         self.assertTrue(torch.allclose(y_nested_compile.grad.a.b, y_nested.grad.a.b))
+
+    @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/127470")
+    def test_nested_subclasses_complicated_inps_mixed(self):
+        def f(x, y):
+            y_elem = y.elem
+            y_elem_elem = y_elem.elem
+            y_elem_metadata = y_elem.constant_attribute
+            return y * y_elem * y_elem_elem * y_elem_metadata + x
+
+        x = torch.ones(4, requires_grad=True)
+        x2 = x.clone().detach().requires_grad_()
+        xx = TwoTensor(x, x2)
+        xx2 = xx.clone().detach().requires_grad_()
+
+        x_nested = TwoTensor(xx, xx2)
+        x_nested_compile = x_nested.clone().detach().requires_grad_()
+
+        a = torch.ones(4, requires_grad=True)
+        custom_a = ConstantExtraMetadataTensor(a)
+        custom_a.constant_attribute = 6
+        custom_aa = ConstantExtraMetadataTensor(custom_a)
+        custom_aa.constant_attribute = 4
+
+        custom_aa_compile = custom_aa.clone().detach().requires_grad_()
+        custom_aa_compile.constant_attribute = 4
+        custom_aa_compile.elem.constant_attribute = 6
+
+        compiled_f = torch.compile(f, backend="aot_eager")
+        out_eager = f(x_nested, custom_aa)
+        out = compiled_f(x_nested_compile, custom_aa_compile)
+        self.assertTrue(torch.allclose(out_eager, out))
+
+        out.sum().backward()
+        out_eager.sum().backward()
+
+        self.assertTrue(torch.allclose(x_nested_compile.grad, x_nested.grad))
+        self.assertTrue(torch.allclose(custom_aa_compile.grad, custom_aa.grad))
 
     def test_outputs_are_aliased(self):
         # Tensor, None, int
