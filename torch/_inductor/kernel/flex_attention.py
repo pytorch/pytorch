@@ -356,6 +356,8 @@ flex_attention_template = TritonTemplate(
 
     # Store output and logsumexp
     acc = acc / l_i[:, None]
+    idx_z = tl.program_id(1) // H
+    idx_h = tl.program_id(1) % H
     idx_m = offs_m[:, None]
     idx_d = tl.arange(0, BLOCK_DMODEL)[None, :]
 
