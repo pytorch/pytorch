@@ -1,24 +1,23 @@
+# mypy: allow-untyped-defs
 import torch
 from ..._dynamo.utils import counters
 from ..ir import FixedLayout
-from ..pattern_matcher import Arg, CallFunction, Match, register_graph_pattern, PatternMatcherPass
+from ..pattern_matcher import (
+    Arg,
+    CallFunction,
+    Match,
+    PatternMatcherPass,
+    register_graph_pattern,
+)
 from ..select_algorithm import (
-    TritonTemplate,
     autotune_select_algorithm,
+    TritonTemplate,
+    TritonTemplateCaller,
 )
 from ..utils import ceildiv
 
 aten = torch.ops.aten
 
-# dram load/store estimations
-#   (A @ B) @ C
-#   M * N, N * O, O * P
-#   baseline
-#     load = M * N + N * O + M * O + O * P
-#     store = M * O + M * P
-#   gemm
-#     load = M * N + M / m * (N * O + O * P)
-#     store = M * P
 
 def b2b_gemm_grid(m, n, meta):
     """
@@ -30,12 +29,24 @@ def b2b_gemm_grid(m, n, meta):
         1,
     )
 
+
 b2b_gemm_template = TritonTemplate(
     name="b2b_gemm",
     grid=b2b_gemm_grid,
-    debug=True,
+    debug=False,
     source=r"""
 {{def_kernel("A", "B", "C")}}
+    
+    # B2B_GEMM_TRITON_ENTRANCE
+    # dram load/store estimations
+    #   (A @ B) @ C
+    #   M * N, N * O, O * P
+    #   baseline
+    #     load = M * N + N * O + M * O + O * P
+    #     store = M * O + M * P
+    #   gemm
+    #     load = M * N + M / m * (N * O + O * P)
+    #     store = M * P
     M = {{size("A", 0)}}
     # N = {{size("A", 1)}}
     O = {{size("C", 0)}}
@@ -87,8 +98,19 @@ b2b_gemm_template = TritonTemplate(
 """,
 )
 
-def can_apply_b2b_gemm(mat1, mat2, mat3) -> bool:
-    if not (("val" in mat1.meta) and ("val" in mat2.meta) and ("val" in mat3.meta)):
+
+B2B_GEMM_PASS = PatternMatcherPass(
+    prevent_match_across_mutations=True,
+    pass_name="b2b_gemm_pass",
+)
+
+
+def can_apply_b2b_gemm(
+    mat1: torch.fx.Node, mat2: torch.fx.Node, mat3: torch.fx.Node
+) -> bool:
+    if not (
+        ("val" in mat1.meta) and ("val" in mat2.meta) and ("val" in mat3.meta)
+    ):
         return False
     mat1 = mat1.meta["val"]
     mat2 = mat2.meta["val"]
@@ -102,16 +124,17 @@ def can_apply_b2b_gemm(mat1, mat2, mat3) -> bool:
     # TODO: change to a real-check for size restrictions (may consider hardware limit?)
     m, n, o, p = mat1.shape[0], mat1.shape[1], mat3.shape[0], mat3.shape[1]
     m_ok = (m % 128 == 0) and (m > 128)
-    n_ok = (n == 32)
+    n_ok = n == 32
     o_ok = (o % 128 == 0) and (o > 128)
-    p_ok = (p == 32)
-    return (m_ok and n_ok and o_ok and p_ok)
+    p_ok = p == 32
+    return m_ok and n_ok and o_ok and p_ok
+
 
 def tuned_b2b_gemm(mat1, mat2, mat3, *, layout=None):
     layout = FixedLayout(
         mat1.get_device(), mat1.get_dtype(), [mat1.shape[0], mat3.shape[1]]
     )
-    choices = []
+    choices: list[TritonTemplateCaller] = []
     # TODO: change N and P to non-constexpr
     # Note: the only reason why N and P are hardcoded is because in Triton tl.arange(0, N) only works for tl.constexpr
     # TODO: add more configs for tuning (shall I also tune num_stages and num_warps?)
@@ -157,10 +180,6 @@ def tuned_b2b_gemm(mat1, mat2, mat3, *, layout=None):
         )
     return autotune_select_algorithm("b2b_gemm", choices, [mat1, mat2, mat3], layout)
 
-B2B_GEMM_PASS = PatternMatcherPass(
-    prevent_match_across_mutations=True,
-    pass_name="b2b_gemm_pass",
-)
 
 # currently it matches ((A @ B) @ C)
 # TODO: later will change to matching (A @ B) in (epilogue2 ((epilogue1 (A @ B)) @ C)) and inspecting the graph
@@ -171,15 +190,13 @@ B2B_GEMM_PASS = PatternMatcherPass(
 )
 def b2b_gemm(
     match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node, mat3: torch.fx.Node
-):
-    print("B2B-GEMM handler entered")
+) -> None:
     if can_apply_b2b_gemm(mat1, mat2, mat3):
-        print("B2B-GEMM handler guard passed")
         counters["inductor"]["b2b_gemm"] += 1
         graph = match.graph
         root_node = match.nodes[-1]
         with graph.inserting_before(root_node):
-            tuned_b2b_gemm._inductor_lowering_function = True
+            tuned_b2b_gemm._inductor_lowering_function = True  # type: ignore[attr-defined]
             replacement = graph.call_function(
                 tuned_b2b_gemm, tuple(match.args), match.kwargs
             )
