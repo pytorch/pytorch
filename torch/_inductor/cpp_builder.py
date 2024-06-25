@@ -300,12 +300,6 @@ def _get_optimization_cflags() -> List[str]:
         if not config.cpp.enable_floating_point_contract_flag:
             cflags.append("ffp-contract=off")
 
-        if config.is_fbcode():
-            # FIXME: passing `-fopenmp` adds libgomp.so to the generated shared library's dependencies.
-            # This causes `ldopen` to fail in fbcode, because libgomp does not exist in the default paths.
-            # We will fix it later by exposing the lib path.
-            return cflags
-
         if sys.platform == "darwin":
             # Per https://mac.r-project.org/openmp/ right way to pass `openmp` flags to MacOS is via `-Xclang`
             # Also, `-march=native` is unrecognized option on M1
@@ -315,10 +309,6 @@ def _get_optimization_cflags() -> List[str]:
                 cflags.append("mcpu=native")
             else:
                 cflags.append("march=native")
-
-        # Internal cannot find libgomp.so
-        if not config.is_fbcode():
-            cflags.append("fopenmp")
 
         return cflags
 
@@ -660,7 +650,7 @@ def _get_openmp_args(cpp_compiler):
             fb_openmp_extra_flags = f"-Wp,-fopenmp {openmp_lib}"
             passthough_args.append(fb_openmp_extra_flags)
 
-            libs.append("omp")
+            # libs.append("omp")
         else:
             if _is_clang(cpp_compiler):
                 # TODO: fix issue, can't find omp.h
