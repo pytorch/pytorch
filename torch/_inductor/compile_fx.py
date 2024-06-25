@@ -429,6 +429,93 @@ def with_fresh_cache_if_config(f):
         return f
 
 
+def cudagraph_post_compile(
+    compiled_graph: CompiledFxGraph,
+    cudagraph_fail_reasons: List[str],
+    inputs_to_check: Sequence[int],
+    boxed_forward_device_index: Optional[BoxedDeviceIndex],
+    is_inference: bool,
+    is_backward: bool,
+    stack_traces: List[Optional[str]],
+    placeholders: Sequence[torch.fx.Node],
+    cudagraphs: BoxedBool,
+    example_inputs: List[Any],
+    static_input_idxs: Sequence[int],
+):
+    assert compiled_graph.current_callable is not None
+    if not cudagraph_fail_reasons:
+        if not config.triton.cudagraph_trees:
+            # Force specialize all inputs so that CUDA graphs will work
+            for t in example_inputs:
+                if isinstance(t, torch.SymInt):
+                    int(t)  # guard
+
+        if (
+            boxed_forward_device_index is not None
+            and not is_inference
+            and not is_backward
+        ):
+            boxed_forward_device_index.set(next(iter(compiled_graph.device_idxs)))
+
+        compiled_graph.current_callable = cudagraphify(
+            compiled_graph.current_callable,
+            example_inputs,
+            static_input_idxs=static_input_idxs,
+            device_index=next(iter(compiled_graph.device_idxs)),
+            stack_traces=stack_traces,
+            is_backward=is_backward,
+            is_inference=is_inference,
+            constants=tuple(compiled_graph.constants.values()),
+            placeholders=placeholders,
+            mutated_input_idxs=tuple(compiled_graph.mutated_input_idxs),
+        )
+    else:
+        BoxedBool.disable(cudagraphs)
+
+        # See [Backward Generation Handling]
+        # if cudagraph'd the forward and set the device, we need to let the cudagraph manager
+        # know we are we running the backward even if we will not run it in cudagraphs
+        if is_backward and config.triton.cudagraph_trees:
+            assert boxed_forward_device_index is not None
+            assert boxed_forward_device_index.value is not None
+            compiled_graph_callable = compiled_graph.current_callable
+
+            manager = torch._inductor.cudagraph_trees.get_manager(
+                boxed_forward_device_index.value, create_if_none_exists=False
+            )
+            # should already exist from forward
+            assert manager is not None
+
+            def compiled_artifact(new_inputs):
+                manager.set_to_running_backward()  # type: ignore[union-attr]
+                return compiled_graph_callable(new_inputs)
+
+            compiled_graph.current_callable = compiled_artifact
+
+        if "cuda" in compiled_graph.device_types:
+            # prefer better disable_cudagraphs_reason bc stack trace
+            # TODO: migrate all disable reasons to stack trace, refactor
+            if compiled_graph.disabled_cudagraphs_reason:
+                log_cudagraph_skip_and_bump_counter(
+                    compiled_graph.disabled_cudagraphs_reason
+                )
+            else:
+                log_cudagraph_skip_and_bump_counter(
+                    f"skipping cudagraphs due to {cudagraph_fail_reasons}"
+                )
+
+    # cudagraphs does its own aligning of inputs
+    if not cudagraphs:
+        assert compiled_graph.current_callable is not None
+        new_callable = align_inputs_from_check_idxs(
+            compiled_graph.current_callable, inputs_to_check
+        )
+        if new_callable is not compiled_graph.current_callable:
+            compiled_graph.current_callable = new_callable
+
+    return compiled_graph
+
+
 @DebugContext.wrap
 @torch.utils._python_dispatch._disable_current_modes()
 @time_and_log(attr="compilation time (in seconds)")
@@ -577,14 +664,6 @@ def compile_fx_inner(
         return compiled_graph
 
     if cudagraphs:
-        # output args are tuple of first argument
-        output = output_node(gm)
-        assert len(output.args) == 1
-        stack_traces = [
-            (arg.stack_trace if isinstance(arg, torch.fx.node.Node) else None)
-            for arg in output.args[0]
-        ]
-
         complex_memory_overlap_inputs = any(
             complex_memory_overlap(t)
             for t in example_inputs
@@ -619,84 +698,34 @@ def compile_fx_inner(
                 "non-Tensor inputs",
             ),
         ]
+        output = output_node(gm)
+        # output args are tuple of first argument
+        assert len(output.args) == 1
+        stack_traces = [
+            (arg.stack_trace if isinstance(arg, torch.fx.node.Node) else None)
+            for arg in output.args[0]
+        ]
         cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
-
-        if not cudagraph_fail_reasons:
-            if not config.triton.cudagraph_trees:
-                # Force specialize all inputs so that CUDA graphs will work
-                for t in example_inputs:
-                    if isinstance(t, torch.SymInt):
-                        int(t)  # guard
-
-            if (
-                boxed_forward_device_index is not None
-                and not is_inference
-                and not is_backward
-            ):
-                boxed_forward_device_index.set(next(iter(compiled_graph.device_idxs)))
-
-            compiled_graph.current_callable = cudagraphify(
-                compiled_graph.current_callable,
-                example_inputs,
-                static_input_idxs=static_input_idxs,
-                device_index=next(iter(compiled_graph.device_idxs)),
-                stack_traces=stack_traces,
-                is_backward=is_backward,
-                is_inference=is_inference,
-                constants=tuple(compiled_graph.constants.values()),
-                placeholders=tuple(get_placeholders(gm.graph)),
-                mutated_input_idxs=tuple(compiled_graph.mutated_input_idxs),
-            )
-        else:
-            BoxedBool.disable(cudagraphs)
-
-            # See [Backward Generation Handling]
-            # if cudagraph'd the forward and set the device, we need to let the cudagraph manager
-            # know we are we running the backward even if we will not run it in cudagraphs
-            if is_backward and config.triton.cudagraph_trees:
-                assert boxed_forward_device_index is not None
-                assert boxed_forward_device_index.value is not None
-                compiled_graph_callable = compiled_graph.current_callable
-
-                manager = torch._inductor.cudagraph_trees.get_manager(
-                    boxed_forward_device_index.value, create_if_none_exists=False
-                )
-                # should already exist from forward
-                assert manager is not None
-
-                def compiled_artifact(new_inputs):
-                    manager.set_to_running_backward()  # type: ignore[union-attr]
-                    return compiled_graph_callable(new_inputs)
-
-                compiled_graph.current_callable = compiled_artifact
-
-            if "cuda" in compiled_graph.device_types:
-                # prefer better disable_cudagraphs_reason bc stack trace
-                # TODO: migrate all disable reasons to stack trace, refactor
-                if compiled_graph.disabled_cudagraphs_reason:
-                    log_cudagraph_skip_and_bump_counter(
-                        compiled_graph.disabled_cudagraphs_reason
-                    )
-                else:
-                    log_cudagraph_skip_and_bump_counter(
-                        f"skipping cudagraphs due to {cudagraph_fail_reasons}"
-                    )
-
-    # cudagraphs does its own aligning of inputs
-    if not cudagraphs:
-        new_callable = align_inputs_from_check_idxs(
-            compiled_graph.current_callable, inputs_to_check
+        placeholders = tuple(get_placeholders(gm.graph))
+        compiled_graph = cudagraph_post_compile(
+            compiled_graph,
+            cudagraph_fail_reasons,
+            inputs_to_check,
+            boxed_forward_device_index,
+            is_inference,
+            is_backward,
+            stack_traces,
+            placeholders,
+            cudagraphs,
+            example_inputs,
+            static_input_idxs,
         )
-        if new_callable is not compiled_graph.current_callable:
-            compiled_graph.current_callable = new_callable
-
     _step_logger()(
         logging.INFO,
         "torchinductor done compiling "
         f"{'BACKWARDS' if is_backward else 'FORWARDS'} "
         f"graph {graph_id}",
     )
-
     # aot autograd needs to know to pass in inputs as a list
     compiled_graph._boxed_call = True
     return compiled_graph
@@ -989,7 +1018,7 @@ def cudagraphify(
     constants: Tuple[torch.Tensor, ...] = (),
     placeholders: Tuple[torch.fx.Node, ...] = (),
     mutated_input_idxs: Tuple[int, ...] = (),
-):
+) -> Callable[..., Any]:
     from torch._inductor.cudagraph_trees import (
         cudagraphify_impl as new_cudagraphify_impl,
     )
