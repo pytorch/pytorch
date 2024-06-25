@@ -24,7 +24,6 @@ from torch.distributed._tensor.debug.comm_mode import CommDebugMode
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
     apply_activation_checkpointing,
-    CheckpointWrapper,
 )
 from torch.distributed.checkpoint.state_dict import (
     get_model_state_dict,
@@ -590,14 +589,18 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
         """
         self.run_subtests(
             {
-                "reshard_after_forward": [True, False, 2],
+                "reshard_after_forward": [True, False],
                 "checkpoint_impl": ["composable", "utils", "wrapper"],
+                "multi_module": [False, True],
             },
             self._test_train_parity_with_activation_checkpointing,
         )
 
     def _test_train_parity_with_activation_checkpointing(
-        self, reshard_after_forward: Union[bool, int], checkpoint_impl: str
+        self,
+        reshard_after_forward: Union[bool, int],
+        checkpoint_impl: str,
+        multi_module: bool,
     ):
         assert checkpoint_impl in ("composable", "utils", "wrapper")
         testing_compile = fully_shard != torch.distributed._composable.fsdp.fully_shard
@@ -613,33 +616,39 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
                 max_seq_len=64,
                 dropout_p=0,
                 checkpoint_activations=(checkpoint_impl == "utils"),
+                # For the multi-module grouping, we separate the embeddings
+                # from the output projection, so this does not support tying
+                weight_tying=not multi_module,
             )
             model = Transformer(model_args)
         ref_model = replicate(copy.deepcopy(model), device_ids=[self.rank])
-        foreach = True
-        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=foreach)
-        fully_shard_fn = functools.partial(
-            fully_shard,
-            reshard_after_forward=reshard_after_forward,
-        )
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+
+        # Apply activation checkpointing
+        prefixes_to_ignore = ()
         if checkpoint_impl == "wrapper":
             prefixes_to_ignore = (_CHECKPOINT_PREFIX,)
             apply_activation_checkpointing(
                 model, check_fn=lambda m: isinstance(m, TransformerBlock)
             )
-            for module in model.modules():
-                # Apply to `CheckpointWrapper`, which wraps `TransformerBlock`
-                if isinstance(module, CheckpointWrapper):
-                    fully_shard_fn(module)
-        else:
-            prefixes_to_ignore = ()
+        elif checkpoint_impl == "composable":
             for module in model.modules():
                 if isinstance(module, TransformerBlock):
-                    if checkpoint_impl == "composable":
-                        checkpoint(module)
-                    fully_shard_fn(module)
-        fully_shard_fn(model)
-        optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=foreach)
+                    checkpoint(module)
+
+        # Apply FSDP
+        fsdp_kwargs = {"reshard_after_forward": reshard_after_forward}
+        if multi_module:
+            assert model_args.n_layers == 3
+            fully_shard(model.layers[0], **fsdp_kwargs)
+            fully_shard([model.layers[1], model.layers[2]], **fsdp_kwargs)
+            fully_shard([model.tok_embeddings, model.pos_embeddings], **fsdp_kwargs)
+            fully_shard([model.norm, model.output], **fsdp_kwargs)
+        else:
+            for layer in model.layers:
+                fully_shard(layer, **fsdp_kwargs)
+        fully_shard(model, **fsdp_kwargs)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
 
         torch.manual_seed(42 + self.rank)
         # Reuse the same input across iterations to avoid loss explosion from
