@@ -102,6 +102,12 @@ class TestExportTorchbind(TestCase):
                 test.tq_size_counter += 1
                 return len(self.queue)
 
+            def is_empty(self):
+                return len(self.queue) == 0
+
+            def float_size(self):
+                return float(len(self.queue))
+
         self.torch_bind_ops = [
             torch.ops._TorchScriptTesting.takes_foo,
             torch.ops._TorchScriptTesting.takes_foo_python_meta,
@@ -665,6 +671,54 @@ def forward(self, arg0_1, arg1_1):
         _assertEqualSkipScriptObject(self, gm(tq, x), mod(tq1, x))
         self.assertEqual(tq.size(), 0)
         self.assertEqual(tq1.size(), 0)
+
+    def test_non_strict_export_methods(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, tq, x):
+                x_cos = tq.pop() + tq.float_size() + self.linear(x)
+                if tq.is_empty():
+                    x_sin = self.linear(tq.pop()) - tq.size() + x
+                else:
+                    x_sin = tq.pop() + tq.size() + x
+                return x_sin, x_cos, tq
+
+        mod = Model()
+        tq = _empty_tensor_queue()
+        a = torch.randn(2, 2)
+        b = torch.randn(2, 2)
+        tq.push(a)
+        tq.push(b)
+        ep = torch.export.export(mod, (tq, torch.randn(2, 2)), strict=False)
+        self.assertExpectedInline(
+            ep.graph_module.code.strip(),
+            """\
+def forward(self, token, p_linear_weight, p_linear_bias, tq, x):
+    with_effects = torch._higher_order_ops.effects.with_effects(token, torch.ops.higher_order.call_torchbind, tq, 'pop');  token = None
+    getitem = with_effects[0]
+    getitem_1 = with_effects[1];  with_effects = None
+    with_effects_1 = torch._higher_order_ops.effects.with_effects(getitem, torch.ops.higher_order.call_torchbind, tq, 'float_size');  getitem = None
+    getitem_2 = with_effects_1[0];  with_effects_1 = None
+    add = torch.ops.aten.add.Tensor(getitem_1, 1.0);  getitem_1 = None
+    linear = torch.ops.aten.linear.default(x, p_linear_weight, p_linear_bias);  p_linear_weight = p_linear_bias = None
+    add_1 = torch.ops.aten.add.Tensor(add, linear);  add = linear = None
+    with_effects_2 = torch._higher_order_ops.effects.with_effects(getitem_2, torch.ops.higher_order.call_torchbind, tq, 'is_empty');  getitem_2 = None
+    getitem_4 = with_effects_2[0];  with_effects_2 = None
+    with_effects_3 = torch._higher_order_ops.effects.with_effects(getitem_4, torch.ops.higher_order.call_torchbind, tq, 'pop');  getitem_4 = None
+    getitem_6 = with_effects_3[0]
+    getitem_7 = with_effects_3[1];  with_effects_3 = None
+    with_effects_4 = torch._higher_order_ops.effects.with_effects(getitem_6, torch.ops.higher_order.call_torchbind, tq, 'size');  getitem_6 = None
+    getitem_8 = with_effects_4[0];  with_effects_4 = None
+    add_2 = torch.ops.aten.add.Tensor(getitem_7, 0);  getitem_7 = None
+    add_3 = torch.ops.aten.add.Tensor(add_2, x);  add_2 = x = None
+    return (getitem_8, add_3, add_1, tq)""",  # noqa: B950
+        )
+        self.assertEqual(tq.size(), 2)
+        self.assertTrue(tq.pop() is a)
+        self.assertTrue(tq.pop() is b)
 
     def test_identifying_torchbind_ops(self):
         for op in self.torch_bind_ops:
