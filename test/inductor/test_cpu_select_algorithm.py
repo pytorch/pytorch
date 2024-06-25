@@ -415,6 +415,7 @@ class TestSelectAlgorithm(TestCase):
     ):
         B = (2, batch_size) if input_3d else (batch_size,)
         input = torch.randn(*B, in_features).to(dtype=torch.float32)
+
         class M(torch.nn.Module):
             def __init__(self, bias):
                 super().__init__()
