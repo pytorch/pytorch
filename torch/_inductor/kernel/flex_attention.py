@@ -320,24 +320,26 @@ flex_attention_template = TritonTemplate(
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
         # -- compute scaling constant ---
-        row_max = tl.max(post_mod_scores, 1)
-        m_i_new = tl.maximum(m_i, row_max)
+        m_ij = tl.maximum(m_i, tl.max(post_mod_scores, 1))
 
-        alpha = tl.math.exp2(m_i - m_i_new)
-        p = tl.math.exp2(post_mod_scores - m_i_new[:, None])
+        alpha = tl.math.exp2(m_i - m_ij)
+        p = tl.math.exp2(post_mod_scores - m_ij[:, None])
         if not ROWS_GUARANTEED_SAFE:
-            masked_out_rows = (m_i_new == float("-inf"))
+            masked_out_rows = (m_ij == float("-inf"))
             alpha = tl.where(masked_out_rows, 0, alpha)
             p = tl.where(masked_out_rows[:, None], 0, p)
 
-        # -- scale and update acc --
-        acc_scale = l_i * 0 + alpha  # workaround some compiler bug
-        acc *= acc_scale[:, None]
-        acc = tl.dot(p.to(MATMUL_PRECISION), v.to(MATMUL_PRECISION), acc)
-
-        # -- update m_i and l_i --
+        # NB: l_i update is pulled up here since it's a bit faster
+        # NB: For headdim=256, it's faster to move it back down to after m_i =
+        # m_ij
         l_i = l_i * alpha + tl.sum(p, 1)
-        m_i = m_i_new
+        # # -- scale and update acc --
+        acc = acc * alpha[:, None]
+        v = tl.load(V_block_ptr)
+        acc = tl.dot(p.to(MATMUL_PRECISION), v, acc)
+
+        # -- update m_i
+        m_i = m_ij
 
         # update pointers
         indices_idx = start_n // BLOCKSPARSE_KV_MULTIPLE
@@ -359,8 +361,8 @@ flex_attention_template = TritonTemplate(
     idx_m = offs_m[:, None]
     idx_d = tl.arange(0, BLOCK_DMODEL)[None, :]
 
+    mask = idx_m < Q_LEN
     # TODO generalize and add proper mask support
-    mask = (idx_m != -1) & (idx_d != -1)
     {{store_output(("idx_z", "idx_h", "idx_m", "idx_d"), "acc", "mask")}}
 
     # TODO dont want to write this if we dont require grad
