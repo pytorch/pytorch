@@ -830,6 +830,17 @@
   self: at::_unsafe_index_put(grad.new_zeros_symint(self.sym_sizes(), self.options()), indices, grad, true)
   result: auto_linear
 
+- name: _unsafe_masked_index(Tensor self, Tensor mask, Tensor?[] indices, Scalar fill) -> Tensor
+  self: at::_unsafe_masked_index_put_accumulate(grad.new_zeros_symint(self.sym_sizes(), self.options()), mask, indices, grad)
+  mask: non_differentiable
+  result: _unsafe_masked_index(self_t, mask, indices, 0)
+
+- name: _unsafe_masked_index_put_accumulate(Tensor self, Tensor mask, Tensor?[] indices, Tensor values) -> Tensor
+  self: grad
+  mask: non_differentiable
+  values: at::_unsafe_masked_index(grad, mask, indices, 0)
+  result: at::_unsafe_masked_index_put_accumulate(self_t, mask, indices, values_t)
+
 - name: index_add(Tensor self, int dim, Tensor index, Tensor source, *, Scalar alpha=1) -> Tensor
   self: grad
   # The case source.dim() == 0  is necessary to support scalar tensors of the form

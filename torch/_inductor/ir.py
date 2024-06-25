@@ -5297,10 +5297,21 @@ class FallbackKernel(ExternKernelAlloc):
             self.mutation_names.append(tensor_args[0].get_name())
             return
 
-        if self.op_overload is torch.ops.fsdp.split_with_sizes_copy.default:
-            _, kwargs = self.unflatten_args(self.inputs, self.constant_args)
-            for tensor_arg in kwargs["out"]:
-                self.mutation_names.append(tensor_arg.get_name())
+        args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
+
+        def collect_mutation_names(arg):
+            if isinstance(arg, (list, tuple)):
+                for tensor_arg in arg:
+                    collect_mutation_names(arg)
+            elif isinstance(arg, (TensorBox, BaseView)):
+                self.mutation_names.append(arg.get_name())
+            else:
+                raise NotImplementedError(
+                    f"NYI: Unsupported out= arg type: {type(arg)}"
+                )
+
+        if "out" in kwargs:
+            collect_mutation_names(kwargs["out"])
             return
 
         if schema.is_mutable and not can_auto_functionalize(kernel):
@@ -5309,7 +5320,6 @@ class FallbackKernel(ExternKernelAlloc):
             )
 
         schema_args = schema.arguments
-        args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
 
         def handle_aliasing_and_mutation(info, arg):
             # Assertions to make sure we didn't mismatch args
