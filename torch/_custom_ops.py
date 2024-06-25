@@ -104,6 +104,12 @@ def custom_op(qualname, func_or_schema=None):
                 f"is passed to `custom_op`"
             )
 
+        signature = inspect.signature(func)
+        arguments = list(signature.parameters.values())
+        for arg in arguments:
+            if arg.default is not arg.empty and isinstance(arg.default, torch.device):
+                arg.default = None
+
         schema = infer_schema(func)
         _custom_op_with_schema(qualname, schema)
         return func

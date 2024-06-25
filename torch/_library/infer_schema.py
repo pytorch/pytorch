@@ -74,15 +74,29 @@ def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
         if param.default is inspect.Parameter.empty:
             params.append(f"{schema_type} {name}")
         else:
-            if param.default is not None and not isinstance(
-                param.default, (int, float, bool)
-            ):
-                error_fn(
-                    f"Parameter {name} has an unsupported default value (we only support "
-                    f"int, float, bool, None). Please file an issue on GitHub so we can "
-                    f"prioritize this."
-                )
-            params.append(f"{schema_type} {name}={param.default}")
+            if param.default is not None:
+                if isinstance(param.default, torch.device):
+                    params.append(f"{schema_type} {name}")
+                elif isinstance(param.default, str):
+                    try:
+                        device = torch.device(param.default)
+                        params.append(f"{schema_type} {name}")
+                    except Exception:
+                        error_fn(
+                            f"Parameter {name} has an unsupported default value (we only support "
+                            f"int, float, bool, None, torch.device, and string device representations). "
+                            f"Please file an issue on GitHub so we can prioritize this."
+                        )
+                elif not isinstance(param.default, (int, float, bool)):
+                    error_fn(
+                        f"Parameter {name} has an unsupported default value (we only support "
+                        f"int, float, bool, None). Please file an issue on GitHub so we can "
+                        f"prioritize this."
+                    )
+                else:
+                    params.append(f"{schema_type} {name}={param.default}")
+            else:
+                params.append(f"{schema_type} {name}=None")
     mutates_args_not_seen = set(mutates_args) - seen_args
     if len(mutates_args_not_seen) > 0:
         error_fn(
