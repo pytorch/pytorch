@@ -5,9 +5,7 @@ import logging
 
 import torch
 import torch._subclasses.functional_tensor
-
 import torch.utils._pytree as pytree
-
 from torch._C import DispatchKey
 from torch._C._functorch import (
     _add_batch_dim,
@@ -17,7 +15,6 @@ from torch._C._functorch import (
 )
 from torch._functorch.utils import exposed_in
 from torch._guards import detect_fake_mode
-
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
@@ -27,7 +24,6 @@ from torch._higher_order_ops.utils import (
     unique_graph_id,
     UnsupportedAliasMutationException,
 )
-
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (

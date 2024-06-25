@@ -14,8 +14,7 @@
 #include <c10/util/string_view.h>
 #include <torch/csrc/Export.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // See Python's pickletools.py for a detailed description of each of these codes
 enum class PickleOpCode : char {
@@ -221,7 +220,7 @@ class TORCH_API Pickler {
   // does not)
   static CONSTEXPR_EXCEPT_WIN_CUDA size_t kBufferSize = 256;
   template <typename T>
-  void push(typename std::common_type<T>::type value) {
+  void push(std::common_type_t<T> value) {
     const char* begin = reinterpret_cast<const char*>(&value);
     if (bufferPos_ + sizeof(T) > buffer_.size()) {
       flushNonEmpty();
@@ -425,5 +424,4 @@ inline void setTensorMetadata(
   setTensorMetadata(t, std::move(metadata));
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -1918,7 +1918,7 @@ def forward(self, arg0_1):
         ):
             functional_f(*example_inputs)
 
-    def test_cond_autograd_succeed_when_pred_is_known(self):
+    def test_cond_autograd_succeed_when_pred_is_constant(self):
         def true_fn(x):
             return x.cos()
 
@@ -1947,15 +1947,14 @@ def forward(self, arg0_1):
             return x.sin()
 
         def f(x, y):
-            return control_flow.cond(x.shape[0] > 4, true_fn, false_fn, [y])
+            return control_flow.cond(x.sum() > 4, true_fn, false_fn, [y])
 
         example_inputs = (
             torch.ones(3, 2, 4, requires_grad=True),
             torch.ones(4, requires_grad=True),
         )
-        # Due to x.shape[0] can be statically evaluated to be False, we can evaluate
-        # the backward.
-        f(*example_inputs).sum().backward()
+        with self.assertRaisesRegex(RuntimeError, "Autograd not implemented for cond"):
+            f(*example_inputs).sum().backward()
 
         # Ensure no error is thrown when not running backward
         f(*example_inputs)

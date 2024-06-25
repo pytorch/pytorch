@@ -45,7 +45,8 @@ def check_dynamic_shape_capture():
 
 
 def count_ops(gm, args, freq, op):
-    assert [node.target for node in gm.graph.nodes].count(op) == freq
+    actual = [node.target for node in gm.graph.nodes].count(op)
+    assert actual == freq, f"expected={freq}, actual={actual}"
     return gm
 
 
@@ -2745,26 +2746,6 @@ class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
         wrapped_gm = backend.graphs[graph_idx]
         return wrapped_gm
 
-    def test_hessian_graph_break(self):
-        counters.clear()
-
-        def wrapper_fn(x):
-            return torch.func.hessian(torch.sin)(x)
-
-        x = torch.randn(4, 3)
-        expected = wrapper_fn(x)
-        got = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x)
-        self.assertEqual(expected, got)
-        self.assertEqual(len(counters["graph_break"]), 2)
-        self.assertEqual(
-            {
-                "'skip function disable in file _dynamo/decorators.py'": 1,
-                "call torch._dynamo.disable() wrapped function <function jacfwd.<locals>.wrapper_fn at  0xN>": 1,
-            },
-            {munge_exc(k): v for k, v in counters["graph_break"].items()},
-        )
-
-    @unittest.expectedFailure
     def test_hessian(self):
         counters.clear()
 
@@ -2899,7 +2880,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @unittest.expectedFailure
     def test_hessian_argnums(self):
         counters.clear()
 
@@ -3045,7 +3025,6 @@ class GraphModule(torch.nn.Module):
             """        return (unflatten,)""",
         )
 
-    @unittest.expectedFailure
     def test_hessian_disable_capture(self):
         counters.clear()
 
@@ -3072,26 +3051,6 @@ class GraphModule(torch.nn.Module):
             )
             self.assertEqual(actual, expected)
 
-    def test_jacrev_graph_break(self):
-        counters.clear()
-
-        def wrapper_fn(x):
-            return torch.func.jacrev(torch.sin)(x)
-
-        x = torch.randn(4, 3)
-        expected = wrapper_fn(x)
-        got = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x)
-        self.assertEqual(expected, got)
-        self.assertEqual(len(counters["graph_break"]), 2)
-        self.assertEqual(
-            {
-                "'skip function disable in file _dynamo/decorators.py'": 1,
-                "call torch._dynamo.disable() wrapped function <function jacrev.<locals>.wrapper_fn at  0xN>": 1,
-            },
-            {munge_exc(k): v for k, v in counters["graph_break"].items()},
-        )
-
-    @unittest.expectedFailure
     def test_jacrev(self):
         counters.clear()
 
@@ -3168,7 +3127,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @unittest.expectedFailure
     def test_jacrev_two_tensors_argnums(self):
         counters.clear()
 
@@ -3251,7 +3209,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @unittest.expectedFailure
     def test_jacrev_has_aux(self):
         counters.clear()
 
@@ -3336,7 +3293,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @unittest.expectedFailure
     def test_jacrev_disable_capture(self):
         counters.clear()
 
@@ -4283,26 +4239,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(counters["graph_break"]), 0)
         self.assertEqual(actual, expected)
 
-    def test_jacfwd_graph_break(self):
-        counters.clear()
-
-        def wrapper_fn(x):
-            return torch.func.jacfwd(torch.sin)(x)
-
-        x = torch.randn(4, 3)
-        expected = wrapper_fn(x)
-        got = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x)
-        self.assertEqual(expected, got)
-        self.assertEqual(len(counters["graph_break"]), 2)
-        self.assertEqual(
-            {
-                "'skip function disable in file _dynamo/decorators.py'": 1,
-                "call torch._dynamo.disable() wrapped function <function jacfwd.<locals>.wrapper_fn at  0xN>": 1,
-            },
-            {munge_exc(k): v for k, v in counters["graph_break"].items()},
-        )
-
-    @unittest.expectedFailure
     def test_jacfwd(self):
         counters.clear()
 
@@ -4386,7 +4322,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @unittest.expectedFailure
     def test_jacfwd_two_tensors_argnums(self):
         counters.clear()
 
@@ -4476,7 +4411,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @unittest.expectedFailure
     def test_jacfwd_has_aux(self):
         counters.clear()
 
@@ -4571,7 +4505,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @unittest.expectedFailure
     def test_jacfwd_randomness(self):
         counters.clear()
 
@@ -4675,7 +4608,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @unittest.expectedFailure
     def test_jacfwd_disable_capture(self):
         counters.clear()
 
@@ -6049,9 +5981,7 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         y = torch.randn(4, 4, requires_grad=True)
 
         fw_compiler = functools.partial(count_ops, freq=1, op=torch.ops.aten.mm.default)
-        bw_compiler = functools.partial(
-            count_ops, freq=3, op=torch.ops.aten.mm.default
-        )  # mm recomputed in the bwd
+        bw_compiler = functools.partial(count_ops, freq=2, op=torch.ops.aten.mm.default)
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x, y)
 
@@ -6074,9 +6004,7 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         y = torch.randn(4, 4, requires_grad=True)
 
         fw_compiler = functools.partial(count_ops, freq=1, op=torch.ops.aten.mm.default)
-        bw_compiler = functools.partial(
-            count_ops, freq=3, op=torch.ops.aten.mm.default
-        )  # mm recomputed in the bwd
+        bw_compiler = functools.partial(count_ops, freq=2, op=torch.ops.aten.mm.default)
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x, y)
 
@@ -6097,8 +6025,9 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         fw_compiler = functools.partial(
             count_ops, freq=1, op=torch.ops.rngprims.philox_rand.default
         )
+        # philox_rand is passed from fwd
         bw_compiler = functools.partial(
-            count_ops, freq=1, op=torch.ops.rngprims.philox_rand.default
+            count_ops, freq=0, op=torch.ops.rngprims.philox_rand.default
         )
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(
@@ -6178,8 +6107,9 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         fw_compiler = functools.partial(
             count_ops, freq=1, op=torch.ops.aten.sigmoid.default
         )
+        # sigmoid passed from fwd
         bw_compiler = functools.partial(
-            count_ops, freq=1, op=torch.ops.aten.sigmoid.default
+            count_ops, freq=0, op=torch.ops.aten.sigmoid.default
         )
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x)
