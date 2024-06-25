@@ -37,6 +37,7 @@ HAS_CUDA = HAS_CUDA and not torch.version.hip
 SM75OrLater = SM75OrLater and not torch.version.hip
 SM80OrLater = SM80OrLater and not torch.version.hip
 SM90OrLater = SM90OrLater and not torch.version.hip
+SM80 = SM80OrLater and torch.cuda.get_device_capability() == (8, 0)
 
 
 def _get_path_without_sccache() -> str:
@@ -536,7 +537,7 @@ class TestCutlassBackend(TestCase):
             torch.testing.assert_close(Y_compiled, Y)
 
     # TODO: Enable dynamic test cases when dynamic support is added.
-    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @unittest.skipIf(not SM80, "need sm_80 exactly")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     @parametrize("dynamic", (False,))
     @parametrize("max_autotune_gemm_backends", ("CUTLASS", "CUTLASS,Triton,ATen"))

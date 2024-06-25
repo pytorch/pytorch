@@ -51,6 +51,10 @@ def is_exception_branch(branch: str) -> bool:
 
 
 def get_workflow_type(issue: Issue, username: str) -> Tuple[str, str]:
+    formatted_username = (
+        f"@{username}"  # Add the @ symbol to match the format in the issue body
+    )
+
     try:
         user_list = issue.get_comments()[0].body.split()
 
@@ -60,7 +64,7 @@ def get_workflow_type(issue: Issue, username: str) -> Tuple[str, str]:
         elif user_list[0] == "*":
             MESSAGE = "LF Workflows are enabled for everyone. Using LF runners."
             return WORKFLOW_LABEL_LF, MESSAGE
-        elif username in user_list:
+        elif formatted_username in user_list:
             MESSAGE = f"LF Workflows are enabled for {username}. Using LF runners."
             return WORKFLOW_LABEL_LF, MESSAGE
         else:

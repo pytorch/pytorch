@@ -1,7 +1,7 @@
 import argparse
 import os
-import pathlib
 from collections import namedtuple
+from pathlib import Path
 from typing import (
     Any,
     Callable,
@@ -261,7 +261,7 @@ def main() -> None:
     options = parser.parse_args()
 
     # Assumes that this file lives at PYTORCH_ROOT/torchgen/gen_backend_stubs.py
-    torch_root = pathlib.Path(__file__).parent.parent.parent.absolute()
+    torch_root = Path(__file__).absolute().parents[2]
     aten_path = str(torch_root / "aten" / "src" / "ATen")
     lazy_ir_generator: Type[GenLazyIR] = default_args.lazy_ir_generator
     if options.gen_ts_lowerings:
