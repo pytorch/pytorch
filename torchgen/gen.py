@@ -2720,7 +2720,7 @@ def get_torchgen_root() -> pathlib.Path:
     If you're depending on torchgen out-of-tree, you can use the root to figure
     out the path to native_functions.yaml
     """
-    return pathlib.Path(__file__).parent.resolve()
+    return pathlib.Path(__file__).absolute().parent
 
 
 def main() -> None:

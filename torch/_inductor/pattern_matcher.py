@@ -1440,7 +1440,9 @@ def _serialize_pattern(
     return pattern
 
 
-SERIALIZED_PATTERN_PATH = Path(__file__).parent / "fx_passes" / "serialized_patterns"
+SERIALIZED_PATTERN_PATH = (
+    Path(__file__).absolute().parent / "fx_passes" / "serialized_patterns"
+)
 
 # This is the set of serialized patterns that we've registered.  Used by
 # test_serialized_patterns_up_to_date() to ensure the patterns are up
