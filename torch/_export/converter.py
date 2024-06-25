@@ -413,9 +413,9 @@ class TS2FXGraphConverter:
         fx_node_name = f"{root_attr_name}.{attr_name}" if root_attr_name else attr_name
         self.attribute_map[output_name] = fx_node_name
 
-        # ts graph does not lift attributes as input nodes. So attribute may
-        # be ignored by name may have not been converted by convert_graph_inputs().
-        # If so, we manually insert get_attr fx node.
+        # ts graph does not lift tensor constants as input nodes. So tensor constants may
+        # be ignored by in convert_graph_inputs(). To fix this issue, we insert get_attr 
+        # fx node here.
         if (
             fx_node_name not in self.name_to_node
             and fx_node_name in self.name_to_buffer_map
@@ -424,6 +424,7 @@ class TS2FXGraphConverter:
 
     def convert_prim_SetAttr(self, node: torch._C.Node):
         attr_name = node.s("name")
+
         # Export specializes on non-tensor constants so we skip SetAttr
         if attr_name in self.constant_map:
             return
