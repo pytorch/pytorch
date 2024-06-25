@@ -550,9 +550,13 @@ def _get_torch_related_args(include_pytorch: bool, aot_mode: bool):
             if not aot_mode:
                 libraries.append("torch_python")
 
-    if not include_pytorch and aot_mode and not config.is_fbcode():
-        cpp_prefix_include_dir = [f"{os.path.dirname(cpp_prefix_path())}"]
-        include_dirs += cpp_prefix_include_dir
+    cpp_prefix_include_dir = [f"{os.path.dirname(cpp_prefix_path())}"]
+    if config.is_fbcode():
+        if aot_mode:
+            include_dirs += cpp_prefix_include_dir
+    else:
+        if not include_pytorch and aot_mode:
+            include_dirs += cpp_prefix_include_dir
 
     if _IS_WINDOWS:
         libraries.append("sleef")
