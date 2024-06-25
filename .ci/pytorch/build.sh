@@ -44,15 +44,7 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   fi
 fi
 
-if [[ ${BUILD_ENVIRONMENT} == *"caffe2"* ]]; then
-  echo "Caffe2 build is ON"
-  export BUILD_CAFFE2=ON
-fi
-
-if [[ ${BUILD_ENVIRONMENT} == *"paralleltbb"* ]]; then
-  export ATEN_THREADING=TBB
-  export USE_TBB=1
-elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
+if [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
   export ATEN_THREADING=NATIVE
 fi
 
@@ -81,7 +73,22 @@ if ! which conda; then
     export USE_MKLDNN=0
   fi
 else
-  export CMAKE_PREFIX_PATH=/opt/conda
+  # CMAKE_PREFIX_PATH precedences
+  # 1. $CONDA_PREFIX, if defined. This follows the pytorch official build instructions.
+  # 2. /opt/conda/envs/py_${ANACONDA_PYTHON_VERSION}, if ANACONDA_PYTHON_VERSION defined.
+  #    This is for CI, which defines ANACONDA_PYTHON_VERSION but not CONDA_PREFIX.
+  # 3. $(conda info --base). The fallback value of pytorch official build
+  #    instructions actually refers to this.
+  #    Commonly this is /opt/conda/
+  if [[ -v CONDA_PREFIX ]]; then
+    export CMAKE_PREFIX_PATH=${CONDA_PREFIX}
+  elif [[ -v ANACONDA_PYTHON_VERSION ]]; then
+    export CMAKE_PREFIX_PATH="/opt/conda/envs/py_${ANACONDA_PYTHON_VERSION}"
+  else
+    # already checked by `! which conda`
+    CMAKE_PREFIX_PATH="$(conda info --base)"
+    export CMAKE_PREFIX_PATH
+  fi
 
   # Workaround required for MKL library linkage
   # https://github.com/pytorch/pytorch/issues/119557
@@ -277,9 +284,26 @@ else
         # Which should be backward compatible with Numpy-1.X
         python -mpip install --pre numpy==2.0.0rc1
       fi
-      WERROR=1 python setup.py bdist_wheel
+
+      WERROR=1 python setup.py clean
+
+      if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
+        BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py bdist_wheel
+        BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 python setup.py bdist_wheel --cmake
+      else
+        WERROR=1 python setup.py bdist_wheel
+      fi
     else
-      python setup.py bdist_wheel
+      python setup.py clean
+      if [[ "$BUILD_ENVIRONMENT" == *xla* ]]; then
+        source .ci/pytorch/install_cache_xla.sh
+      fi
+      if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
+        echo "USE_SPLIT_BUILD cannot be used with xla or rocm"
+        exit 1
+      else
+        python setup.py bdist_wheel
+      fi
     fi
     pip_install_whl "$(echo dist/*.whl)"
 
@@ -318,9 +342,10 @@ else
     CUSTOM_OP_TEST="$PWD/test/custom_operator"
     python --version
     SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+
     mkdir -p "$CUSTOM_OP_BUILD"
     pushd "$CUSTOM_OP_BUILD"
-    cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)" \
+    cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch;$SITE_PACKAGES" -DPython_EXECUTABLE="$(which python)" \
           -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
     make VERBOSE=1
     popd
@@ -333,7 +358,7 @@ else
     SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
     mkdir -p "$JIT_HOOK_BUILD"
     pushd "$JIT_HOOK_BUILD"
-    cmake "$JIT_HOOK_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)" \
+    cmake "$JIT_HOOK_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch;$SITE_PACKAGES" -DPython_EXECUTABLE="$(which python)" \
           -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
     make VERBOSE=1
     popd
@@ -345,7 +370,7 @@ else
     python --version
     mkdir -p "$CUSTOM_BACKEND_BUILD"
     pushd "$CUSTOM_BACKEND_BUILD"
-    cmake "$CUSTOM_BACKEND_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)" \
+    cmake "$CUSTOM_BACKEND_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch;$SITE_PACKAGES" -DPython_EXECUTABLE="$(which python)" \
           -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
     make VERBOSE=1
     popd
@@ -376,4 +401,8 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* && "$BUILD_ENVIRONMENT" != *bazel* ]]; 
   python tools/stats/export_test_times.py
 fi
 
-print_sccache_stats
+# snadampal: skipping it till sccache support added for aarch64
+# https://github.com/pytorch/pytorch/issues/121559
+if [[ "$BUILD_ENVIRONMENT" != *aarch64* ]]; then
+  print_sccache_stats
+fi

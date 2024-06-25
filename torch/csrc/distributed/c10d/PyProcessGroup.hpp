@@ -207,7 +207,7 @@ class TORCH_PYTHON_API PythonOnCompletionHook {
     hook_.ptr() = nullptr;
   }
 
-  void operator()(std::shared_ptr<WorkInfo> workInfo) const {
+  void operator()(const std::shared_ptr<WorkInfo>& workInfo) const {
     std::exception_ptr eptr;
     {
       py::gil_scoped_acquire acquire;

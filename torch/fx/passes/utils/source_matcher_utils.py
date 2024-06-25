@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from dataclasses import dataclass, field
 from torch.fx.graph import Graph
 from torch.fx.node import Node

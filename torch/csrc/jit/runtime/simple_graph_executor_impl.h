@@ -12,12 +12,12 @@ struct TORCH_API SimpleGraphExecutorImpl : public GraphExecutorImplBase {
 
   const ExecutionPlan& getPlanFor(
       Stack& stack,
-      c10::optional<size_t> remaining_bailout_depth) override;
+      std::optional<size_t> remaining_bailout_depth) override;
   GraphExecutorState getDebugState() override;
   ~SimpleGraphExecutorImpl() override = default;
 
  private:
-  c10::optional<ExecutionPlan> execution_plan_;
+  std::optional<ExecutionPlan> execution_plan_;
 };
 
 } // namespace torch::jit

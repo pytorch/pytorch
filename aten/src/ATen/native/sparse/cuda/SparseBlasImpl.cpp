@@ -692,13 +692,6 @@ void spgemm(
     const Scalar& beta,
     const Scalar& alpha,
     const at::sparse_csr::SparseCsrTensor& C) {
-#if defined(USE_ROCM) && ROCM_VERSION < 50200
-  TORCH_CHECK(
-      false,
-      "Calling addmm with sparse GPU tensors requires compiling ",
-      "PyTorch with ROCm 5.2+. ",
-      "Please use PyTorch built with newer ROCm version.");
-#else
   // older versions of cusparse on Windows segfault for complex128 dtype
 #if defined(_WIN32) && defined(CUSPARSE_VERSION) && CUSPARSE_VERSION < 11400
   TORCH_CHECK(
@@ -834,7 +827,6 @@ void spgemm(
             CUSPARSE_SPGEMM_DEFAULT,
             spgemm_desc.descriptor()));
       });
-#endif
 }
 
 } // anonymous namespace

@@ -1,7 +1,6 @@
+import operator_benchmark as op_bench
 import torch
 import torch.nn.functional as F
-
-import operator_benchmark as op_bench
 
 
 """Microbenchmarks for groupnorm operator."""

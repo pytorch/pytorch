@@ -52,7 +52,7 @@ struct TORCH_API MPSGuardImpl final : public c10::impl::DeviceGuardImplInterface
     return Device(c10::DeviceType::MPS, 0);
   }
 
-  c10::optional<Device> uncheckedGetDevice() const noexcept {
+  std::optional<Device> uncheckedGetDevice() const noexcept {
     return Device(c10::DeviceType::MPS, 0);
   }
 
@@ -112,12 +112,12 @@ struct TORCH_API MPSGuardImpl final : public c10::impl::DeviceGuardImplInterface
 struct OptionalMPSGuard {
   explicit OptionalMPSGuard() : guard_() {}
 
-  explicit OptionalMPSGuard(c10::optional<Device> device_opt)
+  explicit OptionalMPSGuard(std::optional<Device> device_opt)
       : guard_(device_opt) {}
 
   /// Set the current MPS device to the passed device index, if it is not
   /// nullopt
-  explicit OptionalMPSGuard(c10::optional<DeviceIndex> device_index_opt)
+  explicit OptionalMPSGuard(std::optional<DeviceIndex> device_index_opt)
       : guard_(device_index_opt) {}
 
   // Copy is not allowed
@@ -147,14 +147,14 @@ struct OptionalMPSGuard {
 
   /// Returns the device that was set immediately prior to initialization of the
   /// guard, or nullopt if the guard is uninitialized.
-  c10::optional<Device> original_device() const {
+  std::optional<Device> original_device() const {
     return guard_.original_device();
   }
 
   /// Returns the most recent device that was set using this device guard,
   /// either from construction, or via set_device, if the guard is initialized,
   /// or nullopt if the guard is uninitialized.
-  c10::optional<Device> current_device() const {
+  std::optional<Device> current_device() const {
     return guard_.current_device();
   }
 

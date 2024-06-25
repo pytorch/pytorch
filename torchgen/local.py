@@ -2,6 +2,7 @@ import threading
 from contextlib import contextmanager
 from typing import Iterator, Optional
 
+
 # Simple dynamic scoping implementation.  The name "parametrize" comes
 # from Racket.
 #

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 import torch.nn as nn
 from torch import Tensor
@@ -213,7 +214,7 @@ class LSTMCell(RNNCellBase):
         return ret
 
     @classmethod
-    def from_float(cls, mod, weight_qparams_dict):
+    def from_float(cls, mod, weight_qparams_dict, use_precomputed_fake_quant=False):
         ref_mod = cls(
             mod.input_size,
             mod.hidden_size,

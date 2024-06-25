@@ -377,7 +377,7 @@ void loadFunctions() {
 }
 } // anonymous namespace
 
-c10::optional<std::shared_ptr<Graph>> shapeComputeGraphForSchema(
+std::optional<std::shared_ptr<Graph>> shapeComputeGraphForSchema(
     const FunctionSchema& schema) {
   std::lock_guard<std::mutex> guard(lock);
   if (cached_schema_to_graph.empty()) {
@@ -394,7 +394,7 @@ c10::optional<std::shared_ptr<Graph>> shapeComputeGraphForSchema(
   return c10::nullopt;
 }
 
-TORCH_API c10::optional<BoundedShapeGraphs> boundedGraphsForSchema(
+TORCH_API std::optional<BoundedShapeGraphs> boundedGraphsForSchema(
     const FunctionSchema& schema) {
   std::lock_guard<std::mutex> guard(lock);
   if (cached_bounded_schema_to_graph.empty()) {

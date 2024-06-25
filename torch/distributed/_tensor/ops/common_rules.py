@@ -2,13 +2,13 @@
 from typing import cast, Dict, List, Optional, Tuple
 
 import torch
-from torch.distributed._tensor._utils import compute_local_shape
-from torch.distributed._tensor.op_schema import (
+from torch.distributed._tensor._op_schema import (
     _is_inplace_op,
     _is_out_variant_op,
     OpSchema,
     OutputSharding,
 )
+from torch.distributed._tensor._utils import compute_local_shape
 from torch.distributed._tensor.ops.utils import prod
 from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
 
@@ -40,7 +40,6 @@ def _gen_reshard_suggestions(
     return OutputSharding(
         None,
         redistribute_schema=suggested_schema,
-        failed_reason="Input placements op sharding propagation failed, need to reshard!",
     )
 
 

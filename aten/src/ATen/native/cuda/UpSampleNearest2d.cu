@@ -207,8 +207,8 @@ static void upsample_nearest2d_out_cuda_template(
     const Tensor& output,
     const Tensor& input_,
     IntArrayRef output_size,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
   TensorArg input_arg{input_, "input_", 1}, output_arg{output, "output", 2};
   checkAllSameGPU(__func__, {input_arg, output_arg});
 
@@ -337,8 +337,8 @@ static void upsample_nearest2d_backward_out_cuda_template(
     const Tensor& grad_output_,
     IntArrayRef output_size,
     IntArrayRef input_size,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
   TensorArg grad_input_arg{grad_input, "grad_input", 1},
       grad_output_arg{grad_output_, "grad_output_", 2};
   checkAllSameGPU(__func__, {grad_output_arg, grad_input_arg});
@@ -446,8 +446,8 @@ static void upsample_nearest2d_backward_out_cuda_template(
 TORCH_IMPL_FUNC(upsample_nearest2d_out_cuda) (
     const Tensor& input,
     IntArrayRef output_size,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w,
     const Tensor& output) {
   upsample_nearest2d_out_cuda_template<nearest_neighbor_compute_source_index>(
       output, input, output_size, scales_h, scales_w);
@@ -456,8 +456,8 @@ TORCH_IMPL_FUNC(upsample_nearest2d_out_cuda) (
 TORCH_IMPL_FUNC(_upsample_nearest_exact2d_out_cuda) (
     const Tensor& input,
     IntArrayRef output_size,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w,
     const Tensor& output) {
   upsample_nearest2d_out_cuda_template<nearest_neighbor_exact_compute_source_index>(
       output, input, output_size, scales_h, scales_w);
@@ -467,8 +467,8 @@ TORCH_IMPL_FUNC(upsample_nearest2d_backward_out_cuda) (
     const Tensor& grad_output,
     IntArrayRef output_size,
     IntArrayRef input_size,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w,
     const Tensor& grad_input) {
   upsample_nearest2d_backward_out_cuda_template<nearest_neighbor_bw_compute_source_index>(
       grad_input, grad_output, output_size, input_size, scales_h, scales_w);
@@ -478,8 +478,8 @@ TORCH_IMPL_FUNC(_upsample_nearest_exact2d_backward_out_cuda) (
     const Tensor& grad_output,
     IntArrayRef output_size,
     IntArrayRef input_size,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w,
     const Tensor& grad_input) {
   upsample_nearest2d_backward_out_cuda_template<nearest_neighbor_exact_bw_compute_source_index>(
       grad_input, grad_output, output_size, input_size, scales_h, scales_w);

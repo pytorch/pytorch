@@ -5,10 +5,15 @@ import torch
 
 import torch._inductor.config as inductor_config
 from torch._dynamo.testing import rand_strided
-from torch._inductor.fx_passes.pad_mm import get_alignment_size, get_padded_length
+from torch._inductor.fx_passes.pad_mm import (
+    get_alignment_size,
+    get_pad_cache,
+    get_padded_length,
+    should_pad_common,
+)
 
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -125,7 +130,7 @@ class PadMMTest(TestCase):
         b = rand_strided((K, N), (1, K), device="cuda", dtype=torch.float32)
         # TODO: Getting the alignment right requires pattern matcher to
         # run on newly added nodes
-        aligned_m = get_padded_length(M, get_alignment_size(a)) + M - 3
+        aligned_m = get_padded_length(M, get_alignment_size(a)) + M
         torch._dynamo.mark_dynamic(a, 1)
         torch._dynamo.mark_dynamic(b, 0)
         with unittest.mock.patch(
@@ -163,6 +168,16 @@ class PadMMTest(TestCase):
             compiled_fn = torch.compile(fn)
             res2, (code,) = run_and_get_code(compiled_fn, a, b)
         self.assertEqual(res1, res2)
+
+    @inductor_config.patch(force_shape_pad=True)
+    def test_zero_dim(self):
+        def addmm(x, a, b):
+            return torch.addmm(x, a, b)
+
+        x = torch.randn(100).cuda()
+        a = torch.randn(0, 10).cuda()
+        b = torch.randn(10, 100).cuda()
+        self.assertEqual(torch.compile(addmm)(x, a, b), addmm(x, a, b))
 
     @inductor_config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
     def test_pad_bmm_dyn_b(self):
@@ -311,6 +326,103 @@ class PadMMTest(TestCase):
             # no padding
             FileCheck().check(f"K = {K}").run(code)
         self.assertEqual(res1, res2)
+
+    @inductor_config.patch(force_shape_pad=True)
+    def test_pad_single_cat(self):
+        @torch.compile()
+        def foo(x, y):
+            return x @ y
+
+        inps = [torch.rand([5, 5], device="cuda") for _ in range(2)]
+        out = foo(*inps)
+        self.assertEqual(out, inps[0] @ inps[1])
+
+    @inductor_config.patch(force_shape_pad=True)
+    @fresh_inductor_cache()
+    def test_pad_addmm_2d_bias(self):
+        @torch.compile()
+        def foo(input, x, y):
+            return torch.ops.aten.addmm(input, x, y)
+
+        for a in [1, 4]:
+            for b in [1, 6]:
+                inps = (
+                    torch.rand([a, b], device="cuda"),
+                    torch.rand([4, 5], device="cuda"),
+                    torch.rand([5, 6], device="cuda"),
+                )
+                out = foo(*inps)
+                out_eager = torch.ops.aten.addmm(*inps)
+                self.assertEqual(out, out_eager)
+
+        for a in [1, 6]:
+            inps = (
+                torch.rand([a], device="cuda"),
+                torch.rand([4, 5], device="cuda"),
+                torch.rand([5, 6], device="cuda"),
+            )
+            out = foo(*inps)
+            out_eager = torch.ops.aten.addmm(*inps)
+            self.assertEqual(out, out_eager)
+
+    @inductor_config.patch(force_shape_pad=True)
+    def test_pad_batch(self):
+        m = 6
+        n = 9
+        k = 11
+        batch_size = 3
+        mat1 = torch.ones((batch_size, m, k), device="cuda", dtype=torch.float16)
+        mat2 = torch.ones((batch_size, k, n), device="cuda", dtype=torch.float16)
+        expected_alignment = get_alignment_size(mat1)
+
+        assert expected_alignment == 8, "Alignment for float16 should be 8"
+        assert should_pad_common(
+            mat1, mat2
+        ), "This should pass the common padding criteria"
+
+        @torch.compile()
+        def bmm(mat1, mat2):
+            return torch.bmm(mat1, mat2)
+
+        res2, (code,) = run_and_get_code(bmm, mat1, mat2)
+        bmm_expected_result = torch.bmm(mat1, mat2)
+        # in call code, expect to see a single pad per input, and then we should see padded allocation for output
+        FileCheck().check("del async_compile").check_count(
+            ".run(", 2, exactly=True
+        ).check("empty_strided_cuda((3, 8, 16)").run(code)
+
+        assert torch.allclose(
+            res2, bmm_expected_result
+        ), "BMM results are not identical"
+
+    @fresh_inductor_cache()
+    def test_exclude_padding(self):
+        @torch.compile()
+        def mm(a, b):
+            return a @ b
+
+        mm(torch.rand([25, 25], device="cuda"), torch.rand([25, 25], device="cuda"))
+        local_cache = get_pad_cache().get_local_cache()
+        self.assertTrue(len(local_cache) == 2)
+        FileCheck().check_count("exclude_pad:False", 2, exactly=True).run(
+            repr(local_cache)
+        )
+
+        @torch.compile()
+        def mm(a, b):
+            return (a + 1) @ b
+
+        mm(torch.rand([25, 25], device="cuda"), torch.rand([25, 25], device="cuda"))
+        local_cache = get_pad_cache().get_local_cache()
+        # reuse original base timing
+        self.assertTrue(len(local_cache) == 3)
+
+        FileCheck().check_count("exclude_pad:False", 3, exactly=True).run(
+            repr(local_cache)
+        )
+        FileCheck().check_count("exclude_pad:True", 1, exactly=True).run(
+            repr(local_cache)
+        )
 
 
 if __name__ == "__main__":

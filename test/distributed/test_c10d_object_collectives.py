@@ -101,6 +101,20 @@ class TestObjectCollectives(MultiProcessTestCase):
                 self.assertEqual(i, v, f"rank: {self.rank}")
 
     @with_comms()
+    def test_send_recv_object_list(self):
+        val = 99 if self.rank == 0 else None
+        object_list = [val] * dist.get_world_size()
+        if self.rank == 0:
+            dist.send_object_list(object_list, 1)
+        if self.rank == 1:
+            dist.recv_object_list(object_list, 0)
+
+        if self.rank < 2:
+            self.assertEqual(99, object_list[0])
+        else:
+            self.assertEqual(None, object_list[0])
+
+    @with_comms()
     def test_broadcast_object_list(self):
         val = 99 if self.rank == 0 else None
         object_list = [val] * dist.get_world_size()

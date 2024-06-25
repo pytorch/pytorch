@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Owner(s): ["module: onnx"]
 from __future__ import annotations
 
@@ -292,9 +293,11 @@ class ReductionTypePromotionRule(TypePromotionRule):
     def preview_type_promotion(
         self, args: tuple, kwargs: dict
     ) -> TypePromotionSnapshot:
-        assert len(args) >= 1 and isinstance(
-            arg := args[0], torch.Tensor
+        assert (
+            len(args) >= 1
         ), f"Reduction op torch.ops.{self.namespace}.{self.op_name} expects at least one argument"
+        arg = args[0]
+        assert isinstance(arg, torch.Tensor), f"{type(arg)=} is not torch.Tensor"
         dtype: Optional[torch.dtype] = kwargs.get("dtype", None)
 
         computation_dtype, result_dtype = _prims_common.reduction_dtypes(
@@ -329,9 +332,11 @@ class AllOrAnyReductionTypePromotionRule(ReductionTypePromotionRule):
     def preview_type_promotion(
         self, args: tuple, kwargs: dict
     ) -> TypePromotionSnapshot:
-        assert len(args) >= 1 and isinstance(
-            arg := args[0], torch.Tensor
+        assert (
+            len(args) >= 1
         ), f"Reduction op torch.ops.{self.namespace}.{self.op_name} expects at least one argument"
+        arg = args[0]
+        assert isinstance(arg, torch.Tensor), f"{type(arg)=} is not torch.Tensor"
         computation_dtype = torch.bool
         # Preserves uint8 -- probably a legacy mask thing
         result_dtype = torch.uint8 if arg.dtype == torch.uint8 else torch.bool
@@ -352,9 +357,11 @@ class SumLikeReductionTypePromotionRule(ReductionTypePromotionRule):
     def preview_type_promotion(
         self, args: tuple, kwargs: dict
     ) -> TypePromotionSnapshot:
-        assert len(args) >= 1 and isinstance(
-            arg := args[0], torch.Tensor
+        assert (
+            len(args) >= 1
         ), f"Reduction op torch.ops.{self.namespace}.{self.op_name} expects at least one argument"
+        arg = args[0]
+        assert isinstance(arg, torch.Tensor), f"{type(arg)=} is not torch.Tensor"
         dtype: Optional[torch.dtype] = kwargs.get("dtype", None)
         # The below logic is copied from `torch/_refs/__init__.py` reduction ops impl.
         if dtype is None:

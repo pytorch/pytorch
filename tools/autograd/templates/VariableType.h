@@ -42,7 +42,7 @@ using at::Quantizer;
 // we'll remove them when we are actually exposing Quantizer class
 // to frontend
 using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
-using c10::optional;
+using std::optional;
 
 namespace VariableType {
   TORCH_API std::vector<at::DeprecatedTypeProperties*> allCUDATypes();

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from ..cutlass_utils import try_import_cutlass
 
 if try_import_cutlass():

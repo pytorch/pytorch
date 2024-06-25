@@ -3,7 +3,6 @@ from typing import List, Optional, Union
 import torchgen.api.meta as meta
 import torchgen.api.structured as structured
 from torchgen.api.types import kernel_signature
-
 from torchgen.context import with_native_function_and_index
 from torchgen.model import BackendIndex, NativeFunction, NativeFunctionsGroup
 from torchgen.utils import mapMaybe
