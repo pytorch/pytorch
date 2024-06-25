@@ -4554,12 +4554,6 @@ def upsample_bicubic2d_backward(
     weights_x = _upsample_get_cubic_coefficients(xscale)
     weights_y = _upsample_get_cubic_coefficients(yscale)
 
-    def load_bounded(ys, xs):
-        y_idx = torch.clamp(ys, 0, in_h - 1)
-        x_idx = torch.clamp(xs, 0, in_w - 1)
-        v = aten._unsafe_index(input, [None, None, y_idx, x_idx])
-        return v
-
     y_idxs = [torch.clamp(y_ofs, 0, in_h - 1) for y_ofs in iys_ofs]
     x_idxs = [torch.clamp(x_ofs, 0, in_w - 1) for x_ofs in ixs_ofs]
 
@@ -4567,7 +4561,10 @@ def upsample_bicubic2d_backward(
     for x_idx, x_weight in zip(x_idxs, weights_x):
         for y_idx, y_weight in zip(y_idxs, weights_y):
             result = aten._unsafe_index_put(
-                result, [None, None, y_idx, x_idx], x_weight * y_weight, accumulate=True
+                result,
+                [None, None, y_idx, x_idx],
+                x_weight * (y_weight * grad_output),
+                accumulate=True,
             )
 
     # convert output to correct memory format, if necessary
