@@ -211,6 +211,7 @@ def add_safe_globals(safe_globals: List[Any]) -> None:
         safe_globals (List[Any]): list of globals to mark as safe
 
     Example:
+        >>> # xdoctest: +SKIP("Can't torch.save(t, ...) as doctest thinks MyTensor is defined on torch.serialization")
         >>> import tempfile
         >>> class MyTensor(torch.Tensor):
         ...     pass
