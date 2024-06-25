@@ -503,7 +503,10 @@ class TestFlexAttention(InductorTestCase):
         assert v_strides[-1] == 1
         v = torch.as_strided(v1, v_shape, v_strides, v_offset)
 
-        sdpa_partial = create_attention(score_mod=_generate_alibi_bias(8))
+        block_mask = _create_empty_block_sparse_mask(q, k, v)
+        sdpa_partial = create_attention(
+            score_mod=_generate_alibi_bias(8), block_sparse_mask=block_mask
+        )
         compiled_sdpa = torch.compile(sdpa_partial)
         ref_out = sdpa_partial(q, k, v)
         compiled_out = compiled_sdpa(q, k, v)
