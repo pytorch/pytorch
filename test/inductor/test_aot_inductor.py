@@ -1975,6 +1975,30 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(10, 20, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    def test_triton_kernel_sympy_expr_arg(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def forward(self, x, e):
+                sympy_expr = max(1, e.item())
+                out = torch.zeros_like(x)
+                add_kernel[(1,)](
+                    in_ptr0=x,
+                    in_ptr1=x,
+                    out_ptr=out,
+                    n_elements=sympy_expr,
+                    BLOCK_SIZE=1,
+                )
+                return out
+
+        NUMEL = 64
+        inputs = (
+            torch.randn(NUMEL, device=self.device),
+            torch.tensor(NUMEL, device=self.device),
+        )
+        self.check_model(Model(), inputs)
+
     def test_triton_kernel_with_none_input(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")

@@ -89,6 +89,7 @@ inline void {{kernel_name}}(
             "alpha": self.alpha,
             "kernel_extra_args_declare": self.get_kernel_extra_args_declare(),
             "int8_gemm": self.input_dtype == torch.uint8,
+            "vnni_size": 4 if self.input_dtype == torch.uint8 else 2,
         }
 
     def get_kernel_declaration(self):
@@ -580,11 +581,7 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         _tile_loadd({{tile_idx_a}}, A + {{tile_row * 16}} * lda + k, lda * sizeof({{input_t}}));
         {%- endif %}
         {%- if tile_row == 0 %}
-        {%- if int8_gemm %}
-        _tile_loadd({{tile_idx_b}}, B + k * ldb + {{tile_col * 16 * 4}}, ldb * 4 * sizeof({{input_t}}));
-        {%- else %}
-        _tile_loadd({{tile_idx_b}}, B + k * ldb + {{tile_col * 16 * 2}}, ldb * 2 * sizeof({{input_t}}));
-        {%- endif %}
+        _tile_loadd({{tile_idx_b}}, B + k * ldb + {{tile_col * 16 * vnni_size}}, ldb * {{vnni_size}} * sizeof({{input_t}}));
         {%- endif %}
         {%- if int8_gemm %}
         _tile_dpbusd({{tile_idx_c}}, {{tile_idx_a}}, {{tile_idx_b}});
@@ -631,7 +628,7 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         if self.input_dtype == torch.uint8:
             assert block_k == 64, "Only support block_k = 64 for AMX INT8"
         else:
-            assert block_k == 32, "Only support block_k = 32 for AMX Half"
+            assert block_k == 32, "Only support block_k = 32 for AMX Bfloat16/Float16"
         num_columns = block_n // 16
         options = {
             "declare_kernel": self.get_kernel_declaration(),
@@ -720,11 +717,7 @@ def create_micro_gemm(
                 continue
             if (
                 config.input_dtype == input_dtype
-                and (
-                    config.output_dtype == torch.int32
-                    if input_dtype == torch.uint8
-                    else config.output_dtype == output_dtype
-                )
+                and config.output_dtype == output_dtype
                 and config.compute_dtype == compute_dtype
                 and config.input2_dtype == input2_dtype
             ):
