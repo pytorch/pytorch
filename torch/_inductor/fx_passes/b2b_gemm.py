@@ -95,10 +95,17 @@ def can_apply_b2b_gemm(mat1, mat2, mat3) -> bool:
     mat3 = mat3.meta["val"]
     if not (mat1.is_cuda and mat2.is_cuda and mat3.is_cuda):
         return False
-    if not (len(mat1.shape) == 2 and len(mat2.shape) == 2 and len(mat3.shape) == 2):
+    if not ((len(mat1.shape) == 2) and (len(mat2.shape) == 2) and (len(mat3.shape) == 2)):
+        return False
+    if not ((mat1.shape[1] == mat2.shape[0]) and (mat2.shape[1] == mat3.shape[0])):
         return False
     # TODO: change to a real-check for size restrictions (may consider hardware limit?)
-    return mat1.shape[1] == 32 and mat3.shape[1] == 32
+    m, n, o, p = mat1.shape[0], mat1.shape[1], mat3.shape[0], mat3.shape[1]
+    m_ok = (m % 128 == 0) and (m > 128)
+    n_ok = (n == 32)
+    o_ok = (o % 128 == 0) and (o > 128)
+    p_ok = (p == 32)
+    return (m_ok and n_ok and o_ok and p_ok)
 
 def tuned_b2b_gemm(mat1, mat2, mat3, *, layout=None):
     layout = FixedLayout(
@@ -165,8 +172,9 @@ B2B_GEMM_PASS = PatternMatcherPass(
 def b2b_gemm(
     match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node, mat3: torch.fx.Node
 ):
-    print("B2B-GEMM handler called")
+    print("B2B-GEMM handler entered")
     if can_apply_b2b_gemm(mat1, mat2, mat3):
+        print("B2B-GEMM handler guard passed")
         counters["inductor"]["b2b_gemm"] += 1
         graph = match.graph
         root_node = match.nodes[-1]
