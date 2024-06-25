@@ -519,7 +519,6 @@ def placeholder_naming_pass(
     name_map: Dict[str, str] = {}
 
     # map user input names with mod.forward() signature
-    print("HEY", len(fake_args), fake_args)
     combined_args = _bind_signature_to_inputs(mod, fake_args, fake_kwargs)
 
     flat_args_with_path, _ = tree_flatten_with_path(combined_args)
