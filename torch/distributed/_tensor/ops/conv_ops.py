@@ -3,9 +3,10 @@
 from typing import List
 
 import torch
-from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
+from torch.distributed._tensor._op_schema import OpSchema, OutputSharding
 from torch.distributed._tensor.ops.utils import register_prop_rule
 from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
+
 
 aten = torch.ops.aten
 

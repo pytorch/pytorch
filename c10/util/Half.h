@@ -12,11 +12,12 @@
 #include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/TypeSafeSignMath.h>
+#include <c10/util/bit_cast.h>
 #include <c10/util/complex.h>
 #include <c10/util/floating_point_utils.h>
 #include <type_traits>
 
-#if defined(__cplusplus) && (__cplusplus >= 201103L)
+#if defined(__cplusplus)
 #include <cmath>
 #elif !defined(__OPENCL_VERSION__)
 #include <math.h>
@@ -330,20 +331,12 @@ inline uint16_t fp16_ieee_from_fp32_value(float f) {
 }
 
 #if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__)
-constexpr inline float16_t fp16_from_bits(uint16_t h) {
-  union {
-    uint16_t as_bits;
-    float16_t as_value;
-  } fp16 = {h};
-  return fp16.as_value;
+inline float16_t fp16_from_bits(uint16_t h) {
+  return c10::bit_cast<float16_t>(h);
 }
 
-constexpr inline uint16_t fp16_to_bits(float16_t f) {
-  union {
-    float16_t as_value;
-    uint16_t as_bits;
-  } fp16 = {.as_value = f};
-  return fp16.as_bits;
+inline uint16_t fp16_to_bits(float16_t f) {
+  return c10::bit_cast<uint16_t>(f);
 }
 
 // According to https://godbolt.org/z/8s14GvEjo it would translate to single

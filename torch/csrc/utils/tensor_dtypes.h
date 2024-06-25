@@ -1,15 +1,13 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <c10/core/ScalarType.h>
 #include <string>
 #include <tuple>
 
-namespace torch {
-namespace utils {
+namespace torch::utils {
 
 std::pair<std::string, std::string> getDtypeNames(at::ScalarType scalarType);
 
 void initializeDtypes();
 
-} // namespace utils
-} // namespace torch
+} // namespace torch::utils

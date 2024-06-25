@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import Any, Dict, List, Optional
 
 import sympy
@@ -69,7 +70,8 @@ def signature_to_meta(
 def is_unaligned_buffer(arg: TensorArg):
     buf_name = arg.buffer
     if buf_name in V.graph.graph_inputs:
-        return not config.assume_aligned_inputs
+        # See Note: [Input Alignment handling in Inductor]
+        return buf_name not in V.graph.aligned_inputs
 
     if buf_name in V.graph.constants:
         # all constants are assumed to be aligned

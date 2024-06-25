@@ -123,7 +123,7 @@ static Tensor binary_cross_entropy_plumbing(
 
 static Tensor binary_cross_entropy_backward_plumbing(
     const Tensor& grad, const Tensor& input, const Tensor& target,
-    const c10::optional<Tensor>& weight_opt, int64_t reduction) {
+    const std::optional<Tensor>& weight_opt, int64_t reduction) {
   auto maybe_layer = maybeCurrentDynamicLayer();
   vmap_check_escaped(maybe_layer, "binary_cross_entropy_backward_plumbing");
   int64_t cur_level = maybe_layer->layerId();
