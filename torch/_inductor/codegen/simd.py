@@ -159,16 +159,17 @@ class IterationRangesRoot(IterationRanges):
         for node in self.nodes.values():
             node.cache_clear()
 
+    def index_sym(self):
+        return sympy_index_symbol(f"{self.prefix}index")
+
     def lookup(self, divisor, length):
         """
         Lookup a given RangeTreeEntry, creating it if needed
         """
         if V.graph.sizevars.statically_known_equals(divisor * length, self.numel):
-            expr = FloorDiv(sympy_index_symbol(f"{self.prefix}index"), divisor)
+            expr = FloorDiv(self.index_sym(), divisor)
         else:
-            expr = ModularIndexing(
-                sympy_index_symbol(f"{self.prefix}index"), divisor, length
-            )
+            expr = ModularIndexing(self.index_sym(), divisor, length)
 
         if expr not in self.nodes:
             node = IterationRangesEntry(
@@ -386,6 +387,13 @@ class SIMDKernel(Kernel):
                 )
             )
 
+    def finalize_indexing(self, indices: Sequence[sympy.Expr]):
+        """
+        Hook called right before codegen with every index that will be
+        used in the fused kernel.
+        """
+        pass
+
     def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable):
         prior = self.inside_reduction
         self.inside_reduction = False
@@ -433,7 +441,16 @@ class SIMDKernel(Kernel):
         if (tree_node := self.range_tree_nodes.get(x)) is None:
             return index
         new_index = sympy_subs(index, {x: tree_node.expr})
-        return V.graph.sizevars.combine_modular_indexing_pairs(new_index)
+        new_index = V.graph.sizevars.combine_modular_indexing_pairs(new_index)
+        # the index now contains xindex/etc, which is nonstandard, fix it up
+        return sympy_subs(
+            new_index,
+            {
+                tree_node.root.index_sym(): tree_node.root.lookup(
+                    sympy.Integer(1), tree_node.root.numel
+                ).symbol()
+            },
+        )
 
     def combine_contiguous_dims(self, index: sympy.Expr, tree: IterationRangesRoot):
         if expand_res := V.graph.sizevars.expand_floor_div(index):
@@ -704,19 +721,22 @@ class SIMDKernel(Kernel):
         return expr
 
     @contextlib.contextmanager
-    def mask_loads(self, mask):
+    def mask_loads(self, mask, value):
         """Context manager to add an additional mask to tl.load/store"""
         prior = self._load_mask
+        prior_val = self._load_other
         if prior:
             mask = ops.logical_and(mask, prior)
 
         mask = OpsWrapper._unwrap(mask)
         self._load_mask = mask
+        self._load_other = value
         try:
             # TODO(jansel): do we need a reshape here?
             yield mask
         finally:
             self._load_mask = prior
+            self._load_other = prior_val
 
     def get_strides_of_load(self, index: sympy.Expr):
         """
@@ -894,7 +914,7 @@ class SIMDKernel(Kernel):
         pass
 
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry):
-        raise NotImplementedError
+        pass
 
 
 class SIMDScheduling(BaseScheduling):
@@ -903,6 +923,7 @@ class SIMDScheduling(BaseScheduling):
     int64_type = "torch.int64"
 
     def __init__(self, scheduler):
+        super().__init__()
         self.scheduler = scheduler
 
     def group_fn(self, sizes):
@@ -1282,8 +1303,10 @@ class SIMDScheduling(BaseScheduling):
             isinstance(node, BaseSchedulerNode) and node.is_split_scan()
             for node in node_schedule
         )
+        kernel_type: type = self.kernel_type
+        if is_split_scan and issubclass(TritonSplitScanKernel, kernel_type):
+            kernel_type = TritonSplitScanKernel
 
-        kernel_type = TritonSplitScanKernel if is_split_scan else self.kernel_type
         kernel_args = tiled_groups
         kernel_kwargs = dict(
             reduction_hint=reduction_hint_val,
@@ -1384,10 +1407,26 @@ class SIMDScheduling(BaseScheduling):
         with kernel:
             stack = contextlib.ExitStack()
             kernel.set_last_usage(current_reduction_nodes(node_schedule))
+            all_indexing = {}
 
+            # First pass to collect indexing and decide inplace updates
             for node in node_schedule:
-                if node not in (EnableReduction, DisableReduction):
+                if node is DisableReduction:
+                    stack.enter_context(kernel.disable_reduction())
+                elif node is EnableReduction:
+                    stack.close()
+                else:
                     node.decide_inplace_update()
+                    index_vars = kernel.split_and_set_ranges(node.get_ranges())
+                    all_indexing.update(
+                        dict.fromkeys(
+                            node._body.indexing_from_args(index_vars).values()
+                        )
+                    )
+
+            kernel.finalize_indexing(all_indexing.keys())
+
+            # Second pass to do codegen
             for i, node in enumerate(node_schedule):
                 if node is DisableReduction:
                     stack.enter_context(kernel.disable_reduction())
