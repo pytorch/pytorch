@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import re
 from collections import defaultdict
 from typing import Any, Dict
 
@@ -159,7 +160,7 @@ class CommDebugMode(TorchDispatchMode):
                         (self.advanced_module_tracker.module_depth_dict[fqn]) + 1
                     )
                     table += (
-                        f"\033[1;33m{collective_indent}{collective}: {count}\033[0m\n"
+                        f"\033[1;33m{collective_indent}*{collective}: {count}\033[0m\n"
                     )
 
         return table
@@ -197,6 +198,15 @@ class CommDebugMode(TorchDispatchMode):
     def __exit__(self, *args):
         self.advanced_module_tracker.__exit__()
         super().__exit__(*args)
+
+    def log_module_tracing_table_to_file(self):
+        # ansi_escape is used to remove ANSI escape sequences in table used to make terminal output more readable
+
+        ansi_escape = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
+        table = ansi_escape.sub("", self.generate_module_tracing_table())
+
+        with open("output.txt", "w") as log_file:
+            log_file.write(table)
 
     def print_paramater_info(self):
         self.advanced_module_tracker.print_paramater_info()
