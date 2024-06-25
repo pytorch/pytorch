@@ -1325,7 +1325,7 @@ class OnnxModel(abc.ABC):
     @classmethod
     def _generate_onnx_model_directory(
         cls, output_directory: str, compiler_name: str, model_name: str
-    ) -> pathlib.Path:
+    ) -> Path:
         model_path = Path(
             output_directory,
             ".onnx_models",
