@@ -1,4 +1,4 @@
-#include <torch/csrc/distributed/c10d/CUDASymmetricMemory.cuh>
+#include <torch/csrc/distributed/c10d/CUDASymmetricMemory.hpp>
 
 #include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -138,6 +138,10 @@ CUDASymmetricMemory::CUDASymmetricMemory(
 
 CUDASymmetricMemory::~CUDASymmetricMemory() {
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+  // Leak the cuda allocations during static deinitialization
+  if (is_finalizing()) {
+    return;
+  }
   c10::cuda::CUDAGuard guard(local_device_idx_);
   C10_CUDA_CHECK(cudaDeviceSynchronize());
 
@@ -371,7 +375,8 @@ void* CUDASymmetricMemoryAllocator::alloc(
 void CUDASymmetricMemoryAllocator::free(void* ptr) {
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   auto block = find_block(ptr);
-  if (block == nullptr) {
+  // Leak the cuda allocations during static deinitialization
+  if (block == nullptr || is_finalizing()) {
     return;
   }
   // Initializing CUDASymmetricMemory with an allocation transfers its
