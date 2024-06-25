@@ -7,7 +7,6 @@ import types
 import warnings
 from collections import namedtuple
 from contextlib import contextmanager
-from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from typing import (
     Any,
     Callable,
@@ -24,6 +23,7 @@ from typing import (
 from torch._higher_order_ops.utils import autograd_not_implemented
 
 from torch._library.fake_class_registry import FakeScriptObject
+from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 
@@ -316,39 +316,41 @@ def _name_hoo_subgraph_placeholders(gm: torch.fx.GraphModule) -> None:
         subgraph.recompile()
 
 
-def _decompose_exported_program(
+def _decompose_and_get_gm_with_new_signature_constants(
     ep,
     *,
     decomp_table: Dict[torch._ops.OperatorBase, Callable],
     _preserve_ops: Tuple[torch._ops.OpOverload],
     joint_loss_index: Optional[int],
 ):
-    from torch._export.passes.lift_constants_pass import (
-        ConstantAttrMap,
-        lift_constants_pass,
+    from torch._export.non_strict_utils import (
+        _gather_constant_attrs,
+        make_fake_params_buffers,
     )
     from torch._functorch.aot_autograd import aot_export_module
+    from torch._guards import detect_fake_mode
 
     from torch.export._trace import (
+        _export_to_aten_ir,
+        _get_params_buffers,
         _ignore_backend_decomps,
         _verify_nn_module_stack,
         _verify_placeholder_names,
         _verify_stack_trace,
-        post_process_aot_autograd,
     )
-    
-    # TODO (tmanlaibaatar) this path is very duplicatd
+
     if ep.verifier.dialect == "TRAINING":
         mod = ep.module()
         fake_args = []
         for node in mod.graph.nodes:
             if node.op == "placeholder":
                 fake_args.append(node.meta["val"])
-        
+
         fake_args_unwrapped = pytree.tree_unflatten(fake_args, mod._in_spec)
+        fake_mode = detect_fake_mode(fake_args)
 
         # Fix the graph output signature to be tuple if scalar
-        out_spec =  mod._out_spec
+        out_spec = mod._out_spec
 
         orig_arg_names = mod.graph._codegen.pytree_info.orig_args  # type: ignore[attr-defined]
 
@@ -366,24 +368,20 @@ def _decompose_exported_program(
 
         mod.recompile()
 
-        with _ignore_backend_decomps(), override_composite_implicit_decomp(
-            _preserve_ops
-        ):
-            gm, graph_signature = aot_export_module(
-                mod,
-                fake_args_unwrapped,
-                decompositions=decomp_table,
-                trace_joint=False,
-            )
-
-        aten_export_artifact = post_process_aot_autograd(
-            mod, gm, fake_args, graph_signature, pre_dispatch=False
+        fake_params_buffers = make_fake_params_buffers(
+            fake_mode, _get_params_buffers(mod)
+        )
+        constant_attrs = _gather_constant_attrs(mod)
+        aten_export_artifact = _export_to_aten_ir(
+            mod,
+            fake_args_unwrapped[0],
+            fake_args_unwrapped[1],
+            fake_params_buffers,
+            constant_attrs,
         )
 
-        # Decompose for readability.
         gm = aten_export_artifact.gm
         new_graph_signature = aten_export_artifact.sig
-        constants = aten_export_artifact.constants
 
         for node in gm.graph.nodes:
             # nn_module_stack
@@ -395,104 +393,11 @@ def _decompose_exported_program(
                             mod_cls.__module__ + "." + mod_cls.__qualname__,
                         )
 
-        # # Don't copy over nn_module_stack, stack_trace metadata for params/buffers nodes
-        # for metadata in params_buffers_to_node_meta.values():
-        #     metadata.pop("nn_module_stack", None)
-        #     metadata.pop("stack_trace", None)
-
-        # # After aot_export, set the param/buffer metadata back into placeholders
-        # # Technically, users can still construct this data from param names
-        # # without relying on this metadata
-        # for node in gm.graph.nodes:
-        #     if node.op == "placeholder":
-        #         if node.target in new_graph_signature.inputs_to_parameters:
-        #             param_name = new_graph_signature.inputs_to_parameters[
-        #                 node.target
-        #             ]
-        #             if param_name in params_buffers_to_node_meta:
-        #                 for k, v in params_buffers_to_node_meta[param_name].items():
-        #                     node.meta[k] = v
-        #         if node.target in new_graph_signature.inputs_to_buffers:
-        #             buffer_name = new_graph_signature.inputs_to_buffers[node.target]
-        #             if buffer_name in params_buffers_to_node_meta:
-        #                 for k, v in params_buffers_to_node_meta[
-        #                     buffer_name
-        #                 ].items():
-        #                     node.meta[k] = v
-
-
-        from torch._guards import detect_fake_mode
-
-        fake_mode = detect_fake_mode(fake_args)
-
-        from torch._export.non_strict_utils import make_fake_params_buffers
-        from torch.export._trace import _get_params_buffers
-
-        fake_params_buffers = make_fake_params_buffers(fake_mode, _get_params_buffers(mod))
-
-        from torch._export.utils import placeholder_naming_pass
-
-        # Prettify names for placeholder nodes.
-        placeholder_naming_pass(
-            gm,
-            new_graph_signature,
-            mod,
-            fake_args_unwrapped[0],
-            fake_args_unwrapped[1],
-            fake_params_buffers,
-            constants,
-        )
-
         _verify_nn_module_stack(gm)
         _verify_stack_trace(gm)
         _verify_placeholder_names(gm, new_graph_signature)
+        return gm, new_graph_signature
 
-        new_range_constraints = _get_updated_range_constraints(
-            gm,
-            ep.range_constraints,
-            _is_executorch=False,
-        )
-
-        constants = lift_constants_pass(gm, new_graph_signature, ConstantAttrMap())
-        for k, v in constants.items():
-            assert k not in ep.constants
-            ep.constants[k] = v
-
-        from torch._dynamo import config as _dynamo_config
-        from torch._export.passes._node_metadata_hook import (
-            _node_metadata_hook,
-            _set_node_metadata_hook,
-        )
-
-        if not _dynamo_config.do_not_emit_runtime_asserts:
-            stack_trace = (
-                'File "torch/fx/passes/runtime_assert.py", line 24, '
-                "in insert_deferred_runtime_asserts"
-            )
-            shape_env = _get_shape_env(gm)
-            if shape_env is not None:
-                with _set_node_metadata_hook(
-                    gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
-                ):
-                    insert_deferred_runtime_asserts(
-                        gm,
-                        shape_env,
-                        f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
-                        export=True,
-                    )
-
-        exported_program = ExportedProgram(
-            root=gm,
-            graph=gm.graph,
-            graph_signature=new_graph_signature,
-            state_dict=ep.state_dict,
-            range_constraints=new_range_constraints,
-            module_call_graph=copy.deepcopy(ep.module_call_graph),
-            example_inputs=ep.example_inputs,
-            constants=ep.constants,
-        )
-        return exported_program
-    
     old_placeholders = [
         node for node in ep.graph_module.graph.nodes if node.op == "placeholder"
     ]
@@ -502,7 +407,6 @@ def _decompose_exported_program(
     for name in buffers_to_remove:
         delattr(ep.graph_module, name)
     # TODO(zhxhchen17) Return the new graph_signature directly.
-    from torch.export._trace import _ignore_backend_decomps
 
     with _ignore_backend_decomps(), _override_composite_implicit_decomp(_preserve_ops):
         gm, graph_signature = aot_export_module(
@@ -617,6 +521,33 @@ def _decompose_exported_program(
         ):
             for k, v in old_node.meta.items():
                 new_node.meta[k] = v
+    return gm, new_graph_signature
+
+
+def _decompose_exported_program(
+    ep,
+    *,
+    decomp_table: Dict[torch._ops.OperatorBase, Callable],
+    _preserve_ops: Tuple[torch._ops.OpOverload],
+    joint_loss_index: Optional[int],
+):
+    from torch._dynamo import config as _dynamo_config
+    from torch._export.passes._node_metadata_hook import (
+        _node_metadata_hook,
+        _set_node_metadata_hook,
+    )
+
+    from torch._export.passes.lift_constants_pass import (
+        ConstantAttrMap,
+        lift_constants_pass,
+    )
+
+    gm, new_graph_signature = _decompose_and_get_gm_with_new_signature_constants(
+        ep,
+        decomp_table=decomp_table,
+        _preserve_ops=_preserve_ops,
+        joint_loss_index=joint_loss_index,
+    )
 
     # TODO unfortunately preserving graph-level metadata is not
     # working well with aot_export. So we manually copy it.
@@ -633,12 +564,6 @@ def _decompose_exported_program(
     for k, v in constants.items():
         assert k not in ep.constants
         ep.constants[k] = v
-
-    from torch._dynamo import config as _dynamo_config
-    from torch._export.passes._node_metadata_hook import (
-        _node_metadata_hook,
-        _set_node_metadata_hook,
-    )
 
     if not _dynamo_config.do_not_emit_runtime_asserts:
         stack_trace = (

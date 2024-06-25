@@ -1182,8 +1182,8 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
         class MyLinear(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.weight = torch.randn(20, 98)
-                self.bias = torch.randn(20)
+                self.register_buffer("weight", torch.randn(20, 98))
+                self.register_buffer("bias", torch.randn(20))
 
             def forward(self, x):
                 return torch.nn.functional.linear(x, self.weight, self.bias)
@@ -1205,17 +1205,21 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
             Foo(), (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50))
         )
         ep_has_linear_convd = ep.run_decompositions(
-            decomp_table={}, _preserve_ops=testing.COMPOSITE_OPS_THAT_CAN_BE_PRESERVED
+            decomp_table={},
+            _preserve_ops=testing._COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY,
         )
         self.assertExpectedInline(
             str(ep_has_linear_convd.graph_module.code).strip(),
             """\
-def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_weight, c_linear_bias, x, y):
-    conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
-    conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
-    linear = torch.ops.aten.linear.default(conv2d, c_linear_weight, c_linear_bias);  conv2d = c_linear_weight = c_linear_bias = None
-    cos = torch.ops.aten.cos.default(linear);  linear = None
-    sum_1 = torch.ops.aten.sum.default(conv1d);  conv1d = None
+def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_linear_weight, b_linear_bias, x, y):
+    convolution = torch.ops.aten.convolution.default(x, p_conv_weight, p_conv_bias, [1, 1], [0, 0], [1, 1], False, [0, 0], 1);  x = p_conv_weight = p_conv_bias = None
+    convolution_1 = torch.ops.aten.convolution.default(y, p_conv1d_weight, p_conv1d_bias, [1], [0], [1], False, [0], 1);  y = p_conv1d_weight = p_conv1d_bias = None
+    view = torch.ops.aten.view.default(convolution, [31680, 98]);  convolution = None
+    t = torch.ops.aten.t.default(b_linear_weight);  b_linear_weight = None
+    addmm = torch.ops.aten.addmm.default(b_linear_bias, view, t);  b_linear_bias = view = t = None
+    view_1 = torch.ops.aten.view.default(addmm, [20, 33, 48, 20]);  addmm = None
+    cos = torch.ops.aten.cos.default(view_1);  view_1 = None
+    sum_1 = torch.ops.aten.sum.default(convolution_1);  convolution_1 = None
     add = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
     return (add,)""",
         )
@@ -1230,15 +1234,15 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
         self.assertExpectedInline(
             str(ep_has_convd.graph_module.code).strip(),
             """\
-def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_weight, c_linear_bias, x, y):
-    conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
-    conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
-    view = torch.ops.aten.view.default(conv2d, [31680, 98]);  conv2d = None
-    permute = torch.ops.aten.permute.default(c_linear_weight, [1, 0]);  c_linear_weight = None
-    addmm = torch.ops.aten.addmm.default(c_linear_bias, view, permute);  c_linear_bias = view = permute = None
+def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_linear_weight, b_linear_bias, x, y):
+    convolution = torch.ops.aten.convolution.default(x, p_conv_weight, p_conv_bias, [1, 1], [0, 0], [1, 1], False, [0, 0], 1);  x = p_conv_weight = p_conv_bias = None
+    convolution_1 = torch.ops.aten.convolution.default(y, p_conv1d_weight, p_conv1d_bias, [1], [0], [1], False, [0], 1);  y = p_conv1d_weight = p_conv1d_bias = None
+    view = torch.ops.aten.view.default(convolution, [31680, 98]);  convolution = None
+    t = torch.ops.aten.t.default(b_linear_weight);  b_linear_weight = None
+    addmm = torch.ops.aten.addmm.default(b_linear_bias, view, t);  b_linear_bias = view = t = None
     view_1 = torch.ops.aten.view.default(addmm, [20, 33, 48, 20]);  addmm = None
     cos = torch.ops.aten.cos.default(view_1);  view_1 = None
-    sum_1 = torch.ops.aten.sum.dim_IntList(conv1d, []);  conv1d = None
+    sum_1 = torch.ops.aten.sum.default(convolution_1);  convolution_1 = None
     add = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
     return (add,)""",
         )
@@ -1249,15 +1253,15 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
         self.assertExpectedInline(
             str(ep_has_convd.graph_module.code).strip(),
             """\
-def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_weight, c_linear_bias, x, y):
-    conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
-    convolution = torch.ops.aten.convolution.default(y, p_conv1d_weight, p_conv1d_bias, [1], [0], [1], False, [0], 1);  y = p_conv1d_weight = p_conv1d_bias = None
-    view = torch.ops.aten.view.default(conv2d, [31680, 98]);  conv2d = None
-    permute = torch.ops.aten.permute.default(c_linear_weight, [1, 0]);  c_linear_weight = None
-    addmm = torch.ops.aten.addmm.default(c_linear_bias, view, permute);  c_linear_bias = view = permute = None
+def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_linear_weight, b_linear_bias, x, y):
+    convolution = torch.ops.aten.convolution.default(x, p_conv_weight, p_conv_bias, [1, 1], [0, 0], [1, 1], False, [0, 0], 1);  x = p_conv_weight = p_conv_bias = None
+    convolution_1 = torch.ops.aten.convolution.default(y, p_conv1d_weight, p_conv1d_bias, [1], [0], [1], False, [0], 1);  y = p_conv1d_weight = p_conv1d_bias = None
+    view = torch.ops.aten.view.default(convolution, [31680, 98]);  convolution = None
+    permute = torch.ops.aten.permute.default(b_linear_weight, [1, 0]);  b_linear_weight = None
+    addmm = torch.ops.aten.addmm.default(b_linear_bias, view, permute);  b_linear_bias = view = permute = None
     view_1 = torch.ops.aten.view.default(addmm, [20, 33, 48, 20]);  addmm = None
     cos = torch.ops.aten.cos.default(view_1);  view_1 = None
-    sum_1 = torch.ops.aten.sum.dim_IntList(convolution, []);  convolution = None
+    sum_1 = torch.ops.aten.sum.dim_IntList(convolution_1, []);  convolution_1 = None
     add = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
     return (add,)""",
         )
@@ -1471,14 +1475,17 @@ def forward(self, x):
             (torch.ones(2, 2),),
         )
         ep_for_inference = ep_for_training.run_decompositions()
-        self.assertExpectedInline(str(ep_for_inference.graph_module.code).strip(), """\
+        self.assertExpectedInline(
+            str(ep_for_inference.graph_module.code).strip(),
+            """\
 def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
     add = torch.ops.aten.add.Tensor(b_buffer, 5);  b_buffer = None
-    permute = torch.ops.aten.permute.default(p_linear_weight, [1, 0]);  p_linear_weight = None
-    addmm = torch.ops.aten.addmm.default(p_linear_bias, x, permute);  p_linear_bias = x = permute = None
-    sum_1 = torch.ops.aten.sum.dim_IntList(add, [])
+    t = torch.ops.aten.t.default(p_linear_weight);  p_linear_weight = None
+    addmm = torch.ops.aten.addmm.default(p_linear_bias, x, t);  p_linear_bias = x = t = None
+    sum_1 = torch.ops.aten.sum.default(add)
     add_1 = torch.ops.aten.add.Tensor(addmm, sum_1);  addmm = sum_1 = None
-    return (add, add_1)""")
+    return (add, add_1)""",
+        )
 
     def test_derived_dim_out_of_order_simplified_repeat_non_derived(self):
         class Foo(torch.nn.Module):
