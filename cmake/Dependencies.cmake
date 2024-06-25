@@ -1160,6 +1160,7 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
     add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
 
     list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
+    list(APPEND Caffe2_DEPENDENCY_LIBS nlohmann)
     if(USE_CUDA)
       list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS tensorpipe_cuda)
     elseif(USE_ROCM)
@@ -1681,3 +1682,7 @@ include(${CMAKE_CURRENT_LIST_DIR}/FlatBuffers.cmake)
 # Include cpp-httplib
 add_library(httplib INTERFACE IMPORTED)
 target_include_directories(httplib SYSTEM INTERFACE ${PROJECT_SOURCE_DIR}/third_party/cpp-httplib)
+
+# Include nlohmann-json
+add_library(nlohmann INTERFACE IMPORTED)
+include_directories(nlohmann SYSTEM INTERFACE ${PROJECT_SOURCE_DIR}/third_party/nlohmann/include)
