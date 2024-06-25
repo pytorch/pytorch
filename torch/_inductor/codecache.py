@@ -2846,7 +2846,7 @@ def _do_validate_cpp_commands(
         output_path = os.path.basename(output_path)
 
     # Fix test_new_cpp_build_logical failed on MacOS
-    if sys.platform != "linux":
+    if not config.is_fbcode():
         aot_mode = False
 
     old_cmd = cpp_compile_command(

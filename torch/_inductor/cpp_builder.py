@@ -634,6 +634,8 @@ def _get_openmp_args(cpp_compiler):
 
         # if openmp is still not available, we let the compiler to have a try,
         # and raise error together with instructions at compilation error later
+        if not config.is_fbcode():
+            cflags.append("fopenmp")
     elif _IS_WINDOWS:
         # /openmp, /openmp:llvm
         # llvm on Windows, new openmp: https://devblogs.microsoft.com/cppblog/msvc-openmp-update/
