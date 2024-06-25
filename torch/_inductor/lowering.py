@@ -3272,6 +3272,10 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
         len(aten.scatter_reduce_.overloads()) == 1
         and "two" in aten.scatter_reduce_.overloads()
     ), "aten.scatter_reduce_.two is not the unique overload of aten.scatter_reduce_"
+
+    if isinstance(src, Number):
+        src = full_like(self, src)
+
     fallback_result = scatter_fallback(
         aten.scatter_reduce_.two,
         self,
@@ -3770,9 +3774,16 @@ def _low_memory_max_pool2d_with_offsets(
     h_out, ceil_mode1 = pooling_size(h, 0, kernel_size, stride, padding, ceil_mode)
     w_out, ceil_mode2 = pooling_size(w, 1, kernel_size, stride, padding, ceil_mode)
 
+    dtype = x.dtype
+    min_value = (
+        False
+        if dtype is torch.bool
+        else (float("-inf") if dtype.is_floating_point else torch.iinfo(dtype).min)
+    )
+
     new_size = list(batch) + [h_out, w_out]
     if padding[0] or padding[1] or ceil_mode1 or ceil_mode2:
-        x_loader = constant_boundary_condition(x, float("-inf"), dim=2)
+        x_loader = constant_boundary_condition(x, min_value, dim=2)
     else:
         x_loader = x.make_loader()
 
