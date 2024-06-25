@@ -67,27 +67,61 @@ class _BlockSparseMask:
         self.BLOCKSPARSE_Q = BLOCKSPARSE_Q
 
 
+def broadcast_to_dim(x, dim):
+    while x.dim() < dim:
+        x = x.unsqueeze(0)
+    return x
+
+
+def _convert_mask_to_block_mask(
+    mask,
+    BLOCKSPARSE_KV=_DEFAULT_BLOCKSPARSE_SIZE,
+    BLOCKSPARSE_Q=_DEFAULT_BLOCKSPARSE_SIZE,
+):
+    assert mask.dtype == torch.bool
+    mask = broadcast_to_dim(mask, 4)
+    B, H, Q, KV = mask.shape
+    assert Q % BLOCKSPARSE_Q == 0
+    assert KV % BLOCKSPARSE_KV == 0
+    mask = mask.view(
+        B, H, Q // BLOCKSPARSE_Q, BLOCKSPARSE_Q, KV // BLOCKSPARSE_KV, BLOCKSPARSE_KV
+    )  # [B, H, Q//BLOCKSPARSE_Q, BLOCKSPARSE_Q, KV//BLOCKSPARSE_KV, BLOCKSPARSE_KV]
+    mask = mask.permute(
+        0, 1, 2, 4, 3, 5
+    )  # [B, H, Q//BLOCKSPARSE_Q, KV//BLOCKSPARSE_KV, BLOCKSPARSE_Q, BLOCKSPARSE_KV]
+    mask = mask.sum(dim=[-2, -1]) > 0  # [B, H, Q//BLOCKSPARSE_Q, KV//BLOCKSPARSE_KV]
+    return mask
+
+
+def _convert_block_mask_to_mask(
+    block_mask,
+    BLOCKSPARSE_KV=_DEFAULT_BLOCKSPARSE_SIZE,
+    BLOCKSPARSE_Q=_DEFAULT_BLOCKSPARSE_SIZE,
+):
+    assert block_mask.dim() == 4
+    B, H, Q, KV = block_mask.shape
+    block_mask = block_mask.expand(BLOCKSPARSE_Q, BLOCKSPARSE_KV, *block_mask.shape)
+    block_mask = block_mask.permute(2, 3, 4, 0, 5, 1).reshape(
+        B, H, Q * BLOCKSPARSE_Q, KV * BLOCKSPARSE_KV
+    )
+    return block_mask
+
+
 def _create_block_sparse_mask(
     mask: torch.Tensor,
     BLOCKSPARSE_KV: int = _DEFAULT_BLOCKSPARSE_SIZE,
     BLOCKSPARSE_Q: int = _DEFAULT_BLOCKSPARSE_SIZE,
 ):
-    assert mask.dtype == torch.bool
-    q_len, kv_len = mask.shape
-    assert q_len % BLOCKSPARSE_Q == 0
-    assert kv_len % BLOCKSPARSE_KV == 0
-    mask = mask.view(
-        q_len // BLOCKSPARSE_Q, BLOCKSPARSE_Q, kv_len // BLOCKSPARSE_KV, BLOCKSPARSE_KV
+    block_mask = _convert_mask_to_block_mask(
+        mask, BLOCKSPARSE_KV=BLOCKSPARSE_KV, BLOCKSPARSE_Q=BLOCKSPARSE_Q
     )
-
-    mask = mask.permute(0, 2, 1, 3)
-    block_mask = (mask.sum(dim=[-2, -1]) > 0).to("cpu")
-    kv_num_blocks = block_mask.sum(dim=1)
-    kv_indices = torch.argsort(block_mask, dim=1, descending=True, stable=True)
-    # kv_indices = torch.concat([kv_indices, kv_indices[:, -1][:, None]], dim=1)
-    q_num_blocks = block_mask.sum(dim=0)
-    q_indices = torch.argsort(block_mask, dim=0, descending=True, stable=True).t()
-    # q_indices = torch.concat([q_indices, q_indices[:, -1][:, None]], dim=1)
+    block_mask = block_mask.to(dtype=torch.int8)
+    kv_num_blocks = block_mask.sum(dim=3)
+    kv_indices = torch.argsort(block_mask, dim=3, descending=True, stable=True)
+    q_num_blocks = block_mask.sum(dim=2)
+    q_indices = torch.argsort(block_mask, dim=2, descending=True, stable=True).permute(
+        0, 1, 3, 2
+    )
     return _BlockSparseMask(
         kv_num_blocks=kv_num_blocks.to(torch.int32).to(mask.device).contiguous(),
         kv_indices=kv_indices.to(torch.int32).to(mask.device).contiguous(),
@@ -103,10 +137,10 @@ def _create_empty_block_sparse_mask(query, key, value):
     kv_len = key.size()[-2]
     q_len = query.size()[-2]
     return _BlockSparseMask(
-        kv_num_blocks=torch.ones([1], dtype=torch.int32, device=device),
-        kv_indices=torch.zeros([1, 1], dtype=torch.int32, device=device),
-        q_num_blocks=torch.ones([1], dtype=torch.int32, device=device),
-        q_indices=torch.zeros([1, 1], dtype=torch.int32, device=device),
+        kv_num_blocks=torch.ones([1, 1, 1], dtype=torch.int32, device=device),
+        kv_indices=torch.zeros([1, 1, 1, 1], dtype=torch.int32, device=device),
+        q_num_blocks=torch.ones([1, 1, 1], dtype=torch.int32, device=device),
+        q_indices=torch.zeros([1, 1, 1, 1], dtype=torch.int32, device=device),
         BLOCKSPARSE_KV=kv_len,
         BLOCKSPARSE_Q=q_len,
     )
