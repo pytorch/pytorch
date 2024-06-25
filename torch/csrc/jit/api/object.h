@@ -2,8 +2,8 @@
 
 #include <ATen/core/functional.h>
 #include <ATen/core/ivalue.h>
+#include <c10/util/Optional.h>
 #include <torch/csrc/jit/api/method.h>
-#include <optional>
 
 #include <utility>
 
@@ -129,7 +129,7 @@ struct TORCH_API Object {
   const Property get_property(const std::string& name) const {
     for (const auto& prop : type()->properties()) {
       if (prop.name == name) {
-        std::optional<Method> setter = std::nullopt;
+        std::optional<Method> setter = c10::nullopt;
         if (prop.setter) {
           setter = Method(_ivalue(), prop.setter);
         }
@@ -142,7 +142,7 @@ struct TORCH_API Object {
 
   const std::vector<Property> get_properties() const {
     return c10::fmap(type()->properties(), [&](ClassType::Property prop) {
-      std::optional<Method> setter = std::nullopt;
+      std::optional<Method> setter = c10::nullopt;
       if (prop.setter) {
         setter = Method(_ivalue(), prop.setter);
       }

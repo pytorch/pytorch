@@ -351,6 +351,41 @@ def _get_param_buffer_mapping(
     return param_buffer_table
 
 
+def _preserve_requires_grad_pass(
+    gm: torch.fx.GraphModule,
+    sig: ExportGraphSignature,
+    fake_params_buffers: Dict[str, torch.Tensor],
+    constants: Dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]],
+    flat_fake_args: List[Any],
+):
+    placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
+    assert len(sig.input_specs) == len(placeholders)
+    i = 0
+    for node, spec in zip(placeholders, sig.input_specs):
+        if spec.kind in (
+            InputKind.PARAMETER,
+            InputKind.BUFFER,
+        ):
+            assert spec.target is not None
+            node.meta["val"].requires_grad = fake_params_buffers[
+                spec.target
+            ].requires_grad
+        elif spec.kind == InputKind.USER_INPUT:
+            fake_arg = flat_fake_args[i]
+            if isinstance(fake_arg, torch.Tensor):
+                node.meta["val"].requires_grad = fake_arg.requires_grad
+            i += 1
+        elif spec.kind == InputKind.CONSTANT_TENSOR:
+            assert spec.target is not None
+            constant = constants[spec.target]
+            if isinstance(constant, torch.Tensor):
+                node.meta["val"].requires_grad = constant.requires_grad
+        elif spec.kind in (InputKind.CUSTOM_OBJ, InputKind.TOKEN):
+            continue
+        else:
+            raise AssertionError(spec.kind)
+
+
 def _remap_constants(
     orig_constant_attrs: ConstantAttrMap,
     graph_signature: ExportGraphSignature,
@@ -597,6 +632,10 @@ def post_process_aot_autograd(mod, gm, flat_args, graph_signature, pre_dispatch)
 
     # NOTE: aot_export adds symint metadata for placeholders with int values;
     # since these become specialized, we replace such metadata with the original values
+<<<<<<< HEAD
+    flat_fake_args = pytree.tree_leaves((fake_args, fake_kwargs))
+=======
+>>>>>>> 4d919a05f02 (Make run_decomp work)
     index = 0
     total_non_user_inputs = (
         len(graph_signature.parameters)
@@ -606,7 +645,7 @@ def post_process_aot_autograd(mod, gm, flat_args, graph_signature, pre_dispatch)
     for node in gm.graph.nodes:
         if node.op == "placeholder":
             if index >= total_non_user_inputs:
-                user_arg = flat_args[index - total_non_user_inputs]
+                user_arg = flat_fake_args[index - total_non_user_inputs]
                 if not isinstance(user_arg, torch.Tensor):
                     node.meta["val"] = user_arg
             index += 1
@@ -641,7 +680,7 @@ def post_process_aot_autograd(mod, gm, flat_args, graph_signature, pre_dispatch)
 
     from torch._guards import detect_fake_mode
 
-    fake_mode = detect_fake_mode(flat_args)
+    fake_mode = detect_fake_mode(flat_fake_args)
 
     from torch._dynamo import config as _dynamo_config
 
@@ -679,6 +718,24 @@ def post_process_aot_autograd(mod, gm, flat_args, graph_signature, pre_dispatch)
     constants = rewrite_script_object_meta(gm)
     constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
 
+<<<<<<< HEAD
+    # Prettify names for placeholder nodes.
+    placeholder_naming_pass(
+        gm,
+        export_graph_signature,
+        mod,
+        fake_args,
+        fake_kwargs,
+        fake_params_buffers,
+        constants,
+    )
+
+    _preserve_requires_grad_pass(
+        gm, export_graph_signature, fake_params_buffers, constants, flat_fake_args
+    )
+
+=======
+>>>>>>> 4d919a05f02 (Make run_decomp work)
     return ATenExportArtifact(
         gm,
         export_graph_signature,

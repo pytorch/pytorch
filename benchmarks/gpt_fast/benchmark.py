@@ -21,6 +21,8 @@ class Experiment:
     metric: str
     target: float
     actual: float
+    dtype: str
+    device: str
 
 
 class SimpleMLP(nn.Module):
@@ -41,7 +43,7 @@ class SimpleMLP(nn.Module):
         return x
 
 
-def run_mlp_layer_norm_gelu():
+def run_mlp_layer_norm_gelu(device: str = "cuda"):
     dtype_flops_utilization_map = {
         torch.bfloat16: "0.71",
     }
@@ -53,9 +55,9 @@ def run_mlp_layer_norm_gelu():
         for D in input_shapes:
             mod = SimpleMLP(
                 input_dim=D, hidden_dim=intermediate_size, output_dim=D, dtype=dtype
-            ).to("cuda")
+            ).to(device)
 
-            x = torch.randn(D, device="cuda", dtype=torch.bfloat16)
+            x = torch.randn(D, device=device, dtype=torch.bfloat16)
 
             with FlopCounterMode(display=False) as mode:
                 mod(x)
@@ -74,16 +76,18 @@ def run_mlp_layer_norm_gelu():
         dtype_str = str(dtype).replace("torch.", "")
         results.append(
             Experiment(
-                f"mlp_layer_norm_gelu_{dtype_str}",
+                "mlp_layer_norm_gelu",
                 "flops_utilization",
                 expected_flops_utilization,
                 f"{flops_utilization:.02f}",
+                dtype_str,
+                device,
             )
         )
     return results
 
 
-def run_layer_norm():
+def run_layer_norm(device: str = "cuda"):
     dtype_memory_bandwidth_map = {
         torch.bfloat16: "1017",
     }
@@ -93,9 +97,9 @@ def run_layer_norm():
     for dtype, expected_memory_bandwidth in dtype_memory_bandwidth_map.items():
         memory_bandwidth = 0
         for D in input_shapes:
-            mod = nn.LayerNorm(D).to("cuda")
+            mod = nn.LayerNorm(D).to(device)
 
-            x = torch.randn(BS, D, device="cuda", dtype=dtype)
+            x = torch.randn(BS, D, device=device, dtype=dtype)
 
             compiled_mod = torch.compile(mod, dynamic=False)
 
@@ -109,17 +113,19 @@ def run_layer_norm():
         dtype_str = str(dtype).replace("torch.", "")
         results.append(
             Experiment(
-                f"layer_norm_{dtype_str}",
+                "layer_norm",
                 "memory_bandwidth(GB/s)",
                 expected_memory_bandwidth,
                 f"{memory_bandwidth:.02f}",
+                dtype_str,
+                device,
             )
         )
     return results
 
 
 @torch._inductor.config.patch(coordinate_descent_tuning=True)
-def run_gather_gemv():
+def run_gather_gemv(device: str = "cuda"):
     E = 8
     dtype_memory_bandwidth_map = {
         torch.int8: "1113",
@@ -134,9 +140,9 @@ def run_gather_gemv():
             def gather_gemv(W, score_idxs, x):
                 return W[score_idxs].to(x.dtype) @ x
 
-            W = torch.randn(E, D, D, device="cuda").to(dtype=dtype)
-            x = torch.randn(D, device="cuda", dtype=torch.bfloat16)
-            score_idxs = torch.tensor([3, 5], device="cuda")
+            W = torch.randn(E, D, D, device=device).to(dtype=dtype)
+            x = torch.randn(D, device=device, dtype=torch.bfloat16)
+            score_idxs = torch.tensor([3, 5], device=device)
 
             compiled_fn = torch.compile(gather_gemv, dynamic=False)
 
@@ -150,17 +156,19 @@ def run_gather_gemv():
         dtype_str = str(dtype).replace("torch.", "")
         results.append(
             Experiment(
-                f"gather_gemv_{dtype_str}",
+                "gather_gemv",
                 "memory_bandwidth(GB/s)",
                 expected_memory_bandwidth,
                 f"{memory_bandwidth:.02f}",
+                dtype_str,
+                device,
             )
         )
     return results
 
 
 @torch._inductor.config.patch(coordinate_descent_tuning=True)
-def run_gemv():
+def run_gemv(device: str = "cuda"):
     dtype_memory_bandwidth_map = {
         torch.int8: "990",
         torch.bfloat16: "1137",
@@ -189,10 +197,12 @@ def run_gemv():
         dtype_str = str(dtype).replace("torch.", "")
         results.append(
             Experiment(
-                f"gemv_{dtype_str}",
+                "gemv",
                 "memory_bandwidth(GB/s)",
                 expected_memory_bandwidth,
                 f"{memory_bandwidth:.02f}",
+                dtype_str,
+                device,
             )
         )
     return results

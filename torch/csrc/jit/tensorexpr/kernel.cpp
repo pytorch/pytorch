@@ -129,12 +129,12 @@ bool& getOptConditionals() {
 
 std::optional<at::Device> pickDeviceType(
     const at::ArrayRef<torch::jit::Value*>& inputs) {
-  std::optional<at::Device> device = std::nullopt;
+  std::optional<at::Device> device = c10::nullopt;
   for (auto const& input : inputs) {
     auto tt = input->type()->cast<TensorType>();
     if (tt && tt->device()) {
       if (device && *device != *tt->device()) {
-        return std::nullopt;
+        return c10::nullopt;
       }
       device = *tt->device();
     }
@@ -144,7 +144,7 @@ std::optional<at::Device> pickDeviceType(
 
 static std::optional<at::Device> pickDeviceType(
     const std::shared_ptr<Graph>& graph) {
-  std::optional<at::Device> device = std::nullopt;
+  std::optional<at::Device> device = c10::nullopt;
   for (auto const& node : graph->nodes()) {
     for (auto const& input : node->inputs()) {
       if (auto tt = input->type()->cast<TensorType>()) {
@@ -184,10 +184,10 @@ static std::optional<TensorInfo> getTensorInfoJit(torch::jit::Value* v) {
   c10::ScalarType dtype = c10::ScalarType::Float;
 
   if (!it) {
-    return std::nullopt;
+    return c10::nullopt;
   }
   if (!it->isComplete()) {
-    return std::nullopt;
+    return c10::nullopt;
   }
   if (it->scalarType()) {
     // TODO: ideally we should be strict here and return nullopt if the dtype is
@@ -197,7 +197,7 @@ static std::optional<TensorInfo> getTensorInfoJit(torch::jit::Value* v) {
   }
   auto concrete_sizes = it->sizes().concrete_sizes();
   if (!concrete_sizes) {
-    return std::nullopt;
+    return c10::nullopt;
   }
   return TensorInfo{*concrete_sizes, dtype};
 }
@@ -712,7 +712,7 @@ static std::optional<int64_t> tripCount(ForPtr loop) {
   if (auto val = to<LongImm>(tc.node())) {
     return val->value();
   }
-  return std::nullopt;
+  return c10::nullopt;
 }
 
 // Prune innermost loops until iterations satisfies a minimum grain size.
@@ -1314,7 +1314,7 @@ Tensor TensorExprKernel::convertSymbolicOutputToCorrectStrides(
   BufPtr buf = bufs_.at(v);
   TORCH_INTERNAL_ASSERT(buf != nullptr);
   TORCH_INTERNAL_ASSERT(tt != nullptr);
-  TORCH_INTERNAL_ASSERT(tt->symbolic_sizes().rank() != std::nullopt);
+  TORCH_INTERNAL_ASSERT(tt->symbolic_sizes().rank() != c10::nullopt);
 
   auto stride_desc = getSymbolicStrideDesc(v);
   TORCH_INTERNAL_ASSERT(stride_desc.size() == 1);
