@@ -19,11 +19,13 @@ from pathlib import Path
 from typing import List, Sequence, Tuple, Union
 
 import torch
+from torch._dynamo.utils import dynamo_timed
 from torch._inductor import config, exc
 from torch._inductor.codecache import (
     _get_python_include_dirs,
     _LINKER_SCRIPT,
     _transform_cuda_paths,
+    cpp_prefix_path,
     get_lock_dir,
     invalid_vec_isa,
     LOCK_TIMEOUT,
@@ -196,28 +198,6 @@ def _remove_dir(path_dir):
         os.rmdir(path_dir)
 
 
-def run_command_line(cmd_line, cwd=None):
-    cmd = shlex.split(cmd_line)
-    try:
-        status = subprocess.check_output(args=cmd, cwd=cwd, stderr=subprocess.STDOUT)
-    except subprocess.CalledProcessError as e:
-        output = e.output.decode("utf-8")
-        openmp_problem = "'omp.h' file not found" in output or "libomp" in output
-        if openmp_problem and sys.platform == "darwin":
-            instruction = (
-                "\n\nOpenMP support not found. Please try one of the following solutions:\n"
-                "(1) Set the `CXX` environment variable to a compiler other than Apple clang++/g++ "
-                "that has builtin OpenMP support;\n"
-                "(2) install OpenMP via conda: `conda install llvm-openmp`;\n"
-                "(3) install libomp via brew: `brew install libomp`;\n"
-                "(4) manually setup OpenMP and set the `OMP_PREFIX` environment variable to point to a path"
-                " with `include/omp.h` under it."
-            )
-            output += instruction
-        raise exc.CppCompileError(cmd, output) from e
-    return status
-
-
 class BuildOptionsBase:
     """
     This is the Base class for store cxx build options, as a template.
@@ -320,12 +300,6 @@ def _get_optimization_cflags() -> List[str]:
         if not config.cpp.enable_floating_point_contract_flag:
             cflags.append("ffp-contract=off")
 
-        if config.is_fbcode():
-            # FIXME: passing `-fopenmp` adds libgomp.so to the generated shared library's dependencies.
-            # This causes `ldopen` to fail in fbcode, because libgomp does not exist in the default paths.
-            # We will fix it later by exposing the lib path.
-            return cflags
-
         if sys.platform == "darwin":
             # Per https://mac.r-project.org/openmp/ right way to pass `openmp` flags to MacOS is via `-Xclang`
             # Also, `-march=native` is unrecognized option on M1
@@ -335,10 +309,6 @@ def _get_optimization_cflags() -> List[str]:
                 cflags.append("mcpu=native")
             else:
                 cflags.append("march=native")
-
-        # Internal cannot find libgomp.so
-        if not config.is_fbcode():
-            cflags.append("fopenmp")
 
         return cflags
 
@@ -410,7 +380,7 @@ class CppOptions(BuildOptionsBase):
 
     def __init__(
         self,
-        compile_only: bool,
+        compile_only: bool = False,
         warning_all: bool = True,
         extra_flags: Sequence[str] = (),
         use_absolute_path: bool = False,
@@ -523,23 +493,6 @@ def _setup_standard_sys_libs(
     return cflags, include_dirs, passthough_args
 
 
-# dummy code
-
-
-@functools.lru_cache
-def _cpp_prefix_path() -> str:
-    from torch._inductor.codecache import write  # TODO
-
-    path = Path(Path(__file__).parent).parent / "codegen/cpp_prefix.h"
-    with path.open() as f:
-        content = f.read()
-        _, filename = write(
-            content,
-            "h",
-        )
-    return filename
-
-
 def _get_build_args_of_chosen_isa(vec_isa: VecISA):
     macros = []
     build_flags = []
@@ -575,9 +528,24 @@ def _get_torch_related_args(include_pytorch: bool, aot_mode: bool):
     libraries_dirs = [TORCH_LIB_PATH]
     libraries = []
     if sys.platform != "darwin" and not config.is_fbcode():
-        libraries = ["torch", "torch_cpu"]
-        if not aot_mode:
-            libraries.append("torch_python")
+        if aot_mode:
+            libraries.append("torch")
+            libraries.append("torch_cpu")
+            # libraries.append("torch_python")
+
+        if include_pytorch:
+            libraries.append("torch")
+            libraries.append("torch_cpu")
+            if not aot_mode:
+                libraries.append("torch_python")
+
+    cpp_prefix_include_dir = [f"{os.path.dirname(cpp_prefix_path())}"]
+    if config.is_fbcode():
+        if aot_mode:
+            include_dirs += cpp_prefix_include_dir
+    else:
+        if not include_pytorch and aot_mode:
+            include_dirs += cpp_prefix_include_dir
 
     if _IS_WINDOWS:
         libraries.append("sleef")
@@ -590,7 +558,7 @@ def _get_torch_related_args(include_pytorch: bool, aot_mode: bool):
     return include_dirs, libraries_dirs, libraries
 
 
-def _get_python_related_args():
+def _get_python_related_args(include_pytorch: bool, aot_mode: bool):
     python_include_dirs = _get_python_include_dirs()
     python_include_path = sysconfig.get_path(
         "include", scheme="nt" if _IS_WINDOWS else "posix_prefix"
@@ -598,11 +566,13 @@ def _get_python_related_args():
     if python_include_path is not None:
         python_include_dirs.append(python_include_path)
 
+    python_lib_path = []
     if _IS_WINDOWS:
         python_path = os.path.dirname(sys.executable)
-        python_lib_path = [os.path.join(python_path, "libs")]
+        python_lib_path.append(os.path.join(python_path, "libs"))
     else:
-        python_lib_path = [sysconfig.get_config_var("LIBDIR")]
+        if include_pytorch:
+            python_lib_path.append(sysconfig.get_config_var("LIBDIR"))
 
     if config.is_fbcode():
         python_include_dirs.append(build_paths.python())
@@ -664,6 +634,8 @@ def _get_openmp_args(cpp_compiler):
 
         # if openmp is still not available, we let the compiler to have a try,
         # and raise error together with instructions at compilation error later
+        if not config.is_fbcode():
+            cflags.append("fopenmp")
     elif _IS_WINDOWS:
         # /openmp, /openmp:llvm
         # llvm on Windows, new openmp: https://devblogs.microsoft.com/cppblog/msvc-openmp-update/
@@ -680,7 +652,7 @@ def _get_openmp_args(cpp_compiler):
             fb_openmp_extra_flags = f"-Wp,-fopenmp {openmp_lib}"
             passthough_args.append(fb_openmp_extra_flags)
 
-            libs.append("omp")
+            # libs.append("omp")
         else:
             if _is_clang(cpp_compiler):
                 # TODO: fix issue, can't find omp.h
@@ -734,7 +706,9 @@ def get_cpp_torch_options(
         torch_libraries,
     ) = _get_torch_related_args(include_pytorch=include_pytorch, aot_mode=aot_mode)
 
-    python_include_dirs, python_libraries_dirs = _get_python_related_args()
+    python_include_dirs, python_libraries_dirs = _get_python_related_args(
+        include_pytorch=include_pytorch, aot_mode=aot_mode
+    )
 
     (
         omp_cflags,
@@ -859,13 +833,17 @@ def get_cpp_torch_cuda_options(cuda: bool, aot_mode: bool = False):
     libraries: List[str] = []
     passthough_args: List[str] = []
 
+    """
     if (
         config.is_fbcode()
         and "CUDA_HOME" not in os.environ
         and "CUDA_PATH" not in os.environ
     ):
         os.environ["CUDA_HOME"] = build_paths.cuda()
+    """
+    from torch._inductor.codecache import _set_gpu_runtime_env
 
+    _set_gpu_runtime_env()
     from torch.utils import cpp_extension
 
     include_dirs = cpp_extension.include_paths(cuda)
@@ -889,12 +867,8 @@ def get_cpp_torch_cuda_options(cuda: bool, aot_mode: bool = False):
                 else:
                     libraries += ["c10_cuda", "cuda", "torch_cuda"]
 
-    if aot_mode:
-        cpp_prefix_include_dir = [f"{os.path.dirname(_cpp_prefix_path())}"]
-        include_dirs += cpp_prefix_include_dir
-
-        if cuda and torch.version.hip is None:
-            _transform_cuda_paths(libraries_dirs)
+    if cuda and torch.version.hip is None:
+        _transform_cuda_paths(libraries_dirs)
 
     if config.is_fbcode():
         if torch.version.hip is not None:
@@ -980,15 +954,25 @@ class CppTorchCudaOptions(CppTorchOptions):
 
 
 def get_name_and_dir_from_output_file_path(
-    aot_mode: bool, use_absolute_path: bool, file_path: str
+    file_path: str,
 ):
+    """
+    This function help prepare parameters to new cpp_builder.
+    Example:
+        input_code: /tmp/tmpof1n5g7t/5c/c5crkkcdvhdxpktrmjxbqkqyq5hmxpqsfza4pxcf3mwk42lphygc.cpp
+        name, dir = get_name_and_dir_from_output_file_path(input_code)
+    Run result:
+        name = c5crkkcdvhdxpktrmjxbqkqyq5hmxpqsfza4pxcf3mwk42lphygc
+        dir = /tmp/tmpof1n5g7t/5c/
+    put 'name' and 'dir' to CppBuilder's 'name' and 'output_dir'.
+    CppBuilder --> get_target_file_path will format output path accoding OS:
+    Linux: /tmp/tmppu87g3mm/zh/czhwiz4z7ca7ep3qkxenxerfjxy42kehw6h5cjk6ven4qu4hql4i.so
+    Windows: [Windows temp path]/tmppu87g3mm/zh/czhwiz4z7ca7ep3qkxenxerfjxy42kehw6h5cjk6ven4qu4hql4i.dll
+    """
     name_and_ext = os.path.basename(file_path)
     name, ext = os.path.splitext(name_and_ext)
     dir = os.path.dirname(file_path)
 
-    if config.is_fbcode():
-        if not (aot_mode and not use_absolute_path):
-            dir = "."
     return name, dir
 
 
@@ -1008,6 +992,38 @@ class CppBuilder:
             2. The default value is empty string, and then the use current dir as output dir.
             3. Final target file: output_dir/name.ext
     """
+
+    def __run_command_line(self, cmd_line, cwd=None):
+        cmd = shlex.split(cmd_line)
+        try:
+            status = subprocess.check_output(
+                args=cmd, cwd=cwd, stderr=subprocess.STDOUT
+            )
+        except subprocess.CalledProcessError as e:
+            output = e.output.decode("utf-8")
+            openmp_problem = "'omp.h' file not found" in output or "libomp" in output
+            if openmp_problem and sys.platform == "darwin":
+                instruction = (
+                    "\n\nOpenMP support not found. Please try one of the following solutions:\n"
+                    "(1) Set the `CXX` environment variable to a compiler other than Apple clang++/g++ "
+                    "that has builtin OpenMP support;\n"
+                    "(2) install OpenMP via conda: `conda install llvm-openmp`;\n"
+                    "(3) install libomp via brew: `brew install libomp`;\n"
+                    "(4) manually setup OpenMP and set the `OMP_PREFIX` environment variable to point to a path"
+                    " with `include/omp.h` under it."
+                )
+                output += instruction
+
+            if config.is_fbcode():
+                fb_code_debug = (
+                    f"\n\nfb_code_debug: \n"
+                    f"cwd: {os.getcwd()}\n"
+                    f"use_absolute_path: {self._use_absolute_path}\n"
+                    f"aot_mode: {self._aot_mode}\n"
+                )
+                output += fb_code_debug
+            raise exc.CppCompileError(cmd, output) from e
+        return status
 
     def __get_python_module_ext(self) -> str:
         SHARED_LIB_EXT = ".pyd" if _IS_WINDOWS else ".so"
@@ -1037,17 +1053,23 @@ class CppBuilder:
         self._target_file = ""
 
         self._use_absolute_path: bool = False
+        self._aot_mode: bool = False
 
         self._name = name
 
         # Code start here, initial self internal veriables firstly.
         self._compiler = BuildOption.get_compiler()
         self._use_absolute_path = BuildOption.get_use_absolute_path()
+        self._aot_mode = BuildOption.get_aot_mode()
 
+        """
+        TODO: validate and remove:
         if len(output_dir) == 0:
             self._output_dir = os.path.dirname(os.path.abspath(__file__))
         else:
             self._output_dir = output_dir
+        """
+        self._output_dir = output_dir
 
         self._compile_only = BuildOption.get_compile_only()
         file_ext = (
@@ -1061,7 +1083,7 @@ class CppBuilder:
             sources = [sources]
 
         if config.is_fbcode():
-            if BuildOption.get_aot_mode() and not self._use_absolute_path:
+            if self._aot_mode and not self._use_absolute_path:
                 inp_name = sources
                 # output process @ get_name_and_dir_from_output_file_path
             else:
@@ -1162,6 +1184,7 @@ class CppBuilder:
     def get_target_file_path(self):
         return self._target_file
 
+    @dynamo_timed
     def build(self) -> Tuple[int, str]:
         """
         It is must need a temperary directory to store object files in Windows.
@@ -1175,7 +1198,7 @@ class CppBuilder:
 
         build_cmd = self.get_command_line()
 
-        status = run_command_line(build_cmd, cwd=_build_tmp_dir)
+        status = self.__run_command_line(build_cmd, cwd=_build_tmp_dir)
 
         _remove_dir(_build_tmp_dir)
         return status, self._target_file
