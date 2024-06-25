@@ -89,6 +89,8 @@ decompositions = {**core_aten_decompositions(), **inductor_decompositions}
 # the Inductor decomp table.
 decomps_to_exclude = [
     aten._unsafe_index,
+    aten._unsafe_masked_index,
+    aten._unsafe_masked_index_put_accumulate,
     aten._scaled_dot_product_flash_attention_for_cpu.default,  # See comments in torch/_decomp/decompositions.py
     aten._softmax_backward_data,
     aten.clamp_max,
@@ -724,7 +726,7 @@ def max_pool2d_with_indices(
     if padding == 0:
         padding = [0, 0]
 
-    if stride is None:
+    if not stride:
         stride = kernel_size
 
     kernel_size = pad_listlike(kernel_size, 2)
