@@ -1,0 +1,41 @@
+name: weekly
+
+on:
+  schedule:
+    # Mondays at 7:37am UTC = 12:27am PST
+    # Choose a random time near midnight PST because it may be delayed if there are high loads
+    # See https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#schedule
+    - cron: 37 7 * * 1
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  update-commit-hash:
+    runs-on: ubuntu-latest
+    environment: update-commit-hash
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - name: update-xla-commit-hash
+        continue-on-error: true
+        uses: pytorch/test-infra/.github/actions/update-commit-hash@main
+        with:
+          repo-name: xla
+          branch: master
+          pin-folder: .github/ci_commit_pins
+          test-infra-ref: main
+          updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
+          pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
+      - name: update-triton-commit-hash
+        uses: pytorch/test-infra/.github/actions/update-commit-hash@main
+        with:
+          repo-owner: openai
+          repo-name: triton
+          branch: main
+          pin-folder: .ci/docker/ci_commit_pins
+          test-infra-ref: main
+          updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
+          pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
