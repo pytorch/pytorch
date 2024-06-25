@@ -1,5 +1,5 @@
+#include <data_preproc/common/Counters.h>
 #include <torch/csrc/monitor/instrumentation.h>
-#include "data_preproc/common/Counters.h"
 
 #include <chrono>
 #include <string_view>
@@ -13,15 +13,14 @@ class WaitCounterImpl : public facebook::data_preproc::WaitCounterUs {
   explicit WaitCounterImpl(std::string_view key)
       : facebook::data_preproc::WaitCounterUs(key) {}
 };
-} // namespace detail
-
-detail::WaitCounterImpl& getImpl(std::string_view key) {
+static detail::WaitCounterImpl& getImpl(std::string_view key) {
   auto* impl = new detail::WaitCounterImpl(key);
   return *impl;
 }
+} // namespace detail
 
 WaitCounterHandle::WaitCounterHandle(std::string_view key)
-    : impl_(getImpl(key)) {}
+    : impl_(detail::getImpl(key)) {}
 
 void WaitCounterHandle::start(std::chrono::steady_clock::time_point now) {
   impl_.start(now);
