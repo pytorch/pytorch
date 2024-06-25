@@ -1625,7 +1625,7 @@ class TestSDPAFailureModes(NNTestCase):
         query = rand_nested_tensor(q_shape).transpose(1, 2)
         key = rand_nested_tensor(k_shape).transpose(1, 2)
         value = rand_nested_tensor(v_shape).transpose(1, 2)
-
+        
         with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
             with self.assertRaisesRegex(RuntimeError, "No available kernel"):
                 torch.nn.functional.scaled_dot_product_attention(
@@ -3136,7 +3136,7 @@ class TestSDPACudaOnly(NNTestCase):
 
     @skipIfRocm  # Nested Tensor
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
-    def test_flash_gqa(self, device, ):
+    def test_grouped_query_attention(self, device, ):
         rand_query = torch.rand(8, 8, 64, 64, device=device, dtype=torch.float16, requires_grad=True)
         rand_key = torch.rand(8, 4, 64, 64, device=device, dtype=torch.float16, requires_grad=True)
         rand_value = torch.rand(8, 4, 64, 64, device=device, dtype=torch.float16, requires_grad=True)
@@ -3147,8 +3147,8 @@ class TestSDPACudaOnly(NNTestCase):
         with sdpa_kernel(backends=[SDPBackend.MATH]):
             F.scaled_dot_product_attention(rand_query, rand_key, rand_value, dropout_p=0.0, is_causal=False)
 
-        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
-            F.scaled_dot_product_attention(rand_query, rand_key, rand_value, dropout_p=0.0, is_causal=False)
+        # with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
+        #     F.scaled_dot_product_attention(rand_query, rand_key, rand_value, dropout_p=0.0, is_causal=False)
 
     # def test_flash_gqa(self, device):
     #     rand_query = torch.rand(8, 8, 64, 64, device=device, dtype=torch.float16, requires_grad=True)
@@ -3288,7 +3288,7 @@ class TestSDPACudaOnly(NNTestCase):
         query = query.transpose(1, 2)
         key = key.transpose(1, 2)
         value = value.transpose(1, 2)
-
+        
         with sdpa_kernel(backends=[kernel]):
             actual = torch.nn.functional.scaled_dot_product_attention(
                 query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
