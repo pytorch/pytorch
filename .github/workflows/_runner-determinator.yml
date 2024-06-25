@@ -46,6 +46,7 @@ jobs:
       - name: Hardcode runner-determinator script
         run: |
           cat <<EOF > get_workflow_type.py
+          import sys
           import json
           from argparse import ArgumentParser
           from typing import Any, Tuple
@@ -72,13 +73,16 @@ jobs:
                   help="GitHub repo to get the issue",
               )
               parser.add_argument(
-                  "--github-issue", type=int, required=True, help="GitHub issue umber"
+                  "--github-issue", type=int, required=True, help="GitHub issue number"
               )
               parser.add_argument(
                   "--github-user", type=str, required=True, help="GitHub username"
               )
               parser.add_argument(
                   "--github-branch", type=str, required=True, help="Current GitHub branch"
+              )
+              parser.add_argument(
+                  "--silent", action="store_true", help="Don't print log messages to stderr"
               )
 
               return parser.parse_args()
@@ -100,20 +104,26 @@ jobs:
 
           def get_workflow_type(issue: Issue, username: str) -> Tuple[str, str]:
               try:
+                  first_comment = issue.get_comments()[0].body.strip("\n\t ")
                   user_list = issue.get_comments()[0].body.split()
 
-                  if user_list[0] == "!":
+                  if first_comment[0] == "!":
                       MESSAGE = "LF Workflows are disabled for everyone. Using meta runners."
                       return WORKFLOW_LABEL_META, MESSAGE
-                  elif user_list[0] == "*":
+                  elif first_comment[0] == "*":
                       MESSAGE = "LF Workflows are enabled for everyone. Using LF runners."
                       return WORKFLOW_LABEL_LF, MESSAGE
-                  elif username in user_list:
-                      MESSAGE = f"LF Workflows are enabled for {username}. Using LF runners."
-                      return WORKFLOW_LABEL_LF, MESSAGE
                   else:
-                      MESSAGE = f"LF Workflows are disabled for {username}. Using meta runners."
-                      return WORKFLOW_LABEL_META, MESSAGE
+                      user_set = {
+                          usr.strip("\n\t ") for usr in first_comment.split()
+                      }
+                      if username in user_set:
+                          MESSAGE = f"LF Workflows are enabled for {username}. Using LF runners."
+                          return WORKFLOW_LABEL_LF, MESSAGE
+                      else:
+                          MESSAGE = f"LF Workflows are disabled for {username}. Using meta runners."
+                          return WORKFLOW_LABEL_META, MESSAGE
+
               except Exception as e:
                   MESSAGE = f"Failed to get determine workflow type. Falling back to meta runners. Exception: {e}"
                   return WORKFLOW_LABEL_META, MESSAGE
@@ -142,6 +152,9 @@ jobs:
                           LABEL_TYPE_KEY: WORKFLOW_LABEL_META,
                           MESSAGE_KEY: f"Failed to get issue. Falling back to meta runners. Exception: {e}",
                       }
+
+              if !args.silent
+                  print(output[MESSAGE_KEY], sys.stderr)
 
               json_output = json.dumps(output)
               print(json_output)
