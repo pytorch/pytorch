@@ -5302,7 +5302,7 @@ class FallbackKernel(ExternKernelAlloc):
         def collect_mutation_names(arg):
             if isinstance(arg, (list, tuple)):
                 for tensor_arg in arg:
-                    collect_mutation_names(arg)
+                    collect_mutation_names(tensor_arg)
             elif isinstance(arg, (TensorBox, BaseView)):
                 self.mutation_names.append(arg.get_name())
             else:
