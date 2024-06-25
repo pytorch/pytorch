@@ -4,7 +4,6 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/symbol.h>
 #include <ATen/core/type_factory.h>
-#include <c10/util/string_utils.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
 #include <torch/custom_class.h>
@@ -169,6 +168,7 @@ std::optional<at::ScalarType> SchemaTypeParser::parseTensorDType(
   static std::unordered_map<std::string, at::ScalarType> type_map = {
       AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_SCALAR_TYPE)};
 
+#undef DEFINE_SCALAR_TYPE
   auto type = type_map.find(dtype);
   if (type != type_map.end()) {
     return type->second;

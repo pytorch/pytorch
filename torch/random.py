@@ -1,10 +1,10 @@
 # mypy: allow-untyped-defs
 import contextlib
-from typing import Generator
 import warnings
+from typing import Generator
 
-from torch._C import default_generator
 import torch
+from torch._C import default_generator
 
 
 def set_rng_state(new_state: torch.Tensor) -> None:
@@ -46,10 +46,12 @@ def manual_seed(seed) -> torch._C.Generator:
         torch.cuda.manual_seed_all(seed)
 
     import torch.mps
+
     if not torch.mps._is_in_bad_fork():
         torch.mps.manual_seed(seed)
 
     import torch.xpu
+
     if not torch.xpu._is_in_bad_fork():
         torch.xpu.manual_seed_all(seed)
 
@@ -69,10 +71,12 @@ def seed() -> int:
         torch.cuda.manual_seed_all(seed)
 
     import torch.mps
+
     if not torch.mps._is_in_bad_fork():
         torch.mps.manual_seed(seed)
 
     import torch.xpu
+
     if not torch.xpu._is_in_bad_fork():
         torch.xpu.manual_seed_all(seed)
 
@@ -95,7 +99,9 @@ def _seed_custom_device(seed) -> None:
         custom_device_mod = getattr(torch, custom_backend_name)
         _bad_fork_name = "_is_in_bad_fork"
         _seed_all_name = "manual_seed_all"
-        if hasattr(custom_device_mod, _bad_fork_name) and hasattr(custom_device_mod, _seed_all_name):
+        if hasattr(custom_device_mod, _bad_fork_name) and hasattr(
+            custom_device_mod, _seed_all_name
+        ):
             if not getattr(custom_device_mod, _bad_fork_name)():
                 getattr(custom_device_mod, _seed_all_name)(seed)
         else:
@@ -117,7 +123,13 @@ _fork_rng_warned_already = False
 
 
 @contextlib.contextmanager
-def fork_rng(devices=None, enabled=True, _caller="fork_rng", _devices_kw="devices", device_type="cuda") -> Generator:
+def fork_rng(
+    devices=None,
+    enabled=True,
+    _caller="fork_rng",
+    _devices_kw="devices",
+    device_type="cuda",
+) -> Generator:
     """
     Forks the RNG, so that when you return, the RNG is reset
     to the state that it was previously in.
@@ -138,8 +150,10 @@ def fork_rng(devices=None, enabled=True, _caller="fork_rng", _devices_kw="device
     device_type = torch.device(device_type).type
     device_mod = getattr(torch, device_type, None)
     if device_mod is None:
-        raise RuntimeError(f"torch has no module of `{device_type}`, you should register " +
-                           "a module by `torch._register_device_module`.")
+        raise RuntimeError(
+            f"torch has no module of `{device_type}`, you should register "
+            + "a module by `torch._register_device_module`."
+        )
     global _fork_rng_warned_already
 
     # Internal arguments:
@@ -153,17 +167,19 @@ def fork_rng(devices=None, enabled=True, _caller="fork_rng", _devices_kw="device
     if devices is None:
         num_devices = device_mod.device_count()
         if num_devices > 1 and not _fork_rng_warned_already:
-            message = (f"{device_type.upper()} reports that you have {num_devices} available devices, and "
-                       f"you have used {_caller} without explicitly specifying which devices are being used. "
-                       f"For safety, we initialize *every* {device_type.upper()} device by default, which can "
-                       f"be quite slow if you have a lot of {device_type.upper()}s. If you know that you are only"
-                       f" making use of a few {device_type.upper()} devices, set the environment variable "
-                       f"{device_type.upper()}_VISIBLE_DEVICES or the '{_devices_kw}' keyword argument of {_caller} "
-                       "with the set of devices you are actually using. For example, if you are using CPU only, "
-                       "set device.upper()_VISIBLE_DEVICES= or devices=[]; if you are using device 0 only, "
-                       f"set {device_type.upper()}_VISIBLE_DEVICES=0 or devices=[0].  To initialize all devices "
-                       f"and suppress this warning, set the '{_devices_kw}' keyword argument to "
-                       f"`range(torch.{device_type}.device_count())`.")
+            message = (
+                f"{device_type.upper()} reports that you have {num_devices} available devices, and "
+                f"you have used {_caller} without explicitly specifying which devices are being used. "
+                f"For safety, we initialize *every* {device_type.upper()} device by default, which can "
+                f"be quite slow if you have a lot of {device_type.upper()}s. If you know that you are only"
+                f" making use of a few {device_type.upper()} devices, set the environment variable "
+                f"{device_type.upper()}_VISIBLE_DEVICES or the '{_devices_kw}' keyword argument of {_caller} "
+                "with the set of devices you are actually using. For example, if you are using CPU only, "
+                "set device.upper()_VISIBLE_DEVICES= or devices=[]; if you are using device 0 only, "
+                f"set {device_type.upper()}_VISIBLE_DEVICES=0 or devices=[0].  To initialize all devices "
+                f"and suppress this warning, set the '{_devices_kw}' keyword argument to "
+                f"`range(torch.{device_type}.device_count())`."
+            )
             warnings.warn(message)
             _fork_rng_warned_already = True
         devices = list(range(num_devices))

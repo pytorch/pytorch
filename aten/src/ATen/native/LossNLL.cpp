@@ -525,10 +525,10 @@ static Tensor cross_entropy_loss_prob_target(
 
     switch (reduction) {
       case Reduction::Mean:
-        if (input.numel()==0){
+        if (input.sym_numel()==0){
           return -(input * target * weight_).sum().fill_(std::numeric_limits<double>::quiet_NaN());
         } else {
-          return -(input * target * weight_).sum() / (input.numel() / n_classes);
+          return -(input * target * weight_).sum() / (input.sym_numel() / n_classes);
         }
       case Reduction::Sum:
         return -(input * target * weight_).sum();
@@ -540,10 +540,10 @@ static Tensor cross_entropy_loss_prob_target(
   } else {
     switch (reduction) {
       case Reduction::Mean:
-        if (input.numel()==0){
+        if (input.sym_numel()==0){
           return -(input * target).sum().fill_(std::numeric_limits<double>::quiet_NaN());
         } else {
-          return -(input * target).sum() / (input.numel() / n_classes);
+          return -(input * target).sum() / (input.sym_numel() / n_classes);
         }
       case Reduction::Sum:
         return -(input * target).sum();

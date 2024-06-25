@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+r"""Implementation for the RMSprop algorithm."""
 from typing import List, Optional
 
 import torch
@@ -21,7 +22,7 @@ from .optimizer import (
 __all__ = ["RMSprop", "rmsprop"]
 
 
-class RMSprop(Optimizer):
+class RMSprop(Optimizer):  # noqa: D101
     def __init__(
         self,
         params: ParamsT,
@@ -35,7 +36,7 @@ class RMSprop(Optimizer):
         foreach: Optional[bool] = None,
         maximize: bool = False,
         differentiable: bool = False,
-    ):
+    ):  # noqa: D107
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= eps:
@@ -61,7 +62,7 @@ class RMSprop(Optimizer):
         )
         super().__init__(params, defaults)
 
-    def __setstate__(self, state):
+    def __setstate__(self, state):  # noqa: D105
         super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault("momentum", 0)
@@ -135,7 +136,7 @@ class RMSprop(Optimizer):
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
-        """Performs a single optimization step.
+        """Perform a single optimization step.
 
         Args:
             closure (Callable, optional): A closure that reevaluates the model
@@ -277,7 +278,7 @@ def _single_tensor_rmsprop(
         step = state_steps[i]
 
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-        if not torch.compiler.is_compiling() and capturable:
+        if not torch._utils.is_compiling() and capturable:
             capturable_supported_devices = _get_capturable_supported_devices()
             assert (
                 param.device.type == step.device.type
@@ -350,7 +351,7 @@ def _multi_tensor_rmsprop(
     assert not differentiable, "_foreach ops don't support autograd"
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-    if not torch.compiler.is_compiling() and capturable:
+    if not torch._utils.is_compiling() and capturable:
         capturable_supported_devices = _get_capturable_supported_devices()
         assert all(
             p.device.type == step.device.type
@@ -464,11 +465,12 @@ def rmsprop(
     centered: bool,
 ):
     r"""Functional API that performs rmsprop algorithm computation.
+
     See :class:`~torch.optim.RMSProp` for details.
     """
     # this check is slow during compilation, so we skip it
     # if it's strictly needed we can add this check back in dynamo
-    if not torch.compiler.is_compiling() and not all(
+    if not torch._utils.is_compiling() and not all(
         isinstance(t, torch.Tensor) for t in state_steps
     ):
         raise RuntimeError(
