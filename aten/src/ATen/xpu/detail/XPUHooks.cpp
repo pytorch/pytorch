@@ -80,6 +80,11 @@ bool XPUHooks::isPinnedPtr(const void* data) const {
       sycl::get_pointer_type(data, c10::xpu::get_device_context());
 }
 
+bool XPUHooks::hasPrimaryContext(DeviceIndex device_index) const override {
+  // The default context is utilized for each device. So it always returns true.
+  return true;
+}
+
 REGISTER_XPU_HOOKS(XPUHooks);
 
 } // namespace at::xpu::detail
