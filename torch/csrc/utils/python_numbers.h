@@ -57,8 +57,7 @@ inline bool THPUtils_checkLong(PyObject* obj) {
 }
 
 inline int32_t THPUtils_unpackInt(PyObject* obj) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int overflow;
+  int overflow = 0;
   long value = PyLong_AsLongAndOverflow(obj, &overflow);
   if (value == -1 && PyErr_Occurred()) {
     throw python_error();
@@ -74,8 +73,7 @@ inline int32_t THPUtils_unpackInt(PyObject* obj) {
 }
 
 inline int64_t THPUtils_unpackLong(PyObject* obj) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int overflow;
+  int overflow = 0;
   long long value = PyLong_AsLongLongAndOverflow(obj, &overflow);
   if (value == -1 && PyErr_Occurred()) {
     throw python_error();

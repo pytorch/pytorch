@@ -492,7 +492,7 @@ class TestBinary(TestCase):
         mt1 = masked_tensor(data1, mask1)
         try:
             fn(mt0, mt1)
-            raise AssertionError()
+            raise AssertionError
         except ValueError as e:
             assert (
                 "Input masks must match. If you need support for this, please open an issue on Github."

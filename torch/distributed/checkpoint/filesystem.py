@@ -1,15 +1,20 @@
+# mypy: allow-untyped-defs
 import collections
 import dataclasses
 import io
+import operator
 import os
 import pickle
 import queue
 import threading
+import uuid
+import warnings
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import (
+    Any,
     Callable,
     cast,
     Dict,
@@ -27,10 +32,13 @@ import torch
 from torch import Tensor
 from torch._utils import _get_available_device_type, _get_device_module
 from torch.distributed._shard._utils import narrow_tensor_by_index
-from torch.futures import Future
-
-from .metadata import Metadata, MetadataIndex
-from .planner import (
+from torch.distributed.checkpoint.metadata import (
+    Metadata,
+    MetadataIndex,
+    STATE_DICT_TYPE,
+    StorageMeta,
+)
+from torch.distributed.checkpoint.planner import (
     LoadItemType,
     LoadPlan,
     LoadPlanner,
@@ -40,10 +48,19 @@ from .planner import (
     WriteItem,
     WriteItemType,
 )
-from .storage import StorageReader, StorageWriter, WriteResult
-from .utils import _create_file_view
+from torch.distributed.checkpoint.staging import BlockingAsyncStager
+from torch.distributed.checkpoint.storage import (
+    StorageReader,
+    StorageWriter,
+    WriteResult,
+)
+from torch.distributed.checkpoint.utils import _create_file_view
+from torch.futures import Future
 
-__all__ = ["FileSystemWriter", "FileSystemReader"]
+
+__all__ = ["FileSystemWriter", "FileSystemReader", "FileSystem", "FileSystemBase"]
+
+_metadata_fn: str = ".metadata"
 
 
 @dataclass
@@ -61,6 +78,10 @@ class _StoragePrefix:
 
 
 DEFAULT_SUFFIX = ".distcp"
+
+
+def _generate_uuid() -> str:
+    return str(uuid.uuid4())
 
 
 class _TensorLoader(ABC):
@@ -177,7 +198,7 @@ class _OverlappingCpuLoader(_TensorLoader):
         if self.started:
             return
         self.started = True
-        self.items.sort(key=lambda x: x[0])
+        self.items.sort(key=operator.itemgetter(0))
         self._refill()
 
     def values(self) -> Iterator[Tuple[torch.Tensor, object]]:
@@ -218,7 +239,7 @@ def _split_by_size_and_type(bins: int, items: List[WriteItem]) -> List[List[Writ
 
     for wi in tensor_w:
         # TODO replace with headq
-        idx = min(enumerate(bucket_sizes), key=lambda x: x[1])[0]
+        idx = min(enumerate(bucket_sizes), key=operator.itemgetter(1))[0]
         buckets[idx].append(wi)
         bucket_sizes[idx] += _item_size(wi)
 
@@ -350,6 +371,14 @@ class FileSystemBase(ABC):
     def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
         ...
 
+    @abstractmethod
+    def exists(self, path: Union[str, os.PathLike]) -> bool:
+        ...
+
+    @abstractmethod
+    def rm_file(self, path: Union[str, os.PathLike]) -> None:
+        ...
+
 
 class FileSystem(FileSystemBase):
     @contextmanager
@@ -391,8 +420,14 @@ class FileSystem(FileSystemBase):
 
         return False
 
+    def exists(self, path: Union[str, os.PathLike]) -> bool:
+        return cast(Path, path).exists()
 
-class FileSystemWriter(StorageWriter):
+    def rm_file(self, path: Union[str, os.PathLike]) -> None:
+        cast(Path, path).unlink()
+
+
+class _FileSystemWriter(StorageWriter):
     """
     Basic implementation of StorageWriter using file IO.
 
@@ -413,6 +448,9 @@ class FileSystemWriter(StorageWriter):
         sync_files: bool = True,
         thread_count: int = 1,
         per_thread_copy_ahead: int = 10_000_000,
+        overwrite: bool = True,
+        *args: Any,
+        **kwargs: Any,
     ) -> None:
         """
         Initialize the writer pointing to `path`.
@@ -423,6 +461,7 @@ class FileSystemWriter(StorageWriter):
             sync_files : force files to be synced to permanent storage. Default to True.
             thread_count: Number of IO threads to use to write. Default to 1.
             per_thread_copy_ahead: How many bytes to copy from the GPU ahead of saving then. Default 10Mb.
+            overwrite: Whether to allow overwriting existing checkpoints. Defaults to True.
 
         N. B. If sync_files is disabled, there's no guarantee that the checkpoint will be consistent in the case of a failure.
         """
@@ -433,22 +472,35 @@ class FileSystemWriter(StorageWriter):
         self.sync_files = sync_files
         self.thread_count = thread_count
         self.per_thread_copy_ahead = per_thread_copy_ahead
+        self.save_id = _generate_uuid()
+        self.overwrite = overwrite
 
     def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
         if checkpoint_id:
             self.path = self.fs.init_path(checkpoint_id)
+        self.save_id = _generate_uuid()
 
     def set_up_storage_writer(self, is_coordinator: bool) -> None:
         pass
 
     def prepare_local_plan(self, plan: SavePlan) -> SavePlan:
         self.fs.mkdir(self.path)
+        if self.fs.exists(self.metadata_path):
+            if self.overwrite:
+                warnings.warn(
+                    f"Detected an existing checkpoint in {self.metadata_path}, overwriting since {self.overwrite=}."
+                    " Past version 2.5 of PyTorch, `overwrite` will default to False. Set this variable to True to"
+                    " maintain this functionality or False to raise when an existing checkpoint is found."
+                )
+            else:
+                raise RuntimeError(f"Checkpoint already exists and {self.overwrite=}.")
+
         return plan
 
-    def prepare_global_plan(self, global_plan: List[SavePlan]) -> List[SavePlan]:
+    def prepare_global_plan(self, plans: List[SavePlan]) -> List[SavePlan]:
         new_plans = [
             dataclasses.replace(plan, storage_data=_StoragePrefix(f"__{i}_"))
-            for i, plan in enumerate(global_plan)
+            for i, plan in enumerate(plans)
         ]
         return new_plans
 
@@ -526,8 +578,10 @@ class FileSystemWriter(StorageWriter):
         for wr_list in results:
             storage_md.update({wr.index: wr.storage_data for wr in wr_list})
         metadata.storage_data = storage_md
-        tmp_path = cast(Path, self.fs.concat_path(self.path, ".metadata.tmp"))
-        meta_path = cast(Path, self.fs.concat_path(self.path, ".metadata"))
+
+        metadata.storage_meta = self.storage_meta()
+
+        tmp_path = cast(Path, self.fs.concat_path(self.path, f"{_metadata_fn}.tmp"))
         with self.fs.create_stream(tmp_path, "wb") as metadata_file:
             pickle.dump(metadata, metadata_file)
             if self.sync_files:
@@ -536,7 +590,25 @@ class FileSystemWriter(StorageWriter):
                 except AttributeError:
                     os.sync()
 
-        self.fs.rename(tmp_path, meta_path)
+        # delete in-case other checkpoints were present.
+        if self.fs.exists(self.metadata_path):
+            self.fs.rm_file(self.metadata_path)
+
+        self.fs.rename(tmp_path, self.metadata_path)
+
+    def storage_meta(self) -> Optional[StorageMeta]:
+        return StorageMeta(checkpoint_id=self.checkpoint_id, save_id=self.save_id)
+
+    @property
+    def metadata_path(self) -> Union[str, os.PathLike]:
+        return cast(Path, self.fs.concat_path(self.path, _metadata_fn))
+
+    @property
+    def checkpoint_id(self) -> Union[str, os.PathLike]:
+        """
+        return the checkpoint_id that will be used to save the checkpoint.
+        """
+        return self.path
 
     @classmethod
     def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
@@ -549,6 +621,7 @@ class FileSystemReader(StorageReader):
         self.fs = FileSystem()
         self.path = self.fs.init_path(path)
         self.storage_data: Dict[MetadataIndex, _StorageInfo] = dict()
+        self.load_id = _generate_uuid()
 
     def _slice_file(self, file, sinfo: _StorageInfo) -> io.IOBase:
         return _create_file_view(file, sinfo.offset, sinfo.length)
@@ -557,6 +630,7 @@ class FileSystemReader(StorageReader):
         self.storage_data = dict()
         if checkpoint_id:
             self.path = self.fs.init_path(checkpoint_id)
+        self.load_id = _generate_uuid()
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
         # group requests by file
@@ -601,7 +675,13 @@ class FileSystemReader(StorageReader):
     def read_metadata(self) -> Metadata:
         path = self.fs.concat_path(self.path, ".metadata")
         with self.fs.create_stream(path, "rb") as metadata_file:
-            return pickle.load(metadata_file)
+            metadata = pickle.load(metadata_file)
+
+        if getattr(metadata, "storage_meta", None) is None:
+            metadata.storage_meta = StorageMeta()
+        metadata.storage_meta.load_id = self.load_id
+
+        return metadata
 
     def set_up_storage_reader(self, metadata: Metadata, is_coordinator: bool) -> None:
         self.storage_data = metadata.storage_data
@@ -610,9 +690,74 @@ class FileSystemReader(StorageReader):
     def prepare_local_plan(self, plan: LoadPlan) -> LoadPlan:
         return plan
 
-    def prepare_global_plan(self, global_plan: List[LoadPlan]) -> List[LoadPlan]:
-        return global_plan
+    def prepare_global_plan(self, plans: List[LoadPlan]) -> List[LoadPlan]:
+        return plans
+
+    @property
+    def checkpoint_id(self) -> Union[str, os.PathLike]:
+        """
+        return the checkpoint_id that will be used to save the checkpoint.
+        """
+        return self.path
 
     @classmethod
     def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
         return FileSystem.validate_checkpoint_id(checkpoint_id)
+
+
+class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
+    """
+    Basic implementation of StorageWriter using file IO.
+
+    This implementation makes the following assumptions and simplifications:
+
+    * The checkpoint path is an empty or non-existing directory.
+    * File creation is atomic
+
+    The checkpoint consist of one file per write request plus
+    a `.metadata` file with the serialized metadata.
+
+    """
+
+    def __init__(
+        self,
+        path: Union[str, os.PathLike],
+        single_file_per_rank: bool = True,
+        sync_files: bool = True,
+        thread_count: int = 1,
+        per_thread_copy_ahead: int = 10_000_000,
+        cache_staged_state_dict: bool = False,
+        overwrite: bool = True,
+    ) -> None:
+        """
+        Initialize the writer pointing to `path`.
+
+        Args:
+            path: directory where the checkpoint will be written to.
+            single_file_per_rank: Produce one file per rank instead of one file per tensor/blob. Default to True.
+            sync_files : force files to be synced to permanent storage. Default to True.
+            thread_count: Number of IO threads to use to write. Default to 1.
+            per_thread_copy_ahead: How many bytes to copy from the GPU ahead of saving then. Default 10Mb.
+            cache_staged_state_dict: Whether to cache the staged state_dict. This option decreases staging latency
+                at the cost of increases memory usage. Additionally, if this parameter is set to True, it's the expectation
+                that the stager is maintained and re-used for multiple dcp.async_save calls. Default to False.
+            overwrite: Whether to allow overwriting existing checkpoints. Defaults to True.
+
+        N. B. If sync_files is disabled, there's no guarantee that the checkpoint will be consistent in the case of a failure.
+        """
+        super().__init__(
+            path=path,
+            single_file_per_rank=single_file_per_rank,
+            sync_files=sync_files,
+            thread_count=thread_count,
+            per_thread_copy_ahead=per_thread_copy_ahead,
+            cache_staged_state_dict=cache_staged_state_dict,
+            overwrite=overwrite,
+        )
+
+    def stage(self, state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
+        """Override of AsyncStager.stage"""
+        # in the async case, the state dict is already on CPU, so maintaining this
+        # buffer makes no sense
+        self.per_thread_copy_ahead = 0
+        return super().stage(state_dict)

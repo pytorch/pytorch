@@ -67,7 +67,7 @@ struct TORCH_API Operator {
   };
   struct UnparsedFunctionSchema final {
     std::string schema_string_;
-    mutable c10::optional<c10::AliasAnalysisKind> alias_analysis_;
+    mutable std::optional<c10::AliasAnalysisKind> alias_analysis_;
   };
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   struct JitOnlyOperator final {
@@ -298,16 +298,16 @@ TORCH_API bool aliasAnalysisHasSpecialCaseFor(c10::Symbol sym);
 // compile-time function for the selective op registration based on schema
 // string.
 template <typename Func>
-c10::optional<Operator> OperatorGenerator(
+std::optional<Operator> OperatorGenerator(
     const char* schema_str,
     Func&& op,
     AliasAnalysisKind alias_analysis) {
-  return c10::optional<Operator>(Operator(
+  return std::optional<Operator>(Operator(
       std::string(schema_str), std::forward<Func>(op), alias_analysis));
 }
 
 template <typename Func>
-c10::optional<Operator> OperatorGenerator(
+std::optional<Operator> OperatorGenerator(
     torch::detail::SelectiveStr<true> schema_str,
     Func&& op,
     AliasAnalysisKind alias_analysis) {
@@ -318,7 +318,7 @@ c10::optional<Operator> OperatorGenerator(
 }
 
 template <typename Func>
-c10::optional<Operator> OperatorGenerator(
+std::optional<Operator> OperatorGenerator(
     torch::detail::SelectiveStr<false> schema_str,
     Func&& op,
     AliasAnalysisKind alias_analysis) {
@@ -326,14 +326,14 @@ c10::optional<Operator> OperatorGenerator(
 }
 
 template <typename Func>
-c10::optional<Operator> OperatorGenerator(
+std::optional<Operator> OperatorGenerator(
     const std::string name,
     const std::string overload_name,
     const std::vector<c10::Argument> arguments,
     const std::vector<c10::Argument> returns,
     Func&& op,
     AliasAnalysisKind alias_analysis) {
-  return c10::optional<Operator>(Operator(
+  return std::optional<Operator>(Operator(
       name,
       overload_name,
       arguments,

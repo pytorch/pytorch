@@ -20,7 +20,6 @@
 #include <torch/csrc/onnx/back_compat.h>
 #include <torch/csrc/onnx/onnx.h>
 #include <torch/version.h>
-#include <atomic>
 
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wnewline-eof")
 #include <onnx/checker.h>
@@ -31,11 +30,12 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wsuggest-override")
 #include <onnx/shape_inference/implementation.h>
 C10_DIAGNOSTIC_POP()
 
-#include <fstream>
 #include <memory>
 #include <regex>
 #include <set>
+#include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace torch::jit {
@@ -145,26 +145,6 @@ void validateBlock(
             "\n\nDefined at:\n" + getNodeStackTraceString(node))
       }
     } else {
-#ifdef BUILD_CAFFE2
-      // Assuming this is a Caffe2 change as it only modifies an aten op
-      // for operator_export_type == ONNX_ATEN_FALLBACK, which is a common
-      // pattern for Caffe2-specific scenarios.
-      if (node->kind() == aten::expand) {
-        if (operator_export_type ==
-            onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK) {
-          WithInsertPoint guard(node);
-          auto* new_node =
-              b->owningGraph()->insertNode(b->owningGraph()->create(
-                  Symbol(::c10::aten::ATen),
-                  node->inputs(),
-                  node->outputs().size()));
-          for (size_t i = 0; i < node->outputs().size(); ++i) {
-            node->output(i)->replaceAllUsesWith(new_node->output(i));
-          }
-          new_node->s_(Symbol::fromQualString("attr::operator"), "expand");
-        }
-      }
-#endif
       if (node->kind() == prim::PackPadded || node->kind() == prim::PadPacked) {
         if (operator_export_type !=
             onnx_torch::OperatorExportTypes::ONNX_FALLTHROUGH) {
@@ -209,7 +189,7 @@ std::string GetFileRootPath(const std::string& rootPath) {
 }
 
 std::string GetExternalFileName(
-    const c10::optional<std::string>& external_ref) {
+    const std::optional<std::string>& external_ref) {
   auto tensorName = external_ref.value();
   const std::string illegalChars = "\\/:?\"<>|";
   for (char& i : tensorName) {
@@ -258,7 +238,7 @@ class GraphEncoder {
       bool add_node_names,
       bool use_external_data_format,
       const std::string& onnx_file_path,
-      const NodeAttrNameMap& node_attr_to_name = {});
+      NodeAttrNameMap node_attr_to_name = {});
 
   std::shared_ptr<onnx::ModelProto> get_model_proto() {
     return model_proto_;
@@ -363,7 +343,7 @@ class GraphEncoder {
   void EncodeTensor(
       onnx::TensorProto* tensor_proto,
       const at::Tensor& tensor,
-      const c10::optional<std::string> external_ref = {},
+      const std::optional<std::string>& external_ref = {},
       const bool use_external_data_format = false,
       const std::string& onnx_file_path = std::string());
 
@@ -383,7 +363,7 @@ class GraphEncoder {
 
   void EncodeValueInfoType(
       onnx::TypeProto* onnx_type,
-      const TypePtr node_type,
+      const TypePtr& node_type,
       const Value* n,
       const std::unordered_map<
           std::string,
@@ -416,9 +396,9 @@ class GraphEncoder {
 
   SymbolDimMap symbol_dim_map_;
   std::shared_ptr<onnx::ModelProto> model_proto_;
-  size_t num_blocks_;
-  size_t num_op_nodes_;
-  size_t num_external_data_;
+  size_t num_blocks_{0};
+  size_t num_op_nodes_{0};
+  size_t num_external_data_{0};
   onnx_torch::OperatorExportTypes operator_export_type_;
   bool strip_doc_;
   std::set<std::string> domains_;
@@ -435,7 +415,7 @@ class GraphEncoder {
   // tensor, beyond which the parameter is stored in a separate file (if
   // use_external_data_format_ is True). This threshold is in place
   // so as not to create too many external files.
-  const size_t ParamSizeThresholdForExternalStorage = 1024;
+  static constexpr size_t ParamSizeThresholdForExternalStorage = 1024;
 };
 
 onnx::TensorProto_DataType ATenTypeToOnnxType(at::ScalarType at_type) {
@@ -534,11 +514,9 @@ GraphEncoder::GraphEncoder(
     bool add_node_names,
     bool use_external_data_format,
     const std::string& onnx_file_path,
-    const NodeAttrNameMap& node_attr_to_name)
+    NodeAttrNameMap node_attr_to_name)
     : model_proto_(std::make_shared<onnx::ModelProto>()),
-      num_blocks_(0),
-      num_op_nodes_(0),
-      num_external_data_(0),
+
       operator_export_type_(operator_export_type),
       strip_doc_(strip_doc),
       defer_weight_export_(defer_weight_export),
@@ -546,7 +524,7 @@ GraphEncoder::GraphEncoder(
       onnx_opset_version_(onnx_opset_version),
       custom_opsets_(custom_opsets),
       graph_(graph),
-      node_attr_to_name_(node_attr_to_name) {
+      node_attr_to_name_(std::move(node_attr_to_name)) {
   model_proto_->set_producer_name("pytorch");
   TORCH_CHECK(
       onnx_opset_version > 0 &&
@@ -662,7 +640,7 @@ void GraphEncoder::TensorTypeToONNXType(
 
 void GraphEncoder::EncodeValueInfoType(
     onnx::TypeProto* onnx_type,
-    const TypePtr node_type,
+    const TypePtr& node_type,
     const Value* n,
     const std::unordered_map<
         std::string,
@@ -1248,7 +1226,7 @@ void GraphEncoder::EncodeLocalFunction(
 
   // encode attributes names
   if (n->hasAttribute(Symbol::attr("attributes"))) {
-    for (auto attr_name : n->ss(Symbol::attr("attributes"))) {
+    for (const auto& attr_name : n->ss(Symbol::attr("attributes"))) {
       AddAttribute(func_proto, attr_name);
     }
   }
@@ -1300,7 +1278,7 @@ void GraphEncoder::EncodeTypeProto(
 void GraphEncoder::EncodeTensor(
     onnx::TensorProto* tensor_proto,
     const at::Tensor& tensor,
-    const c10::optional<std::string> external_ref,
+    const std::optional<std::string>& external_ref,
     const bool use_external_data_format,
     const std::string& onnx_file_path) {
   for (auto d : tensor.sizes()) {
@@ -1482,8 +1460,8 @@ void check_onnx_proto(const std::string& proto_string) {
   try {
     auto* schema_registry = onnx::OpSchemaRegistry::Instance();
     onnx::ShapeInferenceOptions options{
-        /*check_type=*/true,
-        /*error_mode=*/true};
+        /*check_type_val=*/true,
+        /*strict_mode_val=*/true};
     onnx::shape_inference::InferShapes(model, schema_registry, options);
   } catch (const onnx::InferenceError& ex) {
     TORCH_WARN(

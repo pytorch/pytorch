@@ -14,10 +14,6 @@ Background_Matting,pass_due_to_skip,0
 
 
 
-DALLE2_pytorch,pass,11
-
-
-
 LearningToPaint,pass,0
 
 
@@ -86,7 +82,7 @@ detectron2_fasterrcnn_r_50_fpn,eager_fail_to_run,0
 
 
 
-detectron2_fcos_r_50_fpn,pass,36
+detectron2_fcos_r_50_fpn,pass,21
 
 
 
@@ -378,4 +374,4 @@ vision_maskrcnn,pass,16
 
 
 
-yolov3,pass,2
+yolov3,pass,0

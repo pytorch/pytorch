@@ -10,10 +10,6 @@ Background_Matting,pass_due_to_skip,0
 
 
 
-DALLE2_pytorch,model_fail_to_load,0
-
-
-
 LearningToPaint,pass,0
 
 
@@ -54,7 +50,7 @@ densenet121,pass,0
 
 
 
-detectron2_fcos_r_50_fpn,pass,38
+detectron2_fcos_r_50_fpn,pass,23
 
 
 
@@ -294,8 +290,8 @@ vgg16,pass,0
 
 
 
-vision_maskrcnn,pass,28
+vision_maskrcnn,pass,27
 
 
 
-yolov3,pass,2
+yolov3,pass,0

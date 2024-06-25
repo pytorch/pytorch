@@ -1,3 +1,4 @@
+import functools
 import math
 from enum import IntEnum
 
@@ -22,6 +23,7 @@ class NVIDIA_GPU_TYPE(IntEnum):
     HOPPER = 2
 
 
+@functools.lru_cache
 def get_gpu_type() -> NVIDIA_GPU_TYPE:
     gpu_info = torch.utils.collect_env.get_gpu_info(torch.utils.collect_env.run) or ""
     if "V100" in gpu_info:
@@ -36,38 +38,30 @@ def get_gpu_type() -> NVIDIA_GPU_TYPE:
 
 
 def get_collective_type(node: ir.IRNode) -> NCCL_COLL:
-    if isinstance(node, ir._CollectiveKernel):
-        kernel_name = node.python_kernel_name
-        assert kernel_name is not None
-        if "all_reduce" in kernel_name:
-            return NCCL_COLL.ALL_REDUCE
-        elif "all_gather" in kernel_name:
-            return NCCL_COLL.ALL_GATHER
-        elif "reduce_scatter" in kernel_name:
-            return NCCL_COLL.REDUCE_SCATTER
-        else:
-            raise Exception(f"Unsupported collective kernel: {kernel_name}")
+    if not isinstance(node, ir._CollectiveKernel):
+        raise ValueError(f"node is not a collective kernel: {node}")
 
-    if isinstance(node, (ir.AllReduce, ir.AllReduceCoalesced)):
+    kernel_name = node.python_kernel_name
+    assert kernel_name is not None
+    if "all_reduce" in kernel_name:
         return NCCL_COLL.ALL_REDUCE
-    elif isinstance(node, (ir.AllGatherIntoTensor, ir.AllGatherIntoTensorCoalesced)):
+    elif "all_gather" in kernel_name:
         return NCCL_COLL.ALL_GATHER
-    elif isinstance(node, (ir.ReduceScatterTensor, ir.ReduceScatterTensorCoalesced)):
+    elif "reduce_scatter" in kernel_name:
         return NCCL_COLL.REDUCE_SCATTER
     else:
-        raise Exception(f"Unsupported collective type: {node}")
+        raise ValueError(f"Unsupported collective kernel: {kernel_name}")
 
 
 def get_collective_input_size_bytes(node: ir.IRNode) -> int:
     sz_bytes = 0
     for inp in node.inputs:  # type: ignore[attr-defined]
-        shape = inp.layout.size
         numel = sympy_product(inp.layout.size)
         if isinstance(numel, sympy.Integer):
             # For ease of testing
             numel = int(numel)
         else:
-            numel = V.graph.sizevars.size_hint(numel)
+            numel = V.graph.sizevars.size_hint(numel, fallback=0)
         sz_bytes += numel * get_dtype_size(inp.layout.dtype)
     return sz_bytes
 
@@ -77,8 +71,6 @@ def get_collective_group_size(node: ir.IRNode) -> int:
         from torch.distributed.distributed_c10d import _get_group_size_by_name
 
         return _get_group_size_by_name(node.constant_args[-1])
-    elif isinstance(node, ir.CollectiveKernel):
-        return node.constant_args[2]  # type: ignore[attr-defined]
     else:
         raise TypeError(f"Unsupported collective type: {node}")
 
@@ -239,7 +231,6 @@ def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
 
     # =============== latency computation ===============
     intraHw = NCCL_HW.NVLINK
-    hw = intraHw if nNodes == 1 else NCCL_HW.NET
 
     if coll == NCCL_COLL.ALL_REDUCE:
         if nNodes > 1:

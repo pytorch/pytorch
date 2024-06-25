@@ -14,10 +14,6 @@ Background_Matting,pass_due_to_skip,0
 
 
 
-DALLE2_pytorch,fail_to_run,0
-
-
-
 LearningToPaint,pass,0
 
 
@@ -242,6 +238,10 @@ pyhpc_equation_of_state,pass,0
 
 
 
+pyhpc_isoneutral_mixing,pass,0
+
+
+
 pyhpc_turbulent_kinetic_energy,pass,0
 
 
@@ -250,7 +250,7 @@ pytorch_CycleGAN_and_pix2pix,pass,0
 
 
 
-pytorch_stargan,fail_to_run,0
+pytorch_stargan,pass,0
 
 
 
@@ -346,4 +346,4 @@ vision_maskrcnn,fail_to_run,0
 
 
 
-yolov3,fail_to_run,0
+yolov3,pass,0

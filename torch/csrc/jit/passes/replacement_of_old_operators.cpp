@@ -30,7 +30,7 @@ struct OldOpsReplacerWithUpgraders {
     Node* node = graph_it.next();
     while (node) {
       // load the schema name for this op
-      c10::optional<std::string> schema_name = c10::nullopt;
+      std::optional<std::string> schema_name = c10::nullopt;
       if (auto op_schema = node->maybeSchema()) {
         schema_name = getFullSchemaName(*op_schema);
       } else {

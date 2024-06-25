@@ -3,12 +3,13 @@ import copy
 import unittest
 
 import torch
+
 from functorch.experimental import control_flow
 from torch._dynamo.eval_frame import is_dynamo_supported
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
 from torch.export import export
 from torch.fx.passes.infra.pass_base import PassResult
-from torch.testing._internal.common_utils import run_tests, TestCase, IS_WINDOWS
+from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
 
 
 @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
@@ -50,12 +51,14 @@ class TestPassInfra(TestCase):
             def forward(self, pred, x, y):
                 def true_fn(x, y):
                     b = x.item()
-                    torch._constrain_as_value(b, min=2, max=5)
+                    torch._check(b >= 2)
+                    torch._check(b <= 5)
                     return x - y
 
                 def false_fn(x, y):
                     c = y.item()
-                    torch._constrain_as_value(c, min=2, max=5)
+                    torch._check(c >= 2)
+                    torch._check(c <= 5)
                     return x + y
 
                 ret = control_flow.cond(pred, true_fn, false_fn, [x, y])
@@ -64,7 +67,9 @@ class TestPassInfra(TestCase):
         x = torch.tensor([2])
         y = torch.tensor([5])
         mod = M()
-        _ = export(mod, (torch.tensor(True), x, y))._transform_do_not_use(_ExportPassBaseDeprecatedDoNotUse())
+        _ = export(mod, (torch.tensor(True), x, y))._transform_do_not_use(
+            _ExportPassBaseDeprecatedDoNotUse()
+        )
 
     def test_node_name_stability(self) -> None:
         # Tests that graph nodes stay the same for nodes that are not touched
@@ -77,12 +82,14 @@ class TestPassInfra(TestCase):
                 self.my_parameter = torch.nn.Parameter(torch.tensor(2.0))
 
                 # Define two buffers
-                self.register_buffer('my_buffer1', torch.tensor(3.0))
-                self.register_buffer('my_buffer2', torch.tensor(4.0))
+                self.register_buffer("my_buffer1", torch.tensor(3.0))
+                self.register_buffer("my_buffer2", torch.tensor(4.0))
 
             def forward(self, x1, x2):
                 # Use the parameter, buffers, and both inputs in the forward method
-                output = (x1 + self.my_parameter) * self.my_buffer1 + x2 * self.my_buffer2
+                output = (
+                    x1 + self.my_parameter
+                ) * self.my_buffer1 + x2 * self.my_buffer2
 
                 # Mutate one of the buffers (e.g., increment it by 1)
                 self.my_buffer2.add_(1.0)
@@ -184,5 +191,6 @@ class TestPassInfra(TestCase):
         old_signature = ep_before.graph_signature
         self.assertNotEqual(sig.user_outputs, old_signature.user_outputs)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     run_tests()

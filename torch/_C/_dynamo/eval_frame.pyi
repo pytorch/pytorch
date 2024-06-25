@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import types
 from typing import List, NewType, Optional
 
@@ -22,3 +23,5 @@ class _ExtraState:
     def invalidate(self, cache_entry: _CacheEntry): ...
 
 def _debug_get_cache_entry_list(code: types.CodeType) -> List[_CacheEntry]: ...
+
+py_opcode_caches: List[int]

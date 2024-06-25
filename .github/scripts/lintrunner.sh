@@ -6,6 +6,9 @@ CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
 eval "$(command conda 'shell.bash' 'hook' 2> /dev/null)"
 conda activate "${CONDA_ENV}"
 
+# Use uv to speed up lintrunner init
+python3 -m pip install uv==0.1.45
+
 CACHE_DIRECTORY="/tmp/.lintbin"
 # Try to recover the cached binaries
 if [[ -d "${CACHE_DIRECTORY}" ]]; then
@@ -26,6 +29,7 @@ python3 -m tools.pyi.gen_pyi \
     --native-functions-path aten/src/ATen/native/native_functions.yaml \
     --tags-path aten/src/ATen/native/tags.yaml \
     --deprecated-functions-path "tools/autograd/deprecated.yaml"
+python3 torch/utils/data/datapipes/gen_pyi.py
 
 RC=0
 # Run lintrunner on all files

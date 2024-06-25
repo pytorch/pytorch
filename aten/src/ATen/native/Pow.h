@@ -24,7 +24,7 @@ namespace native {
 // only non-zero result.
 template <class T,
   typename std::enable_if<std::is_integral<T>::value, T>::type* = nullptr>
-static inline HOST_DEVICE __ubsan_ignore_signed_int_overflow__ T powi_impl(T a, T b) {
+inline HOST_DEVICE __ubsan_ignore_signed_int_overflow__ T powi_impl(T a, T b) {
   T result = 1;
   while (b) {
     if (b & 1) {
@@ -38,13 +38,13 @@ static inline HOST_DEVICE __ubsan_ignore_signed_int_overflow__ T powi_impl(T a, 
 
 template <class T,
   typename std::enable_if<std::is_integral<T>::value && !std::is_signed<T>::value, T>::type* = nullptr>
-static inline HOST_DEVICE T powi(T a, T b) {
+inline HOST_DEVICE T powi(T a, T b) {
   return powi_impl(a, b);
 }
 
 template <class T,
   typename std::enable_if<std::is_integral<T>::value && std::is_signed<T>::value, T>::type* = nullptr>
-static inline HOST_DEVICE T powi(T a, T b) {
+inline HOST_DEVICE T powi(T a, T b) {
   if ( b < 0 ) {
       if ( a == 1 ) {
           return 1;

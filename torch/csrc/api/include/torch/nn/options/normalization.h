@@ -133,7 +133,7 @@ struct TORCH_API NormalizeFuncOptions {
   TORCH_ARG(double, eps) = 1e-12;
   /// the output tensor. If `out` is used, this
   /// operation won't be differentiable.
-  TORCH_ARG(c10::optional<Tensor>, out) = c10::nullopt;
+  TORCH_ARG(std::optional<Tensor>, out) = c10::nullopt;
 };
 
 } // namespace functional

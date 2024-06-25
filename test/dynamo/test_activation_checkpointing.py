@@ -1,7 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import functools
 import math
-import sys
 import unittest  # noqa: F811
 from importlib import import_module
 
@@ -10,7 +9,9 @@ import torch._dynamo.config
 
 import torch._dynamo.test_case
 import torch._functorch.config
+import torch.distributed as dist
 import torch.utils.checkpoint
+
 from functorch.compile import min_cut_rematerialization_partition
 from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.testing import CompileCounterWithBackend
@@ -18,9 +19,16 @@ from torch._higher_order_ops.wrap import tag_activation_checkpoint
 from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.two_tensor import TwoTensor
-from torch.utils.checkpoint import _pt2_selective_checkpoint_context_fn_gen, checkpoint
+from torch.utils.checkpoint import (
+    checkpoint,
+    CheckpointPolicy,
+    create_selective_checkpoint_contexts,
+)
 
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
+requires_distributed = functools.partial(
+    unittest.skipIf, not dist.is_available(), "requires distributed"
+)
 
 
 def checkpoint_wrapper(fn):
@@ -43,6 +51,7 @@ def count_ops(
 
     # assert ((freq or freq_ge) and op) or ((freqs or freqs_ge) and ops)
     if op is not None:
+        assert not isinstance(op, list)
         ops = [op]
     if freq is not None:
         freqs = [freq]
@@ -54,9 +63,8 @@ def count_ops(
             for node in gm.graph.nodes:
                 if match_rng_op(node, op) or node.target == op:
                     actual_count += 1
-            assert (
-                actual_count == freq
-            ), f"In graph {gm}, expected {op} to have occurred {freq} times in the graph, but got {actual_count}."
+            err_msg = f"In graph {gm}, expected {op} to have occurred {freq} times in the graph, but got {actual_count}."
+            assert actual_count == freq, err_msg
     else:
         assert freqs_ge is not None
         for op, freq_ge in zip(ops, freqs_ge):
@@ -101,8 +109,11 @@ def op_count(gm):
 
 
 def _get_custom_policy(no_recompute_list=None):
-    def _custom_policy(mode, func, *args, **kwargs):
-        return func in no_recompute_list
+    def _custom_policy(ctx, func, *args, **kwargs):
+        if func in no_recompute_list:
+            return CheckpointPolicy.MUST_SAVE
+        else:
+            return CheckpointPolicy.PREFER_RECOMPUTE
 
     return _custom_policy
 
@@ -239,6 +250,31 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )  # mm recomputed in the bwd
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x, y)
+
+    @requires_cuda
+    def test_tags_sequential_layers(self):
+        def gn(x):
+            x = x.cos()
+            for _ in range(3):
+                x = torch.mm(x, x)
+            x = x.cos()
+            return x
+
+        def fn(x):
+            x = torch.utils.checkpoint.checkpoint(gn, x)
+            x = torch.utils.checkpoint.checkpoint(gn, x)
+            return x
+
+        x = torch.randn(4, 4, device="cuda", requires_grad=True)
+
+        fw_compiler = functools.partial(count_ops, freq=6, op=torch.ops.aten.mm.default)
+        bw_compiler = functools.partial(
+            count_ops,
+            freqs=[2, 18],
+            ops=[torch.ops.aten.cos.default, torch.ops.aten.mm.default],
+        )  # mm recomputed in the bwd
+        backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
+        self._validate(fn, backend, x)
 
     @requires_cuda
     def test_tags_multiple_checkpoints(self):
@@ -493,9 +529,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
     @requires_cuda
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
     @torch._dynamo.config.patch(
         "_experimental_support_context_fn_in_torch_utils_checkpoint", True
     )
@@ -504,7 +537,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             no_recompute_list = [
                 torch.ops.aten.mm.default,
             ]
-            return _pt2_selective_checkpoint_context_fn_gen(
+            return create_selective_checkpoint_contexts(
                 _get_custom_policy(no_recompute_list=no_recompute_list)
             )
 
@@ -546,9 +579,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
     @requires_cuda
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
     @torch._dynamo.config.patch(
         "_experimental_support_context_fn_in_torch_utils_checkpoint", True
     )
@@ -557,7 +587,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             no_recompute_list = [
                 torch.ops.aten.mm.default,
             ]
-            return _pt2_selective_checkpoint_context_fn_gen(
+            return create_selective_checkpoint_contexts(
                 _get_custom_policy(no_recompute_list=no_recompute_list)
             )
 
@@ -602,9 +632,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
     @requires_cuda
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
     @torch._dynamo.config.patch(
         "_experimental_support_context_fn_in_torch_utils_checkpoint", True
     )
@@ -630,7 +657,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
         def selective_checkpointing_context_fn():
             meta = {}
-            return _pt2_selective_checkpoint_context_fn_gen(_get_custom_policy(meta))
+            return create_selective_checkpoint_contexts(_get_custom_policy(meta))
 
         def gn(x, y):
             return torch.sigmoid(
@@ -673,15 +700,12 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
     @requires_cuda
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
     @torch._dynamo.config.patch(
         "_experimental_support_context_fn_in_torch_utils_checkpoint", True
     )
     def test_compile_selective_checkpoint_partial_ctx_fn(self):
         def selective_checkpointing_context_fn(no_recompute_list):
-            return _pt2_selective_checkpoint_context_fn_gen(
+            return create_selective_checkpoint_contexts(
                 _get_custom_policy(no_recompute_list=no_recompute_list)
             )
 
@@ -725,9 +749,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
     @requires_cuda
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
     @torch._dynamo.config.patch(
         "_experimental_support_context_fn_in_torch_utils_checkpoint", True
     )
@@ -737,7 +758,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 torch.ops.aten.mm.default,
                 torch.ops.aten.sigmoid.default,
             ]
-            return _pt2_selective_checkpoint_context_fn_gen(
+            return create_selective_checkpoint_contexts(
                 _get_custom_policy(no_recompute_list=no_recompute_list),
             )
 
@@ -776,9 +797,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
     @requires_cuda
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
     @unittest.skip(
         "In-place op support in selective checkpointing + torch.compile "
         "requires TorchDispatchMode + torch.compile work to complete"
@@ -792,7 +810,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 torch.ops.aten.mm.default,
                 torch.ops.aten.sigmoid.default,
             ]
-            return _pt2_selective_checkpoint_context_fn_gen(
+            return create_selective_checkpoint_contexts(
                 _get_custom_policy(no_recompute_list=no_recompute_list)
             )
 
@@ -833,9 +851,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
     @requires_cuda
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
     @torch._dynamo.config.patch(
         "_experimental_support_context_fn_in_torch_utils_checkpoint", True
     )
@@ -846,7 +861,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 no_recompute_list = [
                     torch.ops.aten.sigmoid.default,
                 ]
-                return _pt2_selective_checkpoint_context_fn_gen(
+                return create_selective_checkpoint_contexts(
                     _get_custom_policy(no_recompute_list=no_recompute_list)
                 )
 
@@ -897,9 +912,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             self._compare_orig_and_checkpointed_fns(gn, fn, x)
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
     @torch._dynamo.config.patch(
         "_experimental_support_context_fn_in_torch_utils_checkpoint", True
     )
@@ -1078,6 +1090,56 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 op=torch.ops.aten._scaled_dot_product_flash_attention.default,
             )
         )
+
+    @requires_cuda
+    @requires_distributed()
+    def test_distributed_utils_checkpoint_wrapper(self):
+        from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+            checkpoint_wrapper as dist_checkpoint_wrapper,
+        )
+
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+                self.c = 2
+
+            def forward(self, x):
+                x = torch.sin(x)
+                x = self.linear(x)
+                x = torch.cos(x)
+                return x * self.c
+
+        mod = dist_checkpoint_wrapper(MockModule())
+        x = torch.randn(4, 4)
+        ref = mod(x)
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        res = opt_mod(x)
+        self.assertEqual(ref, res)
+
+    @requires_cuda
+    @requires_distributed()
+    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
+    def test_dynamo_does_not_trace_getattr_as_top_frame(self):
+        # inline_inbuilt_nn_modules is a proxy to emulate what FSDP tests do.
+        from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+            CheckpointWrapper,
+        )
+
+        cnt = CompileCounterWithBackend("eager")
+
+        lin = torch.nn.Linear(1, 1)
+        mod = torch.nn.Sequential(lin, lin)
+        mod = CheckpointWrapper(mod)
+        mod._checkpoint_wrapped_module.a = torch.ones(1, 1)
+
+        def fn(x):
+            return mod(x) * mod.a
+
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.randn(1, 1)
+
+        self.assertEqual(opt_fn(x), fn(x))
 
 
 if __name__ == "__main__":

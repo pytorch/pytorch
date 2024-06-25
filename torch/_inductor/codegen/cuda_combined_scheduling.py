@@ -1,6 +1,13 @@
-from typing import List
+# mypy: allow-untyped-defs
+from typing import Sequence, Union
 
-from ..scheduler import BaseSchedulerNode, BaseScheduling, Scheduler, SchedulerNode
+from ..scheduler import (
+    BaseSchedulerNode,
+    BaseScheduling,
+    FusedSchedulerNode,
+    Scheduler,
+    SchedulerNode,
+)
 from .cuda.cuda_cpp_scheduling import CUDACPPScheduling
 
 from .triton import TritonScheduling
@@ -22,10 +29,11 @@ class CUDACombinedScheduling(BaseScheduling):
         self._triton_scheduling = TritonScheduling(scheduler)
         self._cuda_cpp_scheduling = CUDACPPScheduling(scheduler)
 
+    def get_backend_features(self, device):
+        return self._triton_scheduling.get_backend_features(device)
+
     def choose_node_backend(self, node: BaseSchedulerNode) -> BaseScheduling:
-        if self._cuda_cpp_scheduling.is_cuda_cpp_template(
-            node
-        ) or self._cuda_cpp_scheduling.is_cuda_cpp_fused_template(node):
+        if self._cuda_cpp_scheduling.is_cuda_cpp_template(node):
             return self._cuda_cpp_scheduling
         return self._triton_scheduling
 
@@ -36,9 +44,7 @@ class CUDACombinedScheduling(BaseScheduling):
 
     def can_fuse_horizontal(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode):
         for node in (node1, node2):
-            if self._cuda_cpp_scheduling.is_cuda_cpp_template(
-                node
-            ) or self._cuda_cpp_scheduling.is_cuda_cpp_fused_template(node):
+            if self._cuda_cpp_scheduling.is_cuda_cpp_template(node):
                 return self._cuda_cpp_scheduling.can_fuse_horizontal(
                     node1, node2
                 )  # always False at the moment
@@ -48,9 +54,12 @@ class CUDACombinedScheduling(BaseScheduling):
         return self._triton_scheduling.group_fn(sizes)
 
     def codegen_template(
-        self, template_node: SchedulerNode, epilogue_nodes: List[SchedulerNode]
+        self,
+        template_node: BaseSchedulerNode,
+        epilogue_nodes: Sequence[BaseSchedulerNode],
     ):
         if self._cuda_cpp_scheduling.is_cuda_cpp_template(template_node):
+            assert epilogue_nodes is None or len(epilogue_nodes) == 0
             return self._cuda_cpp_scheduling.codegen_template(
                 template_node, epilogue_nodes
             )
@@ -59,8 +68,8 @@ class CUDACombinedScheduling(BaseScheduling):
                 template_node, epilogue_nodes
             )
 
-    def codegen_nodes(self, nodes: List[SchedulerNode]):
-        return self._triton_scheduling.codegen_nodes(nodes)
+    def codegen_node(self, node: Union[FusedSchedulerNode, SchedulerNode]):
+        return self._triton_scheduling.codegen_node(node)
 
     def codegen_sync(self):
         return self._triton_scheduling.codegen_sync()
@@ -73,3 +82,8 @@ class CUDACombinedScheduling(BaseScheduling):
 
     def benchmark_fused_nodes(self, nodes):
         return self._triton_scheduling.benchmark_fused_nodes(nodes)
+
+    def generate_kernel_code_from_nodes(self, nodes, benchmark_kernel=False):
+        return self._triton_scheduling.generate_kernel_code_from_nodes(
+            nodes, benchmark_kernel
+        )

@@ -6,10 +6,9 @@
 #include <torch/script.h>
 
 namespace at {
-namespace native {
-namespace metal {
+namespace native::metal {
 
-at::Tensor& copy_from_metal_(at::Tensor& dst, const at::Tensor& src) {
+static Tensor& copy_from_metal_(Tensor& dst, const Tensor& src) {
   TORCH_INTERNAL_ASSERT(
       src.device().type() == DeviceType::Metal,
       "copy_from_metal input tensor's device is not metal");
@@ -34,7 +33,7 @@ at::Tensor& copy_from_metal_(at::Tensor& dst, const at::Tensor& src) {
   return dst;
 }
 
-at::Tensor& copy_to_metal_(at::Tensor& dst, const at::Tensor& src) {
+static Tensor& copy_to_metal_(Tensor& dst, const Tensor& src) {
   TORCH_INTERNAL_ASSERT(
       dst.device().type() == DeviceType::Metal,
       "copy_to_metal_ output tensor's device is not metal");
@@ -54,7 +53,7 @@ at::Tensor& copy_to_metal_(at::Tensor& dst, const at::Tensor& src) {
   return dst;
 }
 
-at::Tensor& metal_copy_impl_(at::Tensor& dst, const at::Tensor& src) {
+static Tensor& metal_copy_impl_(Tensor& dst, const Tensor& src) {
   if (src.device().type() == at::kMetal && dst.device().type() == at::kCPU) {
     return copy_from_metal_(dst, src);
   }
@@ -69,7 +68,7 @@ at::Tensor& metal_copy_impl_(at::Tensor& dst, const at::Tensor& src) {
 
 #pragma mark - ATen Ops
 
-Tensor empty(
+static Tensor empty(
     c10::SymIntArrayRef sym_size,
     optional<ScalarType> dtype,
     optional<Layout> layout,
@@ -88,7 +87,7 @@ Tensor empty(
       std::move(mt), at::device(at::kMetal).dtype(dtype));
 };
 
-at::Tensor empty_strided(
+static Tensor empty_strided(
     IntArrayRef size,
     IntArrayRef stride,
     optional<ScalarType> dtype,
@@ -109,8 +108,7 @@ TORCH_LIBRARY_IMPL(aten, Metal, m) {
   m.impl(TORCH_SELECTIVE_NAME("aten::empty_strided"), TORCH_FN(empty_strided));
 }
 
-} // namespace metal
-} // namespace native
+} // namespace native::metal
 
 struct MetalImpl : public at::metal::MetalInterface {
   bool is_metal_available() const override {

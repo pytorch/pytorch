@@ -5,11 +5,17 @@
 #include <cmath>
 #include <cstdlib>
 #include <limits>
+#include <memory>
 #include <omp.h>
+
+// WARNING: be extra careful when including more ATen/c10 header files here!
+// Because AOTInductor generated code will copy-paste this cpp_prefix.h for
+// the CPU backend, we have to make sure the used headers are implemented
+// in a header-only way, i.e. all the function and class definitions are
+// in .h files instead of .cpp files, to avoid ABI backward-compatiblity breakage.
 
 #include <ATen/NumericUtils.h>
 #include <ATen/core/PhiloxRNGEngine.h>
-#include <ATen/native/Math.h>
 
 #include <c10/util/Float8_e4m3fn.h>
 #include <c10/util/Float8_e5m2.h>
@@ -28,6 +34,9 @@
 #if INDUCTOR_USE_VECTOR_TYPES()
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
+#else
+// For calc_erfinv
+#include <ATen/native/Math.h>
 #endif
 
 typedef at::Half half;
@@ -40,7 +49,7 @@ template <typename T>
 struct Welford {
   T mean = T(0);
   T m2 = T(0);
-  T weight = T(0);
+  int64_t index = 0;
 };
 
 
@@ -53,41 +62,57 @@ struct IsVecType<at::vec::Vectorized<T>>: std::true_type {};
 #endif
 
 template <typename T>
+struct WeightRecp {
+  using scalar_t = typename T::value_type;
+  int64_t N;
+  std::vector<scalar_t> weight_recps;
+  WeightRecp(int64_t N) : N(N) {
+    weight_recps.reserve(N);
+    for (const auto i : c10::irange(N)) {
+      weight_recps.push_back(
+          scalar_t(static_cast<double>(1) / static_cast<double>(i + 1)));
+    }
+  }
+};
+
+template <typename T>
 Welford<T> welford_combine(const Welford<T> &a, const Welford<T> &b) {
-  if constexpr (!IsVecType<T>::value) {
-    if (a.weight == 0) {
-      return b;
-    }
-    if (b.weight == 0) {
-      return a;
-    }
+  if (a.index == 0) {
+    return b;
+  }
+  if (b.index == 0) {
+    return a;
   }
   auto delta = b.mean - a.mean;
-  auto new_weight = a.weight + b.weight;
-  auto wb_over_w = b.weight / new_weight;
-  if constexpr (IsVecType<T>::value) {
-    // Guard against division by zero
-    wb_over_w = T::blendv(wb_over_w, T(0), new_weight == T(0));
-  }
+  auto new_index = a.index + b.index;
+  auto wb_over_w = T(b.index) / T(new_index);
   auto result = Welford<T>{
     a.mean + delta * wb_over_w,
-    a.m2 + b.m2 + delta * delta * a.weight * wb_over_w,
-    new_weight
+    a.m2 + b.m2 + delta * delta * T(a.index) * wb_over_w,
+    new_index,
   };
   return result;
 }
 
 template <typename T>
-Welford<T> welford_combine(const Welford<T> &acc, T data) {
+Welford<T> welford_combine(const Welford<T> &acc, T data, const WeightRecp<T>* w=nullptr) {
   // Add a single data point
+  int64_t index = acc.index + 1;
   auto delta = data - acc.mean;
-  auto new_weight = acc.weight + T(1);
-  auto new_mean = acc.mean + delta / new_weight;
+  T new_mean;
+  if constexpr (!IsVecType<T>::value) {
+    new_mean = acc.mean + delta / T(index);
+  } else {
+    new_mean = acc.mean +
+      ((w == nullptr || acc.index >= w->weight_recps.size())
+            ? delta / T(index)
+            : delta * T(w->weight_recps[acc.index]));
+  }
   auto new_delta = data - new_mean;
   auto result = Welford<T>{
     new_mean,
     acc.m2 + delta * new_delta,
-    new_weight
+    index
   };
   return result;
 }
@@ -146,14 +171,37 @@ inline at::vec::Vectorized<float> vec_shuffle_down(at::vec::Vectorized<float> x,
 }
 #endif
 
+#ifdef CPU_CAPABILITY_AVX512
+inline at::vec::Vectorized<float> vec_shuffle_down(at::vec::Vectorized<float> x, size_t n) {
+  using vec_t = at::vec::Vectorized<float>;
+#define SHUFFLE_MASK(z, y, x, w) ((z << 6) | (y << 4) | (x << 2) | w)
+  switch (n) {
+    case 1:
+      return vec_t(_mm512_permute_ps(x, SHUFFLE_MASK(1, 1, 3, 3)));
+    case 2:
+      return vec_t(_mm512_permute_ps(x, SHUFFLE_MASK(2, 2, 2, 2)));
+    case 4:
+      return vec_t(_mm512_permutexvar_ps(
+          _mm512_set_epi32(
+              12, 12, 12, 12, 12, 12, 12, 12, 4, 4, 4, 4, 4, 4, 4, 4),
+          x));
+    case 8:
+      return vec_t(_mm512_permutexvar_ps(
+          _mm512_set_epi32(8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8), x));
+  }
+  TORCH_CHECK(false, "Unhandled vec_shuffle_down value ", n);
+}
+#endif
+
 template <typename scalar_t>
 Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> acc) {
   using Vec = at::vec::Vectorized<scalar_t>;
   for (size_t n = 1; n < Vec::size(); n *= 2) {
+    auto index = acc.index;
     auto shuffled = Welford<Vec>{
       vec_shuffle_down(acc.mean, n),
       vec_shuffle_down(acc.m2, n),
-      vec_shuffle_down(acc.weight, n)
+      index,
     };
     acc = welford_combine(acc, shuffled);
   }
@@ -166,8 +214,7 @@ Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> 
   acc.m2.store(array);
   result.m2 = array[0];
 
-  acc.weight.store(array);
-  result.weight = array[0];
+  result.index = acc.index;
 
   return result;
 }
@@ -267,173 +314,167 @@ atomic_add(volatile T *addr, T offset) {
   atomic_addr->fetch_add(offset, std::memory_order_relaxed);
 }
 
-#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON)
+void mm_get_thread_blocking(
+    int num_threads,
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t M0,
+    int64_t N0,
+    int64_t K0,
+    int64_t& Mt,
+    int64_t& Nt,
+    int64_t& Kt) {
+  auto get_factors = [](int64_t number) {
+    int count = 0;
+    for (int64_t i = std::sqrt(number); i > 0; --i) {
+      if (number % i == 0) {
+        count += 2;
+      }
+    }
+    auto factors = std::make_unique<int64_t[]>(count);
+    int index = 0;
+    for (int64_t i = std::sqrt(number); i > 0; --i) {
+      if (number % i == 0) {
+        factors[index++] = number / i;
+        factors[index++] = i;
+      }
+    }
+    return std::make_tuple(std::move(factors), count);
+  };
 
-template <typename scalar_t>
-inline at::vec::Vectorized<float> cvt_lowp_fp_to_fp32(
-    at::vec::Vectorized<scalar_t> src) {
-  at::vec::Vectorized<float> res_vec1(0);
-  at::vec::Vectorized<float> res_vec2(0);
-  std::tie(res_vec1, res_vec2) = at::vec::convert_to_float<scalar_t>(src);
-  return res_vec1;
-}
+  auto get_blocking = [](int64_t num_threads,
+                         int64_t factor,
+                         int64_t m_blocks,
+                         int64_t n_blocks,
+                         int64_t k_blocks) {
+    int64_t thread_block_n = (n_blocks + factor - 1) / factor;
+    int64_t cofactor = num_threads / factor;
+    int64_t thread_block_m = (m_blocks + cofactor - 1) / cofactor;
+    return std::make_tuple(thread_block_m, thread_block_n, k_blocks);
+  };
 
-template <typename scalar_t>
-inline at::vec::Vectorized<scalar_t> cvt_fp32_to_lowp_fp(
-    at::vec::Vectorized<float> src) {
-  return at::vec::convert_from_float<scalar_t>(src, src);
-}
+  int64_t m_blocks = (M + M0 - 1) / M0;
+  int64_t n_blocks = (N + N0 - 1) / N0;
+  int64_t k_blocks = (K + K0 - 1) / K0;
 
-inline at::vec::Vectorized<float> cvt_int64_to_fp32(at::vec::VectorizedN<int64_t,2> src) {
-# if defined(CPU_CAPABILITY_AVX512)
-  auto low = _mm512_cvtepi64_ps(src[0]);
-  auto high = _mm512_cvtepi64_ps(src[1]);
-  return _mm512_insertf32x8(_mm512_castps256_ps512(low), high, 1);
-# elif defined(CPU_CAPABILITY_AVX2)
-  auto low_double = at::vec::convert_to_fp_of_same_size<double>(src[0]);
-  auto low = _mm256_cvtpd_ps(low_double);
-  auto high_double = at::vec::convert_to_fp_of_same_size<double>(src[1]);
-  auto high = _mm256_cvtpd_ps(high_double);
-  return _mm256_insertf128_ps(_mm256_castps128_ps256(low), high, 1);
-# else
-  constexpr int float_vec_size = at::vec::Vectorized<float>::size();
-  constexpr int int64_vec_size = at::vec::Vectorized<int64_t>::size();
-  __at_align__ float result[float_vec_size];
-  __at_align__ int64_t src_buf[int64_vec_size];
-  for (int i = 0; i < 2; i++) {
-    src[i].store(src_buf);
-    for (int j = 0; j < int64_vec_size; j++) {
-      result[i * int64_vec_size + j] = static_cast<float>(src_buf[j]);
+  auto [factors, count] = get_factors(num_threads);
+  assert(count > 0);
+
+  for (int i = 0; i < count; ++i) {
+    int64_t factor = factors[i];
+    if (n_blocks % factor == 0 &&
+        m_blocks % (num_threads / factor) == 0) {
+      std::tie(Mt, Nt, Kt) = get_blocking(
+          num_threads, factor, m_blocks, n_blocks, k_blocks);
+      return;
     }
   }
-  return at::vec::Vectorized<float>::loadu(result);
-# endif
-}
 
-inline at::vec::VectorizedN<int64_t,2> cvt_fp32_to_int64(at::vec::Vectorized<float> src) {
-  at::vec::VectorizedN<int64_t,2> result;
-# if defined(CPU_CAPABILITY_AVX512)
-  result[0] = _mm512_cvt_roundps_epi64(_mm512_castps512_ps256(src), _MM_FROUND_TO_ZERO |_MM_FROUND_NO_EXC);
-  result[1] = _mm512_cvt_roundps_epi64(_mm512_extractf32x8_ps(src, 1), _MM_FROUND_TO_ZERO |_MM_FROUND_NO_EXC);
-# elif defined(CPU_CAPABILITY_AVX2)
-  auto int32_vec = at::vec::convert_to_int_of_same_size(src);
-  result[0] = _mm256_cvtepi32_epi64(_mm256_castsi256_si128(int32_vec));
-  result[1] = _mm256_cvtepi32_epi64(_mm256_extracti128_si256(int32_vec, 1));
-# else
-  constexpr int float_vec_size = at::vec::Vectorized<float>::size();
-  constexpr int int64_vec_size = at::vec::Vectorized<int64_t>::size();
-  __at_align__ float src_buf[float_vec_size];
-  __at_align__ int64_t result_buf[int64_vec_size];
-  src.store(src_buf);
-  for (int i = 0; i < 2; i++) {
-    for (int j = 0; j < int64_vec_size; j++) {
-      result_buf[j] = static_cast<int64_t>(src_buf[i * int64_vec_size + j]);
+  for (int i = 0; i < count; ++i) {
+    int64_t factor = factors[i];
+    if (n_blocks % factor == 0) {
+      std::tie(Mt, Nt, Kt) = get_blocking(
+          num_threads, factor, m_blocks, n_blocks, k_blocks);
+      return;
     }
-    result[i] = at::vec::Vectorized<int64_t>::loadu(result_buf);
-  }
-# endif
-  return result;
-}
-
-inline at::vec::Vectorized<int32_t> cvt_int64_to_int32(at::vec::VectorizedN<int64_t,2> src) {
-# if defined(CPU_CAPABILITY_AVX512)
-  auto low = _mm512_cvtepi64_epi32(src[0]);
-  auto high = _mm512_cvtepi64_epi32(src[1]);
-  return _mm512_inserti32x8(_mm512_castsi256_si512(low), high, 1);
-# elif defined(CPU_CAPABILITY_AVX2)
-  auto low = _mm256_shuffle_epi32(src[0], _MM_SHUFFLE(2, 0, 2, 0));
-  auto high = _mm256_shuffle_epi32(src[1], _MM_SHUFFLE(2, 0, 2, 0));
-  auto low_perm = _mm256_permute4x64_epi64(low, _MM_SHUFFLE(3, 1, 2, 0));
-  auto high_perm = _mm256_permute4x64_epi64(high, _MM_SHUFFLE(3, 1, 2, 0));
-  return _mm256_blend_epi32(low_perm, high_perm, 0xF0);
-# else
-  constexpr int int32_vec_size = at::vec::Vectorized<int32_t>::size();
-  constexpr int int64_vec_size = at::vec::Vectorized<int64_t>::size();
-  __at_align__ int32_t result[int32_vec_size];
-  __at_align__ int64_t src_buf[int64_vec_size];
-  for (int i = 0; i < 2; i++) {
-    src[i].store(src_buf);
-    for (int j = 0; j < int64_vec_size; j++) {
-      result[i * int64_vec_size + j] = static_cast<int32_t>(src_buf[j]);
+    int64_t cofactor = num_threads / factor;
+    if (m_blocks % cofactor == 0) {
+      std::tie(Mt, Nt, Kt) = get_blocking(
+          num_threads, factor, m_blocks, n_blocks, k_blocks);
+      return;
     }
   }
-  return at::vec::Vectorized<int32_t>::loadu(result);
-# endif
+
+  assert(false && "Should not reach here.");
+  // Dummy return to avoid compiler warning
+  return;
 }
 
-inline at::vec::VectorizedN<int64_t,2> cvt_int32_to_int64(at::vec::Vectorized<int32_t> src) {
-  at::vec::VectorizedN<int64_t,2> result;
-# if defined(CPU_CAPABILITY_AVX512)
-  result[0] = _mm512_cvtepi32_epi64(_mm512_castsi512_si256(src));
-  result[1] = _mm512_cvtepi32_epi64(_mm512_extracti32x8_epi32(src, 1));
-# elif defined(CPU_CAPABILITY_AVX2)
-  result[0] = _mm256_cvtepi32_epi64(_mm256_castsi256_si128(src));
-  result[1] = _mm256_cvtepi32_epi64(_mm256_extracti128_si256(src, 1));
-#else
-  constexpr int int32_vec_size = at::vec::Vectorized<int32_t>::size();
-  constexpr int int64_vec_size = at::vec::Vectorized<int64_t>::size();
-  __at_align__ int32_t src_buf[int32_vec_size];
-  __at_align__ int64_t result_buf[int64_vec_size];
-  src.store(src_buf);
-  for (int i = 0; i < 2; i++) {
-    for (int j = 0; j < int64_vec_size; j++) {
-      result_buf[j] = static_cast<int64_t>(src_buf[i * int64_vec_size + j]);
+inline void mm_get_thread_blocks(
+    int thread_id,
+    int64_t M_blocks,
+    int64_t N_blocks,
+    int64_t K_blocks,
+    int64_t Mt_blocks,
+    int64_t Nt_blocks,
+    int64_t Kt_blocks,
+    int64_t& m_block_start,
+    int64_t& m_block_end,
+    int64_t& n_block_start,
+    int64_t& n_block_end,
+    int64_t& k_block_start,
+    int64_t& k_block_end) {
+  int64_t num_Kt = (K_blocks + Kt_blocks - 1) / Kt_blocks;
+  k_block_start = (thread_id % num_Kt) * Kt_blocks;
+  k_block_end = std::min(k_block_start + Kt_blocks, K_blocks);
+  thread_id /= num_Kt;
+  int64_t num_Nt = (N_blocks + Nt_blocks - 1) / Nt_blocks;
+  n_block_start = (thread_id % num_Nt) * Nt_blocks;
+  n_block_end = std::min(n_block_start + Nt_blocks, N_blocks);
+  thread_id /= num_Nt;
+  m_block_start = std::min(thread_id * Mt_blocks, M_blocks);
+  m_block_end = std::min(m_block_start + Mt_blocks, M_blocks);
+}
+
+struct amx_tilecfg {
+  uint8_t palette_id;
+  uint8_t start_row;
+  uint8_t reserved_0[14];
+  uint16_t colsb[16];
+  uint8_t rows[16];
+};
+
+class AMXState {
+ private:
+  amx_tilecfg tilecfg_;
+  uint8_t rows_;
+  uint16_t colsb_;
+  uint8_t num_tile_rows_;
+  uint8_t num_tile_columns_;
+
+ public:
+  AMXState() : rows_(0), colsb_(0), num_tile_rows_(0), num_tile_columns_(0) {
+    memset(&tilecfg_, 0, sizeof(tilecfg_));
+  }
+
+  inline void configure(
+      uint8_t rows,
+      uint16_t colsb,
+      uint8_t num_tile_rows,
+      uint8_t num_tile_columns,
+      void (*loadconfig)(const amx_tilecfg&)) {
+    if (tilecfg_.palette_id == 1 && rows_ == rows && colsb_ == colsb &&
+        num_tile_rows_ == num_tile_rows &&
+        num_tile_columns_ == num_tile_columns) {
+      return;
     }
-    result[i] = at::vec::Vectorized<int64_t>::loadu(result_buf);
+    tilecfg_.palette_id = 1;
+    rows_ = rows;
+    colsb_ = colsb;
+    num_tile_rows_ = num_tile_rows;
+    num_tile_columns_ = num_tile_columns;
+    const auto num_c_tiles = num_tile_rows * num_tile_columns;
+    // For C
+    for (int i = 0; i < num_c_tiles; i++) {
+      tilecfg_.rows[i] = rows;
+      tilecfg_.colsb[i] = 64;
+    }
+    // For A
+    for (int i = 0; i < num_tile_rows; i++) {
+      tilecfg_.rows[i + num_c_tiles] = rows;
+      tilecfg_.colsb[i + num_c_tiles] = colsb;
+    }
+    // For B
+    for (int i = 0; i < num_tile_columns; i++) {
+      tilecfg_.rows[i + num_c_tiles + num_tile_rows] = colsb / 4;
+      tilecfg_.colsb[i + num_c_tiles + num_tile_rows] = 64;
+    }
+    loadconfig(tilecfg_);
   }
-# endif
-  return result;
-}
 
-template <typename T, std::enable_if_t<std::is_same_v<T, int8_t> || std::is_same_v<T, uint8_t>, int> = 0>
-inline at::vec::Vectorized<int32_t> cvt_int8_to_int32(at::vec::Vectorized<T> src) {
-# if defined(CPU_CAPABILITY_AVX512)
-  auto src128 = _mm512_castsi512_si128(src);
-  if constexpr (std::is_same_v<T, int8_t>) {
-    return _mm512_cvtepi8_epi32(src128);
-  } else {
-    return _mm512_cvtepu8_epi32(src128);
+  inline void release(void (*tile_release)()) {
+    tilecfg_.palette_id = 0;
+    tile_release();
   }
-# elif defined(CPU_CAPABILITY_AVX2)
-  auto src128 = _mm256_castsi256_si128(src);
-  if constexpr (std::is_same_v<T, int8_t>) {
-    return _mm256_cvtepi8_epi32(src128);
-  } else {
-    return _mm256_cvtepu8_epi32(src128);
-  }
-# else
-  constexpr int int32_vec_size = at::vec::Vectorized<int32_t>::size();
-  constexpr int int8_vec_size = at::vec::Vectorized<T>::size();
-  __at_align__ int32_t result[int32_vec_size];
-  __at_align__ T src_buf[int8_vec_size];
-  src.store(src_buf);
-  for (int i = 0; i < int32_vec_size; i++) {
-    result[i] = static_cast<int32_t>(src_buf[i]);
-  }
-  return at::vec::Vectorized<int32_t>::loadu(result);
-# endif
-}
-
-template <typename T, std::enable_if_t<std::is_same_v<T, int8_t> || std::is_same_v<T, uint8_t>, int> = 0>
-inline at::vec::VectorizedN<int64_t, 2> cvt_int8_to_int64(at::vec::Vectorized<T> src) {
-  return cvt_int32_to_int64(cvt_int8_to_int32(src));
-}
-
-#endif
-
-#ifdef CPU_CAPABILITY_NEON
-namespace at::vec {
-template <typename T>
-typename std::enable_if_t<std::is_same_v<T, uint8_t> || std::is_same_v<T, int8_t>, at::vec::Vectorized<float>>
-inline convert_int8_to_float(at::vec::Vectorized<T> src) {
-  // Note: this function only convert inputs number of elements equal to at::vec::Vectorized<float>.size()
-  T data[at::vec::Vectorized<T>::size()];
-  float rc[at::vec::Vectorized<float>::size()];
-  src.store(data);
-  for(auto i = 0; i < at::vec::Vectorized<float>::size(); ++i) {
-          rc[i] = static_cast<float>(data[i]);
-  }
-  return at::vec::Vectorized<float>::loadu(rc);
-}
-}
-#endif
+};

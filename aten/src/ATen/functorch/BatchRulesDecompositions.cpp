@@ -226,6 +226,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   m.impl("reshape", native::reshape_symint);
   OP_DECOMPOSE(resolve_conj);
   OP_DECOMPOSE(resolve_neg);
+  OP_DECOMPOSE(rms_norm);
   OP_DECOMPOSE(row_stack);
   OP_DECOMPOSE(rrelu);
   OP_DECOMPOSE(rrelu_);
@@ -323,6 +324,8 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(type_as);
   OP_DECOMPOSE(linalg_diagonal);
   OP_DECOMPOSE(diagonal_copy);
+  OP_DECOMPOSE(alias_copy);
+  m.impl("as_strided_copy", native::as_strided_copy_symint);
   m.impl("pad", native::pad_symint);
   m.impl("_pad_circular", native::_pad_circular_symint);
   OP_DECOMPOSE(swapdims_);

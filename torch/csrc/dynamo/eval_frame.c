@@ -8,6 +8,31 @@
 #include <opcode.h>
 #include <stdbool.h>
 
+
+
+PyObject* guard_error_hook = NULL;
+const char* cache_lookup_profiler_str = "TorchDynamo Cache Lookup";
+
+static int active_dynamo_threads = 0;
+
+static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
+
+inline static PyObject* eval_frame_callback_get(void) {
+  void* result = PyThread_tss_get(&eval_frame_callback_key);
+  if (unlikely(result == NULL)) {
+    return (PyObject*)Py_None;
+  } else {
+    return (PyObject*)result;
+  }
+}
+
+inline static void eval_frame_callback_set(PyObject* obj) {
+  PyThread_tss_set(&eval_frame_callback_key, obj);
+}
+
+// 3.14 Not supported at all. See cpython_defs.c for hints
+#if !(IS_PYTHON_3_14_PLUS)
+
 // Problem in CPython includes when mixing core and non-core build
 // The fix was not backported to 3.12 so this is needed here
 // https://github.com/python/cpython/issues/105268
@@ -58,7 +83,11 @@ DECLARE_PYOBJ_ATTR(f_func)
 DECLARE_PYOBJ_ATTR(f_globals)
 DECLARE_PYOBJ_ATTR(f_builtins)
 DECLARE_PYOBJ_ATTR(f_locals)
+#if IS_PYTHON_3_13_PLUS
+DECLARE_PYOBJ_ATTR(f_executable)
+#else
 DECLARE_PYOBJ_ATTR(f_code)
+#endif
 DECLARE_PYOBJ_ATTR(frame_obj)
 
 #undef DECLARE_PYOBJ_ATTR
@@ -76,7 +105,7 @@ static PyObject* THPPyInterpreterFrame_f_lasti(THPPyInterpreterFrame* self, PyOb
 
 static PyObject* THPPyInterpreterFrame_f_lineno(THPPyInterpreterFrame* self, PyObject* _noargs) {
   if (!self->frame->frame_obj) {
-    return PyLong_FromLong(self->frame->f_code->co_firstlineno);
+    return PyLong_FromLong(F_CODE(self->frame)->co_firstlineno);
   }
   int lineno = PyFrame_GetLineNumber(self->frame->frame_obj);
   if (lineno < 0) {
@@ -102,7 +131,11 @@ static struct PyGetSetDef THPPyInterpreterFrame_properties[] = {
     {"f_globals", (getter)THPPyInterpreterFrame_f_globals, NULL, NULL, NULL},
     {"f_builtins", (getter)THPPyInterpreterFrame_f_builtins, NULL, NULL, NULL},
     {"f_locals", (getter)THPPyInterpreterFrame_f_locals, NULL, NULL, NULL},
+#if IS_PYTHON_3_13_PLUS
+    {"f_code", (getter)THPPyInterpreterFrame_f_executable, NULL, NULL, NULL},
+#else
     {"f_code", (getter)THPPyInterpreterFrame_f_code, NULL, NULL, NULL},
+#endif
     {"frame_obj", (getter)THPPyInterpreterFrame_frame_obj, NULL, NULL, NULL},
     {"previous", (getter)THPPyInterpreterFrame_previous, NULL, NULL, NULL},
     {"f_lasti", (getter)THPPyInterpreterFrame_f_lasti, NULL, NULL, NULL},
@@ -132,26 +165,11 @@ THPPyInterpreterFrame* THPPyInterpreterFrame_New(_PyInterpreterFrame* frame) {
 #else
 #define THP_EVAL_API_FRAME_OBJECT PyFrameObject
 
-#define THP_PyFrame_FastToLocalsWithError PyFrame_FastToLocalsWithError
+static int
+THP_PyFrame_FastToLocalsWithError(THP_EVAL_API_FRAME_OBJECT *frame, int *free_vars_copied) {
+  return PyFrame_FastToLocalsWithError(frame);
+}
 #endif
-
-PyObject* guard_error_hook = NULL;
-const char* cache_lookup_profiler_str = "TorchDynamo Cache Lookup";
-
-static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
-
-inline static PyObject* eval_frame_callback_get(void) {
-  void* result = PyThread_tss_get(&eval_frame_callback_key);
-  if (unlikely(result == NULL)) {
-    return (PyObject*)Py_None;
-  } else {
-    return (PyObject*)result;
-  }
-}
-
-inline static void eval_frame_callback_set(PyObject* obj) {
-  PyThread_tss_set(&eval_frame_callback_key, obj);
-}
 
 static PyObject* _custom_eval_frame_shim(
     PyThreadState* tstate,
@@ -161,7 +179,8 @@ static PyObject* _custom_eval_frame(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag,
-    PyObject* callback);
+    PyObject* callback,
+    int* should_clear_frame);
 static PyObject *(*previous_eval_frame)(PyThreadState *tstate,
                                         THP_EVAL_API_FRAME_OBJECT* frame, int throw_flag) = NULL;
 
@@ -235,8 +254,8 @@ inline static void enable_eval_frame_default(PyThreadState* tstate) {
 
 inline static const char* get_frame_name(THP_EVAL_API_FRAME_OBJECT* frame) {
   // Returns the C string name of the current frame.
-  DEBUG_CHECK(PyUnicode_Check(frame->f_code->co_name));
-  return PyUnicode_AsUTF8(frame->f_code->co_name);
+  DEBUG_CHECK(PyUnicode_Check(F_CODE(frame)->co_name));
+  return PyUnicode_AsUTF8(F_CODE(frame)->co_name);
 }
 
 static inline PyObject* call_callback(
@@ -268,37 +287,46 @@ static inline PyObject* call_callback(
   return res;
 }
 
+static inline void clear_old_frame_if_python_312_plus(
+  PyThreadState* tstate,
+  THP_EVAL_API_FRAME_OBJECT* frame) {
+#if IS_PYTHON_3_12_PLUS
+
+  THP_PyFrame_Clear(frame);
+  THP_PyThreadState_PopFrame(tstate, frame);
+
+#endif
+}
+
 inline static PyObject* eval_custom_code_impl(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     PyCodeObject* code,
-    int throw_flag) {
+    int throw_flag,
+    int free_vars_copied) {
 
   DEBUG_NULL_CHECK(tstate);
   DEBUG_NULL_CHECK(frame);
   DEBUG_NULL_CHECK(code);
 
-  #if IS_PYTHON_3_11_PLUS
+#if IS_PYTHON_3_11_PLUS
 
   // Generate Python function object and _PyInterpreterFrame in a way similar to
   // https://github.com/python/cpython/blob/e715da6db1d1d70cd779dc48e1ba8110c51cc1bf/Python/ceval.c#L1130
-  #if IS_PYTHON_3_12_PLUS
-  // Most of these don't exist in 3.12 anymore.
-  // _PyFunction_CopyWithNewCode and _PyFrame_InitializeSpecials in particular
-  PyFunctionObject* func;
-  PyErr_SetString(PyExc_RuntimeError, "Dynamo is not supported in Python 3.12 yet");
-  return NULL;
-  #else
-  PyFunctionObject* func = _PyFunction_CopyWithNewCode((PyFunctionObject*) frame->f_func, code);
+#if IS_PYTHON_3_12_PLUS
+  PyFunctionObject* old_func = (PyFunctionObject*) frame->f_funcobj;
+  size_t size = code->co_framesize;
+#else
+  PyFunctionObject* old_func = frame->f_func;
+  size_t size = code->co_nlocalsplus + code->co_stacksize + FRAME_SPECIALS_SIZE;
+#endif
+
+  PyFunctionObject* func = _PyFunction_CopyWithNewCode(old_func, code);
   if (func == NULL) {
     return NULL;
   }
-  #endif
 
-  size_t size = code->co_nlocalsplus + code->co_stacksize + FRAME_SPECIALS_SIZE;
-  // THP_EVAL_API_FRAME_OBJECT (_PyInterpreterFrame) is a regular C struct, so
-  // it should be safe to use system malloc over Python malloc, e.g. PyMem_Malloc
-  THP_EVAL_API_FRAME_OBJECT* shadow = malloc(size * sizeof(PyObject*));
+  THP_EVAL_API_FRAME_OBJECT* shadow = THP_PyThreadState_BumpFramePointerSlow(tstate, size);
   if (shadow == NULL) {
     Py_DECREF(func);
     return NULL;
@@ -306,21 +334,33 @@ inline static PyObject* eval_custom_code_impl(
 
   Py_INCREF(func);
   // consumes reference to func
-  #if !(IS_PYTHON_3_12_PLUS)
+#if IS_PYTHON_3_12_PLUS
+  _PyFrame_Initialize(shadow, func, NULL, code, 0);
+#else
   _PyFrame_InitializeSpecials(shadow, func, NULL, code->co_nlocalsplus);
-  #endif
+#endif
 
   PyObject** fastlocals_old = frame->localsplus;
   PyObject** fastlocals_new = shadow->localsplus;
-  Py_ssize_t n_old = frame->f_code->co_nlocalsplus;
+  Py_ssize_t n_old = F_CODE(frame)->co_nlocalsplus;
   Py_ssize_t n_new = code->co_nlocalsplus;
 
   // localsplus are XINCREF'd by default eval frame, so all values must be valid.
+#if !(IS_PYTHON_3_12_PLUS)
+  // _PyFrame_Initialize in 3.12 already does this
   for (int i = 0; i < code->co_nlocalsplus; i++) {
     fastlocals_new[i] = NULL;
   }
+#endif
 
-  #else
+  // for 3.11+, if free_vars_copied is true, we do not need to
+  // run the first COPY_FREE_VARS since THP_PyFrame_FastToLocalsWithError
+  // already did the equivalent action.
+  if (free_vars_copied && _Py_OPCODE(_PyCode_CODE(F_CODE(shadow))[0]) == COPY_FREE_VARS) {
+    PREV_INSTR(shadow) = _PyCode_CODE(F_CODE(shadow));
+  }
+
+#else
 
   THP_EVAL_API_FRAME_OBJECT* shadow = PyFrame_New(tstate, code, frame->f_globals, NULL);
   if (shadow == NULL) {
@@ -329,10 +369,10 @@ inline static PyObject* eval_custom_code_impl(
 
   PyObject** fastlocals_old = frame->f_localsplus;
   PyObject** fastlocals_new = shadow->f_localsplus;
-  Py_ssize_t n_old = frame->f_code->co_nlocals + PyCode_GetNFreevars(frame->f_code) + PyCode_GetNCellvars(frame->f_code);
+  Py_ssize_t n_old = F_CODE(frame)->co_nlocals + PyCode_GetNFreevars(F_CODE(frame)) + PyCode_GetNCellvars(F_CODE(frame));
   Py_ssize_t n_new = code->co_nlocals + PyCode_GetNFreevars(code) + PyCode_GetNCellvars(code);
 
-  #endif
+#endif
 
   // ============== Initialize new frame from old frame ============
   // Python internal for executing a function:
@@ -374,11 +414,11 @@ inline static PyObject* eval_custom_code_impl(
 
   // copy args
   // according to https://docs.python.org/3/library/inspect.html , `co_argcount` is the number of arguments (not including keyword only arguments, * or ** args). so we need to add `co_kwonlyargcount` and `co_flags` to get the total number of arguments.
-  // !!(frame->f_code->co_flags & CO_VARARGS) is 1 if the function has *args, 0 otherwise
-  // !!(frame->f_code->co_flags & CO_VARKEYWORDS) is 1 if the function has **kwargs, 0 otherwise
+  // !!(F_CODE(frame)->co_flags & CO_VARARGS) is 1 if the function has *args, 0 otherwise
+  // !!(F_CODE(frame)->co_flags & CO_VARKEYWORDS) is 1 if the function has **kwargs, 0 otherwise
   // they convert bit flags to 0 or 1, and avoid branching.
   // This is performance critical code, so we really care about performance.
-  Py_ssize_t total_argcount_old = frame->f_code->co_argcount + frame->f_code->co_kwonlyargcount + !!(frame->f_code->co_flags & CO_VARARGS) + !!(frame->f_code->co_flags & CO_VARKEYWORDS);
+  Py_ssize_t total_argcount_old = F_CODE(frame)->co_argcount + F_CODE(frame)->co_kwonlyargcount + !!(F_CODE(frame)->co_flags & CO_VARARGS) + !!(F_CODE(frame)->co_flags & CO_VARKEYWORDS);
 
   for (Py_ssize_t i = 0; i < total_argcount_old; i++) {
     Py_XINCREF(fastlocals_old[i]);
@@ -386,7 +426,7 @@ inline static PyObject* eval_custom_code_impl(
   }
 
   // copy free vars
-  Py_ssize_t nfrees_old = PyCode_GetNFreevars(frame->f_code);
+  Py_ssize_t nfrees_old = PyCode_GetNFreevars(F_CODE(frame));
 
   for (Py_ssize_t i = 0; i < nfrees_old; i++) {
     Py_XINCREF(fastlocals_old[n_old - 1 - i]);
@@ -399,35 +439,47 @@ inline static PyObject* eval_custom_code_impl(
   // conditional test to tell if a variable is not a cell variable
   // this is straightforward in Python 3.11 and higher, as there are bit flags in `co_localspluskinds` to tell if a variable is a cell variable.
   // in Python 3.10 and lower, essentially we are checking if a variable is a new local variable (because of the layout mentioned above, the first variable that is not cell variable is the first new local variable). the corresponding slot in `flocalsplus` is NULL for new local variables.
-  #if IS_PYTHON_3_11_PLUS
-    if(!(_PyLocals_GetKind(frame->f_code->co_localspluskinds, i) & CO_FAST_CELL))
+#if IS_PYTHON_3_11_PLUS
+    if(!(_PyLocals_GetKind(F_CODE(frame)->co_localspluskinds, i) & CO_FAST_CELL))
     {
       break;
     }
-  #else
+#else
     if(fastlocals_old[i] == NULL)
     {
       break;
     }
-  #endif
+#endif
 
     Py_XINCREF(fastlocals_old[i]);
     fastlocals_new[j] = fastlocals_old[i];
   }
 
+  // NOTE: if you want to evaluate frame instead of shadow in 3.12+,
+  // you need to clear_old_frame_if_python_312_plus the shadow frame BEFORE
+  // calling eval_frame_default (i.e. here) and comment out the
+  // clear_old_frame_if_python_312_plus call on the original frame.
+
   PyObject* result = eval_frame_default(tstate, shadow, throw_flag);
 
-  #if IS_PYTHON_3_11_PLUS
+#if IS_PYTHON_3_12_PLUS
 
-  THP_PyFrame_Clear(shadow);
-  free(shadow);
+  // frame is cleared by caller
   Py_DECREF(func);
 
-  #else
+#elif IS_PYTHON_3_11_PLUS
+
+  // In 3.11, shadow has is_entry set to true, so _PyEvalFrameClearAndPop is not called,
+  // so we manually clear and pop the shadow frame.
+  THP_PyFrame_Clear(shadow);
+  THP_PyThreadState_PopFrame(tstate, shadow);
+  Py_DECREF(func);
+
+#else
 
   Py_DECREF(shadow);
 
-  #endif
+#endif
 
   return result;
 }
@@ -437,13 +489,15 @@ inline static PyObject* eval_custom_code(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     PyCodeObject* code,
-    int throw_flag) {
+    int throw_flag,
+    int free_vars_copied) {
   _PytorchRecordFunctionState* rf = _pytorch_record_function_enter("Torch-Compiled Region");
   PyObject* result = eval_custom_code_impl(
     tstate,
     frame,
     code,
-    throw_flag
+    throw_flag,
+    free_vars_copied
   );
   _pytorch_record_function_exit(rf);
   return result;
@@ -464,30 +518,41 @@ static PyObject* _custom_eval_frame_shim(
     return eval_frame_default(tstate, frame, throw_flag);
   }
 
-  return _custom_eval_frame(tstate, frame, throw_flag, callback);
+  int should_clear_frame = 0;
+  PyObject* result = _custom_eval_frame(tstate, frame, throw_flag, callback, &should_clear_frame);
+  if (should_clear_frame) {
+    clear_old_frame_if_python_312_plus(tstate, frame);
+  }
+  return result;
 }
 
+// NOTE: In 3.12+, the frame evaluation function (callee) is responsible for clearing/popping
+// the frame, meaning that unless we default evaluate the original frame,
+// we are responsible for clearing it - via clear_old_frame_if_python_312_plus.
+// The should_clear_frame flag is used to indicate whether the frame should be
+// cleared by _custom_eval_frame's caller.
 static PyObject* _custom_eval_frame(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag,
-    PyObject* callback) {
-  #if IS_PYTHON_3_11_PLUS
+    PyObject* callback,
+    int* should_clear_frame) {
+#if IS_PYTHON_3_11_PLUS
   DEBUG_TRACE(
       "begin %s %s %i %i",
       get_frame_name(frame),
-      PyUnicode_AsUTF8(frame->f_code->co_filename),
-      frame->f_code->co_firstlineno,
+      PyUnicode_AsUTF8(F_CODE(frame)->co_filename),
+      F_CODE(frame)->co_firstlineno,
       _PyInterpreterFrame_LASTI(frame));
-  #else
+#else
   DEBUG_TRACE(
       "begin %s %s %i %i %i",
       get_frame_name(frame),
-      PyUnicode_AsUTF8(frame->f_code->co_filename),
+      PyUnicode_AsUTF8(F_CODE(frame)->co_filename),
       frame->f_lineno,
       frame->f_lasti,
       frame->f_iblock);
-  #endif
+#endif
 
   if (throw_flag) {
     // When unwinding generators, eval frame is called with throw_flag ==
@@ -514,19 +579,21 @@ static PyObject* _custom_eval_frame(
     return eval_frame_default(tstate, frame, throw_flag);
   }
 
-  ExtraState* extra = get_extra_state(frame->f_code);
+  ExtraState* extra = get_extra_state(F_CODE(frame));
   if (extra == SKIP_CODE || (callback == Py_False && extra == NULL)) {
     DEBUG_TRACE("skip %s", get_frame_name(frame));
     return eval_frame_default(tstate, frame, throw_flag);
   }
 
   if (extra == NULL) {
-    extra = init_and_set_extra_state(frame->f_code);
+    extra = init_and_set_extra_state(F_CODE(frame));
   }
 
   // TODO(jansel): investigate directly using the "fast" representation
-  if (THP_PyFrame_FastToLocalsWithError(frame) < 0) {
+  int free_vars_copied = 0;
+  if (THP_PyFrame_FastToLocalsWithError(frame, &free_vars_copied) < 0) {
     DEBUG_TRACE("error %s", get_frame_name(frame));
+    *should_clear_frame = 1;
     return NULL;
   }
 
@@ -542,6 +609,7 @@ static PyObject* _custom_eval_frame(
 
     if (maybe_cached_code == NULL) {
       // guard eval failed, keep propagating
+      *should_clear_frame = 1;
       return NULL;
     } else if (maybe_cached_code == Py_None) {
       DEBUG_TRACE("cache miss %s", get_frame_name(frame));
@@ -550,7 +618,8 @@ static PyObject* _custom_eval_frame(
     PyCodeObject* cached_code = (PyCodeObject*)maybe_cached_code;
     // used cached version
     DEBUG_TRACE("cache hit %s", get_frame_name(frame));
-    return eval_custom_code(tstate, frame, cached_code, throw_flag);
+    *should_clear_frame = 1;
+    return eval_custom_code(tstate, frame, cached_code, throw_flag, free_vars_copied);
   }
   DEBUG_CHECK(PyDict_CheckExact(frame->f_locals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_globals));
@@ -566,6 +635,7 @@ static PyObject* _custom_eval_frame(
   _pytorch_record_function_exit(rf);
   if (maybe_cached_code == NULL) {
     // Python error
+    *should_clear_frame = 1;
     return NULL;
   } else if (maybe_cached_code != Py_None) {
     PyCodeObject* cached_code = (PyCodeObject*)maybe_cached_code;
@@ -573,7 +643,8 @@ static PyObject* _custom_eval_frame(
     DEBUG_TRACE("cache hit %s", get_frame_name(frame));
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
-    return eval_custom_code(tstate, frame, cached_code, throw_flag);
+    *should_clear_frame = 1;
+    return eval_custom_code(tstate, frame, cached_code, throw_flag, free_vars_copied);
   }
   // cache miss
   CacheEntry* cache_entry = extract_cache_entry(extra);
@@ -588,6 +659,7 @@ static PyObject* _custom_eval_frame(
     // cascading failure from internal exceptions.  The upshot is if
     // Dynamo barfs, that's it for Dynamo, even if you catch the exception
     // inside the torch.compile block we won't try to Dynamo anything else.
+    *should_clear_frame = 1;
     return NULL;
   } else if (result != Py_None) {
     DEBUG_TRACE("create cache %s", get_frame_name(frame));
@@ -598,24 +670,48 @@ static PyObject* _custom_eval_frame(
     // extra->cache_entry. extra wont be NULL here.
     CacheEntry* new_cache_entry = create_cache_entry(extra, result, backend);
     Py_DECREF(result);
+
     // Update the existing cache_entry on the extra object. This extra object is
     // sitting on the extra scratch space, we are just changing the cache_entry
     // ptr. As a result, extra now becomes the owner of CacheEntry object. This
     // will be cleaned up when set_extra_state is called.
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
-    return eval_custom_code(tstate, frame, CacheEntry_get_code(new_cache_entry), throw_flag);
+    *should_clear_frame = 1;
+    return eval_custom_code(tstate, frame, CacheEntry_get_code(new_cache_entry), throw_flag, free_vars_copied);
   } else {
     DEBUG_TRACE("create skip %s", get_frame_name(frame));
     Py_DECREF(result);
-    set_extra_state(frame->f_code, SKIP_CODE);
+    set_extra_state(F_CODE(frame), SKIP_CODE);
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
     return eval_frame_default(tstate, frame, throw_flag);
   }
 }
 
-static int active_dynamo_threads = 0;
+#else // IS_PYTHON_3_14_PLUS
+
+// Fake definitions for everything we removed
+
+typedef struct THPPyInterpreterFrame {
+  PyObject_HEAD
+  _PyInterpreterFrame* frame; // Borrowed reference
+} THPPyInterpreterFrame;
+
+inline static void enable_eval_frame_shim(PyThreadState* tstate) {}
+inline static void enable_eval_frame_default(PyThreadState* tstate) {}
+
+static struct PyGetSetDef THPPyInterpreterFrame_properties[] = {NULL};
+
+static PyTypeObject THPPyInterpreterFrameType = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "torch._C.dynamo.eval_frame._PyInterpreterFrame",
+    .tp_basicsize = sizeof(THPPyInterpreterFrame),
+    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_getset = THPPyInterpreterFrame_properties,
+};
+
+#endif // CPython 3.14
 
 static PyObject* increment_working_threads(PyThreadState* tstate) {
   active_dynamo_threads = active_dynamo_threads + 1;
@@ -732,6 +828,9 @@ static struct PyModuleDef _module = {
     -1,
     _methods};
 
+#if IS_PYTHON_3_12_PLUS
+#define _PyEval_RequestCodeExtraIndex PyUnstable_Eval_RequestCodeExtraIndex
+#endif
 
 PyObject* torch_c_dynamo_eval_frame_init(void) {
   extra_index = _PyEval_RequestCodeExtraIndex(destroy_extra_state);

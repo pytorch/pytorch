@@ -71,7 +71,7 @@ TORCH_API int64_t initAndPushDynamicLayer(
     optional<bool> prev_fwd_grad_mode = nullopt,
     optional<bool> functionalize_add_back_views = nullopt);
 TORCH_API DynamicLayer popDynamicLayerAndDeleteMetadata();
-TORCH_API c10::optional<DynamicLayer> maybeCurrentDynamicLayer();
+TORCH_API std::optional<DynamicLayer> maybeCurrentDynamicLayer();
 TORCH_API const std::vector<DynamicLayer>& getDynamicLayerStack();
 TORCH_API void setDynamicLayerStack(const std::vector<DynamicLayer>& stack);
 TORCH_API void setDynamicLayerFrontBackKeysIncluded(bool included);
@@ -95,7 +95,7 @@ TORCH_API const std::shared_ptr<bool>& getLifeHandleForLevel(int64_t level);
 TORCH_API bool isInplaceOp(const c10::FunctionSchema& schema);
 
 // Given the indices of unwrapped inputs and the schema, this returns the indices of any outputs that should remain unwrapped
-TORCH_API c10::optional<size_t> findAliasedOutput(const FunctionSchema& schema, const int64_t immutable_input);
+TORCH_API std::optional<size_t> findAliasedOutput(const FunctionSchema& schema, const int64_t immutable_input);
 
 TORCH_API Tensor unwrapIfDead(const Tensor& tensor);
 TORCH_API bool isDeadTensorWrapper(const Tensor& tensor);

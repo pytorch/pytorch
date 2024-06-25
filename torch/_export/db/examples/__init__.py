@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import glob
 import importlib
 from os.path import basename, dirname, isfile, join

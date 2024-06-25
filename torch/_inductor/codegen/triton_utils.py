@@ -1,9 +1,13 @@
+# mypy: allow-untyped-defs
 from typing import Any, Dict, List, Optional
+
+import sympy
 
 import torch
 
 from .. import config
-from ..utils import _type_of, instance_descriptor
+from ..runtime.hints import instance_descriptor
+from ..utils import _type_of
 from ..virtualized import V
 from .common import KernelArgType, SizeArg, TensorArg, WorkspaceArg
 
@@ -36,7 +40,7 @@ def signature_of(arg: KernelArgType, *, size_dtype: str) -> str:
             # From triton/runtime/jit.py
             # `None` is nullptr.  Implicitly convert to *i8.
             return "*i8"
-        elif isinstance(arg.expr, float):
+        elif isinstance(arg.expr, (float, sympy.Float)):
             return "fp32"
         if size_dtype == "tl.int32":
             return "i32"
@@ -66,7 +70,8 @@ def signature_to_meta(
 def is_unaligned_buffer(arg: TensorArg):
     buf_name = arg.buffer
     if buf_name in V.graph.graph_inputs:
-        return not config.assume_aligned_inputs
+        # See Note: [Input Alignment handling in Inductor]
+        return buf_name not in V.graph.aligned_inputs
 
     if buf_name in V.graph.constants:
         # all constants are assumed to be aligned
@@ -142,7 +147,7 @@ def config_of(
         i
         for i, arg in zip(indices, args)
         if isinstance(arg, SizeArg)
-        and arg.expr is not None
+        and isinstance(arg.expr, (int, sympy.Integer))
         and V.graph.sizevars.statically_known_equals(arg.expr, 1)  # type: ignore[arg-type]
     )
     # ids_of_folded_args is set from equal_to_1

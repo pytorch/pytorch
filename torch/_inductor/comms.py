@@ -1,19 +1,24 @@
+# mypy: allow-untyped-defs
 # pyre-strict
+from __future__ import annotations
 
-from typing import List
+from typing import List, TYPE_CHECKING
 
 import torch
 
-from . import config, ir, scheduler
+from . import config, ir
 from .dependencies import WeakDep
 from .utils import is_collective, is_wait, tuple_sorted
 
 overlap_log = torch._logging.getArtifactLogger(__name__, "overlap")
 
+if TYPE_CHECKING:
+    from .scheduler import BaseSchedulerNode
+
 
 def sink_waits(
-    snodes: List["scheduler.BaseSchedulerNode"],
-) -> List["scheduler.BaseSchedulerNode"]:
+    snodes: List[BaseSchedulerNode],
+) -> List[BaseSchedulerNode]:
     """
     Greedily moves waits as late as possible (i.e. until we reach a use). Optimal in terms of
     communication overlap.
@@ -34,8 +39,8 @@ def sink_waits(
 
 
 def raise_comms(
-    snodes: List["scheduler.BaseSchedulerNode"],
-) -> List["scheduler.BaseSchedulerNode"]:
+    snodes: List[BaseSchedulerNode],
+) -> List[BaseSchedulerNode]:
     """
     Greedily moves comms as early as possible (i.e. until we reach an input).
     Optimal in terms of communication overlap.
@@ -45,8 +50,8 @@ def raise_comms(
     which is the beginning of the forwards pass. We'll have to either do a special pass for FSDP,
     or we'll want to redo this pass with memory considerations so we handle the FSDP case in a general way.
     """
-    new_order_reversed: List["scheduler.BaseSchedulerNode"] = []
-    cur_comms: List["scheduler.BaseSchedulerNode"] = []
+    new_order_reversed: List[BaseSchedulerNode] = []
+    cur_comms: List[BaseSchedulerNode] = []
     for snode in reversed(snodes):
         if is_collective(snode.node):
             cur_comms.append(snode)
@@ -92,7 +97,7 @@ def get_descendants(node):
     return descendants
 
 
-def decide_global_ordering_of_comms(nodes: List["scheduler.BaseSchedulerNode"]):
+def decide_global_ordering_of_comms(nodes: List[BaseSchedulerNode]):
     """
     Decide global ordering of comms, by just enforcing the ordering that's in the input graph
     (might not be the same ordering as the eager mode program).
@@ -104,11 +109,11 @@ def decide_global_ordering_of_comms(nodes: List["scheduler.BaseSchedulerNode"]):
         comm_nodes[i].add_fake_dep(WeakDep(comm_nodes[i - 1].get_name()))
 
 
-def assert_no_comm_nodes(snodes: List["scheduler.BaseSchedulerNode"]) -> None:
+def assert_no_comm_nodes(snodes: List[BaseSchedulerNode]) -> None:
     assert not any(is_collective(snode.node) for snode in snodes)
 
 
-def estimate_op_runtime(snode: "scheduler.BaseSchedulerNode") -> float:
+def estimate_op_runtime(snode: BaseSchedulerNode) -> float:
     """
     Returns estimated op runtime in nanoseconds (ns)
     """
@@ -121,8 +126,8 @@ def estimate_op_runtime(snode: "scheduler.BaseSchedulerNode") -> float:
 
 
 def reorder_compute_for_overlap(
-    snodes: List["scheduler.BaseSchedulerNode"],
-) -> List["scheduler.BaseSchedulerNode"]:
+    snodes: List[BaseSchedulerNode],
+) -> List[BaseSchedulerNode]:
     """
     Decides a global ordering of all compute and communication nodes,
     assuming that we already have a global ordering of communication nodes.
@@ -192,7 +197,7 @@ def reorder_compute_for_overlap(
                     all_nodes.remove(node)
                     progress = True
             if not progress:
-                raise Exception(
+                raise AssertionError(
                     "Unable to find a free node (indeg == 0). This is an impossible state to reach. "
                     "Please report a bug to PyTorch."
                 )
@@ -215,10 +220,8 @@ def reorder_compute_for_overlap(
         assert_no_comm_nodes(needed_by_next_comm_and_ready_compute_nodes)
 
         total_compute_runtime_cost = rolled_over_compute_cost + sum(
-            [
-                estimate_op_runtime(node)
-                for node in needed_by_next_comm_and_ready_compute_nodes
-            ]
+            estimate_op_runtime(node)
+            for node in needed_by_next_comm_and_ready_compute_nodes
         )
         prev_comm_runtime_cost = estimate_op_runtime(comm_nodes[idx - 1])
         schedule_nodes(tuple_sorted(needed_by_next_comm_and_ready_compute_nodes))
@@ -314,7 +317,7 @@ def visualize_overlap(order):
                 total_est_runtime += estimate_op_runtime(snode)
                 cur_comm_node = snode.node
             elif is_wait(snode.node):
-                raise Exception(
+                raise AssertionError(
                     "Wait is not expected when there is no collective running"
                 )
             else:  # exposed compute op
@@ -322,7 +325,7 @@ def visualize_overlap(order):
             overlap_log.debug(f"{node_summary(snode)}")  # noqa: G004
         else:  # cur_comm_node is not None
             if is_collective(snode.node):
-                raise Exception(
+                raise AssertionError(
                     "Found two collectives running at the same time. "
                     "`visualize_overlap` needs to be updated to handle this case"
                 )
@@ -337,8 +340,8 @@ def visualize_overlap(order):
 
 
 def reorder_compute_and_comm_for_overlap(
-    snodes: List["scheduler.BaseSchedulerNode"],
-) -> List["scheduler.BaseSchedulerNode"]:
+    snodes: List[BaseSchedulerNode],
+) -> List[BaseSchedulerNode]:
     order = snodes
     for p in config.reorder_for_compute_comm_overlap_passes:
         if isinstance(p, str) and p in globals():

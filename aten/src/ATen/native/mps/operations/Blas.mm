@@ -136,8 +136,8 @@ static Tensor& addmv_out_mps_impl(const Tensor& self,
   Tensor matMulVec = at::mm(mat, vec.unsqueeze(1)).squeeze(1);
 
   @autoreleasepool {
-    string key = "addmv_out_mps_impl" + getTensorsStringKey({self, matMulVec}) + ":" + to_string(beta_.toDouble()) +
-        ":" + to_string(alpha_.toDouble());
+    string key = "addmv_out_mps_impl" + getTensorsStringKey({self, matMulVec}) + ":" +
+        std::to_string(beta_.toDouble()) + ":" + std::to_string(alpha_.toDouble());
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* matMulVecTensor = mpsGraphRankedPlaceHolder(mpsGraph, matMulVec);
       MPSGraphTensor* selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
