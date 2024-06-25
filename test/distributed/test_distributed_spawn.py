@@ -2,7 +2,6 @@
 
 import os
 import sys
-from os import path
 
 import torch
 import torch.distributed as dist
