@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import pdb
 import sys
+import traceback
 
 import torch
 
@@ -73,14 +74,25 @@ if is_available():
             finally:
                 sys.stdin = _stdin
 
-    def breakpoint(rank: int = 0):
+    _breakpoint_cache = {}
+
+    def breakpoint(rank: int = 0, skip: int = 0):
         """
         Set a breakpoint, but only on a single rank.  All other ranks will wait for you to be
         done with the breakpoint before continuing.
 
         Args:
             rank (int): Which rank to break on.  Default: ``0``
+            skip (int): Skip the first ``skip`` calls to this breakpoint. Default: ``0``.
         """
+        if skip > 0:
+            key = hash(str(traceback.format_exc()))
+            counter = _breakpoint_cache.get(key, 0) + 1
+            _breakpoint_cache[key] = counter
+            if counter <= skip:
+                print(f"Skip the breakpoint, {counter=}.")
+                return
+
         if get_rank() == rank:
             pdb = _DistributedPdb()
             pdb.message(
