@@ -5,7 +5,6 @@ import copy
 import glob
 import json
 import os
-import pathlib
 import re
 import shutil
 import signal
@@ -16,6 +15,7 @@ import time
 from collections import defaultdict
 from contextlib import ExitStack
 from datetime import datetime
+from pathlib import Path
 from typing import Any, cast, Dict, List, NamedTuple, Optional, Sequence, Tuple, Union
 
 import pkg_resources
@@ -38,7 +38,8 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_SLOW_GRADCHECK,
 )
 
-REPO_ROOT = pathlib.Path(__file__).absolute().parent.parent
+
+REPO_ROOT = Path(__file__).absolute().parent.parent
 
 # using tools/ to optimize test run.
 sys.path.insert(0, str(REPO_ROOT))
@@ -61,7 +62,6 @@ from tools.testing.target_determination.heuristics.previously_failed_in_pr impor
     gen_additional_test_failures_file,
 )
 from tools.testing.target_determination.heuristics.utils import get_pr_number
-
 from tools.testing.test_run import TestRun
 from tools.testing.test_selections import (
     calculate_shards,
@@ -70,6 +70,7 @@ from tools.testing.test_selections import (
     ShardedTest,
     THRESHOLD,
 )
+
 
 HAVE_TEST_SELECTION_TOOLS = True
 # Make sure to remove REPO_ROOT after import is done
@@ -465,7 +466,7 @@ def run_test(
             )
         else:
             cpp_test = os.path.join(
-                pathlib.Path(test_directory).parent,
+                Path(test_directory).parent,
                 CPP_TEST_PATH,
                 test_file.replace(f"{CPP_TEST_PREFIX}/", ""),
             )
@@ -800,11 +801,9 @@ def run_doctests(test_module, test_directory, options):
     Assumes the incoming test module is called doctest, and simply executes the
     xdoctest runner on the torch library itself.
     """
-    import pathlib
-
     import xdoctest
 
-    pkgpath = pathlib.Path(torch.__file__).parent
+    pkgpath = Path(torch.__file__).parent
 
     exclude_module_list = ["torch._vendor.*"]
     enabled = {
