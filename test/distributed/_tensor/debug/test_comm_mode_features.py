@@ -19,6 +19,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     MLPStacked,
     ModelArgs,
     NUM_DEVICES,
+    skip_unless_torch_gpu,
     Transformer,
     with_comms,
 )
@@ -210,6 +211,7 @@ class PrintModuleParamaterShardingTest(DTensorTestBase):
             1,
         )
 
+    @skip_unless_torch_gpu
     @with_comms
     def test_transformer_module_tracing(self, is_seq_parallel=False):
         """
