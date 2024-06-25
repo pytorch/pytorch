@@ -536,6 +536,16 @@ class DTensorTest(DTensorTestBase):
         buffer.seek(0)
         reloaded_st = torch.load(buffer)
         self.assertEqual(sharded_tensor, reloaded_st)
+        # Test weights_only load
+        try:
+            torch.serialization.add_safe_globals(
+                [DTensor, DeviceMesh, Shard, DTensorSpec, TensorMeta]
+            )
+            buffer.seek(0)
+            reloaded_st = torch.load(buffer, weights_only=True)
+            self.assertEqual(sharded_tensor, reloaded_st)
+        finally:
+            torch.serialization.clear_safe_globals()
 
 
 class DTensorMeshTest(DTensorTestBase):
