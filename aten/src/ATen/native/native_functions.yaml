@@ -10049,8 +10049,6 @@
 - func: argsort.stable(Tensor self, *, bool stable, int dim=-1, bool descending=False) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
-  dispatch:
-    CPU, CUDA, MPS: argsort_stable
   autogen: argsort.stable_out
 
 - func: argsort.dimname(Tensor self, Dimname dim, bool descending=False) -> Tensor
