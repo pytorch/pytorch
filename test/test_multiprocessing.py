@@ -327,13 +327,17 @@ class TestMultiprocessing(TestCase):
 
             t1 = q.get()
             t2 = q.get()
-            if device != "meta":
+            if device == "meta":
+                self.assertEqual(t1.size(), t2.size())
+            else:
                 self.assertTrue(t1.eq(1).all())
             s1 = t1.storage()
             s2 = t2.storage()
             self.assertEqual(type(s1), type(s2))
             self.assertEqual(s1.data_ptr(), s1.data_ptr())
-            if device != "meta":
+            if device == "meta":
+                self.assertEqual(s1.size(), s2.size())
+            else:
                 self.assertEqual(s1, s2)
 
             # We need to delete this tensors to allow producer (child process)
