@@ -152,7 +152,7 @@ def override_composite_implicit_decomp(ops_to_preserve):
         # 2. If it is maybe aliasing, we decompose because we must know if an op
         #    is mutating or aliasing.
         # TODO (tmanlaibaatar) make this utility function and share it with functional_tensor
-        # decomp part.
+        # decomp part. (https://github.com/pytorch/pytorch/issues/129431)
         def can_preserve(op_overload):
             if op_overload in FunctionalTensor.maybe_aliasing_or_mutating_ops:
                 return False
@@ -837,7 +837,7 @@ class ExportedProgram:
         return _decompose_exported_program(
             self,
             decomp_table=decomp_table,
-            _preserve_ops=_preserve_ops,
+            _preserve_ops=_preserve_ops,  # type: ignore[arg-type]
             joint_loss_index=None,
         )
 

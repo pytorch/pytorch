@@ -1047,6 +1047,22 @@ def forward(self, p_linear_weight, p_linear_bias, x):
                 "dy - 6 = 6" not in exc.args[0]
             )  # don't suggest fix for non-root dim
 
+    def test_keep_composite_ops_invalid(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                x = self.linear(x)
+                return torch.ops.aten.chunk.default(x, 3, 0)
+
+        with self.assertRaisesRegex(RuntimeError, "We can't preserve"):
+            _ = torch.export.export(
+                Foo(),
+                (torch.randn(3, 3),),
+            ).run_decompositions({}, _preserve_ops=(torch.ops.aten.chunk.default,))
+
     def test_keep_composite_ops_linear_convd(self):
         class MyLinear(torch.nn.Module):
             def __init__(self):
