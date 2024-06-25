@@ -2513,6 +2513,57 @@ class ReinterpretView(BaseView):
         )
 
 
+
+@dataclasses.dataclass
+class DtypeView(BaseView):
+    """Pretend our storage has a different type"""
+    target_dtype: torch.dtype
+    def __post_init__(self):
+        super().__post_init__()
+        if isinstance(self.data, BaseView):
+            self.data = self.data.unwrap_view()
+
+    def __str__(self):
+        return self.str_helper(
+            [
+                self.data,
+                self.target_dtype
+            ]
+        )
+
+    __repr__ = __str__
+
+    @property
+    def dtype(self):
+        return self.data.dtype
+
+    def get_size(self):
+        return self.data.get_size()
+
+    def get_stride(self):
+        return self.data.get_stride()
+
+    def make_loader(self):
+        def loader(index):
+            # indexer = self.layout.make_indexer()
+            x = self.data
+            indexer = self.data.make_indexer()
+            # return ops.to_dtype_bitcast(x, self.target_dtype, x.dtype)
+            return ops.to_dtype_bitcast(ops.load(self.get_name(), indexer(index)), self.target_dtype, self.dtype)
+            # return ops.load(self.get_name(), indexer(index))
+        return loader
+
+    def codegen_reference(self, writer=None):
+        # reinterpret_tensor is similar to as_strided except:
+        # - offset is added to the existing offset (rather than replacing it)
+        # - view tracking is disabled similar to unsafe_view
+        return V.graph.wrapper_code.codegen_reinterpret_view(
+            self.data,
+            self.target_dtype,
+            writer,
+        )
+
+
 class SliceView(View):
     @classmethod
     def normalize_start_end(cls, x, dim, start, end):
