@@ -1,3 +1,4 @@
+#include <c10/core/ScalarType.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/native/ReduceOps.h>
@@ -178,6 +179,7 @@ static void aminmax_kernel(
     " but got ", min_result.scalar_type(), " and ", max_result.scalar_type());
 
   if (self.numel() == 1 && self.ndimension() == 0) {
+    TORCH_CHECK(!self.is_complex(), "aminmax not implemented for ", self.scalar_type());
     min_result.resize_({});
     max_result.resize_({});
     min_result.fill_(self);

@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
+import logging
 
 from typing import Any, Callable, cast, Dict, List, NamedTuple, Optional, Set, Tuple
 
@@ -13,6 +14,7 @@ from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicat
 from torch.profiler import record_function
 from torch.utils._pytree import tree_flatten, tree_unflatten
 from torch.utils.hooks import RemovableHandle
+
 from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_collectives import (
     AllGatherResult,
@@ -22,6 +24,9 @@ from ._fsdp_collectives import (
 )
 from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo, TrainingState
 from ._fsdp_param import FSDPParam, ParamModuleInfo, ShardedState
+
+
+logger = logging.getLogger("torch.distributed._composable.fsdp")
 
 _ModuleToHandleDict = Dict[nn.Module, RemovableHandle]  # for state dict
 
@@ -278,6 +283,8 @@ class FSDPParamGroup:
     def pre_forward(
         self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+        if not ca.compiled_autograd_enabled:
+            logger.debug("%s", self._with_fqn("FSDP::pre_forward"))
         with record_function(self._with_fqn("FSDP::pre_forward")):
             self._training_state = TrainingState.FORWARD
             self.unshard()
@@ -286,6 +293,8 @@ class FSDPParamGroup:
             return args, kwargs
 
     def post_forward(self, module: nn.Module, input: Any, output: Any):
+        if not ca.compiled_autograd_enabled:
+            logger.debug("%s", self._with_fqn("FSDP::post_forward"))
         with record_function(self._with_fqn("FSDP::post_forward")):
             self.reshard()
             self._record_post_forward()
@@ -302,6 +311,8 @@ class FSDPParamGroup:
     def pre_backward(self, default_prefetch: bool, *unused: Any):
         if self._training_state == TrainingState.PRE_BACKWARD:
             return
+        if not ca.compiled_autograd_enabled:
+            logger.debug("%s", self._with_fqn("FSDP::pre_backward"))
         with record_function(self._with_fqn("FSDP::pre_backward")):
             self._training_state = TrainingState.PRE_BACKWARD
             self.unshard()  # no-op if prefetched
@@ -310,6 +321,8 @@ class FSDPParamGroup:
                 self._backward_prefetch()
 
     def post_backward(self, *unused: Any):
+        if not ca.compiled_autograd_enabled:
+            logger.debug("%s", self._with_fqn("FSDP::post_backward"))
         self._training_state = TrainingState.POST_BACKWARD
         with record_function(self._with_fqn("FSDP::post_backward_accumulate")):
             for fsdp_param in self.fsdp_params:
