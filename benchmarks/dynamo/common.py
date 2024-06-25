@@ -1287,9 +1287,25 @@ class OnnxModel(abc.ABC):
         example_inputs,
         dynamic_shapes: bool,
         copy_before_export: bool = False,
+        use_experimental_patch: bool = False,
     ):
+        """The abstract class for exporting ONNX model.
+
+        Args:
+            output_directory: output path
+            model: model
+            example_inputs: example inputs for exporting
+            dynamic_shapes (bool): Whether to export the model with dynamic shapes.
+            copy_before_export (bool,): copy before export. Defaults to False.
+            use_experimental_patch (bool): Whether to apply torch_onnx patch which exports
+                with torch.export and onnx ir. Defaults to False.
+        """
         model_name = current_name
         self.copy_before_export = copy_before_export
+        self.use_experimental_patch = use_experimental_patch
+        # NOTE: torch_onnx patch is using OnnxModelFromTorchScript to export ONNX model.
+        if self.use_experimental_patch:
+            self._COMPILER_NAME = "torch_onnx_patch"
         self.model_dir = self._generate_onnx_model_directory(
             output_directory, self._COMPILER_NAME, model_name
         )
@@ -1521,6 +1537,19 @@ class OnnxModelFromTorchScript(OnnxModel):
                     return self.model(**dict(zip(self.keys, args)))
 
             model = WrapperModel(model, list(example_inputs.keys()))
+
+        if self.use_experimental_patch:
+            import torch_onnx
+
+            torch_onnx.patch_torch(error_report=True, profile=True)
+        else:
+            # make sure the patch is not in effect
+            try:
+                import torch_onnx
+
+                torch_onnx.unpatch_torch()
+            except ImportError:
+                pass
 
         torch.onnx.export(
             model,
@@ -1830,6 +1859,7 @@ def optimize_onnx_ctx(
     run_n_iterations: Callable,
     dynamic_shapes: bool = False,
     copy_before_export: bool = False,
+    use_experimental_patch: bool = False,
 ) -> Callable:
     # NOTE(bowbao): This function creates and returns the onnx version of 'run_n_iterations',
     # which does the following:
@@ -1861,6 +1891,7 @@ def optimize_onnx_ctx(
                     copy.deepcopy(inputs),
                     dynamic_shapes=dynamic_shapes,
                     copy_before_export=copy_before_export,
+                    use_experimental_patch=use_experimental_patch,
                 )
             onnx_model = context.onnx_model
 
@@ -3540,6 +3571,12 @@ def parse_args(args=None):
         help="Measure speedup with TorchScript ONNX, i.e. `torch.onnx.export`",
     )
     group.add_argument(
+        "--torch-onnx-patch",
+        "--torch_onnx_patch",
+        action="store_true",
+        help="Measure speedup with dynamo ONNX patch, i.e. `torch_onnx`",
+    )
+    group.add_argument(
         "--dynamo-onnx",
         "--dynamo_onnx",
         action="store_true",
@@ -3932,6 +3969,17 @@ def run(runner, args, original_dir=None):
         experiment = speedup_experiment_onnx
         output_filename = "torchscript_onnx.csv"
         current_onnx_compiler = "torchscript"
+    elif args.torch_onnx_patch:
+        optimize_ctx = functools.partial(
+            optimize_onnx_ctx,
+            args.output_directory or ".",
+            OnnxModelFromTorchScript,
+            copy_before_export=args.performance,
+            use_experimental_patch=True,
+        )
+        experiment = speedup_experiment_onnx
+        output_filename = "torch_onnx_patch.csv"
+        current_onnx_compiler = "torch_onnx_patch"
     elif args.dynamo_onnx:
         optimize_ctx = functools.partial(
             optimize_onnx_ctx,
