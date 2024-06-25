@@ -2411,13 +2411,20 @@ class TestCustomOpAPI(TestCase):
             b: float = 3.14,
             c: bool = True,
             d: int = 3,
+            e: str = "foo",
+            f: torch.dtype = torch.float,
+            g: torch.dtype = torch.float32,
+            h: torch.dtype = torch.int,
         ) -> Tensor:
-            defaults.extend([a, b, c, d])
+            defaults.extend([a, b, c, d, e, f, g, h])
             return x.clone()
 
         x = torch.randn(3)
         f(x)
-        self.assertEqual(defaults, [None, 3.14, True, 3])
+        self.assertEqual(
+            defaults,
+            [None, 3.14, True, 3, "foo", torch.float, torch.float32, torch.int],
+        )
 
     def test_mutated_error(self):
         with self.assertRaisesRegex(
@@ -2480,7 +2487,7 @@ class TestCustomOpAPI(TestCase):
         opname = f"source{idx}"
         op = getattr(torch.ops._torch_testing, opname).default
         entry = torch._library.simple_registry.singleton.find(op._name)
-        source = entry.abstract_impl.kernel.source
+        source = entry.fake_impl.kernel.source
         assert source is not None
         self.assertTrue("custom_op_db.py" in source)
 
