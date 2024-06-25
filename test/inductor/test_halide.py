@@ -117,8 +117,9 @@ class HalideTests(TestCase):
         self.assertEqual(c, a + b)
 
 
-SweepInputsCpuHalideTest = make_halide(test_torchinductor.SweepInputsCpuTest)
-CpuHalideTests = make_halide(test_torchinductor.CpuTests)
+if test_torchinductor.HAS_CPU and HAS_HALIDE:
+    SweepInputsCpuHalideTest = make_halide(test_torchinductor.SweepInputsCpuTest)
+    CpuHalideTests = make_halide(test_torchinductor.CpuTests)
 
 if __name__ == "__main__":
     if HAS_CPU and not IS_MACOS and HAS_HALIDE:
