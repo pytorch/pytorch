@@ -62,10 +62,7 @@ if TYPE_CHECKING:
 
     from torch._guards import Source
     from torch._ops import OpOverload
-    from torch.fx.experimental.symbolic_shapes import (
-        ShapeEnv,
-        SymbolicContext,
-    )
+    from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymbolicContext
     from torch.types import IntLikeType
 
 log = logging.getLogger(__name__)
@@ -316,7 +313,10 @@ class FakeTensorConverter:
             if tracing_context := torch._guards.TracingContext.try_get():
                 if t in tracing_context.tensor_to_context:
                     symbolic_context = tracing_context.tensor_to_context[t]
-                    from torch.fx.experimental.symbolic_shapes import StatefulSymbolicContext
+                    from torch.fx.experimental.symbolic_shapes import (
+                        StatefulSymbolicContext,
+                    )
+
                     assert isinstance(symbolic_context, StatefulSymbolicContext)
                     source = symbolic_context.tensor_source
 
@@ -892,7 +892,6 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
         memory_format = None
 
     storage_offset = t.storage_offset()
-    assert isinstance(storage_offset, int)
 
     return TensorMetadata(
         dtype=t.dtype,

@@ -16,7 +16,7 @@ import math
 import operator
 import sys
 from functools import lru_cache, update_wrapper
-from typing import FrozenSet, Optional, Type, TYPE_CHECKING, Union
+from typing import Optional, Type, TYPE_CHECKING, Union
 
 import torch
 
@@ -126,14 +126,6 @@ class SymNode:
         return SymNode(
             self._expr, shape_env, self.pytype, self._hint, self.constant, self.fx_node
         )
-
-    def __eq__(self, other: object) -> bool:
-        # Do you want pointer equality or value equality? The caller needs to be specific.
-        raise TypeError("unhashable type: SymNode")
-
-    def __hash__(self) -> int:
-        # Do you want pointer hashing or value hashing? The caller needs to be specific.
-        raise TypeError("unhashable type: SymNode")
 
     @property
     def expr(self):
@@ -248,11 +240,6 @@ class SymNode:
         return self.str()
 
     def __repr__(self):
-        # NOTE: This seems wrong because it skips a whole lot of information -
-        # but it's used in GraphModule.recompile() when printing out the
-        # pythonic representation of a graph. This seems unfortunate -
-        # GraphModule should probably have its own mechanism for converting
-        # values to representation.
         return self.str()
 
     # These methods call the metaprogrammed methods, they're hand written
