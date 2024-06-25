@@ -1,13 +1,28 @@
 import contextlib
+import itertools
 import weakref
 from enum import Enum
-from typing import Any, Dict, Generator, List, Optional, Protocol, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Generator,
+    List,
+    Optional,
+    Protocol,
+    Tuple,
+    Union,
+)
 
 import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as ft_c
+import torch.nn.functional as F
 from torch import nn
-from torch.distributed._tensor import distribute_module, DTensor, Replicate
+from torch.distributed._tensor import distribute_module, DTensor, Replicate, Shard
+from torch.distributed._tensor.experimental.distribute_function import (
+    distribute_function,
+)
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor.parallel.style import ParallelStyle
 
@@ -417,7 +432,6 @@ def _scaled_dot_product_ring_flash_attention_backward(
         )
 
         if is_causal_behavior != _CausalBehavior.SKIP:
-
             if _rerun_forward:
                 # Keep this implementation for verification purpose.
                 # TODO(chienchin): remove this implementation after more E2E
@@ -657,3 +671,121 @@ def _is_causal_behavior(
         return _CausalBehavior.NOT_IS_CAUSAL
     else:
         return _CausalBehavior.SKIP
+
+
+_function_cm: weakref.WeakKeyDictionary[Callable, Any] = weakref.WeakKeyDictionary()
+
+
+def enable_context_parallel(
+    seq_dim: int,
+    callers: List[nn.Module],
+    device_mesh: DeviceMesh,
+) -> None:
+    """
+    This is an experimental API to enable context parallelism for
+    ``torch.nn.functional.scaled_dot_product_attention``. This API assumes
+    that the q, k, v are already sharded on the ``seq_dim`` dimension and
+    will install hook to convert the q, k, v to the DTensors.
+
+    This API will change ``scaled_dot_product_attention`` in ``torch.nn.functional``
+    (short as ``F``) to a wrapped function. So any subsequent call to
+    ``F.scaled_dot_product_attention`` will be redirected to the wrapped function.
+
+    Note that it is important to include all the modules that call SDPA in the
+    ``callers`` list. This can avoid the incorrect wrapping if the model code uses
+    ``from ... import ..." to import SDPA.
+
+    Args:
+        seq_dim (int): the sequence dimension for q, k, v.
+        callers (List[nn.Module]): the nn.Modules that call ``scaled_dot_product_attention``.
+        device_mesh (:class:`DeviceMesh`, optional): the device mesh for context
+            parallelism.
+    """
+
+    def attention_input_fn(device_mesh, *args, **kwargs):
+        placement = [Shard(seq_dim)]
+        all_args = []
+
+        for arg in itertools.chain(args, kwargs.values()):
+            if isinstance(arg, torch.Tensor) and not isinstance(arg, DTensor):
+                arg = DTensor.from_local(arg, device_mesh, placement, run_check=False)
+
+            all_args.append(arg)
+
+        new_args = tuple(all_args[0 : len(args)])
+        new_kwargs = {k: v for k, v in zip(kwargs.keys(), all_args[len(args) :])}
+        if not _function_cm:
+            _function_cm[attention_input_fn] = attention_context_parallel()
+            manager = _function_cm[attention_input_fn]
+            manager.__enter__()
+
+        return new_args, new_kwargs
+
+    def attention_output_fn(device_mesh, outputs):
+        new_outputs = []
+        # TODO: Convert to 1D DTensor if 2D is applied.
+        for output in [outputs] if isinstance(outputs, torch.Tensor) else outputs:
+            output = output.to_local() if isinstance(output, DTensor) else output
+            new_outputs.append(output)
+
+        if isinstance(outputs, torch.Tensor):
+            return new_outputs[0]
+
+        return tuple(new_outputs)
+
+    distribute_function(
+        F.scaled_dot_product_attention,
+        F,
+        callers,
+        device_mesh,
+        attention_input_fn,
+        attention_output_fn,
+    )
+
+
+@contextlib.contextmanager
+@torch.no_grad()
+def context_parallel_buffers(
+    cp_rank: int,
+    cp_world_size: int,
+    buffers: List[torch.Tensor],
+    seq_dims: List[int],
+    keep_orig_buffers: List[bool],
+):
+    if cp_world_size == 1:
+        yield
+        return
+
+    for buffer, seq_dim, keep_orig_buffer in zip(buffers, seq_dims, keep_orig_buffers):
+        if keep_orig_buffer:
+            orig_buffer = getattr(buffer, "_orig_buffer", None)
+            if orig_buffer is None:
+                orig_buffer = buffer.clone()
+                buffer._orig_buffer = orig_buffer
+        else:
+            orig_buffer = buffer.clone()
+
+        shape = buffer.shape
+        seq_len = shape[seq_dim]
+        chunk_seq_len = seq_len // cp_world_size
+        view_slices = tuple(
+            slice(0, shape[i])
+            if i != seq_dim
+            else slice(cp_rank * chunk_seq_len, (cp_rank + 1) * chunk_seq_len)
+            for i in range(len(shape))
+        )
+        buffer_view = orig_buffer[view_slices]
+        buffer.resize_(buffer_view.shape)
+        buffer.copy_(buffer_view)
+        if not keep_orig_buffer:
+            del buffer_view
+            del orig_buffer
+
+    yield
+
+    for buffer, seq_dim, keep_orig_buffer in zip(buffers, seq_dims, keep_orig_buffers):
+        if not keep_orig_buffer:
+            continue
+
+        buffer.resize_(buffer._orig_buffer.shape)
+        buffer.copy_(buffer._orig_buffer)

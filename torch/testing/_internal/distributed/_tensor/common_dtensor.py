@@ -25,8 +25,8 @@ from torch.distributed.tensor.parallel import (
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     MultiThreadedTestCase,
-    skip_if_lt_x_gpu,
     run_subtests,
+    skip_if_lt_x_gpu,
     TEST_SKIPS,
 )
 
@@ -180,6 +180,7 @@ class Transformer(nn.Module):
         self.pos_embeddings = nn.Embedding(args.max_seq_len, args.dim)
         self.dropout = nn.Dropout(args.dropout_p)
         self.layers = nn.ModuleList()
+        self.register_buffer("pos", torch.arange(0, args.max_seq_len), persistent=False)
         for _ in range(args.n_layers):
             self.layers.append(TransformerBlock(args))
         self.norm = nn.LayerNorm(args.dim)
@@ -192,8 +193,10 @@ class Transformer(nn.Module):
         _bsz, seq_len = tokens.size()
         assert seq_len <= self.max_seq_len
         h = self.tok_embeddings(tokens)
-        pos = torch.arange(0, seq_len, device=tokens.device)
-        p = self.pos_embeddings(pos)  # positional embeddings of shape (seq_len, dim)
+        self.pos = self.pos.to(tokens.device)[:seq_len]
+        p = self.pos_embeddings(
+            self.pos
+        )  # positional embeddings of shape (seq_len, dim)
         h = h + p
         h = self.dropout(h)
         for layer in self.layers:
@@ -213,14 +216,22 @@ class Transformer(nn.Module):
         # Parallelize the root submodules.
         if use_seq_parallel:
             root_plan = {
-                "tok_embeddings": RowwiseParallel(input_layouts=Replicate(), output_layouts=Shard(1)),
-                "pos_embeddings": RowwiseParallel(input_layouts=Replicate(), output_layouts=Shard(0)),
+                "tok_embeddings": RowwiseParallel(
+                    input_layouts=Replicate(), output_layouts=Shard(1)
+                ),
+                "pos_embeddings": RowwiseParallel(
+                    input_layouts=Replicate(), output_layouts=Shard(0)
+                ),
                 "norm": SequenceParallel(),
             }
         else:
             root_plan = {
-                "tok_embeddings": RowwiseParallel(input_layouts=Replicate(), output_layouts=Replicate()),
-                "pos_embeddings": RowwiseParallel(input_layouts=Replicate(), output_layouts=Replicate()),
+                "tok_embeddings": RowwiseParallel(
+                    input_layouts=Replicate(), output_layouts=Replicate()
+                ),
+                "pos_embeddings": RowwiseParallel(
+                    input_layouts=Replicate(), output_layouts=Replicate()
+                ),
             }
 
         module_tp = parallelize_module(module, device_mesh, root_plan)
@@ -235,9 +246,15 @@ class Transformer(nn.Module):
                 # shard the RMSNorms
                 layer_parallelize_plan["attention_norm"] = SequenceParallel()
                 layer_parallelize_plan["ffn_norm"] = SequenceParallel()
-            layer_parallelize_plan["attention.wq"] = ColwiseParallel(use_local_output=False)
-            layer_parallelize_plan["attention.wk"] = ColwiseParallel(use_local_output=False)
-            layer_parallelize_plan["attention.wv"] = ColwiseParallel(use_local_output=False)
+            layer_parallelize_plan["attention.wq"] = ColwiseParallel(
+                use_local_output=False
+            )
+            layer_parallelize_plan["attention.wk"] = ColwiseParallel(
+                use_local_output=False
+            )
+            layer_parallelize_plan["attention.wv"] = ColwiseParallel(
+                use_local_output=False
+            )
             layer_parallelize_plan["attention.wo"] = (
                 RowwiseParallel(output_layouts=Shard(1))
                 if use_seq_parallel
