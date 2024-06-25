@@ -40,6 +40,7 @@
 
 #include <fmt/format.h>
 #include <pybind11/chrono.h>
+#include <torch/csrc/distributed/c10d/DMAConnectivity.hpp>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/SymmetricMemory.hpp>
 
@@ -975,6 +976,16 @@ This class does not support ``__members__`` property.)");
       .def_readwrite(
           "global_ranks_in_group",
           &::c10d::DistributedBackendOptions::global_ranks_in_group);
+
+  py::class_<
+      ::c10d::DMAConnectivity,
+      c10::intrusive_ptr<::c10d::DMAConnectivity>>(module, "_DMAConnectivity")
+      .def_readonly("device_type", &::c10d::DMAConnectivity::device_type)
+      .def_readonly(
+          "connection_type", &::c10d::DMAConnectivity::connection_type)
+      .def_readonly("matrix", &::c10d::DMAConnectivity::matrix);
+
+  module.def("_detect_dma_connectivity", ::c10d::detect_dma_connectivity);
 
   using SymmetricMemory = ::c10d::symmetric_memory::SymmetricMemory;
   py::class_<SymmetricMemory, c10::intrusive_ptr<SymmetricMemory>>(

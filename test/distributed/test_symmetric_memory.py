@@ -92,6 +92,19 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
     @skipIfRocm
     @skip_if_lt_x_gpu(2)
+    def test_cuda_nvlink_connectivity_detection(self) -> None:
+        from torch._C._autograd import DeviceType
+        from torch._C._distributed_c10d import _detect_dma_connectivity
+
+        connectivity = _detect_dma_connectivity(DeviceType.CUDA, "nvlink")
+        self.assertEqual(connectivity.device_type, DeviceType.CUDA)
+        self.assertEqual(connectivity.connection_type, "nvlink")
+        self.assertEqual(len(connectivity.matrix), torch.cuda.device_count())
+        for row in connectivity.matrix:
+            self.assertEqual(len(row), torch.cuda.device_count())
+
+    @skipIfRocm
+    @skip_if_lt_x_gpu(2)
     def test_empty_strided_p2p(self) -> None:
         self._init_process()
 
