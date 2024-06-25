@@ -155,6 +155,10 @@ class TestScatterOpt(TestCase):
           ms=42.768, peak_mem=7.227 GB
         """
         B, T, D, V = 32, 1024, 768, 50257
+        if not DO_PERF_TEST:
+            # use a smaller V if not doing perf test to avoid OOM
+            # in CI
+            V = V // 100
         ref_model = nn.Linear(D, V).to(torch.bfloat16)
         opt_model = copy.deepcopy(ref_model)
         ce = nn.CrossEntropyLoss()
