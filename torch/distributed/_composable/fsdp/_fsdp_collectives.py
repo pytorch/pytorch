@@ -336,6 +336,11 @@ def foreach_reduce(
                     new_sharded_grad
                 )
                 fsdp_param.sharded_param.grad = new_sharded_dtensor_grad
+            for hook in (
+                getattr(fsdp_param.sharded_param, "_post_accumulate_grad_hooks", {})
+                or {}
+            ).values():
+                hook(fsdp_param.sharded_param)
             padded_sharded_numel = padded_unsharded_size.numel() // world_size
             flat_grad_offset += padded_sharded_numel
         post_reduce_event = post_reduce_stream.record_event()
