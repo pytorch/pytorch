@@ -129,7 +129,7 @@ constexpr bool allowlist_contains(string_view allowlist, string_view item) {
 // and should be registered
 constexpr bool op_allowlist_check(string_view op_name) {
   assert(op_name.find("::") != string_view::npos);
-  // Use assert() instead of throw() due to a gcc bug. See:
+  // Use assert() instead of noexcept due to a gcc bug. See:
   // https://stackoverflow.com/questions/34280729/throw-in-constexpr-function
   // https://github.com/fmtlib/fmt/issues/682
   assert(op_name.find("(") == string_view::npos);
