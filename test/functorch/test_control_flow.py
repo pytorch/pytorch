@@ -473,7 +473,7 @@ class TestControlFlow(TestCase):
             result = associative_scan(op, x, dim, host_side=True)
             return result
 
-        x = torch.randn(3, requires_grad=True)
+        x = torch.arange(5)
         cumsum = associative_scan(add, x, 0, host_side=True)
         cumsum_exp = _fake_associative_scan(add, x, 0)
         self.assertEqual(cumsum, cumsum_exp)
@@ -616,6 +616,40 @@ class f(torch.nn.Module):
                 expexted_result, (W, H.weight, H.bias), grad_out, retain_graph=True
             )
             self.assertEqual(expected_grads, grads)
+            
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    def test_associative_scan_host_side_matmul_CPU_GPU(self):
+        for device in [torch.device('cpu'), torch.device('cuda')]:
+            W = torch.nn.Parameter(torch.randn(2, 2, device=device))
+            H = torch.nn.Linear(2, 2, device=device)
+
+            def fct(x: torch.Tensor, y: torch.Tensor):
+                return x @ W + H(y)
+
+            x = torch.randn(3, 2, 2, requires_grad=True, device=device)
+
+            for direction in [False, True]:
+                result = associative_scan(fct, x, 0, host_side=True, reverse=direction)
+                expexted_result = _fake_associative_scan(fct, x, 0, reverse=direction)
+                self.assertEqual(result, expexted_result)
+                self.assertEqual(result.device.type, device.type)
+
+                grad_out = torch.ones_like(result)
+                grads = torch.autograd.grad(result, (x,), grad_out, retain_graph=True)
+                expected_grads = torch.autograd.grad(
+                    expexted_result, (x,), grad_out, retain_graph=True
+                )
+                self.assertEqual(expected_grads, grads)
+                self.assertEqual([g.device.type for g in grads], [device.type] * len(grads))
+
+                grads = torch.autograd.grad(
+                    result, (W, H.weight, H.bias), grad_out, retain_graph=True
+                )
+                expected_grads = torch.autograd.grad(
+                    expexted_result, (W, H.weight, H.bias), grad_out, retain_graph=True
+                )
+                self.assertEqual(expected_grads, grads)
+                self.assertEqual([g.device.type for g in grads], [device.type] * len(grads))
 
     def test_associative_scan_host_side_tuple(self):
         def fct(x, y):

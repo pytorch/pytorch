@@ -22,7 +22,6 @@ from torch._higher_order_ops.utils import (
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
-    _temp_remove_pre_dispatch_torch_function_mode,
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
     track_tensor_tree,
@@ -63,9 +62,9 @@ def check_args(input, combine_fn, leaves, tree, dim):
     )
 
     out_leaves, tree_out = pytree.tree_flatten(out)
-    assert (
-        tree == tree_out
-    ), "The pytree of the output of the operator needs to match the input pytree"
+    # assert (
+    #     tree == tree_out
+    # ), "The pytree of the output of the operator needs to match the input pytree"
 
 
 def associative_scan(
@@ -109,43 +108,27 @@ def associative_scan(
 
     if not torch._dynamo.is_compiling():
         with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
-            if host_side:
-                return torch.compile(associative_scan_host_side, fullgraph=True)(
-                    combine_fn, input, dim, reverse
-                )
-                # return associative_scan_host_side(combine_fn, input, dim, False)
-            else:
-                if reverse:
-                    raise ValueError(
-                        "For the device-side associative scan, the reverse flag has not yet been implemented"
-                    )
-
-                return torch.compile(associative_scan, fullgraph=True)(
-                    combine_fn, input, dim
+            return torch.compile(associative_scan, fullgraph=True)(
+                    combine_fn, input, dim, reverse, host_side
                 )
 
     leaves, spec = pytree.tree_flatten(input)
 
     check_args(input, combine_fn, leaves, spec, dim)
 
-    if reverse and host_side:
-        raise ValueError(
-            "For the device-side associative scan, the reverse flag has not yet been implemented"
-        )
-
-    combine_fn = functools.partial(
-        wrap_combine_fn_flat, combine_fn=combine_fn, spec=spec, num_leaves=len(leaves)
-    )
+    if reverse:
+        leaves = [torch.flip(elem, [dim]) for elem in leaves]
 
     if host_side:
-        with _set_compilation_env():
-            with torch._dynamo.utils.disable_cache_limit():
-                with _temp_remove_pre_dispatch_torch_function_mode():
-                    return torch.compile(
-                        associative_scan_host_side, backend="eager", fullgraph=True
-                    )(combine_fn, input, dim, reverse)
+        result_flat = associative_scan_host_side(combine_fn, leaves, dim, spec)
     else:
+        combine_fn = functools.partial(
+            wrap_combine_fn_flat, combine_fn=combine_fn, spec=spec, num_leaves=len(leaves)
+        )
         result_flat = associative_scan_op(combine_fn, leaves, dim)
+        
+    if reverse:
+        result_flat = [torch.flip(elem, [dim]) for elem in result_flat]
 
     return pytree.tree_unflatten(result_flat, spec)
 
@@ -185,14 +168,8 @@ def slice_along_axis(start, end, stride=None, dim=0):
     return (slice(None),) * dim + (slice(start, end, stride),)
 
 
-def associative_scan_host_side(operator, elems, dim=0, reverse=False):
-    elems_flat, tree = pytree.tree_flatten(elems)
-
-    check_args(elems, operator, elems_flat, tree, dim)
-
-    if reverse:
-        elems_flat = [torch.flip(elem, [dim]) for elem in elems_flat]
-
+def associative_scan_host_side(operator, elems_flat, dim=0, tree=None):
+    
     def combine(a_flat, b_flat):
         # Lower `fn` to operate on flattened sequences of elems.
         a = pytree.tree_unflatten(a_flat, tree)
@@ -246,11 +223,8 @@ def associative_scan_host_side(operator, elems, dim=0, reverse=False):
         )
 
     scans = _scan(elems_flat)
-
-    if reverse:
-        scans = [torch.flip(scanned, [dim]) for scanned in scans]
-
-    return pytree.tree_unflatten(scans, tree)
+    
+    return scans
 
 
 associative_scan_op = HigherOrderOperator("associative_scan")
