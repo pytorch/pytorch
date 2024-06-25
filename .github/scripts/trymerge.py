@@ -1489,7 +1489,6 @@ def checks_to_markdown_bullets(
 
 @retries_decorator()
 def save_merge_record(
-    collection: str,
     comment_id: int,
     pr_num: int,
     owner: str,
@@ -1505,59 +1504,41 @@ def save_merge_record(
     merge_base_sha: str,
     merge_commit_sha: str = "",
     is_failed: bool = False,
-    dry_run: bool = False,
     skip_mandatory_checks: bool = False,
     ignore_current: bool = False,
     error: str = "",
-    workspace: str = "commons",
 ) -> None:
     """
-    This saves the merge records into Rockset, so we can query them (for fun and profit)
+    This saves the merge records as a json, which can later be uploaded to s3
     """
-    if dry_run:
-        # Decide not to save the record to Rockset if dry-run is set to not pollute
-        # the collection
-        return
 
-    try:
-        import rockset  # type: ignore[import]
+    # Prepare the record to be written into Rockset
+    data = [
+        {
+            "comment_id": comment_id,
+            "pr_num": pr_num,
+            "owner": owner,
+            "project": project,
+            "author": author,
+            "pending_checks": pending_checks,
+            "failed_checks": failed_checks,
+            "ignore_current_checks": ignore_current_checks,
+            "broken_trunk_checks": broken_trunk_checks,
+            "flaky_checks": flaky_checks,
+            "unstable_checks": unstable_checks,
+            "last_commit_sha": last_commit_sha,
+            "merge_base_sha": merge_base_sha,
+            "merge_commit_sha": merge_commit_sha,
+            "is_failed": is_failed,
+            "skip_mandatory_checks": skip_mandatory_checks,
+            "ignore_current": ignore_current,
+            "error": error,
+        }
+    ]
+    repo_root = Path(__file__).resolve().parent.parent.parent
 
-        # Prepare the record to be written into Rockset
-        data = [
-            {
-                "comment_id": comment_id,
-                "pr_num": pr_num,
-                "owner": owner,
-                "project": project,
-                "author": author,
-                "pending_checks": pending_checks,
-                "failed_checks": failed_checks,
-                "ignore_current_checks": ignore_current_checks,
-                "broken_trunk_checks": broken_trunk_checks,
-                "flaky_checks": flaky_checks,
-                "unstable_checks": unstable_checks,
-                "last_commit_sha": last_commit_sha,
-                "merge_base_sha": merge_base_sha,
-                "merge_commit_sha": merge_commit_sha,
-                "is_failed": is_failed,
-                "skip_mandatory_checks": skip_mandatory_checks,
-                "ignore_current": ignore_current,
-                "error": error,
-            }
-        ]
-
-        client = rockset.RocksetClient(
-            host="api.usw2a1.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
-        )
-        client.Documents.add_documents(
-            collection=collection,
-            data=data,
-            workspace=workspace,
-        )
-
-    except ModuleNotFoundError:
-        print("Rockset is missing, no record will be saved")
-        return
+    with open(repo_root / "merge_record.json", "w") as f:
+        json.dump(data, f)
 
 
 @retries_decorator(rc=[])
