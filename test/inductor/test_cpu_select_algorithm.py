@@ -103,7 +103,15 @@ def _get_epilogue(epilogue: str, other: Optional[torch.Tensor] = None):
         return lambda x: x / other
 
 
-class TestSelectAlgorithm(TestCase):
+class BaseTestSelectAlgorithm(TestCase):
+    def _check_amx_usage(self, vec_amx):
+        if vec_amx:
+            self.assertTrue(counters["inductor"]["cpp_micro_gemm_amx_counter"] > 0)
+        else:
+            self.assertEqual(counters["inductor"]["cpp_micro_gemm_amx_counter"], 0)
+
+
+class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     common = check_model
 
     @inductor_config.patch({"freezing": True})
@@ -361,10 +369,7 @@ class TestSelectAlgorithm(TestCase):
             self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         vec_amx = VecAMX()
-        if vec_amx:
-            self.assertTrue(counters["inductor"]["cpp_micro_gemm_amx_counter"] > 0)
-        else:
-            self.assertEqual(counters["inductor"]["cpp_micro_gemm_amx_counter"], 0)
+        self._check_amx_usage(vec_amx)
 
     @inductor_config.patch({"freezing": True})
     @patches
@@ -550,14 +555,11 @@ class TestSelectAlgorithm(TestCase):
             self.common(ref_quantized_mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         vec_amx = VecAMX()
-        if vec_amx:
-            self.assertTrue(counters["inductor"]["cpp_micro_gemm_amx_counter"] > 0)
-        else:
-            self.assertEqual(counters["inductor"]["cpp_micro_gemm_amx_counter"], 0)
+        self._check_amx_usage(vec_amx)
 
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
-class _DynamicShapesTestBase(TestCase):
+class _DynamicShapesTestBase(BaseTestSelectAlgorithm):
     pass
 
 
