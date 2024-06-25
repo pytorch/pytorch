@@ -19510,8 +19510,8 @@ op_db: List[OpInfo] = [
                    'TestJit',
                    'test_variant_consistency_jit',
                    dtypes=(torch.float32,)
-                ),
-            )),
+               ),
+           )),
     OpInfo('T',
            op=lambda x: x.T,
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.chalf),
