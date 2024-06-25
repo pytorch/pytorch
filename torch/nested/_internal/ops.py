@@ -432,9 +432,9 @@ def linear_backward_default(func, *args, **kwargs):
 
     check_ragged_dim_same(func, inp, "self", grad_output, "grad_output")
     ds = NestedTensor(
-        torch.mm(grad_output._values, weight), **extract_kwargs(grad_output)
+        torch.matmul(grad_output._values, weight), **extract_kwargs(grad_output)
     )
-    dw = torch.mm(grad_output._values.T, inp._values)
+    dw = torch.matmul(grad_output._values.transpose(-2, -1), inp._values)
     db = None  # NYI: gradient for bias, need to reduce over ragged dim
     return (ds, dw, db)
 
