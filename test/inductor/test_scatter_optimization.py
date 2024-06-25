@@ -127,7 +127,7 @@ class TestScatterOpt(TestCase):
         y = torch.randn([M, N])
         self.do_acc_test(f, x, y)
 
-        # The generate code is quite in-efficient.
+        # The generated code is quite in-efficient.
         # There are 3 kernels
         # 1. copy from arg to buf
         # 2. scatter upon buf

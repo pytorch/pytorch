@@ -239,6 +239,8 @@ def scatter_upon_const_tensor_extra_check(m):
         # is shorter. But that will need a more complex condition expression
         # especially for multi-dimensional tensors.
         # Skip it for now.
+        if isinstance(full_sz, fx.Node):
+            full_sz = full_sz.meta["val"]
         if select_sz < full_sz:
             return False
 
