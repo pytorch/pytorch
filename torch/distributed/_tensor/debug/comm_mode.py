@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import copy
 import re
 from collections import defaultdict
 from typing import Any, Dict
@@ -147,8 +146,6 @@ class CommDebugMode(TorchDispatchMode):
         self.comm_registry.add(torch.ops._dtensor.shard_dim_alltoall)
         self.advanced_module_tracker = CommModeModuleTracker()
 
-        self.unprocessed_args = {}
-
     def generate_module_tracing_table(self):
         """
         Inspired by flop counter, generates a detailed table displaying collective tracing
@@ -184,6 +181,16 @@ class CommDebugMode(TorchDispatchMode):
 
             indent += " "
             bw = False
+
+            # prints out all collectives in the respective sub-module
+            if fqn in self.comm_module_counts:
+                for collective, count in self.comm_module_counts[fqn].items():
+                    collective_indent = "  " * (
+                        (self.advanced_module_tracker.module_depth_dict[fqn]) + 1
+                    )
+                    table += (
+                        f"\033[1;33m{collective_indent}*{collective}: {count}\033[0m\n"
+                    )
 
             if fqn in self.comm_module_operation_counts:
                 table += f"{indent} FORWARD PASS\n"
@@ -240,11 +247,6 @@ class CommDebugMode(TorchDispatchMode):
         self.comm_counts.clear()
         self.comm_module_counts.clear()
         self.comm_module_operation_counts.clear()
-        self.unprocessed_args.clear()
-        self.unprocessed_args = {
-            "input_shape": [],
-            "input_sharding": [],
-        }
 
         super().__enter__()
         self.advanced_module_tracker.__enter__()
@@ -256,9 +258,15 @@ class CommDebugMode(TorchDispatchMode):
 
     def log_module_tracing_table_to_file(self):
         # ansi_escape is used to remove ANSI escape sequences in table used to make terminal output more readable
-
         ansi_escape = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
         table = ansi_escape.sub("", self.generate_module_tracing_table())
+
+        with open("output.txt", "w") as log_file:
+            log_file.write(table)
+
+    def log_operation_tracing_table_to_file(self):
+        ansi_escape = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
+        table = ansi_escape.sub("", self.generate_operation_tracing_table())
 
         with open("output.txt", "w") as log_file:
             log_file.write(table)
@@ -274,24 +282,39 @@ class CommDebugMode(TorchDispatchMode):
         # run **before** subclasses get a chance to run.
         # Returning NotImplemented here gives us a chance to let DTensor
         # run and desugar into comms ops, before CommDebugMode sees them.
-        # print(func, detect_fake_mode(args), types)
-        _mode_key = torch._C._TorchDispatchModeKey.FAKE
-        # print(func, args)
+
+        # sets up operation-level collective count
+        if self.advanced_module_tracker.name not in self.comm_module_operation_counts:
+            # dictionary should hold module input and output shape, operations list and collective counter
+            self.comm_module_operation_counts[self.advanced_module_tracker.name] = {
+                "operations_list": []
+            }
+        operation_dict = {}
+        operation_dict["name"] = func
+
+        operation_dict["input_shape"] = []
+        operation_dict["input_sharding"] = []
+
+        # tracks if the operation is part of the backward pass
+        operation_dict["is_bw"] = self.advanced_module_tracker.is_bw
 
         if any(t == DTensor for t in types):
             for ele in args:
                 if isinstance(ele, DTensor):
-                    self.unprocessed_args["input_shape"].append(ele.shape)
-                    self.unprocessed_args["input_sharding"].append(ele.placements)
-            # self.unprocessed_args = copy.deepcopy(args)
-            # print(args)
+                    # saves shapes and placements of all DTensor args
+                    operation_dict["input_shape"].append(ele.shape)
+                    operation_dict["input_sharding"].append(ele.placements)
+
+            self.comm_module_operation_counts[self.advanced_module_tracker.name][
+                "operations_list"
+            ].append(operation_dict)
+
             return NotImplemented
+
         kwargs = kwargs if kwargs else {}
         out = func(*args, **kwargs)
         func_packet = func._overloadpacket
 
-        if detect_fake_mode(args):
-            return out
         # We have many tests that use CommDebugMode to verify the occurrence of
         # collectives. These tests do so by querying comm_counts with legacy
         # funcol ops as key. For the purpose of native funcol migration, we
@@ -320,29 +343,11 @@ class CommDebugMode(TorchDispatchMode):
                         self.comm_module_counts[par] = defaultdict(int)
                     self.comm_module_counts[par][func_packet] += 1
 
-        # print(operation_dict)
-        if self.advanced_module_tracker.name not in self.comm_module_operation_counts:
-            # dictionary should hold module input and output shape, operations list and collective counter
-            self.comm_module_operation_counts[self.advanced_module_tracker.name] = {
-                "operations_list": []
-            }
+        # if tensor op uses fake tensors, return
+        if detect_fake_mode(args):
+            return out
 
-        # sets up operation-level collective count
-        operation_dict = {}
-        operation_dict["name"] = func
-
-        # the unprocessed_args from previous func with dTensor's are saved and copied here
-        operation_dict["input_shape"] = copy.deepcopy(
-            self.unprocessed_args["input_shape"]
-        )
-        operation_dict["input_sharding"] = copy.deepcopy(
-            self.unprocessed_args["input_sharding"]
-        )
-        self.unprocessed_args["input_shape"].clear()
-        self.unprocessed_args["input_sharding"].clear()
-
-        # tracks if the operation is part of the backward pass
-        operation_dict["is_bw"] = self.advanced_module_tracker.is_bw
+        # add tensor operation to module operation list
         self.comm_module_operation_counts[self.advanced_module_tracker.name][
             "operations_list"
         ].append(operation_dict)
