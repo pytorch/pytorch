@@ -210,7 +210,7 @@ Tensor _pad_enum_symint(const Tensor &self, c10::SymIntArrayRef pad, int64_t mod
       case at::padding_mode::reflect: return at::reflection_pad1d_symint(self, pad);
       case at::padding_mode::replicate: return at::replication_pad1d_symint(self, pad);
       case at::padding_mode::circular: return at::_pad_circular_symint(self, pad);
-      case at::padding_mode::symmetric: return pad_symmetric(self, pad);
+      case at::padding_mode::symmetric: return at::_pad_symmetric_symint(self, pad);
       default: {}
     }
   } else if(pad.size() == 4 && (input_dim == 3 || input_dim == 4)) {
@@ -218,7 +218,7 @@ Tensor _pad_enum_symint(const Tensor &self, c10::SymIntArrayRef pad, int64_t mod
       case at::padding_mode::reflect: return at::reflection_pad2d_symint(self, pad);
       case at::padding_mode::replicate: return at::replication_pad2d_symint(self, pad);
       case at::padding_mode::circular: return at::_pad_circular_symint(self, pad);
-      case at::padding_mode::symmetric: return pad_symmetric(self, pad);
+      case at::padding_mode::symmetric: return at::_pad_symmetric_symint(self, pad);
       default: {}
     }
   } else if (pad.size() == 6 && (input_dim == 4 || input_dim == 5)) {
@@ -226,7 +226,7 @@ Tensor _pad_enum_symint(const Tensor &self, c10::SymIntArrayRef pad, int64_t mod
       case at::padding_mode::reflect: return at::reflection_pad3d_symint(self, pad);
       case at::padding_mode::replicate: return at::replication_pad3d_symint(self, pad);
       case at::padding_mode::circular: return at::_pad_circular_symint(self, pad);
-      case at::padding_mode::symmetric: return pad_symmetric(self, pad);
+      case at::padding_mode::symmetric: return at::_pad_symmetric_symint(self, pad);
       default: {}
     }
   }
@@ -255,15 +255,7 @@ Tensor pad_symint(const Tensor &self, c10::SymIntArrayRef pad, c10::string_view 
 
 
 /**
- * Pads a 1-dimensional tensor symmetrically with zeros.
- * This is a helper function for _pad_symmetric.
- *
- * @param signal The input tensor to be padded.
- * @param padl The number of zeros to pad on the left side of the tensor.
- * @param padr The number of zeros to pad on the right side of the tensor.
- * @param dim The dimension along which to pad the tensor.
- * 
- * @return The padded tensor.
+ * Pads a 1-dimensional tensor symmetrically.
  */
 Tensor _pad_symmetric_1d(Tensor signal, pair<c10::SymInt, c10::SymInt> pad_tuple, int dim)
 {   auto padl = pad_tuple.first;
@@ -303,14 +295,8 @@ Tensor _pad_symmetric_1d(Tensor signal, pair<c10::SymInt, c10::SymInt> pad_tuple
 
 /**
  * Pads a given signal symmetrically along multiple dimensions.
- *
- * @param signal The input signal to be padded.
- * @param pad_lists A vector of pairs representing the padding amounts for each dimension.
- *                  Each pair contains the left and right padding amounts for a dimension.
- * @return The padded signal.
- * @throws std::invalid_argument if the input signal has fewer dimensions than the specified padding dimensions.
  */
-Tensor pad_symmetric(Tensor signal, c10::SymIntArrayRef pad)
+Tensor _pad_symmetric_symint(Tensor signal, c10::SymIntArrayRef pad)
 {
     std::vector<std::pair<c10::SymInt, c10::SymInt>> pad_lists;
     for (size_t i = 0; i < pad.size(); i += 2) {
