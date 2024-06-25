@@ -1,7 +1,8 @@
 # Owner(s): ["oncall: export"]
 
 import unittest
-from typing import Dict, List, Tuple, Union
+from collections import OrderedDict
+from typing import Dict, List, Optional, Tuple, Union
 
 import torch
 
@@ -22,6 +23,7 @@ class TestConverter(TestCase):
         inp,
         option: Union[List[str]] = None,
         check_persistent=False,
+        lifted_tensor_constants: Optional[OrderedDict[str, torch.Tensor]] = None,
     ) -> ExportedProgram:
         # By default, it tests both jit.trace and jit.script.
         if option is None:
@@ -39,25 +41,40 @@ class TestConverter(TestCase):
                 if check_persistent:
                     original_ts_model = torch.jit.script(M())
                     ts_model = torch.jit.script(M())
+                    eager_model = M()
                 else:
                     original_ts_model = torch.jit.script(M)
                     ts_model = torch.jit.script(M)
+                    eager_model = M
             elif opt == "trace":
                 if check_persistent:
                     original_ts_model = torch.jit.trace(M(), inp)
                     ts_model = torch.jit.trace(M(), inp)
+                    eager_model = M()
                 else:
                     original_ts_model = torch.jit.trace(M, inp)
                     ts_model = torch.jit.trace(M, inp)
+                    eager_model = M
             else:
                 raise RuntimeError(f"Unrecognized mode for torch.jit: {opt}")
 
+            ep = TS2EPConverter(ts_model, inp).convert()
+            ep_list.append(ep)
+
             for _ in range(num_iterations):
                 orig_out, _ = pytree.tree_flatten(original_ts_model(*inp))
-
-                ep = TS2EPConverter(ts_model, inp).convert()
-                ep_list.append(ep)
                 ep_out, _ = pytree.tree_flatten(ep.module()(*inp))
+
+                # Check module.
+                if isinstance(eager_model, torch.nn.Module):
+                    expected_state_dict = OrderedDict()
+                    expected_state_dict.update(ts_model.state_dict())
+                    if lifted_tensor_constants:
+                        expected_state_dict.update(lifted_tensor_constants)
+                    self.assertEqual(
+                        ep.state_dict.keys(),
+                        expected_state_dict.keys(),
+                    )
 
                 # Check results
                 self._check_tensor_list_equal(ep_out, orig_out)
@@ -849,7 +866,11 @@ class TestConverter(TestCase):
 
         inp = (torch.ones(3, 2),)
         self._check_equal_ts_ep_converter(
-            Module, inp, ["script"], check_persistent=True
+            Module,
+            inp,
+            ["script"],
+            check_persistent=True,
+            lifted_tensor_constants=OrderedDict([("data", torch.ones(3, 2))]),
         )
 
         class Module(torch.nn.Module):

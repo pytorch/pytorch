@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import operator
+import warnings
 
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
@@ -414,7 +415,7 @@ class TS2FXGraphConverter:
         self.attribute_map[output_name] = fx_node_name
 
         # ts graph does not lift tensor constants as input nodes. So tensor constants may
-        # be ignored by in convert_graph_inputs(). To fix this issue, we insert get_attr 
+        # be ignored by in convert_graph_inputs(). To fix this issue, we insert get_attr
         # fx node here.
         if (
             fx_node_name not in self.name_to_node
@@ -819,6 +820,7 @@ class TS2EPConverter:
             if node.kind() == "prim::CreateObject":
                 output_name = node.output().debugName()
                 attribute_map[output_name] = ""
+
             if node.kind() == "prim::GetAttr":
                 output_name = node.output().debugName()
 
@@ -832,6 +834,12 @@ class TS2EPConverter:
                 value = get_attr(attr_fqn)
 
                 attribute_map[output_name] = attr_fqn
-                if isinstance(value, torch.Tensor):
+                if (
+                    isinstance(value, torch.Tensor)
+                    and attr_fqn not in self.name_to_buffer_map
+                ):
                     # Lift tensor constants to be a buffer
+                    warnings.warn(
+                        f"ts converter lifted tensor constant {attr_fqn} to be a buffer"
+                    )
                     self.name_to_buffer_map[attr_fqn] = value
