@@ -248,7 +248,7 @@ flex_attention_template = TritonTemplate(
     # SM_KV_IDX and SM_KV_NUM_BLKS are always contiguous.
     sm_hz_offset = sm_idx_z * SM_H + sm_idx_h
     sm_kv_num_blks_offset = sm_hz_offset * BLOCKSPARSE_Q_LEN + start_m // BLOCKSPARSE_Q_MULTIPLE
-    sm_kv_idx_offset = sm_hz_offset * BLOCKSPARSE_Q_LEN * BLOCKSPARSE_KV_LEN + (start_m // BLOCKSPARSE_Q_MULTIPLE) * BLOCKSPARSE_KV_LEN
+    sm_kv_idx_offset = sm_hz_offset * BLOCKSPARSE_Q_LEN * BLOCKSPARSE_KV_LEN + (start_m // BLOCKSPARSE_Q_MULTIPLE) * BLOCKSPARSE_KV_LEN  # noqa: B950
     kv_indices = SM_KV_IDX + sm_kv_idx_offset
     kv_start = tl.load(kv_indices) * BLOCKSPARSE_KV # first kv block we're loading
     sm_kv_num_blocks = tl.load(SM_KV_NUM_BLKS + sm_kv_num_blks_offset)
@@ -673,7 +673,7 @@ flex_attention_backward_template = TritonTemplate(
         # SM_KV_IDX and SM_KV_NUM_BLKS are always contiguous.
         sm_hz_offset = sm_idx_z * SM_H + sm_idx_h
         sm_kv_num_blks_offset = sm_hz_offset * BLOCKSPARSE_Q_LEN + off_pid // BLOCKSPARSE_Q_MULTIPLE
-        sm_kv_idx_offset = sm_hz_offset * BLOCKSPARSE_Q_LEN * BLOCKSPARSE_KV_LEN + (off_pid // BLOCKSPARSE_Q_MULTIPLE) * BLOCKSPARSE_KV_LEN
+        sm_kv_idx_offset = sm_hz_offset * BLOCKSPARSE_Q_LEN * BLOCKSPARSE_KV_LEN + (off_pid // BLOCKSPARSE_Q_MULTIPLE) * BLOCKSPARSE_KV_LEN  # noqa: B950
         kv_indices = SM_KV_IDX + sm_kv_idx_offset
         kv_start = tl.load(kv_indices) * BLOCKSPARSE_KV # first kv block we're loading
         sm_kv_num_blocks = tl.load(SM_KV_NUM_BLKS + sm_kv_num_blks_offset)
@@ -771,7 +771,7 @@ flex_attention_backward_template = TritonTemplate(
         # SM_Q_IDX and SM_Q_NUM_BLKS are always contiguous.
         sm_hz_offset = sm_idx_z * SM_H + sm_idx_h
         sm_q_num_blks_offset = sm_hz_offset * BLOCKSPARSE_KV_LEN + pid // BLOCKSPARSE_KV_MULTIPLE
-        sm_q_idx_offset = sm_hz_offset * BLOCKSPARSE_Q_LEN * BLOCKSPARSE_KV_LEN + (pid // BLOCKSPARSE_KV_MULTIPLE) * BLOCKSPARSE_Q_LEN
+        sm_q_idx_offset = sm_hz_offset * BLOCKSPARSE_Q_LEN * BLOCKSPARSE_KV_LEN + (pid // BLOCKSPARSE_KV_MULTIPLE) * BLOCKSPARSE_Q_LEN  # noqa: B950
         q_indices = SM_Q_IDX + sm_q_idx_offset
         q_start = tl.load(q_indices) * BLOCKSPARSE_Q # first q block we're loading
         sm_q_num_blocks = tl.load(SM_Q_NUM_BLKS + sm_q_num_blks_offset)

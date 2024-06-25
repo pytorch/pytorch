@@ -18,6 +18,7 @@ from torch._inductor.utils import run_and_get_code
 from torch.nn.attention._flex_attention import (
     _causal,
     _compose,
+    _create_block_sparse_mask,
     _create_empty_block_sparse_mask,
     _flex_attention,
     _generate_alibi_bias,
@@ -45,8 +46,25 @@ torch.set_float32_matmul_precision("high")
 index = torch.ops.aten.index
 
 
-def create_attention(score_mod):
-    return functools.partial(_flex_attention, score_mod=score_mod)
+def create_attention(score_mod, block_sparse_mask):
+    return functools.partial(
+        _flex_attention, score_mod=score_mod, block_sparse_mask=block_sparse_mask
+    )
+
+
+def create_block_sparse_mask_from_score_mod(score_mod, query, key, value):
+    Q_LEN = query.shape[-2]
+    KV_LEN = key.shape[-2]
+    if score_mod == _causal:
+        return _create_block_sparse_mask(
+            torch.tril(
+                torch.ones(Q_LEN, KV_LEN, dtype=torch.bool, device=query.device)
+            ),
+            128,
+            128,
+        )
+    else:
+        return None
 
 
 test_dtypes = (
@@ -204,8 +222,6 @@ class TestFlexAttention(InductorTestCase):
         KV_S: int = S,
         KV_D: int = D,
     ):
-        sdpa_partial = create_attention(score_mod)
-        compiled_sdpa = torch.compile(sdpa_partial)
         q = torch.randn(
             (Q_B, Q_H, Q_S, Q_D), dtype=dtype, device="cuda", requires_grad=True
         )
@@ -217,6 +233,9 @@ class TestFlexAttention(InductorTestCase):
         )
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
+        block_sparse_mask = create_block_sparse_mask_from_score_mod(score_mod, q, k, v)
+        sdpa_partial = create_attention(score_mod, block_sparse_mask)
+        compiled_sdpa = torch.compile(sdpa_partial)
         golden_out = sdpa_partial(q_gold, k_gold, v_gold)
         ref_out = sdpa_partial(q_ref, k_ref, v_ref)
         compiled_out = compiled_sdpa(q, k, v)
