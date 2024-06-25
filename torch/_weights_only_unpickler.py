@@ -231,9 +231,12 @@ class Unpickler:
             elif key[0] == NEWOBJ[0]:
                 args = self.stack.pop()
                 cls = self.stack.pop()
-                if cls is not torch.nn.Parameter:
+                if cls is torch.nn.Parameter:
+                    self.append(torch.nn.Parameter(*args))
+                elif cls in _get_user_allowed_globals().values():
+                    self.append(cls.__new__(cls, *args))
+                else:
                     raise RuntimeError(f"Trying to instantiate unsupported class {cls}")
-                self.append(torch.nn.Parameter(*args))
             elif key[0] == REDUCE[0]:
                 args = self.stack.pop()
                 func = self.stack[-1]
@@ -255,9 +258,14 @@ class Unpickler:
                     inst.__setstate__(state)
                 elif type(inst) is OrderedDict:
                     inst.__dict__.update(state)
+                elif type(inst) in _get_user_allowed_globals().values():
+                    if hasattr(inst, "__setstate__"):
+                        inst.__setstate__(state)
+                    else:
+                        inst.__dict__.update(state)
                 else:
                     raise RuntimeError(
-                        f"Can only build Tensor, parameter or dict objects, but got {type(inst)}"
+                        f"Can only build Tensor, parameter or OrderedDict objects, but got {type(inst)}"
                     )
             # Stack manipulation
             elif key[0] == APPEND[0]:
