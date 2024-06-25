@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import argparse
 import os
-import pathlib
 from collections import defaultdict
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable, Sequence, TextIO, TYPE_CHECKING
 
 import yaml
@@ -983,7 +983,7 @@ def main() -> None:
             )
 
     if options.output_dependencies:
-        depfile_path = pathlib.Path(options.output_dependencies).resolve()
+        depfile_path = Path(options.output_dependencies).resolve()
         depfile_name = depfile_path.name
         depfile_stem = depfile_path.stem
 
