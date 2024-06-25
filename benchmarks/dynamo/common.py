@@ -1289,6 +1289,17 @@ class OnnxModel(abc.ABC):
         copy_before_export: bool = False,
         use_experimental_patch: bool = False,
     ):
+        """The abstract class for exporting ONNX model.
+
+        Args:
+            output_directory: output path
+            model: model
+            example_inputs: example inputs for exporting
+            dynamic_shapes (bool): Whether to export the model with dynamic shapes.
+            copy_before_export (bool,): copy before export. Defaults to False.
+            use_experimental_patch (bool): Whether to apply torch_onnx patch which exports
+                with torch.export and onnx ir. Defaults to False.
+        """
         model_name = current_name
         self.copy_before_export = copy_before_export
         self.use_experimental_patch = use_experimental_patch
@@ -1531,9 +1542,14 @@ class OnnxModelFromTorchScript(OnnxModel):
             import torch_onnx
 
             torch_onnx.patch_torch(error_report=True, profile=True)
-        elif "torch_onnx" in sys.modules:
+        else:
             # make sure the patch is not in effect
-            torch_onnx.unpatch_torch()
+            try:
+                import torch_onnx
+
+                torch_onnx.unpatch_torch()
+            except ImportError:
+                pass
 
         torch.onnx.export(
             model,
