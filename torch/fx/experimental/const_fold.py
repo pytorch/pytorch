@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import re
 from typing import Callable, Dict, Optional, Set, Union
 
@@ -60,7 +61,7 @@ class FoldedGraphModule(torch.fx.GraphModule):
 
         def _create_param(i):
             return torch.nn.Parameter(
-                i
+                i.detach().clone()
                 if not isinstance(i, int)
                 else torch.Tensor([i]).to(device=self.device_for_folded_attrs),
                 requires_grad=i.requires_grad if isinstance(i, torch.Tensor) else False,
@@ -258,7 +259,7 @@ def split_const_subgraphs(
     # worry about whether this is one or more tensors because the original graph
     # correctly uses getitem to extract individual tensors if there are multiple folded.
     fx_const_folded_attrs_name = get_unique_attr_name_in_module(
-        split, "_FX_CONST_FOLDED_ATTRS"
+        mod_traced, "_FX_CONST_FOLDED_ATTRS"
     )
     setattr(
         split,
