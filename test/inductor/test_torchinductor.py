@@ -7459,7 +7459,7 @@ class CommonTemplate:
 
             with self.assertRaisesRegex(
                 torch._inductor.exc.LoweringException,
-                "NYI: Can't generate FallbackKernel",
+                "Operators that accept mutable List[Tensor] are not yet"
             ):
                 compiled_f = compile_fx_inner(mod, cloned_args)
 
