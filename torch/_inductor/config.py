@@ -10,6 +10,14 @@ def is_fbcode():
     return not hasattr(torch.version, "git_version")
 
 
+def fx_graph_remote_cache_default():
+    if os.environ.get("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE") == "1":
+        return True
+    if os.environ.get("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE") == "0":
+        return False
+    return None
+
+
 # add some debug printouts
 debug = False
 
@@ -20,10 +28,15 @@ disable_progress = True
 verbose_progress = False
 
 # use fx aot graph codegen cache
-fx_graph_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE") == "1"
+fx_graph_cache = (
+    os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE", "0" if is_fbcode() else "1") == "1"
+)
 
-# use fx aot graph codegen cache
-fx_graph_remote_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE") == "1"
+# use remote fx aot graph codegen cache
+# False: Disables the cache
+# True: Enables the cache
+# None: Not set -- Off for OSS, JustKnobs based for internal
+fx_graph_remote_cache: Optional[bool] = fx_graph_remote_cache_default()
 
 # enable autotune local cache
 autotune_local_cache = True
@@ -43,7 +56,7 @@ abi_compatible = (
 )
 
 c_shim_version = os.environ.get(
-    "TORCHINDUCTOR_C_SHIM_VERSION", "1" if (is_fbcode() and torch.version.hip) else "2"
+    "TORCHINDUCTOR_C_SHIM_VERSION", "1" if is_fbcode() else "2"
 )
 
 # dead code elimination
@@ -438,12 +451,14 @@ def decide_compile_threads():
     Here are the precedence to decide compile_threads
     1. User can override it by TORCHINDUCTOR_COMPILE_THREADS.  One may want to disable async compiling by
        setting this to 1 to make pdb happy.
-    2. Set to 1 if it's win32 platform or it's a fbcode build
+    2. Set to 1 if it's win32 platform
     3. decide by the number of CPU cores
     """
     if "TORCHINDUCTOR_COMPILE_THREADS" in os.environ:
         return int(os.environ["TORCHINDUCTOR_COMPILE_THREADS"])
-    elif sys.platform == "win32" or is_fbcode():
+    elif sys.platform == "win32":
+        return 1
+    elif is_fbcode() and worker_start_method != "subprocess":
         return 1
     else:
         cpu_count = (
@@ -681,6 +696,9 @@ class triton:
 
     # max autotune gemm with cublasLt
     autotune_cublasLt = True
+
+    # Tune the generated Triton kernels at compile time instead of first time they run
+    autotune_at_compile_time = False
 
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = True
