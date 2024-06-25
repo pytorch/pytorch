@@ -20,6 +20,7 @@ from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 
 from .. import config, ir, pattern_matcher
+from ..codegen.common import BackendFeature, has_backend_feature
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
 
 from ..lowering import lowerings as L
@@ -236,6 +237,7 @@ def cuda_and_enabled_mixed_mm(match):
             match.kwargs["mat2_dtype"].itemsize
             > match.kwargs["mat2"].meta.get("val").dtype.itemsize
         )
+        and has_backend_feature("cuda", BackendFeature.TRITON_TEMPLATES)
     )
 
 
