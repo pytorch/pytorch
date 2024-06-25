@@ -147,7 +147,7 @@ Accelerators
 An accelerator is a specialized device designed to significantly enhace performance
 through parallel computation. It empolys a Stream/Event system to synchronize and
 control asynchronous operations effectively. Every accelerator should incorporate
-the concepts of `Device`, `Stream`, and `Event`. As of today, accelerator devices
+the concepts of Device, Stream, and Event. As of today, accelerator devices
 are (in no particular order) :doc:`"CUDA" <cuda>`, :doc:`"MTIA" <mtia>`, :doc:`"XPU" <xpu>`, and PrivateUse1.
 
 Device
@@ -160,16 +160,18 @@ from this host thread will reside or execute on the specific device.
 Stream
 ~~~~~~~~~~~~~~~~~~~~~~~~
 A first in first out (FIFO) queue of executing the respective tasks asynchronously. It can
-control/synchronize the execution of other Streams or block the current host thread to ensure
+control or synchronize the execution of other Streams or block the current host thread to ensure
 the correct task sequencing.
 
 Event
 ~~~~~~~~~~~~~~~~~~~~~~~~
-Query and record Stream status to identify/control dependencies across Stream and measure timing.
+Query and record Stream status to identify or control dependencies across Stream and measure timing.
+
+.. _default_accelerator:
 
 Default Accelerator
 ~~~~~~~~~~~~~~~~~~~~~~~~
-In PyTorch, `Accelerator` is designed for mutually exclusiveness with all other accelerators.
+In PyTorch, the accelerator is designed for mutually exclusiveness with all other accelerators.
 For example, CUDA and XPU will not coexist on the same host system. If there is only one type
 of Accelerator, such as CUDA, on the host system, CUDA becomes the default accelerator. However,
 nothing will be specified as the default accelerator if no accelerators are available.
