@@ -44,6 +44,7 @@ from torch.types import (
     Device,
     Number,
     Storage,
+    IntLikeType,
     _bool,
     _bytes,
     _complex,

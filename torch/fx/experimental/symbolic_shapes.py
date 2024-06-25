@@ -54,7 +54,7 @@ from torch.fx.experimental.recording import (
     replay_shape_env_events,
     shape_env_check_state_equal
 )
-from torch.fx.experimental.sym_node import SymNode, SymTypes, guard_size_oblivious
+from torch.fx.experimental.sym_node import SymNode, SymTypes
 from torch._logging import trace_structured, structured
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
@@ -234,6 +234,21 @@ def is_concrete_int(a: Union[int, SymInt]) -> bool:
 # So make sure only type checker evaluates this alias.
 # Xref: https://www.internalfb.com/diff/D53324783
 SympyBoolean: TypeAlias = "sympy.logic.boolalg.Boolean"
+
+def guard_size_oblivious(expr: Union[torch.SymBool, bool]) -> bool:
+    """
+    Perform a guard on a symbolic boolean expression in a size oblivious way.
+    This is typically used when a non-oblivious test would result in a guard
+    on a data dependent value of which we don't know the value of at compile time.
+    When a guard is tested this way, we may diverge in behavior from how regular
+    PyTorch semantics would treat it.  For more information, see
+    https://github.com/pytorch/pytorch/pull/118579
+    """
+    if isinstance(expr, torch.SymBool):
+        return expr.node.guard_size_oblivious("", 0)
+    else:
+        assert isinstance(expr, bool)
+        return expr
 
 def check_consistent(new, old) -> None:
     """

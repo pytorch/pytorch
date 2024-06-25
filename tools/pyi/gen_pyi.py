@@ -1201,7 +1201,7 @@ def gen_pyi(
             ],
             "set_": [
                 "def set_(self, storage: Union[Storage, TypedStorage, UntypedStorage], "
-                "offset: IntLike, size: _symsize, stride: _symsize) -> Tensor: ...",
+                "offset: IntLikeType, size: _symsize, stride: _symsize) -> Tensor: ...",
                 "def set_(self, storage: Union[Storage, TypedStorage, UntypedStorage]) -> Tensor: ...",
             ],
             "split": [

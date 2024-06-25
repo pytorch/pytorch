@@ -47,7 +47,6 @@ from torch._subclasses.meta_utils import (
     MetaConverter,
 )
 from torch._utils import render_call
-from torch.fx.experimental.sym_node import guard_size_oblivious
 from torch.fx.immutable_collections import immutable_dict
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -1642,7 +1641,16 @@ class FakeTensorMode(TorchDispatchMode):
             storage = empty.untyped_storage()
             with in_kernel_invocation_manager(self), maybe_suppress():
                 empty.set_(storage, storage_offset, shape, stride)
-        if guard_size_oblivious(storage_bytes == 0):
+
+        if isinstance(storage_bytes, SymInt):
+            # Do it this way so we don't import symbolic_shapes (which imports
+            # expensive sympy) unless we have to.
+            from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
+            zero_bytes = guard_size_oblivious(storage_bytes == 0)
+        else:
+            zero_bytes = storage_bytes == 0
+        if zero_bytes:
             empty.untyped_storage().resize_(0)
 
         return FakeTensor(self, empty, metadata.device)
