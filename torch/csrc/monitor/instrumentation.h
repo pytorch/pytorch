@@ -30,7 +30,7 @@ class WaitCounterHandle {
           std::chrono::steady_clock::now());
 
  private:
-  std::shared_ptr<detail::WaitCounterImpl> impl_;
+  detail::WaitCounterImpl& impl_;
 };
 } // namespace monitor
 } // namespace torch
