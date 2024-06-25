@@ -423,7 +423,7 @@ class TS2FXGraphConverter:
             # be ignored by name may have not been converted by convert_graph_inputs().
             # If so, we manually insert get_attr fx node.
             if fx_node_name not in self.name_to_node and fx_node_name in self.name_to_buffer_map:
-                print(f"reach here, fx_node_name: {fx_node_name}")
+                # print(f"reach here, fx_node_name: {fx_node_name}")
                 self.name_to_node[fx_node_name] = self.fx_graph.get_attr(fx_node_name)
 
     def convert_prim_SetAttr(self, node: torch._C.Node):
@@ -767,6 +767,8 @@ class TS2EPConverter:
         self.constant_map: Dict[str, Any] = {}
         self.module_fqn: Dict[str, str] = {}
         self.name_to_modules: Dict[str, torch.nn.Module] = {}
+
+        self.attribute_map = {}
         self.get_attributes()
 
     def convert(self) -> ExportedProgram:
@@ -811,28 +813,58 @@ class TS2EPConverter:
 
         return ep
 
+    # def get_attributes(self):
+    #     # Need to get attributes before `graph_converter.convert()` since torchscript
+    #     # does not lift tensor constants to buffers. So we cannot access those tensor
+    #     # constants during `graph_converter.convert()`.
+    #     print(self.ts_graph)
+    #     for node in self.ts_graph.nodes():
+    #         if node.kind() == "prim::GetAttr":
+    #             attr_name = node.s("name")
+    #             input_name = node.input().debugName()
+    #             module_name = self.module_fqn.get(input_name, "")
+    #             module = self.name_to_modules.get(module_name, self.ts_model)
+    #             value = getattr(module, attr_name)
+    #             attr_name = f"{module_name}.{attr_name}" if module_name else attr_name
+    #             if isinstance(value, torch.Tensor):
+    #                 # Lift tensor constants to be a buffer
+    #                 self.name_to_buffer_map[attr_name] = value
+    #             elif isinstance(value, torch.nn.Module):
+    #                 new_module_name = f"{module_name}.{attr_name}" if module_name else attr_name
+    #                 self.name_to_modules[new_module_name] = value
+
+    #                 output_name = node.output().debugName()
+    #                 self.module_fqn[output_name] = new_module_name
+    #             else:
+    #                 # Support non-tensor constants (e.g. self.count = 1)
+    #                 self.constant_map[attr_name] = value
+
     def get_attributes(self):
         # Need to get attributes before `graph_converter.convert()` since torchscript
         # does not lift tensor constants to buffers. So we cannot access those tensor
         # constants during `graph_converter.convert()`.
-        print(self.ts_graph)
+        def get_attr(fqn: str):
+            name = fqn.split(".")
+            v = self.ts_model
+            for n in name:
+                v = getattr(v, n)
+            return v
+
         for node in self.ts_graph.nodes():
+            if node.kind() == "prim::CreateObject":
+                output_name = node.output().debugName()
+                self.attribute_map[output_name] = ""
             if node.kind() == "prim::GetAttr":
+                output_name = node.output().debugName()
+
                 attr_name = node.s("name")
                 input_name = node.input().debugName()
-                module_name = self.module_fqn.get(input_name, "")
-                module = self.name_to_modules.get(module_name, self.ts_model)
-                value = getattr(module, attr_name)
-                attr_name = f"{module_name}.{attr_name}" if module_name else attr_name
+
+                root_attr_name = self.attribute_map[input_name]
+                attr_fqn = f"{root_attr_name}.{attr_name}" if root_attr_name else attr_name
+                value = get_attr(attr_fqn)
+
+                self.attribute_map[output_name] = attr_fqn
                 if isinstance(value, torch.Tensor):
                     # Lift tensor constants to be a buffer
-                    self.name_to_buffer_map[attr_name] = value
-                elif isinstance(value, torch.nn.Module):
-                    new_module_name = f"{module_name}.{attr_name}" if module_name else attr_name
-                    self.name_to_modules[new_module_name] = value
-
-                    output_name = node.output().debugName()
-                    self.module_fqn[output_name] = new_module_name
-                else:
-                    # Support non-tensor constants (e.g. self.count = 1)
-                    self.constant_map[attr_name] = value
+                    self.name_to_buffer_map[attr_fqn] = value
