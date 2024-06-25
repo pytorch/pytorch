@@ -2467,8 +2467,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
 
   // `getKeyFromDevice` is how we get keys for both collectives and batch P2P
   const auto key = getKeyFromDevice(device);
-  // TODO(whc) unclear if/why we do not want to use the pair-wise stream and communicator for batched/collective PGs.
-  // it seems the current code explicitly avoids this, but i don't understand why that's even safe.
+  // TODO(whc) unclear if/why we do not want to use the pair-wise stream and
+  // communicator for batched/collective PGs. it seems the current code
+  // explicitly avoids this, but i don't understand why that's even safe.
   auto ncclStream = ncclStreams_.at(key);
 
   // Create Work object
@@ -2912,10 +2913,12 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   auto device = getDevice(tensor);
 
   // Note on keys
-  // devKey identifies this gpu device and is used for accessing a nccl Communicator for this PG per device
-  // p2pKey identifies a pair of ranks doing p2p comms, and is used for accessing a unique nccl stream per pair so that
+  // devKey identifies this gpu device and is used for accessing a nccl
+  // Communicator for this PG per device p2pKey identifies a pair of ranks doing
+  // p2p comms, and is used for accessing a unique nccl stream per pair so that
   // p2p comms between different pairs can overlap.
-  // Historically, different nccl communicators were also used for pairs of p2p ranks, but this is unnecessary. 
+  // Historically, different nccl communicators were also used for pairs of p2p
+  // ranks, but this is unnecessary.
   std::string devKey = getKeyFromDevice(device);
   std::string p2pKey = getKeySendRecv(rank_, peer);
   int p2pRank = rank_;
@@ -2924,11 +2927,17 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   // For batch_isend_irecv, ncclGroupStart() would be called upfront
   bool batchP2P = ncclActiveGroupCounter_ > 0;
 
-  // If an existing communicator exists for this PG, we want to use it (for batch or
-  // non-batch P2P)
-  // Note: even if we find a cached nccl communicator, we'll still create a new stream for the streamkey if needed.
+  // If an existing communicator exists for this PG, we want to use it (for
+  // batch or non-batch P2P) Note: even if we find a cached nccl communicator,
+  // we'll still create a new stream for the streamkey if needed.
   auto ncclComm = getNCCLComm(
-      devKey, device, opType, p2pRank, isSendRecvSelf, /*streamKey*/p2pKey,/*onlyCached*/ true);
+      devKey,
+      device,
+      opType,
+      p2pRank,
+      isSendRecvSelf,
+      /*streamKey*/ p2pKey,
+      /*onlyCached*/ true);
 
   if (!batchP2P && !ncclComm) {
     // We create special 2-rank communicators for each pair of send/recv rank if
@@ -2957,7 +2966,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
         "To avoid this, please pass a device_id to init_process_group to eagerly initialize communicators, "
         "or call a collective operation on this process group before the first P2P operation to lazily initialize.");
 
-    // Both the communicator and the stream are keyed against the p2p rank pair in this fallback case
+    // Both the communicator and the stream are keyed against the p2p rank pair
+    // in this fallback case
     ncclComm = getNCCLComm(p2pKey, device, opType, p2pRank, isSendRecvSelf);
   }
   // Bump the logical operation counter regardless of whether this op is
