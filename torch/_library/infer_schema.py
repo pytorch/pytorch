@@ -212,7 +212,6 @@ def tuple_to_list(tuple_type: typing.Type[typing.Tuple]) -> typing.Type[typing.L
         list_type = typing.List
     else:
         # General case: create a List with the same type arguments
-
         list_type = (
             typing.List[type_args[0]]  # type: ignore[valid-type]
             if len(type_args) == 1
