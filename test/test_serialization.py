@@ -13,7 +13,7 @@ import tempfile
 import unittest
 import warnings
 import zipfile
-from collections import OrderedDict
+from collections import namedtuple, OrderedDict
 from copy import deepcopy
 from itertools import product
 from pathlib import Path
