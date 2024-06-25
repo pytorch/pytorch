@@ -2412,13 +2412,19 @@ class TestCustomOpAPI(TestCase):
             c: bool = True,
             d: int = 3,
             e: str = "foo",
+            f: torch.dtype = torch.float,
+            g: torch.dtype = torch.float32,
+            h: torch.dtype = torch.int,
         ) -> Tensor:
-            defaults.extend([a, b, c, d, e])
+            defaults.extend([a, b, c, d, e, f, g, h])
             return x.clone()
 
         x = torch.randn(3)
         f(x)
-        self.assertEqual(defaults, [None, 3.14, True, 3, "foo"])
+        self.assertEqual(
+            defaults,
+            [None, 3.14, True, 3, "foo", torch.float, torch.float32, torch.int],
+        )
 
     def test_mutated_error(self):
         with self.assertRaisesRegex(

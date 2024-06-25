@@ -439,11 +439,15 @@ class AOTAutogradCache:
                 log.info("AOTAutograd cache miss for key %s", cache_key)
                 counters["aot_autograd"]["autograd_cache_miss"] += 1
         # Count missing the FXGraphCache as a miss not a bypass
-        except FXGraphCacheMiss:
+        except FXGraphCacheMiss as e:
             counters["aot_autograd"]["autograd_cache_miss"] += 1
-        except BypassAOTAutogradCache:
+            if config.strict_autograd_cache:
+                raise e
+        except BypassAOTAutogradCache as e:
             cache_key = None
             counters["aot_autograd"]["autograd_cache_bypass"] += 1
+            if config.strict_autograd_cache:
+                raise e
         if compiled_fn is None:
             # Set the cache key so we can save a cache result later
             aot_config.cache_key = cache_key
@@ -470,6 +474,8 @@ class AOTAutogradCache:
             return entry
         except Exception as e:
             log.warning("AOTAutograd cache unable to load compiled graph: %s", e)
+            if config.strict_autograd_cache:
+                raise e
             return None
 
     @staticmethod
@@ -479,7 +485,9 @@ class AOTAutogradCache:
             content = pickle.dumps(entry)
         except Exception as e:
             log.warning("AOTAutograd cache unable to serialize compiled graph: %s", e)
-            raise e
+            if config.strict_autograd_cache:
+                raise e
+            return None
         subdir = os.path.join(AOTAutogradCache._get_tmp_dir(), key)
         if not os.path.exists(subdir):
             os.makedirs(subdir, exist_ok=True)
