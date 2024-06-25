@@ -8,15 +8,14 @@ namespace monitor {
 
 namespace detail {
 class WaitCounterImpl {};
-} // namespace detail
-
-detail::WaitCounterImpl& getImpl(std::string_view key) {
+static detail::WaitCounterImpl& getImpl(std::string_view key) {
   auto* impl = new detail::WaitCounterImpl();
   return *impl;
 }
+} // namespace detail
 
 WaitCounterHandle::WaitCounterHandle(std::string_view key)
-    : impl_(getImpl(key)) {
+    : impl_(detail::getImpl(key)) {
   // implement
 }
 
