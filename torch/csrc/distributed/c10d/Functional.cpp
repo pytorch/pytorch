@@ -561,7 +561,7 @@ TORCH_LIBRARY(_c10d_functional_autograd, m) {
       "SymInt[] output_split_sizes, "
       "SymInt[] input_split_sizes, "
       "str group_name) -> Tensor",
-      torch::dispatch(c10::DispatchKey::Autograd, ::all_to_all_single_autograd),
+      torch::dispatch(c10::DispatchKey::CompositeExplicitAutograd, ::all_to_all_single_autograd),
       {at::Tag::pt2_compliant_tag});
   m.def(
       "reduce_scatter_tensor("
@@ -570,7 +570,7 @@ TORCH_LIBRARY(_c10d_functional_autograd, m) {
       "int group_size, "
       "str group_name) -> Tensor",
       torch::dispatch(
-          c10::DispatchKey::Autograd, ::reduce_scatter_tensor_autograd),
+          c10::DispatchKey::CompositeExplicitAutograd, ::reduce_scatter_tensor_autograd),
       {at::Tag::pt2_compliant_tag});
   m.def(
       "all_gather_into_tensor("
@@ -578,7 +578,7 @@ TORCH_LIBRARY(_c10d_functional_autograd, m) {
       "int group_size, "
       "str group_name) -> Tensor",
       torch::dispatch(
-          c10::DispatchKey::Autograd, ::all_gather_into_tensor_autograd),
+          c10::DispatchKey::CompositeExplicitAutograd, ::all_gather_into_tensor_autograd),
       {at::Tag::pt2_compliant_tag});
 }
 
