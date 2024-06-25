@@ -313,10 +313,7 @@ def should_exclude_padding_time(match, arg_name):
 def should_pad_bench(
     match, mat1: Tensor, mat2: Tensor, op, input: Optional[Tensor] = None
 ) -> bool:
-    do_bench = functools.partial(
-        torch._inductor.runtime.runtime_utils.do_bench_gpu,
-        warmup=5,
-    )
+    do_bench = torch._inductor.runtime.runtime_utils.do_bench_gpu
     m_padded_length = 0
     n_padded_length = 0
     batchsize = 1

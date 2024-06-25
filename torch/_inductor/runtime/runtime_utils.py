@@ -87,42 +87,49 @@ def do_bench(fn, fn_args, fn_kwargs, **kwargs):
         return do_bench_gpu(lambda: fn(*fn_args, **fn_kwargs), **kwargs)
 
 
-def do_bench_gpu(
-    fn, warmup=25, rep=100, fast_flush=True, quantiles=(0.5,), return_mode="mean"
-):
+def do_bench_gpu(fn, estimation_iters=5, benchmark_iters=20, max_benchmark_duration=10, memory_warmup=100):
     @functools.lru_cache(None)
     def get_cache_size():
         device = torch.cuda.current_device()
         properties = torch.cuda.get_device_properties(device)
         return properties.l2CacheSize
 
-    cache = torch.empty(int(get_cache_size() // 4), dtype=torch.int, device="cuda")
+    def get_event_pairs(iters):
+        return [
+            (
+                torch.cuda.Event(enable_timing=True),
+                torch.cuda.Event(enable_timing=True),
+            )
+            for _ in range(iters)
+        ]
+    
+    def get_timing(event_pairs):
+        return min([start_event.elapsed_time(end_event) for start_event, end_event in event_pairs])
+    
+    def benchmark(fn, buffer, iters):
+        event_pairs = get_event_pairs(iters)
+        for start_event, end_event in event_pairs:
+            buffer.zero_()
+            start_event.record()
+            fn()
+            end_event.record()
+        torch.cuda.synchronize()
+        return get_timing(event_pairs)
+    
+    buffer = torch.empty(int(get_cache_size() // 4), dtype=torch.int, device="cuda")
 
-    benchmarking_iters = 10
-    event_pairs = [
-        (
-            torch.cuda.Event(enable_timing=True),
-            torch.cuda.Event(enable_timing=True),
-        )
-        for _ in range(benchmarking_iters)
-    ]
+    estimation_timing = benchmark(fn, buffer, estimation_iters)
 
-    temp_cache = torch.empty(int((get_cache_size() * 100) // 4), dtype=torch.int, device="cuda")
-    temp_cache.zero_()
-    del temp_cache
-    for start_event, end_event in event_pairs:
-        cache.zero_()
-        start_event.record()
-        fn()
-        end_event.record()
-    torch.cuda.synchronize()
+    benchmark_iters = min(benchmark_iters, int(max_benchmark_duration / estimation_timing))
+    if memory_warmup > 0:
+        temp_buffer = torch.empty(int((get_cache_size() * memory_warmup) // 4), dtype=torch.int, device="cuda")
+        temp_buffer.zero_()
+        del temp_buffer
+    benchmark_timing = benchmark(fn, buffer, benchmark_iters)
 
-    # explicitly clean up the cache, since having this stick around can
-    # mess with memory compression calculations during benchmarking
-    del cache
+    del buffer
 
-    timings = [event_pair[0].elapsed_time(event_pair[1]) for event_pair in event_pairs]
-    timing = min(timings)
+    timing = min(estimation_timing, benchmark_timing)
     return timing
 
 
