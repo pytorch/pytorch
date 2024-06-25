@@ -276,8 +276,10 @@ class BackwardStateGraphArg(GraphArg):
 
     def reconstruct(self, codegen):
         assert codegen.tx.output.backward_state_var
-        codegen.load_import_from(BackwardState.__module__, "BackwardState")
-        codegen.call_function(0, True)
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(BackwardState.__module__, "BackwardState")
+        )
+        codegen.call_function(0, False)
         codegen.dup_top()
         codegen.store(codegen.tx.output.backward_state_var)
 
