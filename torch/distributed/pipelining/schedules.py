@@ -48,7 +48,7 @@ class _Action(NamedTuple):
         return f"{self.computation_type}{self.microbatch_index}_s{self.stage_index}"
 
 
-def format_pipeline_order(pipeline_order: Dict[int, List[Optional[_Action]]]) -> str:
+def _format_pipeline_order(pipeline_order: Dict[int, List[Optional[_Action]]]) -> str:
     """
     Formats the pipeline order in a timestep (row) x rank (column) grid of actions
     and returns the formatted string
@@ -94,7 +94,7 @@ def format_pipeline_order(pipeline_order: Dict[int, List[Optional[_Action]]]) ->
     return formatted_table
 
 
-def validate_pipeline_order(
+def _validate_pipeline_order(
     pipeline_order: Dict[int, List[Optional[_Action]]],
     num_microbatches: int,
     num_stages: int,
@@ -875,7 +875,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
                 logger.error(
                     "Exception in rank %s at time step %s", self.rank, time_step
                 )
-                logger.error("%s", format_pipeline_order(self.pipeline_order))
+                logger.error("%s", _format_pipeline_order(self.pipeline_order))
                 raise e
         # Return losses if there is a container passed in
         self._update_losses(self._stages, losses)

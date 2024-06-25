@@ -20,8 +20,8 @@ from torch.distributed.pipelining import (
     ScheduleLoopedBFS,
 )
 from torch.distributed.pipelining.schedules import (
-    format_pipeline_order,
-    validate_pipeline_order,
+    _format_pipeline_order,
+    _validate_pipeline_order,
 )
 from torch.distributed.pipelining.stage import _PipelineStageBase
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
@@ -453,11 +453,11 @@ class TestSchedulePlan(unittest.TestCase):
                 ]
 
                 schedule = ScheduleClass(stages, num_microbatches)
-                formatted_pipeline_order = format_pipeline_order(
+                formatted_pipeline_order = _format_pipeline_order(
                     schedule.pipeline_order
                 )
                 # print(formatted_pipeline_order)
-                validate_pipeline_order(
+                _validate_pipeline_order(
                     schedule.pipeline_order, num_microbatches, num_stages
                 )
 
