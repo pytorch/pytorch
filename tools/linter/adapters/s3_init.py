@@ -3,7 +3,6 @@ import hashlib
 import json
 import logging
 import os
-import pathlib
 import platform
 import stat
 import subprocess
@@ -27,7 +26,7 @@ try:
     PYTORCH_ROOT = result.stdout.decode("utf-8").strip()
 except subprocess.CalledProcessError:
     # If git is not installed, compute repo root as 3 folders up from this file
-    PYTORCH_ROOT = str(pathlib.Path(__file__).absolute().parents[3])
+    PYTORCH_ROOT = str(Path(__file__).absolute().parents[3])
 
 DRY_RUN = False
 
