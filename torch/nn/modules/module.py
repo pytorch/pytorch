@@ -1656,22 +1656,15 @@ class Module:
         else:
             return self._call_impl(*args, **kwargs)
 
+    # torchrec tests the code consistency with the following code
+    # fmt: off
     def _call_impl(self, *args, **kwargs):
-        forward_call = (
-            self._slow_forward if torch._C._get_tracing_state() else self.forward
-        )
+        forward_call = (self._slow_forward if torch._C._get_tracing_state() else self.forward)
         # If we don't have any hooks, we want to skip the rest of the logic in
         # this function, and just call forward.
-        if not (
-            self._backward_hooks
-            or self._backward_pre_hooks
-            or self._forward_hooks
-            or self._forward_pre_hooks
-            or _global_backward_pre_hooks
-            or _global_backward_hooks
-            or _global_forward_hooks
-            or _global_forward_pre_hooks
-        ):
+        if not (self._backward_hooks or self._backward_pre_hooks or self._forward_hooks or self._forward_pre_hooks
+                or _global_backward_pre_hooks or _global_backward_hooks
+                or _global_forward_hooks or _global_forward_pre_hooks):
             return forward_call(*args, **kwargs)
 
         try:
@@ -1684,10 +1677,7 @@ class Module:
                 backward_pre_hooks = self._get_backward_pre_hooks()
 
             if self._backward_hooks or _global_backward_hooks:
-                (
-                    full_backward_hooks,
-                    non_full_backward_hooks,
-                ) = self._get_backward_hooks()
+                full_backward_hooks, non_full_backward_hooks = self._get_backward_hooks()
 
             if _global_forward_pre_hooks or self._forward_pre_hooks:
                 for hook_id, hook in (
@@ -1697,10 +1687,7 @@ class Module:
                     if hook_id in self._forward_pre_hooks_with_kwargs:
                         args_kwargs_result = hook(self, args, kwargs)  # type: ignore[misc]
                         if args_kwargs_result is not None:
-                            if (
-                                isinstance(args_kwargs_result, tuple)
-                                and len(args_kwargs_result) == 2
-                            ):
+                            if isinstance(args_kwargs_result, tuple) and len(args_kwargs_result) == 2:
                                 args, kwargs = args_kwargs_result
                             else:
                                 raise RuntimeError(
@@ -1726,10 +1713,7 @@ class Module:
                     *self._forward_hooks.items(),
                 ):
                     # mark that always called hook is run
-                    if (
-                        hook_id in self._forward_hooks_always_called
-                        or hook_id in _global_forward_hooks_always_called
-                    ):
+                    if hook_id in self._forward_hooks_always_called or hook_id in _global_forward_hooks_always_called:
                         called_always_called_hooks.add(hook_id)
 
                     if hook_id in self._forward_hooks_with_kwargs:
@@ -1742,11 +1726,9 @@ class Module:
 
             if bw_hook:
                 if not isinstance(result, (torch.Tensor, tuple)):
-                    warnings.warn(
-                        "For backward hooks to be called,"
-                        " module output should be a Tensor or a tuple of Tensors"
-                        f" but received {type(result)}"
-                    )
+                    warnings.warn("For backward hooks to be called,"
+                                  " module output should be a Tensor or a tuple of Tensors"
+                                  f" but received {type(result)}")
                 result = bw_hook.setup_output_hook(result)
 
             # Handle the non-full backward hooks
@@ -1754,9 +1736,7 @@ class Module:
                 var = result
                 while not isinstance(var, torch.Tensor):
                     if isinstance(var, dict):
-                        var = next(
-                            v for v in var.values() if isinstance(v, torch.Tensor)
-                        )
+                        var = next(v for v in var.values() if isinstance(v, torch.Tensor))
                     else:
                         var = var[0]
                 grad_fn = var.grad_fn
@@ -1778,10 +1758,8 @@ class Module:
                         if hook_result is not None:
                             result = hook_result
                     except Exception as e:
-                        warnings.warn(
-                            "global module forward hook with ``always_call=True`` raised an exception "
-                            f"that was silenced as another error was raised in forward: {str(e)}"
-                        )
+                        warnings.warn("global module forward hook with ``always_call=True`` raised an exception "
+                                      f"that was silenced as another error was raised in forward: {str(e)}")
                         continue
 
             for hook_id, hook in self._forward_hooks.items():
@@ -1794,13 +1772,12 @@ class Module:
                         if hook_result is not None:
                             result = hook_result
                     except Exception as e:
-                        warnings.warn(
-                            "module forward hook with ``always_call=True`` raised an exception "
-                            f"that was silenced as another error was raised in forward: {str(e)}"
-                        )
+                        warnings.warn("module forward hook with ``always_call=True`` raised an exception "
+                                      f"that was silenced as another error was raised in forward: {str(e)}")
                         continue
             # raise exception raised in try block
             raise
+    # fmt: on
 
     __call__: Callable[..., Any] = _wrapped_call_impl
 
