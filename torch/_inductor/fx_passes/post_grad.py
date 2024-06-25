@@ -220,12 +220,27 @@ def is_valid_mm_plus_mm(match: Match):
 def scatter_upon_const_tensor_extra_check(m):
     if not config.optimize_scatter_upon_const_tensor:
         return False
-    allzero_shape = m.kwargs["shape"]
+    full_shape = m.kwargs["shape"]
     selector = m.kwargs["selector"]
     dim = m.kwargs["dim"]
+    if dim < 0:
+        dim += len(full_shape)
 
     selector_ft = selector.meta["val"]
-    assert selector_ft.dim() == len(allzero_shape)
+    assert selector_ft.dim() == len(full_shape)
+
+    for idx, select_sz, full_sz in zip(
+        itertools.count(), selector_ft.shape, full_shape
+    ):
+        if idx == dim:
+            continue
+
+        # TODO: the pattern can be updated to support the case that index tensor
+        # is shorter. But that will need a more complex condition expression
+        # especially for multi-dimensional tensors.
+        # Skip it for now.
+        if select_sz < full_sz:
+            return False
 
     # Actually we can support small size larger than 1. It would be a bit
     # tedius. E.g., we load all the index values (not many) and compare
@@ -251,6 +266,12 @@ def scatter_upon_const_tensor_extra_check(m):
 def scatter_upon_const_tensor(
     match: Match, shape, background_val, dtype, dim, selector, val
 ):
+    """
+    Match the pattern of full+scatter into a pointwise.
+
+    TODO: Right now the scatter value must be a scalar. But we could support it
+    when it is a tensor as well.
+    """
     from torch._inductor import metrics
 
     metrics.num_matches_for_scatter_upon_const_tensor += 1

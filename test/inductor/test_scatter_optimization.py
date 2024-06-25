@@ -5,7 +5,7 @@ import os
 
 import torch
 from torch import nn
-from torch._dynamo.utils import same
+from torch._dynamo.utils import counters, same
 from torch._inductor import metrics
 from torch._inductor.runtime.runtime_utils import do_bench_gpu as do_bench
 from torch._inductor.test_case import TestCase
@@ -18,6 +18,7 @@ class TestScatterOpt(TestCase):
     def setUp(self):
         super().setUp()
         metrics.reset()
+        counters.clear()
 
     def check_metric(self, val=1):
         self.assertEqual(val, metrics.num_matches_for_scatter_upon_const_tensor)
@@ -57,6 +58,33 @@ class TestScatterOpt(TestCase):
         self.do_acc_test(f, x)
         expected_num_bytes = M * N * torch.float.itemsize + N * torch.int64.itemsize
         self.assertEqual(metrics.num_bytes_accessed, expected_num_bytes)
+
+    def test_neg_scatter_dim(self):
+        M, N = 1024, 2048
+
+        def f(x):
+            y = torch.full([M, N], 3.14, dtype=torch.float)
+            y.scatter_(-1, x.unsqueeze(1), 2.718)
+            return y
+
+        x = torch.randint(0, N, (M,), dtype=torch.int64)
+        self.do_acc_test(f, x)
+        expected_num_bytes = M * N * torch.float.itemsize + M * torch.int64.itemsize
+        self.assertEqual(metrics.num_bytes_accessed, expected_num_bytes)
+
+    def test_shorter_index_tensor(self):
+        M, N = 1024, 2048
+
+        def f(x):
+            y = torch.full([M, N], 3.14, dtype=torch.float)
+            y.scatter_(1, x.unsqueeze(1), 2.718)
+            return y
+
+        x = torch.randint(0, N, (M // 2,), dtype=torch.int64)
+        self.do_acc_test(f, x)
+
+        # no match since the index tensor is shorter. May support it in future.
+        self.assertEqual(0, counters["inductor"]["pattern_matcher_count"])
 
     def test_nonzero_const_tensor(self):
         M, N = 1024, 2048
