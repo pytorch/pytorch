@@ -159,8 +159,8 @@ from this host thread will reside or execute on the specific device.
 
 Stream
 ~~~~~~~~~~~~~~~~~~~~~~~~
-A first in first out (FIFO) queue of executing the respective tasks asynchronously. It can
-control or synchronize the execution of other Streams or block the current host thread to ensure
+An in-order queue of executing the respective tasks asynchronously in first in first out (FIFO) order.
+It can control or synchronize the execution of other Streams or block the current host thread to ensure
 the correct task sequencing.
 
 Event
