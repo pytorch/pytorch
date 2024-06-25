@@ -22,6 +22,7 @@
 #include <ATen/ops/replication_pad1d.h>
 #include <ATen/ops/replication_pad2d.h>
 #include <ATen/ops/replication_pad3d.h>
+#include <ATen/ops/_pad_symmetric.h>
 #include <ATen/ops/cat.h>
 #endif
 

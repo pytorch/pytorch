@@ -23,6 +23,9 @@ inline Tensor pad(
       return at::padding_mode::replicate;
     } else if (std::holds_alternative<enumtype::kCircular>(mode)) {
       return at::padding_mode::circular;
+    } else if (std::holds_alternative<enumtype::kSymmetric>(mode)) {
+      return at::padding_mode::symmetric;
+    
     }
     TORCH_CHECK(false, "Unrecognised padding mode");
   }();
