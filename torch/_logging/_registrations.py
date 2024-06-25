@@ -32,7 +32,7 @@ register_log(
     "ddp", ["torch.nn.parallel.distributed", "torch._dynamo.backends.distributed"]
 )
 register_log("pp", ["torch.distributed.pipelining"])
-register_log("fsdp", ["torch.distributed.fsdp"])
+register_log("fsdp", ["torch.distributed.fsdp", "torch.distributed._composable.fsdp"])
 register_log("onnx", "torch.onnx")
 register_log("export", ["torch._dynamo", "torch.export", *DYNAMIC])
 

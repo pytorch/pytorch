@@ -13,8 +13,7 @@ from ..autotune_process import CppBenchmarkRequest
 from ..select_algorithm import PartialRender
 from ..utils import sympy_index_symbol, sympy_index_symbol_with_prefix
 from ..virtualized import V
-from .common import Kernel, OpOverrides
-from .cpp import CppKernelProxy, KernelGroup
+from .cpp import CppKernel, CppKernelProxy, KernelGroup
 from .cpp_utils import cexpr_index, DTYPE_TO_CPP, LocalBufferScope
 
 
@@ -35,11 +34,9 @@ def wrap_with_tensorbox(node) -> ir.TensorBox:
     )
 
 
-class CppTemplateKernel(Kernel):
-    overrides = OpOverrides
-
-    def __init__(self, kernel_name):
-        super().__init__()
+class CppTemplateKernel(CppKernel):
+    def __init__(self, kernel_name, num_threads):
+        super().__init__(None, num_threads)
         self.kernel_name = kernel_name
         self.render_hooks = {}
         self.local_buffers = {}
@@ -167,13 +164,6 @@ class CppTemplateKernel(Kernel):
         permuted = L.permute(node, dims).data
         assert isinstance(permuted, ir.ReinterpretView)
         return permuted
-
-    @property
-    def assert_function(self) -> str:
-        if V.graph.aot_mode:
-            return "AOTI_TORCH_CHECK"
-        else:
-            return "TORCH_CHECK"
 
     def maybe_codegen_profile(self) -> str:
         if config.cpp.enable_kernel_profile:
