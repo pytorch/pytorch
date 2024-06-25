@@ -9965,7 +9965,8 @@ class CommonTemplate:
         self.assertEqual(rot.grad, rot_e.grad)
         self.assertEqual(trans.grad, trans_e.grad)
 
-    @config.patch({"fx_graph_cache": False})
+    # If we serve from the cache, the init hook isn't called
+    @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_inner_fn_str_and_stride(self):
         def f(x):
             x = x + 1
@@ -10531,6 +10532,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
 
             self.assertEqual(fn_opt(*inps), fn(*inps))
 
+        @config.patch({"fx_graph_remote_cache": False})
         def test_optimize_indexing_dtype_with_constraint(self):
             def fn1(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
                 x = torch.arange(0, b.shape[0], device=GPU_TYPE)
@@ -10547,12 +10549,16 @@ if HAS_GPU and not TEST_WITH_ASAN:
             fn2_opt = torch._dynamo.optimize("inductor")(fn2)
 
             a = torch.rand([100, 100], device=GPU_TYPE)
-            b = torch.rand([100], device=GPU_TYPE)
-            torch._dynamo.mark_dynamic(b, 0)
-            inps = [a, b]
+            b1 = torch.rand([102], device=GPU_TYPE)
+            b2 = torch.rand([100], device=GPU_TYPE)
+            torch._dynamo.mark_dynamic(b1, 0)
+            torch._dynamo.mark_dynamic(b2, 0)
+            inps1 = [a, b1]
+            inps2 = [a, b2]
 
-            code1 = run_and_get_triton_code(fn1_opt, *inps)
-            code2 = run_and_get_triton_code(fn2_opt, *inps)
+            # Run fn2 first since it has more restrictive bounds -- to avoid cache hit
+            code2 = run_and_get_triton_code(fn2_opt, *inps2)
+            code1 = run_and_get_triton_code(fn1_opt, *inps1)
 
             # The function with the constrained tensor should be optimized, but
             # the other should not:
@@ -10560,8 +10566,8 @@ if HAS_GPU and not TEST_WITH_ASAN:
             self.assertTrue("to(tl.int32)" in code2)
             self.assertFalse("to(tl.int64)" in code2)
 
-            self.assertEqual(fn1_opt(*inps), fn1(*inps))
-            self.assertEqual(fn2_opt(*inps), fn1(*inps))
+            self.assertEqual(fn1_opt(*inps1), fn1(*inps1))
+            self.assertEqual(fn2_opt(*inps2), fn1(*inps2))
 
         def test_constant_folding_deallocation(self):
             import torch._inductor

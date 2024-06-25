@@ -255,7 +255,8 @@ if RUN_CPU:
         BaseTest("test_multihead_attention", "cpu", test_cpu_repro.CPUReproTests()),
         BaseTest(
             "test_multi_threading",
-            code_string_count={"py::gil_scoped_release release;": 1},
+            # Two threads compile, so we expect the output code to be printed twice.
+            code_string_count={"py::gil_scoped_release release;": 2},
         ),
         BaseTest("test_profiler_mark_wrapper_call"),
         BaseTest(
