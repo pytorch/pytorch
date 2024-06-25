@@ -1,18 +1,24 @@
 # mypy: allow-untyped-defs
-from collections import namedtuple
-from typing import Dict, List, Optional, Type
+import dataclasses
+from enum import Enum
+from typing import Callable, Dict, List, Optional, Type
 
 import sympy
 
 import torch
 
 from .. import ir
-from ..codecache import pick_vec_isa, VecAVX2, VecAVX512
+from ..codecache import pick_vec_isa, VecAMX, VecAVX2, VecAVX512, VecISA
 from ..utils import IndentedBuffer, parallel_num_threads
 from ..virtualized import V
 from .common import KernelTemplate
 from .cpp_template_kernel import CppTemplateKernel
 from .cpp_utils import DTYPE_TO_CPP, GemmBlocking, value_to_cpp
+
+
+class LayoutType(Enum):
+    NORMAL = 0
+    VNNI2 = 1
 
 
 class CppMicroGemm:
@@ -30,6 +36,9 @@ class CppMicroGemm:
     DECLARE_KERNEL = r"""
 template <bool accum>
 inline void {{kernel_name}}(
+{%- if kernel_extra_args_declare %}
+    {{kernel_extra_args_declare}}
+{%- endif %}
     const {{input_t}}* __restrict__ A,
     const {{input_t}}* __restrict__ B,
     {{output_t}}* __restrict__ C,
@@ -69,11 +78,18 @@ inline void {{kernel_name}}(
             "output_t": DTYPE_TO_CPP[self.output_dtype],
             "compute_t": DTYPE_TO_CPP[self.compute_dtype],
             "alpha": self.alpha,
+            "kernel_extra_args_declare": self.get_kernel_extra_args_declare(),
         }
 
     def get_kernel_declaration(self):
         options = self.get_common_options()
         return KernelTemplate._template_from_string(self.DECLARE_KERNEL).render(options)
+
+    def get_kernel_extra_args_declare(self) -> str:
+        return ""
+
+    def get_kernel_extra_args(self) -> str:
+        return ""
 
     def codegen_define(self, kernel: CppTemplateKernel) -> str:
         raise NotImplementedError
@@ -102,6 +118,9 @@ inline void {{kernel_name}}(
         res = IndentedBuffer()
         res.writeline(f"{self.name}<{value_to_cpp(accum, 'bool')}>(")
         with res.indent():
+            extra_args = self.get_kernel_extra_args()
+            if extra_args:
+                res.writeline(extra_args)
             res.writeline(f"{A_ptr},")
             res.writeline(f"{B_ptr},")
             res.writeline(f"{C_ptr},")
@@ -114,17 +133,31 @@ inline void {{kernel_name}}(
         res.writeline(");")
         return res.getvalue()
 
+    def codegen_init(
+        self,
+        kernel: CppTemplateKernel,
+    ) -> str:
+        return ""
 
-CppMicroGemmConfig = namedtuple(
-    "CppMicroGemmConfig",
-    [
-        "input_dtype",
-        "output_dtype",
-        "compute_dtype",
-        "vec_isa_cls",
-        "register_blocking",
-    ],
-)
+    def codegen_finalize(
+        self,
+        kernel: CppTemplateKernel,
+    ) -> str:
+        return ""
+
+    def get_b_layout(self) -> LayoutType:
+        return LayoutType.NORMAL
+
+
+@dataclasses.dataclass
+class CppMicroGemmConfig:
+    input_dtype: torch.dtype
+    output_dtype: torch.dtype
+    compute_dtype: torch.dtype
+    vec_isa_cls: Type[VecISA]
+    register_blocking: GemmBlocking
+    extra_check: Optional[Callable[..., bool]] = None
+
 
 micro_gemm_configs: Dict[Type[CppMicroGemm], List[CppMicroGemmConfig]] = {}
 
@@ -147,6 +180,7 @@ def generate_gemm_config(
     input_dtype=torch.float,
     output_dtype=None,
     compute_dtype=None,
+    extra_check=None,
 ):
     if output_dtype is None:
         output_dtype = input_dtype
@@ -159,6 +193,7 @@ def generate_gemm_config(
             compute_dtype,
             vec_isa_cls,
             GemmBlocking(*blocking),
+            extra_check,
         )
         for blocking in register_blockings
     ]
@@ -197,36 +232,51 @@ class CppMicroGemmRef(CppMicroGemm):
         return KernelTemplate._template_from_string(self.TEMPLATE_ENTRY).render(options)
 
 
+def check_fp32_vec_extra(config, m, n, k, alpha, num_threads):
+    # TODO(jgong5): support n % n_block_size != 0
+    return n % config.register_blocking.block_n == 0
+
+
 @register_micro_gemm(
     *generate_gemm_config(
-        VecAVX512, [(8, 48, 1), (8, 32, 1), (16, 16, 1)], input_dtype=torch.float
+        VecAVX512,
+        [(8, 48, 1), (8, 32, 1), (16, 16, 1)],
+        input_dtype=torch.float,
+        extra_check=check_fp32_vec_extra,
     ),
     *generate_gemm_config(
         VecAVX512,
         [(8, 48, 1), (8, 32, 1), (16, 16, 1)],
         input_dtype=torch.bfloat16,
         output_dtype=torch.float,
+        extra_check=check_fp32_vec_extra,
     ),
     *generate_gemm_config(
         VecAVX512,
         [(8, 48, 1), (8, 32, 1), (16, 16, 1)],
         input_dtype=torch.half,
         output_dtype=torch.float,
+        extra_check=check_fp32_vec_extra,
     ),
     *generate_gemm_config(
-        VecAVX2, [(4, 24, 1), (4, 16, 1), (8, 8, 1)], input_dtype=torch.float
+        VecAVX2,
+        [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
+        input_dtype=torch.float,
+        extra_check=check_fp32_vec_extra,
     ),
     *generate_gemm_config(
         VecAVX2,
         [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
         input_dtype=torch.bfloat16,
         output_dtype=torch.float,
+        extra_check=check_fp32_vec_extra,
     ),
     *generate_gemm_config(
         VecAVX2,
         [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
         input_dtype=torch.half,
         output_dtype=torch.float,
+        extra_check=check_fp32_vec_extra,
     ),
 )
 class CppMicroGemmFP32Vec(CppMicroGemm):
@@ -367,6 +417,218 @@ inline void {{kernel_name}}_kernel(
         return result
 
 
+# extra check for CppMicroGemmAMX
+def check_amx_extra(config, m, n, k, alpha, num_threads):
+    return n % config.register_blocking.block_n == 0 and k % 2 == 0 and alpha == 1
+
+
+@register_micro_gemm(
+    *generate_gemm_config(
+        VecAMX,
+        [(32, 32, 32), (48, 16, 32), (16, 48, 32)],
+        input_dtype=torch.bfloat16,
+        output_dtype=torch.float,
+        extra_check=check_amx_extra,
+    ),
+)
+class CppMicroGemmAMX(CppMicroGemm):
+    """
+    This class generates the code for micro gemm using Advanced Matrix eXtention (AMX)
+    instructions available in 4th generation Intel Xeon for compute.
+    It supports input types of torch.bfloat16 with fp32 output.
+    TODO(jgong5): support int8 data type.
+    """
+
+    TEMPLATE_ENTRY = r"""
+{{declare_kernel}} {
+    TORCH_CHECK(N % {{block_n}} == 0, "N dimension must be multiple of {{block_n}}");
+    TORCH_CHECK(K % 2 == 0, "K dimension must be multiple of 2");
+    // TODO(jgong5): loop unroll for M and N
+    for (int64_t m = 0; m < M; m += {{block_m}}) {
+        int64_t block_m = std::min<int64_t>(M - m, {{block_m}});
+        int64_t m_tail = m;
+        for (int64_t n = 0; n < N; n += {{block_n}}) {
+            {%- for num_rows in range(block_m, 0, -16) %}
+            {%- if num_rows != block_m %}
+            else
+            {%- endif %}
+            if (block_m >= {{num_rows}}) {
+                {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}<accum>(
+                    amx_state,
+                    A + m * lda,
+                    B + n,
+                    C + m * ldc + n,
+                    K,
+                    lda,
+                    ldb,
+                    ldc,
+                    16
+                );
+                block_m -= {{num_rows}};
+                m_tail += {{num_rows}};
+            }
+            {%- endfor %}
+            if (block_m > 0) {
+                {{kernel_name}}_amx_kernel_16_{{num_columns}}<accum>(
+                    amx_state,
+                    A + m_tail * lda,
+                    B + n,
+                    C + m_tail * ldc + n,
+                    K,
+                    lda,
+                    ldb,
+                    ldc,
+                    block_m
+                );
+            }
+        }
+    }
+}
+"""
+
+    TEMPLATE_KERNEL = r"""
+template <bool accum>
+inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
+    AMXState& amx_state,
+    const {{input_t}}* __restrict__ A,
+    const {{input_t}}* __restrict__ B,
+    {{output_t}}* __restrict__ C,
+    int64_t K,
+    int64_t lda,
+    int64_t ldb,
+    int64_t ldc,
+    uint8_t tilecfg_rows
+) {
+    // TODO(jgong5): add prefetch hint for A, B, C
+    auto loadconfig = [](const amx_tilecfg& cfg) {
+        _tile_loadconfig(&cfg);
+    };
+    const auto last_k_offset = K / {{block_k}} * {{block_k}};
+    const auto tail_k_size = K - last_k_offset;
+    if C10_LIKELY (last_k_offset > 0) {
+        amx_state.configure(tilecfg_rows, 64, {{num_rows}} / 16, {{num_columns}}, loadconfig);
+    } else {
+        amx_state.configure(tilecfg_rows, tail_k_size * sizeof({{input_t}}), {{num_rows}} / 16, {{num_columns}}, loadconfig);
+    }
+    auto load_c = [&]() {
+    {%- for tile_row in range(num_rows // 16) %}
+        {%- for tile_col in range(num_columns) %}
+        {%- set tile_idx = tile_row * num_columns + tile_col %}
+        _tile_loadd({{tile_idx}}, C + {{tile_row * 16}} * ldc + {{tile_col * 16}}, ldc * sizeof({{output_t}}));
+        {%- endfor %}
+    {%- endfor %}
+    };
+    auto zero_c = [&]() {
+    {%- for tile_row in range(num_rows // 16) %}
+        {%- for tile_col in range(num_columns) %}
+        {%- set tile_idx = tile_row * num_columns + tile_col %}
+        _tile_zero({{tile_idx}});
+        {%- endfor %}
+    {%- endfor %}
+    };
+
+    if constexpr (accum) {
+        load_c();
+    } else {
+        zero_c();
+    }
+
+    auto compute = [&](int k) {
+    {%- set tile_offset_a = num_rows // 16 * num_columns %}
+    {%- set tile_offset_b = tile_offset_a + num_rows // 16 %}
+    {%- for tile_row in range(num_rows // 16) %}
+        {%- for tile_col in range(num_columns) %}
+        {%- set tile_idx_a = tile_offset_a + tile_row %}
+        {%- set tile_idx_b = tile_offset_b + tile_col %}
+        {%- set tile_idx_c = tile_row * num_columns + tile_col %}
+        {%- if tile_col == 0 %}
+        _tile_loadd({{tile_idx_a}}, A + {{tile_row * 16}} * lda + k, lda * sizeof({{input_t}}));
+        {%- endif %}
+        {%- if tile_row == 0 %}
+        _tile_loadd({{tile_idx_b}}, B + k * ldb + {{tile_col * 16 * 2}}, ldb * 2 * sizeof({{input_t}}));
+        {%- endif %}
+        _tile_dpbf16ps({{tile_idx_c}}, {{tile_idx_a}}, {{tile_idx_b}});
+        {%- endfor %}
+    {%- endfor %}
+    };
+
+    {{kernel.unroll_pragma(4)}}
+    for (int k = 0; k < last_k_offset; k += {{block_k}}) {
+        compute(k);
+    }
+
+    auto store_c = [&]() {
+    // store to C
+    {%- for tile_row in range(num_rows // 16) %}
+        {%- for tile_col in range(num_columns) %}
+        {%- set tile_idx = tile_row * num_columns + tile_col %}
+        _tile_stored({{tile_idx}}, C + {{tile_row * 16}} * ldc + {{tile_col * 16}}, ldc * sizeof({{output_t}}));
+        {%- endfor %}
+    {%- endfor %}
+    };
+
+    // TODO(jgong5): move tail k computation to separate loopnest to save tile configuration overhead
+    if C10_UNLIKELY (tail_k_size > 0) {
+        if C10_LIKELY (last_k_offset > 0) {
+            store_c();
+            amx_state.configure(tilecfg_rows, tail_k_size * sizeof({{input_t}}), {{num_rows}} / 16, {{num_columns}}, loadconfig);
+            load_c();
+        }
+        compute(last_k_offset);
+    }
+
+    store_c();
+}
+"""
+
+    def codegen_define(self, kernel: CppTemplateKernel) -> str:
+        block_m, block_n, block_k = self.register_blocking
+        assert block_m % 16 == 0, "Only support block_m % 16 == 0 for AMX"
+        assert block_n % 16 == 0, "Only support block_n % 16 == 0 for AMX"
+        assert block_k == 32, "Only support block_k = 32 for AMX"
+        num_columns = block_n // 16
+        options = {
+            "declare_kernel": self.get_kernel_declaration(),
+            "kernel": kernel,
+            "block_m": block_m,
+            "block_n": block_n,
+            "block_k": block_k,
+            "num_columns": num_columns,
+            **self.get_common_options(),
+        }
+        result = ""
+        for num_rows in range(block_m, 0, -16):
+            amx_kernel_options = {**options, "num_rows": num_rows}
+            result += KernelTemplate._template_from_string(self.TEMPLATE_KERNEL).render(
+                amx_kernel_options
+            )
+        result += KernelTemplate._template_from_string(self.TEMPLATE_ENTRY).render(
+            options
+        )
+        return result
+
+    def codegen_init(
+        self,
+        kernel: CppTemplateKernel,
+    ) -> str:
+        return "AMXState amx_state;"
+
+    def codegen_finalize(
+        self,
+        kernel: CppTemplateKernel,
+    ) -> str:
+        return "amx_state.release([]() { _tile_release(); });"
+
+    def get_kernel_extra_args_declare(self) -> str:
+        return "AMXState& amx_state,"
+
+    def get_kernel_extra_args(self) -> str:
+        return "amx_state,"
+
+    def get_b_layout(self):
+        return LayoutType.VNNI2
+
+
 def create_micro_gemm(
     name,
     m,
@@ -403,36 +665,48 @@ def create_micro_gemm(
     matched_configs = []
     for cls, configs in micro_gemm_configs.items():
         for config in configs:
-            if not isinstance(vec_isa, config.vec_isa_cls):
+            if not issubclass(vec_isa.__class__, config.vec_isa_cls):
                 continue
             if (
                 config.input_dtype == input_dtype
                 and config.output_dtype == output_dtype
                 and config.compute_dtype == compute_dtype
             ):
-                block_m, block_n, block_k = config.register_blocking
-                # TODO(jgong5): support n % n_block_size != 0
-                if n % block_n != 0:
+                if config.extra_check is not None and not config.extra_check(
+                    config, m, n, k, alpha, num_threads
+                ):
                     continue
+                block_m, block_n, block_k = config.register_blocking
                 # Criteria on the ranking of configurations
-                # 1. Dividable by block sizes (block_m, block_k)
-                # 2. Number of mxn blocks is large enough to occupy all the threads
-                # 3. Register blocks are larger
+                # 1. ISA: AMX > VEC
+                # 2. Dividable by block sizes (block_m, block_n, block_k)
+                # 3. Number of mxn blocks is large enough to occupy all the threads
+                # 4. Register blocks are larger
+                isa_score = 0
+                if config.vec_isa_cls == VecAMX:
+                    isa_score += 1
                 dividable_score = 0
-                if k % block_k == 0:
-                    dividable_score += 1
                 if m % block_m == 0:
                     dividable_score += 1
+                if n % block_n == 0:
+                    dividable_score += 1
+                if k % block_k == 0:
+                    dividable_score += 1
                 occupancy_score = 0
-                n_blocks = n // block_n
-                total_mxn_blocks = n // block_n * ((m + block_m - 1) // block_m)
+                n_blocks = (n + block_n - 1) // block_n
+                total_mxn_blocks = n_blocks * ((m + block_m - 1) // block_m)
                 if n_blocks >= num_threads:
                     occupancy_score += 1
                 if total_mxn_blocks >= num_threads:
                     occupancy_score += 1
+                register_bytes = (
+                    block_m * block_n * config.compute_dtype.itemsize
+                    + (block_m * block_k + block_k * block_n)
+                    * config.input_dtype.itemsize
+                )
                 matched_configs.append(
                     (
-                        (dividable_score, occupancy_score, block_m * block_n * block_k),
+                        (isa_score, dividable_score, occupancy_score, register_bytes),
                         cls,
                         config,
                     )
