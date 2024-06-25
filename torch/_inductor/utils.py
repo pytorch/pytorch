@@ -734,7 +734,7 @@ def clear_inductor_caches():
 
 
 @contextlib.contextmanager
-def fresh_inductor_cache(cache_entries=None):
+def fresh_inductor_cache(cache_entries=None, dir=None, delete=True):
     """
     Contextmanager that provides a clean tmp cachedir for inductor.
 
@@ -743,7 +743,7 @@ def fresh_inductor_cache(cache_entries=None):
     """
     clear_inductor_caches()
 
-    inductor_cache_dir = tempfile.mkdtemp()
+    inductor_cache_dir = tempfile.mkdtemp(dir=dir)
     try:
         with mock.patch.dict(
             os.environ, {"TORCHINDUCTOR_CACHE_DIR": inductor_cache_dir}
@@ -762,7 +762,8 @@ def fresh_inductor_cache(cache_entries=None):
                                 if ".lock" not in f
                             }
                         )
-        shutil.rmtree(inductor_cache_dir)
+        if delete:
+            shutil.rmtree(inductor_cache_dir)
     except Exception:
         log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
         raise
@@ -1520,6 +1521,13 @@ def use_scatter_fallback(
     src_device_type,
     src_is_tensor,
 ):
+    if (
+        op_overload.overloadpacket
+        in (torch.ops.aten.scatter_reduce_, torch.ops.aten.scatter_reduce)
+        and reduction_type is None
+    ):
+        return False
+
     reduce_ty = (
         "add" if op_overload.overloadpacket == torch.ops.aten.scatter_ else "sum"
     )
@@ -1624,7 +1632,7 @@ def run_and_get_cpp_code(fn, *args, **kwargs):
 
         log_capture_string = io.StringIO()
         ch = logging.StreamHandler(log_capture_string)
-        from torch._inductor.graph import output_code_log
+        from torch._inductor.codecache import output_code_log
 
         output_code_log.addHandler(ch)
         prev_level = output_code_log.level

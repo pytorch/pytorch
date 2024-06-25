@@ -54,6 +54,7 @@ from torch.nn.modules.module import _IncompatibleKeys
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils._pytree import tree_map_only
 
+
 __all__ = [
     "FQNS_T",
     "PrimitiveType",
@@ -150,6 +151,9 @@ class StateDictOptions:
 @dataclass
 class _StateDictInfo(StateDictOptions):
     fqn_param_mapping: Dict[
+        Union[str, torch.Tensor], Union[FQNS_T, torch.Tensor]
+    ] = field(default_factory=dict)
+    shared_params_mapping: Dict[
         Union[str, torch.Tensor], Union[FQNS_T, torch.Tensor]
     ] = field(default_factory=dict)
     submodule_prefixes: Set[str] = field(default_factory=set)
@@ -285,13 +289,28 @@ def _verify_options(
     fqn_param_mapping: Dict[
         Union[str, torch.Tensor], Union[Set[str], torch.Tensor]
     ] = {}
+    shared_params_mapping: Dict[
+        Union[str, torch.Tensor], Union[Set[str], torch.Tensor]
+    ] = {}
     for name, param in _iterate_valid_model_state(model):
+        if isinstance(param, _EXTRA_STATE):
+            continue
+
         fqns = _get_fqns(model, name)
-        if not isinstance(param, _EXTRA_STATE):
-            fqn_param_mapping[param] = fqns
+        fqn = fqn_param_mapping.get(param, None)
+        if fqn is not None:
+            cast(Set[str], fqn_param_mapping[param]).update(fqns)
+            shared_params_mapping[param] = fqn_param_mapping[param]
+        else:
+            # We need to do copy as _get_fqns is lru_cached
+            fqn_param_mapping[param] = fqns.copy()
         for fqn in fqns:
             if not isinstance(param, _EXTRA_STATE):
                 fqn_param_mapping[fqn] = param
+
+    for param_, fqns_ in list(shared_params_mapping.items()):
+        for fqn in fqns_:
+            shared_params_mapping[fqn] = cast(torch.Tensor, param_)
 
     submodule_prefixes: Set[str] = set()
     if submodules:
@@ -360,6 +379,7 @@ def _verify_options(
     return _StateDictInfo(
         **asdict(options),
         fqn_param_mapping=fqn_param_mapping,
+        shared_params_mapping=shared_params_mapping,
         submodule_prefixes=submodule_prefixes,
         fsdp_context=fsdp_context,
         fsdp_modules=cast(List[nn.Module], fsdp_modules),
@@ -449,7 +469,7 @@ def _get_model_state_dict(
 
     for key in list(state_dict.keys()):
         fqns = _get_fqns(model, key)
-        assert len(fqns) == 1
+        assert len(fqns) == 1, (key, fqns)
         fqn = next(iter(fqns))
         if fqn != key:
             # As we only support FSDP, DDP, and TP, the only cases are
@@ -796,6 +816,19 @@ def _split_optim_state_dict(
         pg_state.append({_PARAMS: []})
         for param in param_group[_PARAMS]:
             for fqn in info.fqn_param_mapping[param]:
+                if fqn in info.shared_params_mapping:
+                    in_params = False
+                    for loaded_param_group in cast(
+                        ListDictValueType, optim_state_dict[_PG]
+                    ):
+                        if fqn in cast(List[str], loaded_param_group[_PARAMS]):
+                            in_params = True
+                            break
+                else:
+                    in_params = True
+                if not in_params:
+                    continue
+
                 params = pg_state[-1][_PARAMS]
                 assert isinstance(params, list)
                 params.append(fqn)
@@ -804,9 +837,7 @@ def _split_optim_state_dict(
                 for loaded_param_group in cast(
                     ListDictValueType, optim_state_dict[_PG]
                 ):
-                    params = loaded_param_group[_PARAMS]
-                    assert isinstance(params, list)
-                    if fqn in params:
+                    if fqn in cast(List[str], loaded_param_group[_PARAMS]):
                         pg_mapping[id(loaded_param_group)] = len(return_osd[_PG]) - 1
 
     for param_group in cast(ListDictValueType, optim_state_dict[_PG]):
