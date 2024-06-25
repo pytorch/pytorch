@@ -7,6 +7,7 @@ import torch
 from torch._inductor.codegen.cpp_gemm_template import CppPackedGemmTemplate
 from torch._inductor.virtualized import V
 from .. import config as inductor_config
+from ..codegen.common import BackendFeature
 from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
 from ..codegen.wrapper import WrapperCodeGen
 from ..ir import FlexibleLayout
@@ -460,6 +461,7 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
         )
         or _is_sm7x_or_older_gpu(layout.device.index)
         or inductor_config.mixed_mm_choice == "aten"
+        or not V.graph.has_feature(layout.device, BackendFeature.TRITON_TEMPLATES)
     )
 
     if inductor_config.mixed_mm_choice == "triton":

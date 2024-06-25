@@ -5,7 +5,6 @@ import dataclasses
 import functools
 import itertools
 import logging
-import math
 import re
 from collections import defaultdict
 from math import inf
@@ -89,6 +88,9 @@ class HalidePrinter(PythonPrinter):
     @staticmethod
     def cast_float(expr):
         return f"hl.cast(hl.Float(32), {expr})"
+
+    def _print_Float(self, expr):
+        return f"hl.f32({expr})"
 
     def _print_floor(self, expr):
         assert len(expr.args) == 1
@@ -269,11 +271,13 @@ class HalideOverrides(OpOverrides):
     @staticmethod
     def minimum(a, b):
         # return f"hl.min({a}, {b})"  <== handles nan wrong
+        b = f"hl.cast({a.name}.type(), {b})"
         return f"hl.select(({a}<{b})|hl.is_nan({a}), {a}, {b}) if {a.name}.type().is_float() else hl.min({a}, {b})"
 
     @staticmethod
     def maximum(a, b):
         # return f"hl.max({a}, {b})"  <== handles nan wrong
+        b = f"hl.cast({a.name}.type(), {b})"
         return f"hl.select(({a}>{b})|hl.is_nan({a}), {a}, {b}) if {a.name}.type().is_float() else hl.max({a}, {b})"
 
     @staticmethod
@@ -390,52 +394,19 @@ class HalideOverrides(OpOverrides):
 
     @staticmethod
     def rand(seed, offset):
-        return f"hl.random_float({seed} ^ {offset})"
+        raise Unsupported("rand")
 
     @staticmethod
     def randn(seed, offset):
-        # Box-Muller transform
-        return ops.mul(
-            ops.sqrt(
-                ops.mul(
-                    ops.constant(-2, torch.float32), ops.log(ops.rand(seed, offset))
-                )
-            ),
-            ops.cos(
-                ops.mul(
-                    ops.constant(2 * math.pi, torch.float32),
-                    ops.rand(
-                        ops.bitwise_xor(seed, ops.constant(0x7777, torch.int32)), offset
-                    ),
-                )
-            ),
-        )
-
-    @staticmethod
-    def halide_random_uint(seed, offset):
-        return f"hl.random_uint({seed} ^ {offset})"
+        raise Unsupported("rand")
 
     @staticmethod
     def randint64(seed, offset, low, high):
-        uint64 = "hl.cast(hl.UInt(64), {})".format
-        int64 = "hl.cast(hl.Int(64), {})".format
-        lo = uint64(ops.halide_random_uint(seed, offset))
-        hi = uint64(
-            ops.halide_random_uint(
-                ops.bitwise_xor(seed, ops.constant(0x7777, torch.int32)), offset
-            )
-        )
-        result = f"({lo} | ({hi} << 32))"
-        size = uint64(f"{int64(high)} - {int64(low)}")
-        result = f"{result} % {size}"
-        result = f"{int64(result)} + {int64(low)}"
-        return result
+        raise Unsupported("rand")
 
     @staticmethod
     def load_seed(name, offset):
-        seed = ops.load(name, offset)
-        # Halide requires 32-bit seeds
-        return f"hl.cast(hl.Int(32), {seed} ^ ({seed} >> 32))"
+        raise Unsupported("rand")
 
     @staticmethod
     def rsqrt(x):
@@ -592,7 +563,7 @@ class HalideCSEVariable(CSEVariable):
 
     def index_str(self, dims):
         if len(dims) == 0:
-            return self.name
+            return f"{self.name}[()]"
         # Reversed since Halide is column major
         return f"{self.name}[{', '.join(map(str, dims))}]"
 
@@ -1156,11 +1127,11 @@ class HalideKernel(SIMDKernel):
             index_str = ", ".join(d.index_str(zero_vars=True) for d in dims)
             value_str = str(value)
 
+        dtype = V.graph.get_dtype(name)
         if mode is None:
-            dtype = V.graph.get_dtype(name)
             line = f"{var}[{index_str},] = hl.cast({halide_type(dtype)}, {value_str})"
         elif mode == "atomic_add":
-            line = f"{var}[{index_str},] += {value_str}"
+            line = f"{var}[{index_str},] += hl.cast({halide_type(dtype)}, {value_str})"
         else:
             raise NotImplementedError(f"store mode={mode}")
         self.body.writeline(DeferredLine(name, line))
@@ -1460,10 +1431,7 @@ class HalideKernel(SIMDKernel):
         def update_index(m):
             var = self.cse.varname_map[m.group(1)]
             assert var.used_dims is not None, var
-            if var.used_dims:
-                return str(var)
-            else:
-                return var.name  # a constant doesn't need to be wrapped in func
+            return str(var)
 
         for line in self.body._lines:
             if isinstance(line, str):
@@ -1485,7 +1453,7 @@ class HalideKernel(SIMDKernel):
                 range_hints = []
                 for i, dim in enumerate(dims):
                     hint = self._autoscheduler_workarounds(
-                        V.graph.sizevars.size_hint(dim.size, fallback=1)
+                        V.graph.sizevars.size_hint(dim.size, fallback=1), dims
                     )
                     range_hints.append(f"hl.Range(0, {hint})")
                     if "out" not in arg.name:
@@ -1528,9 +1496,10 @@ class HalideKernel(SIMDKernel):
         return code.getvalue()
 
     @staticmethod
-    def _autoscheduler_workarounds(n):
+    def _autoscheduler_workarounds(n, dims):
         if (
-            config.halide.scheduler_cuda == "Anderson2021"
+            len(dims) == 1
+            and config.halide.scheduler_cuda == "Anderson2021"
             and V.graph.scheduler.get_current_device_or_throw().type == "cuda"
         ):
             # workaround https://github.com/halide/Halide/issues/8246
