@@ -6069,13 +6069,11 @@ class MockFXGraphCache:
 # cache miss instead of cache hitting). They will be fixed in the PRs above this.
 FAILING_CACHE_TESTS = (
     # BypassAOTAutogradCache: unsupported nodes
-    "test_backward_mutation_data",
-    "test_backward_mutation_metadata",
-    "test_custom_autograd",
-    "test_inner_grad",
-    "test_input_mutation_set__nop",
-    "test_nonidempotent_amp",  # einsum
+    "test_backward_mutation_data",  # Custom Autograd Function
+    "test_backward_mutation_metadata",  # Custom Autograd Function
+    "test_custom_autograd",  # Custom Autograd Function
     # Pickle error: OutputAliasInfo/functional tensor
+    "test_input_mutation_set__nop",
     "test_input_aliased_with_mutation_output_alias",
     "test_input_data_and_metadata_mutation",
     "test_input_mutation_aliases_and_output_alias",
