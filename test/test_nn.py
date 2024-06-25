@@ -8464,7 +8464,7 @@ class TestNNDeviceType(NNTestCase):
 
         inputs = torch.rand(1, 3, 4, 4, device=device, dtype=dtype)
         # assert that pad doesn't return a view into the input tensor
-        for mode in 'constant', 'reflect', 'replicate', 'circular':
+        for mode in 'constant', 'reflect', 'replicate', 'circular', 'symmetric':
             out = F.pad(inputs, (0, 0, 0, 0), mode=mode)
             out.fill_(4)
             self.assertTrue(torch.all(torch.abs(inputs) < 2))
