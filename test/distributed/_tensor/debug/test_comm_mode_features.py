@@ -28,7 +28,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 c10d_functional = torch.ops.c10d_functional
 
 
-class PrintModuleParamaterShardingTest(DTensorTestBase):
+class TestCommModeFeatures(DTensorTestBase):
     # checks if parameter / sharding info is the same as ground truth
     def check_same_set_of_keys(self, dict1, dict2):
         """
