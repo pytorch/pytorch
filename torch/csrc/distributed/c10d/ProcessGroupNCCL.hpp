@@ -685,7 +685,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       at::Device& device,
       OpType opType,
       int p2pRank = 0,
-      bool isSendRecvSelf = false);
+      bool isSendRecvSelf = false,
+      std::optional<const std::string> streamKey = c10::nullopt);
 
   // Wrapper method which can be overridden for tests.
   virtual std::exception_ptr checkForNCCLErrors(
