@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 import argparse
 import os
-import pathlib
 import subprocess
+from pathlib import Path
 
 from common import (
     get_testcases,
@@ -12,8 +12,8 @@ from common import (
     key,
     open_test_results,
 )
-
 from download_reports import download_reports
+
 
 """
 Usage: update_failures.py /path/to/dynamo_test_failures.py /path/to/test commit_sha
@@ -194,7 +194,7 @@ if __name__ == "__main__":
         "filename",
         nargs="?",
         default=str(
-            pathlib.Path(__file__).absolute().parent.parent.parent
+            Path(__file__).absolute().parents[2]
             / "torch/testing/_internal/dynamo_test_failures.py"
         ),
         help="Optional path to dynamo_test_failures.py",
@@ -203,7 +203,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "test_dir",
         nargs="?",
-        default=str(pathlib.Path(__file__).absolute().parent.parent.parent / "test"),
+        default=str(Path(__file__).absolute().parents[2] / "test"),
         help="Optional path to test folder",
     )
     parser.add_argument(
@@ -219,7 +219,7 @@ if __name__ == "__main__":
         action="store_true",
     )
     args = parser.parse_args()
-    assert pathlib.Path(args.filename).exists(), args.filename
-    assert pathlib.Path(args.test_dir).exists(), args.test_dir
+    assert Path(args.filename).exists(), args.filename
+    assert Path(args.test_dir).exists(), args.test_dir
     dynamo38, dynamo311 = download_reports(args.commit, ("dynamo38", "dynamo311"))
     update(args.filename, args.test_dir, dynamo38, dynamo311, args.also_remove_skips)

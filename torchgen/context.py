@@ -1,5 +1,4 @@
 import contextlib
-
 import functools
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, TypeVar, Union
 
@@ -12,6 +11,7 @@ from torchgen.model import (
     NativeFunctionsViewGroup,
 )
 from torchgen.utils import context, S, T
+
 
 # Helper functions for defining generators on things in the model
 
