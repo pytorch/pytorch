@@ -456,6 +456,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             self.assertEqual(metrics.generated_kernel_count, 3)
 
     def _test_conv_transpose_unary_base(self, dim=4):
+        assert dim == 4 or dim == 5
         class M(torch.nn.Module):
             def __init__(
                 self,
