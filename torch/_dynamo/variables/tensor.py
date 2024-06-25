@@ -26,7 +26,6 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from .. import config, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
-from ..bytecode_transformation import create_call_method
 from ..current_scope_id import current_scope_id
 from ..exc import unimplemented, UserError, UserErrorType
 from ..external_utils import call_hook_from_backward_state
@@ -1311,5 +1310,5 @@ class UntypedStorageVariable(VariableTracker):
 
     def reconstruct(self, codegen):
         codegen(self.from_tensor)
-        codegen.append_output(codegen.create_load_method("untyped_storage"))
-        codegen.extend_output(create_call_method(0))
+        codegen.load_method("untyped_storage")
+        codegen.call_method(0)
