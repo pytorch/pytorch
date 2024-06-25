@@ -18,7 +18,7 @@ from torch import nn
 from torch._C import FileCheck
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
-from torch._inductor import codecache, config, metrics
+from torch._inductor import codecache, config, metrics, test_operators
 from torch._inductor.codegen.common import OptimizationContext
 from torch._inductor.codegen.cpp import (
     CppOverrides,
@@ -1588,8 +1588,8 @@ class CPUReproTests(TestCase):
     )
     @patch("torch.cuda.is_available", lambda: False)
     def test_auto_simd(self):
-        vec_avx512 = codecache.supported_vec_isa_list[0]
-        vec_avx2 = codecache.supported_vec_isa_list[1]
+        vec_avx512 = codecache.supported_vec_isa_list[1]
+        vec_avx2 = codecache.supported_vec_isa_list[2]
         self.assertTrue(vec_avx512.bit_width() == 512)
         self.assertTrue(vec_avx2.bit_width() == 256)
         self.assertTrue(vec_avx512.nelements() == 16)
@@ -1920,6 +1920,8 @@ class CPUReproTests(TestCase):
                 FileCheck().check(_target_code_check).run(code)
             if _target_code_check_not:
                 FileCheck().check_not(_target_code_check_not).run(code)
+                # Verify that the output isn't empty
+                FileCheck().check("Output code:").run(code)
 
             self.assertEqual(
                 _fn(*_inps),
@@ -1933,10 +1935,16 @@ class CPUReproTests(TestCase):
             _internal_check(fn, inps, "aten.scatter_reduce_")
 
         if "ATen parallel backend: OpenMP" in torch.__config__.parallel_info():
-            # Fix https://github.com/pytorch/pytorch/issues/118518
-            # which fails to change thread number with native thread pool
             with set_num_threads(1):
-                _internal_check(fn, inps, _target_code_check_not="aten.scatter_reduce_")
+                # When running with a single thread, we expect the aten.scatter will go
+                # into the cpp backend codegen instead of a fallback to aten.scatter_reduce_.
+                # Avoid the inductor cache so we don't serve an entry compiled above.
+                with config.patch(
+                    {"fx_graph_cache": False, "fx_graph_remote_cache": False}
+                ):
+                    _internal_check(
+                        fn, inps, _target_code_check_not="aten.scatter_reduce_"
+                    )
 
             with config.patch({"cpp.dynamic_threads": True}), set_num_threads(1):
                 _internal_check(fn, inps, "aten.scatter_reduce_")
@@ -3658,6 +3666,30 @@ class CPUReproTests(TestCase):
         metrics.reset()
         self.common(fn, (x,))
         assert metrics.generated_cpp_vec_kernel_count == 1
+
+    def test_highp_to_lowp_cse_var_cache_with_store(self):
+        # Fix issue: https://github.com/pytorch/pytorch/issues/128263
+        input = torch.randn(5, 128, dtype=torch.float32)
+        input2 = torch.randint(0, 10, (5, 128), dtype=torch.int8)
+        input3 = torch.randn(128, 128, dtype=torch.float32)
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, x2, x3):
+                x2 = x2.to(torch.int32)
+                temp = test_operators.realize(x2.to(torch.float16))
+                temp2 = temp.to(torch.float32)
+                temp2 = temp2 * x
+                return torch.mm(temp, x3.to(torch.float16)), temp2
+
+        metrics.reset()
+        m = Model()
+        self.common(
+            m,
+            (input, input2, input3),
+        )
 
     def test_reduction_float_to_int64(self):
         # https://github.com/pytorch/pytorch/issues/124821
