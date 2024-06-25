@@ -921,6 +921,29 @@ class ComposabilityTest(MultiProcContinousTest):
         cls.device = torch.device(f"cuda:{dev_id}")
         # TODO: investigate why this is needed to prevent multiple NCCL ranks from hitting the same device
         torch.cuda.set_device(cls.device)
+    
+    @classmethod
+    def runRank(
+        cls,
+        rank: int,
+        world_size: int,
+        rdvz_file: Optional[str] = None,
+    ):
+        """
+        This is an entry point for each rank to run the tests in `MultiProcContinousTest`.
+        In this entry point, we set the class variables for the test class.
+        Then we run all tests.
+
+        Note:
+        - This helper only works for a subclass of `MultiProcContinousTest`.
+
+        Example:
+        - See `test_c10d_ops_nccl.py`.
+        """
+        # set class variables for the test class
+        cls.rank = rank
+        cls.world_size = world_size
+        cls.rdvz_file = rdvz_file
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
@@ -1067,7 +1090,6 @@ class ComposabilityTest(MultiProcContinousTest):
 
 instantiate_parametrized_tests(TestNew2dParallelStateDict)
 if __name__ == "__main__":
-    run_tests()
     # Check if GPU and NCCL are available
     
     if not (
@@ -1086,13 +1108,13 @@ if __name__ == "__main__":
     print("ranks: ", rank, world_size)
     if rank != -1:
         # Launched with torchrun or other multi-proc launchers. Directly run the test.
-        ComposabilityTest.run_rank(rank, world_size)
+        ComposabilityTest.runRank(rank, world_size)
     else:
         # Launched as a single process. Spawn subprocess to run the tests.
         # Also need a rendezvous file for `init_process_group` purpose.
         rdvz_file = tempfile.NamedTemporaryFile(delete=False).name
         torch.multiprocessing.spawn(
-            ComposabilityTest.run_rank,
+            ComposabilityTest.runRank,
             nprocs=world_size,
             args=(world_size, rdvz_file),
         )
