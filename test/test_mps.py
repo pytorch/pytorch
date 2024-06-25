@@ -24,6 +24,8 @@ from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
     (gradcheck, gradgradcheck, parametrize, run_tests, TestCase, download_file, IS_CI,
      NoTest, skipIfSlowGradcheckEnv, suppress_warnings)
+    (gradcheck, gradgradcheck, run_tests, TestCase, download_file, IS_CI, NoTest,
+     skipIfSlowGradcheckEnv, suppress_warnings, make_fullrank_matrices_with_distinct_singular_values)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
 import torch.backends.mps
@@ -705,7 +707,7 @@ def mps_ops_modifier(ops):
         'linalg.lstsq': None,
         'linalg.lstsqgrad_oriented': None,
         'linalg.lu': None,
-        'linalg.lu_factor_ex': None,
+        'linalg.lu_factor': None,
         'linalg.lu_solve': None,
         'linalg.matrix_norm': [torch.float32],
         'linalg.norm': [torch.float32],
@@ -9031,6 +9033,78 @@ class TestLinalgMPS(TestCaseMPS):
         m1 = torch.randn(10, device=device).to(dtype)
         m2 = torch.randn(25, device=device).to(dtype)
         self._test_addr(torch.addr, M, m1, m2, beta=0)
+
+    def test_lu_factor_ex_compare_cpu(self, device="mps", dtype=torch.float32):
+        sizes = [(3, 3), (5, 5), (2, 4), (6, 3)]
+        batches = [(), (2,), (1, 3)]
+        pivot_options = [True]
+
+        make_fullrank = make_fullrank_matrices_with_distinct_singular_values
+        make_A_cpu = partial(make_fullrank, device='cpu', dtype=dtype)
+
+        for size, batch, pivot in itertools.product(sizes, batches, pivot_options):
+            shape = batch + size
+            A_cpu = make_A_cpu(*shape)
+
+            # Perform LU decomposition on CPU
+            LU_cpu, pivots_cpu, info_cpu = torch.linalg.lu_factor_ex(A_cpu, pivot=pivot)
+
+            A_mps = A_cpu.to(device)
+
+            # Perform LU decomposition on MPS (or CPU if MPS is not available)
+            LU_mps, pivots_mps, info_mps = torch.linalg.lu_factor_ex(A_mps, pivot=pivot)
+
+            # Convert MPS results back to CPU for comparison
+            LU_mps_cpu = LU_mps.to('cpu')
+            pivot_mps_cpu = pivots_mps.to('cpu')
+            info_mps_cpu = info_mps.to('cpu')
+
+            # compare info
+            self.assertEqual(
+                info_cpu, info_mps_cpu,
+                f"Info differ between CPU and MPS for shape {shape}"
+            )
+
+            # Compare results
+            self.assertTrue(
+                torch.allclose(LU_cpu, LU_mps_cpu, atol=1e-5),
+                "LU decomposition matrices differ between CPU and MPS for shape {} with max diff: {}".format(
+                    shape,
+                    torch.max(torch.abs(LU_cpu - LU_mps_cpu))
+                )
+            )
+
+            # compare pivots
+            # add 1 here as mps pivots are 0 based and cpu pivots are 1 based
+            self.assertEqual(
+                pivots_cpu, pivot_mps_cpu + 1,
+                f"Pivots differ between CPU and MPS for shape {shape}"
+            )
+
+    def test_lu_factor_ex_info(self, device="mps", dtype=torch.float32):
+        sizes = [(3, 3), (5, 5), (2, 4), (6, 3)]
+        batches = [(), (2,), (1, 3)]
+        pivot_options = [True]
+
+        for size, batch, pivot in itertools.product(sizes, batches, pivot_options):
+            shape = batch + size
+            A_cpu = torch.ones(*shape, device='cpu', dtype=dtype)
+
+            # Perform LU decomposition on CPU
+            _, _, info_cpu = torch.linalg.lu_factor_ex(A_cpu, pivot=pivot)
+
+            A_mps = A_cpu.to(device)
+
+            # Perform LU decomposition on MPS (or CPU if MPS is not available)
+            _, _, info_mps = torch.linalg.lu_factor_ex(A_mps, pivot=pivot)
+
+            # Convert MPS results back to CPU for comparison
+            info_mps_cpu = info_mps.to('cpu')
+
+            self.assertEqual(
+                info_cpu, info_mps_cpu,
+                f"Info differ between CPU and MPS for shape {shape}"
+            )
 
     def test_matrix_rank(self, device="mps", dtype=torch.float32):
         matrix_rank = torch.linalg.matrix_rank

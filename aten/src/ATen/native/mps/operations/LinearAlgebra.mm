@@ -2,6 +2,7 @@
 
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/mps/MPSProfiler.h>
+#include <ATen/native/BatchLinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
 // For MTLLanguageVersion_3_1
@@ -663,6 +664,90 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
   });
   return out;
 }
+
+static void lu_factor_stub_mps(const Tensor& LU, const Tensor& pivots, const Tensor& info, bool compute_pivots) {
+  TORCH_CHECK(compute_pivots, "linalg.lu_factor: LU without pivoting is not implemented on MPS device");
+
+  auto LU_ = LU.is_contiguous() ? LU : LU.contiguous();
+  auto pivots_ =
+      at::zeros_like(pivots, pivots.options().dtype(ScalarType::Int).memory_format(MemoryFormat::Contiguous));
+
+  id<MTLBuffer> luBuffer = getMTLBufferStorage(LU_);
+  id<MTLBuffer> pivotsBuffer = getMTLBufferStorage(pivots_);
+  id<MTLDevice> device = MPSDevice::getInstance()->device();
+  MPSStream* mpsStream = getCurrentMPSStream();
+
+  uint64_t luRows = LU.size(-2);
+  uint64_t luCols = LU.size(-1);
+  uint64_t pivotCols = pivots.size(-1);
+  auto batchSize = batchCount(LU);
+  uint64_t luElemSize = LU.element_size();
+
+  dispatch_sync(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
+
+      MPSMatrixDescriptor* luDescriptor = [MPSMatrixDescriptor matrixDescriptorWithRows:luRows
+                                                                                columns:luCols
+                                                                               matrices:batchSize
+                                                                               rowBytes:luCols * luElemSize
+                                                                            matrixBytes:luRows * luCols * luElemSize
+                                                                               dataType:getMPSDataType(LU)];
+
+      MPSMatrixDescriptor* pivotDescriptor = [MPSMatrixDescriptor matrixDescriptorWithRows:1
+                                                                                   columns:pivotCols
+                                                                                  matrices:batchSize
+                                                                                  rowBytes:sizeof(uint32_t) * luCols
+                                                                               matrixBytes:sizeof(uint32_t) * luCols
+                                                                                  dataType:MPSDataTypeUInt32];
+
+      MPSMatrixDecompositionLU* filter = [[MPSMatrixDecompositionLU alloc] initWithDevice:device
+                                                                                     rows:luRows
+                                                                                  columns:luCols];
+
+      getMPSProfiler().beginProfileKernel(filter, " lu_factor_mps", {LU_});
+
+      for (const auto i : c10::irange(batchSize)) {
+        const uint64_t luBatchOffset = i * luRows * luCols;
+        const uint64_t pivotsBatchOffset = i * pivotCols;
+        MPSMatrix* luMatrix = [[MPSMatrix alloc] initWithBuffer:luBuffer
+                                                         offset:(LU_.storage_offset() + luBatchOffset) * luElemSize
+                                                     descriptor:luDescriptor];
+        MPSMatrix* pivotMatrix =
+            [[MPSMatrix alloc] initWithBuffer:pivotsBuffer
+                                       offset:(pivots.storage_offset() + pivotsBatchOffset) * sizeof(uint32_t)
+                                   descriptor:pivotDescriptor];
+
+        [filter encodeToCommandBuffer:commandBuffer
+                         sourceMatrix:luMatrix
+                         resultMatrix:luMatrix
+                         pivotIndices:pivotMatrix
+                               status:nil];
+      }
+
+      getMPSProfiler().endProfileKernel(filter);
+    }
+  });
+
+  // copy into results
+  LU.copy_(LU_);
+
+  // copy calculated pivots into pivots tensor
+  pivots.copy_(pivots_);
+
+  // uncomment next line to match the 1-based indexing on CPU
+  // pivots.add_(1);
+
+  // set info to first index +1 where the diagonal is zero
+  auto diagonal_zeros = LU_.diagonal(0, -2, -1).eq_(0);
+  auto didFail = diagonal_zeros.any(-1);
+  auto firstFailDim = diagonal_zeros.argmax(-1, false).to(info.dtype());
+
+  info.zero_();
+  info.copy_(firstFailDim.add_(1).where(didFail, info));
+}
+
+REGISTER_MPS_DISPATCH(lu_factor_stub, &lu_factor_stub_mps);
 
 } // namespace mps
 

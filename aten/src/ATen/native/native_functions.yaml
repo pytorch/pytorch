@@ -13831,7 +13831,7 @@
   variants: function
   structured: True
   dispatch:
-    CPU, CUDA: linalg_lu_factor_ex_out
+    CPU, CUDA, MPS: linalg_lu_factor_ex_out
 
 # linalg.lu
 - func: linalg_lu(Tensor A, *, bool pivot=True) -> (Tensor P, Tensor L, Tensor U)
