@@ -2184,14 +2184,15 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
     C10D_NCCL_CHECK(ncclGroupStart(), c10::nullopt);
   }
 
-  ncclStreams_.emplace(streamKey, std::move(streamVal));
+  ncclStreams_.emplace(streamKey.value(), std::move(streamVal));
 
   // Note: these events are created with the (default) cudaEventDisableTiming
   // flag This flag provides the best performance when used with
   // cudaStreamWaitEvent() and cudaEventQuery(). Since we here don't measure the
   // performance using cudaEvent, this should be set.
   // TODO(kwen2501): is ncclEvents_ used anywhere else?
-  ncclEvents_.emplace(streamKey, at::cuda::CUDAEvent(cudaEventDisableTiming));
+  ncclEvents_.emplace(
+      streamKey.value(), at::cuda::CUDAEvent(cudaEventDisableTiming));
 
   // Record the communicators based on ncclUniqueId.
   ncclIdToCommMap_.emplace(buildNcclUniqueIdStr(ncclID), ncclComm);
