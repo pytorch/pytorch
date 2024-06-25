@@ -88,9 +88,7 @@ class ContextWrappingVariable(VariableTracker):
         )
 
     def reconstruct(self, codegen):
-        if sys.version_info >= (3, 11):
-            codegen.append_output(create_instruction("PUSH_NULL"))
-        self.reconstruct_type(codegen)
+        codegen.add_push_null(lambda: self.reconstruct_type(codegen))
         target_values = self.target_values
         if not target_values:
             target_values = ()
@@ -387,10 +385,10 @@ class CatchWarningsCtxManagerVariable(ContextWrappingVariable):
         return variables.ConstantVariable.create(ctx_val.__enter__())
 
     def reconstruct(self, cg):
-        cg.load_import_from("warnings", "catch_warnings")
+        cg.add_push_null(lambda: cg.load_import_from("warnings", "catch_warnings"))
         cg.foreach(self.catch_warnings_args.values())
         keys = tuple(self.catch_warnings_args.keys())
-        cg.extend_output(cg.create_call_function_kw(len(keys), keys, True))
+        cg.extend_output(cg.create_call_function_kw(len(keys), keys, False))
 
 
 class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
@@ -969,9 +967,7 @@ class StreamVariable(VariableTracker):
         # design, to unblock current work, we lift the stream into a global and then codegen bytecode to load it from there.
         prefix = f"_stream_{self.device}"
         name = codegen.tx.output.install_global_by_id(prefix, self.value)
-        codegen.append_output(
-            codegen.create_load_global(name, push_null=False, add=True)
-        )
+        codegen.append_output(codegen.create_load_global(name, add=True))
 
 
 class EventVariable(VariableTracker):
@@ -1038,7 +1034,8 @@ class WithExitFunctionVariable(VariableTracker):
         if codegen.tx.output.partial_convert:
             if sys.version_info >= (3, 11):
                 codegen.append_output(create_instruction("PUSH_NULL"))
-                codegen.append_output(create_instruction("SWAP", arg=2))
+                if sys.version_info < (3, 13):
+                    codegen.append_output(create_instruction("SWAP", arg=2))
             codegen.extend_output(
                 [codegen.create_load_const(val) for val in self.ctx.target_values]
             )

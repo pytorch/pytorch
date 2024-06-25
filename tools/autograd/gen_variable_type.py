@@ -377,6 +377,10 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "linalg_lu_solve",
     "_linalg_slogdet",
     "_linalg_solve_ex",
+    "_unsafe_index",
+    "_unsafe_index_put",
+    "_unsafe_masked_index",
+    "_unsafe_masked_index_put_accumulate",
 }
 
 GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
