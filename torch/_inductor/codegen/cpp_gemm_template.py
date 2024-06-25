@@ -237,6 +237,9 @@ class CppPackedGemmTemplate(CppTemplate):
             assert (
                 L2_cache_size > 0
             ), f"Expect L2_cache_size > 0 but got {L2_cache_size}"
+            B_size_limit = L1_cache_size * L1_limit_factor
+            A_size_limit = L2_cache_size * L2_limit_factor
+
             num_byte = torch.tensor([], dtype=self.layout.dtype).element_size()
 
             size_cache_B = K0 * Kc_blocks * N0 * num_byte
@@ -246,16 +249,12 @@ class CppPackedGemmTemplate(CppTemplate):
             def round_down(f):
                 return math.floor(f)
 
-            if size_cache_B > L1_cache_size:
-                Kc_blocks = round_down(
-                    L1_cache_size * L1_limit_factor / (K0 * N0 * num_byte)
-                )
+            if size_cache_B > B_size_limit:
+                Kc_blocks = round_down(B_size_limit / (K0 * N0 * num_byte))
 
             size_cache_A = M0 * Mc_blocks * K0 * Kc_blocks * num_byte
-            if size_cache_A > L2_cache_size:
-                Mc_blocks = round_down(
-                    L2_cache_size * L2_limit_factor / (M0 * Kc_blocks * K0 * num_byte)
-                )
+            if size_cache_A > A_size_limit:
+                Mc_blocks = round_down(A_size_limit / (M0 * Kc_blocks * K0 * num_byte))
             return Mc_blocks, Kc_blocks
 
         assert (
