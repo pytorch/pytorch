@@ -50,6 +50,7 @@ from torch.types import (
     Number,
     Storage,
     _bool,
+    _bytes,
     _complex,
     _device,
     _dispatchkey,
