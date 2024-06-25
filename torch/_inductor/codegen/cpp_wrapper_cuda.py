@@ -79,8 +79,21 @@ class CppWrapperCuda(CppWrapperCpu):
         return super().generate(is_inference)
 
     def generate_user_defined_triton_kernel(
-        self, kernel_name: str, grid: List[Any], configs, args, triton_meta, raw_args
+        self,
+        kernel_name: str,
+        raw_args: List[Any],
+        grid: List[Any],
+        configs,
+        triton_meta,
+        constexprs,
     ):
+        # in C++ wrapper, we don't pass constexpr args, as they don't
+        # get added as parameters to the PTX code compiled from the
+        # user-defined Triton kernel (only non-constexpr args do)
+        raw_args = [
+            raw_arg for i, raw_arg in enumerate(raw_args) if i not in constexprs
+        ]
+        args = [self.val_to_arg_str(v) for v in raw_args]
         arg_types = [
             arg.get_dtype() if hasattr(arg, "get_dtype") else type(arg)
             for arg in raw_args
