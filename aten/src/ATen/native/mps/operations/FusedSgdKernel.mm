@@ -53,7 +53,7 @@ static void _fused_sgd_with_momentum_kernel_mps_(at::TensorList params,
                                                  at::TensorList momentum_buffer_list,
                                                  const double weight_decay,
                                                  const double momentum,
-                                                 const Tensor lr_tensor,
+                                                 const at::Tensor& lr_tensor,
                                                  const double dampening,
                                                  const bool nesterov,
                                                  const bool maximize,
@@ -188,7 +188,7 @@ void _fused_sgd_kernel_mps_(at::TensorList params,
     TORCH_WARN_ONCE("`is_first_step` argument has no effect when `momentum_buffer_list` is empty");
   }
 
-  TORCH_CHECK(lr_tensor.device() == params[0].device(), "found_inf must be on the same GPU device as the params");
+  TORCH_CHECK(lr_tensor.device() == params[0].device(), "lr must be on the same GPU device as the params");
 
   std::vector<std::vector<at::Tensor>> tensor_lists{params.vec(), grads.vec()};
 

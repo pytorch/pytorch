@@ -93,7 +93,7 @@ struct FusedSgdEncodingFunctor {
       const MetadataArguments& metadata_arguments,
       const double weight_decay,
       const double momentum,
-      const Tensor lr_ptr,
+      const at::Tensor& lr,
       const double dampening,
       const bool nesterov,
       const bool maximize,
@@ -114,7 +114,7 @@ struct FusedSgdEncodingFunctor {
                                   atIndex:1];
       [computeEncoder setBytes:&weight_decay_lv length:sizeof(float) atIndex:2];
       [computeEncoder setBytes:&momentum_lv length:sizeof(float) atIndex:3];
-      [computeEncoder setBuffer:getMTLBufferStorage(lr_ptr) offset:lr_ptr.storage_offset() * lr_ptr.element_size() atIndex:4];
+      [computeEncoder setBuffer:getMTLBufferStorage(lr) offset:lr.storage_offset() * lr.element_size() atIndex:4];
       [computeEncoder setBytes:&dampening_lv length:sizeof(float) atIndex:5];
       [computeEncoder setBytes:&nesterov_lv length:sizeof(uint8_t) atIndex:6];
       [computeEncoder setBytes:&maximize_lv length:sizeof(uint8_t) atIndex:7];
