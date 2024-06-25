@@ -1057,11 +1057,41 @@ def forward(self, p_linear_weight, p_linear_bias, x):
                 x = self.linear(x)
                 return torch.ops.aten.chunk.default(x, 3, 0)
 
-        with self.assertRaisesRegex(RuntimeError, "We can't preserve"):
+        with self.assertRaisesRegex(
+            RuntimeError, "aten.chunk.default is a mutating/aliasing op"
+        ):
             _ = torch.export.export(
                 Foo(),
                 (torch.randn(3, 3),),
             ).run_decompositions({}, _preserve_ops=(torch.ops.aten.chunk.default,))
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "aten.add.Tensor is not CompositeImplicitAutograd op, so we will preserve it as",
+        ):
+            _ = torch.export.export(
+                Foo(),
+                (torch.randn(3, 3),),
+            ).run_decompositions({}, _preserve_ops=(torch.ops.aten.add.Tensor,))
+
+        with self.assertRaisesRegex(
+            RuntimeError, "aten.sym_size.default is a metadata query function"
+        ):
+            _ = torch.export.export(
+                Foo(),
+                (torch.randn(3, 3),),
+            ).run_decompositions({}, _preserve_ops=(torch.ops.aten.sym_size.default,))
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "We can't detect aten.native_batch_norm.default as a functional op statically",
+        ):
+            _ = torch.export.export(
+                Foo(),
+                (torch.randn(3, 3),),
+            ).run_decompositions(
+                {}, _preserve_ops=(torch.ops.aten.native_batch_norm.default,)
+            )
 
     def test_keep_composite_ops_linear_convd(self):
         class MyLinear(torch.nn.Module):
@@ -1090,7 +1120,8 @@ def forward(self, p_linear_weight, p_linear_bias, x):
             Foo(), (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50))
         )
         ep_has_linear_convd = ep.run_decompositions(
-            decomp_table={}, _preserve_ops=testing.COMPOSITE_OPS_THAT_CAN_BE_PRESERVED
+            decomp_table={},
+            _preserve_ops=testing._COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY,
         )
         self.assertExpectedInline(
             str(ep_has_linear_convd.graph_module.code).strip(),

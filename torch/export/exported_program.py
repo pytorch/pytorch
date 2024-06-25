@@ -135,8 +135,27 @@ def _register_cia_to_meta(*args, **kwargs):
     )
 
 
+# This list is compiled from DispatchKey.cpp.
+# The idea is that we use these keys to override
+# CIA decomp in export
+_AUTOGRAD_ALIAS_BACKEND_KEYS_TO_OVERRIDE = [
+    torch._C.DispatchKey.AutogradCPU,
+    torch._C.DispatchKey.AutogradCUDA,
+    torch._C.DispatchKey.AutogradMeta,
+    torch._C.DispatchKey.AutogradXLA,
+    torch._C.DispatchKey.AutogradLazy,
+    torch._C.DispatchKey.AutogradIPU,
+    torch._C.DispatchKey.AutogradXPU,
+    torch._C.DispatchKey.AutogradMPS,
+    torch._C.DispatchKey.AutogradHPU,
+    torch._C.DispatchKey.AutogradPrivateUse1,
+    torch._C.DispatchKey.AutogradPrivateUse2,
+    torch._C.DispatchKey.AutogradPrivateUse3,
+]
+
+
 @contextmanager
-def override_composite_implicit_decomp(ops_to_preserve):
+def _override_composite_implicit_decomp(ops_to_preserve):
     # This function overrides CompositeImplicitAutograd decomp for
     # functional composite ops that user specified. Ideally we want to not-decompose
     # ALL composite ops but today's C++ functinalization relies on
@@ -155,9 +174,15 @@ def override_composite_implicit_decomp(ops_to_preserve):
         # decomp part. (https://github.com/pytorch/pytorch/issues/129431)
         def can_preserve(op_overload):
             if op_overload in FunctionalTensor.maybe_aliasing_or_mutating_ops:
-                return False
+                raise RuntimeError(
+                    f"We can't detect {op_overload} as a functional op statically, so we can't preserve it"
+                )
             if op_overload in FunctionalTensor.metadata_fns:
-                return False
+                raise RuntimeError(
+                    f"{op_overload} is a metadata query function, "
+                    "it will be preserved implicitly in our tracing system. "
+                    "Please file an issue on github if you see otherwise"
+                )
 
             alias_info = len(
                 [i for i in op_overload._schema.arguments if i.alias_info is not None]
@@ -166,31 +191,31 @@ def override_composite_implicit_decomp(ops_to_preserve):
             is_mutating_or_aliasing = alias_info != 0 or op_overload._schema.is_mutable
 
             if is_mutating_or_aliasing:
-                return False
+                raise RuntimeError(
+                    f"{op_overload} is a mutating/aliasing op, we can't preserve it as is"
+                )
 
             if not torch._C._dispatch_has_kernel(op_overload.name()):
-                return False
+                raise RuntimeError(
+                    f"{op_overload} is a TorchScript op, we can't preserve it as is"
+                )
 
             if not torch._C._dispatch_has_kernel_for_dispatch_key(
                 op_overload.name(), torch._C.DispatchKey.CompositeImplicitAutograd
             ):
-                return False
+                raise RuntimeError(
+                    f"{op_overload} is not CompositeImplicitAutograd op, so we will preserve "
+                    "it as long as there is no python decomposition"
+                )
 
             return True
 
-        if not can_preserve(op_overload):
-            # TODO (tmanlaibaatar) Better error message
-            raise RuntimeError(
-                f"We can't preserve {op_overload} in export, because it doesn't pass our safety check."
-            )
+        # If we didn't error, it means we can go ahead
+        can_preserve(op_overload)
 
         saved_tables[op_overload] = op_overload.py_kernels.copy()
         patched_ops.add(op_overload)
-        for override_dispatch_key in [
-            torch._C.DispatchKey.AutogradCPU,
-            torch._C.DispatchKey.AutogradCUDA,
-            torch._C.DispatchKey.AutogradMeta,
-        ]:
+        for override_dispatch_key in _AUTOGRAD_ALIAS_BACKEND_KEYS_TO_OVERRIDE:
             if override_dispatch_key not in op_overload.py_kernels:
                 # TODO (tmanlaibaatar)https://github.com/pytorch/pytorch/issues/129430
                 op_overload.py_impl(override_dispatch_key)(
@@ -313,7 +338,7 @@ def _decompose_exported_program(
     # TODO(zhxhchen17) Return the new graph_signature directly.
     from torch.export._trace import _ignore_backend_decomps
 
-    with _ignore_backend_decomps(), override_composite_implicit_decomp(_preserve_ops):
+    with _ignore_backend_decomps(), _override_composite_implicit_decomp(_preserve_ops):
         gm, graph_signature = aot_export_module(
             ep.graph_module,
             fake_args,
