@@ -78,7 +78,7 @@ def check_node_safe(node: Node):
 
     The test suite test_aot_autograd_cache.py::AOTAutogradCachePicklerTests tries its best to fully cover/specify this behavior.
     """
-    SAFE_TORCH_MODULES = ("torch.functional", "torch.nn.functional", "torch")
+    SAFE_TORCH_MODULES = ("torch.functional", "torch.nn.functional")
 
     def is_public_torch_api(target):
         # Don't blindly allow private functions in the torch namespace
