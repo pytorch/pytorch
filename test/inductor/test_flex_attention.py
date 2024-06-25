@@ -1120,13 +1120,13 @@ class GraphModule(torch.nn.Module):
         l_args_1_ = L_args_1_
         l_args_2_ = L_args_2_
 
-        ones: "i32[1]" = torch.ones([1], dtype = torch.int32, device = device(type='cuda', index=0))
+        ones: "i32[1, 1, 1]" = torch.ones([1, 1, 1], dtype = torch.int32, device = device(type='cuda', index=0))
 
-        zeros: "i32[1, 1]" = torch.zeros([1, 1], dtype = torch.int32, device = device(type='cuda', index=0))
+        zeros: "i32[1, 1, 1, 1]" = torch.zeros([1, 1, 1, 1], dtype = torch.int32, device = device(type='cuda', index=0))
 
-        ones_1: "i32[1]" = torch.ones([1], dtype = torch.int32, device = device(type='cuda', index=0))
+        ones_1: "i32[1, 1, 1]" = torch.ones([1, 1, 1], dtype = torch.int32, device = device(type='cuda', index=0))
 
-        zeros_1: "i32[1, 1]" = torch.zeros([1, 1], dtype = torch.int32, device = device(type='cuda', index=0))
+        zeros_1: "i32[1, 1, 1, 1]" = torch.zeros([1, 1, 1, 1], dtype = torch.int32, device = device(type='cuda', index=0))
 
         new_empty: "f64[]" = l_args_0_.new_empty([], requires_grad = True)
         new_empty_1: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
@@ -1165,7 +1165,7 @@ class GraphModule(torch.nn.Module):
             joint_graph,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "f64[2, 2, 8, 4]", primals_2: "f64[2, 2, 8, 4]", primals_3: "f64[2, 2, 8, 4]", full_default: "i32[1]", full_default_1: "i32[1, 1]", getitem: "f64[2, 2, 8, 4]", getitem_1: "f32[2, 2, 8]", tangents_1: "f64[2, 2, 8, 4]"):
+    def forward(self, primals_1: "f64[2, 2, 8, 4]", primals_2: "f64[2, 2, 8, 4]", primals_3: "f64[2, 2, 8, 4]", full_default: "i32[1, 1, 1]", full_default_1: "i32[1, 1, 1, 1]", getitem: "f64[2, 2, 8, 4]", getitem_1: "f32[2, 2, 8]", tangents_1: "f64[2, 2, 8, 4]"):
         fw_graph = self.fw_graph
         joint_graph = self.joint_graph
         flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem, getitem_1, tangents_1, fw_graph, joint_graph, full_default, full_default_1, full_default, full_default_1, 8, 8);  primals_1 = primals_2 = primals_3 = getitem = getitem_1 = tangents_1 = fw_graph = joint_graph = full_default = full_default_1 = None
