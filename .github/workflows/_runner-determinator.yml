@@ -105,7 +105,6 @@ jobs:
           def get_workflow_type(issue: Issue, username: str) -> Tuple[str, str]:
               try:
                   first_comment = issue.get_comments()[0].body.strip("\n\t ")
-                  user_list = issue.get_comments()[0].body.split()
 
                   if first_comment[0] == "!":
                       MESSAGE = "LF Workflows are disabled for everyone. Using meta runners."
