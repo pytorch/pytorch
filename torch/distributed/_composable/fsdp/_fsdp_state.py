@@ -1,8 +1,10 @@
 # mypy: allow-untyped-defs
 import functools
+import logging
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import torch
+import torch._dynamo.compiled_autograd as ca
 import torch.nn as nn
 from torch.autograd import Variable
 from torch.distributed._composable_state import (
@@ -22,6 +24,9 @@ if TYPE_CHECKING:
     from ._fsdp_param import FSDPParam
 
 
+logger = logging.getLogger("torch.distributed._composable.fsdp")
+
+
 class FSDPStateContext:
     """This has state shared across FSDP states."""
 
@@ -36,6 +41,9 @@ class FSDPStateContext:
         self.post_backward_final_callback_queued: bool = False
         # Whether to finalize backward in this backward's final callback
         self.is_last_backward: bool = True
+        # Optional user-provided event recorded after optimizer for the
+        # all-gather streams to wait on in the root pre-forward
+        self.post_optim_event: Optional[torch.cuda.Event] = None
 
 
 def disable_if_config_true(func):
@@ -81,12 +89,19 @@ class FSDPState(_State):
         self._lazy_init()
         if self._state_ctx.iter_forward_root is not None:
             return args, kwargs
+        if not ca.compiled_autograd_enabled:
+            logger.debug("FSDP::root_pre_forward")
         self._state_ctx.iter_forward_root = self
         with torch.profiler.record_function("FSDP::root_pre_forward"):
             # Wait for optimizer before implicitly prefetched all-gathers
-            current_stream = torch.cuda.current_stream()
-            self._comm_ctx.all_gather_copy_in_stream.wait_stream(current_stream)
-            self._comm_ctx.all_gather_stream.wait_stream(current_stream)
+            if (event := self._state_ctx.post_optim_event) is not None:
+                self._comm_ctx.all_gather_copy_in_stream.wait_event(event)
+                self._comm_ctx.all_gather_stream.wait_event(event)
+                self._state_ctx.post_optim_event = None
+            else:
+                current_stream = torch.cuda.current_stream()
+                self._comm_ctx.all_gather_copy_in_stream.wait_stream(current_stream)
+                self._comm_ctx.all_gather_stream.wait_stream(current_stream)
             if self._device.type == "cuda":
                 with torch.profiler.record_function("FSDP::inputs_to_device"):
                     args_tuple, kwargs_tuple = _to_kwargs(
@@ -131,7 +146,7 @@ class FSDPState(_State):
                 state._fsdp_param_group.lazy_init()
 
     def _init_shared_state(self) -> None:
-        self._comm_ctx.init()
+        self._comm_ctx.lazy_init()
         for state in self._state_ctx.all_states:
             state._state_ctx = self._state_ctx
             state._comm_ctx = self._comm_ctx
@@ -219,6 +234,8 @@ class FSDPState(_State):
         return grad
 
     def _root_post_backward_final_callback(self) -> None:
+        if not ca.compiled_autograd_enabled:
+            logger.debug("FSDP::root_post_backward")
         with torch.profiler.record_function("FSDP::root_post_backward_callback"):
             for state in self._state_ctx.all_states:
                 if state._fsdp_param_group and state._fsdp_param_group.is_unsharded:
