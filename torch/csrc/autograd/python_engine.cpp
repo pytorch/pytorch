@@ -166,7 +166,6 @@ c10::intrusive_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
 
 PyObject* THPEngineClass = nullptr;
 
-
 inline static Edge parseGradientEdge(PyObject* obj, int64_t index) {
   PyObject* grad_fn = PyTuple_GetItem(obj, 0);
   auto output_nr = THPUtils_unpackLong(PyTuple_GetItem(obj, 1));
@@ -176,15 +175,14 @@ inline static Edge parseGradientEdge(PyObject* obj, int64_t index) {
   } else if (THPCppFunction_Check(grad_fn)) {
     grad_fn_sp = ((THPCppFunction*)grad_fn)->cdata;
   } else {
-  TORCH_CHECK(
-    false,
-    "GradientEdge's first object must be an autograd.graph.Node "
-    "but got ",
-    THPUtils_typename(grad_fn));
+    TORCH_CHECK(
+        false,
+        "GradientEdge's first object must be an autograd.graph.Node "
+        "but got ",
+        THPUtils_typename(grad_fn));
   }
   return Edge(grad_fn_sp, output_nr);
 }
-
 
 // Implementation of torch._C._EngineBase.run_backward
 PyObject* THPEngine_run_backward(
