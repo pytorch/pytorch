@@ -19295,7 +19295,9 @@ op_db: List[OpInfo] = [
            check_inplace_batched_forward_grad=False,
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
-           sample_inputs_func=sample_inputs_squeeze),
+           sample_inputs_func=sample_inputs_squeeze,
+           skips=(
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),)),
     UnaryUfuncInfo(
         'fill',
         ref=_fill_np,
@@ -19488,6 +19490,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_transpose_swapdims,
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestDTensorOps', 'test_dtensor_op_db'),
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_jit_alias_remapping'),
            )),
     OpInfo('T',
            op=lambda x: x.T,
