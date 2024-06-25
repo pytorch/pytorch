@@ -295,12 +295,10 @@ flex_attention_template = TritonTemplate(
     hi = sparse_kv_num_blocks * BLOCKSPARSE_KV_MULTIPLE
 
     for start_n in range(0, hi):
-        # -- load k, v --
+        # -- load k --
         k = tl.load(K_block_ptr)
-        v = tl.load(V_block_ptr)
         # -- compute qk ---
-        qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
-        qk = tl.dot(q, k.to(MATMUL_PRECISION), acc=qk)
+        qk = tl.dot(q, k)
         # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
         m = offs_m[:, None]
         n = offs_n[None, :]

@@ -132,6 +132,14 @@ def _create_block_sparse_mask(
     )
 
 
+"""
+    The flex attention kernels are implemented using block sparsity,
+    where only the unmasked blocks are computed to get the best perf.
+    If users don't specify any block sparse mask info, we create this
+    empty block sparse mask with all blocks unmasked as the default one.
+"""
+
+
 def _create_empty_block_sparse_mask(query, key, value):
     device = query.device
     kv_len = key.size()[-2]
