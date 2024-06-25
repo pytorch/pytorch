@@ -13056,6 +13056,17 @@ op_db: List[OpInfo] = [
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),),
            ),
+    OpInfo('expand_copy',
+           # op=lambda self, shape: self.expand(shape),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_expand,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           assert_jit_shape_analysis=True,
+           supports_out=True,
+           skips=(
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+           )),
     OpInfo('diag',
            ref=np.diag,
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
@@ -16748,6 +16759,19 @@ op_db: List[OpInfo] = [
            ref=np.transpose,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            supports_out=False,
+           assert_autodiffed=True,
+           autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
+           autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
+           assert_jit_shape_analysis=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           supports_varargs=True,
+           sample_inputs_func=sample_inputs_permute,
+           reference_inputs_func=reference_inputs_permute),
+    OpInfo('permute_copy',
+           ref=np.transpose,
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
+           supports_out=True,
            assert_autodiffed=True,
            autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
            autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
@@ -23490,6 +23514,10 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.expand_as",
         torch_opinfo_name="expand_as",
+    ),
+    PythonRefInfo(
+        "_refs.expand_copy",
+        torch_opinfo_name="expand_copy",
     ),
     PythonRefInfo(
         "_refs.flatten",
