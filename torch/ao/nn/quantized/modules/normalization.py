@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 
 __all__ = ['LayerNorm', 'GroupNorm', 'InstanceNorm1d', 'InstanceNorm2d', 'InstanceNorm3d']
@@ -30,7 +31,7 @@ class LayerNorm(torch.nn.LayerNorm):
         return 'QuantizedLayerNorm'
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         new_mod = cls(
             mod.normalized_shape, mod.weight, mod.bias, float(scale),
@@ -71,7 +72,7 @@ class GroupNorm(torch.nn.GroupNorm):
         return 'QuantizedGroupNorm'
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         new_mod = cls(
             mod.num_groups, mod.num_channels, mod.weight, mod.bias, float(scale), int(zero_point),
@@ -105,7 +106,7 @@ class InstanceNorm1d(torch.nn.InstanceNorm1d):
         return 'QuantizedInstanceNorm1d'
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         new_mod = cls(
             mod.num_features, mod.weight, mod.bias, float(scale), int(zero_point),
@@ -145,7 +146,7 @@ class InstanceNorm2d(torch.nn.InstanceNorm2d):
         return 'QuantizedInstanceNorm2d'
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         new_mod = cls(
             mod.num_features, mod.weight, mod.bias, float(scale), int(zero_point),
@@ -185,7 +186,7 @@ class InstanceNorm3d(torch.nn.InstanceNorm3d):
         return 'QuantizedInstanceNorm3d'
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         new_mod = cls(
             mod.num_features, mod.weight, mod.bias, float(scale), int(zero_point),

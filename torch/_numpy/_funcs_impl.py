@@ -12,20 +12,22 @@ from __future__ import annotations
 import builtins
 import itertools
 import operator
-from typing import Optional, Sequence
+from typing import Optional, Sequence, TYPE_CHECKING
 
 import torch
 
 from . import _dtypes_impl, _util
-from ._normalizations import (
-    ArrayLike,
-    ArrayLikeOrScalar,
-    CastingModes,
-    DTypeLike,
-    NDArray,
-    NotImplementedType,
-    OutArray,
-)
+
+if TYPE_CHECKING:
+    from ._normalizations import (
+        ArrayLike,
+        ArrayLikeOrScalar,
+        CastingModes,
+        DTypeLike,
+        NDArray,
+        NotImplementedType,
+        OutArray,
+    )
 
 
 def copy(
@@ -939,7 +941,7 @@ def choose(
     return choices[idx_list].squeeze(0)
 
 
-# ### unique et al ###
+# ### unique et al. ###
 
 
 def unique(
@@ -1019,7 +1021,7 @@ def resize(a: ArrayLike, new_shape=None):
     return reshape(a, new_shape)
 
 
-# ### diag et al ###
+# ### diag et al. ###
 
 
 def diagonal(a: ArrayLike, offset=0, axis1=0, axis2=1):
@@ -2008,7 +2010,7 @@ def min_scalar_type(a: ArrayLike, /):
     from ._dtypes import DType
 
     if a.numel() > 1:
-        # numpy docs: "For non-scalar array a, returns the vector’s dtype unmodified."
+        # numpy docs: "For non-scalar array a, returns the vector's dtype unmodified."
         return DType(a.dtype)
 
     if a.dtype == torch.bool:

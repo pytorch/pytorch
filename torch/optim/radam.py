@@ -1,4 +1,6 @@
-from typing import List, Optional
+# mypy: allow-untyped-defs
+r"""Implementation for the RAdam algorithm."""
+from typing import cast, List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
@@ -7,32 +9,37 @@ from .optimizer import (
     _capturable_doc,
     _default_to_fused_or_foreach,
     _differentiable_doc,
+    _disable_dynamo_if_unsupported,
     _dispatch_sqrt,
     _foreach_doc,
+    _get_capturable_supported_devices,
     _get_scalar_dtype,
     _get_value,
+    _maximize_doc,
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
+    ParamsT,
 )
 
 __all__ = ["RAdam", "radam"]
 
 
-class RAdam(Optimizer):
+class RAdam(Optimizer):  # noqa: D101
     def __init__(
         self,
-        params,
-        lr=1e-3,
-        betas=(0.9, 0.999),
-        eps=1e-8,
-        weight_decay=0,
+        params: ParamsT,
+        lr: float = 1e-3,
+        betas: Tuple[float, float] = (0.9, 0.999),
+        eps: float = 1e-8,
+        weight_decay: float = 0,
         decoupled_weight_decay: bool = False,
         *,
         foreach: Optional[bool] = None,
+        maximize: bool = False,
         capturable: bool = False,
         differentiable: bool = False,
-    ):
+    ):  # noqa: D107
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= eps:
@@ -49,6 +56,7 @@ class RAdam(Optimizer):
             betas=betas,
             eps=eps,
             weight_decay=weight_decay,
+            maximize=maximize,
             foreach=foreach,
             capturable=capturable,
             decoupled_weight_decay=decoupled_weight_decay,
@@ -56,10 +64,11 @@ class RAdam(Optimizer):
         )
         super().__init__(params, defaults)
 
-    def __setstate__(self, state):
+    def __setstate__(self, state):  # noqa: D105
         super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault("foreach", None)
+            group.setdefault("maximize", False)
             group.setdefault("differentiable", False)
             group.setdefault("decoupled_weight_decay", False)
             group.setdefault("capturable", False)
@@ -112,7 +121,7 @@ class RAdam(Optimizer):
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
-        """Performs a single optimization step.
+        """Perform a single optimization step.
 
         Args:
             closure (Callable, optional): A closure that reevaluates the model
@@ -126,12 +135,12 @@ class RAdam(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
-            params_with_grad = []
-            grads = []
-            exp_avgs = []
-            exp_avg_sqs = []
-            state_steps = []
-            beta1, beta2 = group["betas"]
+            params_with_grad: List[Tensor] = []
+            grads: List[Tensor] = []
+            exp_avgs: List[Tensor] = []
+            exp_avg_sqs: List[Tensor] = []
+            state_steps: List[Tensor] = []
+            beta1, beta2 = cast(Tuple[float, float], group["betas"])
 
             has_complex = self._init_group(
                 group, params_with_grad, grads, exp_avgs, exp_avg_sqs, state_steps
@@ -148,6 +157,7 @@ class RAdam(Optimizer):
                 lr=group["lr"],
                 weight_decay=group["weight_decay"],
                 eps=group["eps"],
+                maximize=group["maximize"],
                 foreach=group["foreach"],
                 capturable=group["capturable"],
                 differentiable=group["differentiable"],
@@ -166,14 +176,17 @@ RAdam.__doc__ = (
             &\rule{110mm}{0.4pt}                                                                 \\
             &\textbf{input}      : \gamma \text{ (lr)}, \: \beta_1, \beta_2
                 \text{ (betas)}, \: \theta_0 \text{ (params)}, \:f(\theta) \text{ (objective)}, \:
-                \lambda \text{ (weightdecay)},                                                   \\
+                \lambda \text{ (weightdecay)}, \:\textit{maximize}                               \\
             &\hspace{13mm} \epsilon \text{ (epsilon)}, \textit{decoupled\_weight\_decay}         \\
             &\textbf{initialize} :  m_0 \leftarrow 0 \text{ ( first moment)},
                 v_0 \leftarrow 0 \text{ ( second moment)},                                       \\
             &\hspace{18mm} \rho_{\infty} \leftarrow 2/(1-\beta_2) -1                      \\[-1.ex]
             &\rule{110mm}{0.4pt}  \\
             &\textbf{for} \: t=1 \: \textbf{to} \: \ldots \: \textbf{do}                         \\
-            &\hspace{6mm} g_t \leftarrow \nabla_{\theta} f_t (\theta_{t-1})                      \\
+            &\hspace{6mm}\textbf{if} \: \textit{maximize}:                                       \\
+            &\hspace{12mm}g_t           \leftarrow   -\nabla_{\theta} f_t (\theta_{t-1})         \\
+            &\hspace{6mm}\textbf{else}                                                           \\
+            &\hspace{12mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})          \\
             &\hspace{6mm} \theta_t \leftarrow \theta_{t-1}                                       \\
             &\hspace{6mm} \textbf{if} \: \lambda \neq 0                                          \\
             &\hspace{12mm}\textbf{if} \: \textit{decoupled\_weight\_decay}                       \\
@@ -220,6 +233,7 @@ RAdam.__doc__ = (
         decoupled_weight_decay (bool, optional): whether to use decoupled weight
             decay as in AdamW to obtain RAdamW (default: False)
         {_foreach_doc}
+        {_maximize_doc}
         {_differentiable_doc}
         {_capturable_doc}
 
@@ -234,67 +248,6 @@ RAdam.__doc__ = (
 )
 
 
-def radam(
-    params: List[Tensor],
-    grads: List[Tensor],
-    exp_avgs: List[Tensor],
-    exp_avg_sqs: List[Tensor],
-    state_steps: List[Tensor],
-    # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
-    # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
-    decoupled_weight_decay: bool = False,
-    foreach: Optional[bool] = None,
-    differentiable: bool = False,
-    capturable: bool = False,
-    has_complex: bool = False,
-    *,
-    beta1: float,
-    beta2: float,
-    lr: float,
-    weight_decay: float,
-    eps: float,
-):
-    r"""Functional API that performs RAdam algorithm computation.
-
-    See :class:`~torch.optim.RAdam` for details.
-    """
-
-    if not all(isinstance(t, torch.Tensor) for t in state_steps):
-        raise RuntimeError(
-            "API has changed, `state_steps` argument must contain a list of singleton tensors"
-        )
-
-    if foreach is None:
-        _, foreach = _default_to_fused_or_foreach(
-            params, differentiable, use_fused=False
-        )
-
-    if foreach and torch.jit.is_scripting():
-        raise RuntimeError("torch.jit.script not supported with foreach optimizers")
-
-    if foreach and not torch.jit.is_scripting():
-        func = _multi_tensor_radam
-    else:
-        func = _single_tensor_radam
-
-    func(
-        params,
-        grads,
-        exp_avgs,
-        exp_avg_sqs,
-        state_steps,
-        beta1=beta1,
-        beta2=beta2,
-        lr=lr,
-        weight_decay=weight_decay,
-        eps=eps,
-        decoupled_weight_decay=decoupled_weight_decay,
-        differentiable=differentiable,
-        capturable=capturable,
-        has_complex=has_complex,
-    )
-
-
 def _single_tensor_radam(
     params: List[Tensor],
     grads: List[Tensor],
@@ -307,22 +260,25 @@ def _single_tensor_radam(
     lr: float,
     weight_decay: float,
     eps: float,
-    differentiable: bool,
     decoupled_weight_decay: bool,
+    differentiable: bool,
+    maximize: bool,
     capturable: bool,
     has_complex: bool,
 ):
     for i, param in enumerate(params):
-        grad = grads[i]
+        grad = grads[i] if not maximize else -grads[i]
         exp_avg = exp_avgs[i]
         exp_avg_sq = exp_avg_sqs[i]
         step_t = state_steps[i]
 
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
         if not torch._utils.is_compiling() and capturable:
-            assert (param.is_cuda and step_t.is_cuda) or (
-                param.is_xla and step_t.is_xla
-            ), "If capturable=True, params and state_steps must be CUDA or XLA tensors."
+            capturable_supported_devices = _get_capturable_supported_devices()
+            assert (
+                param.device.type == step_t.device.type
+                and param.device.type in capturable_supported_devices
+            ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
 
         if torch.is_complex(param):
             param = torch.view_as_real(param)
@@ -405,6 +361,7 @@ def _multi_tensor_radam(
     eps: float,
     decoupled_weight_decay: bool,
     differentiable: bool,
+    maximize: bool,
     capturable: bool,
     has_complex: bool,
 ):
@@ -415,9 +372,14 @@ def _multi_tensor_radam(
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch._utils.is_compiling() and capturable:
+        capturable_supported_devices = _get_capturable_supported_devices(
+            supports_xla=False
+        )
         assert all(
-            p.is_cuda and step.is_cuda for p, step in zip(params, state_steps)
-        ), "If capturable=True, params and state_steps must be CUDA tensors."
+            p.device.type == step.device.type
+            and p.device.type in capturable_supported_devices
+            for p, step in zip(params, state_steps)
+        ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, exp_avgs, exp_avg_sqs, state_steps]
@@ -445,9 +407,15 @@ def _multi_tensor_radam(
                 grouped_params, grouped_grads, grouped_exp_avgs, grouped_exp_avg_sqs
             )
 
+        if maximize:
+            grouped_grads = torch._foreach_neg(grouped_grads)  # type: ignore[assignment]
+
         # maximum length of the approximated SMA
         rho_inf = 2 / (1 - beta2) - 1
         # compute the length of the approximated SMA
+        bias_correction1: Union[Tuple[Tensor, ...], List[Tensor]]
+        bias_correction2: Union[Tuple[Tensor, ...], List[Tensor]]
+        rho_t_list: Union[Tuple[Tensor, ...], List[Tensor]]
         if capturable:
             bias_correction1 = torch._foreach_pow(beta2, grouped_state_steps)
             torch._foreach_neg_(bias_correction1)
@@ -473,9 +441,15 @@ def _multi_tensor_radam(
             if decoupled_weight_decay:
                 torch._foreach_mul_(grouped_params, 1 - lr * weight_decay)
             else:
-                grouped_grads = torch._foreach_add(
-                    grouped_grads, grouped_params, alpha=weight_decay
-                )
+                # Re-use the intermediate memory (grouped_grads) already allocated for maximize
+                if maximize:
+                    torch._foreach_add_(
+                        grouped_grads, grouped_params, alpha=weight_decay
+                    )
+                else:
+                    grouped_grads = torch._foreach_add(  # type: ignore[assignment]
+                        grouped_grads, grouped_params, alpha=weight_decay
+                    )
 
         # Decay the first and second moment running average coefficient
         torch._foreach_lerp_(grouped_exp_avgs, grouped_grads, 1 - beta1)
@@ -529,7 +503,7 @@ def _multi_tensor_radam(
         else:
             rect = [
                 _dispatch_sqrt(
-                    (rho_t - 4)
+                    (rho_t - 4)  # type: ignore[arg-type]
                     * (rho_t - 2)
                     * rho_inf
                     / ((rho_inf - 4) * (rho_inf - 2) * rho_t)
@@ -559,3 +533,66 @@ def _multi_tensor_radam(
 
         # Here, buffer = sqrt(1 - beta2^t) * rect_step_size / (sqrt(v) + eps) + unrect_step_size
         torch._foreach_addcmul_(grouped_params, grouped_exp_avgs, buffer)
+
+
+@_disable_dynamo_if_unsupported(single_tensor_fn=_single_tensor_radam)
+def radam(
+    params: List[Tensor],
+    grads: List[Tensor],
+    exp_avgs: List[Tensor],
+    exp_avg_sqs: List[Tensor],
+    state_steps: List[Tensor],
+    # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
+    # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
+    decoupled_weight_decay: bool = False,
+    foreach: Optional[bool] = None,
+    differentiable: bool = False,
+    capturable: bool = False,
+    has_complex: bool = False,
+    maximize: bool = False,
+    *,
+    beta1: float,
+    beta2: float,
+    lr: float,
+    weight_decay: float,
+    eps: float,
+):
+    r"""Functional API that performs RAdam algorithm computation.
+
+    See :class:`~torch.optim.RAdam` for details.
+    """
+    if not all(isinstance(t, torch.Tensor) for t in state_steps):
+        raise RuntimeError(
+            "API has changed, `state_steps` argument must contain a list of singleton tensors"
+        )
+
+    if foreach is None:
+        _, foreach = _default_to_fused_or_foreach(
+            params, differentiable, use_fused=False
+        )
+
+    if foreach and torch.jit.is_scripting():
+        raise RuntimeError("torch.jit.script not supported with foreach optimizers")
+
+    if foreach and not torch.jit.is_scripting():
+        func = _multi_tensor_radam
+    else:
+        func = _single_tensor_radam
+
+    func(
+        params,
+        grads,
+        exp_avgs,
+        exp_avg_sqs,
+        state_steps,
+        beta1=beta1,
+        beta2=beta2,
+        lr=lr,
+        weight_decay=weight_decay,
+        eps=eps,
+        maximize=maximize,
+        decoupled_weight_decay=decoupled_weight_decay,
+        differentiable=differentiable,
+        capturable=capturable,
+        has_complex=has_complex,
+    )

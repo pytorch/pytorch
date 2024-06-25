@@ -1,11 +1,12 @@
 import modulefinder
 import os
-import pathlib
 import sys
 import warnings
+from pathlib import Path
 from typing import Any, Dict, List, Set
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # These tests are slow enough that it's worth calculating whether the patch
 # touched any related files first. This list was manually generated, but for every
@@ -21,6 +22,8 @@ TARGET_DET_LIST = [
     "test_cpp_extensions_aot_no_ninja",
     "test_cpp_extensions_jit",
     "test_cpp_extensions_open_device_registration",
+    "test_cpp_extensions_stream_and_event",
+    "test_cpp_extensions_mtia_backend",
     "test_cuda",
     "test_cuda_primary_ctx",
     "test_dataloader",

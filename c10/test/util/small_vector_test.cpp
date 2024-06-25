@@ -576,8 +576,8 @@ TYPED_TEST(SmallVectorTest, EraseTest) {
   SCOPED_TRACE("EraseTest");
 
   this->makeSequence(this->theVector, 1, 3);
-  const auto& theConstVector = this->theVector;
-  this->theVector.erase(theConstVector.begin());
+  auto& theVector = this->theVector;
+  this->theVector.erase(theVector.begin());
   this->assertValuesInOrder(this->theVector, 2u, 2, 3);
 }
 
@@ -586,8 +586,8 @@ TYPED_TEST(SmallVectorTest, EraseRangeTest) {
   SCOPED_TRACE("EraseRangeTest");
 
   this->makeSequence(this->theVector, 1, 3);
-  const auto& theConstVector = this->theVector;
-  this->theVector.erase(theConstVector.begin(), theConstVector.begin() + 2);
+  auto& theVector = this->theVector;
+  this->theVector.erase(theVector.begin(), theVector.begin() + 2);
   this->assertValuesInOrder(this->theVector, 1u, 3);
 }
 

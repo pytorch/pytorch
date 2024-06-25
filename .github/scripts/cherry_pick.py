@@ -3,11 +3,11 @@
 import json
 import os
 import re
-from typing import Any, Optional
+from typing import Any, cast, Dict, List, Optional
 
 from urllib.error import HTTPError
 
-from github_utils import gh_fetch_url, gh_post_pr_comment
+from github_utils import gh_fetch_url, gh_post_pr_comment, gh_query_issues_by_labels
 
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from trymerge import get_pr_commit_sha, GitHubPR
@@ -19,6 +19,7 @@ REQUIRES_ISSUE = {
     "critical",
     "fixnewfeature",
 }
+RELEASE_BRANCH_REGEX = re.compile(r"release/(?P<version>.+)")
 
 
 def parse_args() -> Any:
@@ -29,7 +30,7 @@ def parse_args() -> Any:
         "--onto-branch", type=str, required=True, help="the target release branch"
     )
     parser.add_argument(
-        "--github-actor", type=str, required=True, help="all the world’s a stage"
+        "--github-actor", type=str, required=True, help="all the world's a stage"
     )
     parser.add_argument(
         "--classification",
@@ -58,6 +59,33 @@ def get_merge_commit_sha(repo: GitRepo, pr: GitHubPR) -> Optional[str]:
     return commit_sha if pr.is_closed() else None
 
 
+def get_release_version(onto_branch: str) -> Optional[str]:
+    """
+    Return the release version if the target branch is a release branch
+    """
+    m = re.match(RELEASE_BRANCH_REGEX, onto_branch)
+    return m.group("version") if m else ""
+
+
+def get_tracker_issues(
+    org: str, project: str, onto_branch: str
+) -> List[Dict[str, Any]]:
+    """
+    Find the tracker issue from the repo. The tracker issue needs to have the title
+    like [VERSION] Release Tracker following the convention on PyTorch
+    """
+    version = get_release_version(onto_branch)
+    if not version:
+        return []
+
+    tracker_issues = gh_query_issues_by_labels(org, project, labels=["release tracker"])
+    if not tracker_issues:
+        return []
+
+    # Figure out the tracker issue from the list by looking at the title
+    return [issue for issue in tracker_issues if version in issue.get("title", "")]
+
+
 def cherry_pick(
     github_actor: str,
     repo: GitRepo,
@@ -77,17 +105,49 @@ def cherry_pick(
     )
 
     try:
+        org, project = repo.gh_owner_and_name()
+
+        cherry_pick_pr = ""
         if not dry_run:
-            org, project = repo.gh_owner_and_name()
             cherry_pick_pr = submit_pr(repo, pr, cherry_pick_branch, onto_branch)
 
-            msg = f"The cherry pick PR is at {cherry_pick_pr}"
-            if fixes:
-                msg += f" and it is linked with issue {fixes}"
-            elif classification in REQUIRES_ISSUE:
-                msg += f" and it is recommended to link a {classification} cherry pick PR with an issue"
+        tracker_issues_comments = []
+        tracker_issues = get_tracker_issues(org, project, onto_branch)
+        for issue in tracker_issues:
+            issue_number = int(str(issue.get("number", "0")))
+            if not issue_number:
+                continue
 
-            post_comment(org, project, pr.pr_num, msg)
+            res = cast(
+                Dict[str, Any],
+                post_tracker_issue_comment(
+                    org,
+                    project,
+                    issue_number,
+                    pr.pr_num,
+                    cherry_pick_pr,
+                    classification,
+                    fixes,
+                    dry_run,
+                ),
+            )
+
+            comment_url = res.get("html_url", "")
+            if comment_url:
+                tracker_issues_comments.append(comment_url)
+
+        msg = f"The cherry pick PR is at {cherry_pick_pr}"
+        if fixes:
+            msg += f" and it is linked with issue {fixes}."
+        elif classification in REQUIRES_ISSUE:
+            msg += f" and it is recommended to link a {classification} cherry pick PR with an issue."
+
+        if tracker_issues_comments:
+            msg += " The following tracker issues are updated:\n"
+            for tracker_issues_comment in tracker_issues_comments:
+                msg += f"* {tracker_issues_comment}\n"
+
+        post_pr_comment(org, project, pr.pr_num, msg, dry_run)
 
     finally:
         if current_branch:
@@ -159,7 +219,9 @@ def submit_pr(
         raise RuntimeError(msg) from error
 
 
-def post_comment(org: str, project: str, pr_num: int, msg: str) -> None:
+def post_pr_comment(
+    org: str, project: str, pr_num: int, msg: str, dry_run: bool = False
+) -> List[Dict[str, Any]]:
     """
     Post a comment on the PR itself to point to the cherry picking PR when success
     or print the error when failure
@@ -182,7 +244,35 @@ def post_comment(org: str, project: str, pr_num: int, msg: str) -> None:
     comment = "\n".join(
         (f"### Cherry picking #{pr_num}", f"{msg}", "", f"{internal_debugging}")
     )
-    gh_post_pr_comment(org, project, pr_num, comment)
+    return gh_post_pr_comment(org, project, pr_num, comment, dry_run)
+
+
+def post_tracker_issue_comment(
+    org: str,
+    project: str,
+    issue_num: int,
+    pr_num: int,
+    cherry_pick_pr: str,
+    classification: str,
+    fixes: str,
+    dry_run: bool = False,
+) -> List[Dict[str, Any]]:
+    """
+    Post a comment on the tracker issue (if any) to record the cherry pick
+    """
+    comment = "\n".join(
+        (
+            "Link to landed trunk PR (if applicable):",
+            f"* https://github.com/{org}/{project}/pull/{pr_num}",
+            "",
+            "Link to release branch PR:",
+            f"* {cherry_pick_pr}",
+            "",
+            "Criteria Category:",
+            " - ".join((classification.capitalize(), fixes.capitalize())),
+        )
+    )
+    return gh_post_pr_comment(org, project, issue_num, comment, dry_run)
 
 
 def main() -> None:
@@ -214,7 +304,7 @@ def main() -> None:
 
     except RuntimeError as error:
         if not args.dry_run:
-            post_comment(org, project, pr_num, str(error))
+            post_pr_comment(org, project, pr_num, str(error))
         else:
             raise error
 

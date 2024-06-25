@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 This module implements observers which are used to collect statistics about
 the values observed during calibration (PTQ) or training (QAT).
@@ -244,6 +245,8 @@ class UniformQuantizationObserverBase(ObserverBase):
             torch.uint8,
             torch.int16,
             torch.int32,
+            torch.float8_e5m2,
+            torch.float8_e4m3fn,
         )
 
         assert self.dtype in _ALLOWED_DTYPES, f"Default Observer only works for {_ALLOWED_DTYPES} data type"

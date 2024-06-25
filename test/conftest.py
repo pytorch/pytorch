@@ -7,10 +7,9 @@ import sys
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from types import MethodType
-from typing import Any, List, Optional, Union
+from typing import Any, List, Optional, TYPE_CHECKING, Union
 
 import pytest
-from _pytest._code.code import ReprFileLocation
 from _pytest.config import Config, filename_arg
 from _pytest.config.argparsing import Parser
 from _pytest.junitxml import _NodeReporter, bin_xml_escape, LogXML
@@ -19,6 +18,9 @@ from _pytest.reports import TestReport
 from _pytest.stash import StashKey
 from _pytest.terminal import _get_raw_skip_reason
 from pytest_shard_custom import pytest_addoptions as shard_addoptions, PytestShardPlugin
+
+if TYPE_CHECKING:
+    from _pytest._code.code import ReprFileLocation
 
 # a lot of this file is copied from _pytest.junitxml and modified to get rerun info
 
