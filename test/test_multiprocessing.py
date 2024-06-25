@@ -309,8 +309,9 @@ class TestMultiprocessing(TestCase):
                 is_set = e.is_set()
 
             self.assertTrue(is_set)
-            self.assertTrue(data[0].eq(4).all())
-            self.assertTrue(data[1].eq(4).all())
+            if device != "meta":
+                self.assertTrue(data[0].eq(4).all())
+                self.assertTrue(data[1].eq(4).all())
 
             p.join(100)
             self.assertFalse(p.is_alive())
@@ -326,12 +327,14 @@ class TestMultiprocessing(TestCase):
 
             t1 = q.get()
             t2 = q.get()
-            self.assertTrue(t1.eq(1).all())
+            if device != "meta":
+                self.assertTrue(t1.eq(1).all())
             s1 = t1.storage()
             s2 = t2.storage()
             self.assertEqual(type(s1), type(s2))
             self.assertEqual(s1.data_ptr(), s1.data_ptr())
-            self.assertEqual(s1, s2)
+            if device != "meta":
+                self.assertEqual(s1, s2)
 
             # We need to delete this tensors to allow producer (child process)
             # collect them properly
@@ -856,6 +859,22 @@ if __name__ == "__main__":
     def test_empty_tensor_sharing_cuda(self):
         self._test_empty_tensor_sharing(torch.float32, torch.device("cuda"))
         self._test_empty_tensor_sharing(torch.int64, torch.device("cuda"))
+
+    def test_empty_tensor_sharing_meta(self):
+        self._test_empty_tensor_sharing(torch.float32, torch.device("meta"))
+        self._test_empty_tensor_sharing(torch.int64, torch.device("meta"))
+
+    def test_tensor_sharing_meta(self):
+        dtype = torch.float32
+        device = torch.device("meta")
+        q = mp.Queue()
+        empty = torch.tensor([1], dtype=dtype, device=device)
+        q.put(empty)
+        out = q.get(timeout=1)
+        self.assertEqual(out, empty)
+
+    def test_meta_simple(self):
+        self._test_sharing(mp.get_context("spawn"), "meta", torch.float)
 
     def _test_autograd_sharing(self, var, ctx=mp, is_parameter=False):
         device = "cuda" if var.is_cuda else "cpu"
