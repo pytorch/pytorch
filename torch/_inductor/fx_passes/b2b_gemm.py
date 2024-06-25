@@ -36,7 +36,8 @@ b2b_gemm_template = TritonTemplate(
     debug=False,
     source=r"""
 {{def_kernel("A", "B", "C")}}
-    
+
+
     # B2B_GEMM_TRITON_ENTRANCE
     # dram load/store estimations
     #   (A @ B) @ C
@@ -108,16 +109,16 @@ B2B_GEMM_PASS = PatternMatcherPass(
 def can_apply_b2b_gemm(
     mat1: torch.fx.Node, mat2: torch.fx.Node, mat3: torch.fx.Node
 ) -> bool:
-    if not (
-        ("val" in mat1.meta) and ("val" in mat2.meta) and ("val" in mat3.meta)
-    ):
+    if not (("val" in mat1.meta) and ("val" in mat2.meta) and ("val" in mat3.meta)):
         return False
     mat1 = mat1.meta["val"]
     mat2 = mat2.meta["val"]
     mat3 = mat3.meta["val"]
     if not (mat1.is_cuda and mat2.is_cuda and mat3.is_cuda):
         return False
-    if not ((len(mat1.shape) == 2) and (len(mat2.shape) == 2) and (len(mat3.shape) == 2)):
+    if not (
+        (len(mat1.shape) == 2) and (len(mat2.shape) == 2) and (len(mat3.shape) == 2)
+    ):
         return False
     if not ((mat1.shape[1] == mat2.shape[0]) and (mat2.shape[1] == mat3.shape[0])):
         return False
