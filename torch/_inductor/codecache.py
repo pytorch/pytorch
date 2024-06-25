@@ -46,6 +46,7 @@ from typing import (
     TYPE_CHECKING,
     Union,
 )
+from typing_extensions import TypeAlias
 
 import torch
 from torch._dynamo.utils import counters, dynamo_timed
@@ -56,7 +57,7 @@ from torch._inductor.runtime.compile_tasks import (
     _reload_python_module,
     _reload_python_module_in_subproc,
 )
-from torch._inductor.runtime.runtime_utils import cache_dir
+from torch._inductor.runtime.runtime_utils import cache_dir, default_cache_dir
 from torch._inductor.utils import ALIGN_BYTES, clear_on_fresh_inductor_cache, is_linux
 
 from torch._logging import trace_structured
@@ -72,7 +73,7 @@ if TYPE_CHECKING:
 
     from torch._inductor.graph import GraphLowering
     from torch._inductor.ir import ChoiceCaller
-    from torch._inductor.runtime.hints import HalideMeta
+    from torch._inductor.runtime.hints import HalideInputSpec, HalideMeta
 
 
 _HERE = os.path.abspath(__file__)
@@ -1098,6 +1099,9 @@ class FxGraphCache:
             pass
 
 
+_StrideExprStr: TypeAlias = str
+
+
 @dataclasses.dataclass
 class CompiledFxGraph:
     """
@@ -1115,7 +1119,7 @@ class CompiledFxGraph:
     mutated_input_idxs: Set[int]
     constants: Dict[str, torch.Tensor]
     torchbind_constants: Dict[str, torch._C.ScriptObject]
-    output_strides: Optional[List[Optional[Tuple[int, ...]]]]
+    output_strides: Optional[List[Optional[Tuple[_StrideExprStr, ...]]]]
     disabled_cudagraphs_reason: Optional[str]
     metrics_deltas: metrics.CachedMetricsDeltas
     # This is a string representation of an expression we serialize
@@ -1132,7 +1136,7 @@ class CompiledFxGraph:
         self,
         current_callable: Optional[Callable[..., Any]],
         graph: GraphLowering,
-        output_strides: List[Optional[Tuple[int, ...]]],
+        output_strides: List[Optional[Tuple[_StrideExprStr, ...]]],
         disabled_cudagraphs_reason: Optional[str],
         metrics_deltas: metrics.CachedMetricsDeltas,
     ):
@@ -1302,7 +1306,7 @@ class VecISA:
 #include <ATen/cpu/vec/vec.h>
 #endif
 
-__attribute__((aligned(64))) float in_out_ptr0[16] = {0.0};
+alignas(64) float in_out_ptr0[16] = {0.0};
 
 extern "C" void __avx_chk_kernel() {
     auto tmp0 = at::vec::Vectorized<float>(1);
@@ -1332,18 +1336,11 @@ cdll.LoadLibrary("__lib_path__")
     def __hash__(self) -> int:
         return hash(str(self))
 
-    @functools.lru_cache(None)  # noqa: B019
-    def __bool__(self) -> bool:
+    def check_build(self, code) -> bool:
         from torch._inductor.cpp_builder import CppBuilder, CppTorchOptions
 
-        if config.cpp.vec_isa_ok is not None:
-            return config.cpp.vec_isa_ok
-
-        if config.is_fbcode():
-            return True
-
         key, input_path = write(
-            VecISA._avx_code,
+            code,
             "cpp",
             extra=_get_isa_dry_compile_fingerprint(self._arch_flags),
         )
@@ -1365,8 +1362,6 @@ cdll.LoadLibrary("__lib_path__")
                 output_path = x86_isa_help_builder.get_target_file_path()
                 if not os.path.isfile(output_path):
                     status, target_file = x86_isa_help_builder.build()
-                    if status:
-                        return False
 
                 # Check build result
                 subprocess.check_call(
@@ -1382,6 +1377,16 @@ cdll.LoadLibrary("__lib_path__")
                 return False
 
             return True
+
+    @functools.lru_cache(None)  # noqa: B019
+    def __bool__(self) -> bool:
+        if config.cpp.vec_isa_ok is not None:
+            return config.cpp.vec_isa_ok
+
+        if config.is_fbcode():
+            return True
+
+        return self.check_build(VecISA._avx_code)
 
 
 @dataclasses.dataclass
@@ -1414,6 +1419,46 @@ class VecAVX512(VecISA):
         return "avx512"
 
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+
+
+@dataclasses.dataclass
+class VecAMX(VecAVX512):
+    _arch_flags = VecAVX512._arch_flags + " -mamx-tile -mamx-bf16 -mamx-int8"
+
+    def __str__(self) -> str:
+        return super().__str__() + " amx_tile"
+
+    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+
+    _amx_code = """
+#include <cstdint>
+#include <immintrin.h>
+
+struct amx_tilecfg {
+  uint8_t palette_id;
+  uint8_t start_row;
+  uint8_t reserved_0[14];
+  uint16_t colsb[16];
+  uint8_t rows[16];
+};
+
+extern "C" void __amx_chk_kernel() {
+  amx_tilecfg cfg = {0};
+  _tile_loadconfig(&cfg);
+  _tile_zero(0);
+  _tile_dpbf16ps(0, 1, 2);
+  _tile_dpbusd(0, 1, 2);
+}
+"""
+
+    @functools.lru_cache(None)  # noqa: B019
+    def __bool__(self) -> bool:
+        if super().__bool__():
+            if config.is_fbcode():
+                return False
+            if self.check_build(VecAMX._amx_code) and torch.cpu._init_amx():
+                return True
+        return False
 
 
 @dataclasses.dataclass
@@ -1481,15 +1526,17 @@ def x86_isa_checker() -> List[str]:
 
     avx2 = torch.cpu._is_cpu_support_avx2()
     avx512 = torch.cpu._is_cpu_support_avx512()
+    amx_tile = torch.cpu._is_cpu_support_amx_tile()
 
     _check_and_append_supported_isa(supported_isa, avx2, "avx2")
     _check_and_append_supported_isa(supported_isa, avx512, "avx512")
+    _check_and_append_supported_isa(supported_isa, amx_tile, "amx_tile")
 
     return supported_isa
 
 
 invalid_vec_isa = InvalidVecISA()
-supported_vec_isa_list = [VecAVX512(), VecAVX2(), VecNEON()]
+supported_vec_isa_list = [VecAMX(), VecAVX512(), VecAVX2(), VecNEON()]
 
 
 # Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
@@ -1497,12 +1544,11 @@ supported_vec_isa_list = [VecAVX512(), VecAVX2(), VecNEON()]
 # we only cache some key isa information.
 @functools.lru_cache(None)
 def valid_vec_isa_list() -> List[VecISA]:
-    if sys.platform == "darwin" and platform.processor() == "arm":
-        return [VecNEON()]
-
     isa_list: List[VecISA] = []
-    cur_os = sys.platform
-    if cur_os != "linux" and cur_os != "win32":
+    if sys.platform == "darwin" and platform.processor() == "arm":
+        isa_list.append(VecNEON())
+
+    if sys.platform not in ["linux", "win32"]:
         return isa_list
 
     arch = platform.machine()
@@ -1519,17 +1565,16 @@ def valid_vec_isa_list() -> List[VecISA]:
                         if re.search(r"[\^ ]+vxe[\$ ]+", group):
                             isa_list.append(VecZVECTOR())
                             break
-        return isa_list
-
-    if arch == "x86_64" or arch == "AMD64":
+    elif arch == "aarch64":
+        isa_list.append(VecNEON())
+    elif arch in ["x86_64", "AMD64"]:
         """
         arch value is x86_64 on Linux, and the value is AMD64 on Windows.
         """
         _cpu_supported_x86_isa = x86_isa_checker()
         for isa in supported_vec_isa_list:
-            if str(isa) in _cpu_supported_x86_isa and isa:
+            if all(flag in _cpu_supported_x86_isa for flag in str(isa).split()) and isa:
                 isa_list.append(isa)
-        return isa_list
 
     return isa_list
 
@@ -2562,11 +2607,14 @@ class CppPythonBindingsCodeCache(CppCodeCache):
 
         #ifndef _MSC_VER
         #if __cplusplus < 202002L
-        // C++20 earlier code
+        // C++20 (earlier) code
         // https://en.cppreference.com/w/cpp/language/attributes/likely
         #define likely(x)       __builtin_expect(!!(x), 1)
         #define unlikely(x)     __builtin_expect(!!(x), 0)
         #endif
+        #else
+        #define likely(x) (x)
+        #define unlikely(x) (x)
         #endif
 
         // This is defined in guards.cpp so we don't need to import PyTorch headers that are slooow.
@@ -2582,6 +2630,12 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             if(result == -1 && PyErr_Occurred())
                 [[unlikely]] throw std::runtime_error("expected int arg");
             return result;
+        }
+        template <> inline uintptr_t parse_arg<uintptr_t>(PyObject* args, size_t n) {
+            auto result = PyLong_AsVoidPtr(PyTuple_GET_ITEM(args, n));
+            if(result == reinterpret_cast<void*>(-1) && PyErr_Occurred())
+                [[unlikely]] throw std::runtime_error("expected int arg");
+            return reinterpret_cast<uintptr_t>(result);
         }
 
         %s
@@ -2859,40 +2913,142 @@ def validate_new_cpp_commands():
 class HalideCodeCache(CppPythonBindingsCodeCache):
     cache: Dict[str, Callable[[], Union[ModuleType, CDLL]]] = {}
     cache_clear = staticmethod(cache.clear)
-    glue_template = textwrap.dedent(
+    _standalone_runtime_path: Optional[str] = None
+    prefix = textwrap.dedent(
         """
-        #include "{halidebuffer_h}"
+        #include "{halideruntime_h}"
         #include "{headerfile}"
         #include <stdexcept>
         #include <cmath>
-        void kernel({argdefs}) {{
-            {buffers}
-            int err = halide_kernel({buffer_names});
-            if(err != 0) {{
-                throw std::runtime_error("halide_kernel failed");
+
+        namespace c10 {{
+            inline long div_floor_integer(long a, long b) {{
+                if ((a<0) != (b<0)) {{
+                    const auto quot = a / b;
+                    const auto rem = a % b;
+                    return rem ? quot - 1 : quot;
+                }}
+                return a / b;
             }}
         }}
         """
     )
+    glue_template_cpp = prefix + textwrap.dedent(
+        """
+        void kernel({argdefs}) {{
+            {buffers}
+            int err = halide_kernel({buffer_names});
+            if(err != 0) throw std::runtime_error("halide_kernel failed");
+        }}
+        """
+    )
+    glue_template_cuda = prefix + textwrap.dedent(
+        """
+        #include <cuda.h>
+        static const halide_device_interface_t* cuda_interface = halide_cuda_device_interface();
+
+        void kernel({argdefs}, uintptr_t stream) {{
+            {buffers}
+            int err = halide_kernel(reinterpret_cast<void*>(stream), {buffer_names});
+            if(err != 0) throw std::runtime_error("halide_kernel failed");
+        }}
+        """
+    )
+    standalone_runtime_cuda_init = textwrap.dedent(
+        """
+        #include "{}"
+        #include <cuda.h>
+
+        static int acquire_context(void* user_context,
+                                   void** cuda_context_out,
+                                   bool create) {{
+            return cuCtxGetCurrent(reinterpret_cast<CUcontext*>(cuda_context_out));
+        }}
+
+        static int release_context(void* user_context) {{
+            return 0;
+        }}
+
+        static int get_stream(void* user_context,
+                              void* cuda_context,
+                              void** stream_out) {{
+            *stream_out = user_context;
+            return 0;
+        }}
+
+        static int register_halide_hooks() {{
+            halide_set_cuda_acquire_context(&acquire_context);
+            halide_set_cuda_release_context(&release_context);
+            halide_set_cuda_get_stream(&get_stream);
+            return 0;
+        }}
+
+        int inductor_register_halide_hooks_result = register_halide_hooks();
+        """
+    )
 
     @classmethod
-    def _codegen_glue(cls, argtypes, headerfile):
+    def _codegen_buffer(cls, name: str, arg: HalideInputSpec, cuda: bool):
+        assert arg.shape is not None
+        assert arg.stride is not None and len(arg.shape) == len(arg.stride)
+        assert arg.offset is not None
+        data_ptr = f"{arg.alias_of or arg.name} + {arg.offset}"
+        if cuda:
+            device = f"reinterpret_cast<uint64_t>({data_ptr})"
+            device_interface = "cuda_interface"
+            host = "nullptr"
+            flags = "halide_buffer_flag_device_dirty"
+        else:
+            device = "0"
+            device_interface = "nullptr"
+            host = f"reinterpret_cast<uint8_t*>({data_ptr})"
+            flags = "halide_buffer_flag_host_dirty"
+
+        dims = []
+        for size, stride in zip(arg.shape, arg.stride):
+            dims.append(f"halide_dimension_t(0, {size}, {stride})")
+
+        return [
+            f"halide_buffer_t {name};",
+            f"halide_dimension_t {name}_dims[] = {{{', '.join(dims)}}};",
+            f"{name}.device = {device};",
+            f"{name}.device_interface = {device_interface};",
+            f"{name}.host = {host};",
+            f"{name}.flags = {flags};",
+            f"{name}.type = {arg.halide_type()};",
+            f"{name}.dimensions = {len(dims)};",
+            f"{name}.dim = {name}_dims;",
+            f"{name}.padding = nullptr;",
+        ]
+
+    @classmethod
+    def _codegen_glue(cls, meta, headerfile):
+        is_cuda = meta.is_cuda()
+        assert is_cuda is ("user_context" in meta.target)
+        assert "no_runtime" in meta.target
         buffers = []
         buffer_names = []
-        for i, arg in enumerate(argtypes):
-            if arg.numel:
-                buffer_names.append(f"hl_buf_{i}")
-                buffers.append(
-                    f"    Halide::Runtime::Buffer {buffer_names[-1]}({arg.halide_type()}, {arg.name}, {arg.numel});"
-                )
+        for i, arg in enumerate(meta.argtypes):
+            if arg.is_buffer():
+                buffer_names.append(f"&hl_buf_{i}")
+                buffers.extend(cls._codegen_buffer(f"hl_buf_{i}", arg, is_cuda))
             else:
                 assert "*" not in arg.ctype
                 buffer_names.append(arg.name)
-        glue_code = cls.glue_template.format(
-            halidebuffer_h=cls.find_header("HalideBuffer.h"),
+        buffers = "\n".join([f"    {line}" for line in buffers]).lstrip()
+
+        glue_template = cls.glue_template_cuda if is_cuda else cls.glue_template_cpp
+        glue_code = glue_template.format(
+            halideruntime_h=cls.find_header(
+                "HalideRuntimeCuda.h" if is_cuda else "HalideRuntime.h"
+            ),
             headerfile=headerfile,
-            argdefs=", ".join(f"{a.bindings_type()} {a.name}" for a in argtypes),
-            buffers="\n".join(buffers).lstrip(),
+            argdefs=", ".join(
+                f"{a.bindings_type()} {a.name}"
+                for a in meta.argtypes
+                if a.alias_of is None
+            ),
+            buffers=buffers,
             buffer_names=", ".join(buffer_names),
         )
         return glue_code
@@ -2903,34 +3059,21 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         return sha256_hash(
             "\n".join(
                 [
-                    cls.glue_template,
-                    f"{cls.cpu_cache_size()}",
+                    cls.glue_template_cpp,
+                    cls.glue_template_cuda,
+                    cls.standalone_runtime_cuda_init,
                     cpp_compile_command("I", "O"),
                 ]
             ).encode("utf-8")
         )
 
     @staticmethod
-    @functools.lru_cache(None)
-    def cpu_cache_size():
-        try:
-            cpuinfo = open("/proc/cpuinfo").read()
-        except OSError:
-            return 16777216
-        m = re.search(r"cache size\s*: (\d+) KB", cpuinfo)
-        if m:
-            return int(m.group(1)) * 1024
-        m = re.search(r"cache size\s*: (\d+) MB", cpuinfo)
-        if m:
-            return int(m.group(1)) * 1024 * 1024
-        raise RuntimeError("failed to find 'cache size: ... KB' in /proc/cpuinfo")
-
-    @staticmethod
     def _search_for_file(suffix, errmsg):
+        spec = importlib.machinery.PathFinder.find_spec("halide")
+        if spec is None or not spec.submodule_search_locations:
+            raise RuntimeError("halide python bindings not installed")
         try:
-            search, *_ = importlib.machinery.PathFinder.find_spec(  # type: ignore[union-attr,misc]
-                "halide"
-            ).submodule_search_locations
+            search = spec.submodule_search_locations[0]
             for file in os.listdir(search):
                 if file.endswith(".so"):
                     try:
@@ -2999,7 +3142,6 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         lockfile = str(dirpath / "lock")
         need_compile = not os.path.exists(donefile)
         jobs = []
-
         if need_compile:
             write_atomic(genfile, source_code)
             jobs.append(
@@ -3015,7 +3157,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
                         "-f",
                         "halide_kernel",
                         "-e",
-                        "static_library,h,schedule,pytorch_wrapper",
+                        "static_library,h,schedule",
                         "-p",
                         cls.find_libautoschedule(meta.scheduler),
                         *meta.args(),
@@ -3023,11 +3165,17 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
                 )
             )
 
+        binding_types = [
+            arg.bindings_type() for arg in meta.argtypes if arg.alias_of is None
+        ]
+        if meta.is_cuda():
+            binding_types.append("uintptr_t")  # stream
         bindings_future = cls.load_pybinding_async(
-            [arg.bindings_type() for arg in meta.argtypes],
-            cls._codegen_glue(meta.argtypes, headerfile),
-            extra_flags=(libfile,),
+            binding_types,
+            cls._codegen_glue(meta, headerfile),
+            extra_flags=(libfile, cls.build_standalone_runtime()),
             submit_fn=jobs.append if need_compile else None,
+            cuda=meta.is_cuda(),
         )
 
         if need_compile:
@@ -3049,13 +3197,92 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
     def generate_halide(cls, *args, **kwargs):
         return cls.generate_halide_async(*args, **kwargs)()
 
+    @classmethod
+    def build_standalone_runtime(cls):
+        if cls._standalone_runtime_path and os.path.exists(
+            cls._standalone_runtime_path
+        ):
+            return cls._standalone_runtime_path
+        is_cuda = torch.cuda.is_available()
+        libname = "libStandaloneHalideRuntime.so"
+        target = "host-cuda" if is_cuda else "host"
+        if cls._standalone_runtime_path:
+            assert not os.path.exists(cls._standalone_runtime_path)
+            # We hit this case in unittests when we run with fresh_inductor_cache()
+            # Generating a fresh runtime over and over causes errors because we initialize
+            # cuda hundreds of times in the same process and run out of file descriptors.
+            # Workaround by jail breaking the current fresh_inductor_cache().
+            base = default_cache_dir()
+        else:
+            base = cache_dir()
+        dirpath = Path(base) / f"halide-runtime-{target}-{cls.config_hash()}"
+        os.makedirs(dirpath, exist_ok=True)
+        donefile = str(dirpath / "done")
+        lockfile = str(dirpath / "lock")
+        hookfile = str(dirpath / "hooks.cpp")
+        afile = str(dirpath / "standalone_halide_runtime.a")
+        sofile = str(dirpath / libname)
+        if not os.path.exists(donefile):
+            import filelock
+            import halide as hl  # type: ignore[import-untyped,import-not-found]
+
+            with filelock.FileLock(lockfile, LOCK_TIMEOUT):
+                if not os.path.exists(donefile):
+                    with open(hookfile, "w") as f:
+                        if is_cuda:
+                            f.write(
+                                cls.standalone_runtime_cuda_init.format(
+                                    cls.find_header("HalideRuntimeCuda.h")
+                                )
+                            )
+                    hl.compile_standalone_runtime(afile, hl.Target(target))
+                    subprocess.check_call(
+                        shlex.split(
+                            cpp_compile_command([hookfile, afile], sofile, cuda=is_cuda)
+                        )
+                    )
+                    touch(donefile)
+        assert os.path.exists(sofile)
+        cls._standalone_runtime_path = sofile
+        return sofile
+
 
 def _worker_task_halide(lockfile, jobs):
     from filelock import FileLock
 
-    with FileLock(lockfile, LOCK_TIMEOUT):
-        for job in jobs:
-            job()
+    try:
+        with FileLock(lockfile, LOCK_TIMEOUT):
+            for job in jobs:
+                job()
+    except subprocess.SubprocessError as e:
+        if os.environ.get("HALIDE_REPRO") == "1":
+            python, script, *cmd = getattr(e, "cmd", ("", "", ""))
+            if os.path.basename(python).startswith("python"):
+                code = open(script).read()
+                main = "    hl.main()"
+                assert code.count(main) == 1
+
+                class Out:
+                    def __repr__(self):
+                        return "out"
+
+                cmd[cmd.index("-o") + 1] = Out()  # type: ignore[call-overload]
+                repl = textwrap.indent(
+                    textwrap.dedent(
+                        f"""\
+                        import sys, tempfile
+                        with tempfile.TemporaryDirectory() as out:
+                            sys.argv = {["repro.py", *cmd]!r}
+                            hl.main()
+                        """
+                    ),
+                    "    ",
+                )
+                code = code.replace(main, repl)
+                with open("repro.py", "w") as fd:
+                    fd.write(code.lstrip())
+                raise RuntimeError(f"wrote repro.py: {e}") from e
+        raise
 
 
 def touch(filename):
