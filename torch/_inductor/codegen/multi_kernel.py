@@ -343,7 +343,7 @@ class MultiKernelCall:
         be picked.
         """
         return [
-            do_bench_gpu(lambda: kernel_call(True), rep=40, fast_flush=True)
+            do_bench_gpu(lambda: kernel_call(True))
             for kernel_call in kernel_calls
         ]
 
