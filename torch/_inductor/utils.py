@@ -1010,11 +1010,15 @@ def _use_autotune_backend(backend: str) -> bool:
 
 
 def use_triton_template(layout, *, enable_int32=False):
+    from .codegen.common import BackendFeature, has_backend_feature
+
     layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
     if enable_int32:
         layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
-    return _use_template_for_cuda(layout, layout_dtypes) and _use_autotune_backend(
-        "TRITON"
+    return (
+        _use_template_for_cuda(layout, layout_dtypes)
+        and _use_autotune_backend("TRITON")
+        and has_backend_feature(layout.device, BackendFeature.TRITON_TEMPLATES)
     )
 
 
@@ -1524,6 +1528,13 @@ def use_scatter_fallback(
     src_device_type,
     src_is_tensor,
 ):
+    if (
+        op_overload.overloadpacket
+        in (torch.ops.aten.scatter_reduce_, torch.ops.aten.scatter_reduce)
+        and reduction_type is None
+    ):
+        return False
+
     reduce_ty = (
         "add" if op_overload.overloadpacket == torch.ops.aten.scatter_ else "sum"
     )
