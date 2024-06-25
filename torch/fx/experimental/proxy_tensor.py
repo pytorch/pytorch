@@ -172,9 +172,6 @@ def has_proxy_slot(obj: Tensor, tracer: _ProxyTracer) -> bool:
     return bool(get_proxy_slot(obj, tracer, False, lambda _: True))
 
 
-class ProxyUnknown(Protocol):
-    pass
-
 _PySymProxyType = Callable[[], Proxy]
 
 
@@ -349,7 +346,6 @@ def track_tensor(tensor: Tensor, proxy: Proxy, *, constant: Optional[Tensor], tr
         assert callable(proxy_callable)
         if isinstance(outer_s, SymInt):
             set_proxy_slot(outer_s, tracer, thunkify(proxy_callable, outer_s, *args, **kwargs))
-
     # The basic idea is that we need to associate each tensor/SymInt
     # with a Proxy.  How do we setup this association?  We just store
     # the proxy on the proxy slot of the object, keyed on the tracer
@@ -741,50 +737,27 @@ class _SymNodeDict:
     Wrapper around a dictionary that will hash SymInts with their nodes
     """
     def __init__(self) -> None:
-        self.sym_node_dict: Dict[int, _PySymProxyType] = {}
+        self.sym_node_dict: Dict[PySymType, _PySymProxyType] = {}
 
     def __setitem__(self, key: PySymType, value: _PySymProxyType) -> None:
-        key = _SymNodeDict.__key_from_sym(key)
-        self.sym_node_dict[key] = value
+        self.sym_node_dict[key.node] = value
 
     def __getitem__(self, key: PySymType) -> _PySymProxyType:
-        key = _SymNodeDict.__key_from_sym(key)
-        return self.sym_node_dict[key]
+        return self.sym_node_dict[key.node]
 
     def __contains__(self, key: PySymType) -> bool:
-        key = _SymNodeDict.__key_from_sym(key)
-        return key in self.sym_node_dict
+        return key.node in self.sym_node_dict
 
     def get(self, key: PySymType, default: Optional[_PySymProxyType] = None) -> _PySymProxyType:
-        key = _SymNodeDict.__key_from_sym(key)
         # dict.get()'s annotation doesn't accept `None` when the value type
         # isn't Optional.
-        return self.sym_node_dict.get(key, default)  # type: ignore[arg-type]
+        return self.sym_node_dict.get(key.node, default)  # type: ignore[arg-type]
 
     def __iter__(self) -> Any:
         raise NotImplementedError
 
     def __len__(self) -> int:
         return len(self.sym_node_dict)
-
-    @staticmethod
-    def __key_from_sym(key: PySymType) -> int:
-        # Keyed via the node id - NOT the underlying node. We purposely don't
-        # want random `s0/2` to match just any other `s0/2` because we need to
-        # be able to track how they flow through the function.
-        #
-        # Imagine the function:
-        #
-        #     def example(s0):
-        #       a = call1(s0)
-        #       b = call2(s0)
-        #       call3(a, b)
-        #
-        # We want to be able to track the output of `call1()` separately from
-        # `call2()` even if they return fundamentally the same value. If we fold
-        # `s0/2` then we won't be able to tell the difference between them.
-        #
-        return id(key.node)
 
 
 class PythonKeyTracer(Tracer):
