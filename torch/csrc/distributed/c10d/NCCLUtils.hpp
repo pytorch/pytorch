@@ -1014,9 +1014,6 @@ struct NCCLTraceBuffer {
       pg_info["ranks"] = ranks_str(ranks);
       result.emplace(std::get<0>(pg_name), pg_info);
     }
-    // nlohmann::json json_result;
-    // json_result["pg_config"] = result;
-    // return json_result;
     return result;
   }
 
@@ -1088,4 +1085,3 @@ struct NCCLTraceBuffer {
 } // namespace c10d
 
 #endif // USE_C10D_NCCL
-  

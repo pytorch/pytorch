@@ -4394,6 +4394,7 @@ def _new_group_with_tag(
     global _world
 
     default_pg = _get_default_group()
+    device_id = default_pg.bound_device_id or None
     default_backend, default_store = _world.pg_map[default_pg]
     global_rank = default_pg.rank()
     global_world_size = default_pg.size()
@@ -4457,6 +4458,7 @@ def _new_group_with_tag(
         pg_options=pg_options,
         timeout=timeout,
         pg_tag=pg_tag,
+        device_id=device_id,
         group_desc=group_desc,
     )
 
