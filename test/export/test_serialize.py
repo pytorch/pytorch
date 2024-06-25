@@ -7,10 +7,10 @@ with test_sym_bool)
 # Owner(s): ["oncall: export"]
 import copy
 import io
-import pathlib
 import tempfile
 import unittest
 import zipfile
+from pathlib import Path
 
 import torch
 import torch._dynamo as torchdynamo
@@ -38,7 +38,6 @@ from torch.testing._internal.common_utils import (
     TemporaryFileName,
     TestCase,
 )
-
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
 
 
@@ -1052,7 +1051,7 @@ class TestSaveLoad(TestCase):
         ep = export(f, inp)
 
         with TemporaryFileName() as fname:
-            path = pathlib.Path(fname)
+            path = Path(fname)
             save(ep, path)
             loaded_ep = load(path)
 

@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import os
-import pathlib
 from collections import defaultdict
+from pathlib import Path
 from typing import Any, Dict, List, Set, Tuple, Union
 
 
@@ -179,7 +179,7 @@ def get_method_definitions(file_path: Union[str, List[str]],
     # 3. Remove first argument after self (unless it is "*datapipes"), default args, and spaces
     """
     if root == "":
-        root = str(pathlib.Path(__file__).absolute().parent)
+        root = str(Path(__file__).absolute().parent)
     file_path = [file_path] if isinstance(file_path, str) else file_path
     file_path = [os.path.join(root, path) for path in file_path]
     file_paths = find_file_paths(file_path,
@@ -234,7 +234,7 @@ def main() -> None:
     map_method_definitions = get_method_definitions(mapDP_file_path, mapDP_files_to_exclude, mapDP_deprecated_files,
                                                     "MapDataPipe", mapDP_method_to_special_output_type)
 
-    path = pathlib.Path(__file__).absolute().parent
+    path = Path(__file__).absolute().parent
     replacements = [('${IterDataPipeMethods}', iter_method_definitions, 4),
                     ('${MapDataPipeMethods}', map_method_definitions, 4)]
     gen_from_template(dir=str(path),
