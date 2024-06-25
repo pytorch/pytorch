@@ -804,6 +804,9 @@ def register_onednn_fusion_ops():
                         else [x, x_scale, x_zp, packed_weight, w_scale, w_zp, bias],
                         has_bias=bias is not None,
                         epilogue_creator=epilogue_creator,
+                        input_indices=[0, 3, 1, 2, 4, 5]
+                        if bias is None
+                        else [6, 0, 3, 1, 2, 4, 5],
                     )
             if len(choices) == 0 or use_aten_gemm_kernels():
                 kwargs = dict(
@@ -1089,9 +1092,9 @@ def register_onednn_fusion_ops():
                         has_bias=bias is not None,
                         epilogue_creator=epilogue_creator,
                         # Reorder bias and x2
-                        input_indices=[0, 1, 2, 3, 4, 5, 7, 6]
-                        if bias is not None
-                        else None,
+                        input_indices=[0, 3, 1, 2, 4, 5, 6]
+                        if bias is None
+                        else [7, 0, 3, 1, 2, 4, 5, 6],
                     )
 
             if len(choices) == 0 or use_aten_gemm_kernels():
