@@ -8,10 +8,14 @@ import sys
 import torch
 
 from torch.testing._internal.common_cuda import IS_JETSON, IS_WINDOWS
+from tools.stats.import_test_stats import get_disabled_tests
 
 if torch.cuda.is_available() and not IS_JETSON and not IS_WINDOWS:
+    get_disabled_tests('.')
+
     env = os.environ.copy()
     env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+    env["DISABLED_TESTS_FILE"] = ".pytorch-disabled-tests.json"
 
     torch.cuda.memory._set_allocator_settings("expandable_segments:True")
 
