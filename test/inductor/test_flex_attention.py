@@ -504,7 +504,7 @@ class TestFlexAttention(InductorTestCase):
 
     def input_strides_4(B, H, S, D):
         return ((1, D, (B + 1) * (H + 1) * D, 1), 97)  # shared dimension
-    
+
     test_input_strides = [
         input_strides_1,
         input_strides_2,

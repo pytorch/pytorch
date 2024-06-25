@@ -384,6 +384,7 @@ flex_attention_template = TritonTemplate(
  """,
 )
 
+
 def _use_flex_decoding(query):
     # Decide which kernel to use, return true if use flex decoding kernel.
     return V.graph.sizevars.evaluate_expr(sympy.Lt(query.get_size()[-2], 32 + 1))
