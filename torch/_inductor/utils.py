@@ -683,6 +683,7 @@ def get_first_incompatible_cudagraph_node(gm):
         forbidden_set.update(
             {
                 "aten._unsafe_index_put.default",
+                "aten._unsafe_masked_index_put_accumulate.default",
                 "aten.index_put.default",
                 "aten.index_put_.default",
                 "aten.scatter.src",
@@ -1524,6 +1525,13 @@ def use_scatter_fallback(
     src_device_type,
     src_is_tensor,
 ):
+    if (
+        op_overload.overloadpacket
+        in (torch.ops.aten.scatter_reduce_, torch.ops.aten.scatter_reduce)
+        and reduction_type is None
+    ):
+        return False
+
     reduce_ty = (
         "add" if op_overload.overloadpacket == torch.ops.aten.scatter_ else "sum"
     )

@@ -1,13 +1,15 @@
-import pathlib
 import sys
 import unittest
+from pathlib import Path
 from typing import Any, Dict
 
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent.parent
+REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.append(str(REPO_ROOT))
+
 import tools.testing.target_determination.heuristics.utils as utils
 from tools.testing.test_run import TestRun
+
 
 sys.path.remove(str(REPO_ROOT))
 
