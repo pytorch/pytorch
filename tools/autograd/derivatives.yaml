@@ -1938,6 +1938,12 @@
     AutogradNestedTensor:
       self: at::_nested_view_from_buffer(grad.contiguous(), self._nested_tensor_size(), self._nested_tensor_strides(), self._nested_tensor_storage_offsets())
 
+- name: _nested_jagged_to_strided(Tensor(a) self) -> Tensor(a)
+  self: at::_nested_strided_to_jagged(grad)
+
+- name: _nested_strided_to_jagged(Tensor(a) self) -> Tensor(a)
+  self: at::_nested_jagged_to_strided(grad)
+
 # Why is _values() not differentiable?
 # See NOTE [ Sparse: autograd and API ]
 - name: _values(Tensor(a) self) -> Tensor(a)

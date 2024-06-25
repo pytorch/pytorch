@@ -975,7 +975,6 @@ static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwarg
   auto copy = std::get<3>(parsed);
   auto opt_memory_format = std::get<4>(parsed);
   auto& self_ = THPVariable_Unpack(self);
-
   torch::utils::maybe_initialize_device(device);
   if (device && device->is_privateuseone()) {
     at::globalContext().lazyInitPrivateUse1();

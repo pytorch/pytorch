@@ -51,7 +51,6 @@ static PyObject * THPVariable__parse_to(PyObject* module, PyObject* args, PyObje
   auto& scalarType = std::get<1>(parsed);
   auto non_blocking = std::get<2>(parsed);
   auto opt_memory_format = std::get<4>(parsed);
-
   auto tuple = THPObjectPtr{PyTuple_New(4)};
   if (!tuple) throw python_error();
   if (device) {

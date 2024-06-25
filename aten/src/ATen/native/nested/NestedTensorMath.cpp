@@ -15,7 +15,7 @@
 #include <ATen/native/nested/NestedTensorUtils.h>
 
 #include <tuple>
-
+#include <iostream>
 namespace at {
 namespace native {
 namespace {
@@ -881,7 +881,7 @@ Tensor _nested_strided_to_jagged(const Tensor& self) {
       ragged_idx = i;
     }
   }
-  TORCH_INTERNAL_ASSERT(ragged_dims_count == 1, "Only strided NTs with 1 ragged dim can be converted to jagged NTs");
+  TORCH_CHECK(ragged_dims_count == 1, "Only strided NTs with 1 ragged dim can be converted to jagged NTs");
 
   // Once that's checked, we convert the offsets + sizes in strided NT to
   // offsets + (optionally) lengths for the jagged NT
@@ -894,26 +894,29 @@ Tensor _nested_strided_to_jagged(const Tensor& self) {
     post_ragged_stride *= ragged_sizes_ptr[i];
   }
   auto ragged_offsets_sizes = ragged_offsets.sizes();
-  auto metadata_tensor_options = self_ptr->get_buffer().options().dtype(kInt);
+  auto metadata_tensor_options = self_ptr->get_buffer().options().dtype(kLong).device(at::kCPU);
   auto jagged_offsets = at::empty({ragged_offsets_sizes[0]+1}, metadata_tensor_options);
-  int* jagged_offsets_ptr = jagged_offsets.mutable_data_ptr<int>();
+  long* jagged_offsets_ptr = jagged_offsets.mutable_data_ptr<long>();
   auto jagged_lengths = at::empty({ragged_offsets_sizes[0]}, metadata_tensor_options);
-  int* jagged_lengths_ptr = jagged_lengths.mutable_data_ptr<int>();
+  long* jagged_lengths_ptr = jagged_lengths.mutable_data_ptr<long>();
   bool lengths_needed = false;
   int64_t ragged_sizes_stride_0 = ragged_sizes.stride(0);
   int64_t num_offsets = ragged_offsets.size(0);
   for (int64_t i : c10::irange(num_offsets)) {
-    jagged_offsets_ptr[i] = int(ragged_offsets_ptr[i] / post_ragged_stride);
-    jagged_lengths_ptr[i] = int(ragged_sizes_ptr[i * ragged_sizes_stride_0 + (ragged_idx-1)]);
+    jagged_offsets_ptr[i] = long(ragged_offsets_ptr[i] / post_ragged_stride);
+    jagged_lengths_ptr[i] = long(ragged_sizes_ptr[i * ragged_sizes_stride_0 + (ragged_idx-1)]);
     if (i > 0) {
-      auto offsets_diff = (ragged_offsets_ptr[i] - ragged_offsets_ptr[i-1]) / post_ragged_stride;
-      if (offsets_diff != jagged_lengths_ptr[i]) {
+      auto offsets_diff = jagged_offsets_ptr[i] - jagged_offsets_ptr[i-1];
+      if (offsets_diff != jagged_lengths_ptr[i-1]) {
         lengths_needed = true;
       }
     }
   }
 
   jagged_offsets_ptr[num_offsets] = jagged_offsets_ptr[num_offsets-1] + ragged_sizes_ptr[(num_offsets-1)*ragged_sizes_stride_0 + (ragged_idx-1)];
+
+  jagged_offsets = jagged_offsets.to(self_ptr->get_buffer().device());
+  jagged_lengths = jagged_lengths.to(self_ptr->get_buffer().device());
 
   c10::optional<at::Tensor> jagged_lengths_arg = lengths_needed ? c10::optional(jagged_lengths) : c10::nullopt;
   std::vector<int64_t> njt_sizes(self_ptr->dim()-1);

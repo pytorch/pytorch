@@ -514,9 +514,9 @@ def _nested_jagged_to_strided(func, *args, **kwargs):
     nested_offsets = nested_offsets[:-1]
     return torch._nested_view_from_buffer(
         inp._values.view(-1),
-        nested_size=nested_sizes,
-        nested_strides=nested_strides,
-        offsets=nested_offsets,
+        nested_size=nested_sizes.cpu(),
+        nested_strides=nested_strides.cpu(),
+        offsets=nested_offsets.cpu(),
     )
 
 
