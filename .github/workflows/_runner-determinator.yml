@@ -83,7 +83,7 @@ jobs:
               parser.add_argument(
                   "--github-actor", type=str, required=True, help="GitHub triggering_actor"
               )
-              parser.issue_owner(
+              parser.add_argument(
                   "--github-issue-owner", type=str, required=True, help="GitHub issue owner"
               )
               parser.add_argument(
