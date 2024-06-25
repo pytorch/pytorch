@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import dataclasses
 import os
 from typing import Any, List

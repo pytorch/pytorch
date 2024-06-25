@@ -1,9 +1,9 @@
+# mypy: allow-untyped-defs
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
 from torch._functorch.aot_autograd import AOTConfig, create_joint, from_fun
-
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
@@ -230,8 +230,7 @@ def trace_map(proxy_mode, func_overload, f, xs, pos_args):
     example_input = _unstack_pytree(xs)[0]
     body_graph = f
 
-    pre_dispatch = getattr(proxy_mode, "pre_dispatch", False)
-    body_graph = reenter_make_fx(body_graph, pre_dispatch)(*example_input, *pos_args)
+    body_graph = reenter_make_fx(body_graph)(*example_input, *pos_args)
 
     next_name = proxy_mode.tracer.get_fresh_qualname("body_graph_")
 

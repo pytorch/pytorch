@@ -10,6 +10,7 @@ from typing import Any, List
 
 import torch
 import torch._dynamo as torchdynamo
+
 from functorch.experimental.control_flow import cond, map
 from torch import Tensor
 from torch._export.utils import (
@@ -310,6 +311,31 @@ class TestUnflatten(TestCase):
         self.compare_outputs(
             export_module.module(), unflattened, (torch.randn((2, 3)),)
         )
+
+    @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
+    def test_unflatten_preserve_with_unused_input(self):
+        class M1(torch.nn.Module):
+            def forward(self, x, a, b):
+                return x + a, b
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m1 = M1()
+
+            def forward(self, x, y):
+                a, b = torch.topk(y, 2)
+                return self.m1(x, a, b)[0]
+
+        ep = torch.export.export(
+            M(),
+            (torch.randn(2), torch.randn(5)),
+            preserve_module_call_signature=("m1",),
+            strict=False,
+        )
+        ep.graph.eliminate_dead_code()
+        unflattened = unflatten(ep)
+        self.compare_outputs(ep.module(), unflattened, (torch.randn(2), torch.randn(5)))
 
     def test_unflatten_wrong_input(self):
         class Mod(torch.nn.Module):
@@ -707,6 +733,114 @@ class TestUnflatten(TestCase):
         ep_non_strict = export(copy.deepcopy(mod), (input_,), strict=False)
         umod = unflatten(ep_non_strict)
         self.assertTrue(torch.allclose(umod(input_), mod(input_)))
+
+    def test_simple_alias(self):
+        # handle weight sharing, check tensor ids after unflattening
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # alias param
+                self.bias = torch.nn.Parameter(torch.randn(4))
+                self.m = torch.nn.Linear(4, 4)
+                self.m.bias = self.bias
+
+            def forward(self, x):
+                return self.m(x) + self.bias
+
+        m = Foo()
+        inps = (torch.randn(4, 4),)
+        ep = export(m, inps)
+        unep = unflatten(ep)
+        self.assertTrue(id(unep.m.bias) == id(unep.bias))
+
+        # handle aliasing where one alias is unused
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bias = torch.nn.Parameter(torch.randn(4))
+                self.m = torch.nn.Linear(4, 4)
+                self.m.bias = (
+                    self.bias
+                )  # self.bias is unused, aliasing should be handled
+
+            def forward(self, x):
+                return self.m(x)
+
+        m = Foo()
+        inps = (torch.randn(4, 4),)
+        ep = export(m, inps)
+        unep = unflatten(ep)
+        self.assertTrue(torch.allclose(unep(*inps), m(*inps)))
+
+    def test_attr_as_submod_input(self):
+        class layer(torch.nn.Module):
+            def forward(self, x, const) -> torch.Tensor:
+                return x + const
+
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("const", torch.ones(4, 8))
+                self.layers = torch.nn.ModuleList([layer() for _ in range(2)])
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                for layer in self.layers:
+                    x = layer(x, self.const)
+                return x
+
+        mod = M()
+        x = torch.randn(4, 8)
+        ep = export(mod, (x,))
+        unflattened = unflatten(ep)
+        torch.testing.assert_close(unflattened(x), mod(x))
+
+    def test_dedup_sym_size(self):
+        # Here, sym_size & floor div are used in 3 subgraphs (top-level, m1, m2),
+        # but only one copy of sym_size is created in the initial export graph.
+        # For m1, sym_size & floordiv should be copied as recompute since we preserve the call signature,
+        # but for m2 floordiv should be passed in as a placeholder.
+        # Test that this is preserved, and the unflattened module runs correctly.
+        class M1(torch.nn.Module):
+            def forward(self, x, y):
+                d = x.size(0) // 2
+                return y[:d]
+
+        class M2(torch.nn.Module):
+            def forward(self, x, y):
+                d = x.size(0) // 2
+                return y[:d]
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m1 = M1()
+                self.m2 = M2()
+
+            def forward(self, x, y):
+                d = x.size(0) // 2
+                m1_res = self.m1(x, y)
+                m2_res = self.m2(x, y)
+                return y[d:] + m1_res + m2_res
+
+        inputs = (torch.ones(10), torch.ones(10))
+        d_ = torch.export.Dim("foo", max=2048)
+        d = 2 * d_
+        ep = torch.export.export(
+            M(),
+            inputs,
+            dynamic_shapes=((d,), (d,)),
+            strict=False,
+            preserve_module_call_signature=("m1",),
+        )
+        unflat = unflatten(ep)
+        unflat(*inputs)
+
+        fn_count_sym_size = lambda graph: [node.target for node in graph.nodes].count(
+            torch.ops.aten.sym_size.int
+        )
+        self.assertEqual(fn_count_sym_size(unflat.graph), 1)
+        self.assertEqual(fn_count_sym_size(unflat.m1.graph), 1)
+        self.assertEqual(fn_count_sym_size(unflat.m2.graph), 0)
 
 
 if __name__ == "__main__":

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import Any, Callable, Tuple, Union
 
 import torch
@@ -6,6 +7,7 @@ from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_mutation,
     autograd_not_implemented,
+    reenter_make_fx,
     UnsupportedAliasMutationException,
 )
 from torch._ops import HigherOrderOperator
@@ -16,7 +18,6 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.fx.graph_module import GraphModule
-
 from torch.overrides import TorchFunctionMode
 
 
@@ -178,7 +179,7 @@ def trace_flex_attention(
         torch.zeros((), dtype=query.dtype, requires_grad=query.requires_grad)
     ] + [torch.zeros((), dtype=torch.int) for _ in range(4)]
     with TransformGetItemToIndex():
-        score_graph = make_fx(score_mod)(*example_vals, *other_buffers)
+        score_graph = reenter_make_fx(score_mod)(*example_vals, *other_buffers)
     qualname = proxy_mode.tracer.get_fresh_qualname("sdpa_score")
     proxy_mode.tracer.root.register_module(qualname, score_graph)
     node_args = (query, key, value, score_graph, *other_buffers)
@@ -275,7 +276,7 @@ def flex_attention_fake_tensor_mode(
         logsumexp = query.new_empty(
             batch_size, num_heads, seq_len_q, dtype=torch.float32
         )
-        return torch.empty_like(query, memory_format=torch.contiguous_format), logsumexp
+        return torch.empty_like(query), logsumexp
 
 
 # ---------------------------- Autograd Implementation ----------------------------
@@ -286,7 +287,6 @@ def create_fw_bw_graph(score_mod, index_values, other_buffers):
     from torch._dispatch.python import suspend_functionalization
     from torch._functorch.aot_autograd import AOTConfig, create_joint
     from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
-
     from torch._subclasses.functional_tensor import disable_functional_mode
     from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
 
@@ -405,17 +405,20 @@ def flex_attention_autograd(
     score_mod: Callable,
     *other_buffers: Tuple[torch.Tensor, ...],
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    input_requires_grad = any(t.requires_grad for t in (query, key, value))
-    if torch.is_grad_enabled() and input_requires_grad:
-        example_vals = [
-            torch.zeros((), dtype=query.dtype, requires_grad=input_requires_grad)
-        ] + [torch.zeros((), dtype=torch.int) for _ in range(4)]
-        fw_graph, bw_graph = create_fw_bw_graph(score_mod, example_vals, other_buffers)
-    else:
-        fw_graph, bw_graph = score_mod, None
-    out, logsumexp = FlexAttentionAutogradOp.apply(
-        query, key, value, fw_graph, bw_graph, *other_buffers
-    )
+    with TransformGetItemToIndex():
+        input_requires_grad = any(t.requires_grad for t in (query, key, value))
+        if torch.is_grad_enabled() and input_requires_grad:
+            example_vals = [
+                torch.zeros((), dtype=query.dtype, requires_grad=input_requires_grad)
+            ] + [torch.zeros((), dtype=torch.int) for _ in range(4)]
+            fw_graph, bw_graph = create_fw_bw_graph(
+                score_mod, example_vals, other_buffers
+            )
+        else:
+            fw_graph, bw_graph = score_mod, None
+        out, logsumexp = FlexAttentionAutogradOp.apply(
+            query, key, value, fw_graph, bw_graph, *other_buffers
+        )
     return out, logsumexp
 
 
@@ -448,9 +451,10 @@ def sdpa_dense_backward(
     score_mod = torch.vmap(score_mod, in_dims=(0, None, 0, None, None) + in_dim_buffers)
     score_mod = torch.vmap(score_mod, in_dims=(0, 0, None, None, None) + in_dim_buffers)
 
-    post_mod_scores = score_mod(scores, b, h, m, n, *other_buffers).to(
-        working_precision
-    )
+    with TransformGetItemToIndex():
+        post_mod_scores = score_mod(scores, b, h, m, n, *other_buffers).to(
+            working_precision
+        )
 
     softmax_scores = torch.exp(post_mod_scores - logsumexp.unsqueeze(-1))
 
@@ -484,9 +488,10 @@ def sdpa_dense_backward(
         in_dims=(0, 0, None, None, None, 0) + in_dim_buffers,
         out_dims=out_dims,
     )
-    grad_scores, *_ = joint_score_mod(
-        scores, b, h, m, n, grad_score_mod, *other_buffers
-    )
+    with TransformGetItemToIndex():
+        grad_scores, *_ = joint_score_mod(
+            scores, b, h, m, n, grad_score_mod, *other_buffers
+        )
     grad_scores = grad_scores.to(query.dtype)
 
     grad_query = grad_scores @ key
@@ -523,8 +528,9 @@ def trace_flex_attention_backward(
         torch.zeros((), dtype=query.dtype, requires_grad=query.requires_grad)
     ] + [torch.zeros((), dtype=torch.int) for _ in range(4)]
     bw_example_vals = fw_example_vals + [torch.zeros((), dtype=query.dtype)]
-    fw_graph = make_fx(fw_graph)(*fw_example_vals, *other_buffers)
-    joint_graph = make_fx(joint_graph)(*bw_example_vals, *other_buffers)
+    with TransformGetItemToIndex():
+        fw_graph = reenter_make_fx(fw_graph)(*fw_example_vals, *other_buffers)
+        joint_graph = reenter_make_fx(joint_graph)(*bw_example_vals, *other_buffers)
     proxy_mode.tracer.root.register_module("fw_graph", fw_graph)
     proxy_mode.tracer.root.register_module("joint_graph", joint_graph)
     node_args = (
@@ -662,9 +668,9 @@ def flex_attention_backward_fake_tensor_mode(
     *other_buffers: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     with mode:
-        grad_query = torch.empty_like(query, memory_format=torch.contiguous_format)
-        grad_key = torch.empty_like(key, memory_format=torch.contiguous_format)
-        grad_value = torch.empty_like(value, memory_format=torch.contiguous_format)
+        grad_query = torch.empty_like(query)
+        grad_key = torch.empty_like(key)
+        grad_value = torch.empty_like(value)
         return grad_query, grad_key, grad_value
 
 

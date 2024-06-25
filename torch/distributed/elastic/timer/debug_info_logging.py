@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# mypy: allow-untyped-defs
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -10,7 +11,10 @@ from typing import Dict, List
 
 from torch.distributed.elastic.utils.logging import get_logger
 
+
 logger = get_logger(__name__)
+
+__all__ = ["log_debug_info_for_expired_timers"]
 
 
 def log_debug_info_for_expired_timers(

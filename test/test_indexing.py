@@ -8,6 +8,7 @@ import warnings
 from functools import reduce
 
 import numpy as np
+
 import torch
 from torch import tensor
 
@@ -28,6 +29,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TEST_CUDA,
     TestCase,
+    xfailIfTorchDynamo,
 )
 
 
@@ -1158,7 +1160,14 @@ class TestIndexing(TestCase):
         torch.cfloat, torch.cdouble, torch.float, torch.long, torch.bool, torch.bfloat16
     )
     @dtypesIfCUDA(
-        torch.cfloat, torch.cdouble, torch.half, torch.long, torch.bool, torch.bfloat16
+        torch.cfloat,
+        torch.cdouble,
+        torch.half,
+        torch.long,
+        torch.bool,
+        torch.bfloat16,
+        torch.float8_e5m2,
+        torch.float8_e4m3fn,
     )
     def test_index_put_src_datatype(self, device, dtype):
         src = torch.ones(3, 2, 4, device=device, dtype=dtype)
@@ -1784,6 +1793,8 @@ class NumpyTests(TestCase):
         a[b] = 1.0
         self.assertEqual(a, tensor([[1.0, 1.0, 1.0]], device=device))
 
+    # https://github.com/pytorch/pytorch/issues/127003
+    @xfailIfTorchDynamo
     def test_boolean_assignment_value_mismatch(self, device):
         # A boolean assignment should fail when the shape of the values
         # cannot be broadcast to the subscription. (see also gh-3458)

@@ -51,7 +51,7 @@ class CpuTimer : public Timer {
  public:
   explicit CpuTimer(c10::Device /* unused */) {}
 
-  c10::optional<int64_t> measureDifference(Event start, Event end) override {
+  std::optional<int64_t> measureDifference(Event start, Event end) override {
     int64_t start_time = getTimeRef(start);
     int64_t end_time = getTimeRef(end);
     // If cpu_end_time is not recorded in this iteration,
@@ -2096,7 +2096,7 @@ compute_bucket_assignment_by_size(
     const std::vector<size_t>& bucket_size_limits,
     const std::vector<bool>& expect_sparse_gradient,
     const std::vector<int64_t>& tensor_indices,
-    const c10::optional<std::weak_ptr<c10d::Logger>>& logger) {
+    const std::optional<std::weak_ptr<c10d::Logger>>& logger) {
   // Either expect_sparse_gradient is not specified or it has as many elements
   // as the vector with tensors.
   TORCH_INTERNAL_ASSERT(
@@ -2221,7 +2221,7 @@ compute_bucket_assignment_by_size(
 void verify_params_across_processes(
     const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
     const std::vector<at::Tensor>& params,
-    const c10::optional<std::weak_ptr<c10d::Logger>>& logger) {
+    const std::optional<std::weak_ptr<c10d::Logger>>& logger) {
   // First verify number of parameters to avoid inconsistent inputs into
   // broadcast which can cause a crash.
   // See https://github.com/pytorch/pytorch/issues/73547
@@ -2366,10 +2366,18 @@ void Reducer::reset_state() {
   // Ensure forward can run despite previous backward not succeeding.
   expect_autograd_hooks_ = false;
   require_finalize_ = false;
+  first_autograd_hook_called_ = false;
 
   // Unset allreduce division factor, as it may change in next backwards pass
   // when running with DDP join mode.
   div_factor_ = kUnsetDivFactor;
+
+  // Reset unused parameter accounting.
+  // See Note [local_used_map_ -> local_used_map_dev copying]
+  if (find_unused_parameters_) {
+    local_used_map_.zero_();
+    local_used_map_reduced_ = false;
+  }
 }
 
 } // namespace c10d

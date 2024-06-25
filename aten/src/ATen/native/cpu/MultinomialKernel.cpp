@@ -24,7 +24,7 @@ multinomial_with_replacement_apply(
     Tensor& result,
     const Tensor& self,
     const int64_t n_sample,
-    c10::optional<Generator> generator) {
+    std::optional<Generator> generator) {
   auto gen = get_generator_or_default<CPUGeneratorImpl>(
       generator, detail::getDefaultCPUGenerator());
   // See Note [Acquire lock when using random generators]
@@ -128,7 +128,7 @@ multinomial_with_replacement_apply(
     Tensor& result,
     const Tensor& self,
     const int64_t n_sample,
-    c10::optional<Generator> generator) {
+    std::optional<Generator> generator) {
   auto gen = get_generator_or_default<CPUGeneratorImpl>(
       generator, detail::getDefaultCPUGenerator());
   // See Note [Acquire lock when using random generators]
@@ -230,7 +230,7 @@ static void multinomial_with_replacement_kernel_impl(
     Tensor& result,
     const Tensor& self,
     const int64_t n_sample,
-    c10::optional<Generator> gen) {
+    std::optional<Generator> gen) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf, kBFloat16, self.scalar_type(), "multinomial", [&] {
         multinomial_with_replacement_apply<scalar_t>(

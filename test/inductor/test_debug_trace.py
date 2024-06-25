@@ -9,8 +9,7 @@ import unittest
 
 import torch
 from torch._inductor import config, test_operators
-from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.utils._triton import has_triton
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 try:
     try:
@@ -54,9 +53,9 @@ class TestDebugTrace(test_torchinductor.TestCase):
             open(filename / "ir_pre_fusion.txt").read().rstrip(),
             """\
 buf0: SchedulerNode(ComputedBuffer)
-buf0.writes = [MemoryDep('buf0', c0, {c0: 256})]
+buf0.writes = [MemoryDep('buf0', c0, {c0: 256}, None)]
 buf0.unmet_dependencies = []
-buf0.met_dependencies = [MemoryDep('arg0_1', c0, {c0: 256})]
+buf0.met_dependencies = [MemoryDep('arg0_1', c0, {c0: 256}, None)]
 buf0.users = [NodeUser(node=SchedulerNode(name='buf1'), can_inplace=True, is_weak=False)]
 buf0.group.device = cpu
 buf0.group.iteration = ((256,), ())
@@ -77,8 +76,8 @@ class buf0_loop_body:
 
 
 buf1: SchedulerNode(ComputedBuffer)
-buf1.writes = [MemoryDep('buf1', c0, {c0: 256})]
-buf1.unmet_dependencies = [MemoryDep('buf0', c0, {c0: 256})]
+buf1.writes = [MemoryDep('buf1', c0, {c0: 256}, None)]
+buf1.unmet_dependencies = [MemoryDep('buf0', c0, {c0: 256}, None)]
 buf1.met_dependencies = []
 buf1.users = [NodeUser(node=ExternKernelSchedulerNode(name='buf2'), can_inplace=False, is_weak=False)]
 buf1.group.device = cpu
@@ -100,9 +99,9 @@ class buf1_loop_body:
 
 
 buf2: ExternKernelSchedulerNode(ExternKernelOut)
-buf2.writes = [StarDep(name='buf2')]
-buf2.unmet_dependencies = [StarDep(name='buf1')]
-buf2.met_dependencies = [StarDep(name='arg1_1')]
+buf2.writes = [StarDep(name='buf2', mode=None)]
+buf2.unmet_dependencies = [StarDep(name='buf1', mode=None)]
+buf2.met_dependencies = [StarDep(name='arg1_1', mode=None)]
 buf2.users = [NodeUser(node=OUTPUT, can_inplace=False, is_weak=False)]
 buf2.node.kernel = extern_kernels.mm""",
         )
@@ -110,15 +109,15 @@ buf2.node.kernel = extern_kernels.mm""",
             open(filename / "ir_post_fusion.txt").read().rstrip(),
             """\
 buf0_buf1: FusedSchedulerNode(SchedulerNode,SchedulerNode)
-buf0_buf1.writes = [MemoryDep('buf0', c0, {c0: 256}), MemoryDep('buf1', c0, {c0: 256})]
+buf0_buf1.writes = [MemoryDep('buf0', c0, {c0: 256}, None), MemoryDep('buf1', c0, {c0: 256}, None)]
 buf0_buf1.unmet_dependencies = []
-buf0_buf1.met_dependencies = [MemoryDep('arg0_1', c0, {c0: 256})]
+buf0_buf1.met_dependencies = [MemoryDep('arg0_1', c0, {c0: 256}, None)]
 buf0_buf1.users = []
     buf0_buf1.snodes[0] =
     buf0: SchedulerNode(ComputedBuffer)
-    buf0.writes = [MemoryDep('buf0', c0, {c0: 256})]
+    buf0.writes = [MemoryDep('buf0', c0, {c0: 256}, None)]
     buf0.unmet_dependencies = []
-    buf0.met_dependencies = [MemoryDep('arg0_1', c0, {c0: 256})]
+    buf0.met_dependencies = [MemoryDep('arg0_1', c0, {c0: 256}, None)]
     buf0.users = [NodeUser(node=SchedulerNode(name='buf1'), can_inplace=True, is_weak=False)]
     buf0.group.device = cpu
     buf0.group.iteration = ((256,), ())
@@ -138,8 +137,8 @@ buf0_buf1.users = []
             return store
     buf0_buf1.snodes[1] =
     buf1: SchedulerNode(ComputedBuffer)
-    buf1.writes = [MemoryDep('buf1', c0, {c0: 256})]
-    buf1.unmet_dependencies = [MemoryDep('buf0', c0, {c0: 256})]
+    buf1.writes = [MemoryDep('buf1', c0, {c0: 256}, None)]
+    buf1.unmet_dependencies = [MemoryDep('buf0', c0, {c0: 256}, None)]
     buf1.met_dependencies = []
     buf1.users = [NodeUser(node=ExternKernelSchedulerNode(name='buf2'), can_inplace=False, is_weak=False)]
     buf1.group.device = cpu
@@ -161,16 +160,16 @@ buf0_buf1.users = []
 
 
 buf2: ExternKernelSchedulerNode(ExternKernelOut)
-buf2.writes = [StarDep(name='buf2')]
-buf2.unmet_dependencies = [StarDep(name='buf1')]
-buf2.met_dependencies = [StarDep(name='arg1_1')]
+buf2.writes = [StarDep(name='buf2', mode=None)]
+buf2.unmet_dependencies = [StarDep(name='buf1', mode=None)]
+buf2.met_dependencies = [StarDep(name='arg1_1', mode=None)]
 buf2.users = [NodeUser(node=OUTPUT, can_inplace=False, is_weak=False)]
 buf2.node.kernel = extern_kernels.mm""",
         )
         # intentionally only cleanup on success so debugging test is easier
         shutil.rmtree(filename)
 
-    @unittest.skipIf(not TEST_CUDA or not has_triton(), "requires cuda")
+    @unittest.skipIf(not HAS_GPU, "requires GPU")
     def test_debug_multi_tempalte(self):
         class ToyModel(torch.nn.Module):
             def __init__(self):
@@ -188,9 +187,9 @@ buf2.node.kernel = extern_kernels.mm""",
         with self.assertLogs(
             logging.getLogger("torch._inductor.debug"), level=logging.WARNING
         ), fresh_inductor_cache():
-            m = ToyModel().to(device="cuda:0")
+            m = ToyModel().to(device=GPU_TYPE)
             m = torch.compile(m, mode="max-autotune")
-            input_tensor = torch.randn(100).to(device="cuda:0")
+            input_tensor = torch.randn(100).to(device=GPU_TYPE)
             m(input_tensor)
 
 

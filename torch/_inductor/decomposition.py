@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import logging
 import math
@@ -19,6 +20,7 @@ from torch._decomp.decompositions import (
     pw_cast_for_opmath,
 )
 from torch._decomp.decompositions_for_rng import extra_random_decomps
+from torch._dynamo.utils import counters
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.utils import pad_listlike
 from torch._prims_common import (
@@ -26,9 +28,14 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     type_to_dtype,
 )
+from torch.fx.experimental.symbolic_shapes import definitely_true, guard_size_oblivious
 
 from . import config, inductor_prims
-from .utils import needs_fallback_due_to_atomic_add_limitations, use_scatter_fallback
+from .utils import (
+    is_gpu,
+    needs_fallback_due_to_atomic_add_limitations,
+    use_scatter_fallback,
+)
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -82,6 +89,8 @@ decompositions = {**core_aten_decompositions(), **inductor_decompositions}
 # the Inductor decomp table.
 decomps_to_exclude = [
     aten._unsafe_index,
+    aten._unsafe_masked_index,
+    aten._unsafe_masked_index_put_accumulate,
     aten._scaled_dot_product_flash_attention_for_cpu.default,  # See comments in torch/_decomp/decompositions.py
     aten._softmax_backward_data,
     aten.clamp_max,
@@ -167,7 +176,7 @@ def convolution_backward(
     groups,
     output_mask,
 ):
-    if not output_mask[2] or grad_output.device.type != "cuda":
+    if not output_mask[2] or not is_gpu(grad_output.device.type):
         return NotImplemented
     grad_bias = aten.sum(grad_output, [0] + list(range(2, grad_output.dim())))
     grad_inp, grad_weight, _ = aten.convolution_backward(
@@ -196,11 +205,16 @@ def round_dec(x, decimals=0):
 @pw_cast_for_opmath
 def bmm(self, batch2):
     if config.coordinate_descent_tuning:
-        if self.shape[1] == 1 or batch2.shape[2] == 1:
+        if guard_size_oblivious(self.shape[1] == 1) or guard_size_oblivious(
+            batch2.shape[2] == 1
+        ):
             out = (self.unsqueeze(-1) * batch2.unsqueeze(1)).sum(dim=2)
             return out
     if self.device.type == "cpu":
-        if self.size(1) == 1 and batch2.size(-1) == 1:
+        if guard_size_oblivious(self.size(1) == 1) and guard_size_oblivious(
+            batch2.size(-1) == 1
+        ):
+            counters["inductor"]["decompose_bmm"] += 1
             return torch.sum(
                 self.squeeze(1) * batch2.squeeze(-1), dim=1, keepdim=True
             ).unsqueeze(1)
@@ -211,12 +225,20 @@ def bmm(self, batch2):
 @pw_cast_for_opmath
 def addmm(self, mat1, mat2, beta=1, alpha=1):
     if self.device.type == "cpu":
-        if mat1.size(0) == 1 and mat2.size(-1) == 1:
+        if guard_size_oblivious(mat1.size(0) == 1) and guard_size_oblivious(
+            mat2.size(-1) == 1
+        ):
+            counters["inductor"]["decompose_addmm"] += 1
             out = torch.sum(
                 mat1.squeeze(0) * mat2.squeeze(-1), dim=0, keepdim=True
             ).unsqueeze(0)
             return alpha * out + beta * self
-        if mat1.size(0) == 1 and mat2.size(0) <= 16 and mat2.size(1) <= 16:
+        if (
+            guard_size_oblivious(mat1.size(0) == 1)
+            and definitely_true(mat2.size(0) <= 16)
+            and definitely_true(mat2.size(1) <= 16)
+        ):
+            counters["inductor"]["decompose_addmm"] += 1
             out = (mat1.T * mat2).sum(dim=0, keepdim=True)
             return alpha * out + beta * self
     return NotImplemented
@@ -225,15 +247,12 @@ def addmm(self, mat1, mat2, beta=1, alpha=1):
 @register_decomposition([aten.mm])
 @pw_cast_for_opmath
 def mm(self, input2):
-    from torch.fx.experimental.symbolic_shapes import (
-        definitely_true,
-        guard_size_oblivious,
-    )
-
     # Our matrix vector multiplies only achieve peak bandwidth with coordinate descent tuning.
     # todo: Look into why and fix it (hopefully)
     if config.coordinate_descent_tuning:
-        if self.shape[0] == 1 or input2.shape[1] == 1:
+        if guard_size_oblivious(self.shape[0] == 1) or guard_size_oblivious(
+            input2.shape[1] == 1
+        ):
             return (self.unsqueeze(2) * input2.unsqueeze(0)).sum(dim=1)
     if self.device.type == "cpu":
         if (
@@ -243,10 +262,12 @@ def mm(self, input2):
             and (self.dtype == input2.dtype)
             and definitely_true((torch.numel(self) + torch.numel(input2)) <= 32)
         ):
+            counters["inductor"]["decompose_mm"] += 1
             return torch.cat([self[i, :] * input2 for i in range(self.size(0))])
         if guard_size_oblivious(self.size(0) == 1) and guard_size_oblivious(
             input2.size(-1) == 1
         ):
+            counters["inductor"]["decompose_mm"] += 1
             return torch.sum(
                 self.squeeze(0) * input2.squeeze(-1), dim=0, keepdim=True
             ).unsqueeze(0)
@@ -593,7 +614,9 @@ def select_decomp_table():
 
 @register_decomposition(aten.masked_scatter)
 def masked_scatter(self, mask, source):
-    if self.device.type == "cuda":
+    from .codegen.common import BackendFeature, has_backend_feature
+
+    if has_backend_feature(self.device, BackendFeature.MASKED_SCATTER_WITH_INDEX):
         # This two-step algorithm is the same as eager CUDA, for eager CPU we
         # use a 1-shot serial iteration.
         self, mask = aten.broadcast_tensors([self, mask])
@@ -703,7 +726,7 @@ def max_pool2d_with_indices(
     if padding == 0:
         padding = [0, 0]
 
-    if stride is None:
+    if not stride:
         stride = kernel_size
 
     kernel_size = pad_listlike(kernel_size, 2)

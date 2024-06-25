@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import contextlib
 import dis
 import functools
@@ -343,9 +344,21 @@ def skipIfNotPy311(fn):
     return unittest.skip(fn)
 
 
+def skipIfNotPy312(fn):
+    if sys.version_info >= (3, 12):
+        return fn
+    return unittest.skip(fn)
+
+
 def xfailIfPy312(fn):
     if sys.version_info >= (3, 12):
         return unittest.expectedFailure(fn)
+    return fn
+
+
+def skipIfPy312(fn):
+    if sys.version_info >= (3, 12):
+        return unittest.skip(fn)
     return fn
 
 

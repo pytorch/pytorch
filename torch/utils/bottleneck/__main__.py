@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import argparse
 import cProfile
 import pstats
