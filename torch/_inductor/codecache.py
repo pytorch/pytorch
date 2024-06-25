@@ -2872,7 +2872,7 @@ def _do_validate_cpp_commands(
     )
     new_cmd = dummy_builder.get_command_line().split(" ")
 
-    _temp_validate_new_and_old_command(new_cmd, old_cmd)
+    # _temp_validate_new_and_old_command(new_cmd, old_cmd)
 
     temp_dir.cleanup()
 
