@@ -3940,7 +3940,7 @@ class TestSerialization(TestCase, SerializationMixin):
         finally:
             set_default_load_endianness(current_load_endian)
 
-    @parametrize('path_type', (str, pathlib.Path))
+    @parametrize('path_type', (str, Path))
     @parametrize('weights_only', (True, False))
     @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
     def test_serialization_mmap_loading(self, weights_only, path_type):
