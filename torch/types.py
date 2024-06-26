@@ -12,9 +12,18 @@ from builtins import (  # noqa: F401
     int as _int,
     str as _str,
 )
-from typing import Any, List, Optional, Sequence, Tuple, TYPE_CHECKING, Union
+from typing import Any, Dict, List, Sequence, Tuple, TYPE_CHECKING, Union
+from typing_extensions import TypeAlias
 
-import torch
+from torch import (  # noqa: F401
+    device as _device,
+    DispatchKey as DispatchKey,
+    dtype as _dtype,
+    layout as _layout,
+    qscheme as _qscheme,
+    Size as Size,
+    Tensor as Tensor,
+)
 
 
 if TYPE_CHECKING:
@@ -23,84 +32,76 @@ if TYPE_CHECKING:
 
 # Convenience aliases for common composite types that we need
 # to talk about in PyTorch
-
-_TensorOrTensors = Union[torch.Tensor, Sequence[torch.Tensor]]
-_TensorOrTensorsOrGradEdge = Union[
-    torch.Tensor,
-    Sequence[torch.Tensor],
+_TensorOrTensors: TypeAlias = Union[Tensor, Sequence[Tensor]]
+_TensorOrTensorsOrGradEdge: TypeAlias = Union[
+    Tensor,
+    Sequence[Tensor],
     "GradientEdge",
     Sequence["GradientEdge"],
 ]
 
-_dtype = torch.dtype
-_device = torch.device
-_qscheme = torch.qscheme
-_layout = torch.layout
-_size = Union[torch.Size, List[_int], Tuple[_int, ...]]
-_dispatchkey = Union[_str, torch._C.DispatchKey]
+_size: TypeAlias = Union[Size, List[int], Tuple[int, ...]]
+_dispatchkey: TypeAlias = Union[str, DispatchKey]
 
 # Meta-type for "numeric" things; matches our docs
-Number = Union[_int, _float, _bool]
+Number: TypeAlias = Union[int, float, bool]
 
 # Meta-type for "device-like" things.  Not to be confused with 'device' (a
 # literal device object).  This nomenclature is consistent with PythonArgParser.
 # None means use the default device (typically CPU)
-Device = Optional[Union[_device, _str, _int]]
-del Optional
+Device: TypeAlias = Union[_device, str, int, None]
 
 # Storage protocol implemented by ${Type}StorageBase classes
-
-
 class Storage:
-    _cdata: _int
-    device: torch.device
-    dtype: torch.dtype
-    _torch_load_uninitialized: _bool
+    _cdata: int
+    device: _device
+    dtype: _dtype
+    _torch_load_uninitialized: bool
 
-    def __deepcopy__(self, memo: dict) -> "Storage":  # type: ignore[empty-body]
-        ...
+    def __deepcopy__(self, memo: Dict[int, Any]) -> "Storage":
+        raise NotImplementedError
 
-    def _new_shared(self, size: _int) -> "Storage":  # type: ignore[empty-body]
-        ...
+    def _new_shared(self, size: int) -> "Storage":
+        raise NotImplementedError
 
     def _write_file(
         self,
         f: Any,
-        is_real_file: _bool,
-        save_size: _bool,
-        element_size: _int,
+        is_real_file: bool,
+        save_size: bool,
+        element_size: int,
     ) -> None:
-        ...
+        raise NotImplementedError
 
-    def element_size(self) -> _int:  # type: ignore[empty-body]
-        ...
+    def element_size(self) -> int:
+        raise NotImplementedError
 
-    def is_shared(self) -> _bool:  # type: ignore[empty-body]
-        ...
+    def is_shared(self) -> bool:
+        raise NotImplementedError
 
-    def share_memory_(self) -> "Storage":  # type: ignore[empty-body]
-        ...
+    def share_memory_(self) -> "Storage":
+        raise NotImplementedError
 
-    def nbytes(self) -> _int:  # type: ignore[empty-body]
-        ...
+    def nbytes(self) -> int:
+        raise NotImplementedError
 
-    def cpu(self) -> "Storage":  # type: ignore[empty-body]
-        ...
+    def cpu(self) -> "Storage":
+        raise NotImplementedError
 
-    def data_ptr(self) -> _int:  # type: ignore[empty-body]
-        ...
+    def data_ptr(self) -> int:
+        raise NotImplementedError
 
-    def from_file(  # type: ignore[empty-body]
+    def from_file(
         self,
-        filename: _str,
-        shared: _bool = False,
-        nbytes: _int = 0,
+        filename: str,
+        shared: bool = False,
+        nbytes: int = 0,
     ) -> "Storage":
-        ...
+        raise NotImplementedError
 
-    def _new_with_file(  # type: ignore[empty-body]
+    def _new_with_file(
         self,
         f: Any,
-        element_size: _int,
+        element_size: int,
     ) -> "Storage":
-        ...
+        raise NotImplementedError
