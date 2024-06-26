@@ -86,6 +86,7 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
+    xfailIfSM90,
 )
 from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -5833,6 +5834,8 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn([2, 4, 37, 38, 39]),))
 
+    # Diabled for H100 due to a PTXAS optimizer bug
+    @xfailIfSM90
     def test_upsample_nearest2d_backward(self):
         func = torch.ops.aten.upsample_nearest2d_backward
 
@@ -7703,6 +7706,8 @@ class CommonTemplate:
             ],
         )
 
+    # Diabled for H100 due to a PTXAS optimizer bug
+    @xfailIfSM90
     def test_max_pool2d_with_indices_backward2(self):
         def fn(a, b, c):
             return aten.max_pool2d_with_indices_backward(
