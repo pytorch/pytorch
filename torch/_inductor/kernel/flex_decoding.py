@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """ Triton Implementation of the flex_attention Kernel for short query length (FlexDecoding)"""
 from typing import Any, List, Tuple
 
