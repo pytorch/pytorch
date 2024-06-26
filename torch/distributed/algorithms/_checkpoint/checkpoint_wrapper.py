@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import warnings
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from enum import auto, Enum
 from functools import partial
 from typing import Any, Callable, Dict, Iterator, Optional, Tuple
