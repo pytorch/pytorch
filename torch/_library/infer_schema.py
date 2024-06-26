@@ -206,7 +206,9 @@ def tuple_to_list(tuple_type: typing.Type[typing.Tuple]) -> typing.Type[typing.L
     Convert `tuple_type` into a list type with the same type arguments. Assumes that `tuple_type` is typing.Tuple type.
     """
     type_args = getattr(tuple_type, "__args__", None)
-    if type_args is None:
+    # Account for different python versions, e.g. python 3.8 would give ()
+    # but python 3.12 would give None.
+    if tuple_type is typing.Tuple or type_args == () or type_args is None:
         # Handle the case of an empty tuple type
         return typing.List
     elif len(type_args) == 1:
