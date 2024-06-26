@@ -324,6 +324,7 @@ def _get_optimization_cflags() -> List[str]:
             # Per https://mac.r-project.org/openmp/ right way to pass `openmp` flags to MacOS is via `-Xclang`
             # Also, `-march=native` is unrecognized option on M1
             cflags.append("Xclang")
+            cflags.append("fopenmp")
         else:
             if platform.machine() == "ppc64le":
                 cflags.append("mcpu=native")
@@ -648,9 +649,6 @@ def _get_openmp_args(cpp_compiler):
             if omp_available:
                 include_dir_paths.append(os.path.join(libomp_path, "include"))
                 lib_dir_paths.append(os.path.join(libomp_path, "lib"))
-
-        if sys.platform == "darwin" and platform.processor() == "arm":
-            cflags.append("fopenmp")
 
         # if openmp is still not available, we let the compiler to have a try,
         # and raise error together with instructions at compilation error later
