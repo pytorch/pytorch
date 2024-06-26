@@ -58,8 +58,7 @@ def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
             annotation_type = convert_type_string(annotation_type)
 
         if annotation_type not in SUPPORTED_PARAM_TYPES.keys():
-            # __origin__ attribute is only available from Python 3.8 onwards.
-            if getattr(annotation_type, "__origin__", None) is tuple:
+            if annotation_type.__origin__ is tuple:
                 list_type = tuple_to_list(annotation_type)
                 example_type_str = "\n\n"
                 # Only suggest the list type if this type is supported.
@@ -67,7 +66,7 @@ def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
                     example_type_str = f"For example, {list_type}.\n\n"
                 error_fn(
                     f"Parameter {name} has unsupported type {param.annotation}. "
-                    f"Tuple type annotation is not supported. Please try to use a List instead. "
+                    f"We do not support Tuple inputs in schema. As a workaround, please try to use List instead. "
                     f"{example_type_str}"
                     f"The valid types are: {SUPPORTED_PARAM_TYPES.keys()}."
                 )
