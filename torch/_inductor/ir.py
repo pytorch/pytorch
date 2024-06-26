@@ -4316,7 +4316,6 @@ class ExternKernel(InputsKernel):
         ]
 
         new_args, new_kwargs = unflatten_args(example_args, non_tensor_args)
-
         example_output = kernel(*new_args, **new_kwargs)
 
         out_arg_metadata_post_call = [
