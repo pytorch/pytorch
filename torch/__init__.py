@@ -2233,10 +2233,10 @@ def compile(
     mode: _Union[str, None] = None,
     options: _Optional[_Dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
-) -> (
-    _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]
-    | _Callable[_InputT, _RetT]
-):
+) -> _Union[
+    _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]],
+    _Callable[_InputT, _RetT],
+]:
     """
     Optimizes given model/function using TorchDynamo and specified backend.
     If you are compiling an :class:`torch.nn.Module`, you can also use :meth:`torch.nn.Module.compile`
