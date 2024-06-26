@@ -370,6 +370,7 @@ class TestFullyShard2DTraining(FSDPTest):
         loss_cp2 = train_step(model_cp, optim_cp, inp)
         self.assertEqual(loss_no_cp2, loss_cp2)
 
+
 class TestFullyShardHSDPTraining(FSDPTest):
     @property
     def world_size(self) -> int:
