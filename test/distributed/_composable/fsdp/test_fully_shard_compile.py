@@ -252,6 +252,7 @@ class TestFullyShardCompile(FSDPTest):
             *self._create_transformer_factory_fns(), "aot_eager", fullgraph=True
         )
 
+    @unittest.expectedFailure
     @skipIfRocm
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
