@@ -149,6 +149,9 @@ class TORCH_API Context {
   static bool hasCuBLASLt() {
     return detail::getCUDAHooks().hasCuBLASLt();
   }
+  static bool hasROCM() {
+    return detail::getCUDAHooks().hasROCM();
+  }
   static bool hasHIP() {
     return detail::getHIPHooks().hasHIP();
   }
