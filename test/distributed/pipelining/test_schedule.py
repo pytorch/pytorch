@@ -554,7 +554,10 @@ class TestSchedulePlan(unittest.TestCase):
             if len(error_msg) != 0:
                 self.fail(f"Error at timestep {timestep}: " + ",".join(error_msg))
 
-    @parametrize("ScheduleClass", [ScheduleFlexibleInterleaved1F1B, ScheduleInterleaved1F1B, ScheduleLoopedBFS])
+    @parametrize(
+        "ScheduleClass",
+        [ScheduleFlexibleInterleaved1F1B, ScheduleInterleaved1F1B, ScheduleLoopedBFS],
+    )
     def test_pipeline_order(self, ScheduleClass):
         # Define a list of test cases with varying num_local_stages, num_microbatches, and group_size
         # These should succeed since num_microbatches % group_size == 0
@@ -596,7 +599,9 @@ class TestSchedulePlan(unittest.TestCase):
                 group_size=group_size,
             ):
                 only_run_in_flex_pp = num_microbatches % group_size != 0
-                if only_run_in_flex_pp and not isinstance(ScheduleClass, ScheduleFlexibleInterleaved1F1B):
+                if only_run_in_flex_pp and not isinstance(
+                    ScheduleClass, ScheduleFlexibleInterleaved1F1B
+                ):
                     continue
 
                 print(f"{num_local_stages=} {num_microbatches=} {group_size=}")

@@ -802,7 +802,7 @@ def _get_1f1b_rank_ops(
     cooldown_ops,
     rank,
     forward_stage_index,
-    backward_stage_index
+    backward_stage_index,
 ):
     # All stages start with handling microbatch 0
     fwd_stage_mb_index: Dict[int, int] = defaultdict(int)
@@ -820,8 +820,7 @@ def _get_1f1b_rank_ops(
     # earliest time step of first backward = [local_stages * group_size + 2 * (group_size - 1 - rank)]
     # warmup_ops = calculated above
     post_warmup_ops = (
-        n_local_stages * pp_group_size
-        + 2 * (pp_group_size - 1 - rank)
+        n_local_stages * pp_group_size + 2 * (pp_group_size - 1 - rank)
     ) - (warmup_ops + rank)
 
     total_ops = warmup_ops + fwd_bwd_ops + cooldown_ops
@@ -869,6 +868,7 @@ def _get_1f1b_rank_ops(
                 _Action(_ComputationType.BACKWARD, bwd_mb_index, bwd_stage_index)
             )
     return rank_ops
+
 
 class ScheduleInterleaved1F1B(PipelineScheduleMulti):
     """
@@ -969,7 +969,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
             cooldown_ops,
             rank,
             forward_stage_index,
-            backward_stage_index
+            backward_stage_index,
         )
 
 
@@ -985,6 +985,7 @@ class ScheduleFlexibleInterleaved1F1B(PipelineScheduleMulti):
     1. pp_group_size = 4, n_microbatches = 10. We will have num_rounds = 2 and n_microbatches % 2 is 0.
     2. pp_group_size = 4, n_microbatches = 3. We will have num_rounds = 1 and n_microbatches % 1 is 0.
     """
+
     def __init__(
         self,
         stages: List[_PipelineStageBase],
@@ -1024,11 +1025,14 @@ class ScheduleFlexibleInterleaved1F1B(PipelineScheduleMulti):
     def _calculate_single_rank_operations(self, rank) -> List[Optional[_Action]]:
         def get_rank_warmup_ops(rank):
             # Warms up operations for last stage
-            warmups_ops_last_stage = (self.n_local_stages - 1) * self.microbatches_per_round
+            warmups_ops_last_stage = (
+                self.n_local_stages - 1
+            ) * self.microbatches_per_round
             # Increment warmup operations by 2 for each hop away from the last stage
             warmup_ops = warmups_ops_last_stage + 2 * ((self.pp_group_size - 1) - rank)
             # We cannot have more warmup operations than there are number of microbatches, so cap it there
             return min(warmup_ops, self._n_microbatches * self.n_local_stages)
+
         warmup_ops = get_rank_warmup_ops(rank)
         microbatch_ops = self.n_local_stages * self._n_microbatches
         # fwd_bwd_ops should encompass the remaining forwards
@@ -1046,16 +1050,20 @@ class ScheduleFlexibleInterleaved1F1B(PipelineScheduleMulti):
             cooldown_ops,
             total_ops,
         )
+
         # Calculates the stage index based on step and pp_group_size
+
         def forward_stage_index(step):
             # Get the local index from 0 to n_local_stages-1
             local_index = (step // self.microbatches_per_round) % self.n_local_stages
             return (local_index * self.pp_group_size) + rank
+
         def backward_stage_index(step):
             local_index = (
                 self.n_local_stages
                 - 1
-                - ((step - warmup_ops) // self.microbatches_per_round) % self.n_local_stages
+                - ((step - warmup_ops) // self.microbatches_per_round)
+                % self.n_local_stages
             )
             return (local_index * self.pp_group_size) + rank
 
@@ -1067,5 +1075,5 @@ class ScheduleFlexibleInterleaved1F1B(PipelineScheduleMulti):
             cooldown_ops,
             rank,
             forward_stage_index,
-            backward_stage_index
+            backward_stage_index,
         )
