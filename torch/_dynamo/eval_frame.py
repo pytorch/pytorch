@@ -48,8 +48,8 @@ from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tenso
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     DimDynamic,
+    ShapeEnv,
     StatelessSymbolicContext,
-    ShapeEnv
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
@@ -341,9 +341,9 @@ class _TorchDynamoContext:
         # add context containing GraphModule to any GraphModule forward functions
         if isinstance(fn, GraphModule):
             # add context containing GraphModule to any GraphModule forward functions
-            code_context.get_context(fn.forward.__code__)[
-                "orig_graphmodule"
-            ] = weakref.ref(fn)
+            code_context.get_context(fn.forward.__code__)["orig_graphmodule"] = (
+                weakref.ref(fn)
+            )
 
         # Optimize the forward method of torch.nn.Module object
         if isinstance(fn, torch.nn.Module):
@@ -760,9 +760,11 @@ def _optimize(
         hooks,
         backend_ctx_ctor,
         dynamic=dynamic,
-        compiler_config=backend.get_compiler_config()
-        if hasattr(backend, "get_compiler_config")
-        else None,
+        compiler_config=(
+            backend.get_compiler_config()
+            if hasattr(backend, "get_compiler_config")
+            else None
+        ),
         rebuild_ctx=rebuild_ctx,
     )
 
@@ -876,9 +878,11 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
                         flat_args[i],
                         symbolic_context=StatelessSymbolicContext(
                             dynamic_sizes=[
-                                DimDynamic.DYNAMIC
-                                if d in flat_args_dynamic_dims[i]
-                                else DimDynamic.STATIC
+                                (
+                                    DimDynamic.DYNAMIC
+                                    if d in flat_args_dynamic_dims[i]
+                                    else DimDynamic.STATIC
+                                )
                                 for d in range(len(flat_args[i].shape))
                             ],
                             constraint_sizes=[None] * len(flat_args[i].shape),
@@ -1279,6 +1283,7 @@ def export(
         graph_captured_input = None
         graph_captured_result: Optional[Tuple[torch.Tensor, ...]] = None
         fake_mode = None
+        result_traced = None
 
         def guard_export_print(guards: _guards.GuardsSet):
             nonlocal out_guards
@@ -1434,15 +1439,22 @@ def export(
             raise constraint_violation_error
 
         if graph is None:
-            fake_mode = torch._subclasses.FakeTensorMode(shape_env=ShapeEnv(), export=True)
+            fake_mode = torch._subclasses.FakeTensorMode(
+                shape_env=ShapeEnv(), export=True
+            )
+            if out_guards is None:
+                our_guards = _guards.GuardsSet()
+            assert out_guards is not None  # suppress mypy error
             parameter_names = list(original_signature.parameters.keys())
             fx_graph = torch.fx.Graph()
             for i, name in enumerate(parameter_names):
-                if (torch.is_tensor(flat_args[i])):
-                    node = fx_graph.placeholder(name)
+                node = fx_graph.placeholder(name)
+                if torch.is_tensor(flat_args[i]):
                     node.meta["val"] = fake_mode.from_tensor(
                         flat_args[i], static_shapes=True
                     )
+                else:
+                    node.meta["val"] = flat_args[i]
             fx_graph.output(result_traced)
             module = torch.nn.Module()
             graph = torch.fx.GraphModule(module, fx_graph)
