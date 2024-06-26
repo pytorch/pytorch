@@ -1759,6 +1759,7 @@ optim_db: List[OptimizerInfo] = [
         supports_fused_on=(
             "cpu",
             "cuda",
+            "mps",
         ),
         skips=(
             DecorateInfo(
