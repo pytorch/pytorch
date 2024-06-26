@@ -74,8 +74,37 @@ def set_(tensor, data):
     tensor.set_(data)
 
 
+"""
+[Note: Avoiding functionalization for fsdp.set_ and inductor.resize_storage_bytes_]
+
+Currently we don't functionalize `fsdp.set_` op or `inductor.resize_storage_bytes_` op
+(i.e. they show up as a mutation op in the middle of the AOT joint graph).
+
+Reason:
+Traceable FSDP2 compiled autograd BWD graph have the following traits:
+(1) Two inputs of the graph were aliased to each other (one from hook closed-over tensors, one from FWD saved tensors).
+(2) One of them is mutated (set_ and resize_ to handle the all-gathered param).
+(3) They are both subclasses.
+The combination of these traits is not supported by AOTAutograd (it's difficult to reason about subclass aliasing).
+So this doesn't work at all for Traceable FSDP2.
+
+The compromise we use is to avoid functionalization for the FSDP2 set_ and resize_ ops.
+This avoids the problem above, because from AOTAutograd point-of-view there are no mutations
+that functionalization needs to handle. (Although we need to be careful not to DCE those mutable ops.)
+
+We can avoid this functionalization because:
+(1) The nn.Parameter is never used before its .set_() is called in eager code (i.e. no alias of it is created),
+so it's safe to call .set_() in the middle of the graph to swap out its storage and start using the nn.Parameter downstream.
+(2) We always re-allocate the buffer for nn.Parameter to store the AllGather output and to be used in downstream user ops.
+So calling resize-to-0 in the middle of the graph to free nn.Parameter memory after use should always be okay
+(since we always allocate anew next time we need it, we strictly don't need to keep the old tensor storage around anymore).
+"""
+
+
 @torch.library.impl(lib, "set_", "Functionalize")
 def set__functionalize(tensor, data):
+    torch._sync(tensor)
+    torch._sync(data)
     tensor_inner = torch._from_functional_tensor(tensor)
     data_inner = torch._from_functional_tensor(data)
     tensor_inner.set_(data_inner)  # type: ignore[call-overload]
