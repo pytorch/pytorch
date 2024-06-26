@@ -156,10 +156,7 @@ flex_decoding_template = TritonTemplate(
         v = tl.load(V_block_ptr, boundary_check=(0, 1))
         # -- compute qk ---
         qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
-        if BLOCK_M >= 16:
-            qk = tl.dot(q, k, acc=qk)
-        else:
-            qk = tl.sum(q[:, :, None]*k.to(MATMUL_PRECISION)[None, :, :], axis=-2).to(tl.float32)
+        qk = tl.dot(q, k, acc=qk)
 
         # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
         m = offs_m[:, None]
@@ -192,10 +189,7 @@ flex_decoding_template = TritonTemplate(
 
         # -- scale and update acc --
         acc *= alpha[:, None]
-        if BLOCK_M >= 16:
-            acc = tl.dot(p.to(MATMUL_PRECISION), v.to(MATMUL_PRECISION), acc=acc)
-        else:
-            acc += tl.sum(p.to(MATMUL_PRECISION)[:, :, None] * v.to(MATMUL_PRECISION), axis=-2).to(tl.float32)
+        acc = tl.dot(p.to(MATMUL_PRECISION), v.to(MATMUL_PRECISION), acc=acc)
 
         # -- update m_i and l_i --
         l_i = l_i * alpha + tl.sum(p, 1)
@@ -490,7 +484,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
 
     BLOCK_M = (
         query.get_size()[-2]
-        if query.get_size()[-2] <= 2
+        if query.get_size()[-2] <= 0
         else 16
         if query.get_size()[-2] <= 16
         else 32
