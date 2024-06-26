@@ -76,7 +76,8 @@ class MiniArrayRef final {
   /* implicit */ constexpr MiniArrayRef(T (&Arr)[N]) : Data(Arr), Length(N) {}
 
   // /// Construct an MiniArrayRef from an empty C array.
-  /* implicit */ constexpr MiniArrayRef(T (&Arr) []): Data(nullptr), Length(0) {}
+  /* implicit */ constexpr MiniArrayRef(T (&Arr)[])
+      : Data(nullptr), Length(0) {}
 
   /// Construct an MiniArrayRef from a std::initializer_list.
   /* implicit */ constexpr MiniArrayRef(const std::initializer_list<T>& Vec)

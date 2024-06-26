@@ -932,8 +932,8 @@ class CppWrapperCpu(WrapperCodeGen):
         # follow example in generate_c_shim_extern_kernel_call
         # only need convert_arrayref_tensor_to_tensor for ArrayRefTensors
         if isinstance(tensor, str) and tensor.startswith(
-                    ("buf", "arg", "wrap_with_raii_handle_if_needed")
-                ):
+            ("buf", "arg", "wrap_with_raii_handle_if_needed")
+        ):
             tensor = f"convert_arrayref_tensor_to_tensor({tensor})"
 
         writer.writeline(
