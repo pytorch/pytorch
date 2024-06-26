@@ -21,16 +21,20 @@ from typing import (
     Sequence,
     Set,
     Tuple,
+    TYPE_CHECKING,
     Union,
 )
 from typing_extensions import TypeAlias
 from weakref import WeakKeyDictionary, WeakValueDictionary
 
 import torch
-from torch._ops import OpOverload
 from torch.autograd.variable import Variable
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils.hooks import RemovableHandle
+
+
+if TYPE_CHECKING:
+    from torch._ops import OpOverload
 
 
 __all__ = [
@@ -630,7 +634,7 @@ class _CloneArgBeforeMutateMode(TorchDispatchMode):
 
     def __torch_dispatch__(
         self,
-        func: OpOverload,
+        func: "OpOverload",
         types: Iterable[type],
         args: Tuple[Any, ...] = (),
         kwargs: Optional[Dict[Any, Any]] = None,
