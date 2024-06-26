@@ -4001,6 +4001,15 @@ class NCCLTraceTest(NCCLTraceTestBase):
         else:
             self.assertTrue("duration_ms" not in t["entries"][0])
 
+def check_if_test_is_skipped(fn):
+    def wrapper(self, *args, **kwargs):
+        for skip in TEST_SKIPS.values():
+            if self.processes[0].exitcode == skip.exit_code:
+                return MultiProcessTestCase()._check_return_codes(self)
+        return fn(*args, **kwargs)
+
+    return wrapper
+
 
 class NCCLTraceTestDumpOnTimeoutBase(NCCLTraceTestBase):
     timeout_sec = 1
@@ -4017,11 +4026,8 @@ class NCCLTraceTestDumpOnTimeoutBase(NCCLTraceTestBase):
         pg = c10d.distributed_c10d._get_default_group()
         return pg
 
+    @check_if_test_is_skipped
     def _check_return_codes(self, elapsed_time):
-        for skip in TEST_SKIPS.values():
-            if self.processes[0].exitcode == skip.exit_code:
-                return MultiProcessTestCase()._check_return_codes(self)
-
         # the base test infra assumes processes exit with matching return codes,
         # but we want rank0 to abort and rank1 to exit cleanly in this test
         self.assertEqual(self.processes[0].exitcode, -6)
@@ -4087,10 +4093,8 @@ instantiate_parametrized_tests(NCCLTraceTest)
 
 
 class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
+    @check_if_test_is_skipped
     def _check_return_codes(self, elapsed_time):
-        for skip in TEST_SKIPS.values():
-            if self.processes[0].exitcode == skip.exit_code:
-                return MultiProcessTestCase()._check_return_codes(self)
         # the base test infra assumes processes exit with matching return codes,
         # but we want rank0 to abort and rank1 to exit cleanly in this test
         self.assertEqual(self.processes[0].exitcode, -6)
@@ -4149,10 +4153,8 @@ class NcclErrorDumpTest(NCCLTraceTestBase):
         except TimeoutError:
             return None
 
+    @check_if_test_is_skipped
     def _check_return_codes(self, elapsed_time):
-        for skip in TEST_SKIPS.values():
-            if self.processes[0].exitcode == skip.exit_code:
-                return MultiProcessTestCase()._check_return_codes(self)
         # the base test infra assumes processes exit with matching return codes,
         # but we want rank0 to abort with exception and rank1 to exit with exit 1
         self.assertEqual(self.processes[0].exitcode, -6)
