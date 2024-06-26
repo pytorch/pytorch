@@ -11,7 +11,6 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-
 # String representing the host platform (e.g. Linux, Darwin).
 HOST_PLATFORM = platform.system()
 HOST_PLATFORM_ARCH = platform.system() + "-" + platform.processor()
@@ -26,7 +25,10 @@ try:
     PYTORCH_ROOT = result.stdout.decode("utf-8").strip()
 except subprocess.CalledProcessError:
     # If git is not installed, compute repo root as 3 folders up from this file
-    PYTORCH_ROOT = str(Path(__file__).absolute().parents[3])
+    path_ = os.path.abspath(__file__)
+    for _ in range(4):
+        path_ = os.path.dirname(path_)
+    PYTORCH_ROOT = path_
 
 DRY_RUN = False
 

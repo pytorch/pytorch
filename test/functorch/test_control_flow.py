@@ -1055,8 +1055,7 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(graph_module(*example_inputs), f(*example_inputs))
 
     # https://github.com/pytorch/pytorch/issues/126988
-    @xfailIfTorchDynamo
-    def test_cond_functionalized_input_mutation_on_true_branch(self):
+    def test_cond_functionalized_input_mutation_on_true_brancte(self):
         def true_fn(x):
             view_x = x.view(x.shape)
             view_x.add_(1)
@@ -1097,7 +1096,6 @@ def forward(self, x_1):
             )
 
     # https://github.com/pytorch/pytorch/issues/126988
-    @xfailIfTorchDynamo
     def test_cond_functionalized_input_mutation_on_false_branch(self):
         def true_fn(x):
             return x.sin().sum()
@@ -1139,7 +1137,6 @@ def forward(self, x_1):
             )
 
     # https://github.com/pytorch/pytorch/issues/126988
-    @xfailIfTorchDynamo
     def test_cond_functionalized_output_alias_input(self):
         def true_fn(x):
             return x
@@ -1174,7 +1171,6 @@ def forward(self, x_1):
             )
 
     # https://github.com/pytorch/pytorch/issues/126988
-    @xfailIfTorchDynamo
     def test_cond_functionalized_nested_input_mutation(self):
         def true_true_fn(x):
             x.add_(4)
@@ -1203,7 +1199,6 @@ def forward(self, x_1):
             )
 
     # https://github.com/pytorch/pytorch/issues/126988
-    @xfailIfTorchDynamo
     def test_cond_functionalized_nested_input_mutation_with_aot_func(self):
         def true_true_fn(x):
             x.add_(4)
