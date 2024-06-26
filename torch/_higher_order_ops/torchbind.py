@@ -106,8 +106,9 @@ def inner(mode, *args, **kwargs):
         return call_torchbind(*args, **kwargs)
 
 
-# TODO: currently we just run the C++ implementation with fake tensors.
-# But we should make it possible to register a fake torchbind implementation.
+# When tracing with fake script object, the call_torchbind op will return a fake tensor
+# When tracing with real script object, the call_torchbind op return a real tensor,
+# we need to convert it to real tensor mannually.
 @call_torchbind.py_impl(FakeTensorMode)
 def call_torchbind_fake(mode, *args, **kwargs):
     with mode:
