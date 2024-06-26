@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import bisect
 import itertools
 import math

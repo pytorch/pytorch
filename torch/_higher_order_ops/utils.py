@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -95,13 +96,21 @@ def reenter_make_fx(fn):
 @contextmanager
 def _set_compilation_env():
     _old_is_tracing = torch.fx._symbolic_trace._is_fx_tracing_flag
+    _old_is_inlining = torch._dynamo.config.inline_inbuilt_nn_modules
     try:
         # We need to turn off the is_fx_tracing_flag. Remove this flag check from dyanmo
         # once we are confident fx tracing works with dynamo.
         torch.fx._symbolic_trace._is_fx_tracing_flag = False
+
+        # TODO(anijain2305, export-team) For non-strict export with module
+        # stack info, the codepatch forces the nn module __getattr__ to
+        # ProxyAttr __getattr__ downstream. To circumvent the issue for now,
+        # skip inlining inbuilt nn modules for cond.
+        torch._dynamo.config.inline_inbuilt_nn_modules = False
         yield
     finally:
         torch.fx._symbolic_trace._is_fx_tracing_flag = _old_is_tracing
+        torch._dynamo.config.inline_inbuilt_nn_modules = _old_is_inlining
 
 
 def _has_potential_branch_input_mutation(branch, inputs, pre_dispatch=False):

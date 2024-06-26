@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import itertools
 import logging
@@ -11,11 +12,13 @@ import torch.utils._pytree as pytree
 from torch import fx
 from torch._decomp import register_decomposition
 from torch._dynamo.utils import counters, optimus_scuba_log
+from torch._inductor.virtualized import ops
 
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
 
 from torch._utils_internal import upload_graph
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
+from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 
 from .. import config, ir, pattern_matcher
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
@@ -43,6 +46,7 @@ from ..utils import decode_device, is_pointwise_use
 from ..virtualized import V
 from .ddp_fusion import fuse_ddp_communication
 from .group_batch_fusion import group_batch_fusion_passes, POST_GRAD_FUSIONS
+from .micro_pipeline_tp import patterns as micro_pipeline_tp_patterns
 from .pre_grad import is_same_dict, save_inductor_dict
 from .reinplace import reinplace_inplaceable_ops
 from .split_cat import POST_GRAD_PATTERNS
@@ -80,7 +84,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     fake_tensor_updater = FakeTensorUpdater(gm.graph)
 
     if config.post_grad_custom_pre_pass is not None:
-        config.post_grad_custom_pre_pass(gm.graph)
+        with GraphTransformObserver(
+            gm, "post_grad_custom_pre_pass", config.trace.log_url_for_graph_xform
+        ):
+            config.post_grad_custom_pre_pass(gm.graph)
 
     if config.pattern_matcher:
         lazy_init()
@@ -103,6 +110,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                     f"{pattern_matcher_pass.pass_name}_post_grad"
                 ] = upload_graph(gm.graph)
 
+    if config._micro_pipeline_tp:
+        micro_pipeline_tp_patterns.apply(gm)
+
     if config._fuse_ddp_communication:
         fuse_ddp_communication(
             gm.graph,
@@ -111,7 +121,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         )
 
     if config.post_grad_custom_post_pass is not None:
-        config.post_grad_custom_post_pass(gm.graph)
+        with GraphTransformObserver(
+            gm, "post_grad_custom_post_pass", config.trace.log_url_for_graph_xform
+        ):
+            config.post_grad_custom_post_pass(gm.graph)
 
     stable_topological_sort(gm.graph)
 
@@ -204,6 +217,88 @@ def is_valid_mm_plus_mm(match: Match):
     return True
 
 
+def scatter_upon_const_tensor_extra_check(m):
+    if not config.optimize_scatter_upon_const_tensor:
+        return False
+    full_shape = m.kwargs["shape"]
+    selector = m.kwargs["selector"]
+    dim = m.kwargs["dim"]
+    if dim < 0:
+        dim += len(full_shape)
+
+    selector_ft = selector.meta["val"]
+    assert selector_ft.dim() == len(full_shape)
+
+    for idx, select_sz, full_sz in zip(
+        itertools.count(), selector_ft.shape, full_shape
+    ):
+        if idx == dim:
+            continue
+
+        # TODO: the pattern can be updated to support the case that index tensor
+        # is shorter. But that will need a more complex condition expression
+        # especially for multi-dimensional tensors.
+        # Skip it for now.
+        if isinstance(full_sz, fx.Node):
+            full_sz = full_sz.meta["val"]
+        if select_sz < full_sz:
+            return False
+
+    # Actually we can support small size larger than 1. It would be a bit
+    # tedius. E.g., we load all the index values (not many) and compare
+    # them with the position in tensor to decide what value to return.
+    return selector_ft.size(dim) == 1
+
+
+@register_lowering_pattern(
+    CallFunction(
+        aten.scatter.value,
+        CallFunction(
+            aten.full,
+            KeywordArg("shape"),
+            KeywordArg("background_val"),
+            dtype=KeywordArg("dtype"),
+        ),
+        KeywordArg("dim"),
+        KeywordArg("selector"),
+        KeywordArg("val"),  # scalar value
+    ),
+    extra_check=scatter_upon_const_tensor_extra_check,
+)
+def scatter_upon_const_tensor(
+    match: Match, shape, background_val, dtype, dim, selector, val
+):
+    """
+    Match the pattern of full+scatter into a pointwise.
+
+    TODO: Right now the scatter value must be a scalar. But we could support it
+    when it is a tensor as well.
+    """
+    from torch._inductor import metrics
+
+    metrics.num_matches_for_scatter_upon_const_tensor += 1
+
+    selector_loader = selector.make_loader()
+
+    def inner_fn(idx):
+        selector_idx = list(idx)
+        selector_idx[dim] = 0
+
+        selector = selector_loader(selector_idx)
+        return ops.where(
+            selector == ops.index_expr(idx[dim], torch.int64),
+            ops.constant(val, dtype),
+            ops.constant(background_val, dtype),
+        )
+
+    return ir.Pointwise.create(
+        device=selector.get_device(),
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=shape,
+    )
+
+
 @register_lowering_pattern(
     CallFunction(
         aten.add,
@@ -217,8 +312,13 @@ def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
 
 
 def cuda_and_enabled_mixed_mm(match):
-    return (config.use_mixed_mm or config.force_mixed_mm) and getattr(
-        match.kwargs["mat1"].meta.get("val"), "is_cuda", False
+    return (
+        (config.use_mixed_mm or config.mixed_mm_choice != "default")
+        and getattr(match.kwargs["mat1"].meta.get("val"), "is_cuda", False)
+        and (
+            match.kwargs["mat2_dtype"].itemsize
+            > match.kwargs["mat2"].meta.get("val").dtype.itemsize
+        )
     )
 
 
@@ -268,11 +368,12 @@ def cuda_and_enabled_mixed_mm_and_not_int8(match):
                                 KeywordArg("mat2"),
                                 0xF,
                             ),
-                            CallFunction(
-                                aten.__rshift__.Scalar,
-                                KeywordArg("mat2"),
-                                4,
-                            ),
+                            # CallFunction(
+                            #    aten.__rshift__.Scalar,
+                            #    KeywordArg("mat2"),
+                            #    4,
+                            # ),
+                            True,
                         ),
                         1,
                     ),
@@ -347,8 +448,7 @@ def pointless_cumsum_replacement(match: Match, shape, fill_value, device, dtype,
 
     # only replace the output node, not all nodes
     match.nodes = [match.output_node()]
-    with V.fake_mode:
-        match.replace_by_example(repl, list(shape))
+    match.replace_by_example(repl, list(shape))
 
 
 def shape_of_mm(a, b):
@@ -708,8 +808,7 @@ def decompose_auto_functionalized(graph):
             args, kwargs = pytree.tree_unflatten(flat_args, spec)
             return auto_functionalized_dense(*args, only_clone_these_tensors, **kwargs)
 
-        with V.fake_mode:
-            match.replace_by_example(decomp, flat_args, run_dce=False)
+        match.replace_by_example(decomp, flat_args, run_dce=False)
 
     graph_pass.apply(graph)
     for node in graph.find_nodes(
@@ -825,8 +924,7 @@ def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp):
     def repl(inp, x1, x2):
         return x1 @ x2 + inp
 
-    with V.fake_mode:
-        match.replace_by_example(repl, [inp, mat1, mat2])
+    match.replace_by_example(repl, [inp, mat1, mat2])
 
 
 def is_valid_addmm_fusion(match):
@@ -869,8 +967,7 @@ def addmm(match, mat1, mat2, *, inp):
     def repl(inp, mat1, mat2):
         return aten.addmm(inp, mat1, mat2)
 
-    with V.fake_mode:
-        match.replace_by_example(repl, [inp, mat1, mat2])
+    match.replace_by_example(repl, [inp, mat1, mat2])
 
 
 def check_shape_cuda_and_fused_int_mm_mul_enabled(match):

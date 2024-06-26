@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """This module implements the user facing API for flex_attention in PyTorch."""
 import functools
 from typing import Callable
@@ -101,11 +102,6 @@ def _flex_attention(
 
     # Some basic input validation
     _validate_sdpa_input(query, key, value)
-    # This will restriction will be removed in newer version of the kernel
-    if query.size(-2) != key.size(-2):
-        raise ValueError(
-            "NYI: The target sequence length (L) of the query tensor must match the source sequence length (S) of the key tensor."
-        )
     if query.size(-2) % 128 != 0:
         raise ValueError("NYI: S and L must be a multiple of 128")
 

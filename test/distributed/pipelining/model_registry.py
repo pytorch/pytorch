@@ -51,6 +51,27 @@ class ModelWithKwargs(torch.nn.Module):
         return x
 
 
+class ModelWithParamAlias(torch.nn.Module):
+    default_dhid = 512
+    default_batch_size = 256
+
+    def __init__(self, d_hid: int = default_dhid):
+        super().__init__()
+        self.mm_param1 = self.mm_param0 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
+        self.lin1 = self.lin0 = torch.nn.Linear(d_hid, d_hid)
+
+    def forward(self, x, y):
+        x = torch.mm(x, self.mm_param0)
+        x = x + y
+        x = self.lin0(x)
+        x = torch.relu(x)
+        pipe_split()
+        x = torch.mm(x, self.mm_param1)
+        x = self.lin1(x)
+        x = torch.relu(x)
+        return x
+
+
 # MLP Layer
 class MLPModule(torch.nn.Module):
     def __init__(self, d_hid: int):

@@ -28,18 +28,6 @@ Tensor empty_meta_symint(
       size, dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
 }
 
-// Kept only for BC with XLA
-static Tensor empty_strided_meta(
-  IntArrayRef size,
-  IntArrayRef stride,
-  std::optional<ScalarType> dtype_opt,
-  std::optional<Layout> layout_opt,
-  std::optional<Device> device_opt,
-  std::optional<bool> pin_memory_opt
-) {
-  return empty_strided_meta_symint(c10::fromIntArrayRefSlow(size), c10::fromIntArrayRefSlow(stride), dtype_opt, layout_opt, device_opt, pin_memory_opt);
-}
-
 Tensor empty_strided_meta_symint(
   SymIntArrayRef size,
   SymIntArrayRef stride,

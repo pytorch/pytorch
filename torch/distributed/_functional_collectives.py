@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import sys
 import warnings
 from typing import cast, List, Optional, Tuple, TYPE_CHECKING, Union
@@ -9,6 +10,7 @@ from torch.distributed.device_mesh import DeviceMesh
 from torch.fx.experimental.proxy_tensor import get_innermost_proxy_mode
 
 from . import _functional_collectives_impl as fun_col_impl
+
 
 try:
     from torch.utils._cxx_pytree import tree_map_only
@@ -768,6 +770,7 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
                 "identifier has been deprecated. Please switch to "
                 "using ProcessGroup, DeviceMesh, or group name instead.",
                 FutureWarning,
+                stacklevel=3,
             )
         return c10d._resolve_group_name_by_ranks_and_tag(cast(List[int], group), tag)
     else:
@@ -1131,6 +1134,7 @@ from torch.distributed.distributed_c10d import (
     all_to_all_single as legacy_all_to_all_single,
     reduce_scatter_tensor as legacy_reducescatter,
 )
+
 
 # This dict should contain sets of functions that dynamo is allowed to remap.
 # Functions in this set should accept the same args/kwargs 1:1 as their mapping.

@@ -1640,16 +1640,6 @@ static PyObject* _dims(PyObject *self,
     PY_END(nullptr)
 }
 
-static int64_t dim_index(const std::vector<mpy::obj<Dim>>& dims, mpy::hdl<Dim> dim) {
-    for (int64_t i = 0, N  = dims.size(); i < N; ++i) {
-        if (dims[i].ptr() == dim.ptr()) {
-            return i;
-        }
-    }
-    return -1;
-}
-
-
 struct DotPart {
     Slice<DimEntry> dims;
     size_t total_size = 1;

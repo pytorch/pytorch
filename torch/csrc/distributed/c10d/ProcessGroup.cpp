@@ -30,25 +30,6 @@ static ProcessGroup::BackendType strToBackendType(std::string_view backend) {
   }
 }
 
-static std::string backendTypeToStr(ProcessGroup::BackendType backendType) {
-  switch (backendType) {
-    case ProcessGroup::BackendType::UNDEFINED:
-      return "undefined";
-    case ProcessGroup::BackendType::GLOO:
-      return "gloo";
-    case ProcessGroup::BackendType::NCCL:
-      return "nccl";
-    case ProcessGroup::BackendType::UCC:
-      return "ucc";
-    case ProcessGroup::BackendType::MPI:
-      return "mpi";
-    case ProcessGroup::BackendType::CUSTOM:
-      return "custom";
-    default:
-      TORCH_INTERNAL_ASSERT(false, "Unknown backend type");
-  }
-}
-
 std::string opTypeToString(OpType opType) {
   switch (opType) {
     case OpType::BROADCAST:

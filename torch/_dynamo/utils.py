@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import atexit
 import collections
 import contextlib
@@ -22,6 +23,7 @@ import threading
 import time
 import types
 import typing
+import warnings
 import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
@@ -100,6 +102,8 @@ from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._triton import has_triton, has_triton_package
 
 
+unpatched_nn_module_getattr = torch.nn.Module.__getattr__
+
 counters: DefaultDict[str, Counter[str]] = collections.defaultdict(collections.Counter)
 optimus_scuba_log: Dict[str, Any] = {}
 troubleshooting_url = (
@@ -113,7 +117,9 @@ log = logging.getLogger(__name__)
 compilation_time_metrics: Dict[str, List[float]] = {}
 
 # profiling compilation time by frame phase
-frame_phase_timing: Dict[str, Dict[str, float]] = {}
+frame_phase_timing: Dict[str, Dict[str, float]] = collections.defaultdict(
+    lambda: collections.defaultdict(float)
+)
 
 timer_counter = itertools.count()
 
@@ -185,6 +191,10 @@ def print_time_report():
     print(out)
 
 
+def _add_time_spent(key, phase_name, time_spent):
+    frame_phase_timing[key][phase_name] += time_spent
+
+
 # dynamo_timed API works as a function decorator
 # By wrapping a function in dynamo_timed, we can store a record in compilation_time_metrics
 # where the key is the functions name.
@@ -201,31 +211,82 @@ def print_time_report():
 # phase_names record an extra record into a separate compilation timing structure,
 # one keyed on frame+name rather than function.
 # The frame is incremented outside of this function, in def increment_frame() above.
+# `fwd_only` is used to identify if this phase or function is only called
+# during compiling fwd graphs, e.g, `entire_frame_compile` and `backend_compile`.
+# The other phases (`inductor_compile` and `code_gen`) are called for both fwd and bwd graphs.
 
 
-def dynamo_timed(original_function=None, phase_name=None):
+def dynamo_timed(original_function=None, phase_name=None, fwd_only=True):
     def dynamo_timed_inner(func):
-        if config.cprofile:
-            return func
-
         @wraps(func)
         def time_wrapper(*args, **kwargs):
             key = func.__qualname__
             if key not in compilation_time_metrics:
                 compilation_time_metrics[key] = []
-            with torch.profiler.record_function(f"{key} (dynamo_timed)"):
-                t0 = time.time()
-                r = func(*args, **kwargs)
-                time_spent = time.time() - t0
-            compilation_time_metrics[key].append(time_spent)
-            if phase_name:
-                frame_key = str(curr_frame)
-                if frame_key not in frame_phase_timing:
-                    frame_phase_timing[frame_key] = {}
-                if phase_name not in frame_phase_timing[frame_key]:
-                    frame_phase_timing[frame_key][phase_name] = time_spent
-                else:
-                    frame_phase_timing[frame_key][phase_name] += time_spent
+
+            fail_type: Optional[str] = None
+            fail_reason: Optional[str] = None
+            time_spent = float("-inf")
+            try:
+                with torch.profiler.record_function(f"{key} (dynamo_timed)"):
+                    t0 = time.time()
+                    r = func(*args, **kwargs)
+                    time_spent = time.time() - t0
+                compilation_time_metrics[key].append(time_spent)
+            except Exception as e:
+                fail_type = str(type(e))
+                fail_reason = str(e)
+                raise
+            finally:
+                # Only record backward compilation metrics if phase_name is not None!
+                if phase_name:
+                    frame_key = str(curr_frame)
+                    # fwd only compilation stages: entire_frame_compile, backend_compile.
+                    # use frame_key as time aggregation key.
+                    if fwd_only and fail_type is None:
+                        _add_time_spent(frame_key, phase_name, time_spent)
+                    else:
+                        # fwd + bwd compilation stages: inductor_compile, code_gen.
+                        # use frame_key as time aggregation key for fwd graphs;
+                        # use compile_id as time aggregation key for bwd graphs.
+                        if torch._guards.TracingContext.try_get() is not None:
+                            aot_graph_name = str(
+                                torch._guards.TracingContext.get().aot_graph_name
+                            )
+                            if (
+                                "forward" in aot_graph_name
+                                or "inference" in aot_graph_name
+                            ) and fail_type is None:
+                                _add_time_spent(frame_key, phase_name, time_spent)
+                            elif "backward" in aot_graph_name:
+                                compile_id = str(
+                                    torch._guards.CompileContext.current_compile_id()
+                                )
+                                if fail_type is None:
+                                    _add_time_spent(compile_id, phase_name, time_spent)
+
+                                # log backward compilation metrics at the end of `inductor_compile` of bwd graph,
+                                # one record for one bwd graph.
+                                if phase_name == "inductor_compile":
+                                    if fail_type is None:
+                                        inductor_compile_time = frame_phase_timing[
+                                            compile_id
+                                        ].get("inductor_compile", None)
+                                        code_gen_time = frame_phase_timing[
+                                            compile_id
+                                        ].get("code_gen", None)
+                                    else:
+                                        inductor_compile_time = None
+                                        code_gen_time = None
+                                    metrics = BwdCompilationMetrics(
+                                        compile_id,
+                                        inductor_compile_time,
+                                        code_gen_time,
+                                        fail_type,
+                                        fail_reason,
+                                    )
+                                    record_compilation_metrics(metrics)
+
             return r
 
         return time_wrapper
@@ -497,12 +558,15 @@ def is_numpy_float_type(value):
     )
 
 
+def is_lru_cache_wrapped_function(value):
+    return isinstance(value, functools._lru_cache_wrapper) and is_function(
+        inspect.getattr_static(value, "__wrapped__")
+    )
+
+
 def is_function_or_wrapper(value):
-    return (
-        is_function(value)
-        or isinstance(value, functools._lru_cache_wrapper)
-        and is_function(inspect.getattr_static(value, "__wrapped__"))
-        or isinstance(value, (torch._ops.OpOverloadPacket, torch._ops.OpOverload))
+    return is_function(value) or isinstance(
+        value, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
     )
 
 
@@ -514,7 +578,6 @@ def is_function(value):
             types.BuiltinFunctionType,
             types.MethodDescriptorType,
             types.WrapperDescriptorType,
-            torch.jit.ScriptFunction,
         ),
     )
 
@@ -524,20 +587,11 @@ def unwrap_if_wrapper(fn):
 
 
 def unwrap_with_attr_name_if_wrapper(fn):
-    # unpack @functools.lru_cache wrapped function
-    if isinstance(fn, functools._lru_cache_wrapper):
-        fn = inspect.getattr_static(fn, "__wrapped__")
-        attr_name = "__wrapped__"
+    # TODO(anijain2305) - Investigate if we can get rid of this function
     # unpack @torch._dynamo.optimize()(fn) wrapped function
-    elif is_function(fn) and inspect.getattr_static(fn, "_torchdynamo_inline", False):
+    if is_function(fn) and inspect.getattr_static(fn, "_torchdynamo_inline", False):
         fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
         attr_name = "_torchdynamo_inline"
-    # unpack torch.jit.script_if_tracing
-    elif is_function(fn) and inspect.getattr_static(
-        fn, "__script_if_tracing_wrapper", False
-    ):
-        fn = inspect.getattr_static(fn, "__original_fn", fn)
-        attr_name = "__original_fn"
     else:
         attr_name = None
     return fn, attr_name
@@ -598,6 +652,7 @@ def proxy_args_kwargs(args, kwargs):
 
 @dataclasses.dataclass
 class CompilationMetrics:
+    compile_id: str
     frame_key: str
     co_name: str
     co_filename: str
@@ -628,19 +683,34 @@ class CompilationMetrics:
     has_guarded_code: bool
 
 
+@dataclasses.dataclass
+class BwdCompilationMetrics:
+    compile_id: str
+    inductor_compile_time_s: Optional[float]
+    code_gen_time_s: Optional[float]
+    fail_type: Optional[str]
+    fail_reason: Optional[str]
+
+
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
 
 
-_compilation_metrics: Deque[CompilationMetrics] = collections.deque(
-    maxlen=DEFAULT_COMPILATION_METRICS_LIMIT
-)
+_compilation_metrics: Deque[
+    Union[CompilationMetrics, BwdCompilationMetrics]
+] = collections.deque(maxlen=DEFAULT_COMPILATION_METRICS_LIMIT)
 
 
-def record_compilation_metrics(compilation_metrics: CompilationMetrics):
+def record_compilation_metrics(
+    compilation_metrics: Union[CompilationMetrics, BwdCompilationMetrics]
+):
     global _compilation_metrics
     _compilation_metrics.append(compilation_metrics)
+    if isinstance(compilation_metrics, CompilationMetrics):
+        name = "compilation_metrics"
+    else:
+        name = "bwd_compilation_metrics"
     torch._logging.trace_structured(
-        "compilation_metrics",
+        name,
         lambda: {
             k: list(v) if isinstance(v, set) else v
             for k, v in dataclasses.asdict(compilation_metrics).items()
@@ -663,7 +733,7 @@ def clear_compilation_metrics() -> None:
     _compilation_metrics.clear()
 
 
-def get_compilation_metrics() -> List[CompilationMetrics]:
+def get_compilation_metrics() -> List[Union[CompilationMetrics, BwdCompilationMetrics]]:
     return list(_compilation_metrics)
 
 
@@ -1829,7 +1899,7 @@ def run_node(tracer, node, args, kwargs, nnmodule):
                 assert nnmodule is not None
                 return nnmodule(*args, **kwargs)
             elif op == "get_attr":
-                return tracer.get_submodule(node.target)
+                return tracer.output_graph.get_submodule(node.target)
             elif op == "placeholder":
                 assert "example_value" in node.meta
                 return node.meta["example_value"]
@@ -1863,6 +1933,9 @@ def get_real_value(node, tracer):
         (node.args, node.kwargs),
         lambda n: get_real_value(n, tracer),
     )
+
+    if op == "placeholder" and "grapharg" in node.meta:
+        return node.meta["grapharg"].example
 
     if op == "call_module":
         nn_module = tracer.output_graph.nn_modules[node.target]
@@ -1939,12 +2012,12 @@ def object_has_getattribute(value: Any):
     return False
 
 
-def get_custom_getattr(value: Any):
+def get_custom_getattr(value: Any, ignore_nn_module_getattr: bool = False):
     try:
         getattr_fn = inspect.getattr_static(type(value), "__getattr__")
     except AttributeError:
         getattr_fn = None
-    if getattr_fn is torch.nn.Module.__getattr__:
+    if ignore_nn_module_getattr and getattr_fn is torch.nn.Module.__getattr__:
         # ignore this case of getattr
         getattr_fn = None
     return getattr_fn
@@ -2025,6 +2098,14 @@ state_dict_hook_names = [
     "_load_state_dict_post_hooks",
 ]
 all_hook_names = forward_hook_names + backward_hook_names + state_dict_hook_names
+
+
+def nn_module_has_global_hooks():
+    # This is limited to backward hooks for now because NNModuleVariable
+    # supports fwd hooks underneath.
+    return len(torch.nn.modules.module._global_backward_hooks) or len(
+        torch.nn.modules.module._global_backward_pre_hooks
+    )
 
 
 def nn_module_get_all_hooks(
@@ -2529,12 +2610,17 @@ def is_torch_function_object(value):
 
 
 def has_torch_function(vt: "torch._dynamo.variables.base.VariableTracker") -> bool:
-    from torch._dynamo.variables import UserDefinedObjectVariable
+    from torch._dynamo.variables import LazyVariableTracker, UserDefinedObjectVariable
     from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
 
-    return isinstance(vt, TensorWithTFOverrideVariable) or (
-        isinstance(vt, UserDefinedObjectVariable)
-        and hasattr(vt.value, "__torch_function__")
+    if isinstance(vt, TensorWithTFOverrideVariable):
+        return True
+
+    if isinstance(vt, LazyVariableTracker):
+        LazyVariableTracker.realize(vt)
+
+    return isinstance(vt, UserDefinedObjectVariable) and hasattr(
+        vt.value, "__torch_function__"
     )
 
 
@@ -2564,19 +2650,22 @@ def get_first_attr(obj, *attrs):
 
 
 @contextlib.contextmanager
-def maybe_enable_compiled_autograd(should_enable):
-    def compiler_fn(gm):
-        def inner_compiler(gm_, example_inputs_):
-            torch._dynamo.utils.counters["compiled_autograd"]["compiles"] += 1
-            return torch._inductor.compile(gm_, example_inputs_)
+def maybe_enable_compiled_autograd(should_enable, fullgraph=True, dynamic=True):
+    if not should_enable:
+        yield
+    else:
 
-        return torch.compile(gm, backend=inner_compiler, fullgraph=True, dynamic=True)
+        def compiler_fn(gm):
+            def inner_compiler(gm_, example_inputs_):
+                torch._dynamo.utils.counters["compiled_autograd"]["compiles"] += 1
+                return torch._inductor.compile(gm_, example_inputs_)
 
-    if should_enable:
+            return torch.compile(
+                gm, backend=inner_compiler, fullgraph=fullgraph, dynamic=dynamic
+            )
+
         with torch._dynamo.compiled_autograd.enable(compiler_fn) as ctx:
             yield ctx
-    else:
-        yield
 
 
 def invalid_removeable_handle():
@@ -2603,14 +2692,14 @@ def nn_module_proxy(mod):
 
 
 class GmWrapper(torch.nn.Module):
-    def __init__(self, gm, spec):
+    def __init__(self, gm, unflatten_fn):
         super().__init__()
         self.gm = gm
-        self.spec = spec
+        self.unflatten_fn = unflatten_fn
 
     def forward(self, *args):
         args: List[Any] = list(args)
-        return self.gm(*pytree.tree_unflatten(args, self.spec))
+        return self.gm(*self.unflatten_fn(args))
 
 
 def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
@@ -2619,21 +2708,39 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
     accepts those inputs.  This is needed for graphs that take
     bumpy inputs.
     """
-    inputs, spec = pytree.tree_flatten(inputs)
-    compiled_fn = compile_gm(GmWrapper(gm, spec), inputs)
-
-    idx_to_steal = [
+    inputs_idx_to_clear = [
         i
         for i, node in enumerate(gm.graph.nodes)
         if node.op == "placeholder" and node.meta.get("steal_arg", False)
     ]
 
-    def wrapper(*args):
+    if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+        # fast path, avoid pytree overhead
+        # compiled autograd inputs are always a list of tensors, maybe followed by symints
+        assert inputs_idx_to_clear == [0]
+        assert isinstance(inputs[0], list)
+        boxed_inputs_count = len(inputs[0])
+
+        def flatten_fn(args):
+            return args[0] + list(args[1:])
+
+        def unflatten_fn(flat_args):
+            return (flat_args[:boxed_inputs_count], *flat_args[boxed_inputs_count:])
+
+        compiled_fn = compile_gm(GmWrapper(gm, unflatten_fn), flatten_fn(inputs))
+    else:
+        # slow path, don't know inputs structure
+        flat_inputs, spec = pytree.tree_flatten(inputs)
+        unflatten_fn = functools.partial(pytree.tree_unflatten, treespec=spec)
+        compiled_fn = compile_gm(GmWrapper(gm, unflatten_fn), flat_inputs)
         # note this doesn't check the spec, assuming it is the same
-        flat_args = pytree.arg_tree_leaves(*args)
+        flatten_fn = pytree.arg_tree_leaves
+
+    def wrapper(*args):
+        flat_args = flatten_fn(args)
 
         # flat_args is a new list, so we need to clear references from the old list
-        for i in idx_to_steal:
+        for i in inputs_idx_to_clear:
             args[i].clear()
 
         # this call is boxed to avoid increasing refcount until we reach aot_module_simplified forward
@@ -2658,3 +2765,34 @@ class Lit:
 
     def __repr__(self):
         return self.s
+
+
+warn_once_cache: Set[str] = set()
+
+
+def warn_once(msg, stacklevel=1):
+    # Dynamo causes all warnings.warn (in user code and in Dynamo code) to print all the time.
+    # https://github.com/pytorch/pytorch/issues/128427.
+    # warn_once is a workaround: if the msg has been warned on before, then we will not
+    # warn again.
+    # NB: it's totally ok to store a cache of all the strings: this is what warnings.warn does as well.
+    if msg in warn_once_cache:
+        return
+    warn_once_cache.add(msg)
+    warnings.warn(msg, stacklevel=stacklevel + 1)
+
+
+def strip_color_from_string(text):
+    # This regular expression matches ANSI escape codes
+    ansi_escape = re.compile(r"\x1B[@-_][0-?]*[ -/]*[@-~]")
+    return ansi_escape.sub("", text)
+
+
+@contextlib.contextmanager
+def _disable_saved_tensors_hooks_during_tracing():
+    # See NOTE: [Deferring tensor pack/unpack hooks until runtime]
+    try:
+        prior = torch._C._autograd._saved_tensors_hooks_set_tracing(True)
+        yield
+    finally:
+        torch._C._autograd._saved_tensors_hooks_set_tracing(prior)

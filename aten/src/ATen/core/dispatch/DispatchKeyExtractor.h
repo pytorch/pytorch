@@ -21,7 +21,7 @@ namespace impl {
 // on TLS.
 //
 // NB: If there is no valid dispatch key, this will return Undefined
-static inline DispatchKeySet computeDispatchKeySet(
+inline DispatchKeySet computeDispatchKeySet(
     DispatchKeySet ks,
     // The key mask lets us eliminate (by zero entries) keys which should not
     // be considered for dispatch.  There are two cases when we use this:

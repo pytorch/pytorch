@@ -1,6 +1,4 @@
 # Owner(s): ["module: functorch"]
-import unittest
-
 import torch
 import torch._dynamo
 import torch._functorch
@@ -8,30 +6,14 @@ import torch._inductor
 import torch._inductor.decomposition
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import (
-    find_library_location,
-    IS_FBCODE,
-    IS_MACOS,
-    IS_SANDCASTLE,
-    IS_WINDOWS,
-)
+
+from torch.testing._internal.torchbind_impls import init_torchbind_implementations
 
 
 class TestTorchbind(TestCase):
     def setUp(self):
         super().setUp()
-        if IS_MACOS:
-            raise unittest.SkipTest("non-portable load_library call used in test")
-        elif IS_SANDCASTLE or IS_FBCODE:
-            torch.ops.load_library(
-                "//caffe2/test/cpp/jit:test_custom_class_registrations"
-            )
-        elif IS_WINDOWS:
-            lib_file_path = find_library_location("torchbind_test.dll")
-            torch.ops.load_library(str(lib_file_path))
-        else:
-            lib_file_path = find_library_location("libtorchbind_test.so")
-            torch.ops.load_library(str(lib_file_path))
+        init_torchbind_implementations()
 
     def get_exported_model(self):
         """

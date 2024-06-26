@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import dataclasses
@@ -45,6 +46,7 @@ from torch.distributed.checkpoint.planner_helpers import (
 )
 from torch.distributed.checkpoint.utils import find_state_dict_object
 
+
 logger: logging.Logger = logging.getLogger(__name__)
 
 
@@ -67,11 +69,12 @@ class DefaultSavePlanner(SavePlanner):
         flatten_state_dict: bool = True,
         flatten_sharded_tensors: bool = True,
         dedup_replicated_tensors: Optional[bool] = None,
+        dedup_save_to_lowest_rank: bool = False,
     ) -> None:
         self.flatten_state_dict = flatten_state_dict
         self.flatten_sharded_tensors = flatten_sharded_tensors
         self.mappings = {}
-
+        self.dedup_save_to_lowest_rank = dedup_save_to_lowest_rank
         if dedup_replicated_tensors is not None:
             logger.warning(
                 "DefaultSavePlanner's `dedup_replicated_tensors` argument is being "
@@ -103,7 +106,7 @@ class DefaultSavePlanner(SavePlanner):
     def create_global_plan(
         self, all_plans: List[SavePlan]
     ) -> Tuple[List[SavePlan], Metadata]:
-        all_plans = dedup_save_plans(all_plans)
+        all_plans = dedup_save_plans(all_plans, self.dedup_save_to_lowest_rank)
 
         global_plan, metadata = create_default_global_save_plan(all_plans)
 

@@ -393,7 +393,7 @@ struct RegisterPRIVATEUSE1Dispatch {
 // REGISTER_DISPATCH now dispatches an AVX512 kernel to nullptr but registers other dispatches.
 // ALSO_REGISTER_AVX512_DISPATCH should be used for ensuring AVX512 dispatch, among others.
 #ifdef CPU_CAPABILITY_AVX512
-#define REGISTER_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, nullptr)
+#define REGISTER_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, ((void*)(fn) ? nullptr : nullptr))
 #else
 #define REGISTER_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, fn)
 #endif

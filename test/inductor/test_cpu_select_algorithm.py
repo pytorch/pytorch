@@ -1,8 +1,10 @@
 # Owner(s): ["oncall: cpu inductor"]
+import contextlib
 import functools
 
 import sys
 import unittest
+from typing import Optional
 from unittest.mock import patch
 
 import torch
@@ -11,6 +13,7 @@ import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 import torch._inductor.select_algorithm as select_algorithm
 from torch._dynamo.utils import counters
+from torch._inductor.codecache import VecAMX
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -69,6 +72,49 @@ def patches(fn):
     return wrapped
 
 
+@contextlib.contextmanager
+def verify(dtype):
+    # For bfloat16 and half, we have to relax the tolerance
+    # due to the difference associave orders in different
+    # kernel implementations
+    atol, rtol = 1e-4, 1e-4
+    if dtype == torch.half or dtype == torch.bfloat16:
+        atol, rtol = 1e-2, 1e-2
+    with patch.object(select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)):
+        yield atol, rtol
+
+
+def _get_epilogue(epilogue: str, other: Optional[torch.Tensor] = None):
+    if epilogue == "none":
+        return lambda x: x
+    elif epilogue == "relu":
+        return torch.nn.ReLU()
+    elif epilogue == "gelu":
+        return torch.nn.GELU()
+    elif epilogue == "silu":
+        return torch.nn.SiLU()
+    elif epilogue == "sigmoid":
+        return torch.nn.Sigmoid()
+    elif epilogue == "tanh":
+        return torch.nn.Tanh()
+    elif epilogue == "hardswish":
+        return torch.nn.Hardswish()
+    elif epilogue == "hardsigmoid":
+        return torch.nn.Hardsigmoid()
+    elif epilogue == "leaky_relu":
+        return torch.nn.LeakyReLU()
+    elif epilogue == "hardtanh":
+        return torch.nn.Hardtanh()
+    elif epilogue == "add":
+        return lambda x: x + other
+    elif epilogue == "sub":
+        return lambda x: x - other
+    elif epilogue == "mul":
+        return lambda x: x * other
+    elif epilogue == "div":
+        return lambda x: x / other
+
+
 class TestSelectAlgorithm(TestCase):
     common = check_model
 
@@ -97,13 +143,7 @@ class TestSelectAlgorithm(TestCase):
         mod = M(bias=bias).to(dtype=dtype).eval()
         B = (2, batch_size) if input_3d else (batch_size,)
         v = torch.randn(*B, in_features).to(dtype=dtype)
-        # For bfloat16 and half, we have to relax the tolerance
-        # due to the difference associave orders in different
-        # kernel implementations
-        atol, rtol = 1e-4, 1e-4
-        if dtype == torch.half or dtype == torch.bfloat16:
-            atol, rtol = 1e-2, 1e-2
-        with patch.object(select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)):
+        with verify(dtype) as (atol, rtol):
             self.common(mod, (v,), atol=atol, rtol=rtol)
         if (
             counters["inductor"]["decompose_mm"] > 0
@@ -164,7 +204,7 @@ class TestSelectAlgorithm(TestCase):
             "div",
         ),
     )
-    @dtypes(torch.float)
+    @dtypes(torch.float, torch.bfloat16, torch.half)
     def test_linear_with_pointwise(self, bias, epilogue, dtype):
         batch_size = 384
         in_features = 196
@@ -174,32 +214,7 @@ class TestSelectAlgorithm(TestCase):
             def __init__(self, bias, epilogue, other):
                 super().__init__()
                 self.linear = torch.nn.Linear(in_features, out_features, bias)
-                if epilogue == "relu":
-                    self.epilogue = torch.nn.ReLU()
-                elif epilogue == "gelu":
-                    self.epilogue = torch.nn.GELU()
-                elif epilogue == "silu":
-                    self.epilogue = torch.nn.SiLU()
-                elif epilogue == "sigmoid":
-                    self.epilogue = torch.nn.Sigmoid()
-                elif epilogue == "tanh":
-                    self.epilogue = torch.nn.Tanh()
-                elif epilogue == "hardswish":
-                    self.epilogue = torch.nn.Hardswish()
-                elif epilogue == "hardsigmoid":
-                    self.epilogue = torch.nn.Hardsigmoid()
-                elif epilogue == "leaky_relu":
-                    self.epilogue = torch.nn.LeakyReLU()
-                elif epilogue == "hardtanh":
-                    self.epilogue = torch.nn.Hardtanh()
-                elif epilogue == "add":
-                    self.epilogue = lambda x: x + other
-                elif epilogue == "sub":
-                    self.epilogue = lambda x: x - other
-                elif epilogue == "mul":
-                    self.epilogue = lambda x: x * other
-                elif epilogue == "div":
-                    self.epilogue = lambda x: x / other
+                self.epilogue = _get_epilogue(epilogue, other)
 
             def forward(self, x):
                 return self.epilogue(self.linear(x))
@@ -208,7 +223,69 @@ class TestSelectAlgorithm(TestCase):
         v = torch.randn(batch_size, in_features).to(dtype=dtype)
         u = torch.randn(batch_size, out_features).to(dtype=dtype)
         mod = M(bias=bias, epilogue=epilogue, other=u).to(dtype=dtype).eval()
-        self.common(mod, (v,))
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        if (
+            (
+                dtype == torch.bfloat16
+                or (
+                    dtype == torch.float16
+                    and torch.ops.mkldnn._is_mkldnn_fp16_supported()
+                )
+            )
+            and epilogue != "mul"
+            and epilogue != "div"
+            or (dtype == torch.half and epilogue == "add" and not bias)
+        ):
+            # Several scenarios where epilogue fusion is not counted in:
+            # 1. For bfloat16, the epilogue fusion is part of the template,
+            #    not fused via scheduler. This will also be true for float16 when
+            #    hardware has the float16 instruction. The exception is mul or
+            #    div fusion which is not supported for oneDNN linear.
+            # 2. For float16, since oneDNN linear is not applied, linear w/o bias
+            #    plus epilogue add is treated as linear w/ bias.
+            self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 0)
+        else:
+            self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("bias", (True, False))
+    @parametrize(
+        "epilogue",
+        (
+            "none",
+            "relu",
+            "add",
+            "sub",
+            "mul",
+        ),
+    )
+    @dtypes(torch.float, torch.bfloat16, torch.half)
+    def test_linear_with_transpose(self, bias, epilogue, dtype):
+        batch_size = 384
+        in_features = 196
+        out_features = 128
+
+        class M(torch.nn.Module):
+            def __init__(self, bias, epilogue, other):
+                super().__init__()
+                self.epilogue = _get_epilogue(epilogue, other)
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+
+            def forward(self, x, y):
+                return self.epilogue(self.linear(x)).transpose(0, 1) + y
+
+        counters.clear()
+        v = torch.randn(batch_size, in_features).to(dtype=dtype)
+        u = torch.randn(out_features, batch_size).to(dtype=dtype)
+        other = torch.randn(batch_size, out_features).to(dtype=dtype)
+        mod = M(bias=bias, epilogue=epilogue, other=other).to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (v, u), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
 
@@ -217,25 +294,100 @@ class TestSelectAlgorithm(TestCase):
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @parametrize("bias", (True, False))
-    @dtypes(torch.float)
-    def test_linear_with_transpose(self, bias, dtype):
+    @parametrize(
+        "unary",
+        ("relu",),
+    )
+    @parametrize(
+        "binary",
+        (
+            "add",
+            "sub",
+            "mul",
+            "div",
+        ),
+    )
+    @dtypes(torch.float, torch.bfloat16, torch.half)
+    def test_linear_with_unary_binary(self, bias, unary, binary, dtype):
         batch_size = 384
         in_features = 196
-        out_features = 128
+        out_features = 384
+
+        class M(torch.nn.Module):
+            def __init__(self, bias, unary, binary, other):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+                self.unary = _get_epilogue(unary)
+                self.binary = _get_epilogue(binary, other)
+
+            def forward(self, x):
+                return self.binary(self.unary(self.linear(x)))
+
+        counters.clear()
+        v = torch.randn(batch_size, in_features).to(dtype=dtype)
+        u = torch.randn(batch_size, out_features).to(dtype=dtype)
+        mod = M(bias=bias, unary=unary, binary=binary, other=u).to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @parametrize("bias", (True, False))
+    def test_linear_amx(self, bias):
+        batch_size = 1024
+        in_features = 1024
+        out_features = 1024
+        dtype = torch.bfloat16
 
         class M(torch.nn.Module):
             def __init__(self, bias):
                 super().__init__()
                 self.linear = torch.nn.Linear(in_features, out_features, bias)
 
-            def forward(self, x, y):
-                return self.linear(x).transpose(0, 1) + y
+            def forward(self, x):
+                return self.linear(x)
 
         counters.clear()
-        mod = M(bias=bias).to(dtype=dtype).eval()
         v = torch.randn(batch_size, in_features).to(dtype=dtype)
-        u = torch.randn(out_features, batch_size).to(dtype=dtype)
-        self.common(mod, (v, u))
+        mod = M(bias=bias).to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        vec_amx = VecAMX()
+        if vec_amx:
+            self.assertTrue(counters["inductor"]["cpp_micro_gemm_amx_counter"] > 0)
+        else:
+            self.assertEqual(counters["inductor"]["cpp_micro_gemm_amx_counter"], 0)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @parametrize("bias", (True, False))
+    def test_linear_with_embedding(self, bias):
+        batch_size = 384
+        in_features = 196
+        out_features = 384
+        dtype = torch.bfloat16
+
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features, bias).to(
+                    dtype=dtype
+                )
+                self.emb = torch.nn.Embedding(64, out_features)
+
+            def forward(self, idx, x):
+                return self.emb(idx) + self.linear(x)
+
+        idx = torch.randint(0, 64, (batch_size,))
+        x = torch.randn(batch_size, in_features).to(dtype=dtype)
+        mod = M(bias=bias).eval()
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (idx, x), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
 
@@ -253,6 +405,13 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
     )
     test_linear_with_transpose_dynamic_shapes = (
         TestSelectAlgorithm.test_linear_with_transpose
+    )
+    test_linear_with_unary_binary_dynamic_shapes = (
+        TestSelectAlgorithm.test_linear_with_unary_binary
+    )
+    test_linear_amx_dynamic_shapes = TestSelectAlgorithm.test_linear_amx
+    test_linear_with_embedding_dynamic_shapes = (
+        TestSelectAlgorithm.test_linear_with_embedding
     )
 
 

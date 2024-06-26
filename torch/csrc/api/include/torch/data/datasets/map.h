@@ -71,7 +71,7 @@ class MapDataset : public BatchDataset<
   /// applies the transform to the output of `get_batch()` from the dataset.
   template <
       typename D = SourceDataset,
-      typename = torch::disable_if_t<D::is_stateful>>
+      typename = std::enable_if_t<!D::is_stateful>>
   OutputBatchType get_batch_impl(BatchRequestType indices) {
     return transform_.apply_batch(dataset_.get_batch(std::move(indices)));
   }
@@ -82,7 +82,7 @@ class MapDataset : public BatchDataset<
   /// contains a value, and returns a new optional (of a different type)  if the
   /// original optional returned by `get_batch()` was empty.
   template <typename D = SourceDataset>
-  torch::enable_if_t<D::is_stateful, OutputBatchType> get_batch_impl(
+  std::enable_if_t<D::is_stateful, OutputBatchType> get_batch_impl(
       BatchRequestType indices) {
     if (auto batch = dataset_.get_batch(std::move(indices))) {
       return transform_.apply_batch(std::move(*batch));
