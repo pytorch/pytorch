@@ -3459,6 +3459,10 @@ class NCCLTraceTestBase(MultiProcessTestCase):
         return torch.device("cuda", self.rank_to_GPU[self.rank][0])
 
     def _join_processes(self, fn):
+        # We need to patch sys.exit() as skip_if will use sys.exit() and
+        # the exit code from the this process will not be catched.
+        with mock.patch("sys.exit") as exit_mock:
+            fn()
         super()._join_processes(fn)
 
     def _spawn_processes(self) -> None:
