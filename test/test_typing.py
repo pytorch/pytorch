@@ -5,7 +5,6 @@ import itertools
 import os
 import re
 import shutil
-
 import unittest
 from collections import defaultdict
 from threading import Lock
@@ -17,6 +16,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
 )
+
 
 try:
     from mypy import api
@@ -30,7 +30,7 @@ DATA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "typing"))
 REVEAL_DIR = os.path.join(DATA_DIR, "reveal")
 PASS_DIR = os.path.join(DATA_DIR, "pass")
 FAIL_DIR = os.path.join(DATA_DIR, "fail")
-MYPY_INI = os.path.join(DATA_DIR, os.pardir, os.pardir, "mypy.ini")
+MYPY_INI = os.path.join(os.path.dirname(os.path.dirname(DATA_DIR)), "mypy.ini")
 CACHE_DIR = os.path.join(DATA_DIR, ".mypy_cache")
 
 
