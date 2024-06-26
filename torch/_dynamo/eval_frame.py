@@ -906,6 +906,7 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
 
     def output(self, target, args, kwargs):
         dynamo_result_flat = args[0]
+        print(args)
         lookup = [*dynamo_result_flat, *self.new_args]
         new_results_flat = []
         for i in range(len(self.flat_results)):
@@ -1064,28 +1065,25 @@ def rewrite_signature(
 
         return matched_elements_positions
 
-    if graph_captured_input is not None and graph_captured_output is not None:
-        matched_input_elements_positions = produce_matching(
-            "inputs", flat_args, graph_captured_input
-        )
+    matched_input_elements_positions = produce_matching(
+        "inputs", flat_args, graph_captured_input
+    )
 
-        assert graph_captured_output is not None
-        matched_output_elements_positions = produce_matching(
-            "outputs", list(graph_captured_output) + flat_args, flat_results_traced
-        )
+    assert graph_captured_output is not None
+    matched_output_elements_positions = produce_matching(
+        "outputs", list(graph_captured_output) + flat_args, flat_results_traced
+    )
 
-        new_graph = FlattenInputOutputSignature(
-            graph,
-            flat_args,
-            matched_input_elements_positions,
-            flat_results_traced,
-            matched_output_elements_positions,
-            example_fake_inputs,
-            flat_args_dynamic_dims,
-            fake_mode,
-        ).transform()
-    else:
-        new_graph = graph
+    new_graph = FlattenInputOutputSignature(
+        graph,
+        flat_args,
+        matched_input_elements_positions,
+        flat_results_traced,
+        matched_output_elements_positions,
+        example_fake_inputs,
+        flat_args_dynamic_dims,
+        fake_mode,
+    ).transform()
 
     # Make dynamo graph to have same input/output spec as user code
     def argument_names(f_sig, args, kwargs) -> List[str]:
@@ -1435,6 +1433,9 @@ def export(
             raise constraint_violation_error
 
         if graph is None:
+            graph_captured_input = []
+            example_inputs = []
+            graph_captured_result = [] #result_traced
             fake_mode = torch._subclasses.FakeTensorMode(
                 shape_env=ShapeEnv(), export=True
             )
@@ -1443,15 +1444,19 @@ def export(
             assert out_guards is not None  # suppress mypy error
             parameter_names = list(original_signature.parameters.keys())
             fx_graph = torch.fx.Graph()
+            # non-tensor inputs and outputs will be added when rewriting signature
             for i, name in enumerate(parameter_names):
-                node = fx_graph.placeholder(name)
                 if torch.is_tensor(flat_args[i]):
+                    node = fx_graph.placeholder(name)
                     node.meta["val"] = fake_mode.from_tensor(
                         flat_args[i], static_shapes=True
                     )
-                else:
-                    node.meta["val"] = flat_args[i]
-            fx_graph.output(result_traced)
+                    graph_captured_input.append(flat_args[i])
+                    example_inputs.append(flat_args[i])
+            for r in pytree.tree_flatten(result_traced)[0]:
+                if torch.is_tensor(r):
+                    graph_captured_result.append(r)
+            fx_graph.output(graph_captured_result)
             module = torch.nn.Module()
             graph = torch.fx.GraphModule(module, fx_graph)
             log.info(
