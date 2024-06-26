@@ -11,6 +11,7 @@ from torch import Tensor
 from torch._dynamo.utils import counters
 from torch._inductor import utils
 from torch._inductor.autoheuristic import AHContext, AutoHeuristic, LocalFeedback
+from torch._inductor.autoheuristic_utils import pad_mm_operations
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._mode_utils import no_dispatch
 
@@ -500,6 +501,8 @@ def should_pad_bench(
                 k_padded_length,
                 n_padded_length,
                 do_bench,
+                mat1_pre_padded,
+                mat2_pre_padded,
             )
             if ori_time is None and ah_ori_time is not None:
                 ori_time = ah_ori_time
@@ -533,6 +536,52 @@ def should_pad_bench(
         return should_pad
 
 
+def get_context(
+    mat1,
+    mat2,
+    mat1_pre_padded,
+    mat2_pre_padded,
+    m_padded_length,
+    k_padded_length,
+    n_padded_length,
+):
+    context = AHContext()
+
+    context.add_feature("m", mat1.shape[0])
+    context.add_feature("k", mat1.shape[1])
+    context.add_feature("n", mat2.shape[1])
+
+    mat1_strides = mat1.stride()
+    mat2_strides = mat2.stride()
+    context.add_feature("mat1_stride_0", mat1_strides[0])
+    context.add_feature("mat1_stride_1", mat1_strides[1])
+    context.add_feature("mat2_stride_0", mat2_strides[0])
+    context.add_feature("mat2_stride_1", mat2_strides[1])
+
+    context.add_feature("m_padded_length", m_padded_length)
+    context.add_feature("k_padded_length", k_padded_length)
+    context.add_feature("n_padded_length", n_padded_length)
+
+    context.add_feature("mat1_iscontig", mat1.is_contiguous(), is_categorical=True)
+    context.add_feature("mat2_iscontig", mat2.is_contiguous(), is_categorical=True)
+
+    context.add_feature("mat1_align_size", get_alignment_size(mat1))
+    context.add_feature("mat2_align_size", get_alignment_size(mat2))
+
+    context.add_feature("mat1_dtype", mat1.dtype, is_categorical=True)
+    context.add_feature("mat2_dtype", mat2.dtype, is_categorical=True)
+
+    context.add_feature("prepadded_mat1", mat1_pre_padded, is_categorical=True)
+    context.add_feature("prepadded_mat2", mat2_pre_padded, is_categorical=True)
+
+    using_tf32 = "not_float_32"
+    if mat1.dtype == torch.float32:
+        using_tf32 = torch.backends.cuda.matmul.allow_tf32
+    context.add_feature("using_tf32", using_tf32, is_categorical=True)
+
+    return context
+
+
 def run_autoheuristic(
     mat1,
     mat2,
@@ -542,33 +591,9 @@ def run_autoheuristic(
     k_padded_length,
     n_padded_length,
     do_bench,
+    mat1_pre_padded,
+    mat2_pre_padded,
 ):
-    def get_context(mat1, mat2):
-        context = AHContext()
-
-        context.add_feature("m", mat1.shape[0])
-        context.add_feature("k", mat1.shape[1])
-        context.add_feature("n", mat2.shape[1])
-
-        mat1_strides = mat1.stride()
-        mat2_strides = mat2.stride()
-        context.add_feature("mat1_stride_0", mat1_strides[0])
-        context.add_feature("mat1_stride_1", mat1_strides[1])
-        context.add_feature("mat2_stride_0", mat2_strides[0])
-        context.add_feature("mat2_stride_1", mat2_strides[1])
-
-        context.add_feature("m_padded_length", m_padded_length)
-        context.add_feature("k_padded_length", k_padded_length)
-        context.add_feature("n_padded_length", n_padded_length)
-
-        context.add_feature("mat1_iscontig", mat1.is_contiguous(), is_categorical=True)
-        context.add_feature("mat2_iscontig", mat2.is_contiguous(), is_categorical=True)
-
-        context.add_feature("mat1_align_size", get_alignment_size(mat1))
-        context.add_feature("mat2_align_size", get_alignment_size(mat2))
-
-        return context
-
     def feedback_fn(choice):
         if choice == orig_choice:
             return do_bench(orig_bench_fn)
@@ -583,7 +608,15 @@ def run_autoheuristic(
     pad_choice = "pad"
     choices = [orig_choice, pad_choice]
     feedback = LocalFeedback(feedback_fn)
-    context = get_context(mat1, mat2)
+    context = get_context(
+        mat1,
+        mat2,
+        mat1_pre_padded,
+        mat2_pre_padded,
+        m_padded_length,
+        k_padded_length,
+        n_padded_length,
+    )
     name = "pad_mm"
     autoheuristic = AutoHeuristic(
         fallback=fallback,
@@ -591,6 +624,7 @@ def run_autoheuristic(
         feedback=feedback,
         context=context,
         name=name,
+        augment_context=pad_mm_operations(),
     )
     choice = autoheuristic.get_choice()
     choice2should_pad = {orig_choice: False, pad_choice: True, "autotune": None}

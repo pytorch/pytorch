@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import os
+import unittest
 
 import torch
 
@@ -8,7 +9,17 @@ import torch._inductor.config as inductor_config
 from torch._inductor.autoheuristic import AHContext, AutoHeuristic, LocalFeedback
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.utils import get_gpu_shared_memory
+from torch.testing._internal.common_utils import LazyVal
 from torch.testing._internal.inductor_utils import HAS_CUDA
+
+is_A100 = LazyVal(
+    lambda: torch.cuda.is_available() and get_gpu_shared_memory() == 166912
+)
+
+is_H100 = LazyVal(
+    lambda: torch.cuda.is_available() and get_gpu_shared_memory() == 232448
+)
 
 
 class AutoHeuristicTest(TestCase):
@@ -89,15 +100,35 @@ class AutoHeuristicTest(TestCase):
         num_lines = self.count_lines_in_file(path)
         self.assertEqual(num_lines, 5)
 
+        shared_memory = get_gpu_shared_memory()
+        (fst, snd) = torch.cuda.get_device_capability()
+
         with open(path) as file:
             lines = file.readlines()
             self.assertTrue('"numerical_features": ["fa"]' in lines[0])
             self.assertTrue('"categorical_features": []' in lines[0])
             self.assertTrue('"choices": ["a", "b", "c"]' in lines[0])
+            self.assertTrue(f'"shared_memory": {shared_memory}' in lines[0])
+            self.assertTrue(f'"device_capa": [{fst}, {snd}]' in lines[0])
+            self.assertTrue('"name": "test"' in lines[0])
             self.assertEqual("fa,choice,feedback", lines[1].rstrip())
             self.assertEqual("5,a,1", lines[2].rstrip())
             self.assertEqual("5,b,2", lines[3].rstrip())
             self.assertEqual("5,c,3", lines[4].rstrip())
+
+    @unittest.skipIf(not is_A100, "heuristic only run on A100")
+    @inductor_config.patch(autoheuristic_mode="USE_HEURISTIC")
+    def test_autoheuristic_a100(self):
+        # Make sure heuristic does not break anything
+        # TODO (AlnisM): Find a way to check whether heuristic is used
+        self.run_mm()
+
+    @unittest.skipIf(not is_H100, "heuristic only run on H100")
+    @inductor_config.patch(autoheuristic_mode="USE_HEURISTIC")
+    def test_autoheuristic_h100(self):
+        # Make sure heuristic does not break anything
+        # TODO (AlnisM): Find a way to check whether heuristic is used
+        self.run_mm()
 
 
 if __name__ == "__main__":
