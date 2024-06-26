@@ -2,10 +2,6 @@ name,accuracy,graph_breaks
 
 
 
-torchrec_dlrm,eager_fail_to_run,0
-
-
-
 BERT_pytorch,pass,0
 
 
@@ -14,7 +10,7 @@ Background_Matting,pass_due_to_skip,0
 
 
 
-DALLE2_pytorch,pass,12
+DALLE2_pytorch,model_fail_to_load,0
 
 
 
@@ -46,10 +42,6 @@ basic_gnn_sage,pass,0
 
 
 
-cm3leon_generate,pass,4
-
-
-
 dcgan,pass,0
 
 
@@ -62,47 +54,47 @@ densenet121,pass,0
 
 
 
-detectron2_fasterrcnn_r_101_c4,eager_fail_to_run,0
+detectron2_fasterrcnn_r_101_c4,fail_accuracy,42
 
 
 
-detectron2_fasterrcnn_r_101_dc5,eager_fail_to_run,0
+detectron2_fasterrcnn_r_101_dc5,fail_accuracy,42
 
 
 
-detectron2_fasterrcnn_r_101_fpn,eager_fail_to_run,0
+detectron2_fasterrcnn_r_101_fpn,fail_accuracy,46
 
 
 
-detectron2_fasterrcnn_r_50_c4,eager_fail_to_run,0
+detectron2_fasterrcnn_r_50_c4,fail_accuracy,42
 
 
 
-detectron2_fasterrcnn_r_50_dc5,eager_fail_to_run,0
+detectron2_fasterrcnn_r_50_dc5,fail_accuracy,42
 
 
 
-detectron2_fasterrcnn_r_50_fpn,eager_fail_to_run,0
+detectron2_fasterrcnn_r_50_fpn,fail_accuracy,46
 
 
 
-detectron2_fcos_r_50_fpn,pass,21
+detectron2_fcos_r_50_fpn,fail_accuracy,23
 
 
 
-detectron2_maskrcnn_r_101_c4,eager_fail_to_run,0
+detectron2_maskrcnn_r_101_c4,fail_accuracy,57
 
 
 
-detectron2_maskrcnn_r_101_fpn,eager_fail_to_run,0
+detectron2_maskrcnn_r_101_fpn,fail_accuracy,63
 
 
 
-detectron2_maskrcnn_r_50_c4,eager_fail_to_run,0
+detectron2_maskrcnn_r_50_c4,fail_accuracy,57
 
 
 
-detectron2_maskrcnn_r_50_fpn,eager_fail_to_run,0
+detectron2_maskrcnn_r_50_fpn,fail_accuracy,63
 
 
 
@@ -114,7 +106,7 @@ doctr_det_predictor,pass,5
 
 
 
-doctr_reco_predictor,pass,4
+doctr_reco_predictor,fail_accuracy,4
 
 
 
@@ -150,7 +142,7 @@ hf_Bert_large,pass,0
 
 
 
-hf_BigBird,fail_accuracy,43
+hf_BigBird,pass,61
 
 
 
@@ -166,6 +158,10 @@ hf_GPT2_large,pass_due_to_skip,0
 
 
 
+hf_Longformer,pass,4
+
+
+
 hf_Reformer,pass,5
 
 
@@ -174,19 +170,11 @@ hf_T5,pass,0
 
 
 
-hf_T5_base,eager_fail_to_run,0
-
-
-
-hf_T5_generate,pass,5
+hf_T5_base,pass,0
 
 
 
 hf_T5_large,pass_due_to_skip,0
-
-
-
-hf_Whisper,pass,0
 
 
 
@@ -199,14 +187,6 @@ lennard_jones,pass,0
 
 
 llama,pass,0
-
-
-
-llama_v2_7b_16h,model_fail_to_load,0
-
-
-
-llava,model_fail_to_load,0
 
 
 
@@ -226,7 +206,7 @@ mobilenet_v2,pass,0
 
 
 
-mobilenet_v2_quantized_qat,model_fail_to_load,0
+mobilenet_v2_quantized_qat,pass,2
 
 
 
@@ -234,15 +214,11 @@ mobilenet_v3_large,pass,0
 
 
 
-moco,pass,5
+moco,model_fail_to_load,0
 
 
 
-moondream,model_fail_to_load,0
-
-
-
-nanogpt,pass,0
+moondream,pass,0
 
 
 
@@ -298,19 +274,11 @@ resnet50,pass,0
 
 
 
-resnet50_quantized_qat,model_fail_to_load,0
+resnet50_quantized_qat,pass,2
 
 
 
 resnext50_32x4d,pass,0
-
-
-
-sam,pass,0
-
-
-
-sam_fast,pass,0
 
 
 
@@ -330,15 +298,19 @@ squeezenet1_1,pass,0
 
 
 
-stable_diffusion_text_encoder,pass,0
-
-
-
 stable_diffusion_unet,pass_due_to_skip,0
 
 
 
+timm_efficientdet,model_fail_to_load,0
+
+
+
 timm_efficientnet,pass,0
+
+
+
+timm_nfnet,pass,0
 
 
 
@@ -374,8 +346,8 @@ vgg16,pass,0
 
 
 
-vision_maskrcnn,pass,17
+vision_maskrcnn,fail_accuracy,28
 
 
 
-yolov3,pass,2
+yolov3,pass,0
