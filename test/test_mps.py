@@ -1259,7 +1259,7 @@ class TestMemoryLeak(TestCaseMPS):
         step(a)
         torch.mps.empty_cache()
         driver_after = torch.mps.driver_allocated_memory()
-        self.assertEqual(driver_before,  driver_after, f"Detected {driver_after-driver_before} bytes leak of GPU memory")
+        self.assertEqual(driver_before, driver_after, f"Detected {driver_after-driver_before} bytes leak of GPU memory")
 
 
 class TestPixelShuffle(TestCaseMPS):
@@ -7838,7 +7838,7 @@ class TestMPS(TestCaseMPS):
         current_alloc_before = torch.mps.current_allocated_memory()
         # after garbage collection and emptying the cache the
         # current_allocated_memory must be zero
-        self.assertEqual(current_alloc_before,  0)
+        self.assertEqual(current_alloc_before, 0)
         # measure total memory allocations from Metal driver
         driver_alloc_before = torch.mps.driver_allocated_memory()
         # allocate a new 8 MB tensor to force allocation of a new Metal Heap
@@ -7854,7 +7854,7 @@ class TestMPS(TestCaseMPS):
     def test_mps_allocator_stats(self):
         max_memory = torch.mps.recommended_max_memory()
         print(f"Recommended Max Memory : {max_memory/ 1024 ** 3} GB")
-        self.assertGreater(max_memory,  0)
+        self.assertGreater(max_memory, 0)
 
     # to verify this test, run XCode Instruments "Metal System Trace" or "Logging" tool,
     # press record, then run this python test, and press stop. Next expand
