@@ -1336,18 +1336,11 @@ cdll.LoadLibrary("__lib_path__")
     def __hash__(self) -> int:
         return hash(str(self))
 
-    @functools.lru_cache(None)  # noqa: B019
-    def __bool__(self) -> bool:
+    def check_build(self, code) -> bool:
         from torch._inductor.cpp_builder import CppBuilder, CppTorchOptions
 
-        if config.cpp.vec_isa_ok is not None:
-            return config.cpp.vec_isa_ok
-
-        if config.is_fbcode():
-            return True
-
         key, input_path = write(
-            VecISA._avx_code,
+            code,
             "cpp",
             extra=_get_isa_dry_compile_fingerprint(self._arch_flags),
         )
@@ -1385,6 +1378,16 @@ cdll.LoadLibrary("__lib_path__")
 
             return True
 
+    @functools.lru_cache(None)  # noqa: B019
+    def __bool__(self) -> bool:
+        if config.cpp.vec_isa_ok is not None:
+            return config.cpp.vec_isa_ok
+
+        if config.is_fbcode():
+            return True
+
+        return self.check_build(VecISA._avx_code)
+
 
 @dataclasses.dataclass
 class VecNEON(VecISA):
@@ -1416,6 +1419,46 @@ class VecAVX512(VecISA):
         return "avx512"
 
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+
+
+@dataclasses.dataclass
+class VecAMX(VecAVX512):
+    _arch_flags = VecAVX512._arch_flags + " -mamx-tile -mamx-bf16 -mamx-int8"
+
+    def __str__(self) -> str:
+        return super().__str__() + " amx_tile"
+
+    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+
+    _amx_code = """
+#include <cstdint>
+#include <immintrin.h>
+
+struct amx_tilecfg {
+  uint8_t palette_id;
+  uint8_t start_row;
+  uint8_t reserved_0[14];
+  uint16_t colsb[16];
+  uint8_t rows[16];
+};
+
+extern "C" void __amx_chk_kernel() {
+  amx_tilecfg cfg = {0};
+  _tile_loadconfig(&cfg);
+  _tile_zero(0);
+  _tile_dpbf16ps(0, 1, 2);
+  _tile_dpbusd(0, 1, 2);
+}
+"""
+
+    @functools.lru_cache(None)  # noqa: B019
+    def __bool__(self) -> bool:
+        if super().__bool__():
+            if config.is_fbcode():
+                return False
+            if self.check_build(VecAMX._amx_code) and torch.cpu._init_amx():
+                return True
+        return False
 
 
 @dataclasses.dataclass
@@ -1483,15 +1526,17 @@ def x86_isa_checker() -> List[str]:
 
     avx2 = torch.cpu._is_cpu_support_avx2()
     avx512 = torch.cpu._is_cpu_support_avx512()
+    amx_tile = torch.cpu._is_cpu_support_amx_tile()
 
     _check_and_append_supported_isa(supported_isa, avx2, "avx2")
     _check_and_append_supported_isa(supported_isa, avx512, "avx512")
+    _check_and_append_supported_isa(supported_isa, amx_tile, "amx_tile")
 
     return supported_isa
 
 
 invalid_vec_isa = InvalidVecISA()
-supported_vec_isa_list = [VecAVX512(), VecAVX2(), VecNEON()]
+supported_vec_isa_list = [VecAMX(), VecAVX512(), VecAVX2(), VecNEON()]
 
 
 # Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
@@ -1528,7 +1573,7 @@ def valid_vec_isa_list() -> List[VecISA]:
         """
         _cpu_supported_x86_isa = x86_isa_checker()
         for isa in supported_vec_isa_list:
-            if str(isa) in _cpu_supported_x86_isa and isa:
+            if all(flag in _cpu_supported_x86_isa for flag in str(isa).split()) and isa:
                 isa_list.append(isa)
 
     return isa_list
