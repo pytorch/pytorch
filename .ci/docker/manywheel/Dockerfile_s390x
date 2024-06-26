@@ -39,11 +39,11 @@ RUN yum install -y \
   cargo \
   llvm-devel \
   libzstd-devel \
-  python3-devel \
-  python3-setuptools \
-  python3-pip \
+  python3.12-devel \
+  python3.12-setuptools \
+  python3.12-pip \
   python3-virtualenv \
-  python3-pyyaml \
+  python3.12-pyyaml \
   blas-devel \
   openblas-devel \
   lapack-devel \
@@ -89,6 +89,9 @@ COPY --from=python             /opt/python                           /opt/python
 COPY --from=python             /opt/_internal                        /opt/_internal
 COPY --from=python             /opt/python/cp39-cp39/bin/auditwheel  /usr/local/bin/auditwheel
 COPY --from=patchelf           /usr/local/bin/patchelf               /usr/local/bin/patchelf
+
+RUN alternatives --set python /usr/bin/python3.12
+RUN alternatives --set python3 /usr/bin/python3.12
 
 ENTRYPOINT []
 CMD ["/bin/bash"]
