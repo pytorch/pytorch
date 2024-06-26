@@ -994,6 +994,7 @@ class TestBinaryUfuncs(TestCase):
         num = torch.tensor(
             [1.0, -1.0, 0, 0.1, -0.1, np.pi, -np.pi, np.inf, -np.inf, np.nan],
             dtype=dtype,
+            device=device,
         )
         # Divide by zero is tested separately
         denom = num[num != 0]
