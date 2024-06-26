@@ -1800,7 +1800,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
     def test_parameterlistdict_pickle(self):
         # warning from torch.load call in _load_from_bytes used in UntypedStorage.__reduce__
-        WEIGHTS_ONLY_WARN = re.escape("You are using `torch.load` with `weights_only=False`")
+        WEIGHTS_ONLY_WARN = "You are using `torch.load` with `weights_only=False`"
         m = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
         with self.assertWarnsRegex(FutureWarning, WEIGHTS_ONLY_WARN):
             m = pickle.loads(pickle.dumps(m))
