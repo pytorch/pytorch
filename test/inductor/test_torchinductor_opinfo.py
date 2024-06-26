@@ -439,12 +439,9 @@ inductor_one_sample = {
     "nn.functional.gaussian_nll_loss": {f16},
     "nn.functional.grid_sample": {f32, f64},
     "nn.functional.interpolate.area": {f16},
-    "nn.functional.max_pool2d": {f16, f32, f64, i32, i64},
     "nn.functional.nll_loss": {f16, f32, f64},
     "normal": {f16, f32, f64},
     "put": {f16, f32, f64},
-    "rot90": {b8, f16, f32, f64, i32, i64},
-    "scatter": {b8, i64},
     "take": {b8, f16, f32, f64, i32, i64},
     ("__rdiv__", "cuda"): {f16},
     ("__rmod__", "cuda"): {f16, i64},
@@ -491,6 +488,9 @@ inductor_one_sample = {
     ("nn.functional.grid_sample", "cuda"): {f16},
     ("nn.functional.group_norm", "cuda"): {f16},
     ("nn.functional.hinge_embedding_loss", "cuda"): {f16},
+    # Enabling all tests for this test fails randomly
+    # See https://github.com/pytorch/pytorch/issues/129238
+    ("nn.functional.huber_loss", "cuda"): {f16},
     ("nn.functional.interpolate.bicubic", "cuda"): {f16},
     ("nn.functional.interpolate.bilinear", "cuda"): {f16},
     ("nn.functional.interpolate.trilinear", "cuda"): {f16},

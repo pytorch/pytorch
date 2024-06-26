@@ -316,6 +316,38 @@ class TestTransformers(NNTestCase):
         with torch.no_grad():
             model(src, src_mask=src_mask)
 
+    @parametrize("nhead", [3, 4])
+    def test_transformerencoderlayer_no_fastpath_with_hooks(self, device, nhead):
+        batch_size = 2
+        seqlen = 4
+        d_model = 12
+
+        model = torch.nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=nhead,
+            dim_feedforward=d_model,
+            batch_first=True).to(device).eval()
+        src = torch.rand(batch_size, seqlen, d_model).to(device)  # bs, seqlen, d_model
+
+        cache = []
+
+        # forward hook to save output
+        def hook(module, inputs, output):
+            cache.append(output[0].detach())
+
+        # register hook to get the output of the self-attention layer
+        handle = model.self_attn.register_forward_hook(hook)
+
+        # forward pass
+        with torch.inference_mode():
+            model(src)
+
+        # output of the self-attention layer
+        assert len(cache) == 1, f"Expected 1 output, got {len(cache)}"
+
+        # remove hook
+        handle.remove()
+
     @parametrize("use_torchscript", [False])
     @parametrize("enable_nested_tensor", [True, False])
     @parametrize("use_autocast", [True, False])

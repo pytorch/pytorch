@@ -275,7 +275,9 @@ def register_package(
 
 
 def check_module_version_greater_or_equal(
-    module, req_version_tuple, error_if_malformed=True
+    module,
+    req_version_tuple,
+    error_if_malformed=True,
 ):
     """
     Check if a module's version satisfies requirements
@@ -426,7 +428,9 @@ def _deserialize(backend_name, obj, location):
 
 register_package(10, _cpu_tag, _cpu_deserialize)
 register_package(
-    20, functools.partial(_backend_tag, "cuda"), functools.partial(_deserialize, "cuda")
+    20,
+    functools.partial(_backend_tag, "cuda"),
+    functools.partial(_deserialize, "cuda"),
 )
 register_package(21, _mps_tag, _mps_deserialize)
 register_package(22, _meta_tag, _meta_deserialize)
@@ -436,15 +440,19 @@ register_package(
     functools.partial(_deserialize, "privateuse1"),
 )
 register_package(
-    24, functools.partial(_backend_tag, "hpu"), functools.partial(_deserialize, "hpu")
+    24,
+    functools.partial(_backend_tag, "hpu"),
+    functools.partial(_deserialize, "hpu"),
 )
 register_package(
-    25, functools.partial(_backend_tag, "xpu"), functools.partial(_deserialize, "xpu")
+    25,
+    functools.partial(_backend_tag, "xpu"),
+    functools.partial(_deserialize, "xpu"),
 )
 
 
 def location_tag(
-    storage: Union[Storage, torch.storage.TypedStorage, torch.UntypedStorage]
+    storage: Union[Storage, torch.storage.TypedStorage, torch.UntypedStorage],
 ):
     for _, tagger, _ in _package_registry:
         location = tagger(storage)
@@ -1123,6 +1131,7 @@ def load(
                     "`weights_only=True` for any use case where you don't have full control of the loaded file. "
                     "Please open an issue on GitHub for any issues related to this experimental feature.",
                     FutureWarning,
+                    stacklevel=2,
                 )
             pickle_module = pickle
 

@@ -1588,8 +1588,8 @@ class CPUReproTests(TestCase):
     )
     @patch("torch.cuda.is_available", lambda: False)
     def test_auto_simd(self):
-        vec_avx512 = codecache.supported_vec_isa_list[0]
-        vec_avx2 = codecache.supported_vec_isa_list[1]
+        vec_avx512 = codecache.supported_vec_isa_list[1]
+        vec_avx2 = codecache.supported_vec_isa_list[2]
         self.assertTrue(vec_avx512.bit_width() == 512)
         self.assertTrue(vec_avx2.bit_width() == 256)
         self.assertTrue(vec_avx512.nelements() == 16)
