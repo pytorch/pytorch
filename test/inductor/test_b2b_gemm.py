@@ -18,7 +18,7 @@ class B2BGEMMTest(TestCase):
         B = torch.randn((32, 256), device="cuda", dtype=torch.float16)
         C = torch.randn((256, 32), device="cuda", dtype=torch.float16)
         res, (code,) = run_and_get_code(f_opt, A, B, C)
-        self.assertTrue(torch.allclose(f(A, B, C), res, atol=0.3, rtol=0.01))
+        self.assertTrue(torch.allclose(f(A, B, C), res, atol=0.2, rtol=0.01))
         self.assertTrue("B2B_GEMM_TRITON_ENTRANCE" in code)
 
     @torch._inductor.config.patch(b2b_gemm_pass=True)
@@ -33,7 +33,7 @@ class B2BGEMMTest(TestCase):
         B = torch.randn((64, 256), device="cuda", dtype=torch.float16)
         C = torch.randn((256, 64), device="cuda", dtype=torch.float16)
         res, (code,) = run_and_get_code(f_opt, A, B, C)
-        self.assertTrue(torch.allclose(f(A, B, C), res, atol=0.3, rtol=0.01))
+        self.assertTrue(torch.allclose(f(A, B, C), res, atol=0.2, rtol=0.01))
         self.assertTrue("B2B_GEMM_TRITON_ENTRANCE" not in code)
 
 

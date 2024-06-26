@@ -71,7 +71,7 @@ b2b_gemm_template = TritonTemplate(
     offs_col = tl.arange(0, COL_BLOCK_SIZE)  # to be updated in the loop
 
     # accumulator
-    acc = tl.zeros((ROW_BLOCK_SIZE, P), dtype=tl.float16)
+    acc = tl.zeros((ROW_BLOCK_SIZE, P), dtype=tl.float32)
 
     a_ptrs = A + (offs_row[:, None] * stride_am + tl.arange(0, N)[None, :] * stride_an)
     a = tl.load(a_ptrs)
@@ -107,18 +107,14 @@ B2B_GEMM_PASS = PatternMatcherPass(
 
 
 def can_apply_b2b_gemm(match: Match) -> bool:
-    mat1, mat2, mat3 = match.args
-    if not (("val" in mat1.meta) and ("val" in mat2.meta) and ("val" in mat3.meta)):
+    if not all(["val" in arg.meta for arg in match.args]):
         return False
-    mat1 = mat1.meta["val"]
-    mat2 = mat2.meta["val"]
-    mat3 = mat3.meta["val"]
-    if not (mat1.is_cuda and mat2.is_cuda and mat3.is_cuda):
+    mats = [arg.meta["val"] for arg in match.args]
+    if not all([mat.is_cuda for mat in mats]):
         return False
-    if not (
-        (len(mat1.shape) == 2) and (len(mat2.shape) == 2) and (len(mat3.shape) == 2)
-    ):
+    if not all([len(mat.shape) == 2 for mat in mats]):
         return False
+    mat1, mat2, mat3 = mats
     if not ((mat1.shape[1] == mat2.shape[0]) and (mat2.shape[1] == mat3.shape[0])):
         return False
     # TODO: change to a real-check for size restrictions (may consider hardware limit?)
