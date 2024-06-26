@@ -19,8 +19,9 @@ inline bool THPDtype_Check(PyObject* obj) {
 }
 
 inline bool THPPythonScalarType_Check(PyObject* obj) {
-  return obj == (PyObject*)(&PyFloat_Type) || obj == (PyObject*)(&PyComplex_Type) ||
-      obj == (PyObject*)(&PyBool_Type) || obj == (PyObject*)(&PyLong_Type);
+  return obj == (PyObject*)(&PyFloat_Type) ||
+      obj == (PyObject*)(&PyComplex_Type) || obj == (PyObject*)(&PyBool_Type) ||
+      obj == (PyObject*)(&PyLong_Type);
 }
 
 TORCH_API PyObject* THPDtype_New(
