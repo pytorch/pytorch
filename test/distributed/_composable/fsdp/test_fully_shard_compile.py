@@ -234,7 +234,9 @@ class TestFullyShardCompile(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_simple_mlp_fullgraph_backend_aot_eager_decomp_partition(self):
         self._test_traceable_fsdp(
-            *self._create_simple_mlp_factory_fns(), "aot_eager_decomp_partition", fullgraph=True
+            *self._create_simple_mlp_factory_fns(),
+            "aot_eager_decomp_partition",
+            fullgraph=True,
         )
 
     @skipIfRocm
@@ -279,18 +281,22 @@ class TestFullyShardCompile(FSDPTest):
             *self._create_transformer_factory_fns(), "aot_eager", fullgraph=True
         )
 
-    @unittest.expectedFailure
     @skipIfRocm
     @skip_if_lt_x_gpu(2)
+    # TODO: native_dropout has worse accuracy after decomp, need to figure out why
+    @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_fullgraph_backend_aot_eager_decomp_partition(self):
         self._test_traceable_fsdp(
-            *self._create_transformer_factory_fns(), "aot_eager_decomp_partition", fullgraph=True
+            *self._create_transformer_factory_fns(),
+            "aot_eager_decomp_partition",
+            fullgraph=True,
         )
 
-    @unittest.expectedFailure
     @skipIfRocm
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
+    # TODO: native_dropout causes CUDA IMA error, need to figure out why
+    @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_fullgraph_backend_inductor(self):
         self._test_traceable_fsdp(
             *self._create_transformer_factory_fns(), "inductor", fullgraph=True
