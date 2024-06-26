@@ -120,7 +120,7 @@ def do_bench_gpu(fn, estimation_iters=5, benchmark_iters=20, max_benchmark_durat
 
     estimation_timing = benchmark(fn, buffer, estimation_iters)
 
-    benchmark_iters = min(benchmark_iters, int(max_benchmark_duration / estimation_timing))
+    benchmark_iters = min(benchmark_iters, max(int(max_benchmark_duration / estimation_timing), 1))
     if memory_warmup > 0:
         temp_buffer = torch.empty(int((get_cache_size() * memory_warmup) // 4), dtype=torch.int, device="cuda")
         temp_buffer.zero_()
