@@ -146,6 +146,8 @@ extern "C"
 
 
 class CppPackedGemmTemplate(CppTemplate):
+    WGT_IDX = 1
+
     def __init__(
         self,
         input_nodes,
@@ -260,11 +262,12 @@ class CppPackedGemmTemplate(CppTemplate):
                 return [inputs[idx] for idx in input_indices], layout_or_out
 
         def maybe_to_dense(inputs, layout_or_out):
-            wgt_idx = 1
             new_inputs = list(inputs)
-            if isinstance(inputs[wgt_idx], torch.Tensor):
-                W = inputs[wgt_idx]
-                new_inputs[wgt_idx] = W.to_dense() if W.is_mkldnn else W
+            if isinstance(inputs[CppPackedGemmTemplate.WGT_IDX], torch.Tensor):
+                W = inputs[CppPackedGemmTemplate.WGT_IDX]
+                new_inputs[CppPackedGemmTemplate.WGT_IDX] = (
+                    W.to_dense() if W.is_mkldnn else W
+                )
             return new_inputs, layout_or_out
 
         def normalize_shapes(inputs, layout_or_out):
@@ -322,9 +325,7 @@ class CppPackedGemmTemplate(CppTemplate):
         _, block_n, _ = micro_gemm.register_blocking
 
         def pack_weight(inputs, layout_or_out):
-            W_idx = 1
-
-            W = inputs[W_idx]
+            W = inputs[CppPackedGemmTemplate.WGT_IDX]
             new_inputs = list(inputs)
             if isinstance(W, ir.IRNode):
                 if not isinstance(W, ir.TensorBox):
@@ -383,7 +384,7 @@ class CppPackedGemmTemplate(CppTemplate):
                 for sz in reversed(blocked_w.shape[1:]):
                     new_stride.insert(0, new_stride[0] * sz)
                 blocked_w = blocked_w.as_strided(blocked_w.shape, new_stride)
-            new_inputs[W_idx] = blocked_w
+            new_inputs[CppPackedGemmTemplate.WGT_IDX] = blocked_w
 
             def _is_int8_gemm(inputs):
                 return (
@@ -420,18 +421,17 @@ class CppPackedGemmTemplate(CppTemplate):
                 assert isinstance(template_buffer, ir.CppTemplateBuffer)
                 new_input_nodes, _ = reorder_and_filter(input_nodes, layout)
 
-                W_idx = 1
-                W_node = new_input_nodes[W_idx]
+                W_node = new_input_nodes[CppPackedGemmTemplate.WGT_IDX]
                 assert W_node.get_name() in V.graph.constants
                 W = V.graph.constants[W_node.get_name()]
-                new_input_nodes[W_idx] = W
+                new_input_nodes[CppPackedGemmTemplate.WGT_IDX] = W
                 new_input_nodes, _ = pack_weight(
                     *normalize_shapes(*maybe_to_dense(new_input_nodes, layout))
                 )
-                W_packed = new_input_nodes[W_idx]
+                W_packed = new_input_nodes[CppPackedGemmTemplate.WGT_IDX]
                 W_packed_constant = V.graph.add_tensor_constant(W_packed)
                 template_buffer.inputs[
-                    W_idx
+                    CppPackedGemmTemplate.WGT_IDX
                 ] = ir.InputsKernel.unwrap_storage_for_input(W_packed_constant)
             return output
 
