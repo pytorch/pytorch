@@ -160,6 +160,7 @@ class TunableOp {
           ParamsT* numerical_params = params->DeepCopy(false);
           auto status = candidate->Call(numerical_params);
           if (status != OK) {
+            numerical_params->Delete();
             TUNABLE_LOG3("├──unsupported id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
             continue;
           }
