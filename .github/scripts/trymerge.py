@@ -81,9 +81,10 @@ JobNameToStateDict = Dict[str, JobCheckState]
 
 
 class WorkflowCheckState:
-    def __init__(self, name: str, url: str, status: Optional[str]):
+    def __init__(self, name: str, url: str, run_id: int, status: Optional[str]):
         self.name: str = name
         self.url: str = url
+        self.run_id: int = run_id
         self.status: Optional[str] = status
         self.jobs: JobNameToStateDict = {}
 
@@ -122,6 +123,7 @@ fragment PRCheckSuites on CheckSuiteConnection {
       workflowRun {
         workflow {
           name
+          databaseId
         }
         databaseId
         url
@@ -512,7 +514,7 @@ def add_workflow_conclusions(
     workflows: Dict[str, WorkflowCheckState] = {}
 
     # for the jobs that don't have a workflow
-    no_workflow_obj: WorkflowCheckState = WorkflowCheckState("", "", None)
+    no_workflow_obj: WorkflowCheckState = WorkflowCheckState("", "", 0, None)
 
     def add_conclusions(edges: Any) -> None:
         for edge_idx, edge in enumerate(edges):
@@ -523,18 +525,30 @@ def add_workflow_conclusions(
             workflow_obj: WorkflowCheckState = no_workflow_obj
 
             if workflow_run is not None:
+                # This is the usual workflow run ID we see on GitHub
+                workflow_run_id = workflow_run["databaseId"]
+                # While this is the metadata name and ID of the workflow itself
                 workflow_name = workflow_run["workflow"]["name"]
+                workflow_id = workflow_run["workflow"]["databaseId"]
+
                 workflow_conclusion = node["conclusion"]
                 # Do not override existing status with cancelled
                 if workflow_conclusion == "CANCELLED" and workflow_name in workflows:
                     continue
-                if workflow_name not in workflows:
-                    workflows[workflow_name] = WorkflowCheckState(
+
+                # Only keep the latest workflow run for each workflow, heuristically,
+                # it's the run with largest run ID
+                if (
+                    workflow_id not in workflows
+                    or workflows[workflow_id].run_id < workflow_run_id
+                ):
+                    workflows[workflow_id] = WorkflowCheckState(
                         name=workflow_name,
                         status=workflow_conclusion,
                         url=workflow_run["url"],
+                        run_id=workflow_run_id,
                     )
-                workflow_obj = workflows[workflow_name]
+                workflow_obj = workflows[workflow_id]
 
             while checkruns is not None:
                 for checkrun_node in checkruns["nodes"]:
@@ -572,12 +586,12 @@ def add_workflow_conclusions(
     # the jobs in but don't put the workflow in.  We care more about the jobs in
     # the workflow that ran than the container workflow.
     res: JobNameToStateDict = {}
-    for workflow_name, workflow in workflows.items():
+    for workflow in workflows.values():
         if len(workflow.jobs) > 0:
             for job_name, job in workflow.jobs.items():
                 res[job_name] = job
         else:
-            res[workflow_name] = JobCheckState(
+            res[workflow.name] = JobCheckState(
                 workflow.name,
                 workflow.url,
                 workflow.status,
