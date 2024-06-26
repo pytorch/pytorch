@@ -6504,7 +6504,7 @@ add_docstr_all(
 pin_memory() -> Tensor
 
 Copies the tensor to pinned memory, if it's not already pinned. If device is not
-given, use :ref:`default accelerator type<default_accelerator>` instead.
+given, use a default :ref:`accelerator<accelerators>` type instead.
 """,
 )
 
