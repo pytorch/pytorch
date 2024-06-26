@@ -1163,7 +1163,6 @@ class GitHubPR:
             # Finally, upload the record to Rockset. The list of pending and failed
             # checks are at the time of the merge
             save_merge_record(
-                collection=ROCKSET_MERGES_COLLECTION,
                 comment_id=comment_id,
                 pr_num=self.pr_num,
                 owner=self.org,
@@ -1179,10 +1178,8 @@ class GitHubPR:
                 merge_base_sha=self.get_merge_base(),
                 merge_commit_sha=merge_commit_sha,
                 is_failed=False,
-                dry_run=dry_run,
                 skip_mandatory_checks=skip_mandatory_checks,
                 ignore_current=bool(ignore_current_checks),
-                workspace=ROCKSET_MERGES_WORKSPACE,
             )
         else:
             print("Missing comment ID or PR number, couldn't upload to Rockset")
@@ -2358,7 +2355,6 @@ def main() -> None:
             # list of pending and failed checks here, but they are not really
             # needed at the moment
             save_merge_record(
-                collection=ROCKSET_MERGES_COLLECTION,
                 comment_id=args.comment_id,
                 pr_num=args.pr_num,
                 owner=org,
@@ -2373,11 +2369,9 @@ def main() -> None:
                 last_commit_sha=pr.last_commit().get("oid", ""),
                 merge_base_sha=pr.get_merge_base(),
                 is_failed=True,
-                dry_run=args.dry_run,
                 skip_mandatory_checks=args.force,
                 ignore_current=args.ignore_current,
                 error=str(e),
-                workspace=ROCKSET_MERGES_WORKSPACE,
             )
         else:
             print("Missing comment ID or PR number, couldn't upload to Rockset")
