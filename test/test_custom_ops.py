@@ -866,7 +866,7 @@ class TestCustomOp(CustomOpTestCaseBase):
 
             del foo
 
-        with self.assertRaisesRegex(ValueError, r"List\[int\]"):
+        with self.assertRaisesRegex(ValueError, r"For example, typing.List\[int\]"):
             # test that we propose a correct and supported type.
             @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
             def foo(x: Tensor, y: Tuple[int, int]) -> Tensor:
