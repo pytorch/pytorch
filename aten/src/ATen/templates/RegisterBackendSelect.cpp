@@ -30,7 +30,7 @@ bool is_pinned(const Tensor& self, std::optional<at::Device> device) {
     return false;
   }
   // TODO: fetch scalar type from Tensor? But it doesn't really matter...
-  DispatchKeySet _dk = c10::DispatchKeySet(c10::computeDispatchKey(c10::nullopt, self.layout(), device.value_or(at::getAccelerator(true).value())));
+  DispatchKeySet _dk = c10::DispatchKeySet(c10::computeDispatchKey(c10::nullopt, self.layout(), device.value_or(at::getAccelerator(false).value_or(at::kCUDA))));
   return at::_ops::is_pinned::redispatch(_dk, self, device);
 }
 
