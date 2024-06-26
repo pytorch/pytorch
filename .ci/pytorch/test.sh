@@ -451,7 +451,7 @@ test_perf_for_dashboard() {
     for target in "${targets[@]}"; do
       local target_flag=("--${target}")
       if [[ "$target" == "performance" ]]; then
-        target_flag+=( --cold-start-latency)
+        target_flag+=( --warm-start-latency)
       elif [[ "$target" == "accuracy" ]]; then
         target_flag+=( --no-translation-validation)
       fi
