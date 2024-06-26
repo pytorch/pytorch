@@ -995,6 +995,28 @@ class VariableBuilder:
                 ScriptObjectQualifiedNameSource,
             )
 
+            if (
+                hasattr(value, "safe_to_trace_with_real_obj")
+                and value.safe_to_trace_with_real_obj()
+            ):
+                proxy = self.tx.output.root_tracer.create_graph_input(
+                    re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                    type(value),
+                    source=self.source,
+                )
+
+                # setting is_unspecialized=False to not insert a as_tensor call in reconstruct by default
+                # seting example to be real value because these example values will be used
+                # as example_inputs for user compiler.
+                proxy.node.meta["grapharg"] = GraphArg(
+                    self.source, value, False, None, False, value
+                )
+                return TorchScriptObjectVariable.create(
+                    proxy,
+                    value,
+                    source=self.source,
+                )
+
             # This exists to allow a smoother transition.
             # The implications are:
             # The script objects won't be tracked as proxies.

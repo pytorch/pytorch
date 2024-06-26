@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import logging
-from typing import Any, Dict, Optional, Protocol, Tuple
+from typing import Any, Dict, Optional, Protocol, Tuple, Union
 
 import torch
 
@@ -99,8 +99,13 @@ def _check_valid_flat_script_obj(flat_x):
             )
 
 
-def to_fake_obj(fake_mode, x: torch.ScriptObject) -> FakeScriptObject:
+def to_fake_obj(
+    fake_mode, x: torch.ScriptObject
+) -> Union[FakeScriptObject, torch.ScriptObject]:
     import torch.utils._pytree as pytree
+
+    if hasattr(x, "safe_to_trace_with_real_obj") and x.safe_to_trace_with_real_obj():
+        return x
 
     flat_x = x.__obj_flatten__()  # type: ignore[attr-defined]
 
