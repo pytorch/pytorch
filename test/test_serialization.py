@@ -837,6 +837,7 @@ class TestBothSerialization(TestCase):
                 test(f_new, f_old)
             self.assertTrue(len(w) == 0, msg=f"Expected no warnings but got {[str(x) for x in w]}")
 
+
 class TestOldSerialization(TestCase, SerializationMixin):
     # unique_key is necessary because on Python 2.7, if a warning passed to
     # the warning module is the same, it is not raised again.
@@ -877,6 +878,7 @@ class TestOldSerialization(TestCase, SerializationMixin):
                 self.assertTrue(isinstance(loaded, module.Net))
                 if can_retrieve_source:
                     self.assertEqual(len(w), 2)
+                    self.assertTrue(w[0].category, FutureWarning)
                     self.assertTrue(w[1].category, 'SourceChangeWarning')
 
     def test_serialization_container(self):
