@@ -2,10 +2,12 @@
 
 
 import contextlib
+import copy
 import unittest
 
 import torch
 import torch._dynamo.testing
+import torch.distributed._composable.fsdp._fsdp_param
 from torch import nn
 from torch._dynamo import compiled_autograd
 
@@ -112,6 +114,24 @@ class TestFullyShardCompile(FSDPTest):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 1)
         self.assertEqual(len(cnt.graphs), 1)
+
+    def test_trace_fsdp_set_(self):
+        @torch.library.custom_op("mylib::add_one_out", mutates_args={"out"})
+        def add_one_out(x: torch.Tensor, out: torch.Tensor) -> None:
+            torch.add(x, 1, out=out)
+
+        def f(x):
+            buf = torch.zeros(2)
+            buf_view = buf.view(-1)
+            torch.ops.mylib.add_one_out(x, out=buf_view)
+            buf_view2 = buf.view(-1)
+            torch.ops.fsdp.set_(x, buf_view2)
+
+        x = torch.zeros(2)
+        ref_x = copy.deepcopy(x)
+        f(ref_x)
+        torch.compile(f, backend="aot_eager")(x)
+        self.assertEqual(x, ref_x)
 
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
     @torch._functorch.config.patch(recompute_views=True)
