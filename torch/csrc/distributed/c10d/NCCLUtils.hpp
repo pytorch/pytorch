@@ -775,6 +775,8 @@ struct NCCLTraceBuffer {
         startEvent = entry->start_;
         endEvent = entry->end_;
       }
+      entry->retired_ = true;
+      entry->start_ = entry->end_ = nullptr;
     }
     if (can_compute_duration) {
       // Compute duration without without holding the lock, because
@@ -795,8 +797,6 @@ struct NCCLTraceBuffer {
         entry->duration_ = duration.value();
       }
     }
-    entry->retired_ = true;
-    entry->start_ = entry->end_ = nullptr;
   }
 
   std::list<json> getCollectiveTraceJson(bool onlyActive) {
