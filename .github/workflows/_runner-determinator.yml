@@ -3,10 +3,14 @@ name: Check whether the workflow owner can use ARC runners
 on:
   workflow_call:
     inputs:
-      user_name:
+      triggering_actor:
         required: true
         type: string
-        description: The name of the workflow owner.
+        description: The triggering_actor for the workflow. Use github.triggering_actor
+      issue_owner:
+        required: true
+        type: string
+        description: The owner of the issue. Use github.event.pull_request.user.login || github.event.issue.user.login
       curr_branch:
         required: true
         type: string
@@ -26,13 +30,14 @@ on:
 
 jobs:
   runner-determinator:
-    runs-on: linux.4xlarge
+    runs-on: ubuntu-latest
     outputs:
       label-type: ${{ steps.set-condition.outputs.label-type }}
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       ISSUE_NUMBER: ${{ inputs.issue_number }}
-      USERNAME: ${{ inputs.user_name }}
+      TRIGGERING_ACTOR: ${{ inputs.triggering_actor }}
+      ISSUE_OWNER: ${{ inputs.issue_owner }}
     steps:
       # - name: Checkout PyTorch
       #   uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
@@ -46,9 +51,10 @@ jobs:
       - name: Hardcode runner-determinator script
         run: |
           cat <<EOF > get_workflow_type.py
+          import sys
           import json
           from argparse import ArgumentParser
-          from typing import Any, Tuple
+          from typing import Any, Tuple, Iterable
 
           from github import Auth, Github
           from github.Issue import Issue
@@ -72,10 +78,13 @@ jobs:
                   help="GitHub repo to get the issue",
               )
               parser.add_argument(
-                  "--github-issue", type=int, required=True, help="GitHub issue umber"
+                  "--github-issue", type=int, required=True, help="GitHub issue number"
               )
               parser.add_argument(
-                  "--github-user", type=str, required=True, help="GitHub username"
+                  "--github-actor", type=str, required=True, help="GitHub triggering_actor"
+              )
+              parser.add_argument(
+                  "--github-issue-owner", type=str, required=True, help="GitHub issue owner"
               )
               parser.add_argument(
                   "--github-branch", type=str, required=True, help="Current GitHub branch"
@@ -98,26 +107,28 @@ jobs:
               return branch.split("/")[0] in {"main", "nightly", "release", "landchecks"}
 
 
-          def get_workflow_type(issue: Issue, username: str) -> Tuple[str, str]:
-              formatted_username = (
-                  f"@{username}"  # Add the @ symbol to match the format in the issue body
-              )
-
+          def get_workflow_type(issue: Issue, username_check: Iterable[str]) -> Tuple[str, str]:
               try:
-                  user_list = issue.get_comments()[0].body.split()
+                  first_comment = issue.get_comments()[0].body.strip("\n\t ")
 
-                  if user_list[0] == "!":
+                  if first_comment[0] == "!":
                       MESSAGE = "LF Workflows are disabled for everyone. Using meta runners."
                       return WORKFLOW_LABEL_META, MESSAGE
-                  elif user_list[0] == "*":
+                  elif first_comment[0] == "*":
                       MESSAGE = "LF Workflows are enabled for everyone. Using LF runners."
                       return WORKFLOW_LABEL_LF, MESSAGE
-                  elif formatted_username in user_list:
-                      MESSAGE = f"LF Workflows are enabled for {username}. Using LF runners."
-                      return WORKFLOW_LABEL_LF, MESSAGE
                   else:
-                      MESSAGE = f"LF Workflows are disabled for {username}. Using meta runners."
-                      return WORKFLOW_LABEL_META, MESSAGE
+                      user_w_at = first_comment.split()
+                      user_set = {
+                          f"@{susr}" for susr in (usr.strip("\n\t ") for usr in first_comment.split())
+                      }
+                      if any(map(lambda uc: uc in user_set, username_check)):
+                          MESSAGE = f"LF Workflows are enabled for {', '.join(username_check)}. Using LF runners."
+                          return WORKFLOW_LABEL_LF, MESSAGE
+                      else:
+                          MESSAGE = f"LF Workflows are disabled for {', '.join(username_check)}. Using meta runners."
+                          return WORKFLOW_LABEL_META, MESSAGE
+
               except Exception as e:
                   MESSAGE = f"Failed to get determine workflow type. Falling back to meta runners. Exception: {e}"
                   return WORKFLOW_LABEL_META, MESSAGE
@@ -136,7 +147,7 @@ jobs:
                       gh = get_gh_client(args.github_token)
                       # The default issue we use - https://github.com/pytorch/test-infra/issues/5132
                       issue = get_issue(gh, args.github_repo, args.github_issue)
-                      label_type, message = get_workflow_type(issue, args.github_user)
+                      label_type, message = get_workflow_type(issue, (args.github_issue_owner, args.github_actor, ))
                       output = {
                           LABEL_TYPE_KEY: label_type,
                           MESSAGE_KEY: message,
@@ -169,7 +180,8 @@ jobs:
             --github-token "$GITHUB_TOKEN" \
             --github-issue "$ISSUE_NUMBER" \
             --github-branch "$curr_branch" \
-            --github-user "$USERNAME")"
+            --github-actor "$TRIGGERING_ACTOR" \
+            --github-issue-owner "$ISSUE_OWNER")"
 
           echo "Output: '${output}'"
 
