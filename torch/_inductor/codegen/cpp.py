@@ -3875,12 +3875,24 @@ class CppScheduling(BaseScheduling):
                         global_buffer = scheduler_node.node
                         assert isinstance(global_buffer, ir.ComputedBuffer)
                         global_buffer_layout = global_buffer.get_layout()
-                        if not global_buffer_layout.is_contiguous():
-                            continue
-                        # Local Buffer is a view of global buffer
                         size_offset = node.outer_loop_fusion_depth - len(
                             get_call_ranges(scheduler_node)
                         )
+                        if (
+                            not global_buffer_layout.is_contiguous()
+                            and not scheduler_node.is_reduction()
+                            and sympy_product(global_buffer_layout.size[:size_offset])
+                            == sympy_product(scheduler_node.group[1][0][:size_offset])
+                            and all(
+                                scheduler_node.group[1][0][size_offset:][idx]
+                                == global_buffer_layout.size[size_offset:][idx]
+                                for idx in range(
+                                    len(scheduler_node.group[1][0][size_offset:])
+                                )
+                            )
+                        ):
+                            continue
+                        # Local Buffer is a view of global buffer
                         local_buffer_layout = ir.FixedLayout(
                             global_buffer_layout.device,
                             global_buffer_layout.dtype,
@@ -3934,7 +3946,7 @@ class CppScheduling(BaseScheduling):
                 metrics.cpp_outer_loop_fused_inner_counts.append(
                     metrics.CppOuterLoopFusedCount(
                         len(cpp_kernel_proxy_list),
-                        local_buffer_number=len(list(scope.local_buffers.values())),
+                        local_buffer_number=len(scope.local_buffers),
                     )
                 )
                 outer_fusion_cpp_kernel_proxy = node.merge_outer_fusion_kernels(
