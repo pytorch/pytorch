@@ -16,6 +16,7 @@ from torch.distributed.pipelining import (
     pipeline,
     PipelineStage,
     Schedule1F1B,
+    ScheduleFlexibleInterleaved1F1B,
     ScheduleGPipe,
     ScheduleInterleaved1F1B,
     ScheduleLoopedBFS,
@@ -553,7 +554,7 @@ class TestSchedulePlan(unittest.TestCase):
             if len(error_msg) != 0:
                 self.fail(f"Error at timestep {timestep}: " + ",".join(error_msg))
 
-    @parametrize("ScheduleClass", [ScheduleInterleaved1F1B, ScheduleLoopedBFS])
+    @parametrize("ScheduleClass", [ScheduleFlexibleInterleaved1F1B, ScheduleInterleaved1F1B, ScheduleLoopedBFS])
     def test_pipeline_order(self, ScheduleClass):
         # Define a list of test cases with varying num_local_stages, num_microbatches, and group_size
         # These should succeed since num_microbatches % group_size == 0
@@ -582,6 +583,11 @@ class TestSchedulePlan(unittest.TestCase):
             # odd group_sizes
             (4, 6, 3),
             (4, 10, 5),
+            # n_mb non divisible by group_size
+            (2, 3, 4),
+            (2, 4, 4),
+            (2, 10, 4),
+            (2, 15, 4),
         ]
         for num_local_stages, num_microbatches, group_size in test_cases:
             with self.subTest(
@@ -589,6 +595,10 @@ class TestSchedulePlan(unittest.TestCase):
                 num_microbatches=num_microbatches,
                 group_size=group_size,
             ):
+                only_run_in_flex_pp = num_microbatches % group_size != 0
+                if only_run_in_flex_pp and not isinstance(ScheduleClass, ScheduleFlexibleInterleaved1F1B):
+                    continue
+
                 print(f"{num_local_stages=} {num_microbatches=} {group_size=}")
                 num_stages = num_local_stages * group_size
                 stages = [
