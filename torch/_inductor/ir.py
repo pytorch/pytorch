@@ -5449,11 +5449,11 @@ class FallbackKernel(ExternKernelAlloc):
                 self.mutation_names.append(arg.get_name())
             else:
                 raise NotImplementedError(
-                    f"NYI: Unsupported ret= arg type: {type(arg)}"
+                    f"NYI: Unsupported out= arg type: {type(arg)}"
                 )
 
-        if "ret" in kwargs:
-            collect_mutation_names(kwargs["ret"])
+        if "out" in kwargs:
+            collect_mutation_names(kwargs["out"])
             return
 
         if schema.is_mutable and not can_auto_functionalize(kernel):
