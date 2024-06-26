@@ -154,6 +154,13 @@ Stream device_type, etc.
 As of today, accelerator devices are (in no particular order) :doc:`"CUDA" <cuda>`, :doc:`"MTIA" <mtia>`,
 :doc:`"XPU" <xpu>`, and PrivateUse1 (many device not in the PyTorch repo itself).
 
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    Stream
+    Event
+
 .. _generators:
 
 Generators
