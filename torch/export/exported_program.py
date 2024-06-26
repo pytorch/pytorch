@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import contextlib
 import copy
 import dataclasses
 import functools
@@ -172,7 +173,7 @@ def _override_composite_implicit_decomp(ops_to_preserve):
         #    is mutating or aliasing.
         # TODO (tmanlaibaatar) make this utility function and share it with functional_tensor
         # decomp part. (https://github.com/pytorch/pytorch/issues/129431)
-        def can_preserve(op_overload):
+        def assert_valid_to_preserve(op_overload):
             if op_overload in FunctionalTensor.maybe_aliasing_or_mutating_ops:
                 raise RuntimeError(
                     f"We can't detect {op_overload} as a functional op statically, so we can't preserve it"
@@ -211,7 +212,7 @@ def _override_composite_implicit_decomp(ops_to_preserve):
             return True
 
         # If we didn't error, it means we can go ahead
-        can_preserve(op_overload)
+        assert_valid_to_preserve(op_overload)
 
         saved_tables[op_overload] = op_overload.py_kernels.copy()
         patched_ops.add(op_overload)
@@ -335,10 +336,17 @@ def _decompose_exported_program(
     buffers_to_remove = [name for name, _ in ep.graph_module.named_buffers()]
     for name in buffers_to_remove:
         delattr(ep.graph_module, name)
+
+    from torch._guards import detect_fake_mode
+
     # TODO(zhxhchen17) Return the new graph_signature directly.
     from torch.export._trace import _ignore_backend_decomps
 
-    with _ignore_backend_decomps(), _override_composite_implicit_decomp(_preserve_ops):
+    fake_mode = detect_fake_mode(fake_args)
+    fake_mode = contextlib.nullcontext() if fake_mode is None else fake_mode
+    with _ignore_backend_decomps(), fake_mode, _override_composite_implicit_decomp(
+        _preserve_ops
+    ):
         gm, graph_signature = aot_export_module(
             ep.graph_module,
             fake_args,
