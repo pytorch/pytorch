@@ -4136,6 +4136,8 @@ class CommonTemplate:
 
         self.assertEqual(eager_delta, compile_delta)
 
+    # https://github.com/halide/Halide/issues/8256
+    @config.patch("halide.scheduler_cuda", "Li2018")
     def test_buffer_copied_in_graph_with_different_shapes(self):
         class MyModel(torch.nn.Module):
             def __init__(self):
@@ -10324,8 +10326,7 @@ class CommonTemplate:
             net = torch.compile(model)
             out = net(input_t)
 
-    # https://github.com/halide/Halide/issues/8256
-    @config.patch("halide.scheduler_cuda", "Li2018")
+    @skip_if_gpu_halide  # cuda error
     def test_buffer_use_after_remove(self):
         # https://github.com/pytorch/pytorch/issues/102857
 
@@ -10428,8 +10429,7 @@ class CommonTemplate:
         self.assertEqual(ref, actual)
         self.assertTrue(called)
 
-    # https://github.com/halide/Halide/issues/8256
-    @config.patch("halide.scheduler_cuda", "Li2018")
+    @skip_if_gpu_halide  # cuda error
     def test_mutations_loop_fusion(self):
         def fn(tensor, index, source):
             out = tensor.index_add(0, index, source, alpha=2.0) / 2
