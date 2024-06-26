@@ -836,6 +836,16 @@ Tensor i1e_backward(
     const Tensor& grad,
     const Tensor& self,
     const Tensor& result);
+Tensor igammac_backward(
+    const Tensor& grad,
+    const Tensor& result,
+    const Tensor& self,
+    const Tensor& other);
+Tensor igamma_backward(
+    const Tensor& grad,
+    const Tensor& result,
+    const Tensor& self,
+    const Tensor& other);
 Tensor linalg_lu_solve_LU(
     const Tensor& grad,
     const Tensor& LU,
