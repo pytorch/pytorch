@@ -5,6 +5,11 @@ on:
     branches:
       - main
       - release/*
+    tags:
+      # Final Release tags look like: v1.11.0
+      - v[0-9]+.[0-9]+.[0-9]+
+      # Release candidate tags look like: v1.11.0-rc1
+      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
   release:
     types: [published]
   pull_request:
