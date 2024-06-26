@@ -1799,29 +1799,27 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertTrue(len(w) == 0)
 
     def test_parameterlistdict_pickle(self):
+        # warning from torch.load call in _load_from_bytes used in UntypedStorage.__reduce__
+        WEIGHTS_ONLY_WARN = "You are using `torch.load` with `weights_only=False`"
         m = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
-        with warnings.catch_warnings(record=True) as w:
+        with self.assertWarnsRegex(FutureWarning, WEIGHTS_ONLY_WARN):
             m = pickle.loads(pickle.dumps(m))
-        self.assertTrue(len(w) == 0)
 
         # Test whether loading from older checkpoints works without triggering warnings
         m = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
         del m._forward_pre_hooks, m._state_dict_hooks, m._load_state_dict_pre_hooks, m._non_persistent_buffers_set
-        with warnings.catch_warnings(record=True) as w:
+        with self.assertWarnsRegex(FutureWarning, WEIGHTS_ONLY_WARN):
             m = pickle.loads(pickle.dumps(m))
-        self.assertTrue(len(w) == 0)
 
         m = nn.ParameterDict({"a": nn.Parameter(torch.rand(2)), "b": nn.Parameter(torch.rand(2))})
-        with warnings.catch_warnings(record=True) as w:
+        with self.assertWarnsRegex(FutureWarning, WEIGHTS_ONLY_WARN):
             m = pickle.loads(pickle.dumps(m))
-        self.assertTrue(len(w) == 0)
 
         # Test whether loading from older checkpoints works without triggering warnings
         m = nn.ParameterDict({"a": nn.Parameter(torch.rand(2)), "b": nn.Parameter(torch.rand(2))})
         del m._forward_pre_hooks, m._state_dict_hooks, m._load_state_dict_pre_hooks, m._non_persistent_buffers_set
-        with warnings.catch_warnings(record=True) as w:
+        with self.assertWarnsRegex(FutureWarning, WEIGHTS_ONLY_WARN):
             m = pickle.loads(pickle.dumps(m))
-        self.assertTrue(len(w) == 0)
 
     def test_weight_norm_pickle(self):
         m = torch.nn.utils.weight_norm(nn.Linear(5, 7))
