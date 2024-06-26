@@ -954,14 +954,6 @@ class ExportedProgram:
         """
         from torch._decomp import core_aten_decompositions
 
-        def _get_placeholders(gm):
-            placeholders = []
-            for node in gm.graph.nodes:
-                if node.op != "placeholder":
-                    break
-                placeholders.append(node)
-            return placeholders
-
         if decomp_table is None:
             decomp_table = core_aten_decompositions()
 
