@@ -1608,6 +1608,25 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
 
         torch.compile(fn, fullgraph=True, backend="aot_eager")(nt)
 
+    # The test here: nn.Parameters that are secretly subclasses
+    # have a metaclass that overrides __isinstance__,
+    # that dynamo needs to respect when it inlines the if statement.
+    def test_param_subclass_isinstance_input(self):
+        x_inner = torch.randn(16, 16, requires_grad=True)
+        x = torch.nn.Parameter(TwoTensor(x_inner, x_inner))
+        m = torch.nn.Linear(16, 16)
+        m.weight = x
+
+        def fn():
+            if isinstance(m.weight, torch.nn.Parameter):
+                return m.weight + 1
+            else:
+                return m.weight + 2
+
+        out_ref = fn()
+        out_test = torch.compile(fn, backend="aot_eager")()
+        self.assertEqual(out_ref, out_test)
+
     def _input_view_test(self, nt_view_name):
         nt_view = VIEW_TEST_CASES[nt_view_name]()
 

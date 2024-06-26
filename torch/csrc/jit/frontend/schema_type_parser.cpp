@@ -168,6 +168,7 @@ std::optional<at::ScalarType> SchemaTypeParser::parseTensorDType(
   static std::unordered_map<std::string, at::ScalarType> type_map = {
       AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_SCALAR_TYPE)};
 
+#undef DEFINE_SCALAR_TYPE
   auto type = type_map.find(dtype);
   if (type != type_map.end()) {
     return type->second;

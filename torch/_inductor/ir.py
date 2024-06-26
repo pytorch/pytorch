@@ -696,7 +696,7 @@ class Reduction(Loops):
         numel_hint = V.graph.sizevars.symbolic_hint(sympy_product(ranges))
 
         should_split = (
-            get_device_type(device) == "cuda"
+            is_gpu(get_device_type(device))
             and reduction_type
             not in {
                 "argmax",
@@ -711,9 +711,13 @@ class Reduction(Loops):
             return ReductionHint.DEFAULT, 1
 
         device_interface = get_interface_for_device(get_device_type(device))
-        num_sm = device_interface.Worker.get_device_properties(
-            device
-        ).multi_processor_count
+        device_properties = device_interface.Worker.get_device_properties(device)
+        if get_device_type(device) == "xpu":
+            num_sm = device_properties.gpu_subslice_count
+        else:
+            # default is cuda behavior
+            num_sm = device_properties.multi_processor_count
+
         min_elements_per_thread = 32
         max_elements_per_thread = 512
         threads_per_sm = 2048
@@ -3418,16 +3422,9 @@ class ComputedBuffer(Buffer):
             ]
             index_formulas += extra_indexing_expr
 
-        reads_bufs = [
-            V.graph.name_to_buffer[reads_name]
-            if reads_name in V.graph.name_to_buffer.keys()
-            else None
-            for reads_name in body.reads_name2expr.keys()
-        ]
-        memory_addrs = [
-            *body.reads_name2expr.values(),
-            *body.writes_name2expr.values(),
-        ]
+        memory_addrs = [*body.writes_name2expr.values()]
+        if not V.graph.has_feature(self, BackendFeature.PREFER_STORE_LOOP_ORDER):
+            memory_addrs.extend(body.reads_name2expr.values())
 
         def simplify_and_reorder(x_vars, support_vars, sizes):
             sizes, reindex0, reindex1 = self._apply_loop_reordering(
@@ -3440,10 +3437,6 @@ class ComputedBuffer(Buffer):
                 sizes,
                 index_prevent_reordering(index_formulas, x_vars, sizes),
             )
-            x_vars = prune(x_vars)
-            # sizes, reindex1, prune = _simplify_loops(x_vars, sizes, index_formulas)
-            # x_vars = prune(x_vars)
-            # sizes, reindex2 = self._apply_loop_reordering(x_vars, sizes, memory_addrs)
             reindex = fuse_reindexing(reindex1, reindex2)
             return sizes, reindex, reindex1
 
@@ -4677,26 +4670,23 @@ class UserDefinedTritonKernel(ExternKernel):
         )
 
         args = self.codegen_kwargs()
-        arg_types = []
+        raw_args = list(self.kwargs.values())
+
         if V.graph.cpp_wrapper:
             # in C++ wrapper, we don't pass constexpr args, as they don't
             # get added as parameters to the PTX code compiled from the
             # user-defined Triton kernel (only non-constexpr args do)
             args = [arg for i, arg in enumerate(args) if i not in kernel.constexprs]
-            # cpp wrapper needs arg type info for codegen
-            for arg_name in self.ordered_kwargs_for_cpp_kernel:
-                val = self.get_kwargs_value(arg_name)
-                arg_types.append(
-                    val.get_dtype() if hasattr(val, "get_dtype") else type(val)
-                )
-            arg_types = [
-                t for i, t in enumerate(arg_types) if i not in kernel.constexprs
-            ]
+            # Unify raw_args computation between cpp wrapper and python wrapper
+            raw_args = []
+            for i, arg_name in enumerate(self.ordered_kwargs_for_cpp_kernel):
+                if i not in kernel.constexprs:
+                    raw_args.append(self.get_kwargs_value(arg_name))
 
         # Call to kernel
         self.codegen_comment(wrapper)
         wrapper.generate_user_defined_triton_kernel(
-            new_name, self.grid, configs, args, triton_meta, arg_types
+            new_name, self.grid, configs, args, triton_meta, raw_args
         )
 
     def should_allocate(self):
@@ -6406,15 +6396,18 @@ class LoopBody:
         assert self.indexing is not None
         return self.indexing[name]
 
-    def __call__(self, *indices):
-        index = list(itertools.chain.from_iterable(indices))
+    def indexing_from_args(self, indices):
+        index = [*itertools.chain.from_iterable(indices)]
         assert len(index) == len(self.var_ranges), (index, self.var_ranges)
         assert all(v not in self.var_ranges for v in index)
         replacements = dict(zip(self.var_ranges.keys(), index))
-        self.indexing = {
+        return {
             name: sympy_subs(expr, replacements)
             for name, expr in self.indexing_exprs.items()
         }
+
+    def __call__(self, *indices):
+        self.indexing = self.indexing_from_args(indices)
         result = self.root_block()
         self.indexing = None
         return result
