@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import os  # noqa: C101
 import sys
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING, Union
 
 import torch
 
@@ -28,9 +28,7 @@ disable_progress = True
 verbose_progress = False
 
 # use fx aot graph codegen cache
-fx_graph_cache = (
-    os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE", "0" if is_fbcode() else "1") == "1"
-)
+fx_graph_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE") == "1"
 
 # use remote fx aot graph codegen cache
 # False: Disables the cache
@@ -254,10 +252,11 @@ force_same_precision = (
 )
 
 # Specify candidate backends for gemm autotune.
-# Possible choices are combinations of: ATen, Triton, CUTLASS, CPP.
+# Possible choices are combinations of: ATen, Triton, CUTLASS, CK, CPP.
 # ATen: default Pytorch ATen kernels.
-# Triton: Triton templates defined in torch inductor.
-# CUTLASS: Cutlass templates and kernels.
+# Triton: Triton templates defined in torch inductor (AMD and NVidia GPUs).
+# CUTLASS: Cutlass templates and kernels (NVidia GPUs only).
+# CK: Composable Kernel templates and kernels (AMD Instinct GPUs only).
 # CPP: CPP templates and kernels for CPU.
 max_autotune_gemm_backends = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON,CPP"
@@ -402,6 +401,16 @@ debug_index_asserts = False
 # warnings intended for PyTorch developers, disable for point releases
 is_nightly_or_source = "dev" in torch.__version__ or "git" in torch.__version__
 developer_warnings = is_fbcode() or is_nightly_or_source
+
+# This pattern matches a special usage of scatter
+# 1. It's applied to a constant tensor
+# 2. The index tensor has size 1 in the scatter dimension
+# Such pattern generates a sparse matrix when the const tensor is all-zero.
+# We can lower this pattern to a pointwise kernel for more fusion opportunities
+# and saving memory footprint.
+optimize_scatter_upon_const_tensor = (
+    os.environ.get("TORCHINDUCTOR_OPTIMIZE_SCATTER_UPON_CONST_TENSOR", "1") == "1"
+)
 
 
 # The multiprocessing start method to use for inductor workers in the codecache.
@@ -860,6 +869,48 @@ class cuda:
     # caused by the op ordering of the "pingpong" memory access
     # pattern used by some Cutlass Kernels.
     cutlass_op_denylist_regex: Optional[str] = "pingpong"
+
+
+class rocm:
+    # Offload arch list for device code compilation, e.g. ["gfx941", "gfx942"].
+    # If empty, the `native` arch is used
+    arch: List[str] = []
+
+    # Enable for CDNA3 only for now
+    # Processor name reference: https://llvm.org/docs/AMDGPUUsage.html#processors
+    supported_arch: Set[str] = {"gfx940", "gfx941", "gfx942"}
+
+    # Optimization level, use to balance compilation speed and runtime performance
+    compile_opt_level = "-O2"
+
+    # Flag to keep debug information in compiled objects
+    is_debug = False
+
+    # Flag to keep intermediate files (assembly listings, preprocessed sources, etc.)
+    save_temps = False
+
+    # Flag to add `-ffast-math`` to compile flags
+    use_fast_math = True
+
+    # Flag to add `-fgpu-flush-denormals-to-zero` to compile flags
+    flush_denormals = True
+
+    # Flag to print register and LDS usage during compilation
+    print_kernel_resource_usage = False
+
+    # Path to ROCm installation, if None, use env variable ROCM_HOME
+    rocm_home: Optional[str] = None
+
+    # Path to Composable Kernel library.
+    # Install with `pip install git+https://github.com/rocm/composable_kernel@develop`.
+    ck_dir = os.environ.get("TORCHINDUCTOR_CK_DIR")
+
+    # Number of op instance choices to trade off between runtime perf and compilation time
+    n_max_profiling_configs: Optional[int] = None
+
+    # Flag to use a short list of CK instances which perform well across a variety of shapes.
+    # Currently RCR and F16 only
+    use_preselected_instances: bool = False
 
 
 # create a directory containing lots of debug information
