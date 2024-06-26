@@ -49,6 +49,7 @@ from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     DimDynamic,
     StatelessSymbolicContext,
+    ShapeEnv
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
@@ -1063,25 +1064,28 @@ def rewrite_signature(
 
         return matched_elements_positions
 
-    matched_input_elements_positions = produce_matching(
-        "inputs", flat_args, graph_captured_input
-    )
+    if graph_captured_input is not None and graph_captured_output is not None:
+        matched_input_elements_positions = produce_matching(
+            "inputs", flat_args, graph_captured_input
+        )
 
-    assert graph_captured_output is not None
-    matched_output_elements_positions = produce_matching(
-        "outputs", list(graph_captured_output) + flat_args, flat_results_traced
-    )
+        assert graph_captured_output is not None
+        matched_output_elements_positions = produce_matching(
+            "outputs", list(graph_captured_output) + flat_args, flat_results_traced
+        )
 
-    new_graph = FlattenInputOutputSignature(
-        graph,
-        flat_args,
-        matched_input_elements_positions,
-        flat_results_traced,
-        matched_output_elements_positions,
-        example_fake_inputs,
-        flat_args_dynamic_dims,
-        fake_mode,
-    ).transform()
+        new_graph = FlattenInputOutputSignature(
+            graph,
+            flat_args,
+            matched_input_elements_positions,
+            flat_results_traced,
+            matched_output_elements_positions,
+            example_fake_inputs,
+            flat_args_dynamic_dims,
+            fake_mode,
+        ).transform()
+    else:
+        new_graph = graph
 
     # Make dynamo graph to have same input/output spec as user code
     def argument_names(f_sig, args, kwargs) -> List[str]:
@@ -1429,22 +1433,37 @@ def export(
         if constraint_violation_error:
             raise constraint_violation_error
 
-        assert (
-            graph is not None
-        ), "Failed to produce a graph during tracing as no tensor operations were found."
-        assert hasattr(graph, "_source_to_user_stacks")
-        assert out_guards is not None, "Failed to produce guards during tracing"
-        assert fake_mode is not None
+        if graph is None:
+            fake_mode = torch._subclasses.FakeTensorMode(shape_env=ShapeEnv(), export=True)
+            parameter_names = list(original_signature.parameters.keys())
+            fx_graph = torch.fx.Graph()
+            for i, name in enumerate(parameter_names):
+                if (torch.is_tensor(flat_args[i])):
+                    node = fx_graph.placeholder(name)
+                    node.meta["val"] = fake_mode.from_tensor(
+                        flat_args[i], static_shapes=True
+                    )
+            fx_graph.output(result_traced)
+            module = torch.nn.Module()
+            graph = torch.fx.GraphModule(module, fx_graph)
+            log.info(
+                "Failed to capture a graph during tracing as no tensor operations were found.:\n\n%s",
+                graph.print_readable(print_output=False, colored=True),
+            )
+        else:
+            assert hasattr(graph, "_source_to_user_stacks")
+            assert out_guards is not None, "Failed to produce guards during tracing"
+            assert fake_mode is not None
 
-        log.info(
-            "Dynamo captured graph:\n\n%s",
-            graph.print_readable(print_output=False, colored=True),
-        )
+            log.info(
+                "Dynamo captured graph:\n\n%s",
+                graph.print_readable(print_output=False, colored=True),
+            )
 
-        # This check need to happened before aten_graph
-        # because placeholder's _source_node attribute is not preserved by make_fx
-        if same_signature:
-            check_signature_rewritable(graph)
+            # This check need to happened before aten_graph
+            # because placeholder's _source_node attribute is not preserved by make_fx
+            if same_signature:
+                check_signature_rewritable(graph)
 
         # NB: This is mostly hitting the cache; Dynamo already converted these
         example_fake_inputs = [fake_mode.from_tensor(t) for t in example_inputs]
