@@ -2535,7 +2535,7 @@ class DtypeView(BaseView):
 
     @property
     def dtype(self):
-        return self.data.dtype
+        return self.target_dtype
 
     def get_size(self):
         return self.data.get_size()
@@ -2544,20 +2544,13 @@ class DtypeView(BaseView):
         return self.data.get_stride()
 
     def make_loader(self):
-        def loader(index):
-            # indexer = self.layout.make_indexer()
-            x = self.data
-            indexer = self.data.make_indexer()
-            # return ops.to_dtype_bitcast(x, self.target_dtype, x.dtype)
-            return ops.to_dtype_bitcast(ops.load(self.get_name(), indexer(index)), self.target_dtype, self.dtype)
-            # return ops.load(self.get_name(), indexer(index))
+        inner = self.data.make_loader()
+        def loader(idx):
+            return ops.to_dtype_bitcast(inner(idx), self.target_dtype, self.dtype)
         return loader
 
     def codegen_reference(self, writer=None):
-        # reinterpret_tensor is similar to as_strided except:
-        # - offset is added to the existing offset (rather than replacing it)
-        # - view tracking is disabled similar to unsafe_view
-        return V.graph.wrapper_code.codegen_reinterpret_view(
+        return V.graph.wrapper_code.codegen_dtype_view(
             self.data,
             self.target_dtype,
             writer,
