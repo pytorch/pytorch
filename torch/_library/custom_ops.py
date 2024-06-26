@@ -29,7 +29,7 @@ def custom_op(
     fn: Optional[Callable] = None,
     /,
     *,
-    mutates_args: Iterable[str],
+    mutates_args: Union[str, Iterable[str]],
     device_types: device_types_t = None,
     schema: Optional[str] = None,
 ) -> Callable:
@@ -51,7 +51,8 @@ def custom_op(
             To avoid name collisions, please use your project name as the namespace;
             e.g. all custom ops in pytorch/fbgemm use "fbgemm" as the namespace.
         mutates_args (Iterable[str]): The names of args that the function mutates.
-            This MUST be accurate, otherwise, the behavior is undefined.
+            This MUST be accurate, otherwise, the behavior is undefined. If "unknown",
+            it pessimistically assumes that all inputs to the operator are being mutates.
         device_types (None | str | Sequence[str]): The device type(s) the function
             is valid for. If no device type is provided, then the function
             is used as the default implementation for all device types.
@@ -503,6 +504,7 @@ class CustomOpDef:
             )
 
     def __call__(self, *args, **kwargs):
+        print(args, kwargs)
         return self._opoverload(*args, **kwargs)
 
 
