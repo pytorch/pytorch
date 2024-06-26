@@ -221,6 +221,10 @@ class CppPackedGemmTemplate(CppTemplate):
             Mc_blocks = thread_blocking.block_m
             Kc_blocks = thread_blocking.block_k
 
+            # TODO: support multi-thread
+            if self.num_threads != 1:
+                return Mc_blocks, Kc_blocks
+
             # TODO: tune the factor here
             L1_limit_factor = 1
             L2_limit_factor = 0.5
