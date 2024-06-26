@@ -80,22 +80,21 @@ void _fused_adam_kernel_mps_(at::TensorList params,
                              const std::optional<at::Tensor>& grad_scale,
                              const std::optional<at::Tensor>& found_inf) {
   if (lr.is_cpu()) {
-    _fused_adam_kernel_mps_(params,
-                            grads,
-                            exp_avgs,
-                            exp_avg_sqs,
-                            max_exp_avg_sqs,
-                            state_steps,
-                            lr.item<double>(),
-                            beta1,
-                            beta2,
-                            weight_decay,
-                            eps,
-                            amsgrad,
-                            maximize,
-                            grad_scale,
-                            found_inf);
-    return;
+    return _fused_adam_kernel_mps_(params,
+                                   grads,
+                                   exp_avgs,
+                                   exp_avg_sqs,
+                                   max_exp_avg_sqs,
+                                   state_steps,
+                                   lr.item<double>(),
+                                   beta1,
+                                   beta2,
+                                   weight_decay,
+                                   eps,
+                                   amsgrad,
+                                   maximize,
+                                   grad_scale,
+                                   found_inf);
   }
 
   // Manually check devices since we specify no device check in
