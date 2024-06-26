@@ -2208,6 +2208,29 @@ Call this whenever a new thread is created in order to propagate values from
       "Checks if a tensor's data pointer is COW");
 
   py_module.def(
+      "_set_extra_conditional_view_warnings",
+      [](bool mode) {
+        c10::impl::cow::set_extra_conditional_view_warnings(mode);
+      },
+      "Enables extra warnings related to deprecation of conditional views.");
+
+  py_module.def(
+      "_get_extra_conditional_view_warnings",
+      []() { return c10::impl::cow::get_extra_conditional_view_warnings(); },
+      "Check if extra warnings related to deprecation of conditional views are enabled.");
+
+  py_module.def(
+      "_set_future_lazy_clone",
+      [](bool mode) { c10::impl::cow::set_future_lazy_clone(mode); },
+      ("Enables future behavior to make operators always return a copy in "
+       "cases where they currently conditionally return a view or a copy"));
+
+  py_module.def(
+      "_get_future_lazy_clone",
+      []() { return c10::impl::cow::get_future_lazy_clone(); },
+      "Check if future behavior to make operators always return a copy is enabled.");
+
+  py_module.def(
       "_get_cudnn_batch_norm_reserve_space_size",
       [](const at::Tensor& input, bool training) {
 #ifdef USE_CUDA
