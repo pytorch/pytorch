@@ -52,10 +52,10 @@ jobs:
 
       # TODO: Remove the hardcoded step below
       # Hardcoding below is temporary for testing ALI runners
-      # This file below should match the script found in .github/scripts/get_workflow_type.py
+      # This file below should match the script found in .github/scripts/runner_determinator.py
       - name: Hardcode runner-determinator script
         run: |
-          cat <<EOF > get_workflow_type.py
+          cat <<EOF > runner_determinator.py
           import sys
           import json
           from argparse import ArgumentParser
@@ -157,9 +157,8 @@ jobs:
                       MESSAGE = "LF Workflows are enabled for everyone. Using LF runners."
                       return WORKFLOW_LABEL_LF, MESSAGE
                   else:
-                      user_w_at = first_comment.split()
                       user_set = {
-                          f"@{susr}" for susr in (usr.strip("\n\t ") for usr in first_comment.split())
+                          usr for usr in (usr_raw.strip("\n\t@ ") for usr_raw in first_comment.split())
                       }
                       if any(map(lambda uc: uc in user_set, username_check)):
                           MESSAGE = f"LF Workflows are enabled for {', '.join(username_check)}. Using LF runners."
@@ -211,7 +210,8 @@ jobs:
           if __name__ == "__main__":
               main()
           EOF
-          cat get_workflow_type.py
+
+          cat runner_determinator.py
 
       - name: Install dependencies
         run: python3 -m pip install urllib3==1.26.18 PyGithub==2.3.0
@@ -223,7 +223,7 @@ jobs:
           curr_ref_type="${{ inputs.curr_ref_type }}"
           echo "Current branch is '$curr_branch'"
 
-          output="$(python3 get_workflow_type.py \
+          output="$(python3 runner_determinator.py \
             --github-token "$GITHUB_TOKEN" \
             --github-issue "$ISSUE_NUMBER" \
             --github-branch "$curr_branch" \
