@@ -3677,16 +3677,11 @@ def meta_index_put(self, indices, values, accumulate=False):
         ),
     )
     torch._check(
-        not accumulate,
-        lambda: "index_put does not support accumulate=true",
-    )
-    torch._check(
         values.dtype == self.dtype,
-        lambda: "dtype mismatch between tensor and value",
-    )
-    torch._check(
-        values.shape == self.shape[: len(indices)],
-        lambda: "shape mismatch between value and indexed tensor",
+        lambda: (
+            f"Index put requires the source and destination dtypes match, "
+            f"got {self.dtype} for the destination and {values.dtype} for the source."
+        ),
     )
 
     return torch.empty_like(self)
