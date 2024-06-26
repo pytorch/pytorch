@@ -252,6 +252,9 @@ __global__ void conv_depthwise2d_backward_kernel(
       int och = (c * depthwiseMultiplier) + multiplier;
       int weightOffset = och * kernelHeight * kernelWidth;
       for (int kh = 0; kh < KH_LIMIT; ++kh) {
+#if !defined(USE_ROCM)
+#pragma unroll
+#endif
         for (int kw = 0; kw < KW_LIMIT; ++kw) {
           int h_out = h + padHeight - kh * dilationHeight;
           int w_out = w + padWidth - kw * dilationWidth;
