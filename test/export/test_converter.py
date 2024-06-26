@@ -796,7 +796,17 @@ class TestConverter(TestCase):
             torch.randn([2, 3, 4]).to(torch.float32),
             torch.randn([2, 3, 4]).to(torch.float64),
         )
-        self._check_equal_ts_ep_converter(func6, inp)
+        ep_list = self._check_equal_ts_ep_converter(func6, inp)
+
+        # TODO: Additional check once dynamic shape is supported.
+        # self.assertEqual(
+        #     ep_list[0].module()(
+        #         torch.randn([1, 1, 1]).to(torch.int8),
+        #         torch.randn([1, 1, 1]).to(torch.int32),
+        #         torch.randn([1, 1, 1]).to(torch.float32),
+        #         torch.randn([1, 1, 1]).to(torch.float64),
+        #     )[0], 1
+        # )
 
     def test_prim_tolist(self):
         class Module(torch.nn.Module):
