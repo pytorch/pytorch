@@ -234,7 +234,6 @@ static void index_copy_kernel(
 
 
 static void index_put_kernel(TensorIterator& iter, const IntArrayRef index_size, const IntArrayRef index_stride, const bool accumulate) {
-  TORCH_CHECK(!accumulate, "index_put does not support accumulate=true");
   AT_DISPATCH_V2(
     iter.dtype(),
     "index_put",

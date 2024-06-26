@@ -3657,25 +3657,19 @@ def meta_index_put(self, indices, values, accumulate=False):
         lambda: "Tensor and value must be on the same device",
     )
 
-    for tensor in indices:
-        if tensor is not None:
-            dtype = tensor.dtype
-            torch._check(
-                dtype in [torch.long, torch.int64, torch.bool, torch.uint8],
-                lambda: "tensors used as indices must be long, int, byte or bool tensors",
-            )
-
     torch._check(
         self.dim() >= len(indices),
         lambda: f"too many indices for tensor of dimension {self.dim()} (got {len(indices)})",
     )
+
     torch._check(
-        not indices.empty or utils.is_expandable_to(values.size(), self.size()),
+        len(indices) != 0 or utils.is_expandable_to(values.size(), self.size()),
         lambda: (
             f"shape mismatch: value tensor of shape {values.size()} "
             f"cannot be broadcast to indexing result of shape {self.size()}"
         ),
     )
+
     torch._check(
         values.dtype == self.dtype,
         lambda: (
