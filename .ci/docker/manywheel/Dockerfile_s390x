@@ -34,6 +34,7 @@ RUN yum install -y \
   gcc-toolset-${DEVTOOLSET_VERSION}-gcc \
   gcc-toolset-${DEVTOOLSET_VERSION}-gcc-c++ \
   gcc-toolset-${DEVTOOLSET_VERSION}-binutils \
+  gcc-toolset-${DEVTOOLSET_VERSION}-gcc-gfortran \
   cmake \
   rust \
   cargo \
@@ -46,10 +47,16 @@ RUN yum install -y \
   python3.12-pyyaml \
   python3.12-numpy \
   python3.12-wheel \
+  python3.12-cryptography \
   blas-devel \
   openblas-devel \
   lapack-devel \
-  atlas-devel
+  atlas-devel \
+  libjpeg-devel \
+  libxslt-devel \
+  libxml2-devel \
+  valgrind
+
 
 ENV PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
 ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib64:/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib:$LD_LIBRARY_PATH
