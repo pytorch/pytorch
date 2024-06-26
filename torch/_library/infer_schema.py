@@ -209,12 +209,11 @@ def tuple_to_list(tuple_type: typing.Type[typing.Tuple]) -> typing.Type[typing.L
     type_args = getattr(tuple_type, "__args__", None)
     if type_args is None:
         # Handle the case of an empty tuple type
-        list_type = typing.List
-    else:
+        return typing.List
+    elif len(type_args) == 1:
         # General case: create a List with the same type arguments
-        list_type = (
-            typing.List[type_args[0]]  # type: ignore[valid-type]
-            if len(type_args) == 1
-            else typing.List[typing.Union[tuple(type_args)]]  # type: ignore[misc]
-        )
-    return list_type
+        return typing.List[type_args[0]]  # type: ignore[valid-type]
+    elif len(type_args) == 2 and type_args[1] is Ellipsis:  # type: ignore[valid-type]
+        return typing.List[typing.Optional[type_args[0]]]  # type: ignore[valid-type]
+    else:
+        return typing.List[typing.Union[tuple(type_args)]]  # type: ignore[misc]
