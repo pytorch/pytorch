@@ -320,12 +320,6 @@ def _get_optimization_cflags() -> List[str]:
         if not config.cpp.enable_floating_point_contract_flag:
             cflags.append("ffp-contract=off")
 
-        if config.is_fbcode():
-            # FIXME: passing `-fopenmp` adds libgomp.so to the generated shared library's dependencies.
-            # This causes `ldopen` to fail in fbcode, because libgomp does not exist in the default paths.
-            # We will fix it later by exposing the lib path.
-            return cflags
-
         if sys.platform == "darwin":
             # Per https://mac.r-project.org/openmp/ right way to pass `openmp` flags to MacOS is via `-Xclang`
             # Also, `-march=native` is unrecognized option on M1
@@ -335,10 +329,6 @@ def _get_optimization_cflags() -> List[str]:
                 cflags.append("mcpu=native")
             else:
                 cflags.append("march=native")
-
-        # Internal cannot find libgomp.so
-        if not config.is_fbcode():
-            cflags.append("fopenmp")
 
         return cflags
 
@@ -661,14 +651,13 @@ def _get_openmp_args(cpp_compiler):
 
         # if openmp is still not available, we let the compiler to have a try,
         # and raise error together with instructions at compilation error later
+        cflags.append("fopenmp")
     elif _IS_WINDOWS:
         # /openmp, /openmp:llvm
         # llvm on Windows, new openmp: https://devblogs.microsoft.com/cppblog/msvc-openmp-update/
         # msvc openmp: https://learn.microsoft.com/zh-cn/cpp/build/reference/openmp-enable-openmp-2-0-support?view=msvc-170
-
         cflags.append("openmp")
         cflags.append("openmp:experimental")  # MSVC CL
-        libs = []
     else:
         if config.is_fbcode():
             include_dir_paths.append(build_paths.openmp())
