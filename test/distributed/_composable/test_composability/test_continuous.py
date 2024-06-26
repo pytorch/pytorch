@@ -1,18 +1,20 @@
 # Owner(s): ["oncall: distributed"]
-
 import copy
 import os
 import sys
 import tempfile
 
+from model_registry import MLPModule
+
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed._composable.fsdp import fully_shard
-from torch.distributed._composable.fsdp.fully_shard import MixedPrecisionPolicy
-
-from torch.distributed._tensor import DTensor, init_device_mesh
-
+from torch.distributed._composable.fsdp.fully_shard import (
+    fully_shard,
+    MixedPrecisionPolicy,
+)
+from torch.distributed._tensor import DTensor
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.pipelining import PipelineStage
 from torch.distributed.pipelining.schedules import (
     PipelineScheduleSingle,
@@ -20,12 +22,12 @@ from torch.distributed.pipelining.schedules import (
     ScheduleGPipe,
 )
 from torch.nn.parallel import DistributedDataParallel as DDP
+
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
     MultiProcContinousTest,
     requires_nccl,
 )
-
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -236,6 +238,7 @@ if __name__ == "__main__":
         # Launched as a single process. Spawn subprocess to run the tests.
         # Also need a rendezvous file for `init_process_group` purpose.
         rdvz_file = tempfile.NamedTemporaryFile(delete=False).name
+        print(rank, world_size)
         torch.multiprocessing.spawn(
             ComposabilityTest.run_rank,
             nprocs=world_size,
