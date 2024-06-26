@@ -1175,7 +1175,7 @@ def forward(self, x_1):
 
     # https://github.com/pytorch/pytorch/issues/126988
     @xfailIfTorchDynamo
-    def test_cond_functionalized_nested_input_mutation_test(self):
+    def test_cond_functionalized_nested_input_mutation(self):
         def true_true_fn(x):
             x.add_(4)
             return x.sin().max()

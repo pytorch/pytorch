@@ -602,7 +602,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         if type(args[0]) is ConstantVariable:
             log.warning(
                 "Pred is a Python constant. When used with torch.cond, it executes only one of the branches."
-                " If you want torch.cond to perserve two branches, please make the predicate a boolean tensor."
+                " If you want torch.cond to perserve two branches, please make the predicate a boolean tensor or a SymBool."
             )
             if args[0].as_python_constant():
                 return args[1].call_function(tx, args[3].unpack_var_sequence(tx), {})

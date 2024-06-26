@@ -113,7 +113,7 @@ def cond(pred, true_fn, false_fn, operands):
     if isinstance(pred, (bool, int, float)):
         log.warning(
             "Pred is a Python constant. When used with torch.cond, it executes only one of the branches."
-            " If you want torch.cond to perserve two branches, please make the predicate a boolean tensor."
+            " If you want torch.cond to perserve two branches, please make the predicate a boolean tensor or a SymBool."
         )
         if pred:
             return true_fn(*operands)
