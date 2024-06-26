@@ -434,6 +434,63 @@ class TestFlexAttention(InductorTestCase):
             D,
         )
 
+    test_input_strides = [
+        ((H * S * D, S * D, D, 1), 997),  # offset
+        ((H * D, D, B * H * D, 1), 499),  # transposed dimensions
+        (
+            (S * (D + 1), B * S * (D + 1), (D + 1), 1),
+            293,
+        ),  # additional buffer on one dim
+        (
+            (1, D, (B + 1) * (H + 1) * D, 1),
+            97,
+        ),  # additional buffer on multiple dim + shared dimension
+    ]
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.parametrize(
+        "q_s", test_input_strides[:-2]
+    )  # TODO: fix layout for query braodcasting
+    @common_utils.parametrize("k_s", test_input_strides)
+    @common_utils.parametrize("v_s", test_input_strides)
+    def test_strided_inputs(self, dtype: torch.dtype, q_s, k_s, v_s):
+        q1 = torch.randn((B * H * S * D * 2), dtype=dtype, device="cuda")
+        k1 = torch.randn((B * H * S * D * 2), dtype=dtype, device="cuda")
+        v1 = torch.randn((B * H * S * D * 2), dtype=dtype, device="cuda")
+
+        q_shape = (B, H, S // 2, D)
+        k_shape = (B, H, S, D)
+        v_shape = (B, H, S, D)
+
+        q_strides, q_offset = q_s
+        q_max = [x * (y - 1) for x, y in zip(q_strides, q_shape)]
+        assert sum(q_max) + q_offset < B * H * S * D * 2
+        assert q_strides[-1] == 1
+        q = torch.as_strided(q1, q_shape, q_strides, q_offset)
+
+        k_strides, k_offset = k_s
+        k_max = [x * (y - 1) for x, y in zip(k_strides, k_shape)]
+        assert sum(k_max) + k_offset < B * H * S * D * 2
+        assert k_strides[-1] == 1
+        k = torch.as_strided(k1, k_shape, k_strides, k_offset)
+
+        v_strides, v_offset = v_s
+        v_max = [x * (y - 1) for x, y in zip(v_strides, v_shape)]
+        assert sum(v_max) + v_offset < B * H * S * D * 2
+        assert v_strides[-1] == 1
+        v = torch.as_strided(v1, v_shape, v_strides, v_offset)
+
+        sdpa_partial = create_attention(score_mod=_generate_alibi_bias(8))
+        compiled_sdpa = torch.compile(sdpa_partial)
+        ref_out = sdpa_partial(q, k, v)
+        compiled_out = compiled_sdpa(q, k, v)
+
+        tolerance = Tolerances(atol=2e-1, rtol=2e-1)
+        torch.testing.assert_close(
+            ref_out, compiled_out, atol=tolerance.atol, rtol=tolerance.rtol
+        )
+
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
     def test_skip_odd_keys(self, dtype: torch.dtype):
