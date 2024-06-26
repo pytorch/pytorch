@@ -154,17 +154,6 @@ Stream device_type, etc.
 As of today, accelerator devices are (in no particular order) :doc:`"CUDA" <cuda>`, :doc:`"MTIA" <mtia>`,
 :doc:`"XPU" <xpu>`, and PrivateUse1 (many device not in the PyTorch repo itself).
 
-
-Stream
-~~~~~~~~~~~~~~~~~~~~~~~~
-An in-order queue of executing the respective tasks asynchronously in first in first out (FIFO) order.
-It can control or synchronize the execution of other Streams or block the current host thread to ensure
-the correct task sequencing.
-
-Event
-~~~~~~~~~~~~~~~~~~~~~~~~
-Query and record Stream status to identify or control dependencies across Stream and measure timing.
-
 .. _generators:
 
 Generators
