@@ -225,6 +225,10 @@ def is_concrete_int(a: Union[int, SymInt]) -> bool:
     if isinstance(a, int):
         return True
 
+    # note: NestedInt is a concerete int but does not have a.node.expr defined.
+    if a.node.is_nested_int():
+        return True
+
     if isinstance(a.node.expr, sympy.core.numbers.Integer):
         return True
 

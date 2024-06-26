@@ -4847,6 +4847,28 @@ class TestNestedTensorSubclass(TestCase):
         check_results(fn, compiled_fn, generate_inp(20))
         self.assertEqual(compile_counter.frame_count, frame_count_2)
 
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    def test_return_nt_constructed_in_graph(self, device):
+        def fn(values, offsets):
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+            nt = nt.cos()
+            return nt
+
+        values = torch.rand((10, 8), device=device)
+        offsets = torch.tensor([0, 1, 3, 6, 10], device=device)
+
+        fn_c = torch.compile(fn, fullgraph=True)
+
+        ref = fn(values, offsets)
+        res = fn_c(values, offsets)
+        self.assertEqual(ref, res)
+
+    def test_nested_int_concrete_int(self):
+        j1 = torch._C._get_nested_int(1, 1)
+        self.assertTrue(torch.fx.experimental.symbolic_shapes.is_concrete_int(j1))
+
+    # Doesn't work until we have real views
+    @xfailIfTorchDynamo
     # Note 1: Math fallback doesn't work with bfloat16 on CUDA
     # Note 2: ROCm doesn't support flash attention or mem_efficient attention for NT
     @unittest.skipIf(
