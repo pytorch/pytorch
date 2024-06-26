@@ -777,6 +777,14 @@ class TestConverter(TestCase):
         inp = (torch.tensor([[1, 2, 3], [4, 5, 6]]),)
         self._check_equal_ts_ep_converter(Module(), inp, ["script"])
 
+    def test_ts2ep_dynamic_shape(self):
+        def func1(x, y):
+            shape = int(x.sum())
+            return y.reshape([-1, shape])
+
+        inp = (torch.tensor([1,1]), torch.randn([10]),)
+        self._check_equal_ts_ep_converter(func1, inp)
+
 
 if __name__ == "__main__":
     run_tests()
