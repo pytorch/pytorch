@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import copy
 import functools
 import itertools
 import unittest
@@ -233,7 +234,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         orig_params = self._init_params(param_sizes)
         fsdp_param_group = self._init_fsdp_param_group(orig_params, True)
         fsdp_params = fsdp_param_group.fsdp_params
-        fsdp_param_group.comm_ctx.init()
+        fsdp_param_group.comm_ctx.lazy_init()
 
         # Run one unshard to initialize metadata
         fsdp_param_group.unshard()
@@ -929,6 +930,18 @@ class TestFullyShardUnshardMultiThread(FSDPTestMultiThread):
         fully_shard(model)
         handle = model.unshard(async_op=True)
         handle.wait()
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_unshard_without_lazy_init(self):
+        torch.manual_seed(42)
+        model = MLP(4)
+        for param in model.parameters():
+            dist.broadcast(param, src=0)
+        ref_model = copy.deepcopy(model)
+        fully_shard(model)
+        model.unshard()  # no lazy init yet
+        for ref_param, param in zip(ref_model.parameters(), model.parameters()):
+            self.assertEqual(ref_param, param)
 
 
 if __name__ == "__main__":

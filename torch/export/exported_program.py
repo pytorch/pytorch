@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import contextlib
 import copy
 import dataclasses
 import functools
@@ -209,10 +210,15 @@ def _decompose_exported_program(
     buffers_to_remove = [name for name, _ in ep.graph_module.named_buffers()]
     for name in buffers_to_remove:
         delattr(ep.graph_module, name)
+
+    from torch._guards import detect_fake_mode
+
     # TODO(zhxhchen17) Return the new graph_signature directly.
     from torch.export._trace import _ignore_backend_decomps
 
-    with _ignore_backend_decomps():
+    fake_mode = detect_fake_mode(fake_args)
+    fake_mode = contextlib.nullcontext() if fake_mode is None else fake_mode
+    with _ignore_backend_decomps(), fake_mode:
         gm, graph_signature = aot_export_module(
             ep.graph_module,
             fake_args,
