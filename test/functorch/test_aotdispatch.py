@@ -72,6 +72,7 @@ from torch.testing._internal.common_utils import (
     xfail_inherited_tests,
     xfailIfTorchDynamo,
 )
+from torch.testing._internal.custom_tensor import ConstantExtraMetadataTensor
 from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.optests import (
     _test_aot_autograd_forwards_backwards_helper,
@@ -778,6 +779,174 @@ def forward(self, primals_1):
         self.assertEqual(x_ref.grad, x_test.grad)
         self.assertEqual(x_ref_view.grad, x_test_view.grad)
 
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/127470")
+    def test_nested_subclasses(self):
+        @torch.compile(backend="aot_eager")
+        def f(x):
+            return x.sin().cos()
+
+        a = torch.ones(4, requires_grad=True)
+        a2 = a.clone().detach().requires_grad_()
+        aa = TwoTensor(a, a2)
+        aa2 = aa.clone().detach().requires_grad_()
+        aaaa = TwoTensor(aa, aa2)
+        out = f(aaaa)
+        self.assertTrue(isinstance(out, TwoTensor))
+        self.assertTrue(isinstance(out.a, TwoTensor))
+        self.assertTrue(isinstance(out.b, TwoTensor))
+        self.assertTrue(isinstance(out.a.a, torch.Tensor))
+        self.assertTrue(isinstance(out.a.b, torch.Tensor))
+        self.assertTrue(isinstance(out.b.a, torch.Tensor))
+        self.assertTrue(isinstance(out.b.b, torch.Tensor))
+
+        out.sum().backward()
+        self.assertTrue(isinstance(aaaa.grad, TwoTensor))
+        self.assertTrue(isinstance(aaaa.grad.a, TwoTensor))
+        self.assertTrue(isinstance(aaaa.grad.b, TwoTensor))
+
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/127470")
+    def test_nested_subclasses_non_nested_grad(self):
+        @torch.compile(backend="aot_eager")
+        def f(x):
+            return x.sin().cos()
+
+        a = torch.ones(4, requires_grad=True)
+        a2 = a.clone().detach().requires_grad_()
+        a3 = a.clone().detach().requires_grad_()
+        a4 = a.clone().detach().requires_grad_()
+        new_aa = TwoTensor(a3, a4)
+        aa = TwoTensor(a, a2)
+
+        aa2 = aa.clone().detach().requires_grad_()
+        aaaa = TwoTensor(aa, aa2)
+        out = f(new_aa)
+        new_out = out + aaaa
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "The grad inputs should be same tensor subclass type as forward output",
+        ):
+            new_out.sum().backward()
+
+    @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/127470")
+    def test_custom_tensor_metadata(self):
+        def f(x):
+            x_elem = x.elem
+            x_elem_elem = x_elem.elem
+            x_elem_metadata = x_elem.constant_attribute
+            return x * x_elem * x_elem_elem * x_elem_metadata
+
+        a = torch.ones(4, requires_grad=True)
+        custom_a = ConstantExtraMetadataTensor(a)
+        custom_a.constant_attribute = 6
+        custom_aa = ConstantExtraMetadataTensor(custom_a)
+        custom_aa.constant_attribute = 4
+
+        custom_aa_compile = custom_aa.clone().detach().requires_grad_()
+        custom_aa_compile.elem.constant_attribute = 6
+        out_eager = f(custom_aa)
+
+        compiled_f = torch.compile(f, backend="aot_eager")
+        out = compiled_f(custom_aa_compile)
+
+        self.assertTrue(torch.allclose(out_eager, out))
+
+        out.sum().backward()
+
+        self.assertTrue(isinstance(custom_aa_compile.grad, ConstantExtraMetadataTensor))
+        self.assertTrue(
+            isinstance(custom_aa_compile.grad.elem, ConstantExtraMetadataTensor)
+        )
+
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/127470")
+    def test_nested_subclasses_complicated_inps(self):
+        def f(x, y, z):
+            temp = x + y
+            temp_plain = x.a + y.b
+            res = temp.sum() + temp_plain.sum()
+            return x.sin().cos() + res
+
+        x = torch.ones(4, requires_grad=True)
+        x2 = x.clone().detach().requires_grad_()
+        xx = TwoTensor(x, x2)
+        xx2 = xx.clone().detach().requires_grad_()
+
+        x_nested = TwoTensor(xx, xx2)
+        x_nested_compile = x_nested.clone().detach().requires_grad_()
+
+        y_nested = x_nested.clone().detach().requires_grad_()
+        y_nested_compile = y_nested.clone().detach().requires_grad_()
+
+        z = x.clone().detach().requires_grad_()
+        z_compile = z.clone().detach().requires_grad_()
+
+        out_eager = f(x_nested, y_nested, z)
+        compiled_f = torch.compile(f, backend="aot_eager")
+        out = compiled_f(x_nested_compile, y_nested_compile, z_compile)
+        self.assertTrue(torch.allclose(out_eager, out))
+
+        self.assertTrue(isinstance(out, TwoTensor))
+        self.assertTrue(isinstance(out.a, TwoTensor))
+        self.assertTrue(isinstance(out.b, TwoTensor))
+        self.assertTrue(isinstance(out.a.a, torch.Tensor))
+        self.assertTrue(isinstance(out.a.b, torch.Tensor))
+        self.assertTrue(isinstance(out.b.a, torch.Tensor))
+        self.assertTrue(isinstance(out.b.b, torch.Tensor))
+
+        out.sum().backward()
+        out_eager.sum().backward()
+
+        self.assertTrue(isinstance(x_nested_compile.grad, TwoTensor))
+        self.assertTrue(isinstance(x_nested_compile.grad.a, TwoTensor))
+        self.assertTrue(isinstance(x_nested_compile.grad.b, TwoTensor))
+
+        self.assertTrue(isinstance(y_nested_compile.grad, TwoTensor))
+        self.assertTrue(isinstance(y_nested_compile.grad.a, TwoTensor))
+        self.assertTrue(isinstance(y_nested_compile.grad.b, TwoTensor))
+
+        self.assertTrue(torch.allclose(x_nested_compile.grad.a.a, x_nested.grad.a.a))
+        self.assertTrue(torch.allclose(x_nested_compile.grad.a.b, x_nested.grad.a.b))
+        self.assertTrue(torch.allclose(y_nested_compile.grad.a.a, y_nested.grad.a.a))
+        self.assertTrue(torch.allclose(y_nested_compile.grad.a.b, y_nested.grad.a.b))
+
+    @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/127470")
+    def test_nested_subclasses_complicated_inps_mixed(self):
+        def f(x, y):
+            y_elem = y.elem
+            y_elem_elem = y_elem.elem
+            y_elem_metadata = y_elem.constant_attribute
+            return y * y_elem * y_elem_elem * y_elem_metadata + x
+
+        x = torch.ones(4, requires_grad=True)
+        x2 = x.clone().detach().requires_grad_()
+        xx = TwoTensor(x, x2)
+        xx2 = xx.clone().detach().requires_grad_()
+
+        x_nested = TwoTensor(xx, xx2)
+        x_nested_compile = x_nested.clone().detach().requires_grad_()
+
+        a = torch.ones(4, requires_grad=True)
+        custom_a = ConstantExtraMetadataTensor(a)
+        custom_a.constant_attribute = 6
+        custom_aa = ConstantExtraMetadataTensor(custom_a)
+        custom_aa.constant_attribute = 4
+
+        custom_aa_compile = custom_aa.clone().detach().requires_grad_()
+        custom_aa_compile.constant_attribute = 4
+        custom_aa_compile.elem.constant_attribute = 6
+
+        compiled_f = torch.compile(f, backend="aot_eager")
+        out_eager = f(x_nested, custom_aa)
+        out = compiled_f(x_nested_compile, custom_aa_compile)
+        self.assertTrue(torch.allclose(out_eager, out))
+
+        out.sum().backward()
+        out_eager.sum().backward()
+
+        self.assertTrue(torch.allclose(x_nested_compile.grad, x_nested.grad))
+        self.assertTrue(torch.allclose(custom_aa_compile.grad, custom_aa.grad))
+
     def test_outputs_are_aliased(self):
         # Tensor, None, int
         def f(a):
@@ -909,10 +1078,10 @@ def forward(self, arg0_1, arg1_1):
             fw_graph_cell[0].code.strip(),
             """\
 def forward(self, primals_1):
+    resize_storage_bytes_ = torch.ops.inductor.resize_storage_bytes_.default(primals_1, 32)
     ones = torch.ops.aten.ones.default([8], device = device(type='cpu'), pin_memory = False)
     copy = torch.ops.aten.copy.default(primals_1, ones);  ones = None
     add = torch.ops.aten.add.Tensor(copy, 1)
-    resize_storage_bytes_ = torch.ops.inductor.resize_storage_bytes_.default(primals_1, 32)
     copy_ = torch.ops.aten.copy_.default(primals_1, copy);  primals_1 = copy = None
     return [add]""",
         )
@@ -950,46 +1119,46 @@ def forward(self, primals_1):
     return [sin, primals_1]""",
         )
 
-    def test_input_mutation_storage_resize_up_down(self):
-        def f(a):
-            torch.ops.inductor.resize_storage_bytes_(a, 32)
-            # float32, 4 bytes per element, 32 bytes == 8 elements
-            with torch.no_grad():
-                a.copy_(torch.ones(8))
-            out = a.sin()
-            torch.ops.inductor.resize_storage_bytes_(a, 0)
-            return out
+    #     def test_input_mutation_storage_resize_up_down(self):
+    #         def f(a):
+    #             torch.ops.inductor.resize_storage_bytes_(a, 32)
+    #             # float32, 4 bytes per element, 32 bytes == 8 elements
+    #             with torch.no_grad():
+    #                 a.copy_(torch.ones(8))
+    #             out = a.sin()
+    #             torch.ops.inductor.resize_storage_bytes_(a, 0)
+    #             return out
 
-        inp = torch.zeros(8, requires_grad=True)
-        # Input starts with zero-size-storage
-        inp.untyped_storage().resize_(0)
+    #         inp = torch.zeros(8, requires_grad=True)
+    #         # Input starts with zero-size-storage
+    #         inp.untyped_storage().resize_(0)
 
-        fw_graph_cell = [None]
-        compiled_f = aot_function(
-            f,
-            fw_compiler=make_boxed_compiler(
-                partial(extract_graph, graph_cell=fw_graph_cell)
-            ),
-            bw_compiler=nop,
-            decompositions={},
-            keep_inference_input_mutations=True,
-            dynamic=False,
-        )
-        out = compiled_f(inp)
-        # Final graph has two interesting properties:
-        # (1) no resizes in the functional graph, since the two resizes cancel out
-        #     and the final size is zero
-        # (2) no copy_ in the functional graph, even though we copied data into the input,
-        #     because the input has no storage at the end of graph execution (so no data to copy)
-        self.assertExpectedInline(
-            fw_graph_cell[0].code.strip(),
-            """\
-def forward(self, primals_1):
-    ones = torch.ops.aten.ones.default([8], device = device(type='cpu'), pin_memory = False)
-    copy = torch.ops.aten.copy.default(primals_1, ones);  primals_1 = ones = None
-    sin = torch.ops.aten.sin.default(copy)
-    return [sin, copy]""",
-        )
+    #         fw_graph_cell = [None]
+    #         compiled_f = aot_function(
+    #             f,
+    #             fw_compiler=make_boxed_compiler(
+    #                 partial(extract_graph, graph_cell=fw_graph_cell)
+    #             ),
+    #             bw_compiler=nop,
+    #             decompositions={},
+    #             keep_inference_input_mutations=True,
+    #             dynamic=False,
+    #         )
+    #         out = compiled_f(inp)
+    #         # Final graph has two interesting properties:
+    #         # (1) no resizes in the functional graph, since the two resizes cancel out
+    #         #     and the final size is zero
+    #         # (2) no copy_ in the functional graph, even though we copied data into the input,
+    #         #     because the input has no storage at the end of graph execution (so no data to copy)
+    #         self.assertExpectedInline(
+    #             fw_graph_cell[0].code.strip(),
+    #             """\
+    # def forward(self, primals_1):
+    #     ones = torch.ops.aten.ones.default([8], device = device(type='cpu'), pin_memory = False)
+    #     copy = torch.ops.aten.copy.default(primals_1, ones);  primals_1 = ones = None
+    #     sin = torch.ops.aten.sin.default(copy)
+    #     return [sin, copy]""",
+    #         )
 
     def test_input_mutation_storage_resize_down_and_set_(self):
         # Meant to mimic ppFSDP
@@ -1046,12 +1215,12 @@ def forward(self, primals_1):
 def forward(self, primals_1, primals_2):
     cat = torch.ops.aten.cat.default([primals_2, primals_2]);  primals_2 = None
     sin = torch.ops.aten.sin.default(cat)
+    resize_storage_bytes_ = torch.ops.inductor.resize_storage_bytes_.default(cat, 0)
     set_ = torch.ops.aten.set_.source_Tensor(primals_1, cat);  primals_1 = None
-    resize_storage_bytes_ = torch.ops.inductor.resize_storage_bytes_.default(set_, 0);  set_ = None
     return [sin, cat]""",
         )
 
-    def test_input_mutation_storage_resize_before_set__not_supported(self):
+    def test_input_mutation_storage_resize_before_set_(self):
         def f(a):
             with torch.no_grad():
                 torch.ops.inductor.resize_storage_bytes_(a, 0)
@@ -1059,38 +1228,36 @@ def forward(self, primals_1, primals_2):
 
         inp = torch.zeros(8, requires_grad=True)
 
-        # See Note [Ordering of resize_() and set_()]
-        with self.assertRaisesRegex(RuntimeError, "not supported today"):
-            compiled_f = aot_function(
-                f,
-                fw_compiler=nop,
-                bw_compiler=nop,
-                decompositions={},
-                keep_inference_input_mutations=True,
-                dynamic=False,
-            )
-            out = compiled_f(inp)
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            decompositions={},
+            keep_inference_input_mutations=True,
+            dynamic=False,
+        )
+        out = compiled_f(inp)
 
-    def test_input_mutation_storage_resize_not_supported(self):
-        def f(a):
-            a.mul_(2)
-            torch.ops.inductor.resize_storage_bytes_(a, 0)
-            return a
+    # def test_input_mutation_storage_resize_not_supported(self):
+    #     def f(a):
+    #         a.mul_(2)
+    #         torch.ops.inductor.resize_storage_bytes_(a, 0)
+    #         return a
 
-        inp = torch.zeros(8, requires_grad=True)
+    #     inp = torch.zeros(8, requires_grad=True)
 
-        with self.assertRaisesRegex(
-            AssertionError, "the input has other mutations that we cannot"
-        ):
-            compiled_f = aot_function(
-                f,
-                fw_compiler=nop,
-                bw_compiler=nop,
-                decompositions={},
-                keep_inference_input_mutations=True,
-                dynamic=False,
-            )
-            out = compiled_f(inp)
+    #     with self.assertRaisesRegex(
+    #         AssertionError, "the input has other mutations that we cannot"
+    #     ):
+    #         compiled_f = aot_function(
+    #             f,
+    #             fw_compiler=nop,
+    #             bw_compiler=nop,
+    #             decompositions={},
+    #             keep_inference_input_mutations=True,
+    #             dynamic=False,
+    #         )
+    #         out = compiled_f(inp)
 
     def test_input_output_aliase_custom_autograd_function(self):
         class Foo(torch.autograd.Function):

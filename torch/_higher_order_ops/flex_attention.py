@@ -18,7 +18,6 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.fx.graph_module import GraphModule
-
 from torch.overrides import TorchFunctionMode
 
 
@@ -288,7 +287,6 @@ def create_fw_bw_graph(score_mod, index_values, other_buffers):
     from torch._dispatch.python import suspend_functionalization
     from torch._functorch.aot_autograd import AOTConfig, create_joint
     from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
-
     from torch._subclasses.functional_tensor import disable_functional_mode
     from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
 

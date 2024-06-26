@@ -821,6 +821,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         return key in self.value.__dict__
 
+    def is_supported_nn_module_method(self, method):
+        return method in (torch.nn.Module.parameters,)
+
     def var_getattr(self, tx, name):
         from .. import trace_rules
         from . import ConstantVariable
@@ -891,6 +894,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.UserMethodVariable(
                 subobj.__get__.__func__, subobj_var, source=source
             ).call_function(tx, [self], {})
+        elif self.is_supported_nn_module_method(subobj):
+            return variables.GetAttrVariable(self, name, source=source)
         elif isinstance(subobj, staticmethod):
             func = subobj.__get__(self.value)
             if source is not None:

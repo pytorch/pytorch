@@ -38,12 +38,14 @@ static void resize_storage_bytes__functionalize(
     op.call(variable, new_size);
     return;
   }
+  // Don't functionalize, call the mutable op on the inner tensor.
   auto functional_impl =
       at::functionalization::impl::unsafeGetFunctionalWrapper(variable);
-  // Sync pending mutations before running the resize_()
-  functional_impl->sync_();
-  functional_impl->storage_resize_(new_size);
-  return;
+  {
+    at::AutoDispatchSkipFunctionalize guard;
+    op.call(functional_impl->value(), new_size);
+    return;
+  }
 }
 
 TORCH_LIBRARY_FRAGMENT(inductor, m) {
