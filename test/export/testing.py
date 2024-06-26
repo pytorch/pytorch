@@ -6,6 +6,7 @@ import torch
 
 aten = torch.ops.aten
 
+# This list is not meant to be comprehensive
 _COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY = [
     aten.arctan2.default,
     aten.divide.Tensor,
