@@ -19,16 +19,8 @@ from ..utils import ceildiv
 aten = torch.ops.aten
 
 
-def b2b_gemm_grid(m, n, meta):
-    """
-    The CUDA grid size for matmul triton templates.
-    """
-    return (
-        ceildiv(m, meta["ROW_BLOCK_SIZE"]) * ceildiv(n, meta["COL_BLOCK_SIZE"]),
-        1,
-        1,
-    )
-
+def b2b_gemm_grid(M, P, meta):
+    return (ceildiv(M, meta["BLOCK_SIZE_M"]) * ceildiv(P, meta["BLOCK_SIZE_P"]), 1, 1)
 
 b2b_gemm_template = TritonTemplate(
     name="b2b_gemm",
@@ -39,19 +31,11 @@ b2b_gemm_template = TritonTemplate(
 
 
     # B2B_GEMM_TRITON_ENTRANCE
-    # dram load/store estimations
-    #   (A @ B) @ C
-    #   M * N, N * O, O * P
-    #   baseline
-    #     load = M * N + N * O + M * O + O * P
-    #     store = M * O + M * P
-    #   gemm
-    #     load = M * N + M / m * (N * O + O * P)
-    #     store = M * P
+    # TODO: handle the non-divisible case
     M = {{size("A", 0)}}
-    # N = {{size("A", 1)}}
+    N = {{size("A", 1)}}
     O = {{size("C", 0)}}
-    # P = {{size("C", 1)}}
+    P = {{size("C", 1)}}
 
     stride_am = {{stride("A", 0)}}
     stride_an = {{stride("A", 1)}}
@@ -60,39 +44,40 @@ b2b_gemm_template = TritonTemplate(
     stride_co = {{stride("C", 0)}}
     stride_cp = {{stride("C", 1)}}
 
-    # A's row block for this thread
-    row_block_id = tl.program_id(axis=0)
+    # output (M * P) block ids
+    pid = tl.program_id(axis=0)
+    m_block_id = pid // (P // BLOCK_SIZE_P)
+    p_block_id = pid % (P // BLOCK_SIZE_P)
 
-    # divide B's columns (and C's rows)
-    num_col_block = tl.cdiv(O, COL_BLOCK_SIZE)
-
-    # offsets (TODO: handle the non-divisible case)
-    offs_row = row_block_id * ROW_BLOCK_SIZE + tl.arange(0, ROW_BLOCK_SIZE)
-    offs_col = tl.arange(0, COL_BLOCK_SIZE)  # to be updated in the loop
+    # internal block numbers
+    num_n_block = tl.cdiv(N, BLOCK_SIZE_N)
+    num_o_block = tl.cdiv(O, BLOCK_SIZE_O)
 
     # accumulator
-    acc = tl.zeros((ROW_BLOCK_SIZE, P), dtype=tl.float32)
+    acc = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_P), dtype=tl.float32)
 
-    a_ptrs = A + (offs_row[:, None] * stride_am + tl.arange(0, N)[None, :] * stride_an)
-    a = tl.load(a_ptrs)
-
-    for _ in range(num_col_block):
-
-        b_ptrs = B + (tl.arange(0, N)[:, None] * stride_bn + offs_col[None, :] * stride_bo)
-        b = tl.load(b_ptrs)
-
-        c_ptrs = C + (offs_col[:, None] * stride_co + tl.arange(0, P)[None, :] * stride_cp)
-        c = tl.load(c_ptrs)
-
-        # computation (TODO: floating point errors)
-        acc += tl.dot(tl.dot(a, b, out_dtype=tl.float16), c, out_dtype=tl.float16)
-
-        # update offsets
-        offs_col += COL_BLOCK_SIZE
+    for n_block_id in range(num_n_block):
+        a_ptrs = A + (
+            (m_block_id * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M))[:, None] * stride_am +
+            (n_block_id * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N))[None, :] * stride_an
+        )
+        a = tl.load(a_ptrs)
+        for o_block_id in range(num_o_block):
+            b_ptrs = B + (
+                (n_block_id * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N))[:, None] * stride_bn +
+                (o_block_id * BLOCK_SIZE_O + tl.arange(0, BLOCK_SIZE_O))[None, :] * stride_bo
+            )
+            b = tl.load(b_ptrs)
+            c_ptrs = C + (
+                (o_block_id * BLOCK_SIZE_O + tl.arange(0, BLOCK_SIZE_O))[:, None] * stride_co +
+                (p_block_id * BLOCK_SIZE_P + tl.arange(0, BLOCK_SIZE_P))[None, :] * stride_cp
+            )
+            c = tl.load(c_ptrs)
+            acc += tl.dot(tl.dot(a, b, out_dtype=tl.float16), c, out_dtype=tl.float16)
 
     # store
-    idx_m = offs_row[:, None]
-    idx_p = tl.arange(0, P)[None, :]
+    idx_m = (m_block_id * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M))[:, None]
+    idx_p = (p_block_id * BLOCK_SIZE_P + tl.arange(0, BLOCK_SIZE_P))[None, :]
     mask = (idx_m < M) & (idx_p < P)
 
     {{store_output(("idx_m", "idx_p"), "acc", "mask")}}
@@ -119,10 +104,10 @@ def can_apply_b2b_gemm(match: Match) -> bool:
         return False
     # TODO: change to a real-check for size restrictions (may consider hardware limit?)
     m, n, o, p = mat1.shape[0], mat1.shape[1], mat3.shape[0], mat3.shape[1]
-    m_ok = (m % 128 == 0) and (m > 128)
-    n_ok = n == 32
-    o_ok = (o % 128 == 0) and (o > 128)
-    p_ok = p == 32
+    m_ok = (m % 64 == 0) and (m >= 64)
+    n_ok = (n % 64 == 0) and (n >= 64)
+    o_ok = (o % 64 == 0) and (o >= 64)
+    p_ok = (p % 64 == 0) and (p >= 64)
     return m_ok and n_ok and o_ok and p_ok
 
 
@@ -131,41 +116,15 @@ def tuned_b2b_gemm(mat1, mat2, mat3, *, layout=None):
         mat1.get_device(), mat1.get_dtype(), [mat1.shape[0], mat3.shape[1]]
     )
     choices: list[TritonTemplateCaller] = []
-    # TODO: change N and P to non-constexpr
-    # Note: the only reason why N and P are hardcoded is because in Triton tl.arange(0, N) only works for tl.constexpr
     # TODO: add more configs for tuning (shall I also tune num_stages and num_warps?)
     for config in [
         {
-            "ROW_BLOCK_SIZE": 32,
-            "COL_BLOCK_SIZE": 32,
+            "BLOCK_SIZE_M": 64,
+            "BLOCK_SIZE_N": 64,
+            "BLOCK_SIZE_O": 64,
+            "BLOCK_SIZE_P": 64,
             "num_stages": 2,
             "num_warps": 4,
-            "N": 32,
-            "P": 32,
-        },
-        {
-            "ROW_BLOCK_SIZE": 32,
-            "COL_BLOCK_SIZE": 128,
-            "num_stages": 2,
-            "num_warps": 4,
-            "N": 32,
-            "P": 32,
-        },
-        {
-            "ROW_BLOCK_SIZE": 128,
-            "COL_BLOCK_SIZE": 32,
-            "num_stages": 2,
-            "num_warps": 4,
-            "N": 32,
-            "P": 32,
-        },
-        {
-            "ROW_BLOCK_SIZE": 128,
-            "COL_BLOCK_SIZE": 128,
-            "num_stages": 2,
-            "num_warps": 4,
-            "N": 32,
-            "P": 32,
         },
     ]:
         b2b_gemm_template.maybe_append_choice(
