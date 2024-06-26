@@ -397,9 +397,9 @@ import logging
 import os
 import sys
 import uuid
-import importlib.metadata as metadata
-from argparse import REMAINDER, ArgumentParser
-from typing import Callable, List, Tuple, Type, Union, Optional, Set
+from argparse import ArgumentParser, REMAINDER
+from importlib import metadata
+from typing import Callable, List, Optional, Set, Tuple, Type, Union
 
 import torch
 from torch.distributed.argparse_util import check_env, env
@@ -408,9 +408,9 @@ from torch.distributed.elastic.multiprocessing.errors import record
 from torch.distributed.elastic.rendezvous.utils import _parse_rendezvous_config
 from torch.distributed.elastic.utils import macros
 from torch.distributed.elastic.utils.logging import get_logger
-from torch.distributed.launcher.api import LaunchConfig, elastic_launch
+from torch.distributed.launcher.api import elastic_launch, LaunchConfig
 from torch.utils.backend_registration import _get_custom_mod_func
-import torch.multiprocessing
+
 
 logger = get_logger(__name__)
 
@@ -693,21 +693,26 @@ def determine_local_world_size(nproc_per_node: str):
             if torch.cuda.is_available():
                 num_proc = torch.cuda.device_count()
                 device_type = "gpu"
-            elif hasattr(torch, torch._C._get_privateuse1_backend_name()) and \
-                    _get_custom_mod_func("is_available")():
+            elif (
+                hasattr(torch, torch._C._get_privateuse1_backend_name())
+                and _get_custom_mod_func("is_available")()
+            ):
                 num_proc = _get_custom_mod_func("device_count")()
                 device_type = torch._C._get_privateuse1_backend_name()
             else:
                 num_proc = os.cpu_count()
                 device_type = "cpu"
         else:
-            raise ValueError(f"Unsupported nproc_per_node value: {nproc_per_node}") from e
+            raise ValueError(
+                f"Unsupported nproc_per_node value: {nproc_per_node}"
+            ) from e
 
         logger.info(
-            "Using nproc_per_node=%s,"
-            " setting to %s since the instance "
-            "has %s %s",
-            nproc_per_node, num_proc, os.cpu_count(), device_type
+            "Using nproc_per_node=%s," " setting to %s since the instance " "has %s %s",
+            nproc_per_node,
+            num_proc,
+            os.cpu_count(),
+            device_type,
         )
         return num_proc
 
@@ -753,9 +758,13 @@ def _get_logs_specs_class(logs_specs_name: Optional[str]) -> Type[LogsSpecs]:
                 logs_specs_cls = entrypoint_list[0].load()
 
         if logs_specs_cls is None:
-            raise ValueError(f"Could not find entrypoint under 'torchrun.logs_specs[{logs_specs_name}]' key")
+            raise ValueError(
+                f"Could not find entrypoint under 'torchrun.logs_specs[{logs_specs_name}]' key"
+            )
 
-        logging.info("Using logs_spec '%s' mapped to %s", logs_specs_name, str(logs_specs_cls))
+        logging.info(
+            "Using logs_spec '%s' mapped to %s", logs_specs_name, str(logs_specs_cls)
+        )
     else:
         logs_specs_cls = DefaultLogsSpecs
 
@@ -768,7 +777,11 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
     assert 0 < min_nodes <= max_nodes
     assert args.max_restarts >= 0
 
-    if hasattr(args, "master_addr") and args.rdzv_backend != "static" and not args.rdzv_endpoint:
+    if (
+        hasattr(args, "master_addr")
+        and args.rdzv_backend != "static"
+        and not args.rdzv_endpoint
+    ):
         logger.warning(
             "master_addr is only used for static rdzv_backend and when rdzv_endpoint "
             "is not specified."
@@ -784,7 +797,7 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
             "please further tune the variable for optimal performance in "
             "your application as needed. \n"
             "*****************************************",
-            omp_num_threads
+            omp_num_threads,
         )
         # This env variable will be passed down to the subprocesses
         os.environ["OMP_NUM_THREADS"] = str(omp_num_threads)
@@ -888,7 +901,9 @@ def run(args):
             "--rdzv-endpoint=%s "
             "--rdzv-id=%s\n"
             "**************************************\n",
-            args.rdzv_backend, args.rdzv_endpoint, args.rdzv_id
+            args.rdzv_backend,
+            args.rdzv_endpoint,
+            args.rdzv_id,
         )
 
     config, cmd, cmd_args = config_from_args(args)

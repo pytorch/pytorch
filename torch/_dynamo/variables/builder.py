@@ -276,8 +276,10 @@ class BackwardStateGraphArg(GraphArg):
 
     def reconstruct(self, codegen):
         assert codegen.tx.output.backward_state_var
-        codegen.load_import_from(BackwardState.__module__, "BackwardState")
-        codegen.call_function(0, True)
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(BackwardState.__module__, "BackwardState")
+        )
+        codegen.call_function(0, False)
         codegen.dup_top()
         codegen.store(codegen.tx.output.backward_state_var)
 
@@ -2110,15 +2112,14 @@ def _automatic_dynamic(
         )
 
         # Get symbolic contexts for inner tensors
-        attrs, _ = type(e).__tensor_flatten__(e)
         inner_contexts = {}  # mapping from attr -> symbolic context
+        attrs, _ = type(e).__tensor_flatten__(e)
         for attr in attrs:
             inner_tensor = getattr(e, attr)
             inner_source = AttrSource(source, attr)
-            inner_context = _automatic_dynamic(
+            inner_contexts[attr] = _automatic_dynamic(
                 inner_tensor, tx, inner_source, static_shapes
             )
-            inner_contexts[attr] = inner_context
 
         return SubclassSymbolicContext(
             dynamic_sizes=outer_context.dynamic_sizes,

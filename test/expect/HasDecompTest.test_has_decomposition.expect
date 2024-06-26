@@ -392,6 +392,7 @@ aten::_jagged_to_padded_dense_forward
 aten::_lazy_clone_alias
 aten::_lazy_clone_alias_copy
 aten::_lazy_clone_copy
+aten::_lazy_clone_future
 aten::_linalg_check_errors
 aten::_linalg_det
 aten::_linalg_det.result

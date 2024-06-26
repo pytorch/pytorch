@@ -5174,7 +5174,10 @@ else:
             with futureLazyCloneGuard(future):
                 a = torch.randn(10)
                 b = torch._lazy_clone(a)
-                self.assertTrue(b._is_view() != future)
+                if future:
+                    self.assertFalse(b._is_view())
+                else:
+                    self.assertTrue(b._is_view())
 
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
     @assertNoLeakedLazyCloneWarnings()

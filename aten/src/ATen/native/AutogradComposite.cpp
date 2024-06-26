@@ -15,6 +15,8 @@
 #include <ATen/ops/_lazy_clone_native.h>
 #include <ATen/ops/_lazy_clone_alias.h>
 #include <ATen/ops/_lazy_clone_alias_native.h>
+#include <ATen/ops/_lazy_clone_future.h>
+#include <ATen/ops/_lazy_clone_future_native.h>
 #include <ATen/ops/alias.h>
 #include <ATen/ops/zeros.h>
 #endif
@@ -129,23 +131,22 @@ static Tensor _lazy_clone_impl(Tensor const& self, bool future) {
       return self.view_symint(self.sym_sizes());
     }
   }
-  auto tensor = c10::make_intrusive<c10::TensorImpl>(
-      c10::Storage(std::move(storage)),
-      self.key_set(),
-      self.dtype());
-  tensor->set_sizes_and_strides(self.sym_sizes(),
-                                self.sym_strides(),
-                                self.sym_storage_offset());
-  return Tensor(std::move(tensor));
+  auto tensor = self.view_symint(self.sym_sizes());
+  tensor.unsafeGetTensorImpl()->set_storage_keep_dtype(std::move(storage));
+  return tensor;
 }
 
 Tensor _lazy_clone_alias(Tensor const& self) {
   return _lazy_clone_impl(self, /*future=*/false);
 }
 
+Tensor _lazy_clone_future(Tensor const& self) {
+  return _lazy_clone_impl(self, /*future=*/true);
+}
+
 Tensor _lazy_clone(Tensor const& self) {
   if (c10::impl::cow::get_future_lazy_clone()) {
-    return _lazy_clone_impl(self, /*future=*/true);
+    return self._lazy_clone_future();
   } else {
     return self._lazy_clone_alias();
   }
