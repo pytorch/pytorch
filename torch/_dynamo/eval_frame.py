@@ -1432,6 +1432,11 @@ def export(
             raise constraint_violation_error
 
         if graph is None:
+            # If the module does not contain any tensor computation, we would create a graph with inputs and outputs.
+            # To be consitant with the graph traced by dynano, `graph` will have only tensor inputs as placeholders
+            # and tensor outputs as output nodes. non-tensor inputs and outputs will be added when rewriting signature.
+            # We will also construct the `example_inputs`, `graph_captured_input`, and `graph_captured_result` corresponding
+            # to `graph`.
             example_inputs = []
             graph_captured_input = ()
             graph_captured_result = ()
@@ -1443,7 +1448,6 @@ def export(
             assert out_guards is not None  # suppress mypy error
             parameter_names = list(original_signature.parameters.keys())
             fx_graph = torch.fx.Graph()
-            # non-tensor inputs and outputs will be added when rewriting signature
             for i, name in enumerate(parameter_names):
                 if torch.is_tensor(flat_args[i]):
                     node = fx_graph.placeholder(name)
