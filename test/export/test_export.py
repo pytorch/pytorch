@@ -1225,6 +1225,172 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
             ep.module()(torch.randn(6), torch.randn(7), torch.randn(8)).size()[0], 6
         )
 
+    def test_simple_export_for_training(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        eager_model = Foo()
+        ep_for_training = torch.export._trace._export_for_training(
+            eager_model, (torch.ones(2, 2),)
+        )
+        self.assertExpectedInline(
+            str(ep_for_training.graph_module.code).strip(),
+            """\
+def forward(self, p_linear_weight, p_linear_bias, x):
+    linear = torch.ops.aten.linear.default(x, p_linear_weight, p_linear_bias);  x = p_linear_weight = p_linear_bias = None
+    return (linear,)""",
+        )
+        gm = ep_for_training.module()
+        self.assertExpectedInline(
+            str(gm.code).strip(),
+            """\
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    linear_weight = self.linear.weight
+    linear_bias = self.linear.bias
+    linear = torch.ops.aten.linear.default(x, linear_weight, linear_bias);  x = linear_weight = linear_bias = None
+    return pytree.tree_unflatten((linear,), self._out_spec)""",
+        )
+
+        self.assertTrue(
+            torch.allclose(gm(torch.ones(2, 2)), eager_model(torch.ones(2, 2)))
+        )
+
+    def test_export_for_training_with_mutation(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.ones(4, 4))
+
+            def forward(self, x):
+                x.add_(5)
+                self.buffer.add_(5)
+                return x + self.buffer
+
+        eager_model_for_export = Foo()
+        eager_model_for_testing = Foo()
+        ep_for_training = torch.export._trace._export_for_training(
+            eager_model_for_export, (torch.ones(4, 4),)
+        )
+        self.assertExpectedInline(
+            str(ep_for_training.graph_module.code).strip(),
+            """\
+def forward(self, b_buffer, x):
+    add_ = torch.ops.aten.add_.Tensor(x, 5);  x = None
+    add__1 = torch.ops.aten.add_.Tensor(b_buffer, 5);  b_buffer = None
+    add = torch.ops.aten.add.Tensor(add_, add__1);  add_ = add__1 = None
+    return (add,)""",
+        )
+        gm = ep_for_training.module()
+        self.assertExpectedInline(
+            str(gm.code).strip(),
+            """\
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    buffer = self.buffer
+    add_ = torch.ops.aten.add_.Tensor(x, 5);  x = None
+    add__1 = torch.ops.aten.add_.Tensor(buffer, 5);  buffer = None
+    add = torch.ops.aten.add.Tensor(add_, add__1);  add_ = add__1 = None
+    return pytree.tree_unflatten((add,), self._out_spec)""",
+        )
+
+        self.assertTrue(
+            torch.allclose(
+                gm(torch.ones(4, 4)), eager_model_for_testing(torch.ones(4, 4))
+            )
+        )
+
+    def test_export_for_training_with_dynamic_shapes(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.ones(4, 4))
+
+            def forward(self, x):
+                x.add_(5)
+                self.buffer.add_(5)
+                return x + self.buffer.sum()
+
+        eager_model_for_export_training = Foo()
+        eager_model_for_export_inference = Foo()
+        eager_model_for_testing = Foo()
+        ep_for_training = torch.export._trace._export_for_training(
+            eager_model_for_export_training,
+            (torch.ones(4, 4),),
+            dynamic_shapes=({0: Dim("x")},),
+        )
+
+        self.assertTrue(
+            torch.allclose(
+                ep_for_training.module()(torch.ones(2, 4)),
+                eager_model_for_testing(torch.ones(2, 4)),
+            )
+        )
+
+        ep_for_real = export(
+            eager_model_for_export_inference,
+            (torch.ones(4, 4),),
+            dynamic_shapes=({0: Dim("x")},),
+        )
+
+        self.assertEqual(
+            str(ep_for_training.range_constraints), str(ep_for_real.range_constraints)
+        )
+
+    def test_export_for_training_with_container_type(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.ones(4, 4))
+
+            def forward(self, container):
+                x = container[0][0]
+                y = container[0][1]
+                x.add_(5)
+                y.add_(5)
+                return x + y + self.buffer.sum()
+
+        eager_model = Foo()
+        ep_for_training = torch.export._trace._export_for_training(
+            eager_model,
+            ([torch.ones(4, 4), torch.ones(4, 4)],),
+        )
+
+        self.assertTrue(
+            torch.allclose(
+                ep_for_training.module()(
+                    ([torch.ones(4, 4), torch.ones(4, 4)]),
+                ),
+                eager_model(([torch.ones(4, 4), torch.ones(4, 4)])),
+            )
+        )
+
+    # FIXME (tmanlaibaatar) run_decomp doesn't work rn because the graph signature is updated
+    @unittest.expectedFailure
+    def test_export_for_training_run_decomp(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.ones(2, 2))
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                self.buffer.add_(5)
+                return self.linear(x) + self.buffer.sum()
+
+        eager_model = Foo()
+        ep_for_training = torch.export._trace._export_for_training(
+            eager_model,
+            (torch.ones(2, 2),),
+        )
+        ep_for_inference = ep_for_training.run_decompositions()
+        self.assertExpectedInline(str(ep_for_inference.code).strip(), """""")
+
     def test_derived_dim_out_of_order_simplified_repeat_non_derived(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y, y1, z):
