@@ -144,18 +144,16 @@ Indexing, Slicing, Joining, Mutating Ops
 
 Accelerators
 ----------------------------------
-An accelerator is a specialized device designed to significantly enhace performance
-through parallel computation. It empolys a Stream/Event system to synchronize and
-control asynchronous operations effectively. Every accelerator should incorporate
-the concepts of Device, Stream, and Event. As of today, accelerator devices
-are (in no particular order) :doc:`"CUDA" <cuda>`, :doc:`"MTIA" <mtia>`, :doc:`"XPU" <xpu>`, and PrivateUse1.
+Within the PyTorch repo, we define an "Accelerator" as a :class:`torch.device` that is being used
+alongside a CPU to speed up computation. These device use an asynchronous execution scheme,
+using :class:`torch.Stream` and :class:`torch.Event` as their main way to perform synchronization.
+We also assume that only one such accelerator can be available at once on a given host. This allows
+us to use the current accelerator as the default device for relevant concepts such as pinned memory,
+Stream device_type, etc.
 
-Device
-~~~~~~~~~~~~~~~~~~~~~~~~
-A host system can have multiple Devices of the same type. Stream and Events are in
-association with Device. It allows the switch of the specific device to the current device,
-which means that the subsequent operations (device memory allocated or kernel launched)
-from this host thread will reside or execute on the specific device.
+As of today, accelerator devices are (in no particular order) :doc:`"CUDA" <cuda>`, :doc:`"MTIA" <mtia>`,
+:doc:`"XPU" <xpu>`, and PrivateUse1 (many device not in the PyTorch repo itself).
+
 
 Stream
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -166,15 +164,6 @@ the correct task sequencing.
 Event
 ~~~~~~~~~~~~~~~~~~~~~~~~
 Query and record Stream status to identify or control dependencies across Stream and measure timing.
-
-.. _default_accelerator:
-
-Default Accelerator
-~~~~~~~~~~~~~~~~~~~~~~~~
-In PyTorch, the accelerator is designed for mutually exclusiveness with all other accelerators.
-For example, CUDA and XPU will not coexist on the same host system. If there is only one type
-of Accelerator, such as CUDA, on the host system, CUDA becomes the default accelerator. However,
-nothing will be specified as the default accelerator if no accelerators are available.
 
 .. _generators:
 
