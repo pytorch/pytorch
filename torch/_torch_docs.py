@@ -13669,7 +13669,7 @@ Example::
 add_docstr(
     torch.Stream,
     r"""
-Stream(device='cuda') -> Stream
+Stream(device, *, priority) -> Stream
 
 An in-order queue of executing the respective tasks asynchronously in first in first out (FIFO) order.
 It can control or synchronize the execution of other Stream or block the current host thread to ensure
@@ -13677,7 +13677,9 @@ the correct task sequencing.
 
 Arguments:
     device (:class:`torch.device`, optional): the desired device for the Stream.
-    If not given, a default :ref:`accelerator<accelerators>` type will be used.
+        If not given, a default :ref:`accelerator<accelerators>` type will be used.
+    priority (int, optional): priority of the stream, should be 0 or negative, where negative
+        numbers indicate higher priority. By default, streams have priority 0.
 
 Returns:
     Stream: An torch.Stream object.
@@ -13793,13 +13795,14 @@ Example::
 add_docstr(
     torch.Event,
     r"""
-Event(device='cuda') -> Event
+Event(device, *, enable_timing) -> Event
 
 Query and record Stream status to identify or control dependencies across Stream and measure timing.
 
 Arguments:
     device (:class:`torch.device`, optional): the desired device for the Event.
-    If not given, a default :ref:`accelerator<accelerators>` type will be used.
+        If not given, a default :ref:`accelerator<accelerators>` type will be used.
+    enable_timing (bool, optional): indicates if the event should measure time (default: ``False``).
 
 Returns:
     Event: An torch.Event object.
@@ -13866,7 +13869,7 @@ Event.record(stream) -> None
 Record the event in a given stream. The stream's device must match the event's device.
 
 Arguments:
-    stream (:class:`torch.Stream`, Optional): A stream to be recorded.
+    stream (:class:`torch.Stream`, optional): A stream to be recorded.
     If not given, the current stream will be used.
 
 Example::
@@ -13903,7 +13906,7 @@ Event.wait(stream) -> None
 Make all future work submitted to the given stream wait for this event.
 
 Arguments:
-    stream (:class:`torch.Stream`, Optional): A stream to synchronize.
+    stream (:class:`torch.Stream`, optional): A stream to synchronize.
     If not given, the current stream will be used.
 
 Example::
