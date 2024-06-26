@@ -1,3 +1,5 @@
+# mypy: allow-untyped-defs
+
 import os
 
 from typing import Callable, Dict
@@ -45,6 +47,49 @@ class CommDebugModeExample:
         self.world_size = world_size
         self.rank = rank
         self.device_type = get_device_type()
+        torch.manual_seed(0)
+
+    def _MLP_model_setup(self, model_type, parallelize_plan=None):
+        """
+        Creates MLP or MLPStacked model for examples
+        """
+
+        if parallelize_plan is None:
+            parallelize_plan = {
+                "net1": ColwiseParallel(),
+                "net2": RowwiseParallel(),
+            }
+
+        device_mesh = DeviceMesh(
+            self.device_type,
+            torch.arange(0, NUM_DEVICES),
+        )
+
+        inp_size = [8, 10]
+        inp = torch.rand(*inp_size, device=self.device_type)
+
+        model = model_type(self.device_type)
+        model = parallelize_module(model, device_mesh, parallelize_plan)
+
+        return model, inp
+
+    def _transformer_model_setup(self, is_seq_parallel=False):
+        """
+        Creates transformer model for examples
+        """
+        device_mesh = DeviceMesh(
+            self.device_type,
+            torch.arange(0, NUM_DEVICES),
+        )
+
+        model_args = ModelArgs()
+        model = Transformer(model_args).to(device=self.device_type)
+        model = Transformer.parallelize(model, device_mesh, is_seq_parallel)
+        inp_size = [8, 8]
+
+        inp = torch.randint(model_args.vocab_size, inp_size, device=self.device_type)
+
+        return model, inp
 
     def test_MLP_distributed_sharding_display(self) -> None:
         """
@@ -56,24 +101,8 @@ class CommDebugModeExample:
         MLPModule.net2.weight: (Shard(dim=1),)
         MLPModule.net2.bias: (Replicate(),)
         """
-        device_mesh = DeviceMesh(
-            self.device_type,
-            torch.arange(0, NUM_DEVICES),
-        )
-        inp_size = [8, 10]
-        rng_seed = 0
-        torch.manual_seed(rng_seed)
-        inp = torch.rand(*inp_size, device=self.device_type)
-        model = MLPModule(self.device_type)
 
-        LR = 0.25
-
-        parallelize_plan = {
-            "net1": ColwiseParallel(),
-            "net2": RowwiseParallel(),
-        }
-
-        model = parallelize_module(model, device_mesh, parallelize_plan)
+        model, inp = self._MLP_model_setup(model_type=MLPModule)
 
         comm_mode = CommDebugMode()
 
@@ -98,17 +127,6 @@ class CommDebugModeExample:
         MLPStacked.layers.1.net2.weight: (Shard(dim=1),)
         MLPStacked.layers.1.net2.bias: (Replicate(),)
         """
-        device_mesh = DeviceMesh(
-            self.device_type,
-            torch.arange(0, NUM_DEVICES),
-        )
-        inp_size = [8, 10]
-        rng_seed = 0
-        torch.manual_seed(rng_seed)
-        inp = torch.rand(*inp_size, device=self.device_type)
-        model = MLPStacked(self.device_type)
-
-        LR = 0.25
 
         parallelize_plan = {
             "MLPStacked.layers.0.net1": ColwiseParallel(),
@@ -117,7 +135,9 @@ class CommDebugModeExample:
             "MLPStacked.layers.1.net2": RowwiseParallel(),
         }
 
-        model = parallelize_module(model, device_mesh, parallelize_plan)
+        model, inp = self._MLP_model_setup(
+            model_type=MLPStacked, parallelize_plan=parallelize_plan
+        )
 
         comm_mode = CommDebugMode()
 
@@ -146,24 +166,7 @@ class CommDebugModeExample:
                     *c10d_functional.all_reduce: 1
         """
 
-        device_mesh = DeviceMesh(
-            self.device_type,
-            torch.arange(0, NUM_DEVICES),
-        )
-        inp_size = [8, 10]
-        rng_seed = 0
-        torch.manual_seed(rng_seed)
-        inp = torch.rand(*inp_size, device=self.device_type)
-        model = MLPModule(self.device_type)
-
-        LR = 0.25
-
-        parallelize_plan = {
-            "net1": ColwiseParallel(),
-            "net2": RowwiseParallel(),
-        }
-
-        model = parallelize_module(model, device_mesh, parallelize_plan)
+        model, inp = self._MLP_model_setup(model_type=MLPModule)
 
         comm_mode = CommDebugMode()
 
@@ -175,7 +178,7 @@ class CommDebugModeExample:
         print(comm_mode.generate_module_tracing_table())
         comm_mode.log_module_tracing_table_to_file()
 
-    def test_transformer_module_tracing(self, is_seq_parallel: bool = False) -> None:
+    def test_transformer_module_tracing(self) -> None:
         """
         Example code to demonstrate CommModeDebug's module level tracing using a distributed Transformer model.
         Prints a table of module level collective tracing information and logs table to output.txt
@@ -250,20 +253,7 @@ class CommDebugModeExample:
                     *c10d_functional.all_gather_into_tensor: 1
 
         """
-        device_mesh = DeviceMesh(
-            self.device_type,
-            torch.arange(0, NUM_DEVICES),
-        )
-
-        model_args = ModelArgs()
-        model = Transformer(model_args).to(device=self.device_type)
-        model = Transformer.parallelize(model, device_mesh, is_seq_parallel)
-
-        LR = 0.25
-        inp_size = [8, 8]
-
-        torch.manual_seed(0)
-        inp = torch.randint(model_args.vocab_size, inp_size, device=self.device_type)
+        model, inp = self._transformer_model_setup()
 
         comm_mode = CommDebugMode()
         with comm_mode:
@@ -476,24 +466,7 @@ class CommDebugModeExample:
                     **aten.detach.default
         """
 
-        device_mesh = DeviceMesh(
-            self.device_type,
-            torch.arange(0, NUM_DEVICES),
-        )
-        inp_size = [8, 10]
-        rng_seed = 0
-        torch.manual_seed(rng_seed)
-        inp = torch.rand(*inp_size, device=self.device_type)
-        model = MLPModule(self.device_type)
-
-        LR = 0.25
-
-        parallelize_plan = {
-            "net1": ColwiseParallel(),
-            "net2": RowwiseParallel(),
-        }
-
-        model = parallelize_module(model, device_mesh, parallelize_plan)
+        model, inp = self._MLP_model_setup(model_type=MLPModule)
 
         comm_mode = CommDebugMode()
 
@@ -510,20 +483,7 @@ class CommDebugModeExample:
         Example code to demonstrate CommModeDebug's module operation level tracing using a distributed transformer model.
         Prints a table of module opoeration level collective tracing information and logs table to output.txt
         """
-        device_mesh = DeviceMesh(
-            self.device_type,
-            torch.arange(0, NUM_DEVICES),
-        )
-
-        model_args = ModelArgs()
-        model = Transformer(model_args).to(device=self.device_type)
-        model = Transformer.parallelize(model, device_mesh, is_seq_parallel)
-
-        LR = 0.25
-        inp_size = [8, 8]
-
-        torch.manual_seed(0)
-        inp = torch.randint(model_args.vocab_size, inp_size, device=self.device_type)
+        model, inp = self._transformer_model_setup()
 
         comm_mode = CommDebugMode()
         with comm_mode:
@@ -536,7 +496,6 @@ class CommDebugModeExample:
 
 def run_example(world_size: int, rank: int, example_name: str) -> None:
     # set manual seed
-    torch.manual_seed(0)
     # intializing class with all of the functions
     instantiated_test = CommDebugModeExample(world_size, rank)
     # dict that stores example code function names
