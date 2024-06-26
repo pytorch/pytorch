@@ -1026,8 +1026,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 block_mask.kv_indices,
                 block_mask.q_num_blocks,
                 block_mask.q_indices,
-                block_mask.BLOCKSPARSE_KV,
-                block_mask.BLOCKSPARSE_Q,
+                block_mask.KV_BLOCK_SIZE,
+                block_mask.Q_BLOCK_SIZE,
             )
 
         @torch.compile(backend="aot_eager")
@@ -1045,8 +1045,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 block_mask.kv_indices,
                 block_mask.q_num_blocks,
                 block_mask.q_indices,
-                block_mask.BLOCKSPARSE_KV,
-                block_mask.BLOCKSPARSE_Q,
+                block_mask.KV_BLOCK_SIZE,
+                block_mask.Q_BLOCK_SIZE,
             )
 
         ref_out, ref_lse = eager_sdpa_hop(
@@ -1107,8 +1107,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 block_mask.kv_indices,
                 block_mask.q_num_blocks,
                 block_mask.q_indices,
-                block_mask.BLOCKSPARSE_KV,
-                block_mask.BLOCKSPARSE_Q,
+                block_mask.KV_BLOCK_SIZE,
+                block_mask.Q_BLOCK_SIZE,
             )
             lse_2 = lse * 2
             return lse_2
@@ -1140,8 +1140,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 block_mask.kv_indices,
                 block_mask.q_num_blocks,
                 block_mask.q_indices,
-                block_mask.BLOCKSPARSE_KV,
-                block_mask.BLOCKSPARSE_Q,
+                block_mask.KV_BLOCK_SIZE,
+                block_mask.Q_BLOCK_SIZE,
             )
             lse_2 = lse * 2
             return out, lse_2

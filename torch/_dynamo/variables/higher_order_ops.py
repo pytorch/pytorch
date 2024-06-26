@@ -1575,12 +1575,12 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             key,
             value,
             score_mod,
-            sparse_mask_kv_num_blocks,
-            sparse_mask_kv_indices,
-            sparse_mask_q_num_blocks,
-            sparse_mask_q_indices,
-            BLOCKSPARSE_KV,
-            BLOCKSPARSE_Q,
+            sparse_kv_num_blocks,
+            sparse_kv_indices,
+            sparse_q_num_blocks,
+            sparse_q_indices,
+            SPARSE_KV_BLOCK_SIZE,
+            SPARSE_Q_BLOCK_SIZE,
         ) = self.normalize_to_args(args, kwargs)
 
         p_args = self.create_wrapped_node(tx, query, score_mod)
@@ -1588,12 +1588,12 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             query,
             key,
             value,
-            sparse_mask_kv_num_blocks,
-            sparse_mask_kv_indices,
-            sparse_mask_q_num_blocks,
-            sparse_mask_q_indices,
-            BLOCKSPARSE_KV,
-            BLOCKSPARSE_Q,
+            sparse_kv_num_blocks,
+            sparse_kv_indices,
+            sparse_q_num_blocks,
+            sparse_q_indices,
+            SPARSE_KV_BLOCK_SIZE,
+            SPARSE_Q_BLOCK_SIZE,
         ]
 
         # Store the invocation as a call
