@@ -16,6 +16,10 @@ from functorch.compile import min_cut_rematerialization_partition
 from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.testing import CompileCounterWithBackend
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_CUDNN_ATTENTION,
+    SM90OrLater,
+)
 from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.two_tensor import TwoTensor
@@ -110,7 +114,7 @@ def op_count(gm):
 
 def _get_custom_policy(no_recompute_list=None, must_recompute_list=None):
     def _custom_policy(ctx, func, *args, **kwargs):
-        if func in no_recompute_list:
+        if no_recompute_list is not None and func in no_recompute_list:
             return CheckpointPolicy.MUST_SAVE
         if must_recompute_list is not None and func in must_recompute_list:
             return CheckpointPolicy.MUST_RECOMPUTE
@@ -532,21 +536,17 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
     @requires_cuda
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     def test_compile_selective_checkpoint_must_recompute(self):
-        def context_fn_must_recompute_sigmoid():
-            no_recompute_list = [
-                torch.ops.aten.mm.default,
-            ]
+        def context_fn_must_recompute_mm():
             must_recompute_list = [
-                torch.ops.aten.sigmoid.default,
+                torch.ops.aten.mm.default,
             ]
             return create_selective_checkpoint_contexts(
                 _get_custom_policy(
-                    no_recompute_list=no_recompute_list,
                     must_recompute_list=must_recompute_list,
                 ),
             )
 
-        def context_fn_let_partitioner_decide_on_sigmoid():
+        def context_fn_no_recompute_mm():
             no_recompute_list = [
                 torch.ops.aten.mm.default,
             ]
@@ -558,10 +558,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
         def _test(context_fn, bw_compiler):
             def gn(x):
-                # NOTE: Normally in this case, sigmoid doesn't need to be recomputed
-                # (because we always have its output which is the program output).
-                # But here we show that we can force its recomputation by using
-                # a custom policy (CheckpointPolicy.MUST_RECOMPUTE) for sigmoid ops.
                 return torch.sigmoid(torch.matmul(x, x))
 
             def fn(x):
@@ -577,7 +573,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             fw_compiler = functools.partial(
                 count_ops,
                 freq=1,
-                op=torch.ops.aten.sigmoid.default,
+                op=torch.ops.aten.mm.default,
             )
 
             backend = aot_autograd(
@@ -588,19 +584,19 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             self._validate(fn, backend, x)
 
         _test(
-            context_fn=context_fn_must_recompute_sigmoid,
+            context_fn=context_fn_must_recompute_mm,
             bw_compiler=functools.partial(
                 count_ops,
-                freq=1,  # sigmoid should be recomputed
-                op=torch.ops.aten.sigmoid.default,
+                freq=3,  # 1 matmul recompute and 2 bwd mm ops per fwd matmul, so 1 + 2 * 1 = 3)
+                op=torch.ops.aten.mm.default,
             ),
         )
         _test(
-            context_fn=context_fn_let_partitioner_decide_on_sigmoid,
+            context_fn=context_fn_no_recompute_mm,
             bw_compiler=functools.partial(
                 count_ops,
-                freq=0,  # sigmoid should not be recomputed
-                op=torch.ops.aten.sigmoid.default,
+                freq=2,  # 2 bwd mm ops per fwd matmul
+                op=torch.ops.aten.mm.default,
             ),
         )
 
@@ -1120,6 +1116,10 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
         opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
         opt_fn(*args1).sum().backward()
+        if PLATFORM_SUPPORTS_CUDNN_ATTENTION and SM90OrLater:
+            op = torch.ops.aten._scaled_dot_product_cudnn_attention.default
+        else:
+            op = torch.ops.aten._scaled_dot_product_flash_attention.default
 
         fwd_graph = aot_graphs[0]
         self.assertTrue(
@@ -1127,7 +1127,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 fwd_graph,
                 [],
                 freq=1,
-                op=torch.ops.aten._scaled_dot_product_flash_attention.default,
+                op=op,
             )
         )
 
@@ -1140,7 +1140,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 bwd_graph,
                 [],
                 freq=1,
-                op=torch.ops.aten._scaled_dot_product_flash_attention.default,
+                op=op,
             )
         )
 
