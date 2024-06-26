@@ -2,8 +2,6 @@
 
 import os
 
-import torch  # noqa: F401
-
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
