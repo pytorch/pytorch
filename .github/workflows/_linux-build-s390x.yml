@@ -130,7 +130,6 @@ jobs:
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
           )
-          docker exec -t "${container_name}" sh -c 'dnf update -y ; dnf install -y python3-numpy </dev/null'
           docker exec -t "${container_name}" sh -c '.ci/pytorch/build.sh'
 
       - name: Archive artifacts into zip
