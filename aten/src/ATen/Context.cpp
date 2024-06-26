@@ -56,6 +56,14 @@ void Context::setDeterministicCuDNN(bool b) {
   deterministic_cudnn = b;
 }
 
+bool Context::deterministicMkldnn() const {
+  return deterministic_mkldnn;
+}
+
+void Context::setDeterministicMkldnn(bool b) {
+  deterministic_mkldnn = b;
+}
+
 bool Context::deterministicAlgorithms() const {
   return _deterministic_algorithms;
 }
@@ -268,6 +276,12 @@ at::BlasBackend Context::blasPreferredBackend() const {
 }
 
 void Context::setBlasPreferredBackend(at::BlasBackend b) {
+#ifdef _MSC_VER
+  TORCH_WARN_ONCE(
+    "torch.backends.cuda.preferred_blas_library is an experimental feature. "
+    "It is not supported on Windows."
+  );
+#else
   TORCH_CHECK((b != at::BlasBackend::Cublaslt) || hasCuBLASLt(),
       "Cannot set preferred backend to cuBLASLt if PyTorch has not been compiled with cuBLASLt.");
   if (b != at::BlasBackend::Cublas) {
@@ -278,6 +292,7 @@ void Context::setBlasPreferredBackend(at::BlasBackend b) {
     );
   }
   blas_preferred_backend = b;
+#endif
 }
 
 bool Context::allowFP16ReductionCuBLAS() const {

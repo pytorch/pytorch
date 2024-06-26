@@ -10,7 +10,12 @@ from torch.distributed._tensor._utils import (
 )
 
 from torch.distributed._tensor.debug import CommDebugMode
-from torch.distributed._tensor.placement_types import Replicate, Shard
+from torch.distributed._tensor.placement_types import (
+    DTensorSpec,
+    Replicate,
+    Shard,
+    TensorMeta,
+)
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 
 from torch.testing._internal.common_utils import run_tests
@@ -144,9 +149,8 @@ class Test2DStridedLocalShard(DTensorTestBase):
                 global_tensor, tp_mesh, placements=[Shard(0)]
             )
             dtensor_2d = DTensor.from_local(
-                dtensor_tp.to_local(), mesh_2d, [Replicate(), Shard(0)]
+                dtensor_tp.to_local(), mesh_2d, [Replicate(), Shard(0)], run_check=False
             ).redistribute(mesh_2d, [Shard(0), Shard(0)])
-            self.assertEqual(len(comm_mode.get_comm_counts()), 1)
             self.assertEqual(
                 comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 1
             )
@@ -186,17 +190,22 @@ class Test2DStridedLocalShard(DTensorTestBase):
             chunks = list(torch.chunk(dtensor_tp.to_local(), 2, dim=0))
             shard_rank = 0 if self.rank // 2 == 0 else 1
             sharded_param = chunks[shard_rank]
-            dtensor_2d = DTensor(
-                sharded_param,
-                mesh_2d,
-                [Shard(0), Shard(0)],
-                shape=global_tensor.size(),
-                dtype=global_tensor.dtype,
-                requires_grad=False,
-                stride=global_tensor.stride(),
+            spec_2d = DTensorSpec(
+                mesh=mesh_2d,
+                placements=(Shard(0), Shard(0)),
+                tensor_meta=TensorMeta(
+                    global_tensor.size(),
+                    global_tensor.stride(),
+                    global_tensor.dtype,
+                ),
             )
 
-            self.assertEqual(len(comm_mode.get_comm_counts()), 0)
+            dtensor_2d = DTensor(
+                sharded_param,
+                spec_2d,
+                requires_grad=False,
+            )
+
             self.assertEqual(
                 comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 0
             )

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from collections import defaultdict
 from dataclasses import dataclass
 from time import perf_counter_ns
@@ -7,6 +8,7 @@ from warnings import warn
 import torch
 
 import torch.cuda
+from torch._C import _get_privateuse1_backend_name
 from torch._C._profiler import _ExperimentalConfig
 
 from torch.autograd import (
@@ -116,7 +118,7 @@ class profile:
 
         use_device (str, optional): Enables timing of device events.
             Adds approximately 4us of overhead to each tensor operation when use cuda.
-            The valid devices options are 'cuda', 'xpu' and 'privateuseone'.
+            The valid devices options are 'cuda', 'xpu', 'mtia' and 'privateuseone'.
 
         record_shapes (bool, optional): If shapes recording is set, information
             about input dimensions will be collected. This allows one to see which
@@ -194,7 +196,7 @@ class profile:
         self,
         enabled=True,
         *,
-        use_cuda=False,
+        use_cuda=False,  # Deprecated
         use_device=None,
         record_shapes=False,
         with_flops=False,
@@ -203,7 +205,6 @@ class profile:
         with_modules=False,
         use_kineto=False,
         use_cpu=True,
-        use_mtia=False,
         experimental_config=None,
     ):
         self.enabled: bool = enabled
@@ -212,7 +213,10 @@ class profile:
         self.use_cuda = use_cuda
         if self.use_cuda:
             warn(
-                "The attribute `use_cuda` will be deprecated soon, please use ``use_device = 'cuda'`` instead."
+                "The attribute `use_cuda` will be deprecated soon, "
+                "please use ``use_device = 'cuda'`` instead.",
+                FutureWarning,
+                stacklevel=2,
             )
             self.use_device: Optional[str] = "cuda"
         else:
@@ -226,7 +230,6 @@ class profile:
         self.with_stack = with_stack
         self.with_modules = with_modules
         self.use_cpu = use_cpu
-        self.use_mtia = use_mtia
         if experimental_config is None:
             experimental_config = _ExperimentalConfig()
         self.experimental_config = experimental_config
@@ -240,25 +243,26 @@ class profile:
                 use_kineto
             ), "Device-only events supported only with Kineto (use_kineto=True)"
 
-        VALID_DEVICE_OPTIONS = ["cuda", "xpu", "privateuseone"]
-        if self.use_device not in VALID_DEVICE_OPTIONS:
-            warn(f"The {self.use_device} is not a valid device option.")
-            self.use_device = None
+        if self.use_device is not None:
+            VALID_DEVICE_OPTIONS = ["cuda", "xpu", "mtia"]
+            if _get_privateuse1_backend_name() != "privateuseone":
+                VALID_DEVICE_OPTIONS.append(_get_privateuse1_backend_name())
+            if self.use_device not in VALID_DEVICE_OPTIONS:
+                warn(f"The {self.use_device} is not a valid device option.")
+                self.use_device = None
 
-        if self.use_device == "cuda" and not torch.cuda.is_available():
-            warn("CUDA is not available, disabling CUDA profiling")
-            self.use_cuda = False
-            self.use_device = None
+            if self.use_device == "cuda" and not torch.cuda.is_available():
+                warn("CUDA is not available, disabling CUDA profiling")
+                self.use_cuda = False
+                self.use_device = None
 
-        if self.use_device == "xpu" and not torch.xpu.is_available():
-            warn("XPU is not available, disabling XPU profiling")
-            self.use_device = None
+            if self.use_device == "xpu" and not torch.xpu.is_available():
+                warn("XPU is not available, disabling XPU profiling")
+                self.use_device = None
 
         self.kineto_activities = set()
         if self.use_cpu:
             self.kineto_activities.add(ProfilerActivity.CPU)
-        if self.use_mtia:
-            self.kineto_activities.add(ProfilerActivity.MTIA)
 
         self.profiler_kind = ProfilerState.KINETO
         if self.use_device == "cuda":
@@ -272,6 +276,11 @@ class profile:
                 use_kineto and ProfilerActivity.XPU in _supported_activities()
             ), "Legacy XPU profiling is not supported. Requires use_kineto=True on XPU devices."
             self.kineto_activities.add(ProfilerActivity.XPU)
+        elif self.use_device == "mtia":
+            assert (
+                use_kineto and ProfilerActivity.MTIA in _supported_activities()
+            ), "Legacy MTIA profiling is not supported. Requires use_kineto=True on MTIA devices."
+            self.kineto_activities.add(ProfilerActivity.MTIA)
         elif self.use_device is not None and self.use_device != "privateuseone":
             if (
                 not use_kineto
@@ -332,7 +341,15 @@ class profile:
             if hasattr(device_module, "synchronize"):
                 device_module.synchronize()
 
+        old_function_events: Optional[EventList] = None
+        if self.function_events:
+            old_function_events = self.function_events
+
         t0 = perf_counter_ns()
+
+        # TODO we are overwriting previous kineto results here
+        # Should combine previous results with the new results otherwise only
+        # the last "repeat" will be recorded in the trace
         self.kineto_results = _disable_profiler()
         t1 = perf_counter_ns()
         self._stats.profiler_disable_call_duration_us = int((t1 - t0) / 1000)
@@ -359,6 +376,9 @@ class profile:
         self._stats.profiling_window_duration_sec = (
             (self.profiling_end_time_ns - self.profiling_start_time_ns) * 1.0 / 1e9
         )
+        if old_function_events:
+            for evt in old_function_events:
+                self.function_events.append(evt)
         return False
 
     def __repr__(self):
@@ -400,6 +420,10 @@ class profile:
     table.__doc__ = EventList.table.__doc__
 
     def export_chrome_trace(self, path):
+        """
+        Exports the collected trace in Chrome JSON format. If kineto is enabled, only
+        last cycle in schedule is exported.
+        """
         self._check_finish()
         if kineto_available():
             self.kineto_results.save(path)  # type: ignore[union-attr]

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 r"""Contains definitions of the methods used by the _BaseDataLoaderIter workers.
 
 These methods are used to collate samples fetched from dataset into Tensor(s).
@@ -121,7 +122,7 @@ def collate(batch, *, collate_fn_map: Optional[Dict[Union[Type, Tuple[Type, ...]
 
     Examples:
         >>> def collate_tensor_fn(batch, *, collate_fn_map):
-        >>> # Extend this function to handle batch of tensors
+        ...     # Extend this function to handle batch of tensors
         ...     return torch.stack(batch, 0)
         >>> def custom_collate(batch):
         ...     collate_map = {torch.Tensor: collate_tensor_fn}

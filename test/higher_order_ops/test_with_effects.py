@@ -17,34 +17,21 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, SM80OrLater
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 from torch.testing._internal.common_utils import (
-    find_library_location,
-    IS_FBCODE,
-    IS_MACOS,
-    IS_SANDCASTLE,
     IS_WINDOWS,
     run_tests,
     TEST_CUDA,
     TEST_WITH_ROCM,
     TestCase,
 )
-from torch.utils.hooks import RemovableHandle
+
+from torch.testing._internal.torchbind_impls import init_torchbind_implementations
+from torch.utils.hooks import RemovableHandle  # noqa: TCH001
 
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestWithEffects(TestCase):
     def setUp(self):
-        if IS_MACOS:
-            raise unittest.SkipTest("non-portable load_library call used in test")
-        elif IS_SANDCASTLE or IS_FBCODE:
-            torch.ops.load_library(
-                "//caffe2/test/cpp/jit:test_custom_class_registrations"
-            )
-        elif IS_WINDOWS:
-            lib_file_path = find_library_location("torchbind_test.dll")
-            torch.ops.load_library(str(lib_file_path))
-        else:
-            lib_file_path = find_library_location("libtorchbind_test.so")
-            torch.ops.load_library(str(lib_file_path))
+        init_torchbind_implementations()
 
     def test_print(self):
         class M(torch.nn.Module):
@@ -110,8 +97,8 @@ def forward(self, arg1_1):
             str(gm.code).strip(),
             """\
 def forward(self, arg0_1, arg1_1):
-    _tensor_constant0 = self._tensor_constant0
-    with_effects = torch._higher_order_ops.effects.with_effects(arg0_1, torch.ops._TorchScriptTesting.takes_foo.default, _tensor_constant0, arg1_1);  arg0_1 = _tensor_constant0 = None
+    _torchbind_obj0 = self._torchbind_obj0
+    with_effects = torch._higher_order_ops.effects.with_effects(arg0_1, torch.ops._TorchScriptTesting.takes_foo.default, _torchbind_obj0, arg1_1);  arg0_1 = _torchbind_obj0 = None
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
     add = torch.ops.aten.add.Tensor(arg1_1, getitem_1);  arg1_1 = getitem_1 = None
@@ -210,6 +197,33 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         res = torch.compile(f, backend="inductor")(*inputs)
         self.assertTrue(torch.allclose(res, f(*inputs)))
+
+    @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
+    @skipIfNoDynamoSupport
+    def test_compile_inductor_external_op_return_none(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::inplace_add",
+                "(Tensor input, Tensor(a!) output) -> ()",
+                lib=lib,
+            )
+
+            def inplace_add(input: torch.Tensor, output: torch.Tensor) -> None:
+                assert input.device == output.device
+                output.add_(input)
+
+            lib.impl("inplace_add", inplace_add, "CompositeExplicitAutograd")
+
+            def f(x):
+                out = torch.empty(3)
+                out = torch.zeros_like(out)
+                torch.ops.mylib.inplace_add(x, out)
+                return out
+
+            inputs = (torch.randn(3),)
+
+            res = torch.compile(f, backend="inductor")(*inputs)
+            self.assertTrue(torch.allclose(res, f(*inputs)))
 
     def test_compile_aot_eager_requires_grad(self):
         def f(x):

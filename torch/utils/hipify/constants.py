@@ -2,7 +2,7 @@
 
 The constants defined here are used to annotate the mapping tuples in cuda_to_hip_mappings.py.
 They are based on
-https://github.com/ROCm-Developer-Tools/HIP/blob/master/hipify-clang/src/Statistics.h
+https://github.com/ROCm/HIPIFY/blob/master/src/Statistics.h
 and fall in three categories: 1) type of mapping, 2) API of mapping, 3) unsupported
 mapping.
 """

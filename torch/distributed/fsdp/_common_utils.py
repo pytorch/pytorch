@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 This file includes private common utilities for FSDP.
 """
@@ -31,8 +32,6 @@ from torch.distributed._composable_state import _get_module_state, _State
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
 )
-from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.fsdp._fsdp_extensions import FSDPExtensions
 from torch.distributed.utils import _apply_to_tensors
 from torch.utils._mode_utils import no_dispatch
 
@@ -45,7 +44,11 @@ from .api import (
     StateDictType,
 )
 
+
 if TYPE_CHECKING:
+    from torch.distributed.device_mesh import DeviceMesh
+    from torch.distributed.fsdp._fsdp_extensions import FSDPExtensions
+
     from ._flat_param import FlatParamHandle
 
 FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
@@ -139,6 +142,7 @@ class _FSDPState(_State):
         self._gradient_postdivide_factor: int = 0
         self._comm_hook: Optional[Callable] = None
         self._comm_hook_state: Optional[Any] = None
+        self._unshard_event: Optional[torch.cuda.Event] = None
         # Abstract device handle for fsdp compute device. For now,
         # the compute device must implement cuda semantics used by fsdp
         self._device_handle: _FSDPDeviceHandle = _UninitializedDeviceHandle()
@@ -420,29 +424,14 @@ def _apply_to_modules(
                     # ``named_children`` + `named_parameter(recurse=False)``.
                     # This hack is a must to make the traversal work.
                     # TODO: Remove this hack once DMP + FSDP is not supported.
+                    # It turns out that recursive wrapping may trigger this as
+                    # well.
                     if (
                         submodule_name == "_fsdp_wrapped_module"
                         or submodule_name == "_dmp_wrapped_module"
                     ):
-                        if (
-                            not torch.distributed._functional_collectives.is_torchdynamo_compiling()
-                        ):
-                            # TODO(voz): Don't graph break on this
-                            warnings.warn(
-                                "An unexpected prefix is detected. This case "
-                                " should only happen when using DMP with FSDP. "
-                                f"prefix = {prefix}, "
-                                f"submodule_name = {submodule_name}"
-                            )
                         new_prefix = prefix
                     elif submodule_name == "module":
-                        warnings.warn(
-                            "An unexpected prefix is detected. This case "
-                            " should only happen when DDP wraps the outer "
-                            " modules while FSDP wraps the inner ones."
-                            f"prefix = {prefix}, "
-                            f"submodule_name = {submodule_name}"
-                        )
                         new_prefix = prefix
             f(submodule, new_prefix, new_tree_level, *args, **kwargs)
 

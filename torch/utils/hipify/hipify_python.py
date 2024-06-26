@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# mypy: allow-untyped-defs
 """ The Python Hipify script.
 ##
 # Copyright (c) 2015-2016 Advanced Micro Devices, Inc. All rights reserved.
@@ -973,7 +974,7 @@ def preprocessor(
             hipify_result.current_state = CurrentState.DONE
             return hipify_result
         except PermissionError as e:
-            print(f"{bcolors.WARNING}Failed to save {fout_path} with \"{e.strerror}\", leaving {fin_path} unchanged.{bcolors.ENDC}",
+            print(f'{bcolors.WARNING}Failed to save {fout_path} with "{e.strerror}", leaving {fin_path} unchanged.{bcolors.ENDC}',
                   file=sys.stderr)
             hipify_result.hipified_path = fin_path
             hipify_result.status = "[skipped, no permissions]"

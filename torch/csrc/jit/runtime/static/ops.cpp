@@ -209,7 +209,7 @@ at::Tensor& to_copy_out(
     const Tensor& self,
     bool non_blocking,
     bool copy_strides,
-    c10::optional<MemoryFormat> memory_format) {
+    std::optional<MemoryFormat> memory_format) {
   if (copy_strides) {
     at::native::resize_impl_cpu_(
         out.unsafeGetTensorImpl(), self.sizes(), self.strides());
@@ -259,7 +259,7 @@ static Tensor& linear_out(
     Tensor& output,
     const Tensor& input,
     const Tensor& weight,
-    const c10::optional<Tensor>& bias_opt) {
+    const std::optional<Tensor>& bias_opt) {
   TORCH_CHECK(!input.is_mkldnn());
 
   auto bias = bias_opt.has_value()
@@ -1048,7 +1048,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
     LogAndDumpSchema(n);
     return nullptr;
   }
-  c10::optional<float> clamp = c10::nullopt;
+  std::optional<float> clamp = c10::nullopt;
   if (n->inputs()[1]->node()->kind() == prim::Constant) {
     auto clamp_d = toIValue(n->inputs()[1])->toOptional<double>();
     clamp = clamp_d
@@ -1353,10 +1353,10 @@ namespace {
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct ToArgs {
-  c10::optional<at::ScalarType> dtype;
+  std::optional<at::ScalarType> dtype;
   c10::Layout layout;
   bool know_to_will_alias = false;
-  c10::optional<c10::MemoryFormat> memory_format;
+  std::optional<c10::MemoryFormat> memory_format;
 };
 
 template <bool has_constant_non_tensor_dtype_and_flags, bool has_memory_format>
@@ -1440,8 +1440,8 @@ C10_ALWAYS_INLINE void to_copy_functor_impl(
   // handle memory format
   bool copy_strides = false;
 
-  c10::optional<c10::MemoryFormat> memory_format = c10::MemoryFormat::Preserve;
-  c10::optional<ToArgs> my_args;
+  std::optional<c10::MemoryFormat> memory_format = c10::MemoryFormat::Preserve;
+  std::optional<ToArgs> my_args;
   if (!args) {
     my_args = extract_to_args<
         has_constant_non_tensor_dtype_and_flags,
@@ -1905,7 +1905,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::div, aten_div, [](Node* n) -> SROperator {
 
   return [te = createDiv()](ProcessedNode* p_node) {
     const auto& in0_t = p_node->Input(0).toTensor();
-    c10::optional<c10::string_view> rounding_mode = c10::nullopt;
+    std::optional<c10::string_view> rounding_mode = c10::nullopt;
     if (p_node->num_inputs() > 2) {
       rounding_mode = p_node->Input(2).toOptional<c10::string_view>();
     }
@@ -2396,8 +2396,8 @@ REGISTER_OPERATOR_FUNCTOR(
 // device & pin_memory matter only when CUDA is enabled.
 static bool hasTensorWithOptions(
     const IValue& ivalue,
-    c10::optional<c10::ScalarType> dtype,
-    c10::optional<c10::Layout> layout) {
+    std::optional<c10::ScalarType> dtype,
+    std::optional<c10::Layout> layout) {
   if (!ivalue.isTensor()) {
     return false;
   }
@@ -2412,9 +2412,9 @@ static bool hasTensorWithOptions(
 
 static bool hasTensorWithOptions(
     const IValue& ivalue,
-    c10::optional<c10::ScalarType> dtype,
-    c10::optional<c10::Layout> layout,
-    c10::optional<c10::MemoryFormat> memory_format) {
+    std::optional<c10::ScalarType> dtype,
+    std::optional<c10::Layout> layout,
+    std::optional<c10::MemoryFormat> memory_format) {
   return hasTensorWithOptions(ivalue, dtype, layout) &&
       (memory_format == ivalue.toTensor().options().memory_format_opt());
 }

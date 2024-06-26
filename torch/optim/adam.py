@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import List, Optional, Tuple, Union
 
 import torch
@@ -7,15 +8,18 @@ from .optimizer import (
     _capturable_doc,
     _default_to_fused_or_foreach,
     _differentiable_doc,
+    _disable_dynamo_if_unsupported,
     _dispatch_sqrt,
     _foreach_doc,
     _fused_doc,
+    _get_capturable_supported_devices,
     _get_scalar_dtype,
     _get_value,
     _maximize_doc,
     _stack_if_compiling,
     _use_grad_for_differentiable,
     _view_as_real,
+    DeviceDict,
     Optimizer,
     ParamsT,
 )
@@ -201,12 +205,12 @@ class Adam(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
-            params_with_grad = []
-            grads = []
-            exp_avgs = []
-            exp_avg_sqs = []
-            max_exp_avg_sqs = []
-            state_steps = []
+            params_with_grad: List[Tensor] = []
+            grads: List[Tensor] = []
+            exp_avgs: List[Tensor] = []
+            exp_avg_sqs: List[Tensor] = []
+            max_exp_avg_sqs: List[Tensor] = []
+            state_steps: List[Tensor] = []
             beta1, beta2 = group["betas"]
 
             has_complex = self._init_group(
@@ -305,6 +309,8 @@ Adam.__doc__ = (
         {_capturable_doc}
         {_differentiable_doc}
         {_fused_doc}
+    .. Note::
+        A prototype implementation of Adam and AdamW for MPS supports `torch.float32` and `torch.float16`.
     .. _Adam\: A Method for Stochastic Optimization:
         https://arxiv.org/abs/1412.6980
     .. _On the Convergence of Adam and Beyond:
@@ -312,94 +318,6 @@ Adam.__doc__ = (
 
     """
 )
-
-
-def adam(
-    params: List[Tensor],
-    grads: List[Tensor],
-    exp_avgs: List[Tensor],
-    exp_avg_sqs: List[Tensor],
-    max_exp_avg_sqs: List[Tensor],
-    state_steps: List[Tensor],
-    # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
-    # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
-    foreach: Optional[bool] = None,
-    capturable: bool = False,
-    differentiable: bool = False,
-    fused: Optional[bool] = None,
-    grad_scale: Optional[Tensor] = None,
-    found_inf: Optional[Tensor] = None,
-    has_complex: bool = False,
-    *,
-    amsgrad: bool,
-    beta1: float,
-    beta2: float,
-    lr: Union[float, Tensor],
-    weight_decay: float,
-    eps: float,
-    maximize: bool,
-):
-    r"""Functional API that performs Adam algorithm computation.
-
-    See :class:`~torch.optim.Adam` for details.
-    """
-    # Respect when the user inputs False/True for foreach or fused. We only want to change
-    # the default when neither have been user-specified. Note that we default to foreach
-    # and pass False to use_fused. This is not a mistake--we want to give the fused impl
-    # bake-in time before making it the default, even if it is typically faster.
-    if fused is None and foreach is None:
-        _, foreach = _default_to_fused_or_foreach(
-            params, differentiable, use_fused=False
-        )
-        # Do not flip on foreach for the unsupported case where lr is a Tensor and capturable=False.
-        if foreach and isinstance(lr, Tensor) and not capturable:
-            foreach = False
-    if fused is None:
-        fused = False
-    if foreach is None:
-        foreach = False
-
-    # this check is slow during compilation, so we skip it
-    # if it's strictly needed we can add this check back in dynamo
-    if not torch._utils.is_compiling() and not all(
-        isinstance(t, torch.Tensor) for t in state_steps
-    ):
-        raise RuntimeError(
-            "API has changed, `state_steps` argument must contain a list of singleton tensors"
-        )
-
-    if foreach and torch.jit.is_scripting():
-        raise RuntimeError("torch.jit.script not supported with foreach optimizers")
-    if fused and torch.jit.is_scripting():
-        raise RuntimeError("torch.jit.script not supported with fused optimizers")
-
-    if fused and not torch.jit.is_scripting():
-        func = _fused_adam
-    elif foreach and not torch.jit.is_scripting():
-        func = _multi_tensor_adam
-    else:
-        func = _single_tensor_adam
-
-    func(
-        params,
-        grads,
-        exp_avgs,
-        exp_avg_sqs,
-        max_exp_avg_sqs,
-        state_steps,
-        amsgrad=amsgrad,
-        has_complex=has_complex,
-        beta1=beta1,
-        beta2=beta2,
-        lr=lr,
-        weight_decay=weight_decay,
-        eps=eps,
-        maximize=maximize,
-        capturable=capturable,
-        differentiable=differentiable,
-        grad_scale=grad_scale,
-        found_inf=found_inf,
-    )
 
 
 def _single_tensor_adam(
@@ -439,9 +357,11 @@ def _single_tensor_adam(
 
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
         if not torch._utils.is_compiling() and capturable:
-            assert (param.is_cuda and step_t.is_cuda) or (
-                param.is_xla and step_t.is_xla
-            ), "If capturable=True, params and state_steps must be CUDA or XLA tensors."
+            capturable_supported_devices = _get_capturable_supported_devices()
+            assert (
+                param.device.type == step_t.device.type
+                and param.device.type in capturable_supported_devices
+            ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
 
         # update step
         step_t += 1
@@ -550,9 +470,14 @@ def _multi_tensor_adam(
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch._utils.is_compiling() and capturable:
+        capturable_supported_devices = _get_capturable_supported_devices(
+            supports_xla=False
+        )
         assert all(
-            p.is_cuda and step.is_cuda for p, step in zip(params, state_steps)
-        ), "If capturable=True, params and state_steps must be CUDA tensors."
+            p.device.type == step.device.type
+            and p.device.type in capturable_supported_devices
+            for p, step in zip(params, state_steps)
+        ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
 
     assert grad_scale is None and found_inf is None
 
@@ -585,7 +510,7 @@ def _multi_tensor_adam(
                 )
 
         if maximize:
-            device_grads = torch._foreach_neg(device_grads)
+            device_grads = torch._foreach_neg(device_grads)  # type: ignore[assignment]
 
         # Update steps
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
@@ -603,7 +528,7 @@ def _multi_tensor_adam(
             if maximize:
                 torch._foreach_add_(device_grads, device_params, alpha=weight_decay)
             else:
-                device_grads = torch._foreach_add(
+                device_grads = torch._foreach_add(  # type: ignore[assignment]
                     device_grads, device_params, alpha=weight_decay
                 )
 
@@ -618,6 +543,9 @@ def _multi_tensor_adam(
         # Delete the local intermediate since it won't be used anymore to save on peak memory
         del device_grads
 
+        bias_correction1: Union[Tuple[Tensor, ...], List[Tensor]]
+        bias_correction2: Union[Tuple[Tensor, ...], List[Tensor]]
+        bias_correction2_sqrt: Union[Tuple[Tensor, ...], List[Tensor]]
         if capturable:
             bias_correction1 = torch._foreach_pow(beta1, device_state_steps)
             bias_correction2 = torch._foreach_pow(beta2, device_state_steps)
@@ -664,7 +592,7 @@ def _multi_tensor_adam(
 
             step_size = _stack_if_compiling([(lr / bc) * -1 for bc in bias_correction1])
 
-            bias_correction2_sqrt = [_dispatch_sqrt(bc) for bc in bias_correction2]
+            bias_correction2_sqrt = [_dispatch_sqrt(bc) for bc in bias_correction2]  # type: ignore[arg-type]
 
             if amsgrad:
                 # Maintains the maximum of all 2nd moment running avg. till now
@@ -678,7 +606,7 @@ def _multi_tensor_adam(
             torch._foreach_div_(exp_avg_sq_sqrt, bias_correction2_sqrt)
             torch._foreach_add_(exp_avg_sq_sqrt, eps)
             torch._foreach_addcdiv_(
-                device_params, device_exp_avgs, exp_avg_sq_sqrt, step_size
+                device_params, device_exp_avgs, exp_avg_sq_sqrt, step_size  # type: ignore[arg-type]
             )
 
 
@@ -708,17 +636,18 @@ def _fused_adam(
     if differentiable:
         raise RuntimeError("Adam with fused=True does not support differentiable=True")
 
-    grad_scale_dict = (
-        {grad_scale.device: grad_scale} if grad_scale is not None else None
+    grad_scale_dict: DeviceDict = (
+        {grad_scale.device: grad_scale} if grad_scale is not None else {}
     )
-    found_inf_dict = {found_inf.device: found_inf} if found_inf is not None else None
+    found_inf_dict: DeviceDict = (
+        {found_inf.device: found_inf} if found_inf is not None else {}
+    )
 
     # We only shuffle around the lr when it is a Tensor and on CUDA, otherwise, we prefer
     # treating it as a scalar.
-    lr_dict = (
+    lr_dict: Optional[DeviceDict] = (
         {lr.device: lr} if isinstance(lr, Tensor) and str(lr.device) != "cpu" else None
     )
-
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps]
     )
@@ -733,17 +662,21 @@ def _fused_adam(
         ),
         _,
     ) in grouped_tensors.items():
+        if device.type == "mps":  # type: ignore[union-attr]
+            assert found_inf is None and grad_scale is None
+            assert not isinstance(lr, Tensor)
+
         device_grad_scale, device_found_inf = None, None
         if grad_scale is not None:
-            if device not in grad_scale_dict:
-                grad_scale_dict[device] = grad_scale.to(device, non_blocking=True)
-            device_grad_scale = grad_scale_dict[device]
+            device_grad_scale = grad_scale_dict.setdefault(
+                device, grad_scale.to(device, non_blocking=True)
+            )
         if found_inf is not None:
-            if found_inf not in found_inf_dict:
-                found_inf_dict[device] = found_inf.to(device, non_blocking=True)
-            device_found_inf = found_inf_dict[device]
+            device_found_inf = found_inf_dict.setdefault(
+                device, found_inf.to(device, non_blocking=True)
+            )
         if lr_dict is not None and device not in lr_dict:
-            lr_dict[device] = lr.to(device=device, non_blocking=True)
+            lr_dict[device] = lr.to(device=device, non_blocking=True)  # type: ignore[union-attr]
             lr = lr_dict[device]
         torch._foreach_add_(device_state_steps, 1)
         torch._fused_adam_(
@@ -767,3 +700,92 @@ def _fused_adam(
             torch._foreach_sub_(
                 device_state_steps, [device_found_inf] * len(device_state_steps)
             )
+
+
+@_disable_dynamo_if_unsupported(single_tensor_fn=_single_tensor_adam)
+def adam(
+    params: List[Tensor],
+    grads: List[Tensor],
+    exp_avgs: List[Tensor],
+    exp_avg_sqs: List[Tensor],
+    max_exp_avg_sqs: List[Tensor],
+    state_steps: List[Tensor],
+    # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
+    # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
+    foreach: Optional[bool] = None,
+    capturable: bool = False,
+    differentiable: bool = False,
+    fused: Optional[bool] = None,
+    grad_scale: Optional[Tensor] = None,
+    found_inf: Optional[Tensor] = None,
+    has_complex: bool = False,
+    *,
+    amsgrad: bool,
+    beta1: float,
+    beta2: float,
+    lr: Union[float, Tensor],
+    weight_decay: float,
+    eps: float,
+    maximize: bool,
+):
+    r"""Functional API that performs Adam algorithm computation.
+
+    See :class:`~torch.optim.Adam` for details.
+    """
+    # Respect when the user inputs False/True for foreach or fused. We only want to change
+    # the default when neither have been user-specified. Note that we default to foreach
+    # and pass False to use_fused. This is not a mistake--we want to give the fused impl
+    # bake-in time before making it the default, even if it is typically faster.
+    if fused is None and foreach is None:
+        _, foreach = _default_to_fused_or_foreach(
+            params, differentiable, use_fused=False
+        )
+        # Do not flip on foreach for the unsupported case where lr is a Tensor and capturable=False.
+        if foreach and isinstance(lr, Tensor) and not capturable:
+            foreach = False
+    if fused is None:
+        fused = False
+    if foreach is None:
+        foreach = False
+
+    # this check is slow during compilation, so we skip it
+    # if it's strictly needed we can add this check back in dynamo
+    if not torch._utils.is_compiling() and not all(
+        isinstance(t, torch.Tensor) for t in state_steps
+    ):
+        raise RuntimeError(
+            "API has changed, `state_steps` argument must contain a list of singleton tensors"
+        )
+
+    if foreach and torch.jit.is_scripting():
+        raise RuntimeError("torch.jit.script not supported with foreach optimizers")
+    if fused and torch.jit.is_scripting():
+        raise RuntimeError("torch.jit.script not supported with fused optimizers")
+
+    if fused and not torch.jit.is_scripting():
+        func = _fused_adam
+    elif foreach and not torch.jit.is_scripting():
+        func = _multi_tensor_adam
+    else:
+        func = _single_tensor_adam
+
+    func(
+        params,
+        grads,
+        exp_avgs,
+        exp_avg_sqs,
+        max_exp_avg_sqs,
+        state_steps,
+        amsgrad=amsgrad,
+        has_complex=has_complex,
+        beta1=beta1,
+        beta2=beta2,
+        lr=lr,
+        weight_decay=weight_decay,
+        eps=eps,
+        maximize=maximize,
+        capturable=capturable,
+        differentiable=differentiable,
+        grad_scale=grad_scale,
+        found_inf=found_inf,
+    )

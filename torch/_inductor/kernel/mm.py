@@ -1,11 +1,14 @@
+# mypy: allow-untyped-defs
 import functools
 import logging
 from typing import Any, Dict, List, Optional
 
 import torch
+from torch._inductor.codegen.cpp_gemm_template import CppPackedGemmTemplate
 from torch._inductor.virtualized import V
 from .. import config as inductor_config
 from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
+from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.wrapper import WrapperCodeGen
 from ..ir import FlexibleLayout
 from ..lowering import register_lowering
@@ -16,7 +19,10 @@ from ..select_algorithm import (
     TritonTemplate,
 )
 from ..utils import (
+    get_gpu_shared_memory,
     use_aten_gemm_kernels,
+    use_ck_template,
+    use_cpp_packed_gemm_template,
     use_cutlass_template,
     use_max_autotune,
     use_triton_template,
@@ -24,10 +30,12 @@ from ..utils import (
 from .mm_common import (
     addmm_epilogue,
     int8_mm_configs,
+    mixed_mm_configs,
     mm_args,
     mm_configs,
     mm_grid,
     mm_options,
+    triton_config,
 )
 
 log = logging.getLogger(__name__)
@@ -63,8 +71,14 @@ mm_template = TritonTemplate(
 
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
     rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
-    ram = tl.max_contiguous(tl.multiple_of(rm % M, BLOCK_M), BLOCK_M)
-    rbn = tl.max_contiguous(tl.multiple_of(rn % N, BLOCK_N), BLOCK_N)
+    if (stride_am == 1 and stride_ak == M) or (stride_am == K and stride_ak == 1):
+        ram = tl.max_contiguous(tl.multiple_of(rm % M, BLOCK_M), BLOCK_M)
+    else:
+        ram = rm % M
+    if (stride_bk == 1 and stride_bn == K) or (stride_bk == N and stride_bn == 1):
+        rbn = tl.max_contiguous(tl.multiple_of(rn % N, BLOCK_N), BLOCK_N)
+    else:
+        rbn = rn % N
     rk = tl.arange(0, BLOCK_K)
     A = A + (ram[:, None] * stride_am + rk[None, :] * stride_ak)
     B = B + (rk[:, None] * stride_bk + rbn[None, :] * stride_bn)
@@ -150,12 +164,29 @@ def tuned_mm(mat1, mat2, *, layout=None):
     if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
         CUTLASSGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
 
-    if len(choices) == 0 and not use_aten_gemm_kernels():
+    if use_ck_template(layout, m, n, k):
+        CKGemmTemplate.add_ck_gemm_choices(choices, layout, [mat1, mat2])
+
+    if use_cpp_packed_gemm_template(layout, mat1, mat2):
+        CppPackedGemmTemplate.add_choices(
+            choices,
+            layout,
+            [mat1, mat2],
+        )
+
+    if (
+        len(choices) == 0
+        and not use_aten_gemm_kernels()
+        and inductor_config.autotune_fallback_to_aten
+    ):
         log.warning("No choices for GEMM, using ATen backend as fallback")
-        choices.append(aten_mm.bind((mat1, mat2), aten_layout))
+        return aten_mm.bind((mat1, mat2), aten_layout).output_node()
+
     try:
         return autotune_select_algorithm("mm", choices, [mat1, mat2], layout)
     except NoValidChoicesError:
+        if not inductor_config.autotune_fallback_to_aten:
+            raise
         log.warning("All choices for GEMM were invalid, using ATen backend as fallback")
         return aten_mm.bind((mat1, mat2), aten_layout).output_node()
 
@@ -218,6 +249,8 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
     try:
         return autotune_select_algorithm("int_mm", choices, [mat1, mat2], layout)
     except NoValidChoicesError:
+        if not inductor_config.autotune_fallback_to_aten:
+            raise
         log.warning("All choices for GEMM were invalid, using ATen backend as fallback")
         choices = [aten__int_mm.bind((mat1, mat2), layout)]
         return autotune_select_algorithm("int_mm", choices, [mat1, mat2], layout)
@@ -305,12 +338,22 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 beta=beta,
             )
 
-    use_aten = use_aten_gemm_kernels()
-    if len(choices) == 0 and not use_aten:
-        log.warning("No choices for GEMM, using ATen backend as fallback")
-        use_aten = True
+    if use_cpp_packed_gemm_template(layout, mat1, mat2):
+        CppPackedGemmTemplate.add_choices(
+            choices,
+            layout,
+            [inp_expanded, mat1, mat2],
+            alpha=alpha,
+            beta=beta,
+            has_bias=True,
+        )
 
-    if use_aten:
+    add_aten_fallback = False
+    if len(choices) == 0:
+        log.warning("No choices for GEMM, using ATen backend as fallback")
+        add_aten_fallback = True
+
+    if add_aten_fallback:
         choices.append(
             aten_addmm.bind(
                 (inp_expanded, mat1, mat2),
@@ -338,6 +381,8 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             "addmm", choices, [inp_expanded, mat1, mat2], layout
         )
     except NoValidChoicesError:
+        if not inductor_config.autotune_fallback_to_aten:
+            raise
         log.warning("All choices for GEMM were invalid, using ATen backend as fallback")
         fallback_choice = aten_addmm.bind(
             (inp, mat1, mat2),
@@ -362,6 +407,48 @@ def _is_sm7x_or_older_gpu(index: Optional[int]) -> bool:
     return props.major <= 7
 
 
+def try_heuristic(m, n, k, choices, mat1, mat2, mat2_dtype, layout):
+    if mat1.dtype != torch.float16:
+        return None
+
+    # only use heuristic if we are running on an A100
+    # torch.cuda.get_device_capability() >= (8, 0) returns true for A10G
+    # which does not have enough shared memory for one of the configs
+    if (
+        not torch.cuda.get_device_capability() >= (8, 0)
+    ) or get_gpu_shared_memory() != 166912:
+        return None
+
+    if m == 1 and (n % 16 != 0 or k % 16 != 0):
+        return None
+
+    if m <= 16 and n >= 4096 and k >= 4096:
+        return triton_config(
+            BLOCK_M=16,
+            BLOCK_N=64,
+            BLOCK_K=128,
+            num_stages=5,
+            num_warps=4,
+        )
+    elif m > 16 and m <= 32 and n >= 4096 and k >= 4096:
+        return triton_config(
+            BLOCK_M=32,
+            BLOCK_N=32,
+            BLOCK_K=128,
+            num_stages=5,
+            num_warps=4,
+        )
+    elif m > 32 and m <= 64 and n >= 4096 and k >= 4096:
+        return triton_config(
+            BLOCK_M=64,
+            BLOCK_N=32,
+            BLOCK_K=128,
+            num_stages=5,
+            num_warps=4,
+        )
+    return None
+
+
 def tuned_mixed_mm(mat1, mat2, mat2_dtype):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=None)
     static_shape, is_nonzero = _is_static_problem([mat1, mat2], layout)
@@ -372,15 +459,33 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
 
     # can't use triton kernel unless one of these is true or if running on v100 (numerical issues)
     skip_triton = (
-        mat1.layout.dtype != torch.float32 and not mat2.layout.is_contiguous()
-    ) or _is_sm7x_or_older_gpu(layout.device.index)
+        (
+            mat1.layout.dtype != torch.float32
+            and not (mat2.layout.is_contiguous() or mat2.layout.is_transposed())
+        )
+        or _is_sm7x_or_older_gpu(layout.device.index)
+        or inductor_config.mixed_mm_choice == "aten"
+    )
 
-    if inductor_config.force_mixed_mm:
+    if inductor_config.mixed_mm_choice == "triton":
         choices = []
+
     if not skip_triton:
         b_prologue_cast_type = f"tl.{mat2_dtype}".replace("torch.", "")
+        if inductor_config.mixed_mm_choice == "heuristic":
+            choices = []
+            config = try_heuristic(m, n, k, choices, mat1, mat2, mat2_dtype, layout)
+            if config is not None:
+                mm_template.maybe_append_choice(
+                    choices,
+                    input_nodes=(mat1, mat2),
+                    layout=layout,
+                    **mm_options(config, m, n, k, layout, b_prologue_cast_type),
+                )
+            choices.append(fallback)
+
         has_int8_tensor = _is_int8_mat(mat1) or _is_int8_mat(mat2)
-        for config in mm_configs(m, n, k, has_int8_tensor=has_int8_tensor):
+        for config in mixed_mm_configs(m, n, k, has_int8_tensor=has_int8_tensor):
             mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),

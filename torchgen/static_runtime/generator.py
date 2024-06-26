@@ -1,6 +1,5 @@
 import json
 import logging
-
 import math
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 
@@ -20,6 +19,7 @@ from torchgen.model import (
     Type,
 )
 from torchgen.static_runtime import config
+
 
 logger: logging.Logger = logging.getLogger()
 
@@ -222,6 +222,17 @@ BLOCKED_OPS = frozenset(
         "special_spherical_bessel_j0",
         "_foobar",
         "_nested_tensor_strides",
+        "_nested_tensor_storage_offsets",
+        "_nested_get_values",  # no CPU backend
+        "_nested_get_values_copy",  # no CPU backend
+        "_nested_view_from_jagged",  # testing needs to be patched
+        "_nested_view_from_jagged_copy",  # testing needs to be patched
+        "_nested_view_from_buffer",  # testing needs to be patched
+        "_nested_view_from_buffer_copy",  # testing needs to be patched
+        "_int_mm",  # testing needs to be patched
+        "_to_sparse_csc",  # testing needs to be patched
+        "_to_sparse_csr",  # testing needs to be patched
+        "segment_reduce",  # testing needs to be patched
     )
 )
 
@@ -402,7 +413,7 @@ def test_value_expression(
         num_dim = test_tensor_dim(op_name)
         size_per_dim = math.ceil(num_tensors / float(num_dim))
         size_per_dim += size_per_dim % 2
-        tensor_size_ex = "{%s}" % (",".join([f"{size_per_dim}"] * num_dim))
+        tensor_size_ex = "{{{}}}".format(",".join([f"{size_per_dim}"] * num_dim))
     if should_use_int_tensor(op_name):
         tensor_expression = f"at::randint(1, 100, {tensor_size_ex}, at::kInt)"
     elif should_use_complex_tensor(op_name):

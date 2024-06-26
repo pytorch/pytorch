@@ -11,7 +11,6 @@
 
 #include <c10/util/Logging.h>
 #include <c10/util/irange.h>
-#include <c10/util/string_utils.h>
 
 #include <ATen/core/functional.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -3140,7 +3139,7 @@ void LoopNest::computeAt(StmtPtr s, ForPtr f) {
   for (const auto i : c10::irange(dims.size())) {
     // TODO: Use name-hint of the producer indices instead of 'idx'
     temp_indices[i] =
-        alloc<Var>(std::string("idx") + c10::to_string(i), dims[i]->dtype());
+        alloc<Var>(std::string("idx") + std::to_string(i), dims[i]->dtype());
   }
 
   // Prepare substitute rules for constructing the temp statement from the prod

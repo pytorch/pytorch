@@ -5,8 +5,7 @@
 #include <thread>
 #include "c10/util/thread_name.h"
 #include <c10/util/irange.h>
-#include "caffe2/core/common.h"
-#include "caffe2/core/logging.h"
+#include <c10/util/Logging.h>
 
 #if defined(_MSC_VER)
 #include <intrin.h>

@@ -258,9 +258,8 @@ def dyn_shape(fake_mode, func, *args, **kwargs):
     raise DynamicOutputShapeException(func)
 
 
-@register_op_impl(aten._unique2.default)
-def unique2(
-    fake_mode, func, arg, sorted=True, return_inverse=False, return_counts=False
+def _unique(
+    fake_mode, func, arg, dim, sorted=True, return_inverse=False, return_counts=False
 ):
     if (
         fake_mode.shape_env is None
@@ -269,7 +268,8 @@ def unique2(
         # Without symints/symfloats, cannot handle this
         raise DynamicOutputShapeException(func)
 
-    if arg.unique_memo is None:
+    # Do not use a memo for unique_dim
+    if dim is not None or (nnz := arg.unique_memo) is None:
         # Avoid importing sympy at a module level
         from torch.fx.experimental.symbolic_shapes import (
             _constrain_range_for_size,
@@ -285,33 +285,63 @@ def unique2(
             # symint cannot equal zero).  We could also unconditionally
             # allocate an unbacked SymInt and not refine its range,
             # but this seems more precise.
-            nnz = arg._unique_memo = 0
-            arg._unique_memo_vc = arg._version
+            nnz = 0
         else:
             nnz = fake_mode.shape_env.create_unbacked_symint()
 
             maxval = sys.maxsize - 1
 
-            if not has_free_symbols(arg.numel()):
-                maxval = int(arg.numel())
+            numel = arg.numel() if dim is None else arg.size(dim)
+            if not has_free_symbols(numel):
+                maxval = int(numel)
 
             _constrain_range_for_size(nnz, max=maxval)
 
-        arg.unique_memo = nnz
+        if dim is None:
+            arg.unique_memo = nnz
 
-    ret = [arg.new_empty((arg.unique_memo,))]
-
-    if return_inverse:
-        ret.append(torch.empty_like(arg))
+    if dim is None:
+        ret = [arg.new_empty((nnz,))]
     else:
-        ret.append(arg.new_empty(0))
+        ret = [arg.new_empty(*arg.shape[:dim], nnz, *arg.shape[dim + 1 :])]
 
-    if return_counts:
-        ret.append(torch.empty_like(arg))
+    return_if_dim_and_cpu = dim is not None and arg.fake_device == torch.device("cpu")
+    if return_inverse or return_if_dim_and_cpu:
+        inverse = arg.new_empty(arg.shape if dim is None else (arg.shape[dim],))
     else:
-        ret.append(arg.new_empty(0))
+        inverse = arg.new_empty(0)
+    ret.append(inverse)
+
+    if return_counts or return_if_dim_and_cpu:
+        counts = arg.new_empty(ret[0].shape if dim is None else (ret[0].shape[dim],))
+    else:
+        counts = arg.new_empty(0)
+    ret.append(counts)
 
     return tuple(ret)
+
+
+@register_op_impl(aten._unique2.default)
+def unique2(
+    fake_mode, func, arg, sorted=True, return_inverse=False, return_counts=False
+):
+    return _unique(fake_mode, func, arg, None, sorted, return_inverse, return_counts)
+
+
+@register_op_impl(aten.unique_dim.default)
+def unique_dim(
+    fake_mode, func, arg, dim, sorted=True, return_inverse=False, return_counts=False
+):
+    return _unique(
+        fake_mode,
+        func,
+        arg,
+        # normalize dim to be non-negative
+        dim if dim >= 0 else dim % max(arg.ndim, 1),
+        sorted,
+        return_inverse,
+        return_counts,
+    )
 
 
 @register_op_impl(aten.repeat_interleave.Tensor)
@@ -335,17 +365,24 @@ def repeat_interleave_tensor(fake_mode, func, repeats, output_size=None):
 
 @register_op_impl(torch.ops.aten._local_scalar_dense.default)
 def local_scalar_dense(fake_mode, func, arg):
-    if fake_mode.shape_env is None or not fake_mode.shape_env.allow_scalar_outputs:
+    if (r := arg.item_memo) is not None:
+        return r
+    if fake_mode.shape_env is None or (
+        not fake_mode.shape_env.allow_scalar_outputs
+        and not fake_mode.allow_scalar_outputs
+    ):
         # Without symints/symfloats, cannot handle this
         raise DataDependentOutputException(func)
     if is_float_dtype(arg.dtype):
-        return fake_mode.shape_env.create_unbacked_symfloat()
+        r = fake_mode.shape_env.create_unbacked_symfloat()
     elif is_integer_dtype(arg.dtype):
-        return fake_mode.shape_env.create_unbacked_symint()
+        r = fake_mode.shape_env.create_unbacked_symint()
     elif is_boolean_dtype(arg.dtype):
-        return fake_mode.shape_env.create_unbacked_symbool()
+        r = fake_mode.shape_env.create_unbacked_symbool()
     else:
         raise NotImplementedError(f"local_scalar_dense/item NYI for {arg.dtype}")
+    arg.item_memo = r
+    return r
 
 
 @register_op_impl(torch.ops.aten.nonzero.default)
@@ -357,9 +394,7 @@ def nonzero(fake_mode, func, arg):
         # Without symints/symfloats, cannot handle this
         raise DynamicOutputShapeException(func)
 
-    if arg.nonzero_memo is not None:
-        nnz = arg.nonzero_memo
-    else:
+    if (nnz := arg.nonzero_memo) is None:
         # Avoid importing sympy at a module level
         from torch.fx.experimental.symbolic_shapes import (
             _constrain_range_for_size,
@@ -375,9 +410,7 @@ def nonzero(fake_mode, func, arg):
             # symint cannot equal zero).  We could also unconditionally
             # allocate an unbacked SymInt and not refine its range,
             # but this seems more precise.
-            nnz = arg._nonzero_memo = 0
-            arg._nonzero_memo_vc = arg._version
-            arg._nonzero_memo_epoch = fake_mode.epoch
+            nnz = 0
         else:
             nnz = fake_mode.shape_env.create_unbacked_symint()
 
@@ -388,11 +421,7 @@ def nonzero(fake_mode, func, arg):
 
             _constrain_range_for_size(nnz, max=maxval)
 
-            if not torch.is_inference_mode_enabled():
-                # arg._version N/A in inference mode
-                arg._nonzero_memo = nnz
-                arg._nonzero_memo_vc = arg._version
-                arg._nonzero_memo_epoch = fake_mode.epoch
+        arg.nonzero_memo = nnz
 
     return arg.new_empty((nnz, arg.dim()), dtype=torch.int64)
 
@@ -735,6 +764,62 @@ def meta__scaled_dot_product_flash(fake_mode, func, *args, **kwargs):
     )
 
 
+@register_op_impl(aten._scaled_dot_product_cudnn_attention.default)
+def meta__scaled_dot_product_cudnn(fake_mode, func, *args, **kwargs):
+    _, kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    query = kwargs["query"]
+    key = kwargs["key"]
+    value = kwargs["value"]
+    compute_log_sumexp = kwargs["compute_log_sumexp"]
+    # unused: attn_bias, dropout_p, is_causal, return_debug_mask, scale
+
+    def convert_tensor(t, device):
+        return FakeTensor(fake_mode, t, device)
+
+    B = query.size(0)
+    H = query.size(1)
+    S_Q = query.size(2)
+    S_KV = key.size(2)
+    D_QK = query.size(-1)
+    D_V = value.size(-1)
+
+    res = convert_tensor(
+        torch.empty(B, H, S_Q, D_V, dtype=query.dtype, device="meta"),
+        query.device,
+    )
+
+    logsum_exp = convert_tensor(
+        torch.empty(
+            (B, H, S_Q),
+            dtype=torch.float,
+            device="meta",
+        ),
+        query.device,
+    )
+
+    # See Note [Seed and Offset]:
+    seed = convert_tensor(
+        torch.empty((), dtype=torch.long, device="meta"), query.device
+    )
+    offset = convert_tensor(
+        torch.empty((), dtype=torch.long, device="meta"), query.device
+    )
+    return (
+        res,
+        logsum_exp,
+        None,
+        None,
+        S_Q,
+        S_KV,
+        seed,
+        offset,
+        None,
+    )
+
+
 @register_op_impl(aten._scaled_dot_product_efficient_attention.default)
 def meta__scaled_dot_product_efficient(fake_mode, func, *args, **kwargs):
     _, kwargs = normalize_function(
@@ -803,6 +888,7 @@ def meta__flash_attention_forward(fake_mode, func, *args, **kwargs):
     max_k = kwargs["max_k"]
     return_debug_mask = kwargs["return_debug_mask"]
     # unused: value, dropout_p, is_causal, scale
+    # unused: seqused_k, alibi_slopes, window_size_left, window_size_right
 
     def convert_tensor(t, device):
         return FakeTensor(fake_mode, t, device)
@@ -873,7 +959,7 @@ def meta__efficient_attention_forward(fake_mode, func, *args, **kwargs):
     max_seqlen_q = kwargs["max_seqlen_q"]
     max_seqlen_k = kwargs["max_seqlen_k"]
     compute_log_sumexp = kwargs["compute_log_sumexp"]
-    # unused: bias, cu_seqlens_k, dropout_p, custom_mask_type, scale, causal_diagonal, seqlen_k
+    # unused: bias, cu_seqlens_k, dropout_p, custom_mask_type, scale, seqlen_k
 
     def convert_tensor(t, device):
         return FakeTensor(fake_mode, t, device)
@@ -917,6 +1003,31 @@ def meta__efficient_attention_forward(fake_mode, func, *args, **kwargs):
     )
 
     return res, logsum_exp, seed, offset, actual_max_seqlen_q, actual_max_seqlen_k
+
+
+@register_op_impl(torch.ops.aten._pack_padded_sequence.default)
+def _pack_padded_sequence(fake_mode, func, inputs, lengths, batch_first):
+    if (
+        fake_mode.shape_env is None
+        or not fake_mode.shape_env.allow_dynamic_output_shape_ops
+    ):
+        # Without symints/symfloats, cannot handle this
+        raise DynamicOutputShapeException(func)
+
+    new_batch_size = fake_mode.shape_env.create_unbacked_symint()
+
+    from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
+
+    _constrain_range_for_size(new_batch_size)
+
+    if not batch_first:
+        # Inputs should have shape (batch_size, seq_len, *)
+        inputs = inputs.transpose(0, 1)
+
+    res_size = inputs.shape[1:]
+    packed_data = inputs.new_empty(res_size)
+    batch_size = inputs.new_empty((new_batch_size,))
+    return (packed_data, batch_size)
 
 
 FAST_OP_IMPLEMENTATIONS = {}

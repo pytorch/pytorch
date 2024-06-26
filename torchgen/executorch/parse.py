@@ -4,7 +4,6 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import yaml
 
 from torchgen.executorch.model import ETKernelIndex, ETKernelKey
-
 from torchgen.gen import LineLoader, parse_native_yaml
 from torchgen.model import (
     BackendMetadata,
@@ -14,6 +13,7 @@ from torchgen.model import (
     OperatorName,
 )
 from torchgen.utils import NamespaceHelper
+
 
 # Parse native_functions.yaml into a sequence of NativeFunctions and ET Backend Indices.
 ETParsedYaml = namedtuple("ETParsedYaml", ["native_functions", "et_kernel_indices"])

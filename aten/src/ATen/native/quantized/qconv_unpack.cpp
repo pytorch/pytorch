@@ -49,7 +49,7 @@ namespace {
 template <int kSpatialDim = 2>
 class QConvUnpackWeightsInt8 final {
  public:
-  static std::tuple<at::Tensor, c10::optional<at::Tensor>> run(
+  static std::tuple<at::Tensor, std::optional<at::Tensor>> run(
       const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& packed_weight) {
     auto& ctx = at::globalContext();
 
@@ -85,17 +85,17 @@ class QConvUnpackWeightsInt8 final {
 
 class QConv1dUnpackWeightsInt8 final {
  public:
-  static std::tuple<at::Tensor, c10::optional<at::Tensor>> run(
+  static std::tuple<at::Tensor, std::optional<at::Tensor>> run(
       const c10::intrusive_ptr<ConvPackedParamsBase<2>>& packed_weight) {
     auto& ctx = at::globalContext();
     at::Tensor weight;
-    c10::optional<at::Tensor> bias;
+    std::optional<at::Tensor> bias;
 #ifdef USE_FBGEMM
     if (ctx.qEngine() == at::QEngine::FBGEMM ||
         ctx.qEngine() == at::QEngine::X86) {
       std::tie(weight, bias) = packed_weight->unpack();
       weight = weight.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
-      return std::tuple<at::Tensor, c10::optional<at::Tensor>>(weight, bias);
+      return std::tuple<at::Tensor, std::optional<at::Tensor>>(weight, bias);
     }
 #endif
 
@@ -104,7 +104,7 @@ class QConv1dUnpackWeightsInt8 final {
       std::tie(weight, bias) = packed_weight->unpack();
       at::Tensor new_weight = weight.clone();
       new_weight = new_weight.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
-      return std::tuple<at::Tensor, c10::optional<at::Tensor>>(new_weight, bias);
+      return std::tuple<at::Tensor, std::optional<at::Tensor>>(new_weight, bias);
     }
 #endif
 
@@ -113,7 +113,7 @@ class QConv1dUnpackWeightsInt8 final {
       std::tie(weight, bias) = packed_weight->unpack();
       at::Tensor new_weight = weight.clone();
       new_weight.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
-      return std::tuple<at::Tensor, c10::optional<at::Tensor>>(new_weight, bias);
+      return std::tuple<at::Tensor, std::optional<at::Tensor>>(new_weight, bias);
     }
 #endif
 

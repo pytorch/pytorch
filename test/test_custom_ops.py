@@ -13,6 +13,7 @@ import torch._custom_ops as custom_ops
 
 import torch.testing._internal.optests as optests
 import torch.utils.cpp_extension
+
 from functorch import make_fx
 from torch import Tensor
 from torch._custom_op.impl import custom_op, CustomOp, infer_schema
@@ -198,6 +199,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         ):
             torch.library.opcheck(op, (x,), {})
 
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_incorrect_abstract_impl(self, device):
         lib = self.lib()
         lib.define("foo(Tensor x) -> Tensor")
@@ -1838,7 +1840,6 @@ dynamic shape operator: _torch_testing.numpy_nonzero.default
 
     def test_autogen_aten_ops_are_pt2_compliant(self):
         for op in [
-            torch.ops.aten._foreach_copy.default,
             torch.ops.aten.fill.Tensor_out,
         ]:
             self.assertIn(torch.Tag.generated, op.tags)
@@ -2152,6 +2153,41 @@ class TestCustomOpAPI(TestCase):
         self.assertTrue(cpu_called)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_no_grad_skips_autograd(self):
+        @torch.library.custom_op("_torch_testing::add", mutates_args=())
+        def add(x: Tensor, y: float) -> Tensor:
+            x_np = x.numpy(force=True)
+            out_np = x_np + y
+            return torch.from_numpy(out_np).to(x.device)
+
+        called = 0
+
+        def setup_context(ctx, inputs, output):
+            nonlocal called
+            called += 1
+
+        def backward(ctx, grad):
+            raise AssertionError("should not be reached")
+
+        add.register_autograd(backward, setup_context=setup_context)
+
+        x = torch.randn(3, requires_grad=True)
+        with torch.no_grad():
+            y = add(x, 2.0)
+        self.assertEqual(called, 0)
+        self.assertEqual(y, x + 2.0)
+
+        x.requires_grad_(False)
+        y = add(x, 2.0)
+        self.assertEqual(called, 0)
+        self.assertEqual(y, x + 2.0)
+
+        x = torch.randn(3, requires_grad=True)
+        y = add(x, 2.0)
+        self.assertEqual(called, 1)
+        self.assertEqual(y, x + 2.0)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_manual_schema(self):
         @torch.library.custom_op(
             "_torch_testing::add",
@@ -2290,10 +2326,13 @@ class TestCustomOpAPI(TestCase):
         class Stack(torch.autograd.Function):
             @staticmethod
             def forward(ctx, xs):
+                ctx.num_xs = len(xs)
                 return torch.stack(xs)
 
             @staticmethod
             def backward(ctx, grad):
+                expected = ([True] * ctx.num_xs,)
+                self.assertEqual(ctx.needs_input_grad, expected)
                 return list(grad.unbind(0))
 
         # call two applys, do a backward on the first
@@ -2326,19 +2365,21 @@ class TestCustomOpAPI(TestCase):
         class Foo(torch.autograd.Function):
             @staticmethod
             def forward(ctx, xs):
-                if len(xs) > 0:
+                if len(xs) > 1:
                     return Foo.apply(xs[1:])
                 ctx.len_xs = len(xs)
-                return x.sin()
+                return xs[0].sin()
 
             @staticmethod
             def backward(ctx, grad):
-                result = [None] * len_xs
+                result = [None] * ctx.len_xs
                 result[-1] = grad.cos()
                 return result
 
-        with self.assertRaisesRegex(NotImplementedError, "Recursive call"):
-            Foo.apply(xs)
+        # should work
+        result = Foo.apply(xs)
+        expected = xs[-1].sin()
+        self.assertEqual(result, expected)
 
         # recursive on backward
         @torch._library.autograd.supports_tensorlist
@@ -2370,13 +2411,20 @@ class TestCustomOpAPI(TestCase):
             b: float = 3.14,
             c: bool = True,
             d: int = 3,
+            e: str = "foo",
+            f: torch.dtype = torch.float,
+            g: torch.dtype = torch.float32,
+            h: torch.dtype = torch.int,
         ) -> Tensor:
-            defaults.extend([a, b, c, d])
+            defaults.extend([a, b, c, d, e, f, g, h])
             return x.clone()
 
         x = torch.randn(3)
         f(x)
-        self.assertEqual(defaults, [None, 3.14, True, 3])
+        self.assertEqual(
+            defaults,
+            [None, 3.14, True, 3, "foo", torch.float, torch.float32, torch.int],
+        )
 
     def test_mutated_error(self):
         with self.assertRaisesRegex(
@@ -2434,6 +2482,16 @@ class TestCustomOpAPI(TestCase):
             self.assertGreater(after, prev)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    @parametrize("idx", [0, 1, 2, 3, 4, 5])
+    def test_library_register_fake_source(self, idx):
+        opname = f"source{idx}"
+        op = getattr(torch.ops._torch_testing, opname).default
+        entry = torch._library.simple_registry.singleton.find(op._name)
+        source = entry.fake_impl.kernel.source
+        assert source is not None
+        self.assertTrue("custom_op_db.py" in source)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_library_register_fake(self):
         for mode in ["function", "qualname", "opoverload"]:
 
@@ -2447,10 +2505,15 @@ class TestCustomOpAPI(TestCase):
 
             if mode == "function":
                 dec = torch.library.register_fake(add)
+                self.assertIsNotNone(dec)
             elif mode == "qualname":
                 dec = torch.library.register_fake("_torch_testing::add")
+                self.assertIsNotNone(dec)
             elif mode == "opoverload":
                 dec = torch.library.register_fake(torch.ops._torch_testing.add.default)
+                self.assertIsNotNone(dec)
+            else:
+                raise AssertionError("should not get here")
 
             @dec
             def _(x, y):
@@ -3137,6 +3200,21 @@ opcheck(op, args, kwargs, test_utils="test_schema")
                 "test_aot_dispatch_dynamic": "SUCCESS",
             },
         )
+
+    def test_opcheck_does_not_require_extra_deps(self):
+        # torch.testing._internal.common_utils comes with a lot of additional
+        # test-time dependencies. Since opcheck is public API, it should be
+        # usable only with pytorch install-time dependencies.
+        cmd = [
+            sys.executable,
+            "-c",
+            "import torch; import sys; \
+               x = torch.randn(3, requires_grad=True); \
+               torch.library.opcheck(torch.ops.aten.sin.default, (x,)); \
+               assert 'expecttest' not in sys.modules; \
+               assert 'torch.testing._internal.common_utils' not in sys.modules",
+        ]
+        subprocess.check_output(cmd, shell=False)
 
 
 only_for = ("cpu", "cuda")

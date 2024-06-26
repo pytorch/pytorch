@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import contextlib
 from typing import Callable, List, TYPE_CHECKING
 

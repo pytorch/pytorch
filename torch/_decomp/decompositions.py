@@ -1,4 +1,4 @@
-import builtins
+# mypy: allow-untyped-defs
 import functools
 import numbers
 import operator
@@ -332,8 +332,8 @@ def rrelu_with_noise(
 def rrelu_with_noise_(
     self: Tensor,
     noise: Tensor,
-    lower: float,
-    upper: float,
+    lower: float = 0.125,
+    upper: float = 0.3333333333333333,
     training: bool = False,
     generator: Optional[torch.Generator] = None,
 ) -> Tensor:
@@ -735,6 +735,11 @@ def slice_forward(
     end: Optional[int] = None,
     step: int = 1,
 ):
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_size_oblivious,
+        statically_known_true,
+    )
+
     ndim = self.dim()
     if ndim == 0:
         raise RuntimeError("slice() cannot be applied to a 0-dim tensor.")
@@ -761,7 +766,9 @@ def slice_forward(
 
     if end_val < start_val:
         end_val = start_val
-    elif end_val > sizes[dim]:
+    elif statically_known_true(end_val == sys.maxsize) or guard_size_oblivious(
+        end_val > sizes[dim]
+    ):
         end_val = sizes[dim]
 
     storage_offset = self.storage_offset() + start_val * strides[dim]
@@ -1488,6 +1495,15 @@ def tensor_split_tensor_indices_or_sections_py_impl(
         return self.tensor_split(sections, dim)
     else:
         indices = [i.item() for i in tensor_indices_or_sections]
+        # WARNING: Tempted to torch._check_is_size on the indices here?  You
+        # can't: tensor_split works with negative values in indices:
+        #
+        # >>> torch.tensor_split(torch.randn(10), torch.tensor([-5, 5]))
+        # (tensor([ 0.3540,  2.1074, -0.8507,  1.1639,  0.3055]), tensor([]),
+        # tensor([-0.4285,  1.0692, -0.1776,  0.9362,  1.6143]))
+        #
+        # Sorry, I don't make the rules.  Explicitly do the item call in user
+        # code if you KNOW that they are non-negative.
         return self.tensor_split(indices, dim)
 
 
@@ -2213,7 +2229,7 @@ def cudnn_batch_norm(
 
 def _broadcast_batch_norm_backward(x, broadcast_mask):
     for axis, mask in enumerate(broadcast_mask):
-        if mask == 1 and not (axis < x.ndim and x.shape[axis] == broadcast_mask[axis]):
+        if mask == 1 and not (axis < x.ndim and x.shape[axis] == mask):
             x = x.unsqueeze(axis)
     return x
 
@@ -2383,6 +2399,32 @@ def native_batch_norm_backward_out(
             _safe_copy_out(copy_from=r, copy_to=grad_input[i], exact_dtype=True)
 
     return grad_input
+
+
+@register_decomposition(aten.miopen_batch_norm_backward)
+@out_wrapper("out0", "out1", "out2")
+def miopen_batch_norm_backward(
+    input: Tensor,
+    grad_output: Tensor,
+    weight: Tensor,
+    running_mean: Optional[Tensor],
+    running_var: Optional[Tensor],
+    save_mean: Optional[Tensor],
+    save_var: Optional[Tensor],
+    epsilon: float,
+):
+    return aten.native_batch_norm_backward(
+        grad_output,
+        input,
+        weight,
+        running_mean,
+        running_var,
+        save_mean,
+        save_var,
+        True,
+        epsilon,
+        [True, True, True],
+    )
 
 
 @register_decomposition(aten.cudnn_batch_norm_backward)
@@ -3808,59 +3850,6 @@ def _unsafe_masked_index_put_accumulate(x, mask, indices, values):
     return aten._unsafe_index_put(x, indices, masked_value, accumulate=True)
 
 
-@register_decomposition(aten.constant_pad_nd)
-@out_wrapper()
-def constant_pad_nd(
-    input: Tensor,
-    pad: Tuple[int, ...],
-    value: NumberType = 0,
-) -> Tensor:
-    # Avoid importing sympy at a module level
-    from torch.fx.experimental.symbolic_shapes import statically_known_true
-
-    if builtins.all(statically_known_true(p <= 0) for p in pad):
-        import torch._refs as refs
-
-        return refs.constant_pad_nd(input, pad, value)
-
-    torch._check(
-        len(pad) % 2 == 0,
-        lambda: "constant_pad_nd requires an even number of padding",
-    )
-
-    dim = len(pad) // 2
-    inp_shape = input.shape[-dim:]
-    nc_dim = input.dim() - dim
-
-    pad_left = [pad[2 * (dim - 1 - i)] for i in range(dim)]
-    pad_right = [pad[2 * (dim - 1 - i) + 1] for i in range(dim)]
-
-    out_indices = [
-        torch.arange(
-            -pad_left[i], inp_shape[i] + pad_right[i], device=input.device
-        ).reshape(-1, *[1] * (dim - 1 - i))
-        for i in range(dim)
-    ]
-
-    indices: List[Any] = [None] * input.dim()
-    for i in range(dim):
-        indices[i + nc_dim] = out_indices[i]
-
-    conds = []
-    for i in range(dim):
-        view_shape = [1] * input.dim()
-        view_shape[nc_dim + i] = out_indices[i].shape[0]
-        idx = out_indices[i].view(view_shape)
-        conds.append(torch.logical_and(idx >= 0, idx < input.shape[nc_dim + i]))
-    mask = reduce(torch.logical_and, conds)
-    result = aten._unsafe_masked_index(input, mask, indices, value)
-
-    # convert output to correct memory format, if necessary
-    memory_format = utils.suggest_memory_format(input)
-    result = result.contiguous(memory_format=memory_format)
-    return result
-
-
 def _nll_loss_forward(
     self: Tensor,
     target: Tensor,
@@ -4907,11 +4896,13 @@ def squeeze_default(self: Tensor, dim: Optional[int] = None):
 
 
 @register_decomposition(torch.ops.aten._weight_norm_interface)
-def _weight_norm_interface(x, y, dim=0):
+def _weight_norm_interface(v, g, dim=0):
     # https://github.com/pytorch/pytorch/blob/852f8526c52190125446adc9a6ecbcc28fb66182/aten/src/ATen/native/WeightNorm.cpp#L58
-    keep_dim = tuple(i for i in range(len(x.shape)) if i != dim)
-    norm = x.norm(2, keep_dim, keepdim=True)
-    return x * (y / norm), norm
+    keep_dim = tuple(i for i in range(len(v.shape)) if i != dim)
+    # align with cuda behavior, keep norm in 'float' when g is 'bfloat16'
+    norm_dtype = torch.float if g.dtype == torch.bfloat16 else None
+    norm = v.norm(2, keep_dim, keepdim=True, dtype=norm_dtype)
+    return v * (g / norm.to(g.dtype)), norm
 
 
 @register_decomposition(aten.isin)

@@ -7,9 +7,9 @@ from enum import Enum
 from typing import List, Optional
 
 import torch
-from torch.testing._internal.jit_utils import JitTestCase
 
 from jit.myfunction_a import my_function_a
+from torch.testing._internal.jit_utils import JitTestCase
 
 
 class TestDecorator(JitTestCase):

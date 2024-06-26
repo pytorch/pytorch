@@ -31,7 +31,7 @@ struct C10_EXPORT ConcretePyObjectHolder final : PyObjectHolder {
     return torch::jit::tryToInferType(py_obj_);
   }
 
-  IValue toIValue(const TypePtr& type, c10::optional<int32_t> N = c10::nullopt)
+  IValue toIValue(const TypePtr& type, std::optional<int32_t> N = c10::nullopt)
       override {
     pybind11::gil_scoped_acquire ag;
     return torch::jit::toIValue(py_obj_, type, N);

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch._C._lazy_ts_backend
 
 
