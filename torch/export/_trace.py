@@ -1113,7 +1113,7 @@ def _strict_export(
     _is_torch_jit_trace: bool,
 ) -> ExportArtifact:
     lower_to_aten = functools.partial(_export_to_aten_ir, pre_dispatch=pre_dispatch)
-    return _generic_export_lower_to_aten_callback(
+    return _strict_export_lower_to_aten_ir(
         mod=mod,
         args=args,
         kwargs=kwargs,
@@ -1129,7 +1129,7 @@ def _strict_export(
     )
 
 
-def _generic_export_lower_to_aten_callback(
+def _strict_export_lower_to_aten_ir(
     mod: torch.nn.Module,
     args: Tuple[Any, ...],
     kwargs: Dict[str, Any],
@@ -1667,7 +1667,7 @@ def _export_for_training(
     original_state_dict = mod.state_dict(keep_vars=True)
     forward_arg_names = _get_forward_arg_names(mod, args, kwargs)
 
-    export_artifact = _generic_export_lower_to_aten_callback(
+    export_artifact = _strict_export_lower_to_aten_ir(
         mod=mod,
         args=args,
         kwargs=kwargs,
