@@ -1800,25 +1800,25 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
     def test_parameterlistdict_pickle(self):
         # warning from torch.load call in _load_from_bytes used in UntypedStorage.__reduce__
-        regex = re.escape("You are using `torch.load` with `weights_only=False`")
+        WEIGHTS_ONLY_WARN = re.escape("You are using `torch.load` with `weights_only=False`")
         m = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
-        with self.assertWarnsRegex(FutureWarning, regex):
+        with self.assertWarnsRegex(FutureWarning, WEIGHTS_ONLY_WARN):
             m = pickle.loads(pickle.dumps(m))
 
         # Test whether loading from older checkpoints works without triggering warnings
         m = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
         del m._forward_pre_hooks, m._state_dict_hooks, m._load_state_dict_pre_hooks, m._non_persistent_buffers_set
-        with self.assertWarnsRegex(FutureWarning, regex):
+        with self.assertWarnsRegex(FutureWarning, WEIGHTS_ONLY_WARN):
             m = pickle.loads(pickle.dumps(m))
 
         m = nn.ParameterDict({"a": nn.Parameter(torch.rand(2)), "b": nn.Parameter(torch.rand(2))})
-        with self.assertWarnsRegex(FutureWarning, regex):
+        with self.assertWarnsRegex(FutureWarning, WEIGHTS_ONLY_WARN):
             m = pickle.loads(pickle.dumps(m))
 
         # Test whether loading from older checkpoints works without triggering warnings
         m = nn.ParameterDict({"a": nn.Parameter(torch.rand(2)), "b": nn.Parameter(torch.rand(2))})
         del m._forward_pre_hooks, m._state_dict_hooks, m._load_state_dict_pre_hooks, m._non_persistent_buffers_set
-        with self.assertWarnsRegex(FutureWarning, regex):
+        with self.assertWarnsRegex(FutureWarning, WEIGHTS_ONLY_WARN):
             m = pickle.loads(pickle.dumps(m))
 
     def test_weight_norm_pickle(self):
