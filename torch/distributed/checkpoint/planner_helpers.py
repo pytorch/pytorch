@@ -8,7 +8,7 @@ from torch.distributed._shard.metadata import ShardMetadata
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._tensor import DTensor
 from torch.distributed._tensor._utils import compute_local_shape_and_global_offset
-from torch.utils._pytree import tree_map_only
+from torch.utils._pytree import tree_map_only_
 
 from .metadata import (
     BytesStorageMetadata,
@@ -285,13 +285,7 @@ def _create_read_items(fqn: str, md: STORAGE_TYPES, obj: Any) -> List[ReadItem]:
 
 
 def _init_state_dict(state_dict: STATE_DICT_TYPE) -> None:
-    state_dict_assigned_storage = tree_map_only(
-        torch.Tensor, lambda v: _init_meta_tensor(v), state_dict
-    )
-    # The inplace version of tree_map_only, tree_map_only_ doesn't seem to work.
-    # So we need to temporariy update the each element in the state dict with meta tensor.
-    for k in state_dict.keys():
-        state_dict[k] = state_dict_assigned_storage[k]
+    tree_map_only_(torch.Tensor, _init_meta_tensor, state_dict)
 
 
 def _init_meta_tensor(value: Any) -> Any:
