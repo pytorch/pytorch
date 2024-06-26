@@ -278,12 +278,7 @@ def convert_1x1_conv_to_mm(x, weight, bias):
         weight = L[aten.squeeze](weight, dim=-1)
     weight = L[aten.permute](weight, [1, 0])
 
-    if x.get_size()[0] != 1:
-        x = ir.ExternKernel.require_stride_order(x, channels_last_order(rank))
-    else:
-        x.realize()
-        x.freeze_layout()
-
+    x = ir.ExternKernel.require_stride_order(x, channels_last_order(rank))
     x_permute = list(range(rank))
     x_permute.append(x_permute.pop(1))
     x = L[aten.permute](x, x_permute)

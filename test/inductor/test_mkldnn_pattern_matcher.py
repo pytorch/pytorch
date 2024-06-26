@@ -406,12 +406,15 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     def test_linear_add_bias(self):
         class M(torch.nn.Module):
-            def __init__(self, dtype, unary_fn):
+            def __init__(self, dtype, unary_fn, cast_bias):
                 super().__init__()
                 self.linear1 = torch.nn.Linear(10, 64, bias=False)
-                self.bias1 = torch.randn(64).to(dtype=dtype)
+                self.bias1 = torch.randn(64)
                 self.linear2 = torch.nn.Linear(10, 64, bias=False)
-                self.bias2 = torch.randn(64).to(dtype=dtype)
+                self.bias2 = torch.randn(64)
+                if cast_bias:
+                    self.bias1 = self.bias1.to(dtype=dtype)
+                    self.bias2 = self.bias2.to(dtype=dtype)
                 self.unary_fn = unary_fn
 
             def forward(self, x):
@@ -427,7 +430,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         options = itertools.product(unary_list, dtypes)
         for unary_fn, dtype in options:
             metrics.reset()
-            mod = M(dtype, unary_fn).eval()
+            fold_mod = M(dtype, unary_fn, cast_bias=True).eval()
             v = torch.randn(2, 10)
             matcher_count = 3
             # Add 1 for weight packing pass, add 2 for bias folding pass per linear.
@@ -437,9 +440,20 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 matcher_nodes += 2
             # we have 2 linears, so we double the matcher_count/nodes
             self._test_common(
-                mod, (v,), matcher_count * 2, matcher_nodes * 2, check_autocast=dtype
+                fold_mod,
+                (v,),
+                matcher_count * 2,
+                matcher_nodes * 2,
+                check_autocast=dtype,
             )
             self.assertEqual(metrics.generated_kernel_count, 1)
+            # we won't fold the bias if bias is not same dtype with weight
+            # https://github.com/pytorch/pytorch/pull/129138
+            metrics.reset()
+            mod = M(dtype, unary_fn, cast_bias=False).eval()
+            self._test_common(mod, (v,), 2, 2, check_autocast=dtype)
+            # 1 kernel for "to_lowp", 2 kernels for unary ops
+            self.assertEqual(metrics.generated_kernel_count, 3)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
