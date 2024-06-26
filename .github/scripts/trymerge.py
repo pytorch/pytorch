@@ -1533,6 +1533,9 @@ def save_merge_record(
             "skip_mandatory_checks": skip_mandatory_checks,
             "ignore_current": ignore_current,
             "error": error,
+            # This is a unique identifier for the record for deduping purposes
+            # in rockset.  Any unique string would work
+            "_id": f"{project}-{pr_num}-{comment_id}-{os.environ.get('GITHUB_RUN_ID')}",
         }
     ]
     repo_root = Path(__file__).resolve().parent.parent.parent
