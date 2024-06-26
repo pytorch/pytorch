@@ -1,11 +1,11 @@
 #pragma once
 
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
+#include <cstdlib>
 #include <cstring>
+#include <optional>
 
-namespace c10 {
-namespace utils {
+namespace c10::utils {
 // Reads an environment variable and returns
 // - optional<true>,              if set equal to "1"
 // - optional<false>,             if set equal to "0"
@@ -13,7 +13,7 @@ namespace utils {
 //
 // NB:
 // Issues a warning if the value of the environment variable is not 0 or 1.
-inline optional<bool> check_env(const char* name) {
+inline std::optional<bool> check_env(const char* name) {
 #ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable : 4996)
@@ -36,7 +36,6 @@ inline optional<bool> check_env(const char* name) {
         envar,
         "valid values are 0 or 1.");
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
-} // namespace utils
-} // namespace c10
+} // namespace c10::utils

@@ -133,9 +133,6 @@ class TestConstFold(TestCase):
         """
 
         class ConstFoldTestModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x, y):
                 return x * 2 + y
 

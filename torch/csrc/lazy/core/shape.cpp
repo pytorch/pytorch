@@ -13,7 +13,7 @@ namespace lazy {
 Shape::Shape(
     at::ScalarType scalar_type,
     c10::ArrayRef<int64_t> sizes,
-    c10::optional<std::vector<bool>> is_symbolic)
+    std::optional<std::vector<bool>> is_symbolic)
     : scalar_type_(scalar_type),
       sizes_(sizes.begin(), sizes.end()),
       is_symbolic_(std::move(is_symbolic)) {}
@@ -49,7 +49,7 @@ hash_t Shape::hash(bool bakeInSizes) const {
 }
 
 Shape Shape::with_symbolic_dims(
-    c10::optional<std::vector<bool>> symbolic_dims) const {
+    std::optional<std::vector<bool>> symbolic_dims) const {
   Shape copy = *this;
   copy.is_symbolic_ = symbolic_dims;
   return copy;
@@ -60,7 +60,7 @@ bool symbolicShapeEnabled() {
   return enabled || FLAGS_ltc_enable_symbolic_shapes;
 }
 
-c10::SymbolicShape get_symbolic_shape(at::Tensor& tensor) {
+static c10::SymbolicShape get_symbolic_shape(at::Tensor& tensor) {
   auto ltc_tensor = TryGetLtcTensor(tensor);
   if (!ltc_tensor) {
     // Set Concrete sizes for Concrete tensors
@@ -75,8 +75,8 @@ c10::SymbolicShape get_symbolic_shape(at::Tensor& tensor) {
   TORCH_INTERNAL_ASSERT(
       sizes.size() == is_symbolic->size(),
       "Dims of two values are not consistent");
-  std::vector<c10::optional<int64_t>> symbolic_dims;
-  for (int64_t i = 0; i < sizes.size(); i++) {
+  std::vector<std::optional<int64_t>> symbolic_dims;
+  for (size_t i = 0; i < sizes.size(); i++) {
     if (is_symbolic->at(i)) {
       symbolic_dims.emplace_back(c10::nullopt);
     } else {
@@ -120,7 +120,7 @@ void applySymbolicShapesOnLT(
     TORCH_INTERNAL_ASSERT(
         res_symbolic->size() == result_shapes.size(),
         "Result shape size is not consistent");
-    for (int64_t i = 0; i < res_symbolic->size(); i++) {
+    for (size_t i = 0; i < res_symbolic->size(); i++) {
       auto sym_dims = res_symbolic->at(i).symbolicDims();
       if (sym_dims.has_value()) {
         result_shapes[i] = result_shapes[i].with_symbolic_dims(*sym_dims);

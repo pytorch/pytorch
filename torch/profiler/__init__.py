@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 r"""
 PyTorch Profiler is a tool that allows the collection of performance metrics during training and inference.
 Profiler's context manager API can be used to better understand what model operators are the most expensive,
@@ -11,12 +12,12 @@ import os
 
 from torch._C._autograd import _supported_activities, DeviceType, kineto_available
 from torch._C._profiler import _ExperimentalConfig, ProfilerActivity, RecordScope
-from torch.autograd.profiler import record_function, KinetoStepTracker
+from torch.autograd.profiler import KinetoStepTracker, record_function
 from torch.optim.optimizer import register_optimizer_step_post_hook
 
 from .profiler import (
     _KinetoProfile,
-    ExecutionGraphObserver,
+    ExecutionTraceObserver,
     profile,
     ProfilerAction,
     schedule,
@@ -34,13 +35,15 @@ __all__ = [
     "kineto_available",
     "DeviceType",
     "record_function",
-    "ExecutionGraphObserver",
+    "ExecutionTraceObserver",
 ]
 
 from . import itt
 
+
 def _optimizer_post_hook(optimizer, args, kwargs):
     KinetoStepTracker.increment_step("Optimizer")
+
 
 if os.environ.get("KINETO_USE_DAEMON", None):
     _ = register_optimizer_step_post_hook(_optimizer_post_hook)

@@ -1,12 +1,10 @@
 import argparse
 import os
 import pathlib
-import re
-from collections import Counter, namedtuple
+from collections import namedtuple
 from typing import (
     Any,
     Callable,
-    Dict,
     Iterable,
     Iterator,
     List,
@@ -20,21 +18,21 @@ from typing import (
 import yaml
 
 import torchgen.dest as dest
-
 from torchgen.api.lazy import setValueT
 from torchgen.api.types import BaseCppType
 from torchgen.dest.lazy_ir import GenLazyIR, GenLazyNativeFuncDefinition, GenTSLazyIR
 from torchgen.gen import get_grouped_native_functions, parse_native_yaml
-
-from torchgen.model import NativeFunction, NativeFunctionsGroup, OperatorName
-from torchgen.selective_build.selector import SelectiveBuilder
-from torchgen.utils import concatMap, FileManager, NamespaceHelper, YamlLoader
-from .gen_backend_stubs import (
+from torchgen.gen_backend_stubs import (
     error_on_missing_kernels,
     gen_dispatcher_registrations,
     gen_dispatchkey_nativefunc_headers,
     parse_backend_yaml,
 )
+from torchgen.model import NativeFunction, NativeFunctionsGroup, OperatorName
+from torchgen.selective_build.selector import SelectiveBuilder
+from torchgen.utils import FileManager, NamespaceHelper
+from torchgen.yaml_utils import YamlLoader
+
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
@@ -106,16 +104,7 @@ def parse_native_functions_keys(
     backend_yaml_path: str,
     grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
 ) -> Tuple[List[OperatorName], List[Any], List[OperatorName]]:
-
-    native_functions_map: Dict[OperatorName, NativeFunction] = {
-        f.func.name: f
-        for f in concatMap(
-            lambda f: [f] if isinstance(f, NativeFunction) else list(f.functions()),
-            grouped_native_functions,
-        )
-    }
-
-    with open(backend_yaml_path, "r") as f:
+    with open(backend_yaml_path) as f:
         yaml_values = yaml.load(f, Loader=YamlLoader)
     assert isinstance(yaml_values, dict)
 
@@ -134,28 +123,24 @@ def validate_shape_inference_header(
     shape_inference_hdr: str, expected_shape_infr_decls: List[str]
 ) -> None:
     try:
-        with open(shape_inference_hdr, "r") as f:
+        with open(shape_inference_hdr) as f:
             shape_infr_decls = f.read()
             shape_infr_decl_lines = set(shape_infr_decls.split("\n"))
-    except IOError as e:
+    except OSError as e:
         raise AssertionError(
             f"Unable to read from the specified shape_inference_hdr file: {shape_inference_hdr}"
         ) from e
 
-    shape_infr_regex = r"compute_shape_(\w+)"
-    actual_shape_infr_name_counts = Counter(
-        re.findall(shape_infr_regex, shape_infr_decls)
-    )
     # TODO(whc) add a check for shape inference functions that have meta kernels implement and should be retired.
 
     missing_decls = [
         decl for decl in expected_shape_infr_decls if decl not in shape_infr_decl_lines
     ]
     if missing_decls:
-        raise Exception(
+        raise Exception(  # noqa: TRY002
             f"""Missing shape inference function.\n
 Please add declare this function in {shape_inference_hdr}:\n
-and implement it in the the corresponding shape_inference.cpp file.\n
+and implement it in the corresponding shape_inference.cpp file.\n
 {os.linesep.join(missing_decls)}"""
         )
 
@@ -167,19 +152,19 @@ at::Tensor to_meta(const at::Tensor& tensor) {
   // undefined tensors can't be converted to the meta device, since they don't have sizes/strides
   if (!tensor.defined()) return tensor;
   auto out = at::native::empty_strided_meta_symint(tensor.sym_sizes(), tensor.sym_strides(), \
-/*dtype=*/c10::make_optional(tensor.scalar_type()), /*layout=*/c10::make_optional(tensor.layout()), \
-/*device=*/c10::make_optional(c10::Device(c10::kMeta)), /*pin_memory=*/c10::nullopt);
+/*dtype=*/std::make_optional(tensor.scalar_type()), /*layout=*/std::make_optional(tensor.layout()), \
+/*device=*/std::make_optional(c10::Device(c10::kMeta)), /*pin_memory=*/std::nullopt);
   // needs to handle wrapped numbers, so dtype promotion works properly.
   if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
     out.unsafeGetTensorImpl()->set_wrapped_number(true);
   }
   return out;
 }
-c10::optional<at::Tensor> to_meta(const c10::optional<at::Tensor>& tensor) {
+std::optional<at::Tensor> to_meta(const std::optional<at::Tensor>& tensor) {
   if (tensor.has_value()) {
     return to_meta(*tensor);
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 std::vector<at::Tensor> to_meta(at::ITensorListRef t_list) {
@@ -404,8 +389,7 @@ def run_gen_lazy_tensor(
             fs = list(x.functions()) if isinstance(x, NativeFunctionsGroup) else [x]
             for f in fs:
                 if f.func.name in ops_list:
-                    for r in func(f):
-                        yield r
+                    yield from func(f)
 
     selector = SelectiveBuilder.get_nop_selector()
 
@@ -427,7 +411,7 @@ def run_gen_lazy_tensor(
 
     Generated lazy native functions all perform shape inference, by first using a meta:: kernel
     if available for that op, and otherwise using a 'compute_shape_{op}' function instead.  The generator
-    knows the call signature for compute_shape_{op} becuase it matches the nativefunction (and meta::) signature,
+    knows the call signature for compute_shape_{op} because it matches the nativefunction (and meta::) signature,
     so it just has to check whether the op is structured and generate a call for one or the other.  It's up to the dev
     to supply the missing compute_shape_{op} function, but the codegen at least warns you about this and provides
     the expected signature which can be copy-pasted into shape_inference.h.

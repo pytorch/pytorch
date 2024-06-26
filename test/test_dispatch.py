@@ -1,14 +1,15 @@
 # Owner(s): ["module: dispatch"]
 
-import torch._C as C
-from torch.testing._internal.common_utils import TestCase, run_tests
-from torch._python_dispatcher import PythonDispatcher
-
-from collections import namedtuple
 import itertools
 import os
 import re
+
+from collections import namedtuple
+
+import torch._C as C
 import torch.utils.cpp_extension
+from torch._python_dispatcher import PythonDispatcher
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 # TODO: Expand the dispatcher API to be a generic API for interfacing with
 # the dispatcher from Python!
@@ -26,29 +27,32 @@ import torch.utils.cpp_extension
 #   - Internal state of Dispatcher makes sense.  This is indirectly
 #     tested by the invariant testing
 
-Result = namedtuple('Result', 'state table provenance')
+Result = namedtuple("Result", "state table provenance")
 
 dispatch_keys_to_check = (
-    'Undefined',
-    'CPU',
-    'CUDA',
-    'XLA',
-    'AutogradOther',
-    'AutogradCPU',
-    'AutogradCUDA',
-    'AutogradXLA')
+    "Undefined",
+    "CPU",
+    "CUDA",
+    "XLA",
+    "AutogradOther",
+    "AutogradCPU",
+    "AutogradCUDA",
+    "AutogradXLA",
+)
+
 
 def extract_dispatch_table_with_keys(table, dispatch_keys):
-    extracted = ''
-    table_entries = table.split('\n')
+    extracted = ""
+    table_entries = table.split("\n")
     regex = re.compile(r"registered at .*FallbackKernel\.cpp.*(\[)")
     for k in dispatch_keys:
         for t in table_entries:
             if t.startswith(k):
                 # mask out file:line info for in-tree backend fallback
-                entry = regex.sub('registered in pytorch framework [', t)
-                extracted += (entry + '\n')
+                entry = regex.sub("registered in pytorch framework [", t)
+                extracted += entry + "\n"
     return extracted
+
 
 class TestDispatch(TestCase):
     namespace_index = 0
@@ -60,8 +64,15 @@ class TestDispatch(TestCase):
     # You probably don't want to call this directly; if your constructors
     # don't commute, you can still run commute with a fixed ctor_order
     # so that you can test that the destructors still commute
-    def run_ops(self, name, ops, ctor_order=None, dtor_order=None,
-                results=None, expect_raises=False):
+    def run_ops(
+        self,
+        name,
+        ops,
+        ctor_order=None,
+        dtor_order=None,
+        results=None,
+        expect_raises=False,
+    ):
         """
         Given a list of operator registrations, run the registrations in the
         order specified by ctor_order, and then run the deregistrations in
@@ -101,28 +112,30 @@ class TestDispatch(TestCase):
 
         # double underscore to make it less likely we conflict with something
         # else
-        test_namespace = "__test{}__".format(self.namespace_index)
+        test_namespace = f"__test{self.namespace_index}__"
 
         def check_invariants(actual_provenance):
             C._dispatch_check_invariants(name)
             # Normalize the test namespace so that expected outputs are stable
-            actual_state = C._dispatch_dump(
-                "{}::{}".format(test_namespace, name)).replace(test_namespace, "test")
-            actual_table = C._dispatch_dump_table(
-                "{}::{}".format(test_namespace, name)).replace(test_namespace, "test")
+            actual_state = C._dispatch_dump(f"{test_namespace}::{name}").replace(
+                test_namespace, "test"
+            )
+            actual_table = C._dispatch_dump_table(f"{test_namespace}::{name}").replace(
+                test_namespace, "test"
+            )
             expected_state, expected_table, expected_provenance = results.setdefault(
                 frozenset(active_ops),
-                Result(actual_state, actual_table, actual_provenance)
+                Result(actual_state, actual_table, actual_provenance),
             )
             self.assertMultiLineEqual(
-                expected_state, actual_state,
-                "expected from {}; actual from {}"
-                .format(expected_provenance, actual_provenance)
+                expected_state,
+                actual_state,
+                f"expected from {expected_provenance}; actual from {actual_provenance}",
             )
             self.assertMultiLineEqual(
-                expected_table, actual_table,
-                "expected from {}; actual from {}"
-                .format(expected_provenance, actual_provenance)
+                expected_table,
+                actual_table,
+                f"expected from {expected_provenance}; actual from {actual_provenance}",
             )
 
         results.setdefault(frozenset(), Result("", "", "hardcoded initial state"))
@@ -138,7 +151,7 @@ class TestDispatch(TestCase):
             active_ops.add(op_ix)
             try:
                 ops[op_ix](refs[op_ix])
-                check_invariants("running ctors {}".format(ctor_order[:i + 1]))
+                check_invariants(f"running ctors {ctor_order[:i + 1]}")
             except RuntimeError as e:
                 if not expect_raises:
                     raise
@@ -146,7 +159,9 @@ class TestDispatch(TestCase):
                 actual = actual.split("\nException raised from ")[0]
                 expected, _, expected_provenance = results.setdefault(
                     frozenset(active_ops),
-                    Result(actual, "", "error after running ctors {}".format(ctor_order[:i + 1]))
+                    Result(
+                        actual, "", f"error after running ctors {ctor_order[:i + 1]}"
+                    ),
                 )
                 self.assertMultiLineEqual(expected, actual, expected_provenance)
                 set_to_report = frozenset(active_ops)
@@ -154,10 +169,10 @@ class TestDispatch(TestCase):
                 # NB: this finally test asserts that if a registrations fails,
                 # the dispatcher is left in the same state *that it was before*!
                 check_invariants(
-                    "running ctors {} and then failing to run ctor {} "
+                    f"running ctors {ctor_order[:i]} and then failing to run ctor {op_ix} "
                     "(did this failure leave the dispatcher in a wedged state? "
                     "it shouldn't!)"
-                    .format(ctor_order[:i], op_ix))
+                )
                 break
         last_ctor = i
         if expect_raises and len(active_ops) == len(ops):
@@ -167,7 +182,8 @@ class TestDispatch(TestCase):
             self.assertTrue(
                 False,
                 "expected exception to be raised, but nothing was raised "
-                "(after running ctors {})".format(ctor_order))
+                f"(after running ctors {ctor_order})",
+            )
         # In the order specified by dtor_order, run deregistrations
         for i, op_ix in enumerate(dtor_order):
             # Trigger a destruction
@@ -179,8 +195,7 @@ class TestDispatch(TestCase):
             else:
                 active_ops.remove(op_ix)
             check_invariants(
-                "running ctors {}, then running dtors {}"
-                .format(ctor_order[:last_ctor + 1], dtor_order[:i + 1])
+                f"running ctors {ctor_order[:last_ctor + 1]}, then running dtors {dtor_order[:i + 1]}"
             )
         return results[set_to_report][0]
 
@@ -212,8 +227,13 @@ class TestDispatch(TestCase):
         def go(ctor_order):
             for dtor_order in itertools.permutations(range(len(ops))):
                 self.run_ops(
-                    name, ops, ctor_order, dtor_order,
-                    results=results, expect_raises=expect_raises)
+                    name,
+                    ops,
+                    ctor_order,
+                    dtor_order,
+                    results=results,
+                    expect_raises=expect_raises,
+                )
 
         if ctor_order is not None:
             go(ctor_order)
@@ -229,19 +249,24 @@ class TestDispatch(TestCase):
         return results[frozenset(range(len(ops)))]
 
     def test_def(self):
-        state = self.commute("foo", [
-            # m.def("foo(Tensor x) -> Tensor")
-            lambda m: m.def_("foo(Tensor x) -> Tensor"),
-            # m.impl("test_def", [](const Tensor& x) { return x })
-            lambda m: m.impl_t_t("foo"),
-            # m.impl("test_def", kCPU, [](const Tensor& x) { return x })
-            lambda m: m.impl_t_t("foo", dispatch="CPU"),
-            # m.impl("test_def", kAutograd, [](const Tensor& x) { return x })
-            lambda m: m.impl_t_t("foo", dispatch="Autograd"),
-            # m.impl("test_def", kAutogradCPU, [](const Tensor& x) { return x })
-            lambda m: m.impl_t_t("foo", dispatch="AutogradCPU")
-        ]).state
-        self.assertExpectedInline(state, '''\
+        state = self.commute(
+            "foo",
+            [
+                # m.def("foo(Tensor x) -> Tensor")
+                lambda m: m.def_("foo(Tensor x) -> Tensor"),
+                # m.impl("test_def", [](const Tensor& x) { return x })
+                lambda m: m.impl_t_t("foo"),
+                # m.impl("test_def", kCPU, [](const Tensor& x) { return x })
+                lambda m: m.impl_t_t("foo", dispatch="CPU"),
+                # m.impl("test_def", kAutograd, [](const Tensor& x) { return x })
+                lambda m: m.impl_t_t("foo", dispatch="Autograd"),
+                # m.impl("test_def", kAutogradCPU, [](const Tensor& x) { return x })
+                lambda m: m.impl_t_t("foo", dispatch="AutogradCPU"),
+            ],
+        ).state
+        self.assertExpectedInline(
+            state,
+            """\
 name: test::foo
 schema: test::foo(Tensor x) -> Tensor
 debug: registered at /dev/null:0
@@ -250,38 +275,51 @@ CPU: impl_t_t :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
 AutogradCPU: impl_t_t :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
 Autograd[alias]: impl_t_t :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
 CompositeImplicitAutograd[alias]: impl_t_t :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
-''')
+""",
+        )
 
     def test_def_impl_schema_mismatch(self):
         # NB: an impl-impl mismatch is not reported eagerly; you'll find out
         # about it because one of them won't match with def
-        state = self.commute("foo", [
-            # m.def("foo(Tensor x, Tensor y) -> Tensor")
-            lambda m: m.def_("foo(Tensor x, Tensor y) -> Tensor"),
-            # m.impl("foo", [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo"),
-        ], expect_raises=True).state
-        self.assertExpectedInline(state, '''\
+        state = self.commute(
+            "foo",
+            [
+                # m.def("foo(Tensor x, Tensor y) -> Tensor")
+                lambda m: m.def_("foo(Tensor x, Tensor y) -> Tensor"),
+                # m.impl("foo", [](const Tensor & x) { return x })
+                lambda m: m.impl_t_t("foo"),
+            ],
+            expect_raises=True,
+        ).state
+        self.assertExpectedInline(
+            state,
+            """\
 Inferred operator schema for a C++ kernel function doesn't match the expected function schema.
   operator: test::foo
   expected schema: test::foo(Tensor x, Tensor y) -> Tensor
     registered at /dev/null:0
   inferred schema: (Tensor _0) -> Tensor _0
     impl_t_t
-  reason: The number of arguments is different. 2 vs 1.''')
+  reason: The number of arguments is different. 2 vs 1.""",
+        )
 
     def test_def_with_inference(self):
-        state = self.commute("foo", [
-            # m.def("foo", [](const Tensor & x) { return x })
-            lambda m: m.def_name_t_t("foo"),
-            # m.impl("foo", torch::kCPU, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "CPU"),
-            # m.impl("foo", torch::kAutograd, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "Autograd"),
-            # m.impl("foo", torch::kAutogradCPU, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "AutogradCPU")
-        ]).state
-        self.assertExpectedInline(state, '''\
+        state = self.commute(
+            "foo",
+            [
+                # m.def("foo", [](const Tensor & x) { return x })
+                lambda m: m.def_name_t_t("foo"),
+                # m.impl("foo", torch::kCPU, [](const Tensor & x) { return x })
+                lambda m: m.impl_t_t("foo", "CPU"),
+                # m.impl("foo", torch::kAutograd, [](const Tensor & x) { return x })
+                lambda m: m.impl_t_t("foo", "Autograd"),
+                # m.impl("foo", torch::kAutogradCPU, [](const Tensor & x) { return x })
+                lambda m: m.impl_t_t("foo", "AutogradCPU"),
+            ],
+        ).state
+        self.assertExpectedInline(
+            state,
+            """\
 name: test::foo
 schema: test::foo(Tensor _0) -> Tensor _0
 debug: registered at /dev/null:0
@@ -290,55 +328,73 @@ CPU: impl_t_t :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
 AutogradCPU: impl_t_t :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
 Autograd[alias]: impl_t_t :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
 CompositeImplicitAutograd[alias]: default_def_name_t_t :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
-''')
+""",
+        )
 
     def test_def_only(self):
-        state = self.commute("foo", [
-            # m.def("foo(Tensor x, Tensor y) -> Tensor")
-            lambda m: m.def_("foo(Tensor x, Tensor y) -> Tensor"),
-        ]).state
-        self.assertExpectedInline(state, '''\
+        state = self.commute(
+            "foo",
+            [
+                # m.def("foo(Tensor x, Tensor y) -> Tensor")
+                lambda m: m.def_("foo(Tensor x, Tensor y) -> Tensor"),
+            ],
+        ).state
+        self.assertExpectedInline(
+            state,
+            """\
 name: test::foo
 schema: test::foo(Tensor x, Tensor y) -> Tensor
 debug: registered at /dev/null:0
 alias analysis kind: FROM_SCHEMA
-''')
+""",
+        )
 
     def test_impl_only(self):
-        state = self.commute("foo", [
-            # m.impl("foo", [](const Tensor& x) { return x })
-            lambda m: m.impl_t_t("foo"),
-            # m.impl("foo", torch::kCPU, [](const Tensor& x) { return x })
-            lambda m: m.impl_t_t("foo", "CPU"),
-            # m.impl("foo", torch::kAutograd, [](const Tensor& x) { return x })
-            lambda m: m.impl_t_t("foo", "Autograd"),
-            # m.impl("foo", torch::kAutogradCPU, [](const Tensor& x) { return x })
-            lambda m: m.impl_t_t("foo", "AutogradCPU")
-        ]).state
-        self.assertExpectedInline(state, '''\
+        state = self.commute(
+            "foo",
+            [
+                # m.impl("foo", [](const Tensor& x) { return x })
+                lambda m: m.impl_t_t("foo"),
+                # m.impl("foo", torch::kCPU, [](const Tensor& x) { return x })
+                lambda m: m.impl_t_t("foo", "CPU"),
+                # m.impl("foo", torch::kAutograd, [](const Tensor& x) { return x })
+                lambda m: m.impl_t_t("foo", "Autograd"),
+                # m.impl("foo", torch::kAutogradCPU, [](const Tensor& x) { return x })
+                lambda m: m.impl_t_t("foo", "AutogradCPU"),
+            ],
+        ).state
+        self.assertExpectedInline(
+            state,
+            """\
 name: test::foo
 schema: (none)
 CPU: impl_t_t :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
 AutogradCPU: impl_t_t :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
 Autograd[alias]: impl_t_t :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
 CompositeImplicitAutograd[alias]: impl_t_t :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
-''')
+""",
+        )
 
     def test_computed_table(self):
-        result = self.commute("foo", [
-            # m.def("foo", [](const Tensor & x) { return x })
-            lambda m: m.def_name_t_t("foo"),
-            # m.impl("foo", torch::kCPU, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "CPU", debug="fn_cpu"),
-            # m.impl("foo", torch::kCUDA, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "XLA", debug="fn_xla"),
-            # m.impl("foo", torch::kAutograd, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "Autograd", debug="fn_autograd"),
-            # m.impl("foo", torch::kAutogradCPU, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "AutogradCPU", debug="fn_autogradcpu")
-        ])
+        result = self.commute(
+            "foo",
+            [
+                # m.def("foo", [](const Tensor & x) { return x })
+                lambda m: m.def_name_t_t("foo"),
+                # m.impl("foo", torch::kCPU, [](const Tensor & x) { return x })
+                lambda m: m.impl_t_t("foo", "CPU", debug="fn_cpu"),
+                # m.impl("foo", torch::kCUDA, [](const Tensor & x) { return x })
+                lambda m: m.impl_t_t("foo", "XLA", debug="fn_xla"),
+                # m.impl("foo", torch::kAutograd, [](const Tensor & x) { return x })
+                lambda m: m.impl_t_t("foo", "Autograd", debug="fn_autograd"),
+                # m.impl("foo", torch::kAutogradCPU, [](const Tensor & x) { return x })
+                lambda m: m.impl_t_t("foo", "AutogradCPU", debug="fn_autogradcpu"),
+            ],
+        )
         state, table = result.state, result.table
-        self.assertExpectedInline(state, '''\
+        self.assertExpectedInline(
+            state,
+            """\
 name: test::foo
 schema: test::foo(Tensor _0) -> Tensor _0
 debug: registered at /dev/null:0
@@ -348,12 +404,17 @@ XLA: fn_xla :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
 AutogradCPU: fn_autogradcpu :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
 Autograd[alias]: fn_autograd :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
 CompositeImplicitAutograd[alias]: default_def_name_t_t :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
-''')
+""",
+        )
 
         # computed dispatch table is too big, so we only check on a few entries we're interested in.
-        extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check)
+        extracted_table = extract_dispatch_table_with_keys(
+            table, dispatch_keys_to_check
+        )
 
-        self.assertExpectedInline(extracted_table, '''\
+        self.assertExpectedInline(
+            extracted_table,
+            """\
 Undefined: default_def_name_t_t [math kernel]
 CPU: fn_cpu [kernel]
 CUDA: default_def_name_t_t [math kernel]
@@ -362,61 +423,83 @@ AutogradOther: default_def_name_t_t [math kernel]
 AutogradCPU: fn_autogradcpu [kernel]
 AutogradCUDA: default_def_name_t_t [math kernel]
 AutogradXLA: fn_autograd [autograd kernel]
-''')
+""",
+        )
 
     def test_computed_table_with_cpu_math_autogradcpu_fallthrough(self):
         global_m = C._dispatch_library("IMPL", "_", "AutogradCPU")
-        result = self.commute("foo", [
-            # m.def("foo", [](const Tensor & x) { return x })
-            lambda m: m.def_name_t_t("foo"),
-            # m.impl("foo", torch::kCPU, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "CPU"),
-        ])
+        result = self.commute(
+            "foo",
+            [
+                # m.def("foo", [](const Tensor & x) { return x })
+                lambda m: m.def_name_t_t("foo"),
+                # m.impl("foo", torch::kCPU, [](const Tensor & x) { return x })
+                lambda m: m.impl_t_t("foo", "CPU"),
+            ],
+        )
         state, table = result.state, result.table
-        self.assertExpectedInline(state, '''\
+        self.assertExpectedInline(
+            state,
+            """\
 name: test::foo
 schema: test::foo(Tensor _0) -> Tensor _0
 debug: registered at /dev/null:0
 alias analysis kind: CONSERVATIVE
 CPU: impl_t_t :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
 CompositeImplicitAutograd[alias]: default_def_name_t_t :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
-''')
+""",
+        )
 
         # computed dispatch table is too big, so we only check on a few entries we're interested in.
-        extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check)
+        extracted_table = extract_dispatch_table_with_keys(
+            table, dispatch_keys_to_check
+        )
 
-        self.assertExpectedInline(extracted_table, '''\
+        self.assertExpectedInline(
+            extracted_table,
+            """\
 Undefined: default_def_name_t_t [math kernel]
 CPU: impl_t_t [kernel]
 CUDA: default_def_name_t_t [math kernel]
 XLA: default_def_name_t_t [math kernel]
 AutogradOther: default_def_name_t_t [math kernel]
-AutogradCPU: fallthrough registered in pytorch framework [backend fallback]
+AutogradCPU: registered in pytorch framework [backend fallback]
 AutogradCUDA: default_def_name_t_t [math kernel]
 AutogradXLA: default_def_name_t_t [math kernel]
-''')
+""",
+        )
 
     def test_computed_table_with_math(self):
         global_m = C._dispatch_library("IMPL", "_", "AutogradCPU")
-        result = self.commute("foo", [
-            # m.def("foo(Tensor x) -> Tensor")
-            lambda m: m.def_("foo(Tensor x) -> Tensor"),
-            # m.impl("foo", torch::kCompositeImplicitAutograd, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "CompositeImplicitAutograd"),
-        ])
+        result = self.commute(
+            "foo",
+            [
+                # m.def("foo(Tensor x) -> Tensor")
+                lambda m: m.def_("foo(Tensor x) -> Tensor"),
+                # m.impl("foo", torch::kCompositeImplicitAutograd, [](const Tensor & x) { return x })
+                lambda m: m.impl_t_t("foo", "CompositeImplicitAutograd"),
+            ],
+        )
         state, table = result.state, result.table
-        self.assertExpectedInline(state, '''\
+        self.assertExpectedInline(
+            state,
+            """\
 name: test::foo
 schema: test::foo(Tensor x) -> Tensor
 debug: registered at /dev/null:0
 alias analysis kind: FROM_SCHEMA
 CompositeImplicitAutograd[alias]: impl_t_t :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
-''')
+""",
+        )
 
         # computed dispatch table is too big, so we only check on a few entries we're interested in.
-        extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check)
+        extracted_table = extract_dispatch_table_with_keys(
+            table, dispatch_keys_to_check
+        )
 
-        self.assertExpectedInline(extracted_table, '''\
+        self.assertExpectedInline(
+            extracted_table,
+            """\
 Undefined: impl_t_t [math kernel]
 CPU: impl_t_t [math kernel]
 CUDA: impl_t_t [math kernel]
@@ -425,84 +508,116 @@ AutogradOther: impl_t_t [math kernel]
 AutogradCPU: impl_t_t [math kernel]
 AutogradCUDA: impl_t_t [math kernel]
 AutogradXLA: impl_t_t [math kernel]
-''')
+""",
+        )
 
     def test_computed_table_with_cpu_math(self):
         global_m = C._dispatch_library("IMPL", "_", "AutogradCPU")
-        result = self.commute("foo", [
-            # m.def("foo(Tensor x) -> Tensor")
-            lambda m: m.def_("foo(Tensor x) -> Tensor"),
-            # m.impl("foo", torch::kCPU, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "CPU", debug="fn_cpu"),
-            # m.impl("foo", torch::kCompositeImplicitAutograd, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "CompositeImplicitAutograd", debug="fn_math"),
-        ])
+        result = self.commute(
+            "foo",
+            [
+                # m.def("foo(Tensor x) -> Tensor")
+                lambda m: m.def_("foo(Tensor x) -> Tensor"),
+                # m.impl("foo", torch::kCPU, [](const Tensor & x) { return x })
+                lambda m: m.impl_t_t("foo", "CPU", debug="fn_cpu"),
+                # m.impl("foo", torch::kCompositeImplicitAutograd, [](const Tensor & x) { return x })
+                lambda m: m.impl_t_t(
+                    "foo", "CompositeImplicitAutograd", debug="fn_math"
+                ),
+            ],
+        )
         state, table = result.state, result.table
-        self.assertExpectedInline(state, '''\
+        self.assertExpectedInline(
+            state,
+            """\
 name: test::foo
 schema: test::foo(Tensor x) -> Tensor
 debug: registered at /dev/null:0
 alias analysis kind: FROM_SCHEMA
 CPU: fn_cpu :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
 CompositeImplicitAutograd[alias]: fn_math :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
-''')
+""",
+        )
 
         # computed dispatch table is too big, so we only check on a few entries we're interested in.
-        extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check)
+        extracted_table = extract_dispatch_table_with_keys(
+            table, dispatch_keys_to_check
+        )
 
-        self.assertExpectedInline(extracted_table, '''\
+        self.assertExpectedInline(
+            extracted_table,
+            """\
 Undefined: fn_math [math kernel]
 CPU: fn_cpu [kernel]
 CUDA: fn_math [math kernel]
 XLA: fn_math [math kernel]
 AutogradOther: fn_math [math kernel]
-AutogradCPU: fallthrough registered in pytorch framework [backend fallback]
+AutogradCPU: registered in pytorch framework [backend fallback]
 AutogradCUDA: fn_math [math kernel]
 AutogradXLA: fn_math [math kernel]
-''')
+""",
+        )
 
     def test_computed_table_with_autograd(self):
         global_m = C._dispatch_library("IMPL", "_", "AutogradCPU")
-        result = self.commute("foo", [
-            # m.def("foo(Tensor x) -> Tensor")
-            lambda m: m.def_("foo(Tensor x) -> Tensor"),
-            # m.impl("foo", torch::kAutograd, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "Autograd"),
-        ])
+        result = self.commute(
+            "foo",
+            [
+                # m.def("foo(Tensor x) -> Tensor")
+                lambda m: m.def_("foo(Tensor x) -> Tensor"),
+                # m.impl("foo", torch::kAutograd, [](const Tensor & x) { return x })
+                lambda m: m.impl_t_t("foo", "Autograd"),
+            ],
+        )
         state, table = result.state, result.table
-        self.assertExpectedInline(state, '''\
+        self.assertExpectedInline(
+            state,
+            """\
 name: test::foo
 schema: test::foo(Tensor x) -> Tensor
 debug: registered at /dev/null:0
 alias analysis kind: FROM_SCHEMA
 Autograd[alias]: impl_t_t :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
-''')
+""",
+        )
 
         # computed dispatch table is too big, so we only check on a few entries we're interested in.
-        extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check)
+        extracted_table = extract_dispatch_table_with_keys(
+            table, dispatch_keys_to_check
+        )
 
-        self.assertExpectedInline(extracted_table, '''\
+        self.assertExpectedInline(
+            extracted_table,
+            """\
 AutogradOther: impl_t_t [autograd kernel]
 AutogradCPU: impl_t_t [autograd kernel]
 AutogradCUDA: impl_t_t [autograd kernel]
 AutogradXLA: impl_t_t [autograd kernel]
-''')
+""",
+        )
 
     # Now that catchAll maps to CompositeImplicitAutograd, registering to both
     # catchAll and CompositeImplicitAutograd breaks commutativity.
     def test_computed_table_with_cpu_autograd_math(self):
-        result = self.commute("foo", [
-            # m.def("foo(Tensor x) -> Tensor")
-            lambda m: m.def_("foo(Tensor x) -> Tensor"),
-            # m.impl("foo", torch::kCPU, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "CPU", debug="fn_cpu"),
-            # m.impl("foo", torch::kAutograd, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "Autograd", debug="fn_autograd"),
-            # m.impl("foo", torch::kCompositeImplicitAutograd, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "CompositeImplicitAutograd", debug="fn_math"),
-        ])
+        result = self.commute(
+            "foo",
+            [
+                # m.def("foo(Tensor x) -> Tensor")
+                lambda m: m.def_("foo(Tensor x) -> Tensor"),
+                # m.impl("foo", torch::kCPU, [](const Tensor & x) { return x })
+                lambda m: m.impl_t_t("foo", "CPU", debug="fn_cpu"),
+                # m.impl("foo", torch::kAutograd, [](const Tensor & x) { return x })
+                lambda m: m.impl_t_t("foo", "Autograd", debug="fn_autograd"),
+                # m.impl("foo", torch::kCompositeImplicitAutograd, [](const Tensor & x) { return x })
+                lambda m: m.impl_t_t(
+                    "foo", "CompositeImplicitAutograd", debug="fn_math"
+                ),
+            ],
+        )
         state, table = result.state, result.table
-        self.assertExpectedInline(state, '''\
+        self.assertExpectedInline(
+            state,
+            """\
 name: test::foo
 schema: test::foo(Tensor x) -> Tensor
 debug: registered at /dev/null:0
@@ -510,12 +625,17 @@ alias analysis kind: FROM_SCHEMA
 CPU: fn_cpu :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
 Autograd[alias]: fn_autograd :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
 CompositeImplicitAutograd[alias]: fn_math :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
-''')
+""",
+        )
 
         # computed dispatch table is too big, so we only check on a few entries we're interested in.
-        extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check)
+        extracted_table = extract_dispatch_table_with_keys(
+            table, dispatch_keys_to_check
+        )
 
-        self.assertExpectedInline(extracted_table, '''\
+        self.assertExpectedInline(
+            extracted_table,
+            """\
 Undefined: fn_math [math kernel]
 CPU: fn_cpu [kernel]
 CUDA: fn_math [math kernel]
@@ -524,31 +644,44 @@ AutogradOther: fn_math [math kernel]
 AutogradCPU: fn_autograd [autograd kernel]
 AutogradCUDA: fn_math [math kernel]
 AutogradXLA: fn_math [math kernel]
-''')
+""",
+        )
 
     def test_computed_table_with_ambiguous_autogradother(self):
-        result = self.commute("foo", [
-            # m.def("foo(Tensor x) -> Tensor")
-            lambda m: m.def_("foo(Tensor x) -> Tensor"),
-            # m.impl("foo", torch::kCompositeImplicitAutograd, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "CompositeImplicitAutograd", debug="fn_math"),
-            # m.impl("foo", torch::kFPGA, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "FPGA", debug="fn_fpga"),
-        ])
+        result = self.commute(
+            "foo",
+            [
+                # m.def("foo(Tensor x) -> Tensor")
+                lambda m: m.def_("foo(Tensor x) -> Tensor"),
+                # m.impl("foo", torch::kCompositeImplicitAutograd, [](const Tensor & x) { return x })
+                lambda m: m.impl_t_t(
+                    "foo", "CompositeImplicitAutograd", debug="fn_math"
+                ),
+                # m.impl("foo", torch::kFPGA, [](const Tensor & x) { return x })
+                lambda m: m.impl_t_t("foo", "FPGA", debug="fn_fpga"),
+            ],
+        )
         state, table = result.state, result.table
-        self.assertExpectedInline(state, '''\
+        self.assertExpectedInline(
+            state,
+            """\
 name: test::foo
 schema: test::foo(Tensor x) -> Tensor
 debug: registered at /dev/null:0
 alias analysis kind: FROM_SCHEMA
 FPGA: fn_fpga :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
 CompositeImplicitAutograd[alias]: fn_math :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
-''')
+""",
+        )
 
         # computed dispatch table is too big, so we only check on a few entries we're interested in.
-        extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check + ('FPGA',))
+        extracted_table = extract_dispatch_table_with_keys(
+            table, dispatch_keys_to_check + ("FPGA",)
+        )
 
-        self.assertExpectedInline(extracted_table, '''\
+        self.assertExpectedInline(
+            extracted_table,
+            """\
 Undefined: fn_math [math kernel]
 CPU: fn_math [math kernel]
 CUDA: fn_math [math kernel]
@@ -558,54 +691,75 @@ AutogradCPU: fn_math [math kernel]
 AutogradCUDA: fn_math [math kernel]
 AutogradXLA: fn_math [math kernel]
 FPGA: fn_fpga [kernel]
-''')
+""",
+        )
 
     def test_computed_table_with_cpu_defaultbackend(self):
-        result = self.commute("foo", [
-            # m.def("foo(Tensor x) -> Tensor")
-            lambda m: m.def_("foo(Tensor x) -> Tensor"),
-            # m.impl("foo", torch::kCPU, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "CPU", debug="fn_cpu"),
-            # m.impl("foo", torch::kCompositeExplicitAutograd, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "CompositeExplicitAutograd", debug="fn_defaultbackend"),
-        ])
+        result = self.commute(
+            "foo",
+            [
+                # m.def("foo(Tensor x) -> Tensor")
+                lambda m: m.def_("foo(Tensor x) -> Tensor"),
+                # m.impl("foo", torch::kCPU, [](const Tensor & x) { return x })
+                lambda m: m.impl_t_t("foo", "CPU", debug="fn_cpu"),
+                # m.impl("foo", torch::kCompositeExplicitAutograd, [](const Tensor & x) { return x })
+                lambda m: m.impl_t_t(
+                    "foo", "CompositeExplicitAutograd", debug="fn_defaultbackend"
+                ),
+            ],
+        )
         state, table = result.state, result.table
-        self.assertExpectedInline(state, '''\
+        self.assertExpectedInline(
+            state,
+            """\
 name: test::foo
 schema: test::foo(Tensor x) -> Tensor
 debug: registered at /dev/null:0
 alias analysis kind: FROM_SCHEMA
 CPU: fn_cpu :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
 CompositeExplicitAutograd[alias]: fn_defaultbackend :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
-''')
+""",
+        )
 
         # computed dispatch table is too big, so we only check on a few entries we're interested in.
-        extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check)
+        extracted_table = extract_dispatch_table_with_keys(
+            table, dispatch_keys_to_check
+        )
 
-        self.assertExpectedInline(extracted_table, '''\
+        self.assertExpectedInline(
+            extracted_table,
+            """\
 Undefined: fn_defaultbackend [default backend kernel]
 CPU: fn_cpu [kernel]
 CUDA: fn_defaultbackend [default backend kernel]
 XLA: fn_defaultbackend [default backend kernel]
-AutogradOther: fallthrough registered in pytorch framework [backend fallback]
-AutogradCPU: fallthrough registered in pytorch framework [backend fallback]
-AutogradCUDA: fallthrough registered in pytorch framework [backend fallback]
-AutogradXLA: fallthrough registered in pytorch framework [backend fallback]
-''')
+AutogradOther: registered in pytorch framework [backend fallback]
+AutogradCPU: registered in pytorch framework [backend fallback]
+AutogradCUDA: registered in pytorch framework [backend fallback]
+AutogradXLA: registered in pytorch framework [backend fallback]
+""",
+        )
 
     def test_computed_table_with_cpu_autograd_defaultbackend(self):
-        result = self.commute("foo", [
-            # m.def("foo(Tensor x) -> Tensor")
-            lambda m: m.def_("foo(Tensor x) -> Tensor"),
-            # m.impl("foo", torch::kCPU, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "CPU", debug="fn_cpu"),
-            # m.impl("foo", torch::kAutograd, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "Autograd", debug="fn_autograd"),
-            # m.impl("foo", torch::kCompositeExplicitAutograd, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "CompositeExplicitAutograd", debug="fn_defaultbackend"),
-        ])
+        result = self.commute(
+            "foo",
+            [
+                # m.def("foo(Tensor x) -> Tensor")
+                lambda m: m.def_("foo(Tensor x) -> Tensor"),
+                # m.impl("foo", torch::kCPU, [](const Tensor & x) { return x })
+                lambda m: m.impl_t_t("foo", "CPU", debug="fn_cpu"),
+                # m.impl("foo", torch::kAutograd, [](const Tensor & x) { return x })
+                lambda m: m.impl_t_t("foo", "Autograd", debug="fn_autograd"),
+                # m.impl("foo", torch::kCompositeExplicitAutograd, [](const Tensor & x) { return x })
+                lambda m: m.impl_t_t(
+                    "foo", "CompositeExplicitAutograd", debug="fn_defaultbackend"
+                ),
+            ],
+        )
         state, table = result.state, result.table
-        self.assertExpectedInline(state, '''\
+        self.assertExpectedInline(
+            state,
+            """\
 name: test::foo
 schema: test::foo(Tensor x) -> Tensor
 debug: registered at /dev/null:0
@@ -613,12 +767,17 @@ alias analysis kind: FROM_SCHEMA
 CPU: fn_cpu :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
 Autograd[alias]: fn_autograd :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
 CompositeExplicitAutograd[alias]: fn_defaultbackend :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
-''')
+""",
+        )
 
         # computed dispatch table is too big, so we only check on a few entries we're interested in.
-        extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check + ('FPGA',))
+        extracted_table = extract_dispatch_table_with_keys(
+            table, dispatch_keys_to_check + ("FPGA",)
+        )
 
-        self.assertExpectedInline(extracted_table, '''\
+        self.assertExpectedInline(
+            extracted_table,
+            """\
 Undefined: fn_defaultbackend [default backend kernel]
 CPU: fn_cpu [kernel]
 CUDA: fn_defaultbackend [default backend kernel]
@@ -628,23 +787,33 @@ AutogradCPU: fn_autograd [autograd kernel]
 AutogradCUDA: fn_autograd [autograd kernel]
 AutogradXLA: fn_autograd [autograd kernel]
 FPGA: fn_defaultbackend [default backend kernel]
-''')
+""",
+        )
 
     def test_computed_table_with_cpu_autograd_math_defaultbackend(self):
-        result = self.commute("foo", [
-            # m.def("foo(Tensor x) -> Tensor")
-            lambda m: m.def_("foo(Tensor x) -> Tensor"),
-            # m.impl("foo", torch::kCPU, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "CPU", debug="fn_cpu"),
-            # m.impl("foo", torch::kAutograd, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "Autograd", debug="fn_autograd"),
-            # m.impl("foo", torch::kCompositeImplicitAutograd, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "CompositeImplicitAutograd", debug="fn_math"),
-            # m.impl("foo", torch::kCompositeExplicitAutograd, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "CompositeExplicitAutograd", debug="fn_defaultbackend"),
-        ])
+        result = self.commute(
+            "foo",
+            [
+                # m.def("foo(Tensor x) -> Tensor")
+                lambda m: m.def_("foo(Tensor x) -> Tensor"),
+                # m.impl("foo", torch::kCPU, [](const Tensor & x) { return x })
+                lambda m: m.impl_t_t("foo", "CPU", debug="fn_cpu"),
+                # m.impl("foo", torch::kAutograd, [](const Tensor & x) { return x })
+                lambda m: m.impl_t_t("foo", "Autograd", debug="fn_autograd"),
+                # m.impl("foo", torch::kCompositeImplicitAutograd, [](const Tensor & x) { return x })
+                lambda m: m.impl_t_t(
+                    "foo", "CompositeImplicitAutograd", debug="fn_math"
+                ),
+                # m.impl("foo", torch::kCompositeExplicitAutograd, [](const Tensor & x) { return x })
+                lambda m: m.impl_t_t(
+                    "foo", "CompositeExplicitAutograd", debug="fn_defaultbackend"
+                ),
+            ],
+        )
         state, table = result.state, result.table
-        self.assertExpectedInline(state, '''\
+        self.assertExpectedInline(
+            state,
+            """\
 name: test::foo
 schema: test::foo(Tensor x) -> Tensor
 debug: registered at /dev/null:0
@@ -653,12 +822,17 @@ CPU: fn_cpu :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
 Autograd[alias]: fn_autograd :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
 CompositeImplicitAutograd[alias]: fn_math :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
 CompositeExplicitAutograd[alias]: fn_defaultbackend :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
-''')
+""",
+        )
 
         # computed dispatch table is too big, so we only check on a few entries we're interested in.
-        extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check)
+        extracted_table = extract_dispatch_table_with_keys(
+            table, dispatch_keys_to_check
+        )
 
-        self.assertExpectedInline(extracted_table, '''\
+        self.assertExpectedInline(
+            extracted_table,
+            """\
 Undefined: fn_defaultbackend [default backend kernel]
 CPU: fn_cpu [kernel]
 CUDA: fn_defaultbackend [default backend kernel]
@@ -667,7 +841,8 @@ AutogradOther: fn_autograd [autograd kernel]
 AutogradCPU: fn_autograd [autograd kernel]
 AutogradCUDA: fn_autograd [autograd kernel]
 AutogradXLA: fn_autograd [autograd kernel]
-''')
+""",
+        )
 
     def test_multiple_def_error(self):
         ops = [
@@ -678,25 +853,32 @@ AutogradXLA: fn_autograd [autograd kernel]
         ]
         self.assertExpectedInline(
             self.commute("foo", ops, expect_raises=True).state,
-            '''Tried to register an operator (test::foo(Tensor x, Tensor y) -> Tensor) with the same name and overload '''
-            '''name multiple times. Each overload's schema should only be registered with a single call to def(). '''
-            '''Duplicate registration: registered at /dev/null:0. Original registration: registered at /dev/null:0'''
+            """Tried to register an operator (test::foo(Tensor x, Tensor y) -> Tensor) with the same name and overload """
+            """name multiple times. Each overload's schema should only be registered with a single call to def(). """
+            """Duplicate registration: registered at /dev/null:0. Original registration: registered at /dev/null:0""",
         )
 
     def test_def_with_explicit_alias(self):
-        state = self.commute("foo", [
-            # m.def(torch::schema(
-            #   "foo(Tensor x, Tensor y) -> Tensor",
-            #   AliasAnalysisKind::PURE))
-            lambda m: m.def_("foo(Tensor x, Tensor y) -> Tensor",
-                             alias="PURE_FUNCTION")
-        ]).state
-        self.assertExpectedInline(state, '''\
+        state = self.commute(
+            "foo",
+            [
+                # m.def(torch::schema(
+                #   "foo(Tensor x, Tensor y) -> Tensor",
+                #   AliasAnalysisKind::PURE))
+                lambda m: m.def_(
+                    "foo(Tensor x, Tensor y) -> Tensor", alias="PURE_FUNCTION"
+                )
+            ],
+        ).state
+        self.assertExpectedInline(
+            state,
+            """\
 name: test::foo
 schema: test::foo(Tensor x, Tensor y) -> Tensor
 debug: registered at /dev/null:0
 alias analysis kind: PURE_FUNCTION
-''')
+""",
+        )
 
     def test_multiple_def_alias_defaulting(self):
         ops = [
@@ -708,9 +890,9 @@ alias analysis kind: PURE_FUNCTION
         ]
         self.assertExpectedInline(
             self.commute("foo", ops, expect_raises=True).state,
-            '''Tried to register an operator (test::foo(Tensor x) -> Tensor) with the same name and overload '''
-            '''name multiple times. Each overload's schema should only be registered with a single call to def(). '''
-            '''Duplicate registration: registered at /dev/null:0. Original registration: registered at /dev/null:0'''
+            """Tried to register an operator (test::foo(Tensor x) -> Tensor) with the same name and overload """
+            """name multiple times. Each overload's schema should only be registered with a single call to def(). """
+            """Duplicate registration: registered at /dev/null:0. Original registration: registered at /dev/null:0""",
         )
 
     def test_multiple_def_alias_mismatch(self):
@@ -724,9 +906,9 @@ alias analysis kind: PURE_FUNCTION
         ]
         self.assertExpectedInline(
             self.commute("foo", ops, expect_raises=True).state,
-            '''Tried to register an operator (test::foo(Tensor x) -> Tensor) with the same name and overload '''
-            '''name multiple times. Each overload's schema should only be registered with a single call to def(). '''
-            '''Duplicate registration: registered at /dev/null:0. Original registration: registered at /dev/null:0'''
+            """Tried to register an operator (test::foo(Tensor x) -> Tensor) with the same name and overload """
+            """name multiple times. Each overload's schema should only be registered with a single call to def(). """
+            """Duplicate registration: registered at /dev/null:0. Original registration: registered at /dev/null:0""",
         )
 
     def test_multiple_fallback(self):
@@ -737,8 +919,8 @@ alias analysis kind: PURE_FUNCTION
         except RuntimeError as e:
             self.assertExpectedInline(
                 str(e),
-                '''Tried to register multiple backend fallbacks for the same dispatch key XLA; previous registration '''
-                '''registered at /dev/null:0, new registration registered at /dev/null:0'''
+                """Tried to register multiple backend fallbacks for the same dispatch key XLA; previous registration """
+                """registered at /dev/null:0, new registration registered at /dev/null:0""",
             )
         else:
             self.assertTrue(False)
@@ -751,12 +933,12 @@ alias analysis kind: PURE_FUNCTION
         # Not commutative
         self.assertExpectedInline(
             self.commute("foo", ops, ctor_order=(0, 1)).state,
-            '''\
+            """\
 name: test::foo
 schema: (none)
 CompositeImplicitAutograd[alias]: fn2 :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
 CompositeImplicitAutograd[alias] (inactive): fn1 :: (Tensor _0) -> Tensor _0 [ boxed unboxed ]
-'''
+""",
         )
 
     # Definition: a dangling impl happens when someone does an impl() on a
@@ -768,11 +950,15 @@ CompositeImplicitAutograd[alias] (inactive): fn1 :: (Tensor _0) -> Tensor _0 [ b
         self.assertEqual(
             0,
             len(dangling_impls),
-            msg=f"Expect zero dangling impls, but found: {dangling_impls}"
+            msg=f"Expect zero dangling impls, but found: {dangling_impls}",
         )
 
     def test_find_dangling_impls_ext(self):
-        extension_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cpp_extensions', 'dangling_impl_extension.cpp')
+        extension_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "cpp_extensions",
+            "dangling_impl_extension.cpp",
+        )
         module = torch.utils.cpp_extension.load(
             name="dangling_impl_extension",
             sources=[
@@ -785,18 +971,20 @@ CompositeImplicitAutograd[alias] (inactive): fn1 :: (Tensor _0) -> Tensor _0 [ b
         impls = C._dispatch_find_dangling_impls()
         self.assertEqual(1, len(impls))
         self.assertEqual(
-            '''\
+            f"""\
 name: __test::foo
 schema: (none)
-CPU: registered at {}:5 :: () -> () [ boxed unboxed ]
-'''.format(extension_path),
-            impls[0])
+CPU: registered at {extension_path}:5 :: () -> () [ boxed unboxed ]
+""",
+            impls[0],
+        )
 
     def test_dispatch_print_registrations_for_dispatch_key_invalid(self):
         with self.assertRaisesRegex(
-                RuntimeError,
-                "could not parse dispatch key: invalid_key"):
-            C._dispatch_print_registrations_for_dispatch_key('invalid_key')
+            RuntimeError, "could not parse dispatch key: invalid_key"
+        ):
+            C._dispatch_print_registrations_for_dispatch_key("invalid_key")
+
 
 class TestPythonDispatcher(TestCase):
     def test_basic(self):
@@ -804,7 +992,7 @@ class TestPythonDispatcher(TestCase):
         dispatcher.register(["CPU", "XLA", "Lazy", "CompositeImplicitAutograd"])
         self.assertExpectedInline(
             dispatcher.dispatchTable(),
-            '''\
+            """\
 
 Computed Dispatch Table
 key             kernel
@@ -814,18 +1002,20 @@ XLA             fn_XLA [kernel]
 Lazy            fn_Lazy [kernel]
 FPGA            fn_CompositeImplicitAutograd [math kernel]
 AutogradOther   fn_CompositeImplicitAutograd [math kernel]
-AutogradCPU     fallthrough [backend fallback]
-AutogradXLA     fallthrough [backend fallback]
-AutogradLazy    fallthrough [backend fallback]
-'''
+AutogradCPU     [backend fallback]
+AutogradXLA     [backend fallback]
+AutogradLazy    [backend fallback]
+""",
         )
 
     def test_math_autogradcpu(self):
         dispatcher = PythonDispatcher()
-        dispatcher.register(["CPU", "XLA", "Lazy", "CompositeImplicitAutograd", "AutogradCPU"])
+        dispatcher.register(
+            ["CPU", "XLA", "Lazy", "CompositeImplicitAutograd", "AutogradCPU"]
+        )
         self.assertExpectedInline(
             dispatcher.dispatchTable(),
-            '''\
+            """\
 
 Computed Dispatch Table
 key             kernel
@@ -836,13 +1026,13 @@ Lazy            fn_Lazy [kernel]
 FPGA            fn_CompositeImplicitAutograd [math kernel]
 AutogradOther   fn_CompositeImplicitAutograd [math kernel]
 AutogradCPU     fn_AutogradCPU [kernel]
-AutogradXLA     fallthrough [backend fallback]
-AutogradLazy    fallthrough [backend fallback]
-'''
+AutogradXLA     [backend fallback]
+AutogradLazy    [backend fallback]
+""",
         )
         self.assertExpectedInline(
             dispatcher.registrations(),
-            '''\
+            """\
 
 Registered Kernels
 key             kernel
@@ -852,15 +1042,17 @@ XLA             fn_XLA
 Lazy            fn_Lazy
 AutogradCPU     fn_AutogradCPU
 CompositeImplicitAutograd[alias] fn_CompositeImplicitAutograd
-'''
+""",
         )
 
     def test_defaultbackend_autogradcpu(self):
         dispatcher = PythonDispatcher()
-        dispatcher.register(["CPU", "XLA", "Lazy", "CompositeExplicitAutograd", "AutogradCPU"])
+        dispatcher.register(
+            ["CPU", "XLA", "Lazy", "CompositeExplicitAutograd", "AutogradCPU"]
+        )
         self.assertExpectedInline(
             dispatcher.dispatchTable(),
-            '''\
+            """\
 
 Computed Dispatch Table
 key             kernel
@@ -869,16 +1061,16 @@ CPU             fn_CPU [kernel]
 XLA             fn_XLA [kernel]
 Lazy            fn_Lazy [kernel]
 FPGA            fn_CompositeExplicitAutograd [default backend kernel]
-AutogradOther   fallthrough [backend fallback]
+AutogradOther   [backend fallback]
 AutogradCPU     fn_AutogradCPU [kernel]
-AutogradXLA     fallthrough [backend fallback]
-AutogradLazy    fallthrough [backend fallback]
-'''
+AutogradXLA     [backend fallback]
+AutogradLazy    [backend fallback]
+""",
         )
 
         self.assertExpectedInline(
             dispatcher.registrations(),
-            '''\
+            """\
 
 Registered Kernels
 key             kernel
@@ -888,7 +1080,7 @@ XLA             fn_XLA
 Lazy            fn_Lazy
 AutogradCPU     fn_AutogradCPU
 CompositeExplicitAutograd[alias] fn_CompositeExplicitAutograd
-'''
+""",
         )
 
     def test_autogradother(self):
@@ -896,7 +1088,7 @@ CompositeExplicitAutograd[alias] fn_CompositeExplicitAutograd
         dispatcher.register(["CPU", "FPGA", "CompositeImplicitAutograd"])
         self.assertExpectedInline(
             dispatcher.dispatchTable(),
-            '''\
+            """\
 
 Computed Dispatch Table
 key             kernel
@@ -906,15 +1098,15 @@ XLA             fn_CompositeImplicitAutograd [math kernel]
 Lazy            fn_CompositeImplicitAutograd [math kernel]
 FPGA            fn_FPGA [kernel]
 AutogradOther   ambiguous_autogradother [ambiguous autogradother]
-AutogradCPU     fallthrough [backend fallback]
+AutogradCPU     [backend fallback]
 AutogradXLA     fn_CompositeImplicitAutograd [math kernel]
 AutogradLazy    fn_CompositeImplicitAutograd [math kernel]
-'''
+""",
         )
 
         self.assertExpectedInline(
             dispatcher.registrations(),
-            '''\
+            """\
 
 Registered Kernels
 key             kernel
@@ -922,7 +1114,7 @@ key             kernel
 FPGA            fn_FPGA
 CPU             fn_CPU
 CompositeImplicitAutograd[alias] fn_CompositeImplicitAutograd
-'''
+""",
         )
 
     def test_duplicate_registrations(self):
@@ -935,9 +1127,12 @@ CompositeImplicitAutograd[alias] fn_CompositeImplicitAutograd
         dispatcher = PythonDispatcher()
 
         with self.assertRaisesRegex(
-                RuntimeError,
-                r"Registration to both CompositeImplicitAutograd and CompositeExplicitAutograd is not allowed"):
-            dispatcher.register(["CompositeExplicitAutograd", "CompositeImplicitAutograd"])
+            RuntimeError,
+            r"Registration to both CompositeImplicitAutograd and CompositeExplicitAutograd is not allowed",
+        ):
+            dispatcher.register(
+                ["CompositeExplicitAutograd", "CompositeImplicitAutograd"]
+            )
 
     def test_quantized_structured_not_implemented(self):
         x = torch.zeros([1, 1, 1])
@@ -951,8 +1146,9 @@ CompositeImplicitAutograd[alias] fn_CompositeImplicitAutograd
         self.assertRaisesRegex(
             NotImplementedError,
             "Could not run 'aten::bmm.out' with arguments from the 'QuantizedCPU' backend.",
-            lambda: torch.bmm(qx, qy)
+            lambda: torch.bmm(qx, qy),
         )
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     run_tests()

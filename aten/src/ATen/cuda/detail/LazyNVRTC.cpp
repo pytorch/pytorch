@@ -161,12 +161,51 @@ CUDA_STUB3(cuModuleGetFunction, CUfunction *, CUmodule, const char *);
 CUDA_STUB4(cuOccupancyMaxActiveBlocksPerMultiprocessor, int *, CUfunction, int, size_t);
 CUDA_STUB2(cuGetErrorString, CUresult, const char **);
 CUDA_STUB1(cuCtxGetCurrent, CUcontext *);
+CUDA_STUB1(cuCtxSetCurrent, CUcontext);
 CUDA_STUB1(cuModuleUnload, CUmodule);
 CUDA_STUB3(cuDevicePrimaryCtxGetState, CUdevice, unsigned int *, int *);
+CUDA_STUB2(cuDevicePrimaryCtxRetain, CUcontext *, CUdevice);
 CUDA_STUB4(cuLinkCreate, unsigned int, CUjit_option *, void **, CUlinkState *);
 CUDA_STUB3(cuLinkComplete, CUlinkState, void **, size_t *);
 CUDA_STUB3(cuFuncSetAttribute, CUfunction, CUfunction_attribute, int);
 CUDA_STUB3(cuFuncGetAttribute, int*, CUfunction_attribute, CUfunction);
+
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 12000
+CUresult CUDAAPI
+cuTensorMapEncodeTiled(
+    CUtensorMap* tensorMap,
+    CUtensorMapDataType tensorDataType,
+    cuuint32_t tensorRank,
+    void* globalAddress,
+    const cuuint64_t* globalDim,
+    const cuuint64_t* globalStrides,
+    const cuuint32_t* boxDim,
+    const cuuint32_t* elementStrides,
+    CUtensorMapInterleave interleave,
+    CUtensorMapSwizzle swizzle,
+    CUtensorMapL2promotion l2Promotion,
+    CUtensorMapFloatOOBfill oobFill) {
+  auto fn = reinterpret_cast<decltype(&cuTensorMapEncodeTiled)>(
+      getCUDALibrary().sym(__func__));
+  if (!fn)
+    throw std::runtime_error("Can't get cuTensorMapEncodeTiled");
+  lazyNVRTC.cuTensorMapEncodeTiled = fn;
+  return fn(
+      tensorMap,
+      tensorDataType,
+      tensorRank,
+      globalAddress,
+      globalDim,
+      globalStrides,
+      boxDim,
+      elementStrides,
+      interleave,
+      swizzle,
+      l2Promotion,
+      oobFill);
+}
+
+#endif
 
 // Irregularly shaped functions
 CUresult CUDAAPI cuLaunchKernel(CUfunction f,

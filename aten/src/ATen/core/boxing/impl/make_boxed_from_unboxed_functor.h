@@ -82,6 +82,7 @@ namespace impl {
     c10::QScheme,
     c10::ScalarType,
     c10::Device,
+    c10::DeviceIndex,
     c10::Layout,
     c10::MemoryFormat,
     at::Dimname
@@ -105,17 +106,17 @@ namespace impl {
   template<class T, bool AllowDeprecatedTypes, class Enable = void>
   struct assert_is_valid_input_type {
     assert_is_valid_input_type() {
-      guts::if_constexpr<guts::typelist::contains<supported_primitive_arg_types, T>::value>([] {
+      if constexpr (guts::typelist::contains<supported_primitive_arg_types, T>::value) {
         /* everything is ok, this is a primitive type */
-      }, /* else */ [] {
+      } else {
         /* otherwise this must be an instance of a valid custom class, since it can only
            have been created via IValue(x), which ensures this. */
-      });
+      }
     }
   };
 
   template<class T, bool AllowDeprecatedTypes>
-  struct assert_is_valid_input_type<c10::optional<T>, AllowDeprecatedTypes>
+  struct assert_is_valid_input_type<std::optional<T>, AllowDeprecatedTypes>
   : assert_is_valid_input_type<T, AllowDeprecatedTypes> {};
 
   template <bool AllowDeprecatedTypes, class... Args>
@@ -178,15 +179,11 @@ namespace impl {
       "You tried to register a kernel with an unsupported input type: std::array<Scalar, N>. Please use std::array<int64_t, N> instead.");
   };
 
-  // The following specialisations of assert_is_valid_input_type are technically not
-  // necessary since we would hit the base case and show an error message
-  // there if they didn't exist, but we can show a better error message
-  // in some common error scenarios.
   template<class T, bool AllowDeprecatedTypes>
   struct assert_is_valid_input_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_same<float, T>::value>> {
     // There is no reason to support float when we have double. Keep the API lean.
     static_assert(guts::false_t<T>::value,
-      "You tried to register a kernel with an unsupported input type: float. Please use double instead.");
+      "You tried to register a kernel with an unsupported input type: float. Please use double instead; you should use `double` in the C++ function signature and `float` in the schema string.");
   };
   template<class T, bool AllowDeprecatedTypes>
   struct assert_is_valid_input_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_same<const char*, T>::value>> {
@@ -201,8 +198,16 @@ namespace impl {
   template<class T, bool AllowDeprecatedTypes>
   struct assert_is_valid_input_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_integral<T>::value && !guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
     static_assert(guts::false_t<T>::value,
-      "You tried to register a kernel with an unsupported integral input type. Please use int64_t instead.");
+      "You tried to register a kernel with an unsupported integral input type. Please use int64_t instead; you should use `int64_t` in the C++ function signature and `int` in the schema string.");
   };
+  template<class T, bool AllowDeprecatedTypes>
+  struct assert_is_valid_input_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_same<const c10::SymInt&, T>::value>> {
+    static_assert(guts::false_t<T>::value,
+      "You tried to register a kernel taking c10::SymInt by reference. Please accept it by value instead.");
+  };
+
+  // TODO: it probably would be good to tighten this up quite a bit more with
+  // an explicit list for everything
 
   //
   // assert_is_valid_output_type
@@ -211,17 +216,17 @@ namespace impl {
   template<class T, bool AllowDeprecatedTypes, class Enable = void>
   struct assert_is_valid_output_type {
     assert_is_valid_output_type() {
-      guts::if_constexpr<guts::typelist::contains<supported_primitive_arg_types, T>::value>([] {
+      if constexpr(guts::typelist::contains<supported_primitive_arg_types, T>::value) {
         /* everything is ok, this is a primitive type */
-      }, /* else */ [] {
+      } else {
         /* otherwise T is verified to be a registered custom class in the IValue
           constructor, so no benefit in double-checking here */
-      });
+      }
     }
   };
 
   template<class T, bool AllowDeprecatedTypes>
-  struct assert_is_valid_output_type<c10::optional<T>, AllowDeprecatedTypes>
+  struct assert_is_valid_output_type<std::optional<T>, AllowDeprecatedTypes>
   : assert_is_valid_output_type<T, AllowDeprecatedTypes> {};
 
   template<class T, bool AllowDeprecatedTypes>
@@ -278,7 +283,7 @@ namespace impl {
   struct assert_is_valid_output_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_same<float, T>::value>> {
     // There is no reason to support float when we have double. Keep the API lean.
     static_assert(guts::false_t<T>::value,
-      "You tried to register a kernel with an unsupported output type: float. Please use double instead.");
+      "You tried to register a kernel with an unsupported output type: float. Please use double instead; you should use `double` in the C++ function signature and `float` in the schema string.");
   };
   template<class T, bool AllowDeprecatedTypes>
   struct assert_is_valid_output_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_same<const char*, T>::value>> {
@@ -293,7 +298,7 @@ namespace impl {
   template<class T, bool AllowDeprecatedTypes>
   struct assert_is_valid_output_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_integral<T>::value && !guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
     static_assert(guts::false_t<T>::value,
-      "You tried to register a kernel with an unsupported integral output type. Please use int64_t instead.");
+      "You tried to register a kernel with an unsupported integral output type. Please use int64_t instead; you should use `int64_t` in the C++ function signature and `int` in the schema string.");
   };
 
   // ivalue_to_arg
@@ -571,36 +576,19 @@ namespace impl {
       using ArgTypes = typename c10::remove_DispatchKeySet_arg_from_func<KernelFunctor>::parameter_types;
       constexpr bool has_outputs = !std::is_same<void, ReturnType>::value;
       constexpr size_t num_inputs = guts::typelist::size<ArgTypes>::value;
-#ifdef __cpp_if_constexpr
       if constexpr (has_outputs) {
-#else
-      guts::if_constexpr<has_outputs>([&] (auto delay_check) {
-#endif
         // Decay ReturnType to ReturnType_ so that if a reference gets returned, we actually store it by value
         // and don't get a dangling reference. This is only required because some kernels still return `Tensor&`.
-#ifdef __cpp_if_constexpr
         // [Note: VC++ and 'std': ambiguous symbol]
         using ReturnType_ = ::std::decay_t<ReturnType>;
         ReturnType_ output = call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor, dispatchKeySet, stack);
-#else
-        using ReturnType_ = std::decay_t<typename decltype(delay_check)::template type_identity<ReturnType>>;
-        ReturnType_ output = call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor, dispatchKeySet, delay_check(stack));
-#endif
         torch::jit::drop(*stack, num_inputs);
         // See note [ VC++ and 'std': ambiguous symbol]
         push_outputs<ReturnType_, AllowDeprecatedTypes>::call(::std::move(output), stack);
-#ifdef __cpp_if_constexpr
       } else {
-#else
-      }, /* else */ [&] {
-#endif
         call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor, dispatchKeySet, stack);
         torch::jit::drop(*stack, num_inputs);
-#ifdef __cpp_if_constexpr
       }
-#else
-      });
-#endif
     }
   };
 } // namespace impl

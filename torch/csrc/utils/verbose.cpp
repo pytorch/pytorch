@@ -1,5 +1,6 @@
 #include <ATen/native/verbose_wrapper.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/verbose.h>
 
 namespace torch {
 

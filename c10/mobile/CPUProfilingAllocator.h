@@ -1,13 +1,11 @@
 #pragma once
 
-#include <algorithm>
-#include <deque>
-#include <memory>
-#include <mutex>
-
-#include <c10/util/Exception.h>
-#include <c10/util/SmallVector.h>
+#include <c10/macros/Export.h>
 #include <c10/util/flat_hash_map.h>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <vector>
 
 namespace c10 {
 

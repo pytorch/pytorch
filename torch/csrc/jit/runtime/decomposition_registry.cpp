@@ -17,8 +17,7 @@
 #include <memory>
 #include <unordered_map>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 namespace {
 std::mutex lock;
 
@@ -70,7 +69,7 @@ void loadDecompositionFunctions() {
 
 } // anonymous namespace
 
-void DecomposeOp(Node* n) {
+static void DecomposeOp(Node* n) {
   auto schema = n->maybeSchema();
   if (!schema) {
     return;
@@ -89,7 +88,7 @@ void DecomposeOp(Node* n) {
   n->destroy();
 }
 
-void RunDecompositions(Block* block) {
+static void RunDecompositions(Block* block) {
   for (auto it = block->nodes().begin(); it != block->nodes().end();) {
     Node* n = *it;
     it++; // advance iterator bc the current node may be destroyed
@@ -108,7 +107,7 @@ void RunDecompositions(std::shared_ptr<Graph> g) {
   }
 }
 
-c10::optional<std::shared_ptr<Graph>> GetDecomposition(
+std::optional<std::shared_ptr<Graph>> GetDecomposition(
     const FunctionSchema& schema) {
   loadDecompositionFunctions();
   GRAPH_DEBUG("Trying to find schema: ", schema);
@@ -121,7 +120,7 @@ c10::optional<std::shared_ptr<Graph>> GetDecomposition(
   return c10::nullopt;
 }
 
-c10::optional<GraphFunction*> GetDecompositionFunction(
+std::optional<GraphFunction*> GetDecompositionFunction(
     const FunctionSchema& schema) {
   loadDecompositionFunctions();
   auto cache_it = schema_to_function.find(&schema);
@@ -133,7 +132,7 @@ c10::optional<GraphFunction*> GetDecompositionFunction(
   auto& func = toGraphFunction(*cache_it->second);
   // Simple Executor:
   // To allow decomposition to run on tensor subclasses such as batched tensors,
-  // we set decompostion execution to use the simple executor so that
+  // we set decomposition execution to use the simple executor so that
   // optimizations that do not compose with arbitrary subclasses (such as
   // fusion) do not run
   func._set_initial_executor_execution_mode(ExecutorExecutionMode::SIMPLE);
@@ -154,8 +153,8 @@ void RegisterDecomposition(
     ConstantPropagationImmutableTypes(g);
   }
 
-  std::unique_ptr<GraphFunction> new_func(new GraphFunction(
-      schema.name(), g, nullptr, ExecutorExecutionMode::SIMPLE));
+  auto new_func = std::make_unique<GraphFunction>(
+      schema.name(), g, nullptr, ExecutorExecutionMode::SIMPLE);
   user_registered_funcs.emplace(&schema, std::move(new_func));
   schema_to_function[&schema] = user_registered_funcs[&schema].get();
   schema_to_decomposition[&schema] = g;
@@ -213,5 +212,4 @@ Function* GetDecompositionExecutor(const char* schema_literal) {
   return GetDecompositionExecutor(schema);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

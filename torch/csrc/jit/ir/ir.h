@@ -23,7 +23,7 @@
 #include <c10/util/Optional.h>
 
 #include <functional>
-#include <iostream>
+#include <iosfwd>
 #include <unordered_set>
 #include <vector>
 
@@ -224,7 +224,7 @@ struct Value {
     if (hasDebugName()) {
       return unique_name_;
     }
-    return c10::to_string(unique());
+    return std::to_string(unique());
   }
   TORCH_API std::string debugNameBase() const;
   Node* node() {
@@ -332,9 +332,9 @@ struct TORCH_API Node {
   std::vector<Block*> blocks_;
   Graph* graph_;
   Block* owning_block_;
-  c10::optional<SourceRange> source_range_;
+  std::optional<SourceRange> source_range_;
   ScopePtr scope_;
-  c10::optional<InlinedCallStackPtr> callstack_;
+  std::optional<InlinedCallStackPtr> callstack_;
   // Assumes FunctionSchemas are persistent, so we don't manage their lifetime.
   // This field is effective a cache that's populated on attribute lookups and
   // invalidated every time we perform an operation that could potentially
@@ -348,7 +348,7 @@ struct TORCH_API Node {
   // is changed, we need to rely on this name
   // to retrieve old schemas to successfully apply upgraders
   // for this operator.
-  c10::optional<std::string> historic_schema_name_ = c10::nullopt;
+  std::optional<std::string> historic_schema_name_ = c10::nullopt;
 
  protected:
   Node(Graph* graph_, NodeKind kind_); // defined after graph
@@ -373,7 +373,7 @@ struct TORCH_API Node {
     return wrap_;
   }
 
-  const c10::optional<std::string> getHistoricSchemaName() {
+  const std::optional<std::string> getHistoricSchemaName() {
     return historic_schema_name_;
   }
 
@@ -442,11 +442,11 @@ struct TORCH_API Node {
     return this;
   }
 
-  c10::optional<InlinedCallStackPtr> callstack() const {
+  std::optional<InlinedCallStackPtr> callstack() const {
     return callstack_;
   }
   void setCallStack(InlinedCallStackPtr cs) {
-    callstack_ = cs;
+    callstack_ = std::move(cs);
   }
 
   // NB: This returns an ArrayRef; that means that it will
@@ -527,10 +527,10 @@ struct TORCH_API Node {
   Value* namedInput(const std::string& unqualName) const;
   Value* namedInput(Symbol name) const;
 
-  c10::optional<IValue> get(Symbol name) const;
+  std::optional<IValue> get(Symbol name) const;
 
   template <typename T>
-  c10::optional<T> get(Symbol name) const {
+  std::optional<T> get(Symbol name) const {
     if (auto v = get(name)) {
       return v->template to<T>();
     }
@@ -1206,8 +1206,9 @@ struct Graph : std::enable_shared_from_this<Graph> {
   // when insertNode() is called, the node is inserted before this node
   // by default this is set to append to the top level block
   Node* insert_before_;
+  int64_t predicted_insert_count_ = 0;
 
-  c10::optional<size_t> op_version_;
+  std::optional<size_t> op_version_;
 
  public:
   Graph(ScopePtr scope_root = c10::make_intrusive<Scope>())
@@ -1260,11 +1261,11 @@ struct Graph : std::enable_shared_from_this<Graph> {
     return current_scope_;
   }
 
-  void set_op_version(c10::optional<size_t> version) {
+  void set_op_version(std::optional<size_t> version) {
     op_version_ = version;
   }
 
-  c10::optional<size_t> get_op_version() {
+  std::optional<size_t> get_op_version() {
     return op_version_;
   }
 
@@ -1367,8 +1368,8 @@ struct Graph : std::enable_shared_from_this<Graph> {
   // Insert constant IValue into the graph.
   TORCH_API Value* insertConstant(
       const IValue& val,
-      c10::optional<SourceRange> loc = c10::nullopt,
-      c10::optional<ScopePtr> scope = c10::nullopt);
+      std::optional<SourceRange> loc = c10::nullopt,
+      std::optional<ScopePtr> scope = c10::nullopt);
 
   // Schema-driven insert:
   // This inserts a node into the graph with inputs determined from args and
@@ -1381,7 +1382,7 @@ struct Graph : std::enable_shared_from_this<Graph> {
       Symbol opname,
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs = {},
-      const c10::optional<SourceRange>& range = {});
+      const std::optional<SourceRange>& range = {});
 
   Node* appendNode(Node* n) {
     return block_->appendNode(n);
@@ -1403,7 +1404,7 @@ struct Graph : std::enable_shared_from_this<Graph> {
   // set where nodes are inserted to append to the end of this block
   void setInsertPoint(Block* b) {
     AT_ASSERT(b->owningGraph() == this);
-    insert_before_ = b->return_node();
+    setInsertPoint(b->return_node());
   }
   // set where nodes are inserted to insert _before_ this node
   // for implementation simplicity we only support inserting before a node for
@@ -1411,6 +1412,7 @@ struct Graph : std::enable_shared_from_this<Graph> {
   void setInsertPoint(Node* n) {
     AT_ASSERT(n->owningGraph() == this && n->inBlockList());
     insert_before_ = n;
+    predicted_insert_count_ = 0;
   }
   Node* insertPoint() {
     return insert_before_;
@@ -1565,7 +1567,7 @@ struct TORCH_API ProfileIValueOp : public Node {
   }
 
   void setCallback(std::function<void(std::vector<IValue>&)> callback) {
-    callback_ = callback;
+    callback_ = std::move(callback);
   }
 
  private:
@@ -1589,7 +1591,7 @@ struct TORCH_API PythonOp : public Node {
   // recover the autograd.Function instance, if this PythonOp's function
   // was originally SomeFunction.apply
   // used in ONNX for discovering symbolics
-  virtual c10::optional<THPObjectPtr> autogradFunction() const = 0;
+  virtual std::optional<THPObjectPtr> autogradFunction() const = 0;
 
   virtual void lint_python() const = 0;
 };
@@ -1728,7 +1730,7 @@ struct OperatorMap {
     return n->maybeOperator() && contains(n->getOperator());
   }
 
-  c10::optional<T> find(const Operator& op) {
+  std::optional<T> find(const Operator& op) {
     const auto it = map.find(Symbol::fromQualString(op.schema().name()));
     if (it == map.end()) {
       return c10::nullopt;
@@ -1804,7 +1806,7 @@ struct FunctionSchemaMap {
     return false;
   }
 
-  c10::optional<T> find(const FunctionSchema& schema) const {
+  std::optional<T> find(const FunctionSchema& schema) const {
     const auto it = map.find(Symbol::fromQualString(schema.name()));
     if (it == map.end()) {
       return c10::nullopt;

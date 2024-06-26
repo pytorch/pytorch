@@ -82,11 +82,11 @@ void _nested_op_dense_esuhm_kernel(Tensor& result, const Tensor& self, const Ten
   const auto embedding_size = other.size(2);
 
   auto result_buffer = result_ptr->get_buffer();
-  auto result_offsets = at::cat({at::tensor(offsets), at::tensor(self_ptr->numel())});
+  auto result_offsets = at::cat({offsets, at::tensor(self_ptr->numel())});
   result_offsets = result_offsets.to(kCUDA);
 
-  const scalar_t* self_data_ptr = self_buffer.data_ptr<scalar_t>();
-  const scalar_t* other_data_ptr = other.data_ptr<scalar_t>();
+  const scalar_t* self_data_ptr = self_buffer.const_data_ptr<scalar_t>();
+  const scalar_t* other_data_ptr = other.const_data_ptr<scalar_t>();
   scalar_t* result_data_ptr = result_buffer.data_ptr<scalar_t>();
   int64_t* result_offsets_ptr = result_offsets.data_ptr<int64_t>();
 

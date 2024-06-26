@@ -148,9 +148,9 @@ static void upsample_nearest3d_out_cuda_template(
     const Tensor& output,
     const Tensor& input_,
     IntArrayRef output_size,
-    c10::optional<double> scales_d,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_d,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
   TensorArg input_arg{input_, "input_", 1}, output_arg{output, "output", 2};
   checkAllSameGPU(__func__, {input_arg, output_arg});
 
@@ -184,11 +184,11 @@ static void upsample_nearest3d_out_cuda_template(
   TORCH_CHECK(output.numel() <= std::numeric_limits<int32_t>::max());
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::Byte,input.scalar_type(), "upsample_nearest3d_out_frame", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Byte,input.scalar_type(), "upsample_nearest3d_out_frame", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
-        auto idata = input.data_ptr<scalar_t>();
-        auto odata = output_c.data_ptr<scalar_t>();
+        auto idata = input.const_data_ptr<scalar_t>();
+        auto odata = output_c.mutable_data_ptr<scalar_t>();
 
         const float depth_scale = compute_scales_value<float>(scales_d, input_depth, output_depth);
         const float height_scale = compute_scales_value<float>(scales_h, input_height, output_height);
@@ -223,9 +223,9 @@ static void upsample_nearest3d_backward_out_cuda_template(
     const Tensor& grad_output_,
     IntArrayRef output_size,
     IntArrayRef input_size,
-    c10::optional<double> scales_d,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_d,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
   TensorArg grad_input_arg{grad_input, "grad_input", 1},
       grad_output_arg{grad_output_, "grad_output_", 2};
   checkAllSameGPU(
@@ -255,13 +255,14 @@ static void upsample_nearest3d_backward_out_cuda_template(
   dim3 gdim{ceil_div(n, bdim.x)};
   // safe check for int32 indexing; implicitly restrict launch config for kernel
   TORCH_CHECK(grad_input.numel() <= std::numeric_limits<int32_t>::max());
+  TORCH_CHECK(grad_output.numel() <= std::numeric_limits<int32_t>::max());
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::Byte, grad_output.scalar_type(), "upsample_nearest3d_backward_out_frame", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Byte, grad_output.scalar_type(), "upsample_nearest3d_backward_out_frame", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
-        auto idata = grad_input.data_ptr<scalar_t>();
-        auto odata = grad_output.data_ptr<scalar_t>();
+        auto idata = grad_input.mutable_data_ptr<scalar_t>();
+        auto odata = grad_output.const_data_ptr<scalar_t>();
 
         float depth_scale = compute_scales_value_backwards<float>(scales_d, output_depth, input_depth);
         float height_scale = compute_scales_value_backwards<float>(scales_h, output_height, input_height);
@@ -291,9 +292,9 @@ static void upsample_nearest3d_backward_out_cuda_template(
 TORCH_IMPL_FUNC(upsample_nearest3d_out_cuda) (
     const Tensor& input,
     IntArrayRef output_size,
-    c10::optional<double> scales_d,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w,
+    std::optional<double> scales_d,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w,
     const Tensor& output) {
   upsample_nearest3d_out_cuda_template<nearest_neighbor_compute_source_index>(
       output, input, output_size, scales_d, scales_h, scales_w);
@@ -302,9 +303,9 @@ TORCH_IMPL_FUNC(upsample_nearest3d_out_cuda) (
 TORCH_IMPL_FUNC(_upsample_nearest_exact3d_out_cuda) (
     const Tensor& input,
     IntArrayRef output_size,
-    c10::optional<double> scales_d,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w,
+    std::optional<double> scales_d,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w,
     const Tensor& output) {
   upsample_nearest3d_out_cuda_template<nearest_neighbor_exact_compute_source_index>(output, input, output_size, scales_d, scales_h, scales_w);
 }
@@ -313,9 +314,9 @@ TORCH_IMPL_FUNC(upsample_nearest3d_backward_out_cuda) (
     const Tensor& grad_output,
     IntArrayRef output_size,
     IntArrayRef input_size,
-    c10::optional<double> scales_d,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w,
+    std::optional<double> scales_d,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w,
     const Tensor& grad_input) {
   upsample_nearest3d_backward_out_cuda_template<nearest_neighbor_bw_compute_source_index>(
       grad_input, grad_output, output_size, input_size, scales_d, scales_h, scales_w);
@@ -325,9 +326,9 @@ TORCH_IMPL_FUNC(_upsample_nearest_exact3d_backward_out_cuda) (
     const Tensor& grad_output,
     IntArrayRef output_size,
     IntArrayRef input_size,
-    c10::optional<double> scales_d,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w,
+    std::optional<double> scales_d,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w,
     const Tensor& grad_input) {
   upsample_nearest3d_backward_out_cuda_template<nearest_neighbor_exact_bw_compute_source_index>(
       grad_input, grad_output, output_size, input_size, scales_d, scales_h, scales_w);

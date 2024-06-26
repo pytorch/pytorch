@@ -11,7 +11,7 @@
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/xnnpack/Engine.h>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 // NOTE: [functorch's PyTorch Operator Hacks]
 //
@@ -25,57 +25,19 @@ namespace at { namespace functorch {
 // pytorch/pytorch.
 
 // TODO: upstream into core
+
+namespace {
 Tensor index_select_backward_hack(const Tensor& grad, IntArrayRef self_sizes, int64_t dim, const Tensor& index) {
   return at::zeros(self_sizes, grad.options()).index_add(dim, index, grad);
 }
 
-static optional<std::tuple<Tensor,int64_t>> unwrap(const Tensor& tensor) {
-  auto* wrapped = maybeGetTensorWrapper(tensor);
-  if (wrapped) {
-    if (wrapped->level().has_value()) {
-      return std::make_tuple(wrapped->value(), *wrapped->level());
-    }
-    return unwrap(wrapped->value());
-  }
-  auto* batched = maybeGetBatchedImpl(tensor);
-  if (batched) {
-    return std::make_tuple(batched->value(), batched->level());
-  }
-  return nullopt;
-}
-
-static bool can_perform_inplace(const Tensor& a, const Tensor& b) {
-  // TODO: generalize this to more transforms
-  auto a_ = unwrap(a);
-  auto b_ = unwrap(b);
-  if (!a_.has_value() && b_.has_value()) {
-    return false;
-  }
-  if (!a_.has_value() && !b_.has_value()) {
-    return true;
-  }
-  if (a_.has_value() && !b_.has_value()) {
-    return true;
-  }
-  TORCH_INTERNAL_ASSERT(a_.has_value() && b_.has_value());
-
-  // If b has any wrapper that a does not, then we cannot do a.inplace_(b)
-  if (std::get<1>(*a_) < std::get<1>(*b_)) {
-    return false;
-  }
-  if (std::get<1>(*a_) > std::get<1>(*b_)) {
-    return can_perform_inplace(std::get<0>(*a_), b);
-  }
-  return can_perform_inplace(std::get<0>(*a_), std::get<0>(*b_));
-}
-
 // TODO: linear is pretty important for performance, but I'm not sure how to work
 // around the in-place.
-Tensor linear_hack(const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt) {
+Tensor linear_hack(const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
   auto bias = bias_opt.has_value()
     ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
-    : c10::MaybeOwned<Tensor>::owned(c10::in_place);
+    : c10::MaybeOwned<Tensor>::owned(std::in_place);
 
   if (input.is_mkldnn()) {
     return at::mkldnn_linear(input, weight, *bias);
@@ -121,8 +83,8 @@ static inline at::Tensor apply_loss_reduction(const at::Tensor& unreduced, int64
 Tensor binary_cross_entropy_with_logits_hack(
     const Tensor& input,
     const Tensor& target,
-    const c10::optional<Tensor>& weight_opt,
-    const c10::optional<Tensor>& pos_weight_opt,
+    const std::optional<Tensor>& weight_opt,
+    const std::optional<Tensor>& pos_weight_opt,
     int64_t reduction) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
@@ -156,30 +118,32 @@ Tensor trace_backward_decomp(const Tensor& grad, IntArrayRef sizes) {
   grad_input = grad_input.index_put({indices}, grad);
   return grad_input.view(sizes);
 }
+}
 
 // dropout hack
 // TODO: make the following changes in pytorch/pytorch
 namespace dropout_hack {
 
-template<bool inplace>
-using Ctype = typename std::conditional<inplace, Tensor&, Tensor>::type;
+namespace {
 
-Tensor make_feature_noise(const Tensor& input) {
+template<bool inplace>
+using Ctype = std::conditional_t<inplace, Tensor&, Tensor>;
+
+static Tensor make_feature_noise(const Tensor& input) {
   auto input_sizes = input.sizes();
   TORCH_CHECK(input.dim() >= 2, "Feature dropout requires at least 2 dimensions in the input");
   std::vector<int64_t> sizes;
   sizes.reserve(input.dim());
   sizes.push_back(input_sizes[0]);
   sizes.push_back(input_sizes[1]);
-  for (const auto i : c10::irange(2, input.dim())) {
-    (void)i; //Suppress unused variable warning
+  for (C10_UNUSED const auto i : c10::irange(2, input.dim())) {
     sizes.push_back(1);
   }
   // NB: THIS WAS CHANGED FROM THE ORIGINAL
   return at::empty(sizes, input.options());
 }
 
-bool is_fused_kernel_acceptable(const Tensor& input, double p) {
+static bool is_fused_kernel_acceptable(const Tensor& input, double p) {
   return (input.is_cuda() || input.is_xpu() || input.is_lazy()) && p > 0 && p < 1 && input.numel() > 0;
 }
 
@@ -248,7 +212,7 @@ ALIAS_SPECIALIZATION(_feature_dropout,       true,  false)
 ALIAS_SPECIALIZATION(_alpha_dropout,         false, true )
 ALIAS_SPECIALIZATION(_feature_alpha_dropout, true,  true )
 
-Tensor dropout(const Tensor& input, double p, bool train) {
+static Tensor dropout(const Tensor& input, double p, bool train) {
   auto result = [&]() {
     NoNamesGuard guard;
     if (train && is_fused_kernel_acceptable(input, p)) {
@@ -288,6 +252,7 @@ Tensor& feature_alpha_dropout_(Tensor& input, double p, bool train) {
   return _feature_alpha_dropout<true>(input, p, train);
 }
 
+}
 } // dropout_hack
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchDynamicLayerFrontMode, m) {
@@ -307,4 +272,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchDynamicLayerFrontMode, m) {
   m.impl("feature_alpha_dropout_", dropout_hack::feature_alpha_dropout_);
 }
 
-}}
+} // namespace at::functorch

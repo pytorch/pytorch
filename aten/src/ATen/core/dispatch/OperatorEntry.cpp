@@ -7,7 +7,7 @@ namespace c10 {
 namespace impl {
 
 namespace {
-  std::string toString(c10::optional<DispatchKey> k) {
+  std::string toString(std::optional<DispatchKey> k) {
     if (k.has_value()) {
       return toString(*k);
     } else {
@@ -39,7 +39,7 @@ namespace {
     // TODO: figure out if we can just directly save real schema at def time
     FunctionSchema from_def = from_def_.cloneWithRealTypes(kernel.isValidSymUnboxed());
     FunctionSchema inferred = inferred_.cloneWithRealTypes();
-    c10::optional<std::string> schema_difference = findSchemaDifferences(from_def, inferred);
+    std::optional<std::string> schema_difference = findSchemaDifferences(from_def, inferred);
     if (schema_difference.has_value()) {
       TORCH_CHECK(false,
         "Inferred operator schema for a C++ kernel function doesn't match the expected function schema.\n"
@@ -101,9 +101,9 @@ void OperatorEntry::deregisterSchema() {
 
 OperatorEntry::AnnotatedKernelContainerIterator OperatorEntry::registerKernel(
   const c10::Dispatcher& dispatcher,
-  c10::optional<DispatchKey> dispatch_key,
+  std::optional<DispatchKey> dispatch_key,
   KernelFunction kernel,
-  c10::optional<CppSignature> cpp_signature,
+  std::optional<CppSignature> cpp_signature,
   std::unique_ptr<FunctionSchema> inferred_function_schema,
   std::string debug
 ) {
@@ -150,7 +150,8 @@ OperatorEntry::AnnotatedKernelContainerIterator OperatorEntry::registerKernel(
     // Suppress the warning for Meta key as we are overriding C++ meta functions with python meta functions
     // for some ops
     if (dispatch_key != DispatchKey::Meta) {
-      TORCH_WARN("Overriding a previously registered kernel for the same operator and the same dispatch key\n",
+      TORCH_WARN_ONCE("Warning only once for all operators,  other operators may also be overrided.\n",
+            "  Overriding a previously registered kernel for the same operator and the same dispatch key\n",
             "  operator: ", (schema_.has_value() ? toString(schema_->schema) : toString(name_)), "\n",
             "    ", (this->schema_.has_value() ? this->schema_->debug : "no debug info"), "\n",
             "  dispatch key: ", toString(dispatch_key), "\n",
@@ -180,7 +181,7 @@ OperatorEntry::AnnotatedKernelContainerIterator OperatorEntry::registerKernel(
 
 void OperatorEntry::deregisterKernel_(
   const c10::Dispatcher& dispatcher,
-  c10::optional<DispatchKey> dispatch_key,
+  std::optional<DispatchKey> dispatch_key,
   AnnotatedKernelContainerIterator kernel
 ) {
   // Redirect catchAll deregistrations to CompositeImplicitAutograd.
@@ -420,7 +421,7 @@ void OperatorEntry::updateDispatchTable_(const c10::Dispatcher& dispatcher, Disp
   // In theory, we should only have to check if the given runtime key has "dense" functionality,
   // e.g. DispatchKey::CPU (which is composed of DispatchKey::Dense and BackendComponent::CPUBit).
   // However, there are some backends that should be included in this set that don't have the dense key set.
-  // E.g. DispatchKey::Meta, DispatchKey::ORT.
+  // E.g. DispatchKey::Meta, DispatchKey::MAIA.
   if (c10::isBackendDispatchKey(dispatch_key)) {
     DispatchKey autograd_key = getAutogradKeyFromBackend(toBackendComponent(dispatch_key));
     updateDispatchTableEntry_(dispatcher, autograd_key);
@@ -509,7 +510,7 @@ void OperatorEntry::reportSignatureError(const CppSignature& call_signature, con
   );
 };
 
-std::string post_process_dispatch_key_str(std::string dispatch_key) {
+static std::string post_process_dispatch_key_str(std::string dispatch_key) {
   const std::string substr = "PrivateUse1";
   if (substr.size() <= dispatch_key.size() && std::equal(substr.rbegin(), substr.rend(), dispatch_key.rbegin())) {
     auto privateuse1_backend = get_privateuse1_backend();
@@ -529,6 +530,11 @@ void OperatorEntry::reportError(DispatchKey dispatchKey) const {
   // If there is an invariant problem, report it now.
   checkInvariants();
 
+  if (report_error_callback_ != nullptr) {
+    report_error_callback_->pyinterpreter()->reportErrorCallback(report_error_callback_->ptr(&report_error_callback_->pyinterpreter()), dispatchKey);
+    // reportErrorCallback should have raised an error
+    TORCH_INTERNAL_ASSERT(false);
+  }
   if (dispatchKey == DispatchKey::Undefined) {
     TORCH_CHECK_NOT_IMPLEMENTED(false,
           "There were no tensor arguments to this function (e.g., you passed an "
@@ -571,6 +577,10 @@ std::string OperatorEntry::dumpComputedTable() const {
     }
   }
   return oss.str();
+}
+
+void OperatorEntry::setReportErrorCallback_(std::unique_ptr<c10::SafePyObject> callback) {
+  report_error_callback_ = std::move(callback);
 }
 
 // Inspect the "canonical" information in OperatorEntry.  This only prints out

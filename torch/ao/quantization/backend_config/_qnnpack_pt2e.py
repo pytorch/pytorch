@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import operator
 import torch
 from torch.ao.quantization.backend_config import (
@@ -59,6 +60,13 @@ def get_linear_configs():
         .set_observation_type(observation_type)  # noqa: E131
         .set_dtype_configs(dtype_configs)
         ._set_input_type_to_index({"weight": 2, "bias": 0})
+    )
+    # linear is decomposed to `t - mm` if bias is not present
+    linear_configs.append(
+        BackendPatternConfig(torch.ops.aten.mm.default)
+        .set_observation_type(observation_type)  # noqa: E131
+        .set_dtype_configs(dtype_configs)
+        ._set_input_type_to_index({"weight": 1})
     )
     return linear_configs
 

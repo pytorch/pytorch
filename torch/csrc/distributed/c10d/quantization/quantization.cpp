@@ -2,14 +2,11 @@
 #include <torch/csrc/distributed/c10d/quantization/quantization_utils.h>
 #include <torch/library.h>
 
-namespace torch {
-namespace distributed {
-namespace c10d {
-namespace quantization {
+namespace torch::distributed::c10d::quantization {
 
 // TODO: The kernels are copied from fbgemm_gpu, we should dedup them later
 
-void FloatToBFloat16Quantized_ref(
+static void FloatToBFloat16Quantized_ref(
     const float* const input,
     const size_t nrows,
     const size_t ncols,
@@ -26,16 +23,14 @@ void FloatToBFloat16Quantized_ref(
   }
 }
 
-void BFloat16QuantizedToFloat_ref(
+static void BFloat16QuantizedToFloat_ref(
     const at::BFloat16* const input,
     const size_t nrows,
     const size_t ncols,
     float* const output) {
-  const int32_t output_columns = ncols;
-
   for (const auto row : c10::irange(nrows)) {
     const at::BFloat16* input_row = input + row * ncols;
-    float* output_row = output + row * output_columns;
+    float* output_row = output + row * ncols;
 
     for (const auto col : c10::irange(ncols)) {
       uint32_t val_fp32 = static_cast<uint32_t>(
@@ -52,17 +47,15 @@ at::Tensor _float_to_bfloat16_cpu(const at::Tensor& input) {
   TENSOR_NDIM_EQUALS(input, 2);
 
   const auto input_sizes = input.sizes();
-  const int32_t nrows = input_sizes[0];
-  const int32_t ncols = input_sizes[1];
-  const int32_t output_columns = ncols;
-  auto output =
-      at::empty({nrows, output_columns}, input.options().dtype(at::kHalf));
+  const auto nrows = input_sizes[0];
+  const auto ncols = input_sizes[1];
+  auto output = at::empty({nrows, ncols}, input.options().dtype(at::kHalf));
 
   FloatToBFloat16Quantized_ref(
-      input.data_ptr<float>(),
+      input.const_data_ptr<float>(),
       nrows,
       ncols,
-      reinterpret_cast<uint16_t*>(output.data_ptr<at::Half>()));
+      reinterpret_cast<uint16_t*>(output.mutable_data_ptr<at::Half>()));
 
   return output;
 }
@@ -73,18 +66,15 @@ at::Tensor _bfloat16_to_float_cpu(const at::Tensor& input) {
   TENSOR_NDIM_EQUALS(input, 2);
 
   const auto input_sizes = input.sizes();
-  const int32_t nrows = input_sizes[0];
-  const int32_t ncols = input_sizes[1];
-  const int32_t output_columns = ncols;
+  const auto nrows = input_sizes[0];
+  const auto ncols = input_sizes[1];
 
-  auto output = at::empty(
-      {nrows, output_columns}, // 4 = sizeof(float)
-      input.options().dtype(at::kFloat)); //
+  auto output = at::empty({nrows, ncols}, input.options().dtype(at::kFloat));
   BFloat16QuantizedToFloat_ref(
-      reinterpret_cast<at::BFloat16*>(input.data_ptr<at::Half>()),
+      reinterpret_cast<const at::BFloat16*>(input.const_data_ptr<at::Half>()),
       nrows,
       ncols,
-      output.data_ptr<float>());
+      output.mutable_data_ptr<float>());
 
   return output;
 }
@@ -99,7 +89,4 @@ TORCH_LIBRARY_IMPL(quantization, CPU, m) {
   m.impl("_FloatToBfloat16Quantized", _float_to_bfloat16_cpu);
 }
 
-} // namespace quantization
-} // namespace c10d
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::c10d::quantization

@@ -1,3 +1,4 @@
+#include <c10/core/ScalarType.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/native/ReduceOps.h>
@@ -59,7 +60,7 @@ static inline void compare_base_kernel_core(
     .declare_static_shape(self.sizes(), /*squash_dims=*/dim)
     .add_output(result1)
     .add_output(result2)
-    .add_input(self)
+    .add_const_input(self)
     .build();
 
   iter.for_each(loop, /* grain_size */ 1);
@@ -177,7 +178,16 @@ static void aminmax_kernel(
     "Expect min and max dtype ", self.scalar_type(),
     " but got ", min_result.scalar_type(), " and ", max_result.scalar_type());
 
-  AT_DISPATCH_ALL_TYPES_AND(ScalarType::Bool, self.scalar_type(), "aminmax_cpu", [&] {
+  if (self.numel() == 1 && self.ndimension() == 0) {
+    TORCH_CHECK(!self.is_complex(), "aminmax not implemented for ", self.scalar_type());
+    min_result.resize_({});
+    max_result.resize_({});
+    min_result.fill_(self);
+    max_result.fill_(self);
+    return;
+  }
+
+  AT_DISPATCH_ALL_TYPES_AND3(ScalarType::Bool, ScalarType::BFloat16, ScalarType::Half, self.scalar_type(), "aminmax_cpu", [&] {
     compare_base_kernel<scalar_t, scalar_t>(min_result, max_result, self, wrap_dim, keepdim, [&] (
       scalar_t* min_result_data, scalar_t* max_result_data,
       const scalar_t* self_data, auto self_dim_stride) {
@@ -312,13 +322,13 @@ static void isin_default_kernel_cpu(
 
   auto iter = TensorIteratorConfig()
     .add_output(out)
-    .add_input(promoted_elements)
+    .add_const_input(promoted_elements)
     .check_all_same_dtype(false)
     .build();
   // Dispatch based on promoted type.
   AT_DISPATCH_ALL_TYPES(iter.dtype(1), "isin_default_cpu", [&]() {
     cpu_kernel(iter, [&](scalar_t element_val) -> bool {
-      const auto* test_element_data = test_elements_flat.data_ptr<scalar_t>();
+      const auto* test_element_data = test_elements_flat.const_data_ptr<scalar_t>();
       for (const auto j : c10::irange(test_elements_flat.numel())) {
         if (element_val == *(test_element_data + test_elements_stride * j)) {
           return !invert;
@@ -330,7 +340,7 @@ static void isin_default_kernel_cpu(
 }
 
 static void clamp_kernel_impl(TensorIteratorBase& iter) {
-  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.common_dtype(), "clamp_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "clamp_cpu", [&]() {
     cpu_kernel_vec(iter,
       [](scalar_t a, scalar_t min, scalar_t max) -> scalar_t {
         if (min != min || max != max) {
@@ -346,7 +356,7 @@ static void clamp_kernel_impl(TensorIteratorBase& iter) {
 }
 
 static void clamp_scalar_kernel_impl(TensorIteratorBase& iter, const Scalar& min_, const Scalar& max_) {
-  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.common_dtype(), "clamp_scalar_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "clamp_scalar_cpu", [&]() {
     const auto min = min_.to<scalar_t>();
     const auto max = max_.to<scalar_t>();
     const Vectorized<scalar_t> min_vec(min);
@@ -362,7 +372,7 @@ static void clamp_scalar_kernel_impl(TensorIteratorBase& iter, const Scalar& min
 }
 
 static void clamp_max_scalar_kernel_impl(TensorIteratorBase& iter, Scalar max_) {
-  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.common_dtype(), "clamp_max_scalar_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "clamp_max_scalar_cpu", [&]() {
     const auto max = max_.to<scalar_t>();
     const Vectorized<scalar_t> max_vec(max);
     cpu_kernel_vec(iter,
@@ -376,7 +386,7 @@ static void clamp_max_scalar_kernel_impl(TensorIteratorBase& iter, Scalar max_) 
 }
 
 static void clamp_min_scalar_kernel_impl(TensorIteratorBase& iter, Scalar min_) {
-  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.common_dtype(), "clamp_min_scalar_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "clamp_min_scalar_cpu", [&]() {
     const auto min = min_.to<scalar_t>();
     const Vectorized<scalar_t> min_vec(min);
     cpu_kernel_vec(iter,

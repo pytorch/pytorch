@@ -26,8 +26,7 @@ void topk_out_with_sort(
   const Tensor& values,
   const Tensor& indices
 ) {
-  Tensor sorted_values, sorted_indices;
-  std::tie(sorted_values, sorted_indices) = at::cuda::sort(self, /* stable= */false, dim, largest);
+  auto [sorted_values, sorted_indices] = at::cuda::sort(self, /* stable= */false, dim, largest);
   values.copy_(sorted_values.narrow(dim, 0, k));
   indices.copy_(sorted_indices.narrow(dim, 0, k));
 }

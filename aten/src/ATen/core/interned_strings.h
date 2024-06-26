@@ -1,9 +1,4 @@
 #pragma once
-#include <vector>
-#include <cstdint>
-#include <string>
-#include <unordered_map>
-#include <algorithm>
 
 #include <c10/macros/Macros.h>
 
@@ -231,6 +226,8 @@ namespace c10 {
   _(aten, has_torch_function)        \
   _(aten, is_autocast_enabled)       \
   _(aten, is_autocast_cpu_enabled)   \
+  _(aten, is_autocast_xla_enabled)   \
+  _(aten, get_autocast_dtype)        \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
   _(onnx, Concat)                    \
@@ -339,7 +336,8 @@ namespace c10 {
   _(attr, output_layouts)            \
   _(attr, allowzero)                 \
   _(attr, seen_none)                 \
-  _(attr, overload_name)
+  _(attr, overload_name)             \
+  _(attr, node_stack_idx)
 
 enum class _keys : unique_t {
     #define DEFINE_KEY(ns, s) ns##_##s,

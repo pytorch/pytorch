@@ -18,15 +18,18 @@
 #include <ATen/ops/is_set_to_native.h>
 #include <ATen/ops/size_native.h>
 #include <ATen/ops/stride_native.h>
+#include <ATen/ops/sym_numel_native.h>
+#include <ATen/ops/sym_size_native.h>
+#include <ATen/ops/sym_storage_offset_native.h>
+#include <ATen/ops/sym_stride_native.h>
 #endif
 
 #include <c10/util/irange.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 bool is_same_size(const Tensor& self, const Tensor& other) {
-  return self.sizes().equals(other.sizes());
+  return self.sym_sizes().equals(other.sym_sizes());
 }
 
 bool nested_is_same_size(const Tensor& self, const Tensor& other) {
@@ -47,6 +50,22 @@ int64_t size(const Tensor& self, int64_t dim) {
 
 int64_t stride(const Tensor& self, int64_t dim) {
   return self.stride(dim);
+}
+
+c10::SymInt sym_size(const Tensor& self, int64_t dim) {
+  return self.sym_size(dim);
+}
+
+c10::SymInt sym_stride(const Tensor& self, int64_t dim) {
+  return self.sym_stride(dim);
+}
+
+c10::SymInt sym_numel(const Tensor& self) {
+  return self.sym_numel();
+}
+
+c10::SymInt sym_storage_offset(const Tensor& self) {
+  return self.sym_storage_offset();
 }
 
 int64_t size(const Tensor& self, Dimname dim) {
@@ -86,10 +105,6 @@ Tensor & detach_(Tensor & self) {
   return self;
 }
 
-Tensor contiguous(const Tensor & self) {
-  return contiguous(self, MemoryFormat::Contiguous);
-}
-
 Tensor contiguous(const Tensor& self, MemoryFormat memory_format) {
   if (self.is_contiguous(memory_format)) {
     return self;
@@ -115,5 +130,4 @@ bool is_set_to(const Tensor& self, const Tensor& src) {
   return false;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

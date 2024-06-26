@@ -1,7 +1,8 @@
-import torch
+# mypy: allow-untyped-defs
+r"""Autograd anomaly mode."""
 import warnings
 
-from typing import Any
+import torch
 
 __all__ = ["detect_anomaly", "set_detect_anomaly"]
 
@@ -22,8 +23,7 @@ class detect_anomaly:
         will slow down your program execution.
 
     Example:
-
-        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_ANOMOLY)
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_ANOMALY)
         >>> import torch
         >>> from torch import autograd
         >>> class MyFunc(autograd.Function):
@@ -73,18 +73,21 @@ class detect_anomaly:
 
     """
 
-    def __init__(self, check_nan=True) -> None:
+    def __init__(self, check_nan=True) -> None:  # noqa: D107
         self.prev = torch.is_anomaly_enabled()
         self.check_nan = check_nan
         self.prev_check_nan = torch.is_anomaly_check_nan_enabled()
-        warnings.warn('Anomaly Detection has been enabled. '
-                      'This mode will increase the runtime '
-                      'and should only be enabled for debugging.', stacklevel=2)
+        warnings.warn(
+            "Anomaly Detection has been enabled. "
+            "This mode will increase the runtime "
+            "and should only be enabled for debugging.",
+            stacklevel=2,
+        )
 
-    def __enter__(self) -> None:
+    def __enter__(self) -> None:  # noqa: D105
         torch.set_anomaly_enabled(True, self.check_nan)
 
-    def __exit__(self, *args: Any) -> None:
+    def __exit__(self, *args: object) -> None:  # noqa: D105
         torch.set_anomaly_enabled(self.prev, self.prev_check_nan)
 
 
@@ -105,13 +108,13 @@ class set_detect_anomaly:
 
     """
 
-    def __init__(self, mode: bool, check_nan: bool = True) -> None:
+    def __init__(self, mode: bool, check_nan: bool = True) -> None:  # noqa: D107
         self.prev = torch.is_anomaly_enabled()
         self.prev_check_nan = torch.is_anomaly_check_nan_enabled()
         torch.set_anomaly_enabled(mode, check_nan)
 
-    def __enter__(self) -> None:
+    def __enter__(self) -> None:  # noqa: D105
         pass
 
-    def __exit__(self, *args: Any) -> None:
+    def __exit__(self, *args: object) -> None:  # noqa: D105
         torch.set_anomaly_enabled(self.prev, self.prev_check_nan)

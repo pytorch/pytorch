@@ -25,7 +25,7 @@ public:
         HIPStream(
           Stream(
             Stream::UNSAFE,
-            Device(DeviceType::HIP, stream.device_index()),
+            Device(c10::DeviceType::HIP, stream.device_index()),
             stream.id())
         )
       ) {}
@@ -51,11 +51,11 @@ public:
   DeviceIndex device_index() const { return stream_.device_index(); }
 
   // Unsafely coerce HIP device into CUDA device
-  DeviceType device_type() const { return DeviceType::CUDA; }
+  c10::DeviceType device_type() const { return c10::DeviceType::CUDA; }
 
   Device device() const {
     // Unsafely coerce HIP device into CUDA device
-    return Device(DeviceType::CUDA, stream_.device_index());
+    return Device(c10::DeviceType::CUDA, stream_.device_index());
   }
 
   StreamId id() const        { return stream_.id(); }
@@ -76,7 +76,7 @@ public:
 
   static HIPStreamMasqueradingAsCUDA unpack3(StreamId stream_id,
                                              DeviceIndex device_index,
-                                             DeviceType device_type) {
+                                             c10::DeviceType device_type) {
     // NB: constructor manages CUDA->HIP translation for us
     return HIPStreamMasqueradingAsCUDA(Stream::unpack3(
         stream_id, device_index, device_type));
@@ -94,6 +94,11 @@ private:
 HIPStreamMasqueradingAsCUDA
 inline getStreamFromPoolMasqueradingAsCUDA(const bool isHighPriority = false, DeviceIndex device = -1) {
   return HIPStreamMasqueradingAsCUDA(getStreamFromPool(isHighPriority, device));
+}
+
+HIPStreamMasqueradingAsCUDA
+inline getStreamFromPoolMasqueradingAsCUDA(const int priority, DeviceIndex device = -1) {
+  return HIPStreamMasqueradingAsCUDA(getStreamFromPool(priority, device));
 }
 
 HIPStreamMasqueradingAsCUDA

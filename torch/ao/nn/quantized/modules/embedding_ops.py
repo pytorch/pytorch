@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 import torch.nn as nn
 from torch import Tensor  # noqa: F401
@@ -12,7 +13,7 @@ class EmbeddingPackedParams(torch.nn.Module):
     _version = 1
 
     def __init__(self, num_embeddings, embedding_dim, dtype=torch.quint8):
-        super(EmbeddingPackedParams, self).__init__()
+        super().__init__()
         self.dtype = dtype
         if self.dtype in [torch.quint8, torch.quint4x2]:
             scales = torch.ones(num_embeddings, dtype=torch.float)
@@ -48,7 +49,7 @@ class EmbeddingPackedParams(torch.nn.Module):
     #   |--- dtype : torch.dtype
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super(EmbeddingPackedParams, self)._save_to_state_dict(destination, prefix, keep_vars)
+        super()._save_to_state_dict(destination, prefix, keep_vars)
         destination[prefix + 'dtype'] = self.dtype
         destination[prefix + '_packed_weight'] = self._weight()
 
@@ -61,8 +62,8 @@ class EmbeddingPackedParams(torch.nn.Module):
         state_dict.pop(prefix + '_packed_weight')
         self.set_weight(weight)
 
-        super(EmbeddingPackedParams, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
-                                                                 missing_keys, unexpected_keys, error_msgs)
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, False,
+                                      missing_keys, unexpected_keys, error_msgs)
 
     def __repr__(self):
         return self._weight().__repr__()
@@ -71,7 +72,7 @@ class Embedding(torch.nn.Module):
     r"""
     A quantized Embedding module with quantized packed weights as inputs.
     We adopt the same interface as `torch.nn.Embedding`, please see
-    https://pytorch.org/docs/stable/nn.html#torch.nn.Embedding for documentation.
+    https://pytorch.org/docs/stable/generated/torch.nn.Embedding.html for documentation.
 
     Similar to :class:`~torch.nn.Embedding`, attributes will be randomly
     initialized at module creation time and will be overwritten later
@@ -93,7 +94,7 @@ class Embedding(torch.nn.Module):
     def __init__(self, num_embeddings: int, embedding_dim: int, padding_idx: Optional[int] = None,
                  max_norm: Optional[float] = None, norm_type: float = 2., scale_grad_by_freq: bool = False,
                  sparse: bool = False, _weight: Optional[Tensor] = None, dtype=torch.quint8) -> None:
-        super(Embedding, self).__init__()
+        super().__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
         self.dtype = dtype
@@ -125,9 +126,8 @@ class Embedding(torch.nn.Module):
         return _hide_packed_params_repr(self, EmbeddingPackedParams)
 
     def extra_repr(self):
-        extra_repr_str = 'num_embeddings={}, embedding_dim={}, dtype={}, qscheme={}'.format(
-            self.num_embeddings, self.embedding_dim, self._packed_params.dtype, self.weight().qscheme()
-        )
+        extra_repr_str = (f'num_embeddings={self.num_embeddings}, embedding_dim={self.embedding_dim}, '
+                          f'dtype={self._packed_params.dtype}, qscheme={self.weight().qscheme()}')
 
         return extra_repr_str
 
@@ -138,7 +138,7 @@ class Embedding(torch.nn.Module):
         return self._packed_params._weight()
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         r"""Create a quantized embedding module from a float module
 
         Args:
@@ -196,7 +196,7 @@ class EmbeddingBag(Embedding):
     r"""
     A quantized EmbeddingBag module with quantized packed weights as inputs.
     We adopt the same interface as `torch.nn.EmbeddingBag`, please see
-    https://pytorch.org/docs/stable/nn.html#torch.nn.EmbeddingBag for documentation.
+    https://pytorch.org/docs/stable/generated/torch.nn.EmbeddingBag.html for documentation.
 
     Similar to :class:`~torch.nn.EmbeddingBag`, attributes will be randomly
     initialized at module creation time and will be overwritten later
@@ -220,7 +220,7 @@ class EmbeddingBag(Embedding):
                  max_norm: Optional[float] = None, norm_type: float = 2., scale_grad_by_freq: bool = False,
                  mode: str = 'sum', sparse: bool = False, _weight: Optional[Tensor] = None,
                  include_last_offset: bool = False, dtype=torch.quint8) -> None:
-        super(EmbeddingBag, self).__init__(num_embeddings, embedding_dim, _weight=_weight, dtype=dtype)
+        super().__init__(num_embeddings, embedding_dim, _weight=_weight, dtype=dtype)
 
         self.mode = mode
         self.pruned_weights = False
@@ -242,7 +242,7 @@ class EmbeddingBag(Embedding):
         return 'QuantizedEmbeddingBag'
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         r"""Create a quantized embedding_bag module from a float module
 
         Args:

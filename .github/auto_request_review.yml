@@ -3,19 +3,17 @@ reviewers:
   groups:
     symbolic-shapes:
       - ezyang
-      - Chillee
       - albanD
       - miladm
       - bdhirsh
-      - voznesenskym
-      - jbschlosser
 
   per_author:
     symbolic-shapes:
       - symbolic-shapes
       - antoniojkim
-      - wconstab
       - SherlockNoMad
+    Chillee:
+      - ezyang
 
 files:
   # none yet, TODO: migrate CODEOWNERS here

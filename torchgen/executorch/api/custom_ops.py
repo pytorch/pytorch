@@ -1,14 +1,14 @@
 from collections import defaultdict
-
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from torchgen import dest
 
 # disable import sorting to avoid circular dependency.
-from torchgen.api.types import DispatcherSignature  # isort:skip
+from torchgen.api.types import DispatcherSignature  # usort:skip
 from torchgen.context import method_with_native_function
-from torchgen.model import BackendIndex, DispatchKey, NativeFunction, Variant
+from torchgen.executorch.model import ETKernelIndex
+from torchgen.model import BaseTy, BaseType, DispatchKey, NativeFunction, Variant
 from torchgen.selective_build.selector import SelectiveBuilder
 from torchgen.utils import concatMap, Target
 
@@ -41,17 +41,30 @@ class ComputeNativeFunctionStub:
                     "",
                 )
             if not ret_name:
-                raise Exception(f"Can't handle this return type {f.func}")
-        else:
-            assert len(f.func.arguments.out) == len(f.func.returns), (
-                "Out variant number of returns need to match the number of out arguments."
-                f" Got outs {str(f.func.arguments.out)} but returns {str(f.func.returns)}"
-            )
-            # returns a tuple of out arguments
+                # if return type is tensor
+                if f.func.returns[0].type == BaseType(BaseTy.Tensor):
+                    # Returns an empty tensor
+                    ret_name = "at::Tensor()"
+                else:
+                    raise Exception(  # noqa: TRY002
+                        f"Can't handle this return type {f.func}"
+                    )  # noqa: TRY002
+        elif len(f.func.arguments.out) == len(f.func.returns):
+            # Returns a tuple of out arguments
             tensor_type = "at::Tensor &"
             comma = ", "
             ret_name = f"""::std::tuple<{comma.join([tensor_type] * len(f.func.returns))}>(
                 {comma.join([r.name for r in f.func.arguments.out])}
+            )"""
+        else:
+            assert all(
+                a.type == BaseType(BaseTy.Tensor) for a in f.func.returns
+            ), f"Only support tensor returns but got {f.func.returns}"
+            # Returns a tuple of empty tensors
+            tensor_type = "at::Tensor"
+            comma = ", "
+            ret_name = f"""::std::tuple<{comma.join([tensor_type] * len(f.func.returns))}>(
+                {comma.join(["at::Tensor()" for _ in f.func.returns])}
             )"""
         ret_str = f"return {ret_name};" if len(f.func.returns) > 0 else ""
         return f"""
@@ -65,7 +78,7 @@ def gen_custom_ops_registration(
     *,
     native_functions: Sequence[NativeFunction],
     selector: SelectiveBuilder,
-    backend_index: BackendIndex,
+    kernel_index: ETKernelIndex,
     rocm: bool,
 ) -> Tuple[str, str]:
     """
@@ -73,12 +86,16 @@ def gen_custom_ops_registration(
 
     :param native_functions: a sequence of `NativeFunction`
     :param selector: for selective build.
-    :param backend_index: kernels for all the ops.
+    :param kernel_index: kernels for all the ops.
     :param rocm: bool for dest.RegisterDispatchKey.
     :return: generated C++ code to register custom operators into PyTorch
     """
-    dispatch_key = DispatchKey.CPU
 
+    # convert kernel index to BackendIndex. This is because we can't handle ETKernelIndex yet.
+    # TODO larryliu: evaluate if this code is still needed. If yes let it handle ETKernelIndex.
+
+    dispatch_key = DispatchKey.CPU
+    backend_index = kernel_index._to_backend_index()
     static_init_dispatch_registrations = ""
     ns_grouped_native_functions: Dict[str, List[NativeFunction]] = defaultdict(list)
     for native_function in native_functions:

@@ -112,6 +112,7 @@ void* SmallVectorBase<Size_T>::mallocForGrow(
     size_t TSize,
     size_t& NewCapacity) {
   NewCapacity = getNewCapacity<Size_T>(MinSize, TSize, this->capacity());
+  // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
   auto Result = std::malloc(NewCapacity * TSize);
   if (Result == nullptr) {
     throw std::bad_alloc();
@@ -122,12 +123,13 @@ void* SmallVectorBase<Size_T>::mallocForGrow(
 // Note: Moving this function into the header may cause performance regression.
 template <class Size_T>
 void SmallVectorBase<Size_T>::grow_pod(
-    void* FirstEl,
+    const void* FirstEl,
     size_t MinSize,
     size_t TSize) {
   size_t NewCapacity = getNewCapacity<Size_T>(MinSize, TSize, this->capacity());
   void* NewElts = nullptr;
   if (BeginX == FirstEl) {
+    // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
     NewElts = std::malloc(NewCapacity * TSize);
     if (NewElts == nullptr) {
       throw std::bad_alloc();
@@ -137,6 +139,7 @@ void SmallVectorBase<Size_T>::grow_pod(
     memcpy(NewElts, this->BeginX, size() * TSize);
   } else {
     // If this wasn't grown from the inline copy, grow the allocated space.
+    // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
     NewElts = std::realloc(this->BeginX, NewCapacity * TSize);
     if (NewElts == nullptr) {
       throw std::bad_alloc();

@@ -1,14 +1,15 @@
-import torch
-import torch.nn as nn
-import torchvision.models as models
-from opacus.utils.module_modification import convert_batchnorm_modules
 import time
 
-from functorch import vmap, grad
-from functorch import make_functional
+import torchvision.models as models
 from opacus import PrivacyEngine
+from opacus.utils.module_modification import convert_batchnorm_modules
 
-device = 'cuda'
+import torch
+import torch.nn as nn
+
+from functorch import grad, make_functional, vmap
+
+device = "cuda"
 batch_size = 128
 torch.manual_seed(0)
 
@@ -20,6 +21,7 @@ images = torch.randn(batch_size, 3, 32, 32, device=device)
 targets = torch.randint(0, 10, (batch_size,), device=device)
 func_model, weights = make_functional(model_functorch)
 
+
 def compute_loss(weights, image, target):
     images = image.unsqueeze(0)
     targets = target.unsqueeze(0)
@@ -27,10 +29,10 @@ def compute_loss(weights, image, target):
     loss = criterion(output, targets)
     return loss
 
+
 def functorch_per_sample_grad():
     compute_grad = grad(compute_loss)
     compute_per_sample_grad = vmap(compute_grad, (None, 0, 0))
-
 
     start = time.time()
     result = compute_per_sample_grad(weights, images, targets)
@@ -38,6 +40,7 @@ def functorch_per_sample_grad():
     end = time.time()
 
     return result, end - start  # end - start in seconds
+
 
 torch.manual_seed(0)
 model_opacus = convert_batchnorm_modules(models.resnet18(num_classes=10))
@@ -54,6 +57,7 @@ privacy_engine = PrivacyEngine(
     max_grad_norm=10000.0,
 )
 
+
 def opacus_per_sample_grad():
     start = time.time()
     output = model_opacus(images)
@@ -63,7 +67,7 @@ def opacus_per_sample_grad():
     end = time.time()
     expected = [p.grad_sample for p in model_opacus.parameters()]
     for p in model_opacus.parameters():
-        delattr(p, 'grad_sample')
+        delattr(p, "grad_sample")
         p.grad = None
     return expected, end - start
 

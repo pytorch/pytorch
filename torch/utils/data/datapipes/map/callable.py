@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from torch.utils.data.datapipes.utils.common import _check_unpickable_fn
 from typing import Callable, TypeVar
 from torch.utils.data.datapipes._decorator import functional_datapipe
@@ -19,6 +20,7 @@ def default_fn(data):
 class MapperMapDataPipe(MapDataPipe[T_co]):
     r"""
     Apply the input function over each item from the source DataPipe (functional name: ``map``).
+
     The function can be any regular Python function or partial object. Lambda
     function is not recommended as it is not supported by pickle.
 
@@ -39,6 +41,7 @@ class MapperMapDataPipe(MapDataPipe[T_co]):
         >>> list(map_dp_2)
         [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     """
+
     datapipe: MapDataPipe
     fn: Callable
 

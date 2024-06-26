@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -14,10 +15,12 @@ from datetime import timedelta
 from threading import Event, Thread
 from typing import Any, Callable, Dict, Optional, Tuple, Union
 
-__all__ = ['parse_rendezvous_endpoint']
+
+__all__ = ["parse_rendezvous_endpoint"]
+
 
 def _parse_rendezvous_config(config_str: str) -> Dict[str, str]:
-    """Extracts key-value pairs from a rendezvous configuration string.
+    """Extract key-value pairs from a rendezvous configuration string.
 
     Args:
         config_str:
@@ -55,14 +58,16 @@ def _parse_rendezvous_config(config_str: str) -> Dict[str, str]:
 
 
 def _try_parse_port(port_str: str) -> Optional[int]:
-    """Tries to extract the port number from ``port_str``."""
+    """Try to extract the port number from ``port_str``."""
     if port_str and re.match(r"^[0-9]{1,5}$", port_str):
         return int(port_str)
     return None
 
 
-def parse_rendezvous_endpoint(endpoint: Optional[str], default_port: int) -> Tuple[str, int]:
-    """Extracts the hostname and the port number from a rendezvous endpoint.
+def parse_rendezvous_endpoint(
+    endpoint: Optional[str], default_port: int
+) -> Tuple[str, int]:
+    """Extract the hostname and the port number from a rendezvous endpoint.
 
     Args:
         endpoint:
@@ -91,7 +96,7 @@ def parse_rendezvous_endpoint(endpoint: Optional[str], default_port: int) -> Tup
 
     if len(rest) == 1:
         port = _try_parse_port(rest[0])
-        if port is None or port >= 2 ** 16:
+        if port is None or port >= 2**16:
             raise ValueError(
                 f"The port number of the rendezvous endpoint '{endpoint}' must be an integer "
                 "between 0 and 65536."
@@ -109,7 +114,7 @@ def parse_rendezvous_endpoint(endpoint: Optional[str], default_port: int) -> Tup
 
 
 def _matches_machine_hostname(host: str) -> bool:
-    """Indicates whether ``host`` matches the hostname of this machine.
+    """Indicate whether ``host`` matches the hostname of this machine.
 
     This function compares ``host`` to the hostname as well as to the IP
     addresses of this machine. Note that it may return a false negative if this
@@ -134,10 +139,7 @@ def _matches_machine_hostname(host: str) -> bool:
     except (ValueError, socket.gaierror) as _:
         host_addr_list = []
 
-    host_ip_list = [
-        host_addr_info[4][0]
-        for host_addr_info in host_addr_list
-    ]
+    host_ip_list = [host_addr_info[4][0] for host_addr_info in host_addr_list]
 
     this_host = socket.gethostname()
     if host == this_host:
@@ -164,7 +166,7 @@ def _matches_machine_hostname(host: str) -> bool:
 
 
 def _delay(seconds: Union[float, Tuple[float, float]]) -> None:
-    """Suspends the current thread for ``seconds``.
+    """Suspend the current thread for ``seconds``.
 
     Args:
         seconds:
@@ -179,7 +181,7 @@ def _delay(seconds: Union[float, Tuple[float, float]]) -> None:
 
 
 class _PeriodicTimer:
-    """Represents a timer that periodically runs a specified function.
+    """Represent a timer that periodically runs a specified function.
 
     Args:
         interval:
@@ -225,11 +227,11 @@ class _PeriodicTimer:
 
     @property
     def name(self) -> Optional[str]:
-        """Gets the name of the timer."""
+        """Get the name of the timer."""
         return self._name
 
     def set_name(self, name: str) -> None:
-        """Sets the name of the timer.
+        """Set the name of the timer.
 
         The specified name will be assigned to the background thread and serves
         for debugging and troubleshooting purposes.
@@ -245,7 +247,10 @@ class _PeriodicTimer:
             raise RuntimeError("The timer has already started.")
 
         self._thread = Thread(
-            target=self._run, name=self._name or "PeriodicTimer", args=(self._ctx,), daemon=True
+            target=self._run,
+            name=self._name or "PeriodicTimer",
+            args=(self._ctx,),
+            daemon=True,
         )
 
         # We avoid using a regular finalizer (a.k.a. __del__) for stopping the

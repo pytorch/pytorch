@@ -6,9 +6,7 @@
 #include <ATen/functorch/ADInterpreters.h>
 #include <ATen/functorch/DynamicLayer.h>
 
-#include <utility>
-
-namespace at { namespace functorch {
+namespace at::functorch {
 
 static DispatchKeySet get_all_dynlayer_keyset() {
   // NB: FULL_AFTER does not include the dispatch key
@@ -40,7 +38,7 @@ static DispatchKeySet keysForEnteringDynamicLayer(TransformType key) {
     // NB: Does not include DispatchKey::FuncTorchVmapMode. We may modulate the key when
     // constructing the DynamicLayer, but we don't control it when entering/exiting
     // the DynamicLayer.
-    return DispatchKeySet({DispatchKey::FuncTorchBatched});
+    return DispatchKeySet({DispatchKey::FuncTorchBatched, DispatchKey::BatchedNestedTensor});
   } else if (key == TransformType::Grad || key == TransformType::Jvp) {
     return autograd_dispatch_keyset.add(DispatchKey::ADInplaceOrView);
   } else if (key == TransformType::Functionalize) {
@@ -57,10 +55,13 @@ DispatchKeySet keysToExcludeWhenEnteringDynamicLayer(TransformType key) {
   return exclude;
 }
 
-void setup_dispatch_key_tls(DispatchKeySet exclude, DispatchKeySet include) {
+void setup_dispatch_key_tls(TransformType key, DispatchKeySet also_include) {
   auto local_keyset = c10::impl::tls_local_dispatch_key_set();
-  local_keyset.excluded_ = local_keyset.excluded_ | exclude;
-  local_keyset.included_ = local_keyset.included_ | include;
+  auto to_exclude = local_keyset.excluded_;
+  to_exclude = to_exclude | keysToExcludeWhenEnteringDynamicLayer(key);
+  to_exclude = to_exclude - keysForEnteringDynamicLayer(key);
+  local_keyset.excluded_ = to_exclude;
+  local_keyset.included_ = local_keyset.included_ | also_include;
   c10::impl::_force_tls_local_dispatch_key_set(local_keyset);
 }
 
@@ -89,12 +90,12 @@ std::ostream& operator<<(std::ostream& os, const TransformType& t) {
 
 void sanityCheckStack(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   auto num_args = op.schema().arguments().size();
-  foreachTensorInplace(*stack, stack->size() - num_args, stack->size(),
+  foreachTensorInplace(*stack, static_cast<int64_t>(stack->size() - num_args), static_cast<int64_t>(stack->size()),
       [](const Tensor& tensor) {
         auto result = unwrapIfDead(tensor);
         auto* wrapper = maybeGetTensorWrapper(result);
         TORCH_INTERNAL_ASSERT(wrapper == nullptr);
-        auto* batched = maybeGetBatchedImpl(std::move(result));
+        auto* batched = maybeGetBatchedImpl(result);
         TORCH_INTERNAL_ASSERT(batched == nullptr);
         return tensor;
       });
@@ -103,12 +104,16 @@ void sanityCheckStack(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
 #define INTERPRETER_DISPATCH(type, method) \
   switch (key()) { \
     case TransformType::Vmap: \
+      TORCH_INTERNAL_ASSERT(std::holds_alternative<VmapInterpreterMeta>(this->meta()));\
       return VmapInterpreterPtr(this). method; \
     case TransformType::Grad: \
+      TORCH_INTERNAL_ASSERT(std::holds_alternative<GradInterpreterMeta>(this->meta()));\
       return GradInterpreterPtr(this). method; \
     case TransformType::Jvp: \
+      TORCH_INTERNAL_ASSERT(std::holds_alternative<JvpInterpreterMeta>(this->meta()));\
       return JvpInterpreterPtr(this). method; \
     case TransformType::Functionalize: \
+      TORCH_INTERNAL_ASSERT(std::holds_alternative<FunctionalizeInterpreterMeta>(this->meta()));\
       return FunctionalizeInterpreterPtr(this). method; \
     default: \
       TORCH_INTERNAL_ASSERT(false, "Unrecognized transform"); \
@@ -122,4 +127,4 @@ void Interpreter::sendToNextInterpreter(const c10::OperatorHandle& op, torch::ji
   INTERPRETER_DISPATCH(key_, SINGLE_ARG(sendToNextInterpreterImpl(op, stack, grad_special_case)));
 }
 
-}}
+} // namespace at::functorch

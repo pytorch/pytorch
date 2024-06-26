@@ -66,8 +66,8 @@ const char* toString(DispatchKey t) {
       return "Dense";
     case DispatchKey::FPGA:
       return "FPGA";
-    case DispatchKey::ORT:
-      return "ORT";
+    case DispatchKey::MAIA:
+      return "MAIA";
     case DispatchKey::Vulkan:
       return "Vulkan";
     case DispatchKey::Metal:
@@ -91,10 +91,9 @@ const char* toString(DispatchKey t) {
 
     case DispatchKey::Sparse:
       return "Sparse";
-    case DispatchKey::SparseCsrCPU:
-      return "SparseCsrCPU";
-    case DispatchKey::SparseCsrCUDA:
-      return "SparseCsrCUDA";
+
+    case DispatchKey::SparseCsr:
+      return "SparseCsr";
 
     case DispatchKey::NestedTensor:
       return "NestedTensor";
@@ -140,13 +139,21 @@ const char* toString(DispatchKey t) {
       return "AutocastCPU";
     case DispatchKey::AutocastXPU:
       return "AutocastXPU";
+    case DispatchKey::AutocastIPU:
+      return "AutocastIPU";
     case DispatchKey::AutocastHPU:
       return "AutocastHPU";
     case DispatchKey::AutocastCUDA:
       return "AutocastCUDA";
+    case DispatchKey::AutocastXLA:
+      return "AutocastXLA";
+    case DispatchKey::AutocastPrivateUse1:
+      return "AutocastPrivateUse1";
 
     case DispatchKey::FuncTorchBatched:
       return "FuncTorchBatched";
+    case DispatchKey::BatchedNestedTensor:
+      return "BatchedNestedTensor";
     case DispatchKey::FuncTorchVmapMode:
       return "FuncTorchVmapMode";
 
@@ -177,6 +184,9 @@ const char* toString(DispatchKey t) {
 
     case DispatchKey::TESTING_ONLY_GenericMode:
       return "TESTING_ONLY_GenericMode";
+
+    case DispatchKey::PreDispatch:
+      return "PreDispatch";
 
     case DispatchKey::PythonDispatcher:
       return "PythonDispatcher";
@@ -253,7 +263,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"Undefined", c10::DispatchKey::Undefined},
       {"Dense", c10::DispatchKey::Dense},
       {"FPGA", c10::DispatchKey::FPGA},
-      {"ORT", c10::DispatchKey::ORT},
+      {"MAIA", c10::DispatchKey::MAIA},
       {"MPS", c10::DispatchKey::MPS},
       {"Vulkan", c10::DispatchKey::Vulkan},
       {"Metal", c10::DispatchKey::Metal},
@@ -263,8 +273,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"CustomRNGKeyId", c10::DispatchKey::CustomRNGKeyId},
       {"MkldnnCPU", c10::DispatchKey::MkldnnCPU},
       {"Sparse", c10::DispatchKey::Sparse},
-      {"SparseCsrCPU", c10::DispatchKey::SparseCsrCPU},
-      {"SparseCsrCUDA", c10::DispatchKey::SparseCsrCUDA},
+      {"SparseCsr", c10::DispatchKey::SparseCsr},
       {"BackendSelect", c10::DispatchKey::BackendSelect},
       {"Python", c10::DispatchKey::Python},
       {"PythonTLSSnapshot", c10::DispatchKey::PythonTLSSnapshot},
@@ -283,9 +292,13 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"Tracer", c10::DispatchKey::Tracer},
       {"AutocastCPU", c10::DispatchKey::AutocastCPU},
       {"AutocastXPU", c10::DispatchKey::AutocastXPU},
+      {"AutocastIPU", c10::DispatchKey::AutocastIPU},
       {"AutocastHPU", c10::DispatchKey::AutocastHPU},
       {"AutocastCUDA", c10::DispatchKey::AutocastCUDA},
+      {"AutocastXLA", c10::DispatchKey::AutocastXLA},
+      {"AutocastPrivateUse1", c10::DispatchKey::AutocastPrivateUse1},
       {"FuncTorchBatched", c10::DispatchKey::FuncTorchBatched},
+      {"BatchedNestedTensor", c10::DispatchKey::BatchedNestedTensor},
       {"FuncTorchVmapMode", c10::DispatchKey::FuncTorchVmapMode},
       {"Batched", c10::DispatchKey::Batched},
       {"VmapMode", c10::DispatchKey::VmapMode},
@@ -297,6 +310,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
        c10::DispatchKey::TESTING_ONLY_GenericWrapper},
       {"TESTING_ONLY_GenericMode", c10::DispatchKey::TESTING_ONLY_GenericMode},
       {"PythonDispatcher", c10::DispatchKey::PythonDispatcher},
+      {"PreDispatch", c10::DispatchKey::PreDispatch},
 
       {"CPU", c10::DispatchKey::CPU},
       {"CUDA", c10::DispatchKey::CUDA},
@@ -312,6 +326,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"NestedTensorCPU", c10::DispatchKey::NestedTensorCPU},
       {"NestedTensorCUDA", c10::DispatchKey::NestedTensorCUDA},
       {"NestedTensorMeta", c10::DispatchKey::NestedTensorMeta},
+      {"NestedTensorPrivateUse1", c10::DispatchKey::NestedTensorPrivateUse1},
       {"PrivateUse1", c10::DispatchKey::PrivateUse1},
       {"PrivateUse2", c10::DispatchKey::PrivateUse2},
       {"PrivateUse3", c10::DispatchKey::PrivateUse3},
@@ -319,6 +334,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"QuantizedCPU", c10::DispatchKey::QuantizedCPU},
       {"QuantizedCUDA", c10::DispatchKey::QuantizedCUDA},
       {"QuantizedXPU", c10::DispatchKey::QuantizedXPU},
+      {"QuantizedPrivateUse1", c10::DispatchKey::QuantizedPrivateUse1},
 
       {"SparseCPU", c10::DispatchKey::SparseCPU},
       {"SparseCUDA", c10::DispatchKey::SparseCUDA},
@@ -326,6 +342,15 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"SparseXPU", c10::DispatchKey::SparseXPU},
       {"SparseVE", c10::DispatchKey::SparseVE},
       {"SparseMeta", c10::DispatchKey::SparseMeta},
+      {"SparsePrivateUse1", c10::DispatchKey::SparsePrivateUse1},
+
+      {"SparseCsrCPU", c10::DispatchKey::SparseCsrCPU},
+      {"SparseCsrCUDA", c10::DispatchKey::SparseCsrCUDA},
+      {"SparseCsrHIP", c10::DispatchKey::SparseCsrHIP},
+      {"SparseCsrXPU", c10::DispatchKey::SparseCsrXPU},
+      {"SparseCsrVE", c10::DispatchKey::SparseCsrVE},
+      {"SparseCsrMeta", c10::DispatchKey::SparseCsrMeta},
+      {"SparseCsrPrivateUse1", c10::DispatchKey::SparseCsrPrivateUse1},
 
       {"AutogradCPU", c10::DispatchKey::AutogradCPU},
       {"AutogradCUDA", c10::DispatchKey::AutogradCUDA},

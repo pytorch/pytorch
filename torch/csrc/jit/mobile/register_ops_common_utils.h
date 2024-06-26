@@ -7,8 +7,6 @@
 #include <torch/csrc/jit/runtime/jit_exception.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
-#include <iostream>
-
 namespace torch {
 namespace jit {
 
@@ -19,8 +17,8 @@ int64_t normalizeIndex(int64_t idx, int64_t list_size);
 // reference function THPVariable_to in python_variable_methods.cpp
 static C10_UNUSED at::Tensor to_dispatch(
     at::Tensor self,
-    c10::optional<at::Device> device,
-    c10::optional<at::ScalarType> scalarType,
+    std::optional<at::Device> device,
+    std::optional<at::ScalarType> scalarType,
     bool non_blocking,
     bool copy) {
   if (device && device->is_cuda()) {

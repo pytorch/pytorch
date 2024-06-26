@@ -5,25 +5,43 @@
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
-from functorch.dim import Tensor, Dim, dims, dimlists, stack, DimensionBindError, DimList
+import gc
+
+from unittest import skip, skipIf
 
 from attn_ft import BertSelfAttention as BertSelfAttentionA, Linear
 from attn_positional import BertSelfAttention as BertSelfAttentionB
 
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_CUDA, TEST_WITH_ASAN
-
-from unittest import skip, skipIf
 import torch
-import gc
 
 from functorch._C import dim as _C
+from functorch.dim import (
+    Dim,
+    DimensionBindError,
+    DimList,
+    dimlists,
+    dims,
+    stack,
+    Tensor,
+)
+
+from torch.testing._internal.common_utils import (
+    run_tests,
+    skipIfTorchDynamo,
+    TEST_CUDA,
+    TestCase,
+)
 
 try:
     from torchvision.models import resnet18
 except ImportError:
     resnet18 = None
 
-_test_c, _parse_test, _set_pointwise_optimize = _C._test_c, _C._parse_test, _C._set_pointwise_optimize
+_test_c, _parse_test, _set_pointwise_optimize = (
+    _C._test_c,
+    _C._parse_test,
+    _C._set_pointwise_optimize,
+)
 
 from contextlib import contextmanager
 from time import perf_counter
@@ -32,9 +50,11 @@ measure_perf = False
 if measure_perf:
     from torchdim.magic_trace import magic_trace
 else:
+
     @contextmanager
     def magic_trace(*args, **kwargs):
         yield
+
 
 @contextmanager
 def measure(what):
@@ -43,11 +63,13 @@ def measure(what):
     e = perf_counter()
     print(f"{what}: {e - b:.20f} seconds")
 
+
 def triu(A):
     i, j = dims()
     a = A[i, j]
     zero = torch.tensor(0, dtype=torch.float)  # XXX - torch.where is janky...
     return torch.where(i <= j, a, zero).order(i, j)
+
 
 def gpu_time(lmb, name, r=100):
     b = torch.cuda.Event(enable_timing=True)
@@ -71,8 +93,9 @@ def gpu_time(lmb, name, r=100):
     print(name, elapsed / r)
     return elapsed / r
 
-class TestMin(TestCase):
 
+@skipIfTorchDynamo("Bad interaction")
+class TestMin(TestCase):
     def setUp(self):
         super().setUp()
         gc.disable()
@@ -81,33 +104,36 @@ class TestMin(TestCase):
         for o in gc.get_objects():
             if isinstance(o, (torch.Tensor, Dim, Tensor, DimList)):
                 self.interesting.add(id(o))
-        if 'cuda' in self._testMethodName:
+        if "cuda" in self._testMethodName:
             self.mem_allocated = torch.cuda.memory_allocated()
 
     def tearDown(self):
         interesting = []
         for o in gc.get_objects():
-            if isinstance(o, (torch.Tensor, Dim, Tensor, DimList)) and id(o) not in self.interesting:
+            if (
+                isinstance(o, (torch.Tensor, Dim, Tensor, DimList))
+                and id(o) not in self.interesting
+            ):
                 interesting.append(o)
 
         extra_memory = 0
-        if 'cuda' in self._testMethodName:
+        if "cuda" in self._testMethodName:
             extra_memory += torch.cuda.memory_allocated() - self.mem_allocated
 
         #  nolevels = _n_levels_in_use() == 0
         if extra_memory != 0 or len(interesting) != 0:
             import refcycle
-            refcycle.garbage().export_image('garbage.pdf')
+
+            refcycle.garbage().export_image("garbage.pdf")
         gc.collect()
         # assert nolevels, f"cleanup failed? {_n_levels_in_use()}"
-        assert extra_memory == 0, f'extra cuda memory left allocated: {extra_memory}'
-        assert len(interesting) == 0, \
-            f'extra torch.Tensor, Dim, or Tensor left allocated: {len(interesting)} objects of types:' \
-            f' { [type(t) for t in interesting] }'
+        assert extra_memory == 0, f"extra cuda memory left allocated: {extra_memory}"
+        assert len(interesting) == 0, (
+            f"extra torch.Tensor, Dim, or Tensor left allocated: {len(interesting)} objects of types:"
+            f" { [type(t) for t in interesting] }"
+        )
 
-    @skipIf(TEST_WITH_ASAN, "tests gets asan error, put up issue since seems real")
     def test_manual_stuff(self):
-
         A_ = torch.rand(3, 4)
         B_ = torch.rand(4, 5)
         i, j, k = dims()
@@ -123,33 +149,71 @@ class TestMin(TestCase):
 
         A.index([i], [D]).order(k, d)
 
-    def attn(self, batch_size=1, sequence_length=4, hidden_size=6, num_attention_heads=3, linear=Linear, device=None, time=False):
+    def attn(
+        self,
+        batch_size=1,
+        sequence_length=4,
+        hidden_size=6,
+        num_attention_heads=3,
+        linear=Linear,
+        device=None,
+        time=False,
+    ):
         def maybe_to(x):
             return x if device is None else x.to(device)
 
-        attention_probs_dropout_prob = 0.
-        A = maybe_to(BertSelfAttentionA(hidden_size, num_attention_heads, attention_probs_dropout_prob, linear=linear))
-        B = maybe_to(BertSelfAttentionB(hidden_size, num_attention_heads, attention_probs_dropout_prob))
-
+        attention_probs_dropout_prob = 0.0
+        A = maybe_to(
+            BertSelfAttentionA(
+                hidden_size,
+                num_attention_heads,
+                attention_probs_dropout_prob,
+                linear=linear,
+            )
+        )
+        B = maybe_to(
+            BertSelfAttentionB(
+                hidden_size, num_attention_heads, attention_probs_dropout_prob
+            )
+        )
 
         A.load_state_dict(B.state_dict())
         hidden_state = maybe_to(torch.rand(batch_size, sequence_length, hidden_size))
         b_out = B(hidden_state)
         a_out = A(hidden_state)
-        self.assertTrue(torch.allclose(a_out, b_out))  # why does a simple matmul not do the right thing?
+        self.assertTrue(
+            torch.allclose(a_out, b_out)
+        )  # why does a simple matmul not do the right thing?
 
         if time:
             gpu_time(lambda: B(hidden_state), "positional", r=3)
             gpu_time(lambda: A(hidden_state), "first_class", r=3)
 
-        for approach in ('relative_key', 'relative_key_query'):
-            A = maybe_to(BertSelfAttentionA(hidden_size, num_attention_heads,
-                         attention_probs_dropout_prob, approach, sequence_length, linear=linear))
-            B = maybe_to(BertSelfAttentionB(hidden_size, num_attention_heads,
-                         attention_probs_dropout_prob, approach, sequence_length))
+        for approach in ("relative_key", "relative_key_query"):
+            A = maybe_to(
+                BertSelfAttentionA(
+                    hidden_size,
+                    num_attention_heads,
+                    attention_probs_dropout_prob,
+                    approach,
+                    sequence_length,
+                    linear=linear,
+                )
+            )
+            B = maybe_to(
+                BertSelfAttentionB(
+                    hidden_size,
+                    num_attention_heads,
+                    attention_probs_dropout_prob,
+                    approach,
+                    sequence_length,
+                )
+            )
             A.load_state_dict(B.state_dict())
 
-            hidden_state = maybe_to(torch.rand(batch_size, sequence_length, hidden_size))
+            hidden_state = maybe_to(
+                torch.rand(batch_size, sequence_length, hidden_size)
+            )
             b_out = B(hidden_state)
             a_out = A(hidden_state)
             self.assertTrue(torch.allclose(a_out, b_out))
@@ -158,17 +222,46 @@ class TestMin(TestCase):
                 gpu_time(lambda: B(hidden_state), "positional", r=3)
                 gpu_time(lambda: A(hidden_state), "first_class", r=3)
 
-        A = maybe_to(BertSelfAttentionA(hidden_size, num_attention_heads,
-                                        attention_probs_dropout_prob, None, None, linear=linear))
-        B = maybe_to(BertSelfAttentionB(hidden_size, num_attention_heads,
-                                        attention_probs_dropout_prob, None, None))
+        A = maybe_to(
+            BertSelfAttentionA(
+                hidden_size,
+                num_attention_heads,
+                attention_probs_dropout_prob,
+                None,
+                None,
+                linear=linear,
+            )
+        )
+        B = maybe_to(
+            BertSelfAttentionB(
+                hidden_size,
+                num_attention_heads,
+                attention_probs_dropout_prob,
+                None,
+                None,
+            )
+        )
         A.load_state_dict(B.state_dict())
 
         hidden_state = maybe_to(torch.rand(batch_size, sequence_length, hidden_size))
-        past_key_value = (maybe_to(torch.rand(batch_size, num_attention_heads,
-                                   sequence_length, hidden_size // num_attention_heads)),
-                          maybe_to(torch.rand(batch_size, num_attention_heads,
-                                   sequence_length, hidden_size // num_attention_heads)))
+        past_key_value = (
+            maybe_to(
+                torch.rand(
+                    batch_size,
+                    num_attention_heads,
+                    sequence_length,
+                    hidden_size // num_attention_heads,
+                )
+            ),
+            maybe_to(
+                torch.rand(
+                    batch_size,
+                    num_attention_heads,
+                    sequence_length,
+                    hidden_size // num_attention_heads,
+                )
+            ),
+        )
 
         b_out = B(hidden_state, past_key_value=past_key_value)
         a_out = A(hidden_state, past_key_value=past_key_value)
@@ -178,11 +271,9 @@ class TestMin(TestCase):
             gpu_time(lambda: B(hidden_state), "positional", r=3)
             gpu_time(lambda: A(hidden_state), "first_class", r=3)
 
-    @skipIf(TEST_WITH_ASAN, "tests gets asan error, put up issue since seems real")
     def test_attn(self):
         self.attn()
 
-    @skipIf(TEST_WITH_ASAN, "tests gets asan error, put up issue since seems real")
     def test_inplace(self):
         # some embeddings table
         embeddings = torch.zeros(10, 3)
@@ -198,6 +289,7 @@ class TestMin(TestCase):
     def test_adapt(self):
         def f():
             ci, co = dims()
+
         # python 3.11 adapts bytecode after a number of iterations
         # check that we still match names correctly
         for i in range(10):
@@ -206,8 +298,15 @@ class TestMin(TestCase):
     @skipIf(not TEST_CUDA, "no CUDA")
     def test_attn_cuda(self):
         # size from the BERT paper, 90% pretraining of sequence length 128
-        self.attn(batch_size=256, hidden_size=768, sequence_length=128,
-                  num_attention_heads=12, device='cuda', time=measure_perf, linear=torch.nn.Linear)
+        self.attn(
+            batch_size=256,
+            hidden_size=768,
+            sequence_length=128,
+            num_attention_heads=12,
+            device="cuda",
+            time=measure_perf,
+            linear=torch.nn.Linear,
+        )
 
     def test_stack(self):
         i, j, d = dims()
@@ -244,13 +343,10 @@ class TestMin(TestCase):
         x = r.order(i, [j, k])
         self.assertTrue(torch.allclose(a, x))
 
-    @skipIf(TEST_WITH_ASAN, "tests gets asan error, put up issue since seems real")
     def test_hello(self):
         A = torch.rand(3, 4)
         B = torch.rand(4, 5)
         i, j, k = dims()
-
-
 
         # r = A[i]*4
         r = (A[i, k] * B[k, j]).sum(k).order(i, j)
@@ -307,17 +403,19 @@ class TestMin(TestCase):
         # test with too many elements
         try:
             A[1, ..., 1, 1]
-            raise NotImplementedError()
+            raise NotImplementedError
         except IndexError:
             pass
         c, d = dims()
         c.size = 2
         assert torch.allclose(A[i, [c, d]].order(i, c, d), A.view(3, 2, 2))
 
-        assert torch.allclose(A[c + 1, c + 0].order(c), A[torch.arange(2) + 1, torch.arange(2)])
+        assert torch.allclose(
+            A[c + 1, c + 0].order(c), A[torch.arange(2) + 1, torch.arange(2)]
+        )
         try:
             A[..., 3, ...]
-            raise NotImplementedError()
+            raise NotImplementedError
         except DimensionBindError:
             pass
 
@@ -332,15 +430,15 @@ class TestMin(TestCase):
             assert torch.allclose(a, b.order(s, d))
 
         D = torch.rand(3, 4, 5)
-        assert torch.allclose(D.transpose(0, 1).flatten(1, 2), D[i, k, j].order((i, j)).order(k))
-
+        assert torch.allclose(
+            D.transpose(0, 1).flatten(1, 2), D[i, k, j].order((i, j)).order(k)
+        )
 
         r = [id(x) for x in torch.rand_like(A[i, k]).dims]
         assert id(i) in r and id(k) in r
         r = [id(x) for x in torch.nn.functional.dropout(A[i, k]).dims]
         assert id(i) in r and id(k) in r
 
-    @skipIf(TEST_WITH_ASAN, "tests gets asan error, put up issue since seems real")
     def test_simple(self):
         i, j, k = dims()
         x = torch.rand(3, 4)
@@ -361,7 +459,6 @@ class TestMin(TestCase):
         A = torch.rand(3, 4)
         B = torch.rand(4, 5)
 
-
         for _ in range(10):
             r0 = A @ B
 
@@ -370,39 +467,36 @@ class TestMin(TestCase):
             b = B[k, j]
             r1 = (a * b).sum(k)
 
-        with measure('pp'):
+        with measure("pp"):
             for _ in range(10000):
                 A @ B
         # magic_trace_stop_indicator()
 
-        with measure('fc'):
+        with measure("fc"):
             for _ in range(10000):
                 (A[i, k] * B[k, j]).sum(k).order(i, j)
 
-        with magic_trace('f.fxt'):
+        with magic_trace("f.fxt"):
             for _ in range(10000):
                 (A[i, k] * B[k, j]).sum(k).order(i, j)
 
-        with magic_trace('p.fxt'):
+        with magic_trace("p.fxt"):
             for _ in range(10000):
                 A @ B
 
         # magic_trace_stop_indicator()
-
 
         assert torch.allclose(r1.order(i, j), r0)
 
-    @skipIf(TEST_WITH_ASAN, "tests gets asan error, put up issue since seems real")
     def test_compare_dims(self):
         i, j = dims()
         i.size = 3
         j.size = 4
-        (i < j)
+        (i < j)  # noqa: B015
 
     def test_c(self):
         _test_c()
 
-    @skipIf(TEST_WITH_ASAN, "tests gets asan error, put up issue since seems real")
     def test_seg(self):
         A = torch.rand(3, 4)
         i, k = dims()
@@ -415,8 +509,6 @@ class TestMin(TestCase):
         i = dims()
         assert list(A[i].expand(2, 4).order(i).size()) == [3, 2, 4]
 
-
-    @skipIf(TEST_WITH_ASAN, "tests gets asan error, maybe real issue")
     def test_parse(self):
         self.assertEqual(("x", None, None, None), _parse_test(1, 0, "x"))
         self.assertEqual(("x", None, "y", None), _parse_test(1, 0, "x", c="y"))
@@ -436,8 +528,10 @@ class TestMin(TestCase):
 
     def test_network(self):
         if resnet18 is None:
-            self.skipTest('no torchvision')
-        rn = resnet18(norm_layer=lambda x: torch.nn.BatchNorm2d(x, track_running_stats=False))
+            self.skipTest("no torchvision")
+        rn = resnet18(
+            norm_layer=lambda x: torch.nn.BatchNorm2d(x, track_running_stats=False)
+        )
         rn.train()
         img = torch.rand(1, 1, 2, 3, 224, 224)
         imgf = img.view(2, 3, 224, 224)
@@ -455,7 +549,7 @@ class TestMin(TestCase):
         b = dimlists()
         assert isinstance(a, Dim)
         assert isinstance(b, DimList)
-        assert str(a) == 'a'
+        assert str(a) == "a"
         a, b = dims(sizes=[3, 4])
         assert a.size == 3
         assert b.size == 4
@@ -467,17 +561,15 @@ class TestMin(TestCase):
         assert b[0].size == 4
         assert b[1].size == 5
 
-    @skipIf(TEST_WITH_ASAN, "tests gets asan error, put up issue since seems real")
     def test_diag(self):
         i = dims()
         A = torch.rand(4, 4)
         (A[i, i])
 
-    @skipIf(TEST_WITH_ASAN, "tests gets asan error, put up issue since seems real")
     def test_softmax_split(self):
         a = torch.rand(16)
         g, i = dims(sizes=[2, None])
-        a2 = a[[i, g], ]
+        a2 = a[[i, g],]
 
         m_b, _ = a2.max(i)
         f_b = torch.exp(a2 - m_b)
@@ -507,7 +599,9 @@ class TestMin(TestCase):
 
         C = torch.rand(3, 4, 5)
         ik = dims()
-        assert torch.allclose(C.index((0, 2), ik).order(ik), C.permute(0, 2, 1).reshape(15, 4))
+        assert torch.allclose(
+            C.index((0, 2), ik).order(ik), C.permute(0, 2, 1).reshape(15, 4)
+        )
 
     # failures that came up from monkey patching some operators...
     def test_monkey(self):
@@ -525,7 +619,6 @@ class TestMin(TestCase):
         x.new(a)
         # self.assertEqual(x.new([z[2], z[0] + 3]).tolist(), [3, 4])
 
-    @skipIf(TEST_WITH_ASAN, "tests gets asan error, put up issue since seems real")
     def test_index_placement(self):
         A = torch.rand(1, 2, 3, 4)
 
@@ -541,13 +634,11 @@ class TestMin(TestCase):
         A = torch.rand(3, 4, 5)
         assert torch.allclose(A[i].order(1, i), A.permute(2, 0, 1))
 
-    @skipIf(TEST_WITH_ASAN, "tests gets asan error, put up issue since seems real")
     def test_mask(self):
         a = torch.rand(5)
         i, j = dims(sizes=[a.size(0), a.size(0)])
         ((i >= j) * a[i]).sum(j).order(i)
 
-    @skipIf(TEST_WITH_ASAN, "tests gets asan error, put up issue since seems real")
     def test_eq(self):
         i, j = dims(sizes=[3, 3])
         assert (i == j).sum((i, j)) == 3
@@ -558,13 +649,13 @@ class TestMin(TestCase):
 
         class Foo:
             pass
+
         y = Foo()
         z, y.x, q = dims(3)
         assert str(z) == "z"
         assert str(y.x) == "d1"
         assert str(q) == "d2"
 
-    @skipIf(TEST_WITH_ASAN, "tests gets asan error, put up issue since seems real")
     def test_dir(self):
         i, j = dims(sizes=[3, 3])
         dir(i <= j)
@@ -573,7 +664,6 @@ class TestMin(TestCase):
         assert Tensor.clamp.__doc__ == torch.Tensor.clamp.__doc__
 
     def test_embed(self):
-
         embeddings = torch.rand(8, 32)
         ids = torch.tensor([1, 0, 3, 4])
 
@@ -619,7 +709,10 @@ class TestMin(TestCase):
         x = torch.randn(total, 1)
         x.split(l, 0)
 
-skip_functorch_only = ['test_time_mm_fuse', 'test_attn_cuda']
+
+skip_functorch_only = ["test_time_mm_fuse", "test_attn_cuda"]
+
+
 class TestMinFunctorchOnly(TestMin):
     def setUp(self):
         super().setUp()
@@ -629,8 +722,9 @@ class TestMinFunctorchOnly(TestMin):
         _set_pointwise_optimize(True)
         super().tearDown()
 
+
 for n in skip_functorch_only:
     setattr(TestMinFunctorchOnly, n, skip("skip_functorch_only")(lambda self: None))
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Extra utilities for working with context managers that should have been
 # in the standard library but are not
 
@@ -68,8 +69,9 @@ def _wrap_generator(ctx_factory, func):
 
 def context_decorator(ctx, func):
     """
-    Like contextlib.ContextDecorator, but:
+    Like contextlib.ContextDecorator.
 
+    But with the following differences:
     1. Is done by wrapping, rather than inheritance, so it works with context
        managers that are implemented from C and thus cannot easily inherit from
        Python classes
@@ -81,7 +83,6 @@ def context_decorator(ctx, func):
     be a multi-shot context manager that can be directly invoked multiple times)
     or a callable that produces a context manager.
     """
-
     assert not (callable(ctx) and hasattr(ctx, '__enter__')), (
         f"Passed in {ctx} is both callable and also a valid context manager "
         "(has __enter__), making it ambiguous which interface to use.  If you "
@@ -118,14 +119,18 @@ def context_decorator(ctx, func):
 
 
 class _DecoratorContextManager:
-    """Allow a context manager to be used as a decorator"""
+    """Allow a context manager to be used as a decorator."""
 
     def __call__(self, orig_func: F) -> F:
         if inspect.isclass(orig_func):
-            warnings.warn("Decorating classes is deprecated and will be disabled in "
-                          "future versions. You should only decorate functions or methods. "
-                          "To preserve the current behavior of class decoration, you can "
-                          "directly decorate the `__init__` method and nothing else.")
+            warnings.warn(
+                "Decorating classes is deprecated and will be disabled in "
+                "future versions. You should only decorate functions or methods. "
+                "To preserve the current behavior of class decoration, you can "
+                "directly decorate the `__init__` method and nothing else.",
+                FutureWarning,
+                stacklevel=2,
+            )
             func = cast(F, lambda *args, **kwargs: orig_func(*args, **kwargs))
         else:
             func = orig_func
@@ -141,3 +146,12 @@ class _DecoratorContextManager:
     def clone(self):
         # override this method if your children class takes __init__ parameters
         return self.__class__()
+
+
+class _NoParamDecoratorContextManager(_DecoratorContextManager):
+    """Allow a context manager to be used as a decorator without parentheses."""
+
+    def __new__(cls, orig_func=None):
+        if orig_func is None:
+            return super().__new__(cls)
+        return cls()(orig_func)

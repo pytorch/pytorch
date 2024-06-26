@@ -17,8 +17,7 @@
 #endif
 
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -140,16 +139,6 @@ namespace {
     }
   }
 
-  Tensor& adaptive_avg_pool2d_backward_out_cpu(
-    Tensor& grad_input,
-    const Tensor& grad_output,
-    const Tensor& input)
-  {
-    adaptive_avg_pool2d_backward_out_cpu_template(
-      grad_input, grad_output, input);
-    return grad_input;
-  }
-
   Tensor adaptive_avg_pool2d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& input)
@@ -163,5 +152,4 @@ namespace {
 DEFINE_DISPATCH(adaptive_avg_pool2d_kernel);
 DEFINE_DISPATCH(adaptive_avg_pool2d_backward_kernel);
 
-} // at::native
-} // at
+} // namespace at::native

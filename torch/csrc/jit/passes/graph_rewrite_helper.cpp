@@ -27,14 +27,14 @@ Value* getValue(
   return match_vmap.at(vmap.at(name));
 }
 
-c10::optional<IValue> getIValue(
+std::optional<IValue> getIValue(
     const std::string& name,
     const std::unordered_map<const Value*, Value*>& match_vmap,
     const std::unordered_map<std::string, Value*>& vmap) {
   return toIValue(getValue(name, match_vmap, vmap));
 }
 
-std::unordered_map<std::string, c10::IValue> getConvParams(
+static std::unordered_map<std::string, c10::IValue> getConvParams(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap) {
   std::unordered_map<std::string, c10::IValue> calc_values;

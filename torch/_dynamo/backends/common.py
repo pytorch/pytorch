@@ -1,28 +1,37 @@
+# mypy: ignore-errors
+
+import contextlib
 import functools
 import logging
+from unittest.mock import patch
 
 import torch
-from torch._dynamo import eval_frame
-from torch._dynamo.utils import counters
+from torch._dynamo import disable
+from torch._dynamo.utils import counters, defake, flatten_graph_inputs
 from torch._functorch.aot_autograd import aot_module_simplified
-from torch._subclasses import FakeTensor
 from torch.utils._python_dispatch import _disable_current_modes
 
 log = logging.getLogger(__name__)
 
 
-def aot_autograd(**kwargs):
-    def compiler_fn(gm: torch.fx.GraphModule, example_inputs):
-        import functorch.compile
+class AotAutograd:
+    def __init__(self, **kwargs):
+        self.__name__ = "compiler_fn"
+        self.kwargs = kwargs
+
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+        if any(isinstance(x, (list, tuple, dict)) for x in example_inputs):
+            return flatten_graph_inputs(
+                gm,
+                example_inputs,
+                self,
+            )
 
         # Hack to get around circular import problems with aot_eager_decomp_partition
-        if callable(kwargs.get("decompositions")):
-            kwargs["decompositions"] = kwargs["decompositions"]()
+        if callable(self.kwargs.get("decompositions")):
+            self.kwargs["decompositions"] = self.kwargs["decompositions"]()
 
-        # TODO: stop monkeypatching here (without even cleaning up, UGH!)
-        functorch.compile.config.use_functionalize = True
-        functorch.compile.config.use_fake_tensor = True
-
+        # NB: dont delete counter increment
         counters["aot_autograd"]["total"] += 1
         use_fallback = False
 
@@ -35,24 +44,38 @@ def aot_autograd(**kwargs):
 
         def _wrapped_bw_compiler(*args, **kwargs):
             # stop TorchDynamo from trying to compile our generated backwards pass
-            return eval_frame.disable(eval_frame.disable(bw_compiler)(*args, **kwargs))
+            return disable(disable(bw_compiler)(*args, **kwargs))
 
-        bw_compiler = kwargs.get("bw_compiler") or kwargs["fw_compiler"]
-        kwargs["bw_compiler"] = _wrapped_bw_compiler
+        bw_compiler = self.kwargs.get("bw_compiler") or self.kwargs["fw_compiler"]
+        self.kwargs["bw_compiler"] = _wrapped_bw_compiler
+        self.kwargs["inference_compiler"] = (
+            self.kwargs.get("inference_compiler") or self.kwargs["fw_compiler"]
+        )
+
+        from functorch.compile import nop
 
         from torch._inductor.debug import enable_aot_logging
 
+        # debug asserts slow down compile time noticeably,
+        # So only default them on when the aot_eager backend is used.
+        if self.kwargs.get("fw_compiler", None) == nop:
+            patch_config = patch("functorch.compile.config.debug_assert", True)
+        else:
+            patch_config = contextlib.nullcontext()
+
         try:
             # NB: NOT cloned!
-            with enable_aot_logging():
-                cg = aot_module_simplified(gm, example_inputs, **kwargs)
+            with enable_aot_logging(), patch_config:
+                cg = aot_module_simplified(gm, example_inputs, **self.kwargs)
                 counters["aot_autograd"]["ok"] += 1
-                return eval_frame.disable(cg)
+                return disable(cg)
         except Exception:
             counters["aot_autograd"]["not_ok"] += 1
             raise
 
-    return compiler_fn
+
+def aot_autograd(**kwargs):
+    return AotAutograd(**kwargs)
 
 
 def mem_efficient_fusion_kwargs(use_decomps):
@@ -80,25 +103,6 @@ def fake_tensor_unsupported(fn):
     Decorator for backends that need real inputs.  We swap out fake
     tensors for zero tensors.
     """
-
-    def defake(x):
-        if not isinstance(x, FakeTensor):
-            return x
-        if x._has_symbolic_sizes_strides:
-            size = [s.node.shape_env.size_hint(s.node.expr) for s in x.size()]
-            stride = [s.node.shape_env.size_hint(s.node.expr) for s in x.stride()]
-        else:
-            size = x.size()
-            stride = x.stride()
-        y = torch.empty_strided(
-            size,
-            stride,
-            dtype=x.dtype,
-            device=x.device,
-            requires_grad=x.requires_grad,
-        )
-        y.zero_()
-        return y
 
     @functools.wraps(fn)
     def wrapper(model, inputs, **kwargs):

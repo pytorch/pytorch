@@ -1,5 +1,5 @@
 /***************************************************************************************************
- * Copyright (c) 2017 - 2022 NVIDIA CORPORATION & AFFILIATES. All rights
+ * Copyright (c) 2017 - 2023 NVIDIA CORPORATION & AFFILIATES. All rights
  *reserved. SPDX-License-Identifier: BSD-3-Clause
  *
  * Redistribution and use in source and binary forms, with or without
@@ -87,7 +87,7 @@ namespace threadblock {
 /// To be efficient, this assumes the iterator will be dereferenced and advanced
 /// at least once outside any looping structure to minimize integer arithmetic.
 ///
-/// Acceses out of bounds are safe so long as `clear_mask()` is called prior to
+/// Access out of bounds are safe so long as `clear_mask()` is called prior to
 /// dereferencing the iterator.
 ///
 ///

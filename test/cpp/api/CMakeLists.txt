@@ -8,8 +8,9 @@ set(TORCH_API_TEST_SOURCES
   ${TORCH_API_TEST_DIR}/expanding-array.cpp
   ${TORCH_API_TEST_DIR}/fft.cpp
   ${TORCH_API_TEST_DIR}/functional.cpp
-  ${TORCH_API_TEST_DIR}/integration.cpp
   ${TORCH_API_TEST_DIR}/init.cpp
+  ${TORCH_API_TEST_DIR}/integration.cpp
+  ${TORCH_API_TEST_DIR}/ivalue.cpp
   ${TORCH_API_TEST_DIR}/jit.cpp
   ${TORCH_API_TEST_DIR}/memory.cpp
   ${TORCH_API_TEST_DIR}/meta_tensor.cpp
@@ -41,34 +42,18 @@ set(TORCH_API_TEST_SOURCES
   ${TORCH_API_TEST_DIR}/inference_mode.cpp
   ${TORCH_API_TEST_DIR}/grad_mode.cpp
   ${TORCH_API_TEST_DIR}/operations.cpp
+  ${TORCH_API_TEST_DIR}/nested_int.cpp
 )
-if(USE_CUDA)
+if(USE_CUDA OR USE_ROCM)
   list(APPEND TORCH_API_TEST_SOURCES ${TORCH_API_TEST_DIR}/parallel.cpp)
 endif()
 
 add_executable(test_api ${TORCH_API_TEST_SOURCES})
 target_include_directories(test_api PRIVATE ${ATen_CPU_INCLUDE})
 target_link_libraries(test_api PRIVATE torch gtest)
-if(NOT MSVC)
-  target_compile_options_if_supported(test_api -Wno-unused-variable)
-endif()
 
 if(USE_CUDA)
-  target_link_libraries(test_api PRIVATE
-    ${CUDA_LIBRARIES}
-    ${CUDA_NVRTC_LIB}
-    ${CUDA_CUDA_LIB}
-    ${TORCH_CUDA_LIBRARIES})
-
   target_compile_definitions(test_api PRIVATE "USE_CUDA")
-endif()
-
-# Workaround for https://github.com/pytorch/pytorch/issues/40941
-if(USE_OPENMP AND CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 8.0.0))
-  # Compiling transformer.cpp or pow_test.cpp with -O2+ and both -fuse-openmp and -faligned-newout any optimization
-  # Fails with internal compiler error in gcc-7.5 or older
-  # Workaround by compiling the tests without openmp (which they are not using anyway)
-  set_property(TARGET test_api APPEND_STRING PROPERTY COMPILE_FLAGS "-fno-openmp")
 endif()
 
 if(NOT MSVC)

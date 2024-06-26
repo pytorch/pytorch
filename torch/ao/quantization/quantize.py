@@ -1,7 +1,8 @@
+# mypy: allow-untyped-defs
 import copy
 import itertools
 import warnings
-
+import inspect
 import torch
 import torch.nn as nn
 import torch.ao.nn.quantized as nnq
@@ -174,8 +175,7 @@ def _add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=N
     if device is None:
         devices = _get_unique_devices_(module)
         assert len(devices) <= 1, (
-            "_add_observer_ only works with cpu or single-device CUDA modules, "
-            "but got devices {}".format(devices)
+            f"_add_observer_ only works with cpu or single-device CUDA modules, but got devices {devices}"
         )
         device = next(iter(devices)) if len(devices) > 0 else None
 
@@ -205,11 +205,14 @@ def _add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=N
         # TODO remove Dropout special after codebase stable
         if type_before_parametrizations(child) in [nn.Dropout]:
             continue
-        elif type_before_parametrizations(child) in [nnq.FloatFunctional, nnq.QFunctional]:
+        elif issubclass(type_before_parametrizations(child), (nnq.FloatFunctional, nnq.QFunctional)):
             if needs_observation(child):
+                assert hasattr(child, "activation_post_process"), (
+                    f"functional class {type_before_parametrizations(child)} has no pre-defined `activation_post_process`"
+                )
                 child.activation_post_process = get_activation_post_process(child.qconfig, device)
         elif isinstance(child, _FusedModule):
-            # activation_post_process are now added directly to nn.Sequentail/_FusedModule
+            # activation_post_process are now added directly to nn.Sequential/_FusedModule
             if needs_observation(child):
                 insert_activation_post_process(child)
         elif non_leaf_module_list is not None and type_before_parametrizations(child) in non_leaf_module_list:
@@ -231,6 +234,13 @@ def _add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=N
     # Insert observers only for leaf nodes, note that this observer is for
     # the output of the module, for input QuantStub will observe them
     if has_no_children_ignoring_parametrizations(module) and not isinstance(module, torch.nn.Sequential) \
+       and type_before_parametrizations(module) in qconfig_propagation_list:
+        insert_activation_post_process(module)
+    # This is a special case for AdaRound eager mode
+    # AdaRound contains weight_fake_quant to be propagated from API to convert
+    # leaf node check with a number of children looks naive assumption that blocks
+    # Adding an exception case for AdaRound
+    if hasattr(module, "weight_fake_quant") and not isinstance(module, torch.nn.Sequential) \
        and type_before_parametrizations(module) in qconfig_propagation_list:
         insert_activation_post_process(module)
 
@@ -323,7 +333,7 @@ def _remove_activation_post_process(module):
        _is_activation_post_process(module.activation_post_process):
         delattr(module, 'activation_post_process')
 
-    # remove activation_post_proceess pre and post hooks
+    # remove activation_post_process pre and post hooks
     def remove_hooks(pre_hook=False):
         hook_map = module._forward_pre_hooks if pre_hook else module._forward_hooks
         observer_hook = _observer_forward_pre_hook if pre_hook else _observer_forward_hook
@@ -442,7 +452,7 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
             }
         else:
             raise ValueError(
-                "Don't know how to quantize with default settings for {}. Provide full qconfig please".format(dtype))
+                f"Don't know how to quantize with default settings for {dtype}. Provide full qconfig please")
     elif isinstance(qconfig_spec, set):
         if dtype is torch.qint8:
             default_qconfig = default_dynamic_qconfig
@@ -518,7 +528,8 @@ def quantize_qat(model, run_fn, run_args, inplace=False):
 
 def convert(
         module, mapping=None, inplace=False, remove_qconfig=True,
-        is_reference=False, convert_custom_config_dict=None):
+        is_reference=False, convert_custom_config_dict=None,
+        use_precomputed_fake_quant=False):
     r"""Converts submodules in input module to a different module according to `mapping`
     by calling `from_float` method on the target module class. And remove qconfig at the
     end if remove_qconfig is set to True.
@@ -531,6 +542,7 @@ def convert(
         `inplace`: carry out model transformations in-place, the original module
                    is mutated
         `convert_custom_config_dict`: custom configuration dictionary for convert function
+        `use_precomputed_fake_quant`: a flag to enable use of precomputed fake quant
 
     .. code-block:: python
 
@@ -550,14 +562,16 @@ def convert(
         module = copy.deepcopy(module)
     _convert(
         module, mapping, inplace=True, is_reference=is_reference,
-        convert_custom_config_dict=convert_custom_config_dict)
+        convert_custom_config_dict=convert_custom_config_dict,
+        use_precomputed_fake_quant=use_precomputed_fake_quant)
     if remove_qconfig:
         _remove_qconfig(module)
     return module
 
 def _convert(
         module, mapping=None, inplace=False,
-        is_reference=False, convert_custom_config_dict=None):
+        is_reference=False, convert_custom_config_dict=None,
+        use_precomputed_fake_quant=False):
     r"""Converts submodules in input module to a different module according to `mapping`
     by calling `from_float` method on the target module class
 
@@ -569,6 +583,7 @@ def _convert(
         inplace: carry out model transformations in-place, the original module
                  is mutated
         is_reference: a flag to enable quantized reference module
+        use_precomputed_fake_quant: a flag to enable use of precomputed fake quant
 
     """
     if mapping is None:
@@ -587,15 +602,16 @@ def _convert(
         if not isinstance(mod, _FusedModule) and \
            type_before_parametrizations(mod) not in custom_module_class_mapping:
             _convert(mod, mapping, True,  # inplace
-                     is_reference, convert_custom_config_dict)
-        reassign[name] = swap_module(mod, mapping, custom_module_class_mapping)
+                     is_reference, convert_custom_config_dict,
+                     use_precomputed_fake_quant=use_precomputed_fake_quant)
+        reassign[name] = swap_module(mod, mapping, custom_module_class_mapping, use_precomputed_fake_quant)
 
     for key, value in reassign.items():
         module._modules[key] = value
 
     return module
 
-def swap_module(mod, mapping, custom_module_class_mapping):
+def swap_module(mod, mapping, custom_module_class_mapping, use_precomputed_fake_quant=False):
     r"""Swaps the module if it has a quantized counterpart and it has an
     `observer` attached.
 
@@ -621,7 +637,11 @@ def swap_module(mod, mapping, custom_module_class_mapping):
                 weight_qparams = get_qparam_dict(weight_post_process)
                 new_mod = qmod.from_float(mod, weight_qparams)
             else:
-                new_mod = qmod.from_float(mod)
+                sig = inspect.signature(qmod.from_float)
+                if 'use_precomputed_fake_quant' in sig.parameters:
+                    new_mod = qmod.from_float(mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
+                else:
+                    new_mod = qmod.from_float(mod)
             swapped = True
 
         if swapped:
@@ -637,8 +657,7 @@ def swap_module(mod, mapping, custom_module_class_mapping):
             # respect device affinity when swapping modules
             devices = _get_unique_devices_(mod)
             assert len(devices) <= 1, (
-                "swap_module only works with cpu or single-device CUDA modules, "
-                "but got devices {}".format(devices)
+                f"swap_module only works with cpu or single-device CUDA modules, but got devices {devices}"
             )
             device = next(iter(devices)) if len(devices) > 0 else None
             if device:

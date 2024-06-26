@@ -229,7 +229,7 @@ void MaxUnpoolImpl<D, Derived>::pretty_print(std::ostream& stream) const {
 Tensor MaxUnpool1dImpl::forward(
     const Tensor& input,
     const Tensor& indices,
-    const c10::optional<std::vector<int64_t>>& output_size) {
+    const std::optional<std::vector<int64_t>>& output_size) {
   return F::detail::max_unpool1d(
       input,
       indices,
@@ -242,7 +242,7 @@ Tensor MaxUnpool1dImpl::forward(
 Tensor MaxUnpool2dImpl::forward(
     const Tensor& input,
     const Tensor& indices,
-    const c10::optional<std::vector<int64_t>>& output_size) {
+    const std::optional<std::vector<int64_t>>& output_size) {
   return F::detail::max_unpool2d(
       input,
       indices,
@@ -255,7 +255,7 @@ Tensor MaxUnpool2dImpl::forward(
 Tensor MaxUnpool3dImpl::forward(
     const Tensor& input,
     const Tensor& indices,
-    const c10::optional<std::vector<int64_t>>& output_size) {
+    const std::optional<std::vector<int64_t>>& output_size) {
   return F::detail::max_unpool3d(
       input,
       indices,
@@ -428,6 +428,17 @@ Tensor LPPool2dImpl::forward(const Tensor& input) {
 }
 
 template class LPPoolImpl<2, LPPool2dImpl>;
+
+Tensor LPPool3dImpl::forward(const Tensor& input) {
+  return F::detail::lp_pool3d(
+      input,
+      options.norm_type(),
+      options.kernel_size(),
+      options.stride(),
+      options.ceil_mode());
+}
+
+template class LPPoolImpl<3, LPPool3dImpl>;
 
 } // namespace nn
 } // namespace torch

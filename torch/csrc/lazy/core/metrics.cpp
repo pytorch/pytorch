@@ -321,7 +321,7 @@ std::string MetricFnValue(double value) {
 std::string MetricFnBytes(double value) {
   static const std::array<const char*, 6> kSizeSuffixes{
       "B", "KB", "MB", "GB", "TB", "PB"};
-  int sfix = 0;
+  unsigned sfix = 0;
   for (; (sfix + 1) < kSizeSuffixes.size() && value >= 1024.0; ++sfix) {
     value /= 1024.0;
   }

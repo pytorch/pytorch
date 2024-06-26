@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import ast
 import inspect
 import textwrap
@@ -21,6 +22,11 @@ class AST_Rewriter(ast.NodeTransformer):
     https://docs.python.org/3/library/ast.html#ast.NodeTransformer
     """
 
+    # This function checks for new keys added in the globals dict. TorchDynamo
+    # can insert new keys in the global dict and upset the check. Therefore, put
+    # a disable here. This function is an optimization pass and not really
+    # suitable for dynamo tracing anyways.
+    @torch._dynamo.disable
     def rewrite(self, fn: FunctionType):
 
         # Normalize the source lines
@@ -33,7 +39,7 @@ class AST_Rewriter(ast.NodeTransformer):
         source_ast = ast.parse(normalized_str)
         dest_ast = ast.fix_missing_locations(self.visit(source_ast))
 
-        # Pull out the compiled fucntion from the newly-created Module
+        # Pull out the compiled function from the newly-created Module
         code = compile(dest_ast, "", "exec")
         globals_dict = copy.copy(fn.__globals__)
         keys_before = set(globals_dict.keys())
@@ -55,7 +61,7 @@ class AST_Rewriter(ast.NodeTransformer):
                 closure=f.__closure__,
             )
             g = functools.update_wrapper(g, f)
-            g.__kwdefaults__ = copy.copy(f.__kwdefaults__)
+            g.__kwdefaults__ = copy.copy(f.__kwdefaults__)  # type:ignore[attr-defined]
             return g
         # Return the correct FunctionType object
         return change_func_globals(fn_compiled, globals=fn.__globals__)

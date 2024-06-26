@@ -142,8 +142,7 @@ std::unique_ptr<RRefUserDelete> RRefUserDelete::fromMessage(
     const Message& message) {
   auto pair =
       ForkMessageBase::fromMessage(message, MessageType::RREF_USER_DELETE);
-  return std::make_unique<RRefUserDelete>(
-      RRefUserDelete(pair.first, pair.second));
+  return std::make_unique<RRefUserDelete>(pair.first, pair.second);
 }
 
 std::unique_ptr<RemoteRet> RemoteRet::fromMessage(const Message& message) {

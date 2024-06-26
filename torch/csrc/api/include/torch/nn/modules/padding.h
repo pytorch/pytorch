@@ -32,7 +32,7 @@ class TORCH_API ReflectionPadImpl : public torch::nn::Cloneable<Derived> {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies ReflectionPad over a 1-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.ReflectionPad1d to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.ReflectionPad1d to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::ReflectionPad1dOptions` class to learn
@@ -59,7 +59,7 @@ TORCH_MODULE(ReflectionPad1d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies ReflectionPad over a 2-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.ReflectionPad2d to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.ReflectionPad2d to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::ReflectionPad2dOptions` class to learn
@@ -86,7 +86,7 @@ TORCH_MODULE(ReflectionPad2d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies ReflectionPad over a 3-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.ReflectionPad3d to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.ReflectionPad3d to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::ReflectionPad3dOptions` class to learn
@@ -135,7 +135,7 @@ class TORCH_API ReplicationPadImpl : public torch::nn::Cloneable<Derived> {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies ReplicationPad over a 1-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.ReplicationPad1d to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.ReplicationPad1d to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::ReplicationPad1dOptions` class to
@@ -162,7 +162,7 @@ TORCH_MODULE(ReplicationPad1d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies ReplicationPad over a 2-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.ReplicationPad2d to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.ReplicationPad2d to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::ReplicationPad2dOptions` class to
@@ -189,7 +189,7 @@ TORCH_MODULE(ReplicationPad2d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies ReplicationPad over a 3-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.ReplicationPad3d to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.ReplicationPad3d to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::ReplicationPad3dOptions` class to
@@ -212,34 +212,46 @@ class TORCH_API ReplicationPad3dImpl
 /// `ModuleHolder` to learn about PyTorch's module storage semantics.
 TORCH_MODULE(ReplicationPad3d);
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ZeroPad2d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ============================================================================
 
-/// Applies ZeroPad over a 2-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.ZeroPad2d to learn
-/// about the exact behavior of this module.
-///
-/// See the documentation for `torch::nn::ZeroPad2dOptions` class to learn what
-/// constructor arguments are supported for this module.
-///
-/// Example:
-/// ```
-/// ZeroPad2d model(ZeroPad2dOptions({1, 1, 2, 0}));
-/// ```
-class TORCH_API ZeroPad2dImpl : public Cloneable<ZeroPad2dImpl> {
+/// Base class for all (dimension-specialized) ZeroPad modules.
+template <size_t D, typename Derived>
+class TORCH_API ZeroPadImpl : public torch::nn::Cloneable<Derived> {
  public:
-  ZeroPad2dImpl(ExpandingArray<4> padding)
-      : ZeroPad2dImpl(ZeroPad2dOptions(padding)) {}
-  explicit ZeroPad2dImpl(const ZeroPad2dOptions& options_);
+  ZeroPadImpl(ExpandingArray<D * 2> padding)
+      : ZeroPadImpl(ZeroPadOptions<D>(padding)) {}
+  explicit ZeroPadImpl(const ZeroPadOptions<D>& options_);
 
   void reset() override;
 
-  /// Pretty prints the `ZeroPad2d` module into the given `stream`.
-  void pretty_print(std::ostream& stream) const override;
-
   Tensor forward(const Tensor& input);
 
+  /// Pretty prints the `ZeroPad{1,2}d` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
   /// The options with which this `Module` was constructed.
-  ZeroPad2dOptions options;
+  ZeroPadOptions<D> options;
+};
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ZeroPad1d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Applies ZeroPad over a 1-D input.
+class TORCH_API ZeroPad1dImpl : public ZeroPadImpl<1, ZeroPad1dImpl> {
+ public:
+  using ZeroPadImpl<1, ZeroPad1dImpl>::ZeroPadImpl;
+};
+
+/// A `ModuleHolder` subclass for `ZeroPad1dImpl`.
+/// See the documentation for `ZeroPad1dImpl` class to learn what methods it
+/// provides, and examples of how to use `ZeroPad1d` with
+/// `torch::nn::ZeroPad1dOptions`. See the documentation for `ModuleHolder` to
+/// learn about PyTorch's module storage semantics.
+TORCH_MODULE(ZeroPad1d);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ZeroPad2d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Applies ZeroPad over a 2-D input.
+class TORCH_API ZeroPad2dImpl : public ZeroPadImpl<2, ZeroPad2dImpl> {
+ public:
+  using ZeroPadImpl<2, ZeroPad2dImpl>::ZeroPadImpl;
 };
 
 /// A `ModuleHolder` subclass for `ZeroPad2dImpl`.
@@ -248,6 +260,20 @@ class TORCH_API ZeroPad2dImpl : public Cloneable<ZeroPad2dImpl> {
 /// `torch::nn::ZeroPad2dOptions`. See the documentation for `ModuleHolder` to
 /// learn about PyTorch's module storage semantics.
 TORCH_MODULE(ZeroPad2d);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ZeroPad3d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Applies ZeroPad over a 3-D input.
+class TORCH_API ZeroPad3dImpl : public ZeroPadImpl<3, ZeroPad3dImpl> {
+ public:
+  using ZeroPadImpl<3, ZeroPad3dImpl>::ZeroPadImpl;
+};
+
+/// A `ModuleHolder` subclass for `ZeroPad3dImpl`.
+/// See the documentation for `ZeroPad3dImpl` class to learn what methods it
+/// provides, and examples of how to use `ZeroPad3d` with
+/// `torch::nn::ZeroPad3dOptions`. See the documentation for `ModuleHolder` to
+/// learn about PyTorch's module storage semantics.
+TORCH_MODULE(ZeroPad3d);
 
 // ============================================================================
 
@@ -273,7 +299,7 @@ class TORCH_API ConstantPadImpl : public torch::nn::Cloneable<Derived> {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ConstantPad1d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies ConstantPad over a 1-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.ConstantPad1d to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.ConstantPad1d to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::ConstantPad1dOptions` class to learn
@@ -299,7 +325,7 @@ TORCH_MODULE(ConstantPad1d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ConstantPad2d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies ConstantPad over a 2-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.ConstantPad2d to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.ConstantPad2d to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::ConstantPad2dOptions` class to learn
@@ -325,7 +351,7 @@ TORCH_MODULE(ConstantPad2d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ConstantPad3d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies ConstantPad over a 3-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.ConstantPad3d to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.ConstantPad3d to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::ConstantPad3dOptions` class to learn

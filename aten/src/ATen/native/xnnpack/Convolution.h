@@ -6,34 +6,31 @@
 #include <ATen/native/xnnpack/Common.h>
 #include <ATen/native/xnnpack/OpContext.h>
 
-namespace at {
-namespace native {
-namespace xnnpack {
-namespace internal {
-namespace convolution2d {
+namespace at::native::xnnpack {
+namespace internal::convolution2d {
 
 c10::intrusive_ptr<xnnpack::Conv2dOpContext>
     createConv2dClampPrePackOpContext(
         Tensor weight,
-        c10::optional<Tensor> bias,
+        std::optional<Tensor> bias,
         std::vector<int64_t> stride,
         std::vector<int64_t> padding,
         std::vector<int64_t> dilation,
         int64_t groups,
-        const c10::optional<Scalar>& output_min,
-        const c10::optional<Scalar>& output_max);
+        const std::optional<Scalar>& output_min,
+        const std::optional<Scalar>& output_max);
 
 c10::intrusive_ptr<xnnpack::TransposeConv2dOpContext>
     createConv2dTransposeClampPrePackOpContext(
         Tensor weight,
-        c10::optional<Tensor> bias,
+        std::optional<Tensor> bias,
         std::vector<int64_t> stride,
         std::vector<int64_t> padding,
         std::vector<int64_t> output_padding,
         std::vector<int64_t> dilation,
         int64_t groups,
-        const c10::optional<Scalar>& output_min,
-        const c10::optional<Scalar>& output_max);
+        const std::optional<Scalar>& output_min,
+        const std::optional<Scalar>& output_max);
 
 Tensor conv2d_clamp_run(
     const Tensor& input,
@@ -48,7 +45,7 @@ Tensor conv2d_transpose_clamp_run(
 
 ContextConv2D create(
     const Tensor& weight,
-    const c10::optional<Tensor>& bias,
+    const std::optional<Tensor>& bias,
     const IntArrayRef padding,
     const IntArrayRef output_padding,
     const IntArrayRef stride,
@@ -60,10 +57,16 @@ ContextConv2D create(
 
 Tensor run(ContextConv2D& context, const Tensor& input);
 
-} // namespace convolution2d
-} // namespace internal
-} // namespace xnnpack
-} // namespace native
-} // namespace at
+} // namespace internal::convolution2d
+
+Tensor convolution2d(
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& bias,
+    const IntArrayRef padding,
+    const IntArrayRef stride,
+    const IntArrayRef dilation,
+    const int64_t groups);
+} // namespace at::native::xnnpack
 
 #endif /* USE_XNNPACK */

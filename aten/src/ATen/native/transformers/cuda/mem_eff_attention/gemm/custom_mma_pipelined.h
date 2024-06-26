@@ -1,5 +1,5 @@
 /***************************************************************************************************
- * Copyright (c) 2017 - 2022 NVIDIA CORPORATION & AFFILIATES. All rights
+ * Copyright (c) 2017 - 2023 NVIDIA CORPORATION & AFFILIATES. All rights
  *reserved. SPDX-License-Identifier: BSD-3-Clause
  *
  * Redistribution and use in source and binary forms, with or without
@@ -139,7 +139,7 @@ class CustomMmaPipelined : public CustomMmaBase<Shape_, Policy_, 2> {
   /// Complex transform on B operand
   static ComplexTransform const kTransformB = Operator::kTransformB;
 
-  // staticaly assert kStages for MmaPipelined is two (Double-buffered pipeline)
+  // statically assert kStages for MmaPipelined is two (Double-buffered pipeline)
   static_assert(
       (Base::kStages == 2),
       "MmaPipelined requires kStages set to value 2");

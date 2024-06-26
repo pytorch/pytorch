@@ -28,7 +28,7 @@ __global__ void upsample_linear1d_out_frame(
     const int n,
     const accscalar_t rwidth,
     const bool align_corners,
-    const PackedTensorAccessor64<scalar_t, 3> idata,
+    const PackedTensorAccessor64<const scalar_t, 3> idata,
     PackedTensorAccessor64<scalar_t, 3> odata) {
   int index = threadIdx.x + blockIdx.x * blockDim.x;
 
@@ -76,7 +76,7 @@ __global__ void upsample_linear1d_out_frame_backward(
     const accscalar_t rwidth,
     const bool align_corners,
     PackedTensorAccessor64<scalar_t, 3> idata,
-    const PackedTensorAccessor64<scalar_t, 3> odata) {
+    const PackedTensorAccessor64<const scalar_t, 3> odata) {
   int index = threadIdx.x + blockIdx.x * blockDim.x;
 
   const int batchsize = idata.size(0);
@@ -121,7 +121,7 @@ static void upsample_linear1d_out_cuda_template(
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
-    c10::optional<double> scales) {
+    std::optional<double> scales) {
   TensorArg input_arg{input, "input", 1}, output_arg{output, "output", 2};
   checkAllSameGPU(__func__, {input_arg, output_arg});
 
@@ -138,11 +138,12 @@ static void upsample_linear1d_out_cuda_template(
       //at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::BFloat16,
       input.scalar_type(), "upsample_linear1d_out_frame", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
-        auto idata = input.packed_accessor64<scalar_t, 3>();
+        auto idata = input.packed_accessor64<const scalar_t, 3>();
         auto odata = output.packed_accessor64<scalar_t, 3>();
 
         const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
@@ -163,7 +164,7 @@ static void upsample_linear1d_backward_out_cuda_template(
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners,
-    c10::optional<double> scales) {
+    std::optional<double> scales) {
   TensorArg grad_output_arg{grad_output_, "grad_output_", 1},
       grad_input_arg{grad_input, "grad_input", 2};
   checkAllSameGPU(__func__, {grad_output_arg, grad_input_arg});
@@ -181,12 +182,13 @@ static void upsample_linear1d_backward_out_cuda_template(
       //at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::BFloat16,
       grad_output.scalar_type(), "upsample_linear1d_out_frame_backward", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
         auto idata = grad_input.packed_accessor64<scalar_t, 3>();
-        auto odata = grad_output.packed_accessor64<scalar_t, 3>();
+        auto odata = grad_output.packed_accessor64<const scalar_t, 3>();
 
         const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
             input_width, output_width, align_corners, scales);
@@ -206,7 +208,7 @@ TORCH_IMPL_FUNC(upsample_linear1d_out_cuda) (
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
-    c10::optional<double> scales,
+    std::optional<double> scales,
     const Tensor& output
 ) {
   upsample_linear1d_out_cuda_template(output, input, output_size, align_corners, scales);
@@ -217,7 +219,7 @@ TORCH_IMPL_FUNC(upsample_linear1d_backward_out_cuda) (
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners,
-    c10::optional<double> scales,
+    std::optional<double> scales,
     const Tensor& grad_input
 ) {
   // See Note [Writing Nondeterministic Operations]

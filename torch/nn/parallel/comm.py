@@ -1,9 +1,18 @@
+# mypy: allow-untyped-defs
 import warnings
-import torch
-from torch.cuda import nccl
-from torch._utils import _take_tensors, _flatten_dense_tensors, \
-    _unflatten_dense_tensors, _reorder_tensors_as, _get_device_index, _handle_complex
 from typing import List
+
+import torch
+from torch._utils import (
+    _flatten_dense_tensors,
+    _get_device_index,
+    _handle_complex,
+    _reorder_tensors_as,
+    _take_tensors,
+    _unflatten_dense_tensors,
+)
+from torch.cuda import nccl
+
 
 def broadcast(tensor, devices=None, *, out=None):
     r"""Broadcasts a tensor to specified GPU devices.
@@ -29,8 +38,8 @@ def broadcast(tensor, devices=None, *, out=None):
     tensor = _handle_complex(tensor)
     if not ((devices is None) ^ (out is None)):
         raise RuntimeError(
-            "Exactly one of 'devices' and 'out' must be specified, but got "
-            "devices={} and out={}".format(devices, out))
+            f"Exactly one of 'devices' and 'out' must be specified, but got devices={devices} and out={out}"
+        )
     if devices is not None:
         devices = [_get_device_index(d) for d in devices]
         return torch._C._broadcast(tensor, devices)
@@ -39,9 +48,9 @@ def broadcast(tensor, devices=None, *, out=None):
 
 
 def broadcast_coalesced(tensors, devices, buffer_size=10485760):
-    """Broadcasts a sequence tensors to the specified GPUs.
-    Small tensors are first coalesced into a buffer to reduce the number
-    of synchronizations.
+    """Broadcast a sequence of tensors to the specified GPUs.
+
+    Small tensors are first coalesced into a buffer to reduce the number of synchronizations.
 
     Args:
         tensors (sequence): tensors to broadcast. Must be on the same device,
@@ -59,7 +68,7 @@ def broadcast_coalesced(tensors, devices, buffer_size=10485760):
 
 
 def reduce_add(inputs, destination=None):
-    """Sums tensors from multiple GPUs.
+    """Sum tensors from multiple GPUs.
 
     All inputs should have matching shapes, dtype, and layout. The output tensor
     will be of the same shape, dtype, and layout.
@@ -81,12 +90,15 @@ def reduce_add(inputs, destination=None):
         if inp.get_device() == destination:
             root_index = i
         if inp.size() != input_size:
-            got = 'x'.join(str(x) for x in inp.size())
-            expected = 'x'.join(str(x) for x in input_size)
-            raise ValueError("input {} has invalid size: got {}, but expected "
-                             "{}".format(i, got, expected))
+            got = "x".join(str(x) for x in inp.size())
+            expected = "x".join(str(x) for x in input_size)
+            raise ValueError(
+                f"input {i} has invalid size: got {got}, but expected {expected}"
+            )
     if root_index is None:
-        raise RuntimeError("reduce_add expects destination to be on the same GPU with one of the tensors")
+        raise RuntimeError(
+            "reduce_add expects destination to be on the same GPU with one of the tensors"
+        )
 
     if len(inputs) == 1:
         return inputs[0]
@@ -98,14 +110,16 @@ def reduce_add(inputs, destination=None):
         destination_device = torch.device(inputs[root_index].device.type, destination)
         nonroot = [t for i, t in enumerate(inputs) if i != root_index]
         # make a new tensor w/o clone
-        result = inputs[root_index] + nonroot[0].to(device=destination_device, non_blocking=True)
+        result = inputs[root_index] + nonroot[0].to(
+            device=destination_device, non_blocking=True
+        )
         for other in nonroot[1:]:
             result.add_(other.to(device=destination_device, non_blocking=True))
     return result
 
 
 def reduce_add_coalesced(inputs, destination=None, buffer_size=10485760):
-    """Sums tensors from multiple GPUs.
+    """Sum tensors from multiple GPUs.
 
     Small tensors are first coalesced into a buffer to reduce the number
     of synchronizations.
@@ -139,7 +153,9 @@ def reduce_add_coalesced(inputs, destination=None, buffer_size=10485760):
     itrs = [_take_tensors(tensors, buffer_size) for tensors in dense_tensors]
     # now the dense ones, which have consistent sizes
     for chunks in zip(*itrs):
-        flat_tensors = [_flatten_dense_tensors(chunk) for chunk in chunks]  # (num_gpus,)
+        flat_tensors = [
+            _flatten_dense_tensors(chunk) for chunk in chunks
+        ]  # (num_gpus,)
         flat_result = reduce_add(flat_tensors, destination)
         for t in _unflatten_dense_tensors(flat_result, chunks[0]):
             # The unflattened tensors do not share storage, and we don't expose
@@ -162,7 +178,7 @@ def scatter(tensor, devices=None, chunk_sizes=None, dim=0, streams=None, *, out=
           into equal chunks.
         dim (int, optional): A dimension along which to chunk :attr:`tensor`.
           Default: ``0``.
-        streams (Iterable[Stream], optional): an iterable of Streams, among
+        streams (Iterable[torch.cuda.Stream], optional): an iterable of Streams, among
           which to execute the scatter. If not specified, the default stream will
           be utilized.
         out (Sequence[Tensor], optional, keyword-only): the GPU tensors to
@@ -190,12 +206,12 @@ def scatter(tensor, devices=None, chunk_sizes=None, dim=0, streams=None, *, out=
     else:
         if devices is not None:
             raise RuntimeError(
-                "'devices' must not be specified when 'out' is specified, but "
-                "got devices={}".format(devices))
+                f"'devices' must not be specified when 'out' is specified, but got devices={devices}"
+            )
         if chunk_sizes is not None:
             raise RuntimeError(
-                "'chunk_sizes' must not be specified when 'out' is specified, "
-                "but got chunk_sizes={}".format(chunk_sizes))
+                f"'chunk_sizes' must not be specified when 'out' is specified, but got chunk_sizes={chunk_sizes}"
+            )
         return tuple(torch._C._scatter_out(tensor, out, dim, streams))
 
 
@@ -229,13 +245,16 @@ def gather(tensors, dim=0, destination=None, *, out=None):
     if out is None:
         if destination == -1:
             warnings.warn(
-                'Using -1 to represent CPU tensor is deprecated. Please use a '
-                'device object or string instead, e.g., "cpu".')
+                "Using -1 to represent CPU tensor is deprecated. Please use a "
+                'device object or string instead, e.g., "cpu".',
+                FutureWarning,
+                stacklevel=2,
+            )
         destination = _get_device_index(destination, allow_cpu=True, optional=True)
         return torch._C._gather(tensors, dim, destination)
     else:
         if destination is not None:
             raise RuntimeError(
-                "'destination' must not be specified when 'out' is specified, but "
-                "got destination={}".format(destination))
+                f"'destination' must not be specified when 'out' is specified, but got destination={destination}"
+            )
         return torch._C._gather_out(tensors, out, dim)

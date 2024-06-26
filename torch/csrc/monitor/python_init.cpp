@@ -42,18 +42,18 @@ struct type_caster<torch::monitor::data_value_t> {
       torch::monitor::data_value_t src,
       return_value_policy /* policy */,
       handle /* parent */) {
-    if (c10::holds_alternative<double>(src)) {
-      return PyFloat_FromDouble(c10::get<double>(src));
-    } else if (c10::holds_alternative<int64_t>(src)) {
-      return THPUtils_packInt64(c10::get<int64_t>(src));
-    } else if (c10::holds_alternative<bool>(src)) {
-      if (c10::get<bool>(src)) {
+    if (std::holds_alternative<double>(src)) {
+      return PyFloat_FromDouble(std::get<double>(src));
+    } else if (std::holds_alternative<int64_t>(src)) {
+      return THPUtils_packInt64(std::get<int64_t>(src));
+    } else if (std::holds_alternative<bool>(src)) {
+      if (std::get<bool>(src)) {
         Py_RETURN_TRUE;
       } else {
         Py_RETURN_FALSE;
       }
-    } else if (c10::holds_alternative<std::string>(src)) {
-      std::string str = c10::get<std::string>(src);
+    } else if (std::holds_alternative<std::string>(src)) {
+      std::string str = std::get<std::string>(src);
       return THPUtils_packString(str);
     }
     throw std::runtime_error("unknown data_value_t type");
@@ -213,7 +213,7 @@ void initMonitorBindings(PyObject* module) {
             Event e;
             e.name = name;
             e.timestamp = timestamp;
-            e.data = data;
+            e.data = std::move(data);
             return e;
           }),
           py::arg("name"),
@@ -274,7 +274,7 @@ void initMonitorBindings(PyObject* module) {
   m.def(
       "register_event_handler",
       [](std::function<void(const Event&)> f) {
-        auto handler = std::make_shared<PythonEventHandler>(f);
+        auto handler = std::make_shared<PythonEventHandler>(std::move(f));
         registerEventHandler(handler);
         return handler;
       },
@@ -287,7 +287,7 @@ void initMonitorBindings(PyObject* module) {
       )DOC");
   m.def(
       "unregister_event_handler",
-      [](std::shared_ptr<PythonEventHandler> handler) {
+      [](const std::shared_ptr<PythonEventHandler>& handler) {
         unregisterEventHandler(handler);
       },
       py::arg("handler"),

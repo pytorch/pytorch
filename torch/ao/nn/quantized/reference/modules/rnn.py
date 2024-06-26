@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 import torch.nn as nn
 from torch import Tensor
@@ -152,7 +153,7 @@ class RNNCell(RNNCellBase):
         else:
             ret = input  # TODO: remove when jit supports exception flow
             raise RuntimeError(
-                "Unknown nonlinearity: {}".format(self.nonlinearity))
+                f"Unknown nonlinearity: {self.nonlinearity}")
 
         if not is_batched:
             ret = ret.squeeze(0)
@@ -213,7 +214,7 @@ class LSTMCell(RNNCellBase):
         return ret
 
     @classmethod
-    def from_float(cls, mod, weight_qparams_dict):
+    def from_float(cls, mod, weight_qparams_dict, use_precomputed_fake_quant=False):
         ref_mod = cls(
             mod.input_size,
             mod.hidden_size,
@@ -412,8 +413,7 @@ class LSTM(RNNBase):
         batch_sizes = None
         if isinstance(orig_input, PackedSequence):
             input, batch_sizes, sorted_indices, unsorted_indices = input
-            max_batch_size = batch_sizes[0]
-            max_batch_size = int(max_batch_size)
+            max_batch_size = int(batch_sizes[0])
         else:
             batch_sizes = None
             is_batched = input.dim() == 3
@@ -436,7 +436,7 @@ class LSTM(RNNBase):
             hx = (h_zeros, c_zeros)
         else:
             if batch_sizes is None:  # If not PackedSequence input.
-                if is_batched:
+                if is_batched:  # type: ignore[possibly-undefined]
                     if (hx[0].dim() != 3 or hx[1].dim() != 3):
                         msg = ("For batched 3-D input, hx and cx should "
                                f"also be 3-D but got ({hx[0].dim()}-D, {hx[1].dim()}-D) tensors")
@@ -466,8 +466,8 @@ class LSTM(RNNBase):
             output_packed = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
             return output_packed, self.permute_hidden(hidden, unsorted_indices)
         else:
-            if not is_batched:
-                output = output.squeeze(batch_dim)
+            if not is_batched:  # type: ignore[possibly-undefined]
+                output = output.squeeze(batch_dim)  # type: ignore[possibly-undefined]
                 hidden = (hidden[0].squeeze(1), hidden[1].squeeze(1))
             return output, self.permute_hidden(hidden, unsorted_indices)
 
@@ -544,8 +544,7 @@ class GRU(RNNBase):
         # xxx: isinstance check needs to be in conditional for TorchScript to compile
         if isinstance(orig_input, PackedSequence):
             input, batch_sizes, sorted_indices, unsorted_indices = input
-            max_batch_size = batch_sizes[0]
-            max_batch_size = int(max_batch_size)
+            max_batch_size = int(batch_sizes[0])
         else:
             batch_sizes = None
             assert (input.dim() in (2, 3)), f"GRU: Expected input to be 2-D or 3-D but received {input.dim()}-D tensor"
@@ -591,8 +590,8 @@ class GRU(RNNBase):
             output_packed = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
             return output_packed, self.permute_hidden(hidden, unsorted_indices)
         else:
-            if not is_batched:
-                output = output.squeeze(batch_dim)
+            if not is_batched:  # type: ignore[possibly-undefined]
+                output = output.squeeze(batch_dim)  # type: ignore[possibly-undefined]
                 hidden = hidden.squeeze(1)
 
             return output, self.permute_hidden(hidden, unsorted_indices)

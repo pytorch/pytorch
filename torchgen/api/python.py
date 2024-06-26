@@ -2,7 +2,6 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Set, Tuple, Union
 
 from torchgen.api import cpp
-
 from torchgen.api.types import Binding, CppSignature, CppSignatureGroup
 from torchgen.gen import pythonify_default
 from torchgen.model import (
@@ -17,6 +16,7 @@ from torchgen.model import (
     Type,
     Variant,
 )
+
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
@@ -62,9 +62,9 @@ from torchgen.model import (
 #    Note: the scattered TensorOptions fields are packed into 'options'.
 #
 #      auto dispatch_empty =
-#          [](IntArrayRef size, c10::optional<DimnameList> names,
+#          [](IntArrayRef size, std::optional<DimnameList> names,
 #             const TensorOptions & options,
-#             c10::optional<MemoryFormat> memory_format) -> Tensor {
+#             std::optional<MemoryFormat> memory_format) -> Tensor {
 #          pybind11::gil_scoped_release no_gil;
 #          return torch::empty(size, names, options, memory_format);
 #      };
@@ -93,9 +93,9 @@ from torchgen.model import (
 #    Where does 'names' come from? It involves special local init:
 #
 #      auto __names = _r.toDimnameListOptional(1);
-#      c10::optional<DimnameList> names =
-#          __names ? c10::make_optional(DimnameList(__names.value()))
-#                  : c10::nullopt;
+#      std::optional<DimnameList> names =
+#          __names ? std::make_optional(DimnameList(__names.value()))
+#                  : std::nullopt;
 #
 #    Where does 'options' come from? It involves special local init
 #    for TensorOptions. Note that Python side has the additional
@@ -235,6 +235,8 @@ class PythonArgument:
             default = {
                 "nullptr": "None",
                 "c10::nullopt": "None",
+                "::std::nullopt": "None",
+                "std::nullopt": "None",
                 "{}": "None",
             }.get(self.default, self.default)
             return f"{type_str} {name}={default}"
@@ -280,11 +282,13 @@ class PythonArgument:
                 default = {
                     "nullptr": "None",
                     "c10::nullopt": "None",
+                    "::std::nullopt": "None",
+                    "std::nullopt": "None",
                     "{}": "None",
                     "MemoryFormat::Contiguous": "contiguous_format",
                     "QScheme::PER_TENSOR_AFFINE": "per_tensor_affine",
                 }.get(self.default, self.default)
-            return f"{name}: {type_str}={default}"
+            return f"{name}: {type_str} = {default}"
         else:
             return f"{name}: {type_str}"
 
@@ -315,7 +319,7 @@ class PythonOutArgument(PythonArgument):
                 outputs=outputs,
             )
         elif size > 1:
-            if any(map(lambda a: not a.type.is_tensor_like(), outputs)):
+            if any(not a.type.is_tensor_like() for a in outputs):
                 raise RuntimeError(f"Unsupported output type: {outputs}")
             return PythonOutArgument(
                 name="out",
@@ -390,9 +394,9 @@ class PythonSignature:
     # signature_str_pyi().
     def signature_str(self, *, skip_outputs: bool = False, symint: bool = True) -> str:
         args = self.arguments(skip_outputs=skip_outputs)
-        schema_formals: List[str] = list(
-            map(lambda a: a.argument_str(method=self.method, symint=symint), args)
-        )
+        schema_formals: List[str] = [
+            a.argument_str(method=self.method, symint=symint) for a in args
+        ]
         positional_argc = len(self.input_args)
         if len(schema_formals) > positional_argc:
             schema_formals.insert(positional_argc, "*")
@@ -401,9 +405,9 @@ class PythonSignature:
 
     def signature_str_pyi(self, *, skip_outputs: bool = False) -> str:
         args = self.arguments(skip_outputs=skip_outputs)
-        schema_formals: List[str] = list(
-            map(lambda a: a.argument_str_pyi(method=self.method), args)
-        )
+        schema_formals: List[str] = [
+            a.argument_str_pyi(method=self.method) for a in args
+        ]
         positional_argc = len(self.input_args)
         if len(schema_formals) > positional_argc:
             schema_formals.insert(positional_argc, "*")
@@ -418,9 +422,9 @@ class PythonSignature:
     def signature_str_pyi_vararg(self, *, skip_outputs: bool = False) -> Optional[str]:
         # only pyi uses vararg signatures
         args = self.arguments(skip_outputs=skip_outputs)
-        schema_formals: List[str] = list(
-            map(lambda a: a.argument_str_pyi(method=self.method), args)
-        )
+        schema_formals: List[str] = [
+            a.argument_str_pyi(method=self.method) for a in args
+        ]
         # vararg only applies to pyi signatures. vararg variants are not generated for all signatures
         num_args = self.arguments_count()
         num_positionalargs = len(self.input_args)
@@ -437,9 +441,13 @@ class PythonSignature:
 
         if not have_vararg_version:
             return None
+
         # Below are the major changes in vararg vs. regular pyi signatures
         # vararg signatures also omit the asterix
-        schema_formals[0] = "*" + args[0].name + ": _int"
+        assert isinstance(vararg_type, ListType)
+        schema_formals[0] = (
+            "*" + args[0].name + ": " + argument_type_str_pyi(vararg_type.elem)
+        )
 
         returns_str = returns_str_pyi(self)
         # pyi also includes self (with no typing/defaults) for methods
@@ -478,9 +486,9 @@ class PythonSignatureDeprecated(PythonSignature):
 
     def signature_str_pyi(self, *, skip_outputs: bool = False) -> str:
         args = self.arguments(skip_outputs=skip_outputs)
-        schema_formals: List[str] = list(
-            map(lambda a: a.argument_str_pyi(method=self.method, deprecated=True), args)
-        )
+        schema_formals: List[str] = [
+            a.argument_str_pyi(method=self.method, deprecated=True) for a in args
+        ]
         positional_argc = len(self.input_args)
         if len(schema_formals) > positional_argc:
             schema_formals.insert(positional_argc, "*")
@@ -636,6 +644,7 @@ def has_tensor_options(f: NativeFunction) -> bool:
 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
+
 # 'simple_type' was introduced by the old codegen, which is slightly
 # different from the python schema type, e.g.: doesn't have '?' suffix
 # for optional Tensor/TensorList; doesn't have '[size]' suffix for list type.
@@ -660,6 +669,7 @@ def argument_type_str(
             BaseTy.Storage,
             BaseTy.Layout,
             BaseTy.Device,
+            BaseTy.DeviceIndex,
             BaseTy.MemoryFormat,
             BaseTy.Dimname,
             BaseTy.Stream,
@@ -695,9 +705,9 @@ def argument_type_str(
             return f"ScalarList[{size}]" if size is not None else "ScalarList"
         elif str(t.elem) == "Tensor?":
             if simple_type:
-                return "c10::List<c10::optional<Tensor>>"
+                return "c10::List<::std::optional<Tensor>>"
             else:
-                return "const c10::List<c10::optional<Tensor>> &"
+                return "const c10::List<::std::optional<Tensor>> &"
         elif str(t.elem) == "Dimname":
             return f"DimnameList[{size}]" if size is not None else "DimnameList"
         elem = argument_type_str(t.elem, simple_type=simple_type, symint=symint)
@@ -719,11 +729,11 @@ def argument(a: Argument) -> PythonArgument:
         name=a.name,
         type=a.type,
         # TODO: directly translate a.default to python default
-        default=str(
-            pythonify_default(cpp.default_expr(a.default, a.type, symint=False))
-        )
-        if a.default is not None
-        else None,
+        default=(
+            str(pythonify_default(cpp.default_expr(a.default, a.type, symint=False)))
+            if a.default is not None
+            else None
+        ),
         default_init=None,
     )
 
@@ -756,9 +766,9 @@ def signature_from_schema(
     args.extend(func.arguments.post_tensor_options_kwarg_only)
     args.extend(func.arguments.out)
 
-    input_arg_set = set(a.name for a in func.arguments.flat_positional)
-    kwarg_only_set = set(a.name for a in func.arguments.flat_kwarg_only)
-    out_arg_set = set(a.name for a in func.arguments.out)
+    input_arg_set = {a.name for a in func.arguments.flat_positional}
+    kwarg_only_set = {a.name for a in func.arguments.flat_kwarg_only}
+    out_arg_set = {a.name for a in func.arguments.out}
 
     input_args = tuple(map(argument, filter(lambda a: a.name in input_arg_set, args)))
     input_kwargs = tuple(
@@ -795,9 +805,10 @@ def signature_from_schema(
         or name.startswith("new_")
         or name.endswith("_like")
     )
+    is_dummy_function = category_override == "dummy"
 
     tensor_options_args: List[PythonArgument] = []
-    if is_factory_function or is_like_or_new_function:
+    if (is_factory_function or is_like_or_new_function) and not is_dummy_function:
 
         def topt_default_init(name: str) -> Optional[str]:
             topt_args = func.arguments.tensor_options
@@ -814,9 +825,7 @@ def signature_from_schema(
                 type=OptionalType(BaseType(BaseTy.ScalarType)),
                 default="None",
                 default_init=(
-                    "self.scalar_type()"
-                    if is_like_or_new_function
-                    else topt_default_init("dtype")
+                    None if is_like_or_new_function else topt_default_init("dtype")
                 ),
             )
         )
@@ -826,9 +835,7 @@ def signature_from_schema(
                 type=OptionalType(BaseType(BaseTy.Layout)),
                 default="None",
                 default_init=(
-                    "self.layout()"
-                    if is_like_or_new_function
-                    else topt_default_init("layout")
+                    None if is_like_or_new_function else topt_default_init("layout")
                 ),
             )
         )
@@ -838,7 +845,7 @@ def signature_from_schema(
                 type=OptionalType(BaseType(BaseTy.Device)),
                 default="None",
                 default_init=(
-                    "self.device()"
+                    None
                     if is_like_or_new_function
                     else (
                         topt_default_init("device")
@@ -884,11 +891,11 @@ def signature_from_schema(
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
-def namedtuple_fieldnames(returns: Tuple[Return, ...]) -> List[str]:
-    if len(returns) <= 1 or all(map(lambda r: r.name is None, returns)):
+def structseq_fieldnames(returns: Tuple[Return, ...]) -> List[str]:
+    if len(returns) <= 1 or all(r.name is None for r in returns):
         return []
     else:
-        if any(map(lambda r: r.name is None, returns)):
+        if any(r.name is None for r in returns):
             # When building on Windows, `PyStructSequence_UnnamedField` could not be
             # resolved by the linker for some reason, which cause error in building:
             #
@@ -896,11 +903,11 @@ def namedtuple_fieldnames(returns: Tuple[Return, ...]) -> List[str]:
             # PyStructSequence_UnnamedField
             #
             # Thus, at this point in time, we do not support unnamed
-            # fields in namedtuple; you must either name all fields,
+            # fields in structseq; you must either name all fields,
             # or none of them.
             raise ValueError("Unnamed field is not supported by codegen")
 
-        return list(map(lambda r: str(r.name), returns))
+        return [str(r.name) for r in returns]
 
 
 def argument_type_str_pyi(t: Type) -> str:
@@ -910,7 +917,7 @@ def argument_type_str_pyi(t: Type) -> str:
         add_optional = True
 
     if isinstance(t, BaseType):
-        if t.name == BaseTy.int:
+        if t.name in [BaseTy.int, BaseTy.DeviceIndex]:
             ret = "_int"
         if t.name == BaseTy.SymInt:
             ret = "Union[_int, SymInt]"
@@ -919,7 +926,7 @@ def argument_type_str_pyi(t: Type) -> str:
         elif t.name == BaseTy.str:
             ret = "str"
         elif t.name == BaseTy.Scalar:
-            ret = "Number"
+            ret = "Union[Number, _complex]"
         elif t.name == BaseTy.ScalarType:
             ret = "_dtype"
         elif t.name == BaseTy.bool:
@@ -929,12 +936,14 @@ def argument_type_str_pyi(t: Type) -> str:
         elif t.name == BaseTy.Layout:
             ret = "_layout"
         elif t.name == BaseTy.Device:
-            ret = "Union[_device, str, None]"
+            ret = "Optional[DeviceLikeType]"
         elif t.name == BaseTy.MemoryFormat:
             ret = "memory_format"
         elif t.name == BaseTy.Dimname:
             ret = "Union[str, ellipsis, None]"
-        elif t.name in [BaseTy.Tensor, BaseTy.Generator, BaseTy.Storage, BaseTy.Stream]:
+        elif t.name == BaseTy.Storage:
+            ret = "Union[Storage, UntypedStorage]"
+        elif t.name in [BaseTy.Tensor, BaseTy.Generator, BaseTy.Stream]:
             # These python schema type names line up with their function schema names
             ret = t.name.name
 
@@ -954,6 +963,9 @@ def argument_type_str_pyi(t: Type) -> str:
             )
         elif str(t.elem) == "float":
             ret = "Sequence[_float]"
+        elif str(t.elem) == "SymInt" and t.size is not None:
+            elem = argument_type_str_pyi(t.elem)
+            ret = f"Union[{elem}, Sequence[{elem}]]"
         else:
             elem = argument_type_str_pyi(t.elem)
             ret = f"Sequence[{elem}]"
@@ -985,26 +997,60 @@ def return_type_str_pyi(t: Type) -> str:
 
     if isinstance(t, ListType):
         inner = return_type_str_pyi(t.elem)
-        return f"List[{inner}]"
+        return f"Tuple[{inner}, ...]"
 
     return argument_type_str_pyi(t)
 
 
-def returns_named_tuple_pyi(signature: PythonSignature) -> Optional[Tuple[str, str]]:
+def returns_structseq_pyi(signature: PythonSignature) -> Optional[Tuple[str, str]]:
     python_returns = [return_type_str_pyi(r.type) for r in signature.returns.returns]
-    namedtuple_name = signature.name
-    field_names = namedtuple_fieldnames(signature.returns.returns)
+    structseq_name = signature.name
+    field_names = structseq_fieldnames(signature.returns.returns)
     if field_names:
-        tuple_args = [
-            f'("{name}", {typ})' for name, typ in zip(field_names, python_returns)
+        # These types are structseq objects which act like named NamedTuples, but
+        # the constructor acts like the constructor of tuple. Using typing.NamedTuple
+        # does not allow us to override __init__.
+        seq_type = f"Tuple[{', '.join(python_returns)}]"
+        structseq_def_lines = [
+            f"class {structseq_name}({seq_type}):",
         ]
-        namedtuple_def = f'NamedTuple("{namedtuple_name}", [{", ".join(tuple_args)}])'
-        return namedtuple_name, namedtuple_def
+        for name, typ in zip(field_names, python_returns):
+            structseq_def_lines.extend(
+                [
+                    "    @property",
+                    f"    def {name}(self) -> {typ}: ...",
+                ]
+            )
+        structseq_def_lines.extend(
+            [
+                f"    def __new__(cls, sequence: {seq_type}): ...",
+                f"    n_fields: _int = {len(field_names)}",
+                f"    n_sequeunce_fields: _int = {len(field_names)}",
+                "    n_unnamed_fields: _int = 0",
+                "    def __init_subclass__(cls) -> NoReturn: ...  # prohibit subclassing",
+                "",  # add an extra newline
+            ]
+        )
+        structseq_def = "\n".join(structseq_def_lines)
+        # Example:
+        # structseq_def = (
+        #     "class max(Tuple[Tensor, Tensor]):\n"
+        #     "    @property\n"
+        #     "    def values(self) -> Tensor: ...\n"
+        #     "    @property\n"
+        #     "    def indices(self) -> Tensor: ...\n"
+        #     "    def __new__(cls, sequence: Tuple[Tensor, Tensor]): ...\n"
+        #     "    n_fields: _int = 2",
+        #     "    n_sequeunce_fields: _int = 2",
+        #     "    n_unnamed_fields: _int = 0",
+        #     "    def __init_subclass__(cls) -> NoReturn: ...  # prohibit subclassing",
+        # )
+        return structseq_name, structseq_def
     return None
 
 
 def returns_str_pyi(signature: PythonSignature) -> str:
-    field_names = namedtuple_fieldnames(signature.returns.returns)
+    field_names = structseq_fieldnames(signature.returns.returns)
     if field_names:
         return f"torch.return_types.{signature.name}"
 
@@ -1072,7 +1118,7 @@ def dispatch_lambda_args(
         method=False,
         cpp_no_default_args=f.cpp_no_default_args,
     )
-    out_args: Set[str] = set(a.name for a in schema.arguments.out)
+    out_args: Set[str] = {a.name for a in schema.arguments.out}
 
     # Convert from cpp argument to lambda argument
     def dispatch_lambda_arg(cpp_arg: Binding) -> DispatchLambdaArgument:
@@ -1109,6 +1155,7 @@ SUPPORTED_RETURN_TYPES = {
     "::std::tuple<at::Tensor,at::Tensor,at::Tensor>",
     "::std::tuple<at::Tensor,at::Tensor,at::Tensor,at::Tensor>",
     "::std::tuple<at::Tensor,at::Tensor,at::Tensor,at::Tensor,at::Tensor>",
+    "::std::tuple<at::Tensor,at::Tensor,at::Tensor,at::Tensor,at::Tensor,at::Tensor>",
     "::std::tuple<at::Tensor,at::Tensor,at::Tensor,int64_t>",
     "::std::tuple<at::Tensor,at::Tensor,double,int64_t>",
     "::std::tuple<at::Tensor,at::Tensor,at::Tensor,at::Tensor,int64_t>",
@@ -1117,7 +1164,7 @@ SUPPORTED_RETURN_TYPES = {
     "::std::tuple<at::Tensor,::std::vector<at::Tensor>>",
     "::std::vector<at::Tensor>",
     # Needed for flash attention forw/backward
-    "::std::tuple<at::Tensor,at::Tensor,at::Tensor,at::Tensor,int64_t,int64_t,int64_t,int64_t,at::Tensor>",
+    "::std::tuple<at::Tensor,at::Tensor,at::Tensor,at::Tensor,c10::SymInt,c10::SymInt,at::Tensor,at::Tensor,at::Tensor>",
     "at::Scalar",
     "bool",
     "int64_t",
@@ -1127,6 +1174,7 @@ SUPPORTED_RETURN_TYPES = {
     "double",
     "at::IntArrayRef",
     "at::ScalarType",
+    "at::Stream",
 }
 
 
@@ -1151,7 +1199,7 @@ def dispatch_lambda_return_str(f: NativeFunction) -> str:
     # mutable reference to temporary.  Maybe we could assign it to a
     # variable itself.)
     returns_without_annotation = tuple(
-        map(lambda r: Return(r.name, r.type, None), f.func.returns)
+        Return(r.name, r.type, None) for r in f.func.returns
     )
     return_str = cpp.returns_type(returns_without_annotation, symint=True).cpp_type()
     if return_str not in SUPPORTED_RETURN_TYPES:
@@ -1183,7 +1231,7 @@ def cpp_dispatch_exprs(
     exprs: Tuple[str, ...] = tuple()
     if not isinstance(python_signature, PythonSignatureDeprecated):
         # By default the exprs are consistent with the C++ signature.
-        exprs = tuple(map(lambda a: a.name, cpp_args))
+        exprs = tuple(a.name for a in cpp_args)
     else:
         # For deprecated python signature we may need fill in some constants.
         exprs = tuple(
@@ -1204,6 +1252,7 @@ def cpp_dispatch_exprs(
 #                     Python / C++ Args Binding
 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+
 
 # We explicitly enumerate the PythonArgParser unpacking methods for all
 # supported types. This might be more verbose than necessary, partially
@@ -1242,13 +1291,12 @@ def arg_parser_unpack_method(
             return "scalartypeWithDefault" if has_default_init else "scalartype"
         elif t.name == BaseTy.Device:
             return "deviceWithDefault" if has_default_init else "device"
+        elif t.name == BaseTy.DeviceIndex:
+            return "toInt64"
         elif t.name == BaseTy.int:
             return "toInt64"
         elif t.name == BaseTy.SymInt:
-            if symint:
-                return "toSymInt"
-            else:
-                return "toInt64"
+            return "toSymInt" if symint else "toInt64"
         elif t.name == BaseTy.bool:
             return "toBoolWithDefault" if has_default_init else "toBool"
         elif t.name == BaseTy.float:
@@ -1267,7 +1315,13 @@ def arg_parser_unpack_method(
             return "generator"
         elif str(t.elem) == "Dimname[]":
             return "toDimnameListOptional"
-        elif not has_default_init and default in (None, "None", "c10::nullopt"):
+        elif not has_default_init and default in (
+            None,
+            "None",
+            "c10::nullopt",
+            "::std::nullopt",
+            "std::nullopt",
+        ):
             # If default is None: append 'Optional' to elem's unpacking method
             return (
                 arg_parser_unpack_method(t.elem, None, None, symint=symint) + "Optional"
@@ -1281,10 +1335,7 @@ def arg_parser_unpack_method(
     elif isinstance(t, ListType):
         if str(t.elem) == "Tensor":
             # accept and use definite size
-            if t.size is not None:
-                return f"tensorlist_n<{t.size}>"
-            else:
-                return "tensorlist"
+            return f"tensorlist_n<{t.size}>" if t.size is not None else "tensorlist"
         elif str(t.elem) == "Tensor?":
             return "list_of_optional_tensors"
         elif str(t.elem) == "Dimname":
@@ -1293,15 +1344,12 @@ def arg_parser_unpack_method(
         elif str(t.elem) == "int":
             # accept definite size
             return "intlist"
-        elif str(t) == "float[]":
+        elif str(t.elem) == "float":
             return "doublelist"
         elif str(t.elem) == "SymInt":
             # accept definite size
-            if symint:
-                return "symintlist"
-            else:
-                return "intlist"
-        elif str(t) == "Scalar[]":
+            return "symintlist" if symint else "intlist"
+        elif str(t.elem) == "Scalar":
             return "scalarlist"
     raise RuntimeError(f"type '{t}' is not supported by PythonArgParser")
 
@@ -1345,6 +1393,7 @@ TENSOR_OPTIONS_FIELDS = {
     "pin_memory": "bool?",
     "requires_grad": "bool?",
 }
+
 
 # bind arg parser outputs (python args) with dispatch lambda arguments (c++ args).
 def dispatch_lambda_exprs(
@@ -1394,7 +1443,7 @@ def dispatch_lambda_exprs(
             inits.extend(
                 [
                     f"auto __{name} = {arg_parser_expr};",
-                    f"c10::optional<DimnameList> {name} = __{name} ? c10::make_optional(DimnameList(__{name}.value())) : c10::nullopt;",  # noqa: B950
+                    f"::std::optional<DimnameList> {name} = __{name} ? ::std::make_optional(DimnameList(__{name}.value())) : ::std::nullopt;",  # noqa: B950
                 ]
             )
             lambda_args_exprs[name] = name
@@ -1407,7 +1456,7 @@ def dispatch_lambda_exprs(
         lambda_args_exprs["self"] = "self"
 
     # 2. special packing/checking for TensorOptions.
-    tensor_options_args_names = list(map(lambda a: a.name, ps.tensor_options_args))
+    tensor_options_args_names = [a.name for a in ps.tensor_options_args]
     if has_toptions:
         if f.func.is_out_fn():
             raise RuntimeError(f"{f.func}: tensor options with output arg")
@@ -1420,9 +1469,7 @@ def dispatch_lambda_exprs(
                 raise RuntimeError(
                     f"{f.func}: unrecognized type '{str(a.type)}' for tensor options field '{a.name}'"
                 )
-        if not all(
-            map(lambda a: a in tensor_options_args_names, TENSOR_OPTIONS_FIELDS.keys())
-        ):
+        if not all(a in tensor_options_args_names for a in TENSOR_OPTIONS_FIELDS):
             raise RuntimeError(
                 f"{f.func}: incomplete tensor options args: {tensor_options_args_names}"
             )
@@ -1435,7 +1482,7 @@ const auto options = TensorOptions()
     .layout({arg_parser_outputs['layout'].expr})
     .requires_grad({arg_parser_outputs['requires_grad'].expr})
     .pinned_memory({arg_parser_outputs['pin_memory'].expr});
-torch::utils::maybe_initialize_cuda(options);
+torch::utils::maybe_initialize_device(options);
 """
         )
         lambda_args_exprs["options"] = "options"
@@ -1447,11 +1494,9 @@ torch::utils::maybe_initialize_cuda(options);
             # we're an output-arg variant, check these args against output tensor
             if not f.func.is_out_fn():
                 raise RuntimeError(
-                    f"{f.func}: dtype in tensor_options_args without output arg"
+                    f"{f.func}: dtype in tensor_options_args without output arg, {ps} {ps.arguments}"
                 )
-            if not all(
-                map(lambda a: a in tensor_options_args_names, ("layout", "device"))
-            ):
+            if not all(a in tensor_options_args_names for a in ("layout", "device")):
                 raise RuntimeError(
                     f"{f.func}: incomplete tensor options for output check"
                 )
@@ -1470,6 +1515,6 @@ check_out_type_matches({arg_parser_outputs['out'].expr}, {arg_parser_outputs['dt
             )
 
     return DispatchLambdaArgumentExprs(
-        exprs=tuple(map(lambda a: lambda_args_exprs[a.name], lambda_args)),
+        exprs=tuple(lambda_args_exprs[a.name] for a in lambda_args),
         inits=inits,
     )

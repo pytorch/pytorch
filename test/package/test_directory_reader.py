@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Owner(s): ["oncall: package/deploy"]
 
 import os
@@ -45,7 +44,10 @@ class DirectoryReaderTest(PackageTestCase):
     """Tests use of DirectoryReader as accessor for opened packages."""
 
     @skipIfNoTorchVision
-    @skipIf(True, "Does not work with latest TorchVision, see https://github.com/pytorch/pytorch/issues/81115")
+    @skipIf(
+        True,
+        "Does not work with latest TorchVision, see https://github.com/pytorch/pytorch/issues/81115",
+    )
     def test_loading_pickle(self):
         """
         Test basic saving and loading of modules and pickles from a DirectoryReader.
@@ -109,16 +111,16 @@ class DirectoryReaderTest(PackageTestCase):
         with PackageExporter(filename) as pe:
             # Layout looks like:
             #    package
-            #    ├── one/
-            #    │   ├── a.txt
-            #    │   ├── b.txt
-            #    │   ├── c.txt
-            #    │   └── three/
-            #    │       ├── d.txt
-            #    │       └── e.txt
-            #    └── two/
-            #       ├── f.txt
-            #       └── g.txt
+            #    |-- one/
+            #    |   |-- a.txt
+            #    |   |-- b.txt
+            #    |   |-- c.txt
+            #    |   +-- three/
+            #    |       |-- d.txt
+            #    |       +-- e.txt
+            #    +-- two/
+            #       |-- f.txt
+            #       +-- g.txt
             pe.save_text("one", "a.txt", "hello, a!")
             pe.save_text("one", "b.txt", "hello, b!")
             pe.save_text("one", "c.txt", "hello, c!")
@@ -207,7 +209,7 @@ class DirectoryReaderTest(PackageTestCase):
         filename = self.temp()
         with PackageExporter(filename) as he:
             he.save_text("main", "main", "my string")
-            he.save_binary("main", "main_binary", "my string".encode("utf-8"))
+            he.save_binary("main", "main_binary", b"my string")
             src = dedent(
                 """\
                 import importlib
@@ -226,7 +228,7 @@ class DirectoryReaderTest(PackageTestCase):
             dir_importer = PackageImporter(Path(temp_dir) / Path(filename).name)
             m = dir_importer.import_module("main")
             self.assertEqual(m.t, "my string")
-            self.assertEqual(m.b, "my string".encode("utf-8"))
+            self.assertEqual(m.b, b"my string")
 
     @skipIf(version_info < (3, 7), "ResourceReader API introduced in Python 3.7")
     def test_resource_access_by_path(self):
@@ -235,7 +237,7 @@ class DirectoryReaderTest(PackageTestCase):
         """
         filename = self.temp()
         with PackageExporter(filename) as e:
-            e.save_binary("string_module", "my_string", "my string".encode("utf-8"))
+            e.save_binary("string_module", "my_string", b"my string")
             src = dedent(
                 """\
                 import importlib.resources

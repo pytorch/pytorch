@@ -1,15 +1,16 @@
 #pragma once
 #include <c10/util/ArrayRef.h>
 #include <c10/util/DimVector.h>
+#include <algorithm>
 
 namespace c10 {
 
 // Computes the contiguous strides of a tensor, given its sizes.
-static inline DimVector contiguous_strides(const IntArrayRef sizes) {
+inline DimVector contiguous_strides(const IntArrayRef sizes) {
   using Int = IntArrayRef::value_type;
   const Int dims = static_cast<Int>(sizes.size());
 
-  // With this intialisation we get the case dim == 0 or 1 right
+  // With this initialisation we get the case dim == 0 or 1 right
   DimVector strides(dims, 1);
 
   for (auto i = dims - 2; i >= 0; --i) {

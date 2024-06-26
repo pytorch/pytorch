@@ -16,6 +16,10 @@ namespace autograd {
 
 struct TORCH_API CopyBackwards : public Node {
   variable_list apply(variable_list&& grads) override;
+  void compiled_args(CompiledNodeArgs& args) override;
+  variable_list apply_with_saved(
+      const variable_list& inputs,
+      SwapSavedVariables& saved) override;
 
   at::TensorOptions src_options;
 };
@@ -75,7 +79,7 @@ struct TORCH_API CopyBackwards : public Node {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
 // We need to perform grad_view = fn(grad_view), but out-of-place.
-// view_fn_ is an optional lambda function saved in DifferentiableViewMeta
+// view_fn_ is an optional function saved in DifferentiableViewMeta
 // from forward pass, so that we can recover we when as_strided is not
 // supported. It preserves the invariants:
 //   view = view_fn_(base)
@@ -156,17 +160,25 @@ struct TORCH_API CopySlices : public Node {
   CopySlices(
       const Variable& base_var,
       at::TensorGeometry view_,
-      std::function<at::Tensor(const at::Tensor&)> view_fn_,
+      std::unique_ptr<ViewFunc> view_fn_,
       std::shared_ptr<Node> fn_);
+
+  // common code between apply/apply_with_saved
+  template <typename T>
+  variable_list apply_impl(variable_list&& inputs, const T& call_fn);
 
   variable_list apply(variable_list&& inputs) override;
   void release_variables() override;
+  void compiled_args(CompiledNodeArgs& args) override;
+  variable_list apply_with_saved(
+      const variable_list& inputs,
+      SwapSavedVariables& saved) override;
 
   at::TensorGeometry base;
   // view and view_fn are redundant and view_fn will be used if available.
   // See Note [View + Inplace update for base tensor] for details.
   at::TensorGeometry view;
-  std::function<at::Tensor(const at::Tensor&)> view_fn;
+  std::unique_ptr<ViewFunc> view_fn;
   std::shared_ptr<Node> fn;
 };
 

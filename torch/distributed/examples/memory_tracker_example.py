@@ -1,6 +1,7 @@
-import torch
+# mypy: allow-untyped-defs
 import torchvision
 
+import torch
 from torch.distributed._tools import MemoryTracker
 
 
@@ -13,7 +14,7 @@ def run_one_model(net: torch.nn.Module, input: torch.Tensor):
     # start_monitor before the training iteration starts
     mem_tracker.start_monitor(net)
 
-    # run one traing iteration
+    # run one training iteration
     net.zero_grad(True)
     loss = net(input)
     if isinstance(loss, dict):

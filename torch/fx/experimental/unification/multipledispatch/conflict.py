@@ -1,5 +1,7 @@
+# mypy: allow-untyped-defs
 from .utils import _toposort, groupby
 from .variadic import isvariadic
+import operator
 
 __all__ = ["AmbiguityWarning", "supercedes", "consistent", "ambiguous", "ambiguities", "super_signature",
            "edge", "ordering"]
@@ -68,8 +70,8 @@ def consistent(a, b):
                 p1 += 1
         # We only need to check for variadic ends
         # Variadic types are guaranteed to be the last element
-        return (isvariadic(cur_a) and p2 == len(b) or
-                isvariadic(cur_b) and p1 == len(a))
+        return (isvariadic(cur_a) and p2 == len(b) or  # type: ignore[possibly-undefined]
+                isvariadic(cur_b) and p1 == len(a))  # type: ignore[possibly-undefined]
 
 
 def ambiguous(a, b):
@@ -80,11 +82,11 @@ def ambiguous(a, b):
 def ambiguities(signatures):
     """ All signature pairs such that A is ambiguous with B """
     signatures = list(map(tuple, signatures))
-    return set((a, b) for a in signatures for b in signatures
-               if hash(a) < hash(b)
-               and ambiguous(a, b)
-               and not any(supercedes(c, a) and supercedes(c, b)
-                           for c in signatures))
+    return {(a, b) for a in signatures for b in signatures
+            if hash(a) < hash(b)
+            and ambiguous(a, b)
+            and not any(supercedes(c, a) and supercedes(c, b)
+            for c in signatures)}
 
 
 def super_signature(signatures):
@@ -92,7 +94,7 @@ def super_signature(signatures):
     n = len(signatures[0])
     assert all(len(s) == n for s in signatures)
 
-    return [max([type.mro(sig[i]) for sig in signatures], key=len)[0]
+    return [max((type.mro(sig[i]) for sig in signatures), key=len)[0]
             for i in range(n)]
 
 
@@ -107,13 +109,13 @@ def edge(a, b, tie_breaker=hash):
 
 def ordering(signatures):
     """ A sane ordering of signatures to check, first to last
-    Topoological sort of edges as given by ``edge`` and ``supercedes``
+    Topological sort of edges as given by ``edge`` and ``supercedes``
     """
     signatures = list(map(tuple, signatures))
     edges = [(a, b) for a in signatures for b in signatures if edge(a, b)]
-    edges = groupby(lambda x: x[0], edges)
+    edges = groupby(operator.itemgetter(0), edges)
     for s in signatures:
         if s not in edges:
             edges[s] = []
-    edges = dict((k, [b for a, b in v]) for k, v in edges.items())  # type: ignore[assignment, attr-defined]
+    edges = {k: [b for a, b in v] for k, v in edges.items()}  # type: ignore[assignment, attr-defined]
     return _toposort(edges)

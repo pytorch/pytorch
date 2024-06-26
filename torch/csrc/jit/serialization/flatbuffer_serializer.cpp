@@ -61,7 +61,7 @@ static TypePtr realType(TypePtr type) {
   }
 }
 
-auto print_type(const c10::Type& t) -> c10::optional<std::string> {
+auto print_type(const c10::Type& t) -> std::optional<std::string> {
   auto namedType = t.cast<c10::NamedType>();
   if (namedType && namedType->name()) {
     return namedType->name().value().qualifiedName();
@@ -129,11 +129,11 @@ class FlatbufferSerializer {
       flatbuffers::FlatBufferBuilder& fbb,
       const std::vector<Argument>& args,
       const std::vector<Argument>& returns,
-      c10::TypePrinter type_printer);
+      const c10::TypePrinter& type_printer);
 
   flatbuffers::Offset<mobile::serialization::ObjectType> classTypeToFB(
       flatbuffers::FlatBufferBuilder& fbb,
-      ClassTypePtr class_ptr);
+      const ClassTypePtr& class_ptr);
 
   uint32_t storeIValueAndGetIndex(
       flatbuffers::FlatBufferBuilder& fbb,
@@ -145,7 +145,7 @@ class FlatbufferSerializer {
 
   uint32_t storeClassTypeAndGetIndex(
       flatbuffers::FlatBufferBuilder& fbb,
-      ClassTypePtr class_type);
+      const ClassTypePtr& class_type);
 
   flatbuffers::Offset<flatbuffers::Vector<
       flatbuffers::Offset<mobile::serialization::ExtraFile>>>
@@ -179,8 +179,29 @@ class FlatbufferSerializer {
     }
   };
 
-  std::unordered_map<IValue, uint32_t, IValueHash> cached_ivalues_;
+  struct IValueEqual {
+    // Copy of this
+    // https://www.internalfb.com/code/aros/[3b875bce7ffa2adacdcea9b3e0cb6d304737a193]/xros/third-party/caffe2/caffe2/aten/src/ATen/core/ivalue.cpp?lines=266
+    // but without relying on aten::nonzero operator being present in the
+    // binary.
+    bool operator()(const IValue& lhs, const IValue& rhs) const {
+      // The only case we don't return bool is for tensor comparison. Lets do
+      // pointer comparison here.
+      if (lhs.isTensor() || rhs.isTensor()) {
+        if (lhs.isTensor() && rhs.isTensor()) {
+          return (&lhs.toTensor()) == (&rhs.toTensor());
+        }
+        return false;
+      }
+      IValue eq = lhs.equals(rhs);
+      if (eq.isBool()) {
+        return eq.toBool();
+      }
+      return false;
+    }
+  };
 
+  std::unordered_map<IValue, uint32_t, IValueHash, IValueEqual> cached_ivalues_;
   const mobile::CompilationUnit* mcu_ = nullptr;
 };
 
@@ -189,7 +210,7 @@ flatbuffers::Offset<jit::mobile::serialization::Schema> FlatbufferSerializer::
         flatbuffers::FlatBufferBuilder& fbb,
         const std::vector<Argument>& args,
         const std::vector<Argument>& returns,
-        c10::TypePrinter type_printer) {
+        const c10::TypePrinter& type_printer) {
   std::vector<flatbuffers::Offset<jit::mobile::serialization::Arg>> arg_vec;
   arg_vec.reserve(args.size());
   std::vector<flatbuffers::Offset<jit::mobile::serialization::Arg>> return_vec;
@@ -235,7 +256,7 @@ flatbuffers::Offset<mobile::serialization::Function> FlatbufferSerializer::
   std::vector<flatbuffers::Offset<mobile::serialization::Operator>>
       operator_vector;
   operator_vector.reserve(code.op_names_.size());
-  for (int i = 0; i < code.op_names_.size(); ++i) {
+  for (const auto i : c10::irange(code.op_names_.size())) {
     const auto& opname = code.op_names_[i];
     const int op_size = code.operator_input_sizes_[i];
     operator_vector.push_back(CreateOperator(
@@ -277,7 +298,7 @@ flatbuffers::Offset<mobile::serialization::Function> FlatbufferSerializer::
   auto register_size = static_cast<int>(code.register_size_);
 
   // schema
-  auto type_printer = [&](const c10::Type& t) -> c10::optional<std::string> {
+  auto type_printer = [&](const c10::Type& t) -> std::optional<std::string> {
     auto namedType = t.cast<c10::NamedType>();
     if (namedType && namedType->name()) {
       return namedType->name().value().qualifiedName();
@@ -478,7 +499,7 @@ flatbuffers::Offset<mobile::serialization::Dict> FlatbufferSerializer::dictToFB(
 }
 
 flatbuffers::Offset<mobile::serialization::ObjectType> FlatbufferSerializer::
-    classTypeToFB(FlatBufferBuilder& fbb, ClassTypePtr class_ptr) {
+    classTypeToFB(FlatBufferBuilder& fbb, const ClassTypePtr& class_ptr) {
   mobile::serialization::TypeType typetype =
       mobile::serialization::TypeType::UNSET;
 
@@ -531,7 +552,7 @@ uint32_t FlatbufferSerializer::storeFunctionAndGetIndex(
 
 uint32_t FlatbufferSerializer::storeClassTypeAndGetIndex(
     FlatBufferBuilder& fbb,
-    ClassTypePtr class_ptr) {
+    const ClassTypePtr& class_ptr) {
   const auto& type_str = class_ptr->name()->qualifiedName();
   auto iter = qn_to_serialized_values_.find(type_str);
   if (iter != qn_to_serialized_values_.end()) {
@@ -662,18 +683,20 @@ uint32_t FlatbufferSerializer::storeIValueAndGetIndex(
     if (iter != cached_ivalues_.end()) {
       return iter->second;
     }
-  } catch (const std::runtime_error&) {
-    // Threw if ivalue is not hashable
-  } catch (const c10::Error&) {
-    // Threw if ivalue is don't have proper operator==
+  } catch (...) {
+    // Threw if ivalue is not hashable or
+    // if ivalue is don't have proper operator==
+    // we don't care catchall because either case we want to skip hashing
   }
 
   auto offset = iValueToFB(fbb, ivalue);
   uint32_t index = insertIValue(offset);
   try {
     cached_ivalues_[ivalue] = index;
-  } catch (const std::runtime_error&) {
-  } catch (const c10::Error&) {
+  } catch (...) {
+    // Threw if ivalue is not hashable or
+    // if ivalue is don't have proper operator==
+    // we don't care catchall because either case we want to skip hashing
   }
 
   return index;

@@ -1,9 +1,11 @@
+# mypy: allow-untyped-defs
 import torch
 from torch.distributions import constraints
 from torch.distributions.categorical import Categorical
 from torch.distributions.distribution import Distribution
 
-__all__ = ['OneHotCategorical', 'OneHotCategoricalStraightThrough']
+__all__ = ["OneHotCategorical", "OneHotCategoricalStraightThrough"]
+
 
 class OneHotCategorical(Distribution):
     r"""
@@ -25,7 +27,7 @@ class OneHotCategorical(Distribution):
 
     Example::
 
-        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> m = OneHotCategorical(torch.tensor([ 0.25, 0.25, 0.25, 0.25 ]))
         >>> m.sample()  # equal probability of 0, 1, 2, 3
         tensor([ 0.,  0.,  0.,  1.])
@@ -34,8 +36,7 @@ class OneHotCategorical(Distribution):
         probs (Tensor): event probabilities
         logits (Tensor): event log probabilities (unnormalized)
     """
-    arg_constraints = {'probs': constraints.simplex,
-                       'logits': constraints.real_vector}
+    arg_constraints = {"probs": constraints.simplex, "logits": constraints.real_vector}
     support = constraints.one_hot
     has_enumerate_support = True
 
@@ -43,13 +44,15 @@ class OneHotCategorical(Distribution):
         self._categorical = Categorical(probs, logits)
         batch_shape = self._categorical.batch_shape
         event_shape = self._categorical.param_shape[-1:]
-        super(OneHotCategorical, self).__init__(batch_shape, event_shape, validate_args=validate_args)
+        super().__init__(batch_shape, event_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(OneHotCategorical, _instance)
         batch_shape = torch.Size(batch_shape)
         new._categorical = self._categorical.expand(batch_shape)
-        super(OneHotCategorical, new).__init__(batch_shape, self.event_shape, validate_args=False)
+        super(OneHotCategorical, new).__init__(
+            batch_shape, self.event_shape, validate_args=False
+        )
         new._validate_args = self._validate_args
         return new
 
@@ -110,13 +113,14 @@ class OneHotCategorical(Distribution):
             values = values.expand((n,) + self.batch_shape + (n,))
         return values
 
+
 class OneHotCategoricalStraightThrough(OneHotCategorical):
     r"""
     Creates a reparameterizable :class:`OneHotCategorical` distribution based on the straight-
     through gradient estimator from [1].
 
     [1] Estimating or Propagating Gradients Through Stochastic Neurons for Conditional Computation
-    (Bengio et al, 2013)
+    (Bengio et al., 2013)
     """
     has_rsample = True
 

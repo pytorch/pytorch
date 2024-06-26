@@ -43,6 +43,23 @@
 #include <set>
 #include <stack>
 
+namespace {
+bool reportSourceLocation(size_t file_size) {
+  if (file_size < 512 * 1024) {
+    return true;
+  }
+  const char* enable_env =
+      std::getenv("PYTORCH_JIT_ENABLE_LARGE_SOURCE_LOCATION");
+  bool flag = true;
+  if (enable_env == nullptr || std::strcmp(enable_env, "0") == 0 ||
+      std::strcmp(enable_env, "FALSE") == 0 ||
+      std::strcmp(enable_env, "false") == 0) {
+    flag = false;
+  }
+  return flag;
+}
+} // namespace
+
 namespace torch::jit {
 
 using FunctionTable = std::unordered_map<std::string, Function&>;
@@ -151,7 +168,7 @@ struct CondValue {
   CondValue(
       Value* value,
       RefinementSet refinements,
-      c10::optional<bool> static_if)
+      std::optional<bool> static_if)
       : value_(value),
         refinements_(std::move(refinements)),
         static_if_(static_if) {}
@@ -169,14 +186,14 @@ struct CondValue {
   const RefinementSet& refinements() const {
     return refinements_;
   }
-  c10::optional<bool> staticIf() const {
+  std::optional<bool> staticIf() const {
     return static_if_;
   }
 
  private:
   Value* value_;
   RefinementSet refinements_;
-  c10::optional<bool>
+  std::optional<bool>
       static_if_; // certain expression cause us to emit a static if statement
                   // this value is present if this is the case.
                   // this is not equivalent to value_ being a constant
@@ -187,7 +204,7 @@ struct CondValue {
 };
 
 enum NoneStatus { ALWAYS, MAYBE, NEVER };
-NoneStatus canBeNone(Value* v) {
+static NoneStatus canBeNone(Value* v) {
   if (v->node()->mustBeNone()) {
     return ALWAYS;
   }
@@ -266,7 +283,7 @@ struct Environment {
   }
 
   // see if type error has been set for a variable
-  c10::optional<std::string> findVariableTypeError(const std::string& name) {
+  std::optional<std::string> findVariableTypeError(const std::string& name) {
     auto runner = this;
     while (runner->next) {
       runner = runner->next.get();
@@ -705,7 +722,7 @@ struct to_ir {
   std::vector<DefContext> def_stack_;
   size_t temp_name_count_ = 0;
   std::string createTempName(const std::string& prefix) {
-    return prefix + c10::to_string(temp_name_count_++);
+    return prefix + std::to_string(temp_name_count_++);
   }
 
   void pushFrame(Block* b, bool starts_def = false) {
@@ -1183,7 +1200,7 @@ struct to_ir {
     }
     if (const auto union_type = lhs_value->type()->cast<UnionType>()) {
       std::vector<TypePtr> to_subtract{NoneType::get()};
-      c10::optional<TypePtr> remaining =
+      std::optional<TypePtr> remaining =
           union_type->subtractTypeSet(to_subtract);
       std::vector<Refinement> all_present;
       if (remaining) {
@@ -1211,7 +1228,7 @@ struct to_ir {
         CondValue v = emitCondExpr(Expr(expr.tree()->trees()[0]));
         Value* result = emitBuiltinCall(
             expr.range(), *graph, aten::__not__, {v.value()}, {});
-        c10::optional<bool> static_if;
+        std::optional<bool> static_if;
         if (v.staticIf()) {
           static_if = !*v.staticIf();
         }
@@ -1277,7 +1294,7 @@ struct to_ir {
           }
         }
         auto expr_out = emitToBool(expr.range(), emitExpr(expr));
-        c10::optional<bool> static_if = c10::nullopt;
+        std::optional<bool> static_if = c10::nullopt;
         auto kind = expr_out->node()->kind();
         if (kind == aten::is_scripting) {
           static_if = true;
@@ -1542,7 +1559,7 @@ struct to_ir {
           ? refined_type_hint->cast<ListType>()->getElementType()
           : nullptr;
 
-      c10::optional<TypePtr> unified_elem_type = unifyTypes(
+      std::optional<TypePtr> unified_elem_type = unifyTypes(
           list_value->type()->expect<ListType>()->getElementType(),
           out->type(),
           /*default_to_union=*/true,
@@ -1723,7 +1740,7 @@ struct to_ir {
           ? refined_type_hint->expect<DictType>()->getValueType()
           : nullptr;
 
-      c10::optional<TypePtr> unified_value_type = unifyTypes(
+      std::optional<TypePtr> unified_value_type = unifyTypes(
           first_generated_value_type,
           v->type(),
           /*default_to_union=*/true,
@@ -1815,7 +1832,7 @@ struct to_ir {
     // and the second expr in the false branch, if it's an AND the opposite
     auto get_const_expr = [&] { return graph->insertConstant(is_or, loc); };
 
-    c10::optional<CondValue> rhs;
+    std::optional<CondValue> rhs;
     auto get_continue_expr = [&] {
       rhs = emitCondExpr(second_expr);
       return rhs->value();
@@ -1825,8 +1842,8 @@ struct to_ir {
     // If this is an AND, eval second expression if first expr is True
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Value* new_result;
-    c10::optional<RefinementSet> refinements;
-    c10::optional<bool> static_if;
+    std::optional<RefinementSet> refinements;
+    std::optional<bool> static_if;
     if (is_or) {
       new_result = emitIfExpr(loc, lhs, get_const_expr, get_continue_expr);
       refinements = lhs.refinements().Or(rhs->refinements());
@@ -1987,11 +2004,22 @@ struct to_ir {
         if (save_false->findInAnyFrame(v) || false_exits) {
           mutated_variables.insert(v);
         } else {
-          ErrorReport error(loc);
-          environment_stack->setVariableTypeError(v, [=]() -> std::string {
-            error << v << " is not defined in the false branch";
-            return error.what();
-          });
+          if (reportSourceLocation(loc.source()->size())) {
+            ErrorReport error(loc);
+            environment_stack->setVariableTypeError(v, [=]() -> std::string {
+              error << v << " is not defined in the false branch";
+              return error.what();
+            });
+          } else {
+            environment_stack->setVariableTypeError(v, [=]() -> std::string {
+              std::stringstream ss;
+              ss << v << " is not defined in the false branch. "
+                 << "The source info is eliminated due to the source file is too large. "
+                 << "To get it back, please set PYTORCH_JIT_ENABLE_LARGE_SOURCE_LOCATION=1 "
+                 << "as env var";
+              return ss.str();
+            });
+          }
         }
       }
     }
@@ -2001,11 +2029,22 @@ struct to_ir {
         if (save_true->findInAnyFrame(v) || true_exits) {
           mutated_variables.insert(v);
         } else {
-          ErrorReport error(loc);
-          environment_stack->setVariableTypeError(v, [=]() -> std::string {
-            error << v << " is not defined in the true branch";
-            return error.what();
-          });
+          if (reportSourceLocation(loc.source()->size())) {
+            ErrorReport error(loc);
+            environment_stack->setVariableTypeError(v, [=]() -> std::string {
+              error << v << " is not defined in the true branch";
+              return error.what();
+            });
+          } else {
+            environment_stack->setVariableTypeError(v, [=]() -> std::string {
+              std::stringstream ss;
+              ss << v << " is not defined in the false branch. "
+                 << "The source info is eliminated due to the source file is too large. "
+                 << "To get it back, please set PYTORCH_JIT_ENABLE_LARGE_SOURCE_LOCATION=1 "
+                 << "as env var";
+              return ss.str();
+            });
+          }
         }
       }
     }
@@ -2281,8 +2320,8 @@ struct to_ir {
       const SourceRange& range,
       const std::function<void()>& emit_body,
       const SugaredValuePtr& iter_val,
-      c10::optional<List<Expr>> targets,
-      c10::optional<Expr> cond) {
+      std::optional<List<Expr>> targets,
+      std::optional<Expr> cond) {
     Value* max_trip_count_val = nullptr;
     if (iter_val != nullptr) {
       max_trip_count_val = iter_val->len(range, method);
@@ -2853,15 +2892,12 @@ struct to_ir {
 
     // If it's a tensor, copy the RHS data into it
     if (sliceable->type()->isSubtypeOf(*TensorType::get())) {
-      std::vector<Value*> tensorIndices;
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      Value* sliced;
       // Handle multi-dimensional slicing: first emit int/slice indexing
       // TODO: the Python equivalent code has special-cased copy_to
       // broadcasting to match NumPy semantics (see PR#4853). We can't
       // replicate that without knowing the size of the Tensor; so really that
       // code should be moved into the aten function
-      std::tie(sliced, tensorIndices) = emitIntAndSliceIndexing(
+      auto [sliced, tensorIndices] = emitIntAndSliceIndexing(
           lhs.range(), sliceable, lhs.subscript_exprs());
 
       const auto slicedArg = NamedValue(lhs.range(), sliced);
@@ -2932,7 +2968,7 @@ struct to_ir {
     auto outputs = rhs_output->asTuple(
         rhs_loc,
         method,
-        starred_unpack ? c10::nullopt : c10::optional<size_t>{n_binders});
+        starred_unpack ? c10::nullopt : std::optional<size_t>{n_binders});
     if (outputs.size() < n_binders) {
       throw ErrorReport(tl)
           << "need " << (starred_unpack ? "at least " : "") << n_binders
@@ -3186,7 +3222,7 @@ struct to_ir {
       case TK_IN:
         return aten::__contains__;
       default:
-        throw std::runtime_error("unknown kind " + c10::to_string(kind));
+        throw std::runtime_error("unknown kind " + std::to_string(kind));
     }
   }
 
@@ -3233,7 +3269,7 @@ struct to_ir {
       case TK_RSHIFT:
         return "__rshift__";
       default:
-        throw std::runtime_error("unknown kind " + c10::to_string(kind));
+        throw std::runtime_error("unknown kind " + std::to_string(kind));
     }
   }
 
@@ -3619,7 +3655,7 @@ struct to_ir {
         auto iterable_value = expr_sv->iter(loc, method);
 
         // range should have the same static length as the other iterable
-        c10::optional<int64_t> iter_static_len = iterable_value->staticLen();
+        std::optional<int64_t> iter_static_len = iterable_value->staticLen();
         SugaredValuePtr range_sv = std::make_shared<RangeValue>(
             loc, method, range_inputs, iter_static_len);
 
@@ -4418,7 +4454,7 @@ struct to_ir {
           ? refined_type_hint->cast<ListType>()->getElementType()
           : nullptr;
 
-      c10::optional<TypePtr> unified_elem_type = unifyTypeList(
+      std::optional<TypePtr> unified_elem_type = unifyTypeList(
           types, nowhere, /*default_to_union=*/true, elem_type_hint);
 
       if (!refined_type_hint &&
@@ -4849,7 +4885,7 @@ struct to_ir {
       return graph->insertConstant(dim, loc);
     };
     std::vector<int64_t> dims(subscript_exprs.size());
-    std::vector<c10::optional<Value*>> exprs(
+    std::vector<std::optional<Value*>> exprs(
         subscript_exprs.size(), c10::nullopt);
 
     auto handle_indexing = [&](const Expr& subscript_expr,
@@ -5316,7 +5352,7 @@ struct CompilationUnit::PropertyPair
 };
 
 CompilationUnit::PropertyPair CompilationUnit::define_property(
-    const c10::optional<c10::QualifiedName>& prefix,
+    const std::optional<c10::QualifiedName>& prefix,
     const Property& prop,
     const ResolverPtr& resolver,
     const Self* self,
@@ -5350,14 +5386,14 @@ CompilationUnit::PropertyPair CompilationUnit::define_property(
 }
 
 std::unique_ptr<Function> CompilationUnit::define(
-    const c10::optional<QualifiedName>& prefix,
+    const std::optional<QualifiedName>& prefix,
     const Def& def,
     const ResolverPtr& resolver,
     const Self* self,
     const std::unordered_map<std::string, Function*>& function_table,
     bool shouldMangle,
     CompilationUnit::FunctionType type,
-    c10::optional<size_t> operator_set_version) const {
+    std::optional<size_t> operator_set_version) const {
   TORCH_INTERNAL_ASSERT(resolver);
   auto _resolver = resolver;
   if (!self) {
@@ -5393,7 +5429,7 @@ std::unique_ptr<Function> CompilationUnit::define(
   auto graph = std::make_shared<Graph>();
   graph->set_op_version(operator_set_version);
 
-  auto fn = torch::make_unique<GraphFunction>(std::move(name), graph, creator);
+  auto fn = std::make_unique<GraphFunction>(std::move(name), graph, creator);
   if (self) {
     // Register this as a method on `self`'s type
     if (type == CompilationUnit::FunctionType::Hook) {
@@ -5408,14 +5444,14 @@ std::unique_ptr<Function> CompilationUnit::define(
 }
 
 std::vector<Function*> CompilationUnit::define(
-    const c10::optional<c10::QualifiedName>& prefix,
+    const std::optional<c10::QualifiedName>& prefix,
     const std::vector<Property>& properties,
     const std::vector<ResolverPtr>& propResolvers,
     const std::vector<Def>& definitions,
     const std::vector<ResolverPtr>& defResolvers,
     const Self* self,
     bool shouldMangle,
-    c10::optional<size_t> operator_set_version) {
+    std::optional<size_t> operator_set_version) {
   TORCH_INTERNAL_ASSERT(definitions.size() == defResolvers.size());
   TORCH_INTERNAL_ASSERT(properties.size() == propResolvers.size());
   std::vector<Function*> functions;
@@ -5479,7 +5515,7 @@ std::vector<Function*> CompilationUnit::define(
 }
 
 void CompilationUnit::define_hooks(
-    const c10::optional<c10::QualifiedName>& prefix,
+    const std::optional<c10::QualifiedName>& prefix,
     const std::vector<Def>& hookDefs,
     const std::vector<ResolverPtr>& hookResolvers,
     const std::vector<Def>& preHookDefs,
@@ -5584,7 +5620,7 @@ void CompilationUnit::define_hooks(
 }
 
 std::vector<Function*> CompilationUnit::define(
-    const c10::optional<QualifiedName>& prefix,
+    const std::optional<QualifiedName>& prefix,
     const std::string& source,
     const ResolverPtr& resolver,
     const Self* self) {
@@ -5605,7 +5641,7 @@ std::vector<Function*> CompilationUnit::define(
       self);
 }
 
-void eraseListLiterals(std::shared_ptr<Graph>& graph) {
+static void eraseListLiterals(std::shared_ptr<Graph>& graph) {
   DepthFirstGraphNodeIterator it(graph);
 
   for (auto next_node = it.next(); next_node != nullptr;) {
@@ -5649,7 +5685,7 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
   // successive runs of immutable constant prop does not change the graph
   ConstantPropagationImmutableTypes(to_clean);
 
-  // Constant Pooling pass must be after ConstantPropogation, which can create
+  // Constant Pooling pass must be after ConstantPropagation, which can create
   // new constants that needs to be pooled.
   ConstantPooling(to_clean);
 

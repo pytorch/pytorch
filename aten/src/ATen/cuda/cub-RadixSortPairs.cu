@@ -2,10 +2,7 @@
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/cub.cuh>
 
-namespace at {
-namespace cuda {
-namespace cub {
-namespace detail {
+namespace at::cuda::cub::detail {
 
 template <typename key_t, int value_size>
 void radix_sort_pairs_impl(
@@ -80,14 +77,9 @@ AT_INSTANTIATE_SORT_PAIRS(int64_t, 4)
   AT_INSTANTIATE_SORT_PAIRS(scalar_t, 8)
 
 AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, AT_INSTANTIATE_SORT_PAIRS_8)
-
-// BFloat16 Radix sort is supported from ROCm 4.5 onwards
-#if !AT_ROCM_ENABLED() || (AT_ROCM_ENABLED() && ROCM_VERSION >= 40500)
+AT_INSTANTIATE_SORT_PAIRS(uint16_t, 8)
+AT_INSTANTIATE_SORT_PAIRS(uint32_t, 8)
+AT_INSTANTIATE_SORT_PAIRS(uint64_t, 8)
 AT_INSTANTIATE_SORT_PAIRS(c10::BFloat16, 8)
-#endif
 
-} // namespace detail
-
-} // namespace cub
-} // namespace cuda
-} // namespace at
+} // namespace at::cuda::cub::detail

@@ -1,6 +1,8 @@
 # Owner(s): ["module: dynamo"]
 
+import collections
 import re
+import sys
 from io import StringIO
 
 import torch._dynamo.test_case
@@ -16,6 +18,57 @@ SELF = None
 
 
 class ComptimeTests(torch._dynamo.test_case.TestCase):
+    def test_print_single(self):
+        global FILE
+        FILE = StringIO()
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        def comptime_print(e):
+            @comptime
+            def _(ctx):
+                ctx.print(ctx.get_local("e"), file=FILE)
+
+        Employee = collections.namedtuple("Employee", ["name", "id"])
+
+        class mylist(list):
+            pass
+
+        @torch._dynamo.optimize(cnt, dynamic=True)
+        def f(x):
+            y = x * 2
+            comptime_print(y)
+            comptime_print(2)
+            comptime_print([y, 2])
+            comptime_print((y, 2))
+            comptime_print({"foo": y})
+            comptime_print(range(1, 3))
+            comptime_print(Employee("foo", 2))
+            comptime_print(mylist([1, 2]))
+            comptime_print(collections.defaultdict(lambda: None))
+            comptime_print(set())
+            comptime_print({"a", "b"})
+            comptime_print(x.size(0))
+            return y + 3
+
+        f(torch.randn(2))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertExpectedInline(
+            FILE.getvalue().strip(),
+            """\
+FakeTensor(..., size=(s0,))
+2
+[FakeTensor(..., size=(s0,)), 2]
+(FakeTensor(..., size=(s0,)), 2)
+{'foo': FakeTensor(..., size=(s0,))}
+range(1, 3, 1)
+Employee(name='foo', id=2)
+[1, 2]
+defaultdict(NestedUserFunctionVariable(), {})
+set()
+{'a','b'}
+s0""",
+        )
+
     def test_print_graph(self):
         global FILE
         FILE = StringIO()
@@ -40,8 +93,9 @@ class ComptimeTests(torch._dynamo.test_case.TestCase):
         self.assertExpectedInline(
             FILE.getvalue().strip(),
             """\
-def forward(self, x : torch.Tensor):
-    mul = x * 2;  x = None""",
+def forward(self, L_x_ : torch.Tensor):
+    l_x_ = L_x_
+    y = l_x_ * 2;  l_x_ = None""",
         )
 
     def test_print_disas(self):
@@ -76,7 +130,10 @@ def forward(self, x : torch.Tensor):
         self.assertIn("-->", out)
         # Check that the bytecode resembles what we expect
         self.assertIn("STORE_FAST", out)
-        self.assertIn("BINARY_MULTIPLY", out)
+        if sys.version_info < (3, 11):
+            self.assertIn("BINARY_MULTIPLY", out)
+        else:
+            self.assertIn("BINARY_OP", out)
 
     def test_print_value_stack(self):
         global FILE
@@ -132,6 +189,43 @@ y = TensorVariable()
 """,
         )
 
+    # Just make sure it doesn't crash
+    def test_print_direct(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch._dynamo.optimize(cnt)
+        def f(x, z):
+            y = x * 2
+            lambda: z
+            comptime.print(z)
+            return y + 3
+
+        f(torch.randn(2), torch.randn(2))
+
+    # Just make sure it doesn't crash
+    def test_get_local_closure_variable(self):
+        global SELF
+        SELF = self
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch._dynamo.optimize(cnt)
+        def f(x):
+            z = 3
+
+            def g():
+                @comptime
+                def _(ctx):
+                    r = ctx.get_local("z")
+                    SELF.assertEqual(repr(r), "3")
+
+                comptime.print(z)
+                return 2
+
+            y = x * g()
+            return y + 3
+
+        f(torch.randn(2))
+
     def test_print_bt(self):
         global FILE
         FILE = StringIO()
@@ -180,16 +274,51 @@ y = TensorVariable()
         f(torch.randn(2))
         self.assertEqual(cnt.frame_count, 1)
         self.assertExpectedInline(
-            FILE.getvalue().rstrip(),
+            re.sub(r"\s+$", "", FILE.getvalue().rstrip(), flags=re.MULTILINE),
             """\
--
-            local 'x' TENSOR_MATCH
-            {
-                'guard_types': None,
-                'code': None,
-                'obj_weakref': None
-                'guarded_class': None
-            }""",
+
+        local "L['x']" TENSOR_MATCH
+        {
+            'guard_types': None,
+            'code': None,
+            'obj_weakref': None
+            'guarded_class': None
+        }
+        global '' GRAD_MODE
+        {
+            'guard_types': None,
+            'code': None,
+            'obj_weakref': None
+            'guarded_class': None
+        }
+        global '' DETERMINISTIC_ALGORITHMS
+        {
+            'guard_types': None,
+            'code': None,
+            'obj_weakref': None
+            'guarded_class': None
+        }
+        global '' TORCH_FUNCTION_STATE
+        {
+            'guard_types': None,
+            'code': None,
+            'obj_weakref': None
+            'guarded_class': None
+        }
+        global '' DEFAULT_DEVICE
+        {
+            'guard_types': None,
+            'code': None,
+            'obj_weakref': None
+            'guarded_class': None
+        }
+        shape_env '' SHAPE_ENV
+        {
+            'guard_types': None,
+            'code': None,
+            'obj_weakref': None
+            'guarded_class': None
+        }""",
         )
 
     def test_graph_break(self):
@@ -241,6 +370,7 @@ y = TensorVariable()
             def _(ctx):
                 y = ctx.get_local("y")
                 SELF.assertEqual(y.as_fake().size(0), 2)
+                SELF.assertEqual(y.size(0), 2)
                 # Trigger a graph write (TODO: this is not so
                 # useful right now as there's no way to make use
                 # of the output proxy; maybe it's useful for inserting
@@ -258,9 +388,10 @@ y = TensorVariable()
         self.assertExpectedInline(
             FILE.getvalue().strip(),
             """\
-def forward(self, x : torch.Tensor):
-    mul = x * 2;  x = None
-    add = mul + 4;  mul = None""",
+def forward(self, L_x_ : torch.Tensor):
+    l_x_ = L_x_
+    y = l_x_ * 2;  l_x_ = None
+    add = y + 4;  y = None""",
         )
 
 

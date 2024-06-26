@@ -33,8 +33,7 @@ struct WorkEntry {
       std::vector<at::Tensor>* srcPtr,
       std::vector<at::Tensor>* dstPtr,
       std::function<void(std::unique_ptr<WorkEntry>&)> run)
-      : dst(dstPtr ? *dstPtr : std::vector<at::Tensor>()),
-        run(std::move(run)) {
+      : dst(dstPtr ? *dstPtr : std::vector<at::Tensor>()), run(std::move(run)) {
     if (srcPtr) {
       src = *srcPtr;
     }
@@ -71,9 +70,9 @@ struct WorkEntry {
 // MPI_THREAD_SERIALIZED, ProcessGroupMPI will only support a singe process
 // group. In other words, no more than 1 process group can be created globally.
 //
-// If you would like to use multiple ProcessGroupMPI, it requres your MPI
-// implemenation to have a thread support value of MPI_THREAD_MULTIPLE, that is,
-// multiple threads may call MPI, with no restriction.
+// If you would like to use multiple ProcessGroupMPI, it requires your MPI
+// implementation to have a thread support value of MPI_THREAD_MULTIPLE, that
+// is, multiple threads may call MPI, with no restriction.
 //
 // Also note that ProcessGroupMPI only supports a single Tensor operation. In
 // other words, the size of the input Tensor vector should always be 1.
@@ -87,7 +86,7 @@ class TORCH_API ProcessGroupMPI : public Backend {
     explicit WorkMPI(
         std::vector<at::Tensor> outputTensors,
         const char* profilingTitle = nullptr,
-        const c10::optional<std::vector<at::Tensor>>& inputTensors =
+        const std::optional<std::vector<at::Tensor>>& inputTensors =
             c10::nullopt)
         : Work(-1, OpType::UNKNOWN, profilingTitle, inputTensors),
           outputTensors_(std::move(outputTensors)),
@@ -103,7 +102,7 @@ class TORCH_API ProcessGroupMPI : public Backend {
 
    private:
     void finishWorkMPI();
-    void finishWorkMPIError(std::exception_ptr eptr);
+    void finishWorkMPIError(const std::exception_ptr& eptr);
 
     std::vector<at::Tensor> outputTensors_;
     c10::intrusive_ptr<at::ivalue::Future> future_;
@@ -115,10 +114,10 @@ class TORCH_API ProcessGroupMPI : public Backend {
         MPI_Request request,
         std::vector<at::Tensor> outputTensors,
         const char* profilingTitle = nullptr,
-        const c10::optional<std::vector<at::Tensor>>& inputTensors =
+        const std::optional<std::vector<at::Tensor>>& inputTensors =
             c10::nullopt);
 
-    virtual ~AsyncWork();
+    ~AsyncWork() override;
 
     bool isCompleted() override;
 
@@ -138,13 +137,13 @@ class TORCH_API ProcessGroupMPI : public Backend {
    private:
     const std::vector<at::Tensor> outputTensors_;
     MPI_Request request_;
-    MPI_Status status_;
+    MPI_Status status_{};
   };
 
   // Constructor will spawn up the worker thread loop
   explicit ProcessGroupMPI(int rank, int size, MPI_Comm pgComm);
 
-  virtual ~ProcessGroupMPI();
+  ~ProcessGroupMPI() override;
 
   // Abort the MPI program, needs to be called when exception is detected
   void abort();
@@ -229,7 +228,7 @@ class TORCH_API ProcessGroupMPI : public Backend {
   c10::intrusive_ptr<Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
 
-  // Creating a new ProcessGroupMPI, will initiialize MPI if not initialized
+  // Creating a new ProcessGroupMPI, will initialize MPI if not initialized
   static c10::intrusive_ptr<ProcessGroupMPI> createProcessGroupMPI(
       std::vector<int> ranks = {});
 
@@ -244,7 +243,8 @@ class TORCH_API ProcessGroupMPI : public Backend {
   c10::intrusive_ptr<Work> enqueue(
       std::unique_ptr<WorkEntry> entry,
       const char* profilingTitle = nullptr,
-      const c10::optional<std::vector<at::Tensor>>& inputTensors = c10::nullopt);
+      const std::optional<std::vector<at::Tensor>>& inputTensors =
+          c10::nullopt);
 
   bool stop_;
 

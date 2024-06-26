@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -25,8 +26,9 @@ def cas_delay():
 # pyre-fixme[11]: Annotation `Store` is not defined as a type.
 class EtcdStore(Store):
     """
-    Implements a c10 Store interface by piggybacking on the rendezvous etcd
-    instance. This is the store object returned by ``EtcdRendezvous``
+    Implement a c10 Store interface by piggybacking on the rendezvous etcd instance.
+
+    This is the store object returned by ``EtcdRendezvous``.
     """
 
     def __init__(
@@ -50,6 +52,7 @@ class EtcdStore(Store):
     def set(self, key, value):
         """
         Write a key/value pair into ``EtcdStore``.
+
         Both key and value may be either Python ``str`` or ``bytes``.
         """
         self.client.set(key=self.prefix + self._encode(key), value=self._encode(value))
@@ -78,8 +81,9 @@ class EtcdStore(Store):
 
     def add(self, key, num: int) -> int:
         """
-        Atomically increment a value by an integer amount. The integer is
-        represented as a string using base 10. If key is not present,
+        Atomically increment a value by an integer amount.
+
+        The integer is represented as a string using base 10. If key is not present,
         a default value of ``0`` will be assumed.
 
         Returns:
@@ -115,7 +119,7 @@ class EtcdStore(Store):
 
     def wait(self, keys, override_timeout: Optional[datetime.timedelta] = None):
         """
-        Waits until all of the keys are published, or until timeout.
+        Wait until all of the keys are published, or until timeout.
 
         Raises:
             LookupError - if timeout occurs
@@ -127,9 +131,7 @@ class EtcdStore(Store):
         # No return value on success
 
     def check(self, keys) -> bool:
-        """
-        Check if all of the keys are immediately present (without waiting).
-        """
+        """Check if all of the keys are immediately present (without waiting)."""
         b64_keys = [self.prefix + self._encode(key) for key in keys]
         kvs = self._try_wait_get(
             b64_keys,
@@ -176,7 +178,9 @@ class EtcdStore(Store):
             # Read whole directory (of keys), filter only the ones waited for
             all_nodes = self.client.get(key=self.prefix)
             req_nodes = {
-                node.key: node.value for node in all_nodes.children if node.key in b64_keys
+                node.key: node.value
+                for node in all_nodes.children
+                if node.key in b64_keys
             }
 
             if len(req_nodes) == len(b64_keys):

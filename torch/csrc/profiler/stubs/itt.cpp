@@ -10,21 +10,22 @@ namespace impl {
 namespace {
 
 struct ITTMethods : public ProfilerStubs {
-  void record(int* device, ProfilerEventStub* event, int64_t* cpu_ns)
-      const override {}
+  void record(
+      c10::DeviceIndex* device,
+      ProfilerVoidEventStub* event,
+      int64_t* cpu_ns) const override {}
 
-  float elapsed(const ProfilerEventStub* event, const ProfilerEventStub* event2)
-      const override {
+  float elapsed(
+      const ProfilerVoidEventStub* event,
+      const ProfilerVoidEventStub* event2) const override {
     return 0;
   }
 
   void mark(const char* name) const override {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     torch::profiler::itt_mark(name);
   }
 
   void rangePush(const char* name) const override {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     torch::profiler::itt_range_push(name);
   }
 

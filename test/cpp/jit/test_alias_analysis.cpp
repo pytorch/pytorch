@@ -4,10 +4,10 @@
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/irparser.h>
+#include <torch/csrc/jit/ir/type_hashing.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
-#include <torch/csrc/utils/memory.h>
 
 #include <ATen/TensorOperators.h>
 
@@ -23,7 +23,7 @@ class TopologicalMoveTest : public ::testing::Test {
  protected:
   TopologicalMoveTest() {
     createGraph();
-    aliasDb = torch::make_unique<AliasDb>(graph);
+    aliasDb = std::make_unique<AliasDb>(graph);
   }
 
   // Nodes are named after their output.
@@ -1690,6 +1690,18 @@ TEST(NonDeterminismBackwardsCompatibility, BackwardsCompatibility) {
         c10::OperatorName(schema.name(), schema.overload_name()));
     ASSERT_TRUE(op_handle->hasTag(at::Tag::nondeterministic_seeded));
   }
+}
+
+TEST(TypeHashing, HashTypes) {
+  HashType hasher;
+
+  const TypePtr int_type = IntType::get();
+  const TypePtr float_type = FloatType::get();
+  ASSERT_NE(hasher(int_type), hasher(float_type));
+
+  const TypePtr int2_type = TupleType::create({int_type, int_type});
+  const TypePtr int3_type = TupleType::create({int_type, int_type, int_type});
+  ASSERT_NE(hasher(int2_type), hasher(int3_type));
 }
 
 } // namespace jit

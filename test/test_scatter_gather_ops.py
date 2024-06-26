@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Owner(s): ["module: scatter & gather ops"]
 
 import random
@@ -150,7 +149,13 @@ class TestScatterGather(TestCase):
             else:
                 expected.div_(counts, rounding_mode="floor")
 
-        self.assertEqual(actual, expected, atol=0, rtol=0)
+        if dtype == torch.float16 or dtype == torch.bfloat16:
+            # Some CUDA kernels (e.g. indexing_backward_kernel_stride_1) that are called during
+            # the test use fp32 for internal accumulation for improved accuracy. When using 16 bit
+            # precision types can be small differences
+            self.assertEqual(actual, expected, atol=0.04, rtol=0.05)
+        else:
+            self.assertEqual(actual, expected, atol=0, rtol=0)
 
         # Tests empty index
         dst = make_tensor((2, 2), device=device, dtype=dtype)
@@ -164,8 +169,10 @@ class TestScatterGather(TestCase):
 
     @dtypes(torch.float16, torch.float32, torch.complex64)
     def test_scatter_(self, device, dtype):
-        self._test_scatter_base(torch.Tensor.scatter_, device=device, dtype=dtype,
-                                is_scalar=False, reduction=None)
+        for deterministic in [False, True]:
+            with DeterministicGuard(deterministic):
+                self._test_scatter_base(torch.Tensor.scatter_, device=device, dtype=dtype,
+                                        is_scalar=False, reduction=None)
 
     @dtypes(torch.float16, torch.float32, torch.complex64)
     def test_scatter__scalar(self, device, dtype):
@@ -207,9 +214,11 @@ class TestScatterGather(TestCase):
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_bool=False))
     def test_scatter_reduce_sum(self, device, dtype):
         for include_self in (True, False):
-            self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
-                                    is_scalar=False, reduction='sum', unique_indices=False,
-                                    include_self=include_self)
+            for deterministic in [False, True]:
+                with DeterministicGuard(deterministic):
+                    self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
+                                            is_scalar=False, reduction='sum', unique_indices=False,
+                                            include_self=include_self)
 
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True))
     @dtypesIfCUDA(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False, include_bool=False))
@@ -223,9 +232,11 @@ class TestScatterGather(TestCase):
     @dtypesIfCUDA(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False, include_bool=False))
     def test_scatter_reduce_mean(self, device, dtype):
         for include_self in (True, False):
-            self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
-                                    is_scalar=False, reduction='mean', unique_indices=False,
-                                    include_self=include_self)
+            for deterministic in [False, True]:
+                with DeterministicGuard(deterministic):
+                    self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
+                                            is_scalar=False, reduction='mean', unique_indices=False,
+                                            include_self=include_self)
 
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False))
     @dtypesIfCUDA(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False, include_bool=False))
@@ -265,7 +276,7 @@ class TestScatterGather(TestCase):
                 self.assertEqual(input, expected_result)
 
     @onlyCPU
-    @dtypes(torch.float32, torch.float64, torch.bfloat16)
+    @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.float16)
     def test_scatter_expanded_index(self, device, dtype):
         def helper(input_size, idx_size):
             input = torch.randn(input_size, device=device).to(dtype=dtype)
@@ -291,7 +302,6 @@ class TestScatterGather(TestCase):
 
             out = input.scatter_add(0, idx, src)
             out2 = input2.scatter_add(0, idx2, src)
-
             self.assertEqual(out, out2)
 
             for reduce in ["sum", "prod", "mean", "amax", "amin"]:
@@ -308,6 +318,17 @@ class TestScatterGather(TestCase):
     @onlyCPU
     @dtypes(torch.float32, torch.float64, torch.bfloat16)
     def test_gather_expanded_index(self, device, dtype):
+        # Test when index is [N, 1], which would have stride [1, 0]
+        # should be excluded from the fast path when index ix expanded
+        input = torch.arange(25).view(5, 5)
+        input2 = input.to(dtype=dtype)
+
+        idx = torch.arange(5).view(5, 1)
+        out = torch.gather(input, 0, idx)
+        out2 = torch.gather(input2, 0, idx)
+
+        self.assertEqual(out.to(dtype=dtype), out2)
+
         def helper(input_size, idx_size):
             input = torch.randn(input_size, device=device).to(dtype=dtype)
             input2 = input.clone()

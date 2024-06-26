@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -264,7 +265,7 @@ class FunctionalModuleWithBuffers(nn.Module):
         param_names_map: Dict[str, List[str]],
         buffer_names_map: Dict[str, List[str]],
     ) -> None:
-        super(FunctionalModuleWithBuffers, self).__init__()
+        super().__init__()
         self.stateless_model = stateless_model
         self.param_names = param_names
         self.buffer_names = buffer_names
@@ -318,7 +319,7 @@ class FunctionalModule(nn.Module):
         param_names: Tuple[str, ...],
         names_map: Dict[str, List[str]],
     ) -> None:
-        super(FunctionalModule, self).__init__()
+        super().__init__()
         self.stateless_model = stateless_model
         self.param_names = param_names
         self.names_map = names_map

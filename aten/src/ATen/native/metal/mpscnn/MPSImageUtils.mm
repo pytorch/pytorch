@@ -36,7 +36,7 @@ MPSImage* createStaticImage(const float* src, IntArrayRef sizes) {
   int64_t size_bytes = c10::multiply_integers(sizes) * sizeof(float);
   id<MTLBuffer> buff = [[MetalContext sharedInstance].device
       newBufferWithLength:size_bytes
-                  options:MTLResourceOptionCPUCacheModeWriteCombined];
+                  options:MTLResourceCPUCacheModeWriteCombined];
   memcpy(buff.contents, src, size_bytes);
   MPSImage* output = createStaticImage(sizes);
   id<MTLComputePipelineState> state = [[MetalContext sharedInstance]
@@ -171,7 +171,7 @@ void copyImageToFloatBuffer(float* dst, MPSImage* image) {
   int64_t size_bytes = c10::multiply_integers([image sizes]) * sizeof(float);
   id<MTLBuffer> buffer = [[MetalContext sharedInstance].device
       newBufferWithLength:size_bytes
-                  options:MTLResourceOptionCPUCacheModeDefault];
+                  options:MTLResourceCPUCacheModeDefaultCache];
 
   id<MTLCommandBuffer> cb =
       [MetalContext sharedInstance].commandQueue.commandBuffer;

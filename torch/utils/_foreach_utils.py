@@ -1,9 +1,21 @@
-from collections import defaultdict
-from typing import List, Dict, Tuple, Optional, Union
+from typing import List, Dict, Tuple, Optional
 
 import torch
 from torch import Tensor
 from torch.autograd.grad_mode import no_grad
+from typing_extensions import TypeAlias
+
+def _get_foreach_kernels_supported_devices() -> List[str]:
+    r"""Return the device type list that supports foreach kernels."""
+    return ["cuda", "xpu", torch._C._get_privateuse1_backend_name()]
+
+def _get_fused_kernels_supported_devices() -> List[str]:
+    r"""Return the device type list that supports fused kernels in optimizer."""
+    return ["mps", "cuda", "xpu", "cpu", torch._C._get_privateuse1_backend_name()]
+
+TensorListList: TypeAlias = List[List[Optional[Tensor]]]
+Indices: TypeAlias = List[int]
+_foreach_supported_types = [torch.Tensor]
 
 
 # This util function splits tensors into groups by device and dtype, which is useful before sending
@@ -18,25 +30,15 @@ from torch.autograd.grad_mode import no_grad
 #   original input tensorlists, changing up Nones/literals WILL NOT propagate, and manual propagation
 #   may be necessary. Check out torch/optim/sgd.py for an example.
 @no_grad()
-def _group_tensors_by_device_and_dtype(tensorlistlist: List[List[Tensor]],
-                                       with_indices: Optional[bool] = False) -> \
-        Dict[Tuple[torch.device, torch.dtype], List[List[Union[Tensor, int]]]]:
-    assert all([not x or len(x) == len(tensorlistlist[0]) for x in tensorlistlist]), (
-           "all specified tensorlists must match in length")
-    per_device_and_dtype_tensors: Dict[Tuple[torch.device, torch.dtype], List[List[Union[Tensor, int]]]] = defaultdict(
-        lambda: [[] for _ in range(len(tensorlistlist) + (1 if with_indices else 0))])
-    for i, t in enumerate(tensorlistlist[0]):
-        key = (t.device, t.dtype)
-        for j in range(len(tensorlistlist)):
-            # a tensorlist may be empty/None
-            if tensorlistlist[j]:
-                per_device_and_dtype_tensors[key][j].append(tensorlistlist[j][i])
-        if with_indices:
-            # tack on previous index
-            per_device_and_dtype_tensors[key][j + 1].append(i)
-    return per_device_and_dtype_tensors
+def _group_tensors_by_device_and_dtype(
+    tensorlistlist: TensorListList,
+    with_indices: bool = False,
+) -> Dict[Tuple[torch.device, torch.dtype], Tuple[TensorListList, Indices]]:
+    return torch._C._group_tensors_by_device_and_dtype(tensorlistlist, with_indices)
+
+def _device_has_foreach_support(device: torch.device) -> bool:
+    return device.type in (_get_foreach_kernels_supported_devices() + ["cpu"]) and not torch.jit.is_scripting()
+
 
 def _has_foreach_support(tensors: List[Tensor], device: torch.device) -> bool:
-    if device.type not in ['cpu', 'cuda'] or torch.jit.is_scripting():
-        return False
-    return all([t is None or type(t) == torch.Tensor for t in tensors])
+    return _device_has_foreach_support(device) and all(t is None or type(t) in _foreach_supported_types for t in tensors)

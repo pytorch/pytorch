@@ -13,14 +13,13 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
-#include <torch/csrc/utils/memory.h>
 
 #include <utility>
 
 namespace torch {
 namespace jit {
 
-c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
+std::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
     const Node* n,
     bool ignore_custom_classes,
     AliasDb* db) {

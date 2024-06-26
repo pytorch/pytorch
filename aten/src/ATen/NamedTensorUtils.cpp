@@ -128,7 +128,7 @@ static void assert_names_equal(DimnameList a, DimnameList b) {
 }
 
 const Tensor& propagate_names_if_present_and_nonempty(const Tensor& result,
-    c10::optional<DimnameList> maybe_names,
+    std::optional<DimnameList> maybe_names,
     bool validate_names) {
   auto maybe_name_list = maybe_names.value_or(at::ArrayRef<Dimname>{});
   propagate_names_if_nonempty(result.unsafeGetTensorImpl(), maybe_name_list, validate_names);
@@ -297,7 +297,7 @@ static int64_t num_batch_dims(DimnameList names) {
   if (names.size() <= 2) {
     return 0;
   }
-  return names.size() - 2;
+  return static_cast<int64_t>(names.size() - 2);
 }
 
 static std::vector<Dimname> compute_matmul_outnames(

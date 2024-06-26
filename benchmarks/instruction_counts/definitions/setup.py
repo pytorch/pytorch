@@ -6,26 +6,22 @@ from core.api import GroupedSetup
 from core.utils import parse_stmts
 
 
-_TRIVIAL_2D = GroupedSetup(
-    r"x = torch.ones((4, 4))",
-    r"auto x = torch::ones({4, 4});"
-)
+_TRIVIAL_2D = GroupedSetup(r"x = torch.ones((4, 4))", r"auto x = torch::ones({4, 4});")
 
 
 _TRIVIAL_3D = GroupedSetup(
-    r"x = torch.ones((4, 4, 4))",
-    r"auto x = torch::ones({4, 4, 4});"
+    r"x = torch.ones((4, 4, 4))", r"auto x = torch::ones({4, 4, 4});"
 )
 
 
 _TRIVIAL_4D = GroupedSetup(
-    r"x = torch.ones((4, 4, 4, 4))",
-    r"auto x = torch::ones({4, 4, 4, 4});"
+    r"x = torch.ones((4, 4, 4, 4))", r"auto x = torch::ones({4, 4, 4, 4});"
 )
 
 
-_TRAINING = GroupedSetup(*parse_stmts(
-    r"""
+_TRAINING = GroupedSetup(
+    *parse_stmts(
+        r"""
         Python                                   | C++
         ---------------------------------------- | ----------------------------------------
         # Inputs                                 | // Inputs
@@ -40,7 +36,8 @@ _TRAINING = GroupedSetup(*parse_stmts(
         w2 = torch.ones(                         | auto w2 = torch::ones({2});
             (2,), requires_grad=True)            | w2.set_requires_grad(true);
     """
-))
+    )
+)
 
 
 class Setup(enum.Enum):

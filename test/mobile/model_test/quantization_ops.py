@@ -4,7 +4,7 @@ import torch.nn as nn
 
 class GeneralQuantModule(torch.nn.Module):
     def __init__(self):
-        super(GeneralQuantModule, self).__init__()
+        super().__init__()
         self.embedding = torch.ao.nn.quantized.Embedding(
             num_embeddings=10, embedding_dim=12
         )
@@ -48,7 +48,7 @@ class GeneralQuantModule(torch.nn.Module):
 
 class DynamicQuantModule:
     def __init__(self):
-        super(DynamicQuantModule, self).__init__()
+        super().__init__()
         self.module = self.M()
 
     def getModule(self):
@@ -93,27 +93,26 @@ class DynamicQuantModule:
             trans_input = torch.randn(1, 16, 2)
             tgt = torch.rand(1, 16, 2)
 
-            return len((
-                self.rnn(input, h),
-                self.rnncell(input[0], h[0]),
-                self.gru(input, h),
-                self.grucell(input[0], h[0]),
-                self.lstm(input, (h, c)),
-                # self.lstm(torch.nn.utils.rnn.pack_padded_sequence(self.a, lengths=torch.tensor([3,2,1])), (h, c)),
-                self.lstmcell(input[0], (h[0], c[0])),
-                self.transformers[0](trans_input, tgt),
-                self.transformers[1](trans_input),
-                self.transformers[2](trans_input, tgt),
-                self.linears[0](linear_input),
-                self.linears[1](linear_input),
-                self.linears[2](linear_input, linear_input),
-            ))
+            return len(
+                (
+                    self.rnn(input, h),
+                    self.rnncell(input[0], h[0]),
+                    self.gru(input, h),
+                    self.grucell(input[0], h[0]),
+                    self.lstm(input, (h, c)),
+                    # self.lstm(torch.nn.utils.rnn.pack_padded_sequence(self.a, lengths=torch.tensor([3,2,1])), (h, c)),
+                    self.lstmcell(input[0], (h[0], c[0])),
+                    self.transformers[0](trans_input, tgt),
+                    self.transformers[1](trans_input),
+                    self.transformers[2](trans_input, tgt),
+                    self.linears[0](linear_input),
+                    self.linears[1](linear_input),
+                    self.linears[2](linear_input, linear_input),
+                )
+            )
 
 
 class StaticQuantModule:
-    def __init__(self):
-        super(StaticQuantModule, self).__init__()
-
     def getModule(self):
         model_fp32 = self.M()
         model_fp32.eval()
@@ -165,9 +164,6 @@ class StaticQuantModule:
 
 
 class FusedQuantModule:
-    def __init__(self):
-        super(FusedQuantModule, self).__init__()
-
     def getModule(self):
         model_fp32 = self.M()
         model_fp32.eval()

@@ -2,7 +2,6 @@
 
 #include <c10/util/irange.h>
 #include <torch/arg.h>
-#include <torch/csrc/utils/memory.h>
 #include <torch/data/datasets/stateful.h>
 #include <torch/data/samplers.h>
 #include <queue>
@@ -329,14 +328,13 @@ class ChunkDataset final
       ChunkSampler chunk_sampler,
       ExampleSampler example_sampler,
       ChunkDatasetOptions options,
-      // NOLINTNEXTLINE(modernize-pass-by-value)
       std::function<void(UnwrappedBatchType&)> preprocessing_policy =
           std::function<void(UnwrappedBatchType&)>())
       : chunk_reader_(std::move(chunk_reader)),
         chunk_sampler_(std::move(chunk_sampler)),
         example_sampler_(std::move(example_sampler)),
         options_(std::move(options)),
-        preprocessing_policy_(preprocessing_policy),
+        preprocessing_policy_(std::move(preprocessing_policy)),
         quit_worker_(false),
         running_preloaders_(0),
         load_checkpoint_(false) {}
@@ -392,7 +390,7 @@ class ChunkDataset final
 
     // Throw out any existing cached batch in the buffer and re-creates a new
     // chunk buffer.
-    batch_buffer_ = torch::make_unique<
+    batch_buffer_ = std::make_unique<
         detail::BatchDataBuffer<UnwrappedBatchType, ExampleSamplerType>>(
         options_.batch_size(), example_sampler_, options_.cache_size());
 

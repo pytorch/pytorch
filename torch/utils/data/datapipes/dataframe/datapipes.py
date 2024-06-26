@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import random
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
@@ -23,8 +24,7 @@ class DataFramesAsTuplesPipe(IterDataPipe):
     def __iter__(self):
         for df in self.source_datapipe:
             # for record in df.to_records(index=False):
-            for record in df_wrapper.iterate(df):
-                yield record
+            yield from df_wrapper.iterate(df)
 
 
 @functional_datapipe('_dataframes_per_row', enable_df_api_tracing=True)

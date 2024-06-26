@@ -1,8 +1,18 @@
+# mypy: allow-untyped-defs
 import logging
 import warnings
-
 from copy import deepcopy
-from typing import Any, Collection, Dict, List, Mapping, Union
+from typing import (
+    Any,
+    Callable,
+    Collection,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    overload,
+    Union,
+)
 
 import torch
 import torch.nn as nn
@@ -18,9 +28,10 @@ logger = logging.getLogger(__name__)
 
 class _NamedOptimizer(optim.Optimizer):
     """
-    ``_NamedOptimizer`` takes a dict of parameters and exposes ``state_dict`` by
-    parameter key. We replace the original key (number) in an optim to the
-    fully qualifed name (FQN) string. User can initialize the optim as they
+    ``_NamedOptimizer`` takes a dict of parameters and exposes ``state_dict`` by parameter key.
+
+    We replace the original key (number) in an optim to the
+    fully qualified name (FQN) string. User can initialize the optim as they
     initialize a PyTorch optim, the only difference is that they also need to
     pass in the FQN of each parameters.
 
@@ -63,8 +74,8 @@ class _NamedOptimizer(optim.Optimizer):
         self,
         named_parameters: Mapping[str, Union[torch.Tensor, ShardedTensor]],
         optimizer_class: optim.Optimizer,
-        param_groups: Collection[Mapping[str, Any]] = None,
-        module: nn.Module = None,
+        param_groups: Optional[Collection[Mapping[str, Any]]] = None,
+        module: Optional[nn.Module] = None,
         *args,
         **kwargs,
     ) -> None:
@@ -120,8 +131,10 @@ class _NamedOptimizer(optim.Optimizer):
 
     def state_dict(self) -> Dict[str, Any]:
         """
-        Return the ``state_dict`` of the optimzer. Instead of using number to index
-        parameters, we will use module fully qualifed name (FQN) as the key.
+        Return the ``state_dict`` of the optimizer.
+
+        Instead of using number to index
+        parameters, we will use module fully qualified name (FQN) as the key.
         """
         state_dict = self._optimizer.state_dict()
         param_groups = state_dict["param_groups"]
@@ -144,19 +157,30 @@ class _NamedOptimizer(optim.Optimizer):
 
         return self._post_state_dict({"state": ret_state, "param_groups": ret_groups})
 
-    def step(self, closure: Any = None) -> None:
+    @overload
+    def step(self, closure: None = ...) -> None:
+        ...
+
+    @overload
+    def step(self, closure: Callable[[], float]) -> float:
+        ...
+
+    def step(self, closure: Optional[Callable[[], float]] = None) -> Optional[float]:
         """
-        Performs a single optimization step.
+        Perform a single optimization step.
 
         This will call :meth:`torch.optim.Optimizer.step` on the wrapped
         optimizer.
         """
-        self._optimizer.step(closure=closure)
+        return self._optimizer.step(closure=closure)
+
+    @property
+    def state(self) -> Mapping[torch.Tensor, Any]:  # type: ignore[override]
+        return self._optimizer.state
 
     def load_state_dict(self, state_dict: Mapping[str, Any]) -> None:
         """
-        This public function defines the default behavior to load a state_dict
-        for ``_NamedOptimizer``.
+        Define the default behavior to load a state_dict for ``_NamedOptimizer``.
 
         Sample Code
         ```
@@ -230,9 +254,7 @@ class _NamedOptimizer(optim.Optimizer):
 
         src_group_map = {}
         for group in src_param_groups:
-            param_keys = []
-            for param_key in group["params"]:
-                param_keys.append(param_key)
+            param_keys = list(group["params"])
             src_group_map[_gen_param_group_key(param_keys)] = group
         new_group_map = {}
         for new_group in new_param_groups:
@@ -286,12 +308,11 @@ class _NamedOptimizer(optim.Optimizer):
 
     def init_state(self) -> None:
         """
-        Runs a dummy optimizer step, which allows to initialize optimizer state
-        because we do lazy init for most optimizers.
+        Run a dummy optimizer step, which allows to initialize optimizer state because we do lazy init for most optimizers.
 
         This allows doing in-place loading of optimizer state from a checkpoint.
         """
-        for _, param in self.named_parameters.items():
+        for param in self.named_parameters.values():
             if param.requires_grad:
                 t = torch.zeros_like(param)
                 param.grad = torch.autograd.Variable(t)
@@ -299,20 +320,22 @@ class _NamedOptimizer(optim.Optimizer):
         self.step(closure=None)
 
     def _pre_load_state_dict(self, state_dict) -> Dict[str, Any]:
+        # TODO(chienchin): This API should be FSDP agnostic and should support
+        # general user hooks.
         if isinstance(self.module, FSDP):
-            return FSDP.load_optim_state_dict_pre_hook(
-                self.module, self._optimizer, state_dict
+            return FSDP.optim_state_dict_to_load(
+                self.module, self._optimizer, state_dict, is_named_optimizer=True
             )
         return state_dict
 
     def _post_state_dict(self, state_dict) -> Dict[str, Any]:
+        # TODO(chienchin): This API should be FSDP agnostic and should support
+        # general user hooks.
         if isinstance(self.module, FSDP):
-            FSDP.optim_state_dict_post_hook(self.module, self._optimizer, state_dict)
+            FSDP.optim_state_dict(self.module, self._optimizer, state_dict)
         return state_dict
 
 
 def _gen_param_group_key(param_keys: List[str]) -> str:
-    """
-    Concatenate all param keys as a unique indentifier for one param group.
-    """
+    """Concatenate all param keys as a unique indentifier for one param group."""
     return "/".join(sorted(param_keys))

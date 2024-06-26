@@ -1,13 +1,14 @@
-import torch
-from torch.utils._pytree import tree_map
+# mypy: allow-untyped-defs
 from typing import Optional
+
+import torch
+from torch.utils import _pytree as pytree
+
 
 def _basic_validation(op, args=(), kwargs=None):
     """
     Common validation across all ops go in here.
     """
-    from torch.distributed._shard.partial_tensor import _PartialTensor
-    from torch.distributed._shard.replicated_tensor import ReplicatedTensor
     from torch.distributed._shard.sharded_tensor import ShardedTensor
 
     if len(args) == 0 and (kwargs is None or len(kwargs) == 0):
@@ -18,11 +19,11 @@ def _basic_validation(op, args=(), kwargs=None):
 
     def is_distributed_tensor(e):
         nonlocal has_distributed_tensor
-        if isinstance(e, (ReplicatedTensor, _PartialTensor, ShardedTensor)):
+        if isinstance(e, ShardedTensor):
             has_distributed_tensor = True
 
-    tree_map(is_distributed_tensor, args)
-    tree_map(is_distributed_tensor, kwargs)
+    pytree.tree_map_(is_distributed_tensor, args)
+    pytree.tree_map_(is_distributed_tensor, kwargs)
 
     if not has_distributed_tensor:
         raise TypeError(
@@ -35,16 +36,17 @@ def _basic_validation(op, args=(), kwargs=None):
 
     def validate_pg(e):
         nonlocal cur_pg
-        if isinstance(e, (ReplicatedTensor, _PartialTensor, ShardedTensor)):
+        if isinstance(e, ShardedTensor):
             if cur_pg is not None and e._process_group is not cur_pg:
                 raise RuntimeError(
-                    'All distributed tensors should use the '
-                    'same ProcessGroup if used together in an op.'
+                    "All distributed tensors should use the "
+                    "same ProcessGroup if used together in an op."
                 )
             cur_pg = e._process_group
 
-    tree_map(validate_pg, args)
-    tree_map(validate_pg, kwargs)
+    pytree.tree_map_(validate_pg, args)
+    pytree.tree_map_(validate_pg, kwargs)
+
 
 def _register_default_op(op, decorator):
     @decorator(op)

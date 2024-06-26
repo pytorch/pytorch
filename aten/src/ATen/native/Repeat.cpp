@@ -16,8 +16,8 @@
 
 template <typename index_t>
 static void compute_cpu(
-    index_t* repeat_ptr,
-    int64_t* cumsum_ptr,
+    const index_t* repeat_ptr,
+    const int64_t* cumsum_ptr,
     index_t* result_ptr,
     int64_t size,
     int64_t result_size) {
@@ -37,12 +37,11 @@ static void compute_cpu(
   });
 }
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor repeat_interleave_cpu(
     const Tensor& repeat,
-    c10::optional<int64_t> output_size) {
+    std::optional<int64_t> output_size) {
   Tensor output;
   AT_DISPATCH_INDEX_TYPES(repeat.scalar_type(), "repeat_interleave_cpu", [&]() {
     output = repeat_interleave_common<index_t, compute_cpu<index_t>>(
@@ -52,11 +51,11 @@ Tensor repeat_interleave_cpu(
   return output;
 }
 
-Tensor repeat_interleave(
+Tensor repeat_interleave_symint(
     const Tensor& self,
     const Tensor& repeats,
-    c10::optional<int64_t> dim,
-    c10::optional<int64_t> output_size) {
+    std::optional<int64_t> dim,
+    std::optional<SymInt> output_size) {
   Tensor input = self;
 
   // Store conj and neg bits
@@ -80,13 +79,15 @@ Tensor repeat_interleave(
   } else if (repeats.dim() == 1) {
     TORCH_CHECK(
         repeats.sym_size(0) == input.sym_size(dim.value()),
-        "repeats must have the same size as input along dim")
+        "repeats must have the same size as input along dim, but got repeats.size(0) = ",
+        repeats.sym_size(0), " and input.size(", dim.value(), ") = ", input.sym_size(dim.value())
+    );
   } else {
     AT_ERROR("repeats must be 0-dim or 1-dim tensor");
   }
 
   auto ret = input.index_select(
-      dim.value(), at::repeat_interleave(repeats_, output_size));
+      dim.value(), at::repeat_interleave_symint(repeats_, output_size));
   // Restore conj and neg bits
   if (conj) {
     ret = ret.conj();
@@ -97,22 +98,29 @@ Tensor repeat_interleave(
   return ret;
 }
 
-Tensor repeat_interleave(
-    const Tensor& self,
-    int64_t repeats,
-    c10::optional<int64_t> dim,
-    c10::optional<int64_t> output_size) {
-  at::Tensor repeats_ = at::empty(1, self.options().dtype(at::kLong)).fill_(repeats);
-  return at::native::repeat_interleave(self, repeats_, dim, output_size);
-}
-
 Tensor repeat_interleave_symint(
     const Tensor& self,
     c10::SymInt repeats,
-    c10::optional<int64_t> dim,
-    c10::optional<int64_t> output_size) {
-    return at::native::repeat_interleave(self, repeats.guard_int(__FILE__, __LINE__), dim, output_size);
+    std::optional<int64_t> dim_opt,
+    std::optional<SymInt> output_size) {
+  Tensor input = dim_opt ? self : self.flatten();
+  int64_t dim = c10::maybe_wrap_dim(dim_opt.value_or(0), self.dim());
+  TORCH_CHECK(repeats >= 0, "Repeats must be non-negative");
+
+  input = input.unsqueeze(dim + 1);
+  auto expand_shape = input.sym_sizes().vec();
+  expand_shape[dim + 1] = repeats;
+  input = input.expand_symint(expand_shape);
+
+  // This argument doesn't really make sense for the scalar overload, but exists
+  // for consistency with the tensor overload
+  if (output_size) {
+    auto calculated_size = (repeats * expand_shape[dim]).guard_int(__FILE__, __LINE__);
+    TORCH_CHECK(*output_size == calculated_size, "repeat_interleave: Invalid output_size, expected ",
+                calculated_size, " but got ", *output_size);
   }
 
-} // namespace native
-} // namespace at
+  return input.clone(at::MemoryFormat::Contiguous).flatten(dim, dim + 1);
+}
+
+} // namespace at::native

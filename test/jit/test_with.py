@@ -32,6 +32,7 @@ class TestWith(JitTestCase):
         Check that with statements that use the 'as' keyword to bind expressions
         to targets work as expected.
         """
+
         @torch.jit.script
         class Context:
             """
@@ -189,6 +190,7 @@ class TestWith(JitTestCase):
         Check that with statements that do not use the 'as' keyword to bind expressions
         to targets work as expected.
         """
+
         @torch.jit.script
         class Context:
             """
@@ -345,6 +347,7 @@ class TestWith(JitTestCase):
         Check that exceptions thrown in the bodies of with-statements are
         handled correctly.
         """
+
         @torch.jit.script
         class Context:
             """
@@ -368,7 +371,7 @@ class TestWith(JitTestCase):
 
         @torch.jit.script
         def method_that_raises() -> torch.Tensor:
-            raise Exception("raised exception")
+            raise Exception("raised exception")  # noqa: TRY002
 
         @torch.jit.script
         def test_exception(x: torch.Tensor, c: Context) -> torch.Tensor:
@@ -416,15 +419,21 @@ class TestWith(JitTestCase):
         # checkScript and checkScriptRaisesRegex cannot be used because the string frontend will
         # not compile class types (of which Context, the context manager being used for this test
         # is one).
-        with self.assertRaisesRegexWithHighlight(Exception, r"raised exception", "raise Exception(\"raised exception"):
+        with self.assertRaisesRegexWithHighlight(
+            Exception, r"raised exception", 'raise Exception("raised exception'
+        ):
             test_exception(torch.randn(2), c)
         self.assertEqual(c.count, 1)
 
-        with self.assertRaisesRegexWithHighlight(Exception, r"raised exception", "raise Exception(\"raised exception"):
+        with self.assertRaisesRegexWithHighlight(
+            Exception, r"raised exception", 'raise Exception("raised exception'
+        ):
             test_exception_nested(torch.randn(2), c)
         self.assertEqual(c.count, 1)
 
-        with self.assertRaisesRegexWithHighlight(Exception, r"raised exception", "raise Exception(\"raised exception"):
+        with self.assertRaisesRegexWithHighlight(
+            Exception, r"raised exception", 'raise Exception("raised exception'
+        ):
             test_exception_fn_call(torch.randn(2), c)
         self.assertEqual(c.count, 1)
 
@@ -451,7 +460,7 @@ class TestWith(JitTestCase):
             def __init__(self):
                 self.count = 1
 
-            def __enter__(self, incr: int):
+            def __enter__(self, incr: int):  # noqa: PLE0302
                 self.count += incr
 
             def __exit__(self, type: Any, value: Any, tb: Any):
@@ -469,7 +478,7 @@ class TestWith(JitTestCase):
             def __enter__(self):
                 self.count += 1
 
-            def __exit__(self, type: Any, value: Any):
+            def __exit__(self, type: Any, value: Any):  # noqa: PLE0302
                 pass
 
         @torch.jit.script
@@ -505,7 +514,9 @@ class TestWith(JitTestCase):
 
             return x
 
-        def test_exit_incorrect_types(x: torch.Tensor, cm: ExitIncorrectTypes) -> torch.Tensor:
+        def test_exit_incorrect_types(
+            x: torch.Tensor, cm: ExitIncorrectTypes
+        ) -> torch.Tensor:
             with cm as _:
                 pass
 
@@ -523,7 +534,9 @@ class TestWith(JitTestCase):
             self.checkScript(test_no_enter_no_exit, (test_tensor, NoEnterNoExit()))
 
         with self.assertRaisesRegexWithHighlight(
-            RuntimeError, r"__enter__ must have only one argument and one return value", "cm"
+            RuntimeError,
+            r"__enter__ must have only one argument and one return value",
+            "cm",
         ):
             self.checkScript(test_bad_enter, (test_tensor, BadEnter()))
 
@@ -539,7 +552,9 @@ class TestWith(JitTestCase):
                 test_exit_incorrect_types, (test_tensor, ExitIncorrectTypes())
             )
 
-        with self.assertRaisesRegexWithHighlight(RuntimeError, r"must return an object", "\"not_object\""):
+        with self.assertRaisesRegexWithHighlight(
+            RuntimeError, r"must return an object", '"not_object"'
+        ):
             self.checkScript(test_enter_without_object, ())
 
     def test_with_no_grad(self):
@@ -581,9 +596,6 @@ class TestWith(JitTestCase):
         # Check that @torch.jit.ignored functions respect no_grad when it is
         # called in JIT mode.
         class NoGradModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             @torch.jit.ignore
             def adder(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
                 w = x + y
@@ -606,6 +618,7 @@ class TestWith(JitTestCase):
         Check that torch.autograd.profiler.record_function context manager is
         torchscriptable.
         """
+
         def with_rf(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
             with torch.autograd.profiler.record_function("foo"):
                 # Nested record_function.

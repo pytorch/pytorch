@@ -4,11 +4,8 @@
 #include <ATen/native/utils/Factory.h>
 #include <ATen/native/xnnpack/Linear.h>
 
-namespace at {
-namespace native {
-namespace xnnpack {
-namespace internal {
-namespace linear {
+namespace at::native::xnnpack {
+namespace internal::linear {
 
 namespace {
 
@@ -17,7 +14,7 @@ namespace {
 // TODO: Decouple and improve error handling and messages.
 bool available(
     const Tensor& weight,
-    const c10::optional<Tensor>& bias,
+    const std::optional<Tensor>& bias,
     const float output_min,
     const float output_max) {
          // XNNPACK
@@ -64,11 +61,11 @@ Tensor create_and_run(
       input);
 }
 
-} // namespace
+} // anonymous namespace
 
 ContextLinear create(
     const Tensor& weight,
-    const c10::optional<Tensor>& bias,
+    const std::optional<Tensor>& bias,
     const float output_min,
     const float output_max) {
   const Tensor weight_contig = weight.contiguous();
@@ -97,6 +94,8 @@ ContextLinear create(
       output_min,                                                     // output_min
       output_max,                                                     // output_max
       0u,                                                             // flags
+      nullptr,                                                        // xnn_caches_t
+      nullptr,                                                        // xnn_weights_cache_t
       &linear_op);                                                    // operator
 
   TORCH_CHECK(
@@ -138,12 +137,19 @@ Tensor run(
       padded_input.suggest_memory_format(),
       padded_input.opt_names());
 
-  const xnn_status setup_status = xnn_setup_fully_connected_nc_f32(
+  const xnn_status reshape_status = xnn_reshape_fully_connected_nc_f32(
       context.op.get(),                                   // operator
       Layout::ActivationND::batch(padded_input.sizes()),  // Batch,
-      padded_input.data_ptr<float>(),                     // input
-      output.data_ptr<float>(),                           // output
       caffe2::pthreadpool_());                            // threadpool
+
+  TORCH_CHECK(
+      xnn_status_success == reshape_status,
+      "xnn_reshape_fully_connected_nc_f32 failed!");
+
+  const xnn_status setup_status = xnn_setup_fully_connected_nc_f32(
+      context.op.get(),                                   // operator
+      padded_input.data_ptr<float>(),                     // input
+      output.data_ptr<float>());                          // output
 
   TORCH_CHECK(
       xnn_status_success == setup_status,
@@ -167,9 +173,9 @@ Tensor run(
 
 c10::intrusive_ptr<xnnpack::LinearOpContext> createLinearClampPrePackOpContext(
     Tensor weight,
-    c10::optional<Tensor> bias,
-    const c10::optional<Scalar>& output_min,
-    const c10::optional<Scalar>& output_max) {
+    std::optional<Tensor> bias,
+    const std::optional<Scalar>& output_min,
+    const std::optional<Scalar>& output_max) {
   return xnnpack::XNNPackLinearOpContext::create_context(
       std::move(weight), std::move(bias), output_min, output_max);
 }
@@ -190,8 +196,7 @@ unpack_prepacked_sizes_linear(const IValue& ivalue) {
       (bias && bias->defined()) ? at::OptionalIntArrayRef(bias->sizes()) : c10::nullopt));
 }
 
-} // namespace linear
-} // namespace internal
+} // namespace internal::linear
 
 bool use_linear(
     const Tensor& input,
@@ -218,9 +223,6 @@ Tensor linear(
       ContextLinear::kMax);
 }
 
-} // namespace xnnpack
-
-} // namespace native
-} // namespace at
+} // namespace at::native::xnnpack
 
 #endif /* USE_XNNPACK */

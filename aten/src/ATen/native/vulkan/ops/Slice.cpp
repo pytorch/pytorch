@@ -24,25 +24,33 @@ Tensor slice_4d(
   const Tensor input = input_arg.is_vulkan() ? input_arg : input_arg.vulkan();
   const vTensor& v_self = convert(input);
 
+  uint32_t out_channels = out_tsize.data[1u];
+  uint32_t in_channels = in_tsize.data[1u];
+
+  uint32_t out_c_aligned = api::utils::align_up(out_channels, 4u);
+  uint32_t in_c_aligned = api::utils::align_up(in_channels, 4u);
+
   const struct Block final {
-    uvec3 size; // output texture size
-    uint32_t fill_0; // dummy
-    uvec3 isize; // input texture size
-    uint32_t fill_1; // dummy
+    ivec3 size; // output texture size
+    int32_t fill_0; // dummy
+    ivec3 isize; // input texture size
+    int32_t fill_1; // dummy
     uvec4 tensor_size; // output tensor size
     uvec4 itensor_size; // input tensor size
     uvec4 args; // input arguments (dim, start, end, step)
+    uvec2 c_info; // tensor channels aligned to 4
   } block{
-      v_output.extents(),
-      0u,
-      v_self.extents(),
-      0u,
+      api::utils::make_ivec3(v_output.extents()),
+      0,
+      api::utils::make_ivec3(v_self.extents()),
+      0,
       out_tsize,
       in_tsize,
       {safe_downcast<uint32_t>(dim),
        safe_downcast<uint32_t>(start),
        safe_downcast<uint32_t>(end),
        safe_downcast<uint32_t>(step)},
+      {out_c_aligned, in_c_aligned},
   };
 
   api::UniformParamsBuffer params(context, block);
@@ -224,8 +232,8 @@ Tensor slice_height(
 Tensor slice(
     const Tensor& self,
     int64_t dim,
-    c10::optional<int64_t> start,
-    c10::optional<int64_t> end,
+    std::optional<int64_t> start,
+    std::optional<int64_t> end,
     const int64_t step) {
   TORCH_CHECK(step > 0, "slice step must be positive");
   auto nDims = safe_downcast<uint32_t>(self.dim());
@@ -259,7 +267,6 @@ Tensor slice(
 
   auto len = end_val - start_val;
   newSizes[dim] = (len + step - 1) / step; // round-up
-  TORCH_CHECK(len > 0, "Vulkan doesn't support zero-sized slice");
 
   // generalize into 4D tensor
   uvec4 in_tsize{1u, 1u, 1u, 1u}, out_tsize{1u, 1u, 1u, 1u};
@@ -269,7 +276,9 @@ Tensor slice(
   }
   dim += 4 - nDims;
 
-  vTensor v_output{api::context(), newSizes, self.scalar_type()};
+  IntArrayRef output_sizes(newSizes);
+  vTensor v_output{
+      api::context(), output_sizes.vec(), convert_dtype(self.scalar_type())};
 
   if (dim == 3) {
     slice_width(self, start_val, end_val, step, v_output);

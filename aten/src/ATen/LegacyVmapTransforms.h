@@ -40,6 +40,7 @@ using VmapPhysicalViewVec =
 // dimensions to get 8. Adjust this number as necessary
 constexpr int64_t kVmapStaticDimVecSize = 8;
 using VmapDimVector = SmallVector<int64_t, kVmapStaticDimVecSize>;
+using VmapSymDimVector = SmallVector<c10::SymInt, kVmapStaticDimVecSize>;
 
 // NOTE: [What is an VmapTransform?]
 // An *VmapTransform* converts logical views of tensors to physical views.
@@ -112,8 +113,8 @@ struct VmapPhysicalToLogicalMap;
 //   levels: 012345
 struct TORCH_API VmapPhysicalView {
   VmapPhysicalView(Tensor&& tensor, std::bitset<kVmapNumLevels> levels)
-      : levels_(levels), tensor_(tensor) {
-    TORCH_INTERNAL_ASSERT(!isBatchedTensor(tensor));
+      : levels_(levels), tensor_(std::move(tensor)) {
+    TORCH_INTERNAL_ASSERT(!isBatchedTensor(tensor_));
   }
 
   Tensor& tensor() {

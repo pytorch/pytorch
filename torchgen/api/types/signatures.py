@@ -1,7 +1,7 @@
 from dataclasses import dataclass
-
 from typing import Iterator, List, Optional, Sequence, Set, Tuple, Union
 
+from torchgen.api.types.types_base import Binding, CType, Expr
 from torchgen.model import (
     BackendIndex,
     FunctionSchema,
@@ -9,8 +9,6 @@ from torchgen.model import (
     NativeFunctionsGroup,
     NativeFunctionsViewGroup,
 )
-
-from .types_base import Binding, CType, Expr
 
 
 @dataclass(frozen=True)
@@ -35,6 +33,8 @@ class CppSignature:
     # Is this a symint C++ signature.  For BC reasons, functions that take
     # SymInts still present as int64_t in C++, and the SymInt variant is
     # offered at a different overload name
+    #
+    # NB: If a function RETURNS a SymInt, this is ALWAYS false
     symint: bool
 
     # The set of C++ arguments which should not have defaults applied to them
@@ -287,16 +287,14 @@ class ViewInverseSignature:
     g: NativeFunctionsViewGroup
 
     def name(self) -> str:
-        assert self.g.view_copy is not None
-        return functionalization.name(self.g, is_reverse=True, include_namespace=False)
+        return functionalization.reverse_name(self.g.view, include_namespace=False)
 
     def decl(self) -> str:
-        assert self.g.view_copy is not None
-        return_type = functionalization.returns_type(self.g.view_copy.func)
+        return_type = functionalization.returns_type(self.g.view.func)
         decls = [
             a.decl()
             for a in functionalization.inner_arguments(
-                self.g.view_copy.func, is_reverse=True
+                self.g.view.func, is_reverse=True
             )
         ]
         return f"static {return_type.cpp_type()} {self.name()}({', '.join(decls)});"
@@ -314,7 +312,8 @@ class FunctionalizationLambda:
         # We also need to read the "reapply views" TLS at the time that the functionalization kernel was executed,
         # and plumb it into the lambda.
         outer_ctx = dispatcher.arguments(self.g.view.func) + [
-            functionalization.reapply_views_binding
+            functionalization.reapply_views_binding,
+            functionalization.inverse_return_mode_binding,
         ]
         capture_bindings = functionalization.capture_arguments(
             self.g.view.func, is_reverse=self.is_reverse

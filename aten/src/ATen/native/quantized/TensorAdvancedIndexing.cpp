@@ -32,10 +32,8 @@ static TensorIterator make_index_put_iterator(const AdvancedIndex& info, const T
 
 static Tensor & masked_fill_impl_quantized_cpu(Tensor & self, const Tensor & mask, const Scalar& value) {
   NoNamesGuard guard;
-  if (mask.dtype() == ScalarType::Byte) {
-    TORCH_WARN("masked_fill_ received a mask with dtype torch.uint8, this behavior is now deprecated," \
-            "please use a mask with dtype torch.bool instead.");
-  }
+  TORCH_CHECK(mask.dtype() == ScalarType::Bool, "masked_fill only supports boolean masks, "
+    "but got dtype ", mask.dtype());
 
   if (at::has_internal_overlap(self) == MemOverlap::Yes) {
     TORCH_WARN(
@@ -78,11 +76,11 @@ Tensor & masked_fill__quantized_cpu(Tensor& self, const Tensor & mask, const Ten
   return self;
 }
 
-Tensor & masked_fill_impl_quantized_cuda(Tensor& self, const Tensor & mask, const Scalar& value) {
+static Tensor & masked_fill_impl_quantized_cuda(Tensor& self, const Tensor & mask, const Scalar& value) {
   TORCH_CHECK(self.device() == mask.device(), "expected self and mask to be on the same device, but got mask on ",
     mask.device(), " and self on ", self.device());
-  TORCH_CHECK(mask.scalar_type() == kByte || mask.scalar_type() == kBool,
-    "expected mask dtype to be Bool but got ", mask.scalar_type());
+  TORCH_CHECK(mask.scalar_type() == kBool, "masked_fill only supports boolean masks, "
+    "but got dtype ", mask.scalar_type());
   TORCH_CHECK(self.qscheme() == c10::kPerTensorAffine, "masked_fill__quantized_cpu for quantized tensors is currently only supported for per tensor quantized tensors");
 
   auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
@@ -123,7 +121,7 @@ Tensor & masked_fill__quantized_cuda(Tensor& self, const Tensor & mask, const Te
   return masked_fill_impl_quantized_cuda(self, mask, value.item());
 }
 
-Tensor& _index_put_impl_quantized_cpu_(Tensor & self, const torch::List<c10::optional<Tensor>>& indices, const Tensor & value, const bool accumulate, const bool unsafe) {
+Tensor& _index_put_impl_quantized_cpu_(Tensor & self, const torch::List<std::optional<Tensor>>& indices, const Tensor & value, const bool accumulate, const bool unsafe) {
   TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   TORCH_CHECK(!value.is_quantized(), "Value argument for quantized input_put should not be quantized");
   TORCH_CHECK(self.qscheme() == c10::kPerTensorAffine, "index_put for quantized tensors is currently only supported for per tensor quantized tensors");
@@ -147,7 +145,7 @@ Tensor& _index_put_impl_quantized_cpu_(Tensor & self, const torch::List<c10::opt
   }
   at::assert_no_overlap(self, value);
   // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
-  for (const c10::optional<Tensor>& index: indices) {
+  for (const std::optional<Tensor>& index: indices) {
     if (index.has_value()) {
       at::assert_no_overlap(self, *index);
     }
@@ -159,7 +157,7 @@ Tensor& _index_put_impl_quantized_cpu_(Tensor & self, const torch::List<c10::opt
   return self;
 }
 
-Tensor& _index_put_impl_quantized_cuda_(Tensor & self, const torch::List<c10::optional<Tensor>>& indices, const Tensor & value, const bool accumulate, const bool unsafe) {
+Tensor& _index_put_impl_quantized_cuda_(Tensor & self, const torch::List<std::optional<Tensor>>& indices, const Tensor & value, const bool accumulate, const bool unsafe) {
   TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   TORCH_CHECK(!value.is_quantized(), "Value argument for quantized input_put should not be quantized");
   TORCH_CHECK(self.qscheme() == c10::kPerTensorAffine, "index_put for quantized tensors is currently only supported for per tensor quantized tensors");
@@ -185,7 +183,7 @@ Tensor& _index_put_impl_quantized_cuda_(Tensor & self, const torch::List<c10::op
 
   at::assert_no_overlap(self, value);
   // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
-  for (const c10::optional<Tensor>& index: indices) {
+  for (const std::optional<Tensor>& index: indices) {
     if (index.has_value()) {
       at::assert_no_overlap(self, *index);
     }

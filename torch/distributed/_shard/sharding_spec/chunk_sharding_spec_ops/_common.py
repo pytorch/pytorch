@@ -1,4 +1,4 @@
-# coding=utf-8
+# mypy: allow-untyped-defs
 
 import torch
 import torch.distributed as dist
@@ -107,7 +107,7 @@ def _handle_col_wise_sharding_base(
         col_dim: dim of result tensor after the operation.
         input: tensor to be applied op on.
         world_size: number of ranks.
-        weight: shareded weight tensor.
+        weight: sharded weight tensor.
         local_shard: col-wise sharded weight tensor.
         pg: process group.
         gathered_inputs: list of inputs from all ranks. If specified, we
@@ -118,7 +118,7 @@ def _handle_col_wise_sharding_base(
         padding_idx: If specified, the entries at padding_idx do
             not contribute to the gradient; therefore, the embedding
             vector at padding_idx is not updated during training,
-            i.e. it remains as a fixed “pad”.
+            i.e. it remains as a fixed "pad".
             Note that the embedding vector at padding_idx is
             excluded from the reduction.
 
@@ -170,7 +170,7 @@ def _result_distribute_with_col_rearrange(results, input, world_size, weight, pg
             We need to distribute them back to their original ranks.
         input: tensor to be applied op to.
         world_size: number of ranks.
-        weight: shareded weight tensor.
+        weight: sharded weight tensor.
         pg: process group.
 
     Return: column rearranged result.
@@ -200,10 +200,8 @@ def _result_distribute_with_col_rearrange(results, input, world_size, weight, pg
 
     # Check if we need to rearrange columns appropriately for output.
     rearrange_columns = any(
-        [
-            idx != placement.rank()
-            for idx, placement in enumerate(weight._sharding_spec.placements)
-        ]
+        idx != placement.rank()
+        for idx, placement in enumerate(weight._sharding_spec.placements)
     )
     if not rearrange_columns:
         return output
@@ -212,10 +210,8 @@ def _result_distribute_with_col_rearrange(results, input, world_size, weight, pg
     for placement in weight._sharding_spec.placements:
         dim_size = output_split_sizes[placement.rank()]
         start = sum(
-            [
-                split_size if i < placement.rank() else 0
-                for i, split_size in enumerate(output_split_sizes)
-            ]
+            split_size if i < placement.rank() else 0
+            for i, split_size in enumerate(output_split_sizes)
         )
         indices += list(range(start, start + dim_size))
 
@@ -317,7 +313,7 @@ def _handle_row_wise_mask(gather_inp, padding_idx, weight, world_size, rank):
         padding_idx: If specified, the entries at padding_idx do
             not contribute to the gradient; therefore, the embedding
             vector at padding_idx is not updated during training,
-            i.e. it remains as a fixed “pad”.
+            i.e. it remains as a fixed "pad".
             Note that the embedding vector at padding_idx is
             excluded from the reduction.
         weight: weight tensor of Embedding look-up table.

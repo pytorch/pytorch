@@ -23,12 +23,12 @@
 
 // This file contains helper functions for batching rules.
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 TORCH_API Tensor reshape_dim_into(int64_t src, int64_t dst, const Tensor& x);
 TORCH_API Tensor reshape_dim_outof(int64_t src, int64_t size1, const Tensor& x);
 
-TORCH_API Tensor reshape_dim_outof_symint(int64_t src, c10::SymInt size1, const Tensor& x);
+TORCH_API Tensor reshape_dim_outof_symint(int64_t src, const c10::SymInt& size1, const Tensor& x);
 
 Tensor moveBatchDimToFront(const Tensor& tensor, optional<int64_t> maybe_batch_dim);
 int64_t rankWithoutBatchDim(const Tensor& tensor, optional<int64_t> maybe_batch_dim);
@@ -44,16 +44,16 @@ Tensor maybePadToLogicalRank(const Tensor& tensor, optional<int64_t> has_bdim, i
 void check_randomness(RandomnessType randomness);
 void check_randomness(RandomnessType randomness, bool any_tensor_bdim);
 
-inline Tensor ensure_has_bdim(const Tensor& tensor, bool has_bdim, int64_t batch_size) {
+inline Tensor ensure_has_bdim(const Tensor& tensor, bool has_bdim, c10::SymInt batch_size) {
   if (has_bdim) {
     return tensor;
   }
-  const auto sizes = tensor.sizes();
-  DimVector expanded_shape;
+  const auto sizes = tensor.sym_sizes();
+  SymDimVector expanded_shape;
   expanded_shape.reserve(sizes.size());
-  expanded_shape.emplace_back(batch_size);
+  expanded_shape.emplace_back(std::move(batch_size));
   expanded_shape.insert(expanded_shape.end(), sizes.begin(), sizes.end());
-  return tensor.expand(expanded_shape);
+  return tensor.expand_symint(expanded_shape);
 }
 
 #define VMAP_SUPPORT(op, batch_rule) \
@@ -144,11 +144,9 @@ void boxed_tensor_inputs_batch_rule(const c10::OperatorHandle& op, torch::jit::S
   for (const auto idx : c10::irange(0, num_arguments)) {
     const auto& ivalue = arguments[idx];
     if (ivalue.isTensor()) {
-      Tensor tensor_value;
-      optional<int64_t> tensor_bdim;
-      std::tie(tensor_value, tensor_bdim) = unwrapTensorAtLevel(ivalue.toTensor(), cur_level);
+      auto [tensor_value, tensor_bdim] = unwrapTensorAtLevel(ivalue.toTensor(), cur_level);
       tensor_inputs.emplace_back(tensor_value, tensor_bdim);
-      tensor_pos.push_back(idx);
+      tensor_pos.push_back(static_cast<int64_t>(idx));
     }
   }
   Func(tensor_inputs);
@@ -214,7 +212,7 @@ inline void find_and_unpack_tensors(
     int64_t* batch_size) {
 
   int64_t computed_batch_size = -1;
-  int64_t args_begin = stack->size() - num_args;
+  int64_t args_begin = static_cast<int64_t>(stack->size()) - num_args;
 
   for (const auto idx : c10::irange(0, num_args)) {
     const auto& ivalue = (*stack)[args_begin + idx];
@@ -243,7 +241,7 @@ inline void boxed_existing_bdim_all_batch_rule(
     const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   const auto& schema = op.schema();
   const auto num_returns = schema.returns().size();
-  const auto num_arguments = schema.arguments().size();
+  const auto num_arguments = static_cast<int64_t>(schema.arguments().size());
 
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -256,10 +254,10 @@ inline void boxed_existing_bdim_all_batch_rule(
     return;
   }
 
-  int64_t args_begin = stack->size() - num_arguments;
+  int64_t args_begin = static_cast<int64_t>(stack->size()) - num_arguments;
   SmallVector<UnpackedBatchedTensor, 5> tensor_inputs;
   SmallVector<int64_t, 5> tensor_pos;
-  int64_t batch_size;
+  int64_t batch_size = 0;
 
   find_and_unpack_tensors(
       stack, num_arguments, cur_level,
@@ -312,13 +310,13 @@ inline void boxed_all_tensors_have_optional_bdim(
     return;
   }
 
-  int64_t args_begin = stack->size() - num_arguments;
+  int64_t args_begin = static_cast<int64_t>(stack->size() - num_arguments);
   SmallVector<UnpackedBatchedTensor, 5> tensor_inputs;
   SmallVector<int64_t, 5> tensor_pos;
-  int64_t batch_size;
+  int64_t batch_size = 0;
 
   find_and_unpack_tensors(
-      stack, num_arguments, cur_level,
+      stack, static_cast<int64_t>(num_arguments), cur_level,
       &tensor_inputs, &tensor_pos, &batch_size);
 
   optional<bool> is_no_batch_dim_case;
@@ -474,4 +472,4 @@ std::tuple<Tensor, Tensor> _binary_pointwise_helper(
     const Tensor& tensor, optional<int64_t> tensor_batch_dim, const Tensor& other, optional<int64_t> other_batch_dim,
     bool do_type_promotion=true);
 
-}}
+} // namespace at::functorch

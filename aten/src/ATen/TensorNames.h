@@ -2,8 +2,7 @@
 
 #include <ATen/WrapDimUtils.h>
 
-namespace at {
-namespace namedinference {
+namespace at::namedinference {
 
 // TensorName and TensorNames are wrappers around Dimname and DimnameList
 // that contain helper functions to make writing name inference rules easier.
@@ -29,7 +28,9 @@ namespace namedinference {
 struct TORCH_API TensorName {
   explicit TensorName(ArrayRef<Dimname> origin, int origin_idx)
       : origin_(origin),
-        name_(origin[maybe_wrap_dim(origin_idx, origin.size())]),
+        name_(origin[maybe_wrap_dim(
+            origin_idx,
+            static_cast<int64_t>(origin.size()))]),
         origin_idx_(origin_idx) {}
 
   // op_name is only used for error reporting.
@@ -62,14 +63,13 @@ struct TORCH_API TensorNames {
       const char* op_name = "unify");
   void checkUnique(const char* op_name) const;
 
-  void append(TensorName&& name);
+  void append(TensorName name);
   std::vector<Dimname> toDimnameVec() const;
 
  private:
-  explicit TensorNames(TensorNameVec&& names) : names_(names){};
+  explicit TensorNames(TensorNameVec&& names) : names_(std::move(names)){};
 
   TensorNameVec names_;
 };
 
-} // namespace namedinference
-} // namespace at
+} // namespace at::namedinference

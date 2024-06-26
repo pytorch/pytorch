@@ -1,15 +1,16 @@
 #pragma once
 
-#include <vector>
 #include <c10/macros/Macros.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
+#include <mutex>
+#include <vector>
 
 namespace c10d {
 const int kUnsetSeqNum = 0;
 
 namespace {
-  constexpr int kByteOffset = 8;
+constexpr int kByteOffset = 8;
 }
 
 // Converts from int to char vec to write in store
@@ -58,7 +59,7 @@ class TORCH_API SequenceNum {
   SequenceNum(const SequenceNum& other);
 
  private:
-  c10::optional<uint64_t> num_;
+  std::optional<uint64_t> num_;
   mutable std::mutex lock_;
 };
 

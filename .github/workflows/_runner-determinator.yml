@@ -1,0 +1,189 @@
+name: Check whether the workflow owner can use ARC runners
+
+on:
+  workflow_call:
+    inputs:
+      triggering_actor:
+        required: true
+        type: string
+        description: The triggering_actor for the workflow. Use github.triggering_actor
+      issue_owner:
+        required: true
+        type: string
+        description: The owner of the issue. Use github.event.pull_request.user.login || github.event.issue.user.login
+      curr_branch:
+        required: true
+        type: string
+        description: Current branch.
+      issue_number:
+        required: false
+        type: string
+        default: "5132"
+        description: |
+          Fetch's GitHub Issue from pytorch/test-infra
+          Example: https://github.com/pytorch/test-infra/issues/5132
+
+    outputs:
+      label-type:
+        description: Type of runners to use
+        value: ${{ jobs.runner-determinator.outputs.label-type }}
+
+jobs:
+  runner-determinator:
+    runs-on: ubuntu-latest
+    outputs:
+      label-type: ${{ steps.set-condition.outputs.label-type }}
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      ISSUE_NUMBER: ${{ inputs.issue_number }}
+      TRIGGERING_ACTOR: ${{ inputs.triggering_actor }}
+      ISSUE_OWNER: ${{ inputs.issue_owner }}
+    steps:
+      # - name: Checkout PyTorch
+      #   uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+      #   with:
+      #     fetch-depth: 1
+      #     submodules: true
+
+      # TODO: Remove the hardcoded step below
+      # Hardcoding below is temporary for testing ALI runners
+      # This file below should match the script found in .github/scripts/get_workflow_type.py
+      - name: Hardcode runner-determinator script
+        run: |
+          cat <<EOF > get_workflow_type.py
+          import sys
+          import json
+          from argparse import ArgumentParser
+          from typing import Any, Tuple, Iterable
+
+          from github import Auth, Github
+          from github.Issue import Issue
+
+
+          WORKFLOW_LABEL_META = ""  # use meta runners
+          WORKFLOW_LABEL_LF = "lf."  # use runners from the linux foundation
+          LABEL_TYPE_KEY = "label_type"
+          MESSAGE_KEY = "message"
+          MESSAGE = ""  # Debug message to return to the caller
+
+
+          def parse_args() -> Any:
+              parser = ArgumentParser("Get dynamic rollout settings")
+              parser.add_argument("--github-token", type=str, required=True, help="GitHub token")
+              parser.add_argument(
+                  "--github-repo",
+                  type=str,
+                  required=False,
+                  default="pytorch/test-infra",
+                  help="GitHub repo to get the issue",
+              )
+              parser.add_argument(
+                  "--github-issue", type=int, required=True, help="GitHub issue number"
+              )
+              parser.add_argument(
+                  "--github-actor", type=str, required=True, help="GitHub triggering_actor"
+              )
+              parser.add_argument(
+                  "--github-issue-owner", type=str, required=True, help="GitHub issue owner"
+              )
+              parser.add_argument(
+                  "--github-branch", type=str, required=True, help="Current GitHub branch"
+              )
+
+              return parser.parse_args()
+
+
+          def get_gh_client(github_token: str) -> Github:
+              auth = Auth.Token(github_token)
+              return Github(auth=auth)
+
+
+          def get_issue(gh: Github, repo: str, issue_num: int) -> Issue:
+              repo = gh.get_repo(repo)
+              return repo.get_issue(number=issue_num)
+
+
+          def is_exception_branch(branch: str) -> bool:
+              return branch.split("/")[0] in {"main", "nightly", "release", "landchecks"}
+
+
+          def get_workflow_type(issue: Issue, username_check: Iterable[str]) -> Tuple[str, str]:
+              try:
+                  first_comment = issue.get_comments()[0].body.strip("\n\t ")
+
+                  if first_comment[0] == "!":
+                      MESSAGE = "LF Workflows are disabled for everyone. Using meta runners."
+                      return WORKFLOW_LABEL_META, MESSAGE
+                  elif first_comment[0] == "*":
+                      MESSAGE = "LF Workflows are enabled for everyone. Using LF runners."
+                      return WORKFLOW_LABEL_LF, MESSAGE
+                  else:
+                      user_w_at = first_comment.split()
+                      user_set = {
+                          f"@{susr}" for susr in (usr.strip("\n\t ") for usr in first_comment.split())
+                      }
+                      if any(map(lambda uc: uc in user_set, username_check)):
+                          MESSAGE = f"LF Workflows are enabled for {', '.join(username_check)}. Using LF runners."
+                          return WORKFLOW_LABEL_LF, MESSAGE
+                      else:
+                          MESSAGE = f"LF Workflows are disabled for {', '.join(username_check)}. Using meta runners."
+                          return WORKFLOW_LABEL_META, MESSAGE
+
+              except Exception as e:
+                  MESSAGE = f"Failed to get determine workflow type. Falling back to meta runners. Exception: {e}"
+                  return WORKFLOW_LABEL_META, MESSAGE
+
+
+          def main() -> None:
+              args = parse_args()
+
+              if is_exception_branch(args.github_branch):
+                  output = {
+                      LABEL_TYPE_KEY: WORKFLOW_LABEL_META,
+                      MESSAGE_KEY: f"Exception branch: '{args.github_branch}', using meta runners",
+                  }
+              else:
+                  try:
+                      gh = get_gh_client(args.github_token)
+                      # The default issue we use - https://github.com/pytorch/test-infra/issues/5132
+                      issue = get_issue(gh, args.github_repo, args.github_issue)
+                      label_type, message = get_workflow_type(issue, (args.github_issue_owner, args.github_actor, ))
+                      output = {
+                          LABEL_TYPE_KEY: label_type,
+                          MESSAGE_KEY: message,
+                      }
+                  except Exception as e:
+                      output = {
+                          LABEL_TYPE_KEY: WORKFLOW_LABEL_META,
+                          MESSAGE_KEY: f"Failed to get issue. Falling back to meta runners. Exception: {e}",
+                      }
+
+              json_output = json.dumps(output)
+              print(json_output)
+
+
+          if __name__ == "__main__":
+              main()
+          EOF
+          cat get_workflow_type.py
+
+      - name: Install dependencies
+        run: python3 -m pip install urllib3==1.26.18 PyGithub==2.3.0
+
+      - name: Get the workflow type for the current user
+        id: set-condition
+        run: |
+          curr_branch="${{ inputs.curr_branch }}"
+          echo "Current branch is '$curr_branch'"
+
+          output="$(python3 get_workflow_type.py \
+            --github-token "$GITHUB_TOKEN" \
+            --github-issue "$ISSUE_NUMBER" \
+            --github-branch "$curr_branch" \
+            --github-actor "$TRIGGERING_ACTOR" \
+            --github-issue-owner "$ISSUE_OWNER")"
+
+          echo "Output: '${output}'"
+
+          LABEL_TYPE=$(echo "${output}" | jq -r '.label_type')
+          echo "label-type=$LABEL_TYPE" >> "$GITHUB_OUTPUT"

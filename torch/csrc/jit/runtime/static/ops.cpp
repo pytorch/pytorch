@@ -48,10 +48,12 @@ C10_DEFINE_bool(
     "If on, static runtime may use use optimizations that cause accuracy loss "
     "vs the jit interpreter");
 
-namespace at {
-namespace native {
+namespace at::native {
 
-void repeat_out(at::Tensor& result, const Tensor& self, IntArrayRef repeats) {
+static void repeat_out(
+    at::Tensor& result,
+    const Tensor& self,
+    IntArrayRef repeats) {
   TORCH_CHECK(
       repeats.size() >= static_cast<size_t>(self.dim()),
       "Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor");
@@ -108,14 +110,14 @@ at::Tensor& reshape_copy_out(
     return out;
   }
 
-  const void* self_data = self_contig->data_ptr();
-  void* out_data = out.data_ptr();
+  const void* self_data = self_contig->const_data_ptr();
+  void* out_data = out.mutable_data_ptr();
   memcpy(out_data, self_data, nbytes);
 
   return out;
 }
 
-at::Tensor& flatten_copy_out(
+static at::Tensor& flatten_copy_out(
     at::Tensor& out,
     const at::Tensor& self,
     int64_t start_dim,
@@ -171,7 +173,7 @@ namespace {
 #define TO_COPY_OUT_FAST_PATH_LOGIC(out, self, self_t)             \
   do {                                                             \
     const auto N = self.numel();                                   \
-    const auto self_data = self.data_ptr<self_t>();                \
+    const auto self_data = self.const_data_ptr<self_t>();          \
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(                        \
         kHalf,                                                     \
         kBFloat16,                                                 \
@@ -179,7 +181,7 @@ namespace {
         out.scalar_type(),                                         \
         "to_copy_out_inner_loop",                                  \
         [&]() {                                                    \
-          const auto out_data = out.data_ptr<scalar_t>();          \
+          const auto out_data = out.mutable_data_ptr<scalar_t>();  \
           for (const auto idx : c10::irange(N)) {                  \
             /* NOLINTNEXTLINE(bugprone-signed-char-misuse) */      \
             out_data[idx] = static_cast<scalar_t>(self_data[idx]); \
@@ -207,7 +209,7 @@ at::Tensor& to_copy_out(
     const Tensor& self,
     bool non_blocking,
     bool copy_strides,
-    c10::optional<MemoryFormat> memory_format) {
+    std::optional<MemoryFormat> memory_format) {
   if (copy_strides) {
     at::native::resize_impl_cpu_(
         out.unsafeGetTensorImpl(), self.sizes(), self.strides());
@@ -253,16 +255,16 @@ at::Tensor& to_copy_out(
   return out;
 }
 
-Tensor& linear_out(
+static Tensor& linear_out(
     Tensor& output,
     const Tensor& input,
     const Tensor& weight,
-    const c10::optional<Tensor>& bias_opt) {
+    const std::optional<Tensor>& bias_opt) {
   TORCH_CHECK(!input.is_mkldnn());
 
   auto bias = bias_opt.has_value()
       ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
-      : c10::MaybeOwned<Tensor>::owned(c10::in_place);
+      : c10::MaybeOwned<Tensor>::owned(std::in_place);
 
   if (input.dim() == 2 && bias->defined()) {
     // Fused op is marginally faster.
@@ -275,7 +277,7 @@ Tensor& linear_out(
   return output;
 }
 
-Tensor& c2_argmin_out(
+static Tensor& c2_argmin_out(
     Tensor& output,
     const Tensor& input,
     const int64_t dim,
@@ -308,8 +310,8 @@ Tensor& c2_argmin_out(
   if (next_size == 1) {
     AT_DISPATCH_ALL_TYPES_AND2(
         kHalf, kBFloat16, input.scalar_type(), "argmin_input", [&]() {
-          const auto in_ptr = input.data_ptr<scalar_t>();
-          const auto out_ptr = output.data_ptr<int64_t>();
+          const auto in_ptr = input.const_data_ptr<scalar_t>();
+          const auto out_ptr = output.mutable_data_ptr<int64_t>();
           // input is a [prev_size, n] tensor.
           // output is a [prev_size,] tensor.
           // Thus, access is contiguous/coalesced.
@@ -337,8 +339,8 @@ Tensor& c2_argmin_out(
         kHalf, kBFloat16, input.scalar_type(), "argmin_input", [&]() {
           const auto less_or_nan = native::detail::LessOrNan<scalar_t>{};
 
-          const auto in_ptr = input.data_ptr<scalar_t>();
-          const auto out_ptr = output.data_ptr<int64_t>();
+          const auto in_ptr = input.const_data_ptr<scalar_t>();
+          const auto out_ptr = output.mutable_data_ptr<int64_t>();
 
           std::memset(out_ptr, 0, prev_size * next_size * sizeof(int64_t));
 
@@ -364,7 +366,7 @@ Tensor& c2_argmin_out(
   return output;
 }
 
-at::Tensor& dequantize_copy_out(Tensor& out, const Tensor& self) {
+static at::Tensor& dequantize_copy_out(Tensor& out, const Tensor& self) {
   if (C10_UNLIKELY(!self.is_quantized())) {
     // fallback to dequantize_cpu equivalent case: make sure out is at::kFloat
     DCHECK(out.scalar_type() == kFloat);
@@ -372,11 +374,9 @@ at::Tensor& dequantize_copy_out(Tensor& out, const Tensor& self) {
   }
   return get_qtensorimpl(self)->quantizer()->dequantize_out(out, self);
 }
-} // namespace native
-} // namespace at
+} // namespace at::native
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 C10_DEFINE_REGISTRY(SROperatorRegistry, SROperatorFunctor);
 
@@ -385,7 +385,7 @@ bool opIsRegistered(const c10::Symbol& op_name) {
   return SROperatorRegistry()->Has(name);
 }
 
-bool disableUnsafeMathOp(const char* op_name) {
+static bool disableUnsafeMathOp(const char* op_name) {
   if (FLAGS_static_runtime_enable_fast_math) {
     return false;
   }
@@ -393,7 +393,7 @@ bool disableUnsafeMathOp(const char* op_name) {
   // not guarantee bit exactness vs the jit interpreter. Note aten::relu is not
   // included even though it uses NNC because the results of relu should always
   // match.
-  static const FastSet<std::string> fast_ops{
+  static const c10::FastSet<std::string> fast_ops{
       "aten::add", "aten::tanh", "aten::sigmoid", "aten::logit"};
   return fast_ops.count(op_name) > 0;
 }
@@ -417,7 +417,7 @@ bool hasVarArgs(Node* n) {
 
 bool canReuseInputsOutputs(
     Node* n,
-    const FastMap<Node*, bool>& node_has_out_variant) {
+    const c10::FastMap<Node*, bool>& node_has_out_variant) {
   auto it = node_has_out_variant.find(n);
   if (it != node_has_out_variant.end()) {
     return it->second;
@@ -428,9 +428,9 @@ bool canReuseInputsOutputs(
 // returns true if the producers of the inputs
 // to this operations are out of place.
 // This means the IValues will not change run to run
-bool inputsCanRunOutOfPlace(
+static bool inputsCanRunOutOfPlace(
     Node* n,
-    const FastMap<Node*, bool>& node_has_out_variant) {
+    const c10::FastMap<Node*, bool>& node_has_out_variant) {
   for (auto* input : n->inputs()) {
     if (!canReuseInputsOutputs(input->node(), node_has_out_variant)) {
       return false;
@@ -441,7 +441,7 @@ bool inputsCanRunOutOfPlace(
 
 bool isOptimizableContainerType(
     Node* n,
-    const FastMap<Node*, bool>& node_has_out_variant) {
+    const c10::FastMap<Node*, bool>& node_has_out_variant) {
   const auto& type = n->output()->type();
   bool is_supported_type = false;
   if (type->kind() == TypeKind::ListType) {
@@ -488,7 +488,7 @@ REGISTER_OPERATOR_FUNCTOR(
         return nullptr;
       }
       const bool can_optimize =
-          isOptimizableContainerType(n, FastMap<Node*, bool>());
+          isOptimizableContainerType(n, c10::FastMap<Node*, bool>());
       const auto& type = n->output()->type()->expectRef<ListType>();
       const size_t size = n->inputs().size();
       if (!can_optimize) {
@@ -543,7 +543,7 @@ REGISTER_OPERATOR_FUNCTOR(
         return nullptr;
       }
       const bool can_optimize =
-          isOptimizableContainerType(n, FastMap<Node*, bool>());
+          isOptimizableContainerType(n, c10::FastMap<Node*, bool>());
       const size_t size = n->inputs().size();
       if (!can_optimize) {
         return [size](ProcessedNode* p_node) {
@@ -833,10 +833,10 @@ void varStackFastOut(
   at::native::resize_(out, output_size, c10::nullopt);
 
   AT_DISPATCH_ALL_TYPES(out.scalar_type(), "varStackFastOut", [&]() {
-    auto* out_data = out.data_ptr<scalar_t>();
+    auto* out_data = out.mutable_data_ptr<scalar_t>();
     for (const auto i : c10::irange(num_inputs)) {
       auto& tensor = inputs[i];
-      auto* input_ptr = tensor.data_ptr<scalar_t>();
+      auto* input_ptr = tensor.const_data_ptr<scalar_t>();
       out_data[i] = *input_ptr;
     }
   });
@@ -877,7 +877,7 @@ void varStackOut(ProcessedNode& pnode, int64_t dim) {
 } // namespace
 
 // Split out into a function to appease MSVC's pre-processor
-SROperator aten_stack(Node* n) {
+static SROperator aten_stack(Node* n) {
   if (!n->matches(torch::schema(
           "aten::stack(Tensor[] tensors, int dim=0) -> Tensor"))) {
     LogAndDumpSchema(n);
@@ -1048,7 +1048,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
     LogAndDumpSchema(n);
     return nullptr;
   }
-  c10::optional<float> clamp = c10::nullopt;
+  std::optional<float> clamp = c10::nullopt;
   if (n->inputs()[1]->node()->kind() == prim::Constant) {
     auto clamp_d = toIValue(n->inputs()[1])->toOptional<double>();
     clamp = clamp_d
@@ -1353,10 +1353,10 @@ namespace {
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct ToArgs {
-  c10::optional<at::ScalarType> dtype;
+  std::optional<at::ScalarType> dtype;
   c10::Layout layout;
   bool know_to_will_alias = false;
-  c10::optional<c10::MemoryFormat> memory_format;
+  std::optional<c10::MemoryFormat> memory_format;
 };
 
 template <bool has_constant_non_tensor_dtype_and_flags, bool has_memory_format>
@@ -1440,8 +1440,8 @@ C10_ALWAYS_INLINE void to_copy_functor_impl(
   // handle memory format
   bool copy_strides = false;
 
-  c10::optional<c10::MemoryFormat> memory_format = c10::MemoryFormat::Preserve;
-  c10::optional<ToArgs> my_args;
+  std::optional<c10::MemoryFormat> memory_format = c10::MemoryFormat::Preserve;
+  std::optional<ToArgs> my_args;
   if (!args) {
     my_args = extract_to_args<
         has_constant_non_tensor_dtype_and_flags,
@@ -1905,7 +1905,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::div, aten_div, [](Node* n) -> SROperator {
 
   return [te = createDiv()](ProcessedNode* p_node) {
     const auto& in0_t = p_node->Input(0).toTensor();
-    c10::optional<c10::string_view> rounding_mode = c10::nullopt;
+    std::optional<c10::string_view> rounding_mode = c10::nullopt;
     if (p_node->num_inputs() > 2) {
       rounding_mode = p_node->Input(2).toOptional<c10::string_view>();
     }
@@ -2075,7 +2075,7 @@ namespace {
 c10::MaybeOwned<at::Tensor> borrow_from_optional_tensor_ivalue(
     const IValue& iv) {
   if (iv.isNone()) {
-    return c10::MaybeOwned<at::Tensor>::owned(c10::in_place);
+    return c10::MaybeOwned<at::Tensor>::owned(std::in_place);
   }
   return c10::MaybeOwned<at::Tensor>::borrowed(iv.toTensor());
 }
@@ -2122,7 +2122,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::layer_norm, aten_layer_norm, [](Node* n) -> SROp
           p_node->Output(0).toTensor(), X->sizes(), c10::nullopt);
     }
     at::Tensor& output = p_node->Output(0).toTensor();
-    at::native::layer_norm_cpu_out(output, input, *gamma, *beta, eps, M, N);
+    at::native::layer_norm_cpu_out(output, *X, *gamma, *beta, eps, M, N);
   };
 });
 
@@ -2396,8 +2396,8 @@ REGISTER_OPERATOR_FUNCTOR(
 // device & pin_memory matter only when CUDA is enabled.
 static bool hasTensorWithOptions(
     const IValue& ivalue,
-    c10::optional<c10::ScalarType> dtype,
-    c10::optional<c10::Layout> layout) {
+    std::optional<c10::ScalarType> dtype,
+    std::optional<c10::Layout> layout) {
   if (!ivalue.isTensor()) {
     return false;
   }
@@ -2412,9 +2412,9 @@ static bool hasTensorWithOptions(
 
 static bool hasTensorWithOptions(
     const IValue& ivalue,
-    c10::optional<c10::ScalarType> dtype,
-    c10::optional<c10::Layout> layout,
-    c10::optional<c10::MemoryFormat> memory_format) {
+    std::optional<c10::ScalarType> dtype,
+    std::optional<c10::Layout> layout,
+    std::optional<c10::MemoryFormat> memory_format) {
   return hasTensorWithOptions(ivalue, dtype, layout) &&
       (memory_format == ivalue.toTensor().options().memory_format_opt());
 }
@@ -2715,8 +2715,8 @@ void signed_log1p_out(at::Tensor& out, const at::Tensor& input) {
   auto output_contig = out.expect_contiguous();
 
   AT_DISPATCH_ALL_TYPES(input.scalar_type(), "signed_log1p_kernel", [&]() {
-    const auto input_data = input_contig->data_ptr<scalar_t>();
-    auto output_data = output_contig->data_ptr<float>();
+    const auto input_data = input_contig->const_data_ptr<scalar_t>();
+    auto output_data = output_contig->mutable_data_ptr<float>();
     const auto N = input.numel();
 
     for (const auto i : c10::irange(N)) {
@@ -2859,5 +2859,4 @@ REGISTER_OPERATOR_FUNCTOR(
       };
     });
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import importlib
 from abc import ABC, abstractmethod
 from pickle import (  # type: ignore[attr-defined]  # type: ignore[attr-defined]
@@ -61,7 +62,7 @@ class Importer(ABC):
         object from this environment.
 
         Args:
-            obj: An object to get the the module-environment-relative name for.
+            obj: An object to get the module-environment-relative name for.
             name: If set, use this name instead of looking up __name__ or __qualname__ on `obj`.
                 This is only here to match how Pickler handles __reduce__ functions that return a string,
                 don't use otherwise.

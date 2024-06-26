@@ -35,7 +35,10 @@ class IRParser {
       : L(std::make_shared<Source>(str)),
         g(graph),
         vmap(vmap),
-        type_parser(L, /*parse_complete_tensor_types*/ true),
+        type_parser(
+            L,
+            /*parse_complete_tensor_types*/ true,
+            /*allow_type_vars*/ true),
         parse_tensor_constants_(parse_tensor_constants) {}
 
   std::string parseVar();
@@ -169,7 +172,7 @@ void IRParser::parseOperatorOutputs(std::vector<VarWithType>* outs) {
 ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
   auto token = L.cur();
   std::string str;
-  std::pair<TypePtr, c10::optional<c10::AliasInfo>> type_alias;
+  std::pair<TypePtr, std::optional<c10::AliasInfo>> type_alias;
   ParsedLiteral r;
   switch (token.kind) {
     case TK_STRINGLITERAL:
@@ -184,14 +187,14 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
         throw ErrorReport(token.range)
             << "Expected a number after '-' but got:" << token.text();
       }
-      // Fallthrough
+      [[fallthrough]];
     case TK_NUMBER:
       str += L.cur().text();
       if (str.find('j') != std::string::npos) {
         r.k = AttributeKind::c;
         double imag = 0.0f;
         try {
-          imag = c10::stod(str.substr(0, str.size() - 1));
+          imag = std::stod(str.substr(0, str.size() - 1));
         } catch (const std::invalid_argument& e) {
           throw ErrorReport(token.range)
               << "Number cannot be converted to double";
@@ -205,7 +208,7 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
           str.find('e') != std::string::npos) {
         r.k = AttributeKind::f;
         try {
-          r.f = c10::stod(str);
+          r.f = std::stod(str);
         } catch (const std::invalid_argument& e) {
           throw ErrorReport(token.range)
               << "Number cannot be converted to double";
@@ -216,7 +219,7 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
       } else {
         r.k = AttributeKind::i;
         try {
-          r.i = c10::stoll(str);
+          r.i = std::stoll(str);
         } catch (const std::invalid_argument& e) {
           throw ErrorReport(token.range)
               << "Number cannot be converted to integer";
@@ -520,7 +523,7 @@ void IRParser::parseOperator(Block* b) {
   const FunctionSchema* schema = n->maybeSchema();
 
   // Register outputs.
-  int idx = 0;
+  unsigned idx = 0;
   for (const VarWithType& v : outs) {
     vmap[v.name] = n->outputs()[idx];
     if (schema && !schema->is_varret()) {

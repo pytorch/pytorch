@@ -18,8 +18,7 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 // The estimated integral of a function y of x,
@@ -70,12 +69,12 @@ Tensor do_cumulative_trapezoid(const Tensor& y, double dx, int64_t dim) {
 // For example, curr_shape = (5,5,5) and target_n_dim = 6 ==> (1,1,1,5,5,5)
 // Note that no padding will be added if the current shape has the greater than or equal
 // number of dimensions than the target numbers of dimensions.
-DimVector add_padding_to_shape(IntArrayRef curr_shape, int64_t target_n_dim) {
+SymDimVector add_padding_to_shape(SymIntArrayRef curr_shape, int64_t target_n_dim) {
     const auto curr_size = static_cast<int64_t>(curr_shape.size());
     if (curr_size >= target_n_dim){
         target_n_dim = curr_size;
     }
-    DimVector new_shape(target_n_dim, 1);
+    SymDimVector new_shape(target_n_dim, 1);
     for (const auto i : c10::irange(curr_size)) {
         new_shape[target_n_dim-i-1] = curr_shape[curr_size-i-1];
     }
@@ -87,7 +86,7 @@ Tensor trapezoid(const Tensor& y, const Tensor& x, int64_t dim) {
     dim = maybe_wrap_dim(dim, y);
     // asking for the integral with zero samples is a bit nonsensical,
     // but we'll return "0" to match numpy behavior.
-    if (y.size(dim) == 0) {
+    if (y.sym_size(dim) == 0) {
         return zeros_like_except(y, dim);
     }
     TORCH_CHECK(y.scalar_type() != kBool && x.scalar_type() != kBool, "trapezoid: received a bool input for `x` or `y`, but bool is not supported")
@@ -98,16 +97,16 @@ Tensor trapezoid(const Tensor& y, const Tensor& x, int64_t dim) {
         // This step takes 'x' with dimension (n,), and returns 'x_view' with
         // dimension (1,1,...,n,...,1,1) based on dim and y.dim() so that, later on, 'dx'
         // can be broadcast to match 'dy' at the correct dimensions.
-        TORCH_CHECK(x.size(0) == y.size(dim), "trapezoid: There must be one `x` value for each sample point");
-        DimVector new_sizes(y.dim(), 1); // shape = [1] * y.
-        new_sizes[dim] = x.size(0); // shape[axis] = d.shape[0]
-        x_viewed = x.view(new_sizes);
+        TORCH_CHECK(x.sym_size(0) == y.sym_size(dim), "trapezoid: There must be one `x` value for each sample point");
+        SymDimVector new_sizes(y.dim(), 1); // shape = [1] * y.
+        new_sizes[dim] = x.sym_size(0); // shape[axis] = d.shape[0]
+        x_viewed = x.view_symint(new_sizes);
     } else if (x.dim() < y.dim()) {
         // When 'y' has more dimension than 'x', this step takes 'x' with dimension (n_1, n_2, ...),
         // and add '1's as dimensions in front to become (1, 1, ..., n_1, n_2), matching the dimension of 'y'.
         // This allows the subsequent slicing operations to proceed with any 'dim' without going out of bound.
-        DimVector new_sizes = add_padding_to_shape(x.sizes(), y.dim());
-        x_viewed = x.view(new_sizes);
+        SymDimVector new_sizes = add_padding_to_shape(x.sym_sizes(), y.dim());
+        x_viewed = x.view_symint(new_sizes);
     } else {
         x_viewed = x;
     }
@@ -144,14 +143,14 @@ Tensor cumulative_trapezoid(const Tensor& y, const Tensor& x, int64_t dim) {
     Tensor x_viewed;
     if (x.dim() == 1) {
         // See trapezoid for implementation notes
-        TORCH_CHECK(x.size(0) == y.size(dim), "cumulative_trapezoid: There must be one `x` value for each sample point");
-        DimVector new_sizes(y.dim(), 1); // shape = [1] * y.
-        new_sizes[dim] = x.size(0); // shape[axis] = d.shape[0]
-        x_viewed = x.view(new_sizes);
+        TORCH_CHECK(x.sym_size(0) == y.sym_size(dim), "cumulative_trapezoid: There must be one `x` value for each sample point");
+        SymDimVector new_sizes(y.dim(), 1); // shape = [1] * y.
+        new_sizes[dim] = x.sym_size(0); // shape[axis] = d.shape[0]
+        x_viewed = x.view_symint(new_sizes);
     } else if (x.dim() < y.dim()) {
         // See trapezoid for implementation notes
-        DimVector new_sizes = add_padding_to_shape(x.sizes(), y.dim());
-        x_viewed = x.view(new_sizes);
+        SymDimVector new_sizes = add_padding_to_shape(x.sym_sizes(), y.dim());
+        x_viewed = x.view_symint(new_sizes);
     } else {
         x_viewed = x;
     }
@@ -169,4 +168,4 @@ Tensor cumulative_trapezoid(const Tensor& y, const Scalar& dx, int64_t dim) {
     return do_cumulative_trapezoid(y, dx.toDouble(), dim);
 }
 
-}} // namespace at::native
+} // namespace at::native

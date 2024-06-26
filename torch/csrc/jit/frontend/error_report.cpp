@@ -1,8 +1,6 @@
 #include <torch/csrc/jit/frontend/error_report.h>
 
-#include <c10/util/Optional.h>
 #include <torch/csrc/jit/frontend/tree.h>
-#include <torch/csrc/utils/memory.h>
 
 namespace torch::jit {
 
@@ -46,7 +44,7 @@ ErrorReport::CallStack::CallStack(
 ErrorReport::CallStack::~CallStack() {}
 #endif // C10_MOBILE
 
-std::string get_stacked_errors(const std::vector<Call>& error_stack) {
+static std::string get_stacked_errors(const std::vector<Call>& error_stack) {
   std::stringstream msg;
   if (!error_stack.empty()) {
     for (auto it = error_stack.rbegin(); it != error_stack.rend() - 1; ++it) {

@@ -1,8 +1,5 @@
 #pragma once
 
-#include <cstdint>
-#include <utility>
-
 #include <cuda_runtime_api.h>
 
 #include <c10/core/DeviceGuard.h>
@@ -52,8 +49,9 @@
  * a kernel on the same stream from two different threads.
  */
 
-namespace c10 {
-namespace cuda {
+namespace c10::cuda {
+
+static constexpr int max_compile_time_stream_priorities = 4;
 
 // Value object representing a CUDA stream.  This is just a wrapper
 // around c10::Stream, but it comes with a little extra CUDA-specific
@@ -174,16 +172,24 @@ class C10_CUDA_API CUDAStream {
   static std::tuple<int, int> priority_range() {
     // Note: this returns the range of priority **supported by PyTorch**, not
     // the range of priority **supported by CUDA**. The former is a subset of
-    // the latter. Currently PyTorch only supports 0 and -1, which are "low" and
-    // "high" priority.
-    int least_priority, greatest_priority;
+    // the latter.
+    int least_priority = 0, greatest_priority = 0;
     C10_CUDA_CHECK(
         cudaDeviceGetStreamPriorityRange(&least_priority, &greatest_priority));
+#ifdef USE_ROCM
+    // See Note [HIP stream priorities]
     TORCH_INTERNAL_ASSERT(
-        least_priority >= 0, "Unexpected CUDA stream priority range");
+        least_priority == 1, "Unexpected HIP stream priority range");
+    least_priority = 0;
+#else
+    TORCH_INTERNAL_ASSERT(
+        least_priority == 0, "Unexpected CUDA stream priority range");
+#endif
     TORCH_INTERNAL_ASSERT(
         greatest_priority <= -1, "Unexpected CUDA stream priority range");
-    return std::make_tuple(0, -1);
+    greatest_priority = std::max(
+        -c10::cuda::max_compile_time_stream_priorities + 1, greatest_priority);
+    return std::make_tuple(least_priority, greatest_priority);
   }
 
   // Deleted for now; use CUDAEvent::block instead
@@ -205,6 +211,9 @@ class C10_CUDA_API CUDAStream {
  */
 C10_API CUDAStream
 getStreamFromPool(const bool isHighPriority = false, DeviceIndex device = -1);
+// no default priority to disambiguate overloads
+C10_API CUDAStream
+getStreamFromPool(const int priority, DeviceIndex device = -1);
 
 /**
  * Get a CUDAStream from a externally allocated one.
@@ -247,8 +256,7 @@ C10_API void setCurrentCUDAStream(CUDAStream stream);
 
 C10_API std::ostream& operator<<(std::ostream& stream, const CUDAStream& s);
 
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda
 
 namespace std {
 template <>

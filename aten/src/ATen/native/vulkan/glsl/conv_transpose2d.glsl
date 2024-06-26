@@ -1,6 +1,6 @@
 #version 450 core
-#define PRECISION $precision
-#define FORMAT $format
+#define PRECISION ${PRECISION}
+#define FORMAT ${FORMAT}
 
 /*
  * TILE_SIZE = (1, 1, 1)

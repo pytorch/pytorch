@@ -1,3 +1,6 @@
+# mypy: allow-untyped-defs
+from __future__ import annotations
+
 import os
 import tempfile
 import textwrap
@@ -12,7 +15,7 @@ if os.environ.get("TORCHINDUCTOR_WRITE_MISSING_OPS") == "1":
 
 else:
 
-    def _record_missing_op(target):
+    def _record_missing_op(target):  # type: ignore[misc]
         pass
 
 
@@ -43,17 +46,21 @@ class MissingOperatorWithDecomp(OperatorIssue):
 
                 There is a decomposition available for {target} in
                 torch._decomp.get_decompositions().  Please add this operator to the
-                `decompositions` list in torch._inductor.decompositions
+                `decompositions` list in torch._inductor.decomposition
                 """
             )
         )
 
 
 class LoweringException(OperatorIssue):
-    def __init__(self, exc, target, args, kwargs):
+    def __init__(self, exc: Exception, target, args, kwargs):
         super().__init__(
             f"{type(exc).__name__}: {exc}\n{self.operator_str(target, args, kwargs)}"
         )
+
+
+class SubgraphLoweringException(RuntimeError):
+    pass
 
 
 class InvalidCxxCompiler(RuntimeError):
@@ -65,8 +72,16 @@ class InvalidCxxCompiler(RuntimeError):
         )
 
 
+class CppWrapperCodeGenError(RuntimeError):
+    def __init__(self, msg: str):
+        super().__init__(f"C++ wrapper codegen error: {msg}")
+
+
 class CppCompileError(RuntimeError):
-    def __init__(self, cmd, output):
+    def __init__(self, cmd: list[str], output: str):
+        if isinstance(output, bytes):
+            output = output.decode("utf-8")
+
         super().__init__(
             textwrap.dedent(
                 """
@@ -80,5 +95,9 @@ class CppCompileError(RuntimeError):
                 """
             )
             .strip()
-            .format(cmd=" ".join(cmd), output=output.decode("utf-8"))
+            .format(cmd=" ".join(cmd), output=output)
         )
+
+
+class CUDACompileError(CppCompileError):
+    pass

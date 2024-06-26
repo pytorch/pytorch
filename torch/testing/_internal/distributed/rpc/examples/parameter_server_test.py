@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 # If you need to modify this file to make this test pass, please also apply same edits accordingly to
 # https://github.com/pytorch/examples/blob/master/distributed/rpc/batch/parameter_server.py
 # and https://pytorch.org/tutorials/intermediate/rpc_async_execution.html#batch-updating-parameter-server

@@ -1,6 +1,5 @@
 import json
 import logging
-
 import math
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 
@@ -20,6 +19,7 @@ from torchgen.model import (
     Type,
 )
 from torchgen.static_runtime import config
+
 
 logger: logging.Logger = logging.getLogger()
 
@@ -126,6 +126,7 @@ BLOCKED_OPS = frozenset(
         "zero",
         "_sparse_addmm",
         "sparse_mask",
+        "_sparse_mask_projection",
         "_to_dense",
         "_coalesce",
         "_coalesced",
@@ -221,6 +222,17 @@ BLOCKED_OPS = frozenset(
         "special_spherical_bessel_j0",
         "_foobar",
         "_nested_tensor_strides",
+        "_nested_tensor_storage_offsets",
+        "_nested_get_values",  # no CPU backend
+        "_nested_get_values_copy",  # no CPU backend
+        "_nested_view_from_jagged",  # testing needs to be patched
+        "_nested_view_from_jagged_copy",  # testing needs to be patched
+        "_nested_view_from_buffer",  # testing needs to be patched
+        "_nested_view_from_buffer_copy",  # testing needs to be patched
+        "_int_mm",  # testing needs to be patched
+        "_to_sparse_csc",  # testing needs to be patched
+        "_to_sparse_csr",  # testing needs to be patched
+        "segment_reduce",  # testing needs to be patched
     )
 )
 
@@ -235,16 +247,16 @@ def is_supported(g: Union[NativeFunctionsGroup, NativeFunctionsViewGroup]) -> bo
         base_op_name = g.out.func.name.name.base
         func = g.out.func
     if config.is_hand_written(g):
-        logger.info(f"HAND WRITTEN: {base_op_name}")
+        logger.info("HAND WRITTEN: %s", base_op_name)
         return False
     if base_op_name in BLOCKED_OPS:
-        logger.info(f"BLOCKED: {base_op_name}")
+        logger.info("BLOCKED: %s", base_op_name)
         return False
     for arg in func.schema_order_arguments():
         maybe_method = ivalue_type_conversion_method(arg.type)
         if not maybe_method:
             # Type converting is unsupported yet.
-            logger.info(f"NOT SUPPORTED TYPE CONVERTING: {str(func)}")
+            logger.info("NOT SUPPORTED TYPE CONVERTING: %s", func)
             return False
 
     if isinstance(g, NativeFunctionsViewGroup):
@@ -252,7 +264,7 @@ def is_supported(g: Union[NativeFunctionsGroup, NativeFunctionsViewGroup]) -> bo
         # the string, just test the dang thing directly
         if "at::Tensor" != cpp.returns_type(func.returns, symint=False).cpp_type():
             # Returns a non-Tensor value.
-            logger.info(f"NON-TENSOR RET TYPE: {str(func)}")
+            logger.info("NON-TENSOR RET TYPE: %s", str(func))
             return False
         return True
 
@@ -261,7 +273,7 @@ def is_supported(g: Union[NativeFunctionsGroup, NativeFunctionsViewGroup]) -> bo
         maybe_method = ivalue_type_conversion_method(arg.type)
         if not maybe_method:
             # Type converting is unsupported yet.
-            logger.info(f"NOT SUPPORTED TYPE CONVERTING: {str(g.functional.func)}")
+            logger.info("NOT SUPPORTED TYPE CONVERTING: %s", g.functional.func)
             return False
 
     if not g.structured:
@@ -276,11 +288,11 @@ def is_supported(g: Union[NativeFunctionsGroup, NativeFunctionsViewGroup]) -> bo
             return False
     # TODO: stop type testing by converting to C++
     if "at::Tensor &" != cpp.returns_type(func.returns, symint=False).cpp_type():
-        logger.info(f"NON_TENSOR RET TYPE: {str(func)}")
+        logger.info("NON_TENSOR RET TYPE: %s", func)
         return False
     if has_alias(func.arguments.non_out):
         # This op may create an alias of inputs.
-        logger.info(f"INPUTS ALIAS: {base_op_name}")
+        logger.info("INPUTS ALIAS: %s", base_op_name)
         return False
     return True
 
@@ -401,7 +413,7 @@ def test_value_expression(
         num_dim = test_tensor_dim(op_name)
         size_per_dim = math.ceil(num_tensors / float(num_dim))
         size_per_dim += size_per_dim % 2
-        tensor_size_ex = "{%s}" % (",".join([f"{size_per_dim}"] * num_dim))
+        tensor_size_ex = "{{{}}}".format(",".join([f"{size_per_dim}"] * num_dim))
     if should_use_int_tensor(op_name):
         tensor_expression = f"at::randint(1, 100, {tensor_size_ex}, at::kInt)"
     elif should_use_complex_tensor(op_name):

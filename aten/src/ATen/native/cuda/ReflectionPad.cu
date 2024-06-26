@@ -7,6 +7,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
+#include <ATen/native/Padding.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -93,7 +94,7 @@ inline thrust::pair<int64_t, int64_t>  get_index_mapping2d(
 
 template<typename scalar_t>
 __global__ void reflection_pad1d_out_kernel(
-    scalar_t * input, scalar_t * output,
+    const scalar_t * input, scalar_t * output,
     int64_t input_w,
     int64_t pad_l, int64_t pad_r) {
   auto output_x = threadIdx.x + blockIdx.x * blockDim.x;
@@ -107,7 +108,7 @@ __global__ void reflection_pad1d_out_kernel(
 
 template <typename scalar_t>
 __global__ void reflection_pad1d_backward_out_kernel(
-    scalar_t * grad_input, scalar_t * grad_output,
+    scalar_t * grad_input, const scalar_t * grad_output,
     int64_t input_w,
     int64_t pad_l, int64_t pad_r) {
   auto output_x = threadIdx.x + blockIdx.x * blockDim.x;
@@ -122,7 +123,7 @@ __global__ void reflection_pad1d_backward_out_kernel(
 
 template<typename scalar_t>
 __global__ void reflection_pad2d_out_kernel(
-    scalar_t * input, scalar_t * output,
+    const scalar_t * input, scalar_t * output,
     int64_t input_dim_x, int64_t input_dim_y,
     int pad_t, int pad_b, int pad_l, int pad_r, int y_shift, int z_shift, int nplane) {
   auto output_xy = threadIdx.x + blockIdx.x * blockDim.x;
@@ -142,7 +143,7 @@ __global__ void reflection_pad2d_out_kernel(
 
 template <typename scalar_t>
 __global__ void reflection_pad2d_backward_out_kernel(
-    scalar_t * grad_input, scalar_t * grad_output,
+    scalar_t * grad_input, const scalar_t * grad_output,
     int64_t input_dim_x, int64_t input_dim_y,
     int pad_t, int pad_b, int pad_l, int pad_r, int y_shift, int z_shift, int nplane) {
   auto output_xy = threadIdx.x + blockIdx.x * blockDim.x;
@@ -159,10 +160,10 @@ __global__ void reflection_pad2d_backward_out_kernel(
     gpuAtomicAddNoReturn(&grad_input[index_pair.first], grad_output[index_pair.second]);
   }
 }
-template <typename scalar_t, typename F>
+template <typename input_scalar_t, typename output_scalar_t, typename F>
 __device__ inline void parallel_reflection_pad3d(
-    PackedTensorAccessor64<scalar_t, 5> input,
-    PackedTensorAccessor64<scalar_t, 5> output,
+    PackedTensorAccessor64<input_scalar_t, 5> input,
+    PackedTensorAccessor64<output_scalar_t, 5> output,
     int64_t pad_left,
     int64_t pad_top,
     int64_t pad_front,
@@ -210,7 +211,7 @@ __device__ inline void parallel_reflection_pad3d(
 
 template<typename scalar_t>
 __global__ void reflection_pad3d_out_kernel(
-    PackedTensorAccessor64<scalar_t, 5> input,
+    PackedTensorAccessor64<const scalar_t, 5> input,
     PackedTensorAccessor64<scalar_t, 5> output,
     int64_t pad_left,  int64_t pad_top, int64_t pad_front,
     int64_t y_shift, int64_t z_shift
@@ -240,7 +241,7 @@ __global__ void reflection_pad3d_out_kernel(
 template <typename scalar_t>
 __global__ void reflection_pad3d_backward_out_kernel(
     PackedTensorAccessor64<scalar_t, 5> grad_input,
-    PackedTensorAccessor64<scalar_t, 5> grad_output,
+    PackedTensorAccessor64<const scalar_t, 5> grad_output,
     int64_t pad_left,  int64_t pad_top, int64_t pad_front,
     int64_t y_shift, int64_t z_shift
 ) {
@@ -278,11 +279,7 @@ void reflection_pad2d_out_template(
   int dim_w = 2;
   int nbatch = 1;
 
-  bool valid_dims = input_.size(1) != 0 && input_.size(2) != 0;
-  TORCH_CHECK(
-      (input_.ndimension() == 3 && valid_dims) ||
-      (input_.ndimension() == 4 && valid_dims && input_.size(3) != 0),
-      "3D or 4D (batch mode) tensor expected for input, but got: ", input_);
+  at::native::padding::check_valid_input<2>(input_, padding);
 
   if (input_.ndimension() == 4) {
     nbatch = input_.size(0);
@@ -314,7 +311,7 @@ void reflection_pad2d_out_template(
   int output_w  = input_w + pad_l + pad_r;
 
   TORCH_CHECK(output_w >= 1 || output_h >= 1,
-    "input (H: ", input_h, ", W: ", input_w, ")is too small.  Calculated "
+    "input (H: ", input_h, ", W: ", input_w, ") is too small.  Calculated "
     "output H: ", output_h, " W: ", output_w);
 
   if (input_.ndimension() == 3) {
@@ -334,7 +331,7 @@ void reflection_pad2d_out_template(
   int64_t size_y = nplane;
   int64_t size_z = nbatch;
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16,
     input.scalar_type(), "reflection_pad2d_out_template", [&] {
 
       for (int64_t block_y = 0; block_y < size_y; block_y += 65535) {
@@ -346,7 +343,7 @@ void reflection_pad2d_out_template(
 
           reflection_pad2d_out_kernel<<<
             grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
-              input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
+              input.const_data_ptr<scalar_t>(), output.mutable_data_ptr<scalar_t>(),
               input_w, input_h,
               pad_t, pad_b, pad_l, pad_r, block_y, block_z, nplane);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -418,7 +415,7 @@ void reflection_pad2d_backward_out_template(
 
           reflection_pad2d_backward_out_kernel<<<
             grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
-              grad_input.data_ptr<scalar_t>(), grad_output.data_ptr<scalar_t>(),
+              grad_input.mutable_data_ptr<scalar_t>(), grad_output.const_data_ptr<scalar_t>(),
               input_w, input_h,
               pad_t, pad_b, pad_l, pad_r, block_y, block_z, nplane);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -462,15 +459,15 @@ TORCH_IMPL_FUNC(reflection_pad1d_out_cuda)
 
   Tensor input = input_.contiguous();
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
       kHalf, kBFloat16, input.scalar_type(), "reflection_pad1d_out_template", [&] {
         reflection_pad1d_out_kernel<<<
             grid_size,
             block_size,
             0,
             at::cuda::getCurrentCUDAStream()>>>(
-            input.data_ptr<scalar_t>(),
-            output.data_ptr<scalar_t>(),
+            input.const_data_ptr<scalar_t>(),
+            output.mutable_data_ptr<scalar_t>(),
             input_w,
             pad_l,
             pad_r);
@@ -523,7 +520,7 @@ TORCH_IMPL_FUNC(reflection_pad1d_backward_out_cuda)(const Tensor& grad_output_,
     grad_input.scalar_type(), "reflection_pad1d_backward_out_cuda", [&] {
       reflection_pad1d_backward_out_kernel<<<
         grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
-          grad_input.data_ptr<scalar_t>(), grad_output.data_ptr<scalar_t>(),
+          grad_input.mutable_data_ptr<scalar_t>(), grad_output.const_data_ptr<scalar_t>(),
           input_w, pad_l, pad_r);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
@@ -588,7 +585,7 @@ TORCH_IMPL_FUNC(reflection_pad3d_out_cuda) (
   auto input = input_.contiguous();
   bool batch_mode = (input.dim() == 5);
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16,
       input.scalar_type(), "reflection_pad3d_out_cuda", [&] {
         auto input_inner = input;
         auto output_inner = output;
@@ -598,7 +595,7 @@ TORCH_IMPL_FUNC(reflection_pad3d_out_cuda) (
           output_inner = output.unsqueeze(0);
         }
 
-        auto input_packed = input_inner.packed_accessor64<scalar_t, 5>();
+        auto input_packed = input_inner.packed_accessor64<const scalar_t, 5>();
         auto output_packed = output_inner.packed_accessor64<scalar_t, 5>();
 
         int64_t output_plane_size = output_packed.size(2) * output_packed.size(3) * output_packed.size(4);
@@ -651,7 +648,7 @@ TORCH_IMPL_FUNC(reflection_pad3d_backward_out_cuda) (
         }
 
         auto grad_input_packed = grad_input_.packed_accessor64<scalar_t, 5>();
-        auto grad_output_packed = grad_output_.packed_accessor64<scalar_t, 5>();
+        auto grad_output_packed = grad_output_.packed_accessor64<const scalar_t, 5>();
 
         int64_t output_plane_size = grad_output_packed.size(2) *
             grad_output_packed.size(3) * grad_output_packed.size(4);

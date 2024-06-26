@@ -1,10 +1,8 @@
-#include <c10/core/DispatchKeySet.h>
-#include <c10/core/SafePyObject.h>
+#include <c10/core/DispatchKey.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
 thread_local PyInterpreter* pythonDispatcherState;
 
@@ -28,5 +26,4 @@ void PythonDispatcherTLS::reset_state() {
       DispatchKey::PythonDispatcher, false);
 }
 
-} // namespace impl
-} // namespace c10
+} // namespace c10::impl

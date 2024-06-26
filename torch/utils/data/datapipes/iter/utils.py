@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import copy
 import warnings
 from torch.utils.data.datapipes.datapipe import IterDataPipe
@@ -26,6 +27,7 @@ class IterableWrapperIterDataPipe(IterDataPipe):
         >>> list(dp)
         [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
     """
+
     def __init__(self, iterable, deepcopy=True):
         self.iterable = iterable
         self.deepcopy = deepcopy

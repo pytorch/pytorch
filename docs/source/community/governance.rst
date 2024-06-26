@@ -61,6 +61,7 @@ contributors and other interested parties understand the
 future direction of the project and can participate in discussion.
 
 Responsibilities of the maintainer includes:
+
 * Triaging high priority issues of the module
 * Triaging and reviewing and landing high priority pull requests of the module
 * Supporting public documentation related to the module
@@ -311,9 +312,9 @@ discuss.
 relatively minor, a pull request on GitHub can be opened up immediately
 for review and merge by the project committers. For larger changes,
 please open an issue to make a proposal to discuss prior. Please also
-see the :doc:`PyTorch Contributor
-Guide <contribution_guide>` for contribution
-guidelines.
+see the `PyTorch Contributor
+Wiki <https://github.com/pytorch/pytorch/wiki/The-Ultimate-Guide-to-PyTorch-Contributions>`__ for contribution
+for a walkthrough.
 
 **Q: Can I become a committer on the project?** Unfortunately, the
 current commit process to PyTorch involves an interaction with Facebook

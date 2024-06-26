@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+# mypy: allow-untyped-defs
 import warnings
 
 from .base_scheduler import BaseScheduler

@@ -5,8 +5,7 @@
 
 namespace py = pybind11;
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 PySavedVariableHooks::PySavedVariableHooks(
     py::function& pack_hook,
     py::function& unpack_hook)
@@ -45,6 +44,7 @@ at::Tensor PySavedVariableHooks::call_unpack_hook() {
   // unpack_hook_ will be manually decrefed when the saved variable is released
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 PySavedVariableHooks::~PySavedVariableHooks() {
   // If python is already dead, leak the wrapped python objects
   if (Py_IsInitialized()) {
@@ -64,20 +64,17 @@ void PyDefaultSavedVariableHooks::push_hooks(
 }
 
 void PyDefaultSavedVariableHooks::pop_hooks() {
-  PyObject *pack_hook(nullptr), *unpack_hook(nullptr);
-  std::tie(pack_hook, unpack_hook) = at::SavedTensorDefaultHooks::get_hooks();
+  auto [pack_hook, unpack_hook] = at::SavedTensorDefaultHooks::pop_hooks();
   TORCH_INTERNAL_ASSERT(pack_hook != nullptr && unpack_hook != nullptr);
   if (Py_IsInitialized()) {
     py::gil_scoped_acquire gil;
     Py_XDECREF(pack_hook);
     Py_XDECREF(unpack_hook);
   }
-  at::SavedTensorDefaultHooks::pop_hooks();
 }
 
 std::unique_ptr<SavedVariableHooks> PyDefaultSavedVariableHooks::get_hooks() {
-  PyObject *pack_hook(nullptr), *unpack_hook(nullptr);
-  std::tie(pack_hook, unpack_hook) = at::SavedTensorDefaultHooks::get_hooks();
+  auto [pack_hook, unpack_hook] = at::SavedTensorDefaultHooks::get_hooks();
   if (!pack_hook || !unpack_hook) {
     return nullptr;
   }
@@ -87,5 +84,4 @@ std::unique_ptr<SavedVariableHooks> PyDefaultSavedVariableHooks::get_hooks() {
   return std::make_unique<PySavedVariableHooks>(pack_hook_, unpack_hook_);
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

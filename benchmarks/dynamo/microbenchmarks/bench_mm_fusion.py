@@ -1,10 +1,11 @@
 # flake8: noqa
+import triton
+from prettytable import PrettyTable
+
 import torch
 
 import torch._dynamo
 import torch._inductor.config
-import triton
-from prettytable import PrettyTable
 
 # torch._inductor.config.debug = True
 torch._inductor.config.triton.dense_indexing = True
@@ -56,7 +57,6 @@ def bench(shape, layer_id, p, fusion_types=[""]):
 
     row = [layer_id]
     for fusion_type in fusion_types:
-
         if fusion_type == "":
             fn_mm = getattr(Func, "mm")
         else:

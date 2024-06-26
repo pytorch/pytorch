@@ -203,11 +203,8 @@ static inline __device__ void gpuAtomicAdd(int64_t *address, int64_t val) {
 #if defined(USE_ROCM)
   __atomic_fetch_add(address, val, __ATOMIC_RELAXED);
 #else
-  AtomicAddIntegerImpl<int64_t, sizeof(int64_t)>()(address,
-                                                   val,
-                                                   [](int64_t a, int64_t b) {
-                                                      return a + b;
-                                                   });
+  static_assert(sizeof(unsigned long long int) == sizeof(int64_t), "bitwidth change is not allowed");
+  atomicAdd(reinterpret_cast<unsigned long long int *>(address), static_cast<unsigned long long int>(val));
 #endif
 }
 
@@ -337,7 +334,13 @@ static inline __device__ void gpuAtomicAddNoReturn(double *address, double val) 
 
 /* Special case fp32 atomic. */
 #if defined(USE_ROCM)
-static inline __device__ void gpuAtomicAddNoReturn(float *address, float val) { atomicAddNoRet(address, val); }
+static inline __device__ void gpuAtomicAddNoReturn(float *address, float val) {
+#if defined(__gfx908__)
+  atomicAddNoRet(address, val);
+#else
+  (void)unsafeAtomicAdd(address, val);
+#endif
+}
 #else
 static inline __device__ void gpuAtomicAddNoReturn(float *address, float val) { gpuAtomicAdd(address, val); }
 #endif

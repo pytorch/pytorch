@@ -12,7 +12,7 @@
 
 // It implements various functions with a simple interface
 // For example it enables the user to call vsin(float* out, const float* in,
-// size) This functions takes a pointer to a contious output array of floats and
+// size) This functions takes a pointer to a continuous output array of floats and
 // a constant input array. It will then apply sin to each value in the input
 // array and write the result into the output array. out and in may point to the
 // same memory, i.e. this fully supports in-place operations. These functions
@@ -67,6 +67,7 @@ IMPLEMENT_VML(abs)
 IMPLEMENT_VML(acos)
 IMPLEMENT_VML(asin)
 IMPLEMENT_VML(atan)
+IMPLEMENT_VML(atanh)
 IMPLEMENT_VML(ceil)
 IMPLEMENT_VML(cos)
 // IMPLEMENT_VML(cosh)
@@ -78,6 +79,7 @@ IMPLEMENT_VML(expm1)
 IMPLEMENT_VML(floor)
 IMPLEMENT_VML(i0)
 IMPLEMENT_VML(i0e)
+IMPLEMENT_VML(digamma)
 IMPLEMENT_VML(reciprocal)
 IMPLEMENT_VML(log)
 IMPLEMENT_VML(log10)
@@ -98,11 +100,11 @@ IMPLEMENT_VML(lgamma)
 #if AT_MKL_ENABLED() && !defined(__APPLE__)
 
 // NB: LP64 MKL is the most commonly used and thus we assume it here. That means
-// we need to expect MKL_INT to be of type int, which implies int32_t in most
+// we need to expect MKL_INT to be of type int, which implies int32_t or int64_t in most
 // cases.
 static_assert(
-    std::is_same<MKL_INT, int32_t>::value,
-    "MKL_INT is assumed to be int32_t");
+    std::is_same_v<MKL_INT, int32_t> || std::is_same_v<MKL_INT, int64_t>,
+    "MKL_INT is assumed to be int32_t or int64_t");
 #define IMPLEMENT_VML_MKL_STUB(op, mklop, type, mkltype)                \
   template <>                                                           \
   inline void v##op(type * out, const type * in, int64_t size) {        \

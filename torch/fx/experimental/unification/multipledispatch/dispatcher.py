@@ -1,5 +1,7 @@
+# mypy: allow-untyped-defs
 from warnings import warn
 import inspect
+from typing_extensions import deprecated
 from .conflict import ordering, ambiguities, super_signature, AmbiguityWarning
 from .utils import expand_tuples
 from .variadic import Variadic, isvariadic
@@ -27,24 +29,21 @@ def ambiguity_warn(dispatcher, ambiguities):
     warn(warning_text(dispatcher.name, ambiguities), AmbiguityWarning)
 
 
+@deprecated(
+    "`halt_ordering` is deprecated, you can safely remove this call.",
+    category=FutureWarning,
+)
 def halt_ordering():
-    """Deprecated interface to temporarily disable ordering.
-    """
-    warn(
-        'halt_ordering is deprecated, you can safely remove this call.',
-        DeprecationWarning,
-    )
+    """Deprecated interface to temporarily disable ordering."""
 
 
+@deprecated(
+    "`restart_ordering` is deprecated, if you would like to eagerly order the dispatchers, "
+    "you should call the `reorder()` method on each dispatcher.",
+    category=FutureWarning,
+)
 def restart_ordering(on_ambiguity=ambiguity_warn):
-    """Deprecated interface to temporarily resume ordering.
-    """
-    warn(
-        'restart_ordering is deprecated, if you would like to eagerly order'
-        'the dispatchers, you should call the ``reorder()`` method on each'
-        ' dispatcher.',
-        DeprecationWarning,
-    )
+    """Deprecated interface to temporarily resume ordering."""
 
 
 def variadic_signature_matches_iter(types, full_signature):
@@ -205,10 +204,9 @@ class Dispatcher:
             if not isinstance(typ, (type, list)):
                 str_sig = ', '.join(c.__name__ if isinstance(c, type)
                                     else str(c) for c in signature)
-                raise TypeError("Tried to dispatch on non-type: %s\n"
-                                "In signature: <%s>\n"
-                                "In function: %s" %
-                                (typ, str_sig, self.name))
+                raise TypeError(f"Tried to dispatch on non-type: {typ}\n"
+                                f"In signature: <{str_sig}>\n"
+                                f"In function: {self.name}")
 
             # handle variadic signatures
             if isinstance(typ, list):
@@ -257,8 +255,7 @@ class Dispatcher:
             func = self.dispatch(*types)
             if not func:
                 raise NotImplementedError(
-                    'Could not find signature for %s: <%s>' %
-                    (self.name, str_signature(types))) from e
+                    f'Could not find signature for {self.name}: <{str_signature(types)}>') from e
             self._cache[types] = func
         try:
             return func(*args, **kwargs)
@@ -274,15 +271,14 @@ class Dispatcher:
 
             raise NotImplementedError(
                 "Matching functions for "
-                "%s: <%s> found, but none completed successfully" % (
-                    self.name, str_signature(types),),) from e
+                f"{self.name}: <{str_signature(types)}> found, but none completed successfully",) from e
 
     def __str__(self):
-        return "<dispatched %s>" % self.name
+        return f"<dispatched {self.name}>"
     __repr__ = __str__
 
     def dispatch(self, *types):
-        """Deterimine appropriate implementation for this type signature
+        """Determine appropriate implementation for this type signature
         This method is internal.  Users should call this object as a function.
         Implementation resolution occurs within the ``__call__`` method.
         >>> # xdoctest: +SKIP
@@ -319,14 +315,12 @@ class Dispatcher:
                     result = self.funcs[signature]
                     yield result
 
+    @deprecated("`resolve()` is deprecated, use `dispatch(*types)`", category=FutureWarning)
     def resolve(self, types):
-        """ Deterimine appropriate implementation for this type signature
+        """ Determine appropriate implementation for this type signature
         .. deprecated:: 0.4.4
             Use ``dispatch(*types)`` instead
         """
-        warn("resolve() is deprecated, use dispatch(*types)",
-             DeprecationWarning)
-
         return self.dispatch(*types)
 
     def __getstate__(self):
@@ -341,7 +335,7 @@ class Dispatcher:
 
     @property
     def __doc__(self):
-        docs = ["Multiply dispatched method: %s" % self.name]
+        docs = [f"Multiply dispatched method: {self.name}"]
 
         if self.doc:
             docs.append(self.doc)
@@ -350,7 +344,7 @@ class Dispatcher:
         for sig in self.ordering[::-1]:
             func = self.funcs[sig]
             if func.__doc__:
-                s = 'Inputs: <%s>\n' % str_signature(sig)
+                s = f'Inputs: <{str_signature(sig)}>\n'
                 s += '-' * len(s) + '\n'
                 s += func.__doc__.strip()
                 docs.append(s)
@@ -381,7 +375,7 @@ class Dispatcher:
 
 
 def source(func):
-    s = 'File: %s\n\n' % inspect.getsourcefile(func)
+    s = f'File: {inspect.getsourcefile(func)}\n\n'
     s = s + inspect.getsource(func)
     return s
 
@@ -408,8 +402,7 @@ class MethodDispatcher(Dispatcher):
         types = tuple([type(arg) for arg in args])
         func = self.dispatch(*types)
         if not func:
-            raise NotImplementedError('Could not find signature for %s: <%s>' %
-                                      (self.name, str_signature(types)))
+            raise NotImplementedError(f'Could not find signature for {self.name}: <{str_signature(types)}>')
         return func(self.obj, *args, **kwargs)
 
 
@@ -423,12 +416,12 @@ def str_signature(sig):
 
 def warning_text(name, amb):
     """ The text for ambiguity warnings """
-    text = "\nAmbiguities exist in dispatched function %s\n\n" % (name)
+    text = f"\nAmbiguities exist in dispatched function {name}\n\n"
     text += "The following signatures may result in ambiguous behavior:\n"
     for pair in amb:
         text += "\t" + \
                 ', '.join('[' + str_signature(s) + ']' for s in pair) + "\n"
     text += "\n\nConsider making the following additions:\n\n"
     text += '\n\n'.join(['@dispatch(' + str_signature(super_signature(s))
-                         + ')\ndef %s(...)' % name for s in amb])
+                         + f')\ndef {name}(...)' for s in amb])
     return text

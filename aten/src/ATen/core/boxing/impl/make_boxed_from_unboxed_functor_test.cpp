@@ -51,23 +51,12 @@ void expectCallsIncrement(DispatchKey dispatch_key) {
   EXPECT_EQ(6, result[0].toInt());
 }
 
-void expectCallsDecrement(DispatchKey dispatch_key) {
-  at::AutoDispatchBelowAutograd mode;
-
-  // assert that schema and cpu kernel are present
-  auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
-  ASSERT_TRUE(op.has_value());
-  auto result = callOp(*op, dummyTensor(dispatch_key), 5);
-  EXPECT_EQ(1, result.size());
-  EXPECT_EQ(4, result[0].toInt());
-}
-
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernel_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenKernel_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<IncrementKernel>(DispatchKey::CPU));
   expectCallsIncrement(DispatchKey::CPU);
 }
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInOneRegistrar_thenCallsRightKernel) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInOneRegistrar_thenCallsRightKernel) {
   auto registrar = RegisterOperators()
       .op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<IncrementKernel>(DispatchKey::CPU)
                                                                                       .kernel<ErrorKernel>(DispatchKey::CUDA))
@@ -76,7 +65,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenMultipleOperatorsAndKerne
   expectCallsIncrement(DispatchKey::CPU);
 }
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInMultipleRegistrars_thenCallsRightKernel) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInMultipleRegistrars_thenCallsRightKernel) {
   auto registrar1 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<IncrementKernel>(DispatchKey::CPU)
                                                                                                                        .kernel<ErrorKernel>(DispatchKey::CUDA));
   auto registrar2 = RegisterOperators().op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<ErrorKernel>(DispatchKey::CPU)
@@ -92,7 +81,7 @@ struct KernelWithoutOutput final : OperatorKernel {
   }
 };
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithoutOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenKernelWithoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op("_test::no_return(Tensor dummy) -> ()", RegisterOperators::options().kernel<KernelWithoutOutput>(DispatchKey::CPU));
 
   auto op = c10::Dispatcher::singleton().findSchema({"_test::no_return", ""});
@@ -110,7 +99,7 @@ struct KernelWithZeroOutputs final : OperatorKernel {
   }
 };
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithZeroOutputs_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenKernelWithZeroOutputs_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op("_test::zero_outputs(Tensor dummy) -> ()", RegisterOperators::options().kernel<KernelWithZeroOutputs>(DispatchKey::CPU));
 
   auto op = c10::Dispatcher::singleton().findSchema({"_test::zero_outputs", ""});
@@ -127,7 +116,7 @@ struct KernelWithIntOutput final : OperatorKernel {
   }
 };
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithIntOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenKernelWithIntOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::int_output(Tensor dummy, int a, int b) -> int", RegisterOperators::options().kernel<KernelWithIntOutput>(DispatchKey::CPU));
 
@@ -145,7 +134,7 @@ struct KernelWithTensorOutput final : OperatorKernel {
   }
 };
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenKernelWithTensorOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::returning_tensor(Tensor input) -> Tensor", RegisterOperators::options().kernel<KernelWithTensorOutput>(DispatchKey::CPU)
                                                                                          .kernel<KernelWithTensorOutput>(DispatchKey::CUDA));
@@ -168,7 +157,7 @@ struct KernelWithTensorListOutput final : OperatorKernel {
   }
 };
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorListOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenKernelWithTensorListOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::list_output(Tensor input1, Tensor input2, Tensor input3) -> Tensor[]", RegisterOperators::options().kernel<KernelWithTensorListOutput>(DispatchKey::CUDA));
 
@@ -189,7 +178,7 @@ struct KernelWithIntListOutput final : OperatorKernel {
   }
 };
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithIntListOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenKernelWithIntListOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::list_output(Tensor dummy, int input1, int input2, int input3) -> int[]", RegisterOperators::options().kernel<KernelWithIntListOutput>(DispatchKey::CPU));
 
@@ -205,21 +194,21 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithIntListOutput_w
 }
 
 struct KernelWithMultipleOutputs final : OperatorKernel {
-  std::tuple<Tensor, int64_t, c10::List<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>> operator()(Tensor) {
+  std::tuple<Tensor, int64_t, c10::List<Tensor>, std::optional<int64_t>, Dict<string, Tensor>> operator()(Tensor) {
     Dict<string, Tensor> dict;
     dict.insert("first", dummyTensor(DispatchKey::CPU));
     dict.insert("second", dummyTensor(DispatchKey::CUDA));
-    return std::tuple<Tensor, int64_t, c10::List<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>>(
+    return std::tuple<Tensor, int64_t, c10::List<Tensor>, std::optional<int64_t>, Dict<string, Tensor>>(
       dummyTensor(DispatchKey::CUDA),
       5,
       c10::List<Tensor>({dummyTensor(DispatchKey::CPU), dummyTensor(DispatchKey::CUDA)}),
-      c10::optional<int64_t>(c10::in_place, 0),
+      std::optional<int64_t>(std::in_place, 0),
       dict
     );
   }
 };
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithMultipleOutputs_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenKernelWithMultipleOutputs_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
      .op("_test::multiple_outputs(Tensor dummy) -> (Tensor, int, Tensor[], int?, Dict(str, Tensor))", RegisterOperators::options().kernel<KernelWithMultipleOutputs>(DispatchKey::CPU));
 
@@ -252,7 +241,7 @@ struct KernelWithTensorInputByValueWithOutput final : OperatorKernel {
   }
 };
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorInputByReference_withOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenKernelWithTensorInputByReference_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::tensor_input(Tensor input) -> Tensor", RegisterOperators::options().kernel<KernelWithTensorInputByReferenceWithOutput>(DispatchKey::CPU)
                                                                                      .kernel<KernelWithTensorInputByReferenceWithOutput>(DispatchKey::CUDA));
@@ -269,7 +258,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorInputByRe
   EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(result[0].toTensor()));
 }
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorInputByValue_withOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenKernelWithTensorInputByValue_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::tensor_input(Tensor input) -> Tensor", RegisterOperators::options().kernel<KernelWithTensorInputByValueWithOutput>(DispatchKey::CPU)
                                                                                      .kernel<KernelWithTensorInputByValueWithOutput>(DispatchKey::CUDA));
@@ -300,7 +289,7 @@ struct KernelWithTensorInputByValueWithoutOutput final : OperatorKernel {
   }
 };
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorInputByReference_withoutOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenKernelWithTensorInputByReference_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::tensor_input(Tensor input) -> ()", RegisterOperators::options().kernel<KernelWithTensorInputByReferenceWithoutOutput>(DispatchKey::CPU)
                                                                                  .kernel<KernelWithTensorInputByReferenceWithoutOutput>(DispatchKey::CUDA));
@@ -317,7 +306,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorInputByRe
   EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(captured_input));
 }
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorInputByValue_withoutOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenKernelWithTensorInputByValue_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::tensor_input(Tensor input) -> ()", RegisterOperators::options().kernel<KernelWithTensorInputByValueWithoutOutput>(DispatchKey::CPU)
                                                                                  .kernel<KernelWithTensorInputByValueWithoutOutput>(DispatchKey::CUDA));
@@ -342,7 +331,7 @@ struct KernelWithIntInputWithoutOutput final : OperatorKernel {
   }
 };
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithIntInput_withoutOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenKernelWithIntInput_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::int_input(Tensor dummy, int input) -> ()", RegisterOperators::options().kernel<KernelWithIntInputWithoutOutput>(DispatchKey::CPU));
 
@@ -361,7 +350,7 @@ struct KernelWithIntInputWithOutput final : OperatorKernel {
   }
 };
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithIntInput_withOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenKernelWithIntInput_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::int_input(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<KernelWithIntInputWithOutput>(DispatchKey::CPU));
 
@@ -381,7 +370,7 @@ struct KernelWithIntListInputWithoutOutput final : OperatorKernel {
   }
 };
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithIntListInput_withoutOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenKernelWithIntListInput_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::int_list_input(Tensor dummy, int[] input) -> ()", RegisterOperators::options().kernel<KernelWithIntListInputWithoutOutput>(DispatchKey::CPU));
 
@@ -400,7 +389,7 @@ struct KernelWithIntListInputWithOutput final : OperatorKernel {
   }
 };
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithIntListInput_withOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenKernelWithIntListInput_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::int_list_input(Tensor dummy, int[] input) -> int", RegisterOperators::options().kernel<KernelWithIntListInputWithOutput>(DispatchKey::CPU));
 
@@ -418,7 +407,7 @@ struct KernelWithTensorListInputWithoutOutput final : OperatorKernel {
   }
 };
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorListInput_withoutOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenKernelWithTensorListInput_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::tensor_list_input(Tensor[] input) -> ()", RegisterOperators::options().kernel<KernelWithTensorListInputWithoutOutput>(DispatchKey::CPU));
 
@@ -437,7 +426,7 @@ struct KernelWithTensorListInputWithOutput final : OperatorKernel {
   }
 };
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorListInput_withOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenKernelWithTensorListInput_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::tensor_list_input(Tensor[] input) -> int", RegisterOperators::options().kernel<KernelWithTensorListInputWithOutput>(DispatchKey::CPU));
 
@@ -457,7 +446,7 @@ struct KernelWithDictInputWithoutOutput final : OperatorKernel {
   }
 };
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithDictInput_withoutOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenKernelWithDictInput_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::dict_input(Dict(str, Tensor) input) -> ()", RegisterOperators::options().catchAllKernel<KernelWithDictInputWithoutOutput>());
 
@@ -479,7 +468,7 @@ struct KernelWithDictInputWithOutput final : OperatorKernel {
   }
 };
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithDictInput_withOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenKernelWithDictInput_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::dict_input(Dict(str, str) input) -> str", RegisterOperators::options().catchAllKernel<KernelWithDictInputWithOutput>());
 
@@ -500,7 +489,7 @@ struct KernelWithDictOutput final : OperatorKernel {
   }
 };
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithDictOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenKernelWithDictOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::dict_output(Dict(str, str) input) -> Dict(str, str)", RegisterOperators::options().catchAllKernel<KernelWithDictOutput>());
 
@@ -536,7 +525,7 @@ struct KernelWithTupleInput final : OperatorKernel {
   }
 };
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTupleInput_withOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenKernelWithTupleInput_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::tuple_input((str, int, float) input) -> str", RegisterOperators::options().catchAllKernel<KernelWithTupleInput>());
 
@@ -549,7 +538,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTupleInput_with
   EXPECT_EQ("foobar", outputs[0].toStringRef());
 }
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithCache_thenCacheIsKeptCorrectly) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenKernelWithCache_thenCacheIsKeptCorrectly) {
   auto registrar = RegisterOperators()
       .op("_test::cache_op(Tensor input) -> int", RegisterOperators::options().kernel<KernelWithCache>(DispatchKey::CPU));
 
@@ -588,7 +577,7 @@ private:
   int64_t offset_;
 };
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithConstructorArg_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenKernelWithConstructorArg_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::offset_op(Tensor tensor, int input) -> int", RegisterOperators::options().kernel<KernelWithConstructorArg>(DispatchKey::CPU, 2)
                                                                                            .kernel<KernelWithConstructorArg>(DispatchKey::CUDA, 4));
@@ -618,7 +607,7 @@ private:
   int64_t offset_;
 };
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithMultipleConstructorArgs_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenKernelWithMultipleConstructorArgs_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::offset_op(Tensor tensor, int input) -> int", RegisterOperators::options().kernel<KernelWithMultipleConstructorArgs>(DispatchKey::CPU, 2, 3)
                                                                                            .kernel<KernelWithMultipleConstructorArgs>(DispatchKey::CUDA, 4, 5));
@@ -643,7 +632,7 @@ struct KernelWithoutInputs final : OperatorKernel {
   }
 };
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenFallbackKernelWithoutAnyArguments_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenFallbackKernelWithoutAnyArguments_whenRegistered_thenCanBeCalled) {
   // note: non-fallback kernels without tensor arguments don't work because there
   // is no way to get the dispatch key. For operators that only have a fallback
   // kernel, this must work for backwards compatibility.
@@ -664,7 +653,7 @@ struct KernelWithoutTensorInputs final : OperatorKernel {
   }
 };
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenFallbackKernelWithoutTensorArguments_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenFallbackKernelWithoutTensorArguments_whenRegistered_thenCanBeCalled) {
   // note: non-fallback kernels without tensor arguments don't work because there
   // is no way to get the dispatch key. For operators that only have a fallback
   // kernel, this must work for backwards compatibility.
@@ -679,12 +668,12 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenFallbackKernelWithoutTens
   EXPECT_EQ(4, outputs[0].toInt());
 }
 
-c10::optional<Tensor> called_arg2 = c10::nullopt;
-c10::optional<int64_t> called_arg3 = c10::nullopt;
-c10::optional<std::string> called_arg4 = c10::nullopt;
+std::optional<Tensor> called_arg2 = c10::nullopt;
+std::optional<int64_t> called_arg3 = c10::nullopt;
+std::optional<std::string> called_arg4 = c10::nullopt;
 
 struct KernelWithOptInputWithoutOutput final : OperatorKernel {
-  void operator()(Tensor arg1, const c10::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
+  void operator()(Tensor arg1, const std::optional<Tensor>& arg2, std::optional<int64_t> arg3, std::optional<std::string> arg4) {
     called = true;
     called_arg2 = arg2;
     called_arg3 = arg3;
@@ -692,7 +681,7 @@ struct KernelWithOptInputWithoutOutput final : OperatorKernel {
   }
 };
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithOptionalInputs_withoutOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenKernelWithOptionalInputs_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op("_test::opt_input(Tensor arg1, Tensor? arg2, int? arg3, str? arg4) -> ()", RegisterOperators::options().kernel<KernelWithOptInputWithoutOutput>(DispatchKey::CPU));
   auto op = c10::Dispatcher::singleton().findSchema({"_test::opt_input", ""});
   ASSERT_TRUE(op.has_value());
@@ -720,7 +709,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithOptionalInputs_
 }
 
 struct KernelWithOptInputWithOutput final : OperatorKernel {
-  c10::optional<Tensor> operator()(Tensor arg1, const c10::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
+  std::optional<Tensor> operator()(Tensor arg1, const std::optional<Tensor>& arg2, std::optional<int64_t> arg3, std::optional<std::string> arg4) {
     called = true;
     called_arg2 = arg2;
     called_arg3 = arg3;
@@ -729,7 +718,7 @@ struct KernelWithOptInputWithOutput final : OperatorKernel {
   }
 };
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithOptionalInputs_withOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenKernelWithOptionalInputs_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op("_test::opt_input(Tensor arg1, Tensor? arg2, int? arg3, str? arg4) -> Tensor?", RegisterOperators::options().kernel<KernelWithOptInputWithOutput>(DispatchKey::CPU));
   auto op = c10::Dispatcher::singleton().findSchema({"_test::opt_input", ""});
   ASSERT_TRUE(op.has_value());
@@ -759,13 +748,13 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithOptionalInputs_
 }
 
 struct KernelWithOptInputWithMultipleOutputs final : OperatorKernel {
-  std::tuple<c10::optional<Tensor>, c10::optional<int64_t>, c10::optional<std::string>>
-  operator()(Tensor arg1, const c10::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
+  std::tuple<std::optional<Tensor>, std::optional<int64_t>, std::optional<std::string>>
+  operator()(Tensor arg1, const std::optional<Tensor>& arg2, std::optional<int64_t> arg3, std::optional<std::string> arg4) {
     return std::make_tuple(arg2, arg3, arg4);
   }
 };
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithOptionalInputs_withMultipleOutputs_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenKernelWithOptionalInputs_withMultipleOutputs_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op("_test::opt_input(Tensor arg1, Tensor? arg2, int? arg3, str? arg4) -> (Tensor?, int?, str?)", RegisterOperators::options().kernel<KernelWithOptInputWithMultipleOutputs>(DispatchKey::CPU));
   auto op = c10::Dispatcher::singleton().findSchema({"_test::opt_input", ""});
   ASSERT_TRUE(op.has_value());
@@ -787,7 +776,7 @@ struct ConcatKernel final : OperatorKernel {
   explicit ConcatKernel(std::string prefix): prefix_(std::move(prefix)) {}
 
   std::string operator()(const Tensor& tensor1, std::string a, const std::string& b, int64_t c) {
-    return prefix_ + a + b + c10::guts::to_string(c);
+    return prefix_ + a + b + std::to_string(c);
   }
 
   std::string prefix_;
@@ -803,7 +792,7 @@ void expectCallsConcatUnboxed(DispatchKey dispatch_key) {
   EXPECT_EQ("prefix123", result);
 }
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernel_whenRegistered_thenCanBeCalledUnboxed) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenKernel_whenRegistered_thenCanBeCalledUnboxed) {
   auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, str a, str b, int c) -> str", RegisterOperators::options().kernel<ConcatKernel>(DispatchKey::CPU, "prefix"));
   expectCallsConcatUnboxed(DispatchKey::CPU);
 }
@@ -814,25 +803,25 @@ struct KernelForSchemaInference final : OperatorKernel {
   }
 };
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernel_whenRegisteredWithoutSpecifyingSchema_thenInfersSchema) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenKernel_whenRegisteredWithoutSpecifyingSchema_thenInfersSchema) {
   auto registrar = RegisterOperators()
       .op("_test::no_schema_specified", RegisterOperators::options().kernel<KernelForSchemaInference>(DispatchKey::CPU));
 
   auto op = c10::Dispatcher::singleton().findSchema({"_test::no_schema_specified", ""});
   ASSERT_TRUE(op.has_value());
 
-  c10::optional<std::string> differences = c10::findSchemaDifferences(torch::jit::parseSchema("_test::no_schema_specified(Tensor arg1, int arg2, Tensor[] arg3) -> (int, Tensor)"), op->schema());
+  std::optional<std::string> differences = c10::findSchemaDifferences(torch::jit::parseSchema("_test::no_schema_specified(Tensor arg1, int arg2, Tensor[] arg3) -> (int, Tensor)"), op->schema());
   EXPECT_FALSE(differences.has_value());
 }
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernel_whenRegisteredCatchAllWithoutSpecifyingSchema_thenInfersSchema) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenKernel_whenRegisteredCatchAllWithoutSpecifyingSchema_thenInfersSchema) {
   auto registrar = RegisterOperators()
       .op("_test::no_schema_specified", RegisterOperators::options().catchAllKernel<KernelForSchemaInference>());
 
   auto op = c10::Dispatcher::singleton().findSchema({"_test::no_schema_specified", ""});
   ASSERT_TRUE(op.has_value());
 
-  c10::optional<std::string> differences = c10::findSchemaDifferences(torch::jit::parseSchema("_test::no_schema_specified(Tensor arg1, int arg2, Tensor[] arg3) -> (int, Tensor)"), op->schema());
+  std::optional<std::string> differences = c10::findSchemaDifferences(torch::jit::parseSchema("_test::no_schema_specified(Tensor arg1, int arg2, Tensor[] arg3) -> (int, Tensor)"), op->schema());
   EXPECT_FALSE(differences.has_value());
 }
 
@@ -843,7 +832,7 @@ template<class... Args> struct KernelFunc<void, Args...> final : OperatorKernel 
   void operator()(Args...) {}
 };
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenMismatchedKernel_withDifferentNumArguments_whenRegistering_thenFails) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenMismatchedKernel_withDifferentNumArguments_whenRegistering_thenFails) {
   // assert this does not fail because it matches
   RegisterOperators()
       .op("_test::mismatch(Tensor arg) -> int", RegisterOperators::options().kernel<KernelFunc<int64_t, Tensor>>(DispatchKey::CPU));
@@ -879,7 +868,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenMismatchedKernel_withDiff
   );
 }
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenMismatchedKernel_withDifferentArgumentType_whenRegistering_thenFails) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenMismatchedKernel_withDifferentArgumentType_whenRegistering_thenFails) {
   // assert this does not fail because it matches
   RegisterOperators()
       .op("_test::mismatch(Tensor arg1, int arg2) -> int", RegisterOperators::options().kernel<KernelFunc<int64_t, Tensor, int64_t>>(DispatchKey::CPU));
@@ -898,7 +887,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenMismatchedKernel_withDiff
   );
 }
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenMismatchedKernel_withDifferentNumReturns_whenRegistering_thenFails) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenMismatchedKernel_withDifferentNumReturns_whenRegistering_thenFails) {
   // assert this does not fail because it matches
   RegisterOperators()
       .op("_test::mismatch(Tensor arg) -> int", RegisterOperators::options().kernel<KernelFunc<int64_t, Tensor>>(DispatchKey::CPU));
@@ -957,7 +946,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenMismatchedKernel_withDiff
   );
 }
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenMismatchedKernel_withDifferentReturnTypes_whenRegistering_thenFails) {
+TEST(OperatorRegistrationTestFunctorBasedKernel, givenMismatchedKernel_withDifferentReturnTypes_whenRegistering_thenFails) {
   // assert this does not fail because it matches
   RegisterOperators()
       .op("_test::mismatch(Tensor arg) -> int", RegisterOperators::options().kernel<KernelFunc<int64_t, Tensor>>(DispatchKey::CPU));

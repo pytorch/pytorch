@@ -1,15 +1,13 @@
 # Owner(s): ["module: dynamo"]
 import operator
-import unittest
 
 import torch
 
 import torch._dynamo
-import torch._dynamo.backends.ipex
 import torch._dynamo.config as config
 import torch._dynamo.test_case
-from torch._dynamo.backends.ipex import has_ipex
 from torch._dynamo.testing import same
+from torch.fx._lazy_graph_module import _force_skip_lazy_graph_module
 
 
 class Seq(torch.nn.Module):
@@ -28,7 +26,7 @@ class Seq(torch.nn.Module):
 
 class Conv_Bn_Relu(torch.nn.Module):
     def __init__(self, in_channels, out_channels, **kwargs):
-        super(Conv_Bn_Relu, self).__init__()
+        super().__init__()
         self.conv = torch.nn.Conv2d(in_channels, out_channels, bias=False, **kwargs)
         self.bn = torch.nn.BatchNorm2d(out_channels, eps=0.001)
         self.relu = torch.nn.ReLU()
@@ -89,6 +87,7 @@ class TestVerifyCorrectness(torch._dynamo.test_case.TestCase):
         self.assertEqual(r1.device, r2.device)
         self.assertEqual(r1.device, r3.device)
 
+    @_force_skip_lazy_graph_module()
     def test_torchscript(self):
         s = Seq()
         i = torch.randn(10)
@@ -137,19 +136,6 @@ class TestVerifyCorrectness(torch._dynamo.test_case.TestCase):
         opt_toy_example = torch._dynamo.optimize(incorrect_compile_fn)(toy_example)
         r2 = opt_toy_example(i1, i2)
         self.assertTrue(not same(r1, r2))
-
-    @unittest.skipIf(not has_ipex(), "requires ipex")
-    def test_ipex_fp32(self):
-        model = Conv_Bn_Relu(3, 32, kernel_size=3, stride=1)
-        model = model.to(memory_format=torch.channels_last)
-        model = model.eval()
-        input = torch.randn(8, 3, 64, 64).contiguous(memory_format=torch.channels_last)
-        r1 = model(input)
-        opt_model = torch._dynamo.optimize("ipex")(model)
-        with torch.no_grad():
-            r2 = opt_model(input)
-        self.assertTrue(same(r1, r2))
-        self.assertEqual(r2.dtype, torch.float32)
 
 
 if __name__ == "__main__":

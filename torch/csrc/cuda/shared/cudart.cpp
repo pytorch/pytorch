@@ -10,9 +10,7 @@
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAGuard.h>
 
-namespace torch {
-namespace cuda {
-namespace shared {
+namespace torch::cuda::shared {
 
 #ifdef USE_ROCM
 namespace {
@@ -105,7 +103,7 @@ void initCudartBindings(PyObject* module) {
   cudart.def(
       "cuda"
       "MemGetInfo",
-      [](int device) -> std::pair<size_t, size_t> {
+      [](c10::DeviceIndex device) -> std::pair<size_t, size_t> {
         c10::cuda::CUDAGuard guard(device);
         size_t device_free = 0;
         size_t device_total = 0;
@@ -114,6 +112,4 @@ void initCudartBindings(PyObject* module) {
       });
 }
 
-} // namespace shared
-} // namespace cuda
-} // namespace torch
+} // namespace torch::cuda::shared

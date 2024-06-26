@@ -1,7 +1,6 @@
 from typing import List, Union
 
 from torchgen.api import cpp
-
 from torchgen.api.types import (
     ArgName,
     ArrayRefCType,
@@ -33,11 +32,13 @@ from torchgen.model import (
 )
 from torchgen.utils import assert_never
 
+
 # This file describes the translation of JIT schema to the structured functions API.
 # This is similar to native API, but a number of historical problems with native
 # API have been fixed.
 
-# Translation of types occuring in JIT arguments to a C++ argument type.
+
+# Translation of types occurring in JIT arguments to a C++ argument type.
 # NB: For now, mutable doesn't do anything; but it could if we make
 # some more nominal types
 def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
@@ -94,6 +95,7 @@ def argument_type(a: Argument, *, binds: ArgName) -> NamedCType:
 # function, by calling set_output; in the case of an impl function, by writing
 # directly into the provided out argument).
 
+
 # Structured kernels are never defaulted
 def argument(a: Union[Argument, SelfArgument, TensorOptionsArguments]) -> List[Binding]:
     if isinstance(a, Argument):
@@ -127,8 +129,7 @@ def impl_arguments(g: NativeFunctionsGroup) -> List[Binding]:
             if isinstance(a, Argument) and a.name in g.out.precomputed.replace:
                 # If a is in precompute.replace, append the parameters
                 # that should replace it onto non_out_args_replaced.
-                for replacement in g.out.precomputed.replace[a.name]:
-                    non_out_args_replaced.append(replacement)
+                non_out_args_replaced.extend(g.out.precomputed.replace[a.name])
             else:
                 # If not, push a as it is.
                 non_out_args_replaced.append(a)

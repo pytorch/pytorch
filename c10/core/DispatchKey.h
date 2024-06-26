@@ -1,7 +1,10 @@
 #pragma once
 
 #include <c10/core/DeviceType.h>
-#include <c10/macros/Macros.h>
+#include <c10/macros/Export.h>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
 #include <ostream>
 #include <string>
 
@@ -16,13 +19,19 @@ namespace c10 {
 // a DispatchKeySet. The bits in the DispatchKeySet are split between the bottom
 // ~12 "BackendComponent" bits, while the remaining upper bits are assigned to
 // functionalities. When we encounter a functionality bit that is known to be
-// customizeable per-backend, then we also look at the lower BackendComponent
+// customizable per-backend, then we also look at the lower BackendComponent
 // bits and take the highest bit to determine which backend's implementation to
 // use.
 
 // WARNING!  If you add a new backend component to the end of this list,
-// make sure you update PrivateUse3Bit.  (But you shouldn't: private use
-// keys should have higher precedence than all built-in keys)
+// make sure you register it before Meta.
+// Meta must be at the end so that meta key in tls triggers meta kernels.
+// (But you shouldn't: private use keys should have higher precedence than all
+// built-in keys)
+
+// If you add a new (non-privateuse) backend here,
+// make sure to add an Autograd<Backend> fallthrough kernel
+// in aten/src/ATen/core/VariableFallbackKernel.cpp
 
 #define C10_FORALL_BACKEND_COMPONENTS(_, extra) \
   _(CPU, extra)                                 \
@@ -35,11 +44,11 @@ namespace c10 {
   _(HPU, extra)                                 \
   _(VE, extra)                                  \
   _(Lazy, extra)                                \
-  _(Meta, extra)                                \
   _(MTIA, extra)                                \
   _(PrivateUse1, extra)                         \
   _(PrivateUse2, extra)                         \
-  _(PrivateUse3, extra)
+  _(PrivateUse3, extra)                         \
+  _(Meta, extra)
 
 // WARNING!  If we add a new per-backend functionality key that has higher
 // priority than Autograd, then make sure you update EndOfRuntimeBackendKeys
@@ -48,6 +57,7 @@ namespace c10 {
   _(Dense, )                             \
   _(Quantized, Quantized)                \
   _(Sparse, Sparse)                      \
+  _(SparseCsr, SparseCsr)                \
   _(NestedTensor, NestedTensor)          \
   _(AutogradFunctionality, Autograd)
 
@@ -88,7 +98,7 @@ enum class BackendComponent : uint8_t {
 
   // Define an alias to represent end of backend dispatch keys.
   // If you add new backend keys after PrivateUse3, please also update it here.
-  EndOfBackendKeys = PrivateUse3Bit,
+  EndOfBackendKeys = MetaBit,
 };
 
 // Semantically, a dispatch key identifies a possible "level" in our
@@ -171,13 +181,11 @@ enum class DispatchKey : uint16_t {
   // https://gitlab.com/pytorch-complex/vitis_kernels
 
   // TODO: put this in BackendComponents
-  // ONNX Runtime, lives out of tree at https://github.com/pytorch/ort and
-  // https://github.com/microsoft/onnxruntime, and is also used to test general
-  // backend/extension machinery in the core. cf:
-  // - test/cpp_extensions/ort_extension.cpp
+  // MAIA backend lives out of tree
+  // - test/cpp_extensions/maia_extension.cpp
   // - test/test_torch.py
   // - aten/src/ATen/test/extension_backend_test.cpp
-  ORT,
+  MAIA,
 
   Vulkan, // TODO: put this in BackendComponents
   Metal, // TODO: put this in BackendComponents
@@ -208,9 +216,7 @@ enum class DispatchKey : uint16_t {
   // See [Note: Per-Backend Functionality Dispatch Keys]
   Sparse,
 
-  // TODO: Make SparseCsr a functionality key
-  SparseCsrCPU,
-  SparseCsrCUDA,
+  SparseCsr,
 
   NestedTensor,
 
@@ -348,10 +354,13 @@ enum class DispatchKey : uint16_t {
   // and inputs are saved for backward in the post-autocast type.
   AutocastCPU,
   AutocastXPU,
+  AutocastIPU,
   AutocastHPU,
-  // Naughtily, AutocastCUDA is also being used for XLA.  In the terminal state,
-  // it probably should get its own Autocast key
+  AutocastXLA,
+  // AutocastXLA is only being used for TPUs. XLA GPUs continue to use
+  // AutocastCUDA.
   AutocastCUDA,
+  AutocastPrivateUse1,
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ WRAPPERS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // There are a number of alternative modes which may want to handle before
@@ -359,6 +368,10 @@ enum class DispatchKey : uint16_t {
   // go here.
 
   FuncTorchBatched, // See Note [Out-of-tree vmap+grad prototype]
+
+  // Dispatch key for BatchedTensorImpl wrapping a nested tensor.
+  BatchedNestedTensor,
+
   FuncTorchVmapMode, // See Note [Out-of-tree vmap+grad prototype]
 
   // This is the dispatch key for BatchedTensorImpl, which is used to implement
@@ -400,6 +413,12 @@ enum class DispatchKey : uint16_t {
   // for a usage example
   TESTING_ONLY_GenericMode,
 
+  // This key is used for pre-dispatch tracing in make_fx.
+  // It has lower priority than the PythonDispatcher key
+  // because we use the PythonDispatcher to intercept the key from python,
+  // and avoid having to implement it in C++.
+  PreDispatch,
+
   // This is a bypass that allows you to skip running the C++ dispatcher
   // entirely
   PythonDispatcher,
@@ -417,7 +436,7 @@ enum class DispatchKey : uint16_t {
   StartOf##fullname##Backends,                         \
       C10_FORALL_BACKEND_COMPONENTS(                   \
           DEFINE_PER_BACKEND_KEYS_FOR_BACKEND, prefix) \
-          EndOf##fullname##Backends = prefix##PrivateUse3,
+          EndOf##fullname##Backends = prefix##Meta,
 
   C10_FORALL_FUNCTIONALITY_KEYS(DEFINE_PER_BACKEND_KEYS)
 
@@ -515,7 +534,7 @@ constexpr bool isAliasDispatchKey(DispatchKey k) {
 // [Note: Per-Backend Functionality Dispatch Keys]
 // Check if a DispatchKey is a per-backend functionality key
 // Any functionalities that can be customized per-backend should be added here.
-// These keys correspond to functionalities that can be customized indivually
+// These keys correspond to functionalities that can be customized individually
 // per backend. While they only take up one bit in the `DispatchKeySet` bitset,
 // they map to (# backends) slots in the operator table.
 // Each of these keys also has a separate set of "runtime keys" in the dispatch
@@ -526,7 +545,8 @@ constexpr bool isAliasDispatchKey(DispatchKey k) {
 
 constexpr bool isPerBackendFunctionalityKey(DispatchKey k) {
   if (k == DispatchKey::Dense || k == DispatchKey::Quantized ||
-      k == DispatchKey::Sparse || k == DispatchKey::AutogradFunctionality ||
+      k == DispatchKey::Sparse || k == DispatchKey::SparseCsr ||
+      k == DispatchKey::AutogradFunctionality ||
       k == DispatchKey::NestedTensor) {
     return true;
   } else {
@@ -614,6 +634,12 @@ constexpr BackendComponent toBackendComponent(DispatchKey k) {
         static_cast<uint8_t>(k) -
         static_cast<uint8_t>(DispatchKey::StartOfSparseBackends));
   } else if (
+      k >= DispatchKey::StartOfSparseCsrBackends &&
+      k <= DispatchKey::EndOfSparseCsrBackends) {
+    return static_cast<BackendComponent>(
+        static_cast<uint8_t>(k) -
+        static_cast<uint8_t>(DispatchKey::StartOfSparseCsrBackends));
+  } else if (
       k >= DispatchKey::StartOfNestedTensorBackends &&
       k <= DispatchKey::EndOfNestedTensorBackends) {
     return static_cast<BackendComponent>(
@@ -640,6 +666,8 @@ constexpr DispatchKey toFunctionalityKey(DispatchKey k) {
     return DispatchKey::Quantized;
   } else if (k <= DispatchKey::EndOfSparseBackends) {
     return DispatchKey::Sparse;
+  } else if (k <= DispatchKey::EndOfSparseCsrBackends) {
+    return DispatchKey::SparseCsr;
   } else if (k <= DispatchKey::EndOfNestedTensorBackends) {
     return DispatchKey::NestedTensor;
   } else if (k <= DispatchKey::EndOfAutogradFunctionalityBackends) {
@@ -670,6 +698,11 @@ constexpr DispatchKey toRuntimePerBackendFunctionalityKey(
         static_cast<uint8_t>(DispatchKey::StartOfSparseBackends) +
         static_cast<uint8_t>(backend_k));
   }
+  if (functionality_k == DispatchKey::SparseCsr) {
+    return static_cast<DispatchKey>(
+        static_cast<uint8_t>(DispatchKey::StartOfSparseCsrBackends) +
+        static_cast<uint8_t>(backend_k));
+  }
   if (functionality_k == DispatchKey::Quantized) {
     return static_cast<DispatchKey>(
         static_cast<uint8_t>(DispatchKey::StartOfQuantizedBackends) +
@@ -694,6 +727,7 @@ constexpr DispatchKey toRuntimePerBackendFunctionalityKey(
 namespace torch {
 // Expose the constant, but not the TYPE (DispatchKey is an implementation
 // detail!)
+// NOLINTNEXTLINE(misc-unused-using-decls)
 using c10::kAutograd;
 } // namespace torch
 

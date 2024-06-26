@@ -19,6 +19,8 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
+#include <iostream>
+
 namespace torch::jit {
 
 namespace {
@@ -163,10 +165,10 @@ void Module::to(at::Device device, bool non_blocking) {
   to_impl(device, /*dtype=*/c10::nullopt, non_blocking);
 }
 
-void module_state_to(
+static void module_state_to(
     const autograd::Variable& variable,
-    const c10::optional<at::Device>& device,
-    const c10::optional<at::ScalarType>& dtype,
+    const std::optional<at::Device>& device,
+    const std::optional<at::ScalarType>& dtype,
     bool non_blocking) {
   // Need to access the `at::Tensor` as a `Variable` here.
   // Use the data's original device or dtype if not supplied here.
@@ -178,8 +180,8 @@ void module_state_to(
 }
 
 void Module::to_impl(
-    const c10::optional<at::Device>& device,
-    const c10::optional<at::ScalarType>& dtype,
+    const std::optional<at::Device>& device,
+    const std::optional<at::ScalarType>& dtype,
     bool non_blocking) {
   for (at::Tensor e : parameters()) {
     module_state_to(e, device, dtype, non_blocking);
@@ -194,6 +196,9 @@ Method::Method(ModulePtr owner, Function* function)
 
 Module Method::owner() const {
   return Module(owner_);
+}
+ObjectPtr Method::raw_owner() const {
+  return owner_;
 }
 void Method::run(Stack& stack) {
   stack.insert(stack.begin(), owner()._ivalue()); // self
@@ -312,13 +317,13 @@ Module Module::copy() const {
   return Module(_ivalue()->copy());
 }
 
-Module Module::deepcopy() const {
-  return Module(_ivalue()->deepcopy());
+Module Module::deepcopy(std::optional<at::Device> device) const {
+  return Module(_ivalue()->deepcopy(device));
 }
 
 Module Module::clone(bool inplace) const {
   std::unordered_map<TypePtr, TypePtr> type_remap;
-  IValue::HashAliasedIValueMap memo;
+  IValue::HashIdentityIValueMap memo;
   const std::unordered_set<std::string> ignored_methods;
   const std::unordered_set<std::string> ignored_attributes;
   return clone_impl(
@@ -330,7 +335,7 @@ Module Module::clone(
     const std::unordered_set<std::string>& ignored_methods,
     const std::unordered_set<std::string>& ignored_attributes) const {
   std::unordered_map<TypePtr, TypePtr> type_remap;
-  IValue::HashAliasedIValueMap memo;
+  IValue::HashIdentityIValueMap memo;
   return clone_impl(
       type_remap, inplace, memo, ignored_methods, ignored_attributes);
 }
@@ -338,7 +343,7 @@ Module Module::clone(
 Module Module::clone_impl(
     std::unordered_map<TypePtr, TypePtr>& type_remap,
     bool inplace,
-    IValue::HashAliasedIValueMap memo,
+    IValue::HashIdentityIValueMap memo,
     const std::unordered_set<std::string>& ignored_methods,
     const std::unordered_set<std::string>& ignored_attributes) const {
   // Create a new _ivalue in the same compilation unit.
@@ -471,7 +476,7 @@ IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
 
 Module freeze(
     const Module& module,
-    c10::optional<std::vector<std::string>> preserved_attrs,
+    const std::optional<std::vector<std::string>>& preserved_attrs,
     bool optimize_numerics) {
   TORCH_CHECK(
       !module.hasattr("training") || !module.is_training(),
@@ -502,9 +507,9 @@ Module optimize_for_inference(
   } else {
     frozen_mod = module;
   }
-
-  optimize_for_inference(frozen_mod.get_method("forward").graph());
-
+  if (auto method = frozen_mod.find_method("forward")) {
+    optimize_for_inference(frozen_mod.get_method("forward").graph());
+  }
   for (const auto& method : other_methods) {
     optimize_for_inference(frozen_mod.get_method(method).graph());
   }

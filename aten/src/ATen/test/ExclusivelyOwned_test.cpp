@@ -66,7 +66,7 @@ using ExclusivelyOwnedTypes = ::testing::Types<
   caffe2::Tensor
   >;
 
-TYPED_TEST_CASE(ExclusivelyOwnedTest, ExclusivelyOwnedTypes);
+TYPED_TEST_SUITE(ExclusivelyOwnedTest, ExclusivelyOwnedTypes);
 
 TYPED_TEST(ExclusivelyOwnedTest, DefaultConstructor) {
   c10::ExclusivelyOwned<TypeParam> defaultConstructed;

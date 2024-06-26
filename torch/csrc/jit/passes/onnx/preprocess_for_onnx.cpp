@@ -53,7 +53,7 @@ at::optional<Node*> FindFusibleListUnpack(Node* n) {
 // graph(%input : Float(5, 4, 3, strides=[12, 3, 1])):
 //   %13 : int[] = prim::Constant[value=[2, 1, 2]]()
 //   %7 : int = prim::Constant[value=0]()
-//   %8 : int = prim::Constant[value=3]()  # Adding addtional input of value 3
+//   %8 : int = prim::Constant[value=3]()  # Adding additional input of value 3
 //      representing the number of outputs.
 //   %14 : Float(2, 4, 3, strides=[12, 3, 1]), %15 : Float(1, 4, 3, strides=[12,
 //      3, 1]), %16 : Float(2, 4, 3, strides=[12, 3, 1] =
@@ -165,7 +165,7 @@ static void ReplaceAddWithConcat(Block* b) {
 }
 
 // This pass also covers the case when the input to ListUnpack
-// is int[] comming from some other op than ListConstruct (like Slice or Shape)
+// is int[] coming from some other op than ListConstruct (like Slice or Shape)
 //
 // before the pass
 // graph(%x.1 : Float(2, 3, strides=[3, 1], requires_grad=0, device=cpu)):

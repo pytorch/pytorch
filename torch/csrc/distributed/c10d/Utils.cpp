@@ -1,21 +1,8 @@
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 
-#include <algorithm>
 #include <cstring>
-#include <memory>
-#include <string>
-#include <thread>
 
 namespace c10d {
-
-std::string parse_env(const char* env_var_name) {
-  char* stringValue = std::getenv(env_var_name);
-  std::string res = "N/A";
-  if (stringValue != nullptr) {
-    res = stringValue;
-  }
-  return res;
-}
 
 std::vector<at::Tensor> getTensorShapes(
     const std::vector<at::Tensor>& tensors) {
@@ -29,6 +16,14 @@ std::vector<at::Tensor> getTensorShapes(
     shapeTensors.emplace_back(std::move(shapesTensor));
   }
   return shapeTensors;
+}
+
+size_t getTensorsNumel(const std::vector<at::Tensor>& tensors) {
+  size_t numel = 0;
+  for (auto& tensor : tensors) {
+    numel += tensor.numel();
+  }
+  return numel;
 }
 
 } // namespace c10d

@@ -89,7 +89,9 @@ def get_raw_profiles_folder() -> str:
 
 def detect_compiler_type(platform: TestPlatform) -> CompilerType:
     if platform == TestPlatform.OSS:
-        from package.oss.utils import detect_compiler_type  # type: ignore[misc]
+        from package.oss.utils import (  # type: ignore[assignment, import, misc]
+            detect_compiler_type,
+        )
 
         cov_type = detect_compiler_type()  # type: ignore[call-arg]
     else:
@@ -100,7 +102,7 @@ def detect_compiler_type(platform: TestPlatform) -> CompilerType:
         cov_type = detect_compiler_type()
 
     check_compiler_type(cov_type)
-    return cov_type
+    return cov_type  # type: ignore[no-any-return]
 
 
 def get_test_name_from_whole_path(path: str) -> str:
@@ -114,7 +116,7 @@ def get_test_name_from_whole_path(path: str) -> str:
 def check_compiler_type(cov_type: Optional[CompilerType]) -> None:
     if cov_type is not None and cov_type in [CompilerType.GCC, CompilerType.CLANG]:
         return
-    raise Exception(
+    raise Exception(  # noqa: TRY002
         f"Can't parse compiler type: {cov_type}.",
         " Please set environment variable COMPILER_TYPE as CLANG or GCC",
     )
@@ -123,7 +125,7 @@ def check_compiler_type(cov_type: Optional[CompilerType]) -> None:
 def check_platform_type(platform_type: TestPlatform) -> None:
     if platform_type in [TestPlatform.OSS, TestPlatform.FBCODE]:
         return
-    raise Exception(
+    raise Exception(  # noqa: TRY002
         f"Can't parse platform type: {platform_type}.",
         " Please set environment variable COMPILER_TYPE as OSS or FBCODE",
     )
@@ -132,7 +134,7 @@ def check_platform_type(platform_type: TestPlatform) -> None:
 def check_test_type(test_type: str, target: str) -> None:
     if test_type in [TestType.CPP.value, TestType.PY.value]:
         return
-    raise Exception(
+    raise Exception(  # noqa: TRY002
         f"Can't parse test type: {test_type}.",
         f" Please check the type of buck target: {target}",
     )

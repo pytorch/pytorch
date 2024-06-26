@@ -20,7 +20,7 @@ struct TORCH_API TensorGeometry {
         strides_(sizes.size()),
         has_symbolic_sizes_strides_(
             !c10::asIntArrayRefSlowOpt(sizes).has_value()) {
-    int64_t dim = sizes.size();
+    int64_t dim = static_cast<int64_t>(sizes.size());
     c10::SymInt expected_stride = 1;
     for (int64_t i = dim - 1; i >= 0; i--) {
       strides_[i] = expected_stride;
@@ -41,7 +41,7 @@ struct TORCH_API TensorGeometry {
   bool is_contiguous() const;
 
   int64_t dim() const {
-    return sizes_.size();
+    return static_cast<int64_t>(sizes_.size());
   }
 
   int64_t size(int64_t dim) const {
@@ -111,6 +111,26 @@ struct TORCH_API TensorGeometry {
     std::swap(r.sizes_[dim0], r.sizes_[dim1]);
     std::swap(r.strides_[dim0], r.strides_[dim1]);
     return r;
+  }
+
+  std::vector<c10::SymInt>& mutable_sizes() {
+    return sizes_;
+  }
+  std::vector<c10::SymInt>& mutable_strides() {
+    return strides_;
+  }
+  c10::SymInt& mutable_storage_offset() {
+    return storage_offset_;
+  }
+  void recompute() {
+    // recalculate numel after a change
+    c10::SymInt numel = 1;
+    for (const auto& i : sizes_) {
+      numel = numel * i;
+    }
+    numel_ = std::move(numel);
+    has_symbolic_sizes_strides_ =
+        !c10::asIntArrayRefSlowOpt(sizes_).has_value();
   }
 
  private:

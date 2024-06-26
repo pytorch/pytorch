@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from torch.ao.pruning._experimental.data_sparsifier.data_norm_sparsifier import DataNormSparsifier
 from torch.ao.pruning._experimental.data_scheduler.base_data_scheduler import BaseDataScheduler
 import torch
@@ -131,7 +132,7 @@ class TestTrainingAwareCallback(TestCase):
 
         # data sparsifier args are correct
         for key, value in sparsifier_args.items():
-            callback.data_sparsifier.defaults[key] == value
+            assert callback.data_sparsifier.defaults[key] == value
 
         # data scheduler args are correct
         for key, value in scheduler_args.items():

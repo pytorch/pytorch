@@ -1,10 +1,9 @@
 #pragma once
 
-#include <c10/macros/Macros.h>
+#include <c10/macros/Export.h>
 #include <atomic>
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
 // This TLS controls whether or not we permanently associate PyObject
 // with Tensor the first time it is allocated.  When hermetic PyObject
@@ -57,5 +56,4 @@ struct C10_API HermeticPyObjectTLS {
   static bool get_tls_state();
 };
 
-} // namespace impl
-} // namespace c10
+} // namespace c10::impl

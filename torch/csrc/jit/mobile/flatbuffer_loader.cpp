@@ -85,7 +85,7 @@ class FlatbufferLoader final {
   void registerIValueParser(
       mobile::serialization::IValueUnion ivalue_type,
       IValueParser parser);
-  mobile::Module parseModule(mobile::serialization::Module* module);
+  mobile::Module parseModule(mobile::serialization::Module* module, char* end);
 
   void extractJitSourceAndConstants(
       ExtraFilesMap* jit_sources,
@@ -281,7 +281,8 @@ void FlatbufferLoader::parseAndPopulate(
 }
 
 mobile::Module FlatbufferLoader::parseModule(
-    mobile::serialization::Module* module) {
+    mobile::serialization::Module* module,
+    char* end) {
   module_ = module;
   all_ivalues_.clear();
   all_types_.clear();
@@ -290,18 +291,30 @@ mobile::Module FlatbufferLoader::parseModule(
   module_parsed_ = false;
 
   const auto* ivalues = module->ivalues();
+  TORCH_CHECK(
+      ivalues && module->object_types(),
+      "Parsing flatbuffer module: Corrupted ivalues/object_types field");
+  TORCH_CHECK(
+      reinterpret_cast<const char*>(ivalues) < end, "Corrupted ivalues field");
+  TORCH_CHECK(
+      module->storage_data_size() >= 0,
+      "Parsing flatbuffer module: illegal storage_data_size: ",
+      module->storage_data_size(),
+      ", expected to be non negative");
   all_ivalues_.resize(ivalues->size());
   all_types_.resize(module->object_types()->size());
   storages_.resize(module->storage_data_size());
   storage_loaded_.resize(module->storage_data_size(), false);
 
   mobile_ivalue_size_ = module_->mobile_ivalue_size();
-  if (mobile_ivalue_size_ == 0) {
+  if (mobile_ivalue_size_ == 0 || mobile_ivalue_size_ > ivalues->size()) {
     mobile_ivalue_size_ = ivalues->size();
   }
 
   for (uint32_t i = 0; i < mobile_ivalue_size_; i++) {
     const auto* ival = ivalues->Get(i);
+    TORCH_CHECK(
+        reinterpret_cast<const char*>(ival) < end, "Corrupted ivalue item")
     parseAndPopulate(i, ival);
   }
   IValue& module_ivalue = getIValue(module->state_obj());
@@ -351,7 +364,7 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
       (operator_version < caffe2::serialize::kProducedFileFormatVersion);
 
   for (const auto* op : *method->operators()) {
-    c10::optional<int> num_args = c10::nullopt;
+    std::optional<int> num_args = c10::nullopt;
     if (op->num_args_serialized() > -1) {
       num_args = op->num_args_serialized();
     }
@@ -733,7 +746,7 @@ void FlatbufferLoader::extractJitSourceAndConstants(
     }
   }
   const auto* jit_constants = module_->jit_constants();
-  for (auto i = 0; i < jit_constants->size(); ++i) {
+  for (const auto i : c10::irange(jit_constants->size())) {
     constants->emplace_back(getIValue(jit_constants->Get(i)));
   }
   parseExtraFilesFromVector(module_->jit_sources(), jit_sources);
@@ -743,14 +756,18 @@ void FlatbufferLoader::extractJitSourceAndConstants(
 
 mobile::Module parse_and_initialize_mobile_module(
     void* data,
-    size_t,
-    c10::optional<at::Device>,
+    size_t size,
+    std::optional<at::Device>,
     ExtraFilesMap* extra_files,
     bool should_copy_tensor_memory) {
-  TORCH_CHECK(
-      mobile::serialization::ModuleBufferHasIdentifier(data), "Format error");
   // TODO(T128189662): If not copying, enforce that data is aligned to
   // kFlatbufferDataAlignmentBytes, and add unit tests.
+
+  // Validate Flatbuffer module before parsing.
+  flatbuffers::Verifier verifier(reinterpret_cast<uint8_t*>(data), size);
+  TORCH_CHECK(
+      mobile::serialization::VerifyModuleBuffer(verifier),
+      "Malformed Flatbuffer module");
 
   FlatbufferLoader loader;
   loader.setShouldCopyTensorMemory(should_copy_tensor_memory);
@@ -758,7 +775,8 @@ mobile::Module parse_and_initialize_mobile_module(
   // Flatbuffer doesn't seem to have a way to provide the buffer size when
   // interacting with the buffer.
   auto* flatbuffer_module = mobile::serialization::GetMutableModule(data);
-  mobile::Module m = loader.parseModule(flatbuffer_module);
+  auto* end = static_cast<char*>(data) + size;
+  mobile::Module m = loader.parseModule(flatbuffer_module, end);
   if (extra_files != nullptr) {
     parseExtraFiles(flatbuffer_module, *extra_files);
   }
@@ -768,7 +786,7 @@ mobile::Module parse_and_initialize_mobile_module(
 mobile::Module parse_and_initialize_mobile_module(
     std::shared_ptr<char> data,
     size_t size,
-    c10::optional<at::Device> device,
+    std::optional<at::Device> device,
     ExtraFilesMap* extra_files) {
   mobile::Module m = parse_and_initialize_mobile_module(
       data.get(),
@@ -782,19 +800,26 @@ mobile::Module parse_and_initialize_mobile_module(
 
 mobile::Module parse_and_initialize_mobile_module_for_jit(
     void* data,
-    size_t,
+    size_t size,
     ExtraFilesMap& jit_sources,
     std::vector<IValue>& jit_constants,
-    c10::optional<at::Device>,
+    std::optional<at::Device>,
     ExtraFilesMap* extra_files) {
   TORCH_CHECK(
       mobile::serialization::ModuleBufferHasIdentifier(data), "Format error");
   // TODO(T128189662): Enforce that data is aligned to
   // kFlatbufferDataAlignmentBytes, and add unit tests.
 
+  // Validate Flatbuffer module before parsing.
+  flatbuffers::Verifier verifier(reinterpret_cast<uint8_t*>(data), size);
+  TORCH_CHECK(
+      mobile::serialization::VerifyModuleBuffer(verifier),
+      "Malformed Flatbuffer module");
+
   FlatbufferLoader loader;
   auto* flatbuffer_module = mobile::serialization::GetMutableModule(data);
-  mobile::Module m = loader.parseModule(flatbuffer_module);
+  auto* end = static_cast<char*>(data) + size;
+  mobile::Module m = loader.parseModule(flatbuffer_module, end);
   if (extra_files != nullptr) {
     parseExtraFiles(flatbuffer_module, *extra_files);
   }
@@ -805,26 +830,20 @@ mobile::Module parse_and_initialize_mobile_module_for_jit(
 
 mobile::Module load_mobile_module_from_file(
     const std::string& filename,
-    c10::optional<c10::Device> device,
+    std::optional<c10::Device> device,
     ExtraFilesMap* extra_files) {
-  std::shared_ptr<char> data;
-  size_t size = 0;
-  std::tie(data, size) = get_file_content(filename.c_str());
+  auto [data, size] = get_file_content(filename.c_str());
   return parse_and_initialize_mobile_module(
       std::move(data), size, device, extra_files);
 }
 
 uint64_t get_bytecode_version(std::istream& in) {
-  std::shared_ptr<char> data;
-  size_t size = 0;
-  std::tie(data, size) = get_stream_content(in);
+  auto [data, size] = get_stream_content(in);
   return get_bytecode_version_from_bytes(data.get());
 }
 
 uint64_t get_bytecode_version(const std::string& filename) {
-  std::shared_ptr<char> data;
-  size_t size = 0;
-  std::tie(data, size) = get_file_content(filename.c_str());
+  auto [data, size] = get_file_content(filename.c_str());
   return get_bytecode_version_from_bytes(data.get());
 }
 
@@ -871,11 +890,9 @@ mobile::ModuleInfo get_module_info_from_flatbuffer(char* flatbuffer_content) {
 
 mobile::Module load_mobile_module_from_stream_with_copy(
     std::istream& in,
-    c10::optional<at::Device> device,
+    std::optional<at::Device> device,
     ExtraFilesMap* extra_files) {
-  std::shared_ptr<char> data;
-  size_t size = 0;
-  std::tie(data, size) = get_stream_content(in);
+  auto [data, size] = get_stream_content(in);
   return parse_and_initialize_mobile_module(
       std::move(data), size, device, extra_files);
 }
@@ -883,9 +900,16 @@ mobile::Module load_mobile_module_from_stream_with_copy(
 mobile::Module parse_flatbuffer_no_object(
     std::shared_ptr<char> data,
     size_t size,
-    c10::optional<at::Device> device) {
+    std::optional<at::Device> device) {
   (void)device;
   (void)size;
+
+  // Validate Flatbuffer module before parsing.
+  flatbuffers::Verifier verifier(reinterpret_cast<uint8_t*>(data.get()), size);
+  TORCH_CHECK(
+      mobile::serialization::VerifyModuleBuffer(verifier),
+      "Malformed Flatbuffer module");
+
   auto* flatbuffer_module = mobile::serialization::GetMutableModule(data.get());
   FlatbufferLoader loader;
   // replace parserObject with to handle only class with field case
@@ -905,7 +929,8 @@ mobile::Module parse_flatbuffer_no_object(
         return static_cast<c10::IValue>(obj);
       });
 
-  mobile::Module m = loader.parseModule(flatbuffer_module);
+  auto* end = data.get() + size;
+  mobile::Module m = loader.parseModule(flatbuffer_module, end);
   m.set_delete_memory(std::move(data));
   return m;
 }

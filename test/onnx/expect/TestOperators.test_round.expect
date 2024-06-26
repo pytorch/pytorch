@@ -8,7 +8,7 @@ graph {
     name: "Round_0"
     op_type: "Round"
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::Round_0"
     type {

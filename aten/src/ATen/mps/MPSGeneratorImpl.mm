@@ -5,8 +5,7 @@
 #include <algorithm>
 
 namespace at {
-namespace mps {
-namespace detail {
+namespace mps::detail {
 
 const Generator& getDefaultMPSGenerator() {
   static auto default_gen_mps = createMPSGenerator(c10::detail::getNonDeterministicRandom());
@@ -19,12 +18,12 @@ Generator createMPSGenerator(uint64_t seed_val) {
   return gen;
 }
 
-} // namespace detail
-} // namespace mps
+} // namespace mps::detail
 
 MPSGeneratorImpl::MPSGeneratorImpl(uint64_t seed_in)
-  : c10::GeneratorImpl{Device(DeviceType::MPS), DispatchKeySet(c10::DispatchKey::MPS)},
-    data_({.seed = seed_in}), engine_(seed_in, 0, 0) { }
+    : c10::GeneratorImpl{Device(DeviceType::MPS, 0), DispatchKeySet(c10::DispatchKey::MPS)},
+      data_({.seed = seed_in}),
+      engine_(seed_in, 0, 0) {}
 
 void MPSGeneratorImpl::set_current_seed(uint64_t seed) {
   data_.seed = seed;
@@ -34,6 +33,14 @@ void MPSGeneratorImpl::set_current_seed(uint64_t seed) {
   data_.state[5] = static_cast<uint32_t>(seed);
   data_.state[6] = static_cast<uint32_t>(seed >> 32);
   engine_.reset_state(seed);
+}
+
+void MPSGeneratorImpl::set_offset(uint64_t offset) {
+  engine_.set_offset(offset);
+}
+
+uint64_t MPSGeneratorImpl::get_offset() const {
+  return engine_.get_offset();
 }
 
 uint64_t MPSGeneratorImpl::current_seed() const {
@@ -60,7 +67,8 @@ c10::intrusive_ptr<c10::TensorImpl> MPSGeneratorImpl::get_state() const {
   static const size_t seed_size = sizeof(uint64_t);
   static const size_t total_size = states_size + seed_size;
 
-  auto state_tensor = at::detail::empty_cpu({(int64_t)total_size}, ScalarType::Byte, c10::nullopt, c10::nullopt, c10::nullopt, c10::nullopt);
+  auto state_tensor = at::detail::empty_cpu(
+      {(int64_t)total_size}, ScalarType::Byte, c10::nullopt, c10::nullopt, c10::nullopt, c10::nullopt);
   auto rng_state = state_tensor.data_ptr<uint8_t>();
   auto current_seed = this->current_seed();
   memcpy(rng_state, this->data_.state.data(), states_size);
@@ -80,7 +88,7 @@ void MPSGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   TORCH_CHECK(new_state_size == total_size, "RNG state is wrong size");
 
   uint64_t input_seed = default_rng_seed_val;
-  auto new_rng_state = new_state.data<uint8_t>();
+  auto new_rng_state = new_state.data_dtype_initialized<uint8_t>();
   memcpy(&input_seed, new_rng_state + states_size, seed_size);
   this->set_current_seed(input_seed);
   // state.data must be copied after input_seed to not reset the state in set_current_seed()

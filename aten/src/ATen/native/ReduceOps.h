@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/native/DispatchStub.h>
+#include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
 
 namespace c10 {
@@ -12,7 +13,7 @@ struct TensorIterator;
 class Tensor;
 }
 
-namespace at { namespace native {
+namespace at::native {
 
 using reduce_fn = void(*)(TensorIterator &);
 
@@ -28,11 +29,11 @@ DECLARE_DISPATCH(reduce_fn, argmax_stub);
 DECLARE_DISPATCH(reduce_fn, argmin_stub);
 
 using reduce_std_var_function =
-    void (*)(TensorIterator&, int64_t correction, bool take_sqrt);
+    void (*)(TensorIterator&, double correction, bool take_sqrt);
 DECLARE_DISPATCH(reduce_std_var_function, std_var_stub);
 
 using reduce_norm_fn =
-    void (*)(Tensor&, const Tensor&, const c10::Scalar&, c10::optional<int64_t>);
+    void (*)(Tensor&, const Tensor&, const c10::Scalar&, std::optional<int64_t>);
 DECLARE_DISPATCH(reduce_norm_fn, norm_kernel);
 
 using reduce_fn_flag = void(*)(TensorIterator &, const c10::Scalar&);
@@ -52,4 +53,4 @@ TORCH_API std::tuple<Tensor&,Tensor&> var_mean_out(
     Tensor &result1, Tensor &result2, const Tensor &self, IntArrayRef dim,
     int64_t correction, bool keepdim);
 
-}} // namespace at::native
+} // namespace at::native

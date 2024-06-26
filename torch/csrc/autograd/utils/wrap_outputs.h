@@ -30,6 +30,10 @@ inline PyObject* wrap(bool value) {
   }
 }
 
+inline PyObject* wrap(c10::DeviceIndex value) {
+  return THPUtils_packDeviceIndex(value);
+}
+
 inline PyObject* wrap(int64_t value) {
   return THPUtils_packInt64(value);
 }
@@ -49,21 +53,19 @@ inline PyObject* wrap(void* value) {
 }
 
 inline PyObject* wrap(THPDtype* dtype) {
-  Py_INCREF(dtype);
-  return (PyObject*)dtype;
+  return Py_NewRef(dtype);
 }
 
 inline PyObject* wrap(at::ScalarType scalarType) {
-  return wrap(getTHPDtype(scalarType));
+  return Py_NewRef(getTHPDtype(scalarType));
 }
 
 inline PyObject* wrap(THPLayout* layout) {
-  Py_INCREF(layout);
-  return (PyObject*)layout;
+  return Py_NewRef(layout);
 }
 
 inline PyObject* wrap(at::Layout layout) {
-  return wrap(getTHPLayout(layout));
+  return Py_NewRef(getTHPLayout(layout));
 }
 
 inline PyObject* wrap(at::Tensor tensor) {
@@ -98,6 +100,10 @@ inline PyObject* wrap(at::IntArrayRef list) {
     PyTuple_SET_ITEM(r.get(), i, wrap(list[i]));
   }
   return r.release();
+}
+
+inline PyObject* wrap(at::Stream stream) {
+  return THPStream_Wrap(stream);
 }
 
 namespace detail {

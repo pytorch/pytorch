@@ -8,7 +8,7 @@
 
 namespace torch::jit::tensorexpr {
 
-std::string blockDtypeCppString(const Dtype& dtype) {
+static std::string blockDtypeCppString(const Dtype& dtype) {
   switch (dtype.scalar_type()) {
     case ScalarType::Bool:
       return "1";
@@ -321,7 +321,7 @@ std::string BlockCodeGen::GetUniqueFuncName(const std::string& func_prefix) {
   static int64_t counter = 0;
   ++counter;
   int64_t value = counter;
-  return func_prefix + "_" + c10::to_string(value);
+  return func_prefix + "_" + std::to_string(value);
 }
 
 void BlockCodeGen::Initialize() {

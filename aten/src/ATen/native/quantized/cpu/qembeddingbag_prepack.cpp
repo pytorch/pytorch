@@ -1,10 +1,10 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/quantized/cpu/qembeddingbag_prepack.h>
 
-#include <ATen/core/Tensor.h>
-#include <ATen/core/custom_class.h>
 #include <ATen/Parallel.h>
 #include <ATen/Utils.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/core/custom_class.h>
 #include <ATen/native/quantized/cpu/EmbeddingPackedParams.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <c10/core/ScalarType.h>
@@ -52,11 +52,12 @@ c10::intrusive_ptr<EmbeddingPackedParamsBase> PackedEmbeddingBagWeight::prepack(
   uint8_t* weight_data = static_cast<uint8_t*>(weight_contig.data_ptr());
   if (qweight.scalar_type() == c10::kQUInt8) {
     bit_width = 8;
-    scale_bias_bytes = 8; // extra 8 bytes to store FP scale and bias per row.
+    scale_bias_bytes =
+        sizeof(float) * 2; // extra 8 bytes to store FP scale and bias per row.
   } else {
     bit_width = 4;
-    scale_bias_bytes =
-        4; // extra 4 bytes to store at::Half scale and bias per row.
+    scale_bias_bytes = sizeof(at::Half) *
+        2; // extra 4 bytes to store at::Half scale and bias per row.
   }
   const auto num_elem_per_byte = 8 / bit_width;
 
@@ -101,10 +102,14 @@ c10::intrusive_ptr<EmbeddingPackedParamsBase> PackedEmbeddingBagWeight::prepack(
           for (const auto row : c10::irange(start_idx, end_idx)) {
             const uint8_t* input_row = weight_data + row * embedding_cols;
             std::uint8_t* output_row = output_data + row * output_columns;
-            float* output_row_scale_bias =
-                reinterpret_cast<float*>(output_row + embedding_cols);
-            output_row_scale_bias[0] = weight_scales[row];
-            output_row_scale_bias[1] = weight_bias[row];
+            auto output_row_scale_bias = output_row + embedding_cols;
+            // don't use float* to avoid unaligned address access
+            std::memcpy(
+                output_row_scale_bias, &(weight_scales[row]), sizeof(float));
+            std::memcpy(
+                output_row_scale_bias + sizeof(float),
+                &(weight_bias[row]),
+                sizeof(float));
             for (const auto col : c10::irange(embedding_cols)) {
               output_row[col] = input_row[col];
             }
@@ -120,10 +125,16 @@ c10::intrusive_ptr<EmbeddingPackedParamsBase> PackedEmbeddingBagWeight::prepack(
           for (const auto row : c10::irange(start_idx, end_idx)) {
             const uint8_t* input_row = weight_data + row * embedding_cols;
             std::uint8_t* output_row = output_data + row * output_columns;
-            at::Half* output_row_scale_bias =
-                reinterpret_cast<at::Half*>(output_row + embedding_cols);
-            output_row_scale_bias[0] = weight_scales[row];
-            output_row_scale_bias[1] = weight_bias[row];
+            auto output_row_scale_bias = output_row + embedding_cols;
+            at::Half weight_scale = weight_scales[row];
+            at::Half weight_bias_half = weight_bias[row];
+            // don't use at::Half* to avoid unaligned address access
+            std::memcpy(output_row_scale_bias, &weight_scale, sizeof(at::Half));
+            std::memcpy(
+                output_row_scale_bias + sizeof(at::Half),
+                &weight_bias_half,
+                sizeof(at::Half));
+
             for (const auto col : c10::irange(embedding_cols)) {
               // The weight values have already been packed, so here we just
               // store it in the output tensor.
@@ -268,9 +279,10 @@ Tensor& qembeddingbag_byte_prepack_out(Tensor& output, const Tensor& weight) {
   }
 
 #else
-  const Tensor& float_weight = weight_contig->scalar_type() == at::ScalarType::Half
-    ? weight_contig->to(at::ScalarType::Float)
-    : *weight_contig;
+  const Tensor& float_weight =
+      weight_contig->scalar_type() == at::ScalarType::Half
+      ? weight_contig->to(at::ScalarType::Float)
+      : *weight_contig;
   const auto weight_data = float_weight.data_ptr<float>();
   constexpr float kEpsilon = 1e-8f;
   for (auto row : c10::irange(embedding_rows)) {
@@ -312,6 +324,30 @@ Tensor qembeddingbag_byte_prepack(const Tensor& weight) {
   return output;
 }
 
+Tensor qembeddingbag_byte_prepack_meta(const Tensor& weight) {
+  const auto weight_contig =
+      weight.expect_contiguous(weight.suggest_memory_format());
+  TORCH_CHECK(
+      weight.scalar_type() == at::ScalarType::Float ||
+          weight.scalar_type() == at::ScalarType::Half,
+      "'embedding_bag_byte_prepack' only support float32 or float16.");
+  const auto weight_sizes = weight.sizes();
+  const auto cols_dim = weight_sizes.size() - 1;
+  const int32_t embedding_cols = weight_sizes[cols_dim];
+  // Add 8 bytes per column to store FP32 scale and zero_point per row.
+  const int32_t output_columns = embedding_cols + 2 * sizeof(float);
+
+  // Adjust output dimensions to account for FP32 scale and zero_points.
+  std::vector<int64_t> output_shape = weight_sizes.vec();
+  output_shape[cols_dim] = output_columns;
+  at::SymDimVector output_shape_vec(output_shape);
+
+  return at::empty_symint(
+      output_shape_vec,
+      weight.options().dtype(weight.scalar_type()),
+      weight.suggest_memory_format());
+}
+
 namespace {
 
 // TODO: Extend support to N-D batched embeddings, similar to
@@ -340,9 +376,10 @@ Tensor _qembeddingbag_nbit_prepack_helper(
   int NUM_ELEM_PER_BYTE = 8 / bit_width;
   TORCH_CHECK(
       weight_contig.size(weight.dim() - 1) % NUM_ELEM_PER_BYTE == 0,
-      "qembeddingbag_" + c10::to_string(bit_width) +
-          "bit_prepack only works for the number of columns a multiple of " +
-          c10::to_string(NUM_ELEM_PER_BYTE));
+      "qembeddingbag_",
+      std::to_string(bit_width),
+      "bit_prepack only works for the number of columns a multiple of ",
+      std::to_string(NUM_ELEM_PER_BYTE));
 
   // The "fused" representation stores the scale and bias with the
   // row-wise quantized data in one tensor.
@@ -403,8 +440,7 @@ Tensor _qembeddingbag_nbit_prepack_helper(
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       float Xmin, Xmax;
       if (optimized_qparams) {
-        at::Tensor xmax_tensor, xmin_tensor;
-        std::tie(xmax_tensor, xmin_tensor) = at::choose_qparams_optimized(
+        auto [xmax_tensor, xmin_tensor] = at::choose_qparams_optimized(
             float_weight[row], embedding_cols, nbins, ratio, bit_width);
         TORCH_CHECK(
             xmax_tensor.numel() == 1 && xmin_tensor.numel() == 1,
@@ -517,6 +553,11 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("quantized::embedding_bag_prepack"),
       TORCH_FN(QEmbeddingPackWeights::run));
+}
+
+TORCH_LIBRARY_IMPL(quantized, Meta, m) {
+  m.impl(
+      "quantized::embedding_bag_byte_prepack", qembeddingbag_byte_prepack_meta);
 }
 
 } // namespace

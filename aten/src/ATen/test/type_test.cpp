@@ -9,7 +9,7 @@ namespace c10 {
 
 TEST(TypeCustomPrinter, Basic) {
   TypePrinter printer =
-      [](const Type& t) -> c10::optional<std::string> {
+      [](const Type& t) -> std::optional<std::string> {
     if (auto tensorType = t.cast<TensorType>()) {
       return "CustomTensor";
     }
@@ -22,14 +22,14 @@ TEST(TypeCustomPrinter, Basic) {
   EXPECT_EQ(type->annotation_str(), "Tensor");
   EXPECT_EQ(type->annotation_str(printer), "CustomTensor");
 
-  // Unrelated types shoudl not be affected
+  // Unrelated types should not be affected
   const auto intType = IntType::get();
   EXPECT_EQ(intType->annotation_str(printer), intType->annotation_str());
 }
 
 TEST(TypeCustomPrinter, ContainedTypes) {
   TypePrinter printer =
-      [](const Type& t) -> c10::optional<std::string> {
+      [](const Type& t) -> std::optional<std::string> {
     if (auto tensorType = t.cast<TensorType>()) {
       return "CustomTensor";
     }
@@ -53,7 +53,7 @@ TEST(TypeCustomPrinter, ContainedTypes) {
 
 TEST(TypeCustomPrinter, NamedTuples) {
   TypePrinter printer =
-      [](const Type& t) -> c10::optional<std::string> {
+      [](const Type& t) -> std::optional<std::string> {
     if (auto tupleType = t.cast<TupleType>()) {
       // Rewrite only NamedTuples
       if (tupleType->name()) {

@@ -10,21 +10,19 @@
 #include <ATen/ATen.h>
 #include <torch/library.h>
 
-namespace at {
-namespace native {
-namespace metal {
+namespace at::native::metal {
 
 // TODO: Move this function to MetalContext
 template<typename T>
 id<MTLBuffer> _makeMTLBuffer(const std::vector<T>& src) {
     id<MTLBuffer> buffer = [[MetalContext sharedInstance].device
           newBufferWithLength:src.size() * sizeof(T)
-                      options:MTLResourceOptionCPUCacheModeWriteCombined];
+                      options:MTLResourceCPUCacheModeWriteCombined];
     memcpy(buffer.contents, src.data(), src.size() * sizeof(T));
     return buffer;
 }
 
-Tensor transpose(const Tensor& input, int64_t dim0, int64_t dim1) {
+static Tensor transpose(const Tensor& input, int64_t dim0, int64_t dim1) {
   TORCH_CHECK(input.is_metal());
   auto ndims = input.dim();
   // Support maximum eight channels on mobile
@@ -87,7 +85,7 @@ Tensor transpose(const Tensor& input, int64_t dim0, int64_t dim1) {
   }
 }
 
-Tensor t(const Tensor& input) {
+static Tensor t(const Tensor& input) {
   TORCH_CHECK(input.is_metal());
   TORCH_CHECK(input.dim() == 2);
   return metal::transpose(input, 0, input.dim() < 2 ? 0 : 1);
@@ -98,6 +96,4 @@ TORCH_LIBRARY_IMPL(aten, Metal, m) {
   m.impl(TORCH_SELECTIVE_NAME("aten::transpose.int"), TORCH_FN(transpose));
 };
 
-}
-}
-}
+} // namespace at::native::metal

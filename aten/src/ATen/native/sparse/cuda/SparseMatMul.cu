@@ -5,8 +5,8 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseTensorImpl.h>
-#include <ATen/SparseTensorUtils.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/SparseTensorUtils.h>
 #include <cuda_runtime.h>
 #include <type_traits>
 
@@ -50,8 +50,7 @@
 #include <library_types.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -235,9 +234,9 @@ struct CusparseMatrixMultiplyOp {
     cusparseOperation_t opB = CUSPARSE_OPERATION_NON_TRANSPOSE;
 
     csrMatrixRef<scalar_t> C(
-      nullptr,
-      nullptr,
-      nullptr,
+      dC_columns,
+      dC_csrOffsets,
+      dC_values,
       /*nnz*/0,
       {A_num_rows, B_num_cols}
     );
@@ -283,7 +282,7 @@ struct CusparseMatrixMultiplyOp {
 
     at::DataPtr dataPtr1 = allocator.allocate(bufferSize1);
     dBuffer1 = dataPtr1.get();
-    // inspect the matrices A and B to understand the memory requiremnent for
+    // inspect the matrices A and B to understand the memory requirement for
     // the next step
     TORCH_CUDASPARSE_CHECK(cusparseSpGEMM_workEstimation(
         handle,
@@ -388,7 +387,7 @@ struct CusparseMatrixMultiplyOp {
       Tensor &output_values,
       Tensor &output_indices)
   {
-    TORCH_INTERNAL_ASSERT(false, "cusparse csr sparse-sparse MM only supports data type of float and double.");
+    static_assert(false&&sizeof(scalar_t), "cusparse csr sparse-sparse MM only supports data type of float and double.");
   }
 };
 
@@ -811,5 +810,4 @@ Tensor sparse_sparse_matmul_cuda(const Tensor& mat1_, const Tensor& mat2_) {
   return output;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

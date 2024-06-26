@@ -6,6 +6,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_spdiags_native.h>
 #include <ATen/ops/_unique.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/empty.h>
@@ -13,8 +14,7 @@
 #include <ATen/ops/where.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(spdiags_kernel_stub);
 
@@ -22,7 +22,7 @@ Tensor spdiags(
     const Tensor& diagonals,
     const Tensor& offsets,
     IntArrayRef shape,
-    c10::optional<Layout> layout) {
+    std::optional<Layout> layout) {
   auto diagonals_2d = diagonals.dim() == 1 ? diagonals.unsqueeze(0) : diagonals;
   TORCH_CHECK(diagonals_2d.dim() == 2, "Diagonals must be vector or matrix");
   TORCH_CHECK(shape.size() == 2, "Output shape must be 2d");
@@ -92,5 +92,4 @@ Tensor spdiags(
   return result_coo;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

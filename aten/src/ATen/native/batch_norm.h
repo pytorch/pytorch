@@ -3,9 +3,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/DispatchStub.h>
 
-namespace at {
-
-namespace native {
+namespace at::native {
 
 using batch_norm_fn = void (*)(Tensor&, const Tensor&, const Tensor&,
     const Tensor&, const Tensor&, const Tensor&, const Tensor&, const Tensor&, bool, double);
@@ -28,10 +26,13 @@ static TensorAccessor<scalar_t, 1> conditional_accessor_1d(const Tensor& t) {
 
 template <typename scalar_t>
 static scalar_t* conditional_data_ptr(const Tensor& t) {
-  return t.defined() ? t.contiguous().data_ptr<scalar_t>()
-                     : nullptr;
+  if constexpr (std::is_const_v<scalar_t>) {
+    return t.defined() ? t.contiguous().const_data_ptr<scalar_t>()
+                      : nullptr;
+  } else {
+    return t.defined() ? t.contiguous().data_ptr<scalar_t>()
+                      : nullptr;
+  }
 }
 
-} // namespace native
-
-} // namespace at
+} // namespace at::native

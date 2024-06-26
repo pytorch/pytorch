@@ -117,12 +117,12 @@ __host__ __device__ static inline double nearbyint_wrapper(double a) {
   return ::nearbyint(a);
 }
 
+#pragma push
+#pragma nv_diag_suppress 177   // Function was declared but never referenced
 __host__ __device__ static inline c10::complex<float> nearbyint_wrapper(c10::complex<float> a) {
   return c10::complex<float>(::nearbyintf(static_cast<float>(a.real())), ::nearbyintf(static_cast<float>(a.imag())));
 }
 
-#pragma push
-#pragma nv_diag_suppress 177   // Function was declared but never referenced
 __host__ __device__ static inline c10::complex<double> nearbyint_wrapper(c10::complex<double> a) {
   return c10::complex<double>(::nearbyint(static_cast<double>(a.real())), ::nearbyint(static_cast<double>(a.imag())));
 }

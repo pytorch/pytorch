@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch.fx as fx
 from torch.fx.node import Argument, Target
 from torch.nn.utils.fusion import fuse_conv_bn_eval
@@ -42,12 +43,12 @@ def matches_module_pattern(pattern: Iterable[Type], node: fx.Node, modules: Dict
 
 
 def replace_node_module(node: fx.Node, modules: Dict[str, Any], new_module: torch.nn.Module):
-    assert(isinstance(node.target, str))
+    assert isinstance(node.target, str)
     parent_name, name = _parent_name(node.target)
     modules[node.target] = new_module
     setattr(modules[parent_name], name, new_module)
 
-def fuse(model: torch.nn.Module, inplace=False) -> torch.nn.Module:
+def fuse(model: torch.nn.Module, inplace=False, no_trace=False) -> torch.nn.Module:
     """
     Fuses convolution/BN layers for inference purposes. Will deepcopy your
     model by default, but can modify the model inplace as well.
@@ -57,7 +58,10 @@ def fuse(model: torch.nn.Module, inplace=False) -> torch.nn.Module:
                 (nn.Conv3d, nn.BatchNorm3d)]
     if not inplace:
         model = copy.deepcopy(model)
-    fx_model = fx.symbolic_trace(model)
+    if not no_trace or not isinstance(model, torch.fx.GraphModule):
+        fx_model = fx.symbolic_trace(model)
+    else:
+        fx_model = model
     modules = dict(fx_model.named_modules())
     new_graph = copy.deepcopy(fx_model.graph)
 
@@ -133,11 +137,11 @@ def modules_to_mkldnn(nodes: List[fx.Node], modules: Dict[str, nn.Module]):
     old_modules: Dict[nn.Module, nn.Module] = {}
     for node in nodes:
         if node.op == 'call_module':
-            assert(isinstance(node.target, str))
+            assert isinstance(node.target, str)
             cur_module = modules[node.target]
             if type(cur_module) in mkldnn_map:
                 new_module = mkldnn_map[type(cur_module)](cur_module, torch.float)
-                assert(isinstance(new_module, nn.Module))
+                assert isinstance(new_module, nn.Module)
                 old_modules[new_module] = copy.deepcopy(cur_module)
                 replace_node_module(node, modules, new_module)
     return old_modules
@@ -149,7 +153,7 @@ def reset_modules(nodes: List[fx.Node], modules: Dict[str, nn.Module], old_modul
     """
     for node in nodes:
         if node.op == 'call_module':
-            assert(isinstance(node.target, str))
+            assert (isinstance(node.target, str))
             cur_module = modules[node.target]
             if cur_module in old_modules:
                 replace_node_module(node, modules, old_modules[cur_module])
@@ -220,7 +224,7 @@ class UnionFind:
         par = self.parent[v]
         if v == par:
             return v
-        assert(par is not None)
+        assert par is not None
         self.parent[v] = self.find(par)
         return cast(int, self.parent[v])
 
@@ -246,7 +250,7 @@ def optimize_for_inference(
     3. MKL layout optimizations
 
     The third optimization takes a function `use_mkl_heuristic` that's used
-    to determine whether a subgraph should be explicity run in MKL layout.
+    to determine whether a subgraph should be explicitly run in MKL layout.
 
     Note: As FX does not currently handle aliasing, this pass currently
     assumes nothing aliases. If that isn't true, use at your own risk.
@@ -294,8 +298,8 @@ def optimize_for_inference(
                 supports_mkldnn = MklSupport.YES
                 sample_parameter = next(cur_module.parameters(), None)
                 if sample_parameter is not None:
-                    assert(sample_parameter.dtype == torch.float), "this pass is only for torch.float modules"
-                    assert(sample_parameter.device == torch.device('cpu')), "this pass is only for CPU modules"
+                    assert sample_parameter.dtype == torch.float, "this pass is only for torch.float modules"
+                    assert sample_parameter.device == torch.device('cpu'), "this pass is only for CPU modules"
         elif node.op == 'call_function':
             if node.target in mkldnn_supported:
                 supports_mkldnn = MklSupport.YES
@@ -304,7 +308,7 @@ def optimize_for_inference(
 
         if supports_mkldnn != MklSupport.NO:
             if supports_mkldnn == MklSupport.UNKNOWN:
-                if not any([arg.target == 'to_dense' for arg in node.args]):
+                if not any(arg.target == 'to_dense' for arg in node.args):
                     continue
             with fx_graph.inserting_before(node):
                 mkldnn_args = fx.map_arg(node.args, lambda n: fx_graph.call_method('to_mkldnn', (n, )))
@@ -360,14 +364,14 @@ def optimize_for_inference(
             node.start_color = cur_idx
             uf.make_set(cur_idx)
         elif node.op == 'call_method' and node.target == 'to_dense':
-            assert(get_color(node.args[0]) is not None)
+            assert get_color(node.args[0]) is not None
             node.end_color = get_color(node.args[0])
         else:
             cur_colors = [get_color(i) for i in node.all_input_nodes if isinstance(i, fx.Node) if get_color(i) is not None]
 
             if len(cur_colors) == 0:
                 continue
-            assert(not any(i is None for i in cur_colors))
+            assert not any(i is None for i in cur_colors)
             cur_colors = sorted(cur_colors)
             node.color = cur_colors[0]
             for other_color in cur_colors[1:]:
@@ -399,7 +403,7 @@ def optimize_for_inference(
         if node.target == 'to_mkldnn' or node.target == 'to_dense':
             mkldnn_conversions += 1
 
-    logging.getLogger(__name__).info(f"mkldnn conversions: {mkldnn_conversions}")
+    logging.getLogger(__name__).info("mkldnn conversions: %s", mkldnn_conversions)
     fx_graph.lint()
     result = fx.GraphModule(model, fx_graph)
     return result

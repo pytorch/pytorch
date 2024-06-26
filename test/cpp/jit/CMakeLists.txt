@@ -129,9 +129,6 @@ endif(MSVC)
 
 target_link_libraries(test_jit PRIVATE ${JIT_TEST_DEPENDENCIES})
 target_include_directories(test_jit PRIVATE ${ATen_CPU_INCLUDE})
-if(NOT MSVC)
-  target_compile_options(test_jit PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wno-unused-variable>)
-endif()
 
 if(LINUX)
   #Update to target_link_options when CMake version can be upgraded
@@ -139,12 +136,6 @@ if(LINUX)
 endif()
 
 if(USE_CUDA)
-  target_link_libraries(test_jit PRIVATE
-    ${CUDA_LIBRARIES}
-    ${CUDA_NVRTC_LIB}
-    ${CUDA_CUDA_LIB}
-    ${TORCH_CUDA_LIBRARIES})
-
   target_compile_definitions(test_jit PRIVATE USE_CUDA)
   # Suppress sign compare checks for NVFUSER JIT tests
   if(NOT MSVC)
@@ -153,7 +144,7 @@ if(USE_CUDA)
 elseif(USE_ROCM)
   target_link_libraries(test_jit PRIVATE
     ${ROCM_HIPRTC_LIB}
-    ${PYTORCH_HIP_HCC_LIBRARIES}
+    ${PYTORCH_HIP_LIBRARIES}
     ${TORCH_CUDA_LIBRARIES})
 
   target_compile_definitions(test_jit PRIVATE USE_ROCM)

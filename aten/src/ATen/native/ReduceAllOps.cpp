@@ -17,8 +17,7 @@
 #include <ATen/ops/min_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(min_all_stub);
 DEFINE_DISPATCH(max_all_stub);
@@ -32,9 +31,16 @@ Tensor min(const Tensor &self) {
 }
 
 Tensor& min_unary_out(const Tensor &self, Tensor& out) {
-  Tensor tmp_output = at::min(self);
-  at::native::resize_output(out, tmp_output.sizes());
-  out.copy_(tmp_output);
+  // First check if the devices match (CPU vs GPU)
+  TORCH_CHECK(self.device() == out.device());
+
+  TORCH_CHECK(canCast(
+      typeMetaToScalarType(self.dtype()),
+      typeMetaToScalarType(out.dtype())));
+
+  at::native::resize_output(out, {});
+
+  min_all_stub(self.device().type(), out, self.contiguous());
   return out;
 }
 
@@ -67,4 +73,4 @@ std::tuple<Tensor, Tensor> _aminmax_all(const Tensor &self) {
   return at::aminmax(self);
 }
 
-}} // namespace at::native
+} // namespace at::native

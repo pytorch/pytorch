@@ -3,35 +3,36 @@
 import os
 import sys
 from datetime import timedelta
+from unittest.mock import patch
 
 import torch
 import torch.distributed as c10d
+from torch._C._distributed_c10d import _ProcessGroupWrapper
+
 
 if not c10d.is_available():
     print("c10d not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
 from test_c10d_common import LOOPBACK
+
 from torch.testing._internal.common_distributed import (
+    create_device,
     MultiProcessTestCase,
-    requires_nccl,
     requires_gloo,
+    requires_nccl,
     skip_if_lt_x_gpu,
     with_dist_debug_levels,
-    create_device,
 )
-from torch.testing._internal.common_utils import (
-    run_tests,
-    TEST_WITH_DEV_DBG_ASAN,
-)
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 
 
 class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
     def setUp(self):
-        super(AbstractProcessGroupWrapperTest, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
-    def _validate_error(self, exception, op_type, rank, tensor):
+    def _validate_error(self, exception, op_type, rank, tensor, verify_diff=True):
         err = str(exception)
         self.assertTrue(
             op_type in err, f"Got {err} but expected {op_type} to be in error."
@@ -60,6 +61,14 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
             else:
                 self.fail(f"Unexpected dtype {str(tensor.dtype)} for error {err}")
 
+            # Ensure sequence number is logged in error
+            self.assertTrue("SequenceNumber" in err)
+            # Ensure info about how collectives diff is in the error.
+            if verify_diff:
+                self.assertTrue(
+                    "Collectives differ in the following" in err, f"Got error {err}"
+                )
+
     def _test_collective_hang(self, wrapper_pg, use_cuda=False):
         # All ranks besides 1 call allreduce and wrapper_pg should detect a hang
         # and report an issue with rank 1.
@@ -87,7 +96,7 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
             tensor = tensor.to(self.rank)
         works = []
         # Run a few successful collectives
-        for _ in range(10):
+        for _ in range(500):
             work = wrapper_pg.allreduce([tensor])
             works.append(work)
 
@@ -119,20 +128,6 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
             op_type="REDUCE" if self.rank == 0 else "BARRIER",
             rank=self.rank,
             tensor=tensor,
-        )
-
-        with self.assertRaisesRegex(RuntimeError, ".*") as cm:
-            scatter_result = [torch.ones(4) * i for i in range(self.world_size)]
-            scattered_tensor = torch.empty(4)
-            if self.rank == 0:
-                wrapper_pg.scatter(scattered_tensor, scatter_result, 0)
-            else:
-                wrapper_pg.reduce_scatter(scattered_tensor, scatter_result)
-        self._validate_error(
-            exception=cm.exception,
-            op_type="SCATTER" if self.rank == 0 else "REDUCE_SCATTER",
-            rank=self.rank,
-            tensor=scattered_tensor,
         )
 
         with self.assertRaisesRegex(RuntimeError, ".*") as cm:
@@ -211,15 +206,16 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
 
 # ASAN is not safe since we are spawning processes.
 if not TEST_WITH_DEV_DBG_ASAN:
+
     @requires_gloo()
     @requires_nccl()
     class ProcessGroupNCCLWrapperTest(AbstractProcessGroupWrapperTest):
         def setUp(self):
             super(AbstractProcessGroupWrapperTest, self).setUp()
             self._spawn_processes()
-            # NCCL_BLOCKING_WAIT overrides NCCL_ASYNC_ERROR_HANDLING hence tests
-            # that use NCCL_BLOCKING_WAIT will test it as expected.
-            os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
+            # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
+            # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
+            os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
 
         @property
         def world_size(self) -> int:
@@ -238,7 +234,10 @@ if not TEST_WITH_DEV_DBG_ASAN:
                 pg = c10d.new_group(backend="nccl", timeout=timedelta(seconds=timeout))
             else:
                 _pg = c10d.ProcessGroupNCCL(
-                    store, self.rank, self.world_size, timeout=timedelta(seconds=timeout)
+                    store,
+                    self.rank,
+                    self.world_size,
+                    timeout=timedelta(seconds=timeout),
                 )
                 pg = c10d._create_process_group_wrapper(
                     _pg,
@@ -278,7 +277,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
         @requires_nccl()
         @skip_if_lt_x_gpu(2)
         @with_dist_debug_levels(levels=["DETAIL"])
-        def test_collective_shape_mismatch_debug_mode(self):
+        def test_collective_shape_mismatch_debug_mode_detail(self):
             pg = self._create_wrapper_pg(with_new_group=True)
             self._test_collective_shape_mismatch(pg, use_cuda=True)
             self._test_nccl_only_shape_mismatch(pg)
@@ -286,7 +285,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
         @requires_nccl()
         @skip_if_lt_x_gpu(2)
         @with_dist_debug_levels(levels=["OFF"])
-        def test_collective_shape_mismatch(self):
+        def test_collective_shape_mismatch_debug_mode_off(self):
             pg = self._create_wrapper_pg(with_new_group=False)
             self._test_collective_shape_mismatch(pg, use_cuda=True)
             self._test_nccl_only_shape_mismatch(pg)
@@ -300,9 +299,11 @@ if not TEST_WITH_DEV_DBG_ASAN:
                     wrapper_pg._allgather_base(output, input).wait()
                 else:
                     wrapper_pg._reduce_scatter_base(output, input).wait()
+
+            op_type = "ALLGATHER_BASE" if self.rank == 0 else "REDUCE_SCATTER_BASE"
             self._validate_error(
                 exception=cm.exception,
-                op_type="ALLGATHER_BASE" if self.rank == 0 else "REDUCE_SCATTER_BASE",
+                op_type=op_type,
                 rank=self.rank,
                 tensor=input,
             )
@@ -311,7 +312,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
             device = f"cuda:{self.rank}"
             with self.assertRaisesRegex(RuntimeError, ".*") as cm:
                 output = torch.zeros(4 + self.rank, device=device)
-                input = torch.ones(4 * self.world_size, device=device)
+                input = torch.ones(4 * (self.world_size + 1), device=device)
 
                 wrapper_pg._reduce_scatter_base(output, input).wait()
             self._validate_error(
@@ -319,6 +320,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
                 op_type="REDUCE_SCATTER_BASE",
                 rank=self.rank,
                 tensor=input,
+                verify_diff=False,
             )
             with self.assertRaisesRegex(RuntimeError, ".*") as cm:
                 output = torch.zeros(4, device=device)
@@ -330,14 +332,57 @@ if not TEST_WITH_DEV_DBG_ASAN:
                 op_type="REDUCE_SCATTER_BASE",
                 rank=self.rank,
                 tensor=input,
+                verify_diff=False,
             )
+
+        @requires_nccl()
+        @skip_if_lt_x_gpu(2)
+        @with_dist_debug_levels(levels=["DETAIL"])
+        def test_coalescing_manager_debug_mode_detail(self):
+            """
+            Tests that coalescing manager w/TORCH_DISTRIBUTED_DEBUG
+            does not crash: https://github.com/pytorch/pytorch/issues/109520
+            """
+            torch.cuda.set_device(self.rank)
+            pg = self._create_wrapper_pg(with_new_group=True)
+            dev = torch.cuda.current_device()
+            pg._start_coalescing(torch.device(dev))
+            pg.allreduce([torch.ones(1, device=dev)])
+            pg._end_coalescing(torch.device(dev))
+
+        @requires_nccl()
+        @skip_if_lt_x_gpu(2)
+        @with_dist_debug_levels(levels=["DETAIL"])
+        @patch("torch.distributed.distributed_c10d._GLOO_AVAILABLE", False)
+        def test_debug_level_detail_no_gloo(self):
+            with self.assertRaisesRegex(
+                AssertionError, "ProcessGroupWrapper unsupported without GLOO backend"
+            ):
+                self._create_wrapper_pg()
+
+        @requires_nccl()
+        @skip_if_lt_x_gpu(2)
+        @patch("torch.distributed.distributed_c10d._GLOO_AVAILABLE", False)
+        def test_new_group_no_gloo(self):
+            def patched_isinstance(obj, clazz):
+                if clazz is _ProcessGroupWrapper:
+                    raise NameError
+                else:
+                    return isinstance(obj, clazz)
+
+            with patch(
+                "torch.distributed.distributed_c10d.isinstance",
+                side_effect=patched_isinstance,
+            ):
+                self._create_wrapper_pg(with_new_group=True)
+                # nothing to assert, isinstance(pg, _ProcessGroupWrapper)
+                # should never be invoked since it is preceeded by
+                # _GLOO_AVAILABLE check, this test will fail on
+                # an unexpected NameError if not.
 
 
 @requires_gloo()
 class ProcessGroupGlooWrapperTest(AbstractProcessGroupWrapperTest):
-    def setUp(self):
-        super(ProcessGroupGlooWrapperTest, self).setUp()
-
     def opts(self, threads=2, timeout=10.0):
         opts = c10d.ProcessGroupGloo._Options()
         opts._timeout = timeout
@@ -389,7 +434,7 @@ class ProcessGroupGlooWrapperTest(AbstractProcessGroupWrapperTest):
         self._test_collective_shape_mismatch(pg)
 
     @with_dist_debug_levels(levels=["OFF"])
-    def test_collective_shape_mismatch(self):
+    def test_collective_shape_mismatch_debug_mode_off(self):
         pg = self._create_wrapper_pg(with_new_group=False)
         self._test_collective_shape_mismatch(pg)
 

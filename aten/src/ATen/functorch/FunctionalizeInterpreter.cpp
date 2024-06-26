@@ -2,7 +2,7 @@
 #include <ATen/functorch/DynamicLayer.h>
 #include <ATen/FunctionalTensorWrapper.h>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 static void sanityCheckNotFunctional(const c10::OperatorHandle& op, torch::jit::Stack* stack, size_t num_args) {
   foreachTensorInplace(*stack, stack->size() - num_args, stack->size(),
@@ -15,12 +15,10 @@ static void sanityCheckNotFunctional(const c10::OperatorHandle& op, torch::jit::
 void FunctionalizeInterpreterPtr::processImpl(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack) {
-  DispatchKeySet exclude = keysToExcludeWhenEnteringDynamicLayer(TransformType::Functionalize);
-
   // We always want to call the functionalization kernels if functionalize() is on the layer stack.
   // It's the responsibility of the functionalization kernel to no-op and redispatch
   // if none of the input tensors are functional.
-  setup_dispatch_key_tls(exclude, DispatchKeySet(DispatchKey::Functionalize));
+  setup_dispatch_key_tls(TransformType::Functionalize, DispatchKeySet(DispatchKey::Functionalize));
   auto functionalization_add_back_views = functionalizeAddBackViews();
   // We have some side-car TLS that we can set to toggle the functionaliation behavior.
   // If set, then we functionalization will only remove mutations, instead of
@@ -66,4 +64,4 @@ void FunctionalizeInterpreterPtr::sendToNextInterpreterImpl(
   sanityCheckNotFunctional(op, stack, ret_size);
 }
 
-}} // namespace at::functorch
+} // namespace at::functorch

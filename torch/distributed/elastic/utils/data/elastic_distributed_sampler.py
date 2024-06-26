@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# mypy: allow-untyped-defs
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -37,9 +38,7 @@ class ElasticDistributedSampler(DistributedSampler):
         super().__init__(dataset=dataset, num_replicas=num_replicas, rank=rank)
         if start_index >= len(dataset):
             raise ValueError(
-                "Start index {} should be less than dataset size {}".format(
-                    start_index, len(dataset)
-                )
+                f"Start index {start_index} should be less than dataset size {len(dataset)}"
             )
 
         self.start_index = start_index

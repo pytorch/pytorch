@@ -24,7 +24,7 @@ IValue expect_field(
       expected_name,
       " found ",
       row->elements().at(0).toStringRef());
-  return std::move(row->elements().at(1));
+  return std::move(row)->elements().at(1);
 }
 
 namespace mobile {
@@ -89,8 +89,8 @@ void applyUpgrader(mobile::Function* function, uint64_t operator_version) {
         // algorithm, because the number of upgrader per operator will be just a
         // few and tend to keep the code light-weight from binary size concern.
         for (const auto& upgrader : upgrader_list) {
-          if (operator_version <= upgrader.max_version &&
-              operator_version >= upgrader.min_version) {
+          if (static_cast<int>(operator_version) <= upgrader.max_version &&
+              static_cast<int>(operator_version) >= upgrader.min_version) {
             // If there exists a valid upgrader, change the instruction OP to
             // CALL, and the index will point to the according upgrader
             // function. All upgrader function are available in
@@ -102,7 +102,7 @@ void applyUpgrader(mobile::Function* function, uint64_t operator_version) {
             // new_inst.X = upgrader.index;
             // code->instructions_[i] = new_inst;
             TORCH_CHECK(
-                upgrader.index < code.functions_.size(),
+                upgrader.index < static_cast<int>(code.functions_.size()),
                 "upgrader index is, ",
                 upgrader.index,
                 " and it's larger than the upgrader function list length ",

@@ -39,14 +39,36 @@ endif()
 # Enable CUDA language support
 set(CUDAToolkit_ROOT "${CUDA_TOOLKIT_ROOT_DIR}")
 # Pass clang as host compiler, which according to the docs
-# Must be done before CUDA language is enabled, see  mast be done before
-# see https://cmake.org/cmake/help/v3.15/variable/CMAKE_CUDA_HOST_COMPILER.html
+# Must be done before CUDA language is enabled, see
+# https://cmake.org/cmake/help/v3.15/variable/CMAKE_CUDA_HOST_COMPILER.html
 if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
   set(CMAKE_CUDA_HOST_COMPILER "${CMAKE_C_COMPILER}")
 endif()
 enable_language(CUDA)
-set(CMAKE_CUDA_STANDARD ${CMAKE_CXX_STANDARD})
+if("X${CMAKE_CUDA_STANDARD}" STREQUAL "X" )
+  set(CMAKE_CUDA_STANDARD ${CMAKE_CXX_STANDARD})
+endif()
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+
+# CMP0074 - find_package will respect <PackageName>_ROOT variables
+cmake_policy(PUSH)
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.12.0)
+  cmake_policy(SET CMP0074 NEW)
+endif()
+
+find_package(CUDAToolkit REQUIRED)
+
+cmake_policy(POP)
+
+if(NOT CMAKE_CUDA_COMPILER_VERSION VERSION_EQUAL CUDAToolkit_VERSION)
+  message(FATAL_ERROR "Found two conflicting CUDA versions:\n"
+                      "V${CMAKE_CUDA_COMPILER_VERSION} in '${CUDA_INCLUDE_DIRS}' and\n"
+                      "V${CUDAToolkit_VERSION} in '${CUDAToolkit_INCLUDE_DIRS}'")
+endif()
+
+if(NOT TARGET CUDA::nvToolsExt)
+  message(FATAL_ERROR "Failed to find nvToolsExt")
+endif()
 
 message(STATUS "Caffe2: CUDA detected: " ${CUDA_VERSION})
 message(STATUS "Caffe2: CUDA nvcc is: " ${CUDA_NVCC_EXECUTABLE})
@@ -107,58 +129,13 @@ if(CUDA_FOUND)
   endif()
 endif()
 
-# Optionally, find TensorRT
-if(CAFFE2_USE_TENSORRT)
-  find_path(TENSORRT_INCLUDE_DIR NvInfer.h
-    HINTS ${TENSORRT_ROOT} ${CUDA_TOOLKIT_ROOT_DIR}
-    PATH_SUFFIXES include)
-  find_library(TENSORRT_LIBRARY nvinfer
-    HINTS ${TENSORRT_ROOT} ${CUDA_TOOLKIT_ROOT_DIR}
-    PATH_SUFFIXES lib lib64 lib/x64)
-  find_package_handle_standard_args(
-    TENSORRT DEFAULT_MSG TENSORRT_INCLUDE_DIR TENSORRT_LIBRARY)
-  if(TENSORRT_FOUND)
-    execute_process(COMMAND /bin/sh -c "[ -r \"${TENSORRT_INCLUDE_DIR}/NvInferVersion.h\" ] && awk '/^\#define NV_TENSORRT_MAJOR/ {print $3}' \"${TENSORRT_INCLUDE_DIR}/NvInferVersion.h\"" OUTPUT_VARIABLE TENSORRT_VERSION_MAJOR)
-    execute_process(COMMAND /bin/sh -c "[ -r \"${TENSORRT_INCLUDE_DIR}/NvInferVersion.h\" ] && awk '/^\#define NV_TENSORRT_MINOR/ {print $3}' \"${TENSORRT_INCLUDE_DIR}/NvInferVersion.h\"" OUTPUT_VARIABLE TENSORRT_VERSION_MINOR)
-    if(TENSORRT_VERSION_MAJOR)
-      string(STRIP ${TENSORRT_VERSION_MAJOR} TENSORRT_VERSION_MAJOR)
-      string(STRIP ${TENSORRT_VERSION_MINOR} TENSORRT_VERSION_MINOR)
-      set(TENSORRT_VERSION "${TENSORRT_VERSION_MAJOR}.${TENSORRT_VERSION_MINOR}")
-      #CAFFE2_USE_TRT is set in Dependencies
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DTENSORRT_VERSION_MAJOR=${TENSORRT_VERSION_MAJOR}")
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DTENSORRT_VERSION_MINOR=${TENSORRT_VERSION_MINOR}")
-    else()
-      message(WARNING "Caffe2: Cannot find ${TENSORRT_INCLUDE_DIR}/NvInferVersion.h. Assuming TRT 5.0 which is no longer supported. Turning the option off.")
-      set(CAFFE2_USE_TENSORRT OFF)
-    endif()
-  else()
-    message(WARNING
-      "Caffe2: Cannot find TensorRT library. Turning the option off.")
-    set(CAFFE2_USE_TENSORRT OFF)
-  endif()
-endif()
-
 # ---[ CUDA libraries wrapper
 
-# find libcuda.so and lbnvrtc.so
-# For libcuda.so, we will find it under lib, lib64, and then the
-# stubs folder, in case we are building on a system that does not
-# have cuda driver installed. On windows, we also search under the
-# folder lib/x64.
-find_library(CUDA_CUDA_LIB cuda
-    PATHS ${CUDA_TOOLKIT_ROOT_DIR}
-    PATH_SUFFIXES lib lib64 lib/stubs lib64/stubs lib/x64)
-find_library(CUDA_NVRTC_LIB nvrtc
-    PATHS ${CUDA_TOOLKIT_ROOT_DIR}
-    PATH_SUFFIXES lib lib64 lib/x64)
+# find lbnvrtc.so
+set(CUDA_NVRTC_LIB "${CUDA_nvrtc_LIBRARY}" CACHE FILEPATH "")
 if(CUDA_NVRTC_LIB AND NOT CUDA_NVRTC_SHORTHASH)
-  if("${PYTHON_EXECUTABLE}" STREQUAL "")
-    set(_python_exe "python")
-  else()
-    set(_python_exe "${PYTHON_EXECUTABLE}")
-  endif()
   execute_process(
-    COMMAND "${_python_exe}" -c
+    COMMAND Python::Interpreter -c
     "import hashlib;hash=hashlib.sha256();hash.update(open('${CUDA_NVRTC_LIB}','rb').read());print(hash.hexdigest()[:8])"
     RESULT_VARIABLE _retval
     OUTPUT_VARIABLE CUDA_NVRTC_SHORTHASH)
@@ -178,84 +155,44 @@ endif()
 # end-users should never have this flag set.
 
 # cuda
-add_library(caffe2::cuda UNKNOWN IMPORTED)
+add_library(caffe2::cuda INTERFACE IMPORTED)
 set_property(
-    TARGET caffe2::cuda PROPERTY IMPORTED_LOCATION
-    ${CUDA_CUDA_LIB})
-set_property(
-    TARGET caffe2::cuda PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-    ${CUDA_INCLUDE_DIRS})
+    TARGET caffe2::cuda PROPERTY INTERFACE_LINK_LIBRARIES
+    CUDA::cuda_driver)
 
-# cudart. CUDA_LIBRARIES is actually a list, so we will make an interface
-# library.
+# cudart
 add_library(torch::cudart INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA)
     set_property(
         TARGET torch::cudart PROPERTY INTERFACE_LINK_LIBRARIES
-        "${CUDA_cudart_static_LIBRARY}")
-    if(NOT WIN32)
-      set_property(
-          TARGET torch::cudart APPEND PROPERTY INTERFACE_LINK_LIBRARIES
-          rt dl)
-    endif()
+        CUDA::cudart_static)
 else()
     set_property(
         TARGET torch::cudart PROPERTY INTERFACE_LINK_LIBRARIES
-        ${CUDA_LIBRARIES})
+        CUDA::cudart)
 endif()
-set_property(
-    TARGET torch::cudart PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-    ${CUDA_INCLUDE_DIRS})
 
 # nvToolsExt
 add_library(torch::nvtoolsext INTERFACE IMPORTED)
-if(MSVC)
-  if(NOT NVTOOLEXT_HOME)
-    set(NVTOOLEXT_HOME "C:/Program Files/NVIDIA Corporation/NvToolsExt")
-  endif()
-  if(DEFINED ENV{NVTOOLSEXT_PATH})
-    set(NVTOOLEXT_HOME $ENV{NVTOOLSEXT_PATH})
-    file(TO_CMAKE_PATH ${NVTOOLEXT_HOME} NVTOOLEXT_HOME)
-  endif()
-  set_target_properties(
-      torch::nvtoolsext PROPERTIES
-      INTERFACE_LINK_LIBRARIES ${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib
-      INTERFACE_INCLUDE_DIRECTORIES ${NVTOOLEXT_HOME}/include)
+set_property(
+    TARGET torch::nvtoolsext PROPERTY INTERFACE_LINK_LIBRARIES
+    CUDA::nvToolsExt)
 
-elseif(APPLE)
-  set_property(
-      TARGET torch::nvtoolsext PROPERTY INTERFACE_LINK_LIBRARIES
-      ${CUDA_TOOLKIT_ROOT_DIR}/lib/libnvrtc.dylib
-      ${CUDA_TOOLKIT_ROOT_DIR}/lib/libnvToolsExt.dylib)
-
-else()
-  find_library(LIBNVTOOLSEXT libnvToolsExt.so PATHS ${CUDA_TOOLKIT_ROOT_DIR}/lib64/)
-  set_property(
-      TARGET torch::nvtoolsext PROPERTY INTERFACE_LINK_LIBRARIES
-      ${LIBNVTOOLSEXT})
-endif()
-
-# cublas. CUDA_CUBLAS_LIBRARIES is actually a list, so we will make an
-# interface library similar to cudart.
+# cublas
 add_library(caffe2::cublas INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
     set_property(
         TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
-        ${CUDA_CUBLAS_LIBRARIES})
-    # Add explicit dependency to cudart_static to fix
-    # libcublasLt_static.a.o): undefined reference to symbol 'cudaStreamWaitEvent'
-    # error adding symbols: DSO missing from command line
+        # NOTE: cublas is always linked dynamically
+        CUDA::cublas CUDA::cublasLt)
     set_property(
-      TARGET caffe2::cublas APPEND PROPERTY INTERFACE_LINK_LIBRARIES
-      "${CUDA_cudart_static_LIBRARY}" rt dl)
+        TARGET caffe2::cublas APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+        CUDA::cudart_static rt)
 else()
     set_property(
         TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
-        ${CUDA_CUBLAS_LIBRARIES})
+        CUDA::cublas CUDA::cublasLt)
 endif()
-set_property(
-    TARGET caffe2::cublas PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-    ${CUDA_INCLUDE_DIRS})
 
 # cudnn interface
 # static linking is handled by USE_STATIC_CUDNN environment variable
@@ -273,8 +210,8 @@ if(CAFFE2_USE_CUDNN)
       "Cannot find cuDNN library. Turning the option off")
     set(CAFFE2_USE_CUDNN OFF)
   else()
-    if(CUDNN_VERSION VERSION_LESS "8.0.0")
-      message(FATAL_ERROR "PyTorch requires cuDNN 8 and above.")
+    if(CUDNN_VERSION VERSION_LESS "8.1.0")
+      message(FATAL_ERROR "PyTorch requires cuDNN 8.1 and above.")
     endif()
   endif()
 
@@ -290,60 +227,51 @@ else()
   message(STATUS "USE_CUDNN is set to 0. Compiling without cuDNN support")
 endif()
 
+if(CAFFE2_USE_CUSPARSELT)
+  find_package(CUSPARSELT)
+
+  if(NOT CUSPARSELT_FOUND)
+    message(WARNING
+      "Cannot find cuSPARSELt library. Turning the option off")
+    set(CAFFE2_USE_CUSPARSELT OFF)
+  else()
+    add_library(torch::cusparselt INTERFACE IMPORTED)
+    target_include_directories(torch::cusparselt INTERFACE ${CUSPARSELT_INCLUDE_PATH})
+    target_link_libraries(torch::cusparselt INTERFACE ${CUSPARSELT_LIBRARY_PATH})
+  endif()
+else()
+  message(STATUS "USE_CUSPARSELT is set to 0. Compiling without cuSPARSELt support")
+endif()
+
 # curand
-add_library(caffe2::curand UNKNOWN IMPORTED)
+add_library(caffe2::curand INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
     set_property(
-        TARGET caffe2::curand PROPERTY IMPORTED_LOCATION
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcurand_static.a")
-    set_property(
         TARGET caffe2::curand PROPERTY INTERFACE_LINK_LIBRARIES
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)
+        CUDA::curand_static)
 else()
     set_property(
-        TARGET caffe2::curand PROPERTY IMPORTED_LOCATION
-        ${CUDA_curand_LIBRARY})
+        TARGET caffe2::curand PROPERTY INTERFACE_LINK_LIBRARIES
+        CUDA::curand)
 endif()
-set_property(
-    TARGET caffe2::curand PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-    ${CUDA_INCLUDE_DIRS})
 
-# cufft. CUDA_CUFFT_LIBRARIES is actually a list, so we will make an
-# interface library similar to cudart.
+# cufft
 add_library(caffe2::cufft INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
     set_property(
         TARGET caffe2::cufft PROPERTY INTERFACE_LINK_LIBRARIES
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcufft_static_nocallback.a"
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)
+        CUDA::cufft_static_nocallback)
 else()
     set_property(
         TARGET caffe2::cufft PROPERTY INTERFACE_LINK_LIBRARIES
-        ${CUDA_CUFFT_LIBRARIES})
-endif()
-set_property(
-    TARGET caffe2::cufft PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-    ${CUDA_INCLUDE_DIRS})
-
-# TensorRT
-if(CAFFE2_USE_TENSORRT)
-  add_library(caffe2::tensorrt UNKNOWN IMPORTED)
-  set_property(
-      TARGET caffe2::tensorrt PROPERTY IMPORTED_LOCATION
-      ${TENSORRT_LIBRARY})
-  set_property(
-      TARGET caffe2::tensorrt PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-      ${TENSORRT_INCLUDE_DIR})
+        CUDA::cufft)
 endif()
 
 # nvrtc
-add_library(caffe2::nvrtc UNKNOWN IMPORTED)
+add_library(caffe2::nvrtc INTERFACE IMPORTED)
 set_property(
-    TARGET caffe2::nvrtc PROPERTY IMPORTED_LOCATION
-    ${CUDA_NVRTC_LIB})
-set_property(
-    TARGET caffe2::nvrtc PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-    ${CUDA_INCLUDE_DIRS})
+    TARGET caffe2::nvrtc PROPERTY INTERFACE_LINK_LIBRARIES
+    CUDA::nvrtc caffe2::cuda)
 
 # Add onnx namepsace definition to nvcc
 if(ONNX_NAMESPACE)
@@ -366,14 +294,11 @@ list(APPEND CUDA_NVCC_FLAGS ${NVCC_FLAGS_EXTRA})
 message(STATUS "Added CUDA NVCC flags for: ${NVCC_FLAGS_EXTRA}")
 
 # disable some nvcc diagnostic that appears in boost, glog, glags, opencv, etc.
-foreach(diag cc_clobber_ignored integer_sign_change useless_using_declaration
-             set_but_not_used field_without_dll_interface
+foreach(diag cc_clobber_ignored
+             field_without_dll_interface
              base_class_has_different_dll_interface
              dll_interface_conflict_none_assumed
              dll_interface_conflict_dllexport_assumed
-             implicit_return_from_non_void_function
-             unsigned_compare_with_zero
-             declared_but_not_referenced
              bad_friend_decl)
   list(APPEND SUPPRESS_WARNING_FLAGS --diag_suppress=${diag})
 endforeach()

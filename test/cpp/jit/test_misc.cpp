@@ -6,6 +6,7 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type_base.h>
+#include <c10/macros/Macros.h>
 #include <test/cpp/jit/test_utils.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
@@ -491,13 +492,7 @@ TEST(ControlFlowTest, Basic) {
   ASSERT_EQ(256, run_binary("while_test", 2, 0));
 }
 
-#if defined(__has_feature)
-#if __has_feature(address_sanitizer)
-#define HAS_ASANUBSAN 1
-#endif
-#endif
-
-#ifndef HAS_ASANUBSAN
+#if !(C10_ASAN_ENABLED || C10_UBSAN_ENABLED)
 // This test fails vptr UBSAN checks
 
 TEST(ProtoTest, Basic) {
@@ -1172,7 +1167,7 @@ TEST(RecordFunctionTest, Callbacks) {
         },
         [](const RecordFunction& /* unused */, ObserverContext* ctx_ptr) {
           auto ctx = dynamic_cast<TestContext*>(ctx_ptr);
-          TORCH_CHECK(ctx_ptr != nullptr);
+          TORCH_CHECK(ctx != nullptr);
           TORCH_CHECK(ctx->a == 123);
           TORCH_CHECK(ctx->b == "test_str");
         }));
@@ -1302,7 +1297,7 @@ TEST(RecordFunctionTest, OperatorNameOverload) {
   at::addGlobalCallback(at::RecordFunctionCallback(
                             [](const at::RecordFunction& fn)
                                 -> std::unique_ptr<at::ObserverContext> {
-                              c10::optional<c10::OperatorName> op_name =
+                              std::optional<c10::OperatorName> op_name =
                                   fn.operator_name();
                               if (op_name.has_value()) {
                                 operator_names.insert(c10::toString(*op_name));
@@ -1335,8 +1330,8 @@ class TestThreadLocalDebugInfo : public c10::DebugInfoBase {
     model_id_ = model_id;
   }
 
-  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
-  virtual ~TestThreadLocalDebugInfo() {}
+  // NOLINTNEXTLINE(modernize-use-equals-default)
+  virtual ~TestThreadLocalDebugInfo() override {}
 
  private:
   int model_id_ = 0;
@@ -2399,6 +2394,28 @@ TEST(FuturesTest, Basic) {
   ASSERT_EQ(sat2, 1);
 }
 
+// Sparse CUDA tensor test
+TEST(FutureTest, SparseTensor) {
+  // Skip test if CUDA is not available.
+  bool has_cuda = at::globalContext().hasCUDA();
+  if (!has_cuda) {
+    LOG(INFO) << "CUDA not available, skipping test";
+  }
+  for (int i = 0; i < 2; ++i) {
+    auto f = c10::make_intrusive<Future>(TensorType::get());
+    at::TensorOptions opts = at::TensorOptions().device(at::DeviceType::CUDA);
+    auto sparse_tensor = i == 0 ? at::ones(10).to_sparse()
+                                : at::sparse_coo_tensor(
+                                      at::arange(10).unsqueeze(0).to(at::kLong),
+                                      at::ones({10, 10}),
+                                      opts);
+    // Runs storage extraction for sparse CUDA tensors
+    f->markCompleted(sparse_tensor);
+    ASSERT_TRUE(f->completed());
+    ASSERT_FALSE(f->hasError());
+  }
+}
+
 // Basic error cases.
 TEST(FuturesTest, Error) {
   auto f1 = c10::make_intrusive<Future>(IntType::get());
@@ -2985,7 +3002,7 @@ graph(%x.1 : Tensor):
   return (%y))IR",
       &*graph);
   {
-    auto func = torch::make_unique<GraphFunction>(
+    auto func = std::make_unique<GraphFunction>(
         "name", graph, [](GraphFunction&) {}, ExecutorExecutionMode::PROFILING);
     auto a = at::rand({2, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
     Stack stack = {a};
@@ -2998,7 +3015,7 @@ graph(%x.1 : Tensor):
         ->run(*g);
   }
   {
-    auto func = torch::make_unique<GraphFunction>(
+    auto func = std::make_unique<GraphFunction>(
         "name", graph, [](GraphFunction&) {}, ExecutorExecutionMode::SIMPLE);
     auto a = at::rand({2, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
     Stack stack = {a};
@@ -3027,7 +3044,7 @@ TEST(TestFunctionExecutor, RunDecompositionTest) {
 TEST(TestShapeGraphLinting, Basic) {
   auto schemas = RegisteredShapeComputeSchemas();
   for (const auto& schema : schemas) {
-    // arange does not acually support complex, leave as
+    // arange does not actually support complex, leave as
     // union[int, float] for now
     if (schema->name() == "aten::arange") {
       continue;
@@ -3112,6 +3129,7 @@ TEST_F(Composed, ComposedOp) {
 }
 
 TEST(ConstantPropagation, CustomClassesCanBePropagated) {
+#ifdef USE_PYTORCH_QNNPACK
   const auto src = R"IR(
     graph():
         %none: NoneType = prim::Constant()
@@ -3132,6 +3150,7 @@ TEST(ConstantPropagation, CustomClassesCanBePropagated) {
   ConstantPropagation(graph);
 
   testing::FileCheck().check_not("quantized::linear_prepack")->run(*graph);
+#endif
 }
 
 } // namespace jit

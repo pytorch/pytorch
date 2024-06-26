@@ -1,6 +1,8 @@
+#include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 
 #include <ATen/core/ivalue.h>
+#include <c10/util/ApproximateClock.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/jit/frontend/tracer.h>
@@ -24,8 +26,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -260,7 +261,7 @@ RegisterOperators reg({
         },
         aliasAnalysisFromSchema()),
     // NB: backward op might write to every input tensors in the graph and it's
-    // much more expensive to analayze the leaves and sometimes it might retain
+    // much more expensive to analyze the leaves and sometimes it might retain
     // the whole gradients in every tensor of the Autograd graph with
     // create_graph=True so we use aliasAnalysisConservative for these two OPs
     Operator(
@@ -370,8 +371,7 @@ RegisterOperators logging_operators(
              tracer::recordSourceLocation(node);
              graph->insertNode(node);
            }
-           auto output =
-               torch::profiler::impl::getTime(/*allow_monotonic=*/true);
+           auto output = c10::getTime(/*allow_monotonic=*/true);
            push(stack, output);
            if (jit::tracer::isTracing()) {
              jit::tracer::addOutput(node, output);
@@ -383,122 +383,6 @@ C10_UNUSED void hashValue(Stack& stack) {
   auto value = pop(stack);
   push(stack, value.hash());
 }
-
-bool isSortableTupleType(
-    const TupleTypePtr& tuple_type,
-    std::stringstream& why_not) {
-  for (const TypePtr& ele_type : tuple_type->containedTypes()) {
-    switch (ele_type->kind()) {
-      case TypeKind::IntType:
-      case TypeKind::BoolType:
-      case TypeKind::FloatType:
-      case TypeKind::StringType:
-      case TypeKind::TensorType:
-        continue;
-      case TypeKind::TupleType:
-        if (!isSortableTupleType(ele_type->expect<TupleType>(), why_not)) {
-          return false;
-        }
-        continue;
-      case TypeKind::ClassType:
-        if (!c10::checkObjectSortSchema(
-                ele_type->expect<ClassType>(), why_not)) {
-          return false;
-        }
-        continue;
-      default:
-        why_not << "Contained elements in " << *tuple_type
-                << " are not sortable. Only Int, Bool, Float, String, Tensor, "
-                << "a User Defined Class with __lt__ method defined or Tuples "
-                << "of aforementionted types can be sorted.";
-        return false;
-    }
-  }
-
-  return true;
-}
-
-bool isSortableListOfObjectsOrTuples(
-    c10::List<IValue>& ivalues,
-    std::stringstream& why_not) {
-  if (ivalues.empty()) {
-    return true;
-  }
-
-  auto type = ivalues.get(0).type();
-  // We assume lists have homogenous types, use first element to determine
-  // best sorting methods. If in the future we need to support heterogenous
-  // types inside list, then sorting needs to have runtime sortable checks.
-  const size_t n = ivalues.size();
-  for (const auto i : c10::irange(n)) {
-    const IValue& v = ivalues.get(i);
-    auto curr_type = v.type();
-    if (*curr_type != *type) {
-      why_not << "Only values of same type can be compared. "
-              << "Found " << type->repr_str() << " and "
-              << curr_type->repr_str();
-      return false;
-    }
-  }
-
-  if (auto tuple_type = type->cast<TupleType>()) {
-    return isSortableTupleType(tuple_type, why_not);
-  }
-
-  if (auto class_type = type->cast<ClassType>()) {
-    return c10::checkObjectSortSchema(class_type, why_not) != nullptr;
-  }
-
-  // Basic types like tensors/ints/floats/bools/strs are not checked in this
-  // method because they should have been schema matched to specialized
-  // aten::sort kernels using listSort<T>.
-  why_not << "Only list of Tensors, ints, floats, bools, strs, "
-          << "a User Defined Class that defines the __lt__ compare method "
-          << "or Tuples of aforementioned types can be sorted, got list of "
-          << type->repr_str() << "\n";
-  return false;
-}
-
-template <bool has_reverse_arg, bool copy_return_list>
-void sort_op(Stack& stack) {
-  bool reverse = has_reverse_arg ? pop(stack).toBool() : false;
-  auto g_list = pop(stack).toList();
-
-  if (copy_return_list) {
-    g_list = g_list.copy();
-  }
-
-  if (!g_list.empty()) {
-    std::stringstream error_str;
-    if (!isSortableListOfObjectsOrTuples(g_list, error_str)) {
-      throw std::runtime_error(error_str.str());
-    }
-
-    c10::IValueComparator comparator;
-    if (reverse) {
-      comparator = c10::getGreaterThanComparator(g_list.get(0));
-    } else {
-      comparator = c10::getLessThanComparator(g_list.get(0));
-    }
-    std::sort(g_list.begin(), g_list.end(), comparator);
-  }
-
-  if (copy_return_list) {
-    push(stack, g_list);
-  }
-}
-
-// NB: this must be registered after the other aten::sort operators
-RegisterOperators regSort({
-    Operator(
-        "aten::sorted.any(t[](a) self) -> (t[])",
-        sort_op</*has_reverse_arg*/ false, /*copy_return_list*/ true>,
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::sort.any(t[](a!) self, bool reverse=False) -> ()",
-        sort_op</*has_reverse_arg*/ true, /*copy_return_list*/ false>,
-        aliasAnalysisFromSchema()),
-});
 
 // reference: _output_size in torch/nn/functional.py
 // size can be none, int or intlist
@@ -543,8 +427,8 @@ at::Tensor interpolate(
     const IValue& size,
     const IValue& scale_factors,
     const std::string& mode,
-    c10::optional<bool> align_corners,
-    c10::optional<bool> recompute_scale_factor) {
+    std::optional<bool> align_corners,
+    std::optional<bool> recompute_scale_factor) {
   if ((mode == "nearest" || mode == "area")) {
     if (align_corners != c10::nullopt) {
       throw std::runtime_error(
@@ -870,5 +754,4 @@ static auto reg4 =
         .op("_test::get_first", &get_first);
 
 } // namespace
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

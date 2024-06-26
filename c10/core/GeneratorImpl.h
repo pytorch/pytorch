@@ -1,6 +1,6 @@
 #pragma once
 
-#include <stdint.h>
+#include <cstdint>
 #include <mutex>
 
 #include <c10/core/Device.h>
@@ -67,10 +67,15 @@ struct C10_API GeneratorImpl : public c10::intrusive_ptr_target {
 
   // Common methods for all generators
   virtual void set_current_seed(uint64_t seed) = 0;
+  virtual void set_offset(uint64_t offset) = 0;
+  virtual uint64_t get_offset() const = 0;
   virtual uint64_t current_seed() const = 0;
   virtual uint64_t seed() = 0;
   virtual void set_state(const c10::TensorImpl& new_state) = 0;
   virtual c10::intrusive_ptr<c10::TensorImpl> get_state() const = 0;
+  virtual void graphsafe_set_state(
+      const c10::intrusive_ptr<c10::GeneratorImpl>& new_state);
+  virtual c10::intrusive_ptr<c10::GeneratorImpl> graphsafe_get_state() const;
   Device device() const;
 
   // See Note [Acquire lock when using random generators]

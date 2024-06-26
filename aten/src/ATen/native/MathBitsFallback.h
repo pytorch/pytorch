@@ -14,8 +14,7 @@
 #include <utility>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 // This fallback should only be used for operations that are self inverse and have a corresponding tensor
 // bit (internally implemented using DispatchKey) to maintain the state on tensor using tensor bit.
 // Currently there are two tensor bits that trigger this fallback: conjugate bit and negative bit.
@@ -57,7 +56,7 @@ struct MathOpFallback {
     const auto num_arguments = arguments.size();
     const auto stack_start = stack->size() - num_arguments;
 
-    c10::optional<bool> is_write;
+    std::optional<bool> is_write;
     for (const auto i : c10::irange(num_arguments)) {
       // Three possible states:
       // 1. alias_info has no value --> out-of-place operation
@@ -154,5 +153,5 @@ struct MathOpFallback {
   DispatchKey key;
   string op_name;
 };
-}
-}// namespace at
+
+} // namespace at::native

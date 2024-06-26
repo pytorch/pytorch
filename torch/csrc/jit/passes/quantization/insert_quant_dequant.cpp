@@ -30,7 +30,7 @@ struct QuantOpParams {
   c10::QScheme qscheme{c10::kPerTensorAffine};
   std::vector<Value*> qparams;
   // This is only so that insertQuantizationOps can be templatized
-  // and subsequntly significant portion of that code can be reused.
+  // and subsequently significant portion of that code can be reused.
   std::string back() const {
     return "AttributeDoesNotExist";
   }
@@ -59,7 +59,7 @@ bool isWeight(Module& module, Value* v) {
   if (isWeight(v)) {
     return true;
   }
-  c10::optional<bool> result;
+  std::optional<bool> result;
   auto* self = v->owningGraph()->inputs()[0];
   for (const Use& u : v->uses()) {
     Node* n = u.user;
@@ -126,7 +126,7 @@ Node* insertDeQuant(
   Node* dequant = graph->create(Symbol::aten("dequantize"), {quantized_val});
   dequant->output()
       ->setDebugName(
-          original_val->debugName() + ".dequant." + c10::guts::to_string(id))
+          original_val->debugName() + ".dequant." + std::to_string(id))
       ->setType(original_val->type());
   graph->insertNode(dequant);
   return dequant;
@@ -221,7 +221,7 @@ Node* insertFP16CastOps(Graph* graph, Value* observer_out) {
 }
 
 // find the observer for Value `v` and return the name of the observer
-c10::optional<std::string> findObserverName(Value* v) {
+std::optional<std::string> findObserverName(Value* v) {
   // Note that here we just check for the name of observer, but the ideally
   // we should be comparing the type of observer, this is a temporary
   // work around until data only clone of module.clone is supported.
@@ -258,7 +258,7 @@ at::ScalarType getObserverDtype(Module& module, Value* v) {
   return at::ScalarType::Undefined;
 }
 
-c10::optional<std::string> getEmbeddingBagObsName(
+std::optional<std::string> getEmbeddingBagObsName(
     script::Module& module,
     Node* n) {
   Value* v = n->output();
@@ -273,7 +273,7 @@ c10::optional<std::string> getEmbeddingBagObsName(
 
 bool isEmbeddingBagOp(
     Node* observer,
-    c10::optional<std::string> embedding_bag_name) {
+    std::optional<std::string> embedding_bag_name) {
   return embedding_bag_name &&
       embedding_bag_name.value().find("embedding_bag_") != std::string::npos;
 }
@@ -714,7 +714,7 @@ class InsertQuantDeQuantHelper {
 
   // In order to propagate quantization ops through the ops that doesn't
   // require observation, we'll first inline the graph, and call the
-  // PropgateQuantizationOps pass
+  // PropagateQuantizationOps pass
   void propagateQuantizationOps(Module& module);
 
   // Used for dynamic quantization to selectively run the weight observers.
@@ -791,7 +791,7 @@ class InsertQuantDeQuantHelper {
       Value* original_output,
       const std::vector<Value*>& inputs,
       bool is_scalar = false,
-      const c10::optional<std::tuple<c10::QScheme, QParamVector>>& qparams_opt =
+      const std::optional<std::tuple<c10::QScheme, QParamVector>>& qparams_opt =
           c10::nullopt);
 
   bool isQuantized(Value* v) {
@@ -971,7 +971,7 @@ std::unique_ptr<GraphFunction> SubGraphCloneHelper::buildGraphFromNodes(
   auto build_observer_graph = [&](GraphFunction& func) {
     buildObserverSubgraph(nodes, func.graph());
   };
-  return torch::make_unique<GraphFunction>(
+  return std::make_unique<GraphFunction>(
       name, observer_subgraph, build_observer_graph);
 }
 
@@ -1042,10 +1042,10 @@ void InsertQuantDeQuantHelper::quantizeTensors(
       const auto& qparam = pr.second;
       size_t uid = 0;
       auto qparam_name =
-          original_value->debugName() + name + "_" + c10::to_string(uid++);
+          original_value->debugName() + name + "_" + std::to_string(uid++);
       while (module.hasattr(qparam_name)) {
         qparam_name =
-            original_value->debugName() + name + "_" + c10::to_string(uid++);
+            original_value->debugName() + name + "_" + std::to_string(uid++);
       }
       qparam_name_map_for_node_[n][name] = qparam_name;
       module.register_attribute(qparam_name, qparam.type(), qparam);
@@ -1125,7 +1125,7 @@ ModuleMethodVector InsertQuantDeQuantHelper::getInvokedMethods(
       if (n->kind() == prim::CallMethod) {
         auto module_instance = n->inputs()[0];
         auto module_method_name = n->s(attr::name);
-        c10::optional<Module> m;
+        std::optional<Module> m;
         // calling method on self
         if (module_instance == graph->inputs()[0]) {
           m = module;
@@ -1152,7 +1152,7 @@ void InsertQuantDeQuantHelper::propagateQParams(
     Value* original_output,
     const std::vector<Value*>& inputs,
     bool is_scalar,
-    const c10::optional<std::tuple<c10::QScheme, QParamVector>>& qparams_opt) {
+    const std::optional<std::tuple<c10::QScheme, QParamVector>>& qparams_opt) {
   Node* n = original_output->node();
   Graph* graph = n->owningGraph();
   if (is_scalar) {
@@ -1248,7 +1248,7 @@ void removeDequantizeFromInputs(const std::unordered_set<Value*>& inputs) {
 
 // Check if we need to propagate the quantization ops from input to
 // output
-c10::optional<std::vector<Value*>> getDequantizedInputs(Value* output) {
+std::optional<std::vector<Value*>> getDequantizedInputs(Value* output) {
   auto inputs = getPassThroughInputs(output);
   if (!inputs.empty()) {
     // note that we don't need to recursively check for prim::If
@@ -1342,7 +1342,7 @@ void InsertQuantDeQuantHelper::propagateQuantizationOps(Block* block) {
       }
       // 2. remove the dequantize ops from inputs
       removeDequantizeFromInputs(dequantized_inputs);
-      // 3. insert dequantize op for outpus
+      // 3. insert dequantize op for outputs
       for (auto* output : outputs_to_dequantize) {
         insertDeQuantForAllUse(output->owningGraph(), output, output);
       }

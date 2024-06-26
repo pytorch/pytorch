@@ -2,18 +2,19 @@
 # base commitlist . Useful if you are refactoring any code
 # but want to keep the previous data on categories
 
-import commitlist
 import csv
+
+import commitlist
 
 category_csv = "results/category_data.csv"
 commitlist_csv = "results/commitlist.csv"
 
-with open(category_csv, "r") as category_data:
+with open(category_csv) as category_data:
     reader = csv.DictReader(category_data, commitlist.commit_fields)
     rows = list(reader)
     category_map = {row["commit_hash"]: row["category"] for row in rows}
 
-with open(commitlist_csv, "r") as commitlist_data:
+with open(commitlist_csv) as commitlist_data:
     reader = csv.DictReader(commitlist_data, commitlist.commit_fields)
     commitlist_rows = list(reader)
 

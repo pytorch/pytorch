@@ -15,7 +15,6 @@
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/file_format.h>
 #include <torch/csrc/jit/mobile/flatbuffer_loader.h>
-#include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/mobile/upgrader_mobile.h>
@@ -24,8 +23,6 @@
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 #include <torch/custom_class.h>
-#include <exception>
-#include <fstream>
 #include <string>
 #include <vector>
 
@@ -117,7 +114,7 @@ TypePtr resolveTypeNameMobile(
 
 c10::StrongTypePtr typeResolverMobile(
     const c10::QualifiedName& qn,
-    std::shared_ptr<CompilationUnit> compilation_unit) {
+    const std::shared_ptr<CompilationUnit>& compilation_unit) {
   return c10::StrongTypePtr(
       compilation_unit, resolveTypeNameMobile(qn, compilation_unit));
 }
@@ -194,12 +191,12 @@ class BytecodeDeserializer final {
   explicit BytecodeDeserializer(
       std::unique_ptr<PyTorchStreamReader> reader,
       uint64_t module_load_options = 0);
-  mobile::Module deserialize(c10::optional<at::Device> device);
+  mobile::Module deserialize(std::optional<at::Device> device);
   mobile::Module deserialize(
-      c10::optional<at::Device> device,
+      std::optional<at::Device> device,
       ExtraFilesMap& extra_files);
   void deserialize_only_extra(
-      c10::optional<at::Device> device,
+      std::optional<at::Device> device,
       ExtraFilesMap& extra_files);
 
  private:
@@ -207,7 +204,7 @@ class BytecodeDeserializer final {
   void init_upgrader(mobile::Function* function);
   void parseMethods(
       c10::ivalue::TupleElements&& vals,
-      c10::optional<c10::ivalue::TupleElements>&& debug_handles,
+      std::optional<c10::ivalue::TupleElements>&& debug_handles,
       mobile::CompilationUnit& mcu);
   c10::IValue readArchive(
       const std::string& archive_name,
@@ -220,7 +217,7 @@ class BytecodeDeserializer final {
   std::shared_ptr<CompilationUnit> compilation_unit_;
   std::unordered_set<std::string> imported_libs_;
   std::unique_ptr<PyTorchStreamReader> reader_{};
-  c10::optional<at::Device> device_;
+  std::optional<at::Device> device_;
   uint64_t module_load_options_;
   // From `version` or `.data/version` in model.ptl and it's compute
   // dynamically. It's used for finding the minimum required runtime to run all
@@ -308,7 +305,7 @@ void BytecodeDeserializer::init_upgrader(mobile::Function* function) {
 
 void BytecodeDeserializer::parseMethods(
     c10::ivalue::TupleElements&& vals,
-    c10::optional<c10::ivalue::TupleElements>&& debug_handles,
+    std::optional<c10::ivalue::TupleElements>&& debug_handles,
     mobile::CompilationUnit& mcu) {
   TORCH_CHECK(!vals.empty(), "Bytecode has no elements. ");
   // Initialized with the version number when kProducedBytecodeVersion was
@@ -420,15 +417,13 @@ void BytecodeDeserializer::parseMethods(
 }
 
 void BytecodeDeserializer::deserialize_only_extra(
-    c10::optional<at::Device> device,
+    std::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
   device_ = device;
   for (const auto& kv : extra_files) {
     const std::string& key = "extra/" + kv.first;
     if (reader_->hasRecord(key)) {
-      at::DataPtr meta_ptr;
-      size_t meta_size = 0;
-      std::tie(meta_ptr, meta_size) = reader_->getRecord(key);
+      auto [meta_ptr, meta_size] = reader_->getRecord(key);
       extra_files[kv.first] =
           std::string(static_cast<char*>(meta_ptr.get()), meta_size);
     }
@@ -436,14 +431,14 @@ void BytecodeDeserializer::deserialize_only_extra(
 }
 
 mobile::Module BytecodeDeserializer::deserialize(
-    c10::optional<at::Device> device,
+    std::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
   deserialize_only_extra(device, extra_files);
   return deserialize(device);
 }
 
 mobile::Module BytecodeDeserializer::deserialize(
-    c10::optional<at::Device> device) {
+    std::optional<at::Device> device) {
   device_ = device;
   auto mcu = std::make_shared<mobile::CompilationUnit>();
 
@@ -458,7 +453,7 @@ mobile::Module BytecodeDeserializer::deserialize(
   //
   auto bvals = std::move(readArchive("bytecode", mcu).toTupleRef()).elements();
 
-  c10::optional<c10::ivalue::TupleElements> debug_handles;
+  std::optional<c10::ivalue::TupleElements> debug_handles;
   bool has_debug_handles{false};
   if (reader_->hasRecord("mobile_debug_handles.pkl")) {
     debug_handles =
@@ -486,7 +481,7 @@ c10::IValue BytecodeDeserializer::readArchive(
     return typeResolverMobile(qn, compilation_unit_);
   };
 
-  auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
+  auto obj_loader = [&](const at::StrongTypePtr& type, const IValue& input) {
     return objLoaderMobile(type, input, *mcu);
   };
 
@@ -507,130 +502,9 @@ c10::IValue BytecodeDeserializer::readArchive(
   return ivalues;
 }
 
-} // namespace
-
-// Forward declare so that _load_for_mobile() overloads can
-// call this method directly.
 mobile::Module _load_for_mobile_impl(
     std::unique_ptr<ReadAdapterInterface> rai,
-    c10::optional<c10::Device> device,
-    ExtraFilesMap& extra_files,
-    uint64_t module_load_options);
-
-mobile::Module _load_mobile_from_bytes(
-    std::shared_ptr<char> data,
-    size_t size,
-    c10::optional<c10::Device> device,
-    ExtraFilesMap& extra_files,
-    uint64_t module_load_options);
-
-mobile::Module _load_for_mobile(
-    std::istream& in,
-    c10::optional<at::Device> device) {
-  ExtraFilesMap extra_files;
-  return _load_for_mobile(in, device, extra_files);
-}
-
-mobile::Module _load_for_mobile(
-    const std::string& filename,
-    c10::optional<at::Device> device) {
-  ExtraFilesMap extra_files;
-  return _load_for_mobile(filename, device, extra_files);
-}
-
-mobile::Module _load_for_mobile(
-    std::unique_ptr<ReadAdapterInterface> rai,
-    c10::optional<c10::Device> device) {
-  ExtraFilesMap extra_files;
-  return _load_for_mobile(std::move(rai), device, extra_files);
-}
-
-mobile::Module _load_for_mobile(
-    std::istream& in,
-    c10::optional<at::Device> device,
-    ExtraFilesMap& extra_files) {
-  if (getFileFormat(in) == FileFormat::FlatbufferFileFormat) {
-    std::shared_ptr<char> data;
-    size_t size = 0;
-    std::tie(data, size) = get_stream_content(in);
-    return _load_mobile_from_bytes(
-        data, size, device, extra_files, kDefaultMobileLoadOptions);
-  }
-  std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
-  auto module = _load_for_mobile_impl(
-      std::move(rai), device, extra_files, kDefaultMobileLoadOptions);
-  return module;
-}
-
-mobile::Module _load_for_mobile(
-    const std::string& filename,
-    c10::optional<at::Device> device,
-    ExtraFilesMap& extra_files) {
-  return _load_for_mobile(
-      filename, device, extra_files, kDefaultMobileLoadOptions);
-}
-
-mobile::Module _load_for_mobile(
-    const std::string& filename,
-    c10::optional<at::Device> device,
-    ExtraFilesMap& extra_files,
-    uint64_t module_load_options) {
-  auto format = getFileFormat(filename);
-
-  if (format == FileFormat::FlatbufferFileFormat) {
-    std::shared_ptr<char> data;
-    size_t size = 0;
-    std::tie(data, size) = get_file_content(filename.c_str());
-    return _load_mobile_from_bytes(
-        data, size, device, extra_files, module_load_options);
-  }
-
-  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
-  return _load_for_mobile_impl(
-      std::move(rai), device, extra_files, module_load_options);
-}
-
-TORCH_API mobile::Module _load_for_mobile(
-    std::unique_ptr<ReadAdapterInterface> rai,
-    c10::optional<c10::Device> device,
-    ExtraFilesMap& extra_files,
-    uint64_t module_load_options) {
-  // TODO optimize file read for non-flatbuffer models
-  std::shared_ptr<char> data;
-  size_t size = 0;
-  std::tie(data, size) = get_rai_content(rai.get());
-  return _load_mobile_from_bytes(
-      data, size, device, extra_files, module_load_options);
-}
-
-mobile::Module _load_mobile_from_bytes(
-    std::shared_ptr<char> data,
-    size_t size,
-    c10::optional<c10::Device> device,
-    ExtraFilesMap& extra_files,
-    uint64_t module_load_options) {
-  TORCH_CHECK(size >= kFileFormatHeaderSize, "Format error");
-  auto format = getFileFormat(data.get());
-  switch (format) {
-    case FileFormat::ZipFileFormat: {
-      std::unique_ptr<ReadAdapterInterface> rai =
-          std::make_unique<MemoryReadAdapter>(data.get(), size);
-      return _load_for_mobile_impl(
-          std::move(rai), device, extra_files, module_load_options);
-    }
-    case FileFormat::FlatbufferFileFormat: {
-      return parse_and_initialize_mobile_module(
-          data, size, device, &extra_files);
-    }
-    default: {
-      TORCH_CHECK(false, "Format error");
-    }
-  }
-}
-
-mobile::Module _load_for_mobile_impl(
-    std::unique_ptr<ReadAdapterInterface> rai,
-    c10::optional<c10::Device> device,
+    std::optional<c10::Device> device,
     ExtraFilesMap& extra_files,
     uint64_t module_load_options) {
   auto observer = torch::observerConfig().getModuleObserver();
@@ -648,7 +522,22 @@ mobile::Module _load_for_mobile_impl(
   }
 
   const size_t model_size = rai != nullptr ? rai->size() : 0;
-  auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
+  auto reader = std::make_unique<PyTorchStreamReader>(std::move(rai));
+  if (module_load_options &
+      MobileModuleLoadOptions::PARSE_ALL_EXTRA_FILE_MAPS) {
+    // ExtraFilesMap is serialized with a "extra/", hence it is necessary to
+    // account for when we de-serialize de-serialized filemap key values contain
+    // prefix and we need to remove prior to construct the map. "extra/" string
+    // has a length of 6 characters, hence we need only sub-string 6th position
+    // of a string. Please refer to following link for a detail:
+    // https://www.internalfb.com/code/fbsource/[9996fcb7a6fb]/fbcode/caffe2/torch/csrc/jit/mobile/import.cpp?lines=427-434
+    std::vector<std::string> all_files = reader->getAllRecords();
+    for (auto& file_name : all_files) {
+      if (file_name.find("extra/") == 0) {
+        extra_files[file_name.substr(6)] = "";
+      }
+    }
+  }
   BytecodeDeserializer deserializer(std::move(reader), module_load_options);
 
   std::string error_message;
@@ -672,7 +561,7 @@ mobile::Module _load_for_mobile_impl(
       // Add model_name and model_size to metadata_map
       extra_files.insert(std::make_pair("model_name", result.name()));
       extra_files.insert(
-          std::make_pair("model_size", c10::guts::to_string(model_size)));
+          std::make_pair("model_size", std::to_string(model_size)));
       metadata_map = observer->processMetadataFromExtra(extra_files);
       observer->onExitLoadModel(instance_key, metadata_map);
     }
@@ -685,9 +574,114 @@ mobile::Module _load_for_mobile_impl(
   }
 }
 
+mobile::Module _load_mobile_from_bytes(
+    const std::shared_ptr<char>& data,
+    size_t size,
+    std::optional<c10::Device> device,
+    ExtraFilesMap& extra_files,
+    uint64_t module_load_options) {
+  TORCH_CHECK(size >= kFileFormatHeaderSize, "Format error");
+  auto format = getFileFormat(data.get());
+  switch (format) {
+    case FileFormat::ZipFileFormat: {
+      std::unique_ptr<ReadAdapterInterface> rai =
+          std::make_unique<MemoryReadAdapter>(data.get(), size);
+      return _load_for_mobile_impl(
+          std::move(rai), device, extra_files, module_load_options);
+    }
+    case FileFormat::FlatbufferFileFormat: {
+      return parse_and_initialize_mobile_module(
+          data, size, device, &extra_files);
+    }
+    default: {
+      TORCH_CHECK(false, "Format error");
+    }
+  }
+}
+
+} // namespace
+
+mobile::Module _load_for_mobile(
+    std::istream& in,
+    std::optional<at::Device> device) {
+  ExtraFilesMap extra_files;
+  return _load_for_mobile(in, device, extra_files);
+}
+
+mobile::Module _load_for_mobile(
+    const std::string& filename,
+    std::optional<at::Device> device) {
+  ExtraFilesMap extra_files;
+  return _load_for_mobile(filename, device, extra_files);
+}
+
+mobile::Module _load_for_mobile(
+    std::unique_ptr<ReadAdapterInterface> rai,
+    std::optional<c10::Device> device) {
+  ExtraFilesMap extra_files;
+  return _load_for_mobile(std::move(rai), device, extra_files);
+}
+
+mobile::Module _load_for_mobile(
+    std::istream& in,
+    std::optional<at::Device> device,
+    ExtraFilesMap& extra_files,
+    uint64_t module_load_options) {
+  if (getFileFormat(in) == FileFormat::FlatbufferFileFormat) {
+    auto [data, size] = get_stream_content(in);
+    return _load_mobile_from_bytes(
+        data, size, device, extra_files, module_load_options);
+  }
+  std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
+  auto module = _load_for_mobile_impl(
+      std::move(rai), device, extra_files, module_load_options);
+  return module;
+}
+
+mobile::Module _load_for_mobile(
+    const std::string& filename,
+    std::optional<at::Device> device,
+    ExtraFilesMap& extra_files) {
+  return _load_for_mobile(
+      filename, device, extra_files, kDefaultMobileLoadOptions);
+}
+
+mobile::Module _load_for_mobile(
+    const std::string& filename,
+    std::optional<at::Device> device,
+    ExtraFilesMap& extra_files,
+    uint64_t module_load_options) {
+  auto observer = torch::observerConfig().getModuleObserver();
+  if (observer) {
+    extra_files.insert(std::make_pair("model_path", filename));
+  }
+  auto format = getFileFormat(filename);
+
+  if (format == FileFormat::FlatbufferFileFormat) {
+    auto [data, size] = get_file_content(filename.c_str());
+    return _load_mobile_from_bytes(
+        data, size, device, extra_files, module_load_options);
+  }
+
+  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
+  return _load_for_mobile_impl(
+      std::move(rai), device, extra_files, module_load_options);
+}
+
+TORCH_API mobile::Module _load_for_mobile(
+    std::unique_ptr<ReadAdapterInterface> rai,
+    std::optional<c10::Device> device,
+    ExtraFilesMap& extra_files,
+    uint64_t module_load_options) {
+  // TODO optimize file read for non-flatbuffer models
+  auto [data, size] = get_rai_content(rai.get());
+  return _load_mobile_from_bytes(
+      data, size, device, extra_files, module_load_options);
+}
+
 void _load_extra_only_for_mobile(
     const std::string& filename,
-    c10::optional<at::Device> device,
+    std::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
   auto observer = torch::observerConfig().getModuleObserver();
   // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
@@ -701,7 +695,7 @@ void _load_extra_only_for_mobile(
     case FileFormat::ZipFileFormat: {
       std::unique_ptr<FileAdapter> rai =
           std::make_unique<FileAdapter>(filename);
-      auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
+      auto reader = std::make_unique<PyTorchStreamReader>(std::move(rai));
       BytecodeDeserializer deserializer(std::move(reader));
       deserializer.deserialize_only_extra(device, extra_files);
       break;

@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // This class facilitates depth-first iteration over all nodes in a graph.
 class DepthFirstGraphNodeIterator {
@@ -145,5 +144,4 @@ class DepthFirstGraphNodeIterator {
   }
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

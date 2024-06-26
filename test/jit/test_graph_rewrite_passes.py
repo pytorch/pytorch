@@ -1,16 +1,16 @@
 # Owner(s): ["oncall: jit"]
 
-from torch.testing._internal.jit_utils import JitTestCase
 import torch
 import torch._C
 from torch.testing import FileCheck
+from torch.testing._internal.jit_utils import JitTestCase
 
 
 class TestGraphRewritePasses(JitTestCase):
     def test_fuse_linear(self):
         class FunctionalLinear(torch.nn.Module):
             def __init__(self, weight, bias):
-                super(FunctionalLinear, self).__init__()
+                super().__init__()
                 self.weight = weight
                 self.bias = bias
 
@@ -44,7 +44,7 @@ class TestGraphRewritePasses(JitTestCase):
         # check matmuls are not fused
         class Matmul(torch.nn.Module):
             def __init__(self, weight):
-                super(Matmul, self).__init__()
+                super().__init__()
                 self.weight = weight
 
             def forward(self, x):

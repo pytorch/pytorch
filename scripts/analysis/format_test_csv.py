@@ -15,13 +15,14 @@ onto your local file system is to send it to GitHub Gist:
 See also scripts/analysis/run_test_csv.sh
 """
 
+import argparse
 import csv
 import subprocess
 import sys
-import argparse
 
-parser = argparse.ArgumentParser(description=__doc__,
-    formatter_class=argparse.RawDescriptionHelpFormatter)
+parser = argparse.ArgumentParser(
+    description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+)
 parser.add_argument("--log-url", type=str, default="", help="URL of raw logs")
 parser.add_argument("file", help="pytest CSV file to format")
 args = parser.parse_args()
@@ -33,7 +34,7 @@ hash = subprocess.check_output(
 
 out.writerow([hash, args.log_url, ""])
 
-with open(args.file, "r") as f:
+with open(args.file) as f:
     reader = csv.DictReader(f)
     for row in reader:
         if row["status"] not in {"failed", "error"}:
@@ -45,6 +46,6 @@ with open(args.file, "r") as f:
         )
         msg.replace("\t", " ")
         # Feel free to edit this; the idea is to remove prefixes that are
-        # just gooping up the resulting spreadsheet outpu
+        # just gooping up the resulting spreadsheet output
         name = row["name"].replace("test_make_fx_symbolic_exhaustive_", "")
         out.writerow([name, msg, ""])

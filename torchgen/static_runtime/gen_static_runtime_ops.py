@@ -10,6 +10,7 @@ from torchgen.context import native_function_manager
 from torchgen.model import DispatchKey, NativeFunctionsGroup, NativeFunctionsViewGroup
 from torchgen.static_runtime import config, generator
 
+
 # Given a list of `grouped_native_functions` sorted by their op names, return a list of
 # lists each of which groups ops that share the base name. For example, `mean` and
 # `mean.dim` are grouped together by this function.
@@ -37,7 +38,7 @@ def group_functions_by_op_name(
         for k, group in (
             itertools.groupby(
                 eligible_ops,
-                key=lambda g: config.func_name_base_str(g),
+                key=config.func_name_base_str,
             )
         )
     ]
@@ -48,7 +49,7 @@ def group_functions_by_op_name(
 def clang_format(cpp_file_path: str) -> None:
     import subprocess
 
-    subprocess.run(["clang-format", "-i", cpp_file_path])
+    subprocess.check_call(["clang-format", "-i", cpp_file_path])
 
 
 def write_cpp(cpp_ops: Sequence[str], file_path: str) -> None:
@@ -206,14 +207,12 @@ def main() -> None:
     )
 
     print("grouped native ops with out variant: %d" % len(native_functions_groups))
-    supported_functions_num = sum(
-        [len(groups) for groups in supported_functions_groups]
-    )
+    supported_functions_num = sum(len(groups) for groups in supported_functions_groups)
     print("generated functions groups with out variant: %d" % supported_functions_num)
 
     print("\nview grouped native ops: %d" % len(native_functions_view_groups))
     supported_view_functions_num = sum(
-        [len(groups) for groups in supported_functions_view_groups]
+        len(groups) for groups in supported_functions_view_groups
     )
     print("generated functions view groups: %d" % supported_view_functions_num)
 

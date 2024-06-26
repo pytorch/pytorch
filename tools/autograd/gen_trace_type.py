@@ -2,7 +2,6 @@ import itertools
 from typing import Dict, List, Sequence, Union
 
 from torchgen.api import cpp
-
 from torchgen.api.types import DispatcherSignature
 from torchgen.code_template import CodeTemplate
 from torchgen.context import with_native_function
@@ -19,33 +18,29 @@ from torchgen.utils import FileManager
 #   - all ops below are part of MANUAL_TRACER to skip codegen Tracer kernel registration
 # Note: we still register to dispatch key Profiler for these ops, keeping it untouched for now.
 # You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
-MANUAL_BACKEND = set(
-    [
-        "options",
-        "data",
-        "set_data",
-        "is_leaf",
-        "output_nr",
-        "_version",
-        "retain_grad",
-        "_backward",
-        "requires_grad_",
-    ]
-)
+MANUAL_BACKEND = {
+    "options",
+    "data",
+    "set_data",
+    "is_leaf",
+    "output_nr",
+    "_version",
+    "retain_grad",
+    "_backward",
+    "requires_grad_",
+}
 
 # For these ops we want to skip the codegen-ed registration to both Autograd and Tracer keys.
 # You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
-MANUAL_AUTOGRAD_AND_TRACER = set(
-    [
-        "resize_",
-        "resize_as_",
-        "detach",
-        "detach_",
-        "copy_",
-        "_fw_primal",
-        "_make_dual",
-    ]
-)
+MANUAL_AUTOGRAD_AND_TRACER = {
+    "resize_",
+    "resize_as_",
+    "detach",
+    "detach_",
+    "copy_",
+    "_fw_primal",
+    "_make_dual",
+}
 
 # Currently MANUAL_AUTOGRAD and MANUAL_TRACER share the same set of ops:
 #   union(MANUAL_BACKEND, MANUAL_AUTOGRAD_AND_TRACER)
@@ -148,7 +143,7 @@ def format_trace_inputs(f: NativeFunction) -> str:
             name = "options"
             return [
                 ADD_TRACE_INPUT.substitute(
-                    name=name, input="optTypeMetaToScalarType(options.dtype_opt())"
+                    name=name, input="c10::optTypeMetaToScalarType(options.dtype_opt())"
                 ),
                 ADD_TRACE_INPUT.substitute(name=name, input="options.layout()"),
                 ADD_TRACE_INPUT.substitute(name=name, input="options.device()"),
@@ -169,9 +164,8 @@ def format_trace_inputs(f: NativeFunction) -> str:
         # *_out functions take the result as a separate argument, but we don't want to
         # trace that argument directly. Instead, we trace its TensorOptions.
         # So first, we need to remove the out argument from the list of arguments to trace.
-        # TODO: byte-for-byte compatible with old codegen behavior - it's incorrect to assume
-        # there is only one output argument.
-        args = args[:-1]
+        num_out_args = len(f.func.arguments.out)
+        args = args[:-num_out_args]
 
     trace_inputs = itertools.chain.from_iterable(
         dispatch_trace_input(arg) for arg in args
@@ -180,8 +174,12 @@ def format_trace_inputs(f: NativeFunction) -> str:
     if f.func.is_out_fn():
         # for *_out functions, handle the result argument differently for inplace/outplace.
         # For inplace: just add the input to the end to confirm with the JIT schema
-        name = f.func.arguments.out[0].name  # TODO: old codegen behavior - should fix
-        inplace = ADD_TRACE_INPUT.substitute(name=name, input=name)
+        inplace = [
+            ADD_TRACE_INPUT.substitute(
+                name=f.func.arguments.out[i].name, input=f.func.arguments.out[i].name
+            )
+            for i in range(num_out_args)
+        ]
 
         # for outplace: do nothing, except if the function is a factory.
         # Factories are a bit special because their out-of-place overloads
@@ -206,7 +204,7 @@ def format_trace_inputs(f: NativeFunction) -> str:
             outplace = [
                 ADD_TRACE_INPUT.substitute(
                     name="out",
-                    input="optTypeMetaToScalarType(out.options().dtype_opt())",
+                    input="c10::optTypeMetaToScalarType(out.options().dtype_opt())",
                 ),
                 ADD_TRACE_INPUT.substitute(name="out", input="out.options().layout()"),
                 ADD_TRACE_INPUT.substitute(name="out", input="out.options().device()"),
@@ -223,7 +221,7 @@ def format_trace_inputs(f: NativeFunction) -> str:
                 SELECT.substitute(
                     cond="tracer_state->force_outplace",
                     true="\n".join(outplace),
-                    false=inplace,
+                    false="\n".join(inplace),
                 )
             ],
         )
@@ -377,22 +375,11 @@ def format_postrecord_trace(f: NativeFunction) -> str:
         return POST_RECORD_TRACE.substitute(add_trace_outputs=outputs)
 
 
-def declare_returned_variables(f: NativeFunction) -> str:
-    modifies_arguments = f.func.kind() in (SchemaKind.inplace, SchemaKind.out)
-    if modifies_arguments:
-        return ""
-    if len(f.func.returns) == 1:
-        return ""
-    types = [cpp.return_type(r, symint=True) for r in f.func.returns]
-    names = cpp.return_names(f)
-    return "\n".join(f"{type.cpp_type()} {name};" for type, name in zip(types, names))
-
-
 def tie_return_values(f: NativeFunction) -> str:
     if len(f.func.returns) == 1:
         return f'auto {f.func.returns[0].name or "result"}'
     names = cpp.return_names(f)
-    return f'std::tie({", ".join(names)})'
+    return f'auto [{", ".join(names)}]'
 
 
 def get_return_value(f: NativeFunction) -> str:
@@ -416,7 +403,6 @@ def emit_trace_body(f: NativeFunction) -> List[str]:
     trace_body: List[str] = []
 
     trace_body.append(format_prerecord_trace(f))
-    trace_body.append(declare_returned_variables(f))
 
     dispatcher_sig = DispatcherSignature.from_schema(f.func)
     dispatcher_exprs = dispatcher_sig.exprs()
@@ -434,7 +420,8 @@ def emit_trace_body(f: NativeFunction) -> List[str]:
     )
 
     # Note that this calls the slow, dispatching variants of manual_cpp_binding ops.
-    # We could probably work harder to ensure that the fast variants are called instead, but the perf benefit would be minimal.
+    # We could probably work harder to ensure that the fast variants are
+    # called instead, but the perf benefit would be minimal.
     trace_body.append(
         TRACE_DISPATCH.substitute(
             assign_return_values=assign_return_values,

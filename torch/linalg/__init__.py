@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import sys
 
 import torch
@@ -87,7 +86,7 @@ Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
 the output has the same batch dimensions.
 
 """ + fr"""
-.. note:: {common_notes["sync_note"]}
+.. note:: {common_notes["sync_note_has_ex"].format("torch.linalg.cholesky_ex")}
 """ + r"""
 
 .. seealso::
@@ -223,7 +222,7 @@ Also supports batches of matrices, and if :attr:`A` is a batch of matrices
 then the output has the same batch dimensions.
 
 """ + fr"""
-.. note:: {common_notes["sync_note"]}
+.. note:: {common_notes["sync_note_has_ex"].format("torch.linalg.inv_ex")}
 """ + r"""
 
 .. note::
@@ -458,6 +457,8 @@ Supports input of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
 the output has the same batch dimensions.
 
+The returned eigenvalues are not guaranteed to be in any specific order.
+
 .. note:: The eigenvalues and eigenvectors of a real matrix may be complex.
 
 """ + fr"""
@@ -477,9 +478,6 @@ the output has the same batch dimensions.
              by :math:`e^{i \phi}, \phi \in \mathbb{R}` produces another set of valid eigenvectors
              of the matrix.  For this reason, the loss function shall not depend on the phase of the
              eigenvectors, as this quantity is not well-defined.
-             This is checked when computing the gradients of this function. As such,
-             when inputs are on a CUDA device, this function synchronizes that device with the CPU
-             when computing the gradients.
              This is checked when computing the gradients of this function. As such,
              when inputs are on a CUDA device, the computation of the gradients
              of this function synchronizes that device with the CPU.
@@ -562,6 +560,8 @@ where :math:`\mathrm{I}_n` is the `n`-dimensional identity matrix.
 Supports input of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
 the output has the same batch dimensions.
+
+The returned eigenvalues are not guaranteed to be in any specific order.
 
 .. note:: The eigenvalues of a real matrix may be complex, as the roots of a real polynomial may be complex.
 
@@ -647,6 +647,13 @@ The eigenvalues are returned in ascending order.
              the gradient will be numerically unstable, as it depends on the eigenvalues
              :math:`\lambda_i` through the computation of
              :math:`\frac{1}{\min_{i \neq j} \lambda_i - \lambda_j}`.
+
+.. warning:: User may see pytorch crashes if running `eigh` on CUDA devices with CUDA versions before 12.1 update 1
+             with large ill-conditioned matrices as inputs.
+             Refer to :ref:`Linear Algebra Numerical Stability<Linear Algebra Stability>` for more details.
+             If this is the case, user may (1) tune their matrix inputs to be less ill-conditioned,
+             or (2) use :func:`torch.backends.cuda.preferred_linalg_library` to
+             try other supported backends.
 
 .. seealso::
 
@@ -871,8 +878,8 @@ the output has the same batch dimensions.
 """ + r"""
 
 Args:
-    A (Tensor): tensor of shape (*, n, n) where * is zero or more batch dimensions consisting of symmetric or Hermitian matrices.
-                    `(*, n, n)` where `*` is one or more batch dimensions.
+    A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
+                consisting of symmetric or Hermitian matrices.
 
 Keyword args:
     hermitian (bool, optional): whether to consider the input to be Hermitian or symmetric.
@@ -920,8 +927,8 @@ If ``check_errors=True`` and ``info`` contains positive integers, then a `Runtim
 """ + r"""
 
 Args:
-    A (Tensor): tensor of shape (*, n, n) where * is zero or more batch dimensions consisting of symmetric or Hermitian matrices.
-                    `(*, n, n)` where `*` is one or more batch dimensions.
+    A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
+                consisting of symmetric or Hermitian matrices.
 
 Keyword args:
     hermitian (bool, optional): whether to consider the input to be Hermitian or symmetric.
@@ -1112,7 +1119,7 @@ Examples::
     tensor([2])
 
 .. _condition number:
-    https://pytorch.org/docs/master/linalg.html#torch.linalg.cond
+    https://pytorch.org/docs/main/linalg.html#torch.linalg.cond
 .. _full description of these drivers:
     https://www.netlib.org/lapack/lug/node27.html
 """)
@@ -1134,7 +1141,7 @@ as :attr:`A`. If :attr:`n` is negative, it returns the inverse of each matrix
     Consider using :func:`torch.linalg.solve` if possible for multiplying a matrix on the left by
     a negative power as, if :attr:`n`\ `> 0`::
 
-        matrix_power(torch.linalg.solve(A, B), n) == matrix_power(A, -n)  @ B
+        torch.linalg.solve(matrix_power(A, n), B) == matrix_power(A, -n)  @ B
 
     It is always preferred to use :func:`~solve` when possible, as it is faster and more
     numerically stable than computing :math:`A^{-n}` explicitly.
@@ -1447,7 +1454,7 @@ Keyword args:
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
     dtype (:class:`torch.dtype`, optional): type used to perform the accumulation and the return.
         If specified, :attr:`x` is cast to :attr:`dtype` before performing the operation,
-        and the returned tensor’s type will be :attr:`dtype` if real and of its real counterpart if complex.
+        and the returned tensor's type will be :attr:`dtype` if real and of its real counterpart if complex.
         :attr:`dtype` may be complex if :attr:`x` is complex, otherwise it must be real.
         :attr:`x` should be convertible without narrowing to :attr:`dtype`. Default: None
 
@@ -1770,7 +1777,7 @@ Examples::
     tensor(3.0957e-06)
 
 .. _condition number:
-    https://pytorch.org/docs/master/linalg.html#torch.linalg.cond
+    https://pytorch.org/docs/main/linalg.html#torch.linalg.cond
 .. _the resulting vectors will span the same subspace:
     https://en.wikipedia.org/wiki/Singular_value_decomposition#Singular_values,_singular_vectors,_and_their_relation_to_the_SVD
 """)
@@ -2048,10 +2055,10 @@ Letting :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`,
 this function computes the **matrix exponential** of :math:`A \in \mathbb{K}^{n \times n}`, which is defined as
 
 .. math::
-    \mathrm{matrix_exp}(A) = \sum_{k=0}^\infty \frac{1}{k!}A^k \in \mathbb{K}^{n \times n}.
+    \mathrm{matrix\_exp}(A) = \sum_{k=0}^\infty \frac{1}{k!}A^k \in \mathbb{K}^{n \times n}.
 
 If the matrix :math:`A` has eigenvalues :math:`\lambda_i \in \mathbb{C}`,
-the matrix :math:`\mathrm{matrix_exp}(A)` has eigenvalues :math:`e^{\lambda_i} \in \mathbb{C}`.
+the matrix :math:`\mathrm{matrix\_exp}(A)` has eigenvalues :math:`e^{\lambda_i} \in \mathbb{C}`.
 
 Supports input of bfloat16, float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
@@ -2128,7 +2135,7 @@ Letting `*` be zero or more batch dimensions,
     :attr:`A` and :attr:`B` transposed and transposing the output returned by this function.
 
 """ + fr"""
-.. note:: {common_notes["sync_note"]}
+.. note:: {common_notes["sync_note_has_ex"].format("torch.linalg.solve_ex")}
 """ + r"""
 
 .. seealso::
@@ -2239,7 +2246,7 @@ Keyword args:
 Examples::
 
     >>> A = torch.randn(3, 3).triu_()
-    >>> b = torch.randn(3, 4)
+    >>> B = torch.randn(3, 4)
     >>> X = torch.linalg.solve_triangular(A, B, upper=True)
     >>> torch.allclose(A @ X, B)
     True
@@ -2329,9 +2336,9 @@ Examples::
     >>> A = torch.randn(2, 3, 3)
     >>> B1 = torch.randn(2, 3, 4)
     >>> B2 = torch.randn(2, 3, 7)
-    >>> A_factor = torch.linalg.lu_factor(A)
-    >>> X1 = torch.linalg.lu_solve(A_factor, B1)
-    >>> X2 = torch.linalg.lu_solve(A_factor, B2)
+    >>> LU, pivots = torch.linalg.lu_factor(A)
+    >>> X1 = torch.linalg.lu_solve(LU, pivots, B1)
+    >>> X2 = torch.linalg.lu_solve(LU, pivots, B2)
     >>> torch.allclose(A @ X1, B1)
     True
     >>> torch.allclose(A @ X2, B2)
@@ -2389,7 +2396,7 @@ If :attr:`left`\ `= False`, this function returns the matrix :math:`X \in \mathb
 
     XA = B\mathrlap{\qquad A \in \mathbb{K}^{k \times k}, B \in \mathbb{K}^{n \times k}.}
 
-If  :attr:`adjoint`\ `= True` (and :attr:`left`\ `= True), given an LU factorization of :math:`A`
+If  :attr:`adjoint`\ `= True` (and :attr:`left`\ `= True`), given an LU factorization of :math:`A`
 this function function returns the :math:`X \in \mathbb{K}^{n \times k}` that solves the system
 
 .. math::
@@ -2590,7 +2597,7 @@ Examples::
 
     >>> A = torch.randn(4, 4)
     >>> Atensorinv = torch.linalg.tensorinv(A, ind=1)
-    >>> Ainv = torch.linalg.inverse(A)
+    >>> Ainv = torch.linalg.inv(A)
     >>> torch.allclose(Atensorinv, Ainv)
     True
 """)

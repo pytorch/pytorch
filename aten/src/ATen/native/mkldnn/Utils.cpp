@@ -70,26 +70,23 @@ void check_mkldnn_binary_fusion_inputs(
       "mkldnn pointwise binary fusion: input's device should be CPU");
   TORCH_CHECK(
       input.scalar_type() == ScalarType::Float ||
-          input.scalar_type() == ScalarType::BFloat16,
-      "mkldnn pointwise binary: input's dtype should be float or bfloat16");
-  if (input.scalar_type() == ScalarType::BFloat16) {
-    TORCH_CHECK(
-        mkldnn_bf16_device_check(),
-        "mkldnn pointwise binary: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
-  }
+          input.scalar_type() == ScalarType::BFloat16 ||
+          input.scalar_type() == ScalarType::Half,
+      "mkldnn pointwise binary: input's dtype should be float, bfloat16 or half");
+  mkldnn_check_low_precision(input.scalar_type(), "mkldnn pointwise binary");
 }
 
 #if AT_MKLDNN_ENABLED()
 
 #define ATTR_FUNC(NAME)                              \
-  [](torch::List<c10::optional<at::Scalar>> scalars, \
-     c10::optional<c10::string_view> algorithm) {    \
+  [](torch::List<std::optional<at::Scalar>> scalars, \
+     std::optional<c10::string_view> algorithm) {    \
     return ideep::attr_t::fuse_##NAME();             \
   }
 
 AttrFunction attr_func_leaky_relu =
-    [](torch::List<c10::optional<at::Scalar>> scalars,
-       c10::optional<c10::string_view> algorithm) {
+    [](torch::List<std::optional<at::Scalar>> scalars,
+       std::optional<c10::string_view> algorithm) {
       TORCH_CHECK(
           scalars.size() == 1 &&
               scalars[0].get().toOptional<at::Scalar>().has_value(),
@@ -100,8 +97,8 @@ AttrFunction attr_func_leaky_relu =
     };
 
 AttrFunction attr_func_hardtanh =
-    [](torch::List<c10::optional<at::Scalar>> scalars,
-       c10::optional<c10::string_view> algorithm) {
+    [](torch::List<std::optional<at::Scalar>> scalars,
+       std::optional<c10::string_view> algorithm) {
       TORCH_CHECK(
           scalars.size() == 2 &&
               scalars[0].get().toOptional<at::Scalar>().has_value() &&
@@ -115,8 +112,8 @@ AttrFunction attr_func_hardtanh =
       return ideep::attr_t::fuse_clamp(lower_bound_value, upper_bound_value);
     };
 
-AttrFunction attr_func_gelu = [](torch::List<c10::optional<at::Scalar>> scalars,
-                                 c10::optional<c10::string_view> algorithm) {
+AttrFunction attr_func_gelu = [](torch::List<std::optional<at::Scalar>> scalars,
+                                 std::optional<c10::string_view> algorithm) {
   TORCH_CHECK(
       algorithm.has_value(),
       "gelu is expected to have one str input: algorithm");
@@ -134,12 +131,12 @@ AttrFunction attr_func_gelu = [](torch::List<c10::optional<at::Scalar>> scalars,
 };
 
 AttrFunction attr_func_hardsigmoid =
-    [](torch::List<c10::optional<at::Scalar>> scalars,
-       c10::optional<c10::string_view> algorithm) {
+    [](torch::List<std::optional<at::Scalar>> scalars,
+       std::optional<c10::string_view> algorithm) {
       ideep::attr_t attr;
       ideep::post_ops po;
       po.append_eltwise(
-          1.0f, ideep::algorithm::eltwise_hardsigmoid, 1.0f / 6.0f, 0.5f);
+          ideep::algorithm::eltwise_hardsigmoid, 1.0f / 6.0f, 0.5f);
       attr.set_post_ops(po);
       return attr;
     };

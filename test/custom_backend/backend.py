@@ -1,6 +1,7 @@
 import argparse
 import os.path
 import sys
+
 import torch
 
 
@@ -17,7 +18,7 @@ def get_custom_backend_library_path():
         library_filename = "libcustom_backend.dylib"
     else:
         library_filename = "libcustom_backend.so"
-    path = os.path.abspath("build/{}".format(library_filename))
+    path = os.path.abspath(f"build/{library_filename}")
     assert os.path.exists(path), path
     return path
 
@@ -33,7 +34,9 @@ def to_custom_backend(module):
     Returns:
         The module, lowered so that it can run on TestBackend.
     """
-    lowered_module = torch._C._jit_to_backend("custom_backend", module, {"forward": {"": ""}})
+    lowered_module = torch._C._jit_to_backend(
+        "custom_backend", module, {"forward": {"": ""}}
+    )
     return lowered_module
 
 
@@ -43,17 +46,12 @@ class Model(torch.nn.Module):
     and executing in C++.
     """
 
-    def __init__(self):
-        super(Model, self).__init__()
-
     def forward(self, a, b):
         return (a + b, a - b)
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Lower a Module to a custom backend"
-    )
+    parser = argparse.ArgumentParser(description="Lower a Module to a custom backend")
     parser.add_argument("--export-module-to", required=True)
     options = parser.parse_args()
 

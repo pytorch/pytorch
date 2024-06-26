@@ -7,23 +7,20 @@ If you are adding a new entry/functionality, please, add it to the
 here.
 """
 
+from torch.ao.quantization.fx.graph_module import ObservedGraphModule
 from torch.ao.quantization.quantize_fx import (
     _check_is_graph_module,
-    _swap_ff_with_fxff,
+    _convert_fx,
+    _convert_standalone_module_fx,
     _fuse_fx,
-    Scope,
-    ScopeContextManager,
-    QuantizationTracer,
     _prepare_fx,
     _prepare_standalone_module_fx,
+    _swap_ff_with_fxff,
+    convert_fx,
     fuse_fx,
     prepare_fx,
     prepare_qat_fx,
-    _convert_fx,
-    convert_fx,
-    _convert_standalone_module_fx,
-)
-
-from torch.ao.quantization.fx.graph_module import (
-    ObservedGraphModule,
+    QuantizationTracer,
+    Scope,
+    ScopeContextManager,
 )

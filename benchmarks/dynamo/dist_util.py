@@ -38,7 +38,7 @@ def cleanup():
 
 class CustomLinear(torch.nn.Module):
     def __init__(self, a, b):
-        super(CustomLinear, self).__init__()
+        super().__init__()
         self.weight = nn.Parameter(torch.randn(a, b))
 
     def forward(self, x):
@@ -47,7 +47,7 @@ class CustomLinear(torch.nn.Module):
 
 class MyModule(torch.nn.Module):
     def __init__(self, a, b):
-        super(MyModule, self).__init__()
+        super().__init__()
         self.net = nn.Sequential(
             nn.Linear(a, b),
             nn.ReLU(),
@@ -59,7 +59,7 @@ class MyModule(torch.nn.Module):
 
 class ToyModel(nn.Module):
     def __init__(self):
-        super(ToyModel, self).__init__()
+        super().__init__()
         self.net = nn.Sequential(
             *[nn.Linear(10, 10000), nn.ReLU()]
             + [nn.Linear(10000, 10000), nn.ReLU()]
@@ -94,9 +94,7 @@ def get_model(args):
             f"torchbenchmark.models.{args.torchbench_model}"
         )
         benchmark_cls = getattr(module, "Model", None)
-        bm = benchmark_cls(
-            test="train", device=args.device, jit=False, batch_size=args.batch_size
-        )
+        bm = benchmark_cls(test="train", device=args.device, batch_size=args.batch_size)
         model, inputs = bm.get_module()
     elif args.toy_model:
         model = ToyModel()

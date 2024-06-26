@@ -4,9 +4,7 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
-namespace interpreter {
+namespace torch::jit::interpreter {
 /*
 This is an optimization that reduces the number of store/load/move nodes needed
 by recognizing that parts of the graph are simple trees like a*x + b*y. When
@@ -67,7 +65,7 @@ struct CanEmitInline {
   Node* scanValue(Node* block_point, Value* v) {
     // this node is a candidate for inline, if our reverse scan of the
     // node list lines up with the use of v, we know it will be emitted in
-    // tree order, and we can inlining. Scan continutes for further nodes.
+    // tree order, and we can inlining. Scan continues for further nodes.
     if (v->node() == block_point && canInline(v)) {
       // since we inlined this node, we may be able to recursively inline
       // its inputs, so we continue scanning it
@@ -105,6 +103,4 @@ struct CanEmitInline {
   std::unordered_map<Node*, bool> can_emit_inline_;
 };
 
-} // namespace interpreter
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::interpreter

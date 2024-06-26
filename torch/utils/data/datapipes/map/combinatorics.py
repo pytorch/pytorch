@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import random
 
 import torch
@@ -47,6 +48,7 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
         the order of data order for the sake of random reads, but ``IterDataPipe`` depends on the order
         of data during data-processing.
     """
+
     datapipe: MapDataPipe[T_co]
     _enabled: bool
     _seed: Optional[int]

@@ -5,6 +5,7 @@
 
 using namespace c10::guts;
 
+// NOLINTBEGIN(modernize*)
 namespace {
 
 namespace test_function_traits {
@@ -93,14 +94,14 @@ struct CopyCounting {
   CopyCounting() : move_count(0), copy_count(0) {}
   CopyCounting(const CopyCounting& rhs)
       : move_count(rhs.move_count), copy_count(rhs.copy_count + 1) {}
-  CopyCounting(CopyCounting&& rhs)
+  CopyCounting(CopyCounting&& rhs) noexcept
       : move_count(rhs.move_count + 1), copy_count(rhs.copy_count) {}
   CopyCounting& operator=(const CopyCounting& rhs) {
     move_count = rhs.move_count;
     copy_count = rhs.copy_count + 1;
     return *this;
   }
-  CopyCounting& operator=(CopyCounting&& rhs) {
+  CopyCounting& operator=(CopyCounting&& rhs) noexcept {
     move_count = rhs.move_count + 1;
     copy_count = rhs.copy_count;
     return *this;
@@ -110,230 +111,6 @@ struct CopyCounting {
 template <class T>
 using is_my_copy_counting_class =
     std::is_same<CopyCounting, std::remove_cv_t<std::remove_reference_t<T>>>;
-
-namespace test_extract_arg_by_filtered_index {
-class MyClass {};
-
-TEST(MetaprogrammingTest, ExtractArgByFilteredIndex) {
-  auto a1 = extract_arg_by_filtered_index<std::is_integral, 0>(
-      3, "bla", MyClass(), 4, nullptr, 5);
-  auto a2 = extract_arg_by_filtered_index<std::is_integral, 1>(
-      3, "bla", MyClass(), 4, nullptr, 5);
-  auto a3 = extract_arg_by_filtered_index<std::is_integral, 2>(
-      3, "bla", MyClass(), 4, nullptr, 5);
-  EXPECT_EQ(3, a1);
-  EXPECT_EQ(4, a2);
-  EXPECT_EQ(5, a3);
-}
-
-TEST(MetaprogrammingTest, ExtractArgByFilteredIndex_singleInput) {
-  auto a1 = extract_arg_by_filtered_index<std::is_integral, 0>(3);
-  EXPECT_EQ(3, a1);
-}
-
-TEST(MetaprogrammingTest, ExtractArgByFilteredIndex_movableOnly) {
-  MovableOnly a1 = extract_arg_by_filtered_index<is_my_movable_only_class, 0>(
-      3, MovableOnly(3), "test", MovableOnly(1));
-  MovableOnly a2 = extract_arg_by_filtered_index<is_my_movable_only_class, 1>(
-      3, MovableOnly(3), "test", MovableOnly(1));
-  EXPECT_EQ(MovableOnly(3), a1);
-  EXPECT_EQ(MovableOnly(1), a2);
-}
-
-TEST(MetaprogrammingTest, ExtractArgByFilteredIndex_onlyCopiesIfNecessary) {
-  CopyCounting source;
-  CopyCounting source2;
-  CopyCounting a1 = extract_arg_by_filtered_index<is_my_copy_counting_class, 0>(
-      3, CopyCounting(), "test", source, std::move(source2));
-  // NOLINTNEXTLINE(bugprone-use-after-move)
-  CopyCounting a2 = extract_arg_by_filtered_index<is_my_copy_counting_class, 1>(
-      3, CopyCounting(), "test", source, std::move(source2));
-  // NOLINTNEXTLINE(bugprone-use-after-move)
-  CopyCounting a3 = extract_arg_by_filtered_index<is_my_copy_counting_class, 2>(
-      3, CopyCounting(), "test", source, std::move(source2));
-  EXPECT_EQ(1, a1.move_count);
-  EXPECT_EQ(0, a1.copy_count);
-  EXPECT_EQ(0, a2.move_count);
-  EXPECT_EQ(1, a3.move_count);
-  EXPECT_EQ(0, a3.copy_count);
-  EXPECT_EQ(1, a2.copy_count);
-}
-
-TEST(MetaprogrammingTest, ExtractArgByFilteredIndex_onlyMovesIfNecessary) {
-  CopyCounting source;
-  CopyCounting source2;
-  CopyCounting&& a1 =
-      extract_arg_by_filtered_index<is_my_copy_counting_class, 0>(
-          3, std::move(source), "test", std::move(source2));
-  // NOLINTNEXTLINE(bugprone-use-after-move)
-  CopyCounting a2 = extract_arg_by_filtered_index<is_my_copy_counting_class, 1>(
-      3, std::move(source), "test", std::move(source2));
-  EXPECT_EQ(0, a1.move_count);
-  EXPECT_EQ(0, a1.copy_count);
-  EXPECT_EQ(1, a2.move_count);
-  EXPECT_EQ(0, a2.copy_count);
-}
-
-template <class T>
-using is_true = std::true_type;
-
-TEST(
-    MetaprogrammingTest,
-    ExtractArgByFilteredIndex_keepsLValueReferencesIntact) {
-  MyClass obj;
-  MyClass& a1 = extract_arg_by_filtered_index<is_true, 1>(3, obj, "test", obj);
-  EXPECT_EQ(&obj, &a1);
-}
-} // namespace test_extract_arg_by_filtered_index
-
-namespace test_filter_map {
-class MyClass {};
-
-struct map_to_double {
-  template <class T>
-  constexpr double operator()(T a) const {
-    return static_cast<double>(a);
-  }
-};
-
-TEST(MetaprogrammingTest, FilterMap) {
-  auto result = filter_map<double, std::is_integral>(
-      map_to_double(), 3, "bla", MyClass(), 4, nullptr, 5);
-  static_assert(std::is_same<array<double, 3>, decltype(result)>::value, "");
-  constexpr array<double, 3> expected{{3.0, 4.0, 5.0}};
-  EXPECT_EQ(expected, result);
-}
-
-TEST(MetaprogrammingTest, FilterMap_emptyInput) {
-  auto result = filter_map<double, std::is_integral>(map_to_double());
-  static_assert(std::is_same<array<double, 0>, decltype(result)>::value, "");
-  constexpr array<double, 0> expected{{}};
-  EXPECT_EQ(expected, result);
-}
-
-TEST(MetaprogrammingTest, FilterMap_emptyOutput) {
-  auto result = filter_map<double, std::is_integral>(
-      map_to_double(), "bla", MyClass(), nullptr);
-  static_assert(std::is_same<array<double, 0>, decltype(result)>::value, "");
-  constexpr array<double, 0> expected{{}};
-  EXPECT_EQ(expected, result);
-}
-
-TEST(MetaprogrammingTest, FilterMap_movableOnly_byRValue) {
-  struct map_movable_by_rvalue {
-    MovableOnly operator()(MovableOnly&& a) const {
-      return std::move(a);
-    }
-  };
-
-  auto result = filter_map<MovableOnly, is_my_movable_only_class>(
-      map_movable_by_rvalue(),
-      MovableOnly(5),
-      "bla",
-      nullptr,
-      3,
-      MovableOnly(2));
-  static_assert(
-      std::is_same<array<MovableOnly, 2>, decltype(result)>::value, "");
-  constexpr array<MovableOnly, 2> expected{{MovableOnly(5), MovableOnly(2)}};
-  EXPECT_EQ(expected, result);
-}
-
-TEST(MetaprogrammingTest, FilterMap_movableOnly_byValue) {
-  struct map_movable_by_lvalue {
-    MovableOnly operator()(MovableOnly a) const {
-      return a;
-    }
-  };
-
-  auto result = filter_map<MovableOnly, is_my_movable_only_class>(
-      map_movable_by_lvalue(),
-      MovableOnly(5),
-      "bla",
-      nullptr,
-      3,
-      MovableOnly(2));
-  static_assert(
-      std::is_same<array<MovableOnly, 2>, decltype(result)>::value, "");
-  constexpr array<MovableOnly, 2> expected{{MovableOnly(5), MovableOnly(2)}};
-  EXPECT_EQ(expected, result);
-}
-
-// See https://github.com/pytorch/pytorch/issues/35546
-TEST(MetaprogrammingTest, FilterMap_onlyCopiesIfNecessary) {
-  struct map_copy_counting_by_copy {
-    CopyCounting operator()(CopyCounting v) const {
-      return v;
-    }
-  };
-
-  CopyCounting source;
-  CopyCounting source2;
-  auto result = filter_map<CopyCounting, is_my_copy_counting_class>(
-      map_copy_counting_by_copy(),
-      CopyCounting(),
-      "bla",
-      nullptr,
-      3,
-      source,
-      std::move(source2));
-  static_assert(
-      std::is_same<array<CopyCounting, 3>, decltype(result)>::value, "");
-  EXPECT_EQ(0, result[0].copy_count);
-  EXPECT_EQ(2, result[0].move_count);
-  EXPECT_EQ(1, result[1].copy_count);
-  EXPECT_EQ(1, result[1].move_count);
-  EXPECT_EQ(0, result[2].copy_count);
-  EXPECT_EQ(2, result[2].move_count);
-}
-
-TEST(MetaprogrammingTest, FilterMap_onlyMovesIfNecessary_1) {
-  struct map_copy_counting_by_move {
-    CopyCounting operator()(CopyCounting&& v) const {
-      return std::move(v);
-    }
-  };
-
-  CopyCounting source;
-  auto result = filter_map<CopyCounting, is_my_copy_counting_class>(
-      map_copy_counting_by_move(),
-      CopyCounting(),
-      "bla",
-      nullptr,
-      3,
-      std::move(source));
-  static_assert(
-      std::is_same<array<CopyCounting, 2>, decltype(result)>::value, "");
-  EXPECT_EQ(0, result[0].copy_count);
-  EXPECT_EQ(1, result[0].move_count);
-  EXPECT_EQ(0, result[1].copy_count);
-  EXPECT_EQ(1, result[1].move_count);
-}
-
-TEST(MetaprogrammingTest, FilterMap_onlyMovesIfNecessary_2) {
-  struct map_copy_counting_by_pointer {
-    const CopyCounting* operator()(const CopyCounting& v) const {
-      return &v;
-    }
-  };
-
-  CopyCounting source1;
-  CopyCounting source2;
-  auto result = filter_map<const CopyCounting*, is_my_copy_counting_class>(
-      map_copy_counting_by_pointer(),
-      "bla",
-      nullptr,
-      3,
-      source1,
-      std::move(source2));
-  static_assert(
-      std::is_same<array<const CopyCounting*, 2>, decltype(result)>::value, "");
-  EXPECT_EQ(0, result[0]->copy_count);
-  EXPECT_EQ(0, result[0]->move_count);
-  EXPECT_EQ(0, result[1]->copy_count);
-  EXPECT_EQ(0, result[1]->move_count);
-}
-} // namespace test_filter_map
 
 namespace test_tuple_elements {
 // note: not testing empty selection, as some compilers will raise
@@ -398,7 +175,7 @@ namespace test_tuple_map {
 TEST(MetaprogrammingTest, TupleMap_simple) {
   auto result = tuple_map(
       std::tuple<int32_t, int32_t, int32_t>(3, 4, 5),
-      [](int32_t a) -> int16_t { return a + 1; });
+      [](int32_t a) -> int16_t { return static_cast<int16_t>(a + 1); });
   static_assert(
       std::is_same<std::tuple<int16_t, int16_t, int16_t>, decltype(result)>::
           value,
@@ -411,7 +188,7 @@ TEST(MetaprogrammingTest, TupleMap_simple) {
 TEST(MetaprogrammingTest, TupleMap_mapperTakesDifferentButConvertibleType) {
   auto result = tuple_map(
       std::tuple<int32_t, int32_t, int32_t>(3, 4, 5),
-      [](int64_t a) -> int16_t { return a + 1; });
+      [](int64_t a) -> int16_t { return static_cast<int16_t>(a + 1); });
   static_assert(
       std::is_same<std::tuple<int16_t, int16_t, int16_t>, decltype(result)>::
           value,
@@ -424,7 +201,7 @@ TEST(MetaprogrammingTest, TupleMap_mapperTakesDifferentButConvertibleType) {
 TEST(MetaprogrammingTest, TupleMap_mapperTakesConstRef) {
   auto result = tuple_map(
       std::tuple<int32_t, int32_t, int32_t>(3, 4, 5),
-      [](const int32_t& a) -> int16_t { return a + 1; });
+      [](const int32_t& a) -> int16_t { return static_cast<int16_t>(a + 1); });
   static_assert(
       std::is_same<std::tuple<int16_t, int16_t, int16_t>, decltype(result)>::
           value,
@@ -523,221 +300,5 @@ TEST(MetaprogrammingTest, TupleMap_canBeUsedWithAutoLambdas) {
 }
 } // namespace test_tuple_map
 
-namespace test_tuple_concat {
-TEST(MetaprogrammingTest, TupleConcat_zerotuples) {
-  auto result = tuple_concat();
-  static_assert(std::is_same<std::tuple<>, decltype(result)>::value, "");
-}
-
-TEST(MetaprogrammingTest, TupleConcat_oneemptytuple) {
-  auto result = tuple_concat(std::tuple<>());
-  static_assert(std::is_same<std::tuple<>, decltype(result)>::value, "");
-}
-
-TEST(MetaprogrammingTest, TupleConcat_onenonemptytuple) {
-  auto result = tuple_concat(std::tuple<int64_t>(3));
-  static_assert(std::is_same<std::tuple<int64_t>, decltype(result)>::value, "");
-  EXPECT_EQ(3, std::get<0>(result));
-}
-
-TEST(MetaprogrammingTest, TupleConcat_twotuples) {
-  auto result = tuple_concat(
-      std::tuple<int64_t, std::string>(3, "4"),
-      std::tuple<double, int16_t>(2.3, 15));
-  static_assert(
-      std::is_same<
-          std::tuple<int64_t, std::string, double, int16_t>,
-          decltype(result)>::value,
-      "");
-  EXPECT_EQ(3, std::get<0>(result));
-  EXPECT_EQ("4", std::get<1>(result));
-  EXPECT_EQ(2.3, std::get<2>(result));
-  EXPECT_EQ(15, std::get<3>(result));
-}
-
-TEST(MetaprogrammingTest, TupleConcat_threetuples) {
-  auto result = tuple_concat(
-      std::tuple<int64_t, std::string>(3, "4"),
-      std::tuple<double, int16_t>(2.3, 15),
-      std::tuple<std::string, float>("5", 3.2));
-  static_assert(
-      std::is_same<
-          std::tuple<int64_t, std::string, double, int16_t, std::string, float>,
-          decltype(result)>::value,
-      "");
-  EXPECT_EQ(3, std::get<0>(result));
-  EXPECT_EQ("4", std::get<1>(result));
-  EXPECT_EQ(2.3, std::get<2>(result));
-  EXPECT_EQ(15, std::get<3>(result));
-  EXPECT_EQ("5", std::get<4>(result));
-  EXPECT_EQ(static_cast<float>(3.2), std::get<5>(result));
-}
-
-TEST(MetaprogrammingTest, TupleConcat_emptytupleatbeginning) {
-  auto result = tuple_concat(
-      std::tuple<>(),
-      std::tuple<double, int16_t>(2.3, 15),
-      std::tuple<std::string, float>("5", 3.2));
-  static_assert(
-      std::is_same<
-          std::tuple<double, int16_t, std::string, float>,
-          decltype(result)>::value,
-      "");
-  EXPECT_EQ(2.3, std::get<0>(result));
-  EXPECT_EQ(15, std::get<1>(result));
-  EXPECT_EQ("5", std::get<2>(result));
-  EXPECT_EQ(static_cast<float>(3.2), std::get<3>(result));
-}
-
-TEST(MetaprogrammingTest, TupleConcat_emptytupleinmiddle) {
-  auto result = tuple_concat(
-      std::tuple<double, int16_t>(2.3, 15),
-      std::tuple<>(),
-      std::tuple<std::string, float>("5", 3.2));
-  static_assert(
-      std::is_same<
-          std::tuple<double, int16_t, std::string, float>,
-          decltype(result)>::value,
-      "");
-  EXPECT_EQ(2.3, std::get<0>(result));
-  EXPECT_EQ(15, std::get<1>(result));
-  EXPECT_EQ("5", std::get<2>(result));
-  EXPECT_EQ(static_cast<float>(3.2), std::get<3>(result));
-}
-
-TEST(MetaprogrammingTest, TupleConcat_emptytupleatend) {
-  auto result = tuple_concat(
-      std::tuple<double, int16_t>(2.3, 15),
-      std::tuple<std::string, float>("5", 3.2),
-      std::tuple<>());
-  static_assert(
-      std::is_same<
-          std::tuple<double, int16_t, std::string, float>,
-          decltype(result)>::value,
-      "");
-  EXPECT_EQ(2.3, std::get<0>(result));
-  EXPECT_EQ(15, std::get<1>(result));
-  EXPECT_EQ("5", std::get<2>(result));
-  EXPECT_EQ(static_cast<float>(3.2), std::get<3>(result));
-}
-
-TEST(MetaprogrammingTest, TupleConcat_workswithreferencesandpointers) {
-  double val1 = 2.3;
-  int16_t val2 = 15;
-  std::string val3 = "hello";
-  float val4 = 3.2;
-  auto result = tuple_concat(
-      std::tuple<double&, const int16_t&>(val1, val2),
-      std::tuple<std::string&&, float*>(std::move(val3), &val4));
-  static_assert(
-      std::is_same<
-          std::tuple<double&, const int16_t&, std::string&&, float*>,
-          decltype(result)>::value,
-      "");
-  EXPECT_EQ(2.3, std::get<0>(result));
-  EXPECT_EQ(&val1, &std::get<0>(result));
-  EXPECT_EQ(15, std::get<1>(result));
-  EXPECT_EQ(&val2, &std::get<1>(result));
-  EXPECT_EQ("hello", std::get<2>(result));
-  EXPECT_EQ(&val3, &std::get<2>(result));
-  EXPECT_EQ(static_cast<float>(3.2), *std::get<3>(result));
-  EXPECT_EQ(&val4, std::get<3>(result));
-}
-
-TEST(MetaprogrammingTest, TupleConcat_worksWithMovableOnlyTypes) {
-  auto result = tuple_concat(
-      std::tuple<MovableOnly, MovableOnly>(1, 2), std::tuple<MovableOnly>(3));
-  static_assert(
-      std::is_same<
-          std::tuple<MovableOnly, MovableOnly, MovableOnly>,
-          decltype(result)>::value,
-      "");
-  EXPECT_EQ(MovableOnly(1), std::get<0>(result));
-  EXPECT_EQ(MovableOnly(2), std::get<1>(result));
-  EXPECT_EQ(MovableOnly(3), std::get<2>(result));
-}
-
-TEST(MetaprogrammingTest, TupleConcat_doesntCopyMoreThanNecessary) {
-  auto result = tuple_concat(
-      std::tuple<CopyCounting, CopyCounting>(CopyCounting(), CopyCounting()),
-      std::tuple<CopyCounting>(CopyCounting()),
-      std::tuple<CopyCounting>(CopyCounting()));
-  static_assert(
-      std::is_same<
-          std::tuple<CopyCounting, CopyCounting, CopyCounting, CopyCounting>,
-          decltype(result)>::value,
-      "");
-  EXPECT_EQ(0, std::get<0>(result).copy_count);
-  EXPECT_EQ(0, std::get<1>(result).copy_count);
-  EXPECT_EQ(0, std::get<2>(result).copy_count);
-  EXPECT_EQ(0, std::get<3>(result).copy_count);
-  EXPECT_EQ(2, std::get<0>(result).move_count);
-  EXPECT_EQ(2, std::get<1>(result).move_count);
-  EXPECT_EQ(2, std::get<2>(result).move_count);
-  EXPECT_EQ(2, std::get<3>(result).move_count);
-}
-} // namespace test_tuple_concat
-
-namespace test_concat_iseq {
-using std::index_sequence;
-using std::integer_sequence;
-static_assert(std::is_same<index_sequence<>, concat_iseq_t<>>::value, "");
-static_assert(
-    std::is_same<index_sequence<>, concat_iseq_t<index_sequence<>>>::value,
-    "");
-static_assert(
-    std::is_same<
-        index_sequence<>,
-        concat_iseq_t<index_sequence<>, index_sequence<>>>::value,
-    "");
-static_assert(
-    std::is_same<index_sequence<4>, concat_iseq_t<index_sequence<4>>>::value,
-    "");
-static_assert(
-    std::is_same<
-        index_sequence<4>,
-        concat_iseq_t<index_sequence<4>, index_sequence<>>>::value,
-    "");
-static_assert(
-    std::is_same<
-        index_sequence<4>,
-        concat_iseq_t<index_sequence<>, index_sequence<4>>>::value,
-    "");
-static_assert(
-    std::is_same<
-        index_sequence<4>,
-        concat_iseq_t<index_sequence<>, index_sequence<4>, index_sequence<>>>::
-        value,
-    "");
-static_assert(
-    std::is_same<
-        index_sequence<4, 2>,
-        concat_iseq_t<index_sequence<4>, index_sequence<2>>>::value,
-    "");
-static_assert(
-    std::is_same<
-        index_sequence<4, 2>,
-        concat_iseq_t<
-            index_sequence<>,
-            index_sequence<4, 2>,
-            index_sequence<>>>::value,
-    "");
-static_assert(
-    std::is_same<
-        index_sequence<4, 2, 9>,
-        concat_iseq_t<
-            index_sequence<>,
-            index_sequence<4, 2>,
-            index_sequence<9>>>::value,
-    "");
-
-static_assert(
-    std::is_same<
-        integer_sequence<int8_t, -5, -3>,
-        concat_iseq_t<
-            integer_sequence<int8_t, -5>,
-            integer_sequence<int8_t, -3>>>::value,
-    "");
-} // namespace test_concat_iseq
-
 } // namespace
+// NOLINTEND(modernize*)

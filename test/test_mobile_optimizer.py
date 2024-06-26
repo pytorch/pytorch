@@ -46,7 +46,7 @@ class TestOptimizer(TestCase):
 
         input_data = torch.rand((batch_size, input_channels, height, width))
         conv_weight = torch.rand((output_channels, input_channels_per_group, kernel_h, kernel_w))
-        conv_bias = torch.rand((output_channels))
+        conv_bias = torch.rand(output_channels)
         result = F.conv2d(input_data, conv_weight, conv_bias, strides, paddings, dilations, groups)
         weight_output_dim = 24
         linear_input_shape = result.shape[1]
@@ -54,11 +54,11 @@ class TestOptimizer(TestCase):
 
         class MyTestModule(torch.nn.Module):
             def __init__(self):
-                super(MyTestModule, self).__init__()
+                super().__init__()
                 self.conv_weight = torch.nn.Parameter(torch.rand(conv_weight_shape))
-                self.conv_bias = torch.nn.Parameter(torch.rand((conv_bias_shape)))
+                self.conv_bias = torch.nn.Parameter(torch.rand(conv_bias_shape))
                 self.linear_weight = torch.nn.Parameter(torch.rand(linear_weight_shape))
-                self.linear_bias = torch.nn.Parameter(torch.rand((weight_output_dim)))
+                self.linear_bias = torch.nn.Parameter(torch.rand(weight_output_dim))
                 self.strides = strides
                 self.paddings = paddings
                 self.dilations = dilations
@@ -86,7 +86,7 @@ class TestOptimizer(TestCase):
 
         class BNTestModule(torch.nn.Module):
             def __init__(self):
-                super(BNTestModule, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(1, 20, 5, 1)
                 self.bn = torch.nn.BatchNorm2d(num_features=20)
                 self.bn.eps = 0.0023
@@ -149,7 +149,7 @@ class TestOptimizer(TestCase):
         bn_scripted_module.eval()
 
         self.assertEqual(len(torch.jit.export_opnames(bn_scripted_module)), 11)
-        FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
+        FileCheck().check_count('prim::CallMethod[name="forward"]', 2, exactly=True) \
                    .run(str(get_forward(bn_scripted_module._c).graph))
 
         optimization_blocklist_no_prepack = {MobileOptimizerType.INSERT_FOLD_PREPACK_OPS}
@@ -167,9 +167,9 @@ class TestOptimizer(TestCase):
 
         class MyMobileOptimizedTagTest(torch.nn.Module):
             def __init__(self):
-                super(MyMobileOptimizedTagTest, self).__init__()
+                super().__init__()
                 self.linear_weight = torch.nn.Parameter(torch.rand(linear_weight_shape))
-                self.linear_bias = torch.nn.Parameter(torch.rand((weight_output_dim)))
+                self.linear_bias = torch.nn.Parameter(torch.rand(weight_output_dim))
 
             def forward(self, x):
                 o = F.linear(x, self.linear_weight, self.linear_bias)
@@ -184,9 +184,9 @@ class TestOptimizer(TestCase):
 
         class MyPreserveMethodsTest(torch.nn.Module):
             def __init__(self):
-                super(MyPreserveMethodsTest, self).__init__()
+                super().__init__()
                 self.linear_weight = torch.nn.Parameter(torch.rand(linear_weight_shape))
-                self.linear_bias = torch.nn.Parameter(torch.rand((weight_output_dim)))
+                self.linear_bias = torch.nn.Parameter(torch.rand(weight_output_dim))
 
             def forward(self, x):
                 o = F.linear(x, self.linear_weight, self.linear_bias)
@@ -208,7 +208,7 @@ class TestOptimizer(TestCase):
 
         class OptimizeNoForwardTest(torch.nn.Module):
             def __init__(self):
-                super(OptimizeNoForwardTest, self).__init__()
+                super().__init__()
                 self.l = nn.Linear(10, 100)
                 self.l2 = nn.Linear(100, 1)
                 self.d = nn.Dropout(p=0.2)
@@ -234,7 +234,7 @@ class TestOptimizer(TestCase):
 
         class BNTestNoForwardModule(torch.nn.Module):
             def __init__(self):
-                super(BNTestNoForwardModule, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(1, 20, 5, 1)
                 self.bn = torch.nn.BatchNorm2d(num_features=20)
                 self.bn.eps = 0.0023
@@ -250,7 +250,7 @@ class TestOptimizer(TestCase):
         bn_no_forward_scripted_module.eval()
 
         self.assertEqual(len(torch.jit.export_opnames(bn_no_forward_scripted_module)), 11)
-        FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
+        FileCheck().check_count('prim::CallMethod[name="forward"]', 2, exactly=True) \
                    .run(bn_no_forward_scripted_module.foo.graph)
 
         bn_fold_no_forward_scripted_module = optimize_for_mobile(bn_no_forward_scripted_module, preserved_methods=['foo'])
@@ -273,7 +273,7 @@ class TestOptimizer(TestCase):
 
         class Child(nn.Module):
             def __init__(self):
-                super(Child, self).__init__()
+                super().__init__()
                 self.conv2 = nn.Conv2d(1, 1, 1)
 
             def forward(self, x):
@@ -282,7 +282,7 @@ class TestOptimizer(TestCase):
 
         class Parent(nn.Module):
             def __init__(self):
-                super(Parent, self).__init__()
+                super().__init__()
                 self.quant = torch.ao.quantization.QuantStub()
                 self.conv1 = nn.Conv2d(1, 1, 1)
                 self.child = Child()
@@ -308,7 +308,7 @@ class TestOptimizer(TestCase):
     def test_generate_mobile_module_lints(self):
         class MyTestModule(torch.nn.Module):
             def __init__(self):
-                super(MyTestModule, self).__init__()
+                super().__init__()
                 self.fc = torch.nn.Linear(4, 4)
                 self.dropout = torch.nn.Dropout(p=0.5)
 
@@ -319,7 +319,7 @@ class TestOptimizer(TestCase):
 
         class MyBNModule(torch.nn.Module):
             def __init__(self):
-                super(MyBNModule, self).__init__()
+                super().__init__()
                 self.bn = torch.nn.BatchNorm2d(4, affine=True)
 
             def forward(self, inputs):
@@ -327,9 +327,6 @@ class TestOptimizer(TestCase):
                 return bn
 
         class MyBundledInputModule(torch.nn.Module):
-            def __init__(self):
-                super(MyBundledInputModule, self).__init__()
-
             def forward(self, inputs):
                 return inputs
 
@@ -359,16 +356,10 @@ class TestOptimizer(TestCase):
     @skipIfNoXNNPACK
     def test_preserve_bundled_inputs_methods(self):
         class MyBundledInputModule(torch.nn.Module):
-            def __init__(self):
-                super(MyBundledInputModule, self).__init__()
-
             def forward(self, inputs):
                 return inputs
 
         class MyIncompleteBundledInputModule(torch.nn.Module):
-            def __init__(self):
-                super(MyIncompleteBundledInputModule, self).__init__()
-
             def forward(self, inputs):
                 return inputs
 
@@ -419,7 +410,7 @@ class TestOptimizer(TestCase):
 
         class Standalone(nn.Module):
             def __init__(self):
-                super(Standalone, self).__init__()
+                super().__init__()
                 self.quant = torch.ao.quantization.QuantStub()
                 self.conv1 = nn.Conv2d(1, 1, 1)
                 self.conv2 = nn.Conv2d(1, 1, 1)
@@ -440,7 +431,7 @@ class TestOptimizer(TestCase):
 
         class Child(nn.Module):
             def __init__(self):
-                super(Child, self).__init__()
+                super().__init__()
                 self.conv1 = nn.Conv2d(1, 1, 1)
 
             def forward(self, x):
@@ -449,7 +440,7 @@ class TestOptimizer(TestCase):
 
         class Parent(nn.Module):
             def __init__(self):
-                super(Parent, self).__init__()
+                super().__init__()
                 self.quant = torch.ao.quantization.QuantStub()
                 self.conv1 = nn.Conv2d(1, 1, 1)
                 self.child = Child()
@@ -480,7 +471,7 @@ class TestOptimizer(TestCase):
             # basic case
 
             m, m_optim = _quant_script_and_optimize(Standalone())
-            FileCheck().check_not("Conv2d = prim::GetAttr[name=\"conv1\"]") \
+            FileCheck().check_not('Conv2d = prim::GetAttr[name="conv1"]') \
                        .check_count("__torch__.torch.classes.quantized.Conv2dPackedParamsBase = prim::Constant", 2, exactly=True) \
                        .run(m_optim.graph)
             self.assertFalse(hasattr(m_optim, "conv1"))
@@ -494,7 +485,7 @@ class TestOptimizer(TestCase):
             # generic case
 
             m, m_optim = _quant_script_and_optimize(Parent())
-            FileCheck().check_not("Conv2d = prim::GetAttr[name=\"conv1\"]") \
+            FileCheck().check_not('Conv2d = prim::GetAttr[name="conv1"]') \
                        .check_count("__torch__.torch.classes.quantized.Conv2dPackedParamsBase = prim::Constant", 2, exactly=True) \
                        .run(m_optim.graph)
             self.assertFalse(hasattr(m_optim, "conv1"))
@@ -521,7 +512,7 @@ class TestOptimizer(TestCase):
     def test_clone_module_with_class(self):
         class MyInnerTestModule(torch.nn.Module):
             def __init__(self):
-                super(MyInnerTestModule, self).__init__()
+                super().__init__()
                 self.pqr = torch.Tensor([10., 20., 30.])
 
             def forward(self, inputs):
@@ -533,7 +524,7 @@ class TestOptimizer(TestCase):
 
         class MyTestModule(torch.nn.Module):
             def __init__(self):
-                super(MyTestModule, self).__init__()
+                super().__init__()
                 self.abc = 23
                 self.pqr = torch.Tensor([1., 2., 3.])
                 self.inner = MyInnerTestModule()
@@ -591,7 +582,7 @@ class TestOptimizer(TestCase):
         self.assertTrue(
             cloned.qualified_name.startswith('__torch__.'),
             ("Expected the cloned module's name to start with the string "
-             "'__torch__.', but got: {0}").format(cloned.qualified_name),
+             f"'__torch__.', but got: {cloned.qualified_name}"),
         )
 
 

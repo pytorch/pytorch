@@ -7,7 +7,7 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <iostream>
+#include <ostream>
 #include <vector>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
@@ -15,8 +15,7 @@ C10_CLANG_DIAGNOSTIC_PUSH()
 C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
 #endif
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // GraphExecutor creates specializations of Graphs for different
 // dimensionalitities and types of inputs.
@@ -48,7 +47,7 @@ struct ArgumentInfo {
       return TensorType::get();
 
     return TensorType::create(
-        type(), device(), c10::optional<size_t>(dim()), requires_grad());
+        type(), device(), std::optional<size_t>(dim()), requires_grad());
   }
   operator TypePtr() const {
     return toType();
@@ -73,10 +72,10 @@ static_assert(
     "ArgumentInfo is expected to be a 32-bit struct");
 
 struct ArgumentSpec {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  ArgumentSpec(size_t num_flat_tensor_inputs, size_t num_flat_optional_inputs) {
-    hash_code =
-        c10::hash_combine(num_flat_tensor_inputs, num_flat_optional_inputs);
+  ArgumentSpec(size_t num_flat_tensor_inputs, size_t num_flat_optional_inputs)
+      : hash_code(c10::hash_combine(
+            num_flat_tensor_inputs,
+            num_flat_optional_inputs)) {
     tensor_args.reserve(num_flat_tensor_inputs);
     optional_presence.reserve(num_flat_optional_inputs);
   }
@@ -461,14 +460,13 @@ inline CompleteArgumentInfo CompleteArgumentSpec::at(size_t i) const {
   return CompleteArgumentInfo(*this, i);
 }
 
-inline c10::optional<int8_t> convertOptional(
-    c10::optional<c10::ScalarType> const& from) {
-  return (from) ? c10::optional<int8_t>(static_cast<int8_t>(*from))
-                : c10::optional<int8_t>{};
+inline std::optional<int8_t> convertOptional(
+    std::optional<c10::ScalarType> const& from) {
+  return (from) ? std::optional<int8_t>(static_cast<int8_t>(*from))
+                : std::optional<int8_t>{};
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
 
 namespace std {
 
@@ -477,7 +475,7 @@ struct hash<c10::VaryingShape<T>> {
   size_t operator()(const c10::VaryingShape<T>& vs) const {
     return c10::get_hash(
         vs.size(),
-        vs.size() ? vs.sizes().value() : std::vector<c10::optional<T>>());
+        vs.size() ? vs.sizes().value() : std::vector<std::optional<T>>());
   }
 };
 
@@ -485,10 +483,10 @@ template <>
 struct hash<c10::TensorType> {
   size_t operator()(const c10::TensorType& ptt) const {
     return c10::get_hash<
-        c10::optional<int8_t>,
+        std::optional<int8_t>,
         c10::VaryingShape<int64_t>,
         c10::VaryingShape<int64_t>,
-        c10::optional<bool>>(
+        std::optional<bool>>(
         torch::jit::convertOptional(ptt.scalarType()),
         ptt.sizes(),
         ptt.strides(),

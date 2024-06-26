@@ -1,11 +1,13 @@
+# mypy: allow-untyped-defs
 from typing import Dict, List, Optional, Tuple
 
 import torch
 import torch.optim._functional as F
-
 from torch import Tensor
 
+
 __all__: List[str] = []
+
 
 # Define a TorchScript compatible Functional Adamax Optimizer
 # where we use these optimizer in a functional way.
@@ -30,15 +32,15 @@ class _FunctionalAdamax:
         _allow_empty_param_list: bool = False,
     ):
         if not 0.0 <= lr:
-            raise ValueError("Invalid learning rate: {}".format(lr))
+            raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= eps:
-            raise ValueError("Invalid epsilon value: {}".format(eps))
+            raise ValueError(f"Invalid epsilon value: {eps}")
         if not 0.0 <= betas[0] < 1.0:
-            raise ValueError("Invalid beta parameter at index 0: {}".format(betas[0]))
+            raise ValueError(f"Invalid beta parameter at index 0: {betas[0]}")
         if not 0.0 <= betas[1] < 1.0:
-            raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
+            raise ValueError(f"Invalid beta parameter at index 1: {betas[1]}")
         if not 0.0 <= weight_decay:
-            raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
+            raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
         self.defaults = {
             "lr": lr,
@@ -73,8 +75,10 @@ class _FunctionalAdamax:
                 + f"Gradients length: {len(gradients)}"
             )
 
+        has_complex = False
         for param, gradient in zip(self.param_group["params"], gradients):
             if gradient is not None:
+                has_complex |= torch.is_complex(param)
                 params_with_grad.append(param)
                 grads.append(gradient)
                 # Lazy state initialization
@@ -111,4 +115,5 @@ class _FunctionalAdamax:
                 weight_decay=self.defaults["weight_decay"],
                 foreach=self.foreach,
                 maximize=self.maximize,
+                has_complex=has_complex,
             )

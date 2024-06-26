@@ -101,7 +101,7 @@ endfunction()
 # setting to `python -c`, or using with pycmd. This allows multiline code to be
 # nested nicely in the surrounding code structure.
 #
-# This function respsects PYTHON_EXECUTABLE if it defined, otherwise it uses
+# This function respsects Python_EXECUTABLE if it defined, otherwise it uses
 # `python` and hopes for the best. An error will be thrown if it is not found.
 #
 # Args:
@@ -109,11 +109,11 @@ endfunction()
 #     text   : text to remove indentation from
 #
 function(dedent outvar text)
-  # Use PYTHON_EXECUTABLE if it is defined, otherwise default to python
-  if("${PYTHON_EXECUTABLE}" STREQUAL "")
-    set(_python_exe "python")
+  # Use Python_EXECUTABLE if it is defined, otherwise default to python
+  if("${Python_EXECUTABLE}" STREQUAL "")
+    set(_python_exe "python3")
   else()
-    set(_python_exe "${PYTHON_EXECUTABLE}")
+    set(_python_exe "${Python_EXECUTABLE}")
   endif()
   set(_fixup_cmd "import sys; from textwrap import dedent; print(dedent(sys.stdin.read()))")
   file(WRITE "${CMAKE_BINARY_DIR}/indented.txt" "${text}")
@@ -134,11 +134,11 @@ endfunction()
 
 
 function(pycmd_no_exit outvar exitcode cmd)
-  # Use PYTHON_EXECUTABLE if it is defined, otherwise default to python
-  if("${PYTHON_EXECUTABLE}" STREQUAL "")
+  # Use Python_EXECUTABLE if it is defined, otherwise default to python
+  if("${Python_EXECUTABLE}" STREQUAL "")
     set(_python_exe "python")
   else()
-    set(_python_exe "${PYTHON_EXECUTABLE}")
+    set(_python_exe "${Python_EXECUTABLE}")
   endif()
   # run the actual command
   execute_process(
@@ -159,7 +159,7 @@ endfunction()
 # Common indentation in the text of `cmd` is removed before the command is
 # executed, so the caller does not need to worry about indentation issues.
 #
-# This function respsects PYTHON_EXECUTABLE if it defined, otherwise it uses
+# This function respsects Python_EXECUTABLE if it defined, otherwise it uses
 # `python` and hopes for the best. An error will be thrown if it is not found.
 #
 # Args:
@@ -317,9 +317,6 @@ function(caffe2_binary_target target_name_or_src)
   if(DEFINED Caffe2_MODULES)
     target_link_libraries(${__target} ${Caffe2_MODULES})
   endif()
-  if(USE_TBB AND NOT USE_SYSTEM_TBB)
-    target_include_directories(${__target} PUBLIC ${TBB_INCLUDE_DIR})
-  endif()
   install(TARGETS ${__target} DESTINATION bin)
 endfunction()
 
@@ -381,7 +378,7 @@ endmacro()
 #
 macro(torch_cuda_get_nvcc_gencode_flag store_var)
   # setting nvcc arch flags
-  if((NOT EXISTS ${TORCH_CUDA_ARCH_LIST}) AND (DEFINED ENV{TORCH_CUDA_ARCH_LIST}))
+  if((NOT DEFINED TORCH_CUDA_ARCH_LIST) AND (DEFINED ENV{TORCH_CUDA_ARCH_LIST}))
     message(WARNING
         "In the future we will require one to explicitly pass "
         "TORCH_CUDA_ARCH_LIST to cmake instead of implicitly setting it as an "
@@ -389,7 +386,7 @@ macro(torch_cuda_get_nvcc_gencode_flag store_var)
         "pytorch.")
     set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
   endif()
-  if(EXISTS ${CUDA_ARCH_NAME})
+  if(DEFINED CUDA_ARCH_NAME)
     message(WARNING
         "CUDA_ARCH_NAME is no longer used. Use TORCH_CUDA_ARCH_LIST instead. "
         "Right now, CUDA_ARCH_NAME is ${CUDA_ARCH_NAME} and "
@@ -429,57 +426,39 @@ function(torch_compile_options libname)
         ${MSVC_RUNTIME_LIBRARY_OPTION}
         $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:${MSVC_DEBINFO_OPTION}>
         /EHsc
-        /DNOMINMAX
-        /wd4267
-        /wd4251
-        /wd4522
-        /wd4522
-        /wd4838
-        /wd4305
-        /wd4244
-        /wd4190
-        /wd4101
-        /wd4996
-        /wd4275
         /bigobj>
       )
   else()
     list(APPEND private_compile_options
       -Wall
       -Wextra
+      -Wdeprecated
       -Wno-unused-parameter
-      -Wno-unused-function
-      -Wno-unused-result
       -Wno-missing-field-initializers
-      -Wno-write-strings
       -Wno-unknown-pragmas
       -Wno-type-limits
       -Wno-array-bounds
       -Wno-unknown-pragmas
-      -Wno-sign-compare
       -Wno-strict-overflow
       -Wno-strict-aliasing
-      -Wno-error=deprecated-declarations
-      # Clang has an unfixed bug leading to spurious missing braces
-      # warnings, see https://bugs.llvm.org/show_bug.cgi?id=21629
-      -Wno-missing-braces
       )
-    if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-      list(APPEND private_compile_options
-        -Wno-range-loop-analysis)
+    if("${libname}" STREQUAL "torch_cpu")
+      list(APPEND private_compile_options -Wunused-function)
     else()
+      list(APPEND private_compile_options -Wno-unused-function)
+    endif()
+    if(NOT "${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
       list(APPEND private_compile_options
         # Considered to be flaky.  See the discussion at
         # https://github.com/pytorch/pytorch/pull/9608
         -Wno-maybe-uninitialized)
     endif()
 
+    if(WERROR)
+      list(APPEND private_compile_options -Wno-strict-overflow)
+    endif()
   endif()
 
-  if(MSVC)
-  elseif(WERROR)
-    list(APPEND private_compile_options -Wno-strict-overflow)
-  endif()
 
   target_compile_options(${libname} PRIVATE
       $<$<COMPILE_LANGUAGE:CXX>:${private_compile_options}>)
@@ -548,6 +527,8 @@ function(torch_update_find_cuda_flags)
   endif()
 endfunction()
 
+include(CheckCXXCompilerFlag)
+
 ##############################################################################
 # CHeck if given flag is supported and append it to provided outputvar
 # Also define HAS_UPPER_CASE_FLAG_NAME variable
@@ -556,7 +537,13 @@ endfunction()
 function(append_cxx_flag_if_supported flag outputvar)
     string(TOUPPER "HAS${flag}" _FLAG_NAME)
     string(REGEX REPLACE "[=-]" "_" _FLAG_NAME "${_FLAG_NAME}")
-    check_cxx_compiler_flag("${flag}" ${_FLAG_NAME})
+    # GCC silents unknown -Wno-XXX flags, so we detect the corresponding -WXXX.
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+      string(REGEX REPLACE "Wno-" "W" new_flag "${flag}")
+    else()
+      set(new_flag ${flag})
+    endif()
+    check_cxx_compiler_flag("${new_flag}" ${_FLAG_NAME})
     if(${_FLAG_NAME})
         string(APPEND ${outputvar} " ${flag}")
         set(${outputvar} "${${outputvar}}" PARENT_SCOPE)

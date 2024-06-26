@@ -1,5 +1,7 @@
+# mypy: allow-untyped-defs
 import os
 import pathlib
+from collections import defaultdict
 from typing import Any, Dict, List, Set, Tuple, Union
 
 
@@ -18,7 +20,7 @@ def gen_from_template(dir: str, template_name: str, output_name: str, replacemen
     template_path = os.path.join(dir, template_name)
     output_path = os.path.join(dir, output_name)
 
-    with open(template_path, "r") as f:
+    with open(template_path) as f:
         content = f.read()
     for placeholder, lines, indentation in replacements:
         with open(output_path, "w") as f:
@@ -29,6 +31,7 @@ def gen_from_template(dir: str, template_name: str, output_name: str, replacemen
 def find_file_paths(dir_paths: List[str], files_to_exclude: Set[str]) -> Set[str]:
     """
     When given a path to a directory, returns the paths to the relevant files within it.
+
     This function does NOT recursive traverse to subdirectories.
     """
     paths: Set[str] = set()
@@ -41,13 +44,11 @@ def find_file_paths(dir_paths: List[str], files_to_exclude: Set[str]) -> Set[str
 
 
 def extract_method_name(line: str) -> str:
-    """
-    Extracts method name from decorator in the form of "@functional_datapipe({method_name})"
-    """
-    if "(\"" in line:
-        start_token, end_token = "(\"", "\")"
-    elif "(\'" in line:
-        start_token, end_token = "(\'", "\')"
+    """Extract method name from decorator in the form of "@functional_datapipe({method_name})"."""
+    if '("' in line:
+        start_token, end_token = '("', '")'
+    elif "('" in line:
+        start_token, end_token = "('", "')"
     else:
         raise RuntimeError(f"Unable to find appropriate method name within line:\n{line}")
     start, end = line.find(start_token) + len(start_token), line.find(end_token)
@@ -55,31 +56,30 @@ def extract_method_name(line: str) -> str:
 
 
 def extract_class_name(line: str) -> str:
-    """
-    Extracts class name from class definition in the form of "class {CLASS_NAME}({Type}):"
-    """
+    """Extract class name from class definition in the form of "class {CLASS_NAME}({Type}):"."""
     start_token = "class "
     end_token = "("
     start, end = line.find(start_token) + len(start_token), line.find(end_token)
     return line[start:end]
 
 
-def parse_datapipe_file(file_path: str) -> Tuple[Dict[str, str], Dict[str, str], Set[str]]:
-    """
-    Given a path to file, parses the file and returns a dictionary of method names to function signatures.
-    """
+def parse_datapipe_file(file_path: str) -> Tuple[Dict[str, str], Dict[str, str], Set[str], Dict[str, List[str]]]:
+    """Given a path to file, parses the file and returns a dictionary of method names to function signatures."""
     method_to_signature, method_to_class_name, special_output_type = {}, {}, set()
+    doc_string_dict = defaultdict(list)
     with open(file_path) as f:
         open_paren_count = 0
         method_name, class_name, signature = "", "", ""
         skip = False
-        for line in f.readlines():
-            if line.count("\"\"\"") % 2 == 1:
+        for line in f:
+            if line.count('"""') % 2 == 1:
                 skip = not skip
-            if skip or "\"\"\"" in line:  # Skipping comment/example blocks
+            if skip or '"""' in line:  # Saving docstrings
+                doc_string_dict[method_name].append(line)
                 continue
             if "@functional_datapipe" in line:
                 method_name = extract_method_name(line)
+                doc_string_dict[method_name] = []
                 continue
             if method_name and "class " in line:
                 class_name = extract_class_name(line)
@@ -103,23 +103,28 @@ def parse_datapipe_file(file_path: str) -> Tuple[Dict[str, str], Dict[str, str],
                     raise RuntimeError("open parenthesis count < 0. This shouldn't be possible.")
                 else:
                     signature += line.strip('\n').strip(' ')
-    return method_to_signature, method_to_class_name, special_output_type
+    return method_to_signature, method_to_class_name, special_output_type, doc_string_dict
 
 
-def parse_datapipe_files(file_paths: Set[str]) -> Tuple[Dict[str, str], Dict[str, str], Set[str]]:
+def parse_datapipe_files(file_paths: Set[str]) -> Tuple[Dict[str, str], Dict[str, str], Set[str], Dict[str, List[str]]]:
     methods_and_signatures, methods_and_class_names, methods_with_special_output_types = {}, {}, set()
+    methods_and_doc_strings = {}
     for path in file_paths:
-        method_to_signature, method_to_class_name, methods_needing_special_output_types = parse_datapipe_file(path)
+        (
+            method_to_signature,
+            method_to_class_name,
+            methods_needing_special_output_types,
+            doc_string_dict,
+        ) = parse_datapipe_file(path)
         methods_and_signatures.update(method_to_signature)
         methods_and_class_names.update(method_to_class_name)
         methods_with_special_output_types.update(methods_needing_special_output_types)
-    return methods_and_signatures, methods_and_class_names, methods_with_special_output_types
+        methods_and_doc_strings.update(doc_string_dict)
+    return methods_and_signatures, methods_and_class_names, methods_with_special_output_types, methods_and_doc_strings
 
 
 def split_outside_bracket(line: str, delimiter: str = ",") -> List[str]:
-    """
-    Given a line of text, split it on comma unless the comma is within a bracket '[]'.
-    """
+    """Given a line of text, split it on comma unless the comma is within a bracket '[]'."""
     bracket_count = 0
     curr_token = ""
     res = []
@@ -139,8 +144,10 @@ def split_outside_bracket(line: str, delimiter: str = ",") -> List[str]:
 
 def process_signature(line: str) -> str:
     """
-    Given a raw function signature, clean it up by removing the self-referential datapipe argument,
-    default arguments of input functions, newlines, and spaces.
+    Clean up a given raw function signature.
+
+    This includes removing the self-referential datapipe argument, default
+    arguments of input functions, newlines, and spaces.
     """
     tokens: List[str] = split_outside_bracket(line)
     for i, token in enumerate(tokens):
@@ -165,7 +172,8 @@ def get_method_definitions(file_path: Union[str, List[str]],
                            method_to_special_output_type: Dict[str, str],
                            root: str = "") -> List[str]:
     """
-    .pyi generation for functional DataPipes Process
+    #.pyi generation for functional DataPipes Process.
+
     # 1. Find files that we want to process (exclude the ones who don't)
     # 2. Parse method name and signature
     # 3. Remove first argument after self (unless it is "*datapipes"), default args, and spaces
@@ -176,7 +184,7 @@ def get_method_definitions(file_path: Union[str, List[str]],
     file_path = [os.path.join(root, path) for path in file_path]
     file_paths = find_file_paths(file_path,
                                  files_to_exclude=files_to_exclude.union(deprecated_files))
-    methods_and_signatures, methods_and_class_names, methods_w_special_output_types = \
+    methods_and_signatures, methods_and_class_names, methods_w_special_output_types, methods_and_doc_strings = \
         parse_datapipe_files(file_paths)
 
     for fn_name in method_to_special_output_type:
@@ -190,8 +198,12 @@ def get_method_definitions(file_path: Union[str, List[str]],
             output_type = method_to_special_output_type[method_name]
         else:
             output_type = default_output_type
+        doc_string = "".join(methods_and_doc_strings[method_name])
+        if doc_string == "":
+            doc_string = "    ...\n"
         method_definitions.append(f"# Functional form of '{class_name}'\n"
-                                  f"def {method_name}({arguments}) -> {output_type}: ...")
+                                  f"def {method_name}({arguments}) -> {output_type}:\n"
+                                  f"{doc_string}")
     method_definitions.sort(key=lambda s: s.split('\n')[1])  # sorting based on method_name
 
     return method_definitions
@@ -211,7 +223,8 @@ mapDP_method_to_special_output_type: Dict[str, str] = {"shuffle": "IterDataPipe"
 
 def main() -> None:
     """
-    # Inject file into template datapipe.pyi.in
+    # Inject file into template datapipe.pyi.in.
+
     TODO: The current implementation of this script only generates interfaces for built-in methods. To generate
           interface for user-defined DataPipes, consider changing `IterDataPipe.register_datapipe_as_function`.
     """

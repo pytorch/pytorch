@@ -16,8 +16,7 @@
 // registered to FuncTorchVmapMode. This is because we need to interpose on
 // random operations even if they're not on a BatchedTensor.
 
-namespace at {
-namespace functorch {
+namespace at::functorch {
 
 template <typename F, F Func, typename... ExtraArgs>
 Tensor random_batching_rule(SymIntArrayRef shape, ExtraArgs... extra_args) {
@@ -40,9 +39,7 @@ Tensor& random_inplace_batching_rule(Tensor& self, ExtraArgs... extra_args) {
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
   const auto cur_level = maybe_layer->layerId();
-  Tensor self_value;
-  optional<int64_t> self_bdim;
-  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  auto [self_value, self_bdim] = unwrapTensorAtLevel(self, cur_level);
   self_value = moveBatchDimToFront(self_value, self_bdim);
   RandomnessType randomness = maybe_layer->randomness();
   check_randomness(randomness);
@@ -61,19 +58,15 @@ Tensor& random_inplace_batching_rule(Tensor& self, ExtraArgs... extra_args) {
   }
 }
 
-Tensor& bernoulli_inplace_Tensor_batching_rule(Tensor& self, const Tensor& p_, c10::optional<Generator> gen) {
+static Tensor& bernoulli_inplace_Tensor_batching_rule(Tensor& self, const Tensor& p_, std::optional<Generator> gen) {
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
   auto cur_level = maybe_layer->layerId();
   RandomnessType randomness = maybe_layer->randomness();
 
-  Tensor self_value;
-  optional<int64_t> self_bdim;
-  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  auto [self_value, self_bdim] = unwrapTensorAtLevel(self, cur_level);
 
-  Tensor other_value;
-  optional<int64_t> other_bdim;
-  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(p_, cur_level);
+  auto [other_value, other_bdim] = unwrapTensorAtLevel(p_, cur_level);
 
   check_randomness(randomness, other_bdim.has_value());
 
@@ -118,8 +111,7 @@ Tensor randperm_batching_rule(int64_t n, ExtraArgs... extra_args) {
   RandomnessType randomness = maybe_layer->randomness();
   check_randomness(randomness);
   if (randomness == RandomnessType::Different) {
-    std::vector<at::Tensor> stackedList(batch_size);
-    stackedList.reserve(batch_size);
+    std::vector<at::Tensor> stackedList(batch_size.guard_int(__FILE__, __LINE__));
     for (int64_t idx = 0; idx < batch_size; ++idx) {
       // since this is done in a loop, need to pass by reference for generator to update
       stackedList[idx] = Func(n, extra_args...);
@@ -136,20 +128,18 @@ Tensor unary_pointwise_random_batch_rule(const Tensor& tensor, ExtraArgs... extr
   auto maybe_layer = maybeCurrentDynamicLayer();
   const auto cur_level = maybe_layer->layerId();
 
-  Tensor tensor_value;
-  optional<int64_t> tensor_bdim;
-  std::tie(tensor_value, tensor_bdim) = unwrapTensorAtLevel(tensor, cur_level);
+  auto [tensor_value, tensor_bdim] = unwrapTensorAtLevel(tensor, cur_level);
   tensor_value = moveBatchDimToFront(tensor_value, tensor_bdim);
 
   RandomnessType randomness = maybe_layer->randomness();
   check_randomness(randomness, tensor_bdim.has_value());
   auto shape = tensor_value.sizes();
-  VmapDimVector shapeVec(1, maybe_layer->batchSize());
+  VmapSymDimVector shapeVec(1, maybe_layer->batchSize());
   shapeVec.reserve(shape.size() + 1);
   shapeVec.insert(shapeVec.end(), shape.begin(), shape.end());
 
   if (randomness == RandomnessType::Different && !tensor_bdim) {
-    tensor_value = tensor_value.expand(shapeVec);
+    tensor_value = tensor_value.expand_symint(shapeVec);
   }
   auto out = Func(tensor_value, std::forward<ExtraArgs>(extra_args)...);
   if (randomness == RandomnessType::Same && !tensor_bdim) {
@@ -166,34 +156,30 @@ Tensor tensor_like_random_batch_rule(const Tensor& self, ExtraArgs... extra_args
   RandomnessType randomness = maybe_layer->randomness();
   check_randomness(randomness);
 
-  Tensor tensor_value;
-  optional<int64_t> tensor_bdim;
-  std::tie(tensor_value, tensor_bdim) = unwrapTensorAtLevel(self, cur_level);
+  auto [tensor_value, tensor_bdim] = unwrapTensorAtLevel(self, cur_level);
   tensor_value = moveBatchDimToFront(tensor_value, tensor_bdim);
 
   if (randomness == RandomnessType::Same && tensor_bdim) {
     tensor_value = tensor_value[0];
   } else if (randomness == RandomnessType::Different && !tensor_bdim) {
     auto shape = tensor_value.sizes();
-    VmapDimVector shapeVec(1, maybe_layer->batchSize());
+    VmapSymDimVector shapeVec(1, maybe_layer->batchSize());
     shapeVec.reserve(shape.size() + 1);
     shapeVec.insert(shapeVec.end(), shape.begin(), shape.end());
-    tensor_value = tensor_value.expand(shapeVec);
+    tensor_value = tensor_value.expand_symint(shapeVec);
   }
 
   auto res = Func(tensor_value, std::forward<ExtraArgs>(extra_args)...);
   return (randomness == RandomnessType::Same) ? res : makeBatched(res, 0, cur_level);
 }
 
-std::tuple<Tensor,Tensor> native_dropout_batching_rule(const Tensor& tensor, double p, c10::optional<bool> train) {
+static std::tuple<Tensor,Tensor> native_dropout_batching_rule(const Tensor& tensor, double p, std::optional<bool> train) {
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
   const auto cur_level = maybe_layer->layerId();
   RandomnessType randomness = maybe_layer->randomness();
 
-  Tensor tensor_value;
-  optional<int64_t> tensor_bdim;
-  std::tie(tensor_value, tensor_bdim) = unwrapTensorAtLevel(tensor, cur_level);
+  auto [tensor_value, tensor_bdim] = unwrapTensorAtLevel(tensor, cur_level);
   tensor_value = moveBatchDimToFront(tensor_value, tensor_bdim);
 
   if (!train.has_value() || train) {
@@ -206,15 +192,15 @@ std::tuple<Tensor,Tensor> native_dropout_batching_rule(const Tensor& tensor, dou
       // if tensor is unbatched, add batch dim before
       // calling dropout.
       auto shape = tensor_value.sizes();
-      VmapDimVector shapeVec(1, maybe_layer->batchSize());
+      VmapSymDimVector shapeVec(1, maybe_layer->batchSize());
       shapeVec.reserve(shape.size() + 1);
       shapeVec.insert(shapeVec.end(), shape.begin(), shape.end());
-      tensor_value = tensor_value.expand(shapeVec);
+      tensor_value = tensor_value.expand_symint(shapeVec);
     }
     auto [output, mask] = at::native_dropout(tensor_value, p, train);
     return std::make_tuple(
-        makeBatched(std::move(output), 0, cur_level),
-        makeBatched(std::move(mask), 0, cur_level));
+        makeBatched(output, 0, cur_level),
+        makeBatched(mask, 0, cur_level));
   }
 
   // repeated code from the CPU kernel since the CUDA one doesn't call bernoulli_ explicitly
@@ -227,14 +213,12 @@ std::tuple<Tensor,Tensor> native_dropout_batching_rule(const Tensor& tensor, dou
   return std::make_tuple(output, mask);
 }
 
-Tensor multinomial_batching_rule(const Tensor& self, const int64_t num_samples, const bool replacement, const c10::optional<Generator> generator) {
+static Tensor multinomial_batching_rule(const Tensor& self, const int64_t num_samples, const bool replacement, const std::optional<Generator> generator) {
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
   const auto cur_level = maybe_layer->layerId();
 
-  Tensor self_value;
-  optional<int64_t> self_bdim;
-  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  auto [self_value, self_bdim] = unwrapTensorAtLevel(self, cur_level);
   self_value = moveBatchDimToFront(self_value, self_bdim);
 
   RandomnessType randomness = maybe_layer->randomness();
@@ -255,7 +239,7 @@ Tensor multinomial_batching_rule(const Tensor& self, const int64_t num_samples, 
     }
     auto out = multinomial(self_value, num_samples, replacement, generator);
     if (is_2D_case) {
-      out = reshape_dim_outof(0, maybe_layer->batchSize(), out);
+      out = reshape_dim_outof_symint(0, maybe_layer->batchSize(), out);
     }
     return makeBatched(out, 0, cur_level);;
   }
@@ -279,7 +263,7 @@ struct RandomBatchRuleHelper<F, Func, typelist<T1, T...>> {
 };
 
 template <typename F, F Func, typename... T>
-Tensor rand_int_wrapper(SymIntArrayRef shape, int64_t high, T... extra_args) {
+Tensor rand_int_wrapper(SymIntArrayRef shape, c10::SymInt high, T... extra_args) {
   return Func(high, shape, std::forward<T>(extra_args)...);
 }
 
@@ -298,10 +282,10 @@ struct RandIntBatchRuleHelper;
 
 template <typename F, F Func, typename T1, typename T2, typename... T>
 struct RandIntBatchRuleHelper<F, Func, typelist<T1, T2, T...>> {
-  static Tensor apply(int64_t high, SymIntArrayRef shape, T... extra_args) {
+  static Tensor apply(c10::SymInt high, SymIntArrayRef shape, T... extra_args) {
     return random_batching_rule<decltype(&rand_int_wrapper<F, Func, T...>),
                                 &rand_int_wrapper<F, Func, T...>,
-                                int64_t, T...>(shape, high, std::forward<T>(extra_args)...);
+                                c10::SymInt, T...>(shape, std::move(high), std::forward<T>(extra_args)...);
   }
 };
 
@@ -318,7 +302,7 @@ struct RandTwoLeadingScalarsBatchRuleHelper<F, Func, typelist<T0, T1, T2, T...>>
   static Tensor apply(T0 scalar0, T1 scalar1, SymIntArrayRef shape, T... extra_args) {
     return random_batching_rule<decltype(&rand_int_low_wrapper<F, Func, T0, T1, T...>),
                                 &rand_int_low_wrapper<F, Func, T0, T1, T...>,
-                                int64_t, int64_t, T...>(shape, scalar0, scalar1, std::forward<T>(extra_args)...);
+                                T0, T1, T...>(shape, scalar0, scalar1, std::forward<T>(extra_args)...);
   }
 };
 
@@ -506,4 +490,5 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   #undef UNARY_POINTWISE_RANDOM_LEADING_FLOAT
   #undef TENSOR_LIKE_COMMON_ARG_TYPES
 }
-}} // namespace at::functorch
+
+} // namespace at::functorch

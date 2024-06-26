@@ -16,6 +16,7 @@ function(c10d_add_test test_src)
   add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
 endfunction()
 
+c10d_add_test(BackoffTest.cpp torch_cpu gtest_main)
 c10d_add_test(FileStoreTest.cpp torch_cpu gtest_main)
 c10d_add_test(TCPStoreTest.cpp torch_cpu gtest_main)
 if(INSTALL_TEST)
@@ -79,7 +80,7 @@ if(USE_MPI AND USE_C10D_MPI)
   # private headers of libtorch, which in turn include MPI. As a hacky
   # alternative to making MPI a public dependency of libtorch, we make it
   # a private dependency of the tests as well.
-  c10d_add_test(ProcessGroupMPITest.cpp torch_cpu ${MPI_CXX_LIBRARIES})
+  c10d_add_test(ProcessGroupMPITest.cpp torch_cpu MPI::MPI_CXX)
   if(INSTALL_TEST)
     install(TARGETS ProcessGroupMPITest DESTINATION bin)
   endif()

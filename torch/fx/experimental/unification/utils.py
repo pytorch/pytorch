@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 __all__ = ["hashable", "transitive_get", "raises", "reverse_dict", "xfail", "freeze"]
 def hashable(x):
     try:
@@ -45,8 +46,8 @@ def _toposort(edges):
     [2] http://en.wikipedia.org/wiki/Toposort#Algorithms
     """
     incoming_edges = reverse_dict(edges)
-    incoming_edges = dict((k, set(val)) for k, val in incoming_edges.items())
-    S = set((v for v in edges if v not in incoming_edges))
+    incoming_edges = {k: set(val) for k, val in incoming_edges.items()}
+    S = ({v for v in edges if v not in incoming_edges})
     L = []
 
     while S:
@@ -82,7 +83,7 @@ def reverse_dict(d):
 def xfail(func):
     try:
         func()
-        raise Exception("XFailed test passed")  # pragma:nocover
+        raise Exception("XFailed test passed")  # pragma:nocover  # noqa: TRY002
     except Exception:
         pass
 

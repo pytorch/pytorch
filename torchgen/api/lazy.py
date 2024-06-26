@@ -7,6 +7,7 @@ from torchgen.api.types import (
     CType,
     deviceT,
     doubleT,
+    generatorT,
     layoutT,
     ListCType,
     longT,
@@ -19,7 +20,6 @@ from torchgen.api.types import (
     SymIntT,
     VectorCType,
 )
-
 from torchgen.model import (
     Argument,
     BaseTy,
@@ -34,7 +34,7 @@ from torchgen.model import (
 )
 
 
-_valueT = None
+_valueT: Optional[BaseCppType] = None
 
 
 # A ValueT is an IR type which represents the computation of a Tensor.  In other
@@ -109,6 +109,8 @@ def process_ir_type(
             return BaseCType(stringT)
         elif typ.name == BaseTy.Device:
             return BaseCType(deviceT)
+        elif typ.name == BaseTy.Generator:
+            return BaseCType(generatorT)
         elif typ.name == BaseTy.Layout:
             return BaseCType(layoutT)
         elif typ.name == BaseTy.MemoryFormat:
@@ -218,16 +220,7 @@ class LazyArgument:
         self.symint = symint
         self.is_optional = isinstance(arg.type, OptionalType)
         self.is_generator = isGeneratorType(arg.type)
-        if self.is_generator:
-            assert (
-                self.is_optional
-            ), "We expect all generators are optional since currently they are"
-            # there is no handling for generators in TorchScript IR (or XLA)
-            # so we fall back to eager if the (optional)generator has value, and otherwise
-            # its null and safe to exclude from lazy IR
-            self.lazy_type_ = None
-        else:
-            self.lazy_type_ = process_ir_type(arg.type, properties, symint=symint)
+        self.lazy_type_ = process_ir_type(arg.type, properties, symint=symint)
         self.is_wrapped_scalar = isWrappedScalarType(arg.type)
         self.is_symint_or_list = symint and (
             isSymIntType(arg.type)
@@ -236,9 +229,7 @@ class LazyArgument:
             # or (isinstance(arg.type, ListType) and isSymIntType(arg.type.elem))
         )
 
-        self.is_lazy_value = not self.is_generator and isValueType(
-            self.lazy_type, properties
-        )
+        self.is_lazy_value = isValueType(self.lazy_type, properties)
 
     @property
     def lazy_type(self) -> CType:
@@ -281,9 +272,9 @@ class LazyIrProperties:
     )
 
     def __init__(self, *default_properties: str):
-        properties: Dict[Tuple[str, ...], Optional[str]] = {
-            p: None for p in LazyIrProperties.Properties
-        }
+        properties: Dict[Tuple[str, ...], Optional[str]] = dict.fromkeys(
+            LazyIrProperties.Properties
+        )
         self.__dict__["properties"] = properties
         for p in default_properties:
             setattr(self, p, True)
@@ -355,7 +346,7 @@ class LazyIrSchema:
         positional_args: List[LazyArgument] = []
         for arg_field in ["pre_self_positional", "self_arg", "post_self_positional"]:
             if arg_field == "self_arg" and func.arguments.self_arg is not None:
-                arg = getattr(func.arguments, "self_arg").argument
+                arg = func.arguments.self_arg.argument
                 positional_args.append(
                     LazyArgument(arg, self.properties, symint=symint)
                 )
@@ -382,7 +373,9 @@ class LazyIrSchema:
                         assert (
                             self.generator_arg is None
                         ), "We expect there is only one generator arg"
-                        self.generator_arg = NamedCType(arg.name, arg.type)
+                        self.generator_arg = NamedCType(
+                            arg.name, arg.type  # type:ignore[arg-type]
+                        )
                 keyword_args.extend(
                     LazyArgument(arg, self.properties, symint=symint)
                     for arg in curr_args
@@ -417,7 +410,7 @@ class LazyIrSchema:
         keyword: bool = True,
         values: bool = True,
         scalars: bool = True,
-        generator: bool = False,
+        generator: bool = True,
     ) -> List[LazyArgument]:
         # This function maintains the sorted order of arguments but provides different filtered views.
         # Some parts of the code care about kwargs vs args (TS lowerings),

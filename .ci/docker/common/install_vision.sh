@@ -5,8 +5,7 @@ set -ex
 install_ubuntu() {
   apt-get update
   apt-get install -y --no-install-recommends \
-          libopencv-dev \
-          libavcodec-dev
+          libopencv-dev
 
   # Cleanup
   apt-get autoclean && apt-get clean
@@ -19,8 +18,7 @@ install_centos() {
   yum --enablerepo=extras install -y epel-release
 
   yum install -y \
-      opencv-devel \
-      ffmpeg-devel
+      opencv-devel
 
   # Cleanup
   yum clean all
@@ -43,3 +41,6 @@ case "$ID" in
     exit 1
     ;;
 esac
+
+# Cache vision models used by the test
+source "$(dirname "${BASH_SOURCE[0]}")/cache_vision_models.sh"

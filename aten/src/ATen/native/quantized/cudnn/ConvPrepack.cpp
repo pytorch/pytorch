@@ -3,10 +3,6 @@
 
 #if AT_CUDNN_ENABLED()
 
-#include <ATen/native/cudnn/Macros.h>
-
-#if HAS_CUDNN_V8()
-
 #include <ATen/ATen.h>
 #include <torch/library.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>
@@ -20,12 +16,18 @@
 #include <array>
 #include <vector>
 
+template <int kSpatialDim = 2>
+int register_conv_params();
+
+extern template int register_conv_params<2>();
+extern template int register_conv_params<3>();
+
 template <int kSpatialDim>
 c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightCudnn<
     kSpatialDim>::
     prepack(
         at::Tensor weight,
-        c10::optional<at::Tensor> bias,
+        std::optional<at::Tensor> bias,
         torch::List<int64_t> stride,
         torch::List<int64_t> padding,
         torch::List<int64_t> output_padding,
@@ -114,7 +116,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<2>> PackedConvWeightCudnn<
     2>::
     prepack(
         at::Tensor weight,
-        c10::optional<at::Tensor> bias_in,
+        std::optional<at::Tensor> bias_in,
         torch::List<int64_t> stride,
         torch::List<int64_t> padding,
         torch::List<int64_t> output_padding,
@@ -131,15 +133,14 @@ class QConvPackWeightInt8Cudnn final {
  public:
   static c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> run_conv(
       Tensor weight,
-      c10::optional<Tensor> bias,
+      std::optional<Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> dilation,
       int64_t groups) {
     torch::List<int64_t> output_padding;
     output_padding.reserve(kSpatialDim);
-    for (const auto idx : c10::irange(kSpatialDim)) {
-      (void)idx; //Suppress unused variable warning
+    for (C10_UNUSED const auto idx : c10::irange(kSpatialDim)) {
       output_padding.push_back((int64_t)0);
     }
     return _run(weight, bias, stride, padding, output_padding, dilation, groups,
@@ -149,7 +150,7 @@ class QConvPackWeightInt8Cudnn final {
  private:
   static c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> _run(
       Tensor weight,
-      c10::optional<Tensor> bias,
+      std::optional<Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> output_padding,
@@ -166,7 +167,7 @@ class QConv1dPackWeightInt8Cudnn final {
  public:
   static c10::intrusive_ptr<ConvPackedParamsBase<2>> run_conv(
       Tensor weight,
-      c10::optional<Tensor> bias,
+      std::optional<Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> dilation,
@@ -179,7 +180,7 @@ class QConv1dPackWeightInt8Cudnn final {
  private:
   static c10::intrusive_ptr<ConvPackedParamsBase<2>> _run(
       Tensor weight,
-      c10::optional<Tensor> bias,
+      std::optional<Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> output_padding,
@@ -204,6 +205,8 @@ class QConv1dPackWeightInt8Cudnn final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {
+  register_conv_params<2>();
+  register_conv_params<3>();
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv1d_prepack"), TORCH_FN(QConv1dPackWeightInt8Cudnn::run_conv));
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d_prepack"), TORCH_FN(QConvPackWeightInt8Cudnn<2>::run_conv));
 }
@@ -212,6 +215,5 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {
 } // namespace native
 } // namespace at
 
-#endif  // HAS_CUDNN_V8
 #endif  // AT_CUDNN_ENABLED
 #endif  // USE_CUDA

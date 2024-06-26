@@ -8,7 +8,6 @@
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <c10/util/Optional.h>
 
 #include <cstddef>
 #include <memory>
@@ -18,9 +17,9 @@ namespace torch {
 namespace autograd {
 Scatter::Scatter(
     std::vector<at::Device> devices,
-    c10::optional<std::vector<int64_t>> chunk_sizes,
+    std::optional<std::vector<int64_t>> chunk_sizes,
     int64_t dim,
-    c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>> streams,
+    std::optional<std::vector<std::optional<at::cuda::CUDAStream>>> streams,
     bool unsqueeze_scalars)
     : devices_(std::move(devices)),
       chunk_sizes_(std::move(chunk_sizes)),
@@ -44,8 +43,8 @@ variable_list Scatter::apply(variable_list&& inputs) {
   auto device_indices = fmap(devices_, [](const at::Device& device) -> int64_t {
     return device.index();
   });
-  auto tensors = torch::cuda::scatter(
-      std::move(input), device_indices, chunk_sizes_, dim_, streams_);
+  auto tensors =
+      torch::cuda::scatter(input, device_indices, chunk_sizes_, dim_, streams_);
 
   std::vector<Variable> variables;
   variables.reserve(tensors.size());

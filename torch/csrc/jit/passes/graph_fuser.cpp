@@ -402,7 +402,7 @@ struct GraphFuser {
   // to prepare for fusion and replace uses of n with the new group
   Node* createSingletonFusionGroup(Node* n) {
     auto group = block_->owningGraph()->createWithSubgraph(kind_);
-    // propogate position information for the new node so we can always
+    // propagate position information for the new node so we can always
     // have a valid mapping
     group->insertBefore(n);
     Node* mergedNode = mergeNodeIntoGroup(group, n);
@@ -490,7 +490,7 @@ struct GraphFuser {
     return true;
   }
 
-  c10::optional<Node*> findFusedChunk(Node* group, Value* input) {
+  std::optional<Node*> findFusedChunk(Node* group, Value* input) {
     AT_ASSERT(group->kind() == prim::FusionGroup);
     auto it = std::find(group->inputs().begin(), group->inputs().end(), input);
     if (it == group->inputs().end()) {

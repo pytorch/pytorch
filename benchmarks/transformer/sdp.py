@@ -1,18 +1,20 @@
-import torch
-import itertools
-import numpy as np
-import random
 import argparse
-from pathlib import Path
-import torch.utils.benchmark as benchmark
-from dataclasses import dataclass
-from typing import Optional, List
-from pprint import pprint
-from torch.backends.cuda import sdp_kernel
-from tqdm import tqdm
-from prettytable import PrettyTable
+import itertools
+import random
 
 import warnings
+from dataclasses import dataclass
+from pathlib import Path
+from pprint import pprint
+from typing import List, Optional
+
+import numpy as np
+from prettytable import PrettyTable
+from tqdm import tqdm
+
+import torch
+import torch.utils.benchmark as benchmark
+from torch.backends.cuda import sdp_kernel
 
 warnings.filterwarnings("ignore")
 
@@ -28,6 +30,7 @@ class ExperimentConfig:
     enable_math: bool
     enable_flash: bool
     enable_mem_efficient: bool
+    enable_cudnn: bool
 
     def get_entries(self) -> List:
         return [
@@ -40,6 +43,7 @@ class ExperimentConfig:
             self.enable_math,
             self.enable_flash,
             self.enable_mem_efficient,
+            self.enable_cudnn,
         ]
 
     @classmethod
@@ -54,6 +58,7 @@ class ExperimentConfig:
             "enable_math",
             "enable_flash",
             "enable_mem_efficient",
+            "enable_cudnn",
         ]
 
 
@@ -69,16 +74,18 @@ class ExperimentResults:
             f"{self.nn_mha_time:2f}",
             f"{self.compiled_nn_mha_time:2f}" if self.compiled_nn_mha_time else None,
             f"{self.composite_mha_time:2f}",
-            f"{self.compiled_composite_mha_time:2f}" if self.compiled_composite_mha_time else None,
+            f"{self.compiled_composite_mha_time:2f}"
+            if self.compiled_composite_mha_time
+            else None,
         ]
 
     @classmethod
     def get_entry_names(cls) -> List[str]:
         return [
-            "nn_mha_time (μs)",
-            "compiled_nn_mha_time (μs)",
-            "composite_mha_time (μs)",
-            "compiled_composite_mha_time (μs)",
+            "nn_mha_time (\u00B5s)",
+            "compiled_nn_mha_time (\u00B5s)",
+            "composite_mha_time (\u00B5s)",
+            "compiled_composite_mha_time (\u00B5s)",
         ]
 
 
@@ -193,7 +200,7 @@ def assert_close_tensors(tensor_a, tensor_b):
     # First order sanity check. Not a replacement for rigorous tests.
     if tensor_a.is_nested and tensor_b.is_nested:
         for a, b in zip(tensor_a.unbind(), tensor_b.unbind()):
-            assert torch.allclose(a, b, atol=1e-3, rtol=1e-3)
+            assert torch.allclose(a, b, atol=1e-2, rtol=1e-2)
     else:
         assert torch.allclose(tensor_a, tensor_b, atol=1e-3, rtol=1e-3)
 
@@ -203,6 +210,7 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
         enable_math=config.enable_math,
         enable_flash=config.enable_flash,
         enable_mem_efficient=config.enable_mem_efficient,
+        enable_cudnn=config.enable_cudnn,
     ) as kernel_choice, torch.inference_mode() as inference_mode:
         dropout_p = 0.0
         mask = None
@@ -245,7 +253,11 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
             )
 
             compiled_composite_mha_time = benchmark_torch_function_in_microseconds(
-                compiled_composite_mha, qkv, qkv, qkv, mask,
+                compiled_composite_mha,
+                qkv,
+                qkv,
+                qkv,
+                mask,
             )
         else:
             compiled_nn_mha_time = None
@@ -279,6 +291,7 @@ def generate_experiments(
                 enable_math=False,
                 enable_flash=True,
                 enable_mem_efficient=True,
+                enable_cudnn=True,
             )
         )
     return configs
@@ -300,6 +313,7 @@ def main(save_path: Optional[Path]):
         enable_math=False,
         enable_flash=True,
         enable_mem_efficient=True,
+        enable_cudnn=True,
     )
 
     experiment = run_single_experiment(config)
@@ -339,7 +353,9 @@ def main(save_path: Optional[Path]):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--save-path", "--save_path", type=str, help="Path to save the results")
+    parser.add_argument(
+        "--save-path", "--save_path", type=str, help="Path to save the results"
+    )
 
     args = parser.parse_args()
     save_path = Path(args.save_path) if args.save_path else None

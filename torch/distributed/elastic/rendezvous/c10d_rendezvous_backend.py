@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -10,13 +11,10 @@ import os
 import tempfile
 from base64 import b64decode, b64encode
 from datetime import timedelta
-from typing import Any, Optional, Tuple, cast
+from typing import Any, cast, Optional, Tuple
 
 from torch.distributed import FileStore, Store, TCPStore
-from torch.distributed.elastic.events import (
-    NodeState,
-    construct_and_record_rdzv_event,
-)
+from torch.distributed.elastic.events import construct_and_record_rdzv_event, NodeState
 
 from .api import (
     RendezvousConnectionError,
@@ -27,7 +25,8 @@ from .api import (
 from .dynamic_rendezvous import RendezvousBackend, Token
 from .utils import _matches_machine_hostname, parse_rendezvous_endpoint
 
-log = logging.getLogger(__name__)
+
+logger = logging.getLogger(__name__)
 
 
 class C10dRendezvousBackend(RendezvousBackend):
@@ -95,7 +94,9 @@ class C10dRendezvousBackend(RendezvousBackend):
         else:
             token = self._NULL_SENTINEL
 
-        base64_state: bytes = self._call_store("compare_set", self._key, token, base64_state_str)
+        base64_state: bytes = self._call_store(
+            "compare_set", self._key, token, base64_state_str
+        )
 
         state_token_pair = self._decode_state(base64_state)
         if state_token_pair is None:
@@ -143,6 +144,8 @@ def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
     else:
         is_host = _matches_machine_hostname(host)
 
+    use_libuv = params.get_as_bool("use_libuv", False)
+
     # The timeout
     read_timeout = cast(int, params.get_as_int("read_timeout", 60))
     if read_timeout <= 0:
@@ -153,7 +156,12 @@ def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
     for is_server in [is_host, False]:
         try:
             store = TCPStore(
-                host, port, is_master=is_server, timeout=timedelta(seconds=read_timeout)
+                host,
+                port,
+                is_master=is_server,
+                multi_tenant=True,
+                timeout=timedelta(seconds=read_timeout),
+                use_libuv=use_libuv,
             )
 
             if is_server:
@@ -161,7 +169,7 @@ def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
                 construct_and_record_rdzv_event(
                     run_id=params.run_id, message=msg, node_state=NodeState.INIT
                 )
-                log.info(msg)
+                logger.info(msg)
 
             break
         except (ValueError, RuntimeError, TimeoutError) as exc:
@@ -176,7 +184,7 @@ def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
                     "The connection to the C10d store has failed. See inner exception for details."
                 ) from exc
 
-    return store
+    return store  # type: ignore[possibly-undefined]
 
 
 def _create_file_store(params: RendezvousParameters) -> FileStore:
@@ -204,8 +212,7 @@ def _create_file_store(params: RendezvousParameters) -> FileStore:
 
 
 def create_backend(params: RendezvousParameters) -> Tuple[C10dRendezvousBackend, Store]:
-    """Creates a new :py:class:`C10dRendezvousBackend` from the specified
-    parameters.
+    """Create a new :py:class:`C10dRendezvousBackend` from the specified parameters.
 
     +--------------+-----------------------------------------------------------+
     | Parameter    | Description                                               |
@@ -249,7 +256,9 @@ def create_backend(params: RendezvousParameters) -> Tuple[C10dRendezvousBackend,
         elif store_type == "tcp":
             store = _create_tcp_store(params)
         else:
-            raise ValueError("Invalid store type given. Currently only supports file and tcp.")
+            raise ValueError(
+                "Invalid store type given. Currently only supports file and tcp."
+            )
 
         backend = C10dRendezvousBackend(store, params.run_id)
 

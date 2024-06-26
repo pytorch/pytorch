@@ -1,6 +1,7 @@
+# mypy: allow-untyped-defs
 import functools
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple
 
 import torch
@@ -27,7 +28,7 @@ class TracingConfig:
             in :meth:`~torch.fx.Tracer.trace`.
     """
 
-    tracer: torch.fx.Tracer = torch.fx.Tracer()
+    tracer: torch.fx.Tracer = field(default_factory=torch.fx.Tracer)
     concrete_args: Optional[Dict[str, Any]] = None
 
 
@@ -167,7 +168,7 @@ class _ExecOrderTracer:
         kwargs: Dict[str, Any],
         name: Optional[str] = None,
         type_expr: Optional[Any] = None,
-        proxy_factory_fn: Callable[[torch.fx.Node], torch.fx.Proxy] = None,
+        proxy_factory_fn: Optional[Callable[[torch.fx.Node], torch.fx.Proxy]] = None,
     ) -> torch.fx.Proxy:
         """
         Overrides ``create_proxy`` to save execution information to

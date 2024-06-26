@@ -57,13 +57,14 @@ const uint128_pod kuint128max = {
   } while (0)
 static inline int Fls64(uint64_t n) {
   //   GOOGLE_DCHECK_NE(0, n);
-  int pos = 0;
+  uint64_t pos = 0;
   STEP(uint64_t, n, pos, 0x20);
   uint32_t n32 = n;
   STEP(uint32_t, n32, pos, 0x10);
   STEP(uint32_t, n32, pos, 0x08);
   STEP(uint32_t, n32, pos, 0x04);
-  return pos + ((uint64_t{0x3333333322221100u} >> (n32 << 2)) & 0x3);
+  return static_cast<int>(
+      pos + ((uint64_t{0x3333333322221100u} >> (n32 << 2)) & 0x3));
 }
 #undef STEP
 
@@ -128,7 +129,7 @@ std::ostream& operator<<(std::ostream& o, const uint128& b) {
 
   // Select a divisor which is the largest power of the base < 2^64.
   uint128 div;
-  std::streamsize div_base_log = 0;
+  int div_base_log = 0;
   switch (flags & std::ios::basefield) {
     case std::ios::hex:
       div = (uint64_t)0x1000000000000000u; // 16^15

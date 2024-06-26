@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import collections
 import warnings
 from functools import partial, wraps
@@ -139,16 +141,12 @@ def is_dynamic_dtype_set(op):
 
 
 def str_format_dynamic_dtype(op):
-    fmt_str = """
-        OpInfo({name},
-               dtypes={dtypes},
-               dtypesIfCUDA={dtypesIfCUDA},
+    fmt_str = f"""
+        OpInfo({op.name},
+               dtypes={dtypes_dispatch_hint(op.dtypes).dispatch_fn_str},
+               dtypesIfCUDA={dtypes_dispatch_hint(op.dtypesIfCUDA).dispatch_fn_str},
         )
-        """.format(
-        name=op.name,
-        dtypes=dtypes_dispatch_hint(op.dtypes).dispatch_fn_str,
-        dtypesIfCUDA=dtypes_dispatch_hint(op.dtypesIfCUDA).dispatch_fn_str,
-    )
+        """
 
     return fmt_str
 

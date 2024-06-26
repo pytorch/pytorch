@@ -1,11 +1,9 @@
 #pragma once
 
-#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/custom_class.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 void initPythonCustomClassBindings(PyObject* module);
 
@@ -18,5 +16,4 @@ struct ScriptClass {
   c10::StrongTypePtr class_type_;
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

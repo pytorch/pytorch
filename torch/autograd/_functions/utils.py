@@ -1,3 +1,5 @@
+# mypy: allow-untyped-defs
+import operator
 from functools import reduce
 
 
@@ -11,9 +13,13 @@ def maybe_unexpand(tensor, old_size, check_same_size=True):
     if check_same_size and tensor.size() == old_size:
         return tensor
     num_unsqueezed = tensor.dim() - len(old_size)
-    expanded_dims = [dim for dim, (expanded, original)
-                     in enumerate(zip(tensor.size()[num_unsqueezed:], old_size))
-                     if expanded != original]
+    expanded_dims = [
+        dim
+        for dim, (expanded, original) in enumerate(
+            zip(tensor.size()[num_unsqueezed:], old_size)
+        )
+        if expanded != original
+    ]
 
     for _ in range(num_unsqueezed):
         tensor = tensor.sum(0, keepdim=False)
@@ -34,15 +40,15 @@ def check_onnx_broadcast(dims1, dims2):
     supported = True
     len1 = len(dims1)
     len2 = len(dims2)
-    numel1 = reduce(lambda x, y: x * y, dims1)
-    numel2 = reduce(lambda x, y: x * y, dims2)
+    numel1 = reduce(operator.mul, dims1)
+    numel2 = reduce(operator.mul, dims2)
     if len1 < len2:
         broadcast = True
         if numel2 != 1:
             supported = False
     elif len1 > len2:
         broadcast = True
-        if numel2 != 1 and dims1[len1 - len2:] != dims2:
+        if numel2 != 1 and dims1[len1 - len2 :] != dims2:
             supported = False
     else:
         if dims1 != dims2:
@@ -51,6 +57,7 @@ def check_onnx_broadcast(dims1, dims2):
                 supported = False
 
     if not supported:
-        raise ValueError("Numpy style broadcasting is not supported in ONNX. "
-                         "Input dims are: {}, {}".format(dims1, dims2))
+        raise ValueError(
+            f"Numpy style broadcasting is not supported in ONNX. Input dims are: {dims1}, {dims2}"
+        )
     return broadcast

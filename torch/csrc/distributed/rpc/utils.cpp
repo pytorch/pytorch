@@ -297,7 +297,7 @@ parseWireSections(const void* data, size_t data_size) {
     if (ptr == endp) {
       break;
     }
-    size_t sz = c10::stoll(std::string(sizePtr, ptr - sizePtr));
+    size_t sz = std::stoll(std::string(sizePtr, ptr - sizePtr));
     headerEnts.emplace_back(name, sz);
     ++ptr; // past the '\n'
   }
@@ -389,7 +389,7 @@ std::string wireSerialize(
       // out of scope of this loop.
       auto writeableTensorData = jit::getWriteableTensorData(tensorData[i]);
       entries.push_back(
-          {c10::to_string(i),
+          {std::to_string(i),
            writeableTensorData.data(),
            writeableTensorData.sizeInBytes()});
     }
@@ -401,7 +401,7 @@ std::string wireSerialize(
     tot += e.size;
     header.append(e.name)
         .append(" ")
-        .append(c10::to_string(e.size))
+        .append(std::to_string(e.size))
         .append("\n");
   }
   header.push_back('\n');
@@ -502,8 +502,8 @@ std::vector<at::IValue> readWrappedPayload(
   payload.resize(indexToRead);
 
   TORCH_INTERNAL_ASSERT(
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      payload.size() > additionalPayloadSize,
+      additionalPayloadSize > 0 &&
+          static_cast<int64_t>(payload.size()) > additionalPayloadSize,
       "Wrong payload sizes: payload.size() is ",
       payload.size(),
       " but additional payload size is ",

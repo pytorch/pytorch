@@ -18,7 +18,9 @@ def allreduce_hook(state, bucket):
     if tensor.is_sparse:
         tensor = tensor.coalesce()
     tensor_type = "sparse" if tensor.is_sparse else "dense"
-    cref.record_start("hook_future_metric", key, f"{cref.backend}_{tensor_type}_allreduce")
+    cref.record_start(
+        "hook_future_metric", key, f"{cref.backend}_{tensor_type}_allreduce"
+    )
     fut = state.process_group.allreduce(tensors).get_future()
 
     def callback(fut):

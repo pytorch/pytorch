@@ -35,14 +35,14 @@ class LintMessage(NamedTuple):
 def check_file(filename: str) -> Optional[LintMessage]:
     logging.debug("Checking file %s", filename)
 
-    with open(filename, "r") as f:
+    with open(filename) as f:
         lines = f.readlines()
 
     for idx, line in enumerate(lines):
         if CONSTEXPR in line:
             original = "".join(lines)
             replacement = original.replace(CONSTEXPR, CONSTEXPR_MACRO)
-            logging.debug(f"replacement: {replacement}")
+            logging.debug("replacement: %s", replacement)
             return LintMessage(
                 path=filename,
                 line=idx,

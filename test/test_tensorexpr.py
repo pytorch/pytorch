@@ -7,7 +7,7 @@ from torch import nn
 import unittest
 import itertools
 
-from torch.testing._internal.common_utils import suppress_warnings, num_profiled_runs, run_tests
+from torch.testing._internal.common_utils import suppress_warnings, num_profiled_runs, run_tests, skipIfTorchDynamo
 
 from torch.testing._internal.jit_utils import JitTestCase, TensorExprTestOptions
 
@@ -15,14 +15,14 @@ LLVM_ENABLED = torch._C._llvm_enabled()
 
 class BaseTestClass(JitTestCase):
     def setUp(self):
-        super(BaseTestClass, self).setUp()
+        super().setUp()
         self.tensorexpr_options = TensorExprTestOptions()
         self.devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         self.dtypes = [torch.float32, torch.bfloat16] if LLVM_ENABLED else [torch.float32]
 
     def tearDown(self):
         self.tensorexpr_options.restore()
-        super(BaseTestClass, self).tearDown()
+        super().tearDown()
 
     def assertLastGraphAllFused(self):
         self.assertAllFused(torch.jit.last_executed_optimized_graph())
@@ -34,6 +34,7 @@ def warmup_and_run_forward(f, *args):
     return results
 
 
+@skipIfTorchDynamo()
 class TestTensorExprFuser(BaseTestClass):
     def test_easy(self):
         def easy(x, y):
@@ -590,7 +591,7 @@ class TestTensorExprFuser(BaseTestClass):
 
         xs = [(torch.rand(4) * 3 + 1).to(torch.int32) for i in range(3)]
         x, y, z = xs
-        xn, yn, zn = [t.numpy() for t in xs]
+        xn, yn, zn = (t.numpy() for t in xs)
         traced = torch.jit.trace(test, (x, y, z))
         res = warmup_and_run_forward(traced, x, y, z)
         self.assertLastGraphAllFused()
@@ -925,6 +926,19 @@ class TestTensorExprFuser(BaseTestClass):
             #     print("Failed on dev=", dev, "function=", torch_fn)
             #     # np.testing.assert_allclose(x.cpu().numpy(), y.cpu().numpy())
 
+
+    def test_round_2(self):
+        def round(x):
+            return torch.round(x)
+
+        for data_type in [torch.float32, torch.double]:
+            a = torch.tensor([0.2, 1.6, 2.5, 3.5]).to(data_type)
+            traced = torch.jit.trace(round, (a))
+            x = warmup_and_run_forward(traced, a)
+            self.assertLastGraphAllFused()
+            y = round(x)
+            self.assertEqual(x, y)
+
     def test_rand_like(self):
         N = 1 << 16
 
@@ -1191,7 +1205,7 @@ class TestTensorExprFuser(BaseTestClass):
 
         for test in (test_float, test_int):
             for data_type in self.dtypes:
-                x, y, z = [torch.rand(4, dtype=data_type) for i in range(3)]
+                x, y, z = (torch.rand(4, dtype=data_type) for i in range(3))
                 a, b = 1, 2
                 test(x, y, z, a, b)
                 r = test(x, y, z, a, b)
@@ -1365,7 +1379,7 @@ class TestTensorExprFuser(BaseTestClass):
             @torch.jit.script
             def test(x, y, z):
                 return x * y * z
-            x, y, z = [torch.rand(4, 8).cuda() for _ in range(3)]
+            x, y, z = (torch.rand(4, 8).cuda() for _ in range(3))
             ref = test(x, y, z)
             _ = test(*[torch.rand(6, 8).cuda() for _ in range(3)])
             res = test(x, y, z)
@@ -1376,7 +1390,7 @@ class TestTensorExprFuser(BaseTestClass):
             y = torch.rand(1, 8).cuda()
             z = torch.rand(4, 1).cuda()
             res = test(x, y, z)
-            xn, yn, zn = [t.cpu().numpy() for t in (x, y, z)]
+            xn, yn, zn = (t.cpu().numpy() for t in (x, y, z))
             np.testing.assert_allclose(res.cpu().numpy(), xn * yn * zn)
 
             # Mismatched shapes shouldn't reach codegen.
@@ -1532,7 +1546,7 @@ class TestTensorExprFuser(BaseTestClass):
     def test_alias_analysis_module(self):
         class AliasModule(nn.Module):
             def __init__(self):
-                super(AliasModule, self).__init__()
+                super().__init__()
                 torch.manual_seed(1337)
                 self.a = torch.randn(128, 128)
                 self.b = torch.randn(128, 128)
@@ -1570,7 +1584,7 @@ class TestTensorExprFuser(BaseTestClass):
     def test_alias_analysis_inputs(self):
         class AliasModule(nn.Module):
             def __init__(self):
-                super(AliasModule, self).__init__()
+                super().__init__()
                 torch.manual_seed(1337)
                 self.a = torch.randn(128, 128)
                 self.b = torch.randn(128, 128)
@@ -1603,7 +1617,7 @@ class TestTensorExprFuser(BaseTestClass):
     def test_alias_analysis_input_and_module(self):
         class AliasModule(nn.Module):
             def __init__(self):
-                super(AliasModule, self).__init__()
+                super().__init__()
                 torch.manual_seed(1337)
                 self.a = torch.randn(128, 128)
                 self.b = torch.randn(128, 128)

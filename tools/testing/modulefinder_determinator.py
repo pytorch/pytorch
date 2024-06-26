@@ -21,6 +21,8 @@ TARGET_DET_LIST = [
     "test_cpp_extensions_aot_no_ninja",
     "test_cpp_extensions_jit",
     "test_cpp_extensions_open_device_registration",
+    "test_cpp_extensions_stream_and_event",
+    "test_cpp_extensions_mtia_backend",
     "test_cuda",
     "test_cuda_primary_ctx",
     "test_dataloader",
@@ -133,11 +135,7 @@ def test_impact_of_file(filename: str) -> str:
 def log_test_reason(file_type: str, filename: str, test: str, options: Any) -> None:
     if options.verbose:
         print_to_stderr(
-            "Determination found {} file {} -- running {}".format(
-                file_type,
-                filename,
-                test,
-            )
+            f"Determination found {file_type} file {filename} -- running {test}"
         )
 
 

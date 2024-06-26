@@ -62,24 +62,6 @@ struct CustomMin {
   }
 };
 
-Tensor _get_complete_sum(const Tensor& lengths) {
-  int64_t segment_count = lengths.numel();
-  TORCH_CHECK(segment_count < INT_MAX);
-  auto offsets = at::empty({segment_count + 1}, lengths.options());
-  offsets[0].zero_();
-
-  AT_DISPATCH_INDEX_TYPES(
-      lengths.scalar_type(), "_segment_reduce_cuda_lengths_offsets_backward_kernel1", ([&] {
-        auto* lengths_data_ptr = lengths.data_ptr<index_t>();
-        auto* offsets_data_ptr = offsets.data_ptr<index_t>();
-        at::cuda::cub::inclusive_sum(
-            lengths_data_ptr,
-            offsets_data_ptr + 1,
-            segment_count);
-      }));
-  return offsets;
-}
-
 template <typename scalar_t, typename index_t>
 __global__ static void post_sum_div_kernel(
     scalar_t* output_data,
@@ -105,7 +87,7 @@ template <typename scalar_t, typename index_t>
 __global__ void segment_reduce_forward_kernel(
     ReductionType reduction,
     scalar_t* output_data,
-    scalar_t* values_data,
+    const scalar_t* values_data,
     const index_t* lengths_data,
     const index_t* lengths_cumsum_data,
     const int64_t segment_count,
@@ -175,8 +157,8 @@ template <typename scalar_t, typename index_t>
 __global__ void segment_reduce_backward_kernel(
     ReductionType reduction,
     scalar_t* grad_input_data,
-    scalar_t* grad_data,
-    scalar_t* output_data,
+    const scalar_t* grad_data,
+    const scalar_t* output_data,
     const scalar_t* values_data,
     const index_t* lengths_data,
     const index_t* lengths_cumsum_data,
@@ -284,7 +266,7 @@ Tensor _segment_reduce_lengths_offsets_backward_cuda_kernel(
     ReductionType reduction,
     const Tensor& lengths_or_offsets_contig,
     int64_t axis,
-    const c10::optional<Scalar>& initial,
+    const std::optional<Scalar>& initial,
     bool is_offsets_like) {
   axis = lengths_or_offsets_contig.dim() - 1;
   int64_t segment_count = is_offsets_like ?
@@ -298,7 +280,6 @@ Tensor _segment_reduce_lengths_offsets_backward_cuda_kernel(
   if (is_offsets_like) {
     lengths = lengths.diff();
   } else {
-    // _get_complete_sum only supports 1D
     auto zeros_shape = offsets.sizes().vec();
     zeros_shape[axis] = 1;
     offsets = at::cat({at::zeros(zeros_shape, offsets.options()), offsets}, axis);
@@ -328,8 +309,8 @@ Tensor _segment_reduce_lengths_offsets_backward_cuda_kernel(
 
   AT_DISPATCH_INDEX_TYPES(
       lengths_or_offsets_contig.scalar_type(), "_segment_reduce_cuda_lengths_offsets_backward_kernel1", ([&] {
-        const auto* lengths_data = lengths.data_ptr<index_t>();
-        auto* offsets_data = offsets.data_ptr<index_t>();
+        const auto* lengths_data = lengths.const_data_ptr<index_t>();
+        auto* offsets_data = offsets.const_data_ptr<index_t>();
 
         // TODO: Switch to TensorIterator for better maintainablility and
         // readability
@@ -339,10 +320,10 @@ Tensor _segment_reduce_lengths_offsets_backward_cuda_kernel(
             data_contig.scalar_type(),
             "_segment_reduce_cpu",
             ([&]() {
-              auto* output_data = output_contig.data_ptr<scalar_t>();
-              auto* grad_data = grad_contig.data_ptr<scalar_t>();
-              auto* grad_input_data = grad_input.data_ptr<scalar_t>();
-              const auto* values_data = data_contig.data_ptr<scalar_t>();
+              auto* output_data = output_contig.const_data_ptr<scalar_t>();
+              auto* grad_data = grad_contig.const_data_ptr<scalar_t>();
+              auto* grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
+              const auto* values_data = data_contig.const_data_ptr<scalar_t>();
 
               scalar_t initial_prod_value;
               if (initial.has_value()) {
@@ -387,7 +368,7 @@ Tensor _segment_reduce_lengths_backward_cuda_kernel(
   ReductionType reduction,
   const Tensor& lengths_contig,
   int64_t axis,
-  const c10::optional<Scalar>& initial) {
+  const std::optional<Scalar>& initial) {
   return _segment_reduce_lengths_offsets_backward_cuda_kernel(
     grad_contig, output_contig, data_contig, reduction, lengths_contig, axis, initial, /*is_offsets_like=*/false);
 }
@@ -399,7 +380,7 @@ Tensor _segment_reduce_offsets_backward_cuda_kernel(
   ReductionType reduction,
   const Tensor& offsets_contig,
   int64_t axis,
-  const c10::optional<Scalar>& initial) {
+  const std::optional<Scalar>& initial) {
   return _segment_reduce_lengths_offsets_backward_cuda_kernel(
     grad_contig, output_contig, data_contig, reduction, offsets_contig, axis, initial, /*is_offsets_like=*/true);
 }
@@ -409,7 +390,7 @@ Tensor _segment_reduce_lengths_offsets_cuda_kernel(
   const Tensor& data,
   const Tensor& lengths_or_offsets,
   int64_t axis,
-  const c10::optional<Scalar>& initial,
+  const std::optional<Scalar>& initial,
   bool is_offsets_like) {
   // data and lengths_or_offsets should be contiguous from the call to .contiguous in segment_reduce_kernel
   TORCH_CHECK(data.is_contiguous());
@@ -427,7 +408,6 @@ Tensor _segment_reduce_lengths_offsets_cuda_kernel(
   if (is_offsets_like) {
     lengths = lengths.diff();
   } else {
-    // _get_complete_sum only supports 1D
     auto zeros_shape = offsets.sizes().vec();
     zeros_shape[axis] = 1;
     offsets = at::cat({at::zeros(zeros_shape, offsets.options()), offsets}, axis);
@@ -458,19 +438,19 @@ Tensor _segment_reduce_lengths_offsets_cuda_kernel(
 
   AT_DISPATCH_INDEX_TYPES(
       lengths_or_offsets.scalar_type(), "_segment_reduce_cuda_kernel1", ([&] {
-        auto* offsets_data_ptr = offsets.data_ptr<index_t>();
-        auto* lengths_data_ptr = lengths.data_ptr<index_t>();
+        auto* offsets_data_ptr = offsets.const_data_ptr<index_t>();
+        auto* lengths_data_ptr = lengths.const_data_ptr<index_t>();
         AT_DISPATCH_FLOATING_TYPES_AND2(
             at::ScalarType::Half,
             at::ScalarType::BFloat16,
             data.scalar_type(),
             "segment_reduce_cuda",
             [&]() {
-              auto* data_data_ptr = data.data_ptr<scalar_t>();
-              auto* output_data_ptr = output.data_ptr<scalar_t>();
+              auto* data_data_ptr = data.const_data_ptr<scalar_t>();
+              auto* output_data_ptr = output.mutable_data_ptr<scalar_t>();
 
               // initialize starting value
-              scalar_t initial_value;
+              scalar_t initial_value = 0;
               if (initial.has_value()) {
                 initial_value = initial.value().to<scalar_t>();
               } else if (reduction == ReductionType::MAX) {
@@ -595,7 +575,7 @@ Tensor _segment_reduce_lengths_cuda_kernel(
   const Tensor& data,
   const Tensor& lengths,
   int64_t axis,
-  const c10::optional<Scalar>& initial) {
+  const std::optional<Scalar>& initial) {
   return _segment_reduce_lengths_offsets_cuda_kernel(
     reduction, data, lengths, axis, initial, /*is_offsets_like=*/false);
 }
@@ -605,7 +585,7 @@ Tensor _segment_reduce_offsets_cuda_kernel(
   const Tensor& data,
   const Tensor& offsets,
   int64_t axis,
-  const c10::optional<Scalar>& initial) {
+  const std::optional<Scalar>& initial) {
   return _segment_reduce_lengths_offsets_cuda_kernel(
     reduction, data, offsets, axis, initial, /*is_offsets_like=*/true);
 }

@@ -26,27 +26,27 @@
 namespace at::native {
 namespace {
 
-static void cauchy_kernel(TensorIteratorBase& iter, double median, double sigma, c10::optional<Generator> gen) {
+static void cauchy_kernel(TensorIteratorBase& iter, double median, double sigma, std::optional<Generator> gen) {
   CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::cauchy_kernel(iter, median, sigma, generator);
 }
 
-void bernoulli_tensor_kernel(const TensorBase &self, const TensorBase &p_, c10::optional<Generator> gen) {
+void bernoulli_tensor_kernel(const TensorBase &self, const TensorBase &p_, std::optional<Generator> gen) {
   CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::bernoulli_kernel(self, p_, generator);
 }
 
 #if !AT_MKL_ENABLED()
-void bernoulli_scalar_kernel_default(const TensorBase &self, double p, c10::optional<Generator> gen) {
+void bernoulli_scalar_kernel_default(const TensorBase &self, double p, std::optional<Generator> gen) {
   CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::bernoulli_kernel(self, p, generator);
 }
 
-void bernoulli_scalar_kernel(const TensorBase &self, double p, c10::optional<Generator> gen) {
+void bernoulli_scalar_kernel(const TensorBase &self, double p, std::optional<Generator> gen) {
   bernoulli_scalar_kernel_default(self, p, gen);
 }
 #else
-void bernoulli_scalar_kernel(const TensorBase &self, double p, c10::optional<Generator> gen) {
+void bernoulli_scalar_kernel(const TensorBase &self, double p, std::optional<Generator> gen) {
   CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   int64_t seed;
   {
@@ -57,7 +57,8 @@ void bernoulli_scalar_kernel(const TensorBase &self, double p, c10::optional<Gen
   int64_t n = self.numel();
   bool contig = self.is_contiguous();
 
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::BFloat16, self.scalar_type(), "bernoulli_scalar_cpu_", [&] {
+  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half,
+  self.scalar_type(), "bernoulli_scalar_cpu_", [&] {
     at::Tensor tmp_int_tensor;
     if (std::is_same<scalar_t, int>::value && contig) {
       tmp_int_tensor = self;
@@ -98,17 +99,17 @@ void bernoulli_scalar_kernel(const TensorBase &self, double p, c10::optional<Gen
 }
 #endif
 
-static void exponential_kernel_default(TensorIteratorBase& iter, double lambda, c10::optional<Generator> gen) {
+static void exponential_kernel_default(TensorIteratorBase& iter, double lambda, std::optional<Generator> gen) {
   CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::exponential_kernel(iter, lambda, generator);
 }
 
 #if (!AT_MKL_ENABLED() || defined(FBCODE_CAFFE2))
-void exponential_kernel(TensorIteratorBase& iter, double lambda, c10::optional<Generator> gen) {
+void exponential_kernel(TensorIteratorBase& iter, double lambda, std::optional<Generator> gen) {
   exponential_kernel_default(iter, lambda, gen);
 }
 #else
-void exponential_kernel(TensorIteratorBase &iter, double lambda, c10::optional<Generator> gen) {
+void exponential_kernel(TensorIteratorBase &iter, double lambda, std::optional<Generator> gen) {
   TORCH_CHECK(isFloatingType(iter.dtype()), "Exponential distribution is a continuous probability distribution. dtype must be a floating point but you specified ", iter.dtype());
 
   Tensor self = iter.tensor(0);
@@ -141,21 +142,34 @@ void exponential_kernel(TensorIteratorBase &iter, double lambda, c10::optional<G
       using tmp_scalar_t = typename std::conditional_t<std::is_same<scalar_t, double>::value, double, float>;
       tmp_scalar_t *sample_ptr = tmp_tensor.data_ptr<tmp_scalar_t>();
 
+      // Intel MKL vRngExponential variate originally does not exclude 0.
+      // However, to align with pytorch exponential variate definition which excludes 0,
+      // we shift the MKL vRngExponential distribution location by adding a very small constant, eps.
+      // If X ~ Exp(lambda), then E(X) = 1/lambda, and V(X) = 1/lambda**2.
+      // If Y = X + eps, where eps ~= 0, then E(Y) = (1/lambda) + eps, and V(Y) = 1/lambda**2.
+      // If eps is very small, the two distributions are indistinguishable, and are almost identical.
+      // The detail of location-shifted MKL vRngExponential is as follows.
+      // PDF:         f(x) = lambda * exp( -lambda * (x - eps) )
+      // CDF:         F(x) = 1 - exp( -lambda * (x - eps) )
+      // Mean:        E[X+eps] = (1/lambda) + eps
+      // Variance:    V[X+eps] = 1/lambda**2
+      auto eps = std::numeric_limits<tmp_scalar_t>::min();
+
       auto sample = [&](int64_t begin, int64_t end) {
         int64_t len = end - begin;
         if (len > 0) {
           VSLStreamStatePtr stream;
-          if (std::is_same<scalar_t, double>::value) {
+          if constexpr (std::is_same<scalar_t, double>::value) {
             vslNewStream(&stream, VSL_BRNG_MCG31, seed);
             vslSkipAheadStream(stream, begin);
             vdRngExponential(VSL_RNG_METHOD_EXPONENTIAL_ICDF, stream, len,
-              (double *)(sample_ptr + begin), 0, 1./lambda);
+              (double *)(sample_ptr + begin), eps, 1./lambda);
             vslDeleteStream(&stream);
           } else {
             vslNewStream(&stream, VSL_BRNG_MCG31, seed);
             vslSkipAheadStream(stream, begin);
             vsRngExponential(VSL_RNG_METHOD_EXPONENTIAL_ICDF, stream, len,
-              (float *) (sample_ptr + begin), 0, 1./lambda);
+              (float *) (sample_ptr + begin), eps, 1./lambda);
             vslDeleteStream(&stream);
           }
           // vectorized copy if using buffer and contiguous
@@ -181,32 +195,32 @@ void exponential_kernel(TensorIteratorBase &iter, double lambda, c10::optional<G
 }
 #endif
 
-static void geometric_kernel(TensorIteratorBase& iter, double p, c10::optional<Generator> gen) {
+static void geometric_kernel(TensorIteratorBase& iter, double p, std::optional<Generator> gen) {
   CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::geometric_kernel(iter, p, generator);
 }
 
-static void log_normal_kernel(TensorIteratorBase& iter, double mean, double std, c10::optional<Generator> gen) {
+static void log_normal_kernel(TensorIteratorBase& iter, double mean, double std, std::optional<Generator> gen) {
   CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::log_normal_kernel(iter, mean, std, generator);
 }
 
-void uniform_kernel(TensorIteratorBase& iter, double from, double to, c10::optional<Generator> gen) {
+void uniform_kernel(TensorIteratorBase& iter, double from, double to, std::optional<Generator> gen) {
   CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::uniform_kernel(iter, from, to, generator);
 }
 
-void normal_kernel(const TensorBase &self, double mean, double std, c10::optional<Generator> gen) {
+void normal_kernel(const TensorBase &self, double mean, double std, std::optional<Generator> gen) {
   CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::normal_kernel(self, mean, std, generator);
 }
 
-static void random_from_to_kernel(TensorIteratorBase& iter, uint64_t range, int64_t base, c10::optional<Generator> gen) {
+static void random_from_to_kernel(TensorIteratorBase& iter, uint64_t range, int64_t base, std::optional<Generator> gen) {
   CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::random_from_to_kernel(iter, range, base, generator);
 }
 
-static void random_kernel(TensorIteratorBase& iter, c10::optional<Generator> gen) {
+static void random_kernel(TensorIteratorBase& iter, std::optional<Generator> gen) {
   CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::random_kernel(iter, generator);
 }
@@ -214,7 +228,7 @@ static void random_kernel(TensorIteratorBase& iter, c10::optional<Generator> gen
 // This is the special kernel to handle single specific case:
 // from(inclusive) = std::numeric_limits<int64_t>::lowest()
 // to(exclusive) = None (= std::numeric_limits<int64_t>::max() + 1)
-static void random_full_64_bits_range_kernel(TensorIteratorBase& iter, c10::optional<Generator> gen) {
+static void random_full_64_bits_range_kernel(TensorIteratorBase& iter, std::optional<Generator> gen) {
   CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::random_full_64_bits_range_kernel(iter, generator);
 }
@@ -227,13 +241,7 @@ REGISTER_DISPATCH(cauchy_stub, &cauchy_kernel);
 REGISTER_DISPATCH(exponential_stub, &exponential_kernel);
 REGISTER_DISPATCH(geometric_stub, &geometric_kernel);
 REGISTER_DISPATCH(log_normal_stub, &log_normal_kernel);
-#ifdef CPU_CAPABILITY_AVX512
-// normal_stub isn't being dispatched to AVX512 because it exposes
-// flakiness in test_sgd of test/test_optim.py
-REGISTER_NO_AVX512_DISPATCH(normal_stub);
-#else
 REGISTER_DISPATCH(normal_stub, &normal_kernel);
-#endif
 REGISTER_DISPATCH(uniform_stub, &uniform_kernel);
 REGISTER_DISPATCH(random_from_to_stub, &random_from_to_kernel);
 REGISTER_DISPATCH(random_full_64_bits_range_stub, &random_full_64_bits_range_kernel);

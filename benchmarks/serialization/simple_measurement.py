@@ -1,7 +1,9 @@
+from pyarkbench import Benchmark, default_args, Timer
+
 import torch
-from pyarkbench import Benchmark, Timer, default_args
 
 use_new = True
+
 
 class Basic(Benchmark):
     def benchmark(self):
@@ -26,8 +28,9 @@ class Basic(Benchmark):
             "Small Tensors Load": small2.ms_duration,
         }
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     bench = Basic(*default_args.bench())
     print("Use zipfile serialization:", use_new)
     results = bench.run()
-    bench.print_stats(results, stats=['mean', 'median'])
+    bench.print_stats(results, stats=["mean", "median"])

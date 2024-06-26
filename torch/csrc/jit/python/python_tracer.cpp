@@ -45,7 +45,7 @@ std::vector<StackEntry> _pythonCallstack() {
 
 SourceRange getPythonInterpreterSourceRange() {
   auto cs = pythonCallstack();
-  c10::optional<std::string> source_filename;
+  std::optional<std::string> source_filename;
   size_t source_line = 0;
   std::stringstream stack_trace;
   for (const auto& entry : cs) {
@@ -102,10 +102,8 @@ std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracingWithDict(
   for (const auto& compact_argument_name : compact_argument_names) {
     for (auto it = inputs_dict.begin(); it != inputs_dict.end(); it++) {
       if (py::cast<std::string>(it->first) == compact_argument_name) {
-        if (THPVariable_Check(it->second.ptr())) {
-          compact_trace_inputs.push_back(
-              toIValue(it->second, tryToInferType(it->second).type()));
-        }
+        compact_trace_inputs.push_back(
+            toIValue(it->second, tryToInferType(it->second).type()));
       }
     }
   }

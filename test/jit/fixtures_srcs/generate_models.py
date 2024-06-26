@@ -6,9 +6,11 @@ from pathlib import Path
 from typing import Set
 
 import torch
+
 # Use asterisk symbol so developer doesn't need to import here when they add tests for upgraders.
 from test.jit.fixtures_srcs.fixtures_src import *  # noqa: F403
-from torch.jit.mobile import _load_for_lite_interpreter, _export_operator_list
+from torch.jit.mobile import _export_operator_list, _load_for_lite_interpreter
+
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -105,28 +107,41 @@ ALL_MODULES = {
 Get the path to `test/jit/fixtures`, where all test models for operator changes
 (upgrader/downgrader) are stored
 """
+
+
 def get_fixtures_path() -> Path:
     pytorch_dir = Path(__file__).resolve().parents[3]
     fixtures_path = pytorch_dir / "test" / "jit" / "fixtures"
     return fixtures_path
 
+
 """
 Get all models' name in `test/jit/fixtures`
 """
+
+
 def get_all_models(model_directory_path: Path) -> Set[str]:
-    files_in_fixtures = model_directory_path.glob('**/*')
-    all_models_from_fixtures = [fixture.stem for fixture in files_in_fixtures if fixture.is_file()]
+    files_in_fixtures = model_directory_path.glob("**/*")
+    all_models_from_fixtures = [
+        fixture.stem for fixture in files_in_fixtures if fixture.is_file()
+    ]
     return set(all_models_from_fixtures)
+
 
 """
 Check if a given model already exist in `test/jit/fixtures`
 """
+
+
 def model_exist(model_file_name: str, all_models: Set[str]) -> bool:
     return model_file_name in all_models
+
 
 """
 Get the operator list given a module
 """
+
+
 def get_operator_list(script_module: torch) -> Set[str]:
     buffer = io.BytesIO(script_module._save_to_buffer_for_lite_interpreter())
     buffer.seek(0)
@@ -134,20 +149,24 @@ def get_operator_list(script_module: torch) -> Set[str]:
     operator_list = _export_operator_list(mobile_module)
     return operator_list
 
+
 """
 Get the output model operator version, given a module
 """
+
+
 def get_output_model_version(script_module: torch.nn.Module) -> int:
     buffer = io.BytesIO()
     torch.jit.save(script_module, buffer)
     buffer.seek(0)
     zipped_model = zipfile.ZipFile(buffer)
     try:
-        version = int(zipped_model.read('archive/version').decode("utf-8"))
+        version = int(zipped_model.read("archive/version").decode("utf-8"))
         return version
     except KeyError:
-        version = int(zipped_model.read('archive/.data/version').decode("utf-8"))
+        version = int(zipped_model.read("archive/.data/version").decode("utf-8"))
         return version
+
 
 """
 Loop through all test modules. If the corresponding model doesn't exist in
@@ -165,6 +184,8 @@ likely this script is running with the commit to make the change.
 3. The model already exists in `test/jit/fixtures`.
 
 """
+
+
 def generate_models(model_directory_path: Path):
     all_models = get_all_models(model_directory_path)
     for a_module, expect_operator in ALL_MODULES.items():
@@ -173,22 +194,26 @@ def generate_models(model_directory_path: Path):
 
         if not isinstance(a_module, torch.nn.Module):
             logger.error(
-                f"The module {torch_module_name} "
-                f"is not a torch.nn.module instance. "
-                f"Please ensure it's a subclass of torch.nn.module in fixtures_src.py"
-                f"and it's registered as an instance in ALL_MODULES in generated_models.py")
-
+                "The module %s "
+                "is not a torch.nn.module instance. "
+                "Please ensure it's a subclass of torch.nn.module in fixtures_src.py"
+                "and it's registered as an instance in ALL_MODULES in generated_models.py",
+                torch_module_name,
+            )
 
         # The corresponding model name is: test_versioned_div_tensor_example_v4
-        model_name = ''.join([
-            '_' + char.lower() if char.isupper() else char for char in torch_module_name
-        ]).lstrip('_')
+        model_name = "".join(
+            [
+                "_" + char.lower() if char.isupper() else char
+                for char in torch_module_name
+            ]
+        ).lstrip("_")
 
         # Some models may not compile anymore, so skip the ones
         # that already has pt file for them.
-        logger.info(f"Processing {torch_module_name}")
+        logger.info("Processing %s", torch_module_name)
         if model_exist(model_name, all_models):
-            logger.info(f"Model {model_name} already exists, skipping")
+            logger.info("Model %s already exists, skipping", model_name)
             continue
 
         script_module = torch.jit.script(a_module)
@@ -197,26 +222,36 @@ def generate_models(model_directory_path: Path):
         current_operator_version = torch._C._get_max_operator_version()
         if actual_model_version >= current_operator_version + 1:
             logger.error(
-                f"Actual model version {actual_model_version} "
-                f"is equal or larger than {current_operator_version} + 1. "
-                f"Please run the script before the commit to change operator.")
+                "Actual model version %s "
+                "is equal or larger than %s + 1. "
+                "Please run the script before the commit to change operator.",
+                actual_model_version,
+                current_operator_version,
+            )
             continue
 
         actual_operator_list = get_operator_list(script_module)
         if expect_operator not in actual_operator_list:
             logger.error(
-                f"The model includes operator: {actual_operator_list}, "
-                f"however it doesn't cover the operator {expect_operator}."
-                f"Please ensure the output model includes the tested operator.")
+                "The model includes operator: %s, "
+                "however it doesn't cover the operator %s."
+                "Please ensure the output model includes the tested operator.",
+                actual_operator_list,
+                expect_operator,
+            )
             continue
 
         export_model_path = str(model_directory_path / (str(model_name) + ".ptl"))
         script_module._save_for_lite_interpreter(export_model_path)
-        logger.info(f"Generating model {model_name} and it's save to {export_model_path}")
+        logger.info(
+            "Generating model %s and it's save to %s", model_name, export_model_path
+        )
+
 
 def main() -> None:
     model_directory_path = get_fixtures_path()
     generate_models(model_directory_path)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

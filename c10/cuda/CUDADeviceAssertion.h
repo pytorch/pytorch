@@ -3,8 +3,7 @@
 #include <c10/cuda/CUDAException.h>
 #include <c10/macros/Macros.h>
 
-namespace c10 {
-namespace cuda {
+namespace c10::cuda {
 
 #ifdef TORCH_USE_CUDA_DSA
 // Copy string from `src` to `dst`
@@ -94,5 +93,4 @@ static __device__ void dsa_add_new_assertion_failure(
 #define CUDA_KERNEL_ASSERT2(condition) assert(condition)
 #endif
 
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda

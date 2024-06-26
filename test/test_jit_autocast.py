@@ -7,12 +7,13 @@ from typing import Optional, Tuple
 import unittest
 from test_jit import JitTestCase
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo
 from torch.testing import FileCheck
 from jit.test_models import MnistNet
 
 TEST_BFLOAT16 = TEST_CUDA and torch.cuda.is_bf16_supported()
 
+@skipIfTorchDynamo("Not a TorchDynamo suitable test")
 class TestAutocast(JitTestCase):
     def setUp(self):
         # common input tensors
@@ -31,6 +32,23 @@ class TestAutocast(JitTestCase):
     def tearDown(self):
         torch._C._jit_set_autocast_mode(self.old_value)
         super().tearDown()
+
+    @unittest.skipIf(not TEST_CUDA, "No cuda")
+    def test_jit_generic_autocast(self):
+        @torch.jit.script
+        def fn_cuda_autocast(a, b):
+            with autocast():
+                x = torch.mm(a, b)
+                y = torch.sum(x)
+                return x, y
+
+        @torch.jit.script
+        def fn_generic_autocast(a, b):
+            with torch.amp.autocast(device_type='cuda'):
+                x = torch.mm(a, b)
+                y = torch.sum(x)
+                return x, y
+        self.assertEqual(fn_cuda_autocast(self.a_fp32, self.b_fp32), fn_generic_autocast(self.a_fp32, self.b_fp32))
 
     @unittest.skipIf(not TEST_CUDA, "No cuda")
     def test_minimal(self):
@@ -664,9 +682,6 @@ class TestAutocast(JitTestCase):
     @unittest.skipIf(not TEST_CUDA, "No cuda")
     def test_jit_freeze_autocast_basic(self):
         class TestModule(torch.nn.Module):
-            def __init__(self):
-                super(TestModule, self).__init__()
-
             def forward(self, x, y):
                 with torch.cuda.amp.autocast():
                     return torch.mm(x, y)
@@ -691,7 +706,7 @@ class TestAutocast(JitTestCase):
     def test_jit_freeze_autocast_constants(self):
         class TestModule(torch.nn.Module):
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.x = torch.rand((3, 4), dtype=torch.float).cuda()
 
             def forward(self, y):
@@ -753,16 +768,17 @@ class TestAutocast(JitTestCase):
 
 class convbn(torch.nn.Module):
     def __init__(self, bias_enabled=True):
-        super(convbn, self).__init__()
+        super().__init__()
         self.conv = torch.nn.Conv2d(3, 64, 7, stride=2, bias=bias_enabled)
         self.bn = torch.nn.BatchNorm2d(64)
 
     def forward(self, x):
         return self.bn(self.conv(x))
 
+@skipIfTorchDynamo("Not a TorchDynamo suitable test")
 class TestJitTraceAutocast(JitTestCase):
     def setUp(self):
-        super(TestJitTraceAutocast, self).setUp()
+        super().setUp()
         self.previous_default_dtype = torch.get_default_dtype()
         torch.set_default_dtype(torch.float32)
         self.models = [MnistNet(),
@@ -776,7 +792,7 @@ class TestJitTraceAutocast(JitTestCase):
     def tearDown(self):
         torch._C._jit_set_autocast_mode(self.previous_jit_autocast_pass)
         torch.set_default_dtype(self.previous_default_dtype)
-        super(TestJitTraceAutocast, self).tearDown()
+        super().tearDown()
 
     def test_generate_autocast_jit_trace_model(self):
         def test_generate_autocast_jit_trace_model(model, x):
@@ -821,11 +837,9 @@ class TestJitTraceAutocast(JitTestCase):
 
     def test_cat_promote(self):
         class TestModel(torch.nn.Module):
-            def __init__(self):
-                super(TestModel, self).__init__()
-
             def forward(self, a, b):
                 return torch.cat([a, b], 0)
+
         with torch.jit.fuser("none"):
             # In this testcase, we will check whether cat has done the promotion in AMP with mixed dtype inputs.
             # To avoid the fusion group from TE, we will disable the fuser here.
@@ -861,7 +875,7 @@ class TestJitTraceAutocast(JitTestCase):
         with torch.cpu.amp.autocast(enabled=True):
             self.assertEqual(fn_s(x), fn(x))
 
-        self.assertTrue(any(["is_autocast_cpu_enabled" in x.kind() for x in fn_s.graph.nodes()]))
+        self.assertTrue(any("is_autocast_cpu_enabled" in x.kind() for x in fn_s.graph.nodes()))
 
     @unittest.skipIf(not TEST_CUDA, "No cuda")
     def test_script_autocast_cuda(self):
@@ -880,7 +894,7 @@ class TestJitTraceAutocast(JitTestCase):
         with torch.cuda.amp.autocast(enabled=True):
             self.assertEqual(fn_s(x), fn(x))
 
-        self.assertTrue(any(["is_autocast_enabled" in x.kind() for x in fn_s.graph.nodes()]))
+        self.assertTrue(any("is_autocast_enabled" in x.kind() for x in fn_s.graph.nodes()))
 
 
     def test_scripted_aliasing(self):

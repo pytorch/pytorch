@@ -9,8 +9,7 @@
 #include <ATen/functorch/Macros.h>
 #include <ATen/functorch/BatchedTensorImpl.h>
 
-namespace at {
-namespace functorch {
+namespace at::functorch {
 
 // This files contains the legacy (now-deprecated) batching rule API.
 // Please try to use the new-style batching rule API (see writing_batch_rules.md)
@@ -48,6 +47,7 @@ using VmapPhysicalViewVec = SmallVector<VmapPhysicalView, kVmapTransformStaticIn
 // dimensions to get 8. Adjust this number as necessary
 constexpr int64_t kVmapStaticDimVecSize = 8;
 using VmapDimVector = SmallVector<int64_t, kVmapStaticDimVecSize>;
+using VmapSymDimVector = SmallVector<c10::SymInt, kVmapStaticDimVecSize>;
 
 // NOTE: [What is an VmapTransform?]
 // An *VmapTransform* converts logical views of tensors to physical views.
@@ -120,7 +120,7 @@ struct VmapPhysicalToLogicalMap;
 //   levels: 012345
 struct TORCH_API VmapPhysicalView {
   VmapPhysicalView(Tensor&& tensor, std::bitset<kVmapNumLevels> levels)
-      : levels_(levels), tensor_(tensor) {
+      : levels_(levels), tensor_(std::move(tensor)) {
     // TORCH_INTERNAL_ASSERT(!isBatchedTensor(tensor));
   }
 
@@ -184,5 +184,4 @@ struct TORCH_API VmapPhysicalToLogicalMap {
 };
 
 
-}
-} // namespace at
+} // namespace at::functorch

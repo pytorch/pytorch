@@ -168,13 +168,11 @@ struct alignas(sizeof(T) * 2) complex {
   // c10::complex<double>
   template <typename U = T>
   C10_HOST_DEVICE explicit constexpr complex(
-      const std::enable_if_t<std::is_same<U, float>::value, complex<double>>&
-          other)
+      const std::enable_if_t<std::is_same_v<U, float>, complex<double>>& other)
       : real_(other.real_), imag_(other.imag_) {}
   template <typename U = T>
   C10_HOST_DEVICE constexpr complex(
-      const std::enable_if_t<std::is_same<U, double>::value, complex<float>>&
-          other)
+      const std::enable_if_t<std::is_same_v<U, double>, complex<float>>& other)
       : real_(other.real_), imag_(other.imag_) {}
 
   constexpr complex<T>& operator=(T re) {
@@ -248,36 +246,36 @@ struct alignas(sizeof(T) * 2) complex {
       __ubsan_ignore_float_divide_by_zero__ {
     // (a + bi) / (c + di) = (ac + bd)/(c^2 + d^2) + (bc - ad)/(c^2 + d^2) i
     // the calculation below follows numpy's complex division
-    T ar = real_;
-    T ai = imag_;
-    U br = rhs.real();
-    U bi = rhs.imag();
+    T a = real_;
+    T b = imag_;
+    U c = rhs.real();
+    U d = rhs.imag();
 
 #if defined(__GNUC__) && !defined(__clang__)
     // std::abs is already constexpr by gcc
-    auto abs_br = std::abs(br);
-    auto abs_bi = std::abs(bi);
+    auto abs_c = std::abs(c);
+    auto abs_d = std::abs(d);
 #else
-    auto abs_br = br < 0 ? -br : br;
-    auto abs_bi = bi < 0 ? -bi : bi;
+    auto abs_c = c < 0 ? -c : c;
+    auto abs_d = d < 0 ? -d : d;
 #endif
 
-    if (abs_br >= abs_bi) {
-      if (abs_br == 0 && abs_bi == 0) {
+    if (abs_c >= abs_d) {
+      if (abs_c == 0 && abs_d == 0) {
         /* divide by zeros should yield a complex inf or nan */
-        real_ = ar / abs_br;
-        imag_ = ai / abs_bi;
+        real_ = a / abs_c;
+        imag_ = b / abs_d;
       } else {
-        auto rat = bi / br;
-        auto scl = 1.0 / (br + bi * rat);
-        real_ = (ar + ai * rat) * scl;
-        imag_ = (ai - ar * rat) * scl;
+        auto rat = d / c;
+        auto scl = 1.0 / (c + d * rat);
+        real_ = (a + b * rat) * scl;
+        imag_ = (b - a * rat) * scl;
       }
     } else {
-      auto rat = br / bi;
-      auto scl = 1.0 / (bi + br * rat);
-      real_ = (ar * rat + ai) * scl;
-      imag_ = (ai * rat - ar) * scl;
+      auto rat = c / d;
+      auto scl = 1.0 / (d + c * rat);
+      real_ = (a * rat + b) * scl;
+      imag_ = (b * rat - a) * scl;
     }
     return *this;
   }
@@ -322,7 +320,7 @@ struct alignas(sizeof(T) * 2) complex {
   constexpr void real(T value) {
     real_ = value;
   }
-  constexpr T imag() const {
+  C10_HOST_DEVICE constexpr T imag() const {
     return imag_;
   }
   constexpr void imag(T value) {
@@ -332,19 +330,19 @@ struct alignas(sizeof(T) * 2) complex {
 
 namespace complex_literals {
 
-constexpr complex<float> operator"" _if(long double imag) {
+constexpr complex<float> operator""_if(long double imag) {
   return complex<float>(0.0f, static_cast<float>(imag));
 }
 
-constexpr complex<double> operator"" _id(long double imag) {
+constexpr complex<double> operator""_id(long double imag) {
   return complex<double>(0.0, static_cast<double>(imag));
 }
 
-constexpr complex<float> operator"" _if(unsigned long long imag) {
+constexpr complex<float> operator""_if(unsigned long long imag) {
   return complex<float>(0.0f, static_cast<float>(imag));
 }
 
-constexpr complex<double> operator"" _id(unsigned long long imag) {
+constexpr complex<double> operator""_id(unsigned long long imag) {
   return complex<double>(0.0, static_cast<double>(imag));
 }
 
@@ -435,9 +433,9 @@ constexpr complex<T> operator/(const T& lhs, const complex<T>& rhs) {
 // not support this when T is a floating-point number. This is useful because it
 // saves a lot of "static_cast" when operate a complex and an integer. This
 // makes the code both less verbose and potentially more efficient.
-#define COMPLEX_INTEGER_OP_TEMPLATE_CONDITION                           \
-  typename std::enable_if_t<                                            \
-      std::is_floating_point<fT>::value && std::is_integral<iT>::value, \
+#define COMPLEX_INTEGER_OP_TEMPLATE_CONDITION                 \
+  typename std::enable_if_t<                                  \
+      std::is_floating_point_v<fT> && std::is_integral_v<iT>, \
       int> = 0
 
 template <typename fT, typename iT, COMPLEX_INTEGER_OP_TEMPLATE_CONDITION>

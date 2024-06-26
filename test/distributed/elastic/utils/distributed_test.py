@@ -14,6 +14,7 @@ import sys
 import unittest
 from contextlib import closing
 
+from torch.distributed import DistNetworkError, DistStoreError
 from torch.distributed.elastic.utils.distributed import (
     create_c10d_store,
     get_socket_with_port,
@@ -23,16 +24,23 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     run_tests,
     TEST_WITH_TSAN,
-    TestCase
+    TestCase,
 )
 
 
 def _create_c10d_store_mp(is_server, server_addr, port, world_size, wait_for_workers):
-    store = create_c10d_store(is_server, server_addr, port, world_size, wait_for_workers=wait_for_workers, timeout=2)
+    store = create_c10d_store(
+        is_server,
+        server_addr,
+        port,
+        world_size,
+        wait_for_workers=wait_for_workers,
+        timeout=2,
+    )
     if store is None:
-        raise AssertionError()
+        raise AssertionError
 
-    store.set(f"test_key/{os.getpid()}", "test_value".encode("UTF-8"))
+    store.set(f"test_key/{os.getpid()}", b"test_value")
 
 
 if IS_WINDOWS or IS_MACOS:
@@ -97,7 +105,7 @@ class DistributedUtilTest(TestCase):
         self.assertEqual(0, worker1.exitcode)
 
     def test_create_store_timeout_on_server(self):
-        with self.assertRaises(TimeoutError):
+        with self.assertRaises(DistStoreError):
             # use any available port (port 0) since timeout is expected
             create_c10d_store(
                 is_server=True,
@@ -108,7 +116,7 @@ class DistributedUtilTest(TestCase):
             )
 
     def test_create_store_timeout_on_worker(self):
-        with self.assertRaises(TimeoutError):
+        with self.assertRaises(DistNetworkError):
             # use any available port (port 0) since timeout is expected
             create_c10d_store(
                 is_server=False,
@@ -117,6 +125,33 @@ class DistributedUtilTest(TestCase):
                 world_size=2,
                 timeout=1,
             )
+
+    def test_create_store_with_libuv_support(self):
+        world_size = 1
+        wait_for_workers = False
+        localhost = socket.gethostname()
+
+        store = create_c10d_store(
+            is_server=True,
+            server_addr=localhost,
+            server_port=0,
+            timeout=2,
+            world_size=world_size,
+            wait_for_workers=wait_for_workers,
+            use_libuv=False,
+        )
+        self.assertFalse(store.libuvBackend)
+
+        store = create_c10d_store(
+            is_server=True,
+            server_addr=localhost,
+            server_port=0,
+            timeout=2,
+            world_size=world_size,
+            wait_for_workers=wait_for_workers,
+            use_libuv=True,
+        )
+        self.assertTrue(store.libuvBackend)
 
     def test_port_already_in_use_on_server(self):
         # try to create the TCPStore server twice on the same port
@@ -142,7 +177,7 @@ class DistributedUtilTest(TestCase):
             port = sock.getsockname()[1]
             # on the worker port conflict shouldn't matter, it should just timeout
             # since we never created a server
-            with self.assertRaises(TimeoutError):
+            with self.assertRaises(DistNetworkError):
                 create_c10d_store(
                     is_server=False,
                     server_addr=socket.gethostname(),

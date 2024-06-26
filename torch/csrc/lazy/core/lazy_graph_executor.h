@@ -348,7 +348,7 @@ class TORCH_API LazyGraphExecutor {
     std::vector<BackendDataPtr> parameters_data;
   };
 
-  virtual bool ShouldSyncTensor(const LazyTensorPtr tensor) const;
+  virtual bool ShouldSyncTensor(const LazyTensorPtr& tensor) const;
 
   SyncTensorCollection CollectSyncTensors(
       const std::vector<LazyTensorPtr>& tensors,

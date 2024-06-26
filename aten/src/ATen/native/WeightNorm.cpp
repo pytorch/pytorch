@@ -10,6 +10,8 @@
 #else
 #include <ATen/ops/_weight_norm_differentiable_backward_native.h>
 #include <ATen/ops/_weight_norm_interface.h>
+#include <ATen/ops/_weight_norm_interface_backward_native.h>
+#include <ATen/ops/_weight_norm_interface_native.h>
 #include <ATen/ops/_weight_norm_native.h>
 #include <ATen/ops/empty_strided.h>
 #include <ATen/ops/norm_except_dim.h>
@@ -18,8 +20,7 @@
 
 #include <vector>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(weight_norm_stub);
 DEFINE_DISPATCH(weight_norm_backward_stub);
@@ -158,5 +159,4 @@ std::tuple<Tensor, Tensor> _weight_norm_differentiable_backward
   }
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

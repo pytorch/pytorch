@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 import typing
 
@@ -19,7 +20,7 @@ class ReferenceQuantizedModule(torch.nn.Module):
         assert self.weight_qscheme in [
             None, torch.per_tensor_affine, torch.per_channel_affine,
             torch.per_channel_affine_float_qparams], \
-            Exception(f"qscheme: {self.weight_qscheme} is not support in reference quantized {self._get_name()}")
+            f"qscheme: {self.weight_qscheme} is not support in reference quantized {self._get_name()}"
         if self.weight_dtype in [torch.quint8, torch.qint8, torch.quint4x2, torch.qint32]:
             zero_point_dtype = weight_qparams["zero_point"].dtype if \
                 isinstance(weight_qparams["zero_point"], torch.Tensor) else \
@@ -54,6 +55,8 @@ class ReferenceQuantizedModule(torch.nn.Module):
         # store weight_axis as weight_axis_int due to some constraints of torchdynamo.export
         # for capturing `.item` operations
         self.weight_axis_int: int = self.weight_axis.item()  # type: ignore[operator, assignment]
+        self.weight_quant_min: typing.Optional[int] = weight_qparams.get("quant_min", None)
+        self.weight_quant_max: typing.Optional[int] = weight_qparams.get("quant_max", None)
 
     def get_weight(self):
         """
@@ -72,7 +75,9 @@ class ReferenceQuantizedModule(torch.nn.Module):
                 self.weight_dtype,
                 self.weight_scale,
                 self.weight_zero_point,
-                self.weight_axis_int)
+                self.weight_axis_int,
+                self.weight_quant_min,
+                self.weight_quant_max)
         else:
             return _quantize_and_dequantize_weight(
                 self.weight,  # type: ignore[arg-type]
@@ -94,7 +99,9 @@ class ReferenceQuantizedModule(torch.nn.Module):
                 self.weight_dtype,
                 self.weight_scale,
                 self.weight_zero_point,
-                self.weight_axis_int)
+                self.weight_axis_int,
+                self.weight_quant_min,
+                self.weight_quant_max)
         else:
             return _quantize_weight(
                 self.weight,  # type: ignore[arg-type]
@@ -126,9 +133,10 @@ def _quantize_weight_decomposed(
         weight_dtype: torch.dtype,
         weight_scale: torch.Tensor,
         weight_zero_point: torch.Tensor,
-        weight_axis: int
+        weight_axis: int,
+        weight_quant_min: typing.Optional[int],
+        weight_quant_max: typing.Optional[int],
 ) -> torch.Tensor:
-    # TODO: get the quant_min and quant_max from activation_post_process
     _DTYPE_TO_QVALUE_BOUNDS = {
         torch.uint8: (0, 255),
         torch.int8: (-128, 127),
@@ -143,7 +151,8 @@ def _quantize_weight_decomposed(
     if weight_qscheme == torch.per_tensor_affine:
         if weight_dtype in [torch.quint8, torch.qint8, torch.qint32]:
             weight_dtype_ = _QDTYPE_TO_UNDERLYING_INT_REPR_DTYPE[weight_dtype]
-            weight_quant_min, weight_quant_max = _DTYPE_TO_QVALUE_BOUNDS[weight_dtype_]
+            if weight_quant_min is None or weight_quant_max is None:
+                weight_quant_min, weight_quant_max = _DTYPE_TO_QVALUE_BOUNDS[weight_dtype_]
             weight = torch.ops.quantized_decomposed.quantize_per_tensor(
                 weight,
                 weight_scale,
@@ -157,7 +166,8 @@ def _quantize_weight_decomposed(
         # TODO: torch.quint4x2 is not supported
         if weight_dtype in [torch.quint8, torch.qint8, torch.qint32]:
             weight_dtype_ = _QDTYPE_TO_UNDERLYING_INT_REPR_DTYPE[weight_dtype]
-            weight_quant_min, weight_quant_max = _DTYPE_TO_QVALUE_BOUNDS[weight_dtype_]
+            if weight_quant_min is None or weight_quant_max is None:
+                weight_quant_min, weight_quant_max = _DTYPE_TO_QVALUE_BOUNDS[weight_dtype_]
             weight = torch.ops.quantized_decomposed.quantize_per_channel(
                 weight,
                 weight_scale,
@@ -167,7 +177,7 @@ def _quantize_weight_decomposed(
                 weight_quant_max,
                 weight_dtype_)  # type: ignore[arg-type]
             return weight
-    raise Exception(f"Unsupported dtype and qscheme: {weight_dtype}, {weight_qscheme}")
+    raise ValueError(f"Unsupported dtype and qscheme: {weight_dtype}, {weight_qscheme}")
 
 def _dequantize_weight_decomposed(
         weight: torch.Tensor,
@@ -175,7 +185,9 @@ def _dequantize_weight_decomposed(
         weight_dtype: torch.dtype,
         weight_scale: torch.Tensor,
         weight_zero_point: torch.Tensor,
-        weight_axis: int
+        weight_axis: int,
+        weight_quant_min: typing.Optional[int],
+        weight_quant_max: typing.Optional[int],
 ) -> torch.Tensor:
     # TODO: get the quant_min and quant_max from activation_post_process
     _DTYPE_TO_QVALUE_BOUNDS = {
@@ -189,10 +201,11 @@ def _dequantize_weight_decomposed(
         torch.qint8: torch.int8,
         torch.qint32: torch.int32,
     }
+    weight_dtype_ = _QDTYPE_TO_UNDERLYING_INT_REPR_DTYPE[weight_dtype]
+    if weight_quant_min is None or weight_quant_max is None:
+        weight_quant_min, weight_quant_max = _DTYPE_TO_QVALUE_BOUNDS[weight_dtype_]
     if weight_qscheme == torch.per_tensor_affine:
         if weight_dtype in [torch.quint8, torch.qint8, torch.qint32]:
-            weight_dtype_ = _QDTYPE_TO_UNDERLYING_INT_REPR_DTYPE[weight_dtype]
-            weight_quant_min, weight_quant_max = _DTYPE_TO_QVALUE_BOUNDS[weight_dtype_]
             weight = torch.ops.quantized_decomposed.dequantize_per_tensor(
                 weight,
                 weight_scale,
@@ -205,8 +218,6 @@ def _dequantize_weight_decomposed(
     elif weight_qscheme in [torch.per_channel_affine, torch.per_channel_affine_float_qparams]:
         # TODO: torch.quint4x2 is not supported
         if weight_dtype in [torch.quint8, torch.qint8, torch.qint32]:
-            weight_dtype_ = _QDTYPE_TO_UNDERLYING_INT_REPR_DTYPE[weight_dtype]
-            weight_quant_min, weight_quant_max = _DTYPE_TO_QVALUE_BOUNDS[weight_dtype_]
             weight = torch.ops.quantized_decomposed.dequantize_per_channel(
                 weight,
                 weight_scale,
@@ -216,7 +227,7 @@ def _dequantize_weight_decomposed(
                 weight_quant_max,
                 weight_dtype_)  # type: ignore[arg-type]
             return weight
-    raise Exception(f"Unsupported dtype and qscheme: {weight_dtype}, {weight_qscheme}")
+    raise ValueError(f"Unsupported dtype and qscheme: {weight_dtype}, {weight_qscheme}")
 
 def _quantize_weight(
         weight: torch.Tensor,
@@ -240,7 +251,7 @@ def _quantize_weight(
                 weight, weight_scale,
                 weight_zero_point, weight_axis_int, weight_dtype)  # type: ignore[arg-type]
             return weight
-    raise Exception(f"Unsupported dtype and qscheme: {weight_dtype}, {weight_qscheme}")
+    raise ValueError(f"Unsupported dtype and qscheme: {weight_dtype}, {weight_qscheme}")
 
 def _quantize_and_dequantize_weight_decomposed(
         weight: torch.Tensor,
@@ -248,7 +259,9 @@ def _quantize_and_dequantize_weight_decomposed(
         weight_dtype: torch.dtype,
         weight_scale: torch.Tensor,
         weight_zero_point: torch.Tensor,
-        weight_axis_int: int
+        weight_axis_int: int,
+        weight_quant_min: typing.Optional[int],
+        weight_quant_max: typing.Optional[int],
 ) -> torch.Tensor:
     """ Quantize and then dequantize the weight based on
     the quantization parameters
@@ -258,9 +271,11 @@ def _quantize_and_dequantize_weight_decomposed(
             torch.per_channel_affine,
             torch.per_channel_affine_float_qparams]:
         weight_quant = _quantize_weight_decomposed(
-            weight, weight_qscheme, weight_dtype, weight_scale, weight_zero_point, weight_axis_int)
+            weight, weight_qscheme, weight_dtype, weight_scale, weight_zero_point, weight_axis_int,
+            weight_quant_min, weight_quant_max)
         weight_dequant = _dequantize_weight_decomposed(
-            weight_quant, weight_qscheme, weight_dtype, weight_scale, weight_zero_point, weight_axis_int)
+            weight_quant, weight_qscheme, weight_dtype, weight_scale, weight_zero_point,
+            weight_axis_int, weight_quant_min, weight_quant_max)
     else:
         weight_dequant = weight
     return weight_dequant

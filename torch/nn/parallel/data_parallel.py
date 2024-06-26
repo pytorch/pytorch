@@ -1,21 +1,27 @@
+# mypy: allow-untyped-defs
 import operator
-import torch
 import warnings
 from itertools import chain
-from ..modules import Module
-from .scatter_gather import scatter_kwargs, gather
-from .replicate import replicate
-from .parallel_apply import parallel_apply
+from typing import Any, Dict, Generic, List, Optional, Sequence, Tuple, TypeVar, Union
+
+import torch
 from torch._utils import (
     _get_all_device_indices,
     _get_available_device_type,
     _get_device_index,
-    _get_devices_properties
+    _get_devices_properties,
 )
 
-__all__ = ['DataParallel', 'data_parallel']
+from ..modules import Module
+from .parallel_apply import parallel_apply
+from .replicate import replicate
+from .scatter_gather import gather, scatter_kwargs
 
-def _check_balance(device_ids):
+
+__all__ = ["DataParallel", "data_parallel"]
+
+
+def _check_balance(device_ids: Sequence[Union[int, torch.device]]) -> None:
     imbalance_warn = """
     There is an imbalance between your GPUs. You may want to exclude GPU {} which
     has less than 75% of the memory or cores of GPU {}. You can do so by setting
@@ -29,7 +35,9 @@ def _check_balance(device_ids):
         min_pos, min_val = min(enumerate(values), key=operator.itemgetter(1))
         max_pos, max_val = max(enumerate(values), key=operator.itemgetter(1))
         if min_val / max_val < 0.75:
-            warnings.warn(imbalance_warn.format(device_ids[min_pos], device_ids[max_pos]))
+            warnings.warn(
+                imbalance_warn.format(device_ids[min_pos], device_ids[max_pos])
+            )
             return True
         return False
 
@@ -39,7 +47,10 @@ def _check_balance(device_ids):
         return
 
 
-class DataParallel(Module):
+T = TypeVar("T", bound=Module)
+
+
+class DataParallel(Module, Generic[T]):
     r"""Implements data parallelism at the module level.
 
     This container parallelizes the application of the given :attr:`module` by
@@ -121,8 +132,14 @@ class DataParallel(Module):
 
     # TODO: update notes/cuda.rst when this class handles 8+ GPUs well
 
-    def __init__(self, module, device_ids=None, output_device=None, dim=0):
-        super(DataParallel, self).__init__()
+    def __init__(
+        self,
+        module: T,
+        device_ids: Optional[Sequence[Union[int, torch.device]]] = None,
+        output_device: Optional[Union[int, torch.device]] = None,
+        dim: int = 0,
+    ) -> None:
+        super().__init__()
         torch._C._log_api_usage_once("torch.nn.parallel.DataParallel")
         device_type = _get_available_device_type()
         if device_type is None:
@@ -133,6 +150,9 @@ class DataParallel(Module):
         if device_ids is None:
             device_ids = _get_all_device_indices()
 
+        if device_ids is None:
+            raise RuntimeError("no available devices were found")
+
         if output_device is None:
             output_device = device_ids[0]
 
@@ -142,50 +162,71 @@ class DataParallel(Module):
         self.output_device = _get_device_index(output_device, True)
         self.src_device_obj = torch.device(device_type, self.device_ids[0])
 
-        _check_balance(self.device_ids)
+        if device_type == "cuda":
+            _check_balance(self.device_ids)
 
         if len(self.device_ids) == 1:
             self.module.to(self.src_device_obj)
 
-    def forward(self, *inputs, **kwargs):
+    def forward(self, *inputs: Any, **kwargs: Any) -> Any:
         with torch.autograd.profiler.record_function("DataParallel.forward"):
             if not self.device_ids:
                 return self.module(*inputs, **kwargs)
 
             for t in chain(self.module.parameters(), self.module.buffers()):
                 if t.device != self.src_device_obj:
-                    raise RuntimeError("module must have its parameters and buffers "
-                                       "on device {} (device_ids[0]) but found one of "
-                                       "them on device: {}".format(self.src_device_obj, t.device))
+                    raise RuntimeError(
+                        "module must have its parameters and buffers "
+                        f"on device {self.src_device_obj} (device_ids[0]) but found one of "
+                        f"them on device: {t.device}"
+                    )
 
-            inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
+            inputs, module_kwargs = self.scatter(inputs, kwargs, self.device_ids)
             # for forward function without any inputs, empty list and dict will be created
             # so the module can be executed on one device which is the first one in device_ids
-            if not inputs and not kwargs:
+            if not inputs and not module_kwargs:
                 inputs = ((),)
-                kwargs = ({},)
+                module_kwargs = ({},)
 
             if len(self.device_ids) == 1:
-                return self.module(*inputs[0], **kwargs[0])
-            replicas = self.replicate(self.module, self.device_ids[:len(inputs)])
-            outputs = self.parallel_apply(replicas, inputs, kwargs)
+                return self.module(*inputs[0], **module_kwargs[0])
+            replicas = self.replicate(self.module, self.device_ids[: len(inputs)])
+            outputs = self.parallel_apply(replicas, inputs, module_kwargs)
             return self.gather(outputs, self.output_device)
 
-    def replicate(self, module, device_ids):
+    def replicate(
+        self, module: T, device_ids: Sequence[Union[int, torch.device]]
+    ) -> List[T]:
         return replicate(module, device_ids, not torch.is_grad_enabled())
 
-    def scatter(self, inputs, kwargs, device_ids):
+    def scatter(
+        self,
+        inputs: Tuple[Any, ...],
+        kwargs: Optional[Dict[str, Any]],
+        device_ids: Sequence[Union[int, torch.device]],
+    ) -> Any:
         return scatter_kwargs(inputs, kwargs, device_ids, dim=self.dim)
 
-    def parallel_apply(self, replicas, inputs, kwargs):
-        return parallel_apply(replicas, inputs, kwargs, self.device_ids[:len(replicas)])
+    def parallel_apply(
+        self, replicas: Sequence[T], inputs: Sequence[Any], kwargs: Any
+    ) -> List[Any]:
+        return parallel_apply(
+            replicas, inputs, kwargs, self.device_ids[: len(replicas)]
+        )
 
-    def gather(self, outputs, output_device):
+    def gather(self, outputs: Any, output_device: Union[int, torch.device]) -> Any:
         return gather(outputs, output_device, dim=self.dim)
 
 
-def data_parallel(module, inputs, device_ids=None, output_device=None, dim=0, module_kwargs=None):
-    r"""Evaluates module(input) in parallel across the GPUs given in device_ids.
+def data_parallel(
+    module: Module,
+    inputs: Any,
+    device_ids: Optional[Sequence[Union[int, torch.device]]] = None,
+    output_device: Optional[Union[int, torch.device]] = None,
+    dim: int = 0,
+    module_kwargs: Optional[Any] = None,
+) -> torch.Tensor:
+    r"""Evaluate module(input) in parallel across the GPUs given in device_ids.
 
     This is the functional version of the DataParallel module.
 
@@ -204,8 +245,14 @@ def data_parallel(module, inputs, device_ids=None, output_device=None, dim=0, mo
 
     device_type = _get_available_device_type()
 
+    if device_type is None:
+        raise RuntimeError("device type could not be determined")
+
     if device_ids is None:
         device_ids = _get_all_device_indices()
+
+    if device_ids is None:
+        raise RuntimeError("no available devices were found")
 
     if output_device is None:
         output_device = device_ids[0]
@@ -216,9 +263,11 @@ def data_parallel(module, inputs, device_ids=None, output_device=None, dim=0, mo
 
     for t in chain(module.parameters(), module.buffers()):
         if t.device != src_device_obj:
-            raise RuntimeError("module must have its parameters and buffers "
-                               "on device {} (device_ids[0]) but found one of "
-                               "them on device: {}".format(src_device_obj, t.device))
+            raise RuntimeError(
+                "module must have its parameters and buffers "
+                f"on device {src_device_obj} (device_ids[0]) but found one of "
+                f"them on device: {t.device}"
+            )
 
     inputs, module_kwargs = scatter_kwargs(inputs, module_kwargs, device_ids, dim)
     # for module without any inputs, empty list and dict will be created
@@ -227,9 +276,11 @@ def data_parallel(module, inputs, device_ids=None, output_device=None, dim=0, mo
         inputs = ((),)
         module_kwargs = ({},)
 
+    assert module_kwargs is not None
+
     if len(device_ids) == 1:
         return module(*inputs[0], **module_kwargs[0])
-    used_device_ids = device_ids[:len(inputs)]
+    used_device_ids = device_ids[: len(inputs)]
     replicas = replicate(module, used_device_ids)
     outputs = parallel_apply(replicas, inputs, module_kwargs, used_device_ids)
     return gather(outputs, output_device, dim)

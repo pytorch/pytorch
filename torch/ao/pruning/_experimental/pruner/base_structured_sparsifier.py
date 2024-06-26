@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from itertools import chain
 from operator import getitem
 import torch
@@ -56,6 +57,7 @@ def _get_supported_activation_functions():
         F.prelu,
         F.softsign,
         F.tanhshrink,
+        F.gelu,
     }
     return SUPPORTED_ACTIVATION_FUNCTIONS
 
@@ -82,6 +84,7 @@ def _get_supported_activation_modules():
         nn.PReLU,
         nn.Softsign,
         nn.Tanhshrink,
+        nn.GELU,
     }
     return SUPPORTED_ACTIVATION_MODULES
 
@@ -283,7 +286,7 @@ class BaseStructuredSparsifier(BaseSparsifier):
                     continue
 
                 first_module = modules.get(node.target)
-                # check if first module exists and has apropriate parameterization, otherwise skip
+                # check if first module exists and has appropriate parameterization, otherwise skip
                 if (
                     first_module is not None
                     and parametrize.is_parametrized(first_module)
@@ -299,7 +302,7 @@ class BaseStructuredSparsifier(BaseSparsifier):
 
         for module in self.traced.modules():
             if module_contains_param(module, FakeStructuredSparsity):
-                raise Exception(
+                raise Exception(  # noqa: TRY002
                     f"Error: {module} still contains FakeStructuredSparsity parametrizations!"
                 )
 

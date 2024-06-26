@@ -1,12 +1,10 @@
 #include <c10/core/Device.h>
-#include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 
 #include <algorithm>
 #include <array>
 #include <cctype>
 #include <exception>
-#include <ostream>
 #include <string>
 #include <vector>
 
@@ -28,7 +26,7 @@ DeviceType parse_type(const std::string& device_string) {
           {"hip", DeviceType::HIP},
           {"ve", DeviceType::VE},
           {"fpga", DeviceType::FPGA},
-          {"ort", DeviceType::ORT},
+          {"maia", DeviceType::MAIA},
           {"xla", DeviceType::XLA},
           {"lazy", DeviceType::Lazy},
           {"vulkan", DeviceType::Vulkan},
@@ -129,7 +127,7 @@ Device::Device(const std::string& device_string) : Device(Type::CPU) {
 
   try {
     if (!device_index_str.empty()) {
-      index_ = static_cast<c10::DeviceIndex>(c10::stoi(device_index_str));
+      index_ = static_cast<c10::DeviceIndex>(std::stoi(device_index_str));
     }
   } catch (const std::exception&) {
     TORCH_CHECK(
@@ -148,7 +146,7 @@ std::string Device::str() const {
   std::string str = DeviceTypeName(type(), /* lower case */ true);
   if (has_index()) {
     str.push_back(':');
-    str.append(to_string(index()));
+    str.append(std::to_string(index()));
   }
   return str;
 }

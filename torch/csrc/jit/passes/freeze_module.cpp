@@ -10,7 +10,6 @@
 #include <torch/csrc/jit/passes/eliminate_no_ops.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
-#include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/runtime/graph_executor_impl.h>
 
 #include <stack>
@@ -62,7 +61,7 @@ class AttributePropagator {
         const auto& attr_name = resolved_name->second;
         if (parent_module.hasattr(attr_name)) {
           auto value = parent_module.attr(attr_name);
-          // Freezing client wants to presever this submodule. When cleaning
+          // Freezing client wants to preserve this submodule. When cleaning
           // the frozen module, make sure it will be preserved entirely.
           if (value.isModule()) {
             preservedSubModule_.insert(value.toModule()._ivalue());
@@ -168,7 +167,7 @@ class AttributePropagator {
   // Examples:
   // submodule1.submodule2.foo -> {submodule2, "foo"}
   // submodule1.non_existent_module.foo -> nullopt
-  c10::optional<ResolvedName> resolveName(const std::string& name) {
+  std::optional<ResolvedName> resolveName(const std::string& name) {
     auto sub_names = splitName(name);
     if (sub_names.empty()) {
       return c10::nullopt;
@@ -226,7 +225,7 @@ class AttributePropagator {
     return true;
   }
 
-  c10::optional<std::deque<std::string>> getModulePath(
+  std::optional<std::deque<std::string>> getModulePath(
       Value* input,
       std::shared_ptr<Graph>& graph) {
     bool success = _loadModulePath(input, graph);
@@ -344,7 +343,7 @@ class AttributePropagator {
   void recordMutableAttrs(std::shared_ptr<Graph>& graph) {
     std::stack<Block*> blocks({graph->block()});
     std::unique_ptr<AliasDb> aliasDb =
-        torch::make_unique<AliasDb>(graph, /* isFrozen */ true);
+        std::make_unique<AliasDb>(graph, /* isFrozen */ true);
     while (!blocks.empty()) {
       Block* block = blocks.top();
       blocks.pop();
@@ -813,7 +812,7 @@ class AttributePropagator {
     removeUnusedAttrs();
   }
 
-  // Prepraring for clean up phase. At this point, record all subModules that
+  // Preparing for clean up phase. At this point, record all subModules that
   // contains mutable attributes.
   void recordReferencedAttrs(std::shared_ptr<Graph>& graph) {
     std::stack<Block*> blocks({graph->block()});
@@ -883,7 +882,7 @@ class AttributePropagator {
     auto type = module.type();
     size_t N = type->numAttributes();
     if (moduleEscapes(module, graph)) {
-      // Perserve all its attributes and methods.
+      // Preserve all its attributes and methods.
       attrsToKeep_[type].insert(N);
       return;
     }
@@ -919,7 +918,7 @@ class AttributePropagator {
   }
 
   // Remove unused attributes and methods for each sub module of the frozen
-  // module. This function iterates over the Calsstypes of its submodule
+  // module. This function iterates over the Classtypes of its submodule
   // attributes including its own type.
   void removeUnusedAttrs() {
     std::vector<std::string> attrsToRemove;

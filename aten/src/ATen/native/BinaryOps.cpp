@@ -146,9 +146,7 @@
 #include <ATen/ops/xor_native.h>
 #endif
 
-namespace at {
-
-namespace meta {
+namespace at::meta {
 
 TORCH_META_FUNC2(add, Tensor) (
   const Tensor& self, const Tensor& other, const Scalar& alpha
@@ -175,7 +173,7 @@ TORCH_META_FUNC2(div, Tensor) (const Tensor& self, const Tensor& other) {
   build_borrowing_binary_float_op(maybe_get_output(), self, other);
 }
 
-TORCH_META_FUNC2(div, Tensor_mode) (const Tensor& self, const Tensor& other, c10::optional<c10::string_view> rounding_mode) {
+TORCH_META_FUNC2(div, Tensor_mode) (const Tensor& self, const Tensor& other, std::optional<c10::string_view> rounding_mode) {
   if (!rounding_mode.has_value()) {
     build_borrowing_binary_float_op(maybe_get_output(), self, other);
   // NOLINTNEXTLINE(bugprone-branch-clone)
@@ -305,7 +303,7 @@ TORCH_META_FUNC2(xlogy, Tensor) (const Tensor& self, const Tensor& other) {
   build_borrowing_binary_float_op(maybe_get_output(), self, other);
 }
 
-TORCH_META_FUNC(logit_backward) (const Tensor& grad_output, const Tensor& input, c10::optional<double> eps) {
+TORCH_META_FUNC(logit_backward) (const Tensor& grad_output, const Tensor& input, std::optional<double> eps) {
   build_borrowing_binary_op(maybe_get_output(), grad_output, input);
 }
 
@@ -371,10 +369,10 @@ CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(le);
 CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(gt);
 CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(ge);
 
-} // namespace meta
+} // namespace at::meta
 
 
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(add_clamp_stub);
 DEFINE_DISPATCH(mul_stub);
@@ -450,7 +448,7 @@ TORCH_IMPL_FUNC(div_out) (const Tensor& self, const Tensor& other, const Tensor&
 }
 
 TORCH_IMPL_FUNC(div_out_mode) (
-  const Tensor& self, const Tensor& other, c10::optional<c10::string_view> rounding_mode, const Tensor& result
+  const Tensor& self, const Tensor& other, std::optional<c10::string_view> rounding_mode, const Tensor& result
 ) {
   if (!rounding_mode.has_value()) {
     div_true_stub(device_type(), *this);
@@ -461,7 +459,7 @@ TORCH_IMPL_FUNC(div_out_mode) (
   }
 }
 
-TORCH_IMPL_FUNC(logit_backward_out) (const Tensor& grad_output, const Tensor& input, c10::optional<double> eps, const Tensor& result) {
+TORCH_IMPL_FUNC(logit_backward_out) (const Tensor& grad_output, const Tensor& input, std::optional<double> eps, const Tensor& result) {
   logit_backward_stub(device_type(), *this, Scalar(eps ? eps.value() : -1.0));
 }
 
@@ -809,7 +807,7 @@ Tensor& arctan2_out(const Tensor& self, const Tensor& other, Tensor& result) {
   return at::atan2_out(result, self, other);
 }
 
-Tensor& add_relu_impl(
+static Tensor& add_relu_impl(
     Tensor& result, const Tensor& self, const Tensor& other, const Scalar& alpha) {
   auto iter = TensorIterator::binary_op(result, self, other);
   Scalar min_val;
@@ -898,11 +896,11 @@ Tensor& div_(Tensor& self, const Scalar& other) {
   return self.div_(wrapped_scalar_tensor(other)); // redispatch!
 }
 
-Tensor div(const Tensor& self, const Scalar& other, c10::optional<c10::string_view> rounding_mode) {
+Tensor div(const Tensor& self, const Scalar& other, std::optional<c10::string_view> rounding_mode) {
   return self.div(wrapped_scalar_tensor(other), std::move(rounding_mode)); // redispatch!
 }
 
-Tensor& div_(Tensor& self, const Scalar& other, c10::optional<c10::string_view> rounding_mode) {
+Tensor& div_(Tensor& self, const Scalar& other, std::optional<c10::string_view> rounding_mode) {
   return self.div_(wrapped_scalar_tensor(other), std::move(rounding_mode)); // redispatch!
 }
 
@@ -927,23 +925,23 @@ Tensor& divide_(Tensor& self, const Scalar& other) {
   return self.div_(other);
 }
 
-Tensor& divide_out(const Tensor& self, const Tensor& other, c10::optional<c10::string_view> rounding_mode, Tensor& result) {
+Tensor& divide_out(const Tensor& self, const Tensor& other, std::optional<c10::string_view> rounding_mode, Tensor& result) {
   return at::div_out(result, self, other, std::move(rounding_mode));
 }
 
-Tensor divide(const Tensor& self, const Tensor& other, c10::optional<c10::string_view> rounding_mode) {
+Tensor divide(const Tensor& self, const Tensor& other, std::optional<c10::string_view> rounding_mode) {
   return self.div(other, std::move(rounding_mode));
 }
 
-Tensor& divide_(Tensor& self, const Tensor& other, c10::optional<c10::string_view> rounding_mode) {
+Tensor& divide_(Tensor& self, const Tensor& other, std::optional<c10::string_view> rounding_mode) {
   return self.div_(other, std::move(rounding_mode));
 }
 
-Tensor divide(const Tensor& self, const Scalar& other, c10::optional<c10::string_view> rounding_mode) {
+Tensor divide(const Tensor& self, const Scalar& other, std::optional<c10::string_view> rounding_mode) {
   return self.div(other, std::move(rounding_mode));
 }
 
-Tensor& divide_(Tensor& self, const Scalar& other, c10::optional<c10::string_view> rounding_mode) {
+Tensor& divide_(Tensor& self, const Scalar& other, std::optional<c10::string_view> rounding_mode) {
   return self.div_(other, std::move(rounding_mode));
 }
 
@@ -1003,7 +1001,7 @@ Tensor& mul__scalar_sparse_csr(Tensor& self, const Scalar& other) {
   return self;
 }
 
-Device correct_out_device(const Tensor& self, const Tensor& other) {
+static Device correct_out_device(const Tensor& self, const Tensor& other) {
   if (self.device() == at::kCPU){
       return other.device();
   } else {
@@ -1049,7 +1047,7 @@ Tensor div_zerotensor(const Tensor& self, const Tensor& other) {
   }
 }
 
-Tensor maybe_add_maybe_sub(const Tensor& self, const Tensor& other, const Scalar& alpha) {
+static Tensor maybe_add_maybe_sub(const Tensor& self, const Tensor& other, const Scalar& alpha) {
   auto out_device = correct_out_device(self, other);
   // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
   auto device_ = Device(DeviceType::Meta);
@@ -1418,7 +1416,7 @@ Tensor& comparison_op_(Tensor& self, const Scalar& other, OutImpl& out_impl) {
 }
 
 // We need explicit cast to OutFunc because each *_out func is overloaded twice. Without An explicit cast, merely
-// referring to *_out function is ambiguious.
+// referring to *_out function is ambiguous.
 using OutFunc = std::add_const<Tensor&(&)(Tensor&, const Tensor&, const Tensor&)>::type;
 
 // less, alias for torch.lt
@@ -1482,23 +1480,14 @@ Tensor& not_equal_(Tensor& self, const Scalar& other) { return self.ne_(other); 
 Tensor& logical_and_out(const Tensor& self, const Tensor& other, Tensor& result) { return comparison_op_out(result, self, other, logical_and_stub); }
 Tensor logical_and(const Tensor& self, const Tensor& other) { return comparison_op(self, other, static_cast<OutFunc>(at::logical_and_out)); }
 Tensor& logical_and_(Tensor& self, const Tensor& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::logical_and_out)); }
-Tensor& logical_and_out(Tensor& result, const Tensor& self, const Scalar& other) { return comparison_op_out(result, self, other, static_cast<OutFunc>(at::logical_and_out)); }
-Tensor logical_and(const Tensor& self, const Scalar& other) { return comparison_op(self, other, static_cast<OutFunc>(at::logical_and_out)); }
-Tensor& logical_and_(Tensor& self, const Scalar& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::logical_and_out)); }
 
 Tensor& logical_or_out(const Tensor& self, const Tensor& other, Tensor& result) { return comparison_op_out(result, self, other, logical_or_stub); }
 Tensor logical_or(const Tensor& self, const Tensor& other) { return comparison_op(self, other, static_cast<OutFunc>(at::logical_or_out)); }
 Tensor& logical_or_(Tensor& self, const Tensor& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::logical_or_out)); }
-Tensor& logical_or_out(Tensor& result, const Tensor& self, const Scalar& other) { return comparison_op_out(result, self, other, static_cast<OutFunc>(at::logical_or_out)); }
-Tensor logical_or(const Tensor& self, const Scalar& other) { return comparison_op(self, other, static_cast<OutFunc>(at::logical_or_out)); }
-Tensor& logical_or_(Tensor& self, const Scalar& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::logical_or_out)); }
 
 Tensor& logical_xor_out(const Tensor& self, const Tensor& other, Tensor& result) { return comparison_op_out(result, self, other, logical_xor_stub); }
 Tensor logical_xor(const Tensor& self, const Tensor& other) { return comparison_op(self, other, static_cast<OutFunc>(at::logical_xor_out)); }
 Tensor& logical_xor_(Tensor& self, const Tensor& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::logical_xor_out)); }
-Tensor& logical_xor_out(Tensor& result, const Tensor& self, const Scalar& other) { return comparison_op_out(result, self, other, static_cast<OutFunc>(at::logical_xor_out)); }
-Tensor logical_xor(const Tensor& self, const Scalar& other) { return comparison_op(self, other, static_cast<OutFunc>(at::logical_xor_out)); }
-Tensor& logical_xor_(Tensor& self, const Scalar& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::logical_xor_out)); }
 
 // binary max, alias for maximum
 Tensor& max_out(const Tensor& self, const Tensor& other, Tensor& result) {
@@ -1609,5 +1598,4 @@ Tensor special_xlogy(const Tensor& x, const Scalar& y) {
   return at::xlogy(x, y);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

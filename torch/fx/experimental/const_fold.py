@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import re
 from typing import Callable, Dict, Optional, Set, Union
 
@@ -23,7 +24,7 @@ class FoldedGraphModule(torch.fx.GraphModule):
         root: torch.nn.Module,
         graph: torch.fx.Graph,
         const_subgraph: Optional[torch.fx.Graph] = None,
-        fx_const_folded_attrs_name: str = None,
+        fx_const_folded_attrs_name: Optional[str] = None,
         device_for_folded_attrs: str = "cuda",
     ):
         super().__init__(root, graph)
@@ -60,7 +61,7 @@ class FoldedGraphModule(torch.fx.GraphModule):
 
         def _create_param(i):
             return torch.nn.Parameter(
-                i
+                i.detach().clone()
                 if not isinstance(i, int)
                 else torch.Tensor([i]).to(device=self.device_for_folded_attrs),
                 requires_grad=i.requires_grad if isinstance(i, torch.Tensor) else False,
@@ -229,13 +230,13 @@ def split_const_subgraphs(
     # because we are fetching attributes directly from the root module, instead of
     # fetching them from const_gm. Example: The const_gm must have some format like:
     # graph():
-    #    %inp : [#users=1] = placeholder[target=const_inp]
-    #    %add : [#users=1] = call_function[target=operator.add](args = (%inp, %inp), kwargs = {})
+    #    %inp : [num_users=1] = placeholder[target=const_inp]
+    #    %add : [num_users=1] = call_function[target=operator.add](args = (%inp, %inp), kwargs = {})
     #    return add
     # We replace that with the following, which does not have any placeholders:
     # graph():
-    #    %inp_1 : [#users=1] = get_attr[target=const_inp]
-    #    %add : [#users=1] = call_function[target=operator.add](args = (%inp_1, %inp_1), kwargs = {})
+    #    %inp_1 : [num_users=1] = get_attr[target=const_inp]
+    #    %add : [num_users=1] = call_function[target=operator.add](args = (%inp_1, %inp_1), kwargs = {})
     #    return add
     root_const_gm = torch.fx.GraphModule(split, const_gm.graph)
     for node in root_const_gm.graph.nodes:
@@ -258,12 +259,12 @@ def split_const_subgraphs(
     # worry about whether this is one or more tensors because the original graph
     # correctly uses getitem to extract individual tensors if there are multiple folded.
     fx_const_folded_attrs_name = get_unique_attr_name_in_module(
-        split, "_FX_CONST_FOLDED_ATTRS"
+        mod_traced, "_FX_CONST_FOLDED_ATTRS"
     )
     setattr(
         split,
         fx_const_folded_attrs_name,
-        torch.nn.ParameterList() if multiple_outputs else torch.nn.Parameter(),
+        torch.nn.ParameterList() if multiple_outputs else torch.nn.Parameter(),  # type: ignore[possibly-undefined]
     )
     for node in split.graph.nodes:
         if node.op == "call_module" and node.target == const_mod_name:

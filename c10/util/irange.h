@@ -3,10 +3,11 @@
 #pragma once
 
 #include <c10/util/Exception.h>
+#include <c10/util/TypeSafeSignMath.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <iterator>
-#include <limits>
 #include <type_traits>
 
 namespace c10 {
@@ -16,7 +17,7 @@ namespace detail {
 template <
     typename I,
     bool one_sided = false,
-    typename std::enable_if<std::is_integral<I>::value, int>::type = 0>
+    std::enable_if_t<std::is_integral_v<I>, int> = 0>
 struct integer_iterator {
   using iterator_category = std::input_iterator_tag;
   using value_type = I;
@@ -46,15 +47,22 @@ struct integer_iterator {
   }
 
   bool operator==(const integer_iterator& other) const {
-    if /* constexpr -- we don't have C++17 yet, see #85969 */ (one_sided) {
+    if constexpr (one_sided) {
       // Range-for loops' end test is `begin != end`, not `begin <
       // end`. To handle `c10::irange(n)` where n < 0 (which should be
       // empty), we just make `begin != end` fail whenever `end` is
       // negative.
-      return other.value < 0 || value == other.value;
+      return is_negative(other.value) || value == other.value;
     } else {
       return value == other.value;
     }
+    // Suppress "warning: missing return statement at end of non-void function"
+    // which Nvidia's Robert Crovella confirms is an NVCC compiler error
+    // here https://stackoverflow.com/a/64561686/752843 on 2020-10-27
+    // `__builtin_unreachable();` would be best here, but it's not
+    // available with all compilers. So we instead return an arbitrary
+    // value trusting that this line will, in fact, never be reached.
+    return false; // Horrible hack
   }
 
   bool operator!=(const integer_iterator& other) const {
@@ -70,7 +78,7 @@ struct integer_iterator {
 template <
     typename I,
     bool one_sided = false,
-    typename std::enable_if<std::is_integral<I>::value, bool>::type = true>
+    std::enable_if_t<std::is_integral_v<I>, bool> = true>
 struct integer_range {
  public:
   integer_range(I begin, I end) : begin_(begin), end_(end) {}
@@ -94,10 +102,8 @@ struct integer_range {
 template <
     typename Integer1,
     typename Integer2,
-    typename std::enable_if<std::is_integral<Integer1>::value, bool>::type =
-        true,
-    typename std::enable_if<std::is_integral<Integer2>::value, bool>::type =
-        true>
+    std::enable_if_t<std::is_integral_v<Integer1>, bool> = true,
+    std::enable_if_t<std::is_integral_v<Integer2>, bool> = true>
 integer_range<Integer2> irange(Integer1 begin, Integer2 end) {
   // If end<=begin then the range is empty; we can achieve this effect by
   // choosing the larger of {begin, end} as the loop terminator
@@ -110,8 +116,7 @@ integer_range<Integer2> irange(Integer1 begin, Integer2 end) {
 /// If end<=begin, then the range is empty
 template <
     typename Integer,
-    typename std::enable_if<std::is_integral<Integer>::value, bool>::type =
-        true>
+    std::enable_if_t<std::is_integral_v<Integer>, bool> = true>
 integer_range<Integer, true> irange(Integer end) {
   return {Integer(), end};
 }

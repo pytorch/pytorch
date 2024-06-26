@@ -52,9 +52,6 @@ def replace_sub_with_add_pass(gm) -> PassResult:
 
 
 class AddModule(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-
     def forward(self, x):
         y = torch.add(x, x)
         z = torch.add(y, x)

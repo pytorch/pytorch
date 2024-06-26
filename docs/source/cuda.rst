@@ -12,6 +12,7 @@ torch.cuda
     current_blas_handle
     current_device
     current_stream
+    cudart
     default_stream
     device
     device_count
@@ -33,6 +34,9 @@ torch.cuda
     stream
     synchronize
     utilization
+    temperature
+    power_draw
+    clock_rate
     OutOfMemoryError
 
 Random Number Generator
@@ -130,6 +134,7 @@ NVIDIA Tools Extension (NVTX)
     nvtx.mark
     nvtx.range_push
     nvtx.range_pop
+    nvtx.range
 
 Jiterator (beta)
 -----------------------------
@@ -139,6 +144,26 @@ Jiterator (beta)
 
     jiterator._create_jit_fn
     jiterator._create_multi_output_jit_fn
+
+TunableOp
+---------
+
+Some operations could be implemented using more than one library or more than
+one technique. For example, a GEMM could be implemented for CUDA or ROCm using
+either the cublas/cublasLt libraries or hipblas/hipblasLt libraries,
+respectively. How does one know which implementation is the fastest and should
+be chosen? That's what TunableOp provides. Certain operators have been
+implemented using multiple strategies as Tunable Operators. At runtime, all
+strategies are profiled and the fastest is selected for all subsequent
+operations.
+
+See the :doc:`documentation <cuda.tunable>` for information on how to use it.
+
+.. toctree::
+    :hidden:
+
+    cuda.tunable
+
 
 Stream Sanitizer (prototype)
 ----------------------------
@@ -150,3 +175,18 @@ See the :doc:`documentation <cuda._sanitizer>` for information on how to use it.
     :hidden:
 
     cuda._sanitizer
+
+
+.. This module needs to be documented. Adding here in the meantime
+.. for tracking purposes
+.. py:module:: torch.cuda.comm
+.. py:module:: torch.cuda.error
+.. py:module:: torch.cuda.graphs
+.. py:module:: torch.cuda.jiterator
+.. py:module:: torch.cuda.memory
+.. py:module:: torch.cuda.nccl
+.. py:module:: torch.cuda.nvtx
+.. py:module:: torch.cuda.profiler
+.. py:module:: torch.cuda.random
+.. py:module:: torch.cuda.sparse
+.. py:module:: torch.cuda.streams

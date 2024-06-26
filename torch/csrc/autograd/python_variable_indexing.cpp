@@ -8,10 +8,14 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/utils/numpy_stub.h>
+#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_numbers.h>
+#include <torch/csrc/utils/python_symnode.h>
 #include <torch/csrc/utils/tensor_new.h>
+#include <torch/csrc/utils/tensor_numpy.h>
 #include <torch/csrc/utils/tensor_types.h>
 
 #include <ATen/DeviceGuard.h>
@@ -24,14 +28,11 @@
 #include <c10/util/irange.h>
 
 #include <c10/core/Layout.h>
-#include <tuple>
-#include <vector>
 
 using namespace at;
 using namespace torch::autograd::utils;
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 Py_ssize_t THPVariable_length(PyObject* self) {
   HANDLE_TH_ERRORS
@@ -67,7 +68,7 @@ static inline int64_t count_specified_dimensions(PyObject* index) {
   for (Py_ssize_t i = 0; i < size; i++) {
     PyObject* obj = PyTuple_GET_ITEM(
         index, i); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
-    if (!THPVariable_CheckExact(obj) && check_has_torch_function(obj))
+    if (check_has_torch_function(obj))
       return -1;
     if (THPVariable_Check(obj)) {
       const auto& var = THPVariable_Unpack(obj);
@@ -87,10 +88,12 @@ static inline int64_t count_specified_dimensions(PyObject* index) {
 }
 
 [[noreturn]] static inline void invalid_index(PyObject* obj) {
-  throw IndexError(
+  TORCH_CHECK_INDEX(
+      false,
       "only integers, slices (`:`), ellipsis (`...`), None and long or byte "
-      "Variables are valid indices (got %s)",
-      Py_TYPE(obj)->tp_name);
+      "Variables are valid indices (got ",
+      Py_TYPE(obj)->tp_name,
+      ")");
 }
 
 static inline Variable sequenceToVariable(
@@ -116,6 +119,12 @@ inline Variable valueToTensor(
     scalar = Scalar(THPUtils_unpackDouble(value));
   } else if (PyComplex_Check(value)) {
     scalar = Scalar(THPUtils_unpackComplexDouble(value));
+  } else if (torch::is_symint(value)) {
+    scalar = Scalar(py::cast<c10::SymInt>(py::handle(value)));
+  } else if (torch::is_symfloat(value)) {
+    scalar = Scalar(py::cast<c10::SymFloat>(py::handle(value)));
+  } else if (torch::is_symbool(value)) {
+    scalar = Scalar(py::cast<c10::SymBool>(py::handle(value)));
   } else {
     throw TypeError(
         "can't assign a %s to a %s",
@@ -125,7 +134,7 @@ inline Variable valueToTensor(
   // lift_fresh is supposed to be used in situations where you are guaranteed to
   // get a plain Tensor which is not true for cpu device but not for non cpu
   // device
-  if (device == at::kCPU) {
+  if (device == at::kCPU && !scalar.isSymbolic()) {
     return at::lift_fresh(
         at::indexing::scalarToTensor(scalar, options, device));
   } else {
@@ -169,7 +178,7 @@ static inline Variable applySlicing(
     variable_list& outIndices,
     bool is_tracing,
     const at::Device& self_device,
-    const c10::optional<int64_t>& self_ndim,
+    const std::optional<int64_t>& self_ndim,
     int64_t specified_dims) {
   int64_t size =
       PyTuple_GET_SIZE(index); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
@@ -191,9 +200,9 @@ static inline Variable applySlicing(
     // nested tensor does not have a size (yet) so for now we represent its size
     // as null may need to be changed after we reach a better solution for
     // nested tensor size
-    c10::optional<SymIntArrayRef> result_sizes = result.is_nested()
-        ? c10::optional<SymIntArrayRef>(c10::nullopt)
-        : c10::optional<SymIntArrayRef>(result.sym_sizes());
+    std::optional<SymIntArrayRef> result_sizes = result.is_nested()
+        ? std::optional<SymIntArrayRef>(c10::nullopt)
+        : std::optional<SymIntArrayRef>(result.sym_sizes());
     result = at::indexing::handleDimInMultiDimIndexing(
         /*prev_dim_result=*/result,
         /*original_tensor=*/self,
@@ -262,6 +271,14 @@ static inline bool treatSequenceAsTuple(PyObject* index) {
   if (THPVariable_Check(index)) {
     return false;
   }
+  //  Allow indexing with ndarray if numpy compilation is enabled. An ndarray
+  //  index should not be treated as a tuple since the indexing has a different
+  //  syntax.
+#ifdef USE_NUMPY
+  if (::torch::utils::is_numpy_available() && PyArray_CheckExact(index)) {
+    return false;
+  }
+#endif
   if (!PySequence_Check(index)) {
     return false;
   }
@@ -323,7 +340,7 @@ static inline THPObjectPtr wrapTuple(PyObject* index) {
 // indexing is needed, it calls C++ `at::indexing::dispatch_index`.
 PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   HANDLE_TH_ERRORS
-  if (!THPVariable_CheckExact(self) && check_has_torch_function(self)) {
+  if (check_has_torch_function(self)) {
     return handle_torch_function_indexing(self, index);
   }
   const auto& self_ = THPVariable_Unpack(self);
@@ -420,9 +437,8 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   if (py_value == nullptr) {
     throw TypeError("Tensor does not support deleting items");
   }
-  if ((!THPVariable_CheckExact(self) && check_has_torch_function(self)) ||
-      (!THPVariable_CheckExact(py_value) &&
-       check_has_torch_function(py_value))) {
+  if ((check_has_torch_function(self)) ||
+      (check_has_torch_function(py_value))) {
     py::object ret = py::reinterpret_steal<py::object>(
         handle_torch_function_indexing(self, index, py_value));
     return 0;
@@ -468,12 +484,13 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   bool is_tracing = torch::jit::tracer::isTracing();
 
   // handle simple types: integers, slices
-  if (THPUtils_checkLong(index)) {
+  if (THPUtils_checkLong(index) || torch::is_symint(index)) {
     if (is_tracing && THPVariable_Check(index)) {
       recordSelectTrace(THPVariable_Unpack(index));
     }
-    dispatch_set_item(
-        self_, {at::indexing::TensorIndex(THPUtils_unpackLong(index))}, value);
+    auto symint = torch::is_symint(index) ? py::cast<SymInt>(index)
+                                          : SymInt(THPUtils_unpackLong(index));
+    dispatch_set_item(self_, {at::indexing::TensorIndex(symint)}, value);
     return 0;
   } else if (PySlice_Check(index)) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -534,5 +551,4 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

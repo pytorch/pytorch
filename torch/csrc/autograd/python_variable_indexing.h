@@ -6,8 +6,7 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_symnode.h>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 struct UnpackedSlice {
   c10::SymInt start;
@@ -16,7 +15,7 @@ struct UnpackedSlice {
 };
 
 // This mirrors Cpython's PySlice_Unpack method
-static inline UnpackedSlice __PySlice_Unpack(PyObject* _r) {
+inline UnpackedSlice __PySlice_Unpack(PyObject* _r) {
   PySliceObject* r = (PySliceObject*)_r;
   /* this is harder to get right than you might think */
 
@@ -42,7 +41,7 @@ static inline UnpackedSlice __PySlice_Unpack(PyObject* _r) {
     step_sym = c10::SymInt(1);
   } else {
     if (torch::is_symint(r->step)) {
-      auto step_sym = py::handle(r->step).cast<c10::SymInt>();
+      step_sym = py::handle(r->step).cast<c10::SymInt>();
     } else {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Py_ssize_t step;
@@ -100,5 +99,4 @@ Variable valueToTensor(
     PyObject* value,
     const at::Device& device);
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

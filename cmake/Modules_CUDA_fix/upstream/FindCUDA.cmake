@@ -630,6 +630,7 @@ macro(cuda_unset_include_and_libraries)
   unset(CUDA_cublas_LIBRARY CACHE)
   unset(CUDA_cublas_device_LIBRARY CACHE)
   unset(CUDA_cublasemu_LIBRARY CACHE)
+  unset(CUDA_cublasLt_LIBRARY CACHE)
   unset(CUDA_cufft_LIBRARY CACHE)
   unset(CUDA_cufftemu_LIBRARY CACHE)
   unset(CUDA_cupti_LIBRARY CACHE)
@@ -711,24 +712,27 @@ if(CMAKE_CROSSCOMPILING)
   SET (CUDA_TOOLKIT_ROOT $ENV{CUDA_TOOLKIT_ROOT})
   if(CMAKE_SYSTEM_PROCESSOR STREQUAL "armv7-a")
     # Support for NVPACK
-    set (CUDA_TOOLKIT_TARGET_NAME "armv7-linux-androideabi")
+    set (CUDA_TOOLKIT_TARGET_NAMES "armv7-linux-androideabi")
   elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "arm")
     # Support for arm cross compilation
-    set(CUDA_TOOLKIT_TARGET_NAME "armv7-linux-gnueabihf")
+    set(CUDA_TOOLKIT_TARGET_NAMES "armv7-linux-gnueabihf")
   elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
     # Support for aarch64 cross compilation
     if (ANDROID_ARCH_NAME STREQUAL "arm64")
-      set(CUDA_TOOLKIT_TARGET_NAME "aarch64-linux-androideabi")
+      set(CUDA_TOOLKIT_TARGET_NAMES "aarch64-linux-androideabi")
     else()
-      set(CUDA_TOOLKIT_TARGET_NAME "aarch64-linux")
+      set(CUDA_TOOLKIT_TARGET_NAMES "aarch64-linux" "sbsa-linux")
     endif (ANDROID_ARCH_NAME STREQUAL "arm64")
   endif()
 
-  if (EXISTS "${CUDA_TOOLKIT_ROOT}/targets/${CUDA_TOOLKIT_TARGET_NAME}")
-    set(CUDA_TOOLKIT_TARGET_DIR "${CUDA_TOOLKIT_ROOT}/targets/${CUDA_TOOLKIT_TARGET_NAME}" CACHE PATH "CUDA Toolkit target location.")
-    SET (CUDA_TOOLKIT_ROOT_DIR ${CUDA_TOOLKIT_ROOT})
-    mark_as_advanced(CUDA_TOOLKIT_TARGET_DIR)
-  endif()
+  foreach(CUDA_TOOLKIT_TARGET_NAME IN LISTS CUDA_TOOLKIT_TARGET_NAMES)
+    if (EXISTS "${CUDA_TOOLKIT_ROOT}/targets/${CUDA_TOOLKIT_TARGET_NAME}")
+      set(CUDA_TOOLKIT_TARGET_DIR "${CUDA_TOOLKIT_ROOT}/targets/${CUDA_TOOLKIT_TARGET_NAME}" CACHE PATH "CUDA Toolkit target location.")
+      SET (CUDA_TOOLKIT_ROOT_DIR ${CUDA_TOOLKIT_ROOT} CACHE PATH "Toolkit location." FORCE)
+      mark_as_advanced(CUDA_TOOLKIT_TARGET_DIR)
+      break()
+    endif()
+  endforeach()
 
   # add known CUDA targetr root path to the set of directories we search for programs, libraries and headers
   set( CMAKE_FIND_ROOT_PATH "${CUDA_TOOLKIT_TARGET_DIR};${CMAKE_FIND_ROOT_PATH}")
@@ -763,19 +767,6 @@ else()
   # Search default search paths, after we search our own set of paths.
   cuda_find_host_program(CUDA_NVCC_EXECUTABLE nvcc)
 endif()
-
-# FAST_NVCC
-if(USE_FAST_NVCC AND CUDA_NVCC_EXECUTABLE AND NOT CUDA_NVCC_EXECUTABLE_ORIGIN)
-  set(CUDA_NVCC_EXECUTABLE_ORIGIN "${CUDA_NVCC_EXECUTABLE}")
-  set(FAST_NVCC_EXECUTABLE "${PROJECT_SOURCE_DIR}/tools/fast_nvcc/fast_nvcc.py")
-  configure_file(${PROJECT_SOURCE_DIR}/tools/fast_nvcc/wrap_nvcc.sh.in "${PROJECT_SOURCE_DIR}/tools/fast_nvcc/tmp/wrap_nvcc.sh")
-  file(COPY "${PROJECT_SOURCE_DIR}/tools/fast_nvcc/tmp/wrap_nvcc.sh"
-    DESTINATION "${PROJECT_SOURCE_DIR}/tools/fast_nvcc/"
-    FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
-  )
-  set(CUDA_NVCC_EXECUTABLE "${PROJECT_SOURCE_DIR}/tools/fast_nvcc/wrap_nvcc.sh")
-endif()
-mark_as_advanced(CUDA_NVCC_EXECUTABLE)
 
 if(CUDA_NVCC_EXECUTABLE AND NOT CUDA_VERSION)
   # Compute the version.
@@ -963,6 +954,7 @@ endif()
 
 find_cuda_helper_libs(cufft)
 find_cuda_helper_libs(cublas)
+find_cuda_helper_libs(cublasLt)
 # cusparse showed up in version 3.2
 find_cuda_helper_libs(cusparse)
 find_cuda_helper_libs(curand)
@@ -993,7 +985,7 @@ if (CUDA_BUILD_EMULATION)
   set(CUDA_CUBLAS_LIBRARIES ${CUDA_cublasemu_LIBRARY})
 else()
   set(CUDA_CUFFT_LIBRARIES ${CUDA_cufft_LIBRARY})
-  set(CUDA_CUBLAS_LIBRARIES ${CUDA_cublas_LIBRARY} ${CUDA_cublas_device_LIBRARY})
+  set(CUDA_CUBLAS_LIBRARIES ${CUDA_cublas_LIBRARY} ${CUDA_cublas_device_LIBRARY} ${CUDA_cublasLt_LIBRARY})
 endif()
 
 ########################
@@ -1962,7 +1954,7 @@ macro(CUDA_ADD_CUBLAS_TO_TARGET target)
   if (CUDA_BUILD_EMULATION)
     target_link_libraries(${target} ${CUDA_LINK_LIBRARIES_KEYWORD} ${CUDA_cublasemu_LIBRARY})
   else()
-    target_link_libraries(${target} ${CUDA_LINK_LIBRARIES_KEYWORD} ${CUDA_cublas_LIBRARY} ${CUDA_cublas_device_LIBRARY})
+    target_link_libraries(${target} ${CUDA_LINK_LIBRARIES_KEYWORD} ${CUDA_cublas_LIBRARY} ${CUDA_cublas_device_LIBRARY} ${CUDA_cublasLt_LIBRARY})
   endif()
 endmacro()
 

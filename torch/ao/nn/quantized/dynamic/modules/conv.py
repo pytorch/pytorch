@@ -1,4 +1,4 @@
-# coding=utf-8
+# mypy: allow-untyped-defs
 r"""Dynamically quantized convolution modules."""
 
 import torch
@@ -57,9 +57,7 @@ class Conv1d(nnq.Conv1d):
                  dtype=None,
                  reduce_range=True):
         warnings.warn(
-            "The current implementation of the {} module has poor numerical accuracy and its use is not recommended".format(
-                self._get_name()
-            )
+            f"The current implementation of the {self._get_name()} module has poor numerical accuracy and its use is not recommended"  # noqa: B950
         )
         factory_kwargs = {'device': device, 'dtype': dtype}
         kernel_size = _single(kernel_size)
@@ -67,7 +65,7 @@ class Conv1d(nnq.Conv1d):
         padding = padding if isinstance(padding, str) else _single(padding)
         dilation = _single(dilation)
 
-        super(Conv1d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             groups, bias, padding_mode, **factory_kwargs)
 
@@ -122,9 +120,8 @@ class Conv2d(nnq.Conv2d):
                  padding=0, dilation=1, groups=1, bias=True,
                  padding_mode='zeros', device=None, dtype=None):
         warnings.warn(
-            "The current implementation of the {} module has poor numerical accuracy and its use is not recommended".format(
-                self._get_name()
-            )
+            f"The current implementation of the {self._get_name()} module "
+            "has poor numerical accuracy and its use is not recommended"
         )
         factory_kwargs = {'device': device, 'dtype': dtype}
         kernel_size = _pair(kernel_size)
@@ -132,7 +129,7 @@ class Conv2d(nnq.Conv2d):
         padding = _pair(padding)
         dilation = _pair(dilation)
 
-        super(Conv2d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             groups, bias, padding_mode, **factory_kwargs)
 
@@ -187,9 +184,7 @@ class Conv3d(nnq.Conv3d):
                  padding=0, dilation=1, groups=1, bias=True,
                  padding_mode='zeros', device=None, dtype=None):
         warnings.warn(
-            "The current implementation of the {} module has poor numerical accuracy and its use is not recommended".format(
-                self._get_name()
-            )
+            f"The current implementation of the {self._get_name()} module has poor numerical accuracy and its use is not recommended"  # noqa: B950
         )
         assert padding_mode != 'reflect', "Conv3d does not support reflection padding"
         factory_kwargs = {'device': device, 'dtype': dtype}
@@ -197,7 +192,7 @@ class Conv3d(nnq.Conv3d):
         stride = _triple(stride)
         padding = _triple(padding)
         dilation = _triple(dilation)
-        super(Conv3d, self)._init(
+        super()._init(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _triple(0), groups, bias, padding_mode, **factory_kwargs)
 
@@ -257,17 +252,15 @@ class ConvTranspose1d(nnq.ConvTranspose1d):
                  padding=0, output_padding=0, groups=1, bias=True,
                  dilation=1, padding_mode='zeros', device=None, dtype=None):
         warnings.warn(
-            "The current implementation of the {} module has poor numerical accuracy and its use is not recommended".format(
-                self._get_name()
-            )
+            f"The current implementation of the {self._get_name()} module has poor numerical accuracy and its use is not recommended"  # noqa: B950
         )
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(ConvTranspose1d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride, padding, output_padding,
             groups, bias, dilation, padding_mode, **factory_kwargs)
 
     def _get_name(self):
-        return 'DynamicQuantizedConvTranpose1d'
+        return 'DynamicQuantizedConvTranspose1d'
 
     def forward(self, input: Tensor, reduce_range: bool = True) -> Tensor:
         # Temporarily using len(shape) instead of ndim due to JIT issue
@@ -318,17 +311,15 @@ class ConvTranspose2d(nnq.ConvTranspose2d):
                  padding=0, output_padding=0, groups=1, bias=True,
                  dilation=1, padding_mode='zeros', device=None, dtype=None):
         warnings.warn(
-            "The current implementation of the {} module has poor numerical accuracy and its use is not recommended".format(
-                self._get_name()
-            )
+            f"The current implementation of the {self._get_name()} module has poor numerical accuracy and its use is not recommended"  # noqa: B950
         )
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(ConvTranspose2d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride, padding, output_padding,
             groups, bias, dilation, padding_mode, **factory_kwargs)
 
     def _get_name(self):
-        return 'DynamicQuantizedConvTranpose2d'
+        return 'DynamicQuantizedConvTranspose2d'
 
     def forward(self, input: Tensor, reduce_range: bool = True) -> Tensor:
         # Temporarily using len(shape) instead of ndim due to JIT issue
@@ -379,17 +370,15 @@ class ConvTranspose3d(nnq.ConvTranspose3d):
                  padding=0, output_padding=0, groups=1, bias=True,
                  dilation=1, padding_mode='zeros', device=None, dtype=None):
         warnings.warn(
-            "The current implementation of the {} module has poor numerical accuracy and its use is not recommended".format(
-                self._get_name()
-            )
+            f"The current implementation of the {self._get_name()} module has poor numerical accuracy and its use is not recommended"  # noqa: B950
         )
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(ConvTranspose3d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride, padding, output_padding,
             groups, bias, dilation, padding_mode, **factory_kwargs)
 
     def _get_name(self):
-        return 'DynamicQuantizedConvTranpose3d'
+        return 'DynamicQuantizedConvTranspose3d'
 
     def forward(self, input: Tensor, reduce_range: bool = True) -> Tensor:
         # Temporarily using len(shape) instead of ndim due to JIT issue

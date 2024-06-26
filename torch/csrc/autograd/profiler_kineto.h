@@ -9,21 +9,21 @@
 #include <torch/csrc/profiler/util.h>
 
 namespace torch {
-namespace profiler {
-namespace impl {
+
+namespace profiler::impl {
 struct Result;
 namespace kineto {
 struct ActivityTraceWrapper;
 } // namespace kineto
-} // namespace impl
-} // namespace profiler
-namespace autograd {
-namespace profiler {
+} // namespace profiler::impl
+
+namespace autograd::profiler {
 using experimental_event_t = std::shared_ptr<torch::profiler::impl::Result>;
+using extra_meta_t = std::unordered_map<std::string, std::string>;
 
 struct TORCH_API KinetoEvent {
   KinetoEvent(
-      std::shared_ptr<const torch::profiler::impl::Result>,
+      const std::shared_ptr<const torch::profiler::impl::Result>&,
       const bool verbose);
 
   uint64_t startThreadId() const;
@@ -34,6 +34,8 @@ struct TORCH_API KinetoEvent {
   const c10::ArrayRef<std::vector<int64_t>> shapes() const;
   bool hasTypes() const;
   const c10::ArrayRef<std::string> dtypes() const;
+  bool hasConcreteInputs() const;
+  const c10::ArrayRef<c10::IValue> concreteInputs() const;
   uint64_t flops() const;
   int64_t sequenceNr() const;
   bool hasStack() const;
@@ -44,10 +46,10 @@ struct TORCH_API KinetoEvent {
   int64_t debugHandle() const;
   std::string name() const;
   c10::DeviceType deviceType() const;
-  uint8_t deviceIndex() const;
+  int deviceIndex() const;
   int64_t nBytes() const;
-  uint64_t startUs() const;
-  uint64_t durationUs() const;
+  uint64_t startNs() const;
+  uint64_t durationNs() const;
   bool isAsync() const;
   uint64_t correlationId() const;
   uint64_t linkedCorrelationId() const;
@@ -55,11 +57,13 @@ struct TORCH_API KinetoEvent {
   std::string backend() const;
   bool isPythonFunction() const;
   int64_t cudaElapsedUs() const;
+  int64_t privateuse1ElapsedUs() const;
   void getPerfEventCounters(torch::profiler::perf_counters_t&) const;
+  extra_meta_t extraMeta() const;
 
  private:
-  torch::profiler::impl::ProfilerEventStub fallbackStart() const;
-  torch::profiler::impl::ProfilerEventStub fallbackEnd() const;
+  torch::profiler::impl::ProfilerVoidEventStub fallbackStart() const;
+  torch::profiler::impl::ProfilerVoidEventStub fallbackEnd() const;
 
   std::shared_ptr<const torch::profiler::impl::Result> result_;
   std::vector<std::string> python_stack_;
@@ -67,6 +71,7 @@ struct TORCH_API KinetoEvent {
   // Copy fields from result so we can return ArrayRefs.
   std::vector<std::vector<int64_t>> shapes_;
   std::vector<std::string> dtypes_;
+  std::vector<c10::IValue> concrete_inputs_;
 };
 
 // Consolidating events returned directly from Kineto
@@ -82,8 +87,8 @@ struct TORCH_API ProfilerResult {
       std::vector<experimental_event_t>&& event_tree);
   ~ProfilerResult();
 
-  uint64_t trace_start_us() const {
-    return trace_start_us_;
+  uint64_t trace_start_ns() const {
+    return trace_start_ns_;
   }
 
   const std::vector<KinetoEvent>& events() const {
@@ -97,7 +102,7 @@ struct TORCH_API ProfilerResult {
   void save(const std::string& path);
 
  private:
-  uint64_t trace_start_us_ = 0;
+  uint64_t trace_start_ns_ = 0;
   std::vector<KinetoEvent> events_;
   std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper> trace_;
   std::vector<experimental_event_t> event_tree_;
@@ -109,7 +114,7 @@ struct TORCH_API ProfilerResult {
  * For example, if part of the model is lowered to a dsp backend, then
  * the execution of that part of the model is delegated to the backend.
  * When backend finishes execution it has an option to provide profiling
- * information (latency only at th emoment) corresponding to different operators
+ * information (latency only at the moment) corresponding to different operators
  * that were executed in the backend.
  * When such events are recorded by backend using this API, the event
  * records will be collected by active kineto profiler. If no kineto profiler
@@ -171,16 +176,13 @@ TORCH_API void prepareProfiler(
     const torch::profiler::impl::ProfilerConfig& config,
     const std::set<torch::profiler::impl::ActivityType>& activities);
 
-} // namespace profiler
-} // namespace autograd
+} // namespace autograd::profiler
 
-namespace profiler {
-namespace impl {
+namespace profiler::impl {
 
 // Experimental.
 TORCH_API void _reportVulkanEventToProfiler(vulkan_id_t id);
 
-} // namespace impl
-} // namespace profiler
+} // namespace profiler::impl
 
 } // namespace torch

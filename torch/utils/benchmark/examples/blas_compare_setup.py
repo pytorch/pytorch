@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import collections
 import os
 import shutil
@@ -113,8 +114,8 @@ def main():
         base_source = subprocess.run(
             f"source activate {env_path}",
             shell=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
+            check=False,
         )
         if base_source.returncode:
             raise OSError(
@@ -147,8 +148,8 @@ def main():
                 f"source activate {env_path} && "
                 f"conda env config vars set {' '.join(env_spec.environment_variables)}",
                 shell=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                capture_output=True,
+                check=False,
             )
             if env_set.returncode:
                 raise OSError(
@@ -161,8 +162,8 @@ def main():
             actual_env_vars = subprocess.run(
                 f"source activate {env_path} && env",
                 shell=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                capture_output=True,
+                check=True,
             ).stdout.decode("utf-8").strip().splitlines()
             for e in env_spec.environment_variables:
                 assert e in actual_env_vars, f"{e} not in envs"
@@ -175,15 +176,15 @@ def main():
             f"cd {git_root} && "
             "python setup.py install --cmake",
             shell=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
+            check=True,
         )
 
         print("Checking configuration:")
         check_run = subprocess.run(
             # Shameless abuse of `python -c ...`
             f"source activate {env_path} && "
-            "python -c \""
+            'python -c "'
             "import torch;"
             "from torch.utils.benchmark import Timer;"
             "print(torch.__config__.show());"
@@ -192,8 +193,8 @@ def main():
             "stats = counts.as_standardized().stats(inclusive=True);"
             "print(stats.filter(lambda l: 'blas' in l.lower()))\"",
             shell=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
+            check=False,
         )
         if check_run.returncode:
             raise OSError(

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from collections import OrderedDict
 
 __all__ = ["raises", "expand_tuples", "reverse_dict", "groupby", "typename"]
@@ -122,4 +123,4 @@ def typename(type):
     except AttributeError:
         if len(type) == 1:
             return typename(*type)
-        return '(%s)' % ', '.join(map(typename, type))
+        return f"({', '.join(map(typename, type))})"

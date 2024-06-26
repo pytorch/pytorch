@@ -1,12 +1,14 @@
-import torch
-import torch.utils.hooks
-from torch._namedtensor_internals import check_serializing_named_tensor
+# mypy: allow-untyped-defs
+import multiprocessing
 import os
 import threading
-import multiprocessing
-from multiprocessing.util import register_after_fork
 from multiprocessing.reduction import ForkingPickler
+from multiprocessing.util import register_after_fork
 from typing import Union
+
+import torch
+from torch._namedtensor_internals import check_serializing_named_tensor
+
 
 try:
     # Early load resource_sharer to prevent a partially initialized instance
@@ -23,13 +25,23 @@ class StorageWeakRef:
     r"""A weak reference to a Storage.
 
     The cdata member is a Python number containing the integer representation of
-    the Storage pointer."""
+    the Storage pointer.
+    """
+
+    __slots__ = ["cdata", "_free_weak_ref"]
 
     def __init__(self, storage):
         self.cdata = storage._weak_ref()
         # Save a direct reference to _free_weak_ref because the `torch` module
         # might be cleared during Python shutdown before this module is cleared.
         self._free_weak_ref = torch.Storage._free_weak_ref  # type: ignore[attr-defined]
+
+    @classmethod
+    def from_weakref(cls, cdata):
+        instance = cls.__new__(cls)
+        instance.cdata = cdata
+        instance._free_weak_ref = torch.Storage._free_weak_ref  # type: ignore[attr-defined]
+        return instance
 
     def expired(self):
         return torch.Storage._expired(self.cdata)  # type: ignore[attr-defined]
@@ -47,7 +59,7 @@ class StorageWeakRef:
 
 
 class SharedCache(dict):
-    """dictionary from multiprocessing handles to StorageWeakRef"""
+    """Dictionary from multiprocessing handles to StorageWeakRef."""
 
     def __init__(self):
         # free_dead_references() is called if the len exceeds the current
@@ -108,14 +120,30 @@ def rebuild_tensor(cls, storage, metadata):
     return t
 
 
-def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
-                        storage_cls, dtype, storage_device, storage_handle, storage_size_bytes, storage_offset_bytes,
-                        requires_grad, ref_counter_handle, ref_counter_offset, event_handle, event_sync_required):
+def rebuild_cuda_tensor(
+    tensor_cls,
+    tensor_size,
+    tensor_stride,
+    tensor_offset,
+    storage_cls,
+    dtype,
+    storage_device,
+    storage_handle,
+    storage_size_bytes,
+    storage_offset_bytes,
+    requires_grad,
+    ref_counter_handle,
+    ref_counter_offset,
+    event_handle,
+    event_sync_required,
+):
     # If storage_handle is None, storage points to nullptr.
     if storage_handle is None or storage_size_bytes == 0:
         storage = storage_cls(0, dtype=dtype, device=storage_device, _internal=True)
     else:
-        storage = storage_from_cache(storage_cls, (storage_handle, storage_offset_bytes))
+        storage = storage_from_cache(
+            storage_cls, (storage_handle, storage_offset_bytes)
+        )
         if storage is None:
             torch.cuda._lazy_init()
             storage = storage_cls._new_shared_cuda(
@@ -126,17 +154,29 @@ def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
                 ref_counter_handle,
                 ref_counter_offset,
                 event_handle,
-                event_sync_required)
-            shared_cache[(storage_handle, storage_offset_bytes)] = StorageWeakRef(storage)
+                event_sync_required,
+            )
+            shared_cache[(storage_handle, storage_offset_bytes)] = StorageWeakRef(
+                storage
+            )
         else:
             # We already ref counting this Storage, but producer needs new ref-counters to be released.
-            storage_cls._release_ipc_counter(ref_counter_handle, ref_counter_offset, device=storage_device)
+            storage_cls._release_ipc_counter(
+                ref_counter_handle, ref_counter_offset, device=storage_device
+            )
 
-    _storage = storage if isinstance(storage, torch.UntypedStorage) else storage._untyped_storage
+    _storage = (
+        storage
+        if isinstance(storage, torch.UntypedStorage)
+        else storage._untyped_storage
+    )
 
     t = torch._utils._rebuild_tensor(
         torch.storage.TypedStorage(wrap_storage=_storage, dtype=dtype, _internal=True),
-        tensor_offset, tensor_size, tensor_stride)
+        tensor_offset,
+        tensor_size,
+        tensor_stride,
+    )
 
     if tensor_cls == torch.nn.parameter.Parameter:
         # It is crucial for integer tensors to receive
@@ -149,13 +189,13 @@ def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
 
 
 def reduce_tensor(tensor):
-    storage = tensor._typed_storage()
-
     if tensor.requires_grad and not tensor.is_leaf:
-        raise RuntimeError("Cowardly refusing to serialize non-leaf tensor which requires_grad, "
-                           "since autograd does not support crossing process boundaries.  "
-                           "If you just want to transfer the data, call detach() on the tensor "
-                           "before serializing (e.g., putting it on the queue).")
+        raise RuntimeError(
+            "Cowardly refusing to serialize non-leaf tensor which requires_grad, "
+            "since autograd does not support crossing process boundaries.  "
+            "If you just want to transfer the data, call detach() on the tensor "
+            "before serializing (e.g., putting it on the queue)."
+        )
 
     check_serializing_named_tensor(tensor)
     torch.utils.hooks.warn_if_has_hooks(tensor)
@@ -250,42 +290,191 @@ def reduce_tensor(tensor):
     # eliminated it so that we could just use tensor views to implement the same
     # thing.
     #
-    if storage._untyped_storage.device.type == 'cuda':
-        (device,
-         handle,
-         storage_size_bytes,
-         storage_offset_bytes,
-         ref_counter_handle,
-         ref_counter_offset,
-         event_handle,
-         event_sync_required) = storage._share_cuda_()
+
+    # TODO: Handle distinguishing between subclass and non-subclass versions of NT better
+    # https://github.com/pytorch/pytorch/issues/110543
+    from torch.nested._internal.nested_tensor import NestedTensor
+
+    if tensor.is_nested and not isinstance(tensor, NestedTensor):
+        return reduce_nested_tensor(tensor)
+
+    if tensor.layout in {
+        torch.sparse_coo,
+        torch.sparse_csr,
+        torch.sparse_bsr,
+        torch.sparse_csc,
+        torch.sparse_bsc,
+    }:
+        return reduce_sparse_tensor(tensor)
+
+    storage = tensor._typed_storage()
+
+    if storage._untyped_storage.device.type == "cuda":
+        (
+            device,
+            handle,
+            storage_size_bytes,
+            storage_offset_bytes,
+            ref_counter_handle,
+            ref_counter_offset,
+            event_handle,
+            event_sync_required,
+        ) = storage._share_cuda_()
         tensor_offset = tensor.storage_offset()
         shared_cache[handle] = StorageWeakRef(storage)
         # _backward_hooks purposely omitted here, see
         # Note [Don't serialize hooks]
-        return (rebuild_cuda_tensor,
-                (type(tensor),
-                 tensor.size(),
-                 tensor.stride(),
-                 tensor_offset,  # tensor offset in its storage
-                 type(storage),
-                 tensor.dtype,
-                 device,
-                 handle,  # identifier which CUDA allocation is the storage in.
-                 storage_size_bytes,  # size(in bytes) of the storage
-                 storage_offset_bytes,  # offset(in bytes) of the storage in the CUDA allocation
-                 tensor.requires_grad,
-                 ref_counter_handle,
-                 ref_counter_offset,
-                 event_handle,
-                 event_sync_required))
+        return (
+            rebuild_cuda_tensor,
+            (
+                type(tensor),
+                tensor.size(),
+                tensor.stride(),
+                tensor_offset,  # tensor offset in its storage
+                type(storage),
+                tensor.dtype,
+                device,
+                handle,  # identifier which CUDA allocation is the storage in.
+                storage_size_bytes,  # size(in bytes) of the storage
+                storage_offset_bytes,  # offset(in bytes) of the storage in the CUDA allocation
+                tensor.requires_grad,
+                ref_counter_handle,
+                ref_counter_offset,
+                event_handle,
+                event_sync_required,
+            ),
+        )
 
     # _backward_hooks purposely omitted here, see Note [Don't serialize hooks]
-    metadata = (tensor.storage_offset(), tensor.size(), tensor.stride(), tensor.requires_grad)
-    return (rebuild_tensor, (
-        type(tensor),
-        storage,
-        metadata))
+    metadata = (
+        tensor.storage_offset(),
+        tensor.size(),
+        tensor.stride(),
+        tensor.requires_grad,
+    )
+    return (rebuild_tensor, (type(tensor), storage, metadata))
+
+
+def rebuild_nested_tensor(
+    rebuild_buffer_func,
+    rebuild_buffer_args,
+    rebuild_sizes_func,
+    rebuild_sizes_args,
+    rebuild_strides_func,
+    rebuild_strides_args,
+    rebuild_offsets_func,
+    rebuild_offsets_args,
+):
+    buffer = rebuild_buffer_func(*rebuild_buffer_args)
+    sizes = rebuild_sizes_func(*rebuild_sizes_args)
+    strides = rebuild_strides_func(*rebuild_strides_args)
+    offsets = rebuild_offsets_func(*rebuild_offsets_args)
+    return torch._nested_view_from_buffer_copy(buffer, sizes, strides, offsets)
+
+
+def reduce_nested_tensor(nt):
+    rebuild_buffer_func, rebuild_buffer_args = reduce_tensor(nt.values())
+    rebuild_sizes_func, rebuild_sizes_args = reduce_tensor(nt._nested_tensor_size())
+    rebuild_strides_func, rebuild_strides_args = reduce_tensor(
+        nt._nested_tensor_strides()
+    )
+    rebuild_offsets_func, rebuild_offsets_args = reduce_tensor(
+        nt._nested_tensor_storage_offsets()
+    )
+
+    return (
+        rebuild_nested_tensor,
+        (
+            rebuild_buffer_func,
+            rebuild_buffer_args,
+            rebuild_sizes_func,
+            rebuild_sizes_args,
+            rebuild_strides_func,
+            rebuild_strides_args,
+            rebuild_offsets_func,
+            rebuild_offsets_args,
+        ),
+    )
+
+
+def rebuild_sparse_coo_tensor(
+    rebuild_indices_func,
+    rebuild_indices_args,
+    rebuild_values_func,
+    rebuild_values_args,
+    shape,
+    is_coalesced,
+):
+    indices = rebuild_indices_func(*rebuild_indices_args)
+    values = rebuild_values_func(*rebuild_values_args)
+    return torch.sparse_coo_tensor(indices, values, shape, is_coalesced=is_coalesced)
+
+
+def rebuild_sparse_compressed_tensor(
+    rebuild_compressed_indices_func,
+    rebuild_compressed_indices_args,
+    rebuild_plain_indices_func,
+    rebuild_plain_indices_args,
+    rebuild_values_func,
+    rebuild_values_args,
+    shape,
+    layout,
+):
+    compressed_indices = rebuild_compressed_indices_func(
+        *rebuild_compressed_indices_args
+    )
+    plain_indices = rebuild_plain_indices_func(*rebuild_plain_indices_args)
+    values = rebuild_values_func(*rebuild_values_args)
+    return torch.sparse_compressed_tensor(
+        compressed_indices, plain_indices, values, shape, layout=layout
+    )
+
+
+def reduce_sparse_tensor(sparse):
+    if sparse.layout is torch.sparse_coo:
+        rebuild_indices_func, rebuild_indices_args = reduce_tensor(sparse._indices())
+        rebuild_values_func, rebuild_values_args = reduce_tensor(sparse._values())
+        return (
+            rebuild_sparse_coo_tensor,
+            (
+                rebuild_indices_func,
+                rebuild_indices_args,
+                rebuild_values_func,
+                rebuild_values_args,
+                sparse.shape,
+                sparse.is_coalesced(),
+            ),
+        )
+    else:
+        if sparse.layout in {torch.sparse_csr, torch.sparse_bsr}:
+            compressed_indices = sparse.crow_indices()
+            plain_indices = sparse.col_indices()
+        elif sparse.layout in {torch.sparse_csc, torch.sparse_bsc}:
+            compressed_indices = sparse.ccol_indices()
+            plain_indices = sparse.row_indices()
+        else:
+            raise NotImplementedError(sparse.layout)
+        (
+            rebuild_compressed_indices_func,
+            rebuild_compressed_indices_args,
+        ) = reduce_tensor(compressed_indices)
+        rebuild_plain_indices_func, rebuild_plain_indices_args = reduce_tensor(
+            plain_indices
+        )
+        rebuild_values_func, rebuild_values_args = reduce_tensor(sparse.values())
+        return (
+            rebuild_sparse_compressed_tensor,
+            (
+                rebuild_compressed_indices_func,
+                rebuild_compressed_indices_args,
+                rebuild_plain_indices_func,
+                rebuild_plain_indices_args,
+                rebuild_values_func,
+                rebuild_values_args,
+                sparse.shape,
+                sparse.layout,
+            ),
+        )
 
 
 def fd_id(fd):
@@ -317,18 +506,21 @@ def rebuild_storage_fd(cls, df, size):
 
 
 def rebuild_storage_filename(cls, manager, handle, size, dtype=None):
-    storage: Union[torch.TypedStorage, torch.UntypedStorage] = storage_from_cache(cls, handle)
+    storage: Union[torch.TypedStorage, torch.UntypedStorage] = storage_from_cache(
+        cls, handle
+    )
     if storage is not None:
         return storage._shared_decref()
     if dtype is None:
         storage = torch.UntypedStorage._new_shared_filename_cpu(manager, handle, size)
     else:
         byte_size = size * torch._utils._element_size(dtype)
-        untyped_storage: torch.UntypedStorage = torch.UntypedStorage._new_shared_filename_cpu(manager, handle, byte_size)
+        untyped_storage: torch.UntypedStorage = (
+            torch.UntypedStorage._new_shared_filename_cpu(manager, handle, byte_size)
+        )
         storage = torch.TypedStorage(
-            wrap_storage=untyped_storage,
-            dtype=dtype,
-            _internal=True)
+            wrap_storage=untyped_storage, dtype=dtype, _internal=True
+        )
     shared_cache[handle] = StorageWeakRef(storage)
     return storage._shared_decref()
 
@@ -336,25 +528,33 @@ def rebuild_storage_filename(cls, manager, handle, size, dtype=None):
 def rebuild_storage_empty(cls):
     return cls()
 
+
 def rebuild_typed_storage(storage, dtype):
     return torch.storage.TypedStorage(wrap_storage=storage, dtype=dtype, _internal=True)
+
 
 # Use for torch.storage.TypedStorage
 def reduce_typed_storage(storage):
     return (rebuild_typed_storage, (storage._untyped_storage, storage.dtype))
 
+
 def rebuild_typed_storage_child(storage, storage_type):
     return storage_type(wrap_storage=storage, _internal=True)
+
 
 # Use for child classes of torch.storage.TypedStorage, like torch.FloatStorage
 def reduce_typed_storage_child(storage):
     return (rebuild_typed_storage_child, (storage._untyped_storage, type(storage)))
 
+
 def reduce_storage(storage):
     from . import get_sharing_strategy
+
     if storage.is_cuda:
-        raise RuntimeError("Cannot pickle CUDA storage; try pickling a CUDA tensor instead")
-    elif get_sharing_strategy() == 'file_system':
+        raise RuntimeError(
+            "Cannot pickle CUDA storage; try pickling a CUDA tensor instead"
+        )
+    elif get_sharing_strategy() == "file_system":
         metadata = storage._share_filename_cpu_()
         cache_key = metadata[1]
         rebuild = rebuild_storage_filename
@@ -380,7 +580,7 @@ def init_reductions():
     ForkingPickler.register(torch.cuda.Event, reduce_event)
 
     for t in torch._storage_classes:
-        if t.__name__ == 'UntypedStorage':
+        if t.__name__ == "UntypedStorage":
             ForkingPickler.register(t, reduce_storage)
         else:
             ForkingPickler.register(t, reduce_typed_storage_child)
@@ -392,4 +592,7 @@ def init_reductions():
 
     # TODO: Maybe this should be in tensor_classes? :)
     ForkingPickler.register(torch.Tensor, reduce_tensor)
-    ForkingPickler.register(torch.nn.parameter.Parameter, reduce_tensor)
+
+    from torch.nn.parameter import Parameter
+
+    ForkingPickler.register(Parameter, reduce_tensor)

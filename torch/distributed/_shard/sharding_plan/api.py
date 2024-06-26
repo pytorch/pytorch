@@ -1,11 +1,11 @@
 import abc
-import torch.nn as nn
-
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Union
 
+import torch.nn as nn
 from torch.distributed._shard.sharder import Sharder
 from torch.distributed._shard.sharding_spec import ShardingSpec
+
 
 @dataclass
 class ShardingPlan:
@@ -29,7 +29,7 @@ class ShardingPlan:
             Default: `None`
         return_local_tensor (List[str], optional): a list of string, each element enables
             a module's sharded output to be returned as a Tensor from its local shards to
-            ensure further processsing in a data parallel fashion. ("" in list means the
+            ensure further processing in a data parallel fashion. ("" in list means the
             root module).
             Default: None
     Example:
@@ -61,6 +61,7 @@ class ShardingPlan:
         >>>    return_local_tensor=["fc2"]
         >>> )
     """
+
     plan: Dict[str, Union[ShardingSpec, Sharder]]
     output_plan: Optional[Dict[str, ShardingSpec]] = None
     return_local_tensor: Optional[List[str]] = None
@@ -71,6 +72,7 @@ class ShardingPlanner(abc.ABC):
     Default ShardingPlanner interface, can be extended and
     implement advanced sharding strategies.
     """
+
     @abc.abstractmethod
     def build_plan(self, module: nn.Module) -> ShardingPlan:
         """

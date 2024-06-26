@@ -250,7 +250,7 @@ def main(args: List[str]) -> None:
     if options.op_registration_allowlist:
         op_registration_allowlist = options.op_registration_allowlist
     elif options.TEST_ONLY_op_registration_allowlist_yaml_path:
-        with open(options.TEST_ONLY_op_registration_allowlist_yaml_path, "r") as f:
+        with open(options.TEST_ONLY_op_registration_allowlist_yaml_path) as f:
             op_registration_allowlist = yaml.safe_load(f)
     else:
         op_registration_allowlist = None

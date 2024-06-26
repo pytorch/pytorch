@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 import copy
 from torch.fx import GraphModule
@@ -30,7 +31,7 @@ class FusedGraphModule(GraphModule):
 class ObservedGraphModule(GraphModule):
 
     def __init__(self, root: Union[torch.nn.Module, Dict[str, Any]], graph: Graph, preserved_attr_names: Set[str]):
-        self.preserved_attr_names = set([
+        self.preserved_attr_names = {
             '_activation_post_process_map',
             '_activation_post_process_indexes',
             '_patterns',
@@ -40,7 +41,7 @@ class ObservedGraphModule(GraphModule):
             '_node_name_to_scope',
             '_qconfig_mapping',
             '_is_qat',
-            '_observed_node_names']).union(preserved_attr_names)
+            '_observed_node_names'}.union(preserved_attr_names)
         preserved_attrs = {attr: getattr(root, attr) for attr in self.preserved_attr_names if hasattr(root, attr)}
         super().__init__(root, graph)
         for attr in preserved_attrs:
@@ -64,9 +65,9 @@ def _get_observed_graph_module_attr(model: Union[torch.nn.Module, GraphModule], 
 
 class ObservedStandaloneGraphModule(ObservedGraphModule):
     def __init__(self, root: Union[torch.nn.Module, Dict[str, Any]], graph: Graph, preserved_attr_names: Set[str]):
-        preserved_attr_names = preserved_attr_names.union(set([
+        preserved_attr_names = preserved_attr_names.union({
             "_standalone_module_input_quantized_idxs",
-            "_standalone_module_output_quantized_idxs"]))
+            "_standalone_module_output_quantized_idxs"})
         super().__init__(root, graph, preserved_attr_names)
 
     def __deepcopy__(self, memo):

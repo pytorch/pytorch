@@ -1,15 +1,25 @@
 #include <c10/util/StringUtil.h>
 
-#include <cstring>
 #include <string>
+
+#ifndef _WIN32
+#include <codecvt>
+#include <locale>
+#else
+#include <c10/util/Unicode.h>
+#endif
 
 namespace c10 {
 
 namespace detail {
 
 std::string StripBasename(const std::string& full_path) {
-  const char kSeparator = '/';
-  size_t pos = full_path.rfind(kSeparator);
+#ifdef _WIN32
+  const std::string separators("/\\");
+#else
+  const std::string separators("/");
+#endif
+  size_t pos = full_path.find_last_of(separators);
   if (pos != std::string::npos) {
     return full_path.substr(pos + 1, std::string::npos);
   } else {
@@ -23,6 +33,42 @@ std::string ExcludeFileExtension(const std::string& file_name) {
       ? -1
       : file_name.find_last_of(sep);
   return file_name.substr(0, end_index);
+}
+
+// Narrows the wstr argument and then passes it to _str.
+// Assumes that the input (wide) text is encoded as UTF-16.
+std::ostream& _strFromWide(std::ostream& ss, const std::wstring& wString);
+
+#ifndef _WIN32
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+// TODO (huydhn) https://en.cppreference.com/w/cpp/header/codecvt has been
+// deprecated in C++17 but there is no alternative yet, so I just ack it
+std::ostream& _strFromWide(std::ostream& ss, const std::wstring& wString) {
+  std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+  return _str(ss, converter.to_bytes(wString));
+}
+#pragma GCC diagnostic pop
+
+#else // #ifndef _WIN32
+// The WIN32 implementation of wstring_convert leaks memory; see
+// https://github.com/microsoft/STL/issues/443
+
+std::ostream& _strFromWide(std::ostream& ss, const std::wstring& wString) {
+  return _str(ss, u16u8(wString));
+}
+
+#endif // _WIN32
+
+std::ostream& _str(std::ostream& ss, const wchar_t* wCStr) {
+  return _strFromWide(ss, std::wstring(wCStr));
+}
+std::ostream& _str(std::ostream& ss, const wchar_t& wChar) {
+  return _strFromWide(ss, std::wstring(1, wChar));
+}
+std::ostream& _str(std::ostream& ss, const std::wstring& wString) {
+  return _strFromWide(ss, wString);
 }
 
 } // namespace detail
@@ -46,7 +92,7 @@ size_t ReplaceAll(std::string& s, c10::string_view from, c10::string_view to) {
   if (from.size() >= to.size()) {
     // If the replacement string is not larger than the original, we
     // can do the replacement in-place without allocating new storage.
-    char* s_data = s.data();
+    char* s_data = &s[0];
 
     while ((cur_pos = s.find(from.data(), last_pos, from.size())) !=
            std::string::npos) {

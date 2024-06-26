@@ -7,7 +7,9 @@
 #include <utility>
 
 #include <fmt/format.h>
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated")
 #include <tensorpipe/tensorpipe.h>
+C10_DIAGNOSTIC_POP()
 
 #include <torch/csrc/distributed/rpc/agent_utils.h>
 #include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
@@ -109,7 +111,7 @@ std::vector<c10::Stream> getCurrentStreamsForDevices(
 
 std::vector<c10::Device> getDevicesOfTensors(
     const std::vector<torch::Tensor>& tensors) {
-  c10::optional<c10::impl::VirtualGuardImpl> impl;
+  std::optional<c10::impl::VirtualGuardImpl> impl;
   size_t deviceCount = 0;
   std::vector<bool> indexBitset;
   for (const torch::Tensor& tensor : tensors) {
@@ -161,11 +163,9 @@ C10_DEFINE_REGISTRY_WITHOUT_WARNING(
 
 const std::string& TensorPipeAgent::guessAddress() {
   static const std::string uvAddress = []() {
-    tensorpipe::Error error;
-    std::string result;
     char* ifnameEnv = std::getenv(kSocketIfnameEnvVar.c_str());
     if (ifnameEnv != nullptr) {
-      std::tie(error, result) =
+      auto [error, result] =
           tensorpipe::transport::uv::lookupAddrForIface(ifnameEnv);
       if (error) {
         LOG(WARNING) << "Failed to look up the IP address for interface "
@@ -173,15 +173,13 @@ const std::string& TensorPipeAgent::guessAddress() {
                      << kDefaultUvAddress;
         return kDefaultUvAddress;
       }
-    } else {
-      std::tie(error, result) =
-          tensorpipe::transport::uv::lookupAddrForHostname();
-      if (error) {
-        LOG(WARNING) << "Failed to look up the IP address for the hostname ("
-                     << error.what() << "), defaulting to "
-                     << kDefaultUvAddress;
-        return kDefaultUvAddress;
-      }
+      return result;
+    }
+    auto [error, result] = tensorpipe::transport::uv::lookupAddrForHostname();
+    if (error) {
+      LOG(WARNING) << "Failed to look up the IP address for the hostname ("
+                   << error.what() << "), defaulting to " << kDefaultUvAddress;
+      return kDefaultUvAddress;
     }
     return result;
   }();
@@ -566,10 +564,7 @@ void TensorPipeAgent::pipeRead(
       GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
       streams = getStreamsFromPoolForDevices(devices_);
     }
-    tensorpipe::Allocation tpAllocation;
-    TensorpipeReadBuffers tpBuffers;
-    std::tie(tpAllocation, tpBuffers) =
-        tensorpipeAllocate(tpDescriptor, streams);
+    auto [tpAllocation, tpBuffers] = tensorpipeAllocate(tpDescriptor, streams);
 
     pipe->read(
         std::move(tpAllocation),
@@ -599,10 +594,7 @@ void TensorPipeAgent::pipeWrite(
     std::vector<c10::Device>&& devices,
     std::vector<c10::Stream> streams,
     std::function<void(const tensorpipe::Error&)> fn) noexcept {
-  tensorpipe::Message tpMessage;
-  TensorpipeWriteBuffers tpBuffers;
-
-  std::tie(tpMessage, tpBuffers) =
+  auto [tpMessage, tpBuffers] =
       tensorpipeSerialize(std::move(rpcMessage), std::move(devices), streams);
 
   pipe->write(
@@ -818,11 +810,15 @@ c10::intrusive_ptr<JitFuture> TensorPipeAgent::send(
       // An instance of ClientPipe cannot be copied or moved as it contains a
       // mutex, and to force in-place construction in GCC 5 we need piecewise
       // construction in order to work around an issue.
-      std::tie(it, std::ignore) = connectedPipes_.emplace(
-          std::piecewise_construct,
-          std::forward_as_tuple(toWorkerInfo.id_),
-          std::forward_as_tuple(context_->connect(
-              url, tensorpipe::PipeOptions().remoteName(toWorkerInfo.name_))));
+      it = connectedPipes_
+               .emplace(
+                   std::piecewise_construct,
+                   std::forward_as_tuple(toWorkerInfo.id_),
+                   std::forward_as_tuple(context_->connect(
+                       url,
+                       tensorpipe::PipeOptions().remoteName(
+                           toWorkerInfo.name_))))
+               .first;
     }
   }
   ClientPipe& clientPipe = it->second;
@@ -1226,8 +1222,8 @@ const std::string& TensorPipeAgent::findWorkerURL(
 
 void TensorPipeAgent::updateGroupMembership(
     const WorkerInfo& workerInfo,
-    const std::vector<c10::Device> devices,
-    const std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
+    const std::vector<c10::Device>& devices,
+    const std::unordered_map<std::string, DeviceMap>& reverseDeviceMaps,
     bool isJoin) {
   std::string name = workerInfo.name_;
   worker_id_t id = workerInfo.id_;
@@ -1283,13 +1279,13 @@ void TensorPipeAgent::updateGroupMembership(
 }
 std::unordered_map<std::string, std::string> TensorPipeAgent::getMetrics() {
   std::unordered_map<std::string, std::string> metrics;
-  metrics[kThreadPoolSize] = c10::to_string(threadPool_.size());
-  metrics[kNumIdleThreads] = c10::to_string(threadPool_.numAvailable());
+  metrics[kThreadPoolSize] = std::to_string(threadPool_.size());
+  metrics[kNumIdleThreads] = std::to_string(threadPool_.numAvailable());
   {
     std::unique_lock<std::mutex> lock(callCountMutex_);
-    metrics[kClientActiveCalls] = c10::to_string(clientActiveCalls_);
-    metrics[kServerActiveCalls] = c10::to_string(serverActiveCalls_);
-    metrics[kServerActiveAsyncCalls] = c10::to_string(serverActiveAsyncCalls_);
+    metrics[kClientActiveCalls] = std::to_string(clientActiveCalls_);
+    metrics[kServerActiveCalls] = std::to_string(serverActiveCalls_);
+    metrics[kServerActiveAsyncCalls] = std::to_string(serverActiveAsyncCalls_);
   }
   if (isGILProfilingEnabled()) {
     {
@@ -1299,7 +1295,7 @@ std::unordered_map<std::string, std::string> TensorPipeAgent::getMetrics() {
       auto averageGilWaitTime =
           timeSeriesMetrics_[kGilAverageWaitTime].computeAverage();
       lock.unlock();
-      metrics[kGilAverageWaitTime] = c10::to_string(averageGilWaitTime);
+      metrics[kGilAverageWaitTime] = std::to_string(averageGilWaitTime);
     }
   }
 

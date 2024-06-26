@@ -15,6 +15,14 @@ from torchgen.api.types import (
     VectorCType,
     voidT,
 )
+from torchgen.executorch.api.types import (
+    ArrayRefCType,
+    BaseTypeToCppMapping,
+    OptionalCType,
+    scalarT,
+    tensorListT,
+    tensorT,
+)
 from torchgen.model import (
     Argument,
     Arguments,
@@ -29,14 +37,7 @@ from torchgen.model import (
     Type,
 )
 from torchgen.utils import assert_never
-from .types import (
-    ArrayRefCType,
-    BaseTypeToCppMapping,
-    OptionalCType,
-    scalarT,
-    tensorListT,
-    tensorT,
-)
+
 
 """
 This file describes the translation of JIT schema to the public C++ API, which is what people use when they call
@@ -93,7 +94,7 @@ def valuetype_type(
         raise AssertionError(f"unrecognized type {repr(t)}")
 
 
-# Translation of types occuring in JIT arguments to a C++ argument type.
+# Translation of types occurring in JIT arguments to a C++ argument type.
 # If remove_non_owning_ref_types is set, we'll guarantee that the outputed CType is not a non-owning reference type.
 # For example, we'll return std::vector<int> instead of IntArrayRef.
 # See Note [translation from C++ reference to value types]

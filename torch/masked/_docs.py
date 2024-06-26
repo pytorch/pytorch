@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # This file is generated, do not modify it!
 #
 # To update this file, run the update masked docs script as follows:
@@ -1013,7 +1012,7 @@ Args:
     input (Tensor): the input tensor
     dim (int or tuple of ints, optional): the dimension or dimensions to reduce.
       Default: None that is equivalent to ``tuple(range(input.ndim))``.
-    unbiased (bool): when True, use Bessel’s correction, otherwise, compute
+    unbiased (bool): when True, use Bessel's correction, otherwise, compute
       the uncorrected sample variance.
 
 Keyword args:
@@ -1149,7 +1148,7 @@ Args:
     input (Tensor): the input tensor
     dim (int or tuple of ints, optional): the dimension or dimensions to reduce.
       Default: None that is equivalent to ``tuple(range(input.ndim))``.
-    unbiased (bool): when True, use Bessel’s correction, otherwise, compute
+    unbiased (bool): when True, use Bessel's correction, otherwise, compute
       the uncorrected sample variance.
 
 Keyword args:

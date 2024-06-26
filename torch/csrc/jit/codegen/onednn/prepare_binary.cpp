@@ -8,14 +8,14 @@ namespace jit {
 namespace fuser {
 namespace onednn {
 
-bool compareConstValue(Value* v, double d) {
+static bool compareConstValue(Value* v, double d) {
   auto ival = toIValue(v);
   return ival.has_value() &&
       ((ival->isInt() && static_cast<int>(ival->toInt()) == d) ||
        (ival->isDouble() && ival->toDouble() == d));
 }
 
-void handleBinaryOpInputs(Node* node) {
+static void handleBinaryOpInputs(Node* node) {
   // We do not handle binary ops with two scalar inputs,
   // and we assume scalar is always at the second place.
   if (node->input(0)->type()->isSubtypeOf(TensorType::get())) {
@@ -47,7 +47,7 @@ void handleBinaryOpInputs(Node* node) {
       // 42 : Scalar  -->  tensor(42.0) : Float([])
       auto t = g->insert(aten::as_tensor, {scalar}, {{"dtype", promotedDtype}});
       // add dim & stride info to IR
-      c10::optional<size_t> t_dim = 1;
+      std::optional<size_t> t_dim = 1;
       auto target_type = TensorTypePtr(
           TensorType::create(promotedDtype, at::kCPU, t_dim, false));
       target_type = target_type->withSizes({1});
@@ -67,7 +67,7 @@ void handleBinaryOpInputs(Node* node) {
       // are the same dtype, as oneDNN Graph requires both inputs to have the
       // same dtype. We'll follow PyTorch's type-promotion rules here.
       auto second_input_typeptr = node->input(1)->type()->expect<TensorType>();
-      c10::optional<at::ScalarType> second_input_type =
+      std::optional<at::ScalarType> second_input_type =
           second_input_typeptr->scalarType();
       if (second_input_type != c10::nullopt) {
         // dtype of the second tensor might not be available in the IR
@@ -123,7 +123,7 @@ static void ConvertScalarToTensor(Block* block) {
   }
 }
 
-void mayDecomposeAdd(Node* node) {
+static void mayDecomposeAdd(Node* node) {
   if (node->inputs().size() < 3) {
     return; // corner-case in BERT-mrpc that's not in line with
             // native_functions.yaml

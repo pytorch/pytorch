@@ -11,12 +11,13 @@ import subprocess
 import sys
 import textwrap
 from typing import (
-    cast, Any, Callable, DefaultDict, Dict, Generator, List, NamedTuple,
+    cast, Any, Callable, DefaultDict, Dict, Iterator, List, NamedTuple,
     Optional, Tuple, Union, TYPE_CHECKING)
 
 import torch
 from torch.utils.benchmark.utils import common, cpp_jit
 from torch.utils.benchmark.utils._stubs import CallgrindModuleType
+import operator
 
 
 __all__ = ["FunctionCount", "FunctionCounts", "CallgrindStats", "CopyIfCallgrind"]
@@ -28,7 +29,10 @@ else:
     CompletedProcessType = subprocess.CompletedProcess
 
 
-FunctionCount = NamedTuple("FunctionCount", [("count", int), ("function", str)])
+class FunctionCount(NamedTuple):
+    # TODO(#105471): Rename the count field
+    count: int  # type: ignore[assignment]
+    function: str
 
 
 @dataclasses.dataclass(repr=False, eq=False, frozen=True)
@@ -51,7 +55,7 @@ class FunctionCounts:
     # the print settings. This is simply to allow hermetic unit tests.
     _linewidth: Optional[int] = None
 
-    def __iter__(self) -> Generator[FunctionCount, None, None]:
+    def __iter__(self) -> Iterator[FunctionCount]:
         yield from self._data
 
     def __len__(self) -> int:
@@ -97,7 +101,7 @@ class FunctionCounts:
         self,
         other: "FunctionCounts",
     ) -> "FunctionCounts":
-        return self._merge(other, lambda c: -c)
+        return self._merge(other, operator.neg)
 
     def __mul__(self, other: Union[int, float]) -> "FunctionCounts":
         return self._from_dict({
@@ -461,7 +465,7 @@ class GlobalsBridge:
                 path = os.path.join(self._data_dir, f"{name}.pt")
                 load_lines.append(f"{name} = torch.jit.load({repr(path)})")
                 with open(path, "wb") as f:
-                    torch.jit.save(wrapped_value.value, f)
+                    torch.jit.save(wrapped_value.value, f)  # type: ignore[no-untyped-call]
 
             else:
                 raise NotImplementedError(
@@ -493,12 +497,12 @@ class _ValgrindWrapper:
             for cmd in ("valgrind", "callgrind_control", "callgrind_annotate"):
                 self._commands_available[cmd] = not subprocess.run(
                     ["which", cmd],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
+                    capture_output=True,
+                    check=False,
                 ).returncode
 
         self._build_type: Optional[str] = None
-        build_search = re.search("BUILD_TYPE=(.+),", torch.__config__.show())
+        build_search = re.search("BUILD_TYPE=(.+),", torch.__config__.show())  # type: ignore[no-untyped-call]
         if build_search is not None:
             self._build_type = build_search.groups()[0].split(",")[0]
 
@@ -599,7 +603,7 @@ class _ValgrindWrapper:
                     stderr=subprocess.STDOUT,
                     **kwargs,
                 )
-                with open(stdout_stderr_log, "rt") as f:
+                with open(stdout_stderr_log) as f:
                     return invocation, f.read()
             finally:
                 f_stdout_stderr.close()
@@ -613,7 +617,7 @@ class _ValgrindWrapper:
                     )
 
                 script_file = os.path.join(working_dir, "timer_callgrind.py")
-                with open(script_file, "wt") as f:
+                with open(script_file, "w") as f:
                     f.write(self._construct_script(
                         task_spec,
                         globals=GlobalsBridge(globals, data_dir),
@@ -653,7 +657,7 @@ class _ValgrindWrapper:
             if valgrind_invocation.returncode:
                 error_report = ""
                 if os.path.exists(error_log):
-                    with open(error_log, "rt") as f:
+                    with open(error_log) as f:
                         error_report = f.read()
                 if not error_report:
                     error_report = "Unknown error.\n" + valgrind_invocation_output
@@ -697,7 +701,7 @@ class _ValgrindWrapper:
                         if fn_match:
                             ir_str, file_function = fn_match.groups()
                             ir = int(ir_str.replace(",", ""))
-                            if ir == program_totals:
+                            if ir == program_totals:  # type: ignore[possibly-undefined]
                                 # Callgrind includes some top level red herring symbols when
                                 # a program dumps multiple profiles.
                                 continue
@@ -725,7 +729,7 @@ class _ValgrindWrapper:
                 fpath = f"{callgrind_out}.{i + 1}"  # Callgrind one-indexes files.
                 callgrind_out_contents: Optional[str] = None
                 if retain_out_file:
-                    with open(fpath, "rt") as f:
+                    with open(fpath) as f:
                         callgrind_out_contents = f.read()
 
                 return (

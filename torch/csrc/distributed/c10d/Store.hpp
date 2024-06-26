@@ -2,7 +2,6 @@
 
 #include <chrono>
 #include <cstdint>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -14,7 +13,7 @@ namespace c10d {
 // callback function will be given arguments (optional<string> oldValue,
 // optional<string> newValue)
 using WatchKeyCallback =
-    std::function<void(c10::optional<std::string>, c10::optional<std::string>)>;
+    std::function<void(std::optional<std::string>, std::optional<std::string>)>;
 
 class TORCH_API Store : public torch::CustomClassHolder {
  public:
@@ -28,7 +27,10 @@ class TORCH_API Store : public torch::CustomClassHolder {
   explicit Store(const std::chrono::milliseconds& timeout)
       : timeout_(timeout) {}
 
-  ~Store() override;
+  Store(const Store&) = default;
+  Store(Store&&) noexcept = default;
+
+  ~Store() override = default;
 
   void set(const std::string& key, const std::string& value);
 
@@ -70,24 +72,57 @@ class TORCH_API Store : public torch::CustomClassHolder {
 
   virtual void setTimeout(const std::chrono::milliseconds& timeout);
 
-  // watchKey() takes two arguments: key and callback function. The callback
-  // should be run whenever the key is changed (create, update, or delete). The
-  // callback function takes two parameters: currentValue and newValue, which
-  // are optional depending on how the key is changed. These key updates should
-  // trigger the callback as follows:
-  // CREATE: callback(c10::nullopt, newValue) // null currentValue
-  // UPDATE: callback(currentValue, newValue)
-  // DELETE: callback(currentValue, c10::nullopt) // null newValue
+  // watchKey() is deprecated and no longer supported.
   virtual void watchKey(
       const std::string& /* unused */,
       WatchKeyCallback /* unused */) {
-    TORCH_CHECK(
-        false,
-        "watchKey only implemented for TCPStore and PrefixStore that wraps TCPStore.");
+    TORCH_CHECK(false, "watchKey is deprecated, no implementation support it.");
   }
+
+  virtual void append(
+      const std::string& key,
+      const std::vector<uint8_t>& value);
+
+  virtual std::vector<std::vector<uint8_t>> multiGet(
+      const std::vector<std::string>& keys);
+
+  virtual void multiSet(
+      const std::vector<std::string>& keys,
+      const std::vector<std::vector<uint8_t>>& values);
+
+  // Returns true if this store support append, multiGet and multiSet
+  virtual bool hasExtendedApi() const;
 
  protected:
   std::chrono::milliseconds timeout_;
+};
+
+/*
+StoreTimeoutGuard is a RAII guard that will set the store timeout and restore it
+when it returns.
+*/
+class StoreTimeoutGuard {
+ public:
+  explicit StoreTimeoutGuard(
+      Store& store,
+      const std::chrono::milliseconds& timeout)
+      : store_(store), oldTimeout_(store.getTimeout()) {
+    store.setTimeout(timeout);
+  }
+
+  ~StoreTimeoutGuard() {
+    store_.setTimeout(oldTimeout_);
+  }
+
+  /* Disabling copy and move semantics */
+  StoreTimeoutGuard(const StoreTimeoutGuard&) = delete;
+  StoreTimeoutGuard& operator=(const StoreTimeoutGuard&) = delete;
+  StoreTimeoutGuard(StoreTimeoutGuard&&) = delete;
+  StoreTimeoutGuard& operator=(StoreTimeoutGuard&&) = delete;
+
+ private:
+  Store& store_;
+  std::chrono::milliseconds oldTimeout_{};
 };
 
 } // namespace c10d

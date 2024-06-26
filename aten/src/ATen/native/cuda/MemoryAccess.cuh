@@ -109,7 +109,7 @@ struct LoadWithCast {
   size_array_t element_sizes;
 
   LoadWithCast(const TensorIteratorBase& iter) {
-    assert(iter.ninputs() == N);
+    CUDA_KERNEL_ASSERT(iter.ninputs() == N);
     #pragma unroll
     for (auto i = 0; i < N; ++i) {
       this->dtypes[i] = iter.dtype(i + iter.noutputs());
@@ -140,7 +140,7 @@ struct StoreWithCast {
   size_array_t element_sizes;
 
   StoreWithCast(const TensorIteratorBase& iter) {
-    assert(iter.noutputs() == N);
+    CUDA_KERNEL_ASSERT(iter.noutputs() == N);
     #pragma unroll
     for (auto i = 0; i < N; ++i) {
       this->dtypes[i] = iter.dtype(i);
@@ -197,7 +197,7 @@ struct unroll {
     data(data), remaining(remaining), input_offset_calculator(ic), output_offset_calculator(oc), loader(l), storer(s) {}
 
   __device__ inline bool check_inbounds(int thread_work_elem) {
-    return ((threadIdx.x  + thread_work_elem*num_threads()) < remaining);
+    return ((int)(threadIdx.x  + thread_work_elem*num_threads()) < remaining);
   }
 
   template<typename args_t>
@@ -219,7 +219,6 @@ struct unroll {
   template<typename scalar_t>
   __device__ inline void store(scalar_t *from, int idx) {
     int thread_idx = threadIdx.x;
-    scalar_t *to = reinterpret_cast<scalar_t *>(data[0]) + block_work_size() * idx;
     #pragma unroll
     for (int i = 0; i < thread_work_size(); i++) {
       if (thread_idx >= remaining) {
@@ -237,7 +236,7 @@ struct unroll {
 // all tensors are contiguous, that is: stride == sizeof(type) for all tensors
 // Note:
 // Functions in vectorized policy does not do boundary check. It assumes the whole block
-// has its job to do. So the reminders should be handled by the the caller manually.
+// has its job to do. So the reminders should be handled by the caller manually.
 template <int vec_size, typename data_t>  // vec_size: number of scalars, can be 1, 2, or 4.
 struct vectorized {
 
@@ -305,7 +304,7 @@ struct multi_outputs_unroll {
   data(data), remaining(remaining), input_offset_calculator(ic), output_offset_calculator(oc) {}
 
   __device__ inline bool check_inbounds(int thread_work_elem) {
-    return ((threadIdx.x  + thread_work_elem*num_threads()) < remaining);
+    return ((int)(threadIdx.x  + thread_work_elem*num_threads()) < remaining);
   }
 
   template<typename args_t>
@@ -347,7 +346,7 @@ struct multi_outputs_unroll {
 // which is C10_HOST_DEVICE, so we have to make this C10_HOST_DEVICE
 // in order to compile
 template<typename scalar_t>
-inline C10_HOST_DEVICE int can_vectorize_up_to(char *pointer) {
+inline C10_HOST_DEVICE int can_vectorize_up_to(const char *pointer) {
   uint64_t address = reinterpret_cast<uint64_t>(pointer);
   constexpr int vec2_alignment = std::alignment_of<aligned_vector<scalar_t, 2>>::value;
   constexpr int vec4_alignment = std::alignment_of<aligned_vector<scalar_t, 4>>::value;
@@ -357,6 +356,11 @@ inline C10_HOST_DEVICE int can_vectorize_up_to(char *pointer) {
     return 2;
   }
   return 1;
+}
+
+template<typename scalar_t>
+inline C10_HOST_DEVICE int can_vectorize_up_to(char *pointer) {
+  return can_vectorize_up_to<scalar_t>(static_cast<const char*>(pointer));
 }
 
 template<int i>

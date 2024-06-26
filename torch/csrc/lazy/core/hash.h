@@ -112,29 +112,35 @@ static inline hash_t TensorHash(const at::Tensor& tensor) {
   int64_t size = ctensor.numel() * ctensor.element_size();
   switch (ctensor.scalar_type()) {
     case at::ScalarType::Bool:
-      return DataHash(ctensor.data_ptr<bool>(), size);
+      return DataHash(ctensor.const_data_ptr<bool>(), size);
     case at::ScalarType::Byte:
-      return DataHash(ctensor.data_ptr<uint8_t>(), size);
+      return DataHash(ctensor.const_data_ptr<uint8_t>(), size);
     case at::ScalarType::Char:
-      return DataHash(ctensor.data_ptr<int8_t>(), size);
+      return DataHash(ctensor.const_data_ptr<int8_t>(), size);
     case at::ScalarType::Short:
-      return DataHash(ctensor.data_ptr<int16_t>(), size);
+      return DataHash(ctensor.const_data_ptr<int16_t>(), size);
     case at::ScalarType::Int:
-      return DataHash(ctensor.data_ptr<int32_t>(), size);
+      return DataHash(ctensor.const_data_ptr<int32_t>(), size);
     case at::ScalarType::Long:
-      return DataHash(ctensor.data_ptr<int64_t>(), size);
+      return DataHash(ctensor.const_data_ptr<int64_t>(), size);
     case at::ScalarType::Float:
-      return DataHash(ctensor.data_ptr<float>(), size);
+      return DataHash(ctensor.const_data_ptr<float>(), size);
     case at::ScalarType::Double:
-      return DataHash(ctensor.data_ptr<double>(), size);
+      return DataHash(ctensor.const_data_ptr<double>(), size);
     case at::ScalarType::BFloat16:
-      return DataHash(ctensor.data_ptr<at::BFloat16>(), size);
+      return DataHash(ctensor.const_data_ptr<at::BFloat16>(), size);
     case at::ScalarType::Half:
-      return DataHash(ctensor.data_ptr<at::Half>(), size);
+      return DataHash(ctensor.const_data_ptr<at::Half>(), size);
     case at::ScalarType::ComplexFloat:
-      return DataHash(ctensor.data_ptr<c10::complex<float>>(), size);
+      return DataHash(ctensor.const_data_ptr<c10::complex<float>>(), size);
     case at::ScalarType::ComplexDouble:
-      return DataHash(ctensor.data_ptr<c10::complex<double>>(), size);
+      return DataHash(ctensor.const_data_ptr<c10::complex<double>>(), size);
+    case at::ScalarType::UInt16:
+      return DataHash(ctensor.const_data_ptr<uint16_t>(), size);
+    case at::ScalarType::UInt32:
+      return DataHash(ctensor.const_data_ptr<uint32_t>(), size);
+    case at::ScalarType::UInt64:
+      return DataHash(ctensor.const_data_ptr<uint64_t>(), size);
     default:
       TORCH_INTERNAL_ASSERT(
           false, "Unsupported scalar type:", ctensor.scalar_type());
@@ -148,6 +154,11 @@ static inline hash_t Hash(const std::string& value) {
 static inline hash_t Hash(const c10::string_view& value) {
   return DataHash(value.data(), value.size());
 }
+
+static inline hash_t Hash(const at::Generator& value) {
+  return TensorHash(value.get_state());
+}
+
 // Taken from glibc's implementation of hashing optionals,
 // we want to include a contribution to the hash to distinguish
 // cases where one or another option was null, but we hope it doesn't
@@ -158,11 +169,11 @@ static inline hash_t Hash(const c10::string_view& value) {
 // repeatedly hash a constant at runtime.
 static const int64_t kNullOpt = 0x8655d738f3678dda;
 
-// Hashing for c10::optional types contributes to hash
+// Hashing for std::optional types contributes to hash
 // for optionals with null value, important to distinguish
 // between <nullopt, non-nullopt> and <non-nullopt, nullopt> cases
 template <typename T>
-hash_t Hash(const c10::optional<T>& value) {
+hash_t Hash(const std::optional<T>& value) {
   if (value.has_value()) {
     return Hash(value.value());
   } else {
@@ -182,7 +193,7 @@ hash_t Hash(const std::vector<T>& values) {
 
 // Need a special case for optional<container>?
 template <typename T>
-hash_t Hash(const c10::optional<std::vector<T>>& value) {
+hash_t Hash(const std::optional<std::vector<T>>& value) {
   if (value.has_value()) {
     return ContainerHash(value.value());
   } else {

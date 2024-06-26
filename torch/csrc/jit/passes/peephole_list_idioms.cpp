@@ -8,14 +8,13 @@
 #include <torch/csrc/jit/passes/value_refinement_utils.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/slice_indices_adjust.h>
-#include <torch/csrc/utils/memory.h>
 #include <limits>
 #include <utility>
 
 namespace torch {
 namespace jit {
 
-c10::optional<size_t> normalizeIndex(int64_t index, size_t len) {
+static std::optional<size_t> normalizeIndex(int64_t index, size_t len) {
   if (index < 0) {
     index = index + len;
   }
@@ -130,7 +129,7 @@ struct ListLenRefiner {
     return block_refinements;
   };
 
-  c10::optional<int64_t> tryFindRefinement(Value* v) {
+  std::optional<int64_t> tryFindRefinement(Value* v) {
     for (const auto& ref : active_refinements_) {
       auto maybe_refinement = ref->find(v);
       if (maybe_refinement != ref->end()) {
@@ -161,7 +160,7 @@ struct PeepholeOptimizeListIdiomsImpl {
       std::shared_ptr<Graph> graph,
       bool refine_list_len)
       : graph_(std::move(graph)),
-        aliasDb_(torch::make_unique<AliasDb>(graph_)),
+        aliasDb_(std::make_unique<AliasDb>(graph_)),
         refine_list_len_(refine_list_len) {}
 
   bool run() {

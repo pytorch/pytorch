@@ -122,13 +122,9 @@ static std::ostream& printValueRefs(
 // Can't make these two overloads directly a template, it'll be ambiguous with
 // the global printer for operator<<.
 
-std::ostream& operator<<(
+static std::ostream& operator<<(
     std::ostream& out,
     const at::ArrayRef<const Value*> nodes) {
-  return printValueRefs(out, nodes);
-}
-
-std::ostream& operator<<(std::ostream& out, const at::ArrayRef<Value*> nodes) {
   return printValueRefs(out, nodes);
 }
 
@@ -141,7 +137,7 @@ struct const_value_list_with_types {
       : values(values), delim(std::move(delim_)) {}
 };
 
-std::ostream& operator<<(
+static std::ostream& operator<<(
     std::ostream& out,
     const const_value_list_with_types& l) {
   size_t i = 0;
@@ -352,10 +348,7 @@ std::ostream& Node::print(
       }
     }
     if (auto file_line_col = r.file_line_col()) {
-      std::string filename;
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      size_t line, col;
-      std::tie(filename, line, col) = *file_line_col;
+      auto [filename, line, col] = *file_line_col;
       out << " # " << filename << ":" << line << ":" << col;
     }
   }
@@ -419,7 +412,7 @@ std::ostream& operator<<(std::ostream& out, const Graph& g) {
 
 static void checkSameDevice(const Node* node) {
   bool has_device = false;
-  c10::optional<at::Device> device = c10::nullopt;
+  std::optional<at::Device> device = c10::nullopt;
   auto checkValue = [&](const Value* v) {
     if (TensorTypePtr type = v->type()->cast<TensorType>()) {
       if (type->device() && !has_device) {
@@ -591,8 +584,7 @@ void Graph::lint() const {
       anticipated_uses[n] = -1; // we saw the anticipated user!
       scope->insert(n);
       for (auto block : n->blocks()) {
-        std::unique_ptr<LintScope> new_scope(new LintScope(std::move(scope)));
-        scope = std::move(new_scope);
+        scope = std::make_unique<LintScope>(std::move(scope));
         check_block(block);
         scope = std::move(scope->parent);
       }
@@ -874,7 +866,7 @@ Value* Value::setDebugName(const std::string& name) {
     if (last_dot_pos != std::string::npos && last_dot_pos + 1 != name.size()) {
       if (name.find_first_not_of("0123456789", last_dot_pos + 1) ==
           std::string::npos) {
-        suffix = c10::stoll(name.substr(last_dot_pos + 1));
+        suffix = std::stoll(name.substr(last_dot_pos + 1));
         name_base = name.substr(0, last_dot_pos);
       }
     }
@@ -967,7 +959,7 @@ void Value::replaceAllUsesDominatedByNodeWith(
       uses_.end());
 }
 
-size_t findArgument(
+static size_t findArgument(
     const FunctionSchema& the_schema,
     const std::string& unqualName) {
   for (const auto i : c10::irange(the_schema.arguments().size())) {
@@ -980,12 +972,12 @@ size_t findArgument(
       std::string("Couldn't find an argument called ") + unqualName);
 }
 
-size_t findArgument(const FunctionSchema& the_schema, Symbol name) {
+static size_t findArgument(const FunctionSchema& the_schema, Symbol name) {
   const auto unqualName = name.toUnqualString();
   return findArgument(the_schema, unqualName);
 }
 
-c10::optional<IValue> Node::get(Symbol name) const {
+std::optional<IValue> Node::get(Symbol name) const {
   return toIValue(namedInput(name));
 }
 
@@ -1283,13 +1275,20 @@ void Node::assignTopoPosition() {
 
     // insert between two existing nodes
   } else {
-    const auto posBetween = prevPos + (nextPos - prevPos) / 2;
-    if (posBetween == prevPos) {
+    int64_t remaining = nextPos - prevPos;
+    AT_ASSERT(remaining > 0);
+    if (remaining == 1) {
       // There was no room
       owningBlock()->reIndexTopology();
       return;
     }
-    topo_position_ = posBetween;
+    int64_t predicted_future_insertions = 0;
+    if (next() == graph_->insertPoint()) {
+      predicted_future_insertions = graph_->predicted_insert_count_++;
+    }
+    topo_position_ = prevPos +
+        std::max(int64_t(1), remaining / (2 + predicted_future_insertions));
+    AT_ASSERT(prevPos < topo_position_ && topo_position_ < nextPos);
   }
 }
 
@@ -1680,7 +1679,7 @@ Value* Graph::insert(
     Symbol opname,
     at::ArrayRef<NamedValue> args,
     at::ArrayRef<NamedValue> kwargs,
-    const c10::optional<SourceRange>& range) {
+    const std::optional<SourceRange>& range) {
   return emitBuiltinCall(
       range.value_or(fakeRange()), *this, opname, args, kwargs);
 }
@@ -1987,8 +1986,8 @@ Node* Graph::createClone(
 
 Value* Graph::insertConstant(
     const IValue& val,
-    c10::optional<SourceRange> loc,
-    c10::optional<ScopePtr> scope) {
+    std::optional<SourceRange> loc,
+    std::optional<ScopePtr> scope) {
   return jit::insertConstant(*this, val, std::move(loc), std::move(scope));
 }
 
@@ -2045,14 +2044,14 @@ void inlineCallStackOfNode(
     std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entries,
     Function* callee,
     Node* to_replace,
-    c10::optional<ModuleInstanceInfo> m_info);
+    std::optional<ModuleInstanceInfo> m_info);
 
-void inlineCallStackOfBlock(
+static void inlineCallStackOfBlock(
     Block* b,
     std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entries,
     Function* callee,
     Node* to_replace,
-    c10::optional<ModuleInstanceInfo> m_info) {
+    std::optional<ModuleInstanceInfo> m_info) {
   for (auto n : b->nodes()) {
     inlineCallStackOfNode(n, new_cs_entries, callee, to_replace, m_info);
   }
@@ -2063,7 +2062,7 @@ void inlineCallStackOfNode(
     std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entries,
     Function* callee,
     Node* to_replace,
-    c10::optional<ModuleInstanceInfo> m_info) {
+    std::optional<ModuleInstanceInfo> m_info) {
   auto new_node_cs = new_node->callstack();
 
   InlinedCallStack* raw_callstack_ptr =
@@ -2102,7 +2101,7 @@ std::vector<Value*> inlineCallTo(
   std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>
       new_callstack_entries;
 
-  c10::optional<ModuleInstanceInfo> module_instance_info = c10::nullopt;
+  std::optional<ModuleInstanceInfo> module_instance_info = c10::nullopt;
   if (to_replace->kind() == prim::CallMethod) {
     auto class_type_ptr = to_replace->input(0)->type()->cast<c10::ClassType>();
     if (to_replace->input(0)->node()->kind() == prim::GetAttr) {

@@ -1,42 +1,70 @@
+.. _torch-library-docs:
+
 torch.library
 ===================================
+.. py:module:: torch.library
+.. currentmodule:: torch.library
 
-Python operator registration API provides capabilities for extending PyTorch's core library
-of operators with user defined operators. Currently, this can be done in two ways:
+torch.library is a collection of APIs for extending PyTorch's core library
+of operators. It contains utilities for testing custom operators, creating new
+custom operators, and extending operators defined with PyTorch's C++ operator
+registration APIs (e.g. aten operators).
 
-#. Creating new libraries
+For a detailed guide on effectively using these APIs, please see
+Please see :ref:`custom-ops-landing-page`
+for more details on how to effectively use these APIs.
 
-   * Lets you to register **new operators** and kernels for various backends and functionalities by specifying the appropriate dispatch keys. For example,
+Testing custom ops
+------------------
 
-      * Consider registering a new operator ``add`` in your newly created namespace ``foo``. You can access this operator using the ``torch.ops`` API and calling into by calling ``torch.ops.foo.add``. You can also access specific registered overloads by calling ``torch.ops.foo.add.{overload_name}``.
+Use :func:`torch.library.opcheck` to test custom ops for incorrect usage of the
+Python torch.library and/or C++ TORCH_LIBRARY APIs. Also, if your operator supports
+training, use :func:`torch.autograd.gradcheck` to test that the gradients are
+mathematically correct.
 
-      * If you registered a new kernel for the ``CUDA`` dispatch key for this operator, then your custom defined function will be called for CUDA tensor inputs.
+.. autofunction:: opcheck
 
-   * This can be done by creating Library class objects of ``"DEF"`` kind.
+Creating new custom ops in Python
+---------------------------------
 
-#. Extending existing C++ libraries (e.g., aten)
+Use :func:`torch.library.custom_op` to create new custom ops.
 
-   * Lets you register kernels for **existing operators** corresponding to various backends and functionalities by specifying the appropriate dispatch keys.
+.. autofunction:: custom_op
 
-   * This may come in handy to fill up spotty operator support for a feature implemented through a dispatch key. For example.,
+Extending custom ops (created from Python or C++)
+-------------------------------------------------
 
-      * You can add operator support for Meta Tensors (by registering function to the ``Meta`` dispatch key).
+Use the register.* methods, such as :func:`torch.library.register_kernel` and
+func:`torch.library.register_fake`, to add implementations
+for any operators (they may have been created using :func:`torch.library.custom_op` or
+via PyTorch's C++ operator registration APIs).
 
-   * This can be done by creating Library class objects of ``"IMPL"`` kind.
+.. autofunction:: register_kernel
+.. autofunction:: register_autograd
+.. autofunction:: register_fake
+.. autofunction:: impl_abstract
+.. autofunction:: get_ctx
 
-A tutorial that walks you through some examples on how to use this API is available on `Google Colab <https://colab.research.google.com/drive/1RRhSfk7So3Cn02itzLWE9K4Fam-8U011?usp=sharing>`_.
+Low-level APIs
+--------------
+
+The following APIs are direct bindings to PyTorch's C++ low-level
+operator registration APIs.
 
 .. warning::
-  Dispatcher is a complicated PyTorch concept and having a sound understanding of Dispatcher is crucial
-  to be able to do anything advanced with this API. `This blog post <http://blog.ezyang.com/2020/09/lets-talk-about-the-pytorch-dispatcher/>`_
-  is a good starting point to learn about Dispatcher.
+   The low-level operator registration APIs and the PyTorch Dispatcher are a
+   complicated PyTorch concept. We recommend you use the higher level APIs above
+   (that do not require a torch.library.Library object) when possible.
+   This blog post <http://blog.ezyang.com/2020/09/lets-talk-about-the-pytorch-dispatcher/>`_
+   is a good starting point to learn about the PyTorch Dispatcher.
 
-.. currentmodule:: torch.library
+A tutorial that walks you through some examples on how to use this API is available on `Google Colab <https://colab.research.google.com/drive/1RRhSfk7So3Cn02itzLWE9K4Fam-8U011?usp=sharing>`_.
 
 .. autoclass:: torch.library.Library
   :members:
 
-We have also added some function decorators to make it convenient to register functions for operators:
+.. autofunction:: fallthrough_kernel
 
-* :func:`torch.library.impl`
-* :func:`torch.library.define`
+.. autofunction:: define
+
+.. autofunction:: impl

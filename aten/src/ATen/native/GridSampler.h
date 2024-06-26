@@ -7,7 +7,7 @@
 
 #include <ATen/native/GridSamplerUtils.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 using detail::GridSamplerInterpolation;
 using detail::GridSamplerPadding;
@@ -211,7 +211,7 @@ static inline bool within_bounds_3d(int64_t d, int64_t h, int64_t w, int64_t D, 
 
 template<typename scalar_t>
 static inline scalar_t get_value_bounded(
-    scalar_t* data,
+    const scalar_t* data,
     scalar_t x,
     scalar_t y,
     int64_t W,
@@ -295,4 +295,4 @@ static inline void get_cubic_coefficients_grad(
   coeffs[3] = (3 * A * x - 10 * A) * x + 8 * A;
 }
 
-}}  // namespace at::native
+}  // namespace at::native

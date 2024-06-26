@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import argparse
 import copy
 from collections import defaultdict
@@ -102,6 +103,7 @@ class FxNetAccNodesFinder:
         self.module = module
         self.operator_support = operator_support
         self.allow_non_tensor = allow_non_tensor
+        self.acc_nodes: NodeSet = set()
 
     def reduce_acc_nodes_non_tensor_input_helper(
         self, cpu_worklist: NodeList
@@ -188,7 +190,7 @@ class FxNetSplitterInternalError(Exception):
 class Subgraph:
     is_acc: bool
     nodes: NodeList
-
+    device_ordinal: Optional[int] = None
 
 @compatibility(is_backward_compatible=False)
 class SplitResult(NamedTuple):
@@ -229,7 +231,7 @@ def generate_inputs_for_submodules(
 
     handles = []
     results = {}
-    submodule_to_names = dict((mod, name) for name, mod in model.named_modules())
+    submodule_to_names = {mod: name for name, mod in model.named_modules()}
 
     def pre_forward(module, module_inputs):
         results[submodule_to_names[module]] = copy.deepcopy(module_inputs) if deepcopy else module_inputs
@@ -306,6 +308,7 @@ class _SplitterBase:
         operator_support: OperatorSupportBase,
         settings: _SplitterSettingBase,
         non_acc_submodule_name: str = "_run_on_cpu_",
+        return_tuple: bool = False,
     ):
         """
         Preprocesses graph before splitting:
@@ -336,6 +339,9 @@ class _SplitterBase:
 
         self.non_acc_submodule_name = non_acc_submodule_name
         self._node_submodule_map: Dict[str, str] = {}
+        self._return_tuple = return_tuple
+
+        self.tags: List[str] = []
 
     # ===============================================================
     # Helpers for ctor and initial state
@@ -429,6 +435,7 @@ class _SplitterBase:
 
         drawer = CustomDrawer(mod, "node_support", ignore_getattr=True)
         dot_graph = drawer.get_main_dot_graph()
+        # pyre-fixme[16]: `pydot.Dot` has no attribute `write_raw`.
         dot_graph.write_raw("node_support.dot")
 
     def node_support_preview(self, dump_graph: bool = False):
@@ -524,6 +531,7 @@ class _SplitterBase:
             )
             dot_graphs = drawer.get_all_dot_graphs()
             for name, dot_graph in dot_graphs.items():
+                # pyre-fixme[16]: `pydot.Dot` has no attribute `write_raw`.
                 dot_graph.write_raw(f"{name}.dot")
 
         max_qps: float = self.PCIe_BW
@@ -575,7 +583,7 @@ class _SplitterBase:
                     else:
                         total_output_bytes += get_size_of_node(submod, node)[0]
 
-                map_arg(output_node.args, get_bytes)
+                map_arg(output_node.args, get_bytes)  # type: ignore[possibly-undefined]
                 qps = self.PCIe_BW / max(total_input_bytes, total_output_bytes)
                 reports += f"Total input size in bytes is {total_input_bytes}, total output size in bytes is {total_output_bytes},"
                 reports += f" theoretical max qps (bounds by PCIe bandwidth) for this submodule is {qps}.\n"
@@ -747,7 +755,7 @@ class _SplitterBase:
 
         # Determine which subgraph to start from based on which subgraph has
         # 0-dep node
-        acc_subgraph: bool = not any([len(self.deps[n]) == 0 for n in current_cpu_nodes])
+        acc_subgraph: bool = not any(len(self.deps[n]) == 0 for n in current_cpu_nodes)
 
         current_subgraph_nodes: NodeList = []
 
@@ -834,7 +842,7 @@ class _SplitterBase:
         return result
 
     def tag(self, subgraphs: List[Subgraph]):
-        self.tags: List[str] = []
+        self.tags = []
         for subgraph in subgraphs:
             tag = f"_run_on_acc_{len(self.tags)}" if subgraph.is_acc else f"{self.non_acc_submodule_name}{len(self.tags)}"
             self.tags.append(tag)
@@ -846,7 +854,7 @@ class _SplitterBase:
                 self._node_submodule_map[node.name] = tag
 
     def split(self, remove_tag: bool = False) -> torch.fx.GraphModule:
-        split_module = split_by_tags(self.module, self.tags)
+        split_module = split_by_tags(self.module, self.tags, return_tuple=self._return_tuple)
         if remove_tag:
             for node in self.module.graph.nodes:
                 if hasattr(node, "tag"):

@@ -5,8 +5,7 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 void tupleUnpack(Stack& stack);
 
@@ -39,5 +38,4 @@ void tupleSlice(Stack& stack, size_t begin, size_t end);
 
 void dequantize(Stack& stack);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

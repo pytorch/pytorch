@@ -29,10 +29,7 @@ sudo apt-get install \
 # obtain optional dependencies that are usually useful to have.
 echo "Installing optional dependencies."
 sudo apt-get install \
-  libleveldb-dev \
-  liblmdb-dev \
   libpython-dev \
-  libsnappy-dev \
   python-numpy \
   python-pip \
   python-protobuf
@@ -40,10 +37,6 @@ sudo apt-get install \
 # Obtain python hypothesis, which Caffe2 uses for unit testing. Note that
 # the one provided by apt-get is quite old so we install it via pip
 sudo pip install hypothesis
-
-# Install the six module, which includes Python 2 and 3 compatibility utilities,
-# and is required for Caffe2
-sudo pip install six
 
 # Now, actually build the android target.
 echo "Building caffe2"

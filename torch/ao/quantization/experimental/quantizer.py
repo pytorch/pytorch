@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 from torch import Tensor
 import numpy as np
@@ -5,7 +6,7 @@ from torch.ao.quantization.experimental.apot_utils import float_to_apot, apot_to
 
 # class to store APoT quantizer and
 # implement quantize and dequantize
-class APoTQuantizer():
+class APoTQuantizer:
     alpha: torch.Tensor
     gamma: torch.Tensor
     quantization_levels: torch.Tensor
@@ -44,7 +45,7 @@ class APoTQuantizer():
 
         from torch.ao.quantization.experimental.APoT_tensor import TensorAPoT
 
-        result = TensorAPoT(self, tensor2quantize)
+        result = TensorAPoT(self, tensor2quantize)  # type: ignore[assignment]
 
         return result
 
@@ -83,7 +84,7 @@ class APoTQuantizer():
     def quant_dequant(self, tensor2quantize: Tensor) -> Tensor:
         levels_lst = list(self.quantization_levels)
 
-        result = tensor2quantize.apply_(lambda x: quant_dequant_util(x, levels_lst))
+        result = tensor2quantize.apply_(lambda x: quant_dequant_util(x, levels_lst))  # type: ignore[call-arg]
 
         return result
 

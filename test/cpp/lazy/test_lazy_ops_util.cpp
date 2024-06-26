@@ -12,16 +12,11 @@ namespace torch {
 namespace lazy {
 namespace {
 
-bool IsLtcTensor(const at::Tensor& tensor) {
-  return dynamic_cast<torch::lazy::LTCTensorImpl*>(
-      tensor.unsafeGetTensorImpl());
-}
-
 std::unordered_set<std::string>* CreateIgnoredCounters() {
   std::unordered_set<std::string>* icounters =
       new std::unordered_set<std::string>();
   // Add below the counters whose name need to be ignored when doing
-  // is-any-counter-changed assertins.
+  // is-any-counter-changed assertions.
   icounters->insert("aten::rand");
   return icounters;
 }

@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import os
 from abc import ABC, abstractmethod
 
@@ -35,7 +37,7 @@ class RpcAgentTestFixture(ABC):
     def rpc_backend_options(self):
         pass
 
-    def setup_fault_injection(self, faulty_messages, messages_to_delay):
+    def setup_fault_injection(self, faulty_messages, messages_to_delay):  # noqa: B027
         """Method used by dist_init to prepare the faulty agent.
 
         Does nothing for other agents.

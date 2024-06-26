@@ -1,11 +1,12 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
 #include <csignal>
+#include <cstdint>
 #include <mutex>
 
 #include <c10/macros/Export.h>
-#include <c10/util/Logging.h>
 
 #if defined(__APPLE__)
 #define C10_SUPPORTS_SIGNAL_HANDLER
@@ -35,8 +36,8 @@ class C10_API SignalHandler {
 
   Action SIGINT_action_;
   Action SIGHUP_action_;
-  unsigned long my_sigint_count_;
-  unsigned long my_sighup_count_;
+  std::atomic<uint64_t> my_sigint_count_;
+  std::atomic<uint64_t> my_sighup_count_;
 };
 
 #if defined(C10_SUPPORTS_FATAL_SIGNAL_HANDLERS)
@@ -89,8 +90,10 @@ class C10_API FatalSignalHandler {
   // This wait condition is used to wait for other threads to finish writing
   // their stack trace when in fatal sig handler (we can't use pthread_join
   // because there's no way to convert from a tid to a pthread_t).
-  pthread_cond_t writingCond;
-  pthread_mutex_t writingMutex;
+  std::condition_variable writingCond;
+  std::mutex writingMutex;
+  // used to indicate if the other thread responded to the signal
+  bool signalReceived;
 
   struct signal_handler {
     const char* name;
@@ -98,6 +101,7 @@ class C10_API FatalSignalHandler {
     struct sigaction previous;
   };
 
+  // NOLINTNEXTLINE(*c-arrays*)
   static signal_handler kSignalHandlers[];
 };
 

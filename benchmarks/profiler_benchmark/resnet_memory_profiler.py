@@ -1,5 +1,6 @@
-import torch
 import torchvision.models as models
+
+import torch
 
 import torch.autograd.profiler as profiler
 
@@ -19,4 +20,8 @@ for with_cuda in [False, True]:
         with profiler.record_function("root"):
             model(inputs)
 
-    print(prof.key_averages(group_by_input_shape=True).table(sort_by=sort_key, row_limit=-1))
+    print(
+        prof.key_averages(group_by_input_shape=True).table(
+            sort_by=sort_key, row_limit=-1
+        )
+    )

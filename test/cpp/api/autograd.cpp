@@ -31,6 +31,22 @@ Variable simple_fn(const Variable& x, const Variable& y) {
   return x + 2 * y + x * y;
 }
 
+TEST(AutogradAPITests, RegisterHookVoidReturnAcceptsUndefinedTensor) {
+  auto x = at::zeros({}, at::kCPU);
+  x.requires_grad_();
+  x.register_hook([](at::TensorBase x) { return; });
+  auto y = torch::autograd::UndefinedGrad().apply({x});
+  y[0].backward();
+}
+
+TEST(AutogradAPITests, RegisterHookTensorReturnAcceptsUndefinedTensor) {
+  auto x = at::zeros({}, at::kCPU);
+  x.requires_grad_();
+  x.register_hook([](at::Tensor x) -> at::Tensor { return x; });
+  auto y = torch::autograd::UndefinedGrad().apply({x});
+  y[0].backward();
+}
+
 TEST(AutogradAPITests, BackwardSimpleTest) {
   Variable x = torch::randn({2, 2}, torch::requires_grad());
   Variable y = torch::randn({2, 2}, torch::requires_grad());
@@ -252,6 +268,28 @@ TEST(AutogradAPITests, AnomalyMode) {
     }
   }
   double_backward_produce_nan(true);
+}
+
+TEST(CustomAutogradTest, CustomFunctionReturnInputAsIsAndSavesIt) {
+  struct MyFunction : public Function<MyFunction> {
+    static Variable forward(
+        AutogradContext* ctx,
+        Variable var1,
+        Variable var2) {
+      ctx->save_for_backward({var1, var2});
+      return var1 * var2, var1;
+    }
+
+    static variable_list backward(
+        AutogradContext* ctx,
+        variable_list grad_output) {
+      return {};
+    }
+  };
+
+  Variable x = torch::randn({5, 5}, torch::requires_grad());
+  Variable y = torch::randn({5, 5}, torch::requires_grad());
+  MyFunction::apply(x, y);
 }
 
 TEST(CustomAutogradTest, CustomFunction) {
@@ -1227,7 +1265,7 @@ int64_t ret_single_non_tensor(
 
 torch::Tensor opt_op(
     const torch::Tensor& self,
-    const c10::optional<at::Tensor>& other) {
+    const std::optional<at::Tensor>& other) {
   if (other.has_value()) {
     return self + other.value();
   } else {
@@ -1316,12 +1354,6 @@ void assertBasicChecks(F op) {
 }
 
 } // namespace
-
-// These tests trigger an MSVC bug in the internal arvr build
-// Reproduce with: buck build @arvr/mode/win/opt
-// //xplat/caffe2:autograd_libtorch_test_ovrsource It is probably caused by the
-// lambda, see https://github.com/pytorch/pytorch/issues/48763
-#if !defined(_MSC_VER)
 
 TEST(TestAutogradNotImplementedFallback, RetSingleNonTensor) {
   REGISTER_TEST_OP(
@@ -1429,11 +1461,11 @@ TEST(TestAutogradNotImplementedFallback, OptOp) {
   auto opHandle =
       c10::Dispatcher::singleton().findSchemaOrThrow("_test::opt_op", "");
   auto op = [&](const torch::Tensor& _1,
-                const c10::optional<torch::Tensor>& _2) {
+                const std::optional<torch::Tensor>& _2) {
     return callOpUnboxed<
         torch::Tensor,
         const torch::Tensor&,
-        const c10::optional<torch::Tensor>&>(opHandle, _1, _2);
+        const std::optional<torch::Tensor>&>(opHandle, _1, _2);
   };
 
   auto a = torch::tensor({1.}, {torch::kFloat32}).set_requires_grad(true);
@@ -1468,14 +1500,11 @@ TEST(TestAutogradNotImplementedFallback, RetTupleNonTensor) {
   auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow(
       "_test::ret_tuple_non_tensor", "");
   auto op = [&](const torch::Tensor& _1, const torch::Tensor& _2) {
-    torch::Tensor out0;
-    torch::Tensor out1;
-    int64_t out2;
     auto out = callOpUnboxed<
         std::tuple<torch::Tensor, torch::Tensor, int64_t>,
         const torch::Tensor&,
         const torch::Tensor&>(opHandle, _1, _2);
-    std::tie(out0, out1, out2) = std::move(out);
+    auto [out0, out1, out2] = std::move(out);
     return out0;
   };
 
@@ -1632,14 +1661,12 @@ TEST(TestAutogradNotImplementedFallback, TensorlistOp) {
 
   ASSERT_THROWS_WITH(
       torch::autograd::grad({out}, {vec[0]}),
-      "One of the differentiated Tensors does not require grad");
+      "element 0 of the input tensors does not require grad");
   ASSERT_THROWS_WITH(
       torch::autograd::grad({out}, {vec[1]}), "is not implemented");
 
   ASSERT_TRUE(at::allclose(op(a, vec), tensorlist_op(a, vec)));
 }
-
-#endif
 
 // TODO add these tests if needed
 // test_once_differentiable

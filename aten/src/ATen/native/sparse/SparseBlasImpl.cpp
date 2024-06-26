@@ -1,8 +1,12 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Config.h>
+#include <ATen/mkl/Sparse.h>
 #include <ATen/native/mkl/SparseBlasImpl.h>
 #include <ATen/native/sparse/SparseBlasImpl.h>
 #include <ATen/SparseCsrTensorUtils.h>
+
+// Required for checking whether Triton kernels are available
+#include <ATen/core/dispatch/Dispatcher.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -14,10 +18,39 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-namespace at {
-namespace native {
-namespace sparse {
-namespace impl {
+#if !AT_USE_MKL_SPARSE()
+#include <ATen/Dispatch.h>
+#include <ATen/Parallel.h>
+#endif
+
+
+namespace at::native::sparse::impl {
+
+namespace {
+
+bool operands_support_triton_mm_kernel(const Tensor& compressed, const Tensor& strided) {
+  // Triton works only with blocksizes which are powers of 2.
+  const auto is_power_of_2 = [](int64_t v) -> bool {
+    return !(v & (v - 1));
+  };
+  return AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(compressed.layout(), "operands_support_triton_mm_kernel", [&] { return false; },
+     [&] {
+       const auto blocksize = at::sparse_csr::getBlockSize(compressed);
+       // Dtype and blocksize checks for potential Triton usage.
+       return ((strided.scalar_type() == ScalarType::Half
+                || strided.scalar_type() == ScalarType::BFloat16
+                || strided.scalar_type() == ScalarType::Float)
+               && compressed.scalar_type() == strided.scalar_type()
+               && is_power_of_2(blocksize[0]) && is_power_of_2(blocksize[1])
+               && (blocksize[0] >= 16) && (blocksize[1] >= 16)
+               // lhs is retiled to (b0, b1) while rhs is to (b1, b0),
+               // so the result is tiled to (b0, b0) and we need to make
+               // sure that strided.size(-1) is divisible by b0.
+               && strided.size(-1) % blocksize[0] == 0);
+     });
+}
+
+}
 
 Tensor& _compressed_row_strided_mm_out(const Tensor& compressed, const Tensor& strided, Tensor& result) {
   const auto compressed_layout = compressed.layout();
@@ -70,6 +103,22 @@ Tensor& _compressed_row_strided_mm_out(const Tensor& compressed, const Tensor& s
     blocksize = {values.size(-2), values.size(-1)};
   }
 
+// No stable support for ROCM in Triton yet.
+#ifndef USE_ROCM
+
+  if (operands_support_triton_mm_kernel(compressed, strided)) {
+    const auto triton_schema = c10::Dispatcher::singleton()
+      .findSchema({"triton::_triton_bsr_dense_mm_out", ""});
+    if (triton_schema.has_value()) {
+      const auto triton_kernel = triton_schema.value().typed<Tensor&(const Tensor&, const Tensor&, Tensor&)>();
+      if (triton_kernel.hasKernelForDispatchKey(c10::DispatchKey::SparseCsrCUDA)) {
+        return triton_kernel.call(compressed, strided, result);
+      }
+    } /* else the schema is not defined and/or the key is not
+         overwritten, so skip and execute the code below. */
+  }
+#endif
+
   // (..., r, c) -> (..., r / b0, c / b1, b0, b1)
   // NOTE: this function ALWAYS creates a view upon successful execution.
   const auto tile_tensor = [compressed_layout](
@@ -93,7 +142,7 @@ Tensor& _compressed_row_strided_mm_out(const Tensor& compressed, const Tensor& s
   // the strided input has to be "tilable" to (..., b1, x) with
   // any x >= 1 such that all the shapes are (block) matrix product
   // compatible. The matrix product will then have shape (..., b0, x).
-  // This in turn means the the result has to be "tilable" to
+  // This in turn means the result has to be "tilable" to
   // (..., b0, x).
   //
   // These observations imply the following restrictions:
@@ -125,10 +174,9 @@ Tensor& _compressed_row_strided_mm_out(const Tensor& compressed, const Tensor& s
     values.unsqueeze_(-1).unsqueeze_(-1);
   }
 
-  Tensor compressed_indices, plain_indices;
-  std::tie(compressed_indices, plain_indices) = at::sparse_csr::getCompressedPlainIndices(compressed);
+  auto [compressed_indices, plain_indices] = at::sparse_csr::getCompressedPlainIndices(compressed);
 
-  // Select block rows of the strided input that intersect with the block colums of the sparse input.
+  // Select block rows of the strided input that intersect with the block columns of the sparse input.
   auto strided_tiled_selected_rows = strided_tiled.index_select(-4, plain_indices);
 
   // Promote to float if output is half or bfloat16 for better precision
@@ -151,7 +199,7 @@ Tensor& _compressed_row_strided_mm_out(const Tensor& compressed, const Tensor& s
       compressed_indices.scalar_type() == kInt).select(0, 0);
 
   // Reduction step.
-  // If result is neither half nor bfloat16, do everyting in-place.
+  // If result is neither half nor bfloat16, do everything in-place.
   if (result.scalar_type() == mm_dtype) {
     // Zero out and sum over the blocks that share the same row indices.
     result_tiled.zero_();
@@ -184,27 +232,66 @@ Tensor& _compressed_row_strided_addmm_out(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& result) {
+
+// No stable support for ROCM in Triton yet.
+#ifndef USE_ROCM
+  if (operands_support_triton_mm_kernel(mat1, mat2)) {
+    const auto triton_schema = c10::Dispatcher::singleton()
+      .findSchema({"triton::_triton_bsr_dense_addmm_out", ""});
+    if (triton_schema.has_value()) {
+      const auto triton_kernel = triton_schema.value().typed<Tensor&(const Tensor&, const Tensor&, const Tensor&, const Scalar&, const Scalar&, Tensor&)>();
+      if (triton_kernel.hasKernelForDispatchKey(c10::DispatchKey::SparseCsrCUDA)) {
+        try {
+          return triton_kernel.call(self, mat1, mat2, beta, alpha, result);
+        } catch (std::runtime_error& e) {
+          const std::string msg = e.what();
+          if (msg != std::string("Unable to cast NotImplemented to Tensor")) {
+            throw std::runtime_error(msg);
+          }
+        } /* else triton_kernel returned NotImplemented, continue
+             with the generic method below */
+      }
+    } /* else the schema is not defined and/or the key is not
+           overwritten, so skip and execute the code below. */
+  }
+#endif
+
+  auto alpha_val = alpha.toComplexDouble();
+  auto beta_val = beta.toComplexDouble();
   // If result is not the same as self, it could always be used as out argument to mm.
   if (!result.is_same(self)) {
-    _compressed_row_strided_mm_out(mat1, mat2, result).mul_(alpha);
-
+    _compressed_row_strided_mm_out(mat1, mat2, result);
+    if (alpha_val != 1.) {
+      result.mul_(alpha);
+    }
     // Process beta
-    if (beta.toComplexDouble() != 0.) {
-      result.add_(self.mul(beta));
+    if (beta_val != 0.) {
+      if (beta_val == 1.) {
+        result.add_(self);
+      } else {
+        result.add_(self.mul(beta));
+      }
     }
   }
   // Otherwise we need to allocate external memory for mm if beta != 0.
   else {
     // Process beta
-    if (beta.toComplexDouble() != 0.) {
-      result.mul_(beta);
+    if (beta_val != 0.) {
+      if (beta_val != 1.) {
+        result.mul_(beta);
+      }
       auto mm = at::empty_like(result);
       _compressed_row_strided_mm_out(mat1, mat2, mm);
-      mm.mul_(alpha);
+      if (alpha_val != 1.) {
+        mm.mul_(alpha);
+      }
       result.add_(mm);
     }
     else {
-      _compressed_row_strided_mm_out(mat1, mat2, result).mul_(alpha);
+      _compressed_row_strided_mm_out(mat1, mat2, result);
+      if (alpha_val != 1.) {
+        result.mul_(alpha);
+      }
     }
   }
 
@@ -212,6 +299,98 @@ Tensor& _compressed_row_strided_addmm_out(
 }
 
 namespace cpu {
+#if !AT_USE_MKL_SPARSE()
+namespace {
+template<typename scalar_t, typename idx_t>
+void addmv_sparse_csr(
+    const scalar_t* mat_values,
+    const idx_t* crow_index,
+    const idx_t* col_index,
+    const int64_t mat_rows,
+    const scalar_t* vec,
+    const size_t vec_stride,
+    const scalar_t alpha,
+    const scalar_t beta,
+    scalar_t* result,
+    const size_t result_stride) {
+  at::parallel_for(0, mat_rows, 0, [&](int64_t rstart, int64_t rend) {
+    for(const auto row: c10::irange(rstart, rend)) {
+      scalar_t acc(0);
+      for(const auto idx: c10::irange(crow_index[row], crow_index[row + 1])) {
+        acc += mat_values[idx] * vec[col_index[idx] * vec_stride];
+      }
+      result[row * result_stride] = acc * alpha + result[row * result_stride] * beta;
+    }
+  });
+}
+
+template<typename scalar_t, typename idx_t>
+void addmv_sparse_bsr(
+    const scalar_t* mat_values,
+    const idx_t* crow_index,
+    const idx_t* col_index,
+    const int64_t mat_rows,
+    const int64_t blocksize_rows,
+    const int64_t blocksize_cols,
+    const scalar_t* vec,
+    const size_t vec_stride,
+    const scalar_t alpha,
+    const scalar_t beta,
+    scalar_t* result,
+    const size_t result_stride) {
+  at::parallel_for(0, mat_rows, 0, [&](int64_t rstart, int64_t rend) {
+    for(const auto row: c10::irange(rstart, rend)) {
+      const auto block_row = row / blocksize_rows;
+      const auto block_row_offset = row % blocksize_rows;
+      scalar_t acc(0);
+      for(const auto block_idx: c10::irange(crow_index[block_row], crow_index[block_row + 1])) {
+        const auto block_offs = (block_idx * blocksize_rows + block_row_offset) * blocksize_cols;
+        const auto vec_offs = col_index[block_idx]* blocksize_cols;
+        for(const auto idx: c10::irange(blocksize_cols)) {
+          acc += mat_values[block_offs + idx] * vec[(vec_offs + idx) * vec_stride];
+        }
+      }
+      result[row * result_stride] = acc * alpha + result[row * result_stride] * beta;
+    }
+  });
+}
+
+template<typename scalar_t, typename idx_t>
+void addmv_out_sparse_csr(
+    const Tensor& mat,
+    const Tensor& vec,
+    const Scalar& beta,
+    const Scalar& alpha,
+    const Tensor& result) {
+  auto cont_values = mat.values().contiguous();
+  if (mat.layout() == kSparseBsr) {
+    addmv_sparse_bsr(cont_values.data_ptr<scalar_t>(),
+        mat.crow_indices().data_ptr<idx_t>(),
+        mat.col_indices().data_ptr<idx_t>(),
+        mat.size(0),
+        mat.values().size(1),
+        mat.values().size(2),
+        vec.data_ptr<scalar_t>(),
+        vec.stride(0),
+        alpha.to<scalar_t>(),
+        beta.to<scalar_t>(),
+        result.data_ptr<scalar_t>(),
+        result.stride(0));
+  } else {
+    addmv_sparse_csr(cont_values.data_ptr<scalar_t>(),
+        mat.crow_indices().data_ptr<idx_t>(),
+        mat.col_indices().data_ptr<idx_t>(),
+        mat.size(0),
+        vec.data_ptr<scalar_t>(),
+        vec.stride(0),
+        alpha.to<scalar_t>(),
+        beta.to<scalar_t>(),
+        result.data_ptr<scalar_t>(),
+        result.stride(0));
+  }
+}
+} // anonymous namespace
+#endif // !AT_USE_MKL_SPARSE()
 
 /*
   Computes a sparse matrix-dense vector product defined as
@@ -229,11 +408,19 @@ void addmv_out_sparse_csr(
     const Scalar& beta,
     const Scalar& alpha,
     const Tensor& result) {
-#if !AT_MKL_ENABLED()
-  TORCH_CHECK(
-      false,
-      "Calling addmv on a sparse CPU tensor requires compiling PyTorch with MKL. ",
-      "Please use PyTorch built MKL support.");
+#if !AT_USE_MKL_SPARSE()
+  TORCH_CHECK(mat.layout() == kSparseBsr || mat.layout() == kSparseCsr, "Unexpected layout", mat.layout());
+  if (beta.toComplexDouble() == 0.) {
+    result.zero_();
+  }
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+      result.scalar_type(), "addmv_out_sparse_csr_impl_reference", [&] {
+        if (mat.crow_indices().scalar_type() == kLong) {
+          addmv_out_sparse_csr<scalar_t, int64_t>(mat, vec, beta, alpha, result);
+        } else {
+          addmv_out_sparse_csr<scalar_t, int32_t>(mat, vec, beta, alpha, result);
+        }
+      });
 #else
   sparse::impl::mkl::addmv_out_sparse_csr(mat, vec, beta, alpha, result);
 #endif
@@ -283,7 +470,4 @@ void triangular_solve_out_sparse_csr(
 }
 
 } // namespace cpu
-} // namespace impl
-} // namespace sparse
-} // namespace native
-} // namespace at
+} // namespace at::native::sparse::impl

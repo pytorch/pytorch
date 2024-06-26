@@ -63,7 +63,9 @@ void aminmax_kernel_impl(
     const Tensor& self, int64_t dim, bool keepdim, Tensor& min_result, Tensor& max_result) {
   at::TensorIterator iter = make_reduction("aminmax_cuda", min_result,
                                            max_result, self, dim, keepdim, self.scalar_type());
-  aminmax_launch_kernel(iter);
+  if (iter.numel() != 0) {
+    aminmax_launch_kernel(iter);
+  }
 }
 
 void min_all_kernel_impl(Tensor& result, const Tensor& input) {

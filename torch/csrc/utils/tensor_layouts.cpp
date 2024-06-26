@@ -7,8 +7,7 @@
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/tensor_layouts.h>
 
-namespace torch {
-namespace utils {
+namespace torch::utils {
 
 #define REGISTER_LAYOUT(layout, LAYOUT)                                     \
   PyObject* layout##_layout =                                               \
@@ -51,7 +50,8 @@ void initializeLayouts() {
     throw python_error();
   }
   registerLayoutObject((THPLayout*)mkldnn_layout, at::Layout::Mkldnn);
+
+  REGISTER_LAYOUT(jagged, Jagged);
 }
 
-} // namespace utils
-} // namespace torch
+} // namespace torch::utils

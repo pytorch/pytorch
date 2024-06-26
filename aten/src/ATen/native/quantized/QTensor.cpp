@@ -1,7 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/quantized/Quantizer.h>
@@ -189,13 +188,13 @@ QScheme qscheme_quant(const Tensor& self) {
 
 Tensor quantized_clone(
     const Tensor& self,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
+    std::optional<c10::MemoryFormat> optional_memory_format) {
   auto memory_format =
       optional_memory_format.value_or(MemoryFormat::Contiguous);
 
   // TODO: To support all features of MemoryFormat::Preserve we need to add
   // _empty_affine_quantized_strided function and use it similarly to
-  // Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat>
+  // Tensor clone(const Tensor& src, std::optional<c10::MemoryFormat>
   // optional_memory_format) if (self.is_non_overlapping_and_dense()) ->
   // _empty_affine_quantized_strided
   if (memory_format == MemoryFormat::Preserve) {
@@ -232,7 +231,7 @@ bool equal_quantized_cpu(const Tensor& self, const Tensor& other) {
   TORCH_CHECK(
       self.device().type() == kCPU && other.device().type() == kCPU,
       "quantized_equal is implemented only for the QuantizedCPU backend");
-  if (!other.is_quantized()) {
+  if (!self.is_quantized() || !other.is_quantized()) {
     return false;
   }
 
@@ -248,7 +247,7 @@ bool equal_quantized_cpu(const Tensor& self, const Tensor& other) {
   if (self.sizes() != other.sizes()) {
     return false;
   }
-  if (self.element_size() != other.element_size()) {
+  if (self.scalar_type() != other.scalar_type()) {
     return false;
   }
 
@@ -258,7 +257,13 @@ bool equal_quantized_cpu(const Tensor& self, const Tensor& other) {
 
   void* self_data = self_contig.data_ptr();
   void* other_data = other_contig.data_ptr();
-  return 0 == memcmp(self_data, other_data, self.numel() * self.element_size());
+  auto data_size = self.numel() * self.element_size();
+  // For QUint4x2 and QUInt2x4, two elements are packed in one byte
+  if (self.scalar_type() == kQUInt4x2 || self.scalar_type() == kQUInt2x4) {
+      TORCH_INTERNAL_ASSERT(self.element_size() == 1);
+      data_size = (data_size>>1) + (data_size&1);
+  }
+  return 0 == memcmp(self_data, other_data, data_size);
 }
 
 /* Calculate the quantization params for the activation tensor */
@@ -286,7 +291,7 @@ std::tuple<double, int64_t> _choose_qparams_per_tensor(
   return std::make_tuple(q_params.scale, q_params.zero_point);
 }
 
-float calculate_quant_loss(
+static float calculate_quant_loss(
     const float* input,
     int numel,
     float xmin,
@@ -339,7 +344,7 @@ std::tuple<Tensor, Tensor> choose_qparams_optimized(
 
   TORCH_CHECK(numel <= input_tensor.numel(), "numel ", numel,
       " greater than input_tensor.numel() ", input_tensor.numel());
-  const float* input_row = input_tensor.data_ptr<float>();
+  const float* input_row = input_tensor.const_data_ptr<float>();
   float xmin = *std::min_element(input_row, input_row + numel);
   float xmax = *std::max_element(input_row, input_row + numel);
 
@@ -347,7 +352,7 @@ std::tuple<Tensor, Tensor> choose_qparams_optimized(
   // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   int min_bins = n_bins * (1.0 - (float) ratio);
   Tensor input_tensor_contig = input_tensor.contiguous();
-  const float* input = input_tensor_contig.data_ptr<float>();
+  const float* input = input_tensor_contig.const_data_ptr<float>();
   std::vector<float> q_input(numel);
 
   float loss =

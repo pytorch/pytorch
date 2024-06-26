@@ -50,7 +50,7 @@ bool mergeTypes(
   return changed;
 }
 
-void applyTypes(ArrayRef<Value*> src, ArrayRef<Value*> dst) {
+static void applyTypes(ArrayRef<Value*> src, ArrayRef<Value*> dst) {
   AT_ASSERT(src.size() == dst.size());
   for (const auto i : c10::irange(src.size())) {
     dst[i]->setType(src[i]->type());
@@ -153,7 +153,7 @@ bool containsTensorType(const TypePtr& t) {
 // for each node in the schema with type Tensor, extract the T type
 // returns c10::nullopt if any Tensor in the schema does not have a known
 // shape ignores non-tensor in the list of inputs
-c10::optional<std::vector<TensorTypePtr>> gatherTensorTypes(
+std::optional<std::vector<TensorTypePtr>> gatherTensorTypes(
     Node* node,
     bool complete = false) {
   std::vector<TensorTypePtr> tensor_types;
@@ -208,8 +208,8 @@ c10::ScalarType unionScalarTypes(
 // Promotes result types for arithmetic operations on Tensor operands using
 // new type promotion logic. See tensor_attributes.rst for details.
 // This doesn't handle the case of arithmetic ops with Scalar arguments (when
-// `Tensor.getUnsafeTensorImpl()->is_wrapped_nubmer()` would return true)
-c10::optional<c10::ScalarType> getPromotedTypeForArithmeticOp(Node* node) {
+// `Tensor.getUnsafeTensorImpl()->is_wrapped_number()` would return true)
+std::optional<c10::ScalarType> getPromotedTypeForArithmeticOp(Node* node) {
   c10::ScalarType dimmed = c10::ScalarType::Undefined;
   c10::ScalarType zerodim = c10::ScalarType::Undefined;
   // binary arithmetic ops, more than 2 args is alpha.
@@ -460,7 +460,7 @@ class ShapePropagator : public PropertyPropBase {
       // its most constrained form.
       auto tensor_type = node->outputs()[i]->type()->cast<TensorType>();
       if (stack[i].isTensor() && tensor_type) {
-        // gradient information isn't always available or part of represenative
+        // gradient information isn't always available or part of representative
         // inputs, maintain original grad property
         auto tensor_grad = tensor_type->requiresGrad();
         node->outputs()[i]->setType(TensorType::create(stack[i].toTensor())
@@ -741,7 +741,7 @@ class ShapePropagator : public PropertyPropBase {
     return setUnshapedType(node);
   }
 
-  static c10::optional<size_t> determineListSize(Value* list) {
+  static std::optional<size_t> determineListSize(Value* list) {
     AT_ASSERT(list->type()->cast<ListType>());
     if (auto shape = constant_as<c10::List<int64_t>>(list)) {
       return shape->size();
@@ -769,7 +769,7 @@ class ShapePropagator : public PropertyPropBase {
   bool PropagateTensorShapeOnNode(Node* node, bool insert_expands) {
     static const auto broadcast =
         [](std::vector<TensorTypePtr>& tensor_types,
-           c10::optional<at::ScalarType> t) -> TensorTypePtr {
+           std::optional<at::ScalarType> t) -> TensorTypePtr {
       if (tensor_types.size() == 1) {
         return tensor_types[0]->dimensionedOnly()->withScalarType(t);
       }
@@ -1244,7 +1244,7 @@ class ShapePropagator : public PropertyPropBase {
     static const auto reduce_op_handler = [](Node* node,
                                              int64_t num_reduced_dim = 0,
                                              bool upcast_integer = false,
-                                             c10::optional<IValue> opt_dtype =
+                                             std::optional<IValue> opt_dtype =
                                                  c10::nullopt) -> type_vec_t {
       if (auto type = node->input(0)->type()->cast<TensorType>()) {
         if (!type->scalarType() || !type->dim()) {
@@ -1255,8 +1255,8 @@ class ShapePropagator : public PropertyPropBase {
         } else if (upcast_integer && !at::isFloatingType(*type->scalarType())) {
           type = type->withScalarType(at::kLong);
         }
-        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-        if (*type->dim() >= num_reduced_dim && num_reduced_dim > 0) {
+        if (static_cast<int64_t>(*type->dim()) >= num_reduced_dim &&
+            num_reduced_dim > 0) {
           return {type->withDim(*type->dim() - num_reduced_dim)};
         } else {
           return {std::move(type)};
@@ -1458,7 +1458,7 @@ class ShapePropagator : public PropertyPropBase {
     //   tensor inputs  : 1
     //   tensor outputs : 1
     // Additionally:
-    //   - has ScalarType dtype, Layeout layout and Device device arguments
+    //   - has ScalarType dtype, Layout layout and Device device arguments
     static const register_formula_for like_factories_with_options{
         {
             "aten::empty_like(Tensor self, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
@@ -1487,7 +1487,7 @@ class ShapePropagator : public PropertyPropBase {
     //   tensor inputs  : 1
     //   tensor outputs : 1
     // Additionally:
-    //   - has int[] size, ScalarType dtype, Layeout layout and Device device
+    //   - has int[] size, ScalarType dtype, Layout layout and Device device
     //   arguments
     static const register_formula_for size_factories_with_options{
         {

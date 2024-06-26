@@ -301,7 +301,7 @@ void slow_conv_transpose3d_out_cuda_template(
 
         // For each elt in batch, do:
         for (int elt = 0; elt < batch_size; elt++) {
-          // Matrix mulitply per output:
+          // Matrix multiply per output:
           input_n = input.select(0, elt);
           output_n = output.select(0, elt);
 
@@ -321,18 +321,18 @@ void slow_conv_transpose3d_out_cuda_template(
               m,
               k,
               static_cast<scalar_t>(1),
-              input_n.data_ptr<scalar_t>(),
+              input_n.const_data_ptr<scalar_t>(),
               n,
-              weight.data_ptr<scalar_t>(),
+              weight.const_data_ptr<scalar_t>(),
               m,
               static_cast<scalar_t>(0),
-              columns.data_ptr<scalar_t>(),
+              columns.mutable_data_ptr<scalar_t>(),
               n);
 
           // Unpack columns back into input:
           at::native::col2vol<scalar_t, accscalar_t>(
               at::cuda::getCurrentCUDAStream(),
-              columns.data_ptr<scalar_t>(),
+              columns.const_data_ptr<scalar_t>(),
               n_output_plane,
               output_depth,
               output_height,
@@ -352,7 +352,7 @@ void slow_conv_transpose3d_out_cuda_template(
               dilation_depth,
               dilation_height,
               dilation_width,
-              output_n.data_ptr<scalar_t>());
+              output_n.mutable_data_ptr<scalar_t>());
 
           // Do Bias after:
           // M,N,K are dims of matrix A and B
@@ -371,12 +371,12 @@ void slow_conv_transpose3d_out_cuda_template(
                 m_,
                 k_,
                 static_cast<scalar_t>(1),
-                ones.data_ptr<scalar_t>(),
+                ones.const_data_ptr<scalar_t>(),
                 k_,
-                bias.data_ptr<scalar_t>(),
+                bias.const_data_ptr<scalar_t>(),
                 k_,
                 static_cast<scalar_t>(1),
-                output_n.data_ptr<scalar_t>(),
+                output_n.mutable_data_ptr<scalar_t>(),
                 n_);
           }
         }
@@ -531,7 +531,7 @@ void slow_conv_transpose3d_backward_out_cuda_template(
 
         // For each elt in batch, do:
         for (int elt = 0; elt < batch_size; elt++) {
-          // Matrix mulitply per sample:
+          // Matrix multiply per sample:
           grad_input_n = grad_input.select(0, elt);
           grad_output_n = grad_output.select(0, elt);
 
@@ -539,7 +539,7 @@ void slow_conv_transpose3d_backward_out_cuda_template(
             // Extract columns:
             at::native::vol2col<scalar_t>(
                 at::cuda::getCurrentCUDAStream(),
-                grad_output_n.data_ptr<scalar_t>(),
+                grad_output_n.const_data_ptr<scalar_t>(),
                 n_output_plane,
                 output_depth,
                 output_height,
@@ -559,7 +559,7 @@ void slow_conv_transpose3d_backward_out_cuda_template(
                 dilation_depth,
                 dilation_height,
                 dilation_width,
-                grad_columns.data_ptr<scalar_t>());
+                grad_columns.mutable_data_ptr<scalar_t>());
           }
 
           // M,N,K are dims of matrix A and B
@@ -571,8 +571,8 @@ void slow_conv_transpose3d_backward_out_cuda_template(
 
           // Do GEMM (note: this is a bit confusing because gemm assumes
           // column-major matrices)
-          auto gemm_in_ptr = need_columns ? grad_columns.data_ptr<scalar_t>()
-              : grad_output_n.data_ptr<scalar_t>();
+          auto gemm_in_ptr = need_columns ? grad_columns.const_data_ptr<scalar_t>()
+              : grad_output_n.const_data_ptr<scalar_t>();
           at::cuda::blas::gemm<scalar_t>(
               'n',
               'n',
@@ -582,10 +582,10 @@ void slow_conv_transpose3d_backward_out_cuda_template(
               static_cast<scalar_t>(1),
               gemm_in_ptr,
               n,
-              weight.data_ptr<scalar_t>(),
+              weight.const_data_ptr<scalar_t>(),
               k,
               static_cast<scalar_t>(0),
-              grad_input_n.data_ptr<scalar_t>(),
+              grad_input_n.mutable_data_ptr<scalar_t>(),
               n);
         }
 
@@ -756,19 +756,19 @@ void slow_conv_transpose3d_acc_grad_parameters_cuda(
 
         // For each elt in batch, do:
         for (int elt = 0; elt < batch_size; elt++) {
-          // Matrix mulitply per output:
+          // Matrix multiply per output:
           grad_output_n = grad_output.select(0, elt);
 
           // Do Weight:
           if (grad_weight.defined()) {
-            // Matrix mulitply per output:
+            // Matrix multiply per output:
             input_n = input.select(0, elt);
 
             if (need_columns) {
               // Extract columns:
               at::native::vol2col<scalar_t>(
                   at::cuda::getCurrentCUDAStream(),
-                  grad_output_n.data_ptr<scalar_t>(),
+                  grad_output_n.const_data_ptr<scalar_t>(),
                   n_output_plane,
                   output_depth,
                   output_height,
@@ -788,7 +788,7 @@ void slow_conv_transpose3d_acc_grad_parameters_cuda(
                   dilation_depth,
                   dilation_height,
                   dilation_width,
-                  columns.data_ptr<scalar_t>());
+                  columns.mutable_data_ptr<scalar_t>());
             }
 
             // M,N,K are dims of matrix A and B
@@ -799,7 +799,7 @@ void slow_conv_transpose3d_acc_grad_parameters_cuda(
 
             // Do GEMM (note: this is a bit confusing because gemm assumes
             // column-major matrices)
-            auto gemm_in_ptr = need_columns ? columns.data_ptr<scalar_t>() : grad_output_n.data_ptr<scalar_t>();
+            auto gemm_in_ptr = need_columns ? columns.const_data_ptr<scalar_t>() : grad_output_n.const_data_ptr<scalar_t>();
             at::cuda::blas::gemm<scalar_t>(
                 't',
                 'n',
@@ -809,10 +809,10 @@ void slow_conv_transpose3d_acc_grad_parameters_cuda(
                 scale,
                 gemm_in_ptr,
                 k,
-                input_n.data_ptr<scalar_t>(),
+                input_n.const_data_ptr<scalar_t>(),
                 k,
                 static_cast<scalar_t>(1),
-                grad_weight.data_ptr<scalar_t>(),
+                grad_weight.mutable_data_ptr<scalar_t>(),
                 n);
           }
         }
@@ -835,7 +835,7 @@ void slow_conv_transpose3d_acc_grad_parameters_cuda(
 
 Tensor& slow_conv_transpose3d_out_cuda(const Tensor& input,
     const Tensor& weight,
-    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
+    IntArrayRef kernel_size, const std::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef output_padding,
@@ -862,7 +862,7 @@ Tensor& slow_conv_transpose3d_out_cuda(const Tensor& input,
 Tensor slow_conv_transpose3d_cuda(
     const Tensor& input,
     const Tensor& weight,
-    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
+    IntArrayRef kernel_size, const std::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef output_padding,

@@ -22,37 +22,38 @@ constexpr const char* kArchiveNameVersion = "version";
 // into a mobile::Module object.
 TORCH_API mobile::Module _load_for_mobile(
     std::istream& in,
-    c10::optional<at::Device> device,
-    ExtraFilesMap& extra_files);
+    std::optional<at::Device> device,
+    ExtraFilesMap& extra_file,
+    uint64_t module_load_options = kDefaultMobileLoadOptions);
 
 TORCH_API mobile::Module _load_for_mobile(
     const std::string& filename,
-    c10::optional<at::Device> device,
+    std::optional<at::Device> device,
     ExtraFilesMap& extra_files);
 
 TORCH_API mobile::Module _load_for_mobile(
     std::unique_ptr<ReadAdapterInterface> rai,
-    c10::optional<c10::Device> device,
+    std::optional<c10::Device> device,
     ExtraFilesMap& extra_files,
     uint64_t module_load_options = kDefaultMobileLoadOptions);
 
 TORCH_API mobile::Module _load_for_mobile(
     const std::string& filename,
-    c10::optional<at::Device> device,
+    std::optional<at::Device> device,
     ExtraFilesMap& extra_files,
     uint64_t module_load_options);
 
 TORCH_API mobile::Module _load_for_mobile(
     std::istream& in,
-    c10::optional<at::Device> device = c10::nullopt);
+    std::optional<at::Device> device = c10::nullopt);
 
 TORCH_API mobile::Module _load_for_mobile(
     const std::string& filename,
-    c10::optional<at::Device> device = c10::nullopt);
+    std::optional<at::Device> device = c10::nullopt);
 
 TORCH_API mobile::Module _load_for_mobile(
     std::unique_ptr<ReadAdapterInterface> rai,
-    c10::optional<c10::Device> device = c10::nullopt);
+    std::optional<c10::Device> device = c10::nullopt);
 
 /**
  * Load only the contents of the "extra/" files whose names are
@@ -68,7 +69,7 @@ TORCH_API mobile::Module _load_for_mobile(
  */
 void _load_extra_only_for_mobile(
     const std::string& filename,
-    c10::optional<at::Device> device,
+    std::optional<at::Device> device,
     ExtraFilesMap& extra_files);
 
 // Currently used by both mobile/import.cpp and model_compatibility.cpp.
@@ -79,7 +80,7 @@ at::TypePtr resolveTypeNameMobile(
     std::shared_ptr<CompilationUnit> compilation_unit);
 c10::StrongTypePtr typeResolverMobile(
     const c10::QualifiedName& qn,
-    std::shared_ptr<CompilationUnit> compilation_unit);
+    const std::shared_ptr<CompilationUnit>& compilation_unit);
 c10::intrusive_ptr<c10::ivalue::Object> objLoaderMobile(
     const at::StrongTypePtr& type,
     const at::IValue& input,

@@ -13,14 +13,24 @@ from pathlib import Path
 from sysconfig import get_paths as gp
 from typing import Any, List, NamedTuple, Optional, Pattern
 
+
 # PyTorch directory root
-result = subprocess.run(
-    ["git", "rev-parse", "--show-toplevel"],
-    stdout=subprocess.PIPE,
-    check=True,
-)
-PYTORCH_ROOT = result.stdout.decode("utf-8").strip()
+def scm_root() -> str:
+    path = os.path.abspath(os.getcwd())
+    while True:
+        if os.path.exists(os.path.join(path, ".git")):
+            return path
+        if os.path.isdir(os.path.join(path, ".hg")):
+            return path
+        n = len(path)
+        path = os.path.dirname(path)
+        if len(path) == n:
+            raise RuntimeError("Unable to find SCM root")
+
+
+PYTORCH_ROOT = scm_root()
 IS_WINDOWS: bool = os.name == "nt"
+
 
 # Returns '/usr/local/include/python<version number>'
 def get_python_include_dir() -> str:
@@ -77,8 +87,7 @@ def run_command(
     try:
         return subprocess.run(
             args,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             check=False,
         )
     finally:
@@ -106,8 +115,7 @@ def clang_search_dirs() -> List[str]:
     result = subprocess.run(
         [compiler, "-E", "-x", "c++", "-", "-v"],
         stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         check=True,
     )
     stderr = result.stderr.decode().strip().split("\n")
@@ -149,7 +157,7 @@ def check_file(
         proc = run_command(
             [binary, f"-p={build_dir}", *include_args, filename],
         )
-    except (OSError) as err:
+    except OSError as err:
         return [
             LintMessage(
                 path=filename,
@@ -250,7 +258,7 @@ def main() -> None:
             ),
         )
         print(json.dumps(err_msg._asdict()), flush=True)
-        exit(0)
+        sys.exit(0)
 
     abs_build_dir = Path(args.build_dir).resolve()
 

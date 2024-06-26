@@ -6,21 +6,20 @@ from typing import List
 
 import onnx
 import onnxscript
-import torch
 from onnxscript.onnx_types import FLOAT
+
+import torch
 from torch.onnx._internal import jit_utils
 from torch.testing._internal import common_utils
 
 
 class TestONNXScriptExport(common_utils.TestCase):
-
     # opset version is
     # 1. local function is supported after opset 15
     # 2. onnx-script requires users to determine opset in local function
     opset_version = 15
 
     def test_onnxscript_registration_with_multiple_models(self):
-
         from onnxscript.onnx_opset import opset15 as op
 
         # 1. Register Selu onnxscript function as custom Op
@@ -28,8 +27,7 @@ class TestONNXScriptExport(common_utils.TestCase):
 
         @onnxscript.script(custom_opset)
         def Selu(X):
-            # TODO: onnx/ort doesn't support default values for now
-            # move this when they do
+            # default value is not supported by onnxscript
             alpha = 1.67326  # auto wrapped as Constants
             gamma = 1.0507
             alphaX = op.CastLike(alpha, X)
@@ -71,8 +69,7 @@ class TestONNXScriptExport(common_utils.TestCase):
         def custom_layer_norm(
             g, input, normalized_shape, weight, bias, eps, cudnn_enable
         ):
-            # TODO: move the comprehension into local function once
-            # it's supported by onnxscript
+            # comprehension is not supported by onnxscript
             axes = [-i for i in range(len(normalized_shape), 0, -1)]
             return g.onnxscript_op(
                 layer_norm, input, weight, bias, axes_i=axes, eps_f=eps

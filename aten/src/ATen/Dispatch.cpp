@@ -1,4 +1,5 @@
 #include <ATen/Dispatch.h>
+#if defined ENABLE_RECORD_KERNEL_FUNCTION_DTYPE
 #include <ATen/record_function.h>
 
 namespace at::detail {
@@ -11,3 +12,4 @@ void record_kernel_function_dtype(std::string name) {
 }
 
 }  // namespace at::detail
+#endif

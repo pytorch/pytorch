@@ -2,6 +2,7 @@
 
 import onnx_test_common
 import pytorch_test_common
+
 import torch
 import torch.utils.cpp_extension
 from torch.onnx import symbolic_helper
@@ -37,7 +38,7 @@ class TestCustomAutogradFunction(pytorch_test_common.ExportTestCase):
         model = MyModule()
         onnx_test_common.run_model_test(self, model, input_args=(x,))
 
-    def test_register_custom_op(self):
+    def test_register_op(self):
         class MyClip(torch.autograd.Function):
             @staticmethod
             def forward(ctx, input, scalar):

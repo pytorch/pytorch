@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Functions to verify exported ONNX model is functionally equivalent to original PyTorch model.
 
 ONNX Runtime is required, and is used as the ONNX backend for export verification.
@@ -206,14 +207,14 @@ def _ort_session(
 def _onnx_reference_evaluator_session(model: Union[str, io.BytesIO]):
     try:
         import onnx
-        from onnx import reference as onnx_reference
-    except ImportError:
-        raise ImportError("onnx >= 1.13 is required for reference evaluator.")
+        from onnx import reference as onnx_reference  # type: ignore[attr-defined]
+    except ImportError as exc:
+        raise ImportError("onnx >= 1.13 is required for reference evaluator.") from exc
 
     proto = (
-        onnx.load(model)
+        onnx.load(model)  # type: ignore[attr-defined]
         if isinstance(model, str)
-        else onnx.load_model_from_string(model.getvalue())
+        else onnx.load_model_from_string(model.getvalue())  # type: ignore[attr-defined]
     )
     onnx_session = onnx_reference.ReferenceEvaluator(proto)
     return onnx_session
@@ -632,10 +633,7 @@ def _onnx_graph_from_model(
     utils._setup_trace_module_map(model, export_modules_as_functions)
 
     if not operator_export_type:
-        if _C_onnx._CAFFE2_ATEN_FALLBACK:
-            operator_export_type = _C_onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
-        else:
-            operator_export_type = _C_onnx.OperatorExportTypes.ONNX
+        operator_export_type = _C_onnx.OperatorExportTypes.ONNX
 
     GLOBALS.export_onnx_opset_version = opset_version
     GLOBALS.operator_export_type = operator_export_type
@@ -914,10 +912,10 @@ def verify_aten_graph(
     graph = graph.copy()
 
     # Execute aten graph and get reference torch jit outputs.
-    graph_inputs = list(v for v in graph.inputs())
+    graph_inputs = list(graph.inputs())
     jit_inputs = tuple([arg for arg in input_args if arg is not None])
     weights = [params_dict[v.debugName()] for v in graph_inputs[len(jit_inputs) :]]
-    assert all([w is not None for w in weights])
+    assert all(w is not None for w in weights)
     # TODO: Only copy the argument if mutation is detected in Graph.
     jit_inputs = copy.deepcopy(jit_inputs)
     jit_input_and_parameters = jit_inputs + tuple(weights)
@@ -940,7 +938,7 @@ def verify_aten_graph(
     # NOTE: Verification is unstable. Try catch to emit information for debugging.
     try:
         # NOTE: Input might be dce'ed, so we need to remove those from the input args.
-        new_input_names = set(v.debugName() for v in graph.inputs())
+        new_input_names = {v.debugName() for v in graph.inputs()}
         new_input_args = []
         for v, arg in zip(original_jit_graph.inputs(), input_args):
             if v.debugName() in new_input_names:
@@ -956,6 +954,7 @@ def verify_aten_graph(
 
         onnx_session = _onnx_backend_session(model_f, verification_options.backend)
         onnx_outs = _run_onnx(onnx_session, onnx_inputs)
+        del onnx_session  # To free device memory
 
         try:
             _compare_onnx_pytorch_outputs(
@@ -1019,7 +1018,7 @@ class GraphInfoPrettyPrinter:
             else ""
         )
 
-        return f"{node_count} {'X' if has_mismatch else '✓'} {error_node_kind}"
+        return f"{node_count} {'X' if has_mismatch else chr(0x2713)} {error_node_kind}"
 
     @_beartype.beartype
     def _graph_id_segment_str(self) -> str:
@@ -1147,13 +1146,13 @@ class OnnxTestCaseRepro:
         structure is as follows:
 
         dir
-        ├── test_<name>
-        │   ├── model.onnx
-        │   └── test_data_set_0
-        │       ├── input_0.pb
-        │       ├── input_1.pb
-        │       ├── output_0.pb
-        │       └── output_1.pb
+        \u251c\u2500\u2500 test_<name>
+        \u2502   \u251c\u2500\u2500 model.onnx
+        \u2502   \u2514\u2500\u2500 test_data_set_0
+        \u2502       \u251c\u2500\u2500 input_0.pb
+        \u2502       \u251c\u2500\u2500 input_1.pb
+        \u2502       \u251c\u2500\u2500 output_0.pb
+        \u2502       \u2514\u2500\u2500 output_1.pb
 
         Args:
             proto: ONNX model proto.
@@ -1243,19 +1242,19 @@ class GraphInfo:
         Example::
 
             ==================================== Tree: =====================================
-            5 X   __2 X    __1 ✓
+            5 X   __2 X    __1 \u2713
             id:  |  id: 0 |  id: 00
                  |        |
                  |        |__1 X (aten::relu)
                  |           id: 01
                  |
-                 |__3 X    __1 ✓
+                 |__3 X    __1 \u2713
                     id: 1 |  id: 10
                           |
                           |__2 X     __1 X (aten::relu)
                              id: 11 |  id: 110
                                     |
-                                    |__1 ✓
+                                    |__1 \u2713
                                        id: 111
             =========================== Mismatch leaf subgraphs: ===========================
             ['01', '110']
@@ -1353,13 +1352,13 @@ class GraphInfo:
         The repro directory will contain the following files::
 
             dir
-            ├── test_<name>
-            │   ├── model.onnx
-            │   └── test_data_set_0
-            │       ├── input_0.pb
-            │       ├── input_1.pb
-            │       ├── output_0.pb
-            │       └── output_1.pb
+            \u251c\u2500\u2500 test_<name>
+            \u2502   \u251c\u2500\u2500 model.onnx
+            \u2502   \u2514\u2500\u2500 test_data_set_0
+            \u2502       \u251c\u2500\u2500 input_0.pb
+            \u2502       \u251c\u2500\u2500 input_1.pb
+            \u2502       \u251c\u2500\u2500 output_0.pb
+            \u2502       \u2514\u2500\u2500 output_1.pb
 
         Args:
             repro_dir: The directory to export the repro files to. Defaults to current
@@ -1824,19 +1823,19 @@ def find_mismatch(
         Greatest absolute difference: 0.2328854203224182 at index (1, 2) (up to 1e-07 allowed)
         Greatest relative difference: 0.699536174352349 at index (1, 3) (up to 0.001 allowed)
         ==================================== Tree: =====================================
-        5 X   __2 X    __1 ✓
+        5 X   __2 X    __1 \u2713
         id:  |  id: 0 |  id: 00
              |        |
              |        |__1 X (aten::relu)
              |           id: 01
              |
-             |__3 X    __1 ✓
+             |__3 X    __1 \u2713
                 id: 1 |  id: 10
                       |
                       |__2 X     __1 X (aten::relu)
                          id: 11 |  id: 110
                                 |
-                                |__1 ✓
+                                |__1 \u2713
                                    id: 111
         =========================== Mismatch leaf subgraphs: ===========================
         ['01', '110']

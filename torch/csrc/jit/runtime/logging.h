@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -7,9 +8,7 @@
 
 #include <torch/csrc/Export.h>
 
-namespace torch {
-namespace jit {
-namespace logging {
+namespace torch::jit::logging {
 
 class LoggerBase {
  public:
@@ -85,6 +84,4 @@ inline std::vector<const char*> allRuntimeCounters() {
 
 } // namespace runtime_counters
 
-} // namespace logging
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::logging

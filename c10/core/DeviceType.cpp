@@ -27,8 +27,8 @@ std::string DeviceTypeName(DeviceType d, bool lower_case) {
       return lower_case ? "ve" : "VE";
     case DeviceType::FPGA:
       return lower_case ? "fpga" : "FPGA";
-    case DeviceType::ORT:
-      return lower_case ? "ort" : "ORT";
+    case DeviceType::MAIA:
+      return lower_case ? "maia" : "MAIA";
     case DeviceType::XLA:
       return lower_case ? "xla" : "XLA";
     case DeviceType::Lazy:
@@ -83,7 +83,7 @@ bool isValidDeviceType(DeviceType d) {
     case DeviceType::HIP:
     case DeviceType::VE:
     case DeviceType::FPGA:
-    case DeviceType::ORT:
+    case DeviceType::MAIA:
     case DeviceType::XLA:
     case DeviceType::Lazy:
     case DeviceType::MPS:
@@ -113,7 +113,7 @@ std::ostream& operator<<(std::ostream& stream, DeviceType type) {
 //     It's also totally fine for this to be slow, since it happens exactly once
 //     at import time.
 // (2) Atomic is needed during reading:
-//     Whenever a user prints a privatuse1 device name, they need to read this
+//     Whenever a user prints a privateuse1 device name, they need to read this
 //     variable. Although unlikely, we'll data race if someone else is trying to
 //     set this variable at the same time that another thread is print the
 //     device name. We could re-use the same mutex, but reading the atomic will
@@ -134,7 +134,7 @@ std::string get_privateuse1_backend(bool lower_case) {
   return backend_name;
 }
 
-void register_privateuse1_backend(std::string backend_name) {
+void register_privateuse1_backend(const std::string& backend_name) {
   std::lock_guard<std::mutex> guard(privateuse1_lock);
   TORCH_CHECK(
       !privateuse1_backend_name_set.load() ||
@@ -146,6 +146,10 @@ void register_privateuse1_backend(std::string backend_name) {
   // Invariant: once this flag is set, privateuse1_backend_name is NEVER written
   // to.
   privateuse1_backend_name_set.store(true, std::memory_order_relaxed);
+}
+
+bool is_privateuse1_backend_registered() {
+  return privateuse1_backend_name_set.load(std::memory_order_acquire);
 }
 
 } // namespace c10

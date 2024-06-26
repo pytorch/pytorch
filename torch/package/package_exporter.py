@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import collections
 import importlib.machinery
 import io
@@ -79,7 +80,7 @@ class PackagingErrorReason(Enum):
     """
 
     def __repr__(self):
-        return "<%s.%s>" % (self.__class__.__name__, self.name)
+        return f"<{self.__class__.__name__}.{self.name}>"
 
     IS_EXTENSION_MODULE = (
         "Module is a C extension module. torch.package supports Python modules only."
@@ -156,27 +157,23 @@ class PackagingError(Exception):
                     message.write(f"      Context: {error_context}\n")
                 if module_name in _DISALLOWED_MODULES:
                     message.write(
-                        (
-                            "      Note: While we usually use modules in the python standard library "
-                            f"from the local environment, `{module_name}` has a lot of system "
-                            "level access and therefore can pose a security risk. We heavily "
-                            f"recommend removing `{module_name}` from your packaged code. However, if that "
-                            "is not possible, add it to the extern list by calling "
-                            f'PackageExporter.extern("`{module_name}`")\n'
-                        )
+                        "      Note: While we usually use modules in the python standard library "
+                        f"from the local environment, `{module_name}` has a lot of system "
+                        "level access and therefore can pose a security risk. We heavily "
+                        f"recommend removing `{module_name}` from your packaged code. However, if that "
+                        "is not possible, add it to the extern list by calling "
+                        f'PackageExporter.extern("`{module_name}`")\n'
                     )
                 if debug:
                     module_path = dependency_graph.first_path(module_name)
                     message.write(
-                        f"      A path to {module_name}: {' -> '.join(module_path)}"
+                        f"      A path to {module_name}: {' -> '.join(module_path)}\n"
                     )
         if not debug:
             message.write("\n")
             message.write(
-                (
-                    "Set debug=True when invoking PackageExporter for a visualization of where "
-                    "broken modules are coming from!\n"
-                )
+                "Set debug=True when invoking PackageExporter for a visualization of where "
+                "broken modules are coming from!\n"
             )
         # Save the dependency graph so that tooling can get at it.
         self.dependency_graph = dependency_graph
@@ -670,6 +667,7 @@ class PackageExporter:
                 if pickle_protocol == 4:
                     if (
                         opcode.name == "SHORT_BINUNICODE"
+                        or opcode.name == "BINUNICODE"
                         or opcode.name == "BINUNICODE8"
                     ):
                         assert isinstance(arg, str)
@@ -708,9 +706,9 @@ class PackageExporter:
                 """ If an object happens to come from a mocked module, then we collect these errors and spit them
                     out with the other errors found by package exporter.
                 """
-                if module in mocked_modules:
-                    assert isinstance(module, str)
-                    fields = mocked_modules[module]
+                if module_name in mocked_modules:
+                    assert isinstance(module_name, str)
+                    fields = mocked_modules[module_name]
                     self.dependency_graph.add_node(
                         module_name,
                         action=_ModuleProviderAction.MOCK,
@@ -916,7 +914,6 @@ class PackageExporter:
 
     def _persistent_id(self, obj):
         if torch.is_storage(obj) or isinstance(obj, torch.storage.TypedStorage):
-
             storage: Storage
             if isinstance(obj, torch.storage.TypedStorage):
                 # TODO: Once we decide to break serialization FC, we can
@@ -945,7 +942,7 @@ class PackageExporter:
                     storage = storage.cpu()
                 num_bytes = storage.nbytes()
                 self.zip_file.write_record(
-                    f".data/{storage_id}.storage", storage.data_ptr(), num_bytes
+                    f".data/{storage_id}.storage", storage, num_bytes
                 )
             return ("storage", storage_type, storage_id, location, storage_numel)
 
@@ -953,7 +950,7 @@ class PackageExporter:
             if _gate_torchscript_serialization and isinstance(
                 obj, torch.jit.RecursiveScriptModule
             ):
-                raise Exception(
+                raise Exception(  # noqa: TRY002
                     "Serializing ScriptModules directly into a package is a beta feature. "
                     "To use, set global "
                     "`torch.package.package_exporter._gate_torchscript_serialization` to `False`."
@@ -1002,7 +999,7 @@ class PackageExporter:
 
     def _validate_dependency_graph(self):
         # 1. Check the graph for any errors inserted during dependency analysis.
-        for module_name, attrs in self.dependency_graph.nodes.items():
+        for attrs in self.dependency_graph.nodes.values():
             if "error" in attrs:
                 raise PackagingError(self.dependency_graph, debug=self.debug)
 

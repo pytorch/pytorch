@@ -29,7 +29,7 @@ __global__ void cuda_always_fail_assertion_kernel(
 /**
  * TEST: Triggering device side assertion from single block and multiple threads
  * <<<1,128>>>. Once the very first thread asserts all the other threads will
- * basically be in bad state and the block id with failed asseriton would be
+ * basically be in bad state and the block id with failed assertion would be
  * [0,0,0].
  */
 void cuda_device_assertions_multiple_writes_from_same_block() {

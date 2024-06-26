@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import re
 import sys
 import time
@@ -101,7 +103,7 @@ def wait_until_node_failure(rank: int, expected_error_regex: str = ".*") -> str:
     """
     while True:
         try:
-            rpc.rpc_sync("worker{}".format(rank), noop, args=())
+            rpc.rpc_sync(f"worker{rank}", noop, args=())
             time.sleep(0.1)
         except Exception as e:
             if re.search(pattern=expected_error_regex, string=str(e)):
@@ -129,9 +131,8 @@ def wait_until_pending_futures_and_users_flushed(timeout: int = 20) -> None:
         time.sleep(0.1)
         if time.time() - start > timeout:
             raise ValueError(
-                "Timed out waiting to flush pending futures and users, had {} pending futures and {} pending users".format(
-                    num_pending_futures, num_pending_users
-                )
+                f"Timed out waiting to flush pending futures and users, "
+                f"had {num_pending_futures} pending futures and {num_pending_users} pending users"
             )
 
 
@@ -165,13 +166,8 @@ def wait_until_owners_and_forks_on_rank(
         time.sleep(1)
         if time.time() - start > timeout:
             raise ValueError(
-                "Timed out waiting {} sec for {} owners and {} forks on rank, had {} owners and {} forks".format(
-                    timeout,
-                    num_owners,
-                    num_forks,
-                    num_owners_on_rank,
-                    num_forks_on_rank,
-                )
+                f"Timed out waiting {timeout} sec for {num_owners} owners and {num_forks} forks on rank,"
+                f" had {num_owners_on_rank} owners and {num_forks_on_rank} forks"
             )
 
 
@@ -187,7 +183,7 @@ def initialize_pg(init_method, rank: int, world_size: int) -> None:
 
 
 def worker_name(rank: int) -> str:
-    return "worker{}".format(rank)
+    return f"worker{rank}"
 
 
 def get_function_event(function_events, partial_event_name):
@@ -200,5 +196,5 @@ def get_function_event(function_events, partial_event_name):
     function_events: function_events returned by the profiler.
     event_name (str): partial key that the event was profiled with.
     """
-    event = [event for event in function_events if partial_event_name in event.name][0]
+    event = [event for event in function_events if partial_event_name in event.name][0]  # noqa: RUF015
     return event

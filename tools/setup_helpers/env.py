@@ -13,7 +13,7 @@ IS_LINUX = platform.system() == "Linux"
 IS_CONDA = (
     "conda" in sys.version
     or "Continuum" in sys.version
-    or any([x.startswith("CONDA") for x in os.environ])
+    or any(x.startswith("CONDA") for x in os.environ)
 )
 CONDA_DIR = os.path.join(os.path.dirname(sys.executable), "..")
 

@@ -3,6 +3,8 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 
+#include <iostream>
+
 namespace torch::jit {
 
 ClassTypePtr ConcreteModuleTypeBuilder::createTypeFromThis() const {
@@ -147,14 +149,14 @@ TypePtr ConcreteModuleType::getJitType() const {
   return jitType_;
 }
 
-c10::optional<py::object> ConcreteModuleType::getPyClass() const {
+std::optional<py::object> ConcreteModuleType::getPyClass() const {
   if (!data_.pyClass_) {
     return c10::nullopt;
   }
   return data_.pyClass_;
 }
 
-c10::optional<std::vector<std::string>> ConcreteModuleType::findOverloads(
+std::optional<std::vector<std::string>> ConcreteModuleType::findOverloads(
     const std::string& name) const {
   const auto it = data_.overloads_.find(name);
   if (it != data_.overloads_.end()) {
@@ -163,7 +165,7 @@ c10::optional<std::vector<std::string>> ConcreteModuleType::findOverloads(
   return c10::nullopt;
 }
 
-c10::optional<Function*> ConcreteModuleType::findFunctionAttribute(
+std::optional<Function*> ConcreteModuleType::findFunctionAttribute(
     const std::string& name) const {
   const auto it = data_.functionAttributes_.find(name);
   if (it != data_.functionAttributes_.end()) {
@@ -172,7 +174,7 @@ c10::optional<Function*> ConcreteModuleType::findFunctionAttribute(
   return c10::nullopt;
 }
 
-c10::optional<c10::Symbol> ConcreteModuleType::findBuiltinFunction(
+std::optional<c10::Symbol> ConcreteModuleType::findBuiltinFunction(
     const std::string& name) const {
   const auto it = data_.builtinFunctions_.find(name);
   if (it != data_.builtinFunctions_.end()) {
@@ -181,7 +183,7 @@ c10::optional<c10::Symbol> ConcreteModuleType::findBuiltinFunction(
   return c10::nullopt;
 }
 
-c10::optional<std::string> ConcreteModuleType::findFailedAttribute(
+std::optional<std::string> ConcreteModuleType::findFailedAttribute(
     const std::string& name) const {
   const auto it = data_.failedAttributes_.find(name);
   if (it != data_.failedAttributes_.end()) {

@@ -2,8 +2,6 @@
 #include <ATen/cuda/CUDAConfig.h>  // for the definition of AT_CUDNN_ENABLED
 
 #if AT_CUDNN_ENABLED()
-#include <ATen/native/cudnn/Macros.h>
-#if HAS_CUDNN_V8()
 
 #include <ATen/core/TensorBase.h>
 #include <ATen/core/TensorBody.h>
@@ -188,7 +186,7 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
   // relu_op computes
   // relu( (qa_int8 + qb_int8 * ( qb_scale/qa_scale ) )  )
   // output is a fp32 tensor
-  c10::optional<cudnn_frontend::Operation> relu_op;
+  std::optional<cudnn_frontend::Operation> relu_op;
   if (kReluFused) {
     // we use inplace operation here where the output is assigned to the input
     relu_op.emplace(cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
@@ -259,6 +257,5 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {
 } // namespace native
 } // namespace at
 
-#endif  // HAS_CUDNN_V8
 #endif  // AT_CUDNN_ENABLED
 #endif  // USE_CUDA

@@ -6,12 +6,11 @@
 #include <c10/util/Exception.h>
 #include <vector>
 
-namespace at {
-namespace functionalization {
+namespace at::functionalization {
 
 ViewMeta ViewMeta::to_out_idx(int64_t out_idx) {
   if (out_idx == this->out_index) return *this;
-  return ViewMeta(forward_fn, reverse_fn, out_idx);
+  return ViewMeta(forward_fn, reverse_fn, has_symbolic_inputs, is_multi_output, is_as_strided, out_idx);
 }
 
 // Note [Functionalization: Alias Removal Part 2]
@@ -39,7 +38,7 @@ ViewMeta ViewMeta::to_out_idx(int64_t out_idx) {
 // t = view2_inverse(a, t, 0)
 // t = view1_inverse(base, t, 0)  # t now represents the updated storage.
 // storage.base_ = t
-const Tensor apply_update(const FunctionalStorageImpl::Update& update, const Tensor& base) {
+static const Tensor apply_update(const FunctionalStorageImpl::Update& update, const Tensor& base) {
   at::Tensor t = update.new_val;
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(t));
   if (update.view_metas.empty()) return t;
@@ -64,7 +63,7 @@ const Tensor apply_update(const FunctionalStorageImpl::Update& update, const Ten
 }
 
 
-c10::SymInt get_nbytes(const Tensor& value) {
+static c10::SymInt get_nbytes(const Tensor& value) {
   // The functionalization story when wrapping tensors that don't have storage
   // is a bit wonky, but fortunately for some models (e.g., dlrm) we never
   // actually perform mutations on these tensors, so you never really get
@@ -83,6 +82,7 @@ c10::SymInt get_nbytes(const Tensor& value) {
     if (value.key_set().has(c10::DispatchKey::Python)) {
       return value.storage().sym_nbytes();
     }
+    return at::detail::computeStorageNbytes(value.sym_sizes(), value.sym_strides(), value.dtype().itemsize(), value.sym_storage_offset());
   }
   // XLA storage objects also do not properly track nbytes.
   return at::detail::computeStorageNbytes(value.sizes(), value.strides(), value.dtype().itemsize(), value.storage_offset());
@@ -94,15 +94,36 @@ FunctionalStorageImpl::FunctionalStorageImpl(const Tensor& base)
       get_nbytes(base),
       DataPtr{nullptr, base.device()},
       GetAllocator(kMeta),
-      /*resizeable=*/true
+      /*resizable=*/true
     ),
     base_(base)
-  {
+{
+  // SparseTensorImpl has no storage, so we cannot query its nbytes.
+  // (original_storage_size is only used for storage resizing in fsdp anyway, which does not apply to sparse)
+  // Same for XLA
+  if (base.unsafeGetTensorImpl()->has_storage() && base.device().type() != c10::DeviceType::XLA) {
+    original_storage_size_ = base.unsafeGetTensorImpl()->unsafe_storage().unsafeGetStorageImpl()->sym_nbytes();
+  } else {
+    original_storage_size_ = -1;
+  }
+  curr_storage_size_ = original_storage_size_;
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(base_));
 }
 
 void FunctionalStorageImpl::add_update(const Tensor& updated_val, const std::vector<ViewMeta>& metas) {
   TORCH_CHECK(!frozen_, "cannot mutate tensors with frozen storage");
+
+  if (metas.size() > 1) {
+    for (size_t i = 1; i < metas.size(); ++i) {
+      // Skipping this check for XLA. Would be good to add it back, but it is failing XLA CI
+      TORCH_CHECK(updated_val.device().type() == c10::DeviceType::XLA || !metas[i].is_as_strided,
+"During torch.compile, encountered a mutation on a view chain of length ", metas.size(), ", where view ", i,
+" was an as_strided() call. as_strided() is non-compositional, and therefore is not possible to functionalize properly today,"
+"so this behavior is banned in compile. As a workaround, you can either remove the mutation from the model code, or you "
+"can insert a graph break right before the mutation with torch._dynamo.graph_break(). If you would like this behavior to "
+"work properly, please comment on https://github.com/pytorch/pytorch/issues/104505.");
+    }
+  }
   updates_.push_back({updated_val, metas});
   generation_++;
 }
@@ -121,5 +142,4 @@ bool FunctionalStorageImpl::apply_updates() {
   return any_updates;
 }
 
-} // namespace functionalization
-} // namespace at
+} // namespace at::functionalization

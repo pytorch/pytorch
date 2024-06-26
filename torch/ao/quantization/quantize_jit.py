@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 
 import torch
 from torch.ao.quantization.qconfig import QConfig
@@ -254,7 +255,7 @@ def quantize_dynamic_jit(model, qconfig_dict, inplace=False, debug=False):
     ```python
     import torch
     from torch.ao.quantization import per_channel_dynamic_qconfig
-    from torch.ao.quantization import quantize_dynmiac_jit
+    from torch.ao.quantization import quantize_dynamic_jit
 
     ts_model = torch.jit.script(float_model.eval())  # or torch.jit.trace(float_model, input)
     qconfig = get_default_qconfig('fbgemm')

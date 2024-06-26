@@ -12,14 +12,14 @@ def get_custom_op_library_path():
         library_filename = "libcustom_ops.dylib"
     else:
         library_filename = "libcustom_ops.so"
-    path = os.path.abspath("build/{}".format(library_filename))
+    path = os.path.abspath(f"build/{library_filename}")
     assert os.path.exists(path), path
     return path
 
 
 class Model(torch.jit.ScriptModule):
     def __init__(self):
-        super(Model, self).__init__()
+        super().__init__()
         self.p = torch.nn.Parameter(torch.eye(5))
 
     @torch.jit.script_method

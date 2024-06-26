@@ -1,10 +1,7 @@
 #pragma once
 #include <c10/macros/Macros.h>
-#include <c10/util/ArrayRef.h>
 
-#include <iterator>
-#include <numeric>
-#include <type_traits>
+#include <cstdint>
 
 // GCC has __builtin_mul_overflow from before it supported __has_builtin
 #ifdef _MSC_VER
@@ -42,6 +39,19 @@ C10_ALWAYS_INLINE bool mul_overflows(uint64_t a, uint64_t b, uint64_t* out) {
   // This test isnt exact, but avoids doing integer division
   return (
       (c10::llvm::countLeadingZeros(a) + c10::llvm::countLeadingZeros(b)) < 64);
+#endif
+}
+
+C10_ALWAYS_INLINE bool mul_overflows(int64_t a, int64_t b, int64_t* out) {
+#if C10_HAS_BUILTIN_OVERFLOW()
+  return __builtin_mul_overflow(a, b, out);
+#else
+  volatile int64_t tmp = a * b;
+  *out = tmp;
+  if (a == 0 || b == 0) {
+    return false;
+  }
+  return !(a == tmp / b);
 #endif
 }
 

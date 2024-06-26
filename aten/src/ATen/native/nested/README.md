@@ -5,8 +5,8 @@ So you decided to look at the source code.. let's give you a quick overview of t
 
 NestedTensors are a generalization of torch Tensors which eases working with data of different shapes and lengths. They are primarily used to represent a list of N tensors, where each tensor in the list (referred to as a tensor_component) has the same number of dimensions. The tensor_components are flattened and combined into a single NestedTensor, which includes the information required to reconstruct the original tensor_components:
 
-- nested_size_tensor_: 2d tensor of n_tensor_components x n_dims
-- nested_stride_tensor_: 2d tensor of n_tensor_components x n_dims
+- nested_sizes_: 2d tensor of n_tensor_components x n_dims
+- nested_strides_: 2d tensor of n_tensor_components x n_dims
 - storage_offsets_: 1d tensor of offsets corresponding to the start position of each tensor component
 - storage_: The storage object that contains the flattened tensor_components (defined on c10::TensorImp)
 
@@ -37,7 +37,7 @@ The definition of map_nt is:
 template <typename Func>
 Tensor map_nt(const Tensor& nt, Func f) {
   auto* nt_impl = get_nested_tensor_impl(nt);
-  const auto& sizes = nt_impl->get_nested_size_tensor();
+  const auto& sizes = nt_impl->get_nested_sizes();
   return at::detail::make_tensor<NestedTensorImpl>(f(nt_impl->get_buffer()), sizes);
 }
 ```

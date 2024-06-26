@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import re
 
 import torch._C as C
@@ -116,7 +117,7 @@ class PythonDispatcher:
     """
 
     def _format_line(self, key, kernel):
-        return "{:<15} {}\n".format(key, kernel)
+        return f"{key:<15} {kernel}\n"
 
     """
     Helper function to print a table header.
@@ -136,7 +137,7 @@ class PythonDispatcher:
     """
 
     def rawRegistrations(self):
-        return C._dispatch_dump("{}::{}".format(self.namespace, self.name))  # type: ignore[attr-defined]
+        return C._dispatch_dump(f"{self.namespace}::{self.name}")  # type: ignore[attr-defined]
 
     """
     Returns raw output of computed dispatch table for debugging only.
@@ -144,7 +145,7 @@ class PythonDispatcher:
     """
 
     def rawDispatchTable(self):
-        return C._dispatch_dump_table("{}::{}".format(self.namespace, self.name))  # type: ignore[attr-defined]
+        return C._dispatch_dump_table(f"{self.namespace}::{self.name}")  # type: ignore[attr-defined]
 
     """
     Returns a table(str) including all the registrations from users.

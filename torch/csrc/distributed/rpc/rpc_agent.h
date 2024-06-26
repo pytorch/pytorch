@@ -32,11 +32,11 @@ using steady_clock_time_point =
     std::chrono::time_point<std::chrono::steady_clock>;
 // Input is qualified name string, output is JIT StrongTypePtr
 // Same as jit::TypeResolver, did not import jit::TypeResolver to here
-// because it could instroduce cyclic dependencies.
+// because it could introduce cyclic dependencies.
 using TypeResolver =
     std::function<c10::StrongTypePtr(const c10::QualifiedName&)>;
 
-struct RpcBackendOptions {
+struct TORCH_API RpcBackendOptions {
   RpcBackendOptions()
       : RpcBackendOptions(kDefaultRpcTimeoutSeconds, kDefaultInitMethod) {}
 
@@ -153,7 +153,7 @@ class TORCH_API RpcAgent {
       const DeviceMap& deviceMap = {}) = 0;
 
   // Retries sending the message up to maxRetries times until an ACK is
-  // receieved. The duration between consecutive sends is increased over
+  // received. The duration between consecutive sends is increased over
   // time using an exponential backoff algorithm.
   //
   // Sends ``message`` to the ``RpcAgent`` of id ``to`` and returns a
@@ -170,7 +170,7 @@ class TORCH_API RpcAgent {
       RpcRetryOptions retryOptions = RpcRetryOptions());
 
   // Return a reference to the ``WorkerInfo`` of this RpcAgent.
-  // NB: not using ``c10::optional<const std::string&>`` here because we might
+  // NB: not using ``std::optional<const std::string&>`` here because we might
   // need to create a separate RPC API lib and avoid forcing all ``RpcAgent``
   // implementations to depend on libtorch.
   const WorkerInfo& getWorkerInfo() const;
@@ -232,7 +232,7 @@ class TORCH_API RpcAgent {
   // Retrieve metrics as KV map
   virtual std::unordered_map<std::string, std::string> getMetrics() = 0;
 
-  // Retrive debug info in addition to metrics as KV map
+  // Retrieve debug info in addition to metrics as KV map
   virtual std::unordered_map<std::string, std::string> getDebugInfo();
 
   // Flag to control whether GIL wait times

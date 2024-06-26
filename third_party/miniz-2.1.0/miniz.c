@@ -2240,7 +2240,7 @@ void *tdefl_write_image_to_png_file_in_memory(const void *pImage, int w, int h, 
 /* Allocate the tdefl_compressor and tinfl_decompressor structures in C so that */
 /* non-C language bindings to tdefL_ and tinfl_ API don't need to worry about */
 /* structure size and allocation mechanism. */
-tdefl_compressor *tdefl_compressor_alloc()
+tdefl_compressor *tdefl_compressor_alloc(void)
 {
     return (tdefl_compressor *)MZ_MALLOC(sizeof(tdefl_compressor));
 }
@@ -3006,7 +3006,7 @@ int tinfl_decompress_mem_to_callback(const void *pIn_buf, size_t *pIn_buf_size, 
 }
 
 #ifndef MINIZ_NO_MALLOC
-tinfl_decompressor *tinfl_decompressor_alloc()
+tinfl_decompressor *tinfl_decompressor_alloc(void)
 {
     tinfl_decompressor *pDecomp = (tinfl_decompressor *)MZ_MALLOC(sizeof(tinfl_decompressor));
     if (pDecomp)
@@ -6250,6 +6250,7 @@ mz_bool mz_zip_writer_add_mem_ex_v2(mz_zip_archive *pZip, const char *pArchive_n
     mz_uint32 extra_size = 0;
     mz_uint8 extra_data[MZ_ZIP64_MAX_CENTRAL_EXTRA_FIELD_SIZE];
     mz_uint16 bit_flags = 0;
+    mz_bool write_metadata_only = buf_size && !pBuf;
 
     if ((int)level_and_flags < 0)
         level_and_flags = MZ_DEFAULT_LEVEL;
@@ -6263,7 +6264,7 @@ mz_bool mz_zip_writer_add_mem_ex_v2(mz_zip_archive *pZip, const char *pArchive_n
     level = level_and_flags & 0xF;
     store_data_uncompressed = ((!level) || (level_and_flags & MZ_ZIP_FLAG_COMPRESSED_DATA));
 
-    if ((!pZip) || (!pZip->m_pState) || (pZip->m_zip_mode != MZ_ZIP_MODE_WRITING) || ((buf_size) && (!pBuf)) || (!pArchive_name) || ((comment_size) && (!pComment)) || (level > MZ_UBER_COMPRESSION))
+    if ((!pZip) || (!pZip->m_pState) || (pZip->m_zip_mode != MZ_ZIP_MODE_WRITING) || (!pArchive_name) || ((comment_size) && (!pComment)) || (level > MZ_UBER_COMPRESSION))
         return mz_zip_set_error(pZip, MZ_ZIP_INVALID_PARAMETER);
 
     pState = pZip->m_pState;
@@ -6308,7 +6309,9 @@ mz_bool mz_zip_writer_add_mem_ex_v2(mz_zip_archive *pZip, const char *pArchive_n
 
 	if (!(level_and_flags & MZ_ZIP_FLAG_COMPRESSED_DATA))
 	{
-		uncomp_crc32 = (mz_uint32)mz_crc32(MZ_CRC32_INIT, (const mz_uint8 *)pBuf, buf_size);
+        if (!write_metadata_only) {
+            uncomp_crc32 = (mz_uint32)mz_crc32(MZ_CRC32_INIT, (const mz_uint8 *)pBuf, buf_size);
+        }
 		uncomp_size = buf_size;
 		if (uncomp_size <= 3)
 		{
@@ -6330,8 +6333,8 @@ mz_bool mz_zip_writer_add_mem_ex_v2(mz_zip_archive *pZip, const char *pArchive_n
     if (!pState->m_zip64)
     {
         /* Bail early if the archive would obviously become too large */
-        if ((pZip->m_archive_size + num_alignment_padding_bytes + MZ_ZIP_LOCAL_DIR_HEADER_SIZE + archive_name_size 
-			+ MZ_ZIP_CENTRAL_DIR_HEADER_SIZE + archive_name_size + comment_size + user_extra_data_len + 
+        if ((pZip->m_archive_size + num_alignment_padding_bytes + MZ_ZIP_LOCAL_DIR_HEADER_SIZE + archive_name_size
+			+ MZ_ZIP_CENTRAL_DIR_HEADER_SIZE + archive_name_size + comment_size + user_extra_data_len +
 			pState->m_central_dir.m_size + MZ_ZIP_END_OF_CENTRAL_DIR_HEADER_SIZE + user_extra_data_central_len
 			+ MZ_ZIP_DATA_DESCRIPTER_SIZE32) > 0xFFFFFFFF)
         {

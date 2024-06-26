@@ -18,6 +18,7 @@ class PYBIND11_EXPORT PyRRef {
   // for more explanations.
   explicit PyRRef(const py::object& value, const py::object& type_hint);
   explicit PyRRef(c10::intrusive_ptr<RRef> rref);
+  PyRRef(const PyRRef&) = default;
   ~PyRRef();
 
   bool isOwner() const;
@@ -74,8 +75,8 @@ class PYBIND11_EXPORT PyRRef {
 
  private:
   c10::intrusive_ptr<RRef> rref_;
-  c10::optional<c10::intrusive_ptr<JitFuture>> profilingFuture_;
-  c10::optional<py::object> type_;
+  std::optional<c10::intrusive_ptr<JitFuture>> profilingFuture_;
+  std::optional<py::object> type_;
 };
 
 } // namespace rpc

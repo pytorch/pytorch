@@ -6,11 +6,14 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/ScalarTypeToTypeMeta.h>
 #include <c10/core/Storage.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/core/WrapDimMinimal.h>
+#include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
+#include <c10/util/ExclusivelyOwned.h>
 #include <c10/util/ExclusivelyOwnedTensorTraits.h>
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/Optional.h>
@@ -18,18 +21,18 @@
 
 #include <ATen/core/NamedTensor.h>
 #include <ATen/core/QuantizerBase.h>
-#include <c10/core/SymIntArrayRef.h>
 #include <ATen/core/TensorAccessor.h>
+#include <ATen/StorageUtils.h>
 
 namespace c10 {
 class Scalar;
 }
 
-namespace torch { namespace autograd {
+namespace torch::autograd {
 
 struct Node;
 
-}} // namespace torch::autograd
+} // namespace torch::autograd
 
 namespace at {
 
@@ -100,7 +103,7 @@ class TORCH_API TensorBase {
     }
   }
   TensorBase(const TensorBase&) = default;
-  TensorBase(TensorBase&&) = default;
+  TensorBase(TensorBase&&) noexcept = default;
 
  public:
   // Creates a new wrapper from TensorImpl. Intentionally a free method because
@@ -144,7 +147,7 @@ class TORCH_API TensorBase {
   const TensorBase& fill_(const c10::Scalar& scalar) const;
   const TensorBase& zero_() const;
 
-  TensorBase to(at::TensorOptions options={}, bool non_blocking=false, bool copy=false, c10::optional<at::MemoryFormat> memory_format=c10::nullopt) const;
+  TensorBase to(at::TensorOptions options={}, bool non_blocking=false, bool copy=false, std::optional<at::MemoryFormat> memory_format=c10::nullopt) const;
 
   bool is_complex() const {
     return at::isComplexType(this->scalar_type());
@@ -203,6 +206,7 @@ class TORCH_API TensorBase {
     impl_.reset();
   }
 
+#if defined (_MSC_VER)
   TensorBase& operator=(const TensorBase& x) & {
     impl_ = x.impl_;
     return *this;
@@ -211,6 +215,10 @@ class TORCH_API TensorBase {
     impl_ = std::move(x.impl_);
     return *this;
   }
+#else
+  TensorBase& operator=(const TensorBase& x) & = default;
+  TensorBase& operator=(TensorBase&& x) & noexcept = default;
+#endif
 
   // Ban assignment to rvalues, since at::Tensor (weirdly) performs a deep copy here
   TensorBase& operator=(const TensorBase&) && = delete;
@@ -241,7 +249,7 @@ class TORCH_API TensorBase {
     return impl_->strides();
   }
   // See impl::get_opt_names in ATen/NamedTensor.h for docs.
-  c10::optional<DimnameList> opt_names() const {
+  std::optional<DimnameList> opt_names() const {
     return impl::get_opt_names(unsafeGetTensorImpl());
   }
   // See impl::get_names in ATen/NamedTensor.h for docs.
@@ -341,6 +349,25 @@ class TORCH_API TensorBase {
     return impl_->storage().is_alias_of(other.storage());
   }
 
+  // Move the storage backend to shm based
+  // to enable memory sharing across processes.
+  //
+  // NB1: the ideal behavior of this API still requires further discussion
+  // but for now we are inclined to keep it consistent with existing THP behavior
+  // https://github.com/pytorch/pytorch/blob/4dca9bde0552afc67b5b74f4a0696fe6055709c4/torch/storage.py#L196-L212
+  // so we don't assert on anything here and rely on caller knowing
+  // what it's doing.
+  //
+  // NB2: this currently provides Linux fd based shm support only
+  // to simplify the storage lifetime management logic in ATen
+  // and similarly for now we are not adding support for file system based
+  // shm support like in THP due to additional GC manager support needed
+  // to prevent leaks.
+  // As such, calling this from non supported systems (e.g. Windows) would fail.
+  void share_memory_() {
+    at::share_memory_(*this);
+  }
+
   inline bool _is_zerotensor() const {
     return impl_->_is_zerotensor();
   }
@@ -389,7 +416,7 @@ class TORCH_API TensorBase {
   }
 
   /// Returns a `Tensor`'s device index.
-  int64_t get_device() const {
+  DeviceIndex get_device() const {
     // NB: this is not a native function to avoid dispatching overhead.
     return impl_->get_device();
   }
@@ -423,6 +450,11 @@ class TORCH_API TensorBase {
     return impl_->is_xla();
   }
 
+  /// Returns if a `Tensor` has MTIA backend.
+  bool is_mtia() const {
+    return impl_->is_mtia();
+  }
+
   /// Returns if a `Tensor` has HPU backend.
   bool is_hpu() const {
     return impl_->is_hpu();
@@ -443,6 +475,12 @@ class TORCH_API TensorBase {
   bool is_ve() const {
     // NB: this is not a native function to avoid dispatching overhead.
     return impl_->is_ve();
+  }
+
+  /// Returns if a `Tensor` has PrivateUse1 backend.
+  bool is_privateuseone() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_privateuseone();
   }
 
   /// Returns if a `Tensor` has sparse backend.
@@ -469,10 +507,10 @@ class TORCH_API TensorBase {
     return impl_->is_mps();
   }
 
-  /// Returns if a `Tensor` is ort tensor.
-  bool is_ort() const {
+  /// Returns if a `Tensor` is maia tensor.
+  bool is_maia() const {
     // NB: this is not a native function to avoid dispatching overhead.
-    return impl_->is_ort();
+    return impl_->is_maia();
   }
 
   /// Returns if a `Tensor` is vulkan tensor.
@@ -540,12 +578,42 @@ class TORCH_API TensorBase {
                           .layout(layout());
   }
 
-  void* data_ptr() const {
+  const void* const_data_ptr() const {
     return this->unsafeGetTensorImpl()->data();
   }
 
+  void* mutable_data_ptr() const {
+    return this->unsafeGetTensorImpl()->mutable_data();
+  }
+
+  // TODO(#97856) Make this return a const pointer. This currently
+  //              returns a non-const pointer because of the large
+  //              number of clients that we still want to audit before
+  //              migrating to mutable_data_ptr().
+  void* data_ptr() const {
+    return mutable_data_ptr();
+  }
+
+  template <typename T, std::enable_if_t<!std::is_const_v<T>, int> = 0>
+  const T* const_data_ptr() const;
+
+  template <typename T, std::enable_if_t<std::is_const_v<T>, int> = 0>
+  const std::remove_const_t<T>* const_data_ptr() const;
+
   template <typename T>
-  T * data_ptr() const;
+  T* mutable_data_ptr() const;
+
+  // Legacy interface during the migration to indicate that a callsite
+  // has not been audited for mutability.
+  //
+  // Do not add new uses of this, use const_data_ptr() if possible,
+  // mutable_data_ptr() otherwise.
+  //
+  // TODO(#97856) Make this return a const pointer. This is currently
+  //              const because of the vast number of clients that
+  //              rely on this.
+  template <typename T>
+  T* data_ptr() const;
 
   // Purposely not defined here to avoid inlining
   void print() const;
@@ -556,7 +624,13 @@ class TORCH_API TensorBase {
   TensorAccessor<T,N> accessor() const& {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data_ptr<T>()");
     TORCH_CHECK(dim() == N, "TensorAccessor expected ", N, " dims but tensor has ", dim());
-    return TensorAccessor<T,N>(data_ptr<T>(),sizes().data(),strides().data());
+    T* ptr = nullptr;
+    if constexpr (std::is_const<T>::value) {
+      ptr = const_data_ptr<T>();
+    } else {
+      ptr = mutable_data_ptr<T>();
+    }
+    return TensorAccessor<T,N>(ptr,sizes().data(),strides().data());
   }
   template<typename T, size_t N>
   TensorAccessor<T,N> accessor() && = delete;
@@ -570,7 +644,13 @@ class TORCH_API TensorBase {
   GenericPackedTensorAccessor<T,N,PtrTraits,index_t> generic_packed_accessor() const& {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data_ptr<T>()");
     TORCH_CHECK(dim() == N, "TensorAccessor expected ", N, " dims but tensor has ", dim());
-    return GenericPackedTensorAccessor<T,N,PtrTraits,index_t>(static_cast<typename PtrTraits<T>::PtrType>(data_ptr<T>()),sizes().data(),strides().data());
+    T* ptr = nullptr;
+    if constexpr (std::is_const<T>::value) {
+      ptr = const_data_ptr<T>();
+    } else {
+      ptr = mutable_data_ptr<T>();
+    }
+    return GenericPackedTensorAccessor<T,N,PtrTraits,index_t>(static_cast<typename PtrTraits<T>::PtrType>(ptr),sizes().data(),strides().data());
   }
   template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
   GenericPackedTensorAccessor<T,N> generic_packed_accessor() && = delete;
@@ -632,7 +712,7 @@ class TORCH_API TensorBase {
   /// // f requires grad, has no operation creating it
   /// @endcode
 
-  /// \fn void backward(const Tensor & gradient={}, c10::optional<bool> retain_graph=c10::nullopt, bool create_graph=false, c10::optional<TensorList> inputs=c10::nullopt) const;
+  /// \fn void backward(const Tensor & gradient={}, std::optional<bool> retain_graph=c10::nullopt, bool create_graph=false, std::optional<TensorList> inputs=c10::nullopt) const;
   ///
   /// Computes the gradient of current tensor with respect to graph leaves.
   ///
@@ -751,9 +831,9 @@ class TORCH_API TensorBase {
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   template <typename T>
-  using hook_return_void_t = std::enable_if_t<std::is_void<typename c10::invoke_result_t<T&, TensorBase>>::value, unsigned>;
+  using hook_return_void_t = std::enable_if_t<std::is_void_v<typename std::invoke_result_t<T&, TensorBase>>, unsigned>;
   template <typename T>
-  using hook_return_var_t = std::enable_if_t<std::is_same<typename c10::invoke_result_t<T&, TensorBase>, TensorBase>::value, unsigned>;
+  using hook_return_var_t = std::enable_if_t<std::is_same_v<typename std::invoke_result_t<T&, TensorBase>, TensorBase>, unsigned>;
 
   /// Registers a backward hook.
   ///
@@ -840,15 +920,16 @@ private:
   TensorBase __dispatch_contiguous(c10::MemoryFormat) const;
 };
 
-inline int64_t get_device(const TensorBase& self) {
+inline DeviceIndex get_device(const TensorBase& self) {
   return self.get_device();
 }
 
 template <typename T>
+// NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
 auto TensorBase::register_hook(T&& hook) const -> TensorBase::hook_return_void_t<T> {
   // Return the grad argument in case of a hook with void return type to have an
   // std::function with Tensor return type
-  static_assert(std::is_same<decltype(hook(TensorBase())), void>::value,
+  static_assert(std::is_same_v<decltype(hook(TensorBase())), void>,
                 "Expected hook to return void");
   return _register_hook([fn=std::forward<T>(hook)](const TensorBase& grad) {
     fn(grad);
@@ -872,7 +953,7 @@ TensorBase make_tensor_base(Args&&... args) {
 
 } // namespace detail
 
-static inline DispatchKey legacyExtractDispatchKey(const TensorBase& t) {
+inline DispatchKey legacyExtractDispatchKey(const TensorBase& t) {
   return legacyExtractDispatchKey(t.key_set());
 }
 
@@ -929,10 +1010,10 @@ struct ExclusivelyOwnedTraits<at::TensorBase> : public c10::ExclusivelyOwnedTens
 namespace at {
 
 inline c10::MaybeOwned<TensorBase> borrow_from_optional_tensor(
-    const c10::optional<TensorBase>& opt) {
+    const std::optional<TensorBase>& opt) {
   return opt.has_value()
     ? c10::MaybeOwned<TensorBase>::borrowed(*opt)
-    : c10::MaybeOwned<TensorBase>::owned(c10::in_place);
+    : c10::MaybeOwned<TensorBase>::owned(std::in_place);
 }
 
 inline c10::MaybeOwned<TensorBase> TensorBase::expect_contiguous(MemoryFormat memory_format) const & {
@@ -946,9 +1027,9 @@ inline c10::MaybeOwned<TensorBase> TensorBase::expect_contiguous(MemoryFormat me
 namespace symint {
 
 template <typename T>
-using enable_if_symint = std::enable_if_t<std::is_same<T, c10::SymInt>::value>;
+using enable_if_symint = std::enable_if_t<std::is_same_v<T, c10::SymInt>>;
 template <typename T>
-using enable_if_int = std::enable_if_t<std::is_same<T, int64_t>::value>;
+using enable_if_int = std::enable_if_t<std::is_same_v<T, int64_t>>;
 
 template <typename T, typename = enable_if_symint<T>>
 c10::SymIntArrayRef sizes(const TensorBase& t) { return t.sym_sizes(); }

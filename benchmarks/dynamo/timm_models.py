@@ -5,14 +5,21 @@ import os
 import re
 import subprocess
 import sys
-import time
 import warnings
 
-import torch
-from common import BenchmarkRunner, main
+try:
+    from .common import BenchmarkRunner, download_retry_decorator, main
+except ImportError:
+    from common import BenchmarkRunner, download_retry_decorator, main
 
-from torch._dynamo.testing import collect_results
+import torch
+
+from torch._dynamo.testing import collect_results, reduce_to_scalar_loss
 from torch._dynamo.utils import clone_inputs
+
+# Enable FX graph caching
+if "TORCHINDUCTOR_FX_GRAPH_CACHE" not in os.environ:
+    torch._inductor.config.fx_graph_cache = True
 
 
 def pip_install(package):
@@ -22,7 +29,7 @@ def pip_install(package):
 try:
     importlib.import_module("timm")
 except ModuleNotFoundError:
-    print("Installing Pytorch Image Models...")
+    print("Installing PyTorch Image Models...")
     pip_install("git+https://github.com/rwightman/pytorch-image-models")
 finally:
     from timm import __version__ as timmversion
@@ -32,7 +39,7 @@ finally:
 TIMM_MODELS = dict()
 filename = os.path.join(os.path.dirname(__file__), "timm_models_list.txt")
 
-with open(filename, "r") as fh:
+with open(filename) as fh:
     lines = fh.readlines()
     lines = [line.rstrip() for line in lines]
     for line in lines:
@@ -44,40 +51,58 @@ with open(filename, "r") as fh:
 
 BATCH_SIZE_DIVISORS = {
     "beit_base_patch16_224": 2,
-    "cait_m36_384": 2,
     "convit_base": 2,
     "convmixer_768_32": 2,
     "convnext_base": 2,
     "cspdarknet53": 2,
     "deit_base_distilled_patch16_224": 2,
-    "dpn107": 2,
     "gluon_xception65": 2,
     "mobilevit_s": 2,
-    "pit_b_224": 2,
     "pnasnet5large": 2,
     "poolformer_m36": 2,
-    "res2net101_26w_4s": 2,
     "resnest101e": 2,
-    "sebotnet33ts_256": 2,
     "swin_base_patch4_window7_224": 2,
     "swsl_resnext101_32x16d": 2,
-    "twins_pcpvt_base": 2,
     "vit_base_patch16_224": 2,
     "volo_d1_224": 2,
     "jx_nest_base": 4,
-    "xcit_large_24_p8_224": 4,
 }
 
-REQUIRE_HIGHER_TOLERANCE = set("botnet26t_256")
-
-SKIP = {
-    # Unusual training setup
-    "levit_128",
+REQUIRE_HIGHER_TOLERANCE = {
+    "fbnetv3_b",
+    "gmixer_24_224",
+    "hrnet_w18",
+    "inception_v3",
+    "mixer_b16_224",
+    "mobilenetv3_large_100",
+    "sebotnet33ts_256",
+    "selecsls42b",
+    "cspdarknet53",
 }
 
+REQUIRE_HIGHER_TOLERANCE_FOR_FREEZING = {
+    "adv_inception_v3",
+    "botnet26t_256",
+    "gluon_inception_v3",
+    "selecsls42b",
+    "swsl_resnext101_32x16d",
+}
 
-MAX_BATCH_SIZE_FOR_ACCURACY_CHECK = {
-    "cait_m36_384": 4,
+SCALED_COMPUTE_LOSS = {
+    "ese_vovnet19b_dw",
+    "fbnetc_100",
+    "mnasnet_100",
+    "mobilevit_s",
+    "sebotnet33ts_256",
+}
+
+FORCE_AMP_FOR_FP16_BF16_MODELS = {
+    "convit_base",
+    "xcit_large_24_p8_224",
+}
+
+SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS = {
+    "xcit_large_24_p8_224",
 }
 
 
@@ -90,7 +115,7 @@ def refresh_model_names():
         models = set()
         # TODO - set the path to pytorch-image-models repo
         for fn in glob.glob("../pytorch-image-models/docs/models/*.md"):
-            with open(fn, "r") as f:
+            with open(fn) as f:
                 while True:
                     line = f.readline()
                     if not line:
@@ -148,16 +173,13 @@ def refresh_model_names():
     all_models_family = populate_family(all_models)
     docs_models_family = populate_family(docs_models)
 
-    # print(docs_models_family.keys())
     for key in docs_models_family:
         del all_models_family[key]
 
     chosen_models = set()
-    for value in docs_models_family.values():
-        chosen_models.add(value[0])
+    chosen_models.update(value[0] for value in docs_models_family.values())
 
-    for key, value in all_models_family.items():
-        chosen_models.add(value[0])
+    chosen_models.update(value[0] for key, value in all_models_family.items())
 
     filename = "timm_models_list.txt"
     if os.path.exists("benchmarks"):
@@ -167,58 +189,69 @@ def refresh_model_names():
             fw.write(model_name + "\n")
 
 
-class TimmRunnner(BenchmarkRunner):
+class TimmRunner(BenchmarkRunner):
     def __init__(self):
-        super(TimmRunnner, self).__init__()
+        super().__init__()
         self.suite_name = "timm_models"
+
+    @property
+    def force_amp_for_fp16_bf16_models(self):
+        return FORCE_AMP_FOR_FP16_BF16_MODELS
+
+    @property
+    def force_fp16_for_bf16_models(self):
+        return set()
+
+    @property
+    def get_output_amp_train_process_func(self):
+        return {}
+
+    @property
+    def skip_accuracy_check_as_eager_non_deterministic(self):
+        if self.args.accuracy and self.args.training:
+            return SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS
+        return set()
+
+    @property
+    def guard_on_nn_module_models(self):
+        return {
+            "convit_base",
+        }
+
+    @download_retry_decorator
+    def _download_model(self, model_name):
+        model = create_model(
+            model_name,
+            in_chans=3,
+            scriptable=False,
+            num_classes=None,
+            drop_rate=0.0,
+            drop_path_rate=None,
+            drop_block_rate=None,
+            pretrained=True,
+        )
+        return model
 
     def load_model(
         self,
         device,
         model_name,
         batch_size=None,
+        extra_args=None,
     ):
+        if self.args.enable_activation_checkpointing:
+            raise NotImplementedError(
+                "Activation checkpointing not implemented for Timm models"
+            )
 
         is_training = self.args.training
         use_eval_mode = self.args.use_eval_mode
 
-        # _, model_dtype, data_dtype = self.resolve_precision()
         channels_last = self._args.channels_last
-
-        tries = 1
-        success = False
-        model = None
-        total_allowed_tries = 5
-        while not success and tries <= total_allowed_tries:
-            try:
-                model = create_model(
-                    model_name,
-                    in_chans=3,
-                    scriptable=False,
-                    num_classes=None,
-                    drop_rate=0.0,
-                    drop_path_rate=None,
-                    drop_block_rate=None,
-                    pretrained=True,
-                    # global_pool=kwargs.pop('gp', 'fast'),
-                    # num_classes=kwargs.pop('num_classes', None),
-                    # drop_rate=kwargs.pop('drop', 0.),
-                    # drop_path_rate=kwargs.pop('drop_path', None),
-                    # drop_block_rate=kwargs.pop('drop_block', None),
-                )
-                success = True
-            except Exception as e:
-                tries += 1
-                if tries <= total_allowed_tries:
-                    wait = tries * 30
-                    print(
-                        f"Failed to load model: {e}. Trying again ({tries}/{total_allowed_tries}) after {wait}s"
-                    )
-                    time.sleep(wait)
+        model = self._download_model(model_name)
 
         if model is None:
             raise RuntimeError(f"Failed to load model '{model_name}'")
-
         model.to(
             device=device,
             memory_format=torch.channels_last if channels_last else None,
@@ -240,13 +273,6 @@ class TimmRunnner(BenchmarkRunner):
             )
         batch_size = batch_size or recorded_batch_size
 
-        # Control the memory footprint for few models
-        if self.args.accuracy and model_name in MAX_BATCH_SIZE_FOR_ACCURACY_CHECK:
-            batch_size = min(batch_size, MAX_BATCH_SIZE_FOR_ACCURACY_CHECK[model_name])
-
-        # example_inputs = torch.randn(
-        #     (batch_size,) + input_size, device=device, dtype=data_dtype
-        # )
         torch.manual_seed(1337)
         input_tensor = torch.randint(
             256, size=(batch_size,) + input_size, device=device
@@ -265,6 +291,10 @@ class TimmRunnner(BenchmarkRunner):
         self.target = self._gen_target(batch_size, device)
 
         self.loss = torch.nn.CrossEntropyLoss().to(device)
+
+        if model_name in SCALED_COMPUTE_LOSS:
+            self.compute_loss = self.scaled_compute_loss
+
         if is_training and not use_eval_mode:
             model.train()
         else:
@@ -300,15 +330,23 @@ class TimmRunnner(BenchmarkRunner):
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         cosine = self.args.cosine
         tolerance = 1e-3
+
+        if self.args.freezing and name in REQUIRE_HIGHER_TOLERANCE_FOR_FREEZING:
+            # the conv-batchnorm fusion used under freezing may cause relatively
+            # large numerical difference. We need are larger tolerance.
+            # Check https://github.com/pytorch/pytorch/issues/120545 for context
+            tolerance = 8 * 1e-2
+
         if is_training:
-            if REQUIRE_HIGHER_TOLERANCE:
-                tolerance = 2 * 1e-2
+            if name in ["levit_128"]:
+                tolerance = 8 * 1e-2
+            elif name in REQUIRE_HIGHER_TOLERANCE:
+                tolerance = 4 * 1e-2
             else:
                 tolerance = 1e-2
         return tolerance, cosine
 
     def _gen_target(self, batch_size, device):
-        # return torch.ones((batch_size,) + (), device=device, dtype=torch.long)
         return torch.empty((batch_size,) + (), device=device, dtype=torch.long).random_(
             self.num_classes
         )
@@ -316,16 +354,20 @@ class TimmRunnner(BenchmarkRunner):
     def compute_loss(self, pred):
         # High loss values make gradient checking harder, as small changes in
         # accumulation order upsets accuracy checks.
-        return self.loss(pred, self.target) / 10.0
+        return reduce_to_scalar_loss(pred)
+
+    def scaled_compute_loss(self, pred):
+        # Loss values need zoom out further.
+        return reduce_to_scalar_loss(pred) / 1000.0
 
     def forward_pass(self, mod, inputs, collect_outputs=True):
-        with self.autocast():
+        with self.autocast(**self.autocast_arg):
             return mod(*inputs)
 
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)
         self.optimizer_zero_grad(mod)
-        with self.autocast():
+        with self.autocast(**self.autocast_arg):
             pred = mod(*cloned_inputs)
             if isinstance(pred, tuple):
                 pred = pred[0]
@@ -340,7 +382,7 @@ class TimmRunnner(BenchmarkRunner):
 def timm_main():
     logging.basicConfig(level=logging.WARNING)
     warnings.filterwarnings("ignore")
-    main(TimmRunnner())
+    main(TimmRunner())
 
 
 if __name__ == "__main__":

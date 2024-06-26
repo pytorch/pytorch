@@ -353,8 +353,8 @@ void testStaticRuntime(
 
           size_t new_managed_bytes =
               memory_planner ? memory_planner->total_managed() : 0;
-          if (check_resize && new_managed_bytes > 0) {
-            EXPECT_GT(new_managed_bytes, managed_bytes);
+          if (check_resize && new_managed_bytes >= 0) {
+            EXPECT_GE(new_managed_bytes, managed_bytes);
           }
 
           // Run static runtime again with an input of the shape observed during

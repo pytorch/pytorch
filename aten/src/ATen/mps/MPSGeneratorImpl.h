@@ -8,8 +8,7 @@
 #include <c10/util/Optional.h>
 
 namespace at {
-namespace mps {
-namespace detail {
+namespace mps::detail {
 
 static const uint32_t PHILOX_STATE_N = 7;
 struct rng_data_pod {
@@ -20,8 +19,7 @@ struct rng_data_pod {
 TORCH_API const Generator& getDefaultMPSGenerator();
 TORCH_API Generator createMPSGenerator(uint64_t seed_val = default_rng_seed_val);
 
-} // namespace detail
-} // namespace mps
+} // namespace mps::detail
 
 struct TORCH_API MPSGeneratorImpl : public c10::GeneratorImpl {
   // Constructors
@@ -31,6 +29,8 @@ struct TORCH_API MPSGeneratorImpl : public c10::GeneratorImpl {
   // MPSGeneratorImpl methods
   std::shared_ptr<MPSGeneratorImpl> clone() const;
   void set_current_seed(uint64_t seed) override;
+  void set_offset(uint64_t offset) override;
+  uint64_t get_offset() const override;
   uint64_t current_seed() const override;
   uint64_t seed() override;
   void set_state(const c10::TensorImpl& new_state) override;

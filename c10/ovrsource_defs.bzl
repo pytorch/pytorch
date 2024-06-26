@@ -8,6 +8,7 @@ cpu_supported_platforms = [
     "ovr_config//os:macos",
     "ovr_config//os:windows-x86_64",
     "ovr_config//runtime:arm64-linux-ubuntu-neon",
+    "ovr_config//os:linux-arm64",
 ]
 
 cuda_supported_platforms = [
@@ -74,8 +75,9 @@ def define_c10_ovrsource(name, is_mobile):
         exported_deps = [
             ":ovrsource_c10_cmake_macros.h",
             "//arvr/third-party/gflags:gflags",
-            "//third-party/glog:glog",
+            "//third-party/cpuinfo:cpuinfo",
             "//third-party/fmt:fmt",
+            "//third-party/glog:glog",
         ],
     )
 
@@ -101,9 +103,9 @@ def define_ovrsource_targets():
 
     common_c10_cmake_defines = [
         ("#cmakedefine C10_BUILD_SHARED_LIBS", ""),
-        ("#cmakedefine C10_DISABLE_NUMA", ""),
         ("#cmakedefine C10_USE_NUMA", ""),
         ("#cmakedefine C10_USE_MSVC_STATIC_RUNTIME", ""),
+        ("#cmakedefine C10_USE_ROCM_KERNEL_ASSERT", ""),
     ]
 
     mobile_c10_cmake_defines = [

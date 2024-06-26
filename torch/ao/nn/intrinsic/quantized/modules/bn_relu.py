@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 
 import torch
 import torch.ao.nn.intrinsic
@@ -22,7 +23,7 @@ class BNReLU2d(nnq.BatchNorm2d):
     _FLOAT_MODULE = torch.ao.nn.intrinsic.BNReLU2d
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, device=None, dtype=None):
-        super(BNReLU2d, self).__init__(num_features, eps=eps, momentum=momentum, device=device, dtype=dtype)
+        super().__init__(num_features, eps=eps, momentum=momentum, device=device, dtype=dtype)
 
     def forward(self, input):
         # Temporarily using len(shape) instead of ndim due to JIT issue
@@ -37,9 +38,9 @@ class BNReLU2d(nnq.BatchNorm2d):
         return 'QuantizedBNReLU2d'
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         # TODO: Add qat support for BNReLU2d
-        return super(BNReLU2d, cls).from_float(mod)
+        return super().from_float(mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
 
     @classmethod
     def from_reference(cls, bn_relu, output_scale, output_zero_point):
@@ -58,7 +59,7 @@ class BNReLU3d(nnq.BatchNorm3d):
     _FLOAT_MODULE = torch.ao.nn.intrinsic.BNReLU3d
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, device=None, dtype=None):
-        super(BNReLU3d, self).__init__(num_features, eps=eps, momentum=momentum, device=device, dtype=dtype)
+        super().__init__(num_features, eps=eps, momentum=momentum, device=device, dtype=dtype)
 
     def forward(self, input):
         # Temporarily using len(shape) instead of ndim due to JIT issue
@@ -73,9 +74,9 @@ class BNReLU3d(nnq.BatchNorm3d):
         return 'QuantizedBNReLU3d'
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         # TODO: Add qat support for BNReLU3d
-        return super(BNReLU3d, cls).from_float(mod)
+        return super().from_float(mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
 
     @classmethod
     def from_reference(cls, bn_relu, output_scale, output_zero_point):

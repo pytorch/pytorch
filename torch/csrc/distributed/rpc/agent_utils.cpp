@@ -13,7 +13,7 @@ std::unordered_map<std::string, worker_id_t> collectNames(
   std::vector<uint8_t> selfNameVector(
       (uint8_t*)selfName.c_str(),
       (uint8_t*)selfName.c_str() + selfName.length());
-  store.set(c10::to_string(selfId), selfNameVector);
+  store.set(std::to_string(selfId), selfNameVector);
 
   std::unordered_map<std::string, worker_id_t> nameToId;
   nameToId.reserve(worldSize);
@@ -22,7 +22,7 @@ std::unordered_map<std::string, worker_id_t> collectNames(
     if (workerId == selfId) {
       continue;
     }
-    std::vector<uint8_t> workerNameVector = store.get(c10::to_string(workerId));
+    std::vector<uint8_t> workerNameVector = store.get(std::to_string(workerId));
     std::string workerName(
         (char*)workerNameVector.data(), workerNameVector.size());
 
@@ -41,7 +41,7 @@ std::unordered_map<std::string, worker_id_t> collectNames(
   return nameToId;
 }
 
-std::vector<std::string> splitString(
+static std::vector<std::string> splitString(
     const std::string& s,
     const std::string& delim) {
   std::vector<std::string> tokens;
@@ -69,7 +69,7 @@ std::unordered_map<std::string, worker_id_t> collectCurrentNames(
 
   // Check that ID does not already exist and set {ID : NAME}
   std::vector<uint8_t> resultVector = store.compareSet(
-      c10::to_string(selfId), std::vector<uint8_t>(), selfNameVector);
+      std::to_string(selfId), std::vector<uint8_t>(), selfNameVector);
   TORCH_CHECK(
       resultVector == selfNameVector,
       "RPC worker id ",
@@ -80,7 +80,7 @@ std::unordered_map<std::string, worker_id_t> collectCurrentNames(
       selfNameVector,
       " cannot be added.");
 
-  store.set(c10::to_string(selfId), selfNameVector);
+  store.set(std::to_string(selfId), selfNameVector);
 
   std::unordered_map<std::string, worker_id_t> nameToId;
   nameToId.emplace(selfName, selfId);
@@ -154,15 +154,19 @@ const string storeKeyActiveCallCount = "ACTIVE_CALLS";
 const string storeKeyReady = "READY";
 static std::atomic<int> barrierId(0);
 
-std::tuple<std::string, std::string, std::string> getNextKeyIds() {
+static std::tuple<std::string, std::string, std::string> getNextKeyIds() {
   barrierId++;
-  std::string processCountKey =
-      fmt::format("{}{}{}", storeKeyProcessCount, storeKeyBarrierId, barrierId);
+  auto newBarrierId = barrierId.load();
+  std::string processCountKey = fmt::format(
+      "{}{}{}", storeKeyProcessCount, storeKeyBarrierId, newBarrierId);
   std::string activeCallCountKey = fmt::format(
-      "{}{}{}", storeKeyActiveCallCount, storeKeyBarrierId, barrierId);
+      "{}{}{}", storeKeyActiveCallCount, storeKeyBarrierId, newBarrierId);
   std::string barrierKey =
-      fmt::format("{}{}{}", storeKeyReady, storeKeyBarrierId, barrierId);
-  return std::make_tuple(processCountKey, activeCallCountKey, barrierKey);
+      fmt::format("{}{}{}", storeKeyReady, storeKeyBarrierId, newBarrierId);
+  return std::make_tuple(
+      std::move(processCountKey),
+      std::move(activeCallCountKey),
+      std::move(barrierKey));
 }
 
 // Synchronize process with all other agent processes strictly using store
@@ -172,8 +176,7 @@ int syncCallCount(
     ::c10d::PrefixStore store,
     const int worldSize,
     int activeCalls) {
-  std::string processCountKey, activeCallCountKey, readyKey;
-  std::tie(processCountKey, activeCallCountKey, readyKey) = getNextKeyIds();
+  auto [processCountKey, activeCallCountKey, readyKey] = getNextKeyIds();
 
   // Add to keys which will record the number of processes and active calls
   store.add(activeCallCountKey, activeCalls);

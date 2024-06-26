@@ -4,7 +4,7 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/python_headers.h>
 
-const int DTYPE_NAME_LEN = 64;
+constexpr int DTYPE_NAME_LEN = 64;
 
 struct TORCH_API THPDtype {
   PyObject_HEAD at::ScalarType scalar_type;
@@ -23,6 +23,8 @@ inline bool THPPythonScalarType_Check(PyObject* obj) {
       obj == (PyObject*)(&PyBool_Type) || obj == (PyObject*)(&PyLong_Type);
 }
 
-PyObject* THPDtype_New(at::ScalarType scalar_type, const std::string& name);
+TORCH_API PyObject* THPDtype_New(
+    at::ScalarType scalar_type,
+    const std::string& name);
 
 void THPDtype_init(PyObject* module);

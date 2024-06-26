@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# mypy: allow-untyped-defs
 """
 model_dump: a one-stop shop for TorchScript model inspection.
 
@@ -123,9 +124,7 @@ def hierarchical_pickle(data):
     if isinstance(data, torch.utils.show_pickle.FakeObject):
         typename = f"{data.module}.{data.name}"
         if (
-            typename.startswith("__torch__.") or
-            typename.startswith("torch.jit.LoweredWrapper.") or
-            typename.startswith("torch.jit.LoweredModule.")
+            typename.startswith(('__torch__.', 'torch.jit.LoweredWrapper.', 'torch.jit.LoweredModule.'))
         ):
             assert data.args == ()
             return {
@@ -183,8 +182,8 @@ def hierarchical_pickle(data):
                 "__module_type__": typename,
                 "state": hierarchical_pickle((msg,)),
             }
-        raise Exception(f"Can't prepare fake object of type for JS: {typename}")
-    raise Exception(f"Can't prepare data of type for JS: {type(data)}")
+        raise Exception(f"Can't prepare fake object of type for JS: {typename}")  # noqa: TRY002
+    raise Exception(f"Can't prepare data of type for JS: {type(data)}")  # noqa: TRY002
 
 
 def get_model_info(
@@ -219,7 +218,7 @@ def get_model_info(
             if path_prefix is None:
                 path_prefix = prefix
             elif prefix != path_prefix:
-                raise Exception(f"Mismatched prefixes: {path_prefix} != {prefix}")
+                raise Exception(f"Mismatched prefixes: {path_prefix} != {prefix}")  # noqa: TRY002
             zip_files.append(dict(
                 filename=zi.filename,
                 compression=zi.compress_type,
@@ -413,4 +412,4 @@ def main(argv, *, stdout=None):
         page = burn_in_info(skeleton, info)
         output.write(page)
     else:
-        raise Exception("Invalid style")
+        raise Exception("Invalid style")  # noqa: TRY002

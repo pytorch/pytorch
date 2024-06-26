@@ -19,7 +19,7 @@ namespace convolution {
 
 c10::intrusive_ptr<mkldnn::ConvOpContext> createConvPrePackOpContext(
     Tensor weight,
-    c10::optional<Tensor> bias,
+    std::optional<Tensor> bias,
     std::vector<int64_t> stride,
     std::vector<int64_t> padding,
     std::vector<int64_t> dilation,
@@ -43,7 +43,7 @@ c10::intrusive_ptr<mkldnn::ConvOpContext> createConvPrePackOpContext(
 
 ContextConv create(
     const Tensor& weight,
-    const c10::optional<Tensor>& bias,
+    const std::optional<Tensor>& bias,
     const IntArrayRef padding,
     const IntArrayRef stride,
     const IntArrayRef dilation,
@@ -91,14 +91,14 @@ ContextConv create(
       {stride_expanded.begin(), stride_expanded.end()},
       {dilation_expanded.begin(), dilation_expanded.end()},
       groups,
-      std::move(attr)};
+      attr};
 }
 
-void _mkldnn_convolution_out(
+static void _mkldnn_convolution_out(
     const ideep::tensor& x,
     ideep::tensor& y,
     const ideep::tensor& w,
-    const c10::optional<ideep::tensor>& b,
+    const std::optional<ideep::tensor>& b,
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
@@ -143,11 +143,11 @@ void _mkldnn_convolution_out(
   }
 }
 
-void mkldnn_convolution_out(
+static void mkldnn_convolution_out(
     const Tensor& input,
     ideep::tensor& mkldnn_output,
     const ideep::tensor& mkldnn_weight,
-    const c10::optional<Tensor>& bias_opt,
+    const std::optional<Tensor>& bias_opt,
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
@@ -160,7 +160,7 @@ void mkldnn_convolution_out(
 
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
   const ideep::tensor mkldnn_input = itensor_from_tensor(input);
-  c10::optional<ideep::tensor> mkldnn_bias{c10::nullopt};
+  std::optional<ideep::tensor> mkldnn_bias{c10::nullopt};
   if (bias.defined()) {
     mkldnn_bias = itensor_from_tensor(bias);
   }
@@ -178,7 +178,7 @@ void mkldnn_convolution_out(
       attr);
 }
 
-std::vector<int64_t> get_output_sizes(
+static std::vector<int64_t> get_output_sizes(
     ContextConv& context,
     const Tensor& input) {
   const ideep::tensor& mkldnn_weight = context.weight_packed_;

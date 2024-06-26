@@ -1,10 +1,12 @@
+# mypy: allow-untyped-defs
 import functools
-import warnings
 from typing import Any, Callable, List, Optional, Tuple, Union
+from typing_extensions import deprecated
 
 import torch
 from torch import Tensor
 from torch.utils._pytree import _broadcast_to_and_flatten, tree_flatten, tree_unflatten
+
 
 in_dims_t = Union[int, Tuple]
 out_dims_t = Union[int, Tuple[int, ...]]
@@ -12,14 +14,15 @@ out_dims_t = Union[int, Tuple[int, ...]]
 
 # Checks that all args-to-be-batched have the same batch dim size
 def _validate_and_get_batch_size(
-    flat_in_dims: List[Optional[int]], flat_args: List
+    flat_in_dims: List[Optional[int]],
+    flat_args: List,
 ) -> int:
     batch_sizes = [
         arg.size(in_dim)
         for in_dim, arg in zip(flat_in_dims, flat_args)
         if in_dim is not None
     ]
-    if batch_sizes and any([size != batch_sizes[0] for size in batch_sizes]):
+    if batch_sizes and any(size != batch_sizes[0] for size in batch_sizes):
         raise ValueError(
             f"vmap: Expected all tensors to have the same size in the mapped "
             f"dimension, got sizes {batch_sizes} for the mapped dimension"
@@ -36,7 +39,9 @@ def _num_outputs(batched_outputs: Union[Tensor, Tuple[Tensor, ...]]) -> int:
 # If value is a tuple, check it has length `num_elements`.
 # If value is not a tuple, make a tuple with `value` repeated `num_elements` times
 def _as_tuple(
-    value: Any, num_elements: int, error_message_lambda: Callable[[], str]
+    value: Any,
+    num_elements: int,
+    error_message_lambda: Callable[[], str],
 ) -> Tuple:
     if not isinstance(value, tuple):
         return (value,) * num_elements
@@ -48,7 +53,10 @@ def _as_tuple(
 # Creates BatchedTensors for every Tensor in arg that should be batched.
 # Returns the (potentially) batched arguments and the batch_size.
 def _create_batched_inputs(
-    in_dims: in_dims_t, args: Tuple, vmap_level: int, func: Callable
+    in_dims: in_dims_t,
+    args: Tuple,
+    vmap_level: int,
+    func: Callable,
 ) -> Tuple[Tuple, int]:
     if not isinstance(in_dims, int) and not isinstance(in_dims, tuple):
         raise ValueError(
@@ -168,7 +176,7 @@ def _check_out_dims_is_int_or_int_tuple(out_dims: out_dims_t, func: Callable) ->
     if isinstance(out_dims, int):
         return
     if not isinstance(out_dims, tuple) or not all(
-        [isinstance(out_dim, int) for out_dim in out_dims]
+        isinstance(out_dim, int) for out_dim in out_dims
     ):
         raise ValueError(
             f"vmap({_get_name(func)}, ..., out_dims={out_dims}): `out_dims` must be "
@@ -190,14 +198,14 @@ def _get_name(func: Callable):
 # vmap(func)(inputs) wraps all Tensor inputs to be batched in BatchedTensors,
 # sends those into func, and then unwraps the output BatchedTensors. Operations
 # on BatchedTensors perform the batched operations that the user is asking for.
+@deprecated(
+    "Please use `torch.vmap` instead of `torch._vmap_internals.vmap`.",
+    category=FutureWarning,
+)
 def vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> Callable:
     """
     Please use torch.vmap instead of this API.
     """
-    warnings.warn(
-        "Please use torch.vmap instead of torch._vmap_internals.vmap. ",
-        stacklevel=2,
-    )
     return _vmap(func, in_dims, out_dims)
 
 

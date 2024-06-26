@@ -1,8 +1,20 @@
 from dataclasses import dataclass
 from typing import Dict
 
-from torchgen.api.types import BaseCppType, boolT, CType, doubleT, longT
+from torchgen.api.types import (
+    BaseCppType,
+    BaseCType,
+    Binding,
+    boolT,
+    CType,
+    doubleT,
+    Expr,
+    longT,
+    MutRefCType,
+    NamedCType,
+)
 from torchgen.model import BaseTy
+
 
 halfT = BaseCppType("torch::executor", "Half")
 bfloat16T = BaseCppType("torch::executor", "BFloat16")
@@ -14,6 +26,19 @@ scalarT = BaseCppType("torch::executor", "Scalar")
 memoryFormatT = BaseCppType("torch::executor", "MemoryFormat")
 intArrayRefT = BaseCppType("torch::executor", "IntArrayRef")
 optionalT = BaseCppType("torch::executor", "optional")
+contextT = BaseCppType("torch::executor", "KernelRuntimeContext")
+
+contextExpr = Expr(
+    expr="context",
+    type=NamedCType(name="context", type=MutRefCType(BaseCType(contextT))),
+)
+
+contextArg = Binding(
+    name="context",
+    nctype=contextExpr.type,
+    argument=None,  # type: ignore[arg-type]
+    default=None,
+)
 
 BaseTypeToCppMapping: Dict[BaseTy, BaseCppType] = {
     BaseTy.int: longT,

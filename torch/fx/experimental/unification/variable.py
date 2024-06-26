@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from contextlib import contextmanager
 from .utils import hashable
 from .dispatch import dispatch
@@ -13,7 +14,7 @@ class Var:
 
     def __new__(cls, *token):
         if len(token) == 0:
-            token = "_%s" % Var._id  # type: ignore[assignment]
+            token = f"_{Var._id}"  # type: ignore[assignment]
             Var._id += 1
         elif len(token) == 1:
             token = token[0]

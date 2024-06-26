@@ -9,8 +9,6 @@
 
 #include <ATen/Tensor.h>
 
-#include <cstdint>
-#include <list>
 #include <memory>
 #include <sstream>
 
@@ -46,8 +44,7 @@ SavedVariable::SavedVariable(
         "you can make a clone to get a normal tensor and use it in autograd.")
 
     was_default_constructed_ = false;
-    const auto& version_counter = impl::version_counter(variable);
-    saved_version_ = version_counter.current_version();
+    saved_version_ = variable._version();
     is_leaf_ = variable.is_leaf();
     is_output_ = is_output;
     is_inplace_on_view_ = is_inplace_on_view;
@@ -91,7 +88,6 @@ void SavedVariable::save_metadata(const Variable& data) {
   // Save output number, version counter and fw_grad if needed
 
   output_nr_ = data.output_nr();
-  version_counter_ = impl::version_counter(data);
 
   if (is_leaf_) {
     grad_accumulator_ = impl::grad_accumulator(data);
@@ -119,7 +115,7 @@ void SavedVariable::reset_data() {
 }
 
 SavedVariable::SavedVariable(
-    const c10::optional<Variable>& variable,
+    const std::optional<Variable>& variable,
     bool is_output,
     bool is_inplace_on_view)
     : SavedVariable(
@@ -160,9 +156,7 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   // Only check version counter in the case without hooks
   // If user provides hooks, we can't track versions through the hooks
   if (!hooks_) {
-    auto current_version = saved_original_
-        ? impl::version_counter(data_).current_version()
-        : version_counter_.current_version();
+    auto current_version = impl::version_counter(data_).current_version();
 
     if (saved_version_ != current_version) {
       std::stringstream message;
@@ -196,7 +190,7 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   }
 
   // The version counter is correct.
-  // Additionnally, if we deal with a non-leaf variable, we have its correct
+  // Additionally, if we deal with a non-leaf variable, we have its correct
   // grad_fn.
 
   // If we have the original variable, we simply return it
@@ -216,17 +210,8 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
     var = make_variable(data, requires_grad_);
   }
 
-  impl::set_version_counter(var, version_counter_);
-
-  // If a Variable is a leaf (no grad_fn saved), and it requires_grad, then we
-  // should have saved the grad accumulator. Even if the Variable is no longer
-  // alive, the accumulator should be kept alive by the references in the
-  // graph.
-  if (is_leaf_ && requires_grad_) {
-    TORCH_INTERNAL_ASSERT(
-        !grad_accumulator_.expired(), "No grad accumulator for a saved leaf");
-  }
   impl::set_grad_accumulator(var, grad_accumulator_);
+  impl::set_version_counter(var, impl::version_counter(data));
 
   // NB: var here is never a view so there is no need to make anything special
   // for the case where the saved Tensor was a view. This whole argument relies

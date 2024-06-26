@@ -11,10 +11,8 @@
 #include <ATen/ops/avg_pool2d_native.h>
 #endif
 
-namespace at {
-
-namespace meta{
-using namespace native;
+namespace at::meta {
+using namespace ::at::native;
 
 TORCH_PRECOMPUTE_META_FUNC(avg_pool2d)
 (const Tensor& input,
@@ -23,7 +21,7 @@ TORCH_PRECOMPUTE_META_FUNC(avg_pool2d)
  IntArrayRef padding,
  bool ceil_mode,
  bool count_include_pad,
- c10::optional<int64_t> divisor_override) {
+ std::optional<int64_t> divisor_override) {
   // #20866, #22032: Guarantee this for the official C++ API?
   TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 2,
     "avg_pool2d: kernel_size must either be a single int, or a tuple of two ints");
@@ -103,7 +101,7 @@ TORCH_META_FUNC(avg_pool2d_backward) (
   IntArrayRef padding,
   bool ceil_mode,
   bool count_include_pad,
-  c10::optional<int64_t> divisor_override
+  std::optional<int64_t> divisor_override
 ) {
   // #20866, #22032: Guarantee this for the official C++ API?
   TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 2,
@@ -147,9 +145,9 @@ TORCH_META_FUNC(avg_pool2d_backward) (
   set_output_raw_strided(0, input.sizes(), {}, input.options().memory_format(memory_format));
 }
 
-} // namespace meta
+} // namespace at::meta
 
-namespace native {
+namespace at::native {
 
 TORCH_IMPL_FUNC(avg_pool2d_out_cpu)
 (const Tensor& input,
@@ -161,7 +159,7 @@ TORCH_IMPL_FUNC(avg_pool2d_out_cpu)
  int64_t padW,
  bool ceil_mode,
  bool count_include_pad,
- c10::optional<int64_t> divisor_override,
+ std::optional<int64_t> divisor_override,
  const Tensor& output) {
   avg_pool2d_kernel(
       kCPU,
@@ -185,7 +183,7 @@ TORCH_IMPL_FUNC(avg_pool2d_backward_out_cpu) (
   IntArrayRef padding,
   bool ceil_mode,
   bool count_include_pad,
-  c10::optional<int64_t> divisor_override,
+  std::optional<int64_t> divisor_override,
   const Tensor& gradInput
 ) {
   const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
@@ -215,5 +213,4 @@ TORCH_IMPL_FUNC(avg_pool2d_backward_out_cpu) (
 DEFINE_DISPATCH(avg_pool2d_kernel);
 DEFINE_DISPATCH(avg_pool2d_backward_kernel);
 
-} // at::native
-} // at
+} // namespace at::native

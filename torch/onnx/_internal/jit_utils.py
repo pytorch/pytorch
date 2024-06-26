@@ -1,4 +1,6 @@
+# mypy: allow-untyped-defs
 """Utilities for manipulating the torch.Graph object and the torchscript."""
+from __future__ import annotations
 
 # TODO(justinchuby): Move more of the symbolic helper functions here and expose
 # them to the user.
@@ -6,11 +8,10 @@
 import dataclasses
 import re
 import typing
-from typing import Any, Dict, Iterable, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple, Union
 
 import torch
 from torch import _C
-from torch._C import _onnx as _C_onnx
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import _beartype, registration
 
@@ -33,6 +34,9 @@ class GraphContext:
         original_node: Current node that is being converted from.
         params_dict: Mapping from graph initializer name to IValue.
         env: Mapping from Torch domain graph Value to ONNX domain graph Value.
+        values_in_env: Set of all values in env, for constant-time lookups.
+        new_nodes: List that tracks all new nodes that are added (used to make
+            sure metadata is propagated to all new nodes).
     """
 
     graph: _C.Graph
@@ -41,6 +45,8 @@ class GraphContext:
     original_node: _C.Node
     params_dict: Dict[str, "_C.IValue"]
     env: Dict[_C.Value, _C.Value]
+    values_in_env: Set[_C.Value]
+    new_nodes: List[_C.Node] = dataclasses.field(default_factory=list)
 
     # Relay methods from _C.Graph for compatibility with symbolic functions that expect
     # a _C.Graph
@@ -99,10 +105,14 @@ class GraphContext:
             **kwargs,
         )
 
+    # NOTE: For backward compatibility with the old symbolic functions.
+    # We are probably going to remove this only after the fx exporter is established.
+    at = aten_op
+
     @_beartype.beartype
     def onnxscript_op(
         self,
-        onnx_fn,  # TODO(titaiwang): annotate this when onnx-script becomes dependency
+        onnx_fn,
         *raw_args: Union[torch.Tensor, _C.Value],
         outputs: int = 1,
         **kwargs,
@@ -135,7 +145,7 @@ class GraphContext:
         """
         # NOTE(titaiwang): This is using class attributes, and it needs to be updated
         # if onnx-script makes any change on these.
-        symbolic_name = f"{onnx_fn.opset.domain}::{onnx_fn.opname}"
+        symbolic_name = f"{onnx_fn.opset.domain}::{onnx_fn.name}"
         opset_version = onnx_fn.opset.version
 
         registration.custom_onnx_symbolic(symbolic_name, opset_version)(onnx_fn)
@@ -169,7 +179,7 @@ def add_op_with_blocks(
 
     Returns:
         A tuple of (output_values, new_contexts, node) where:
-            output_values: ONe or more output value of this operator
+            output_values: One or more output value of this operator
                 (see the `outputs` keyword argument for multi-return nodes).
             new_contexts: A tuple of new graph contexts for each sub-block.
             node: The node representing the operator.
@@ -248,6 +258,7 @@ def _add_op(
         n_outputs=outputs,
         shape_inference=GLOBALS.onnx_shape_inference,
     )
+    graph_context.new_nodes.append(node)
 
     if outputs == 1:
         return node.output()
@@ -288,8 +299,8 @@ def _create_node(
             for _ in range(1, n_outputs):
                 node.addOutput()
 
-    node_ouputs = tuple(node.outputs())
-    assert len(node_ouputs) == n_outputs
+    node_outputs = tuple(node.outputs())  # type: ignore[possibly-undefined]
+    assert len(node_outputs) == n_outputs
 
     aten = domain_op.startswith("aten::")
 
@@ -305,10 +316,8 @@ def _create_node(
 
 @_beartype.beartype
 def _is_onnx_list(value):
-    return (
-        not isinstance(value, torch._six.string_classes)
-        and not isinstance(value, torch.Tensor)
-        and isinstance(value, Iterable)
+    return isinstance(value, Iterable) and not isinstance(
+        value, (str, bytes, torch.Tensor)
     )
 
 
@@ -317,14 +326,6 @@ def _scalar(x: torch.Tensor):
     """Convert a scalar tensor into a Python value."""
     assert x.numel() == 1
     return x[0]
-
-
-@_beartype.beartype
-def _is_caffe2_aten_fallback() -> bool:
-    return (
-        GLOBALS.operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
-        and _C_onnx._CAFFE2_ATEN_FALLBACK
-    )
 
 
 @_beartype.beartype
@@ -340,16 +341,6 @@ def _add_attribute(node: _C.Node, key: str, value: Any, aten: bool):
     if _is_onnx_list(value):
         kind += "s"
 
-    if aten and _is_caffe2_aten_fallback():
-        if isinstance(value, torch.Tensor):
-            # Caffe2 proto does not support tensor attribute.
-            if value.numel() > 1:
-                raise ValueError("Should not pass tensor attribute")
-            value = _scalar(value)
-            if isinstance(value, float):
-                kind = "f"
-            else:
-                kind = "i"
     return getattr(node, f"{kind}_")(name, value)
 
 

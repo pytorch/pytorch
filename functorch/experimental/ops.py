@@ -1,1 +1,1 @@
-from torch._ops import PyOperator  # noqa: F401
+from torch._ops import HigherOrderOperator  # noqa: F401

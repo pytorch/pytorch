@@ -1,4 +1,4 @@
-# coding=utf-8
+# mypy: allow-untyped-defs
 r"""Quantized convolution modules."""
 
 from typing import Optional, List, TypeVar
@@ -48,7 +48,7 @@ class _ConvNd(WeightedQuantizedModule):
               device=None,
               dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(_ConvNd, self).__init__()
+        super().__init__()
 
         if in_channels % groups != 0:
             raise ValueError('in_channels must be divisible by groups')
@@ -64,7 +64,7 @@ class _ConvNd(WeightedQuantizedModule):
         self.output_padding = output_padding
         self.groups = groups
         if padding_mode not in _SUPPORTED_PADDING:
-            raise ValueError("'padding_mode' {} is not supported by quantized convolution".format(padding_mode))
+            raise ValueError(f"'padding_mode' {padding_mode} is not supported by quantized convolution")
         self.padding_mode = padding_mode
         # Initialize as NCHW. set_weight will internally transpose to NHWC.
         if self.transposed:
@@ -120,7 +120,7 @@ class _ConvNd(WeightedQuantizedModule):
     #   self
     #   |--- _packed_params : Conv2dPackedParamsBase or Conv3dPackedParamsBase
     def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super(_ConvNd, self)._save_to_state_dict(destination, prefix, keep_vars)
+        super()._save_to_state_dict(destination, prefix, keep_vars)
         (w, b) = self._weight_bias()
         destination[prefix + 'weight'] = w
         destination[prefix + 'bias'] = b
@@ -161,7 +161,7 @@ class _ConvNd(WeightedQuantizedModule):
         state_dict.pop(prefix + 'scale')
         self.zero_point = int(state_dict[prefix + 'zero_point'])
         state_dict.pop(prefix + 'zero_point')
-        super(_ConvNd, self)._load_from_state_dict(
+        super()._load_from_state_dict(
             state_dict, prefix, local_metadata, False, missing_keys,
             unexpected_keys, error_msgs)
 
@@ -216,7 +216,7 @@ class _ConvNd(WeightedQuantizedModule):
             return qconv
 
     @staticmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         if hasattr(mod, "weight_fake_quant"):
             # assert type(mod) == cls.__QAT_MODULE, " nnq." + cls.__name__ + \
             # ".from_float only works for " + cls.__QAT_MODULE.__name__
@@ -307,8 +307,8 @@ class Conv1d(_ConvNd):
     _FLOAT_MODULE = nn.Conv1d
     _NNIQAT_CONV_BN_MODULE = nniqat.ConvBn1d
     _NNI_CONV_RELU_MODULE = nni.ConvReLU1d
-    _NNI_CONV_ADD_MODULE = None
-    _NNI_CONV_ADD_RELU_MODULE = None
+    _NNI_CONV_ADD_MODULE: None = None
+    _NNI_CONV_ADD_RELU_MODULE: None = None
 
     def __init__(self,
                  in_channels: int,
@@ -330,7 +330,7 @@ class Conv1d(_ConvNd):
 
         # Subclasses of _ConvNd needs to call _init rather than __init__. See
         # discussion on PR #49702
-        super(Conv1d, self)._init(
+        super()._init(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _single(0), groups, bias, padding_mode, **factory_kwargs)
 
@@ -369,14 +369,14 @@ class Conv1d(_ConvNd):
         return ops.quantized.conv1d(input, self._packed_params, self.scale, self.zero_point)
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         r"""Creates a quantized module from a float module or qparams_dict.
 
         Args:
             mod (Module): a float module, either produced by torch.ao.quantization
               utilities or provided by the user
         """
-        return _ConvNd.from_float(cls, mod)
+        return _ConvNd.from_float(cls, mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
 
 
 class Conv2d(_ConvNd):
@@ -433,7 +433,7 @@ class Conv2d(_ConvNd):
         dilation = _pair(dilation)
         # Subclasses of _ConvNd need to call _init rather than __init__. See
         # discussion on PR #49702
-        super(Conv2d, self)._init(
+        super()._init(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _pair(0), groups, bias, padding_mode, **factory_kwargs)
 
@@ -470,14 +470,14 @@ class Conv2d(_ConvNd):
             input, self._packed_params, self.scale, self.zero_point)
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         r"""Creates a quantized module from a float module or qparams_dict.
 
         Args:
             mod (Module): a float module, either produced by torch.ao.quantization
               utilities or provided by the user
         """
-        return _ConvNd.from_float(cls, mod)
+        return _ConvNd.from_float(cls, mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
 
 
 class Conv3d(_ConvNd):
@@ -521,8 +521,8 @@ class Conv3d(_ConvNd):
     _FLOAT_MODULE = nn.Conv3d
     _NNIQAT_CONV_BN_MODULE = nniqat.ConvBn3d
     _NNI_CONV_RELU_MODULE = nni.ConvReLU3d
-    _NNI_CONV_ADD_MODULE = None
-    _NNI_CONV_ADD_RELU_MODULE = None
+    _NNI_CONV_ADD_MODULE: None = None
+    _NNI_CONV_ADD_RELU_MODULE: None = None
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
@@ -535,7 +535,7 @@ class Conv3d(_ConvNd):
         dilation = _triple(dilation)
         # Subclasses of _ConvNd need to call _init rather than __init__. See
         # discussion on PR #49702
-        super(Conv3d, self)._init(
+        super()._init(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _triple(0), groups, bias, padding_mode, **factory_kwargs)
 
@@ -572,14 +572,14 @@ class Conv3d(_ConvNd):
             input, self._packed_params, self.scale, self.zero_point)
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         r"""Creates a quantized module from a float module or qparams_dict.
 
         Args:
             mod (Module): a float module, either produced by torch.ao.quantization
               utilities or provided by the user
         """
-        return _ConvNd.from_float(cls, mod)
+        return _ConvNd.from_float(cls, mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
 
 # === Transposed Convolutions ===
 MOD = TypeVar('MOD', bound=nn.modules.conv._ConvNd)
@@ -593,11 +593,11 @@ class _ConvTransposeNd(_ConvNd):
                  padding, dilation, transposed, output_padding,
                  groups, bias, padding_mode, device=None, dtype=None):
         if padding_mode != 'zeros':
-            raise ValueError('Only "zeros" padding mode is supported for {}'.format(self.__class__.__name__))
+            raise ValueError(f'Only "zeros" padding mode is supported for {self.__class__.__name__}')
         factory_kwargs = {'device': device, 'dtype': dtype}
         # Subclasses of _ConvNd need to call _init rather than __init__. See
         # discussion on PR #49702
-        super(_ConvTransposeNd, self)._init(
+        super()._init(
             in_channels, out_channels, kernel_size, stride,
             padding, dilation, transposed, output_padding,
             groups, bias, padding_mode, **factory_kwargs)
@@ -610,7 +610,7 @@ class _ConvTransposeNd(_ConvNd):
         return res
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         r"""Creates a quantized module from a float module or qparams_dict.
         Args:
             mod (Module): a float module, either produced by torch.ao.quantization
@@ -725,12 +725,12 @@ class ConvTranspose1d(_ConvTransposeNd):
         dilation = _single(dilation)
         output_padding = _single(output_padding)
 
-        super(ConvTranspose1d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             True, output_padding, groups, bias, padding_mode, **factory_kwargs)
 
     def _get_name(self):
-        return 'QuantizedConvTranpose1d'
+        return 'QuantizedConvTranspose1d'
 
     def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
         self._packed_params = torch.ops.quantized.conv_transpose1d_prepack(
@@ -816,12 +816,12 @@ class ConvTranspose2d(_ConvTransposeNd):
         dilation = _pair(dilation)
         output_padding = _pair(output_padding)
 
-        super(ConvTranspose2d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             True, output_padding, groups, bias, padding_mode, **factory_kwargs)
 
     def _get_name(self):
-        return 'QuantizedConvTranpose2d'
+        return 'QuantizedConvTranspose2d'
 
     def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
         self._packed_params = torch.ops.quantized.conv_transpose2d_prepack(
@@ -909,12 +909,12 @@ class ConvTranspose3d(_ConvTransposeNd):
         dilation = _triple(dilation)
         output_padding = _triple(output_padding)
 
-        super(ConvTranspose3d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             True, output_padding, groups, bias, padding_mode, **factory_kwargs)
 
     def _get_name(self):
-        return 'QuantizedConvTranpose3d'
+        return 'QuantizedConvTranspose3d'
 
     def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
         self._packed_params = torch.ops.quantized.conv_transpose3d_prepack(

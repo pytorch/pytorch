@@ -13,9 +13,9 @@
 #include <ATen/ops/tensor.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 
-at::Tensor linspace_from_neg_one(const Tensor& grid, int64_t num_steps,
+static at::Tensor linspace_from_neg_one(const Tensor& grid, int64_t num_steps,
                                  bool align_corners) {
   if (num_steps <= 1) {
     return at::tensor(0, grid.options());
@@ -27,7 +27,7 @@ at::Tensor linspace_from_neg_one(const Tensor& grid, int64_t num_steps,
   return range;
 }
 
-Tensor make_base_grid_4D(
+static Tensor make_base_grid_4D(
     const Tensor& theta,
     int64_t N,
     int64_t C,
@@ -43,7 +43,7 @@ Tensor make_base_grid_4D(
   return base_grid;
 }
 
-Tensor make_base_grid_5D(
+static Tensor make_base_grid_5D(
     const Tensor& theta,
     int64_t N,
     int64_t C,
@@ -61,7 +61,7 @@ Tensor make_base_grid_5D(
   return base_grid;
 }
 
-Tensor affine_grid_generator_4D(
+static Tensor affine_grid_generator_4D(
     const Tensor& theta,
     int64_t N,
     int64_t C,
@@ -73,7 +73,7 @@ Tensor affine_grid_generator_4D(
   return grid.view({N, H, W, 2});
 }
 
-Tensor affine_grid_generator_5D(
+static Tensor affine_grid_generator_5D(
     const Tensor& theta,
     int64_t N,
     int64_t C,
@@ -99,7 +99,7 @@ Tensor affine_grid_generator(const Tensor& theta, IntArrayRef size, bool align_c
   }
 }
 
-Tensor affine_grid_generator_4D_backward(
+static Tensor affine_grid_generator_4D_backward(
     const Tensor& grad_grid,
     int64_t N,
     int64_t C,
@@ -110,11 +110,11 @@ Tensor affine_grid_generator_4D_backward(
   AT_ASSERT(grad_grid.sizes() == IntArrayRef({N, H, W, 2}));
   auto grad_theta = base_grid.view({N, H * W, 3})
                         .transpose(1, 2)
-                        .bmm(grad_grid.view({N, H * W, 2}));
+                        .bmm(grad_grid.reshape({N, H * W, 2}));
   return grad_theta.transpose(1, 2);
 }
 
-Tensor affine_grid_generator_5D_backward(
+static Tensor affine_grid_generator_5D_backward(
     const Tensor& grad_grid,
     int64_t N,
     int64_t C,
@@ -126,7 +126,7 @@ Tensor affine_grid_generator_5D_backward(
   AT_ASSERT(grad_grid.sizes() == IntArrayRef({N, D, H, W, 3}));
   auto grad_theta = base_grid.view({N, D * H * W, 4})
                         .transpose(1, 2)
-                        .bmm(grad_grid.view({N, D * H * W, 3}));
+                        .bmm(grad_grid.reshape({N, D * H * W, 3}));
   return grad_theta.transpose(1, 2);
 }
 
@@ -143,4 +143,4 @@ Tensor affine_grid_generator_backward(const Tensor& grad, IntArrayRef size, bool
   }
 }
 
-}}  // namespace at::native
+}  // namespace at::native

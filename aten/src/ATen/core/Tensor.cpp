@@ -42,7 +42,7 @@ TensorBase TensorBase::to(
     at::TensorOptions options,
     bool non_blocking,
     bool copy,
-    c10::optional<at::MemoryFormat> memory_format) const {
+    std::optional<at::MemoryFormat> memory_format) const {
   Tensor self(*this);
   return at::_ops::to_dtype_layout::call(
       self, optTypeMetaToScalarType(options.dtype_opt()),
@@ -72,9 +72,9 @@ void TensorBase::enforce_invariants() {
 
 void TensorBase::print() const {
   if (defined()) {
-    std::cerr << "[" << toString() << " " << sizes() << "]" << std::endl;
+    std::cerr << "[" << toString() << " " << sizes() << "]" << '\n';
   } else {
-    std::cerr << "[UndefinedTensor]" << std::endl;
+    std::cerr << "[UndefinedTensor]" << '\n';
   }
 }
 
@@ -83,7 +83,16 @@ std::string TensorBase::toString() const {
   if (scalar_type() == ScalarType::Undefined) {
     base_str = "UndefinedType";
   } else {
-    base_str = std::string(at::toString(options().computeDispatchKey())) + at::toString(scalar_type()) + "Type";
+    auto dispatchkey = options().computeDispatchKey();
+    std::string dispatchkey_str;
+    if (dispatchkey == c10::DispatchKey::PrivateUse1) {
+      dispatchkey_str = c10::get_privateuse1_backend();
+    } else if (dispatchkey == c10::DispatchKey::AutocastPrivateUse1) {
+      dispatchkey_str = "Autocast" + c10::get_privateuse1_backend();
+    } else {
+      dispatchkey_str = at::toString(dispatchkey);
+    }
+    base_str = dispatchkey_str + at::toString(scalar_type()) + "Type";
   }
   return base_str;
 }
@@ -125,8 +134,8 @@ bool TensorBase::retains_grad() const {
 }
 
 void Tensor::_backward(TensorList inputs,
-        const c10::optional<Tensor>& gradient,
-        c10::optional<bool> keep_graph,
+        const std::optional<Tensor>& gradient,
+        std::optional<bool> keep_graph,
         bool create_graph) const {
   return impl::GetVariableHooks()->_backward(*this, inputs, gradient, keep_graph, create_graph);
 }

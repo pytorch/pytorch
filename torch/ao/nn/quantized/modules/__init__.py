@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 
 # The quantized modules use `torch.nn` and `torch.ao.nn.quantizable`
@@ -86,7 +87,7 @@ class Quantize(torch.nn.Module):
 
     def __init__(self, scale, zero_point, dtype, factory_kwargs=None):
         factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
-        super(Quantize, self).__init__()
+        super().__init__()
         self.register_buffer('scale', torch.tensor([scale], **factory_kwargs))
         self.register_buffer('zero_point',
                              torch.tensor([zero_point], dtype=torch.long,
@@ -98,13 +99,13 @@ class Quantize(torch.nn.Module):
                                          int(self.zero_point), self.dtype)
 
     @staticmethod
-    def from_float(mod):
+    def from_float(mod, use_precomputed_fake_quant=False):
         assert hasattr(mod, 'activation_post_process')
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         return Quantize(scale.float().item(), zero_point.long().item(), mod.activation_post_process.dtype)
 
     def extra_repr(self):
-        return 'scale={}, zero_point={}, dtype={}'.format(self.scale, self.zero_point, self.dtype)
+        return f'scale={self.scale}, zero_point={self.zero_point}, dtype={self.dtype}'
 
 
 class DeQuantize(torch.nn.Module):
@@ -123,12 +124,9 @@ class DeQuantize(torch.nn.Module):
                 [ 1., -1.]], dtype=torch.float32)
     """
 
-    def __init__(self):
-        super(DeQuantize, self).__init__()
-
     def forward(self, Xq):
         return Xq.dequantize()
 
     @staticmethod
-    def from_float(mod):
+    def from_float(mod, use_precomputed_fake_quant=False):
         return DeQuantize()

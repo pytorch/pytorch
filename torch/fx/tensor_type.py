@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from torch.fx.experimental.unification import Var  # type: ignore[attr-defined]
 
 from ._compatibility import compatibility
@@ -56,7 +57,7 @@ Dyn = _DynType()
 def is_consistent(t1, t2):
     """
     A binary relation denoted by ~ that determines if t1 is consistent with t2.
-    The relation is reflexive, semmetric but not transitive.
+    The relation is reflexive, symmetric but not transitive.
     returns True if t1 and t2 are consistent and False otherwise.
     Example:
         Dyn ~ TensorType((1,2,3))
@@ -73,7 +74,7 @@ def is_consistent(t1, t2):
 
     if isinstance(t1, TensorType) and isinstance(t2, TensorType):
         return len(t1.__args__) == len(t2.__args__) and \
-            all([is_consistent(elem1, elem2) for elem1, elem2 in zip(t1.__args__, t2.__args__)])
+            all(is_consistent(elem1, elem2) for elem1, elem2 in zip(t1.__args__, t2.__args__))
     else:
         return False
 
@@ -98,7 +99,7 @@ def is_more_precise(t1, t2):
 
     if isinstance(t1, TensorType) and isinstance(t2, TensorType):
         return len(t1.__args__) == len(t2.__args__) and \
-            all([is_more_precise(elem1, elem2) for elem1, elem2 in zip(t1.__args__, t2.__args__)])
+            all(is_more_precise(elem1, elem2) for elem1, elem2 in zip(t1.__args__, t2.__args__))
 
     else:
         return False

@@ -4,6 +4,7 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
+#include <cstdint>
 
 namespace c10 {
 using SymIntArrayRef = ArrayRef<SymInt>;
@@ -12,10 +13,16 @@ inline at::IntArrayRef asIntArrayRefUnchecked(c10::SymIntArrayRef ar) {
   return IntArrayRef(reinterpret_cast<const int64_t*>(ar.data()), ar.size());
 }
 
-inline c10::optional<at::IntArrayRef> asIntArrayRefSlowOpt(
+// TODO: a SymIntArrayRef containing a heap allocated large negative integer
+// can actually technically be converted to an IntArrayRef... but not with
+// the non-owning API we have here.  We can't reinterpet cast; we have to
+// allocate another buffer and write the integers into it.  If you need it,
+// we can do it.  But I don't think you need it.
+
+inline std::optional<at::IntArrayRef> asIntArrayRefSlowOpt(
     c10::SymIntArrayRef ar) {
   for (const c10::SymInt& sci : ar) {
-    if (sci.is_symbolic()) {
+    if (sci.is_heap_allocated()) {
       return c10::nullopt;
     }
   }
@@ -29,7 +36,7 @@ inline at::IntArrayRef asIntArrayRefSlow(
     int64_t line) {
   for (const c10::SymInt& sci : ar) {
     TORCH_CHECK(
-        !sci.is_symbolic(),
+        !sci.is_heap_allocated(),
         file,
         ":",
         line,

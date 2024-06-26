@@ -1,8 +1,9 @@
 #pragma once
 
 #include <c10/core/impl/PyInterpreter.h>
-#include <c10/macros/Macros.h>
+#include <c10/macros/Export.h>
 #include <c10/util/python_stub.h>
+#include <utility>
 
 namespace c10 {
 
@@ -22,6 +23,9 @@ struct C10_API SafePyObject {
   // Steals a reference to data
   SafePyObject(PyObject* data, c10::impl::PyInterpreter* pyinterpreter)
       : data_(data), pyinterpreter_(pyinterpreter) {}
+  SafePyObject(SafePyObject&& other) noexcept
+      : data_(std::exchange(other.data_, nullptr)),
+        pyinterpreter_(other.pyinterpreter_) {}
 
   // In principle this could be copyable if we add an incref to PyInterpreter
   // but for now it's easier to just disallow it.
@@ -29,7 +33,9 @@ struct C10_API SafePyObject {
   SafePyObject& operator=(SafePyObject const&) = delete;
 
   ~SafePyObject() {
-    (*pyinterpreter_)->decref(data_, /*is_tensor*/ false);
+    if (data_ != nullptr) {
+      (*pyinterpreter_)->decref(data_, /*has_pyobj_slot*/ false);
+    }
   }
 
   c10::impl::PyInterpreter& pyinterpreter() const {
@@ -37,9 +43,32 @@ struct C10_API SafePyObject {
   }
   PyObject* ptr(const c10::impl::PyInterpreter*) const;
 
+  // stop tracking the current object, and return it
+  PyObject* release() {
+    auto rv = data_;
+    data_ = nullptr;
+    return rv;
+  }
+
  private:
   PyObject* data_;
   c10::impl::PyInterpreter* pyinterpreter_;
+};
+
+// A newtype wrapper around SafePyObject for type safety when a python object
+// represents a specific type. Note that `T` is only used as a tag and isn't
+// actually used for any true purpose.
+template <typename T>
+struct SafePyObjectT : private SafePyObject {
+  SafePyObjectT(PyObject* data, c10::impl::PyInterpreter* pyinterpreter)
+      : SafePyObject(data, pyinterpreter) {}
+  SafePyObjectT(SafePyObjectT&& other) noexcept : SafePyObject(other) {}
+  SafePyObjectT(SafePyObjectT const&) = delete;
+  SafePyObjectT& operator=(SafePyObjectT const&) = delete;
+
+  using SafePyObject::ptr;
+  using SafePyObject::pyinterpreter;
+  using SafePyObject::release;
 };
 
 // Like SafePyObject, but non-owning.  Good for references to global PyObjects

@@ -21,7 +21,8 @@ namespace jit {
 namespace tensorexpr {
 
 inline std::string formatError(llvm::Error&& err, const char* msg) {
-  static constexpr char* defaultErrorMsg = "Unexpected failure in LLVM JIT";
+  static constexpr const char* defaultErrorMsg =
+      "Unexpected failure in LLVM JIT";
   std::string errorMsg(msg ? msg : defaultErrorMsg);
   llvm::raw_string_ostream ss(errorMsg);
   ss << ": " << err;
@@ -50,9 +51,9 @@ class PytorchLLVMJITImpl;
 class TORCH_API PytorchLLVMJIT {
  public:
   PytorchLLVMJIT(
-      c10::optional<std::string> triple,
-      c10::optional<std::string> cpu,
-      c10::optional<std::string> attrs);
+      std::optional<std::string> triple,
+      std::optional<std::string> cpu,
+      std::optional<std::string> attrs);
   ~PytorchLLVMJIT();
 
   void addModule(std::unique_ptr<Module> M, std::unique_ptr<LLVMContext> C);

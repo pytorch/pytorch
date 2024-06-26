@@ -40,10 +40,10 @@ struct AnyModuleHolder : public AnyModulePlaceholder {
   /// \internal
   struct CheckedGetter {
     template <typename T>
-    decay_t<T>&& operator()(size_t index) {
+    std::decay_t<T>&& operator()(size_t index) {
       AT_ASSERT(index < arguments_.size());
       auto& value = arguments_[index];
-      if (auto* maybe_value = value.template try_get<decay_t<T>>()) {
+      if (auto* maybe_value = value.template try_get<std::decay_t<T>>()) {
         return std::move(*maybe_value);
       }
       AT_ERROR(
@@ -116,12 +116,12 @@ struct AnyModuleHolder : public AnyModulePlaceholder {
   }
 
   std::unique_ptr<AnyModulePlaceholder> copy() const override {
-    return torch::make_unique<AnyModuleHolder>(*this);
+    return std::make_unique<AnyModuleHolder>(*this);
   }
 
   std::unique_ptr<AnyModulePlaceholder> clone_module(
       optional<Device> device) const override {
-    return torch::make_unique<AnyModuleHolder>(
+    return std::make_unique<AnyModuleHolder>(
         std::dynamic_pointer_cast<ModuleType>(module->clone(device)));
   }
 

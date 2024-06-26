@@ -3,16 +3,13 @@
 import copy
 import functools
 import io
+import re
 import warnings
 from typing import Callable
 
 import onnx
 import parameterized
 import pytorch_test_common
-
-import torch
-import torch.onnx
-import torch.utils.cpp_extension
 import torchvision
 from autograd_helper import CustomFunction as CustomFunction2
 from pytorch_test_common import (
@@ -20,12 +17,42 @@ from pytorch_test_common import (
     skipIfUnsupportedMaxOpsetVersion,
     skipIfUnsupportedMinOpsetVersion,
 )
+
+import torch
+import torch.onnx
+import torch.utils.cpp_extension
 from torch.onnx import _constants, OperatorExportTypes, TrainingMode, utils
 from torch.onnx._globals import GLOBALS
 from torch.onnx.symbolic_helper import _unpack_list, parse_args
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import skipIfNoCaffe2, skipIfNoLapack
-from verify import verify
+from torch.testing._internal.common_utils import skipIfNoLapack
+
+
+def _remove_test_environment_prefix_from_scope_name(scope_name: str) -> str:
+    """Remove test environment prefix added to module.
+
+    Remove prefix to normalize scope names, since different test environments add
+    prefixes with slight differences.
+
+    Example:
+
+        >>> _remove_test_environment_prefix_from_scope_name(
+        >>>     "test_utility_funs.M"
+        >>> )
+        "M"
+        >>> _remove_test_environment_prefix_from_scope_name(
+        >>>     "test_utility_funs.test_abc.<locals>.M"
+        >>> )
+        "M"
+        >>> _remove_test_environment_prefix_from_scope_name(
+        >>>     "__main__.M"
+        >>> )
+        "M"
+    """
+    prefixes_to_remove = ["test_utility_funs", "__main__"]
+    for prefix in prefixes_to_remove:
+        scope_name = re.sub(f"{prefix}\\.(.*?<locals>\\.)?", "", scope_name)
+    return scope_name
 
 
 class _BaseTestCase(pytorch_test_common.ExportTestCase):
@@ -141,7 +168,10 @@ class TestUnconvertibleOps(pytorch_test_common.ExportTestCase):
 @parameterized.parameterized_class(
     [
         {"opset_version": opset}
-        for opset in range(_constants.ONNX_BASE_OPSET, _constants.ONNX_MAX_OPSET + 1)
+        for opset in range(
+            _constants.ONNX_BASE_OPSET,
+            _constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET + 1,
+        )
     ],
     class_name_func=lambda cls, num, params_dict: f"{cls.__name__}_opset_{params_dict['opset_version']}",
 )
@@ -225,6 +255,7 @@ class TestUtilityFuns(_BaseTestCase):
             self.assertNotEqual(node.kind(), "onnx::Cast")
         self.assertEqual(len(list(graph.nodes())), 2)
 
+    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_constant_fold_reduceL2(self):
         class ReduceModule(torch.nn.Module):
             def forward(self, x):
@@ -242,6 +273,7 @@ class TestUtilityFuns(_BaseTestCase):
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::ReduceL2")
 
+    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_constant_fold_reduceL1(self):
         class NormModule(torch.nn.Module):
             def forward(self, x):
@@ -1063,6 +1095,45 @@ class TestUtilityFuns(_BaseTestCase):
             self.assertIn(ln_node.attribute[0], expected_ln_attrs)
             self.assertIn(ln_node.attribute[1], expected_ln_attrs)
 
+    # This test cases checks the issue where an object does not have an attribute.
+    # When enabling `export_modules_as_functions = True`, the exporter could return an
+    # AttributeError. With this test case, we check that the export passes successfully
+    # without any AttributeError exceptions.
+    # See https://github.com/pytorch/pytorch/pull/109759 for an example. The exception that
+    # this test tries to avoid is `AttributeError: 'Embedding' object has no attribute 'freeze'`.
+    @skipIfUnsupportedMinOpsetVersion(15)
+    def test_local_function_subset_of_predefined_attributes(self):
+        class M(torch.nn.Module):
+            num_layers: int
+
+            def __init__(self, num_layers):
+                super().__init__()
+                self.embed_layer = torch.nn.Embedding.from_pretrained(
+                    torch.FloatTensor([[1, 2.3, 3], [4, 5.1, 6.3]])
+                )
+                self.num_layers = num_layers
+                self.lns = torch.nn.ModuleList(
+                    [torch.nn.LayerNorm(3, eps=1e-4) for _ in range(num_layers)]
+                )
+
+            def forward(self, x):
+                e = self.embed_layer(torch.LongTensor([1]))
+                for ln in self.lns:
+                    x = ln(x)
+                return x, e
+
+        x = torch.randn(2, 3)
+        f = io.BytesIO()
+        model = M(3)
+        torch.onnx.export(
+            model,
+            (x,),
+            f,
+            export_modules_as_functions=True,
+            opset_version=self.opset_version,
+            verbose=True,  # Allows the test case to print `Skipping module attribute 'freeze'`
+        )
+
     def test_node_scope(self):
         class N(torch.nn.Module):
             def __init__(self):
@@ -1096,43 +1167,32 @@ class TestUtilityFuns(_BaseTestCase):
 
         model = M(3)
         expected_scope_names = {
-            "test_utility_funs.TestUtilityFuns.test_node_scope.<locals>.M::/"
-            "torch.nn.modules.activation.GELU::gelu1",
-            "test_utility_funs.TestUtilityFuns.test_node_scope.<locals>.M::/"
-            "torch.nn.modules.activation.GELU::gelu2",
-            "test_utility_funs.TestUtilityFuns.test_node_scope.<locals>.M::/"
-            "torch.nn.modules.normalization.LayerNorm::lns.0",
-            "test_utility_funs.TestUtilityFuns.test_node_scope.<locals>.M::/"
-            "torch.nn.modules.normalization.LayerNorm::lns.1",
-            "test_utility_funs.TestUtilityFuns.test_node_scope.<locals>.M::/"
-            "torch.nn.modules.normalization.LayerNorm::lns.2",
-            "test_utility_funs.TestUtilityFuns.test_node_scope.<locals>.M::/"
-            "test_utility_funs.TestUtilityFuns.test_node_scope.<locals>.N::relu/"
-            "torch.nn.modules.activation.ReLU::relu",
-            "test_utility_funs.TestUtilityFuns.test_node_scope.<locals>.M::",
+            "M::/torch.nn.modules.activation.GELU::gelu1",
+            "M::/torch.nn.modules.activation.GELU::gelu2",
+            "M::/torch.nn.modules.normalization.LayerNorm::lns.0",
+            "M::/torch.nn.modules.normalization.LayerNorm::lns.1",
+            "M::/torch.nn.modules.normalization.LayerNorm::lns.2",
+            "M::/N::relu/torch.nn.modules.activation.ReLU::relu",
+            "M::",
         }
 
         graph, _, _ = self._model_to_graph(
             model, (x, y, z), input_names=[], dynamic_axes={}
         )
         for node in graph.nodes():
-            self.assertIn(node.scopeName(), expected_scope_names)
-
-        expected_torch_script_scope_names = {
-            "test_utility_funs.M::/torch.nn.modules.activation.GELU::gelu1",
-            "test_utility_funs.M::/torch.nn.modules.activation.GELU::gelu2",
-            "test_utility_funs.M::/torch.nn.modules.normalization.LayerNorm::lns.0",
-            "test_utility_funs.M::/torch.nn.modules.normalization.LayerNorm::lns.1",
-            "test_utility_funs.M::/torch.nn.modules.normalization.LayerNorm::lns.2",
-            "test_utility_funs.M::/test_utility_funs.N::relu/torch.nn.modules.activation.ReLU::relu",
-            "test_utility_funs.M::",
-        }
+            self.assertIn(
+                _remove_test_environment_prefix_from_scope_name(node.scopeName()),
+                expected_scope_names,
+            )
 
         graph, _, _ = self._model_to_graph(
             torch.jit.script(model), (x, y, z), input_names=[], dynamic_axes={}
         )
         for node in graph.nodes():
-            self.assertIn(node.scopeName(), expected_torch_script_scope_names)
+            self.assertIn(
+                _remove_test_environment_prefix_from_scope_name(node.scopeName()),
+                expected_scope_names,
+            )
 
     def test_scope_of_constants_when_combined_by_cse_pass(self):
         layer_num = 3
@@ -1167,9 +1227,8 @@ class TestUtilityFuns(_BaseTestCase):
         #       so we expect 3 constants with different scopes. The 3 constants are for the 3 layers.
         #       If CSE in exporter is improved later, this test needs to be updated.
         #       It should expect 1 constant, with same scope as root.
-        scope_prefix = "test_utility_funs.TestUtilityFuns.test_scope_of_constants_when_combined_by_cse_pass.<locals>"
-        expected_root_scope_name = f"{scope_prefix}.N::"
-        expected_layer_scope_name = f"{scope_prefix}.M::layers"
+        expected_root_scope_name = "N::"
+        expected_layer_scope_name = "M::layers"
         expected_constant_scope_name = [
             f"{expected_root_scope_name}/{expected_layer_scope_name}.{i}"
             for i in range(layer_num)
@@ -1178,7 +1237,9 @@ class TestUtilityFuns(_BaseTestCase):
         constant_scope_names = []
         for node in graph.nodes():
             if node.kind() == "onnx::Constant":
-                constant_scope_names.append(node.scopeName())
+                constant_scope_names.append(
+                    _remove_test_environment_prefix_from_scope_name(node.scopeName())
+                )
         self.assertEqual(constant_scope_names, expected_constant_scope_name)
 
     def test_scope_of_nodes_when_combined_by_cse_pass(self):
@@ -1217,9 +1278,8 @@ class TestUtilityFuns(_BaseTestCase):
         graph, _, _ = self._model_to_graph(
             N(), (torch.randn(2, 3)), input_names=[], dynamic_axes={}
         )
-        scope_prefix = "test_utility_funs.TestUtilityFuns.test_scope_of_nodes_when_combined_by_cse_pass.<locals>"
-        expected_root_scope_name = f"{scope_prefix}.N::"
-        expected_layer_scope_name = f"{scope_prefix}.M::layers"
+        expected_root_scope_name = "N::"
+        expected_layer_scope_name = "M::layers"
         expected_add_scope_names = [
             f"{expected_root_scope_name}/{expected_layer_scope_name}.0"
         ]
@@ -1232,9 +1292,13 @@ class TestUtilityFuns(_BaseTestCase):
         mul_scope_names = []
         for node in graph.nodes():
             if node.kind() == "onnx::Add":
-                add_scope_names.append(node.scopeName())
+                add_scope_names.append(
+                    _remove_test_environment_prefix_from_scope_name(node.scopeName())
+                )
             elif node.kind() == "onnx::Mul":
-                mul_scope_names.append(node.scopeName())
+                mul_scope_names.append(
+                    _remove_test_environment_prefix_from_scope_name(node.scopeName())
+                )
         self.assertEqual(add_scope_names, expected_add_scope_names)
         self.assertEqual(mul_scope_names, expected_mul_scope_names)
 
@@ -1294,6 +1358,8 @@ class TestUtilityFuns(_BaseTestCase):
         iter = graph.nodes()
         self.assertEqual(next(iter).kind(), "custom_namespace::custom_op")
 
+    # gelu is exported as onnx::Gelu for opset >= 20
+    @skipIfUnsupportedMaxOpsetVersion(19)
     def test_custom_opsets_gelu(self):
         self.addCleanup(torch.onnx.unregister_custom_op_symbolic, "::gelu", 9)
 
@@ -1318,6 +1384,8 @@ class TestUtilityFuns(_BaseTestCase):
         self.assertEqual(graph.opset_import[1].domain, "com.microsoft")
         self.assertEqual(graph.opset_import[1].version, 1)
 
+    # gelu is exported as onnx::Gelu for opset >= 20
+    @skipIfUnsupportedMaxOpsetVersion(19)
     def test_register_aten_custom_op_symbolic(self):
         self.addCleanup(torch.onnx.unregister_custom_op_symbolic, "aten::gelu", 9)
 
@@ -1558,25 +1626,6 @@ class TestUtilityFuns(_BaseTestCase):
                 "Graph parameter names does not match model parameters.",
             )
 
-    @skipIfNoCaffe2
-    def test_modifying_params(self):
-        class MyModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.param = torch.nn.Parameter(torch.tensor([2.0]))
-
-            def forward(self, x):
-                y = x * x
-                self.param.data.add_(1.0)
-                return y
-
-        x = torch.tensor([1, 2])
-        # Move import to local as caffe2 backend requires additional build flag,
-        # and is only used in this test case.
-        import caffe2.python.onnx.backend as backend
-
-        verify(MyModel(), x, backend, do_constant_folding=False)
-
     def test_fuse_conv_bn(self):
         class Fuse(torch.nn.Module):
             def __init__(self):
@@ -1605,7 +1654,7 @@ class TestUtilityFuns(_BaseTestCase):
         self.assertEqual(len(list(graph.nodes())), 1)
 
     def test_fuse_resnet18(self):
-        model = torchvision.models.resnet18(pretrained=False)
+        model = torchvision.models.resnet18(weights=None)
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
         graph, _, __ = self._model_to_graph(
             model,
@@ -1625,9 +1674,6 @@ class TestUtilityFuns(_BaseTestCase):
             return x + z
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x, y):
                 return f(x, y)
 

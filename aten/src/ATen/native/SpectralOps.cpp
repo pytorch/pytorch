@@ -63,7 +63,7 @@
 
 #include <algorithm>
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -83,8 +83,7 @@ ScalarType promote_type_fft(ScalarType type, bool require_complex, Device device
   const bool maybe_support_half = (
     // Only CUDA supports half precision, but since meta tensors don't have a
     // device we err on the side of accepting it
-    (device.is_cuda() || device.is_meta()) &&
-    !at::detail::getCUDAHooks().hasROCM()
+    device.is_cuda() || device.is_meta()
   );
   if (maybe_support_half) {
     TORCH_CHECK(type == kHalf || type == kFloat || type == kDouble, "Unsupported dtype ", type);
@@ -115,7 +114,7 @@ Tensor promote_tensor_fft(const Tensor& t, bool require_complex=false) {
 // Convert NumPy compatible normalization mode string to enum values
 // NOTE: NumPy's normalization modes have direction-specific meanings. For example,
 // "forward" translates to `by_n` for a forward transform and `none` for backward.
-fft_norm_mode norm_from_string(c10::optional<c10::string_view> norm, bool forward) {
+fft_norm_mode norm_from_string(std::optional<c10::string_view> norm, bool forward) {
   if (!norm || *norm == "backward") {
     return forward ? fft_norm_mode::none : fft_norm_mode::by_n;
   }
@@ -133,11 +132,11 @@ fft_norm_mode norm_from_string(c10::optional<c10::string_view> norm, bool forwar
 
 // Fixes the shape of x such that x.size(dims[i]) == sizes[i],
 // either by zero-padding, or by slicing x starting from 0.
-Tensor resize_fft_input(Tensor x, IntArrayRef dims, IntArrayRef sizes) {
+Tensor resize_fft_input(Tensor x, IntArrayRef dims, SymIntArrayRef sizes) {
   TORCH_INTERNAL_ASSERT(dims.size() == sizes.size());
   bool must_copy = false;
-  auto x_sizes = x.sizes();
-  DimVector pad_amount(x_sizes.size() * 2);
+  auto x_sizes = x.sym_sizes();
+  SymDimVector pad_amount(x_sizes.size() * 2);
   for (const auto i : c10::irange(dims.size())) {
     if (sizes[i] == -1) {
       continue;
@@ -150,12 +149,12 @@ Tensor resize_fft_input(Tensor x, IntArrayRef dims, IntArrayRef sizes) {
     }
 
     if (x_sizes[dims[i]] > sizes[i]) {
-      x = x.slice(dims[i], 0, sizes[i]);
+      x = x.slice_symint(dims[i], 0, sizes[i]);
     }
   }
 
   // Only call pad if necessary since pad copies the entire tensor
-  return must_copy ? at::constant_pad_nd(x, pad_amount) : x;
+  return must_copy ? at::constant_pad_nd_symint(x, pad_amount) : x;
 }
 
 Tensor fft_r2c_maybe_out(
@@ -172,16 +171,16 @@ Tensor fft_r2c_maybe_out(
 
 Tensor fft_c2r_maybe_out(
     c10::string_view fname, const Tensor& out, const Tensor& input,
-    IntArrayRef dim, int64_t norm, int64_t last_dim_size) {
+    IntArrayRef dim, int64_t norm, SymInt last_dim_size) {
   // Support out argument if defined, otherwise call functional
   // variant so autograd works properly.
   if (out.defined()) {
     TORCH_CHECK(out.is_floating_point(), fname,
                 " expects a floating point output tensor, but got ", out.scalar_type());
     auto out_mut = out;
-    return at::_fft_c2r_outf(input, dim, norm, last_dim_size, out_mut);
+    return at::_fft_c2r_symint_outf(input, dim, norm, last_dim_size, out_mut);
   }
-  return at::_fft_c2r(input, dim, norm, last_dim_size);
+  return at::_fft_c2r_symint(input, dim, norm, last_dim_size);
 }
 
 Tensor fft_c2c_maybe_out(
@@ -198,15 +197,15 @@ Tensor fft_c2c_maybe_out(
 
 // Complex to real FFT
 Tensor fft_c2r(c10::string_view function_name,
-               Tensor out, Tensor input, c10::optional<int64_t> n_opt,
-               int64_t unwrapped_dim, c10::optional<c10::string_view> norm_str,
+               Tensor out, Tensor input, std::optional<SymInt> n_opt,
+               int64_t unwrapped_dim, std::optional<c10::string_view> norm_str,
                bool forward) {
   TORCH_CHECK(!out.defined() || out.is_floating_point(), function_name,
               " expects a floating point output tensor, but got ", out.scalar_type());
   input = promote_tensor_fft(input, /*require_complex=*/true);
   const auto input_dim = input.dim();
   const auto dim = maybe_wrap_dim(unwrapped_dim, input_dim, /*wrap_scalar=*/false);
-  const auto n = n_opt.value_or(2*(input.sizes()[dim] - 1));
+  const auto n = n_opt.value_or(2*(input.sym_sizes()[dim] - 1));
   TORCH_CHECK(n >= 1, "Invalid number of data points (", n, ") specified");
   if (n_opt) {
     input = resize_fft_input(input, dim, n/2 + 1);
@@ -222,8 +221,8 @@ Tensor fft_c2r(c10::string_view function_name,
 
 // Real to complex FFT
 Tensor fft_r2c(c10::string_view function_name,
-               Tensor out, Tensor input, c10::optional<int64_t> n_opt,
-               int64_t unwrapped_dim, c10::optional<c10::string_view> norm_str,
+               Tensor out, Tensor input, std::optional<SymInt> n_opt,
+               int64_t unwrapped_dim, std::optional<c10::string_view> norm_str,
                bool forward, bool onesided) {
   TORCH_CHECK(!input.is_complex(), function_name,
               " expects a real input tensor, but got ", input.scalar_type());
@@ -232,7 +231,7 @@ Tensor fft_r2c(c10::string_view function_name,
   input = promote_tensor_fft(input);
   const auto input_dim = input.dim();
   const auto dim = maybe_wrap_dim(unwrapped_dim, input_dim, /*wrap_scalar=*/false);
-  const auto n = n_opt.value_or(input.sizes()[dim]);
+  const auto n = n_opt.value_or(input.sym_sizes()[dim]);
   TORCH_CHECK(n >= 1, "Invalid number of data points (", n, ") specified");
   if (n_opt) {
     input = resize_fft_input(input, dim, n);
@@ -257,14 +256,14 @@ Tensor fft_r2c(c10::string_view function_name,
 
 // Complex to complex FFT
 Tensor fft_c2c(c10::string_view function_name,
-               Tensor out, Tensor input, c10::optional<int64_t> n_opt,
-               int64_t unwrapped_dim, c10::optional<c10::string_view> norm_str,
+               Tensor out, Tensor input, std::optional<SymInt> n_opt,
+               int64_t unwrapped_dim, std::optional<c10::string_view> norm_str,
                bool forward) {
   TORCH_CHECK(input.is_complex(), function_name,
               " expects a complex input tensor, but got ", input.scalar_type());
   const auto input_dim = input.dim();
   const auto dim = maybe_wrap_dim(unwrapped_dim, input_dim, /*wrap_scalar=*/false);
-  const auto n = n_opt.value_or(input.sizes()[dim]);
+  const auto n = n_opt.value_or(input.sym_sizes()[dim]);
   TORCH_CHECK(n >= 1, "Invalid number of data points (", n, ") specified");
   if (n_opt) {
     input = resize_fft_input(input, dim, n);
@@ -275,16 +274,17 @@ Tensor fft_c2c(c10::string_view function_name,
 
 // Dimensions to transform, and the signal shape in those dimensions
 struct ShapeAndDims {
-  DimVector shape, dim;
+  SymDimVector shape;
+  DimVector dim;
 };
 
 // Pre-process n-dimensional fft's `s` and `dim` arguments.
 // Wraps dimensions and applies defaulting behavior.
 // Also checks transform dims are unique and transform shape is non-empty.
 ShapeAndDims canonicalize_fft_shape_and_dim_args(
-    Tensor input, at::OptionalIntArrayRef shape, at::OptionalIntArrayRef dim) {
+    Tensor input, at::OptionalSymIntArrayRef shape, at::OptionalIntArrayRef dim) {
   const int64_t input_dim = input.dim();
-  const IntArrayRef input_sizes = input.sizes();
+  const SymIntArrayRef input_sizes = input.sym_sizes();
   ShapeAndDims ret;
 
   if (dim) {
@@ -345,8 +345,8 @@ ShapeAndDims canonicalize_fft_shape_and_dim_args(
 // Complex to complex n-dimensional fft
 Tensor fftn_c2c(
     c10::string_view function_name,
-    Tensor out, const Tensor& input, IntArrayRef shape,
-    IntArrayRef dim, c10::optional<c10::string_view> norm_str, bool forward) {
+    Tensor out, const Tensor& input, SymIntArrayRef shape,
+    IntArrayRef dim, std::optional<c10::string_view> norm_str, bool forward) {
   TORCH_CHECK(input.is_complex(), function_name, " expects a complex input tensor, but got", input.scalar_type());
   Tensor x = resize_fft_input(input, dim, shape);
   const auto norm = static_cast<int64_t>(norm_from_string(norm_str, forward));
@@ -357,15 +357,15 @@ Tensor fftn_c2c(
 }  // namespace (anonymous)
 
 // torch.fft.fft, analogous to NumPy's numpy.fft.fft
-Tensor fft_fft(const Tensor& self, c10::optional<int64_t> n, int64_t dim,
-               c10::optional<c10::string_view> norm) {
+Tensor fft_fft_symint(const Tensor& self, std::optional<SymInt> n, int64_t dim,
+               std::optional<c10::string_view> norm) {
   return self.is_complex() ?
     fft_c2c("fft", {}, self, n, dim, norm, /*forward=*/true) :
     fft_r2c("fft", {}, self, n, dim, norm, /*forward=*/true, /*onesided=*/false);
 }
 
-Tensor& fft_fft_out(const Tensor& self, c10::optional<int64_t> n,
-                    int64_t dim, c10::optional<c10::string_view> norm, Tensor& out) {
+Tensor& fft_fft_symint_out(const Tensor& self, std::optional<SymInt> n,
+                    int64_t dim, std::optional<c10::string_view> norm, Tensor& out) {
   if (self.is_complex()) {
     fft_c2c("fft", out, self, n, dim, norm, /*forward=*/true);
   } else {
@@ -374,15 +374,15 @@ Tensor& fft_fft_out(const Tensor& self, c10::optional<int64_t> n,
   return out;
 }
 
-Tensor fft_ifft(const Tensor& self, c10::optional<int64_t> n, int64_t dim,
-                c10::optional<c10::string_view> norm) {
+Tensor fft_ifft_symint(const Tensor& self, std::optional<SymInt> n, int64_t dim,
+                std::optional<c10::string_view> norm) {
   return self.is_complex() ?
     fft_c2c("ifft", {}, self, n, dim, norm, /*forward=*/false) :
     fft_r2c("ifft", {}, self, n, dim, norm, /*forward=*/false, /*onesided=*/false);
 }
 
-Tensor& fft_ifft_out(const Tensor& self, c10::optional<int64_t> n,
-                     int64_t dim, c10::optional<c10::string_view> norm, Tensor& out) {
+Tensor& fft_ifft_symint_out(const Tensor& self, std::optional<SymInt> n,
+                     int64_t dim, std::optional<c10::string_view> norm, Tensor& out) {
   if (self.is_complex()) {
     fft_c2c("ifft", out, self, n, dim, norm, /*forward=*/false);
   } else {
@@ -391,63 +391,63 @@ Tensor& fft_ifft_out(const Tensor& self, c10::optional<int64_t> n,
   return out;
 }
 
-Tensor fft_rfft(const Tensor& self, c10::optional<int64_t> n, int64_t dim,
-                c10::optional<c10::string_view> norm) {
+Tensor fft_rfft_symint(const Tensor& self, std::optional<SymInt> n, int64_t dim,
+                std::optional<c10::string_view> norm) {
   return fft_r2c("rfft", {}, self, n, dim, norm, /*forward=*/true, /*onesided=*/true);
 }
 
-Tensor& fft_rfft_out(const Tensor& self, c10::optional<int64_t> n,
-                     int64_t dim, c10::optional<c10::string_view> norm, Tensor& out) {
+Tensor& fft_rfft_symint_out(const Tensor& self, std::optional<SymInt> n,
+                     int64_t dim, std::optional<c10::string_view> norm, Tensor& out) {
   fft_r2c("rfft", out, self, n, dim, norm, /*forward=*/true, /*onesided=*/true);
   return out;
 }
 
-Tensor fft_irfft(const Tensor& self, c10::optional<int64_t> n, int64_t dim,
-                 c10::optional<c10::string_view> norm) {
+Tensor fft_irfft_symint(const Tensor& self, std::optional<SymInt> n, int64_t dim,
+                 std::optional<c10::string_view> norm) {
   return fft_c2r("irfft", {}, self, n, dim, norm, /*forward=*/false);
 }
 
-Tensor& fft_irfft_out(const Tensor& self, c10::optional<int64_t> n,
-                  int64_t dim, c10::optional<c10::string_view> norm, Tensor& out) {
+Tensor& fft_irfft_symint_out(const Tensor& self, std::optional<SymInt> n,
+                  int64_t dim, std::optional<c10::string_view> norm, Tensor& out) {
   fft_c2r("irfft", out, self, n, dim, norm, /*forward=*/false);
   return out;
 }
 
-Tensor fft_hfft(const Tensor& self, c10::optional<int64_t> n, int64_t dim,
-                c10::optional<c10::string_view> norm) {
+Tensor fft_hfft_symint(const Tensor& self, std::optional<SymInt> n, int64_t dim,
+                std::optional<c10::string_view> norm) {
   return fft_c2r("hfft", {}, self, n, dim, norm, /*forward=*/true);
 }
 
-Tensor& fft_hfft_out(const Tensor& self, c10::optional<int64_t> n,
-                     int64_t dim, c10::optional<c10::string_view> norm, Tensor& out) {
+Tensor& fft_hfft_symint_out(const Tensor& self, std::optional<SymInt> n,
+                     int64_t dim, std::optional<c10::string_view> norm, Tensor& out) {
   fft_c2r("hfft", out, self, n, dim, norm, /*forward=*/true);
   return out;
 }
 
-Tensor fft_ihfft(const Tensor& self, c10::optional<int64_t> n, int64_t dim,
-                 c10::optional<c10::string_view> norm) {
+Tensor fft_ihfft_symint(const Tensor& self, std::optional<SymInt> n, int64_t dim,
+                 std::optional<c10::string_view> norm) {
   return fft_r2c("ihfft", {}, self, n, dim, norm, /*forward=*/false, /*onesided=*/true);
 }
 
-Tensor& fft_ihfft_out(const Tensor& self, c10::optional<int64_t> n,
-                     int64_t dim, c10::optional<c10::string_view> norm, Tensor& out) {
+Tensor& fft_ihfft_symint_out(const Tensor& self, std::optional<SymInt> n,
+                     int64_t dim, std::optional<c10::string_view> norm, Tensor& out) {
   fft_r2c("ihfft", out, self, n, dim, norm, /*forward=*/false, /*onesided=*/true);
   return out;
 }
 
-Tensor fft_fftn(const Tensor& self, at::OptionalIntArrayRef s,
+Tensor fft_fftn_symint(const Tensor& self, at::OptionalSymIntArrayRef s,
                 at::OptionalIntArrayRef dim,
-                c10::optional<c10::string_view> norm) {
+                std::optional<c10::string_view> norm) {
   auto desc = canonicalize_fft_shape_and_dim_args(self, s, dim);
   // TODO: For real input, perform rfftn then mirror with conjugate symmetry
   Tensor input = promote_tensor_fft(self, /*require_complex=*/true);
   return fftn_c2c("fftn", {}, input, desc.shape, desc.dim, norm, /*forward=*/true);
 }
 
-Tensor& fft_fftn_out(const Tensor& self,
-                     at::OptionalIntArrayRef s,
+Tensor& fft_fftn_symint_out(const Tensor& self,
+                     at::OptionalSymIntArrayRef s,
                      at::OptionalIntArrayRef dim,
-                     c10::optional<c10::string_view> norm, Tensor& out) {
+                     std::optional<c10::string_view> norm, Tensor& out) {
   auto desc = canonicalize_fft_shape_and_dim_args(self, s, dim);
   // TODO: For real input, perform rfftn then mirror with conjugate symmetry
   Tensor input = promote_tensor_fft(self, /*require_complex=*/true);
@@ -455,18 +455,18 @@ Tensor& fft_fftn_out(const Tensor& self,
   return out;
 }
 
-Tensor fft_ifftn(const Tensor& self, at::OptionalIntArrayRef s,
+Tensor fft_ifftn_symint(const Tensor& self, at::OptionalSymIntArrayRef s,
                 at::OptionalIntArrayRef dim,
-                c10::optional<c10::string_view> norm) {
+                std::optional<c10::string_view> norm) {
   auto desc = canonicalize_fft_shape_and_dim_args(self, s, dim);
   Tensor input = promote_tensor_fft(self, /*require_complex=*/true);
   return fftn_c2c("ifftn", {}, input, desc.shape, desc.dim, norm, /*forward=*/false);
 }
 
-Tensor& fft_ifftn_out(const Tensor& self,
-                      at::OptionalIntArrayRef s,
+Tensor& fft_ifftn_symint_out(const Tensor& self,
+                      at::OptionalSymIntArrayRef s,
                       at::OptionalIntArrayRef dim,
-                      c10::optional<c10::string_view> norm, Tensor& out) {
+                      std::optional<c10::string_view> norm, Tensor& out) {
   auto desc = canonicalize_fft_shape_and_dim_args(self, s, dim);
   Tensor input = promote_tensor_fft(self, /*require_complex=*/true);
   fftn_c2c("ifftn", out, input, desc.shape, desc.dim, norm, /*forward=*/false);
@@ -474,9 +474,9 @@ Tensor& fft_ifftn_out(const Tensor& self,
 }
 
 static Tensor fft_rfftn_impl(Tensor out, const Tensor& self,
-                             at::OptionalIntArrayRef s,
+                             at::OptionalSymIntArrayRef s,
                              at::OptionalIntArrayRef dim,
-                             const c10::optional<c10::string_view>& norm_str) {
+                             const std::optional<c10::string_view>& norm_str) {
   TORCH_CHECK(!self.is_complex(), "rfftn expects a real-valued input tensor, but got ", self.scalar_type());
   auto desc = canonicalize_fft_shape_and_dim_args(self, s, dim);
   TORCH_CHECK(!desc.shape.empty(), "rfftn must transform at least one axis");
@@ -487,25 +487,25 @@ static Tensor fft_rfftn_impl(Tensor out, const Tensor& self,
   return fft_r2c_maybe_out(fname, out, x, desc.dim, norm, /*onesided=*/true);
 }
 
-Tensor fft_rfftn(const Tensor& self, at::OptionalIntArrayRef s,
+Tensor fft_rfftn_symint(const Tensor& self, at::OptionalSymIntArrayRef s,
                 at::OptionalIntArrayRef dim,
-                c10::optional<c10::string_view> norm_str) {
+                std::optional<c10::string_view> norm_str) {
   return fft_rfftn_impl({}, self, s, dim, norm_str);
 }
 
-Tensor& fft_rfftn_out(const Tensor& self,
-                      at::OptionalIntArrayRef s,
+Tensor& fft_rfftn_symint_out(const Tensor& self,
+                      at::OptionalSymIntArrayRef s,
                       at::OptionalIntArrayRef dim,
-                      c10::optional<c10::string_view> norm_str, Tensor& out) {
+                      std::optional<c10::string_view> norm_str, Tensor& out) {
   fft_rfftn_impl(out, self, s, dim, norm_str);
   return out;
 }
 
-ShapeAndDims canonicalize_fft_c2r_shape_and_dim_args(
+static ShapeAndDims canonicalize_fft_c2r_shape_and_dim_args(
     c10::string_view fname, const Tensor& self,
-    const at::OptionalIntArrayRef& s,
+    const at::OptionalSymIntArrayRef& s,
     const at::OptionalIntArrayRef& dims,
-    int64_t& last_dim_size) {
+    SymInt& last_dim_size) {
   auto desc = canonicalize_fft_shape_and_dim_args(self, s, dims);
   TORCH_CHECK(!desc.shape.empty(), fname, " must transform at least one axis");
 
@@ -514,7 +514,7 @@ ShapeAndDims canonicalize_fft_c2r_shape_and_dim_args(
     // Fixup default shape handling in the last dimension,
     if (!s.has_value() || (s->back() == -1)) {
       const auto last_dim = desc.dim.back();
-      return 2 * (self.sizes()[last_dim] - 1);
+      return 2 * (self.sym_sizes()[last_dim] - 1);
     }
     return desc.shape.back();
   }();
@@ -526,10 +526,10 @@ ShapeAndDims canonicalize_fft_c2r_shape_and_dim_args(
 }
 
 static Tensor fft_irfftn_impl(Tensor out, const Tensor& self,
-                              at::OptionalIntArrayRef s,
+                              at::OptionalSymIntArrayRef s,
                               at::OptionalIntArrayRef dim,
-                              const c10::optional<c10::string_view>& norm_str) {
-  int64_t last_dim_size = 0;
+                              const std::optional<c10::string_view>& norm_str) {
+  SymInt last_dim_size = 0;
   auto desc = canonicalize_fft_c2r_shape_and_dim_args(
       "irfftn", self, s, dim, last_dim_size);
   Tensor input = promote_tensor_fft(self, /*require_complex=*/true);
@@ -539,29 +539,29 @@ static Tensor fft_irfftn_impl(Tensor out, const Tensor& self,
   return fft_c2r_maybe_out(fname, out, x, desc.dim, norm, last_dim_size);
 }
 
-Tensor fft_irfftn(const Tensor& self,
-                  at::OptionalIntArrayRef s,
+Tensor fft_irfftn_symint(const Tensor& self,
+                  at::OptionalSymIntArrayRef s,
                   at::OptionalIntArrayRef dim,
-                  c10::optional<c10::string_view> norm_str) {
+                  std::optional<c10::string_view> norm_str) {
   return fft_irfftn_impl({}, self, s, dim, norm_str);
 }
 
-Tensor& fft_irfftn_out(const Tensor& self,
-                       at::OptionalIntArrayRef s,
+Tensor& fft_irfftn_symint_out(const Tensor& self,
+                       at::OptionalSymIntArrayRef s,
                        at::OptionalIntArrayRef dim,
-                       c10::optional<c10::string_view> norm_str, Tensor& out) {
+                       std::optional<c10::string_view> norm_str, Tensor& out) {
   fft_irfftn_impl(out, self, s, dim, norm_str);
   return out;
 }
 
 static Tensor fft_hfftn_impl(
     const Tensor& self,
-    at::OptionalIntArrayRef s,
+    at::OptionalSymIntArrayRef s,
     at::OptionalIntArrayRef dim,
-    c10::optional<c10::string_view> norm_str,
+    std::optional<c10::string_view> norm_str,
     const Tensor& out) {
   constexpr c10::string_view fname = "hfftn";
-  int64_t last_dim_size = 0;
+  SymInt last_dim_size = 0;
   auto desc = canonicalize_fft_c2r_shape_and_dim_args(
       fname, self, s, dim, last_dim_size);
   auto input = promote_tensor_fft(self, /*require_complex=*/true);
@@ -582,18 +582,18 @@ static Tensor fft_hfftn_impl(
   return fft_c2r_maybe_out(fname, out, tmp, last_dim, norm, last_dim_size);
 }
 
-Tensor fft_hfftn(
+Tensor fft_hfftn_symint(
     const Tensor& self,
-    at::OptionalIntArrayRef s,
+    at::OptionalSymIntArrayRef s,
     at::OptionalIntArrayRef dim,
-    c10::optional<c10::string_view> norm) {
+    std::optional<c10::string_view> norm) {
   return fft_hfftn_impl(self, s, dim, norm, {});
 }
 
-const Tensor& fft_hfftn_out(
+const Tensor& fft_hfftn_symint_out(
     const Tensor& self,
-    at::OptionalIntArrayRef s,
-    at::OptionalIntArrayRef dim, c10::optional<c10::string_view> norm,
+    at::OptionalSymIntArrayRef s,
+    at::OptionalIntArrayRef dim, std::optional<c10::string_view> norm,
     const Tensor& out) {
   fft_hfftn_impl(self, s, dim, norm, out);
   return out;
@@ -601,9 +601,9 @@ const Tensor& fft_hfftn_out(
 
 static Tensor fft_ihfftn_impl(
     const Tensor& self,
-    const at::OptionalIntArrayRef& s,
+    const at::OptionalSymIntArrayRef& s,
     const at::OptionalIntArrayRef& dim,
-    const c10::optional<c10::string_view>& norm_str,
+    const std::optional<c10::string_view>& norm_str,
     const Tensor& out) {
   constexpr c10::string_view fname = "ihfftn";
   auto desc = canonicalize_fft_shape_and_dim_args(self, s, dim);
@@ -624,84 +624,84 @@ static Tensor fft_ihfftn_impl(
   return fft_c2c_maybe_out(fname, out, tmp, c2c_dims, norm, /*forward=*/false);
 }
 
-Tensor fft_ihfftn(
+Tensor fft_ihfftn_symint(
     const Tensor& self,
-    at::OptionalIntArrayRef s,
+    at::OptionalSymIntArrayRef s,
     at::OptionalIntArrayRef dim,
-    c10::optional<c10::string_view> norm) {
+    std::optional<c10::string_view> norm) {
   return fft_ihfftn_impl(self, s, dim, norm, {});
 }
 
-const Tensor& fft_ihfftn_out(
+const Tensor& fft_ihfftn_symint_out(
     const Tensor& self,
-    at::OptionalIntArrayRef s,
+    at::OptionalSymIntArrayRef s,
     at::OptionalIntArrayRef dim,
-    c10::optional<c10::string_view> norm,
+    std::optional<c10::string_view> norm,
     const Tensor& out) {
   fft_ihfftn_impl(self, s, dim, norm, out);
   return out;
 }
 
-Tensor fft_fft2(const Tensor& self, at::OptionalIntArrayRef s,
-                IntArrayRef dim, c10::optional<c10::string_view> norm) {
-  return native::fft_fftn(self, s, dim, std::move(norm));
+Tensor fft_fft2_symint(const Tensor& self, at::OptionalSymIntArrayRef s,
+                IntArrayRef dim, std::optional<c10::string_view> norm) {
+  return native::fft_fftn_symint(self, s, dim, std::move(norm));
 }
 
-Tensor& fft_fft2_out(const Tensor& self, at::OptionalIntArrayRef s,
-                     IntArrayRef dim, c10::optional<c10::string_view> norm, Tensor& out) {
-  return native::fft_fftn_out(self, s, dim, std::move(norm), out);
+Tensor& fft_fft2_symint_out(const Tensor& self, at::OptionalSymIntArrayRef s,
+                     IntArrayRef dim, std::optional<c10::string_view> norm, Tensor& out) {
+  return native::fft_fftn_symint_out(self, s, dim, std::move(norm), out);
 }
 
-Tensor fft_ifft2(const Tensor& self, at::OptionalIntArrayRef s,
-                IntArrayRef dim, c10::optional<c10::string_view> norm) {
-  return native::fft_ifftn(self, s, dim, std::move(norm));
+Tensor fft_ifft2_symint(const Tensor& self, at::OptionalSymIntArrayRef s,
+                IntArrayRef dim, std::optional<c10::string_view> norm) {
+  return native::fft_ifftn_symint(self, s, dim, std::move(norm));
 }
 
-Tensor& fft_ifft2_out(const Tensor& self, at::OptionalIntArrayRef s,
-                      IntArrayRef dim, c10::optional<c10::string_view> norm, Tensor& out) {
-  return native::fft_ifftn_out(self, s, dim, std::move(norm), out);
+Tensor& fft_ifft2_symint_out(const Tensor& self, at::OptionalSymIntArrayRef s,
+                      IntArrayRef dim, std::optional<c10::string_view> norm, Tensor& out) {
+  return native::fft_ifftn_symint_out(self, s, dim, std::move(norm), out);
 }
 
-Tensor fft_rfft2(const Tensor& self, at::OptionalIntArrayRef s,
-                IntArrayRef dim, c10::optional<c10::string_view> norm) {
-  return native::fft_rfftn(self, s, dim, std::move(norm));
+Tensor fft_rfft2_symint(const Tensor& self, at::OptionalSymIntArrayRef s,
+                IntArrayRef dim, std::optional<c10::string_view> norm) {
+  return native::fft_rfftn_symint(self, s, dim, std::move(norm));
 }
 
-Tensor& fft_rfft2_out(const Tensor& self, at::OptionalIntArrayRef s,
-                      IntArrayRef dim, c10::optional<c10::string_view> norm, Tensor& out) {
-  return native::fft_rfftn_out(self, s, dim, std::move(norm), out);
+Tensor& fft_rfft2_symint_out(const Tensor& self, at::OptionalSymIntArrayRef s,
+                      IntArrayRef dim, std::optional<c10::string_view> norm, Tensor& out) {
+  return native::fft_rfftn_symint_out(self, s, dim, std::move(norm), out);
 }
 
-Tensor fft_irfft2(const Tensor& self, at::OptionalIntArrayRef s,
-                  IntArrayRef dim, c10::optional<c10::string_view> norm) {
-  return native::fft_irfftn(self, s, dim, std::move(norm));
+Tensor fft_irfft2_symint(const Tensor& self, at::OptionalSymIntArrayRef s,
+                  IntArrayRef dim, std::optional<c10::string_view> norm) {
+  return native::fft_irfftn_symint(self, s, dim, std::move(norm));
 }
 
-Tensor& fft_irfft2_out(const Tensor& self, at::OptionalIntArrayRef s,
-                       IntArrayRef dim, c10::optional<c10::string_view> norm, Tensor& out) {
-  return native::fft_irfftn_out(self, s, dim, std::move(norm), out);
+Tensor& fft_irfft2_symint_out(const Tensor& self, at::OptionalSymIntArrayRef s,
+                       IntArrayRef dim, std::optional<c10::string_view> norm, Tensor& out) {
+  return native::fft_irfftn_symint_out(self, s, dim, std::move(norm), out);
 }
 
-const Tensor& fft_hfft2_out(
-    const Tensor& self, at::OptionalIntArrayRef s, IntArrayRef dim,
-    c10::optional<c10::string_view> norm, const Tensor& out) {
-  return native::fft_hfftn_out(self, s, dim, std::move(norm), out);
+const Tensor& fft_hfft2_symint_out(
+    const Tensor& self, at::OptionalSymIntArrayRef s, IntArrayRef dim,
+    std::optional<c10::string_view> norm, const Tensor& out) {
+  return native::fft_hfftn_symint_out(self, s, dim, std::move(norm), out);
 }
 
-Tensor fft_hfft2(const Tensor& self, at::OptionalIntArrayRef s,
-                 IntArrayRef dim, c10::optional<c10::string_view> norm) {
-  return native::fft_hfftn(self, s, dim, std::move(norm));
+Tensor fft_hfft2_symint(const Tensor& self, at::OptionalSymIntArrayRef s,
+                 IntArrayRef dim, std::optional<c10::string_view> norm) {
+  return native::fft_hfftn_symint(self, s, dim, std::move(norm));
 }
 
-const Tensor& fft_ihfft2_out(
-    const Tensor& self, at::OptionalIntArrayRef s, IntArrayRef dim,
-    c10::optional<c10::string_view> norm, const Tensor& out) {
-  return native::fft_ihfftn_out(self, s, dim, std::move(norm), out);
+const Tensor& fft_ihfft2_symint_out(
+    const Tensor& self, at::OptionalSymIntArrayRef s, IntArrayRef dim,
+    std::optional<c10::string_view> norm, const Tensor& out) {
+  return native::fft_ihfftn_symint_out(self, s, dim, std::move(norm), out);
 }
 
-Tensor fft_ihfft2(const Tensor& self, at::OptionalIntArrayRef s,
-                  IntArrayRef dim, c10::optional<c10::string_view> norm) {
-  return native::fft_ihfftn(self, s, dim, std::move(norm));
+Tensor fft_ihfft2_symint(const Tensor& self, at::OptionalSymIntArrayRef s,
+                  IntArrayRef dim, std::optional<c10::string_view> norm) {
+  return native::fft_ihfftn_symint(self, s, dim, std::move(norm));
 }
 
 Tensor& fft_fftfreq_out(int64_t n, double d, Tensor& out) {
@@ -716,10 +716,10 @@ Tensor& fft_fftfreq_out(int64_t n, double d, Tensor& out) {
 }
 
 Tensor fft_fftfreq(int64_t n, double d,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
@@ -737,10 +737,10 @@ Tensor& fft_rfftfreq_out(int64_t n, double d, Tensor& out) {
 }
 
 Tensor fft_rfftfreq(int64_t n, double d,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
@@ -750,7 +750,7 @@ Tensor fft_rfftfreq(int64_t n, double d,
 
 // If an array dim is specified, wraps them according to self.dim().
 // Otherwise returns a vector of all dims.
-DimVector default_alldims(const Tensor& self, at::OptionalIntArrayRef dim_opt) {
+static DimVector default_alldims(const Tensor& self, at::OptionalIntArrayRef dim_opt) {
   DimVector dim;
   if (dim_opt) {
     IntArrayRef dim_unwrapped = *dim_opt;
@@ -768,43 +768,43 @@ DimVector default_alldims(const Tensor& self, at::OptionalIntArrayRef dim_opt) {
 Tensor fft_fftshift(const Tensor& x, at::OptionalIntArrayRef dim_opt) {
   auto dim = default_alldims(x, dim_opt);
 
-  IntArrayRef x_sizes = x.sizes();
-  DimVector shift(dim.size());
+  SymIntArrayRef x_sizes = x.sym_sizes();
+  SymDimVector shift(dim.size());
   for (const auto i : c10::irange(dim.size())) {
     shift[i] = x_sizes[dim[i]] / 2;
   }
 
-  return at::roll(x, shift, dim);
+  return at::roll_symint(x, shift, dim);
 }
 
 Tensor fft_ifftshift(const Tensor& x, at::OptionalIntArrayRef dim_opt) {
   auto dim = default_alldims(x, dim_opt);
 
-  IntArrayRef x_sizes = x.sizes();
-  DimVector shift(dim.size());
+  SymIntArrayRef x_sizes = x.sym_sizes();
+  SymDimVector shift(dim.size());
   for (const auto i : c10::irange(dim.size())) {
     shift[i] = (x_sizes[dim[i]] + 1) / 2;
   }
 
-  return at::roll(x, shift, dim);
+  return at::roll_symint(x, shift, dim);
 }
 
 
 // We call the following methods via CUDA hooks because they are really only
 // valid when CUDA is available. See native/cuda/CuFFTPlanCache.h for more details.
-int64_t _cufft_get_plan_cache_max_size(int64_t device_index) {
+int64_t _cufft_get_plan_cache_max_size(DeviceIndex device_index) {
   return detail::getCUDAHooks().cuFFTGetPlanCacheMaxSize(device_index);
 }
 
-void _cufft_set_plan_cache_max_size(int64_t device_index, int64_t max_size) {
+void _cufft_set_plan_cache_max_size(DeviceIndex device_index, int64_t max_size) {
   detail::getCUDAHooks().cuFFTSetPlanCacheMaxSize(device_index, max_size);
 }
 
-int64_t _cufft_get_plan_cache_size(int64_t device_index) {
+int64_t _cufft_get_plan_cache_size(DeviceIndex device_index) {
   return detail::getCUDAHooks().cuFFTGetPlanCacheSize(device_index);
 }
 
-void _cufft_clear_plan_cache(int64_t device_index) {
+void _cufft_clear_plan_cache(DeviceIndex device_index) {
   detail::getCUDAHooks().cuFFTClearPlanCache(device_index);
 }
 
@@ -824,12 +824,23 @@ static Stream& write_opt(Stream& SS, const optional<T>& value) {
  * signals and complex windows.
  */
 Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
-            const optional<int64_t> win_lengthOpt, const c10::optional<Tensor>& window_opt,
+            const optional<int64_t> win_lengthOpt, const std::optional<Tensor>& window_opt,
             const bool center, c10::string_view mode, const bool normalized,
             const optional<bool> onesidedOpt, const optional<bool> return_complexOpt) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> window_maybe_owned = at::borrow_from_optional_tensor(window_opt);
   const Tensor& window = *window_maybe_owned;
+
+  // Warn if window is not provided
+  if (!window.defined()) {
+    TORCH_WARN_ONCE(
+        "A window was not provided. A rectangular window will be applied,"
+        "which is known to cause spectral leakage. "
+        "Other windows such as torch.hann_window or torch.hamming_window "
+        "can are recommended to reduce spectral leakage."
+        "To suppress this warning and use a rectangular window, explicitly set "
+        "`window=torch.ones(n_fft, device=<device>)`.");
+  }
 
   #define REPR(SS) \
     SS << "stft(" << self.toString() << self.sizes() << ", n_fft=" << n_fft \
@@ -969,7 +980,7 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
 
 Tensor stft(
     const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
-    const optional<int64_t> win_lengthOpt, const c10::optional<Tensor>& window_opt,
+    const optional<int64_t> win_lengthOpt, const std::optional<Tensor>& window_opt,
     const bool normalized,
     const optional<bool> onesidedOpt, const optional<bool> return_complexOpt) {
   return at::stft(
@@ -1000,12 +1011,22 @@ static Tensor as_complex(const Tensor& self) {
  * signals and complex windows.
  */
 Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
-             const optional<int64_t> win_lengthOpt, const c10::optional<Tensor>& window_opt,
-             const bool center, const bool normalized, const c10::optional<bool> onesidedOpt,
+             const optional<int64_t> win_lengthOpt, const std::optional<Tensor>& window_opt,
+             const bool center, const bool normalized, const std::optional<bool> onesidedOpt,
              const optional<int64_t> lengthOpt, const bool return_complex) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> window_maybe_owned = at::borrow_from_optional_tensor(window_opt);
   const Tensor& window = *window_maybe_owned;
+
+  // Warn if window is not provided
+  if (!window.defined()) {
+    TORCH_WARN_ONCE(
+        "A window was not provided. A rectangular window will be applied."
+        "Please provide the same window used by stft to make the inversion "
+        "lossless."
+        "To suppress this warning and use a rectangular window, explicitly set "
+        "`window=torch.ones(n_fft, device=<device>)`.");
+  }
 
   #define REPR(SS) \
     SS << "istft(" << self.toString() << self.sizes() << ", n_fft=" << n_fft \
@@ -1174,15 +1195,6 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
 #undef REPR
 }
 
-Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
-             const optional<int64_t> win_lengthOpt, const Tensor& window,
-             const bool center, const bool normalized, const optional<bool> onesidedOpt,
-             const optional<int64_t> lengthOpt) {
-  return at::native::istft(
-      self, n_fft, hop_lengthOpt, win_lengthOpt, window, center, normalized,
-      onesidedOpt, lengthOpt, /*return_complex=*/false);
-}
-
 void _fft_fill_with_conjugate_symmetry_(const Tensor& input, IntArrayRef dim_) {
   const auto input_sizes = input.sizes();
   const auto input_strides = input.strides();
@@ -1276,4 +1288,4 @@ void _fft_fill_with_conjugate_symmetry_(const Tensor& input, IntArrayRef dim_) {
 
 DEFINE_DISPATCH(fft_fill_with_conjugate_symmetry_stub);
 
-}} // at::native
+} // namespace at::native

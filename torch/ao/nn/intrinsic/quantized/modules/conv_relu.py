@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 
 import torch
 import torch.ao.nn.intrinsic
@@ -31,7 +32,7 @@ class ConvReLU1d(nnq.Conv1d):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
                  padding_mode='zeros', device=None, dtype=None):
-        super(ConvReLU1d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride=stride,
             padding=padding, dilation=dilation, groups=groups, bias=bias,
             padding_mode=padding_mode, device=device, dtype=dtype)
@@ -53,12 +54,13 @@ class ConvReLU1d(nnq.Conv1d):
         return 'QuantizedConvReLU1d'
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         if type(mod) == torch.ao.nn.intrinsic.qat.ConvBnReLU1d:
+            assert mod.bn.running_var is not None and mod.bn.running_mean is not None
             mod.weight, mod.bias = fuse_conv_bn_weights(
                 mod.weight, mod.bias, mod.bn.running_mean, mod.bn.running_var,
                 mod.bn.eps, mod.bn.weight, mod.bn.bias)
-        return super(ConvReLU1d, cls).from_float(mod)
+        return super().from_float(mod, use_precomputed_fake_quant)
 
     @classmethod
     def from_reference(cls, ref_qconv, output_scale, output_zero_point):
@@ -81,7 +83,7 @@ class ConvReLU2d(nnq.Conv2d):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
                  padding_mode='zeros', device=None, dtype=None):
-        super(ConvReLU2d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride=stride,
             padding=padding, dilation=dilation, groups=groups, bias=bias,
             padding_mode=padding_mode, device=device, dtype=dtype)
@@ -102,12 +104,13 @@ class ConvReLU2d(nnq.Conv2d):
         return 'QuantizedConvReLU2d'
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         if type(mod) == torch.ao.nn.intrinsic.qat.ConvBnReLU2d:
+            assert mod.bn.running_var is not None and mod.bn.running_mean is not None
             mod.weight, mod.bias = fuse_conv_bn_weights(
                 mod.weight, mod.bias, mod.bn.running_mean, mod.bn.running_var,
                 mod.bn.eps, mod.bn.weight, mod.bn.bias)
-        return super(ConvReLU2d, cls).from_float(mod)
+        return super().from_float(mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
 
     @classmethod
     def from_reference(cls, ref_qconv, output_scale, output_zero_point):
@@ -131,7 +134,7 @@ class ConvReLU3d(nnq.Conv3d):
                  padding=0, dilation=1, groups=1, bias=True,
                  padding_mode='zeros', device=None, dtype=None):
         assert padding_mode != 'reflect', "Conv3d does not support reflection padding"
-        super(ConvReLU3d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride=stride,
             padding=padding, dilation=dilation, groups=groups, bias=bias,
             padding_mode=padding_mode, device=device, dtype=dtype)
@@ -152,8 +155,9 @@ class ConvReLU3d(nnq.Conv3d):
         return 'QuantizedConvReLU3d'
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         if type(mod) == torch.ao.nn.intrinsic.qat.ConvBnReLU3d:
+            assert mod.bn.running_var is not None and mod.bn.running_mean is not None
             mod.weight, mod.bias = fuse_conv_bn_weights(
                 mod.weight,
                 mod.bias,
@@ -163,7 +167,7 @@ class ConvReLU3d(nnq.Conv3d):
                 mod.bn.weight,
                 mod.bn.bias,
             )
-        return super(ConvReLU3d, cls).from_float(mod)
+        return super().from_float(mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
 
     @classmethod
     def from_reference(cls, ref_qconv, output_scale, output_zero_point):

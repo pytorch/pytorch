@@ -8,9 +8,11 @@ cxx_library(
             "test/**/*.cpp",
             "benchmark/**/*.cpp",
             "cuda/**/*.cpp",
+            "xpu/**/*.cpp",
         ],
     ),
       deps = [
+        "//third_party:cpuinfo",
         "//third_party:fmt",
         "//third_party:glog",
     ],
@@ -29,6 +31,7 @@ cxx_library(
             "test/**/*.h",
             "benchmark/**/*.h",
             "cuda/**/*.h",
+            "xpu/**/*.h",
         ],
     ),
     exported_linker_flags = [],
@@ -36,7 +39,6 @@ cxx_library(
         '-DC10_USING_CUSTOM_GENERATED_MACROS',
         '-DC10_USE_GLOG',
         '-DC10_USE_MINIMAL_GLOG',
-        '-DC10_DISABLE_NUMA',
         '-DC10_MOBILE',
         '-fexceptions',
         '-Wno-global-constructors'

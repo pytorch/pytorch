@@ -2,11 +2,11 @@
 
 #include <c10/core/Scalar.h>
 
-namespace at { namespace native {
+namespace at::native {
 
-enum ReductionType {MAX, MEAN, MIN, SUM, PROD};
+enum class ReductionType {MAX, MEAN, MIN, SUM, PROD};
 
-static inline ReductionType get_reduction_enum(const c10::string_view& reduce) {
+inline ReductionType get_reduction_enum(const c10::string_view& reduce) {
   if (reduce == "max" || reduce == "amax") {
     return ReductionType::MAX;
   } else if (reduce == "mean") {
@@ -23,7 +23,7 @@ static inline ReductionType get_reduction_enum(const c10::string_view& reduce) {
 }
 
 // used for `scatter_reduce`, old options for BC.
-static inline ReductionType get_operator_enum(const c10::string_view reduce, bool use_new_options) {
+inline ReductionType get_operator_enum(const c10::string_view reduce, bool use_new_options) {
   if (use_new_options) {
     return get_reduction_enum(reduce);
   } else {
@@ -37,4 +37,4 @@ static inline ReductionType get_operator_enum(const c10::string_view reduce, boo
   }
 }
 
-}} // at::native
+} // at::native

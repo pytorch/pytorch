@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import argparse
 import cProfile
 import pstats
@@ -16,7 +17,7 @@ def redirect_argv(new_argv):
 
 def compiled_with_cuda(sysinfo):
     if sysinfo.cuda_compiled_version:
-        return 'compiled w/ CUDA {}'.format(sysinfo.cuda_compiled_version)
+        return f'compiled w/ CUDA {sysinfo.cuda_compiled_version}'
     return 'not compiled w/ CUDA'
 
 
@@ -59,7 +60,7 @@ def run_env_analysis():
         'debug_str': debug_str,
         'pytorch_version': info.torch_version,
         'cuda_compiled': compiled_with_cuda(info),
-        'py_version': '{}.{}'.format(sys.version_info[0], sys.version_info[1]),
+        'py_version': f'{sys.version_info[0]}.{sys.version_info[1]}',
         'cuda_runtime': cuda_avail,
         'pip_version': pip_version,
         'pip_list_output': pip_list_output,
@@ -138,7 +139,7 @@ def print_autograd_prof_summary(prof, mode, sortby='cpu_time', topk=15):
 
     result = {
         'mode': mode,
-        'description': 'top {} events sorted by {}'.format(topk, sortby),
+        'description': f'top {topk} events sorted by {sortby}',
         'output': torch.autograd.profiler_util._build_table(topk_events),
         'cuda_warning': cuda_warning
     }
@@ -156,7 +157,7 @@ exits in a finite amount of time.
 
 For more complicated uses of the profilers, please see
 https://docs.python.org/3/library/profile.html and
-https://pytorch.org/docs/master/autograd.html#profiler for more information.
+https://pytorch.org/docs/main/autograd.html#profiler for more information.
 """.strip()
 
 
@@ -171,7 +172,7 @@ def parse_args():
 
 
 def cpu_time_total(autograd_prof):
-    return sum([event.cpu_time_total for event in autograd_prof.function_events])
+    return sum(event.cpu_time_total for event in autograd_prof.function_events)
 
 
 def main():

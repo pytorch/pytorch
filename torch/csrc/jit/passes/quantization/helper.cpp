@@ -185,7 +185,7 @@ std::tuple<c10::QScheme, QParamVector> _per_tensor_asym_qparam =
              std::make_pair(".zero_point", IValue(_asym_zero_point)),
              std::make_pair(".scalar_type", IValue(c10::kQUInt8))}));
 
-// quantization parrameters for ops with range -1 to 1
+// quantization parameters for ops with range -1 to 1
 // for example: aten/src/ATen/native/quantized/cpu/qtanh.cpp
 std::tuple<c10::QScheme, QParamVector> _per_tensor_sym_qparam = std::make_tuple(
     c10::kPerTensorAffine,
@@ -235,7 +235,7 @@ std::vector<std::string> _propagate_quant_binary_ops = {
 bool matchAtenFuncToUse(
     const Use& use,
     const std::string& func_name,
-    c10::optional<int> n) {
+    std::optional<int> n) {
   Node* node = use.user;
   return node->kind() == Symbol::aten(func_name) &&
       (!n.has_value() || static_cast<size_t>(n.value()) == use.offset);
@@ -244,7 +244,7 @@ bool matchAtenFuncToUse(
 bool matchCallFuncToUse(
     const Use& use,
     const std::string& func_name,
-    c10::optional<int> n) {
+    std::optional<int> n) {
   Node* node = use.user;
   return node->kind() == prim::CallFunction &&
       getFuncName(node->inputs()[0]) == func_name &&
@@ -253,7 +253,7 @@ bool matchCallFuncToUse(
 
 // Check any use of `v` matches the aten function call
 // or CallFunction patterns
-bool matchArgPattern(
+static bool matchArgPattern(
     Value* v,
     const AtenFuncArgs& aten_func_args,
     const CallFuncArgs& call_func_args) {
@@ -316,7 +316,7 @@ bool isEmbeddingBagNonInput(Value* v) {
   return result;
 }
 
-c10::optional<Use> getClampScalarInputUse(Value* v) {
+std::optional<Use> getClampScalarInputUse(Value* v) {
   for (const auto& use : v->uses()) {
     for (const auto& aten_func : _clamp_funcs) {
       if (matchAtenFuncToUse(use, aten_func, 1) ||
@@ -395,7 +395,8 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
   return {};
 }
 
-std::vector<NodeKind> toAtenSymbol(const std::vector<std::string>& func_names) {
+static std::vector<NodeKind> toAtenSymbol(
+    const std::vector<std::string>& func_names) {
   std::vector<NodeKind> symbols;
   std::transform(
       func_names.begin(),
@@ -405,18 +406,18 @@ std::vector<NodeKind> toAtenSymbol(const std::vector<std::string>& func_names) {
   return symbols;
 }
 
-bool isAtenFunc(Node* n, const std::vector<NodeKind>& aten_funcs) {
+static bool isAtenFunc(Node* n, const std::vector<NodeKind>& aten_funcs) {
   return std::find(aten_funcs.begin(), aten_funcs.end(), n->kind()) !=
       aten_funcs.end();
 }
 
-bool isAtenFunc(Node* n, const std::vector<std::string>& aten_funcs) {
+static bool isAtenFunc(Node* n, const std::vector<std::string>& aten_funcs) {
   const auto& symbols = toAtenSymbol(aten_funcs);
   return isAtenFunc(n, symbols);
 }
 
 // TODO: factor out isCallFunc
-bool isFunctionNode(
+static bool isFunctionNode(
     Node* n,
     const std::vector<std::string>& call_funcs,
     const std::vector<std::string>& aten_funcs) {
@@ -492,7 +493,7 @@ bool isBinaryOpWithScalarInput(Node* n) {
   return isPropagateQuantBinaryOp(n) && isScalar(n->input(1));
 }
 
-c10::optional<std::tuple<c10::QScheme, QParamVector>> getFixedQParams(Node* n) {
+std::optional<std::tuple<c10::QScheme, QParamVector>> getFixedQParams(Node* n) {
   static std::vector<NodeKind> fixed_qparam_funcs;
   std::transform(
       _fixed_qparams_map.begin(),
@@ -641,7 +642,7 @@ Module getInvokedModule(Module& module, Node* n, Value* self) {
   return findChildModule(module, path);
 }
 
-c10::optional<Module> getInvokedModuleOpt(
+std::optional<Module> getInvokedModuleOpt(
     const Module& module,
     Node* n,
     Value* self) {
@@ -669,7 +670,7 @@ bool is_int_constant(
   return v && v->isInt() && v->toInt() == value;
 }
 
-bool is_functional(
+static bool is_functional(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap,
     const std::string& vname,
@@ -685,7 +686,7 @@ std::string removeTorchMangle(const std::string& orig_name) {
   return qualified_name;
 }
 
-c10::optional<std::string> getModuleName(Value* value) {
+std::optional<std::string> getModuleName(Value* value) {
   auto type = value->type()->cast<ClassType>();
   if (type && type->name()) {
     return removeTorchMangle(type->name()->qualifiedName());
@@ -693,7 +694,7 @@ c10::optional<std::string> getModuleName(Value* value) {
   return c10::nullopt;
 }
 
-bool is_module(
+static bool is_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap,
     const std::string& vname,

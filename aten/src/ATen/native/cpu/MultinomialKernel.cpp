@@ -19,11 +19,12 @@ namespace at::native {
 namespace {
 
 template <typename scalar_t>
-void multinomial_with_replacement_apply(
+typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t>, void>
+multinomial_with_replacement_apply(
     Tensor& result,
     const Tensor& self,
     const int64_t n_sample,
-    c10::optional<Generator> generator) {
+    std::optional<Generator> generator) {
   auto gen = get_generator_or_default<CPUGeneratorImpl>(
       generator, detail::getDefaultCPUGenerator());
   // See Note [Acquire lock when using random generators]
@@ -35,7 +36,7 @@ void multinomial_with_replacement_apply(
   /* cumulative probability distribution vector */
   Tensor cum_dist = at::empty({n_categories}, self.options());
 
-  const scalar_t* const self_ptr = self.data_ptr<scalar_t>();
+  const scalar_t* const self_ptr = self.const_data_ptr<scalar_t>();
   scalar_t* const cum_dist_ptr = cum_dist.data_ptr<scalar_t>();
   int64_t* const result_ptr = result.data_ptr<int64_t>();
 
@@ -121,12 +122,13 @@ void multinomial_with_replacement_apply(
   }
 }
 
-template <>
-void multinomial_with_replacement_apply<BFloat16>(
+template <typename scalar_t>
+typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, void>
+multinomial_with_replacement_apply(
     Tensor& result,
     const Tensor& self,
     const int64_t n_sample,
-    c10::optional<Generator> generator) {
+    std::optional<Generator> generator) {
   auto gen = get_generator_or_default<CPUGeneratorImpl>(
       generator, detail::getDefaultCPUGenerator());
   // See Note [Acquire lock when using random generators]
@@ -138,7 +140,7 @@ void multinomial_with_replacement_apply<BFloat16>(
   /* cumulative probability distribution vector */
   Tensor cum_dist = at::empty({n_categories}, self.options().dtype(kFloat));
 
-  const BFloat16* const self_ptr = self.data_ptr<BFloat16>();
+  const scalar_t* const self_ptr = self.const_data_ptr<scalar_t>();
   float* const cum_dist_ptr = cum_dist.data_ptr<float>();
   int64_t* const result_ptr = result.data_ptr<int64_t>();
 
@@ -228,7 +230,7 @@ static void multinomial_with_replacement_kernel_impl(
     Tensor& result,
     const Tensor& self,
     const int64_t n_sample,
-    c10::optional<Generator> gen) {
+    std::optional<Generator> gen) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf, kBFloat16, self.scalar_type(), "multinomial", [&] {
         multinomial_with_replacement_apply<scalar_t>(

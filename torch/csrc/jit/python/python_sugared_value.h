@@ -10,8 +10,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 std::string typeString(py::handle h);
 
@@ -28,12 +27,12 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     const SourceRange& loc,
     bool is_constant = false);
 
-c10::optional<StrongFunctionPtr> as_function(const py::object& obj);
+std::optional<StrongFunctionPtr> as_function(const py::object& obj);
 
 struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
   PythonValue(
       py::object the_self,
-      c10::optional<py::object> rcb = c10::nullopt,
+      std::optional<py::object> rcb = c10::nullopt,
       Value* module_self = nullptr)
       : self(std::move(the_self)),
         rcb(std::move(rcb)),
@@ -57,7 +56,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
   std::vector<std::shared_ptr<SugaredValue>> asTuple(
       const SourceRange& loc,
       GraphFunction& m,
-      const c10::optional<size_t>& size_hint = {}) override;
+      const std::optional<size_t>& size_hint = {}) override;
 
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
@@ -80,7 +79,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   py::object self;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  c10::optional<py::object> rcb;
+  std::optional<py::object> rcb;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Value* moduleSelf_ = nullptr;
 };
@@ -242,7 +241,10 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
 };
 
 bool isNamedTupleClass(const py::object& obj);
-TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc);
+TypePtr registerNamedTuple(
+    const py::object& obj,
+    const SourceRange& loc,
+    const ResolutionCallback& rcb);
 
 void recurseThroughNestedModules(
     const SourceRange& loc,
@@ -371,5 +373,4 @@ struct VISIBILITY_HIDDEN PythonSliceClass : public SugaredValue {
       size_t n_binders) override;
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

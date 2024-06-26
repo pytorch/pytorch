@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import Optional
 
 import torch
@@ -42,9 +43,7 @@ class Linear(torch.nn.Module):
         return 'SparseQuantizedDynamicLinear'
 
     def extra_repr(self):
-        return 'in_features={}, out_features={}, qscheme={}'.format(
-            self.in_features, self.out_features, self.weight().qscheme()
-        )
+        return f'in_features={self.in_features}, out_features={self.out_features}, qscheme={self.weight().qscheme()}'
 
     def __repr__(self):
         return _hide_packed_params_repr(self, linear.LinearPackedParams)
@@ -60,7 +59,7 @@ class Linear(torch.nn.Module):
                               missing_keys, unexpected_keys, error_msgs):
         op_type = int(state_dict[prefix + 'op_type'])
         assert op_type == 'sparse', \
-            "Cannot load from op_type [{}], expecting [{}]".format(op_type, self._op_type)
+            f"Cannot load from op_type [{op_type}], expecting [{self._op_type}]"
         state_dict.pop(prefix + 'op_type')
 
         version = local_metadata.get('version', None)
@@ -94,7 +93,7 @@ class Linear(torch.nn.Module):
         self._packed_params.set_weight_bias(w, b, row_block_size, col_block_size)
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         r"""Create a quantized sparse dynamic module from a float module.
 
         We only care about the convert at this stage, no need for observers just yet.

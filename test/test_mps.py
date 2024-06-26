@@ -1,6 +1,7 @@
-# -*- coding: utf-8 -*-
 # Owner(s): ["module: mps"]
 
+import io
+import platform
 import sys
 import math
 import random
@@ -9,21 +10,21 @@ import warnings
 import subprocess
 import tempfile
 import os
-import pprint
 import copy
+import gc
+import threading
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import itertools
 from collections import defaultdict
-from torch._six import inf
+from torch import inf
 from torch.nn import Parameter
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
-    (gradcheck, gradgradcheck, run_tests, TestCase, download_file, IS_CI,
-     TEST_WITH_UBSAN, dtype_abbrs, skipIfSlowGradcheckEnv, TEST_WITH_ASAN, suppress_warnings)
+    (gradcheck, gradgradcheck, parametrize, run_tests, TestCase, download_file, IS_CI,
+     NoTest, skipIfSlowGradcheckEnv, suppress_warnings)
 from torch.testing import make_tensor
-from torch.testing._comparison import TensorLikePair
 from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
 import torch.backends.mps
 from torch.distributions import Uniform, Exponential
@@ -31,18 +32,23 @@ from functools import partial
 
 from torch.testing._internal.common_methods_invocations import (
     op_db,
+    DecorateInfo,
     UnaryUfuncInfo,
     ReductionOpInfo,
     SpectralFuncInfo,
     BinaryUfuncInfo,
 )
-from torch.testing._internal.common_device_type import ops, instantiate_device_type_tests, onlyMPS
+from torch.testing._internal.common_device_type import ops, dtypes, instantiate_device_type_tests, OpDTypes
 from torch.testing._internal.common_nn import NNTestCase
+from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel
 import numpy as np
 import torch
 import torch.utils._pytree as pytree
 from itertools import product
+import operator
 
+test_consistency_op_db = copy.deepcopy(op_db)
+test_error_inputs_op_db = copy.deepcopy(op_db)
 
 # Copied from `test_ops.py` for the purposes of duplicating `test_numpy_ref`
 _ref_test_ops = tuple(
@@ -55,13 +61,1335 @@ _ref_test_ops = tuple(
     )
 )
 
+def xfailIf(condition):
+    def wrapper(func):
+        if condition:
+            return unittest.expectedFailure(func)
+        else:
+            return func
+    return wrapper
+
+def xfailIfMacOS14_4Plus(func):
+    return unittest.expectedFailure(func) if product_version > 14.3 else func  # noqa: F821
+
+def mps_ops_grad_modifier(ops):
+    XFAILLIST_GRAD = {
+
+        # precision issues
+        'special.polygammaspecial_polygamma_n_0': [torch.float16],
+        'polygammapolygamma_n_0': [torch.float16],
+        'nn.functional.binary_cross_entropy': [torch.float16],
+
+        # Unimplemented ops
+        '__getitem__': [torch.float16],
+        '_segment_reduce': [torch.float16, torch.float32],
+        '_chunk_cat': [torch.float16, torch.float32],
+        'unfold_copy': [torch.float16, torch.float32],  # unfold_backward is not implemented
+        'unfold': [torch.float16, torch.float32],
+        'sparse.mmreduce': [torch.float32],  # csr not supported
+        'unique_consecutive': [torch.float16, torch.float32],
+        'special_modified_bessel_i0': [torch.float16, torch.float32],
+        'scalar_tensor': [torch.float16, torch.float32],
+        'cdist': [torch.float32],
+        'masked.scatter': [torch.float16, torch.float32],
+        'index_fill': [torch.float16, torch.float32],  # missing `aten::_unique`.
+        'linalg.lu_factor': [torch.float16, torch.float32],  # missing `aten::lu_unpack`.
+        'aminmax': [torch.float32, torch.float16],
+
+        # Correctness issues
+        'atanh': [torch.float32],
+
+        # Random output
+        'exponential': [torch.float16, torch.float32],
+
+        # CPU errors
+        # derivative for aten::nextafter is not implemented on CPU
+        'nextafter': None,
+        # derivative for aten::floor_divide is not implemented on CPU
+        'floor_divide': [torch.float16, torch.float32],
+        # derivative for aten::narrow_copy is not implemented on CPU
+        'narrow_copy': [torch.float16, torch.float32],
+        # derivative for aten::_histogramdd_from_bin_cts is not implemented on CPU
+        'histogramdd': [torch.float16, torch.float32],
+        # derivative for aten::histogram is not implemented
+        'histogram': [torch.float16, torch.float32],
+        # 'bool' object is not iterable
+        'allclose': [torch.float16, torch.float32],
+        'equal': [torch.float16, torch.float32],
+        # 'float' object is not iterable
+        'item': [torch.float16, torch.float32],
+        # "mse_backward_cpu_out" not implemented for 'Half'
+        'nn.functional.mse_loss': [torch.float16],
+        # "smooth_l1_backward_cpu_out" not implemented for 'Half'
+        'nn.functional.smooth_l1_loss': [torch.float16],
+        # cpu error: grad requires non-empty inputs
+        'randn': [torch.float16, torch.float32],
+        'signal.windows.bartlett': [torch.float32],
+        'signal.windows.blackman': [torch.float32],
+        'signal.windows.cosine': [torch.float32],
+        'signal.windows.exponential': [torch.float32],
+        'signal.windows.gaussian': [torch.float32],
+        'signal.windows.general_cosine': [torch.float32],
+        'signal.windows.general_hamming': [torch.float32],
+        'signal.windows.hamming': [torch.float32],
+        'signal.windows.hann': [torch.float32],
+        'signal.windows.kaiser': [torch.float32],
+        'signal.windows.nuttall': [torch.float32],
+        'eye': [torch.float16, torch.float32],
+
+        # trunc_tensor not working properly for float16
+        'divtrunc_rounding': [torch.float16],
+        'fmod': [torch.float16],
+
+        # round not working properly for float16
+        'round': [torch.float16],
+
+        # atomic operation in backward pass
+        '_unsafe_masked_index': [torch.float16],
+        '_unsafe_masked_index_put_accumulate': [torch.float16],
+    }
+
+    MACOS_12_3_XFAILLIST_GRAD = {
+        # Unsupported Border padding mode, forward pass success as fallback to cpu
+        'grid_sampler_2d': [torch.float32],
+        # Unimplemented
+        'logaddexp2': [torch.float32],
+
+    }
+
+    MACOS_BEFORE_13_3_XFAILLIST_GRAD = {
+        # Failures due to precision issues (due to fast-math). These has been fixed in MacOS 13.3+
+        'masked.softmin': [torch.float32, torch.float16],
+        'masked.softmax': [torch.float32, torch.float16],
+        'masked.log_softmax': [torch.float32, torch.float16],
+
+        # Unsupported Border padding mode, forward pass success as fallback to cpu
+        'grid_sampler_2d': [torch.float32],
+
+        # Same issue as `argsort` and `sort` with duplicate elements (undefined behaviour).
+        # Forward pass is passing since `msort` doesn't return the indices, just the values, which match the CPU.
+        # On the backward pass for `sort` both are used (values and indices), thus resulting in a issmatch between CPU and MPS.
+        # Running `msort` with stable `sort` passes.
+        'msort': [torch.float16],
+    }
+
+    SKIPLIST_GRAD = {
+        'nn.functional.pairwise_distance': [torch.float16],
+        # failed assertion `destination datatype must be fp32'
+        'nn.functional.conv1d': [torch.float16],
+        'nn.functional.conv2d': [torch.float16],
+        'nn.functional.conv3d': [torch.float16],
+        'nn.functional.conv_transpose1d': [torch.float16],
+        'nn.functional.conv_transpose2d': [torch.float16],
+        'nn.functional.conv_transpose3d': [torch.float16],
+    }
+
+    MACOS_13_3_XFAILLIST_GRAD = {
+        # Same issue as `argsort` and `sort` with duplicate elements (undefined behaviour).
+        # Forward pass is passing since `msort` doesn't return the indices, just the values, which match the CPU.
+        # On the backward pass for `sort` both are used (values and indices), thus resulting in a issmatch between CPU and MPS.
+        # Running `msort` with stable `sort` passes.
+        'msort': [torch.float16],
+    }
+
+    ON_MPS_XFAILLIST = {
+        # Failures due to lack of implementation of downstream functions on MPS backend
+        # TODO: remove these once downstream function 'aten::_linalg_svd.U' have been implemented
+        'linalg.matrix_rank': None,
+
+        # Exception: Caused by sample input at index 3 on MPS
+        'nn.functional.conv3d': [torch.float32],
+    }
+
+    def addDecorator(op, d) -> None:
+        op.decorators = list(op.decorators) if op.decorators is not None else []
+        op.decorators.append(d)
+
+    for op in ops:
+        key = op.name + op.variant_test_name
+        if key in XFAILLIST_GRAD:
+            addDecorator(op, DecorateInfo(
+                         unittest.expectedFailure,
+                         dtypes=XFAILLIST_GRAD[key]))
+
+        if key in SKIPLIST_GRAD:
+            addDecorator(op, DecorateInfo(
+                         unittest.skip,
+                         dtypes=SKIPLIST_GRAD[key]))
+
+        if key in ON_MPS_XFAILLIST:
+            addDecorator(op, DecorateInfo(
+                         unittest.expectedFailure,
+                         dtypes=ON_MPS_XFAILLIST[key]))
+
+        if key in MACOS_12_3_XFAILLIST_GRAD and (not torch.backends.mps.is_macos13_or_newer()):
+            addDecorator(op, DecorateInfo(
+                         unittest.expectedFailure,
+                         dtypes=MACOS_12_3_XFAILLIST_GRAD[key]))
+
+        if key in MACOS_BEFORE_13_3_XFAILLIST_GRAD and (torch.backends.mps.is_macos13_or_newer() and product_version < 13.3):
+            addDecorator(op, DecorateInfo(
+                         unittest.expectedFailure,
+                         dtypes=MACOS_BEFORE_13_3_XFAILLIST_GRAD[key]))
+
+        if key in MACOS_13_3_XFAILLIST_GRAD and (product_version >= 13.3):
+            addDecorator(op, DecorateInfo(
+                         unittest.expectedFailure,
+                         dtypes=MACOS_13_3_XFAILLIST_GRAD[key]))
+        yield op
+
+def mps_ops_modifier(ops):
+    # Supported complex OPS
+    SUPPORTED_COMPLEX_OPS = {
+        '__radd__',
+        '__rmul__',
+        '__getitem__',
+        'abs',
+        'add',
+        'alias_copy',
+        'argwhere',
+        'atleast_1d',
+        'atleast_2d',
+        'atleast_3d',
+        'as_strided',
+        'as_strided_copy',
+        'as_strided_scatter',
+        'broadcast_tensors',
+        'broadcast_to',
+        'chalf',
+        'cfloat',
+        'chunk',
+        'clone',
+        'conj',
+        'conj_physical',
+        'contiguous',
+        'diag',
+        'diag_embed',
+        'diagflat',
+        'diagonal',
+        'diagonal_copy',
+        'diagonal_scatter',
+        'dsplit',
+        'empty',
+        'empty_permuted',
+        'empty_strided',
+        'eye',
+        'exp',
+        'expand',
+        'expand_as',
+        'flatten',
+        'fill',
+        'full',
+        'H',
+        'hsplit',
+        'imag',
+        'index_select',
+        'isfinite',
+        'isinf',
+        'isreal',
+        'item',
+        'kron',
+        'linalg.diagonal',
+        'linalg.svd',
+        'linspace',
+        'logspace',
+        'linspacetensor_overload',
+        'logspacetensor_overload',
+        'mH',
+        'mT',
+        'masked_scatter',
+        'masked_select',
+        'meshgridlist_of_tensors',
+        'meshgridvariadic_tensors',
+        'movedim',
+        'mul',
+        'narrow',
+        'narrow_copy',
+        'nn.functional.conv1d',
+        'nn.functional.conv2d',
+        'nn.functional.conv_transpose1d',
+        'nn.functional.conv_transpose2d',
+        'nn.functional.feature_alpha_dropoutwithout_train',
+        'nn.functional.padcircular',
+        'nn.functional.tanhshrink',
+        'nn.functional.unfold',
+        'nonzero',
+        'ones',
+        'outer',
+        'permute',
+        'positive',
+        'randn',
+        'ravel',
+        'real',
+        'repeat_interleave',
+        'reshape_as',
+        'reshape',
+        'resolve_conj',
+        'resolve_neg',
+        'scalar_tensor',
+        'select',
+        'sgn',
+        'slice',
+        'split',
+        'split_with_sizes',
+        'split_with_sizes_copy',
+        'splitlist_args',
+        'squeeze',
+        'squeezemultiple',
+        'sub',
+        'svd',
+        't',
+        'tanh',
+        'tensor_split',
+        'transpose',
+        'T',
+        'unbind',
+        'unflatten',
+        'unfold',
+        'unfold_copy',
+        'unsafe_chunk',
+        'unsafe_split',
+        'unsqueeze',
+        'view_as',
+        'view_as_real',
+        'view',
+        'vsplit',
+        'zero_',
+        'zeros',
+    }
+
+    AFTER_MACOS_14_0_SUPPORTED_COMPLEX_OPS = {
+        '__rdiv__',
+        '__rmatmul__',
+        '_chunk_cat',
+        '_unsafe_masked_index',
+        'acos',
+        'acosh',
+        'all',
+        'allclose',
+        'any',
+        'addcdiv',
+        'addcmul',
+        'addmmdecomposed',
+        'addmv',
+        'asin',
+        'atan',
+        'atanh',
+        'bfloat16',
+        'bmm',
+        'bool',
+        'cartesian_prod',
+        'cat',
+        'char',
+        'column_stack',
+        'combinations',
+        'corrcoef',
+        'constant_pad_nd',
+        'cos',
+        'cosh',
+        'count_nonzero',
+        'diff',
+        'div',
+        'divno_rounding_mode',
+        'dot',
+        'dstack',
+        'einsum',
+        'eq',
+        'equal',
+        'exp2',
+        'expm1',
+        'fft.fft',
+        'fft.fft2',
+        'fft.fftn',
+        'fft.fftshift',
+        'fft.ifft',
+        'fft.ifft2',
+        'fft.ifftn',
+        'fft.ifftshift',
+        'fft.irfftn',
+        'fft.irfft2',
+        'fft.irfft',
+        'fft.hfftn',
+        'fft.hfft2',
+        'fft.hfft',
+        'flip',
+        'fliplr',
+        'flipud',
+        'float',
+        'gradient',
+        'half',
+        'hstack',
+        'inner',
+        'int',
+        'isclose',
+        'isnan',
+        'ldexp',
+        'linalg.multi_dot',
+        'linalg.pinv',
+        'log10',
+        'log1p',
+        'log2',
+        'log',
+        'logical_and',
+        'logical_not',
+        'logical_or',
+        'logical_xor',
+        'long',
+        'masked_fill',
+        'masked.mean',
+        'masked.prod',
+        'masked.std',
+        'masked.sum',
+        'masked.var',
+        'matmul',
+        'mean',
+        'mm',
+        'mv',
+        'ne',
+        'neg',
+        'nn.functional.padconstant',
+        'nn.functional.padreflect',
+        'nn.functional.padreplicate',
+        'nn.functional.pixel_shuffle',
+        'nn.functional.pixel_unshuffle',
+        'nn.functional.rms_norm',
+        'nn.functional.softsign',
+        'pinverse',
+        'prod',
+        'reciprocal',
+        'roll',
+        'rot90',
+        'rsqrt',
+        'short',
+        'sigmoid',
+        'sin',
+        'sinh',
+        'sqrt',
+        'square',
+        'stack',
+        'stft',
+        'sum',
+        'sum_to_size',
+        'tan',
+        'tensordot',
+        'trace',
+        'trapz',
+        'trapezoid',
+        'tril',
+        'triu',
+        'true_divide',
+        'vstack',
+        'where',
+    }
+    # Those ops worked on MacOS12, but broken on MacOS13, see https://github.com/pytorch/pytorch/issues/85758
+    MACOS_12_3_XFAILLIST = {
+        # Top 60
+        # expected failures
+        # The result of pow(9 , 8) is showing 43046716, whereas it should've been 43046721.
+        # fixed in macOS 13.3. Currently error is not raised.
+        'pow': [torch.int16, torch.int64, torch.uint8, torch.int8],
+        # expected failures
+        '__rpow__': [torch.uint8, torch.int8],
+
+        # Failures due to precision issues (due to fast-math). These has been fixed in MacOS 13.3+
+        'cdist': [torch.float32],
+        'tan': [torch.uint8, torch.float32],
+
+        # Data type support starts from macOS 13
+        'nn.functional.avg_pool1d': [torch.int64],
+        'nn.functional.avg_pool2d': [torch.int64],
+        'nn.functional.local_response_norm': [torch.int64],
+        '__radd__': [torch.uint8],
+        '__rdiv__': [torch.uint8],
+        '__rmul__': [torch.uint8],
+        'abs': [torch.uint8],
+        'acos': [torch.uint8],
+        'acosh': [torch.uint8],
+        'add': [torch.uint8],
+        'asin': [torch.uint8],
+        'asinh': [torch.uint8],
+        'atan': [torch.uint8],
+        'atanh': [torch.uint8],
+        'ceil': [torch.uint8],
+        'corrcoef': [torch.uint8],
+        'cos': [torch.uint8],
+        'cosh': [torch.uint8],
+        'cov': [torch.uint8],
+        'cumulative_trapezoid': [torch.uint8],
+        'deg2rad': [torch.uint8],
+        'diff': [torch.uint8],
+        'eq': [torch.uint8],
+        'equal': [torch.uint8],
+        'erf': [torch.uint8],
+        'exp2': [torch.uint8],
+        'exp': [torch.uint8],
+        'expm1': [torch.uint8],
+        'floor': [torch.uint8],
+        'fmax': [torch.uint8],
+        'fmin': [torch.uint8],
+        'fmod': [torch.uint8],
+        'ge': [torch.uint8],
+        'gt': [torch.uint8],
+        'isclose': [torch.uint8],
+        'isnan': [torch.uint8],
+        'kron': [torch.uint8],
+        'le': [torch.uint8],
+        'log10': [torch.uint8],
+        'log1p': [torch.uint8],
+        'log2': [torch.uint8],
+        'log': [torch.uint8],
+        'logical_and': [torch.uint8],
+        'logical_or': [torch.uint8],
+        'logical_xor': [torch.uint8],
+        'logit': [torch.uint8],
+        'lt': [torch.uint8],
+        'masked.mean': [torch.uint8],
+        'masked.std': [torch.uint8],
+        'masked.var': [torch.uint8],
+        'maximum': [torch.uint8],
+        'minimum': [torch.uint8],
+        'mul': [torch.uint8],
+        'ne': [torch.uint8],
+        'neg': [torch.uint8],
+        'nn.functional.cosine_embedding_loss': [torch.uint8],
+        'nn.functional.margin_ranking_loss': [torch.uint8],
+        'nn.functional.poisson_nll_loss': [torch.uint8],
+        'nn.functional.softsign': [torch.uint8],
+        'nn.functional.tanhshrink': [torch.uint8],
+        'nn.functional.triplet_margin_loss': [torch.uint8],
+        'nn.functional.triplet_margin_with_distance_loss': [torch.uint8],
+        'nn.functional.pairwise_distance': [torch.uint8],
+        'outer': [torch.uint8],
+        'rad2deg': [torch.uint8],
+        'reciprocal': [torch.uint8],
+        'remainder': [torch.uint8],
+        'round': [torch.uint8],
+        'rsqrt': [torch.uint8],
+        'sigmoid': [torch.uint8],
+        'sign': [torch.uint8],
+        'signbit': [torch.uint8],
+        'sin': [torch.uint8],
+        'sinh': [torch.uint8],
+        'special.ndtr': [torch.uint8],
+        'sqrt': [torch.uint8],
+        'sub': [torch.uint8],
+        'trapezoid': [torch.uint8],
+        'trapz': [torch.uint8],
+        'true_divide': [torch.uint8],
+        'trunc': [torch.uint8],
+        'xlogy': [torch.uint8],
+        'minbinary': [torch.uint8],
+        'maxbinary': [torch.uint8],
+        'divtrunc_rounding': [torch.uint8],
+        'divfloor_rounding': [torch.uint8],
+        'divno_rounding_mode': [torch.uint8],
+        'floor_divide': [torch.uint8],
+        'ldexp': [torch.uint8],
+        # square internally calls into power, and will type cast to int64, which supports starting from macOS 13
+        'square': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+
+        # cpu not giving nan for x/0.0
+        'atan2': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+
+        # inconsistency errors between cpu and mps, max seen atol is 2
+        'nn.functional.interpolatebilinear': [torch.uint8],
+    }
+
+    MACOS_BEFORE_13_3_XFAILLIST = {
+        # Failures due to precision issues (due to fast-math). These has been fixed in MacOS 13.3+
+        'tan': [torch.float32],
+        'cdist': [torch.float32],
+
+        # CPU Error: cpu not giving nan for x/0.0
+        'atan2': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+
+        # test blow pass on macOS 12 as it falls back to cpu
+        # Argsort case using duplicate indices (undefined behaviour):
+        #  - CPU output: tensor([2546, 6917, 3181,  ..., 7128, 5133,   30], devuce='cpu')
+        #  - MPS output: tensor([2546, 6917, 3181,  ..., 7128,   30, 5133], device='mps:0')
+        # Elements from index 30 and 5133 are both equal.
+        # Since CPU is not using argsort with stable=True, these cases result in undefined behaviour.
+        'argsort': [torch.float16, torch.int8, torch.uint8, torch.bool],
+        # Same issue as `argsort` with duplicate indices. This test checks both the sorted values and the indices.
+        # The values of the sorted tensor match the CPU, but in case of the returned indices this results in undefined behaviour.
+        'sort': [torch.int8, torch.uint8, torch.bool, torch.float16],
+        # Unsupported dtypes
+        'cumsum': [torch.int64],
+        'cumprod': [torch.int64],
+        'cumulative_trapezoid': [torch.int64],
+        'masked.cumsum': [torch.int64],
+        'masked.cumprod': [torch.int64],
+        'linalg.vander': [torch.int64],
+    }
+
+    MACOS_AFTER_13_1_XFAILLIST = {
+        # before macOS 13.2 it falls back to cpu and pass the forward pass
+        'grid_sampler_2d': [torch.float32],  # Unsupported Border padding mode
+        # inconsistency errors between cpu and mps, max seen atol is 2
+        'nn.functional.interpolatebilinear': [torch.uint8],
+    }
+
+    MACOS_13_3_XFAILLIST = {
+        # Failure due to precision issue for fp16
+        # on both cpu and mps there are test cases that might produce inf result
+        # 'nn.functional.pairwise_distance': [torch.float16],
+
+        # test blow pass on macOS 12 as it falls back to cpu
+        # Argsort case using duplicate indices (undefined behaviour):
+        #  - CPU output: tensor([2546, 6917, 3181,  ..., 7128, 5133,   30], devuce='cpu')
+        #  - MPS output: tensor([2546, 6917, 3181,  ..., 7128,   30, 5133], device='mps:0')
+        # Elements from index 30 and 5133 are both equal.
+        # Since CPU is not using argsort with stable=True, these cases result in undefined behaviour.
+        'argsort': [torch.float16, torch.int8, torch.uint8, torch.bool],
+        # Same issue as `argsort` with duplicate indices. This test checks both the sorted values and the indices.
+        # The values of the sorted tensor match the CPU, but in case of the returned indices this results in undefined behaviour.
+        'sort': [torch.int8, torch.uint8, torch.bool, torch.float16],
+    }
+
+    MACOS_BEFORE_14_4_XFAILLIST = {
+        # These ops work fine in 14.4 but fail in 14.2 or 13.x
+        'fft.hfft2': [torch.complex64],
+    }
+
+    # Those ops are not expected to work
+    UNIMPLEMENTED_XFAILLIST = {
+        # Failures due to lack of op implementation on MPS backend
+        'login': None,
+        'log_sigmoid': None,
+        'log_sigmoid_forward': None,
+        'linalg.eig': None,
+        'linalg.eigvals': None,
+        'put': None,
+        'nn.functional.conv_transpose3d': None,
+        'rounddecimals_neg_3': None,
+        'rounddecimals_3': None,
+        'rounddecimals_0': None,
+        '__rsub__': None,
+        'angle': None,
+        'cauchy_': None,
+        'cauchy': None,
+        'cholesky': None,
+        'cholesky_inverse': None,
+        'cholesky_solve': None,
+        'cummax': None,
+        'cummin': None,
+        'erfc': None,
+        'frexp': None,
+        'gcd': None,
+        'geqrf': None,
+        'nn.functional.grid_sample': None,  # Unsupported Border padding mode
+        'heaviside': None,
+        'i0': None,
+        'igamma': None,
+        'igammac': None,
+        'index_copy': None,
+        'index_reduceprod': None,
+        'index_reducemean': None,
+        'index_reduceamax': None,
+        'index_reduceamin': None,
+        'isneginf': None,
+        'isposinf': None,
+        'kthvalue': None,
+        'lcm': None,
+        'linalg.cholesky': None,
+        'linalg.cholesky_ex': None,
+        'linalg.cond': None,
+        'linalg.detsingular': None,
+        'linalg.det': None,
+        'linalg.eigh': None,
+        'linalg.eigvalsh': None,
+        'linalg.householder_product': None,
+        'linalg.ldl_factor': None,
+        'linalg.ldl_factor_ex': None,
+        'linalg.ldl_solve': None,
+        'linalg.lstsq': None,
+        'linalg.lstsqgrad_oriented': None,
+        'linalg.lu': None,
+        'linalg.lu_factor_ex': None,
+        'linalg.lu_solve': None,
+        'linalg.matrix_norm': [torch.float32],
+        'linalg.norm': [torch.float32],
+        'linalg.normsubgradients_at_zero': [torch.float32],
+        'linalg.qr': None,
+        'linalg.slogdet': None,
+        'linalg.solve': None,
+        'linalg.solve_ex': None,
+        'linalg.svdvals': None,
+        'linalg.tensorsolve': None,
+        'linalg.vecdot': None,
+        'logcumsumexp': None,
+        'logdet': None,
+        'lu': None,
+        'lu_solve': None,
+        'lu_unpack': None,
+        'masked.median': None,
+        'matrix_exp': None,
+        'mode': None,
+        'nanquantile': None,
+        'nanmedian': None,
+        'native_dropout_backward': None,
+        'normnuc': None,
+        'nn.functional.fractional_max_pool2d': None,
+        'nn.functional.fractional_max_pool3d': None,
+        'nn.functional.adaptive_avg_pool3d': None,
+        'nn.functional.adaptive_max_pool3d': None,
+        'nn.functional.interpolatearea': None,
+        'nn.functional.interpolatebicubic': None,
+        'nn.functional.interpolatetrilinear': None,
+        'nn.functional.max_unpool1dgrad': None,
+        'nn.functional.max_unpool2dgrad': None,
+        'nn.functional.max_unpool3dgrad': None,
+        'nn.functional.avg_pool3d': None,
+        'nn.functional.ctc_loss': None,
+        'nn.functional.embedding_bag': None,
+        'nn.functional.hardshrink': None,
+        'nn.functional.max_pool3d': None,
+        'nn.functional.max_unpool1d': None,
+        'nn.functional.max_unpool2d': None,
+        'nn.functional.max_unpool3d': None,
+        'nn.functional.multi_margin_loss': None,
+        'nn.functional.multilabel_margin_loss': None,
+        'nn.functional.pdist': None,
+        'nn.functional.rrelu': None,
+        'nn.functional.norm': None,
+        'ormqr': None,
+        'pca_lowrank': None,
+        'qr': None,
+        'quantile': None,
+        'rsub': None,
+        'scatter_reduceamax': None,
+        'scatter_reduceamin': None,
+        'scatter_reducemin': None,
+        'scatter_reducemean': None,
+        'scatter_reduceprod': None,
+        'scatter_reducesum': None,
+        'segment_reduce': None,
+        '_segment.reduce': None,
+        'segment.reduce': None,
+        'segment_reduce_offsets': None,
+        '_segment_reduce_offsets': None,
+        '_segment_reduce_lengths': None,
+        '_segment_reducelengths': None,
+        '_segment_reduceoffsets': None,
+        'sinc': None,
+        'sparse.mm': None,
+        'sparse.mmreduce': None,
+        'special.airy_ai': None,
+        'special.bessel_j0': None,
+        'special.bessel_j1': None,
+        'special.bessel_y0': None,
+        'special.bessel_y1': None,
+        'special.chebyshev_polynomial_t': None,
+        'special.chebyshev_polynomial_u': None,
+        'special.entr': None,
+        'special.erfcx': None,
+        'special.hermite_polynomial_h': None,
+        'special.hermite_polynomial_he': None,
+        'special.i0e': None,
+        'special.i1': None,
+        'special.i1e': None,
+        'special.laguerre_polynomial_l': None,
+        'special.log_ndtr': None,
+        'special.modified_bessel_i0': None,
+        'special.modified_bessel_i1': None,
+        'special.modified_bessel_k0': None,
+        'special.modified_bessel_k1': None,
+        'special.ndtri': None,
+        'special.scaled_modified_bessel_k0': None,
+        'special.scaled_modified_bessel_k1': None,
+        'special.spherical_bessel_j0': None,
+        'special.xlog1py': None,
+        'special.zeta': None,
+        'svd_lowrank': None,
+        'symeig': None,
+        'take': None,
+        'to': None,
+        'to_sparse': None,
+        'unique': None,
+        'vdot': None,
+        'segment_reduce_': None,
+        '_upsample_bilinear2d_aa': None,
+        'geometric' : None,
+        'geometric_': None,
+        'log_normal_': None,
+        'log_normal': None,
+        'cdouble': None,
+        'double': None,
+        'nn.functional.softminwith_dtype': None,
+        'log_softmaxwith_dtype': None,
+        'softmaxwith_dtype': None,
+        'float_power': None,
+        'full_like': None,
+        'linalg.matrix_rankhermitian': None,
+        'linalg.pinvhermitian': None,
+        'nonzero_static': None,
+
+        # MPS: input sizes must be divisible by output sizes
+        'nn.functional.adaptive_avg_pool1d': None,
+        'nn.functional.adaptive_avg_pool2d': None,
+
+        # Unsupported dtypes
+        # bmm is not supported for integral types
+        'nn.functional.bilinear': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        # Cannot convert a MPS Tensor to float64 dtype. The tensors
+        # input data is created with double in common_methods_invocations.py
+        'nn.functional.batch_norm': [torch.float32],
+        'ones_like': None,
+        'zeros_like': None,
+
+        # Convolution for integral types is not supported on MPS
+        'nn.functional.conv1d': [torch.int64],
+        'nn.functional.conv2d': [torch.int64],
+        'nn.functional.conv3d': [torch.int64],
+        'nn.functional.conv_transpose1d': [torch.int64],
+        'nn.functional.conv_transpose2d': [torch.int64],
+
+        # Unsupported dtypes
+        'dot': [torch.int64],
+        'histc': [torch.float16],
+        'index_add': [torch.int64],
+        'log1p': [torch.int64],
+        'sigmoid': [torch.int64],
+        'atan2': [torch.int64],
+
+        # GEMM on MPS is not supported for integral types
+        'nn.functional.linear': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        '__rmatmul__': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'addmmdecomposed': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'addbmm': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'addmm': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'addmv': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'baddbmm': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'mm': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'bmm': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'einsum': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'inner': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'linalg.multi_dot': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'matmul': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'mat': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'mv': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'tensordot': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'unravel_index': [torch.int32, torch.int64],
+
+        # new_zeros/new_ones: Cannot convert a MPS Tensor to float64 dtype as
+        # the MPS framework doesn't support float64
+        'new_zeros': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'new_ones': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'new_full': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        # returned output on CPU is float64
+        'bincount': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+
+        # trunc_tensor not working properly for float16
+        'divtrunc_rounding': [torch.float16],
+        'fmod': [torch.float16],
+
+        # round not working properly for float16
+        'round': [torch.float16],
+
+        # atomic operations not supported
+        '_unsafe_masked_index_put_accumulate': [torch.bool, torch.int8, torch.uint8, torch.float16, torch.int16, torch.int64],
+    }
+
+    if product_version < 14.0:
+        # FFT and BFloat16 support was added in MacOS 14
+        UNIMPLEMENTED_XFAILLIST.update({
+            'bfloat16': None,
+            'fft.fft': None,
+            'fft.fft2': None,
+            'fft.fftn': None,
+            'fft.hfft': None,
+            'fft.hfft2': None,
+            'fft.hfftn': None,
+            'fft.ifft': None,
+            'fft.ifft2': None,
+            'fft.ifftn': None,
+            'fft.ihfft': None,
+            'fft.ihfft2': None,
+            'fft.ihfftn': None,
+            'fft.irfft': None,
+            'fft.irfft2': None,
+            'fft.irfftn': None,
+            'fft.rfft': None,
+            'fft.rfft2': None,
+            'fft.rfftn': None,
+            'stft': None,
+            # Error in TestConsistencyCPU.test_output_match_isin_cpu fails for integers,
+            # not reproducible in later OS. Added assert to op if used in < 14.0
+            'isin': [torch.int64, torch.int32, torch.int16, torch.uint8, torch.int8],
+            'nn.functional.max_pool2d': [torch.uint8],
+        })
+
+    UNDEFINED_XFAILLIST = {
+        # Top 60 operators
+        # topk fails with duplicate indices
+        'topk': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+
+        # Failures due to random output that they generate using
+        # Philox engine causing mismatch with CPU results
+        'multinomial': [torch.float16, torch.float32],  # random results
+        'uniform': [torch.float16, torch.float32],
+        'rand_like': [torch.float16, torch.float32],
+        'randint_like': [torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'randn_like': [torch.float16, torch.float32],
+        'bernoulli': [torch.float16, torch.float32],
+        'exponential': [torch.float16, torch.float32],
+        'nn.functional.feature_alpha_dropoutwith_train': [torch.float16, torch.float32],
+        'normal': [torch.float16, torch.float32, torch.float16, torch.float32],
+        'normalin_place': [torch.float16, torch.float32],
+        'normalnumber_mean': [torch.float16, torch.float32],
+        'nn.functional.alpha_dropout': [torch.float16, torch.float32],
+        'nn.functional.dropout': [torch.float16, torch.float32],
+        'nn.functional.dropout2d': [torch.float16, torch.float32],
+        'nn.functional.dropout3d': [torch.float16, torch.float32],
+        # See https://github.com/pytorch/pytorch/issues/111479
+        'nn.functional.multi_head_attention_forward': [torch.float32, torch.float16],
+
+        # duplicate indices are used in the testcase - undefined behaviour
+        'index_put': None,
+        # zero to negative integer powers are undefined
+        '__rpow__': [torch.int8, torch.int16, torch.int32, torch.int64],
+        'resize_': [torch.float16, torch.float32],
+        'resize_as_': [torch.float16, torch.float32],
+
+        # CPU Errors:
+        'addr': [torch.bool, torch.int16, torch.int32,
+                 torch.int64, torch.uint8, torch.int8],  # "addmv_impl_cpu" not implemented for 'Half'
+        'as_stridedpartial_views': [torch.bool, torch.float16, torch.float32, torch.int16,
+                                    torch.int32, torch.int64, torch.uint8, torch.int8],  # cpu result off, showing random values
+        'as_strided_partial_views': [torch.bool, torch.float16, torch.float32, torch.int16,
+                                     torch.int32, torch.int64, torch.uint8, torch.int8],  # cpu result off, showing random values
+
+        # random results
+        # mps vs cpu:
+        # Mismatched elements: 40 / 96 (41.7%)
+        # Greatest absolute difference: 17.892311096191406 at index (1, 0, 2) (up to 1e-05 allowed)
+        # Greatest relative difference: inf at index (1, 0, 0) (up to 1.3e-06 allowed)
+        # cuda(2.0.0.dev20230301+cu117) vs cpu:
+        # Mismatched elements: 56 / 96 (58.3%)
+        # Greatest absolute difference: 17.892311096191406 at index (1, 0, 2) (up to 1e-05 allowed)
+        # Greatest relative difference: inf at index (1, 0, 0) (up to 1.3e-06 allowed)
+        'nn.functional.scaled_dot_product_attention': [torch.float32, torch.float16],
+
+        # Failures due to casting negative float to uint8 is undefined
+        'byte': [torch.float16, torch.float32],
+        # float output for float16 input on MPS
+        'logit': [torch.float16],
+    }
+
+    ON_MPS_XFAILLIST = {
+        # Failures due to lack of implementation of downstream functions on MPS backend
+        # TODO: remove these once downstream function 'aten::_linalg_svd.U' have been implemented
+        'linalg.matrix_rank': None,
+    }
+
+    EMPTY_OPS_SKIPLIST = {
+        # Fill tensors with uninitialized data, causing mismatch with CPU.
+        # They occasionally match, thus skipping them.
+        # See https://github.com/pytorch/pytorch/issues/100175
+        'new_empty': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'new_empty_strided': [torch.bool, torch.float16, torch.float32, torch.int16,
+                              torch.int32, torch.int64, torch.uint8, torch.int8],
+        'empty_strided': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        # CPU: empty is returning all 0's and there is a mismatch with MPS
+        # allocation (MacOS 13). According to
+        # https://pytorch.org/docs/2.0/generated/torch.empty.html
+        'empty': [torch.bool, torch.float16, torch.float32, torch.int16,
+                  torch.int32, torch.int64, torch.uint8, torch.int8],
+        'empty_like': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'empty_permuted': [torch.bool, torch.float16, torch.float32, torch.int16,
+                           torch.int32, torch.int64, torch.uint8, torch.int8],
+    }
+
+    SKIPLIST = {
+        # Unsupported
+        # input types 'tensor<1x3x9x9xf16>' and 'tensor<1xf32>' are not broadcast compatible
+        'nn.functional.avg_pool2d': [torch.float16],
+
+        # This doesn't work on M1, but is partially working on M2 with the exception of torch.float16
+        'nn.functional.conv3d': None,
+    }
+
+    def addDecorator(op, d) -> None:
+        op.decorators = list(op.decorators) if op.decorators is not None else []
+        op.decorators.append(d)
+
+    for op in ops:
+        key = op.name + op.variant_test_name
+        if key in EMPTY_OPS_SKIPLIST:
+            addDecorator(op, DecorateInfo(
+                         unittest.skip("Skipping empty ops."),
+                         dtypes=EMPTY_OPS_SKIPLIST[key]))
+        if key in SKIPLIST:
+            addDecorator(op, DecorateInfo(unittest.skip("Skipped!"), dtypes=SKIPLIST[key]))
+        for xfaillist in [UNIMPLEMENTED_XFAILLIST, UNDEFINED_XFAILLIST, ON_MPS_XFAILLIST]:
+            if key in xfaillist:
+                addDecorator(op, DecorateInfo(
+                             unittest.expectedFailure,
+                             dtypes=xfaillist[key]))
+
+        if key in MACOS_BEFORE_14_4_XFAILLIST and (product_version < 14.4):
+            addDecorator(op, DecorateInfo(
+                         unittest.expectedFailure,
+                         dtypes=MACOS_BEFORE_14_4_XFAILLIST[key]))
+
+        if key in MACOS_BEFORE_13_3_XFAILLIST and (torch.backends.mps.is_macos13_or_newer() and product_version < 13.3):
+            addDecorator(op, DecorateInfo(
+                         unittest.expectedFailure,
+                         dtypes=MACOS_BEFORE_13_3_XFAILLIST[key]))
+
+        if key in MACOS_AFTER_13_1_XFAILLIST and torch.backends.mps.is_macos13_or_newer(2):
+            addDecorator(op, DecorateInfo(
+                         unittest.expectedFailure,
+                         dtypes=MACOS_AFTER_13_1_XFAILLIST[key]))
+
+        if key in MACOS_13_3_XFAILLIST and (product_version >= 13.3):
+            addDecorator(op, DecorateInfo(
+                         unittest.expectedFailure,
+                         dtypes=MACOS_13_3_XFAILLIST[key]))
+
+        if key in MACOS_12_3_XFAILLIST and (not torch.backends.mps.is_macos13_or_newer()):
+            addDecorator(op, DecorateInfo(
+                         unittest.expectedFailure,
+                         dtypes=MACOS_12_3_XFAILLIST[key]))
+
+        # If ops is not supported for complex types, expect it to fail
+        if key not in SUPPORTED_COMPLEX_OPS and (key not in AFTER_MACOS_14_0_SUPPORTED_COMPLEX_OPS or product_version < 14.0):
+            addDecorator(op, DecorateInfo(unittest.expectedFailure, dtypes=[torch.complex32, torch.complex64]))
+
+        yield op
+
+def mps_ops_error_inputs_modifier(ops):
+    # Error input samples do not take a dtype argument.
+    XFAILLIST = {
+        # Exceptions are not raised
+        '__rmod__',
+        '__rsub__',
+        '__rpow__',
+        'bernoulli',
+        'clamp_max',
+        'clamp_min',
+        'masked_scatter',
+
+        # unsupported float64 dtype
+        'cat',
+        'complex',
+        'multinomial',
+        'nn.functional.conv1d',
+        'nn.functional.conv2d',
+        'nn.functional.conv3d',
+        'gather',
+        'scatter',
+        'scatter_add',
+
+        # unsupported complex dtypes
+        'masked_fill',
+
+        # MPS does not support tensor dimensions > 16
+        'amax',
+        'amin',
+        'aminmax',
+
+        # memory overlapping checks
+        'index_select',
+
+        # unimplemented
+        'logcumsumexp',
+    }
+
+    def addDecorator(op, d) -> None:
+        op.decorators = list(op.decorators) if op.decorators is not None else []
+        op.decorators.append(d)
+
+    for op in ops:
+        if op.error_inputs_func is None:
+            continue
+        key = op.name + op.variant_test_name
+        if key in XFAILLIST:
+            addDecorator(op, DecorateInfo(unittest.expectedFailure))
+        yield op
+
 # Same logic as test_cuda.py
 if not torch.backends.mps.is_available():
     print('MPS not available, skipping tests', file=sys.stderr)
-    TestCase = object  # noqa: F811
-    NNTestCase = object  # noqa: F811
+    TestCase = NoTest  # noqa: F811
+    NNTestCase = NoTest  # noqa: F811
 
-class MPSReluTest(TestCase):
+product_version = float('.'.join(platform.mac_ver()[0].split('.')[:2]) or -1)
+total_memory = int(subprocess.check_output(["sysctl", "-n", "hw.memsize"]))
+
+# Determine whether to enable MPS memory leak check (uses same code as CUDA).
+TEST_MPS_MEM_LEAK_CHECK = os.getenv('PYTORCH_TEST_MPS_MEM_LEAK_CHECK', '0') == '1'
+
+def skipMPSMemoryLeakCheckIf(condition):
+    def dec(fn):
+        if getattr(fn, '_do_mps_memory_leak_check', True):
+            fn._do_mps_memory_leak_check = not condition
+        return fn
+    return dec
+
+class MpsMemoryLeakCheck:
+    def __init__(self, testcase, name=None):
+        self.name = testcase.id() if name is None else name
+        self.testcase = testcase
+
+    def __enter__(self):
+        # Performs a gc if required (required if any memory is held)
+        caching_allocator_mem_allocated = torch.mps.current_allocated_memory()
+        if caching_allocator_mem_allocated > 0:
+            gc.collect()
+            torch.mps.empty_cache()
+
+        # Acquires caching allocator and driver statistics before the test is run
+        self.caching_allocator_before = torch.mps.current_allocated_memory()
+        self.driver_before = torch.mps.driver_allocated_memory()
+
+    def __exit__(self, exec_type, exec_value, traceback):
+        # Don't check for leaks if an exception was thrown
+        if exec_type is not None:
+            return
+        # Compares caching allocator before/after statistics
+        # An increase in allocated memory is a discrepancy indicating a possible memory leak
+        discrepancy_detected = False
+        caching_allocator_mem_allocated = torch.mps.current_allocated_memory()
+        if caching_allocator_mem_allocated > self.caching_allocator_before:
+            discrepancy_detected = True
+
+        # Short-circuits if no discrepancy detected
+        if not discrepancy_detected:
+            return
+        # Validates the discrepancy persists after garbage collection and
+        # is confirmed by the driver API
+        gc.collect()
+        torch.mps.empty_cache()
+
+        discrepancy_detected = True
+        # Query memory multiple items to ensure leak was not transient
+        for n in range(3):
+            caching_allocator_mem_allocated = torch.mps.current_allocated_memory()
+            driver_mem_allocated = torch.mps.driver_allocated_memory()
+
+            caching_allocator_discrepancy = False
+            driver_discrepancy = False
+
+            if caching_allocator_mem_allocated > self.caching_allocator_before:
+                caching_allocator_discrepancy = True
+
+            if driver_mem_allocated > self.driver_before:
+                driver_discrepancy = True
+
+            if not (caching_allocator_discrepancy or driver_discrepancy):
+                # Leak was false positive, exit loop
+                discrepancy_detected = False
+                break
+
+        if caching_allocator_discrepancy and not driver_discrepancy:
+            # Just raises a warning if the leak is not validated by the driver API
+            msg = ("MPS caching allocator reports a memory leak not "
+                   f"verified by the driver API in {self.name}! "
+                   f"Caching allocator allocated memory was {self.caching_allocator_before} "
+                   f"and is now reported as {caching_allocator_mem_allocated}. "
+                   f"MPS driver allocated memory was {self.driver_before} and is now {driver_mem_allocated}.")
+            warnings.warn(msg)
+        elif caching_allocator_discrepancy and driver_discrepancy:
+            # A caching allocator discrepancy validated by the driver API is a failure
+            msg = (f"MPS driver API confirmed a leak in {self.name}! "
+                   f"Caching allocator allocated memory was {self.caching_allocator_before} "
+                   f"and is now reported as {caching_allocator_mem_allocated}. "
+                   f"MPS driver allocated memory was {self.driver_before} and is now {driver_mem_allocated}.")
+
+            raise RuntimeError(msg)
+
+# Expand TestCase class with Memory Leak Detection on MPS device
+class TestCaseMPS(TestCase):
+    _do_mps_memory_leak_check = True
+
+    def __init__(self, method_name='runTest'):
+        super().__init__(method_name)
+        test_method = getattr(self, method_name, None)
+        if test_method is not None:
+            # Wraps the tested method if we should do MPS memory check.
+            if TEST_MPS_MEM_LEAK_CHECK:
+                if self._do_mps_memory_leak_check:
+                    self.wrap_with_mps_policy(method_name, self.assertLeaksNoMpsTensors)
+
+    def assertLeaksNoMpsTensors(self, name=None):
+        name = self.id() if name is None else name
+        return MpsMemoryLeakCheck(self, name)
+
+    def wrap_with_mps_policy(self, method_name, policy):
+        test_method = getattr(self, method_name)
+        setattr(self, method_name, super().wrap_method_with_policy(test_method, policy))
+
+    # checks for leaks even if TEST_MPS_MEM_LEAK_CHECK is 0
+    def wrap_with_mps_memory_check(self, method):
+        return super().wrap_method_with_policy(method, self.assertLeaksNoMpsTensors)
+
+class TestMemoryLeak(TestCaseMPS):
+    def test_mps_memory_leak_detection(self):
+        l = []
+
+        @self.wrap_with_mps_memory_check
+        def no_leak():
+            pass
+
+        # Trigger an intentional memory leak
+        @self.wrap_with_mps_memory_check
+        def leak_gpu0():
+            # increasing to 8MB to force acquiring a new block and overcome blocksize differences across platforms
+            l.append(torch.randn(1024 * 1024 * 8, device=torch.device("mps")))
+
+        no_leak()
+
+        # check if a runtime error for memory leak was emitted which would
+        # confirm whether memory leak detection worked successfully or not.
+        with self.assertRaisesRegex(RuntimeError, r"MPS driver API confirmed .+"):
+            leak_gpu0()
+
+    def test_copy_cast_no_leak(self):
+
+        def step(x):
+            x = x.to(device='cpu', dtype=torch.float32)
+            x = x.to(device='mps', dtype=torch.float16)
+
+        a = torch.randn(128, 128, device='mps', dtype=torch.float16)
+        # Warm up / prebuild MPS shaders (otherwise check fails on 13.2)
+        step(a)
+        torch.mps.empty_cache()
+        driver_before = torch.mps.driver_allocated_memory()
+        step(a)
+        torch.mps.empty_cache()
+        driver_after = torch.mps.driver_allocated_memory()
+        self.assertEqual(driver_before, driver_after, f"Detected {driver_after-driver_before} bytes leak of GPU memory")
+
+
+class TestPixelShuffle(TestCaseMPS):
+    def test_pixel_shuffle_unshuffle(self):
+        def _test_pixel_shuffle_unshuffle_helper(num_input_dims, valid_channels_dim=True,
+                                                 upscale_factor=None, is_contiguous=True):
+
+            def generate_input():
+                # If valid_channels_dim=False, add 1 to make channels dim indivisible by upscale_factor ** 2.
+                channels = random.randint(1, 4) * upscale_factor ** 2 + (0 if valid_channels_dim else 1)
+                height = random.randint(5, 10)
+                width = random.randint(5, 10)
+
+                if num_input_dims == 1:
+                    input = torch.rand(channels, requires_grad=True, device='mps')
+                    assert is_contiguous
+                elif num_input_dims == 2:
+                    input = torch.rand(width, height, requires_grad=True, device='mps').T
+                    if is_contiguous:
+                        input = input.contiguous()
+                else:
+                    batch_sizes = [random.randint(1, 3) for _ in range(num_input_dims - 3)]
+                    input = torch.rand(*batch_sizes, channels, width, height, requires_grad=True, device='mps')
+                    input = input.transpose(-1, -2)
+                    if is_contiguous:
+                        input = input.contiguous()
+
+                if not is_contiguous and len(input.reshape(-1)) > 0:
+                    assert not input.is_contiguous()
+
+                input = input.detach().clone()
+                input.requires_grad = True
+                return input
+
+            # Function to imperatively ensure pixels are shuffled to the correct locations.
+            # Used to validate the batch operations in pixel_shuffle.
+            def _verify_pixel_shuffle(input, output, upscale_factor):
+                for c in range(output.size(-3)):
+                    for h in range(output.size(-2)):
+                        for w in range(output.size(-1)):
+                            height_idx = h // upscale_factor
+                            weight_idx = w // upscale_factor
+                            channel_idx = (upscale_factor * (h % upscale_factor)) + (w % upscale_factor) + \
+                                          (c * upscale_factor ** 2)
+                            self.assertEqual(output[..., c, h, w], input[..., channel_idx, height_idx, weight_idx])
+
+            upscale_factor = random.randint(2, 5) if upscale_factor is None else upscale_factor
+            input = generate_input()
+
+            ps = nn.PixelShuffle(upscale_factor)
+            pus = nn.PixelUnshuffle(downscale_factor=upscale_factor)
+
+            if num_input_dims >= 3 and valid_channels_dim and upscale_factor > 0:
+                output = ps(input)
+                _verify_pixel_shuffle(input, output, upscale_factor)
+                output.backward(output.data)
+                self.assertEqual(input.data, input.grad.data)
+
+                # Ensure unshuffle properly inverts shuffle.
+                unshuffle_output = pus(output)
+                self.assertEqual(input, unshuffle_output)
+            else:
+                self.assertRaises(RuntimeError, lambda: ps(input))
+
+        def _test_pixel_unshuffle_error_case_helper(num_input_dims, valid_height_dim=True, valid_width_dim=True,
+                                                    downscale_factor=None):
+            downscale_factor = random.randint(2, 5) if downscale_factor is None else downscale_factor
+            channels = random.randint(1, 4)
+            # If valid_height_dim=False, add 1 to make height dim indivisible by downscale_factor.
+            height = random.randint(3, 5) * abs(downscale_factor) + (0 if valid_height_dim else 1)
+            # If valid_width_dim=False, add 1 to make width dim indivisible by downscale_factor.
+            width = random.randint(3, 5) * abs(downscale_factor) + (0 if valid_width_dim else 1)
+
+            if num_input_dims == 1:
+                input = torch.rand(channels, requires_grad=True, device='mps')
+            elif num_input_dims == 2:
+                input = torch.rand(height, width, requires_grad=True, device='mps')
+            else:
+                batch_sizes = [random.randint(1, 3) for _ in range(num_input_dims - 3)]
+                input = torch.rand(*batch_sizes, channels, height, width, requires_grad=True, device='mps')
+
+            pus = nn.PixelUnshuffle(downscale_factor)
+            self.assertRaises(RuntimeError, lambda: pus(input))
+
+        def _test_pixel_shuffle_unshuffle_for_input_dims(num_input_dims):
+            # For 1D - 2D, this is an error case.
+            # For 3D - 5D, this is a success case for pixel_shuffle + pixel_unshuffle.
+            is_contiguous_check = [True, False] if num_input_dims > 1 else [True]
+            for is_contiguous in is_contiguous_check:
+                _test_pixel_shuffle_unshuffle_helper(
+                    num_input_dims=num_input_dims, is_contiguous=is_contiguous
+                )
+                _test_pixel_shuffle_unshuffle_helper(
+                    num_input_dims=num_input_dims, valid_channels_dim=False, is_contiguous=is_contiguous
+                )
+                _test_pixel_shuffle_unshuffle_helper(
+                    num_input_dims=num_input_dims, upscale_factor=0, is_contiguous=is_contiguous
+                )
+                _test_pixel_shuffle_unshuffle_helper(
+                    num_input_dims=num_input_dims, upscale_factor=-2, is_contiguous=is_contiguous
+                )
+
+                # Error cases for pixel_unshuffle.
+            _test_pixel_unshuffle_error_case_helper(num_input_dims=num_input_dims, valid_height_dim=False)
+            _test_pixel_unshuffle_error_case_helper(num_input_dims=num_input_dims, valid_width_dim=False)
+            _test_pixel_unshuffle_error_case_helper(num_input_dims=num_input_dims, downscale_factor=0)
+            _test_pixel_unshuffle_error_case_helper(num_input_dims=num_input_dims, downscale_factor=-2)
+
+        def test_pixel_shuffle_unshuffle_1D():
+            _test_pixel_shuffle_unshuffle_for_input_dims(num_input_dims=1)
+
+        def test_pixel_shuffle_unshuffle_2D():
+            _test_pixel_shuffle_unshuffle_for_input_dims(num_input_dims=2)
+
+        def test_pixel_shuffle_unshuffle_3D():
+            _test_pixel_shuffle_unshuffle_for_input_dims(num_input_dims=3)
+
+        def test_pixel_shuffle_unshuffle_4D():
+            _test_pixel_shuffle_unshuffle_for_input_dims(num_input_dims=4)
+
+        def test_pixel_shuffle_unshuffle_5D():
+            _test_pixel_shuffle_unshuffle_for_input_dims(num_input_dims=5)
+
+        test_pixel_shuffle_unshuffle_1D()
+        test_pixel_shuffle_unshuffle_2D()
+        test_pixel_shuffle_unshuffle_3D()
+        test_pixel_shuffle_unshuffle_4D()
+        test_pixel_shuffle_unshuffle_5D()
+
+class MPSReluTest(TestCaseMPS):
     def _npRelu(self, np_features):
         return np.maximum(np_features, np.zeros(np_features.shape)).astype(np_features.dtype)
 
@@ -112,8 +1440,10 @@ class MPSReluTest(TestCase):
             self._testReluInPlace(
                 np.array([[-9, 7, -5, 3, -1], [1, -3, 5, -7, 9]]).astype(t),
                 device="mps")
+            self._testRelu(np.array([]).astype(t), device="mps")
+            self._testReluInPlace(np.array([]).astype(t), device="mps")
 
-class MatmulTest(TestCase):
+class MatmulTest(TestCaseMPS):
     def _helper(self, shape_tensor_1, shape_tensor_2, expand_tensor_1_shape=None, expand_tensor_2_shape=None):
         if expand_tensor_1_shape:
             tensor1_mps = torch.randn(shape_tensor_1, device="mps").expand(expand_tensor_1_shape)
@@ -152,7 +1482,7 @@ class MatmulTest(TestCase):
         self._helper((10, 3, 4), (4, 5))
 
 
-class MPSLeakyReluTest(TestCase):
+class MPSLeakyReluTest(TestCaseMPS):
     def _npLeakyRelu(self, np_features, negative_slope=0.1):
         return np.maximum(np_features, negative_slope * np_features).astype(np_features.dtype)
 
@@ -165,9 +1495,19 @@ class MPSLeakyReluTest(TestCase):
                                                          0.9]]),
                 negative_slope=0.1))
 
-    def _testLeakyRelu(self, np_features, negative_slope, device):
-        cpu_x = torch.from_numpy(np_features).requires_grad_()
-        mps_x = torch.from_numpy(np_features).to('mps').requires_grad_()
+    def _testLeakyRelu(self, shape, dtype, negative_slope, contiguous):
+        cpu_x = torch.randn(shape, device='cpu', dtype=dtype)
+        mps_x = cpu_x.detach().clone().to('mps')
+
+        if not contiguous and not (0 in shape or len(shape) < 2):
+            # Tranposing will make the tensor non-contiguous
+            cpu_x = cpu_x.transpose(0, 1)
+            mps_x = mps_x.transpose(0, 1)
+            assert not mps_x.is_contiguous()
+
+        cpu_x.requires_grad_()
+        mps_x.requires_grad_()
+
         relu_op = torch.nn.LeakyReLU(negative_slope)
 
         cpu_leaky_relu = relu_op(cpu_x)
@@ -175,21 +1515,26 @@ class MPSLeakyReluTest(TestCase):
         torch.testing.assert_close(cpu_leaky_relu, mps_leaky_relu.to('cpu'))
 
         # test backward pass
+
         cpu_grad = torch.ones_like(cpu_leaky_relu)
         mps_grad = cpu_grad.to('mps')
-        cpu_leaky_relu.backward(gradient=cpu_grad)
+
         mps_leaky_relu.backward(gradient=mps_grad)
-        torch.testing.assert_close(cpu_x.grad, mps_x.grad.to('cpu'))
+        cpu_leaky_relu.backward(gradient=cpu_grad)
+
+        assert cpu_x.grad is not None  # Check that the grad is well-populated
+        self.assertEqual(cpu_x.grad, mps_x.grad)
 
     def testNumbersCPU(self):
-        for t in [np.float32]:
-            self._testLeakyRelu(
-                np.array([[-9, 7, -5, 3, -1], [1, -3, 5, -7, 9]]).astype(t),
-                negative_slope=0.2,
-                device="cpu")
+        for t in [torch.float, torch.half]:
+            for shape in [[], (0,), (0, 3), (4,), (4, 3), (5, 4, 3)]:
+                for contiguous in [True, False]:
+                    self._testLeakyRelu(shape,
+                                        dtype=t,
+                                        negative_slope=0.2,
+                                        contiguous=contiguous)
 
-
-class TestAvgPool(TestCase):
+class TestAvgPool(TestCaseMPS):
     def _sum_pool2d(self, x, kernel_size):
         windows = torch.nn.functional.unfold(x, kernel_size=kernel_size, stride=kernel_size)
         return torch.sum(windows, dim=1)
@@ -204,11 +1549,11 @@ class TestAvgPool(TestCase):
         return joined_x.view(1, joined_x.numel())
 
     def _avg_pool2d(self, x, kernel_size):
-        size = reduce((lambda x, y: x * y), kernel_size)
+        size = reduce(operator.mul, kernel_size)  # noqa: F821
         return self._sum_pool2d(x, kernel_size) / size
 
     def _avg_pool3d(self, x, kernel_size):
-        size = reduce((lambda x, y: x * y), kernel_size)
+        size = reduce(operator.mul, kernel_size)  # noqa: F821
         return self._sum_pool3d(x, kernel_size) / size
 
     def test_avg_pool2d_with_zero_divisor(self):
@@ -232,24 +1577,37 @@ class TestAvgPool(TestCase):
         y = torch.nn.functional.avg_pool2d(
             x, ceil_mode=True, count_include_pad=True, kernel_size=(1, 2),
             padding=(0, 1), stride=2)
-        self.assertTrue(not torch.isnan(y).any())
+        self.assertFalse(torch.isnan(y).any())
         y = torch.nn.functional.avg_pool2d(
             x.to('mps'), ceil_mode=True, count_include_pad=True, kernel_size=(1, 2),
             padding=(0, 1), stride=2)
-        self.assertTrue(not torch.isnan(y).any())
+        self.assertFalse(torch.isnan(y).any())
 
 
-class TestMPS(TestCase):
+class TestMPS(TestCaseMPS):
     def test_exp(self, device="mps", dtype=torch.float):
         for v in (2, -2) + ((1j, 1 + 1j) if dtype.is_complex else ()):
-            b = torch.arange(18, device="cpu") / 3 * math.pi
-            a = torch.tensor(v, dtype=dtype, device="cpu") * b
-            a = a.to(dtype).to("mps")
+            b = torch.arange(18, dtype=dtype, device=device) / 3 * math.pi
+            a = torch.tensor(v, dtype=dtype, device="mps") * b
             self.compare_with_numpy(torch.exp, np.exp, a)
 
+    def test_triu_inf(self, device="mps", dtype=torch.float):
+        for diag in [-1, 0, 1]:
+            mask = torch.full((3, 6, 6), float("-inf"))
+            mask_mps = mask.clone().detach().to('mps')
+            cpu_ref = torch.triu(mask, diagonal=diag)
+            mps_out = torch.triu(mask_mps, diagonal=diag)
+            self.assertEqual(cpu_ref, mps_out)
+
     def test_exp1(self, device="mps", dtype=torch.float):
-        input = torch.tensor([-0.1, 3.0, -0.9]).to('mps')
-        output = torch.exp(input).to('cpu')
+        input = torch.tensor([-0.1, 1.0, -0.9, 0.1], device=device, dtype=dtype)
+        output = torch.exp(input)
+        output_cpu = torch.exp(input.cpu())
+        # If exponentWithTensor: MPS call is used on M1 running 14.5 test will fail with
+        # Mismatched elements: 3 / 4 (75.0%)
+        # Greatest absolute difference: 1.1920928955078125e-07 at index (3,) (up to 1e-08 allowed)
+        # Greatest relative difference: 1.0786502002702036e-07 at index (3,) (up to 1e-08 allowed)
+        self.assertEqual(output, output_cpu, atol=1e-8, rtol=1e-8)
 
     def test_exp_strided_output(self):
         x = torch.rand((256, 10), device='mps')
@@ -287,19 +1645,44 @@ class TestMPS(TestCase):
 
     def test_fill(self):
 
-        def helper(val, shape):
-            tensor = torch.zeros(shape, device='mps')
+        def helper(val, shape, dtype):
+            tensor = torch.zeros(shape, device='mps', dtype=dtype)
             tensor_mps = tensor.fill_(val)
-            tensor_mps = torch.tanh(tensor_mps)
 
-            tensor_0 = torch.zeros(shape, device='cpu')
+            tensor_0 = torch.zeros(shape, device='cpu', dtype=dtype)
             tensor_cpu = tensor_0.fill_(val)
-            tensor_cpu = torch.tanh(tensor_cpu)
 
             self.assertEqual(tensor_mps, tensor_cpu)
 
-        helper(0, [1024])
-        helper(0.2, [2, 3])
+        helper(0, [1024], torch.float32)
+        helper(0.2, [2, 3], torch.float32)
+        helper(0.2 + 0.5j, [2, 3], torch.complex64)
+
+    def test_fill_storage_offset(self):
+        shape = [2, 10]
+        val = 0.2
+        tensor = torch.ones(shape, device="mps")
+        tensor_mps = tensor[:][1].fill_(val)
+        tensor_0 = torch.ones(shape, device="cpu")
+        tensor_cpu = tensor_0[:][1].fill_(val)
+
+        self.assertEqual(tensor_mps, tensor_cpu)
+        self.assertEqual(tensor, tensor_0)
+
+        shape = [1, 10]
+        val = 0.0
+        tensor = torch.ones(shape, device="mps")
+        val_tensor_mps = torch.tensor(val, device="mps")
+        tensor_mps = tensor[:, 9].fill_(val_tensor_mps)
+        # Regression test for https://github.com/pytorch/pytorch/issues/114692
+        tensor[:, 5].fill_(val_tensor_mps)
+        tensor_0 = torch.ones(shape, device="cpu")
+        val_tensor_cpu = torch.tensor(val, device="cpu")
+        tensor_cpu = tensor_0[:, 9].fill_(val_tensor_cpu)
+        tensor_0[:, 5].fill_(val_tensor_cpu)
+
+        self.assertEqual(tensor_mps.to(device="cpu"), tensor_cpu)
+        self.assertEqual(tensor.to(device="cpu"), tensor_0)
 
     def test_cdist_large(self, device="mps"):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
@@ -522,6 +1905,13 @@ class TestMPS(TestCase):
         self.assertEqual(output_cpu, output_mps)
         self.assertEqual(output_cpu.size(), output_mps.size())
 
+    def test_addr(self):
+        A = torch.ones(5, 10).to("mps")
+        B = torch.ones(5).to("mps")
+        C = torch.ones(10).to("mps")
+        D = torch.addr(A, B, C).to("cpu")
+        torch.testing.assert_close(D, torch.full((5, 10), 2.0))
+
     def test_trace(self):
         M_cpu = torch.randn(3, 3)
         M_mps = M_cpu.detach().clone().to("mps")
@@ -594,6 +1984,41 @@ class TestMPS(TestCase):
 
         self.assertEqual(linear, linear_mps)
 
+    def test_linear_bias(self):
+        def helper(bias_shape):
+            device = "cpu"
+            x = torch.randn(2, 2, 2, 64, device=device)
+            linear = torch.nn.Linear(64, 4, device=device)
+            linear.bias = torch.nn.Parameter(torch.randn(bias_shape, dtype=torch.float32, device=device))
+            y = linear(x)
+            device = "mps"
+            x_mps = x.to(device)
+            linear.to(device)
+            y_mps = linear(x_mps)
+            self.assertEqual(y, y_mps)
+
+        helper(())
+        helper((2, 4))
+
+    def test_linear_errors(self):
+        # Mixed CPU<->MPS tensors
+        size = (3, 3)
+
+        # Unsupported dtypes
+        with self.assertRaisesRegex(RuntimeError, "does not support linear for non-float weights"):
+            torch.nn.functional.linear(torch.rand(size, device='mps'),
+                                       torch.randint(-10, 10, size, dtype=torch.int8, device='mps'))
+
+        # Weigths on wrong device
+        with self.assertRaisesRegex(RuntimeError, "argument weight is on cpu but expected on mps"):
+            torch.nn.functional.linear(torch.rand(size, device='mps'),
+                                       torch.rand(size, device='cpu'))
+
+        # Input on wrong device
+        with self.assertRaisesRegex(RuntimeError, "argument input is on cpu but expected on mps"):
+            torch.nn.functional.linear(torch.rand(size, device='cpu'),
+                                       torch.rand(size, device='mps'))
+
     def _linear_helper(self, in_features, out_features, shape, bias=True, backward_pass=False):
         cpu_linear = torch.nn.Linear(in_features=in_features, out_features=out_features, device="cpu", bias=bias)
         mps_linear = torch.nn.Linear(in_features=in_features, out_features=out_features, device="mps", bias=bias)
@@ -618,11 +2043,11 @@ class TestMPS(TestCase):
         self.assertEqual(linear_cpu_output.size(), linear_mps_output.size())
 
         if backward_pass:
-            cpu_grad = torch.ones_like(linear_cpu_output)
-            grad = cpu_grad.to('mps')
+            cpu_grad = torch.rand_like(linear_cpu_output, requires_grad=True)
+            grad = cpu_grad.detach().to('mps').requires_grad_()
 
-            linear_cpu_output.backward(gradient=cpu_grad)
-            linear_mps_output.backward(gradient=grad)
+            linear_cpu_output.backward(gradient=cpu_grad, create_graph=True)
+            linear_mps_output.backward(gradient=grad, create_graph=True)
 
             self.assertEqual(linear_cpu_input.grad.size(), linear_mps_input.grad.size())
             self.assertEqual(linear_cpu_input.grad, linear_mps_input.grad.to("cpu"), atol=8e-04, rtol=10.4e-05)
@@ -632,6 +2057,36 @@ class TestMPS(TestCase):
             if bias:
                 self.assertEqual(cpu_linear.bias.grad.size(), mps_linear.bias.grad.size())
                 self.assertEqual(cpu_linear.bias.grad, mps_linear.bias.grad.to("cpu"), atol=8e-04, rtol=10.4e-05)
+
+            # test gradgrad
+            x_grad_out = torch.rand_like(linear_cpu_input)
+            x_grad_out_mps = x_grad_out.to("mps")
+            w_grad_out = torch.rand_like(cpu_linear.weight)
+            w_grad_out_mps = w_grad_out.to("mps")
+
+            linear_cpu_input.grad.detach().zero_()
+            linear_mps_input.grad.detach().zero_()
+            cpu_linear.weight.grad.detach().zero_()
+            mps_linear.weight.grad.detach().zero_()
+            if bias:
+                b_grad_out = torch.rand_like(cpu_linear.bias)
+                b_grad_out_mps = b_grad_out.to("mps")
+                cpu_linear.bias.grad.detach().zero_()
+                mps_linear.bias.grad.detach().zero_()
+
+            linear_cpu_input.grad.backward(x_grad_out, retain_graph=True)
+            linear_mps_input.grad.backward(x_grad_out_mps, retain_graph=True)
+            cpu_linear.weight.grad.backward(w_grad_out, retain_graph=True)
+            mps_linear.weight.grad.backward(w_grad_out_mps, retain_graph=True)
+            if bias:
+                cpu_linear.bias.grad.backward(b_grad_out, retain_graph=True)
+                mps_linear.bias.grad.backward(b_grad_out_mps, retain_graph=True)
+
+            self.assertEqual(cpu_grad.grad, grad.grad)
+            self.assertEqual(linear_cpu_input.grad, linear_mps_input.grad)
+            self.assertEqual(cpu_linear.weight.grad, mps_linear.weight.grad)
+            if bias:
+                self.assertEqual(cpu_linear.bias.grad, mps_linear.bias.grad)
 
     def test_linear1D(self):
         self._linear_helper(in_features=2, out_features=3, shape=([2]), bias=True, backward_pass=False)
@@ -830,6 +2285,27 @@ class TestMPS(TestCase):
 
         helper((2, 3, 6, 6), torch.contiguous_format)
 
+    def test_masked_scatter(self):
+        def helper(shape):
+            x_mps = torch.randn(shape, device="mps")
+            x_cpu = x_mps.detach().clone().cpu()
+
+            mask_mps = torch.rand(shape, device="mps") < 0.6
+            mask_cpu = mask_mps.detach().clone().cpu()
+
+            y_mps = torch.randn(shape, device="mps")
+            y_cpu = y_mps.detach().clone().cpu()
+
+            y_mps.masked_scatter_(mask_mps, x_mps)
+            y_cpu.masked_scatter_(mask_cpu, x_cpu)
+
+            self.assertEqual(y_mps, y_cpu)
+        helper([2, 5])
+        helper([10, 10])
+        helper([5, 10, 3])
+        helper([10, 5, 10, 3])
+        helper([10, 5, 10, 3, 20])
+
     def test_masked_fill(self):
         device = "mps"
         dtype = torch.float32
@@ -857,7 +2333,7 @@ class TestMPS(TestCase):
                 mask = dst.abs() > 0
             else:
                 mask = dst > 0
-            self.assertTrue(not dst.is_contiguous())
+            self.assertFalse(dst.is_contiguous())
             self.assertTrue(dst2.is_contiguous())
             dst.masked_fill_(mask.to(mask_dtype), val)
             dst2.masked_fill_(mask.to(mask_dtype), val)
@@ -1050,6 +2526,26 @@ class TestMPS(TestCase):
                         helper(shape, eps=3, momentum=0.67, wts=True, training=True, channels_last=channels_last,
                                track_running_stats=track_running_stats, test_module=test_module)
 
+    def test_batch_norm_backward(self):
+        inputs = torch.rand(1, 8, 4, 4, device="mps", requires_grad=True)
+        x = torch.nn.BatchNorm2d(8).to("mps")
+        y = torch.nn.BatchNorm2d(8).to("mps")
+        y.weight.requires_grad = False
+        y.bias.requires_grad = False
+        outputs = y(x(inputs))
+        # This used to crash, see https://github.com/pytorch/pytorch/issues/98602
+        outputs.sum().backward()
+
+    def test_layer_norm_backward(self):
+        inputs = torch.rand(4, 4, device="mps", requires_grad=True)
+        x = torch.nn.LayerNorm(4).to("mps")
+        y = torch.nn.LayerNorm(4).to("mps")
+        y.weight.requires_grad = False
+        y.bias.requires_grad = False
+        outputs = y(x(inputs))
+        # This used to crash, see https://github.com/pytorch/pytorch/issues/98602
+        outputs.sum().backward()
+
     def test_norm(self):
         a = torch.arange(9, dtype=torch.float, device="mps") - 4
         b = a.reshape((3, 3))
@@ -1099,6 +2595,34 @@ class TestMPS(TestCase):
         res_cpu = torch.norm(d_cpu[0, :, :]), torch.norm(d_cpu[1, :, :])
         self.assertEqual(res, res_cpu)
 
+    def test_linalg_vector_norm(self):
+        x_mps = torch.tensor([0, 0, 0, 2, 3], dtype=torch.float, device="mps")
+        x_cpu = x_mps.detach().clone().cpu()
+
+        res_mps = torch.linalg.vector_norm(x_mps, ord=0)
+        res_cpu = torch.linalg.vector_norm(x_cpu, ord=0)
+        self.assertEqual(res_mps, res_cpu)
+
+        a_mps = torch.arange(27, dtype=torch.float, device="mps") - 4
+        a_cpu = torch.arange(27, dtype=torch.float, device="cpu") - 4
+
+        B_mps = a_mps.reshape(3, 3, 3)
+        B_cpu = a_cpu.reshape(3, 3, 3)
+
+        res_mps = torch.linalg.vector_norm(a_mps, ord=3.5)
+        res_cpu = torch.linalg.vector_norm(a_cpu, ord=3.5)
+        self.assertEqual(res_mps, res_cpu)
+
+        res_mps = torch.linalg.vector_norm(B_mps, ord=3.5)
+        res_cpu = torch.linalg.vector_norm(B_cpu, ord=3.5)
+        self.assertEqual(res_mps, res_cpu)
+
+        for dim in range(0, B_mps.dim()):
+            res_mps = torch.linalg.vector_norm(B_mps, ord=3.5, dim=dim)
+            res_cpu = torch.linalg.vector_norm(B_cpu, ord=3.5, dim=dim)
+            self.assertEqual(res_mps, res_cpu)
+
+
     def test_layer_norm(self):
         # TODO: Test non-contiguous
         def helper(input_shape, normalized_shape, eps=1e-05, elementwise_affine=True, dtype=torch.float32):
@@ -1137,6 +2661,22 @@ class TestMPS(TestCase):
             helper((2, 2, 2, 2), (2, 2), elementwise_affine=elementwise_affine)
             helper((2, 3, 4, 5), (4, 5), elementwise_affine=elementwise_affine)
             helper((2, 3, 4, 5, 6), (4, 5, 6), elementwise_affine=elementwise_affine)
+
+        # Regression test for https://github.com/pytorch/pytorch/issues/96113
+        torch.nn.LayerNorm((16,), elementwise_affine=True).to("mps")(torch.randn(1, 2, 16).to("mps", dtype=torch.float16))
+
+    @xfailIf(product_version < 14.0)
+    def test_ifft(self):
+        # See: https://github.com/pytorch/pytorch/issues/124096
+        device = torch.device("mps")
+
+        N = 64
+        signal = torch.rand(N, device=device)
+        fft_result = torch.fft.rfft(signal)
+        ifft_result = torch.fft.irfft(fft_result, n=signal.shape[0])
+
+        # Expecting the inverted to yield the original signal
+        self.assertEqual(ifft_result, signal)
 
     def test_instance_norm(self):
         def helper(shape, eps=1, momentum=0.1, wts=False, channels_last=False, track_running_stats=True, test_module=False):
@@ -1295,6 +2835,95 @@ class TestMPS(TestCase):
                                track_running_stats=track_running_stats, test_module=test_module)
                         helper(shape, eps=3, momentum=0.67, wts=True, channels_last=channels_last,
                                track_running_stats=track_running_stats, test_module=test_module)
+
+    def test_weight_norm(self):
+        def validate_weight_norm_equality(model, cpu_model, x, cpu_x, dim):
+            cpu_norm = torch.nn.utils.parametrizations.weight_norm(cpu_model, dim=dim)
+            norm = torch.nn.utils.parametrizations.weight_norm(model, dim=dim)
+
+            cpu_out = cpu_norm(cpu_x)
+            out = norm(x)
+
+            self.assertEqual(cpu_out, out)
+
+            cpu_grad = torch.randn(cpu_out.shape)
+            grad = cpu_grad.to('mps')
+            cpu_out.backward(gradient=cpu_grad)
+            out.backward(gradient=grad)
+
+            self.assertEqual(cpu_model.parametrizations.weight.original0.grad, model.parametrizations.weight.original0.grad)
+            self.assertEqual(cpu_model.parametrizations.weight.original1.grad, model.parametrizations.weight.original1.grad)
+
+            self.assertEqual(x.grad, cpu_x.grad)
+
+        def helper(dim, layer='linear', dtype=torch.float32):
+            # linear layer
+            if layer == 'linear':
+                cpu_x = torch.randn((2, 5), device='cpu', dtype=dtype, requires_grad=True)
+                x = cpu_x.detach().clone().to('mps').requires_grad_()
+
+                cpu_weight = torch.randn(10, 5, device='cpu', dtype=dtype, requires_grad=True)
+                weight = cpu_weight.detach().clone().to('mps').requires_grad_()
+
+                cpu_bias = torch.randn(10, device='cpu', dtype=dtype, requires_grad=True)
+                bias = cpu_bias.detach().clone().to('mps').requires_grad_()
+
+                cpu_linear = torch.nn.Linear(5, 10, device='cpu')
+                linear = torch.nn.Linear(5, 10, device='mps')
+
+                with torch.no_grad():
+                    cpu_linear.weight.copy_(cpu_weight)
+                    cpu_linear.bias.copy_(cpu_bias)
+                    linear.weight.copy_(weight)
+                    linear.bias.copy_(bias)
+                validate_weight_norm_equality(linear, cpu_linear, x, cpu_x, dim)
+
+            # conv layer
+            if layer == 'conv':
+                cpu_x = torch.randn((3, 5, 5), device='cpu', dtype=dtype, requires_grad=True)
+                x = cpu_x.detach().clone().to('mps').requires_grad_()
+
+                cpu_conv = torch.nn.Conv2d(3, 3, 3, device='cpu')
+                conv = torch.nn.Conv2d(3, 3, 3, device='mps')
+
+                with torch.no_grad():
+                    conv.weight.copy_(cpu_conv.weight)
+                    conv.bias.copy_(cpu_conv.bias)
+
+                validate_weight_norm_equality(conv, cpu_conv, x, cpu_x, dim)
+
+            # conv3d layer
+            if layer == 'conv3d':
+                cpu_x = torch.randn((3, 5, 5, 4), device='cpu', dtype=dtype, requires_grad=True)
+                x = cpu_x.detach().clone().to('mps').requires_grad_()
+
+                cpu_conv = torch.nn.Conv3d(3, 3, 3, device='cpu')
+                conv = torch.nn.Conv3d(3, 3, 3, device='mps')
+
+                with torch.no_grad():
+                    conv.weight.copy_(cpu_conv.weight)
+                    conv.bias.copy_(cpu_conv.bias)
+
+                validate_weight_norm_equality(conv, cpu_conv, x, cpu_x, dim)
+
+        helper(0, layer='linear')
+        helper(1, layer='linear')
+        helper(-1, layer='linear')
+
+        helper(0, layer='conv')
+        helper(1, layer='conv')
+        helper(2, layer='conv')
+        helper(3, layer='conv')
+        helper(-1, layer='conv')
+
+        if product_version >= 13.2:
+            # Conv3d is only available from MacOS 13 onwards
+            helper(0, layer='conv3d')
+            helper(1, layer='conv3d')
+            helper(2, layer='conv3d')
+            helper(3, layer='conv3d')
+            helper(4, layer='conv3d')
+            helper(-1, layer='conv3d')
 
     # Test conv2d
     def test_conv2d_unit(self):
@@ -1516,6 +3145,7 @@ class TestMPS(TestCase):
     # Test pow
     def test_pow(self):
         def helper(shape):
+            # aten::pow.Tensor_Tensor
             cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
             x = cpu_x.detach().clone().to('mps')
             cpu_y = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
@@ -1525,6 +3155,7 @@ class TestMPS(TestCase):
 
             self.assertEqual(z, ref_z)
 
+            # aten::pow.Tensor_Scalar
             cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
             x = cpu_x.detach().clone().to('mps')
             exp = random.random()
@@ -1533,19 +3164,32 @@ class TestMPS(TestCase):
 
             self.assertEqual(z, ref_z)
 
+            # aten::pow.Scalar
+            x = random.random()
+            cpu_y = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
+            y = cpu_y.detach().clone().to('mps')
+            z = torch.pow(x, y)
+            ref_z = torch.pow(x, cpu_y)
+
+            self.assertEqual(z, ref_z)
+
         helper((2, 8, 4, 5))
 
     # Test addcmul
     def test_addcmul(self):
-        def helper(shape, value):
+        def helper(shape, value, xtype=torch.float32, ytype=None, ztype=None):
+            def rand_helper(dtype):
+                if dtype.is_floating_point:
+                    return torch.randn(shape, device='cpu', dtype=dtype, requires_grad=False)
+                return torch.randint(10, shape, dtype=dtype, device='cpu', requires_grad=False)
 
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
+            cpu_x = rand_helper(xtype)
             x = cpu_x.detach().clone().to('mps')
 
-            cpu_y = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
+            cpu_y = rand_helper(ytype if ytype is not None else xtype)
             y = cpu_y.detach().clone().to('mps')
 
-            cpu_z = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
+            cpu_z = rand_helper(ztype if ztype is not None else xtype)
             z = cpu_z.detach().clone().to('mps')
 
             y = torch.addcmul(x, y, z, value=value)
@@ -1557,6 +3201,16 @@ class TestMPS(TestCase):
         helper((2, 8, 4, 5), 0.1)
         helper((2, 3, 4, 5), 0.2)
         helper((2, 8, 4, 5), 0.2)
+        # Integral types
+        helper((2, 2), 1.0, xtype=torch.int32)
+        helper((2, 2), 2.0, xtype=torch.int16)
+
+        # Mixed types
+        helper((2, 2), 1.0, xtype=torch.float16, ytype=torch.float32)
+        helper((3, 2), 1.0, ytype=torch.float16)
+        helper((2, 3), 1.0, ztype=torch.float16)
+        helper((2, 2), 1.0, xtype=torch.int32, ytype=torch.int16, ztype=torch.uint8)
+        helper((2, 2), 1.0, ytype=torch.int16, ztype=torch.uint8)
 
     # Test addcdiv
     def test_addcdiv(self):
@@ -1581,6 +3235,36 @@ class TestMPS(TestCase):
         helper((2, 3, 4, 5), 0.1)
         helper((2, 8, 4, 5), 0.2)
         helper((2, 3, 4, 5), 1.0)  # value of 1 should be ignored internally
+
+    def test_addcdiv_transpose(self):
+        # Regression test for issue https://github.com/pytorch/pytorch/issues/118115
+        # Testing continuity of all input tensors
+
+        def helper(shape, value):
+            shape_t = shape[::-1]
+            for i in range(2):
+                for j in range(2):
+                    for k in range(2):
+                        x = torch.rand(shape, device="cpu") if i == 0 else torch.rand(shape_t, device="cpu").t()
+                        y = torch.rand(shape, device="cpu") if j == 0 else torch.rand(shape_t, device="cpu").t()
+                        z = torch.rand(shape, device="cpu") if k == 0 else torch.rand(shape_t, device="cpu").t()
+
+                        x_mps = x.detach().clone().to(device="mps")
+                        y_mps = y.detach().clone().to(device="mps")
+                        z_mps = z.detach().clone().to(device="mps")
+
+                        result_cpu = x.addcdiv_(y, z, value=value)
+                        result_mps = x_mps.addcdiv(y_mps, z_mps, value=value)
+                        result_mps_out = result_cpu.detach().clone().to('mps')
+                        torch.addcdiv(x_mps, y_mps, z_mps, out=result_mps_out, value=value)
+
+                        self.assertEqual(result_cpu, result_mps)
+                        self.assertEqual(result_cpu, result_mps_out)
+
+        helper((2, 3), 1.0)
+        helper((2, 3), 0.2)
+        helper((100, 300), 1.0)
+        helper((100, 300), 0.2)
 
     def test_buffer_size_match(self):
         # this test shouldn't cause any crash
@@ -1645,6 +3329,87 @@ class TestMPS(TestCase):
         x_cpu = x_cpu + 2
         self.assertEqual(x, x_cpu)
 
+    def test_reshape_storage_offset(self):
+        # https://github.com/pytorch/pytorch/issues/95883
+        B = 4
+        T = 1
+
+        lin_cpu = nn.Linear(10, 256)
+        lin_mps = nn.Linear(10, 256, device="mps")
+
+        # Use the same weights and bias as the ones from the cpu
+        lin_mps.weight.data = lin_cpu.weight.data.detach().clone().to("mps").requires_grad_()
+        lin_mps.bias.data = lin_cpu.bias.data.detach().clone().to("mps").requires_grad_()
+
+        x_mps = torch.rand([B, T, 10], device="mps", requires_grad=True)
+        x_cpu = x_mps.detach().clone().cpu().requires_grad_()
+        x_mps = lin_mps(x_mps)
+        x_cpu = lin_cpu(x_cpu)
+
+        self.assertEqual(x_mps.shape, (B, T, 256))
+        self.assertEqual(x_cpu.shape, (B, T, 256))
+
+        cls_token_mps = torch.rand([1, 256], device="mps", requires_grad=True).repeat(B, 1, 1)
+        cls_token_cpu = cls_token_mps.detach().clone().cpu()
+        x_mps = torch.cat([cls_token_mps, x_mps], dim=1)
+        x_cpu = torch.cat([cls_token_cpu, x_cpu], dim=1)
+
+        x_mps = x_mps.transpose(0, 1)
+        x_cpu = x_cpu.transpose(0, 1)
+
+        target_mps = torch.rand_like(x_mps)
+        target_cpu = target_mps.detach().clone().cpu()
+        loss_mps = F.mse_loss(x_mps, target_mps)
+        loss_cpu = F.mse_loss(x_cpu, target_cpu)
+        self.assertEqual(loss_mps, loss_cpu)
+
+        loss_mps.backward()
+        loss_cpu.backward()
+        self.assertEqual(x_mps.grad, x_cpu.grad)
+
+    def test_stack_storage_offset(self):
+        # https://github.com/pytorch/pytorch/issues/87856
+        x_cpu = torch.tensor([[1, 2]])
+        x_mps = x_cpu.detach().clone().to("mps")
+
+        y_cpu = torch.stack((x_cpu[:, :1], x_cpu[:, -1:]), dim=-1)
+        y_mps = torch.stack((x_mps[:, :1], x_mps[:, -1:]), dim=-1)
+
+        self.assertEqual(y_cpu, y_mps)
+
+        t_mps = torch.tensor([1, 2, 3, 4], device="mps")
+        t_cpu = t_mps.detach().cpu().detach()
+
+        x_mps = t_mps[2:]
+        y_mps = t_mps[:2]
+
+        x_cpu = t_cpu[2:]
+        y_cpu = t_cpu[:2]
+
+        res_mps = torch.stack((y_mps, x_mps), dim=-1)
+        res_cpu = torch.stack((y_cpu, x_cpu), dim=-1)
+
+        self.assertEqual(res_mps, res_cpu)
+
+    def test_unsafe_chunk(self):
+        # https://github.com/pytorch/pytorch/issues/91065
+        a = torch.rand(5, dtype=torch.float32, device="cpu")
+        ret = a.unsafe_chunk(4, 0)
+        y = ret[0] * ret[2]
+        a_mps = a.to("mps")
+        ret_mps = a_mps.unsafe_chunk(4, 0)
+        y_mps = ret_mps[0] * ret_mps[2]
+        self.assertEqual(y, y_mps)
+
+    def test_slice_casting(self):
+        # generate random binary numbers
+        cpu_in = torch.bernoulli(torch.empty(1, 1, 128, 128).uniform_(0, 1)).to(torch.uint8)
+        mps_in = cpu_in.detach().clone().to("mps")
+        # check copy_cast(unit8 -> bool) on tensors with storage offset
+        cpu_out = cpu_in[:, :, 11 : 12, :12].to(torch.bool)
+        mps_out = mps_in[:, :, 11 : 12, :12].to(torch.bool)
+        self.assertEqual(cpu_out, mps_out)
+
     def test_slice_reshape_contg_view(self):
         import torch
 
@@ -1655,6 +3420,72 @@ class TestMPS(TestCase):
         r_cpu = x_cpu + 2
 
         self.assertEqual(r_mps, r_cpu)
+
+    def test_contiguous_slice_2d(self):
+        def helper(shape):
+            for i in range(0, shape[0]):
+                for j in range(0, shape[1]):
+                    t_mps = torch.randn(shape, device="mps")
+                    t_cpu = t_mps.detach().clone().cpu()
+
+                    y_mps = t_mps[i:, :j]
+                    y_cpu = t_cpu[i:, :j]
+                    self.assertEqual(y_mps + 1, y_cpu + 1)
+
+                    y_mps = t_mps[i:, j]
+                    y_cpu = t_cpu[i:, j]
+                    self.assertEqual(y_mps + 1, y_cpu + 1)
+
+                    y_mps = t_mps[i, :j]
+                    y_cpu = t_cpu[i, :j]
+                    self.assertEqual(y_mps + 1, y_cpu + 1)
+
+                    y_mps = t_mps[:i, :j]
+                    y_cpu = t_cpu[:i, :j]
+                    self.assertEqual(y_mps + 1, y_cpu + 1)
+
+                    y_mps = t_mps[:i, j]
+                    y_cpu = t_cpu[:i, j]
+                    self.assertEqual(y_mps + 1, y_cpu + 1)
+
+                    y_mps = t_mps[:i, j:]
+                    y_cpu = t_cpu[:i, j:]
+                    self.assertEqual(y_mps + 1, y_cpu + 1)
+
+        l = []
+        for N in range(1, 3):
+            l.append(N)
+            for C in range(1, 3):
+                l.append(C)
+                helper(l)
+                for D in range(1, 3):
+                    l.append(D)
+                    helper(l)
+                    for H in range(1, 3):
+                        l.append(H)
+                        helper(l)
+                        for W in range(1, 3):
+                            l.append(W)
+                            helper(l)
+                            l.pop()
+                        l.pop()
+                    l.pop()
+                l.pop()
+            l.pop()
+
+        helper([9, 15, 4])
+        helper([9, 3, 2])
+        helper([3, 4, 18, 22])
+        helper([3, 4, 18, 22, 150])
+
+    def test_contiguous_slice_3d(self):
+        x = torch.randn(2, 3, 3, device="mps")
+        x_cpu = x.detach().clone().cpu()
+        x = x[:1]
+        x_cpu = x_cpu[:1]
+        out = x[:, 0:1, 0:1] * x[:, 1:2, 1:2]
+        out_cpu = x_cpu[:, 0:1, 0:1] * x_cpu[:, 1:2, 1:2]
+        self.assertEqual(out, out_cpu)
 
     def test_view_slice(self):
         # https://github.com/pytorch/pytorch/issues/83995
@@ -1749,25 +3580,28 @@ class TestMPS(TestCase):
             if operator == "<=":
                 res_mps = x_mps <= y_mps
                 res_cpu = x_cpu <= y_cpu
-            if operator == "<":
+            elif operator == "<":
                 res_mps = x_mps < y_mps
                 res_cpu = x_cpu < y_cpu
-            if operator == ">=":
+            elif operator == ">=":
                 res_mps = x_mps >= y_mps
                 res_cpu = x_cpu >= y_cpu
-            if operator == ">":
+            elif operator == ">":
                 res_mps = x_mps >= y_mps
                 res_cpu = x_cpu >= y_cpu
-            if operator == "==":
+            elif operator == "==":
                 res_mps = x_mps == y_mps
                 res_cpu = x_cpu == y_cpu
-            if operator == "!=":
+            elif operator == "!=":
                 res_mps = x_mps != y_mps
                 res_cpu = x_cpu != y_cpu
+            elif operator == "stack":
+                res_mps = torch.stack((y_mps, x_mps), dim=-1)
+                res_cpu = torch.stack((y_cpu, x_cpu), dim=-1)
 
             self.assertEqual(res_mps, res_cpu)
 
-        for op in ["<=", "<", ">=", ">", "==", "!="]:
+        for op in ["<=", "<", ">=", ">", "==", "!=", "stack"]:
             helper(op)
 
     def test_slice_of_slice(self):
@@ -1844,6 +3678,100 @@ class TestMPS(TestCase):
         helper((2, 3, 4), (4, 3, 2, 5, 7, 2))
         helper((3, 4, 5), (2, 3, 4, 5))
         helper((3, 4, 5), (2, 2, 2))
+
+    def test_torch_repeat_interleave(self, device="mps"):
+        y = torch.tensor([[1, 2], [3, 4]], device=device)
+        # exercise single argument function signature
+        temp = y.repeat_interleave(2)
+        self.assertEqual(torch.Size([8]), temp.size())
+
+        for dtype in [torch.int, torch.long]:
+            lengths = torch.tensor([1, 2], dtype=dtype, device="mps")
+            output_size = torch.sum(lengths)
+            a = torch.repeat_interleave(
+                y,
+                lengths,
+                dim=0,
+            )
+            self.assertEqual(a.dtype, y.dtype)
+            self.assertEqual(a.size(), torch.Size([3, 2]))
+
+            a_with_output = torch.repeat_interleave(
+                y,
+                lengths,
+                dim=0,
+                output_size=output_size,
+            )
+            self.assertEqual(a_with_output.dtype, y.dtype)
+            self.assertEqual(a_with_output.size(), torch.Size([3, 2]))
+
+    def test_repeat_interleave(self, device="mps"):
+        x = torch.tensor([0, 1, 2, 3], device=device)
+        expected = torch.tensor([1, 2, 2, 3, 3, 3], device=device)
+        # Prior to macos 13.3, input of dtype=torch.int64 returns dtype=torch.int32
+        self.assertEqual(torch.repeat_interleave(x), expected, exact_dtype=product_version >= 13.3)
+
+        with self.assertRaises(RuntimeError):
+            torch.repeat_interleave(torch.arange(4, device=device).reshape(2, 2))
+
+        with self.assertRaises(RuntimeError):
+            torch.repeat_interleave(torch.arange(4.0, device=device))
+
+        with self.assertRaises(RuntimeError):
+            torch.repeat_interleave(torch.tensor([1, 2, -1, 3, 4], device=device))
+
+        y = torch.tensor([[1, 2], [3, 4]], device=device)
+
+        y1_v1 = torch.repeat_interleave(y, 2)
+        y1_v2 = torch.repeat_interleave(y, torch.tensor(2, device=device))
+        y1_v3 = torch.repeat_interleave(y, torch.tensor([2], device=device))
+        y1_expect = torch.tensor([1, 1, 2, 2, 3, 3, 4, 4], device=device)
+        self.assertEqual(y1_v1, y1_expect)
+        self.assertEqual(y1_v2, y1_expect)
+        self.assertEqual(y1_v3, y1_expect)
+
+        y2 = torch.repeat_interleave(y, 3, dim=1)
+        y2_expect = torch.tensor([[1, 1, 1, 2, 2, 2],
+                                  [3, 3, 3, 4, 4, 4]], device=device)
+        self.assertEqual(y2, y2_expect)
+
+        y3 = torch.repeat_interleave(y, torch.tensor([1, 2], device=device), dim=0)
+        y3_expect = torch.tensor([[1, 2],
+                                  [3, 4],
+                                  [3, 4]], device=device)
+        self.assertEqual(y3, y3_expect)
+
+        with self.assertRaises(RuntimeError):
+            torch.repeat_interleave(y, torch.tensor([1, 2, 3], device=device), dim=0)
+
+        with self.assertRaises(RuntimeError):
+            torch.repeat_interleave(y, torch.arange(9, device=device).reshape(3, 3), dim=0)
+
+        # test zero sized dimension
+        x = torch.zeros((5, 0), device=device)
+        y = torch.repeat_interleave(x, repeats=3, dim=1)
+        self.assertEqual(y, x.new_zeros(5, 0, device=device))
+
+        x = torch.tensor([], dtype=torch.int64, device=device)
+        y = torch.repeat_interleave(x, x)
+        self.assertEqual(y, x)
+
+    def test_repeat_interleave_simple(self):
+        def helper(shape, dtype=torch.float32, num_repeats=torch.Tensor(), dim=None):
+            x = torch.randn(shape, dtype=dtype, device="mps")
+            x_cpu = x.detach().clone().cpu()
+
+            num_repeats_cpu = num_repeats.detach().clone().cpu()
+
+            repeats = torch.repeat_interleave(x, num_repeats, dim)
+            repeats_cpu = torch.repeat_interleave(x_cpu, num_repeats_cpu, dim)
+
+            self.assertEqual(repeats, repeats_cpu)
+        helper(shape=3, num_repeats=torch.tensor([100], device="mps"))
+        helper(shape=(2, 2), num_repeats=torch.tensor([3, 3], device="mps"), dim=0)
+        helper(shape=(10, 15, 8), num_repeats=torch.arange(10, device="mps"), dim=0)
+        helper(shape=(10, 15, 8), num_repeats=torch.randint(0, 100, (15, ), device="mps"), dim=1)
+        helper(shape=(10, 15, 30), num_repeats=torch.randint(0, 100, (30, ), device="mps"), dim=2)
 
     def test_count_nonzero(self):
         def helper(dtype):
@@ -2007,6 +3935,7 @@ class TestMPS(TestCase):
         y_cpu = torch.full((2, 2), 247, device='cpu', dtype=torch.uint8)
         self.assertEqual(y_mps, y_cpu)
 
+    @unittest.skipIf(product_version < 13.0, "Skipped on macOS 12")
     # See https://github.com/pytorch/pytorch/issues/84995
     def test_div_bugs(self):
         for (dtype, mode) in itertools.product(integral_types(), ['trunc', 'floor']):
@@ -2146,6 +4075,9 @@ class TestMPS(TestCase):
         helper(torch.randint(3, (10, )), True, True)
         helper(torch.randint(3, (1, )), True, True)
         helper(torch.randint(3, (0, )), True, True)
+        # Regression test for https://github.com/pytorch/pytorch/issues/104879
+        x = torch.arange(2, device="mps")
+        self.assertEqual(x.reshape(1, 1, 2).unique(), x)
 
     def test_unique_consecutive(self):
         def helper(x, dim, return_inverse, return_counts):
@@ -2179,16 +4111,25 @@ class TestMPS(TestCase):
 
     # See https://github.com/pytorch/pytorch/issues/85675
     def test_cat_non_contiguous(self):
-        def rotate_subset(data):
-            return torch.concat([data[:, :2], torch.rot90(data[:, 2:])])
+        def rotate_subset(data, dim):
+            x1 = data[:, :, :2, :]
+            x2 = data[:, :, 2:, :]
+            self.assertFalse(x1.is_contiguous())
+            self.assertFalse(x2.is_contiguous())
+            return torch.concat((x1, x2), dim=dim)
         for dtype in MPS_DTYPES:
             if dtype == torch.bool:
                 continue
-            data = torch.arange(8, dtype=dtype).reshape(2, 4)
+            data = torch.arange(48, dtype=dtype).reshape(1, 2, 4, 6)
+            data = data.to(memory_format=torch.channels_last)
             mps_data = data.to("mps")
-            cpu_result = rotate_subset(data)
-            mps_result = rotate_subset(mps_data)
-            self.assertEqual(cpu_result, mps_result.to("cpu"))
+            self.assertEqual(data, mps_data)
+            for dim in range(data.dim()):
+                cpu_result = rotate_subset(data, dim)
+                mps_result = rotate_subset(mps_data, dim)
+                self.assertEqual(cpu_result, mps_result.to("cpu"))
+                # TODO: enable memory format test
+                # self.assertEqual(cpu_result.is_contiguous(), mps_result.is_contiguous())
 
     # See https://github.com/pytorch/pytorch/issues/85967
     def test_from_numpy_non_contiguous(self):
@@ -2216,6 +4157,45 @@ class TestMPS(TestCase):
         # As y is on MPS and z on CPU, this dispatches to a copy operator
         y.permute(3, 2, 1, 0)[1::, ::2] = z
         self.assertEqual(x, y.to('cpu'))
+
+    # See https://github.com/pytorch/pytorch/issues/95417
+    def test_copy_storage_offset(self):
+        x_cpu = torch.zeros(5, device="cpu", dtype=torch.float32)
+        x_mps = torch.zeros(5, device="mps", dtype=torch.float32)
+        update_cpu = torch.tensor([1, 1], device="cpu", dtype=torch.int64)
+        update_mps = torch.tensor([1, 1], device="mps", dtype=torch.int64)
+        x_cpu[2:4] = update_cpu
+        x_mps[2:4] = update_mps  # implicit type casting and copy
+        self.assertEqual(x_cpu, x_mps)
+
+        x_cpu[2:4] = update_mps  # implicit device moving and copy
+        self.assertEqual(x_cpu, x_mps)
+
+    def test_copy_broadcasting(self):
+        def helper(src_shape, dst_shape, src_dtype, dst_dtype):
+            cpu_src = torch.randint(0, 127, src_shape).to(src_dtype)
+            cpu_dst = torch.randint(0, 127, dst_shape).to(dst_dtype)
+            cpu_result = cpu_dst.copy_(cpu_src)
+            mps_src = cpu_src.to("mps")
+            mps_dst = cpu_dst.to("mps")
+            mps_result = mps_dst.copy_(mps_src)
+            self.assertEqual(cpu_result, mps_result)
+
+        test_dtypes = [torch.float32, torch.int32, torch.int16, torch.int8]
+
+        for (src_dtype, dst_dtype) in itertools.product(test_dtypes, test_dtypes):
+            helper((2, 1), (2, 3), src_dtype, dst_dtype)
+            helper((2, 1), (2, 2), src_dtype, dst_dtype)
+            helper((3, 1, 4, 1), (3, 4, 4, 5), src_dtype, dst_dtype)
+            helper((3,), (2, 3), src_dtype, dst_dtype)
+            helper((2,), (2, 2), src_dtype, dst_dtype)
+            helper((4, 1, 5), (3, 4, 4, 5), src_dtype, dst_dtype)
+            helper((4, 1, 5), (4, 0, 5), src_dtype, dst_dtype)
+            helper((1, 5), (4, 0, 5), src_dtype, dst_dtype)
+            helper((3, 1, 0), (3, 5, 0), src_dtype, dst_dtype)
+            helper((0, 1, 0), (0, 5, 0), src_dtype, dst_dtype)
+        # Regression test for https://github.com/pytorch/pytorch/issues/107867
+        self.assertEqual(torch.tensor([[1]], device='mps').item(), 1.0)
 
     # See https://github.com/pytorch/pytorch/pull/84742
     # and https://github.com/pytorch/pytorch/pull/78319
@@ -2325,6 +4305,82 @@ class TestMPS(TestCase):
             with self.subTest(dtype=dtype, noncontiguous=noncontiguous, dim=dim):
                 helper(dtype, noncontiguous, dim)
 
+    def test_cumsum_all_dtypes(self):
+        def helper(dtype):
+            t = torch.tensor([1, 1, 1, 1], device="mps", dtype=dtype)
+            t_cpu = torch.tensor([1, 1, 1, 1], device="cpu")
+
+            a = t.cumsum(0, dtype=dtype)
+            a_cpu = t_cpu.cumsum(0, dtype=dtype)
+
+            self.assertEqual(a.cpu(), a_cpu)
+        [helper(dtype) for dtype in [torch.int8, torch.int16, torch.int32, torch.float32]]
+
+        try:
+            helper(torch.int64)
+        except Exception as e:
+            e_string = str(e)
+            self.assertEqual(e_string, "MPS does not support cumsum_out_mps op with int64 input." +
+                             " Support has been added in macOS 13.3")
+
+    def test_cumsum_bool(self):
+        a = torch.ones(2**16, dtype=torch.bool)
+        t_cpu = a.cumsum(0)
+        t_mps = a.to("mps").cumsum(0)
+
+        self.assertEqual(t_cpu, t_mps)
+
+    def test_cumsum_minus_one_axis(self):
+        def helper(dtype):
+            # Test with axis -1
+            cpu_x = None
+            if dtype == torch.float32:
+                cpu_x = torch.randn(10, 3, device='cpu', dtype=torch.float32)
+            else:
+                cpu_x = torch.randint(0, 20, (10, 3), device='cpu', dtype=torch.float32)
+            x = cpu_x.detach().clone().to('mps')
+
+            cpu_y = cpu_x.cumsum(-1)
+            y = x.cumsum(-1)
+
+            self.assertEqual(y, cpu_y)
+
+        [helper(dtype) for dtype in [torch.float32, torch.int16, torch.int32, torch.uint8]]
+
+    def test_cumprod_all_dtypes(self):
+        def helper(dtype):
+            t = torch.tensor([1, 1, 1, 1], device="mps", dtype=dtype)
+            t_cpu = torch.tensor([1, 1, 1, 1], device="cpu")
+
+            a = t.cumprod(0, dtype=dtype)
+            a_cpu = t_cpu.cumprod(0, dtype=dtype)
+
+            self.assertEqual(a.cpu(), a_cpu)
+        [helper(dtype) for dtype in [torch.int8, torch.int16, torch.int32, torch.float32]]
+
+        try:
+            helper(torch.int64)
+        except Exception as e:
+            e_string = str(e)
+            self.assertEqual(e_string, "MPS does not support cumprod_out_mps op with int64 input."
+                             + " Support has been added in macOS 13.3")
+
+    def test_cumprod_minus_one_axis(self):
+        def helper(dtype):
+            # Test with axis -1
+            cpu_x = None
+            if dtype == torch.float32:
+                cpu_x = torch.randn(10, 3, device='cpu', dtype=torch.float32)
+            else:
+                cpu_x = torch.randint(0, 20, (10, 3), device='cpu', dtype=torch.float32)
+            x = cpu_x.detach().clone().to('mps')
+
+            cpu_y = cpu_x.cumprod(-1)
+            y = x.cumprod(-1)
+
+            self.assertEqual(y, cpu_y)
+
+        [helper(dtype) for dtype in [torch.float32, torch.int16, torch.int32, torch.uint8]]
 
     def test_median_int16(self):
         def helper(shape, dtype):
@@ -2337,253 +4393,17 @@ class TestMPS(TestCase):
 
         helper((2, 8, 4, 5), torch.int16)
 
-class TestLogical(TestCase):
-    def _wrap_tensor(self, x, device="cpu", dtype=None, requires_grad=False):
-        return torch.tensor(x, device=device, dtype=dtype, requires_grad=requires_grad)
+    def test_activation_checkpoint_does_not_error(self):
+        from torch.utils.checkpoint import checkpoint
 
-    def test_logical_not(self):
-        def helper(x):
-            cpu_x = x
-            x = cpu_x.detach().clone().to('mps')
+        for use_reentrant in (True, False):
+            a = torch.tensor(1., device="mps", requires_grad=True)
 
-            result = torch.logical_not(x)
-            result_cpu = torch.logical_not(cpu_x)
+            def fn(x):
+                return x.sin().cos().exp()
 
-            self.assertEqual(result, result_cpu)
-
-        helper(self._wrap_tensor([1, 1, 0, 0]))
-        helper(self._wrap_tensor([1, 1, 0, 0], dtype=torch.float, requires_grad=True))
-        helper(self._wrap_tensor([True, True, False, False]))
-        helper(self._wrap_tensor(1))
-        helper(self._wrap_tensor(0))
-        helper(self._wrap_tensor(True))
-        helper(self._wrap_tensor(False))
-
-    def test_logical_and(self):
-        def helper(x, other):
-            cpu_x = x
-            x = cpu_x.detach().clone().to('mps')
-
-            cpu_other = other
-            other = cpu_other.detach().clone().to('mps')
-
-            result = torch.logical_and(x, other)
-            result_cpu = torch.logical_and(cpu_x, cpu_other)
-            self.assertEqual(result, result_cpu)
-
-        helper(self._wrap_tensor([1, 1, 0, 0]), self._wrap_tensor(([1, 0, 0, 1])))
-        helper(
-            self._wrap_tensor([1, 1, 0, 0], dtype=torch.float, requires_grad=True),
-            self._wrap_tensor([1, 0, 0, 1], dtype=torch.float)
-        )
-        helper(self._wrap_tensor([True, True, False, False]), self._wrap_tensor([True, False, False, True]))
-        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(1))
-        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(0))
-        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(True))
-        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(False))
-
-    def test_logical_or(self):
-        def helper(x, other):
-            cpu_x = x
-            x = cpu_x.detach().clone().to('mps')
-
-            cpu_other = other
-            other = cpu_other.detach().clone().to('mps')
-
-            result = torch.logical_or(x, other)
-            result_cpu = torch.logical_or(cpu_x, cpu_other)
-
-            self.assertEqual(result, result_cpu)
-
-        helper(self._wrap_tensor([1, 1, 0, 0]), self._wrap_tensor(([1, 0, 0, 1])))
-        helper(
-            self._wrap_tensor([1, 1, 0, 0], dtype=torch.float, requires_grad=True),
-            self._wrap_tensor([1, 0, 0, 1], dtype=torch.float)
-        )
-        helper(self._wrap_tensor([True, True, False, False]), self._wrap_tensor([True, False, False, True]))
-        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(1))
-        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(0))
-        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(True))
-        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(False))
-
-    def test_logical_xor(self):
-        def helper(x, other):
-            cpu_x = x
-            x = cpu_x.detach().clone().to('mps')
-
-            cpu_other = other
-            other = cpu_other.detach().clone().to('mps')
-
-            result = torch.logical_xor(x, other)
-            result_cpu = torch.logical_xor(cpu_x, cpu_other)
-
-            self.assertEqual(result, result_cpu)
-
-        helper(self._wrap_tensor([1, 1, 0, 0]), self._wrap_tensor(([1, 0, 0, 1])))
-        helper(
-            self._wrap_tensor([1, 1, 0, 0], dtype=torch.float, requires_grad=True),
-            self._wrap_tensor([1, 0, 0, 1], dtype=torch.float)
-        )
-        helper(self._wrap_tensor([True, True, False, False]), self._wrap_tensor([True, False, False, True]))
-        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(1))
-        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(0))
-        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(True))
-        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(False))
-
-    def test_min_max(self):
-        def helper(dtype):
-            for _ in range(10):
-                if dtype == torch.float32 or dtype == torch.float16:
-                    x = torch.randn((30, 15), device='mps', dtype=dtype)
-                else:
-                    x = torch.randint(0, 100, (30, 15), device="mps", dtype=dtype)
-                x_cpu = x.to("cpu")
-
-                y = x.max()
-                y_cpu = x_cpu.max()
-                self.assertEqual(y, y_cpu)
-
-                z = x.min()
-                z_cpu = x_cpu.min()
-                self.assertEqual(z, z_cpu)
-
-        [helper(dtype) for dtype in [torch.float32, torch.float16, torch.int32, torch.int16, torch.uint8, torch.int8, torch.bool]]
-
-class TestSmoothL1Loss(TestCase):
-
-    def _smooth_l1_loss_helper(self, reduction="mean", requires_grad=False):
-        # CPU
-        input_cpu = torch.randn(4, 7, requires_grad=requires_grad)
-        target_cpu = torch.randn(4, 7)
-
-        # MPS
-        input_mps = input_cpu.detach().clone().to('mps').requires_grad_()
-        target_mps = target_cpu.detach().clone().to('mps')
-
-        smooth_l1_loss_cpu = F.smooth_l1_loss(input_cpu, target_cpu, beta=1.0, reduction=reduction)
-        smooth_l1_loss_mps = F.smooth_l1_loss(input_mps, target_mps, beta=1.0, reduction=reduction)
-
-        self.assertEqual(smooth_l1_loss_cpu, smooth_l1_loss_mps)
-
-        if requires_grad:
-            smooth_l1_loss_cpu.backward()
-            smooth_l1_loss_mps.backward()
-            self.assertEqual(input_cpu.grad, input_mps.grad.to("cpu"))
-
-        return smooth_l1_loss_cpu, smooth_l1_loss_mps
-
-    def test_smooth_l1_loss_reduction_none(self):
-        self._smooth_l1_loss_helper(reduction="none")
-
-    def test_smooth_l1_loss_reduction_mean(self):
-        self._smooth_l1_loss_helper(reduction="mean")
-
-    def test_smooth_l1_loss_reduction_sum(self):
-        self._smooth_l1_loss_helper(reduction="sum")
-
-    def test_smooth_l1_loss_reduction_mean_backward(self):
-        self._smooth_l1_loss_helper(reduction="mean", requires_grad=True)
-
-    def test_smooth_l1_loss_reduction_mean_sum_backward(self):
-        self._smooth_l1_loss_helper(reduction="sum", requires_grad=True)
-
-
-class TestNLLLoss(TestCase):
-    def test_nll_loss_mismatched_batch(self, device='mps'):
-        x = torch.randn((10, 3), requires_grad=True, device=device)
-        # t should have size (10,)
-        t = torch.zeros((3,), dtype=torch.int64, device=device)
-        with self.assertRaisesRegex(ValueError, 'Expected.*batch_size'):
-            F.nll_loss(x, t)
-
-    def test_nll_loss_out_of_bounds_ignore_index(self):
-
-        def _test_nll_loss_out_of_bounds_ignore_index(device):
-            output = []
-            x = torch.tensor([[0.3, 0.5, 0.2], [0.1, 0.7, 0.2], [0.4, 0.5, 0.1], [
-                             0.3, 0.5, 0.2], [0.1, 0.7, 0.2], [0.4, 0.5, 0.1]], device=device)
-            t = torch.tensor([0, 1, 255, 0, 1, 2], dtype=torch.int64, device=device)
-            for reduction in ['mean', 'none']:
-                output.append(F.nll_loss(x, t, ignore_index=255, reduction=reduction))
-            return output
-
-        output_cpu = _test_nll_loss_out_of_bounds_ignore_index(device='cpu')
-        output_mps = _test_nll_loss_out_of_bounds_ignore_index(device='mps')
-
-        for cpu, mps in zip(output_cpu, output_mps):
-            self.assertEqual(cpu, mps.to('cpu'))
-
-    def test_nll_loss_invalid_target_dim(self):
-
-        def _test_nll_loss_invalid_target_dim(device):
-            output = []
-            x = torch.tensor([[0.3, 0.5, 0.2], [0.1, 0.7, 0.2], [0.4, 0.5, 0.1], [
-                             0.3, 0.5, 0.2], [0.1, 0.7, 0.2], [0.4, 0.5, 0.1]], device=device)
-            t = torch.zeros((6, 2), dtype=torch.int64, device=device)
-            with self.assertRaisesRegex(RuntimeError, "1D target tensor expected"):
-                F.nll_loss(x, t)
-
-        _test_nll_loss_invalid_target_dim(device='cpu')
-        _test_nll_loss_invalid_target_dim(device='mps')
-
-    def test_nll_loss_invalid_weights(self):
-
-        def _test_nll_loss_invalid_weights(device):
-            x = torch.tensor([[0.3, 0.5, 0.2], [0.1, 0.7, 0.2], [0.4, 0.5, 0.1], [
-                             0.3, 0.5, 0.2], [0.1, 0.7, 0.2], [0.4, 0.5, 0.1]], device=device)
-            t = torch.tensor([0, 1, 2, 1, 1, 2], dtype=torch.int64, device=device)
-            invalid_weights = [
-                torch.zeros(4, device=device),
-                torch.zeros((1, 3), device=device),
-            ]
-            msg = "weight tensor should be defined either for all 3 classes or no classes"
-            for weight in invalid_weights:
-                with self.assertRaisesRegex(RuntimeError, msg):
-                    F.nll_loss(x, t, weight=weight)
-
-        _test_nll_loss_invalid_weights(device='cpu')
-        _test_nll_loss_invalid_weights(device='mps')
-
-    def _nll_loss_helper(self, input_size, reduction, expected):
-
-        # CPU
-        input = torch.rand(input_size, requires_grad=True, device='cpu')
-        num_channels = input_size[1]
-        target_size = (input_size[0], ) + tuple(input_size[2:])
-        target = torch.randint(num_channels, target_size, device='cpu')
-        weights = torch.randn(num_channels)
-
-        # MPS
-        input_mps = input.detach().clone().to('mps').requires_grad_()
-        target_mps = target.detach().clone().to('mps')
-        weights_mps = weights.to("mps")
-
-        output_cpu = F.nll_loss(input, target, weight=weights, reduction=reduction)
-        output_mps = F.nll_loss(input_mps, target_mps, weight=weights_mps, reduction=reduction)
-        self.assertEqual(output_cpu, output_mps.to('cpu'))
-
-        output_cpu.sum().backward()
-        output_mps.sum().backward()
-        self.assertEqual(input.grad, input_mps.grad.to('cpu'))
-
-    def _nll_loss_1d_helper(self, input_size, reduction):
-
-        # CPU
-        input = torch.rand(input_size, requires_grad=True, device='cpu')
-        num_channels = input_size[0]
-        target = torch.randint(num_channels, [], device='cpu')
-
-        # MPS
-        input_mps = input.detach().clone().to('mps').requires_grad_()
-        target_mps = target.detach().clone().to('mps')
-
-        output_cpu = F.nll_loss(input, target, reduction=reduction)
-        output_mps = F.nll_loss(input_mps, target_mps, reduction=reduction)
-        self.assertEqual(output_cpu, output_mps.to('cpu'))
-
-        output_cpu.sum().backward()
-        output_mps.sum().backward()
-        self.assertEqual(input.grad, input_mps.grad.to('cpu'))
+            out = checkpoint(fn, a, use_reentrant=use_reentrant)
+            out.backward()
 
     def test_as_strided(self):
         values = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]
@@ -2776,64 +4596,6 @@ class TestNLLLoss(TestCase):
 
         helper(3, 3)
 
-    def test_nll_loss_1d(self, device='cpu'):
-        self._nll_loss_1d_helper([10], "none")
-        self._nll_loss_1d_helper([10], "mean")
-        self._nll_loss_1d_helper([10], "sum")
-
-    def test_nll_loss_empty_tensor_reduction_none(self, device='cpu'):
-        self._nll_loss_helper([1, 3], "none", torch.empty([0], device=device))
-        self._nll_loss_helper([3, 5, 7], "none", torch.empty([5, 7], device=device))
-        self._nll_loss_helper([2, 3, 1, 7], "none", torch.empty([2, 1, 7], device=device))
-        self._nll_loss_helper([2, 3, 5, 1], "none", torch.empty([2, 5, 1], device=device))
-        self._nll_loss_helper([2, 3, 5, 7, 1], "none", torch.empty([2, 5, 7, 1], device=device))
-
-    @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
-    def test_nll_loss_empty_tensor_reduction_mean(self, device='cpu'):
-        nan = torch.tensor(float('nan'), device=device)
-        self._nll_loss_helper([1, 3], "mean", nan)
-        self._nll_loss_helper([1, 3, 5, 7], "mean", nan)
-        self._nll_loss_helper([2, 3, 1, 7], "mean", nan)
-        self._nll_loss_helper([2, 3, 5, 1], "mean", nan)
-        self._nll_loss_helper([2, 3, 5, 7, 1], "mean", nan)
-
-    def test_nll_loss_empty_tensor_reduction_sum(self, device='cpu'):
-        zero = torch.tensor(0, device=device)
-        self._nll_loss_helper([1, 3], "sum", zero)
-        self._nll_loss_helper([1, 3, 5, 7], "sum", zero)
-        self._nll_loss_helper([2, 3, 1, 7], "sum", zero)
-        self._nll_loss_helper([2, 3, 5, 1], "sum", zero)
-        self._nll_loss_helper([2, 3, 5, 7, 1], "sum", zero)
-
-    def test_nll_loss_byte_target_matches_long(self, device='cpu'):
-        N, C = 10, 4
-        input = torch.randn(N, C, device=device, requires_grad=True)
-        target = torch.empty(N, dtype=torch.long, device=device).random_(0, C)
-
-        def compute_result_and_gradient(reduction, target_dtype):
-            result, grad = {}, {}
-            for dev in ['cpu', 'mps']:
-                input_dev = input.to(dev)
-                input_ = input_dev.detach()
-                input_.requires_grad_()
-
-                target_dev = target.to(dev)
-
-                prob = F.log_softmax(input_, dim=-1)
-                loss = nn.NLLLoss(reduction=reduction)
-                result[dev] = loss(prob, target_dev.to(target_dtype))
-                result[dev].sum().backward()
-                grad[dev] = input_.grad
-
-            return result, grad
-
-        for reduction in ["none", "mean", "sum"]:
-            result_long, grad_long = compute_result_and_gradient(reduction, torch.long)
-            result_byte, grad_byte = compute_result_and_gradient(reduction, torch.uint8)
-
-            self.assertEqual(result_long['mps'].to('cpu'), result_long['cpu'])
-            self.assertEqual(grad_long['mps'].to('cpu'), grad_long['cpu'])
-
     # L1 loss
     def test_l1_loss(self):
         def helper(shape, reduction):
@@ -2891,6 +4653,33 @@ class TestNLLLoss(TestCase):
         # verify if changes in shape would cause cached graph lookup problems
         helper([7, 5, 2, 4, 6], 'sum')
         helper([8, 4, 5, 7, 6], 'mean')
+
+    def test_mse_loss_strided_output(self):
+        # https://github.com/pytorch/pytorch/issues/124621
+        lf = nn.MSELoss(reduction='none')
+        model_cpu = nn.Sequential(
+            nn.Conv1d(3, 3, 1),
+        )
+        model_mps = copy.deepcopy(model_cpu).to("mps")
+
+        x = torch.randn(128, 10, 3)
+        x = x.permute(0, 2, 1)
+
+        x_mps = x.detach().clone().to("mps").permute(0, 2, 1)
+        x_mps = x_mps.permute(0, 2, 1)
+
+        y = model_cpu(x)
+        y_mps = model_mps(x_mps)
+
+        y = y.permute(0, 2, 1)[:, :5, :]
+        y_mps = y_mps.permute(0, 2, 1)[:, :5, :]
+
+        y_hat = torch.randn(128, 5, 3)
+        y_hat_mps = y_hat.detach().clone().to("mps")
+
+        loss = lf(y, y_hat)
+        loss_mps = lf(y_mps, y_hat_mps)
+        self.assertEqual(loss, loss_mps)
 
     # Binary Cross Enropy
     def test_bce_loss_simple(self):
@@ -3064,6 +4853,14 @@ class TestNLLLoss(TestCase):
 
         self.assertEqual(out1, out2)
 
+    def test_cross_entropy_loss(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/116095
+        loss = nn.CrossEntropyLoss()
+        pred = torch.randn(3, 5, requires_grad=True, dtype=torch.float16, device='mps')
+        target = torch.ones(3, dtype=torch.long, device='mps')
+        output = loss(pred, target)
+        output.backward()
+
     def test_log_softmax(self):
         values = [[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], [[7.0, 8.0, 9.0], [10.0, 11.0, 12.0]]]
         cpu_x = torch.tensor(values, device='cpu', requires_grad=True)
@@ -3071,6 +4868,26 @@ class TestNLLLoss(TestCase):
 
         cpu_log_softmax = F.log_softmax(cpu_x, dim=0)
         mps_log_softmax = F.log_softmax(mps_x, dim=0)
+        self.assertEqual(cpu_log_softmax, mps_log_softmax.to('cpu'))
+
+        cpu_grad = torch.ones_like(cpu_log_softmax)
+        mps_grad = torch.ones_like(cpu_log_softmax).to('mps')
+
+        cpu_log_softmax.backward(gradient=cpu_grad)
+        mps_log_softmax.backward(gradient=mps_grad)
+
+        self.assertEqual(cpu_x.grad, mps_x.grad.to('cpu'))
+
+    def test_log_softmax_large_numbers(self):
+        values = [
+            [10.0, 100.0, 1000.0, 10000.0, 100000.0, 1000000.0],
+            [-10.0, -100.0, -1000.0, -10000.0, -100000.0, -1000000.0]
+        ]
+        cpu_x = torch.tensor(values, device='cpu', requires_grad=True)
+        mps_x = torch.tensor(values, device='mps', requires_grad=True)
+
+        cpu_log_softmax = F.log_softmax(cpu_x, dim=-1)
+        mps_log_softmax = F.log_softmax(mps_x, dim=-1)
         self.assertEqual(cpu_log_softmax, mps_log_softmax.to('cpu'))
 
         cpu_grad = torch.ones_like(cpu_log_softmax)
@@ -3093,6 +4910,7 @@ class TestNLLLoss(TestCase):
 
         self.assertEqual(result_cpu, result_mps.to('cpu'))
 
+    @unittest.skipIf(product_version < 13.0, "Skipped on macOS 12")
     def test_signed_vs_unsigned_comparison(self):
         cpu_x = torch.tensor((-1, 2, 3), device='cpu', dtype=torch.uint8)
         mps_x = torch.tensor((-1, 2, 3), device='mps', dtype=torch.uint8)
@@ -3233,6 +5051,23 @@ class TestNLLLoss(TestCase):
 
         helper((2, 3, 4, 5))
 
+    def test_argmax(self):
+        # https://github.com/pytorch/pytorch/issues/98191
+        cpu_tensor = torch.tensor([[0, 1], [2, 1], [1, 0]])
+        res_cpu = torch.argmax(cpu_tensor, dim=1)
+
+        mps_tensor = cpu_tensor.to(torch.device('mps'))
+        res_mps = torch.argmax(mps_tensor, dim=1)
+        self.assertEqual(res_cpu, res_mps)
+
+        # https://github.com/pytorch/pytorch/issues/92311
+        mps_tensor = torch.randn(10, 2, device='mps', dtype=torch.float32)
+        cpu_tensor = mps_tensor.detach().clone().cpu()
+
+        res_mps = torch.argmax(mps_tensor, dim=1)
+        res_cpu = torch.argmax(cpu_tensor, dim=1)
+        self.assertEqual(res_cpu, res_mps)
+
     # Test forward argmin argmax
     def test_argmin_argmax(self):
         def helper(n, c, h, w, reduction_type, dtype=torch.float32):
@@ -3297,6 +5132,15 @@ class TestNLLLoss(TestCase):
         helper(2, 8, 4, 4, "min", torch.int32)
         helper(2, 8, 4, 4, "min", torch.float16)
         helper(2, 8, 4, 4, "min", torch.int64)
+
+    @unittest.skipIf(product_version < 13.3, "Long data type supported from macOS 13.3 and above")
+    def test_reduction_sum_max_long_val(self):
+        x_mps = torch.tensor([sys.maxsize, sys.maxsize - 10, sys.maxsize - 5, sys.maxsize - 18], device="mps")
+        x_cpu = x_mps.detach().clone().cpu()
+
+        res_mps = torch.sum(x_mps)
+        res_cpu = torch.sum(x_cpu)
+        self.assertEqual(res_mps, res_cpu)
 
     # Test forward max
     # Note - don't test grad now
@@ -3490,6 +5334,16 @@ class TestNLLLoss(TestCase):
         helper((7, 13))
         helper((2, 8, 4, 5))
 
+    @unittest.skip("Test is crashing")
+    def test_reduction_ops_5D(self):
+        def helper(fn, dim):
+            x_cpu = fn(torch.zeros(1, 1, 1, 1, 1), dim=dim)
+            x_mps = fn(torch.zeros(1, 1, 1, 1, 1, device="mps"), dim=dim)
+            self.assertEqual(x_cpu, x_mps.to('cpu'))
+        for fn in [torch.any]:
+            for dim in range(0, 4):
+                helper(fn, dim)
+
     def test_all(self):
         def helper(shape):
             input_xs = []
@@ -3554,6 +5408,9 @@ class TestNLLLoss(TestCase):
         helper((1, 1, 3, 3))
         helper((7, 13))
         helper((2, 8, 4, 5))
+        x_cpu = torch.tensor([], dtype=torch.bool)
+        x_mps = x_cpu.to("mps")
+        assert x_cpu.all() == x_mps.all().cpu()
 
     # Test forward min
     def test_min_el(self):
@@ -4021,6 +5878,41 @@ class TestNLLLoss(TestCase):
 
         helper(1, 1, 4, 5)
 
+    def test_clamp_fp16_fp32(self):
+        cpu_x = torch.randn(10, device='cpu', dtype=torch.float, requires_grad=False)
+        x = cpu_x.detach().clone().to('mps')
+
+        dtype = torch.float16
+
+        clamp_min_vals_mps = torch.ones(10, device="mps").to(torch.float16)
+        clamp_max_vals_mps = torch.ones(10, device="mps").to(torch.float16) * 10
+        clamp_result_mps = torch.clamp(x, clamp_min_vals_mps, clamp_max_vals_mps)
+
+        clamp_min_vals_cpu = torch.ones(10, device="cpu").to(torch.float16)
+        clamp_max_vals_cpu = torch.ones(10, device="cpu").to(torch.float16) * 10
+        clamp_result_cpu = torch.clamp(cpu_x, clamp_min_vals_cpu, clamp_max_vals_cpu)
+
+        self.assertEqual(clamp_result_mps, clamp_result_cpu)
+
+    def test_clamp_nan(self):
+        t_mps = torch.tensor([torch.nan, 1, 2], device="mps")
+        t_cpu = torch.tensor([torch.nan, 1, 2], device="cpu")
+
+        clamp_min_max_mps = torch.clamp(t_mps, min=-100, max=100)
+        clamp_min_max_cpu = torch.clamp(t_cpu, min=-100, max=100)
+
+        self.assertEqual(clamp_min_max_mps, clamp_min_max_cpu)
+
+        clamp_min_mps = torch.clamp(t_mps, min=-100)
+        clamp_min_cpu = torch.clamp(t_cpu, min=-100)
+
+        self.assertEqual(clamp_min_mps, clamp_min_cpu)
+
+        clamp_max_mps = torch.clamp(t_mps, max=100)
+        clamp_max_cpu = torch.clamp(t_cpu, max=100)
+
+        self.assertEqual(clamp_max_mps, clamp_max_cpu)
+
     # Test clamp_min
     def test_clamp_min(self):
         def helper(n, c, h, w):
@@ -4105,6 +5997,29 @@ class TestNLLLoss(TestCase):
             clamp_topt_result_cpu = torch.clamp(cpu_x, max=cpu_max_t)
             self.assertEqual(clamp_topt_result, clamp_topt_result_cpu)
 
+            # test strided x
+            clamp_result = torch.clamp(x.movedim(0, -1), min=200.0, max=600.0)
+            clamp_result_cpu = torch.clamp(cpu_x.movedim(0, -1), min=200.0, max=600.0)
+            self.assertEqual(clamp_result, clamp_result_cpu)
+
+            # test strided x, min_t, max_t
+            clamp_result = torch.clamp(x.movedim(0, -1), min=min_t.movedim(0, -1), max=max_t.movedim(0, -1))
+            clamp_result_cpu = torch.clamp(cpu_x.movedim(0, -1), min=cpu_min_t.movedim(0, -1), max=cpu_max_t.movedim(0, -1))
+            self.assertEqual(clamp_result, clamp_result_cpu)
+
+            # test strided min_t, max_t
+            clamp_result = torch.clamp(
+                x.movedim(0, -1).clone(memory_format=torch.contiguous_format),
+                min=min_t.movedim(0, -1),
+                max=max_t.movedim(0, -1)
+            )
+            clamp_result_cpu = torch.clamp(
+                cpu_x.movedim(0, -1).clone(memory_format=torch.contiguous_format),
+                min=cpu_min_t.movedim(0, -1),
+                max=cpu_max_t.movedim(0, -1)
+            )
+            self.assertEqual(clamp_result, clamp_result_cpu)
+
             # test inplace clamping
             x.clamp_(min=200.0, max=600.0)
             cpu_x.clamp_(min=200.0, max=600.0)
@@ -4115,7 +6030,8 @@ class TestNLLLoss(TestCase):
     def test_divmode(self):
         def helper(shape, rounding_mode):
             for dtype in [torch.float32, torch.float16, torch.int32, torch.int64]:
-                if (rounding_mode is not None and "floor" in rounding_mode and dtype == torch.int64) is False:
+                if ((rounding_mode is not None and "floor" in rounding_mode and dtype == torch.int64) or
+                        (rounding_mode is not None and "trunc" in rounding_mode and dtype == torch.float16)) is False:
                     cpu_x = None
                     cpu_y = None
                     if (dtype in [torch.float32, torch.float16]):
@@ -4167,6 +6083,19 @@ class TestNLLLoss(TestCase):
         helper((2, 6, 3, 5))
         helper((2, 8, 4, 5))
 
+    def test_remainder(self):
+        res_cpu = torch.remainder(
+            torch.tensor([-3, -2, -1, 1, 2, 3], dtype=torch.int32, device="cpu"), torch.tensor(2, device="cpu", dtype=torch.int32))
+        res_mps = torch.remainder(
+            torch.tensor([-3, -2, -1, 1, 2, 3], dtype=torch.int32, device="mps"), torch.tensor(2, device="mps", dtype=torch.int32))
+        self.assertEqual(res_cpu, res_mps)
+
+        res_cpu = torch.remainder(
+            torch.tensor([1, 2, 3, 4, 5], dtype=torch.int32, device="cpu"), -1.5)
+        res_mps = torch.remainder(
+            torch.tensor([1, 2, 3, 4, 5], dtype=torch.int32, device="mps"), -1.5)
+        self.assertEqual(res_cpu, res_mps)
+
     def test_expand(self):
         def helper(n, c):
             values = [[1.0], [4.0], [7.0]]
@@ -4207,21 +6136,30 @@ class TestNLLLoss(TestCase):
 
         helper(3, 3)
 
-    def test_assert_topk(self):
-        # here the k > 16 raises an error as expected
-        with self.assertRaisesRegex(RuntimeError, "Currently topk on mps works only for k<=16"):
-            xs = torch.arange(30).to('mps')
-            xs.topk(30)
-        # for k <= 16 it works fine
-        ys_cpu = torch.arange(30)
-        ys_mps = ys_cpu.to('mps')
-        self.assertEqual(ys_cpu.topk(16), ys_mps.topk(16))
+    def test_sort(self):
+        for SIZE in (4, 2049):
+            device = 'mps'
+            x = torch.rand(4, SIZE, device=device)
+            res1val, res1ind = torch.sort(x)
 
+            res2val = torch.tensor((), device=device)
+            res2ind = torch.tensor((), device=device, dtype=torch.long)
+            torch.sort(x, out=(res2val, res2ind))
+            self.assertEqual(res1val, res2val, atol=0, rtol=0)
+            self.assertEqual(res1ind, res2ind, atol=0, rtol=0)
+            self.assertEqual(torch.argsort(x), res1ind)
+            self.assertEqual(x.argsort(), res1ind)
+
+            self.assertEqual(
+                torch.sort(torch.tensor((50, 40, 30, 20, 10), device=device))[0],
+                torch.tensor((10, 20, 30, 40, 50), device=device),
+                atol=0, rtol=0
+            )
 
     def test_upsample_nearest2d(self):
-        def helper(N, C, H, W):
+        def helper(N, C, H, W, memory_format):
             inputCPU = torch.arange(N * C * H * W, device='cpu', dtype=torch.float,
-                                    requires_grad=True).reshape(N, C, H, W)
+                                    requires_grad=True).reshape(N, C, H, W).to(memory_format=memory_format)
             inputCPU.retain_grad()
             inputMPS = inputCPU.detach().to('mps').requires_grad_()
 
@@ -4247,8 +6185,9 @@ class TestNLLLoss(TestCase):
 
                     self.assertEqual(inputCPU.grad, inputMPS.grad)
 
-        helper(1, 1, 4, 4)
-        helper(7, 5, 3, 2)
+        for memory_format in [torch.channels_last, torch.contiguous_format]:
+            helper(1, 1, 4, 4, memory_format=memory_format)
+            helper(7, 5, 3, 2, memory_format=memory_format)
 
     def test_upsample_bilinear2d(self):
         def helper(N, C, H, W):
@@ -4353,108 +6292,6 @@ class TestNLLLoss(TestCase):
         helper([2, 2, 6, 5], [2, 0, 6, 5], [2, 5, 6, 5])
         helper([2, 0, 6, 5], [2, 3, 6, 5], [2, 5, 6, 5])
         helper([2, 0, 6, 5], [2, 3, 6, 5], [2, 0, 6, 5])
-
-    def test_constant_pad(self):
-        m = torch.nn.ConstantPad2d((-2, -2, -2, -2), 3.5)
-        input_cpu = torch.randn(1, 16, 16, 16)
-        input_mps = input_cpu.detach().clone().to("mps")
-        r_cpu = m(input_cpu)
-        r_mps = m(input_mps)
-        self.assertEqual(r_cpu, r_mps.to("cpu"))
-
-        # Arbitrary input dimensions
-        pad = (1, 1, 0, 0, 0, 0)
-        value = 3.5
-        input_cpu = torch.randn((1, 1, 3, 3, 3, 3, 3, 3, 3, 3))
-        input_mps = input_cpu.detach().clone().to("mps")
-        r_cpu = F.pad(input_cpu, pad=pad, value=value)
-        r_mps = F.pad(input_mps, pad=pad, value=value)
-        self.assertEqual(r_cpu, r_mps.to("cpu"))
-
-    def test_circular_pad(self):
-        # https://github.com/pytorch/pytorch/issues/80856
-        k_cpu = torch.ones(3, 3, 9, 9)
-        k_mps = k_cpu.detach().clone().to("mps")
-
-        x_cpu = torch.rand(1, 3, 32, 32)
-        x_mps = x_cpu.detach().clone().to("mps")
-
-        x_pad_cpu = F.pad(x_cpu, (2, 2, 2, 2), mode='circular')
-        x_pad_mps = F.pad(x_mps, (2, 2, 2, 2), mode='circular')
-
-        y_cpu = F.conv2d(x_pad_cpu, k_cpu)
-        y_mps = F.conv2d(x_pad_mps, k_mps)
-
-        self.assertEqual(y_cpu, y_mps.cpu())
-
-    def test_constant_pad_4d_warning(self):
-        inputCPU = torch.rand((1, 2, 2, 2, 1, 1))
-        inputMPS = inputCPU.detach().clone().to('mps')
-        outputCPU = F.pad(inputCPU, [0, 0, 0, 0, 0, 0, 1, 0])
-        outputMPS = F.pad(inputMPS, [0, 0, 0, 0, 0, 0, 1, 0])
-        self.assertEqual(outputCPU, outputMPS)
-
-    def test_pad(self):
-        def helper(shape, padding, op, value=0):
-            inputCPU = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
-            inputCPU.retain_grad()
-            inputMPS = inputCPU.detach().clone().to('mps').requires_grad_()
-
-            if (op in [nn.ConstantPad1d, nn.ConstantPad2d, nn.ConstantPad3d]):
-                padCriteria = op(padding, value)
-            else:
-                padCriteria = op(padding)
-            outputCPU = padCriteria(inputCPU)
-            outputMPS = padCriteria(inputMPS)
-            self.assertEqual(outputCPU, outputMPS)
-
-            # backward pass (chose 0.6 just to have the grad_output != 1)
-            outputCPU.backward(gradient=torch.full_like(outputCPU, 0.6))
-            outputMPS.backward(gradient=torch.full_like(outputMPS, 0.6))
-            self.assertEqual(inputCPU.grad, inputMPS.grad)
-
-        # 1D Padding
-        helper((2, 4, 3), 2, nn.ReflectionPad1d)
-        # verify if a change in shape of input would cause problems with graph caching
-        helper((2, 4, 4), (1, 3), nn.ReflectionPad1d)
-        # Replication 1D
-        helper((2, 1, 6), 3, nn.ReplicationPad1d)
-        # Constant Pad 1D
-        helper((2, 3, 4), 2, nn.ConstantPad1d)
-        # Constant Pad 1D with single dimension input
-        helper((16), (1, 2), nn.ConstantPad1d)
-
-        # 2D Padding
-        helper((1, 2, 3, 4), (1, 1, 2, 0), nn.ReflectionPad2d)
-        # verify if a change in shape of input would cause problems with graph caching
-        helper((2, 4, 3, 4), (1, 1, 2, 0), nn.ReflectionPad2d)
-        # this should make the padding (2, 2, 2, 2)
-        helper((2, 1, 6, 8), 2, nn.ReplicationPad2d)
-        # verify if a change in shape of padding would cause problems with graph caching
-        helper((2, 1, 6, 8), (2, 4, 3, 5), nn.ReplicationPad2d)
-        # Constant Pad 2D
-        helper((2, 1, 6, 8), (2, 4, 3, 5), nn.ConstantPad2d)
-        # input size < pad size
-        helper((1, 2, 3), (0, 0, 0, 1), nn.ConstantPad2d)
-        # pad dims < input dims
-        helper((50, 9, 300), (0, 0, 0, 31), nn.ConstantPad2d)
-        # pad dims == input dims
-        helper((1, 3), (0, 2, 0, 1), nn.ConstantPad2d)
-        # input.numel() == 0 but output.numel() > 0
-        helper((0, 3, 3), (1, 1, 1, 1, 1, 1), nn.ConstantPad2d)
-        # pad dims < input dims - 2
-        helper((1, 2, 3, 4), (1, 2), nn.ConstantPad2d)
-
-        # 3D Padding
-        helper((2, 4, 6, 8, 4), (1, 3, 3, 5, 3, 4), nn.ReflectionPad3d)
-        # verify if a change in shape of padding would cause problems with graph caching
-        helper((2, 4, 6, 8, 4), (1, 3, 3, 5, 3, 4), nn.ReplicationPad3d)
-        # Constant Pad 3D
-        helper((2, 4, 6, 8, 4), (1, 3, 3, 5, 3, 4), nn.ConstantPad3d)
-        # input size < pad size
-        helper((2, 4, 6), (1, 3, 3, 5, 3, 4), nn.ConstantPad3d)
-        # check the workaround for the right padding bug in Monterey
-        helper((1, 2, 2, 2, 2), (0, 1), nn.ConstantPad3d)
 
     # Test stack forward
     def test_stack(self):
@@ -4690,10 +6527,11 @@ class TestNLLLoss(TestCase):
 
     # Test selu, elu, celu
     def test_elu(self):
-        def helper(shape, alpha=1.0):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
-            x = cpu_x.detach().clone().to('mps').requires_grad_()
+        def helper(shape, alpha=1.0, memory_format=torch.contiguous_format):
+            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float)
+            cpu_x = cpu_x.to(memory_format=memory_format).requires_grad_()
 
+            x = cpu_x.detach().clone().to('mps').requires_grad_(True)
             for activation_func in [torch.nn.ELU(alpha=alpha), torch.nn.CELU(alpha=alpha), torch.nn.SELU()]:
                 elu_result = activation_func(x)
                 elu_result_cpu = activation_func(cpu_x)
@@ -4708,9 +6546,22 @@ class TestNLLLoss(TestCase):
                 self.assertEqual(x.grad, cpu_x.grad)
 
         # Test empty shape too
-        for shape in [[], (2, 3), (2, 8, 4, 5)]:
-            for alpha in [0.000001, 1.0, 2.3, 0.34, 23]:
-                helper(shape, alpha)
+        for memory_fromat in [torch.channels_last, torch.contiguous_format]:
+            for shape in [(2, 8, 4, 5)]:
+                for alpha in [0.000001, 1.0, 2.3, 0.34, 23]:
+                    helper(shape, alpha, memory_fromat)
+
+    def test_elu_strided_output(self):
+        # https://github.com/pytorch/pytorch/issues/124834
+        elu_input = torch.randn(1, 1024, 500)
+        alpha = float(1)
+        inplace = False
+
+        elu_input_noncontiguous = elu_input.transpose(1, 2)
+        self.assertEqual(
+            F.elu(elu_input_noncontiguous.to('cpu'), alpha, inplace),
+            F.elu(elu_input_noncontiguous.to('mps'), alpha, inplace)
+        )
 
     # Test glu
     def test_glu(self):
@@ -4737,8 +6588,8 @@ class TestNLLLoss(TestCase):
 
     # Test softplus
     def test_softplus(self):
-        def helper(shape, beta=1, threshold=20):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
+        def helper(shape, beta, threshold, dtype):
+            cpu_x = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=True)
             x = cpu_x.detach().clone().to('mps').requires_grad_()
 
             softplus_result = torch.nn.Softplus(beta=beta, threshold=threshold)(x)
@@ -4754,10 +6605,13 @@ class TestNLLLoss(TestCase):
             self.assertEqual(x.grad, cpu_x.grad)
 
         # Test empty shape too
-        for shape in [(), (2, 3), (10, 10), (2, 3, 4, 5)]:
-            for beta in [0.5, 1, 2, 3, 4]:
-                for threshold in [0.5, 20, 30, 40, 50]:
-                    helper(shape, beta, threshold)
+        for shape, beta, threshold, dtype in product(
+            [(), (2, 3), (10, 10), (2, 3, 4, 5)],
+            [0.5, 1, 2, 3, 4],
+            [0.5, 20, 30, 40, 50],
+            [torch.float16, torch.float32]
+        ):
+            helper(shape, beta, threshold, dtype)
 
     # Test silu
 
@@ -4908,9 +6762,18 @@ class TestNLLLoss(TestCase):
                 helper((2, 16, 16), (4, 4), return_indices, dtype)
 
     def test_gelu_simple(self):
-        def helper(shape, dtype=torch.float):
-            cpu_x = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=True)
-            x = cpu_x.detach().clone().to('mps').requires_grad_()
+        def helper(shape, dtype=torch.float, contiguous=True):
+            cpu_x = torch.randn(shape, device='cpu', dtype=dtype)
+            x = cpu_x.detach().clone().to('mps')
+
+            if not contiguous and (0 not in shape and len(shape) >= 2):
+                # Tranposing will make the tensor non-contiguous
+                cpu_x = cpu_x.transpose(0, 1)
+                x = x.transpose(0, 1)
+                assert not x.is_contiguous()
+
+            cpu_x.requires_grad_()
+            x.requires_grad_()
 
             gelu_result = torch.nn.GELU()(x)
             # GELU is not supported on CPU, so cast it to float
@@ -4925,15 +6788,54 @@ class TestNLLLoss(TestCase):
             atol = 1e-5 if dtype == torch.float else 1e-2
             rtol = 1e-3 if dtype == torch.float else 1e-2
             self.assertEqual(gelu_result, gelu_result_cpu.to(dtype), atol=atol, rtol=rtol)
+
+            assert x.grad is not None  # Check that the grad is well-populated
             self.assertEqual(x.grad, cpu_x.grad, atol=atol, rtol=rtol)
 
         # Test empty shape too
         for dtype in [torch.float, torch.half]:
-            for shape in [(0, 3), [], (2, 3), (2, 8, 4, 5)]:
-                helper(shape, dtype)
+            for shape in [[], (0,), (0, 3), (4,), (4, 3), (5, 4, 3)]:
+                for contiguous in [True, False]:
+                    helper(shape, dtype, contiguous)
         # Test that gelu would raise an assert for integral types
         for dtype in [torch.int8, torch.int16, torch.int32, torch.int64]:
             self.assertRaises(RuntimeError, lambda: torch.nn.GELU()(torch.randint(100, (2,), dtype=dtype, device="mps")))
+
+    def test_mish_simple(self):
+        def helper(shape, dtype=torch.float, contiguous=True):
+            cpu_x = torch.randn(shape, device='cpu', dtype=dtype)
+            x = cpu_x.detach().clone().to('mps')
+
+            if not contiguous and (0 not in shape and len(shape) >= 2):
+                # Tranposing will make the tensor non-contiguous
+                cpu_x = cpu_x.transpose(0, 1)
+                x = x.transpose(0, 1)
+                assert not x.is_contiguous()
+
+            cpu_x.requires_grad_()
+            x.requires_grad_()
+
+            mish_result = torch.nn.Mish()(x)
+            mish_result_cpu = torch.nn.Mish()(cpu_x)
+
+            cpu_grad = torch.ones_like(mish_result_cpu)
+            grad = cpu_grad.to('mps')
+
+            mish_result.backward(gradient=grad)
+            mish_result_cpu.backward(gradient=cpu_grad)
+
+            atol = 1e-5 if dtype == torch.float else 1e-2
+            rtol = 1e-3 if dtype == torch.float else 1e-2
+            self.assertEqual(mish_result, mish_result_cpu.to(dtype), atol=atol, rtol=rtol)
+
+            assert x.grad is not None  # Check that the grad is well-populated
+            self.assertEqual(x.grad, cpu_x.grad, atol=atol, rtol=rtol)
+
+        # Test empty shape too
+        for dtype in [torch.float, torch.half]:
+            for shape in [[], (0,), (0, 3), (4,), (4, 3), (5, 4, 3)]:
+                for contiguous in [True, False]:
+                    helper(shape, dtype, contiguous)
 
     def test_gelu(self):
         def _test_gelu(n, m, dtype, contiguous, atol=None, rtol=None):
@@ -4944,7 +6846,7 @@ class TestNLLLoss(TestCase):
             devices += ['mps']
 
             def _gelu_ref(X):
-                return X * stats.norm.cdf(X)
+                return X * stats.norm.cdf(X)  # noqa: F821
 
             for d in devices:
                 X = torch.rand(n, m, dtype=dtype, requires_grad=True, device=d)[:, ::2]
@@ -4964,6 +6866,17 @@ class TestNLLLoss(TestCase):
             _test_gelu(32, 32, torch.float32, False)
         finally:
             torch.set_num_threads(num_threads)
+
+    def test_gelu_tanh(self):
+        def helper(shape):
+            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float)
+            x = cpu_x.detach().clone().to('mps')
+
+            gelu_tanh_result = torch.nn.functional.gelu(x, approximate='tanh')
+            gelu_tanh_result_cpu = torch.nn.functional.gelu(cpu_x, approximate='tanh')
+            self.assertEqual(gelu_tanh_result, gelu_tanh_result_cpu)
+
+        helper((2, 8, 4, 5))
 
     # Test hardtanh
     def test_hardtanh(self):
@@ -5139,6 +7052,13 @@ class TestNLLLoss(TestCase):
 
         helper((2, 8, 4, 5))
 
+    def test_neg_strided_input(self):
+        # See https://github.com/pytorch/pytorch/issues/98074#issuecomment-1496088337
+        x = torch.arange(18.0, device='mps').reshape(2, 3, 3)
+        y = x.permute(1, 0, 2)[..., 1]
+        z = y + y.neg()
+        self.assertEqual(z.abs().max().item(), 0.0)
+
     # Test index add
     def test_index_add(self):
         def helper(shape, dim, index, source_shape, alpha, x_dtype=torch.float32, idx_dtype=torch.int32):
@@ -5167,6 +7087,60 @@ class TestNLLLoss(TestCase):
         # test float16
         helper((2,), 0, [1], (1,), 6.0, x_dtype=torch.float16)
 
+    def test_index_64bit(self):
+        """ Test that index operations work for 4Gb+ tensors """
+        if product_version < 14.0:
+            raise unittest.SkipTest("Sonoma is needed for large tensors, see https://github.com/pytorch/pytorch/issues/84039")
+        # Cleanup memory
+        gc.collect()
+        torch.mps.empty_cache()
+        # Check that index operations work for 4+GB tensors
+        x = torch.rand(16000, 67120, device="mps")
+        self.assertGreater(x.element_size() * x.numel(), 2**32)
+        idx = torch.arange(0, 2, device="mps")
+        x_sampled = x[:, idx]
+        self.assertEqual(x[:, 0], x_sampled[:, 0])
+        # Reclaim memory after running the tests
+        del x
+        gc.collect()
+        torch.mps.empty_cache()
+
+    def test_mm_large(self):
+        """ Test that MM works for matrices with index larger than 32K """
+        x = torch.rand(10, 1, device="mps")
+        y = torch.rand(1, 32769, device="mps")
+        # This used to crash with:
+        # error: subRange.start (24576) is not less than length of dimension[0] (16384)
+        # See https://github.com/pytorch/pytorch/issues/116769#issuecomment-1888302095
+        self.assertNotEqual(torch.mm(x, y[:, 16384:32768]).abs().max().item(), 0.0)
+
+        def compare_mm(m, n, k, dtype=torch.float):
+            x = torch.rand(m, n, device="mps", dtype=dtype)
+            y = torch.rand(n, k, device="mps", dtype=dtype)
+            z = torch.mm(x, y).cpu()
+            z_cpu = torch.mm(x.cpu(), y.cpu())
+            self.assertEqual(z, z_cpu)
+
+        # Used to produce incorrect results with MPS on M1 running MacOS 14.3, but correct with Metal
+        compare_mm(1024, 1, 32769)
+        # one more time, but with dimensions inverted
+        # see https://github.com/pytorch/pytorch/issues/116769#issuecomment-1920066984
+        compare_mm(32769, 1, 1025)
+
+        if product_version >= 14.0:
+            # Test bfloat16 mm
+            compare_mm(1024, 1, 32769, torch.bfloat16)
+
+    @unittest.skipIf(total_memory < 12_000_000_000, "Needs at least 12Gb RAM to run the test")
+    @unittest.skipIf(product_version < 14.0, "Can't allocate 4Gb tensor on MacOS 13")
+    def test_copy_large(self):
+        """ Test that copy of 4Gb+ tensors works """
+        x = torch.ones((2**30 + 11,), dtype=torch.float32)
+        y = x.to(device="mps")
+        self.assertTrue(torch.all(y == torch.tensor(1.0, device="mps")))
+        del y
+        del x
+
     # Test flip
     def test_flip(self):
         def helper(shape, dims):
@@ -5188,6 +7162,8 @@ class TestNLLLoss(TestCase):
         helper((1,), (0,))
         # input.numel() == 0
         helper((0,), (0,))
+        # none of dims that needs to be flipped
+        helper((1, 3), [0])
 
     # Test index select
     def test_index_select(self):
@@ -5225,8 +7201,9 @@ class TestNLLLoss(TestCase):
 
             self.assertEqual(idx_result, idx_result_cpu)
 
-        helper(0.5, 0, [0, 0])
-        helper(22, 0, [])
+        helper(22, 0, [0])
+        with self.assertRaisesRegex(RuntimeError, "Index to scalar can have only 1 value"):
+            helper(22, 0, [])
 
     def test_embedding_dense_backward(self):
         def helper(n, d, m, idx):
@@ -5257,6 +7234,7 @@ class TestNLLLoss(TestCase):
             self.assertEqual(a_CPU.grad, a_MPS.grad)
 
         helper(3, 5, 7, [0, 1, 2])
+        helper(3, 6, 7, [0, 1, 2])  # verify if changes in shape would cause cached graph lookup problems
         helper(3, 5, 7, 2)  # test scalar index
 
     # Test pytorch gather
@@ -5442,22 +7420,22 @@ class TestNLLLoss(TestCase):
             self.assertEqual(scatter_result, scatter_result_cpu)
 
         # for reduce in ["sum", "prod", "amax", "amin"]:
-        for reduce in ["add", "multiply"]:
-            helper((2, 3), 0, (5, 3), (5, 3), reduce_str=reduce)
-            helper((2, 8, 4, 5), 0, (10, 8, 4, 5), (10, 8, 4, 5), reduce_str=reduce)
-            helper((8, 8, 4, 5), 0, (10, 8, 4, 5), (10, 8, 4, 5), reduce_str=reduce)
-            helper((8, 8, 4, 5), 0, (4, 7, 3, 2), (4, 7, 3, 2), reduce_str=reduce)
-            helper((8, 8, 4, 5), 0, (4, 6, 3, 2), (4, 7, 3, 2), reduce_str=reduce)
-            helper((8, 8, 4, 5), 0, (4, 6, 3, 2), (8, 8, 4, 5), reduce_str=reduce)
+        for reduce_type in ["add", "multiply"]:
+            helper((2, 3), 0, (5, 3), (5, 3), reduce_str=reduce_type)
+            helper((2, 8, 4, 5), 0, (10, 8, 4, 5), (10, 8, 4, 5), reduce_str=reduce_type)
+            helper((8, 8, 4, 5), 0, (10, 8, 4, 5), (10, 8, 4, 5), reduce_str=reduce_type)
+            helper((8, 8, 4, 5), 0, (4, 7, 3, 2), (4, 7, 3, 2), reduce_str=reduce_type)
+            helper((8, 8, 4, 5), 0, (4, 6, 3, 2), (4, 7, 3, 2), reduce_str=reduce_type)
+            helper((8, 8, 4, 5), 0, (4, 6, 3, 2), (8, 8, 4, 5), reduce_str=reduce_type)
 
-            helper((2, 8, 4, 5), 1, (2, 20, 4, 5), (2, 20, 4, 5), reduce_str=reduce)
-            helper((2, 8, 4, 5), 1, (2, 13, 3, 2), (2, 13, 3, 2), reduce_str=reduce)
-            helper((8, 8, 4, 5), 1, (6, 5, 2, 3), (6, 5, 2, 3), reduce_str=reduce)
-            helper((8, 8, 4, 5), 1, (3, 4, 2, 2), (6, 5, 2, 3), reduce_str=reduce)
+            helper((2, 8, 4, 5), 1, (2, 20, 4, 5), (2, 20, 4, 5), reduce_str=reduce_type)
+            helper((2, 8, 4, 5), 1, (2, 13, 3, 2), (2, 13, 3, 2), reduce_str=reduce_type)
+            helper((8, 8, 4, 5), 1, (6, 5, 2, 3), (6, 5, 2, 3), reduce_str=reduce_type)
+            helper((8, 8, 4, 5), 1, (3, 4, 2, 2), (6, 5, 2, 3), reduce_str=reduce_type)
 
-            helper((4, 5, 9, 8), 2, (4, 5, 13, 8), (4, 5, 13, 8), reduce_str=reduce)
-            helper((4, 5, 9, 8), 2, (3, 4, 10, 6), (3, 4, 10, 6), reduce_str=reduce)
-            helper((4, 5, 9, 8), 2, (3, 3, 7, 5), (3, 4, 10, 6), reduce_str=reduce)
+            helper((4, 5, 9, 8), 2, (4, 5, 13, 8), (4, 5, 13, 8), reduce_str=reduce_type)
+            helper((4, 5, 9, 8), 2, (3, 4, 10, 6), (3, 4, 10, 6), reduce_str=reduce_type)
+            helper((4, 5, 9, 8), 2, (3, 3, 7, 5), (3, 4, 10, 6), reduce_str=reduce_type)
 
     def test_is_nonzero(self):
         self.assertFalse(torch.is_nonzero(torch.tensor([0.]).to('mps')))
@@ -5547,7 +7525,7 @@ class TestNLLLoss(TestCase):
 
             self.assertEqual(result, cpu_result)
 
-        for dtype in [torch.float32, torch.int32, torch.int64]:
+        for dtype in [torch.bool, torch.float16, torch.float32, torch.uint8, torch.int16, torch.int32, torch.int64]:
             helper(2, 2, dtype)
             helper(2, 3, dtype)
             helper(0, 2, dtype)
@@ -5605,6 +7583,13 @@ class TestNLLLoss(TestCase):
         y_cpu = torch.arange(0, 0, 1, out=out_cpu)
         self.assertEqual(y_mps, y_cpu)
 
+    # Test rgange
+    def test_range(self):
+        self.assertEqual(np.arange(11, dtype=np.float32), torch.range(0, 10, device='mps'))
+        self.assertEqual(np.arange(7, 0, -1, dtype=np.float32), torch.range(7, 1, -1, device='mps'))
+        self.assertEqual(np.array([1.0000, 1.3000, 1.6000, 1.9000], dtype=np.float32), torch.range(1, 2, .3, device='mps'))
+        self.assertEqual(np.arange(6.3, dtype=np.float32), torch.arange(0, 6.3, device='mps'))
+
     # Test softmax
     def test_softmax(self):
         def helper(shape, dim, channels_last=False):
@@ -5657,24 +7642,6 @@ class TestNLLLoss(TestCase):
                 for dim in [0, 1, 2, 3, -1, -2, -3]:
                     helper(shape, dim, channels_last)
 
-    # Test sub
-    def test_sub(self):
-        def helper(shape, alpha):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
-            x = cpu_x.detach().clone().to('mps')
-
-            cpu_y = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
-            y = cpu_y.detach().clone().to('mps')
-
-            cpu_out = torch.sub(cpu_x, cpu_y, alpha=alpha)
-            out = torch.sub(x, y, alpha=alpha)
-
-            self.assertEqual(out, cpu_out)
-
-        helper((2, 8, 4, 5), 0.1)
-        helper((2, 8, 3, 5), 0.1)
-        helper((2, 8, 3, 5), 0.2)
-
     def test_nan_to_num(self):
         inputCPU = torch.tensor([float('nan'), float('inf'), -float('inf'), 3.14])
         inputMPS = inputCPU.detach().clone().to('mps').requires_grad_()
@@ -5720,6 +7687,15 @@ class TestNLLLoss(TestCase):
         helper((2, 3), (5, 2, 3), (2, 3))
         helper((2, 3), (2, 3), (5, 2, 3))
         helper((2, 3), (5, 2, 3), (6, 5, 2, 3))
+        # Test that output is correctly resizes
+        # TODO: Remove me when out OpInfo testing is enabled on MPS
+        output = torch.tensor(0.0, device="mps")
+        cond = torch.randint(2, (3, 3), dtype=torch.bool, device="mps")
+        inp = torch.rand(3, 3, device="mps")
+        other = torch.rand(3, 3, device="mps")
+        out = torch.where(cond, inp, other, out=output)
+        self.assertEqual(id(out), id(output))
+        self.assertEqual(out.shape, (3, 3))
 
     # Test normal
     def test_normal(self):
@@ -5781,6 +7757,17 @@ class TestNLLLoss(TestCase):
         mps_out = torch.bernoulli(all_ones)
         self.assertEqual(mps_out, all_ones)
 
+        # Check it works for different dtypes
+        for dtype in [torch.float16, torch.int8, torch.int16, torch.int32, torch.int64]:
+            mps_out = torch.zeros(shape, device='mps', dtype=dtype).bernoulli(0.5)
+            # Check that output is not all zeros or ones
+            if product_version > 13.0:
+                uniq = mps_out.unique()
+                self.assertEqual(uniq, torch.arange(2, device='mps', dtype=dtype))
+            else:
+                self.assertEqual(mps_out.min().item(), 0.)
+                self.assertEqual(mps_out.max().item(), 1.)
+
     def test_mps_generator(self):
         # explicit manual seeding by creating an MPS Generator
         g_mps = torch.Generator(device='mps')
@@ -5803,7 +7790,113 @@ class TestNLLLoss(TestCase):
         mps_x = torch.randn(5, device='mps', generator=g_mps)
         self.assertEqual(mps_x, mps_y)
 
-    # Test random_.to and random_.from
+    def test_default_mps_generator(self):
+        # manual seeding on the "default" MPS generator using
+        # the global torch.manual_seed()
+        torch.manual_seed(230)
+        mps_x = torch.randn(5, device='mps')
+        # manual seeding using torch.mps.manual_seed()
+        # which should set the "default" MPS generator
+        # like the global torch.manual_seed()
+        torch.mps.manual_seed(230)
+        mps_y = torch.randn(5, device='mps')
+        # seed values were the same, so the random tensor contents should match
+        self.assertEqual(mps_x, mps_y)
+
+        # save the default generator's state to restore it later
+        g_state = torch.mps.get_rng_state()
+
+        # generate random numbers without seeding
+        mps_x = torch.randn(5, device='mps')
+        # in this case, the random results must differ from the last generated random results
+        self.assertNotEqual(mps_x, mps_y)
+
+        # restore the previously saved state, and the results should match again
+        torch.mps.set_rng_state(g_state)
+        mps_x = torch.randn(5, device='mps')
+        self.assertEqual(mps_x, mps_y)
+
+    def test_device_synchronize(self):
+        # just running some ops each followed by a synchronize to wait for
+        # MPS stream to finish running each of them
+        net1 = torch.nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1)\
+            .to(device='mps', dtype=torch.float)
+
+        x = torch.rand(1, 128, 6, 6, device='mps', dtype=torch.float, requires_grad=True)
+        torch.mps.synchronize()
+        x = net1(x)
+        torch.mps.synchronize()
+        x.backward(torch.randn_like(x))
+        torch.mps.synchronize()
+
+    @unittest.expectedFailure
+    def test_mps_allocator_module(self):
+        # first garbage collect and empty the cached blocks
+        gc.collect()
+        torch.mps.empty_cache()
+        # measure memory allocations from MPSAllocator
+        current_alloc_before = torch.mps.current_allocated_memory()
+        # after garbage collection and emptying the cache the
+        # current_allocated_memory must be zero
+        self.assertEqual(current_alloc_before, 0)
+        # measure total memory allocations from Metal driver
+        driver_alloc_before = torch.mps.driver_allocated_memory()
+        # allocate a new 8 MB tensor to force allocation of a new Metal Heap
+        x = torch.ones(1024 * 1024 * 8, device="mps")
+        # get memory allocations after allocating tensor x
+        current_alloc_after = torch.mps.current_allocated_memory()
+        driver_alloc_after = torch.mps.driver_allocated_memory()
+        # current and driver memory allocations must have
+        # grown at this point
+        self.assertGreater(current_alloc_after, current_alloc_before)
+        self.assertGreater(driver_alloc_after, driver_alloc_before)
+
+    def test_mps_allocator_stats(self):
+        max_memory = torch.mps.recommended_max_memory()
+        print(f"Recommended Max Memory : {max_memory/ 1024 ** 3} GB")
+        self.assertGreater(max_memory, 0)
+
+    # to verify this test, run XCode Instruments "Metal System Trace" or "Logging" tool,
+    # press record, then run this python test, and press stop. Next expand
+    # the os_signposts->PyTorchMPS and check if events or intervals are logged
+    # like this example:
+    # "aten::mps_convolution_backward_input:f32[1,128,6,6]:f32[128,64,3,3]:1,128,6,6 (id=G2, run=2)"
+    def test_mps_profiler_module(self):
+        with torch.mps.profiler.profile(mode="event", wait_until_completed=False) as p:
+            # just running some ops to capture the OS Signposts traces for profiling
+            net1 = torch.nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1)\
+                .to(device='mps', dtype=torch.float)
+            x = torch.rand(1, 128, 6, 6, device='mps', dtype=torch.float, requires_grad=True)
+            x = net1(x)
+
+        torch.mps.profiler.start(mode="interval", wait_until_completed=True)
+        # just running some ops to capture the OS Signposts traces for profiling
+        x = torch.rand(1, 128, 6, 6, device='mps', dtype=torch.float, requires_grad=True)
+        x = net1(x)
+        torch.mps.profiler.stop()
+
+    def test_mps_event_module(self):
+        startEvent = torch.mps.Event(enable_timing=True)
+        startEvent.record()
+        net1 = torch.nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1)\
+            .to(device='mps', dtype=torch.float)
+        x = torch.rand(1, 128, 6, 6, device='mps', dtype=torch.float, requires_grad=True)
+        x = net1(x)
+        endEvent = torch.mps.Event(enable_timing=True)
+        endEvent.record()
+        elapsedTime = startEvent.elapsed_time(endEvent)
+        self.assertGreater(elapsedTime, 0.0)
+
+    def test_jit_save_load(self):
+        m = torch.nn.Module()
+        m.x = torch.rand(3, 3, device='mps')
+        buffer = io.BytesIO()
+        torch.jit.save(torch.jit.script(m), buffer)
+        buffer.seek(0)
+        n = torch.jit.load(buffer)
+        self.assertEqual(n.x, m.x)
+
+    # Test random_, random_.to and random_.from
     def test_random(self):
         def helper(shape, low, high, dtype=torch.int32):
 
@@ -5811,14 +7904,20 @@ class TestNLLLoss(TestCase):
 
             # We can't check reliably the mean and std.
             # Just make sure we don't return constant values
-            self.assertNotEqual(mps_out.to('cpu').float().mean(), 0.)
-            self.assertNotEqual(mps_out.to('cpu').float().std(), 0.)
+            self.assertNotEqual(mps_out.float().mean().item(), 0.)
+            self.assertNotEqual(mps_out.float().std().item(), 0.)
 
         helper([100, 100], 0, 10)
         helper([100, 100], 23, 89)
         helper([100, 100], 23, 89, dtype=torch.float32)
         helper([100, 100], 23, 89, dtype=torch.int64)
         helper([100, 100], 0, 2, dtype=torch.bool)
+
+        # Test random_
+        for dtype in [torch.bool, torch.int8, torch.uint8, torch.int32, torch.float16, torch.float32]:
+            x = torch.empty(10, 10, dtype=dtype, device='mps')
+            x.random_()
+            self.assertNotEqual(x.max().item(), 0)
 
     # Test exponential
     def test_exponential(self):
@@ -5847,8 +7946,13 @@ class TestNLLLoss(TestCase):
         self.assertEqual(Exponential(50.0).sample((1,)).size(), (1,))
 
     # Test add
-    def test_add_binary_op(self):
-        def helper(shape, alpha):
+    def test_add_sub(self):
+        def helper(shape, alpha, op_name, inplace):
+            if op_name == "add":
+                op = torch.Tensor.add_ if inplace else torch.add
+            elif op_name == "sub":
+                op = torch.Tensor.sub_ if inplace else torch.sub
+
             for dtype in [torch.float16, torch.float32]:
                 cpu_x = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=False)
                 mps_x = cpu_x.detach().clone().to('mps')
@@ -5856,25 +7960,32 @@ class TestNLLLoss(TestCase):
                 cpu_y = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=False)
                 mps_y = cpu_y.detach().clone().to('mps')
 
-                cpu_out = torch.add(cpu_x, cpu_y, alpha=alpha)
-                mps_out = torch.add(mps_x, mps_y, alpha=alpha)
+                cpu_out = op(cpu_x, cpu_y, alpha=alpha)
+                mps_out = op(mps_x, mps_y, alpha=alpha)
                 # fp16 isn't accurate when alpha is passed
                 # TODO: remove or fix 'tol' when we fix problems with fp16
-                tol = 1e-3 if dtype is torch.float16 else None
+                tol = 2e-3 if dtype is torch.float16 else None
                 self.assertEqual(mps_out, cpu_out, rtol=tol, atol=tol)
+                if not (cpu_y.shape != () and inplace):  # in-place output cannot be broadcasted.
+                    # create a scalar tensor
+                    cpu_s = torch.tensor(2.3, device='cpu', dtype=dtype, requires_grad=False)
+                    mps_s = cpu_s.detach().clone().to('mps')
+                    # primary tensor is scalar
+                    self.assertEqual(op(cpu_s, cpu_y), op(mps_s, mps_y))
                 # create a scalar tensor
                 cpu_s = torch.tensor(2.3, device='cpu', dtype=dtype, requires_grad=False)
                 mps_s = cpu_s.detach().clone().to('mps')
-                # primary tensor is scalar
-                self.assertEqual(torch.add(cpu_s, cpu_y), torch.add(mps_s, mps_y))
                 # secondary tensor is scalar
-                self.assertEqual(torch.add(cpu_x, cpu_s), torch.add(mps_x, mps_s))
+                self.assertEqual(op(cpu_x, cpu_s), op(mps_x, mps_s), rtol=tol, atol=tol)
 
-        helper((2, 8, 4, 5), 1.0)
-        helper((2, 8, 4, 5), 0.0)
-        helper((2, 8, 4, 5), 0.1)
-        helper((2, 8, 3, 5), 0.1)
-        helper((2, 8, 3, 5), 0.2)
+
+        for op_name, inplace in product(["add", "sub"], [True, False]):
+            helper((), 0.0, op_name, inplace)
+            helper((2, 8, 4, 5), 0.0, op_name, inplace)
+            helper((2, 8, 4, 5), 0.1, op_name, inplace)
+            helper((2, 8, 4, 5), 1.0, op_name, inplace)
+            helper((2, 8, 3, 5), 0.1, op_name, inplace)
+            helper((2, 8, 3, 5), 0.2, op_name, inplace)
 
     # Test add
     def test_add_scalars(self):
@@ -5924,12 +8035,76 @@ class TestNLLLoss(TestCase):
                 cpu_x = torch.randint(0, 1000, shape, device='cpu', dtype=dtypei, requires_grad=False)
                 mps_x = cpu_x.to('mps')
                 self.assertEqual(op(cpu_x), op(mps_x), rtol=1e-4, atol=1e-4)
+            # test slice
+            for dtypef in [torch.float32]:
+                cpu_x = torch.randn(shape, device='cpu', dtype=dtypef, requires_grad=False)
+                mps_x = cpu_x.detach().clone().to('mps')
+                cpu_slice = cpu_x[:, ::2, :, :]
+                mps_slice = mps_x[:, ::2, :, :]
+                self.assertEqual(op(cpu_slice), op(mps_slice))
+            # test view
+            for dtypef in [torch.float32]:
+                cpu_x = torch.randn(shape, device='cpu', dtype=dtypef, requires_grad=False)
+                mps_x = cpu_x.detach().clone().to('mps')
+                # create view of tensor by reducing the 3rd and 4th dimension
+                combined_dim = shape[-1] * shape[-2]
+                reshaped_dims = list(shape[:-2]) + [combined_dim]
+                cpu_view = cpu_x.view(*reshaped_dims)
+                mps_view = mps_x.view(*reshaped_dims)
+                self.assertEqual(op(cpu_view), op(mps_view))
 
         helper((2, 8, 4, 5), torch.exp)
         helper((2, 8, 3, 5), torch.exp2)
         helper((2, 8, 3, 5), torch.expm1)
         helper((2, 8, 3, 5), torch.log)
         helper((2, 8, 3, 5), torch.cos)
+        helper((2, 8, 3, 5), torch.erfinv)
+
+
+    def test_non_dense_in_storage_unary_ops(self):
+        def helper(op):
+            for dtypef in [torch.float32]:
+                cpu_x = torch.randn(100, device='cpu', dtype=dtypef, requires_grad=False)
+                mps_x = cpu_x.detach().clone().to('mps')
+                self.assertEqual(op(cpu_x[::2]), op(mps_x[::2]))
+
+            for dtypei in [torch.int32, torch.int16, torch.int8]:
+                cpu_x = torch.randint(127, device='cpu', size=(100,), dtype=dtypei, requires_grad=False)
+                mps_x = cpu_x.to('mps')
+                self.assertEqual(op(cpu_x[::2]), op(mps_x[::2]), rtol=1e-4, atol=1e-4)
+
+        helper(torch.exp)
+        helper(torch.exp2)
+        helper(torch.expm1)
+        helper(torch.log)
+        helper(torch.cos)
+
+    def test_unary_ops_storage_offset_strided(self):
+        def helper(shape, op, inplace, dtype=torch.float32):
+            # test in-place with storage_offset
+            cpu_x = torch.randn(shape, device='cpu', dtype=dtype)
+            mps_x = cpu_x.detach().clone().to('mps')
+            y = op(mps_x[1])
+            cpu_y = op(cpu_x[1])
+            self.assertEqual(y, cpu_y)
+
+
+            # See https://github.com/pytorch/pytorch/issues/100764
+            if not inplace:
+                cpu_x = torch.randn(shape, device='cpu', dtype=dtype)
+                mps_x = cpu_x.detach().clone().to('mps')
+                cpu_y = torch.empty(shape, device='cpu', dtype=dtype).t()
+                mps_y = cpu_y.detach().clone().to('mps')
+                op(cpu_x, out=cpu_y)
+                op(mps_x, out=mps_y)
+                self.assertEqual(mps_y, cpu_y)
+
+
+        helper((5, 5), torch.exp, False)
+        helper((5, 5), torch.cos, False)
+        helper((5, 5), torch.neg, False)
+        helper((5, 5), torch.tanh, False)
+        helper((5, 5), torch.tanh_, True)
 
     def test_atan2(self):
         def helper(shape):
@@ -5976,6 +8151,363 @@ class TestNLLLoss(TestCase):
         self.assertRaises(IndexError, lambda: x.cumsum(2))
         self.assertRaises(IndexError, lambda: x.cumsum(-3))
 
+    def test_cumprod_dim_check(self):
+        x = torch.rand((3, 3), device="mps")
+        self.assertEqual(x.cumprod(1), x.cumprod(-1))
+        self.assertEqual(x.cumprod(0), x.cumprod(-2))
+        self.assertRaises(IndexError, lambda: x.cumprod(2))
+        self.assertRaises(IndexError, lambda: x.cumprod(-3))
+
+class TestLogical(TestCaseMPS):
+    def _wrap_tensor(self, x, device="cpu", dtype=None, requires_grad=False):
+        return torch.tensor(x, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    def test_logical_not(self):
+        def helper(x):
+            cpu_x = x
+            x = cpu_x.detach().clone().to('mps')
+
+            result = torch.logical_not(x)
+            result_cpu = torch.logical_not(cpu_x)
+
+            self.assertEqual(result, result_cpu)
+
+        helper(self._wrap_tensor([1, 1, 0, 0]))
+        helper(self._wrap_tensor([1, 1, 0, 0], dtype=torch.float, requires_grad=True))
+        helper(self._wrap_tensor([True, True, False, False]))
+        helper(self._wrap_tensor(1))
+        helper(self._wrap_tensor(0))
+        helper(self._wrap_tensor(True))
+        helper(self._wrap_tensor(False))
+
+    def test_logical_and(self):
+        def helper(x, other):
+            cpu_x = x
+            x = cpu_x.detach().clone().to('mps')
+
+            cpu_other = other
+            other = cpu_other.detach().clone().to('mps')
+
+            result = torch.logical_and(x, other)
+            result_cpu = torch.logical_and(cpu_x, cpu_other)
+            self.assertEqual(result, result_cpu)
+
+        helper(self._wrap_tensor([1, 1, 0, 0]), self._wrap_tensor([1, 0, 0, 1]))
+        helper(
+            self._wrap_tensor([1, 1, 0, 0], dtype=torch.float, requires_grad=True),
+            self._wrap_tensor([1, 0, 0, 1], dtype=torch.float)
+        )
+        helper(self._wrap_tensor([True, True, False, False]), self._wrap_tensor([True, False, False, True]))
+        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(1))
+        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(0))
+        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(True))
+        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(False))
+
+    def test_logical_or(self):
+        def helper(x, other):
+            cpu_x = x
+            x = cpu_x.detach().clone().to('mps')
+
+            cpu_other = other
+            other = cpu_other.detach().clone().to('mps')
+
+            result = torch.logical_or(x, other)
+            result_cpu = torch.logical_or(cpu_x, cpu_other)
+
+            self.assertEqual(result, result_cpu)
+
+        helper(self._wrap_tensor([1, 1, 0, 0]), self._wrap_tensor([1, 0, 0, 1]))
+        helper(
+            self._wrap_tensor([1, 1, 0, 0], dtype=torch.float, requires_grad=True),
+            self._wrap_tensor([1, 0, 0, 1], dtype=torch.float)
+        )
+        helper(self._wrap_tensor([True, True, False, False]), self._wrap_tensor([True, False, False, True]))
+        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(1))
+        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(0))
+        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(True))
+        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(False))
+
+    def test_logical_xor(self):
+        def helper(x, other):
+            cpu_x = x
+            x = cpu_x.detach().clone().to('mps')
+
+            cpu_other = other
+            other = cpu_other.detach().clone().to('mps')
+
+            result = torch.logical_xor(x, other)
+            result_cpu = torch.logical_xor(cpu_x, cpu_other)
+
+            self.assertEqual(result, result_cpu)
+
+        helper(self._wrap_tensor([1, 1, 0, 0]), self._wrap_tensor([1, 0, 0, 1]))
+        helper(
+            self._wrap_tensor([1, 1, 0, 0], dtype=torch.float, requires_grad=True),
+            self._wrap_tensor([1, 0, 0, 1], dtype=torch.float)
+        )
+        helper(self._wrap_tensor([True, True, False, False]), self._wrap_tensor([True, False, False, True]))
+        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(1))
+        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(0))
+        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(True))
+        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(False))
+
+    def test_min_max(self):
+        def helper(dtype):
+            for _ in range(10):
+                if dtype == torch.float32 or dtype == torch.float16:
+                    x = torch.randn((30, 15), device='mps', dtype=dtype)
+                else:
+                    x = torch.randint(0, 100, (30, 15), device="mps", dtype=dtype)
+                x_cpu = x.to("cpu")
+
+                y = x.max()
+                y_cpu = x_cpu.max()
+                self.assertEqual(y, y_cpu)
+
+                z = x.min()
+                z_cpu = x_cpu.min()
+                self.assertEqual(z, z_cpu)
+
+        [helper(dtype) for dtype in [torch.float32, torch.float16, torch.int32, torch.int16, torch.uint8, torch.int8, torch.bool]]
+
+    def test_isin(self):
+        def helper(dtype):
+            shapes = [([2, 5], [3, 5, 2]), ([10, 3, 5], [20, 1, 3]),
+                      ([5], [10]), ([0], [5]), ([5], [0])]
+            for shape_tuple in shapes:
+                for inverted in [True, False]:
+                    if dtype.is_floating_point:
+                        # Half is not supported for CPU isin. Compute reference in FP32
+                        A = torch.randn(size=shape_tuple[0], device='cpu', dtype=torch.float32)
+                        B = torch.randn(size=shape_tuple[1], device='cpu', dtype=torch.float32)
+                    else:
+                        A = torch.randint(0, 100, size=shape_tuple[0], device='cpu', dtype=dtype)
+                        B = torch.randint(0, 100, size=shape_tuple[1], device='cpu', dtype=dtype)
+
+                    A_mps = A.clone().detach().to('mps')
+                    B_mps = B.clone().detach().to('mps')
+
+                    cpu_ref = torch.isin(A, B, invert=inverted)
+                    if dtype in [torch.float16, torch.bfloat16]:
+                        cpu_ref.type(dtype)
+
+                    mps_out = torch.isin(A_mps, B_mps, invert=inverted)
+                    self.assertEqual(mps_out, cpu_ref)
+
+        dtypes = [torch.float32, torch.float16, torch.bfloat16, torch.int32, torch.int16, torch.uint8, torch.int8]
+        if product_version < 14.0:
+            # Int types expected to fail on MacOS < 14.0
+            dtypes = [torch.float32, torch.float16, torch.bfloat16]
+
+        [helper(dtype) for dtype in dtypes]
+
+    def test_isin_asserts(self):
+        A = torch.randn(size=[1, 4], device='mps', dtype=torch.float32)
+        B = torch.randn(size=[1, 4], device='mps', dtype=torch.float16)
+        with self.assertRaisesRegex(RuntimeError, 'Expected elements.dtype()*'):
+            out = torch.isin(A, B)
+
+
+        C = torch.randn(size=[1, 4], device='mps', dtype=torch.float32)
+        D = torch.randn(size=[1, 4], device='cpu', dtype=torch.float32)
+        with self.assertRaisesRegex(RuntimeError, 'Expected elements.is_mps()*'):
+            out = torch.isin(C, D)
+
+class TestSmoothL1Loss(TestCaseMPS):
+
+    def _smooth_l1_loss_helper(self, reduction="mean", requires_grad=False):
+        # CPU
+        input_cpu = torch.randn(4, 7, requires_grad=requires_grad)
+        target_cpu = torch.randn(4, 7)
+
+        # MPS
+        input_mps = input_cpu.detach().clone().to('mps').requires_grad_()
+        target_mps = target_cpu.detach().clone().to('mps')
+
+        smooth_l1_loss_cpu = F.smooth_l1_loss(input_cpu, target_cpu, beta=1.0, reduction=reduction)
+        smooth_l1_loss_mps = F.smooth_l1_loss(input_mps, target_mps, beta=1.0, reduction=reduction)
+
+        self.assertEqual(smooth_l1_loss_cpu, smooth_l1_loss_mps)
+
+        if requires_grad:
+            smooth_l1_loss_cpu.backward()
+            smooth_l1_loss_mps.backward()
+            self.assertEqual(input_cpu.grad, input_mps.grad.to("cpu"))
+
+        return smooth_l1_loss_cpu, smooth_l1_loss_mps
+
+    def test_smooth_l1_loss_reduction_none(self):
+        self._smooth_l1_loss_helper(reduction="none")
+
+    def test_smooth_l1_loss_reduction_mean(self):
+        self._smooth_l1_loss_helper(reduction="mean")
+
+    def test_smooth_l1_loss_reduction_sum(self):
+        self._smooth_l1_loss_helper(reduction="sum")
+
+    def test_smooth_l1_loss_reduction_mean_backward(self):
+        self._smooth_l1_loss_helper(reduction="mean", requires_grad=True)
+
+    def test_smooth_l1_loss_reduction_mean_sum_backward(self):
+        self._smooth_l1_loss_helper(reduction="sum", requires_grad=True)
+
+class TestNLLLoss(TestCaseMPS):
+    def test_nll_loss_mismatched_batch(self, device='mps'):
+        x = torch.randn((10, 3), requires_grad=True, device=device)
+        # t should have size (10,)
+        t = torch.zeros((3,), dtype=torch.int64, device=device)
+        with self.assertRaisesRegex(ValueError, 'Expected.*batch_size'):
+            F.nll_loss(x, t)
+
+    def test_nll_loss_out_of_bounds_ignore_index(self):
+
+        def test_nll_loss_out_of_bounds_ignore_index_helper(device):
+            output = []
+            x = torch.tensor([[0.3, 0.5, 0.2], [0.1, 0.7, 0.2], [0.4, 0.5, 0.1], [
+                             0.3, 0.5, 0.2], [0.1, 0.7, 0.2], [0.4, 0.5, 0.1]], device=device)
+            t1 = torch.tensor([0, 1, 255, 0, 1, 2], dtype=torch.int64, device=device)
+            t2 = torch.tensor([0, 1, 1, 0, -100, 2], dtype=torch.int64, device=device)
+            for reduction in ['mean', 'none']:
+                # out of bound ignore_index
+                output.append(F.nll_loss(x, t1, ignore_index=255, reduction=reduction))
+                # default ignore_index
+                output.append(F.nll_loss(x, t2, reduction=reduction))
+            return output
+
+        output_cpu = test_nll_loss_out_of_bounds_ignore_index_helper(device='cpu')
+        output_mps = test_nll_loss_out_of_bounds_ignore_index_helper(device='mps')
+
+        for cpu, mps in zip(output_cpu, output_mps):
+            self.assertEqual(cpu, mps)
+
+    def test_nll_loss_invalid_target_dim(self):
+
+        def _test_nll_loss_invalid_target_dim(device):
+            output = []
+            x = torch.tensor([[0.3, 0.5, 0.2], [0.1, 0.7, 0.2], [0.4, 0.5, 0.1], [
+                             0.3, 0.5, 0.2], [0.1, 0.7, 0.2], [0.4, 0.5, 0.1]], device=device)
+            t = torch.zeros((6, 2), dtype=torch.int64, device=device)
+            with self.assertRaisesRegex(RuntimeError, "1D target tensor expected"):
+                F.nll_loss(x, t)
+
+        _test_nll_loss_invalid_target_dim(device='cpu')
+        _test_nll_loss_invalid_target_dim(device='mps')
+
+    def test_nll_loss_invalid_weights(self):
+
+        def _test_nll_loss_invalid_weights(device):
+            x = torch.tensor([[0.3, 0.5, 0.2], [0.1, 0.7, 0.2], [0.4, 0.5, 0.1], [
+                             0.3, 0.5, 0.2], [0.1, 0.7, 0.2], [0.4, 0.5, 0.1]], device=device)
+            t = torch.tensor([0, 1, 2, 1, 1, 2], dtype=torch.int64, device=device)
+            invalid_weights = [
+                torch.zeros(4, device=device),
+                torch.zeros((1, 3), device=device),
+            ]
+            msg = "weight tensor should be defined either for all 3 classes or no classes"
+            for weight in invalid_weights:
+                with self.assertRaisesRegex(RuntimeError, msg):
+                    F.nll_loss(x, t, weight=weight)
+
+        _test_nll_loss_invalid_weights(device='cpu')
+        _test_nll_loss_invalid_weights(device='mps')
+
+    def _nll_loss_helper(self, input_size, reduction, expected):
+
+        # CPU
+        input = torch.rand(input_size, requires_grad=True, device='cpu')
+        num_channels = input_size[1]
+        target_size = (input_size[0], ) + tuple(input_size[2:])
+        target = torch.randint(num_channels, target_size, device='cpu')
+        weights = torch.randn(num_channels)
+
+        # MPS
+        input_mps = input.detach().clone().to('mps').requires_grad_()
+        target_mps = target.detach().clone().to('mps')
+        weights_mps = weights.to("mps")
+
+        output_cpu = F.nll_loss(input, target, weight=weights, reduction=reduction)
+        output_mps = F.nll_loss(input_mps, target_mps, weight=weights_mps, reduction=reduction)
+        self.assertEqual(output_cpu, output_mps.to('cpu'))
+
+        output_cpu.sum().backward()
+        output_mps.sum().backward()
+        self.assertEqual(input.grad, input_mps.grad.to('cpu'))
+
+    def _nll_loss_1d_helper(self, input_size, reduction):
+
+        # CPU
+        input = torch.rand(input_size, requires_grad=True, device='cpu')
+        num_channels = input_size[0]
+        target = torch.randint(num_channels, [], device='cpu')
+
+        # MPS
+        input_mps = input.detach().clone().to('mps').requires_grad_()
+        target_mps = target.detach().clone().to('mps')
+
+        output_cpu = F.nll_loss(input, target, reduction=reduction)
+        output_mps = F.nll_loss(input_mps, target_mps, reduction=reduction)
+        self.assertEqual(output_cpu, output_mps.to('cpu'))
+
+        output_cpu.sum().backward()
+        output_mps.sum().backward()
+        self.assertEqual(input.grad, input_mps.grad.to('cpu'))
+
+    def test_nll_loss_1d(self, device='cpu'):
+        self._nll_loss_1d_helper([10], "none")
+        self._nll_loss_1d_helper([10], "mean")
+        self._nll_loss_1d_helper([10], "sum")
+
+    def test_nll_loss_empty_tensor_reduction_none(self, device='cpu'):
+        self._nll_loss_helper([1, 3], "none", torch.empty([0], device=device))
+        self._nll_loss_helper([3, 5, 7], "none", torch.empty([5, 7], device=device))
+        self._nll_loss_helper([2, 3, 1, 7], "none", torch.empty([2, 1, 7], device=device))
+        self._nll_loss_helper([2, 3, 5, 1], "none", torch.empty([2, 5, 1], device=device))
+        self._nll_loss_helper([2, 3, 5, 7, 1], "none", torch.empty([2, 5, 7, 1], device=device))
+
+    def test_nll_loss_empty_tensor_reduction_mean(self, device='cpu'):
+        nan = torch.tensor(float('nan'), device=device)
+        self._nll_loss_helper([1, 3], "mean", nan)
+        self._nll_loss_helper([1, 3, 5, 7], "mean", nan)
+        self._nll_loss_helper([2, 3, 1, 7], "mean", nan)
+        self._nll_loss_helper([2, 3, 5, 1], "mean", nan)
+        self._nll_loss_helper([2, 3, 5, 7, 1], "mean", nan)
+
+    def test_nll_loss_empty_tensor_reduction_sum(self, device='cpu'):
+        zero = torch.tensor(0, device=device)
+        self._nll_loss_helper([1, 3], "sum", zero)
+        self._nll_loss_helper([1, 3, 5, 7], "sum", zero)
+        self._nll_loss_helper([2, 3, 1, 7], "sum", zero)
+        self._nll_loss_helper([2, 3, 5, 1], "sum", zero)
+        self._nll_loss_helper([2, 3, 5, 7, 1], "sum", zero)
+
+    def test_nll_loss_byte_target_matches_long(self, device='cpu'):
+        N, C = 10, 4
+        input = torch.randn(N, C, device=device, requires_grad=True)
+        target = torch.empty(N, dtype=torch.long, device=device).random_(0, C)
+
+        def compute_result_and_gradient(reduction, target_dtype):
+            result, grad = {}, {}
+            for dev in ['cpu', 'mps']:
+                input_dev = input.to(dev)
+                input_ = input_dev.detach()
+                input_.requires_grad_()
+
+                target_dev = target.to(dev)
+
+                prob = F.log_softmax(input_, dim=-1)
+                loss = nn.NLLLoss(reduction=reduction)
+                result[dev] = loss(prob, target_dev.to(target_dtype))
+                result[dev].sum().backward()
+                grad[dev] = input_.grad
+
+            return result, grad
+
+        for reduction in ["none", "mean", "sum"]:
+            result_long, grad_long = compute_result_and_gradient(reduction, torch.long)
+            result_byte, grad_byte = compute_result_and_gradient(reduction, torch.uint8)
+
+            self.assertEqual(result_long['mps'].to('cpu'), result_long['cpu'])
+            self.assertEqual(grad_long['mps'].to('cpu'), grad_long['cpu'])
 
 class TestTopK(TestCase):
     def _test_topk(self, shape, largest):
@@ -6021,13 +8553,13 @@ class TestNNMPS(NNTestCase):
     def _create_basic_net(self):
         class Layer(nn.Module):
             def __init__(self):
-                super(Layer, self).__init__()
+                super().__init__()
                 self.layer_dummy_param = Parameter(torch.empty(3, 5))
                 self.register_buffer('layer_dummy_buf', torch.zeros(1, 3, 3, 7))
 
         class Net(nn.Module):
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
                 self.l1 = Layer()
                 self.dummy_param = Parameter(torch.empty(3, 5))
                 self.register_buffer('dummy_buf', torch.zeros(7, 3, 3, 1))
@@ -6224,6 +8756,29 @@ class TestNNMPS(NNTestCase):
         actual = F.conv2d(x, y, padding='valid')
         self.assertEqual(expect.to('cpu'), actual.to('cpu'))
 
+    def test_conv2d_backward_collision(self):
+        # Test for https://github.com/pytorch/pytorch/issues/112998
+        x = torch.rand(1, 1, 10, 10, device="mps", requires_grad=True)
+        m1 = nn.Conv2d(1, 1, 3, stride=2, padding=1).to("mps")
+        m2 = nn.Conv2d(1, 1, 4, stride=2, padding=1).to("mps")
+        y1, y2 = m1(x), m2(x)
+        self.assertEqual(y1.shape, y2.shape)
+        y1.sum().backward()
+        # This used to crash with MPSNDArrayConvolutionA14.mm:4352: failed assertion
+        y2.sum().backward()
+
+    @unittest.skipIf(product_version < 13.2, "Skipped on macOS 12")
+    def test_conv3d_backward_collision(self):
+        # Conv3D is only available from MacOS 13.2 onwards
+        x = torch.rand(1, 1, 10, 10, 20, device="mps", requires_grad=True)
+        m1 = nn.Conv3d(1, 1, 3, stride=2, padding=1).to("mps")
+        m2 = nn.Conv3d(1, 1, 4, stride=2, padding=1).to("mps")
+        y1, y2 = m1(x), m2(x)
+        self.assertEqual(y1.shape, y2.shape)
+        y1.sum().backward()
+        # This used to crash with MPSNDArrayConvolutionA14.mm:4352: failed assertion
+        y2.sum().backward()
+
     def test_gemm_permute_transpose(self):
         batch_size = 32
         n = 20
@@ -6297,8 +8852,112 @@ class TestNNMPS(NNTestCase):
         # self.assertEqual(expect, actual)
 
 
-class TestConstantPadNd(TestCase):
-    def test_preserves_memory_format(self):
+class TestPad(TestCaseMPS):
+    def test_constant_pad(self):
+        m = torch.nn.ConstantPad2d((-2, -2, -2, -2), 3.5)
+        input_cpu = torch.randn(1, 16, 16, 16)
+        input_mps = input_cpu.detach().clone().to("mps")
+        r_cpu = m(input_cpu)
+        r_mps = m(input_mps)
+        self.assertEqual(r_cpu, r_mps.to("cpu"))
+
+        # Arbitrary input dimensions
+        pad = (1, 1, 0, 0, 0, 0)
+        value = 3.5
+        input_cpu = torch.randn((1, 1, 3, 3, 3, 3, 3, 3, 3, 3))
+        input_mps = input_cpu.detach().clone().to("mps")
+        r_cpu = F.pad(input_cpu, pad=pad, value=value)
+        r_mps = F.pad(input_mps, pad=pad, value=value)
+        self.assertEqual(r_cpu, r_mps.to("cpu"))
+
+    def test_circular_pad(self):
+        # https://github.com/pytorch/pytorch/issues/80856
+        k_cpu = torch.ones(3, 3, 9, 9)
+        k_mps = k_cpu.detach().clone().to("mps")
+
+        x_cpu = torch.rand(1, 3, 32, 32)
+        x_mps = x_cpu.detach().clone().to("mps")
+
+        x_pad_cpu = F.pad(x_cpu, (2, 2, 2, 2), mode='circular')
+        x_pad_mps = F.pad(x_mps, (2, 2, 2, 2), mode='circular')
+
+        y_cpu = F.conv2d(x_pad_cpu, k_cpu)
+        y_mps = F.conv2d(x_pad_mps, k_mps)
+
+        self.assertEqual(y_cpu, y_mps.cpu())
+
+    def test_constant_pad_4d_warning(self):
+        inputCPU = torch.rand((1, 2, 2, 2, 1, 1))
+        inputMPS = inputCPU.detach().clone().to('mps')
+        outputCPU = F.pad(inputCPU, [0, 0, 0, 0, 0, 0, 1, 0])
+        outputMPS = F.pad(inputMPS, [0, 0, 0, 0, 0, 0, 1, 0])
+        self.assertEqual(outputCPU, outputMPS)
+
+    def test_pad(self):
+        def helper(shape, padding, op, value=0):
+            inputCPU = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
+            inputCPU.retain_grad()
+            inputMPS = inputCPU.detach().clone().to('mps').requires_grad_()
+
+            if (op in [nn.ConstantPad1d, nn.ConstantPad2d, nn.ConstantPad3d]):
+                padCriteria = op(padding, value)
+            else:
+                padCriteria = op(padding)
+            outputCPU = padCriteria(inputCPU)
+            outputMPS = padCriteria(inputMPS)
+            self.assertEqual(outputCPU, outputMPS)
+
+            # backward pass (chose 0.6 just to have the grad_output != 1)
+            outputCPU.backward(gradient=torch.full_like(outputCPU, 0.6))
+            outputMPS.backward(gradient=torch.full_like(outputMPS, 0.6))
+            self.assertEqual(inputCPU.grad, inputMPS.grad)
+
+        # 1D Padding
+        helper((2, 4, 3), 2, nn.ReflectionPad1d)
+        # verify if a change in shape of input would cause problems with graph caching
+        helper((2, 4, 4), (1, 3), nn.ReflectionPad1d)
+        # Replication 1D
+        helper((2, 1, 6), 3, nn.ReplicationPad1d)
+        # Constant Pad 1D
+        helper((2, 3, 4), 2, nn.ConstantPad1d)
+        # Constant Pad 1D with single dimension input
+        helper((16), (1, 2), nn.ConstantPad1d)
+
+        # 2D Padding
+        helper((1, 2, 3, 4), (1, 1, 2, 0), nn.ReflectionPad2d)
+        # verify if a change in shape of input would cause problems with graph caching
+        helper((2, 4, 3, 4), (1, 1, 2, 0), nn.ReflectionPad2d)
+        # this should make the padding (2, 2, 2, 2)
+        helper((2, 1, 6, 8), 2, nn.ReplicationPad2d)
+        # verify if a change in shape of padding would cause problems with graph caching
+        helper((2, 1, 6, 8), (2, 4, 3, 5), nn.ReplicationPad2d)
+        # Constant Pad 2D
+        helper((2, 1, 6, 8), (2, 4, 3, 5), nn.ConstantPad2d)
+        # input size < pad size
+        helper((1, 2, 3), (0, 0, 0, 1), nn.ConstantPad2d)
+        # pad dims < input dims
+        helper((50, 9, 300), (0, 0, 0, 31), nn.ConstantPad2d)
+        # pad dims == input dims
+        helper((1, 3), (0, 2, 0, 1), nn.ConstantPad2d)
+        # input.numel() == 0 but output.numel() > 0
+        helper((0, 3, 3), (1, 1, 1, 1, 1, 1), nn.ConstantPad2d)
+        # pad dims < input dims - 2
+        helper((1, 2, 3, 4), (1, 2), nn.ConstantPad2d)
+
+        # 3D Padding
+        helper((2, 4, 6, 8, 4), (1, 3, 3, 5, 3, 4), nn.ReflectionPad3d)
+        # verify if a change in shape of padding would cause problems with graph caching
+        helper((2, 4, 6, 8, 4), (1, 3, 3, 5, 3, 4), nn.ReplicationPad3d)
+        # case where input_d == pad_front/back for ReplicationPad3d
+        helper((3, 4, 5, 6, 7), (1, 2, 3, 4, 5, 6), nn.ReplicationPad3d)
+        # Constant Pad 3D
+        helper((2, 4, 6, 8, 4), (1, 3, 3, 5, 3, 4), nn.ConstantPad3d)
+        # input size < pad size
+        helper((2, 4, 6), (1, 3, 3, 5, 3, 4), nn.ConstantPad3d)
+        # check the workaround for the right padding bug in Monterey
+        helper((1, 2, 2, 2, 2), (0, 1), nn.ConstantPad3d)
+
+    def test_constant_pad_nd_preserves_memory_format(self):
         nchw_tensor = torch.rand((1, 2, 5, 3))
         nchw_padded = torch.constant_pad_nd(nchw_tensor, [1, 2], 0.5)
         self.assertTrue(nchw_padded.is_contiguous(memory_format=torch.contiguous_format))
@@ -6308,7 +8967,7 @@ class TestConstantPadNd(TestCase):
         self.assertTrue(nhwc_padded.is_contiguous(memory_format=torch.channels_last))
 
 
-class TestLinalgMPS(TestCase):
+class TestLinalgMPS(TestCaseMPS):
     def _test_addmm_addmv(self, f, t, m, v, *, alpha=None, beta=None, transpose_out=False):
         dtype = t.dtype
         numpy_dtype = dtype
@@ -6350,7 +9009,221 @@ class TestLinalgMPS(TestCase):
         m2 = maybe_transpose(t3, torch.randn(50, 25, device=device).to(dtype))
         self._test_addmm_addmv(torch.addmm, M, m1, m2, transpose_out=t4)
 
-class TestGatherScatter(TestCase):
+    def _test_addr(self, f, t, m, v, alpha=None, beta=None):
+        dtype = t.dtype
+        numpy_dtype = dtype
+        alpha = 1.2 if alpha is None else alpha
+        beta = 0.8 if beta is None else beta
+        res1 = f(t, m, v, alpha=alpha, beta=beta)
+        res2 = alpha * np.outer(m.to(numpy_dtype).cpu().numpy(), v.to(numpy_dtype).cpu().numpy())
+        if beta != 0:
+            res2 += (torch.mul(t, beta)).to(numpy_dtype).cpu().numpy()
+        res2 = torch.from_numpy(res2).to(dtype)
+        self.assertEqual(res1, res2)
+
+    def test_addr(self, device="mps", dtype=torch.float32):
+        M = torch.randn(10, 25, device=device).to(dtype)
+        m1 = torch.randn(10, device=device).to(dtype)
+        m2 = torch.randn(25, device=device).to(dtype)
+        self._test_addr(torch.addr, M, m1, m2)
+
+        # Test beta=0, M=nan
+        M = torch.full((10, 25), math.nan, device=device).to(dtype)
+        m1 = torch.randn(10, device=device).to(dtype)
+        m2 = torch.randn(25, device=device).to(dtype)
+        self._test_addr(torch.addr, M, m1, m2, beta=0)
+
+    def test_matrix_rank(self, device="mps", dtype=torch.float32):
+        matrix_rank = torch.linalg.matrix_rank
+
+        def run_test(shape0, shape1, batch):
+            a = torch.randn(*batch, shape0, shape1, dtype=dtype, device=device)
+            rank_a = matrix_rank(a)
+
+            self.assertEqual(rank_a, matrix_rank(a.mH))
+            aaH = torch.matmul(a, a.mH)
+            rank_aaH = matrix_rank(aaH)
+            rank_aaH_hermitian = matrix_rank(aaH, hermitian=True)
+            self.assertEqual(rank_aaH, rank_aaH_hermitian)
+            aHa = torch.matmul(a.mH, a)
+            self.assertEqual(matrix_rank(aHa), matrix_rank(aHa, hermitian=True))
+
+            # check against NumPy
+            self.assertEqual(rank_a, np.linalg.matrix_rank(a.cpu().numpy()))
+            self.assertEqual(matrix_rank(a, 0.01), np.linalg.matrix_rank(a.cpu().numpy(), 0.01))
+
+            self.assertEqual(rank_aaH, np.linalg.matrix_rank(aaH.cpu().numpy()))
+            self.assertEqual(matrix_rank(aaH, 0.01), np.linalg.matrix_rank(aaH.cpu().numpy(), 0.01))
+
+            # hermitian flag for NumPy was added in 1.14.0
+            if np.lib.NumpyVersion(np.__version__) >= '1.14.0':
+                self.assertEqual(rank_aaH_hermitian,
+                                 np.linalg.matrix_rank(aaH.cpu().numpy(), hermitian=True))
+                self.assertEqual(matrix_rank(aaH, 0.01, True),
+                                 np.linalg.matrix_rank(aaH.cpu().numpy(), 0.01, True))
+
+            # check out= variant
+            out = torch.empty(a.shape[:-2], dtype=torch.int64, device=device)
+            ans = matrix_rank(a, out=out)
+            self.assertEqual(ans, out)
+            self.assertEqual(ans, rank_a)
+
+        shapes = (3, 13)
+        batches = ((), (0, ), (4, ), (3, 5, ))
+        for (shape0, shape1), batch in zip(itertools.product(shapes, reversed(shapes)), batches):
+            # escape only when NotImplementedError of downstream function is raised
+            # TODO: remove this once the required function is implemented
+            try:
+                run_test(shape0, shape1, batch)
+            except NotImplementedError as e:
+                with self.assertRaisesRegex(
+                        NotImplementedError,
+                        "The operator 'aten::_linalg_svd.U' is not currently implemented for the MPS device."):
+                    raise e
+
+    def test_pinv(self, device="mps", dtype=torch.float32, precision=1e-4):
+        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+
+        def run_test_main(A, hermitian):
+            # Testing against definition for pseudo-inverses
+            A_pinv = torch.linalg.pinv(A, hermitian=hermitian)
+            np_A = A.cpu().numpy()
+            np_A_pinv = A_pinv.cpu().numpy()
+            if A.numel() > 0:
+                self.assertEqual(A, np_A @ np_A_pinv @ np_A, atol=precision, rtol=precision)
+                self.assertEqual(A_pinv, np_A_pinv @ np_A @ np_A_pinv, atol=precision, rtol=precision)
+                self.assertEqual(np_A @ np_A_pinv, (np_A @ np_A_pinv).conj().swapaxes(-2, -1), atol=precision, rtol=precision)
+                self.assertEqual(np_A_pinv @ np_A, (np_A_pinv @ np_A).conj().swapaxes(-2, -1), atol=precision, rtol=precision)
+            else:
+                self.assertEqual(A.shape, A_pinv.shape[:-2] + (A_pinv.shape[-1], A_pinv.shape[-2]))
+
+            # Check out= variant
+            out = torch.empty_like(A_pinv)
+            ans = torch.linalg.pinv(A, hermitian=hermitian, out=out)
+            self.assertEqual(ans, out)
+            self.assertEqual(ans, A_pinv)
+
+        def run_test_numpy(A, hermitian):
+            # Check against NumPy output
+            # Test float rcond, and specific value for each matrix
+            rconds = [float(torch.rand(1)), ]
+            # Test different types of rcond tensor
+            for rcond_type in MPS_DTYPES:
+                rconds.append(torch.rand(A.shape[:-2], dtype=torch.float32, device=device).to(rcond_type))
+            # Test broadcasting of rcond
+            if A.ndim > 2:
+                rconds.append(torch.rand(A.shape[-3], device=device))
+            for rcond in rconds:
+                actual = torch.linalg.pinv(A, rcond=rcond, hermitian=hermitian)
+                torch_rtol = torch.linalg.pinv(A, rtol=rcond, hermitian=hermitian)
+                self.assertEqual(actual, torch_rtol, atol=precision, rtol=precision)
+                numpy_rcond = rcond if isinstance(rcond, float) else rcond.cpu().numpy()
+                expected = np.linalg.pinv(A.cpu().numpy(), rcond=numpy_rcond, hermitian=hermitian)
+                self.assertEqual(actual, expected, atol=precision, rtol=precision)
+
+        for sizes in [(5, 5), (3, 5, 5), (3, 2, 5, 5),  # square matrices
+                      (3, 2), (5, 3, 2), (2, 5, 3, 2),  # fat matrices
+                      (2, 3), (5, 2, 3), (2, 5, 2, 3),  # thin matrices
+                      (0, 0), (0, 2), (2, 0), (3, 0, 0), (0, 3, 0), (0, 0, 3)]:  # zero numel matrices
+            A = torch.randn(*sizes, dtype=dtype, device=device)
+            hermitian = False
+            run_test_main(A, hermitian)
+            run_test_numpy(A, hermitian)
+
+        # Check hermitian = True
+        for sizes in [(5, 5), (3, 5, 5), (3, 2, 5, 5),  # square matrices
+                      (0, 0), (3, 0, 0), ]:  # zero numel square matrices
+            A = random_hermitian_pd_matrix(sizes[-1], *sizes[:-2], dtype=dtype, device=device)
+            hermitian = True
+            # escape only when NotImplementedError of downstream function is raised
+            # TODO: remove this once the required function is implemented
+            try:
+                run_test_main(A, hermitian)
+            except NotImplementedError as e:
+                with self.assertRaisesRegex(
+                        NotImplementedError,
+                        "The operator 'aten::_linalg_eigh.eigenvalues' is not currently implemented for the MPS device."):
+                    raise e
+            try:
+                run_test_numpy(A, hermitian)
+            except NotImplementedError as e:
+                with self.assertRaisesRegex(
+                        NotImplementedError,
+                        "The operator 'aten::_linalg_eigh.eigenvalues' is not currently implemented for the MPS device."):
+                    raise e
+
+    @parametrize("m", [1, 32, 64])
+    @parametrize("k", [32, 64])
+    @parametrize("n", [48, 64])
+    def test__int4_mm(self, m, k, n):
+        q_group = 32
+        inner_k_tiles = 2
+
+        torch.manual_seed(1)
+        a_f32 = torch.rand((m, k), device="mps")
+        b_f32 = torch.rand((k, n), device="mps")
+
+        def convert_weight_to_int4pack(b):
+            b_int32, b_scales_and_zeros = _group_quantize_tensor(
+                b, n_bit=4, q_group_size=q_group
+            )
+            b_int4pack = torch._convert_weight_to_int4pack(
+                b_int32, inner_k_tiles
+            )
+
+            return b_int4pack, b_scales_and_zeros
+
+        def weight_int4pack_mm(a, b_int4pack, b_scales_and_zeros):
+            return torch._weight_int4pack_mm(
+                a, b_int4pack, q_group, b_scales_and_zeros
+            )
+
+        b_int4pack, b_scales_and_zeros_f32 = convert_weight_to_int4pack(b_f32)
+
+        for dtype in [torch.float16, torch.float32] + ([torch.bfloat16] if product_version > 14.0 else []):
+            a = a_f32.to(dtype=dtype)
+            b = b_f32.to(dtype=dtype)
+            b_scales_and_zeros = b_scales_and_zeros_f32.to(dtype=dtype)
+            ref = torch.mm(a, b)
+            res = weight_int4pack_mm(a, b_int4pack, b_scales_and_zeros)
+
+            mean_err = ((res - ref).abs() / ref).mean()
+            self.assertLess(mean_err, 0.05)
+
+    @parametrize("m", [1, 32, 64])
+    @parametrize("k", [32, 64])
+    @parametrize("n", [32, 64])
+    def test__int8_mm(self, m, k, n):
+        torch.manual_seed(1)
+        a_f32 = torch.rand((m, k), device="mps")
+        b_f32 = torch.rand((n, k), device="mps")
+
+        def convert_weight_to_int8pack(b):
+            b_int8pack, b_scales, _ = _dynamically_quantize_per_channel(
+                b, -128, 127, torch.int8
+            )
+            return b_int8pack, b_scales
+
+        def weight_int8pack_mm(a, b_int8pack, b_scales):
+            return torch._weight_int8pack_mm(a, b_int8pack, b_scales)
+
+        b_int8pack, b_scales_f32 = convert_weight_to_int8pack(b_f32)
+        for dtype in [torch.float16, torch.float32] + ([torch.bfloat16] if product_version > 14.0 else []):
+            a = a_f32.to(dtype=dtype)
+            b = b_f32.to(dtype=dtype)
+            b_scales = b_scales_f32.to(dtype=dtype)
+            res = weight_int8pack_mm(a, b_int8pack, b_scales)
+            ref = torch.mm(a, b.transpose(0, 1))
+
+            mean_err = ((res - ref).abs() / ref).mean()
+            self.assertLess(mean_err, 0.05)
+
+
+
+
+
+
+class TestGatherScatter(TestCaseMPS):
     def test_slicing_with_step(self):
         # Slicing with step
         # https://github.com/pytorch/pytorch/issues/78886
@@ -6415,7 +9288,7 @@ class TestGatherScatter(TestCase):
 # They are subset of those tests as currently only this subset is working.
 # This whole `class` will be removed when we add generic device testing. There
 # are no additional tests added apart from what is part of test_view_ops.py
-class TestViewOpsMPS(TestCase):
+class TestViewOpsMPS(TestCaseMPS):
     exact_dtype = True
 
     def test_permute_slicing(self):
@@ -6440,7 +9313,7 @@ class TestViewOpsMPS(TestCase):
         # Note: only validates storage on native device types
         # because some accelerators, like XLA, do not expose storage
         if base.device.type == 'mps':
-            if base.storage().data_ptr() != other.storage().data_ptr():
+            if base.untyped_storage().data_ptr() != other.untyped_storage().data_ptr():
                 return False
 
         return True
@@ -6563,6 +9436,14 @@ class TestViewOpsMPS(TestCase):
         v[0, 1] = 0
         self.assertEqual(t[1, 0], v[0, 1])
 
+    def test_inplace_view_add(self):
+        # https://github.com/pytorch/pytorch/issues/96153
+        t_mps = torch.ones((2, 6,), device='mps')[1].reshape(2, 3)
+        t_cpu = torch.ones((2, 6,), device='cpu')[1].reshape(2, 3)
+        t_mps = t_mps + 1
+        t_cpu = t_cpu + 1
+        self.assertEqual(t_mps, t_cpu)
+
     def test_t_inplace_view(self, device="mps"):
         t = torch.ones(5, 5, device=device)
         v = t.view_as(t)
@@ -6593,7 +9474,7 @@ class TestViewOpsMPS(TestCase):
         v = torch.squeeze(t)
         self.assertTrue(self.is_view_of(t, v))
         v[0, 1] = 0
-        self.assertTrue(t is v._base)
+        self.assertIs(t, v._base)
 
     def test_squeeze_inplace_view(self, device="mps"):
         t = torch.ones(5, 5, device=device)
@@ -6601,7 +9482,7 @@ class TestViewOpsMPS(TestCase):
         v = v.squeeze_()
         self.assertTrue(self.is_view_of(t, v))
         v[0, 1] = 0
-        self.assertTrue(t is v._base)
+        self.assertIs(t, v._base)
 
     def test_unsqueeze_view(self, device="mps"):
         t = torch.ones(5, 5, device=device)
@@ -6655,12 +9536,12 @@ class TestViewOpsMPS(TestCase):
     def test_contiguous_self(self, device="mps"):
         t = torch.ones(5, 5, device=device)
         s = t.contiguous()
-        self.assertTrue(s is t)
+        self.assertIs(s, t)
 
     def test_contiguous_nonview(self, device="mps"):
         t = torch.ones(5, 5, device=device)
         nv = t.t().contiguous()
-        self.assertTrue(not self.is_view_of(t, nv))
+        self.assertFalse(self.is_view_of(t, nv))
 
         nv[0, 0] = 0
         self.assertNotEqual(t[0, 0], nv[0, 0])
@@ -6685,7 +9566,7 @@ class TestViewOpsMPS(TestCase):
     def test_reshape_nonview(self, device="mps"):
         t = torch.ones(5, 5, device=device)
         nv = torch.reshape(t.t(), (25,))
-        self.assertTrue(not self.is_view_of(t, nv))
+        self.assertFalse(self.is_view_of(t, nv))
 
         nv[6] = 0
         self.assertNotEqual(t[1, 1], nv[6])
@@ -6731,7 +9612,7 @@ class TestViewOpsMPS(TestCase):
         def assert_is_nonview(t, nv):
             idx_t = (0,) * t.ndim
             idx_nv = (0,) * nv.ndim
-            self.assertTrue(not nv._is_view())
+            self.assertFalse(nv._is_view())
             nv[idx_nv] = 0
             self.assertNotEqual(t[idx_t], nv[idx_nv])
         t = torch.ones(2, 3, 2, 3, device=device).transpose(2, 3)
@@ -6745,7 +9626,7 @@ class TestViewOpsMPS(TestCase):
         # flatten returns the original object if start_dim=end_dim
         t = t = torch.ones(2, 2, device=device)
         nv = t.flatten(1, 1)
-        self.assertTrue(t is nv)
+        self.assertIs(t, nv)
 
     def test_basic_indexing_slice_view(self, device="mps"):
         t = torch.ones(5, 5, device=device)
@@ -7200,15 +10081,15 @@ class TestViewOpsMPS(TestCase):
         x.set_(x.storage(), 0, x.size(), stride)
         self.assertTrue(x.is_contiguous())
 
-    def test_resize_all_dtypes_and_devices(self, device="mps"):
+    def test_resize_mps_dtypes(self, device="mps"):
         shape = (2, 2)
-        for dt in (torch.half, torch.bfloat16, torch.bool):
+        for dt in MPS_DTYPES:
             x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
             x.resize_(shape)
             self.assertEqual(shape, x.shape)
 
-    def test_resize_as_all_dtypes_and_devices(self, device="mps"):
-        for dt in (torch.half, torch.bfloat16, torch.bool):
+    def test_resize_as_mps_dtypes(self, device="mps"):
+        for dt in MPS_DTYPES:
             x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
             y = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=dt, device=device)
             x.resize_as_(y)
@@ -7226,7 +10107,7 @@ class TestViewOpsMPS(TestCase):
             x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
             self.assertEqual(x.view(6).shape, [6])
 
-class TestConvolutionMPS(TestCase):
+class TestConvolutionMPS(TestCaseMPS):
     def test_conv1d_all_strides_paddings(self):
         # https://github.com/pytorch/pytorch/issues/82921
         def helper(stride, padding):
@@ -7287,7 +10168,8 @@ class TestConvolutionMPS(TestCase):
     def test_conv_backward_1d_channels_last(self):
         def helper(shape, in_channels=1, out_channels=1, kernel_size=3, groups=1):
             # https://github.com/pytorch/pytorch/issues/84511
-            conv_cpu = torch.nn.Conv1d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size, groups=groups)
+            conv_cpu = torch.nn.Conv1d(
+                in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size, groups=groups).requires_grad_()
             conv_mps = torch.nn.Conv1d(
                 in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size, groups=groups).to("mps")
             conv_mps.weight.data = conv_cpu.weight.data.detach().clone().to("mps").requires_grad_(True)
@@ -7327,21 +10209,107 @@ class TestConvolutionMPS(TestCase):
 
     def test_conv2d_all_strides_paddings(self):
         # https://github.com/pytorch/pytorch/issues/83180
-        y_cpu = torch.randn(2, 2, 3, 6)
-        y_gpu = y_cpu.to(device='mps')
-        for strideX in range(1, 4):
-            for strideY in range(1, 4):
-                conv_cpu = torch.nn.Conv2d(in_channels=2, out_channels=2, kernel_size=3, stride=(strideX, strideY))
-                conv_gpu = copy.deepcopy(conv_cpu).to(device='mps')
-                x_cpu = conv_cpu(y_cpu)
-                x_gpu = conv_gpu(y_gpu)
-                self.assertEqual(x_cpu, x_gpu.cpu(), rtol=1e-03, atol=1e-05)
+        def helper(N, C, H, W, groups, input_mem_format, weight_mem_format, permute_data):
+            x_cpu = torch.randn(N, C, H, W).to(memory_format=input_mem_format).requires_grad_()
+            x_mps = x_cpu.detach().clone().to(device='mps').requires_grad_()
+
+            if permute_data:
+                x_cpu.permute(0, 2, 3, 1)
+                x_mps.permute(0, 2, 3, 1)
+
+            for strideX in range(1, 4):
+                for strideY in range(1, 4):
+                    conv_cpu = torch.nn.Conv2d(
+                        in_channels=N, out_channels=C, kernel_size=H, groups=groups, stride=(strideX, strideY)).requires_grad_()
+                    conv_cpu.weight.data = conv_cpu.weight.to(memory_format=weight_mem_format).requires_grad_()
+
+                    conv_mps = torch.nn.Conv2d(
+                        in_channels=N, out_channels=C, kernel_size=H, groups=groups, stride=(strideX, strideY), device="mps")
+                    conv_mps.weight.data = conv_cpu.weight.data.detach().clone().to("mps").requires_grad_()
+                    conv_mps.bias.data = conv_cpu.bias.data.detach().clone().to("mps").requires_grad_()
+
+                    res_cpu = conv_cpu(x_cpu)
+                    res_mps = conv_mps(x_mps)
+                    self.assertEqual(res_cpu, res_mps.cpu(), rtol=1e-03, atol=1e-05)
+
+                    res_cpu = res_cpu.sum().backward()
+                    res_mps = res_mps.sum().backward()
+                    self.assertEqual(res_cpu, res_mps, rtol=2.6e-05, atol=2e-04)
+                    self.assertEqual(conv_cpu.weight.grad, conv_mps.weight.grad, rtol=2.6e-05, atol=2e-04)
+                    self.assertEqual(conv_cpu.bias.grad, conv_mps.bias.grad)
+                    self.assertEqual(x_cpu.grad, x_mps.grad)
+
+        for mem_format_input in [torch.contiguous_format, torch.channels_last]:
+            for mem_format_weight in [torch.contiguous_format, torch.channels_last]:
+                for permute_data in [True, False]:
+                    helper(2, 2, 3, 6, 1, mem_format_input, mem_format_weight, permute_data)
+                    helper(10, 10, 4, 6, 2, mem_format_input, mem_format_weight, permute_data)
+                    helper(32, 32, 4, 6, 2, mem_format_input, mem_format_weight, permute_data)
+
+    def test_conv_transpose_2d_strided(self):
+        def helper(m_cpu, memory_format):
+            m_mps = copy.deepcopy(m_cpu).requires_grad_()
+            m_mps.weight.data = m_cpu.weight.data.detach().clone().to("mps").requires_grad_()
+            m_mps.bias.data = m_cpu.bias.data.detach().clone().to("mps").requires_grad_()
+
+            input_cpu = torch.randn(20, 16, 50, 100).to(memory_format=memory_format).requires_grad_()
+            input_mps = input_cpu.detach().clone().to("mps")
+
+            output_cpu = m_cpu(input_cpu)
+            output_mps = m_mps(input_mps)
+            self.assertEqual(output_cpu, output_mps)
+
+        for mem_format_input in [torch.contiguous_format, torch.channels_last]:
+            # With square kernels and equal stride
+            helper(nn.ConvTranspose2d(16, 33, 3, stride=2).requires_grad_(), mem_format_input)
+
+            # non-square kernels and unequal stride and with padding
+            helper(nn.ConvTranspose2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2)).requires_grad_(), mem_format_input)
+
+    def test_conv_transpose_2d_specified_output(self):
+        input_cpu = torch.randn(1, 16, 12, 12)
+        input_mps = input_cpu.detach().clone().to("mps")
+
+        downsample_cpu = nn.Conv2d(16, 16, 3, stride=2, padding=1)
+        downsample_mps = nn.Conv2d(16, 16, 3, stride=2, padding=1, device="mps")
+        downsample_mps.weight.data = downsample_cpu.weight.data.detach().clone().to("mps").requires_grad_()
+        downsample_mps.bias.data = downsample_cpu.bias.data.detach().clone().to("mps").requires_grad_()
+
+        upsample_cpu = nn.ConvTranspose2d(16, 16, 3, stride=2, padding=1)
+        upsample_mps = nn.ConvTranspose2d(16, 16, 3, stride=2, padding=1, device="mps")
+        upsample_mps.weight.data = upsample_cpu.weight.data.detach().clone().to("mps").requires_grad_()
+        upsample_mps.bias.data = upsample_cpu.bias.data.detach().clone().to("mps").requires_grad_()
+
+        h_cpu = downsample_cpu(input_cpu)
+        h_mps = downsample_mps(input_mps)
+        self.assertEqual(h_cpu, h_mps)
+
+        size_cpu = h_cpu.size()
+        size_mps = h_mps.size()
+        self.assertEqual(size_cpu, size_mps)
+
+        output_cpu = upsample_cpu(h_cpu, output_size=input_cpu.size())
+        output_mps = upsample_mps(h_mps, output_size=input_mps.size())
+        self.assertEqual(output_cpu, output_mps)
+        self.assertEqual(output_cpu.size(), output_mps.size())
 
     def test_conv2d_single_stride(self):
         y_cpu = torch.randn(2, 2, 3, 6)
         y_gpu = y_cpu.to(device='mps')
         for stride in range(1, 4):
             conv_cpu = torch.nn.Conv2d(in_channels=2, out_channels=2, kernel_size=3, stride=stride)
+            conv_gpu = copy.deepcopy(conv_cpu).to(device='mps')
+            x_cpu = conv_cpu(y_cpu)
+            x_gpu = conv_gpu(y_gpu)
+            self.assertEqual(x_cpu, x_gpu.cpu(), rtol=1e-03, atol=1e-05)
+
+    @unittest.skipIf(product_version < 13.2, "Skipped on macOS 12")
+    def test_conv3d_single_stride(self):
+        # Conv3d is only available from MacOS 13.2 onwards
+        y_cpu = torch.randn(2, 2, 3, 6)
+        y_gpu = y_cpu.to(device='mps')
+        for stride in range(1, 4):
+            conv_cpu = torch.nn.Conv3d(in_channels=2, out_channels=2, kernel_size=2, stride=stride)
             conv_gpu = copy.deepcopy(conv_cpu).to(device='mps')
             x_cpu = conv_cpu(y_cpu)
             x_gpu = conv_gpu(y_gpu)
@@ -7377,7 +10345,7 @@ class TestConvolutionMPS(TestCase):
                     grid_cpu = get_grid().requires_grad_()
                     out_cpu = F.grid_sample(input_cpu, grid_cpu, mode=mode, padding_mode=padding_mode,
                                             align_corners=align_corners)
-                    self.assertTrue(out_cpu.size() == torch.Size([N, C, H, W]))
+                    self.assertEqual(out_cpu.size(), torch.Size([N, C, H, W]))
 
                     gradients = torch.randn_like(out_cpu)
                     out_cpu.backward(gradients)
@@ -7515,7 +10483,7 @@ class TestConvolutionMPS(TestCase):
                                     [[3.0000004768, 6.5000000000, 5.0000, 4.6675000191, 9.2500],
                                      [1.0000000000, 7.1665000916, 5.0000, 5.0000000000, 9.2500]], device="mps").view(1, 1, 2, 5)
                         else:
-                            raise AssertionError("missing groundtruth test for padding mode '{}'".format(padding_mode))
+                            raise AssertionError(f"missing groundtruth test for padding mode '{padding_mode}'")
                     elif mode == 'nearest':
                         if padding_mode == 'zeros':
                             if align_corners:
@@ -7545,7 +10513,7 @@ class TestConvolutionMPS(TestCase):
                                     [[1., 8., 5., 7., 9.],
                                      [1., 8., 5., 8., 9.]], device="mps").view(1, 1, 2, 5)
                         else:
-                            raise AssertionError("missing groundtruth test for padding mode '{}'".format(padding_mode))
+                            raise AssertionError(f"missing groundtruth test for padding mode '{padding_mode}'")
                     elif mode == 'bicubic':
                         if padding_mode == 'zeros':
                             if align_corners:
@@ -7575,17 +10543,17 @@ class TestConvolutionMPS(TestCase):
                                     [[2.7993753, 6.6050020, 4.25, 4.7138715, 10.269531],
                                      [0.8125000, 7.2822485, 4.25, 5.0000052, 9.332031]], device="mps").view(1, 1, 2, 5)
                         else:
-                            raise AssertionError("missing groundtruth test for padding mode '{}'".format(padding_mode))
+                            raise AssertionError(f"missing groundtruth test for padding mode '{padding_mode}'")
 
                     else:
-                        raise AssertionError("missing groundtruth test for interpolation mode '{}'".format(mode))
+                        raise AssertionError(f"missing groundtruth test for interpolation mode '{mode}'")
                     output = F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode,
                                            align_corners=align_corners)
                     self.assertEqual(output, groundtruth, atol=1e-5, rtol=0,
-                                     msg="groundtruth comparison failed for mode={}, "
-                                     "padding_mode={}".format(mode, padding_mode))
+                                     msg=f"groundtruth comparison failed for mode={mode}, "
+                                     f"padding_mode={padding_mode}")
 
-class TestAdvancedIndexing(TestCase):
+class TestAdvancedIndexing(TestCaseMPS):
     supported_dtypes = [torch.float32, torch.float16, torch.int64, torch.int32, torch.int16, torch.uint8]
     supported_np_dtypes = [np.float32, np.float16, np.int64, np.int32, np.int16, np.uint8]
 
@@ -7699,6 +10667,15 @@ class TestAdvancedIndexing(TestCase):
         nz = x.nonzero()
         self.assertFalse(nz.requires_grad)
 
+    def test_nonzero_multi_threading(self):
+        # Test that MPS does not crash if nonzero called concurrently
+        # See https://github.com/pytorch/pytorch/issues/100285
+        x = torch.rand(3, 3, device="mps")
+        t1 = threading.Thread(target=torch.nonzero, args=(x,))
+        t2 = threading.Thread(target=torch.nonzero, args=(x,))
+        t1.start()
+        t2.start()
+
     def test_masked_select(self):
         x = torch.randn(3, 4)
         x_mps = x.to("mps")
@@ -7755,21 +10732,20 @@ class TestAdvancedIndexing(TestCase):
         # FIXME: use supported_dtypes once uint8 is fixed
         [helper(dtype) for dtype in [torch.float32, torch.float16, torch.int64, torch.int32, torch.int16]]
 
-    # FIXME: conditional indexing not working
-    # def test_boolean_array_indexing_1(self):
-    #     def helper(dtype):
-    #         x_cpu = torch.tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8], [9, 10, 11]], dtype=dtype)
-    #         x_mps = x_cpu.detach().clone().to("mps")
+    def test_boolean_array_indexing(self):
+        def helper(dtype):
+            x_cpu = torch.tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8], [9, 10, 11]], dtype=dtype)
+            x_mps = x_cpu.detach().clone().to("mps")
 
-    #         res_cpu = x_cpu[x_cpu > 5]
-    #         res_mps = x_mps[x_mps > 5]
+            res_cpu = x_cpu[x_cpu > 5]
+            res_mps = x_mps[x_mps > 5]
 
-    #         print(res_cpu)
-    #         print(res_mps)
-
-    #         self.assertEqual(res_cpu, res_mps, str(dtype))
-    #     [helper(dtype) for dtype in self.supported_dtypes]
-
+            self.assertEqual(res_cpu, res_mps, str(dtype))
+        for dtype in self.supported_dtypes:
+            # MPS support binary op with uint8 natively starting from macOS 13.0
+            if product_version < 13.0 and dtype == torch.uint8:
+                continue
+            helper(dtype)
 
     def test_advanced_indexing_3D_get(self):
         def helper(x_cpu):
@@ -7927,6 +10903,7 @@ class TestAdvancedIndexing(TestCase):
             self.assertEqual(v[boolIndices], torch.tensor([True], dtype=torch.bool, device=device))
             self.assertEqual(len(w), 2)
 
+    @unittest.skipIf(product_version < 13.0, "Skipped on macOS 12")
     def test_bool_indices_accumulate(self, device="mps"):
         mask = torch.zeros(size=(10, ), dtype=torch.uint8, device=device)
         mask = mask > 0
@@ -8005,16 +10982,16 @@ class TestAdvancedIndexing(TestCase):
         t_dev = t.to(device)
         t1 = t_dev[:, 0, :]
         t2 = t[:, 0, :]
-        self.assertTrue(not t1.is_contiguous())
-        self.assertTrue(not t2.is_contiguous())
+        self.assertFalse(t1.is_contiguous())
+        self.assertFalse(t2.is_contiguous())
 
         indices = [torch.tensor([0, 1]), ]
         indices_dev = [i.to(device) for i in indices]
         value = torch.randn(2, 2)
         out_mps = t1.index_put_(indices_dev, value.to(device), accumulate=True)
         out_cpu = t2.index_put_(indices, value, accumulate=True)
-        self.assertTrue(not t1.is_contiguous())
-        self.assertTrue(not t2.is_contiguous())
+        self.assertFalse(t1.is_contiguous())
+        self.assertFalse(t2.is_contiguous())
 
         self.assertEqual(out_mps.cpu(), out_cpu)
 
@@ -8066,6 +11043,34 @@ class TestAdvancedIndexing(TestCase):
 
             self.assertEqual(output, input_list)
 
+    def test_index_put_deterministic(self, device="mps"):
+        def helper(dtype, accumulate, deterministic, num_tests=128):
+            acc_expected = torch.tensor([233, 187, 360], device=device, dtype=dtype)
+            non_acc_expected = torch.tensor([38, 37, 39], device=device, dtype=dtype)
+            t_idx = torch.tensor(
+                [0, 0, 0, 0, 2, 2, 1, 0, 2, 1, 0, 1, 2, 1, 0, 2, 2, 2, 2, 2,
+                 0, 0, 2, 1, 2, 1, 0, 0, 2, 0, 2, 1, 1, 2, 2, 0, 2, 1, 0, 2]
+            )
+            for _ in range(num_tests):
+                try:
+                    torch.use_deterministic_algorithms(deterministic)
+                    t = torch.zeros(3, dtype=dtype, device=device)
+                    t.index_put_((t_idx,), torch.arange(len(t_idx), device=device, dtype=dtype), accumulate=accumulate)
+                    if accumulate:
+                        self.assertEqual(t, acc_expected)
+                    else:
+                        self.assertEqual(t, non_acc_expected)
+                finally:
+                    torch.use_deterministic_algorithms(False)
+
+        for accumulate, deterministic in product((False, True), (False, True)):
+            dtype = torch.float if accumulate else torch.long
+            if not accumulate and not deterministic:
+                with self.assertRaisesRegex(AssertionError, "Tensor-likes are not equal!"):
+                    helper(dtype, accumulate, deterministic)
+            else:
+                helper(dtype, accumulate, deterministic)
+
     def test_multiple_byte_mask(self, device="mps"):
         v = torch.randn(5, 7, 3, device=device)
         # note: these broadcast together and are transposed to the first dim
@@ -8083,24 +11088,23 @@ class TestAdvancedIndexing(TestCase):
         r = v[c > 0]
         self.assertEqual(r.shape, (num_ones, 3))
 
-    # FIXME: conditional indexing not working
-    # def test_jit_indexing(self, device="mps"):
-    #     def fn1(x):
-    #         x[x < 50] = 1.0
-    #         return x
+    def test_jit_indexing(self, device="mps"):
+        def fn1(x):
+            x[x < 50] = 1.0
+            return x
 
-    #     def fn2(x):
-    #         x[0:50] = 1.0
-    #         return x
+        def fn2(x):
+            x[0:50] = 1.0
+            return x
 
-    #     scripted_fn1 = torch.jit.script(fn1)
-    #     scripted_fn2 = torch.jit.script(fn2)
-    #     data = torch.arange(100, device=device, dtype=torch.float)
-    #     out = scripted_fn1(data.detach().clone())
-    #     ref = torch.tensor(np.concatenate((np.ones(50), np.arange(50, 100))), device=device, dtype=torch.float)
-    #     self.assertEqual(out, ref)
-    #     out = scripted_fn2(data.detach().clone())
-    #     self.assertEqual(out, ref)
+        scripted_fn1 = torch.jit.script(fn1)
+        scripted_fn2 = torch.jit.script(fn2)
+        data = torch.arange(100, device=device, dtype=torch.float)
+        out = scripted_fn1(data.detach().clone())
+        ref = torch.tensor(np.concatenate((np.ones(50), np.arange(50, 100))), device=device, dtype=torch.float)
+        self.assertEqual(out, ref)
+        out = scripted_fn2(data.detach().clone())
+        self.assertEqual(out, ref)
 
     def test_int_indices(self, device="mps"):
         v = torch.randn(5, 7, 3, device=device)
@@ -8117,6 +11121,7 @@ class TestAdvancedIndexing(TestCase):
             self.assertEqual(res.shape, src.shape)
         [helper(device="mps", dtype=dtype) for dtype in [torch.float, torch.int32]]
 
+    @unittest.skipIf(product_version < 13.0, "Skipped on macOS 12")
     def test_index_src_datatype(self):
         def helper(device, dtype):
             orig_dtype = dtype
@@ -8389,13 +11394,44 @@ class TestAdvancedIndexing(TestCase):
         out = x[idx]  # index
         self.assertEqual(out, torch.zeros(2, device=device), atol=0, rtol=0)
 
-class TestRNNMPS(TestCase):
-    def test_lstm_1(self, device="mps", dtype=torch.float32):
+    def test_nextafter(self, device="mps"):
+        for dtype in [torch.float16, torch.float32]:
+            x = torch.tensor([1, -1, 0, 0, 2, -2], device=device, dtype=dtype)
+            y = torch.tensor([2, -2, -1, 1, -3, 3], device=device, dtype=dtype)
+            na = torch.nextafter(x, y)
+            na_cpu = torch.nextafter(x.cpu(), y.cpu())
+            na_ge_x_mps = na.cpu() > x.cpu()
+            # greater is broken on MPS, see https://github.com/pytorch/pytorch/issues/125051
+            na_ge_x_cpu = na_cpu > x.cpu()
+            self.assertEqual(na_ge_x_mps, na_ge_x_cpu)
 
-        rnn = nn.LSTM(1, 4, 2, device="cpu")
-        input = torch.randn(2, 3, 1, device="cpu")
-        hx = torch.zeros(2, 3, 4, device="cpu")
-        cx = torch.zeros(2, 3, 4, device="cpu")
+
+class TestRNNMPS(TestCaseMPS):
+    def _lstm_helper(self, num_layers, dtype, device, bidirectional=False, bias=True, batch_first=False,
+                     seq_len=3, batch_size=5, hidden_size=7, input_size=11, backward=False):
+        rnn = nn.LSTM(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            bias=bias,
+            bidirectional=bidirectional,
+            batch_first=batch_first,
+            device="cpu"
+        )
+        bidirectional_mul = 2 if bidirectional else 1
+
+        if batch_first:
+            input = torch.randn(batch_size, seq_len, input_size, device="cpu", dtype=dtype, requires_grad=backward)
+            hx = torch.randn(num_layers * bidirectional_mul, batch_size, hidden_size, device="cpu", dtype=dtype,
+                             requires_grad=backward)
+            cx = torch.randn(num_layers * bidirectional_mul, batch_size, hidden_size, device="cpu", dtype=dtype,
+                             requires_grad=backward)
+        else:
+            input = torch.randn(seq_len, batch_size, input_size, device="cpu", dtype=dtype, requires_grad=backward)
+            hx = torch.randn(num_layers * bidirectional_mul, batch_size, hidden_size, device="cpu", dtype=dtype,
+                             requires_grad=backward)
+            cx = torch.randn(num_layers * bidirectional_mul, batch_size, hidden_size, device="cpu", dtype=dtype,
+                             requires_grad=backward)
 
         cpu_output, (cpu_hn, cpu_cn) = rnn(input, (hx, cx))
 
@@ -8409,46 +11445,125 @@ class TestRNNMPS(TestCase):
         self.assertEqual(cpu_hn, hn)
         self.assertEqual(cpu_cn, cn)
 
-        # test batch_first
-        rnn = nn.LSTM(1, 4, 2, device="cpu", batch_first=True)
-        input = torch.randn(3, 2, 1, device="cpu")
-        hx = torch.zeros(2, 3, 4, device="cpu")
-        cx = torch.zeros(2, 3, 4, device="cpu")
-        cpu_output, (cpu_hn, cpu_cn) = rnn(input, (hx, cx))
+        def get_backward_results(rnn, device, inp, hx, cx, output_grad_presented=True, states_grad_presented=True):
+            rnn = rnn.to(device)
+            inp, hx, cx = inp.to(device), hx.to(device), cx.to(device)
 
-        rnn = rnn.to(device)
-        input = input.to(device)
-        hx = hx.to(device)
-        cx = cx.to(device)
-        output, (hn, cn) = rnn(input, (hx, cx))
+            output, (hx_out, cx_out) = rnn(inp, (hx, cx))
+            assert output_grad_presented or states_grad_presented, "At least some outputs must be used"
 
-        self.assertEqual(cpu_output, output)
-        self.assertEqual(cpu_hn, hn)
-        self.assertEqual(cpu_cn, cn)
+            f = 0
+            if output_grad_presented:
+                f = f + 3 * output.sum()
+            if states_grad_presented:
+                f = f + (hx_out * cx_out).sum()
 
-    @unittest.skipIf(True, "Backward of lstm returns wrong result")
-    def test_lstm_2(self, device="mps", dtype=torch.float32):
-        def get_results(device):
-            rnn = nn.LSTM(1, 4, 1, device=device)
-            inp = torch.randn(2, 3, 1, device=device, requires_grad=True)
-            hx = torch.zeros(1, 3, 4, device=device)
-            cx = torch.zeros(1, 3, 4, device=device)
+            param_names, params = zip(*rnn.named_parameters())
+            param_grads = zip(param_names, torch.autograd.grad(f, params, retain_graph=True))
 
-            output, _ = rnn(inp, (hx, cx))
-            output.sum().backward()
+            input_grad, hx_grad, cx_grad = torch.autograd.grad(f, [inp, hx, cx])
+            return output, param_grads, input_grad, hx_grad, cx_grad
 
-            weight_grad = rnn.weight_ih_l0.grad.clone()
-            input_grad = inp.grad.clone()
+        if backward:
+            grad_cases = [
+                dict(output_grad_presented=True, states_grad_presented=True),
+                dict(output_grad_presented=False, states_grad_presented=True),
+                dict(output_grad_presented=True, states_grad_presented=False),
+            ]
 
-            return output, weight_grad, input_grad
+            for grad_case in grad_cases:
+                cpu_output, cpu_weights_grad, cpu_input_grad, cpu_hx_grad, cpu_cx_grad =\
+                    get_backward_results(rnn, "cpu", input, hx, cx, **grad_case)
+                mps_output, mps_weights_grad, mps_input_grad, mps_hx_grad, mps_cx_grad =\
+                    get_backward_results(rnn, device, input, hx, cx, **grad_case)
 
+                self.assertEqual(cpu_hx_grad, mps_hx_grad)
+                self.assertEqual(cpu_cx_grad, mps_cx_grad)
+                self.assertEqual(cpu_output, mps_output)
+                self.assertEqual(cpu_input_grad, mps_input_grad)
+                for (cpu_name, cpu_weight_grad), (mps_name, mps_weight_grad) in zip(cpu_weights_grad, mps_weights_grad):
+                    self.assertEqual(cpu_weight_grad, mps_weight_grad,
+                                     f"mismatch in cpu:{cpu_name} vs mps:{mps_name}, layers: {num_layers}")
 
-        cpu_output, cpu_weight_grad, cpu_input_grad = get_results("cpu")
-        mps_output, mps_weight_grad, mps_input_grad = get_results("mps")
+    LSTM_TEST_CASES = [
+        dict(),  # default
+        dict(batch_first=True),
+        dict(bias=False),
+        dict(bidirectional=True),
+        dict(batch_first=True, bias=False),
+        dict(bidirectional=True, bias=False),
+        dict(bidirectional=True, batch_first=True),
+        dict(bidirectional=True, batch_first=True, bias=False)
+    ]
 
-        self.assertEqual(cpu_output, mps_output)
-        self.assertEqual(cpu_input_grad, mps_input_grad)
-        self.assertEqual(cpu_weight_grad, mps_weight_grad)
+    def test_lstm_forward(self, device="mps", dtype=torch.float32):
+        for num_layers in [1, 2, 5]:
+            for test_options in self.LSTM_TEST_CASES:
+                self._lstm_helper(num_layers=num_layers, dtype=dtype, device=device, **test_options)
+
+    # Broke on MacOS-14.4 (but works on 14.2), see https://github.com/pytorch/pytorch/issues/125803
+    @xfailIfMacOS14_4Plus
+    def test_lstm_backward(self, device="mps", dtype=torch.float32):
+        for num_layers in [1, 2, 5]:
+            for test_options in self.LSTM_TEST_CASES:
+                self._lstm_helper(num_layers=num_layers, dtype=dtype, device=device, backward=True, **test_options)
+
+    def test_RNN_cell_no_broadcasting(self):
+        def test(cell_module, input, hx, input_size, hidden_size):
+            cell = cell_module(input_size, hidden_size, device='mps')
+            self.assertRaises(RuntimeError, lambda: cell(input, hx))
+
+        def test_all(hidden_size, bad_hx, good_hx, input_size, input):
+            test(nn.RNNCell, input, bad_hx, input_size, hidden_size)
+            test(nn.GRUCell, input, bad_hx, input_size, hidden_size)
+            test(nn.LSTMCell, input, (bad_hx, good_hx), input_size, hidden_size)
+            test(nn.LSTMCell, input, (good_hx, bad_hx), input_size, hidden_size)
+
+        hidden_size = 20
+        input_size = 10
+        input = torch.randn(3, input_size, device='mps')
+        bad_hx = torch.randn(1, hidden_size, device='mps')
+        good_hx = torch.randn(3, hidden_size, device='mps')
+
+        # Test hidden/input batch size broadcasting
+        test_all(hidden_size, bad_hx, good_hx, input_size, input)
+
+        # Test hx's hidden_size vs module's hidden_size broadcasting
+        bad_hx = torch.randn(3, 1)
+        test_all(hidden_size, bad_hx, good_hx, input_size, input)
+
+        # Test input's input_size vs module's input_size broadcasting
+        bad_input = torch.randn(3, 1)
+        test_all(hidden_size, good_hx, good_hx, input_size, bad_input)
+
+    def test_LSTM_cell(self):
+        # this is just a smoke test; these modules are implemented through
+        # autograd so no Jacobian test is needed
+        for bias in (True, False):
+            input = torch.randn(3, 10, device='mps')
+            hx = torch.randn(3, 20, device='mps')
+            cx = torch.randn(3, 20, device='mps')
+            lstm = nn.LSTMCell(10, 20, bias=bias, device='mps')
+            for _ in range(6):
+                hx, cx = lstm(input, (hx, cx))
+
+            (hx + cx).sum().backward()
+
+    def test_LSTM_cell_forward_input_size(self):
+        input = torch.randn(3, 11, device='mps')
+        hx = torch.randn(3, 20, device='mps')
+        cx = torch.randn(3, 20, device='mps')
+        lstm = nn.LSTMCell(10, 20, device='mps')
+        self.assertRaises(Exception, lambda: lstm(input, (hx, cx)))
+
+    def test_LSTM_cell_forward_hidden_size(self):
+        input = torch.randn(3, 10, device='mps')
+        hx = torch.randn(3, 21, device='mps')
+        cx = torch.randn(3, 20, device='mps')
+        lstm = nn.LSTMCell(10, 20, device='mps')
+        self.assertRaises(Exception, lambda: lstm(input, (hx, cx)))
+        self.assertRaises(Exception, lambda: lstm(input, (cx, hx)))
+
 
 class TestFallbackWarning(TestCase):
     # TODO: Remove once test_testing.py is running on MPS devices
@@ -8462,11 +11577,11 @@ class TestFallbackWarning(TestCase):
         self.assertEqual(out, "")
 
     def _get_not_implemented_op(self):
-        # This can be changed once we actually implement `torch.histc`
+        # This can be changed once we actually implement 'lcm'
         # Should return fn, args, kwargs, string_version
-        return (torch.histc,
-                torch.tensor([100], device='mps'), {},
-                "torch.histc(torch.tensor([4], device='mps', dtype=torch.float))")
+        return (torch.lcm,
+                [torch.tensor([1], device='mps'), torch.tensor([2], device='mps')], {},
+                "torch.lcm(torch.tensor([1], device='mps'), torch.tensor([2], device='mps'))")
 
     def test_error_on_not_implemented(self):
         fn, args, kwargs, _ = self._get_not_implemented_op()
@@ -8532,19 +11647,6 @@ class TestNoRegression(TestCase):
         # with self.assertRaisesRegex(AssertionError, "Tensor-likes are not close!"):
             # torch.testing.assert_close(a, nan)
 
-    @unittest.expectedFailure
-    def test_mps_compat(self):
-        # If this test is successful, that means that all operations in the comparison logic are supported natively on
-        # the MPS backend. Please remove this test as well as the compatibility logic in
-        # torch.testing._comparison.TensorLikePair._equalize_attributes
-        actual = torch.tensor(1.0, device="mps")
-        expected = actual.clone()
-
-        # We can't use assert_close or TensorLikePair.compare() directly, since that would hit the compatibility logic
-        # in torch.testing._comparison.TensorLikePair._equalize_attributes that we want to circumvent here
-        pair = TensorLikePair(actual, expected)
-        pair._compare_values(actual, expected)
-
     def test_double_error(self):
         with self.assertRaisesRegex(TypeError, "the MPS framework doesn't support float64"):
             a = torch.ones(2, dtype=torch.float64, device="mps")
@@ -8593,780 +11695,280 @@ class TestNoRegression(TestCase):
             self.assertEqual(x, x2)
             self.assertEqual(x2.device.type, "cpu")
 
+        # Ensures that `mps:0` Tensors can be loaded on mps
+        with tempfile.NamedTemporaryFile() as f:
+            x = torch.rand(2, device="mps:0")
+            torch.save(x, f)
+
+            f.seek(0)
+            x2 = torch.load(f, map_location="mps:0")
+
+            self.assertEqual(x, x2)
+            self.assertEqual(x2.device.type, "mps")
+
 
 MPS_DTYPES = get_all_dtypes()
-for t in [torch.double, torch.cdouble, torch.cfloat, torch.int8, torch.bfloat16]:
+for t in [torch.double, torch.cdouble, torch.cfloat, torch.bfloat16]:
     del MPS_DTYPES[MPS_DTYPES.index(t)]
 
+MPS_GRAD_DTYPES = [torch.float32, torch.float16]
 
-class TestConsistency(TestCase):
+
+class TestConsistency(TestCaseMPS):
     # TODO: This is only used while some ops are being added.
     # This list should contain all ops and dtypes eventually
     # This can be generated automatically in the `new_mps_allowlist.txt` file
     # by doing `EXPECTTEST_ACCEPT=1 python test_mps.py TestConsistencyCPU`
     # You most likely do NOT want to modify this manually
-    ALLOWLIST_OP = {
-        '__getitem__': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        '__radd__': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        '__rand__': ['b8', 'i16', 'i32', 'i64', 'u8'],
-        '__rdiv__': ['f16', 'f32', 'i16', 'i32', 'u8'],
-        '__rmatmul__': ['f32'],
-        '__rmul__': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        '__ror__': ['b8', 'i16', 'i32', 'i64', 'u8'],
-        '__rpow__': ['f16'],
-        '__rxor__': ['b8', 'i16', 'i32', 'i64', 'u8'],
-        'masked.argmax': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'masked.argmin': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'masked.log_softmax': ['f32'],
-        'masked.logaddexp': ['f32'],
-        'masked.logsumexp': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'masked.norm': ['f16', 'f32'],
-        'masked.normalize': ['f16', 'f32'],
-        'masked.softmax': ['f32'],
-        'masked.softmin': ['f32'],
-        'masked.std': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'masked.var': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'abs': ['b8', 'f16', 'f32', 'i16', 'i32', 'u8'],
-        'acos': ['b8', 'f32', 'i16', 'i32', 'u8'],
-        'acosh': ['b8', 'f32', 'i16', 'i32', 'u8'],
-        'add': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'addbmm': ['f32'],
-        'addcdiv': ['f32'],
-        'addcmul': ['f32', 'i16', 'i32', 'i64', 'u8'],
-        'addmm': ['f32'],
-        'addmv': ['f32'],
-        'addr': ['b8', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'all': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'allclose': ['f16', 'f32'],
-        'any': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'arange': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'argmax': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'argmin': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'amix': ['f32'],
-        'asin': ['b8', 'f32', 'i16', 'i32', 'u8'],
-        'asinh': ['b8', 'f32', 'i16', 'i32', 'u8'],
-        'atan': ['b8', 'f32', 'i16', 'i32', 'u8'],
-        'atan2': ['f32'],
-        'atanh': ['b8', 'f32', 'i16', 'i32', 'u8'],
-        'atleast_1d': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'atleast_2d': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'atleast_3d': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'baddbmm': ['f32'],
-        'bitwise_and': ['b8', 'i16', 'i32', 'i64', 'u8'],
-        'bitwise_left_shift': ['i16', 'i32', 'i64', 'u8'],
-        'bitwise_not': ['b8', 'i16', 'i32', 'i64', 'u8'],
-        'bitwise_or': ['b8', 'i16', 'i32', 'i64', 'u8'],
-        'bitwise_right_shift': ['i16', 'i32', 'i64', 'u8'],
-        'bitwise_xor': ['b8', 'i16', 'i32', 'i64', 'u8'],
-        'block_diag': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
-        'bmm': ['f32'],
-        'broadcast_shapes': ['f32'],
-        'byte': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'cat': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'ceil': ['f32', 'int32', 'int64', 'f16'],
-        'char': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'chunk': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'clamp': ['f32', 'i16', 'i32', 'i64', 'u8'],
-        'clamp_max': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'clamp_min': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'clone': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'column_stack': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'combinations': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'conj': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'conj_physical': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'constant_pad_nd': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'contiguous': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'corrcoef': ['f32'],
-        'cos': ['b8', 'f32', 'i16', 'i32', 'u8', 'i64'],
-        'cosh': ['b8', 'f32', 'i16', 'i32', 'u8', 'i64'],
-        'cov': ['f32'],
-        'cumsum': ['f16', 'f32', 'int16', 'int32'],
-        'deg2rad': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'diag': ['f32', 'i32'],
-        'diag_embed': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
-        'diagflat': ['f32', 'i32'],
-        'diagonal_scatter': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
-        'diff': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'dist': ['f32'],
-        'dot': ['f32', 'i16', 'i32', 'i64', 'u8'],
-        'einsum': ['f32'],
-        'equal': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'erf': ['b8', 'f32', 'i16', 'i32', 'u8'],
-        'exp': ['b8', 'f32', 'i16', 'i32', 'u8'],
-        'exp2': ['b8', 'f16', 'f32', 'i16', 'i32', 'u8'],
-        'eye': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'fill': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'flatten': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'flip': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'fliplr': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'flipud': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'float': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'floor': ['f32', 'f16', 'i16', 'i32', 'i64'],
-        'floor_divide': ['f32', 'f16'],
-        'frac': ['f16', 'f32'],
-        'gather': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'gradient': ['f16', 'f32', 'i16'],
-        'ge': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'gt': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'half': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'hstack': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'index_select': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'index_add': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'int': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'isclose': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'isfinite': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'isinf': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'isnan': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'isreal': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'kron': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'linalg.matrix_norm': ['f16'],
-        'linalg.svd': ['f32'],
-        'linalg.vector_norm': ['f16', 'f32'],
-        'linspace': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'log': ['b8', 'f32', 'i16', 'i32', 'u8'],
-        'log10': ['b8', 'f32', 'i16', 'i32', 'u8'],
-        'log1p': ['b8', 'f32', 'i16', 'i32', 'u8'],
-        'log2': ['b8', 'f32', 'i16', 'i32', 'u8'],
-        'log_softmax': ['f32'],
-        'logaddexp': ['f16', 'f32'],
-        'logaddexp2': ['f16', 'f32'],
-        'logical_and': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'logical_not': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'logical_or': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'logical_xor': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'logspace': ['f32', 'i16', 'i32', 'i64', 'u8'],
-        'logsumexp': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'masked_fill': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'masked_select': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'matmul': ['f32'],
-        'mm': ['f32'],
-        'mv': ['f32'],
-        'nan_to_num': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'neg': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
-        'nn.functional.adaptive_max_pool1d': ['f32'],
-        'nn.functional.adaptive_max_pool2d': ['f32'],
-        'nn.functional.adaptive_avg_pool1d': ['f32'],
-        'nn.functional.adaptive_avg_pool2d': ['f32'],
-        'nn.functional.avg_pool1d': ['f32', 'i64'],
-        'nn.functional.avg_pool2d': ['f32', 'i64'],
-        'nn.functional.binary_cross_entropy': ['f32'],
-        'nn.functional.binary_cross_entropy_with_logits': ['f32'],
-        'nn.functional.celu': ['f32'],
-        'nn.functional.conv1d': ['f32'],
-        'nn.functional.conv2d': ['f32'],
-        'nn.functional.conv_transpose1d': ['f32'],
-        'nn.functional.cosine_embedding_loss': ['b8', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'nn.functional.cosine_similarity': ['f32'],
-        'nn.functional.elu': ['f32'],
-        'nn.functional.feature_alpha_dropout': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'nn.functional.embedding': ['f16', 'f32'],
-        'nn.functional.gaussian_nll_loss': ['f32'],
-        'nn.functional.glu': ['f32'],
-        'nn.functional.group_norm': ['f32'],
-        'nn.functional.hardtanh': ['f32', 'i16', 'i32', 'i64'],
-        'nn.functional.hinge_embedding_loss': ['f32'],
-        'nn.functional.huber_loss': ['f32'],
-        'nn.functional.instance_norm': ['f32'],
-        'nn.functional.kl_div': ['f32', 'i16', 'i32', 'i64'],
-        'nn.functional.l1_loss': ['f16', 'f32'],
-        'nn.functional.leaky_relu': ['f32'],
-        'nn.functional.linear': ['f32'],
-        'nn.functional.local_response_norm': ['f32'],
-        'nn.functional.margin_ranking_loss': ['f32', 'i16', 'i32'],
-        'nn.functional.max_pool1d': ['f32'],
-        'nn.functional.max_pool2d': ['f32'],
-        'max_pool2d_with_indices_backward': ['f32'],
-        'nn.functional.mse_loss': ['f16', 'f32'],
-        'nn.functional.nll_loss': ['f32'],
-        'nn.functional.pad': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'nn.functional.padconstant': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'nn.functional.padreflect': ['f32'],
-        'nn.functional.padreplicate': ['f32'],
-        'nn.functional.pairwise_distance': ['f16', 'f32', 'i16', 'i32', 'i64'],
-        'nn.functional.poisson_nll_loss': ['f32', 'i16', 'i32', 'u8'],
-        'nn.functional.prelu': ['f32'],
-        'nn.functional.relu': ['f32', 'i16', 'i32', 'i64', 'u8'],
-        'nn.functional.relu6': ['f32', 'i16', 'i32', 'i64', 'u8'],
-        'nn.functional.selu': ['f32'],
-        'nn.functional.silu': ['f32'],
-        'nn.functional.smooth_l1_loss': ['f16', 'f32'],
-        'nn.functional.soft_margin_loss': ['f32'],
-        'nn.functional.softmin': ['f32'],
-        'nn.functional.softplus': ['f32'],
-        'nn.functional.softsign': ['f16', 'f32', 'i16', 'u8'],
-        'nn.functional.tanhshrink': ['f32', 'i16', 'i32', 'u8'],
-        'nn.functional.threshold': ['f32', 'i16', 'i32', 'i64', 'u8'],
-        'nn.functional.triplet_margin_loss': ['f32', 'i16', 'i32', 'i64'],
-        'nn.functional.triplet_margin_with_distance_loss': ['f32', 'i16', 'i32', 'i64'],
-        'nn.functional.upsample_bilinear': ['f32'],
-        'nn.functional.upsample_nearest': ['f32'],
-        'norm': ['f32', 'f16'],
-        'positive': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'pow': ['f16'],
-        'rad2deg': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'real': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'reciprocal': ['b8', 'f16', 'f32', 'i16', 'i32', 'u8'],
-        'remainder' : ['f32', 'f16'],
-        'repeat': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'repeat_interleave': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'resize_': ['b8', 'i16', 'i32', 'i64', 'u8'],
-        'resize_as_': ['b8', 'i16', 'i32', 'i64', 'u8'],
-        'resolve_conj': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'resolve_neg': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'rot90': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'round': ['f32', 'f16', 'i16', 'i32', 'i64'],
-        'rsqrt': ['b8', 'f32', 'i16', 'i32', 'u8'],
-        'scatter': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'scatter_add': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'select_scatter': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
-        'sgn': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'short': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'sigmoid': ['b8', 'f16', 'f32', 'i16', 'i32', 'u8'],
-        'sign': ['b8', 'f16', 'f32', 'i16', 'i32', 'u8', 'i64'],
-        'sin': ['b8', 'f32', 'i16', 'i32', 'u8'],
-        'sinh': ['b8', 'f32', 'i16', 'i32', 'u8'],
-        'slice_scatter': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
-        'softmax': ['f32'],
-        'special.ndtr': ['b8', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'split': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'sqrt': ['b8', 'f32', 'i16', 'i32', 'u8'],
-        'square': ['f16', 'f32'],
-        'squeeze': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'stack': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'sub': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'sum_to_size': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'svd': ['f32'],
-        't': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'tan': ['b8', 'i16', 'i32', 'u8'],
-        'tanh': ['b8', 'f32', 'i16', 'i32', 'u8'],
-        'tensordot': ['f32'],
-        'tensor_split': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'tile': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'topk': ['f32'],
-        'trapz': ['f16', 'f32', 'i16', 'i32', 'i64'],
-        'tril': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'tril_indices': ['i32', 'i64'],
-        'triu': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'triu_indices': ['i32', 'i64'],
-        'true_divide': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'trunc': ['f32'],
-        'unbind': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'unflatten': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'unsqueeze': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'view': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'view_as': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'vsplit': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'vstack': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'zero_': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'where': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'nonzero': ['b8', 'u8', 'f16', 'f32', 'i16', 'i32', 'i64'],
-        'cross': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'linalg.cross': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'unique_consecutive': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'std': ['f16', 'f32'],
-        'var': ['f16', 'f32'],
-        'amax': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'amin': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'sum': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'prod': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'mean': ['f16', 'f32'],
-        'count_nonzero': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'masked.amax': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'masked.amin': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'masked.mean': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'masked.prod': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'masked.sum': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'native_layer_norm': ['torch.float32'],
-        'nn.functional.layer_norm': ['torch.float32'],
-        'nn.functional.bilinear': ['f32'],
-        'linalg.solve_triangular': ['f32'],
-        'triangular_solve': ['f32'],
-        '_native_batch_norm_legit': ['f32'],
-        'native_batch_norm': ['f32'],
-        'minreduction_with_dim': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'maxreduction_with_dim': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+
+    FP16_LOW_PRECISION_LIST = {
+        'add', 'sub', 'div', 'addcdiv',
+        '__rdiv__', '__rmul__',
+        'nn.functional.huber_loss',
+        'true_divide', 'kron',
+        'gradient', 'var', 'std', 'std_mean', 'ldexp',
+        'linalg.vector_norm', 'lerp',
+        'addr', 'var_mean',
+        'var_mean_unbiased',
+        'acosh', 'asinh', 'asin',
+        'masked.std',
+        'nn.functional.normalize',
+        'nn.functional.triplet_margin_loss',
+        'nn.functional.triplet_margin_with_distance_loss',
+        'nn.functional.batch_norm',
+        'nn.functional.instance_norm',
+        'round', 'xlogy', 'addcmul',
+        'nn.functional.cross_entropy',
+        'nn.functional.binary_cross_entropy',
+        'nn.functional.nll_loss',
+        'nn.functional.max_pool2d',
+        'nn.functional.gelu',
+        'nn.functional.glu',
+        '_native_batch_norm_legit',
+        '_batch_norm_with_update',
+        'native_batch_norm',
+        'softmax',
+        '_softmax_backward_data',
+        'log_softmax',
+        'masked.softmax',
+        'masked.log_softmax',
+        'masked.softmin',
+        'nn.functional.kl_div',
+        'nn.functional.softmin',
+        'cross', 'linalg.cross',
+        'prod', 'masked.prod',
+        'nextafter',
+        'native_layer_norm',
+        'nn.functional.layer_norm',
+        'nn.functional.interpolate',
+        'nn.functional.upsample_bilinear',
+        'nn.functional.upsample_nearest',
+
+        # for macOS 12
+        'masked.normalize', 'masked.sum', 'masked.var',
+        'outer',
+        'sum_to_size', 'sum',
+        'mul',
+        'nansum', 'nanmean',
+        'norm',
     }
 
-
-    ALLOWLIST_OP_GRAD = {
-        '__radd__': ['f16', 'f32'],
-        '__rdiv__': ['f16', 'f32'],
-        '__rmatmul__': ['f32'],
-        '__rmul__': ['f16', 'f32'],
-        'masked.log_softmax': ['f32'],
-        'masked.logaddexp': ['f32'],
-        'masked.softmax': ['f32'],
-        'masked.softmin': ['f32'],
-        'masked.std': ['f32'],
-        'abs': ['f16', 'f32'],
-        'acos': ['f32'],
-        'acosh': ['f32'],
-        'add': ['f16', 'f32'],
-        'addbmm': ['f32'],
-        'addcdiv': ['f32'],
-        'addcmul': ['f32'],
-        'addmm': ['f32'],
-        'addmv': ['f32'],
-        'addr': ['f32'],
-        'all': ['f16', 'f32'],
-        'any': ['f16', 'f32'],
-        'arange': ['f16', 'f32'],
-        'argmax': ['f16', 'f32'],
-        'argmin': ['f16', 'f32'],
-        'asin': ['f32'],
-        'asinh': ['f32'],
-        'atan': ['f32'],
-        'atan2': ['f32'],
-        'atleast_1d': ['f16', 'f32'],
-        'atleast_2d': ['f16', 'f32'],
-        'atleast_3d': ['f16', 'f32'],
-        'baddbmm': ['f32'],
-        'block_diag': ['f16', 'f32'],
-        'bmm': ['f32'],
-        'broadcast_shapes': ['f32'],
-        'ceil': ['f32'],
-        'chunk': ['f16', 'f32'],
-        'clone': ['f16', 'f32'],
-        'column_stack': ['f16', 'f32'],
-        'conj': ['f16', 'f32'],
-        'conj_physical': ['f16', 'f32'],
-        'contiguous': ['f16', 'f32'],
-        'corrcoef': ['f32'],
-        'cos': ['f32'],
-        'cosh': ['f32'],
-        'cumsum': ['f16', 'f32'],
-        'deg2rad': ['f16', 'f32'],
-        'diag': ['f32'],
-        'diag_embed': ['f16', 'f32'],
-        'diagflat': ['f32'],
-        'diagonal_scatter': ['f16', 'f32'],
-        'diff': ['f16', 'f32'],
-        'dist': ['f32'],
-        'dot': ['f32'],
-        'einsum': ['f32'],
-        'erf': ['f32'],
-        'exp': ['f32'],
-        'exp2': ['f16', 'f32'],
-        'fill': ['f16', 'f32'],
-        'flatten': ['f16', 'f32'],
-        'flip': ['f16', 'f32'],
-        'fliplr': ['f16', 'f32'],
-        'flipud': ['f16', 'f32'],
-        'float': ['f32'],
-        'floor': ['f32'],
-        'gradient': ['f32'],
-        'half': ['f16'],
-        'hstack': ['f16', 'f32'],
-        'index_select': ['f16', 'f32'],
-        'index_add': ['f16', 'f32'],
-        'isclose': ['f16', 'f32'],
-        'isfinite': ['f16', 'f32'],
-        'isinf': ['f16', 'f32'],
-        'isnan': ['f16', 'f32'],
-        'isreal': ['f16', 'f32'],
-        'kron': ['f32'],
-        'linalg.matrix_norm': ['f16'],
-        'linalg.svd': ['f32'],
-        'linspace': ['f16', 'f32'],
-        'log': ['f32'],
-        'log10': ['f32'],
-        'log1p': ['f32'],
-        'log2': ['f32'],
-        'log_softmax': ['f32'],
-        'logaddexp': ['f32'],
-        'logical_not': ['f16', 'f32'],
-        'logspace': ['f32'],
-        'matmul': ['f32'],
-        'mm': ['f32'],
-        'mv': ['f32'],
-        'neg': ['f16', 'f32'],
-        'nn.functional.adaptive_max_pool1d': ['f32'],
-        'nn.functional.adaptive_max_pool2d': ['f32'],
-        'nn.functional.adaptive_avg_pool1d': ['f32'],
-        'nn.functional.adaptive_avg_pool2d': ['f32'],
-        'nn.functional.avg_pool1d': ['f32'],
-        'nn.functional.avg_pool2d': ['f32'],
-        'nn.functional.binary_cross_entropy': ['f32'],
-        'nn.functional.celu': ['f32'],
-        'nn.functional.conv1d': ['f32'],
-        'nn.functional.conv2d': ['f32'],
-        'nn.functional.conv_transpose1d': ['f32'],
-        'nn.functional.cosine_embedding_loss': ['f32'],
-        'nn.functional.elu': ['f32'],
-        'nn.functional.feature_alpha_dropout': ['f16', 'f32'],
-        'nn.functional.glu': ['f32'],
-        'nn.functional.hardtanh': ['f32'],
-        'nn.functional.hinge_embedding_loss': ['f32'],
-        'nn.functional.huber_loss': ['f32'],
-        'nn.functional.instance_norm': ['f32'],
-        'nn.functional.kl_div': ['f32'],
-        'nn.functional.l1_loss': ['f16', 'f32'],
-        'nn.functional.leaky_relu': ['f32'],
-        'nn.functional.local_response_norm': ['f32'],
-        'nn.functional.margin_ranking_loss': ['f32'],
-        'nn.functional.max_pool1d': ['f32'],
-        'nn.functional.max_pool2d': ['f32'],
-        'nn.functional.mse_loss': ['f32'],
-        'nn.functional.nll_loss': ['f32'],
-        'nn.functional.pad': ['f16', 'f32', 'i16', 'i32', 'i64'],
-        'nn.functional.pairwise_distance': ['f16', 'f32'],
-        'nn.functional.poisson_nll_loss': ['f32'],
-        'nn.functional.relu': ['f32'],
-        'nn.functional.relu6': ['f32'],
-        'nn.functional.selu': ['f32'],
-        'nn.functional.silu': ['f32'],
-        'nn.functional.soft_margin_loss': ['f32'],
-        'nn.functional.softmin': ['f32'],
-        'nn.functional.softplus': ['f32'],
-        'nn.functional.softsign': ['f16', 'f32'],
-        'nn.functional.smooth_l1_loss': ['f32'],
-        'nn.functional.threshold': ['f32'],
-        'nn.functional.triplet_margin_loss': ['f32'],
-        'nn.functional.triplet_margin_with_distance_loss': ['f32'],
-        'nn.functional.upsample_bilinear': ['f32'],
-        'norm': ['f32', 'f16'],
-        'positive': ['f16', 'f32'],
-        'rad2deg': ['f16', 'f32'],
-        'real': ['f16', 'f32'],
-        'reciprocal': ['f16', 'f32'],
-        'repeat': ['f16', 'f32'],
-        'repeat_interleave': ['f16', 'f32'],
-        'resolve_conj': ['f16', 'f32'],
-        'resolve_neg': ['f16', 'f32'],
-        'round': ['f32'],
-        'rsqrt': ['f32'],
-        'select_scatter': ['f16', 'f32'],
-        'sign': ['f16', 'f32'],
-        'sin': ['f32'],
-        'sinh': ['f32'],
-        'slice_scatter': ['f16', 'f32'],
-        'softmax': ['f32'],
-        'split': ['f16', 'f32'],
-        'sqrt': ['f32'],
-        'square': ['f16', 'f32'],
-        'squeeze': ['f16', 'f32'],
-        'stack': ['f16', 'f32'],
-        'sub': ['f32'],
-        'sum_to_size': ['f16', 'f32'],
-        'svd': ['f32'],
-        't': ['f16', 'f32'],
-        'tanh': ['f32'],
-        'tensordot': ['f32'],
-        'tile': ['f16', 'f32'],
-        'tril': ['f16', 'f32'],
-        'triu': ['f16', 'f32'],
-        'true_divide': ['f16', 'f32'],
-        'trunc': ['f32'],
-        'unbind': ['f16', 'f32'],
-        'unflatten': ['f16', 'f32'],
-        'unsqueeze': ['f16', 'f32'],
-        'view': ['f16', 'f32'],
-        'view_as': ['f16', 'f32'],
-        'vsplit': ['f16', 'f32'],
-        'vstack': ['f16', 'f32'],
-        'zero_': ['f16', 'f32'],
-        'linalg.solve_triangular': ['f32'],
-        'triangular_solve': ['f32'],
-        '_native_batch_norm_legit': ['f32'],
-        'native_batch_norm': ['f32'],
-        'native_layer_norm': ['f32'],
+    FP32_LOW_PRECISION_LIST = {
+        # conv2d and conv_transpose2d results have a very small
+        # difference compared to CPU/CUDA, so we use lower precision on FP32
+        'nn.functional.conv2d',
+        'nn.functional.conv_transpose2d',
+        'matmul', '__rmatmul__',
+        'linalg.multi_dot',
+        'addbmm',
     }
 
-    # These ops that are problematic. So never run them even when
-    # generating the new allowlist.
-    # If the dtype list is None, all dtypes are excluded.
-    # All the entries in this list should be removed
-    BLOCKLIST = {
-        # Functions that hang
-        'masked_fill': [torch.bool, torch.uint8, torch.float32], 'where': [torch.bool],
-        # + forward when requires_grad=True or running backward
-        'masked.mean': [torch.bool, torch.float16],
-        'masked.prod': [torch.bool],
-        'masked.sum': [torch.bool],
+    def _compute_tolerances(self, op, dtype):
+        if (op.name in self.FP32_LOW_PRECISION_LIST) and dtype in [torch.float32, torch.complex64]:
+            return (1e-4, 3e-5)
 
-        # Functions that hard crash
-        'std': [torch.float16],
-        'stft': [torch.float32], 'var': [torch.float16],
-        # + forward when requires_grad=True or running backward
-        'nn.functional.embedding': [torch.float32, torch.float16],
-        '__rpow__': [torch.int64],
+        if op.name in self.FP16_LOW_PRECISION_LIST and dtype == torch.float16:
+            return (1e-2, 1e-2)
 
-        'as_strided_scatter': [torch.uint8],
-        'atan2': [torch.int64],
-        'bfloat16': None,
-        'block_diag': [torch.uint8],
-        'byte': None,
-        'chalf': None,
-        'diag_embed': [torch.uint8],
-        'diagonal_scatter': [torch.uint8],
-        'linalg.inv': [torch.float32],
-        'long': None,
-        'nn.functional.conv1d': [torch.int64],
-        'nn.functional.conv2d': [torch.int64],
-        'nn.functional.conv_transpose1d': [torch.int64],
-        'nn.functional.conv_transpose2d': [torch.int64],
-        'nn.functional.conv_transpose3d': [torch.int64, torch.float32],
-        'nn.functional.huber_loss': [torch.float16],
-        'nn.functional.local_response_norm': [torch.int64],
-        'nn.functional.padcircular': [torch.uint8],
-        'pow': [torch.int64],
-        'select_scatter': [torch.uint8],
-        'sigmoid': [torch.int64],
-        'slice_scatter': [torch.uint8],
-        'square': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8],  # moved from section below
-
-
-        # failures due to lack of op implementation on MPS backend
-        'put': ['torch.bool', 'torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'],
-
-        # These were moved from ALLOWLIST to BLOCK as they are not working
-        # locally
-        'tile': ['torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'],
-        '__radd__': ['torch.bool', 'torch.uint8'],
-        '__rmul__': ['torch.uint8'],
-        'neg': ['torch.uint8'],
-        'add': ['torch.bool', 'torch.uint8'],
-        'addr': ['torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'],
-        'diag': ['torch.int64'],
-        'diagflat': ['torch.int64'],
-
-        # Functions that are flaky
-        # These are detected as "ok" by the expect case but actually fail to run sometimes
-        'H': None,
-        'T': None,
-        'as_strided': None,
-        'broadcast_tensors': None,
-        'broadcast': None,
-        'broadcast_to': None,
-        'diagonal': None,
-        'divfloor_rounding': None,
-        'divno_rounding_mode': None,
-        'divtrunc_rounding': None,
-        'dsplit': None,
-        'hsplit': None,
-        'empty': None,
-        'expand_as': None,
-        'expand': None,
-        'ge': None,
-        'ne': None,
-        'le': None,
-        'lt': None,
-        'gt': None,
-        'transpose': None,
-        'splitlist_args': None,
-        'select': None,
-        'reshape': None,
-        'reshape_as': None,
-        'permute': None,
-        'norm': None,
-        'nn.functional.pixel_unshuffle': None,
-        'nn.functional.pixel_shuffle': None,
-        'nn.functional.cross_entropy': None,
-        'nn.functional.one_hot': None,
-        'narrow': None,
-        'movedim': None,
-        'minreduction_with_dim': None,
-        'minreduction_no_dim': None,
-        'minbinary': None,
-        'meshgridvariadic_tensors': None,
-        'meshgridlist_of_tensors': None,
-        'maxreduction_with_dim': None,
-        'maxreduction_no_dim': None,
-        'maxbinary': None,
-        'maximum': None,
-        'minimum': None,
-        'mT': None,
-        'mH': None,
-        'outer': None,
-        'softmaxwith_dtype': None,
-        'rounddecimals_neg_3': None,
-        'rounddecimals_3': None,
-        'rounddecimals_0': None,
-        'normnuc': None,
-        'nn.functional.softminwith_dtype': None,
-        'nn.functional.feature_alpha_dropoutwith_train': None,
-        'log_softmaxwith_dtype': None,
-        'split_with_sizes': None,
-        'trapezoid': None,
-        'eq': None,
-        'mul': None,
-        'cartesian_prod': None,
-        'bool': None,
-        'inner': None,
-        'dstack': None,
-        'take_along_dim': None,
-    }
-
-    # Those ops worked on MacOS12, but broken on MacOS13
-    VENTURA_BLOCKLIST = {
-        'masked.softmax': [torch.float32],
-        'masked.softmin': [torch.float32],
-        'masked.log_softmax': [torch.float32],
-        'dot': [torch.int64],
-    }
+        if op.name in ['nn.functional.conv_transpose1d',
+                       'nn.functional.conv_transpose2d',
+                       'nn.functional.conv_transpose3d',
+                       '__rmatmul__', 'addbmm', 'addmv',
+                       'baddbmm', 'cov', 'matmul', 'mv'] and dtype == torch.float16:
+            return (5e-2, 5e-2)
+        if op.name == "masked.mean":
+            return (7e-4, 2e-3)
+        if op.name == "native_layer_norm":
+            return (1e-4, 1.3e-5)
+        if op.name in ["pow", "__rpow__"] and product_version < 13.3:
+            # The result of pow(9 , 8) is showing 43046716, whereas it should've been 43046721.
+            # fixed in macOS 13.3+
+            return (1e-6, 2e-3 if dtype == torch.float16 else 4e-6)
+        if op.name == "nn.functional.interpolate":
+            return (1e-3, 1e-4)
+        if op.name in ['fft.rfftn', 'fft.hfftn', 'fft.hfft2', 'fft.fft', 'fft.fftn', 'fft.rfft']:
+            # TODO: Investigate why this is needed
+            # See https://github.com/pytorch/pytorch/issues/120237
+            return (3e-5, 3e-5)
+        return (None, None)
 
     # Used for accept mode only
     NEW_ALLOW_LIST = defaultdict(list)
     NEW_ALLOW_LIST_GRAD = defaultdict(list)
 
-    @ops(op_db, allowed_dtypes=MPS_DTYPES)
+    @ops(mps_ops_modifier(test_consistency_op_db), allowed_dtypes=MPS_DTYPES + [torch.complex64])
     def test_output_match(self, device, dtype, op):
         self.assertEqual(device, "cpu")
-        if not torch.backends.mps.is_available():
-            self.skipTest("MPS is not available")
-
-        key = op.name + op.variant_test_name
-
-        if key in self.VENTURA_BLOCKLIST and torch.backends.mps.is_macos13_or_newer():
-            if dtype in self.VENTURA_BLOCKLIST[key]:
-                self.skipTest(f"{key}_{dtype} fails on Ventura, see https://github.com/pytorch/pytorch/issues/85758")
-        if key in self.BLOCKLIST:
-            if self.BLOCKLIST[key] is None or dtype in self.BLOCKLIST[key]:
-                self.skipTest(f"Running test with {op.name} hangs so skipping")
-
-        # Make this an expecttest manually
-        # When this env variable is set, generate a new ALLOWLIST_OP
-        # that reflects the current state of what passes or not
-        if os.environ.get("EXPECTTEST_ACCEPT", None) == "1":
-            generate_new_truth = True
-        else:
-            generate_new_truth = False
-
-        run_grad_test = True
-        if not generate_new_truth:
-            if op.name not in self.ALLOWLIST_OP:
-                self.skipTest(f"{op.name} is not in the allow list for test on MPS")
-            else:
-                if dtype_abbrs[dtype] not in self.ALLOWLIST_OP[op.name]:
-                    self.skipTest(f"{op.name} is in the allow list for MPS but {dtype} is excluded")
-
-            if op.name not in self.ALLOWLIST_OP_GRAD or dtype_abbrs[dtype] not in self.ALLOWLIST_OP_GRAD[op.name]:
-                run_grad_test = False
 
         def get_samples():
             return op.sample_inputs(device, dtype, requires_grad=(dtype.is_floating_point or dtype.is_complex))
         cpu_samples = get_samples()
 
-        all_forward_pass = True
-        all_backward_pass = True
+        for cpu_sample in cpu_samples:
+            #
+            # Forward check
+            #
+            mps_sample = cpu_sample.transform(
+                lambda x: x.detach().to("mps").requires_grad_(x.requires_grad) if isinstance(x, torch.Tensor) else x)
+
+            cpu_args = [cpu_sample.input] + list(cpu_sample.args)
+            cpu_kwargs = cpu_sample.kwargs
+            mps_args = [mps_sample.input] + list(mps_sample.args)
+            mps_kwargs = mps_sample.kwargs
+
+            # for tensor_split(), the second tensor arg ("tensor_indices_or_sections") must be on CPU only
+            if op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor):
+                mps_args[1] = cpu_args[1]
+
+            cpu_out = op(*cpu_args, **cpu_kwargs)
+            mps_out = op(*mps_args, **mps_kwargs)
+
+            atol, rtol = self._compute_tolerances(op, dtype)
+            if op.name == "nn.functional.upsample_bilinear" and dtype == torch.uint8:
+                atol = 1.0
+                rtol = 0.0
+
+            self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
+
+
+    @ops(mps_ops_grad_modifier(copy.deepcopy(test_consistency_op_db)), allowed_dtypes=MPS_GRAD_DTYPES)
+    def test_output_grad_match(self, device, dtype, op):
+        self.assertEqual(device, "cpu")
+
+        def get_samples():
+            return op.sample_inputs(device, dtype, requires_grad=(dtype.is_floating_point or dtype.is_complex))
+        cpu_samples = get_samples()
+
         for cpu_sample in cpu_samples:
             #
             # Forward check
             #
             forward_failed = False
-            try:
-                mps_sample = cpu_sample.transform(
-                    lambda x: x.detach().to("mps").requires_grad_(x.requires_grad) if isinstance(x, torch.Tensor) else x)
+            mps_sample = cpu_sample.transform(
+                lambda x: x.detach().to("mps").requires_grad_(x.requires_grad) if isinstance(x, torch.Tensor) else x)
 
-                # TODO: This checks only the function variant. We should also check the method and inplace version
-                # when they exist
-                cpu_args = [cpu_sample.input] + list(cpu_sample.args)
-                cpu_kwargs = cpu_sample.kwargs
-                mps_args = [mps_sample.input] + list(mps_sample.args)
-                mps_kwargs = mps_sample.kwargs
+            cpu_args = [cpu_sample.input] + list(cpu_sample.args)
+            cpu_kwargs = cpu_sample.kwargs
+            mps_args = [mps_sample.input] + list(mps_sample.args)
+            mps_kwargs = mps_sample.kwargs
 
-                # for tensor_split(), the second tensor arg ("tensor_indices_or_sections") must be on CPU only
-                if (op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor)):
-                    mps_args[1] = cpu_args[1]
+            # for tensor_split(), the second tensor arg ("tensor_indices_or_sections") must be on CPU only
+            if op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor):
+                mps_args[1] = cpu_args[1]
 
-                cpu_out = op(*cpu_args, **cpu_kwargs)
-                mps_out = op(*mps_args, **mps_kwargs)
+            cpu_out = op(*cpu_args, **cpu_kwargs)
+            mps_out = op(*mps_args, **mps_kwargs)
 
-                if op.name == "nn.functional.conv2d" and dtype == torch.float32:
-                    atol = 1e-4
-                    rtol = 3e-5
-                elif (op.name == "add" or op.name == "sub" or
-                      op.name == "masked.sum" or op.name == "masked.std" or op.name == "masked.var") and dtype == torch.float16:
-                    atol = 1e-2
-                    rtol = 1e-2
-                elif (op.name == "masked.mean"):
-                    atol = 7e-4
-                    rtol = 2e-3
-                elif (op.name == "native_layer_norm"):
-                    atol = 1e-4
-                    rtol = 1.3e-5
-                else:
-                    atol = None
-                    rtol = None
-
-                self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
-
-            except Exception as e:
-                if any(s in str(e).lower() for s in ["int64", "macos 13", "adaptive pool mps"]):
-                    self.skipTest(f"Expected Runtime Error: {str(e)}")
-
-                if not generate_new_truth:
-                    raise e
-                forward_failed = True
-                all_forward_pass = False
-
-            if not (dtype.is_floating_point or dtype.is_complex):
-                # Maybe we should error here instead?
+            if op.name == "unique" and cpu_kwargs["sorted"] is False:
                 continue
+
+            atol, rtol = self._compute_tolerances(op, dtype)
+            if op.name in ["renorm", "norm", "linalg.norm"] and dtype == torch.float16:
+                atol = 7e-4
+                rtol = 1.5e-3
+
+            self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
             #
             # Backward check
             #
+            if forward_failed:
+                # We would've failed immediately anyway, but this error is clearer
+                # We error instead of continuing so that all_backward_pass would not be True
+                raise RuntimeError("Forward pass already failed")
 
-            # Skip the grad test if it is not part of the allow list
-            if not generate_new_truth and not run_grad_test:
-                # TODO: maybe there is a way to print only when we have -v
-                # if i == 0:
-                #     print(f"Skipping gradient check because {op.name} is not on the allow list")
+            cpu_out = (cpu_out,) if isinstance(cpu_out, torch.Tensor) else tuple(cpu_out)
+            mps_out = (mps_out,) if isinstance(mps_out, torch.Tensor) else tuple(mps_out)
+
+            def req_grad(t):
+                return isinstance(t, torch.Tensor) and t.requires_grad
+
+            diff_cpu_out = tuple(t for t in cpu_out if req_grad(t))
+            diff_mps_out = tuple(t for t in mps_out if req_grad(t))
+            diff_cpu_arg = tuple(t for t in pytree.tree_leaves((cpu_args, cpu_kwargs)) if req_grad(t))
+            diff_mps_arg = tuple(t for t in pytree.tree_leaves((mps_args, mps_kwargs)) if req_grad(t))
+            self.assertEqual(len(diff_cpu_out), len(diff_mps_out))
+            self.assertEqual(len(diff_cpu_arg), len(diff_mps_arg))
+
+            if len(diff_cpu_out) == 0:
                 continue
+            # rand_like does not work with certain dtypes, so cast to double and cast back
+            cpu_grad_outputs = tuple(torch.rand_like(t, dtype=torch.double).to(dtype=t.dtype) for t in diff_cpu_out)
+            mps_grad_outputs = tuple(t.to("mps") for t in cpu_grad_outputs)
 
-            try:
-                if forward_failed:
-                    # We would've failed immediately anyway, but this error is clearer
-                    # We error instead of continuing so that all_backward_pass would not be True
-                    raise RuntimeError("Forward pass already failed")
+            # Compare computed gradients with cpu given random grad_output vector
+            # Sometimes when the derivative is 0, we just don't bother creating the graph
+            # allow_unused is needed in those cases.
+            cpu_grad_inputs = torch.autograd.grad(diff_cpu_out, diff_cpu_arg, grad_outputs=cpu_grad_outputs, allow_unused=True)
+            mps_grad_inputs = torch.autograd.grad(diff_mps_out, diff_mps_arg, grad_outputs=mps_grad_outputs, allow_unused=True)
 
-                cpu_out = (cpu_out,) if isinstance(cpu_out, torch.Tensor) else tuple(cpu_out)
-                mps_out = (mps_out,) if isinstance(mps_out, torch.Tensor) else tuple(mps_out)
+            self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
 
-                def req_grad(t):
-                    return isinstance(t, torch.Tensor) and t.requires_grad
 
-                diff_cpu_out = tuple(t for t in cpu_out if req_grad(t))
-                diff_mps_out = tuple(t for t in mps_out if req_grad(t))
-                diff_cpu_arg = tuple(t for t in pytree.tree_flatten((cpu_args, cpu_kwargs))[0] if req_grad(t))
-                diff_mps_arg = tuple(t for t in pytree.tree_flatten((mps_args, mps_kwargs))[0] if req_grad(t))
-                self.assertEqual(len(diff_cpu_out), len(diff_mps_out))
-                self.assertEqual(len(diff_cpu_arg), len(diff_mps_arg))
+class TestErrorInputs(TestCase):
+    _ignore_not_implemented_error = True
 
-                if len(diff_cpu_out) == 0:
-                    continue
-                # rand_like does not work with certain dtypes, so cast to double and cast back
-                cpu_grad_outputs = tuple(torch.rand_like(t.to(dtype=torch.double)).to(dtype=dtype) for t in diff_cpu_out)
-                mps_grad_outputs = tuple(t.to("mps") for t in cpu_grad_outputs)
+    @ops(mps_ops_error_inputs_modifier(test_error_inputs_op_db), dtypes=OpDTypes.none)
+    def test_error_inputs(self, device, op):
+        self.assertEqual(device, "mps:0")
 
-                # Compare computed gradients with cpu given random grad_output vector
-                # Sometimes when the derivative is 0, we just don't bother creating the graph
-                # allow_unused is needed in those cases.
-                cpu_grad_inputs = torch.autograd.grad(diff_cpu_out, diff_cpu_arg, grad_outputs=cpu_grad_outputs, allow_unused=True)
-                mps_grad_inputs = torch.autograd.grad(diff_mps_out, diff_mps_arg, grad_outputs=mps_grad_outputs, allow_unused=True)
+        mps_samples = op.error_inputs(device)
 
-                self.assertEqual(cpu_grad_inputs, mps_grad_inputs)
-            except Exception as e:
-                if not generate_new_truth:
-                    raise e
-                all_backward_pass = False
+        for mps_sample in mps_samples:
+            mps_sample_input = mps_sample.sample_input
+            error_type = mps_sample.error_type
+            error_regex = mps_sample.error_regex
 
-        if all_forward_pass and generate_new_truth:
-            if dtype_abbrs[dtype] not in self.NEW_ALLOW_LIST[op.name]:
-                self.NEW_ALLOW_LIST[op.name].append(dtype_abbrs[dtype])
-            # We could write it only once. But I don't know how to detect that the current test is the last one
-            # So each test append to the dict and write it.
-            with open("new_mps_allowlist.txt", "w") as f:
-                pprint.pprint(self.NEW_ALLOW_LIST, stream=f)
+            mps_args = [mps_sample_input.input] + list(mps_sample_input.args)
+            mps_kwargs = mps_sample_input.kwargs
 
-        if all_backward_pass and generate_new_truth and dtype.is_floating_point:
-            if dtype_abbrs[dtype] not in self.NEW_ALLOW_LIST_GRAD[op.name]:
-                self.NEW_ALLOW_LIST_GRAD[op.name].append(dtype_abbrs[dtype])
-            # We could write it only once. But I don't know how to detect that the current test is the last one
-            # So each test append to the dict and write it.
-            with open("new_mps_allowlist_grad.txt", "w") as f:
-                pprint.pprint(self.NEW_ALLOW_LIST_GRAD, stream=f)
+            # for tensor_split(), the second tensor arg ("tensor_indices_or_sections") must be on CPU only
+            if (op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor)):
+                mps_args[1] = mps_args[1].cpu()
+
+            with self.assertRaisesRegex(error_type, error_regex):
+                op(*mps_args, **mps_kwargs)
+
+class TestComplex(TestCase):
+    def test_tensor_scalar_binops(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/119088
+        def to_cpu(x):
+            return x.cpu() if isinstance(x, torch.Tensor) else x
+
+        # Allocate tensors on mps
+        with torch.device("mps"):
+            inputs = [torch.rand(2, dtype=dtype) for dtype in [torch.float, torch.half, torch.cfloat]]
+        self.assertTrue(all(x.device.type == "mps" for x in inputs))
+        # Add scalars
+        inputs.extend([7, 3.14, 2 + 3j, torch.tensor(4 + 5j, dtype=torch.chalf)])
+
+        # Iterate over all permutations of types(int, float, complex, half) and ops (excluding div)
+        for x, y in itertools.product(inputs, inputs):
+            for op_name in ["__add__", "__sub__", "__mul__"]:
+                x_cpu, y_cpu = map(to_cpu, (x, y))
+                res = getattr(x, op_name)(y)
+                res_cpu = getattr(x_cpu, op_name)(y_cpu)
+                self.assertEqual(to_cpu(res), res_cpu, f"{op_name}({x}, {y}) produces different results {res} vs {res_cpu}")
 
 
 # Copied from `TestCommon` in `test_ops.py`, just enough to duplicate the `test_numpy_ref` for MPS
@@ -9396,8 +11998,6 @@ class TestCommon(TestCase):
     # MPS still requires some fairly heavy special casing in the test framework.
     # When MPS becomes more consistent, this can probably be merged with that test using
     # `@dtypesIfMPS(torch.float32)`, but for now, the assertions themselves need to be loosened
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
-    @onlyMPS
     @suppress_warnings
     # MPS only supports float32
     @ops(_ref_test_ops, allowed_dtypes=(torch.float32,))
@@ -9411,12 +12011,27 @@ class TestCommon(TestCase):
         for sample_input in inputs:
             self.compare_with_reference(op, op.ref, sample_input)
 
+    @dtypes(*get_all_dtypes())
+    def test_tensor_creation(self, device, dtype):
+        def ones(device):
+            return torch.ones((2, 2), dtype=dtype, device=device)
+        if dtype not in MPS_DTYPES + ([torch.bfloat16, torch.complex64] if product_version > 14.0 else [torch.complex64]):
+            with self.assertRaises(TypeError):
+                ones(device)
+        else:
+            mps_tensor = ones(device)
+            cpu_tensor = ones("cpu")
+            self.assertEqual(mps_tensor.cpu(), cpu_tensor)
+
+
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
 # This requires mps to be properly registered in the device generic test framework which is not the
 # case right now. We can probably use `allow_mps` introduced in https://github.com/pytorch/pytorch/pull/87342
 # to achieve this.
 instantiate_device_type_tests(TestConsistency, globals(), only_for="cpu")
-instantiate_device_type_tests(TestCommon, globals(), allow_mps=True)
+instantiate_device_type_tests(TestErrorInputs, globals(), allow_mps=True, only_for="mps")
+instantiate_device_type_tests(TestCommon, globals(), allow_mps=True, only_for="mps")
+instantiate_device_type_tests(TestLinalgMPS, globals(), allow_mps=True, only_for="mps")
 
 if __name__ == "__main__":
     run_tests()

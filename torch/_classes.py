@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import types
 
 import torch._C
@@ -5,7 +6,7 @@ import torch._C
 
 class _ClassNamespace(types.ModuleType):
     def __init__(self, name):
-        super(_ClassNamespace, self).__init__("torch.classes" + name)
+        super().__init__("torch.classes" + name)
         self.name = name
 
     def __getattr__(self, attr):
@@ -19,7 +20,7 @@ class _Classes(types.ModuleType):
     __file__ = "_classes.py"
 
     def __init__(self):
-        super(_Classes, self).__init__("torch.classes")
+        super().__init__("torch.classes")
 
     def __getattr__(self, name):
         namespace = _ClassNamespace(name)

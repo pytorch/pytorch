@@ -9,7 +9,7 @@ graph {
     name: "Add_0"
     op_type: "Add"
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "input_1"
     type {

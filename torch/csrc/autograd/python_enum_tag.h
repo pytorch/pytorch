@@ -2,8 +2,6 @@
 
 #include <torch/csrc/python_headers.h>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 void initEnumTag(PyObject* module);
 }
-} // namespace torch

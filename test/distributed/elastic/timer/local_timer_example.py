@@ -14,12 +14,12 @@ import time
 import torch.distributed.elastic.timer as timer
 import torch.multiprocessing as torch_mp
 from torch.testing._internal.common_utils import (
-    TEST_WITH_DEV_DBG_ASAN,
-    run_tests,
-    IS_WINDOWS,
     IS_MACOS,
-    sandcastle_skip_if,
-    TestCase
+    IS_WINDOWS,
+    run_tests,
+    skip_but_pass_in_sandcastle_if,
+    TEST_WITH_DEV_DBG_ASAN,
+    TestCase,
 )
 
 
@@ -40,8 +40,9 @@ def _stuck_function(rank, mp_queue):
         time.sleep(5)
 
 
-# timer is not supported on macos or windowns
+# timer is not supported on macos or windows
 if not (IS_WINDOWS or IS_MACOS):
+
     class LocalTimerExample(TestCase):
         """
         Demonstrates how to use LocalTimerServer and LocalTimerClient
@@ -55,7 +56,9 @@ if not (IS_WINDOWS or IS_MACOS):
         unittest. As of now this will SIGSEGV.
         """
 
-        @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test is asan incompatible")
+        @skip_but_pass_in_sandcastle_if(
+            TEST_WITH_DEV_DBG_ASAN, "test is asan incompatible"
+        )
         def test_torch_mp_example(self):
             # in practice set the max_interval to a larger value (e.g. 60 seconds)
             mp_queue = mp.get_context("spawn").Queue()
@@ -80,11 +83,13 @@ if not (IS_WINDOWS or IS_MACOS):
 
             server.stop()
 
-        @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test is asan incompatible")
+        @skip_but_pass_in_sandcastle_if(
+            TEST_WITH_DEV_DBG_ASAN, "test is asan incompatible"
+        )
         def test_example_start_method_spawn(self):
             self._run_example_with(start_method="spawn")
 
-        # @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test is asan incompatible")
+        # @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test is asan incompatible")
         # def test_example_start_method_forkserver(self):
         #     self._run_example_with(start_method="forkserver")
 

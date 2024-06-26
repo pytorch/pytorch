@@ -3,10 +3,8 @@ import torch
 
 # https://pytorch.org/docs/stable/torch.html#random-sampling
 
-class SamplingOpsModule(torch.nn.Module):
-    def __init__(self):
-        super(SamplingOpsModule, self).__init__()
 
+class SamplingOpsModule(torch.nn.Module):
     def forward(self):
         a = torch.empty(3, 3).uniform_(0.0, 1.0)
         size = (1, 4)

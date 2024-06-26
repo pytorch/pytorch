@@ -4,8 +4,7 @@
 #include <ATen/native/DispatchStub.h>
 #include <c10/util/accumulate.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -72,6 +71,12 @@ void layer_norm_cpu_out(
     int64_t M,
     int64_t N);
 
+Tensor rms_norm(
+    const Tensor& input,
+    IntArrayRef normalized_shape,
+    const std::optional<Tensor>& weight_opt /* optional */,
+    std::optional<double> eps);
+
 using forward_fn = void (*)(
     const Tensor& /* X */,
     const Tensor& /* gamma */,
@@ -98,5 +103,4 @@ using backward_fn = void (*)(
 DECLARE_DISPATCH(forward_fn, LayerNormKernel);
 DECLARE_DISPATCH(backward_fn, LayerNormBackwardKernel);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

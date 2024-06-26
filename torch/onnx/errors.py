@@ -11,21 +11,14 @@ from torch.onnx._internal import diagnostics
 __all__ = [
     "OnnxExporterError",
     "OnnxExporterWarning",
-    "CallHintViolationWarning",
     "CheckerError",
-    "UnsupportedOperatorError",
     "SymbolicValueError",
+    "UnsupportedOperatorError",
 ]
 
 
 class OnnxExporterWarning(UserWarning):
     """Base class for all warnings in the ONNX exporter."""
-
-    pass
-
-
-class CallHintViolationWarning(OnnxExporterWarning):
-    """Warning raised when a type hint is violated during a function call."""
 
     pass
 
@@ -53,11 +46,7 @@ class UnsupportedOperatorError(OnnxExporterError):
             msg = diagnostic_rule.format_message(name, version, supported_version)
             diagnostics.diagnose(diagnostic_rule, diagnostics.levels.ERROR, msg)
         else:
-            if (
-                name.startswith("aten::")
-                or name.startswith("prim::")
-                or name.startswith("quantized::")
-            ):
+            if name.startswith(("aten::", "prim::", "quantized::")):
                 diagnostic_rule = diagnostics.rules.missing_standard_symbolic_function
                 msg = diagnostic_rule.format_message(
                     name, version, _constants.PYTORCH_GITHUB_ISSUES_URL

@@ -75,7 +75,7 @@ Node* MutationRemover::createSpecialMappedOp(Node* n) {
   return new_node;
 }
 
-bool removableSetItem(Node* n) {
+static bool removableSetItem(Node* n) {
   if (n->kind() != aten::_set_item ||
       n->input(1)->node()->kind() != prim::Constant) {
     return false;
@@ -177,7 +177,7 @@ bool MutationRemover::RemoveListMutation(Block* block) {
     // x.append(v1) (or x.insert(0, v1))
     // to:
     // x = {v0, v1} (or x = {v1, v0})
-    // We can remove x.append from the the alias db list of writes.
+    // We can remove x.append from the alias db list of writes.
     // All other aliasing properties remain valid.
     Node* list_construct = mutated_value->node();
     switch (node->kind()) {
@@ -360,7 +360,7 @@ bool RemoveListMutation(const std::shared_ptr<Graph>& graph) {
 
 bool RemoveTensorMutation(
     const std::shared_ptr<Graph>& graph,
-    c10::optional<std::function<bool(Node*)>> mutation_filter) {
+    std::optional<std::function<bool(Node*)>> mutation_filter) {
   MutationRemover mr(graph, std::move(mutation_filter));
   return mr.removeTensorMutation();
 }

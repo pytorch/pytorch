@@ -66,13 +66,9 @@ class Errors:
         At the moment, only tests on "numpy.ndarray" are supported.
         """
         if isinstance(x, np.ndarray) and isinstance(y, np.ndarray):
-            try:
-                np.testing.assert_allclose(
-                    x, y, rtol=self.rtol, atol=self.atol, equal_nan=True, verbose=True
-                )
-            except AssertionError as e:
-                raise
-                k(f"{colonize(msg)}{str(e).lstrip()}")
+            np.testing.assert_allclose(
+                x, y, rtol=self.rtol, atol=self.atol, equal_nan=True, verbose=True
+            )
         else:
             raise RuntimeError("Unsupported almost equal test")
 
@@ -105,11 +101,7 @@ class Errors:
             new_msg = f"{colonize(msg)}In embedded parameter '{x.name}'"
             self.equalAndThen(t1, t2, new_msg, k)
         elif isinstance(x, np.ndarray) and isinstance(y, np.ndarray):
-            try:
-                np.testing.assert_equal(x, y)
-            except AssertionError as e:
-                raise
-                k("{}{}".format(colonize(msg, ": "), str(e).lstrip()))
+            np.testing.assert_equal(x, y)
         else:
             if x != y:
                 # TODO: Better algorithm for lists
@@ -162,7 +154,7 @@ class Errors:
         NB: It is an error to "fail" without having added any errors to
         the error context.
         """
-        raise self.exc_class()
+        raise self.exc_class
 
     def failWith(self, msg):
         """
@@ -497,7 +489,7 @@ def verify(
                     errs.requireEqual(
                         proto_bytes.getvalue(), alt_proto_bytes.getvalue()
                     )
-                    raise AssertionError()
+                    raise AssertionError
 
             # TODO: test that the traced model also returns the same thing...
             run_helper(torch_out, args, remained_onnx_input_idx)

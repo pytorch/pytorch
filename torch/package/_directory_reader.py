@@ -1,9 +1,13 @@
+# mypy: allow-untyped-defs
 import os.path
 from glob import glob
 from typing import cast
 
 import torch
 from torch.types import Storage
+
+__serialization_id_record_name__ = ".data/serialization_id"
+
 
 # because get_storage_from_record returns a tensor!?
 class _HasStorage:
@@ -50,3 +54,11 @@ class DirectoryReader:
             if not os.path.isdir(filename):
                 files.append(filename[len(self.directory) + 1 :])
         return files
+
+    def serialization_id(
+        self,
+    ):
+        if self.has_record(__serialization_id_record_name__):
+            return self.get_record(__serialization_id_record_name__)
+        else:
+            return ""

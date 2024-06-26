@@ -12,8 +12,7 @@
 #include <ATen/ops/pin_memory_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // Exposes at::has_internal_overlap as an operator for testing purposes
 int64_t _debug_has_internal_overlap(const Tensor& self) {
@@ -24,11 +23,11 @@ int64_t _debug_has_internal_overlap(const Tensor& self) {
 // pinned memory, always return false", but this makes life a little easier when
 // you haven't loaded the backend extension at all (which can happen, e.g., on a
 // CPU build of PyTorch and you try to check if something is CUDA pinned)
-bool is_pinned_default(const Tensor& self, c10::optional<Device> device) {
+bool is_pinned_default(const Tensor& self, std::optional<Device> device) {
   return false;
 }
 
-Tensor pin_memory(const Tensor& self, c10::optional<Device> device) {
+Tensor pin_memory(const Tensor& self, std::optional<Device> device) {
   // Kind of mad that I have to do two dynamic dispatches here, pretty
   // annoying
   if (self.is_pinned(device)) {
@@ -37,5 +36,4 @@ Tensor pin_memory(const Tensor& self, c10::optional<Device> device) {
   return at::_pin_memory(self, device);
 }
 
-}
-}
+} // namespace at::native

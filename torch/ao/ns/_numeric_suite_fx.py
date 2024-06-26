@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 This module contains tooling to compare weights and activations
 across models. Example usage::
@@ -125,7 +126,6 @@ from torch.ao.quantization.fx.match_utils import _find_matches
 from torch.ao.quantization.fx.graph_module import _get_observed_graph_module_attr
 from torch.ao.quantization.fx.qconfig_mapping_utils import _generate_node_name_to_qconfig
 from torch.ao.quantization.fx.quantize_handler import _get_pattern_to_quantize_handlers
-from torch.ao.quantization.qconfig import QConfigAny
 from torch.ao.quantization import QConfigMapping
 from torch.ao.ns.fx.n_shadows_utils import (
     OutputProp,
@@ -140,7 +140,10 @@ from torch.ao.ns.fx.n_shadows_utils import (
 )
 from torch.ao.ns.fx.qconfig_multi_mapping import QConfigMultiMapping
 
-from typing import Dict, Tuple, Callable, List, Optional, Set, Any, Type
+from typing import Dict, Tuple, Callable, List, Optional, Set, Any, Type, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from torch.ao.quantization.qconfig import QConfigAny
 
 RNNReturnType = Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
 
@@ -732,8 +735,8 @@ def extend_logger_results_with_comparison(
         comparison_name: string name of model to use for
           layer names in the output
     """
-    for _, results_type_to_results in results.items():
-        for _, model_name_to_results in results_type_to_results.items():
+    for results_type_to_results in results.values():
+        for model_name_to_results in results_type_to_results.values():
             assert model_name_1 in model_name_to_results, \
                 f"{model_name_1} not found in results"
             assert model_name_2 in model_name_to_results, \
@@ -856,7 +859,7 @@ def prepare_n_shadows_model(
         create_n_transformed_and_logged_copies_of_subgraph(
             mt, subgraph_idx, match_name, nodes_in_this_subgraph,
             qconfig_multi_mapping.qconfig_mappings_list, list_of_node_name_to_qconfig,
-            custom_prepare_fn, custom_prepare_kwargs
+            custom_prepare_fn, custom_prepare_kwargs  # type: ignore[arg-type]
         )
 
     return mt
@@ -868,7 +871,7 @@ def _prepare_n_shadows_add_loggers_model(
     qconfig_mapping: QConfigMapping,
     backend_config: BackendConfig,
 ) -> torch.nn.Module:
-    """
+    r"""
     Note: this API is not recommended for wide usage, it is only
     provided for customers who need to migrate from the `add_loggers`
     API.

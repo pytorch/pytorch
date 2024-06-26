@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Microbenchmarks for the torch.fft module"""
 from argparse import ArgumentParser
 from collections import namedtuple
@@ -27,7 +28,7 @@ def run_benchmark(name: str, function: object, dtype: torch.dtype, seed: int, de
     results = []
     for tensors, tensor_params, params in spectral_fuzzer.take(samples):
         shape = [params['k0'], params['k1'], params['k2']][:params['ndim']]
-        str_shape = ' x '.join(["{:<4}".format(s) for s in shape])
+        str_shape = ' x '.join([f"{s:<4}" for s in shape])
         sub_label = f"{str_shape} {'' if tensor_params['x']['is_contiguous'] else '(discontiguous)'}"
         for dim in _dim_options(params['ndim']):
             for nthreads in (1, 4, 16) if not cuda else (1,):
@@ -76,7 +77,7 @@ def _output_csv(file, results):
             dim_str = str(dim)
             shape_str = 'x'.join(str(s) for s in shape)
 
-        print(name, device, measurement.task_spec.num_threads, numel, shape_str, contiguous, dim_str,
+        print(name, device, measurement.task_spec.num_threads, numel, shape_str, contiguous, dim_str,  # type: ignore[possibly-undefined]
               measurement.mean * 1e6, measurement.median * 1e6, measurement.iqr * 1e6,
               sep=',', file=file)
 

@@ -24,7 +24,7 @@ void raiseException(Stack& stack) {
 void raiseExceptionWithMessage(Stack& stack) {
   // this kernel supports RaiseException with only two arguments: the error and
   // the message Please make changes only to this kernel
-  c10::optional<std::string> qualified_class_name =
+  std::optional<std::string> qualified_class_name =
       pop(stack).toOptional<std::string>();
   std::string message;
   pop(stack, message);
@@ -92,6 +92,14 @@ void device(Stack& stack) {
   push(stack, pop(stack).toTensor().device());
 }
 
+void device_with_index(Stack& stack) {
+  std::string type = pop(stack).toStringRef();
+  int index = pop(stack).toInt();
+  std::string device_str = type + ":" + std::to_string(index);
+  auto device = c10::Device(device_str);
+  push(stack, device);
+}
+
 void dtype(Stack& stack) {
   at::Tensor a;
   pop(stack, a);
@@ -108,9 +116,9 @@ void toPrimDType(Stack& stack) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool copy;
   pop(stack, non_blocking, copy);
-  c10::optional<at::ScalarType> scalarType =
+  std::optional<at::ScalarType> scalarType =
       pop(stack).toOptional<at::ScalarType>();
-  c10::optional<c10::Device> device = c10::nullopt;
+  std::optional<c10::Device> device = c10::nullopt;
   at::Tensor self = pop(stack).toTensor();
   push(stack, to_dispatch(self, device, scalarType, non_blocking, copy));
 }
@@ -172,7 +180,10 @@ void toList(Stack& stack) {
       (out_ty == at::FloatType::get() && t.is_floating_point()) ||
           (out_ty == at::ComplexType::get() && t.is_complex()) ||
           tryScalarTypeFromJitType(*out_ty) == t.scalar_type(),
-      "Output annotation element type and runtime tensor element type must match for tolist()");
+      "Output annotation element type and runtime tensor element type must match for tolist(): ",
+      *tryScalarTypeFromJitType(*out_ty),
+      " vs ",
+      t.scalar_type());
 
   // Check that the dimension of the Tensor matches that of the
   // annotation.

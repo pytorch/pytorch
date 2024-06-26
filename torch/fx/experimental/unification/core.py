@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from collections.abc import Iterator  # type: ignore[import]
 from functools import partial
 
@@ -8,9 +9,9 @@ from .dispatch import dispatch
 
 __all__ = ["reify", "unify"]
 
-################
-# Reificiation #
-################
+###############
+# Reification #
+###############
 
 @dispatch(Iterator, dict)
 def _reify(t, s):
@@ -30,7 +31,7 @@ _reify
 
 @dispatch(dict, dict)  # type: ignore[no-redef]
 def _reify(d, s):
-    return dict((k, reify(v, s)) for k, v in d.items())
+    return {k: reify(v, s) for k, v in d.items()}
 _reify
 
 @dispatch(object, dict)  # type: ignore[no-redef]
