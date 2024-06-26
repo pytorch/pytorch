@@ -822,7 +822,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return key in self.value.__dict__
 
     def is_supported_nn_module_method(self, method):
-        return method in (torch.nn.Module.parameters,)
+        return torch._dynamo.config.inline_inbuilt_nn_modules and method in (
+            torch.nn.Module.parameters,
+        )
 
     def var_getattr(self, tx, name):
         from .. import trace_rules
