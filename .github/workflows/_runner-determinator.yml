@@ -193,7 +193,7 @@ jobs:
                           args.github_ref_type,
                           args.github_branch,
                       )
-                      label_type, message = get_workflow_type(issue, (args.github_issue_owner, username, ))
+                      label_type, message = get_workflow_type(issue, (f'@{args.github_issue_owner}', f'@{username}', ))
                       output = {
                           LABEL_TYPE_KEY: label_type,
                           MESSAGE_KEY: message,
