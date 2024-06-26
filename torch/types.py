@@ -51,6 +51,7 @@ Number: TypeAlias = Union[int, float, bool]
 # None means use the default device (typically CPU)
 Device: TypeAlias = Union[_device, str, int, None]
 
+
 # Storage protocol implemented by ${Type}StorageBase classes
 class Storage:
     _cdata: int
