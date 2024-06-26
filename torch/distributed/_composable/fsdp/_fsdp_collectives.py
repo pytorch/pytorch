@@ -108,15 +108,15 @@ def split_with_sizes_copy_functionalize(
     all_gather_output: torch.Tensor,
     all_gather_input_split_sizes: List[int],
     dim: int,
-    out: List[torch.Tensor],
+    ret: List[torch.Tensor],
 ) -> None:
     ag_output_elem = torch._from_functional_tensor(all_gather_output)
-    out_elem = [torch._from_functional_tensor(x) for x in out]
+    ret_elem = [torch._from_functional_tensor(x) for x in ret]
     with torch._C._ExcludeDispatchKeyGuard(
         torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
     ):
         torch.ops.fsdp.split_with_sizes_copy(
-            ag_output_elem, all_gather_input_split_sizes, dim=dim, out=out_elem
+            ag_output_elem, all_gather_input_split_sizes, dim=dim, ret=ret_elem
         )
 
 

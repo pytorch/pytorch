@@ -5310,8 +5310,8 @@ class FallbackKernel(ExternKernelAlloc):
                     f"NYI: Unsupported out= arg type: {type(arg)}"
                 )
 
-        if "out" in kwargs:
-            collect_mutation_names(kwargs["out"])
+        if "ret" in kwargs:
+            collect_mutation_names(kwargs["ret"])
             return
 
         if schema.is_mutable and not can_auto_functionalize(kernel):
@@ -5486,7 +5486,6 @@ class FallbackKernel(ExternKernelAlloc):
         return self.alias_names
 
     def get_mutation_names(self):
-        assert len(self.mutation_names) <= 1
         return self.mutation_names
 
     # ProxyExecutor Design Note
