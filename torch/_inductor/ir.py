@@ -5405,8 +5405,8 @@ class FallbackKernel(ExternKernelAlloc):
 
         # args that are aliased
         self.alias_names: List[str] = []
-        # args that are mutated AND returned from the op
-        self.mutation_names: List[str] = []
+        # args that are mutated
+        self.mutable_args: List[IRNode] = []
 
         if isinstance(self.op_overload, torch._ops.HigherOrderOperator):
             # We assume here that HOPs with FallbackKernel are functional.
@@ -5436,24 +5436,26 @@ class FallbackKernel(ExternKernelAlloc):
         # AOTAutograd functionalized them away); the only way for an in-place
         # op to show up here is if a lowering or pass introduced it.
         if torch._library.utils.mutates_and_returns_first_arg(self.op_overload):
-            self.mutation_names.append(tensor_args[0].get_name())
+            self.mutable_args.append(tensor_args[0])
+            mark_node_as_mutating(self, tensor_args[0])
             return
 
         args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
 
-        def collect_mutation_names(arg):
+        def _mark_all_nodes_as_mutating(arg):
             if isinstance(arg, (list, tuple)):
-                for tensor_arg in arg:
-                    collect_mutation_names(tensor_arg)
+                for a in arg:
+                    _mark_all_nodes_as_mutating(a)
             elif isinstance(arg, (TensorBox, BaseView)):
-                self.mutation_names.append(arg.get_name())
+                self.mutable_args.append(arg)
+                mark_node_as_mutating(self, arg)
             else:
                 raise NotImplementedError(
                     f"NYI: Unsupported out= arg type: {type(arg)}"
                 )
 
         if "out" in kwargs:
-            collect_mutation_names(kwargs["out"])
+            _mark_all_nodes_as_mutating(kwargs["out"])
             return
 
         if schema.is_mutable and not can_auto_functionalize(kernel):
@@ -5625,10 +5627,13 @@ class FallbackKernel(ExternKernelAlloc):
         return get_schema_info(self.op_overload).is_mutable()
 
     def get_inputs_that_alias_output(self):
-        return self.alias_names
+        return self.alias_names + [i.get_name() for i in self.mutable_args]
 
     def get_mutation_names(self):
-        return self.mutation_names
+        # NB: Inductor only allows a node to mutate 0 or 1 buffers.
+        # To get around that, we create MutationOutputs which marks their
+        # assigned input as mutable, thus, adhering to Inductor's constraint.
+        return []
 
     # ProxyExecutor Design Note
     # We export the ExternFallbackNodes (for custom ops) into a serialized file
