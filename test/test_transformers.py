@@ -2219,7 +2219,9 @@ class TestSDPACudaOnly(NNTestCase):
         k = torch.randn(b, h, s_kv, d_qk, device=device, dtype=torch.bfloat16)
         v = torch.randn(b, h, s_kv, d_v, device=device, dtype=torch.bfloat16)
 
-        o = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+        with sdpa_kernel(backends=[SDPBackend.CUDNN_ATTENTION]):
+            with self.assertRaisesRegex(RuntimeError, "No available kernel."):
+                o = torch.nn.functional.scaled_dot_product_attention(q, k, v)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("mask_dim", [1, 2, 3, 4])
