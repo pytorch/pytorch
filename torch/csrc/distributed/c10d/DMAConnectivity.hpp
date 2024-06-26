@@ -9,6 +9,12 @@ namespace c10d {
 struct TORCH_API DMAConnectivity : c10::intrusive_ptr_target {
   c10::DeviceType device_type;
   std::string connection_type;
+
+  // This is an NxN matrix representing the connectivity between N devices,
+  // where each element matrix[i][j] indicates the connectivity between device
+  // i and device j. A value of 0 denotes that there is no connection between
+  // device i and j. The meaning of non-zero values are specific to the
+  // connection type (e.g., for NVLink it represents the number of NVLinks).
   std::vector<std::vector<int>> matrix;
 
   explicit DMAConnectivity(

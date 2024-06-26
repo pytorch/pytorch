@@ -9,6 +9,8 @@
 
 namespace {
 
+constexpr int max_nvlinks = 64;
+
 std::string get_bus_id(int device_idx) {
   char bus_id[80];
   cudaDeviceProp prop{};
@@ -56,7 +58,7 @@ struct C10_EXPORT NVLinkDetector : public c10d::DMAConnectivityDetector {
 
     std::vector<int> switch_link_count(num_devices, 0);
     for (int i = 0; i < num_devices; ++i) {
-      for (int link = 0; link < 20; ++link) {
+      for (int link = 0; link < max_nvlinks; ++link) {
         nvmlReturn_t ret;
         nvmlIntNvLinkDeviceType_t deviceType;
         ret = driver_api->nvmlDeviceGetNvLinkRemoteDeviceType_(
