@@ -720,6 +720,41 @@ def forward(self, token, p_linear_weight, p_linear_bias, tq, x):
         self.assertTrue(tq.pop() is a)
         self.assertTrue(tq.pop() is b)
 
+    def test_safe_to_trace_with_real(self):
+        x = torch.randn(3, 3)
+        safe_obj = torch.classes._TorchScriptTesting._ConstantTensorContainer(x)
+
+        class Mod(torch.nn.Module):
+            def forward(self, safe_obj: torch.ScriptObject) -> None:
+                return safe_obj.get().sin()
+
+        mod = Mod()
+        backend = EagerAndRecordGraphs()
+        out = torch.compile(mod, backend=backend, fullgraph=True)(safe_obj)
+        self.assertEqual(out, mod(safe_obj))
+        self.assertExpectedInline(
+            backend.graphs[0].code.strip(),
+            """\
+def forward(self, L_safe_obj_ : torch.ScriptObject):
+    l_safe_obj_ = L_safe_obj_
+    call_torchbind = torch.ops.higher_order.call_torchbind(l_safe_obj_, 'get');  l_safe_obj_ = None
+    sin = call_torchbind.sin();  call_torchbind = None
+    return (sin,)""",
+        )
+
+        with enable_torchbind_tracing():
+            ep = torch.export.export(mod, (safe_obj,), strict=False)
+            self.assertExpectedInline(
+                ep.graph_module.code.strip(),
+                """\
+def forward(self, token, safe_obj):
+    with_effects = torch._higher_order_ops.effects.with_effects(token, torch.ops.higher_order.call_torchbind, safe_obj, 'get');  token = safe_obj = None
+    getitem = with_effects[0]
+    getitem_1 = with_effects[1];  with_effects = None
+    sin = torch.ops.aten.sin.default(getitem_1);  getitem_1 = None
+    return (getitem, sin)""",  # noqa: B950
+            )
+
     def test_identifying_torchbind_ops(self):
         for op in self.torch_bind_ops:
             self.assertTrue(op._has_torchbind_op_overload)

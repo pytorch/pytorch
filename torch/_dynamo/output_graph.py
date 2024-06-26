@@ -1577,14 +1577,19 @@ class OutputGraph:
                     if isinstance(node.meta["grapharg"].example, torch.ScriptObject):
                         real_script_obj = node.meta["grapharg"].example
                         fake_script_obj = node.meta["grapharg"].example_strong_ref
-                        flat_dict = dict(real_script_obj.__obj_flatten__())  # type: ignore[attr-defined]
-                        for attr in flat_dict.keys():
-                            fake_attr_val = getattr(fake_script_obj.wrapped_obj, attr)
-                            pytree.tree_map_only(
-                                (torch.SymInt, torch.Tensor),
-                                lambda t: update_used_symbols(used_symbols, t),
-                                fake_attr_val,
-                            )
+                        if not torch._library.fake_class_registry.tracing_with_real(
+                            real_script_obj
+                        ):
+                            flat_dict = dict(real_script_obj.__obj_flatten__())  # type: ignore[attr-defined]
+                            for attr in flat_dict.keys():
+                                fake_attr_val = getattr(
+                                    fake_script_obj.wrapped_obj, attr
+                                )
+                                pytree.tree_map_only(
+                                    (torch.SymInt, torch.Tensor),
+                                    lambda t: update_used_symbols(used_symbols, t),
+                                    fake_attr_val,
+                                )
                         continue
                     fake = (
                         arg.fake_tensor if arg.fake_tensor is not None else arg.example
