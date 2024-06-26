@@ -749,7 +749,7 @@ class WrapperCodeGen(CodeGen):
         self.writeline(f"{kernel}({', '.join(args)})")
 
     def generate_user_defined_triton_kernel(
-        self, kernel_name, grid, configs, args, triton_meta, raw_args
+        self, kernel_name, raw_args, grid, configs, triton_meta, constexprs
     ):
         grid_fn, code = user_defined_kernel_grid_fn_code(
             kernel_name, configs, grid, wrapper=self
@@ -759,6 +759,7 @@ class WrapperCodeGen(CodeGen):
         for line in code.split("\n"):
             self.writeline(line)
 
+        args = [self.val_to_arg_str(v) for v in raw_args]
         arg_types = [
             arg.get_dtype() if hasattr(arg, "get_dtype") else type(arg)
             for arg in raw_args
@@ -1488,7 +1489,7 @@ class WrapperCodeGen(CodeGen):
             elif isinstance(arg, (int, float, bool, SymbolicCallArg)):
                 return str(arg)
             else:
-                return pexpr(V.graph.sizevars.simplify(arg))
+                return self.expr_printer(V.graph.sizevars.simplify(arg))
 
         call_args = [wrap_arg(arg) for arg in call_args]
 
