@@ -1891,7 +1891,7 @@ class Scheduler:
             V.graph.buffers[orig] = new_node
             V.graph.name_to_buffer[orig_name] = new_node
 
-            orig = V.graph.operations.remove(orig_node)
+            orig = V.graph.operations.index(orig_node)
             V.graph.operations.remove(new_node)
             V.graph.operations[orig] = new_node
 
