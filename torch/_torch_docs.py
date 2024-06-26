@@ -13772,7 +13772,7 @@ Example::
 add_docstr(
     torch.Stream.wait_stream,
     r"""
-Stream.wait_stream(stream) -> bool
+Stream.wait_stream(stream) -> None
 
 Synchronize with another stream. All future work submitted to this stream will wait until all kernels
 submitted to a given stream at the time of call complete.
