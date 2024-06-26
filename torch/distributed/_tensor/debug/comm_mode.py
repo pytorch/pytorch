@@ -246,8 +246,10 @@ class CommDebugMode(TorchDispatchMode):
 
             # adds collective count to parent modules
             for par in self.advanced_module_tracker.parents:
-                if par not in self.comm_module_counts:
-                    self.comm_module_counts[par] = defaultdict(int)
-                self.comm_module_counts[par][func_packet] += 1
+                # makes sure we aren't double counting when current sub-module hasn't been removed from parents
+                if par != self.advanced_module_tracker.name:
+                    if par not in self.comm_module_counts:
+                        self.comm_module_counts[par] = defaultdict(int)
+                    self.comm_module_counts[par][func_packet] += 1
 
         return out

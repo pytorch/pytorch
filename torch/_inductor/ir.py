@@ -1785,6 +1785,147 @@ class SplitScan(Scan):
     pass
 
 
+@dataclasses.dataclass
+class Sort(Loops):
+    # Sorts a tuple of key, value pairs
+    sort_ranges: List[Expr]
+    size: List[Expr]
+    reindex: Callable[[List[Expr], List[Expr]], List[Expr]]
+    reduction_hint: ReductionHint
+    output_index: int
+    # output_index indexes the following tuples
+    dtypes: Tuple[torch.dtype, ...]
+    inner_fns: Tuple[Callable[..., Any], ...]
+
+    stable: bool
+    descending: bool
+
+    # HACK we mimick reduction
+
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
+        return (
+            super().get_unbacked_symbol_uses()
+            | set().union(*(free_unbacked_symbols(e) for e in self.sort_ranges))
+            | set().union(*(free_unbacked_symbols(e) for e in self.size))
+        )
+
+    def __post_init__(self):
+        assert len(self.ranges) + len(self.sort_ranges) == len(self.size)
+        super().__post_init__()
+
+    def store_reduction(self, output_name, indexer, vars, sort_vars):
+        idx = self.reindex(vars, sort_vars)
+        values = [inner_fn(idx) for inner_fn in self.inner_fns]
+        result = ops.sort(self.dtypes, values, self.stable, self.descending)
+        return ops.store(output_name, indexer(idx), result[self.output_index])
+
+    def get_reduction_type(self):
+        return "sort"
+
+    def get_reduction_size(self):
+        return self.sort_ranges
+
+    def get_size(self):
+        return self.size
+
+    def get_pointwise_size(self):
+        return self.ranges
+
+    def index_length(self):
+        return len(self.ranges) + len(self.sort_ranges)
+
+    def inner_fn_args(self):
+        index = self._index(self.ranges)
+        rindex = self._index(self.sort_ranges, SymT.RINDEX)
+        idx = self.reindex(index, rindex)
+        return (idx,)
+
+    def inner_fn_free_unbacked_symbols(self):
+        index = self._index(self.ranges)
+        rindex = self._index(self.sort_ranges, SymT.RINDEX)
+        idx = self.reindex(index, rindex)
+        return extract_free_unbacked_symbols(self.inner_fn, idx)
+
+    @classmethod
+    def create(
+        cls,
+        device: torch.device,
+        dtypes: Tuple[torch.dtype, ...],
+        inner_fns: Tuple[Callable[[List[Expr]], Any], ...],
+        size: List[Expr],
+        axis: int,
+        stable: bool,
+        descending: bool,
+        reduction_hint: ReductionHint = ReductionHint.DEFAULT,
+        **kwargs,
+    ) -> List[Optional[TensorBox]]:
+        pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
+        sort_ranges = [size[axis]]
+
+        if not V.graph.has_feature(device, BackendFeature.SORT):
+            return [None] * len(dtypes)
+
+        sizevars = V.graph.sizevars
+        sort_numel = sizevars.simplify(sympy_product(sort_ranges))
+
+        # Heuristic, smallest rblock where triton usually outperforms aten.sort
+        # It also isn't bandwidth bound so fusion is unlikely to help.
+        max_rblock = 256
+        is_persistent_kernel = (
+            config.triton.persistent_reductions
+            and sizevars.is_expr_static_and_true(sympy.Le(sort_numel, max_rblock))
+        )
+        if not is_persistent_kernel:
+            # We only support persistent triton kernels
+            return [None] * len(dtypes)
+
+        assert len(dtypes) == len(inner_fns)
+
+        # Sort with a single element is just a copy
+        if sizevars.is_expr_static_and_true(sympy.Le(sort_numel, 1)):  # type: ignore[arg-type]
+            return [
+                Pointwise.create(
+                    device=device,
+                    dtype=dtypes[output_index],
+                    inner_fn=inner_fns[output_index],
+                    ranges=size,
+                )
+                for output_index in range(len(dtypes))
+            ]
+
+        def reindex(index, sort_index):
+            assert len(sort_index) == len(sort_ranges)
+            assert len(index) == len(pointwise_ranges)
+            return [*index[:axis], *sort_index, *index[axis:]]
+
+        results = [
+            TensorBox.create(
+                Sort(
+                    device=device,
+                    dtype=dtypes[output_index],
+                    dtypes=dtypes,
+                    inner_fn=inner_fns[output_index],
+                    inner_fns=inner_fns,
+                    size=size,
+                    ranges=pointwise_ranges,
+                    sort_ranges=sort_ranges,
+                    reindex=reindex,
+                    reduction_hint=reduction_hint,
+                    output_index=output_index,
+                    stable=stable,
+                    descending=descending,
+                    **kwargs,
+                )
+            )
+            for output_index in range(len(dtypes))
+        ]
+
+        for result in results:
+            result.realize()
+
+        return results
+
+
 def is_storage_and_layout(x):
     try:
         as_storage_and_layout(x, freeze=False)
@@ -2797,7 +2938,7 @@ class FlexibleLayout(Layout):
         In this format, channels last would be:
             [1, 3, 2, 0]
         """
-        assert set(range(len(sizes))) == set(order)
+        assert set(range(len(sizes))) == set(order), (sizes, order)
         next_stride = sympy.Integer(1)
         strides = [None] * len(order)
 
@@ -3288,7 +3429,7 @@ class ComputedBuffer(Buffer):
 
     def get_store_function(self):
         indexer = self.layout.as_fixed().make_indexer()
-        if isinstance(self.data, (Reduction, Scan)):
+        if isinstance(self.data, (Reduction, Scan, Sort)):
             return partial(self.data.store_reduction, self.name, indexer)
         else:
             assert isinstance(self.data, Pointwise)
@@ -3328,7 +3469,7 @@ class ComputedBuffer(Buffer):
             ]
 
             if reads:
-                if isinstance(self.data, Scan):
+                if isinstance(self.data, (Scan, Sort)):
                     indices = self.data.reindex(index_vars, reduction_vars)
                 else:
                     indices = index_vars
@@ -5201,6 +5342,7 @@ has_c_shim = {
     aten._fft_c2c.default,
     aten._scaled_dot_product_efficient_attention.default,
     aten._scaled_dot_product_flash_attention.default,
+    aten._scaled_dot_product_cudnn_attention.default,
     aten._scaled_mm.default,
     aten.addmm.out,
     aten.bmm.out,
@@ -5870,7 +6012,9 @@ class StorageBox(MutableBox):
             ),
         ):
             return self.data.get_name()
-        assert isinstance(self.data, (Pointwise, Reduction, Scan)), type(self.data)
+        assert isinstance(self.data, (Pointwise, Reduction, Scan, Sort)), type(
+            self.data
+        )
         origin_node = self.data.get_origin_node()
         traceback = self.data.get_traceback()
         self.data = ComputedBuffer(
@@ -6515,6 +6659,11 @@ class LoopBodyBlock:
                 )
                 # Proxies are iterable, but some methods expect tuples/lists
                 return tuple(result[i] for i in range(len(value_proxy)))
+
+            def sort(self, dtypes, values, stable, descending):
+                result = self._inner.sort(dtypes, values, stable, descending)
+                # Proxies are iterable, but some methods expect tuples/lists
+                return tuple(result[i] for i in range(len(values)))
 
             def frexp(self, value_proxy):
                 result = self._inner.frexp(value_proxy)
