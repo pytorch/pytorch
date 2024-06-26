@@ -1,12 +1,11 @@
 from collections import defaultdict
-
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from torchgen import dest
 
 # disable import sorting to avoid circular dependency.
-from torchgen.api.types import DispatcherSignature  # isort:skip
+from torchgen.api.types import DispatcherSignature  # usort:skip
 from torchgen.context import method_with_native_function
 from torchgen.executorch.model import ETKernelIndex
 from torchgen.model import BaseTy, BaseType, DispatchKey, NativeFunction, Variant

@@ -237,7 +237,7 @@ test_failures = {
     "test_pointwise_hermite_polynomial_he_dynamic_shapes": TestFailure(("cuda", "xpu")),
     "test_pointwise_laguerre_polynomial_l_dynamic_shapes": TestFailure(("cuda", "xpu")),
     "test_pointwise_legendre_polynomial_p_dynamic_shapes": TestFailure(("cuda", "xpu")),
-    "test_polar_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
+    "test_polar_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu"), is_skip=True),
     "test_randn_generator_dynamic_shapes": TestFailure(("cpu",)),
     "test_randn_like_empty_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_single_elem_dynamic_shapes": TestFailure(("cpu",)),

@@ -18,22 +18,21 @@ from typing import (
 import yaml
 
 import torchgen.dest as dest
-
 from torchgen.api.lazy import setValueT
 from torchgen.api.types import BaseCppType
 from torchgen.dest.lazy_ir import GenLazyIR, GenLazyNativeFuncDefinition, GenTSLazyIR
 from torchgen.gen import get_grouped_native_functions, parse_native_yaml
-
-from torchgen.model import NativeFunction, NativeFunctionsGroup, OperatorName
-from torchgen.selective_build.selector import SelectiveBuilder
-from torchgen.utils import FileManager, NamespaceHelper
-from torchgen.yaml_utils import YamlLoader
-from .gen_backend_stubs import (
+from torchgen.gen_backend_stubs import (
     error_on_missing_kernels,
     gen_dispatcher_registrations,
     gen_dispatchkey_nativefunc_headers,
     parse_backend_yaml,
 )
+from torchgen.model import NativeFunction, NativeFunctionsGroup, OperatorName
+from torchgen.selective_build.selector import SelectiveBuilder
+from torchgen.utils import FileManager, NamespaceHelper
+from torchgen.yaml_utils import YamlLoader
+
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #

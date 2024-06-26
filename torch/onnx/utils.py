@@ -677,9 +677,7 @@ def _optimize_graph(
 
     symbolic_helper._quantized_ops.clear()
     # Unpack quantized weights for conv and linear ops and insert into graph.
-    _C._jit_pass_onnx_unpack_quantized_weights(
-        graph, params_dict, symbolic_helper.is_caffe2_aten_fallback()
-    )
+    _C._jit_pass_onnx_unpack_quantized_weights(graph, params_dict)
     # onnx only supports tensors, so we turn all out number types into tensors
     _C._jit_pass_erase_number_types(graph)
     if GLOBALS.onnx_shape_inference:
