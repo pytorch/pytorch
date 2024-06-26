@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import os
 from itertools import chain, count
@@ -169,6 +170,7 @@ class CppWrapperCuda(CppWrapperCpu):
         cuda=True,
         triton=True,
         arg_types=None,
+        raw_args=None,
         grid_fn: str = "grid",
         triton_meta=None,
     ):
@@ -182,6 +184,9 @@ class CppWrapperCuda(CppWrapperCpu):
                 name, call_args, grid, device_index, cuda, triton, arg_types
             )
 
+        device_index, call_args = self.prepare_triton_kernel_call(
+            device_index, call_args
+        )
         params = CudaKernelParamCache.get(name)
         assert (
             params is not None
@@ -225,7 +230,7 @@ class CppWrapperCuda(CppWrapperCpu):
 
         grid = [V.graph.sizevars.simplify(item) for item in grid]
         grid_uses_symbolic_shapes = any(item.free_symbols for item in grid)
-        grid_args = [self.grid_expr_printer(item) for item in grid]
+        grid_args = [self.expr_printer(item) for item in grid]
         grid_args_str = ", ".join(grid_args)
         self.writeline(f"Grid {grid_name} = Grid({grid_args_str});")
 

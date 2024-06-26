@@ -188,6 +188,8 @@ class TORCH_API Context {
   void setBenchmarkLimitCuDNN(int);
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool);
+  bool deterministicMkldnn() const;
+  void setDeterministicMkldnn(bool);
   bool userEnabledNNPACK() const;
   void setUserEnabledNNPACK(bool e);
 
@@ -358,13 +360,14 @@ class TORCH_API Context {
   c10::once_flag thp_init;
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
+  bool deterministic_mkldnn = false;
   bool _deterministic_algorithms = false;
   bool _deterministic_algorithms_warn_only = false;
   bool _deterministic_fill_uninitialized_memory = true;
   bool enabled_flashSDP = true;
   bool enabled_mem_efficientSDP = true;
   bool enabled_mathSDP = true;
-  bool enabled_cudnnSDP = false;
+  bool enabled_cudnnSDP = true;
 #ifdef USE_ROCM
   bool benchmark_cudnn = true;
 #else
@@ -385,8 +388,11 @@ class TORCH_API Context {
       ? at::LinalgBackend::Cusolver
       : at::LinalgBackend::Default;
   at::BlasBackend blas_preferred_backend =
-      (c10::utils::check_env("TORCH_BLAS_PREFER_CUBLASLT") == true ||
-       c10::utils::check_env("TORCH_BLAS_PREFER_HIPBLASLT") == true)
+#ifdef USE_ROCM
+      (c10::utils::check_env("TORCH_BLAS_PREFER_HIPBLASLT") != false)
+#else
+      (c10::utils::check_env("TORCH_BLAS_PREFER_CUBLASLT") == true)
+#endif
       ? at::BlasBackend::Cublaslt
       : at::BlasBackend::Cublas;
 #ifdef C10_MOBILE

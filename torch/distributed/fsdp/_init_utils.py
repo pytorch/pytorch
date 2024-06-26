@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import collections
 import itertools
 import os
@@ -57,8 +58,8 @@ from torch.distributed.fsdp.api import (
 from torch.distributed.fsdp.wrap import _Policy
 from torch.distributed.tensor.parallel.fsdp import DTensorExtensions
 from torch.distributed.utils import _sync_params_and_buffers
-
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
 
 if TYPE_CHECKING:
     from torch.utils.hooks import RemovableHandle
@@ -166,8 +167,7 @@ def _init_process_group_state_for_hybrid_shard(
             state.process_group = device_mesh.get_group(mesh_dim=1)
         else:
             raise ValueError(
-                "Expected device_mesh to have ndim=2 "
-                f"but got {len(device_mesh.get_group())}"
+                f"Expected device_mesh to have ndim=2 but got {device_mesh.ndim}"
             )
     elif process_group is None:
         default_group = _get_default_group()

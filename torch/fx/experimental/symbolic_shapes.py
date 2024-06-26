@@ -61,8 +61,11 @@ from torch._logging import trace_structured, structured
 from torch import SymBool, SymFloat, SymInt
 from torch._guards import ShapeGuard, Source, TracingContext
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
-from torch.utils._sympy.functions import FloorDiv, Mod, IsNonOverlappingAndDenseIndicator
+from torch.utils._sympy.functions import (
+    FloorDiv, Mod, PythonMod, IsNonOverlappingAndDenseIndicator, CleanDiv, FloorToInt, CeilToInt
+)
 from torch.utils._sympy.solve import try_solve
+from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.value_ranges import bound_sympy, SymPyValueRangeAnalysis, ValueRanges, ValueRangeError
 from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._traceback import format_frame, CapturedTraceback
@@ -155,7 +158,7 @@ def lru_cache(maxsize):
 @lru_cache(None)
 def uninteresting_files() -> Set[str]:
     import torch._inductor.sizevars
-    import torch._library.abstract_impl
+    import torch._library.fake_impl
     import torch._subclasses.meta_utils
     import torch._subclasses.fake_tensor
     mods = [
@@ -165,7 +168,7 @@ def uninteresting_files() -> Set[str]:
         torch.fx.interpreter,
         torch,
         torch._inductor.sizevars,
-        torch._library.abstract_impl,
+        torch._library.fake_impl,
         torch._subclasses.meta_utils,
         torch._subclasses.fake_tensor,
     ]
@@ -366,23 +369,30 @@ def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
 
     opposite = {sympy.Gt: sympy.Lt, sympy.Ge: sympy.Le}
     if isinstance(expr, tuple(opposite.keys())):
-        lhs = expr.rhs - expr.lhs
+        rhs = expr.lhs - expr.rhs
         t = opposite[type(expr)]
     else:
         assert isinstance(expr, (sympy.Lt, sympy.Le, sympy.Eq, sympy.Ne))
-        lhs = expr.lhs - expr.rhs
+        rhs = expr.rhs - expr.lhs
         t = type(expr)
-    rhs = 0
-    if isinstance(lhs, sympy.Add):
-        cts = []
-        variables = []
-        for term in lhs.args:
-            if term.is_number:
-                cts.append(term)
+
+    def is_neg(t):
+        return t.is_negative or (isinstance(t, sympy.Mul) and t.args[0].is_negative)
+
+    lhs = 0
+    if isinstance(rhs, sympy.Add):
+        pos = []
+        neg = []
+        for term in rhs.args:
+            if is_neg(term):
+                neg.append(-term)
             else:
-                variables.append(term)
-        lhs = sympy.Add(*variables)
-        rhs = -sympy.Add(*cts)
+                pos.append(term)
+        lhs = sympy.Add(*neg)
+        rhs = sympy.Add(*pos)
+    elif is_neg(rhs):
+        # lhs == 0
+        lhs, rhs = -rhs, 0
     return t(lhs, rhs)
 
 def is_concrete_bool(a: Union[bool, SymBool]) -> bool:
@@ -454,20 +464,21 @@ def free_unbacked_symbols(x):
 # setup!
 def is_symbol_binding_fx_node(node) -> Optional[sympy.Symbol]:
     if (
-        node.op == "placeholder" and
         "val" in node.meta and
         isinstance(node.meta["val"], torch.SymInt) and
-        isinstance(node.meta["val"].node.expr, sympy.Symbol)
+        isinstance(node.meta["val"].node.expr, sympy.Symbol) and
+        (node.op == "placeholder" or free_unbacked_symbols(node.meta["val"].node.expr))
     ):
         return node.meta["val"].node.expr
     return None
 
 def find_symbol_binding_fx_nodes(graph):
-    return {
-        node.meta["val"].node.expr: node
-        for node in graph.nodes
-        if is_symbol_binding_fx_node(node)
-    }
+    r = {}
+    # NB: Prefer first occurrence of symbol
+    for node in graph.nodes:
+        if is_symbol_binding_fx_node(node) and node.meta["val"].node.expr not in r:
+            r[node.meta["val"].node.expr] = node
+    return r
 
 
 # Analogous to ConvertIntSource
@@ -873,9 +884,9 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     for N=1.
     """
     if min is None:
-        min = -sympy.oo
+        min = -int_oo
     if max is None:
-        max = sympy.oo
+        max = int_oo
 
     if max < min:
         raise ValueError(
@@ -983,16 +994,6 @@ def eval_guards(gm, *args, ignore_static=True):
 def bind_symbols(gm, *args):
     return gm.shape_env.bind_symbols(fx_placeholder_vals(gm), args)
 
-def _assert_bound_is_rational(expr: sympy.Expr, bound: ValueRanges):
-    """
-    We assert that the bounds are either Boolean, or not finite, or can be computed
-    in exact prevision via rational arithmetic.
-    The only exception to this is the rare case when the user calls `sqrt(s0)`
-    sqrt is turned into sympy.Pow so we just match for that (it matches more things, but still)
-    """
-    assert bound.lower.is_rational or bound.lower.is_Boolean or not bound.lower.is_finite or expr.has(sympy.Pow), (bound, expr)
-    assert bound.upper.is_rational or bound.upper.is_Boolean or not bound.upper.is_finite or expr.has(sympy.Pow), (bound, expr)
-
 class DimDynamic(Enum):
     """
     Controls how to perform symbol allocation for a dimension.  It is always
@@ -1020,6 +1021,8 @@ class DimDynamic(Enum):
     DUCK = 1
     # Treat the dimension statically based on its hint
     STATIC = 2
+    # Treat the dimension as a size-like unbacked
+    SIZE_LIKE_UNBACKED = 3
 
 
 # NB: These constraints affect both clients and backends: given some
@@ -1391,14 +1394,22 @@ SYMPY_INTERP = {
     'Min': min,
     'Max': max,
     'Mod': operator.mod,
+    'PythonMod': operator.mod,
     'FloorDiv': operator.floordiv,
     'TrueDiv': operator.truediv,
+    'PowByNatural': operator.pow,
     'IsNonOverlappingAndDenseIndicator': eval_is_non_overlapping_and_dense,
     'floor': math.floor,
     'ceiling': math.ceil,
+    'FloorToInt': math.floor,
+    'CeilToInt': math.ceil,
     'cast_symbool_to_symint_guardless': cast_symbool_to_symint_guardless,
-    'Round': builtins.round,
+    'RoundToInt': builtins.round,
     'RoundDecimal': builtins.round,
+    'TruncToInt': math.trunc,
+    'IntTrueDiv': operator.truediv,
+    'FloatTrueDiv': operator.truediv,
+    'ToFloat': builtins.float,
 }
 
 
@@ -1465,7 +1476,12 @@ class RuntimeAssert:
     stack: str = field(repr=False)
 
 
-class ShapeGuardPrinter(StrPrinter):
+# Used for printing SymExprs in compile_fx
+class SymExprPrinter(StrPrinter):
+    pass
+
+
+class ShapeGuardPrinter(SymExprPrinter):
     def __init__(
         self,
         symbol_to_source,
@@ -1646,10 +1662,17 @@ class DimConstraints:
             congruence = (base - mod_reduced) % divisor
             if congruence != 0:
                 self._congruences[s].add(congruence)
+            # NB: Must not be CleanDiv, it needs to be regular sympy division
+            # so inequality solver works.  This is sort of problematic for
+            # is_integer tests though haha
             return (base - mod_reduced) / divisor
 
         if expr.has(Mod):
             expr = expr.replace(Mod, mod_handler)
+        # 7 // -3 is -3, 7 % -3 is -2, and 7 - (-2) / -3 is -3.0 so negative
+        # arguments should be OK.
+        if expr.has(PythonMod):
+            expr = expr.replace(PythonMod, mod_handler)
         if expr.has(FloorDiv):
             expr = expr.replace(FloorDiv, floor_div_handler)
         return expr
@@ -1994,7 +2017,7 @@ class DimConstraints:
                     (dim.min < 2 and c.get("min", 2) == 2)
                     or dim.min == c.get("min", 2)
                 )  # let pass if analysis min = 2 and specified min = 0/1
-                and dim.max == c.get("max", sys.maxsize - 1)
+                and dim.max == c.get("max", int_oo)
             )
 
         # 1) newly introduced roots
@@ -2017,7 +2040,7 @@ class DimConstraints:
                     modulus, remainder = sympy.polys.polytools.div(c["eq"], root)
                     c_min = c.get("min", 2)
                     min_ = math.ceil((c_min - remainder) / modulus)
-                    c_max = c.get("max", sys.maxsize - 1)
+                    c_max = c.get("max", int_oo)
                     max_ = math.floor((c_max - remainder) / modulus)
                     # create result & dim
                     results[str(root)] = {"min": min_, "max": max_}
@@ -2765,7 +2788,7 @@ class ShapeEnv:
         if min is None:
             min = 0
         if max is None:
-            max = sys.maxsize - 1
+            max = int_oo
 
         if max < min:
             raise ValueError(
@@ -3329,6 +3352,7 @@ class ShapeEnv:
             self.pending_fresh_unbacked_symbols.append(symbol)
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         vr = self.var_to_range[symbol] = ValueRanges.unknown()
+        assert vr.is_float
 
         # Create a new FX placeholder and Z3 variable for 'symbol'.
         fx_node = self._create_fx_placeholder_and_z3var(symbol, float)
@@ -3347,6 +3371,7 @@ class ShapeEnv:
         self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         vr = self.var_to_range[symbol] = self._default_unspecified_value_range()
+        assert vr.is_int
 
         # Create a new FX placeholder and Z3 variable for 'symbol'.
         fx_node = self._create_fx_placeholder_and_z3var(symbol, int)
@@ -3370,6 +3395,7 @@ class ShapeEnv:
         self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         vr = self.var_to_range[symbol] = ValueRanges(0, 1)
+        assert vr.is_int
 
         # Create a new FX placeholder and Z3 variable for 'symbol'.
         fx_node = self._create_fx_placeholder_and_z3var(symbol, bool)
@@ -3418,6 +3444,12 @@ class ShapeEnv:
     ) -> "sympy.Expr":
         """Create a new symbol which is tracked by this ShapeEnv
         """
+        if dynamic_dim is DimDynamic.SIZE_LIKE_UNBACKED:
+            r = self.create_unbacked_symint().node.expr
+            self._constrain_range_for_size(r)
+            # TODO: maybe put the hint somewhere
+            return r
+
         # check if constraint_dim is actually static integer
         if isinstance(constraint_dim, StrictMinMaxConstraint) and constraint_dim.vr.lower == constraint_dim.vr.upper:
             dynamic_dim = DimDynamic.STATIC
@@ -3515,6 +3547,7 @@ class ShapeEnv:
                     self.var_to_range[sympy_expr] &= constraint_dim.vr
 
                 vr = self.var_to_range[sympy_expr]
+                assert vr.is_int
 
                 if val not in vr:
                     raise ConstraintViolationError(f"{val} not in range [{vr.lower}, {vr.upper}]")
@@ -3523,6 +3556,7 @@ class ShapeEnv:
             elif isinstance(val, float):
                 self.var_to_range[sympy_expr] = vr = ValueRanges(-sympy.oo, sympy.oo)
                 range_str = f"[{vr.lower}, {vr.upper}]"
+                assert vr.is_float
             else:
                 # Skip var_range logic for SingletonInt
                 # Only used for jagged layout nested tensors
@@ -3572,6 +3606,7 @@ class ShapeEnv:
 
     def add_var_to_val(self, expr: sympy.Symbol, val: int):
         """ Adds a new symbol to the symbolic environment. """
+        log.debug("add_var_to_val %s %s", expr, val, stack_info=True)
         assert expr not in self.var_to_val, f"{expr} already exists"
         self.var_to_val[expr] = sympy.Integer(val)
 
@@ -3771,9 +3806,9 @@ class ShapeEnv:
                 concrete_val = self.evaluate_expr(sympy.Eq(expr1, expr2))
                 if not concrete_val:
                     raise ConstraintViolationError(
-                        f"{src1.name()} = {expr1.xreplace(self.var_to_val)}"
+                        f"{src1.name()} = {expr1 if isinstance(expr1, int) else expr1.xreplace(self.var_to_val)}"
                         " is not equal to "
-                        f"{src2.name()} = {expr2.xreplace(self.var_to_val)}"
+                        f"{src2.name()} = {expr2 if isinstance(expr2, int) else expr2.xreplace(self.var_to_val)}"
                     )
 
             for src, root, fn in equalities_inputs.derived_equalities:
@@ -4088,7 +4123,7 @@ class ShapeEnv:
 
             assert sources
             bounds = []
-            if r.lower != -sympy.oo:
+            if r.lower not in (-sympy.oo, -int_oo):
                 if any(is_dim(source) for source in sources):
                     self.dim_constraints.add(sympy.Ge(symbol, r.lower))
                 # Only print lower bound in simplified mode if it is not the
@@ -4096,14 +4131,7 @@ class ShapeEnv:
                 if not _simplified or r.lower != self._default_value_range().lower:
                     bounds.append(str(r.lower))
             bounds.append(source_ref(sources[0]))
-            # NB: This looks like an off-by-one error but it's not: the
-            # upper bound may be sys.maxsize - 1 because we intentionally
-            # exclude sys.maxsize from our bounds to deal with direct
-            # == INT_MAX guards, but it's still dumb to actually test it.
-            # Note that you can be off by a pretty large constant and it
-            # won't matter because sizes in practice will be no where near
-            # the 64-bit limit.
-            if r.upper != sympy.oo and r.upper < sys.maxsize - 1:
+            if r.upper not in (sympy.oo, int_oo):
                 if any(is_dim(source) for source in sources):
                     self.dim_constraints.add(sympy.Le(symbol, r.upper))
                 # nontrivial upper bound is always interesting
@@ -4115,9 +4143,8 @@ class ShapeEnv:
                 constraints = symbol_to_constraints[symbol]
                 for c in constraints:
                     if isinstance(c, StrictMinMaxConstraint):
-                        # NB: By default, we have a restrictive range
-                        # 2 <= s0 <= sys.maxsize - 1.  But export users generally
-                        # expect to be able to specify nice ranges like [0, oo]
+                        # TODO: With int_oo, I think this condition is a noop
+                        # now
                         if not (c.vr & self._default_value_range()).issubset(r):
                             source = sources[0]
 
@@ -4190,9 +4217,9 @@ class ShapeEnv:
             # Reason: '_maybe_evaluate_static' may eliminate guards based on the
             # refined value ranges.
             for sym, vr in self.var_to_range.items():
-                if vr.lower != -sympy.oo:
+                if vr.lower not in (-sympy.oo, -int_oo):
                     self._add_target_expr(sympy.Le(vr.lower, sym))
-                if vr.upper != sympy.oo:
+                if vr.upper not in (sympy.oo, int_oo):
                     self._add_target_expr(sympy.Le(sym, vr.upper))
 
             # Before validating, populate the input of the validator with the
@@ -4228,6 +4255,13 @@ class ShapeEnv:
         if produced_guards:
             return " and ".join(produced_guards)
         return None
+
+    def evaluate_symexpr(self, code):
+        """
+        To be used by compile_fx to evaluate symexprs
+        """
+        args = {str(e): val for e, val in self.var_to_val.items()}
+        return eval(code, SYMPY_INTERP, args)
 
     def evaluate_guards_expression(self, code, args):
         """
@@ -4324,13 +4358,19 @@ class ShapeEnv:
         var_to_range = {x: self.var_to_range.get(x, None) for x in expr.free_symbols}
         if size_oblivious:
             # Clamp values of size-like variables
+            # NB: discarding the old upper bound in intentional, per
+            # https://github.com/pytorch/pytorch/pull/123675
             for x in self.size_like & var_to_range.keys():
                 if var_to_range[x] is not None:
-                    var_to_range[x] = ValueRanges(2, sympy.oo)
+                    # NB: do NOT set upper to 2 ** 48, we're using this solely
+                    # to determine if we can do size-like replacement, the
+                    # upper bound is irrelevant here
+                    var_to_range[x] = ValueRanges(2, int_oo)
+                    assert var_to_range[x].is_int
         return bound_sympy(expr, var_to_range)
 
     @_lru_cache
-    def get_axioms(self, symbols: Optional[Tuple["sympy.Symbol"]] = None) -> Tuple["sympy.Expr"]:
+    def get_axioms(self, symbols: Optional[Tuple["sympy.Symbol"]] = None, compute_hint: bool = False) -> Tuple["sympy.Expr"]:
         """
         Given the symbols in an expression, it returns all the runtime asserts that have those symbols
         concatenated with all the guards.
@@ -4345,31 +4385,34 @@ class ShapeEnv:
                                for s in symbols if s not in self.var_to_val
                                for r in self.deferred_runtime_asserts.get(s, ()))
         guards = (g.expr for g in self.guards)
-        return tuple(itertools.chain(guards, runtime_asserts))
+        axioms = itertools.chain(guards, runtime_asserts)
+        if compute_hint:
+            axioms = (canonicalize_bool_expr(a.xreplace(self.var_to_val)) for a in axioms)
+        return tuple(dict.fromkeys(axioms).keys())
 
-    @_lru_cache
+    @lru_cache(None)
     def get_implications(self,
-                         e: "sympy.Expr",
-                         compute_hint: bool) -> Tuple[Tuple["sympy.Expr", 'sympy.logic.boolalg.BooleanAtom']]:
+                         e: "sympy.Expr") -> Tuple[Tuple["sympy.Expr", 'sympy.logic.boolalg.BooleanAtom']]:
         """ Given a expression, it returns a list of predicates that follow from it """
         equiv = {}
 
         def add_expr(expr):
-            # Expr and negation
-            equiv[canonicalize_bool_expr(expr)] = sympy.true
-            equiv[canonicalize_bool_expr(sympy.Not(expr))] = sympy.false
-            if isinstance(expr, sympy.Rel):
-                if isinstance(expr, (sympy.Eq, sympy.Ne)):
-                    # multiplying by -1 ensures that equality is commutative
-                    dual = type(expr)(-expr.lhs, -expr.rhs)
-                else:
-                    # multiplying by -1 changes the direction of the inequality
-                    dual = type(expr)(-expr.rhs, -expr.lhs)
-                equiv[canonicalize_bool_expr(dual)] = sympy.true
-                equiv[canonicalize_bool_expr(sympy.Not(dual))] = sympy.false
+            expr = canonicalize_bool_expr(expr)
+            if isinstance(expr, (sympy.Eq, sympy.Ne)):
+                # No need to canonicalize
+                # TODO We could further canonicalize Eq ordering the lhs and rhs somehow
+                # With this, we could remove the need for the commutativity part
+                opposite = sympy.Eq if isinstance(expr, sympy.Ne) else sympy.Ne
+                # Commutativity of == and !=
+                equiv[type(expr)(expr.lhs, expr.rhs)] = sympy.true
+                equiv[type(expr)(expr.rhs, expr.lhs)] = sympy.true
+                equiv[opposite(expr.lhs, expr.rhs)] = sympy.false
+                equiv[opposite(expr.rhs, expr.lhs)] = sympy.false
+            else:
+                # Expr and negation
+                equiv[expr] = sympy.true
+                equiv[canonicalize_bool_expr(sympy.Not(expr))] = sympy.false
 
-        if compute_hint:
-            e = canonicalize_bool_expr(e.xreplace(self.var_to_val))
         add_expr(e)
         # Other relational expressions this expression implies
         if isinstance(e, sympy.Eq):
@@ -4421,12 +4464,15 @@ class ShapeEnv:
         # Pattern matching
         symbols = tuple(expr.free_symbols)
         if axioms is None:
-            axioms = self.get_axioms(symbols)
+            axioms = self.get_axioms(symbols, compute_hint=compute_hint)
         subst = {}
         for e in axioms:
-            subst.update(dict(self.get_implications(e, compute_hint=compute_hint)))
+            if e.free_symbols.issubset(expr.free_symbols):
+                subst.update(dict(self.get_implications(e)))
 
         expr = expr.xreplace(subst)
+
+        symbols = tuple(expr.free_symbols)
 
         # Simplify making use of value range lower bound
         new_shape_env = {}
@@ -4436,24 +4482,39 @@ class ShapeEnv:
                 # Skip var_ranges logic for SingletonInt which is only used
                 # for jagged layout NestedTensors today
                 continue
-            try:
-                vr = var_ranges[k]
-            except KeyError:
-                log.warning("%s is not in var_ranges, defaulting to unknown range.", k)
-                vr = self._default_unspecified_value_range()
+            vr = var_ranges[k]
             if size_oblivious and k in self.size_like:
                 lower = max(2, vr.lower)
+                # Clamping size-oblivious to some quantity below sys.maxsize
+                # helps us determine that f(u0) != sys.maxsize, which is a
+                # test that is looking for sys.maxsize as a sentinel, but you
+                # don't really want to worry about it for unbacked SymInts.
+                # This is similar to the flavor where size oblivious omits
+                # 0/1, it changes semantics but in a benign way.
+                upper = min(2 ** 48, vr.upper)
+                # This is a bit dodgy: what this means is that there was a
+                # size-like unbacked symbol whose upper bound < 2.  This
+                # causes... problems.
+                if lower <= upper:
+                    vr = ValueRanges(lower, upper)
             else:
                 lower = vr.lower
             # Don't do anything if we don't have a nontrivial lower bound
             # Also don't do anything if we asked only to simplify unbacked
             # SymInt
             if (
-                lower < (-sys.maxsize - 1) // 2 or
-                (unbacked_only and k in self.var_to_val)
+                lower is -int_oo or
+                (unbacked_only and k in self.var_to_val) or
+                not vr.is_int
             ):
                 new_range_env[k] = vr
                 continue
+            # The goal is to take our symbols which have various lower bounds
+            # and reallocate them into new symbols which are exactly positive;
+            # e.g., if we have s0 in [2, inf], we want to turn it into ess0 in
+            # [1, inf], where s0 = ess0 + 1.  This gives the most information
+            # to sympy for subsequent simplifications.
+            #
             # Positive means >= 1
             # Positive - 1 means >= 0
             # Positive + lower - 1 means >= lower
@@ -4475,16 +4536,24 @@ class ShapeEnv:
             new_shape_env[k] = s + offset
             new_range_env[s] = SymPyValueRangeAnalysis.add(vr, -offset)
 
-        def replace(expr, repl):
-            return expr.xreplace(repl)
-
         try:
-            new_expr = replace(expr, new_shape_env)
+            new_expr = expr.xreplace(new_shape_env)
         except RecursionError:
             log.warning("RecursionError in sympy.xreplace(%s, %s)", expr, new_shape_env)
             self.counter["sympy_recursion_error"] += 1
             return None
 
+        # We need to canonicalize, as after expand we may have something like `a + b = a` and
+        # sympy will not simplify the a. The two appeareances of the a will then make value ranges
+        # analysis give lose bounds
+        new_expr = canonicalize_bool_expr(safe_expand(new_expr))
+        if new_expr.is_number:
+            return new_expr
+
+        # This is bad to do, the replacement with division leaves us with
+        # rationals when atom.args[0] is addition, e.g., sympy will happily
+        # turn (s0 + s1) // 2 into s0 / 2 + s1 / 2.  Needless complication!
+        """
         floor_div_replace = {}
         for atom in new_expr.atoms(FloorDiv):
             floor_div_replace[atom] = sympy.floor(atom.args[0] / atom.args[1])
@@ -4493,13 +4562,12 @@ class ShapeEnv:
         # are still free symbols
         if new_expr.is_number:
             return new_expr
+        """
 
         # Check if the range can solve it statically
         out = bound_sympy(new_expr, new_range_env)
-        if expect_rational:
-            _assert_bound_is_rational(new_expr, out)
-            if out.is_singleton():
-                return out.lower
+        if out.is_singleton():
+            return out.lower
 
         return new_expr if unbacked_only else None
 
@@ -4551,7 +4619,7 @@ class ShapeEnv:
             for fd in expr.atoms(FloorDiv):
                 base, divisor = fd.args
                 if self.replace(Mod(base, divisor)) in self.divisible:
-                    div_replacements[fd] = base / divisor
+                    div_replacements[fd] = CleanDiv(base, divisor)
             new_expr = expr.xreplace(div_replacements)
             new_expr = safe_expand(new_expr)
             new_pows = new_expr.atoms(sympy.Pow)
@@ -4660,9 +4728,15 @@ class ShapeEnv:
 
         # Updates the range and the guards corresponding to each bound of the symbol.
         if symbol not in self.var_to_range:
-            self.var_to_range[symbol] = ValueRanges(lower, upper)
+            r = ValueRanges(lower, upper)
+            self.log.debug("_update_var_to_range %s = %s (new)", symbol, r)
+            self.var_to_range[symbol] = r
         else:
-            self.var_to_range[symbol] &= ValueRanges(lower, upper)
+            old = self.var_to_range[symbol]
+            new = old & ValueRanges(lower, upper)
+            if new != old:
+                self.var_to_range[symbol] = new
+                self.log.debug("_update_var_to_range %s = %s (update)", symbol, new)
 
     def _set_replacement(self, a: "sympy.Symbol", tgt: "sympy.Expr", msg: str) -> None:
         """
@@ -4685,18 +4759,6 @@ class ShapeEnv:
         if a in self.var_to_range:
             src_bound = self.var_to_range[a]
 
-            # If you have x in [2, maxint], then 2*x in [4, 2*maxint].
-            # But we don't really care that the max bound says we can
-            # go beyond the maximum integer size, because we aren't
-            # using bigints anyway.  Arguably, ValueRanges should know
-            # to do this truncation automaticaly (to avoid doing
-            # bigint compute in range analysis), but right now it doesn't
-            # so we need to get rid of some unnecessary precision.
-            int_range = ValueRanges(-sys.maxsize - 1, sys.maxsize - 1)
-
-            def issubset(x, y):
-                return (x & int_range).issubset(y & int_range)
-
             # First, refine the value range of a based on the computed value range
             # of tgt.  This is always OK to do, even if we decide not to do the
             # substitution in the end.  This might be a no-op, if a already has
@@ -4709,15 +4771,22 @@ class ShapeEnv:
             #  - the source bound non-trivially improves over what we get out of
             #    the existing bounds.
             #  - the replacement is univariate and we can invert the tgt expression
-            if not issubset(tgt_bound, src_bound) and len(tgt.free_symbols) == 1:
+            if not tgt_bound.issubset(src_bound) and len(tgt.free_symbols) == 1:
                 b = next(iter(tgt.free_symbols))
                 # Try to invert the equality
                 r = try_solve(sympy.Eq(a, tgt), b, floordiv_inequality=False)
                 if r is not None:
-                    b_bound = self.bound_sympy(r[1])
-                    self.var_to_range[b] = b_bound & self.var_to_range[b]
+                    self.log.debug("set_replacement: solve for %s in %s == %s gives %s", b, a, tgt, r)
+                    # The solution here can be non-integral, for example, if
+                    # we have s0 = 2*s1, then s1 = s0/2.  What we would like
+                    # to do is calculated the bounds in arbitrary precision,
+                    # and then requantize the bound to integers when we are
+                    # done.
+                    rat_b_bound = self.bound_sympy(r[1])
+                    b_bound = ValueRanges(CeilToInt(rat_b_bound.lower), FloorToInt(rat_b_bound.upper))
+                    self._update_var_to_range(b, b_bound)
                     tgt_bound = self.bound_sympy(tgt)
-                    assert issubset(tgt_bound, src_bound)
+                    assert tgt_bound.issubset(src_bound)
 
             # TODO: Should we propagate size-like-ness?
             #
@@ -4755,13 +4824,13 @@ class ShapeEnv:
             #  - If the variable is unbacked, only substitute if the substitution
             #    would preserve the bounds also under size-like-ness conditions.
 
-            if not issubset(tgt_bound, src_bound):
+            if not tgt_bound.issubset(src_bound):
                 self.log.debug("skipped set_replacement %s = %s (%s) [%s not subset of %s]", a, tgt, msg, tgt_bound, src_bound)
                 return
             elif a in self.size_like:
                 tgt_bound_so = self.bound_sympy(tgt, size_oblivious=True)
                 src_bound_so = self.bound_sympy(a, size_oblivious=True)
-                if not issubset(tgt_bound_so, src_bound_so):
+                if not tgt_bound_so.issubset(src_bound_so):
                     self.log.debug("skipped set_replacement %s = %s (%s) "
                                    "[%s not subset of %s (size-oblivious conditions)]", a, tgt, msg, tgt_bound_so, src_bound_so)
                     return
@@ -4846,6 +4915,7 @@ class ShapeEnv:
             has_only_ephemeral_sources = (
                 x in self.var_to_sources and all(s.is_ephemeral() for s in self.var_to_sources[x])
             )
+            # NB: size_hint is int, not sympy.Expr, do not use int_oo here
             size = self.size_hint(x, allow_none=True) or sys.maxsize
             name = x.name
             # 1 puts ephemeral sourced symbols first when sorting in reverse
@@ -4924,12 +4994,12 @@ class ShapeEnv:
                         ):
                             # We have Mod(i0, q / c) == 0, which means we can
                             # rewrite i0 as (q / gcd(q, c)) * i1
-                            d = q / sympy.gcd(q, c)
+                            d = q / sympy.gcd(q, c)  # TODO: CleanDiv?
                             i1 = self.create_unbacked_symint().node.expr
                             # Propagate the value ranges.  It doesn't really
                             # matter if we use truediv or floordiv, because we
                             # have established divisibility.
-                            self._update_var_to_range(i1, SymPyValueRangeAnalysis.truediv(
+                            self._update_var_to_range(i1, SymPyValueRangeAnalysis.floordiv(
                                 self.var_to_range[i0], ValueRanges.wrap(d)
                             ))
                             # Propagate size-like-ness
@@ -4942,15 +5012,12 @@ class ShapeEnv:
         return
 
     # See: Note - On 0/1 specialization
-    # NB: sys.maxsize is NOT allowed for sizes, because we use MAX_INT
-    # as a sentinel sometimes.  Your sizevar isn't going to be
-    # anywhere near the max 64-bit integer anyway.
     def _default_value_range(self) -> ValueRanges:
         lower = 2 if self.specialize_zero_one else 0
-        return ValueRanges(lower, sys.maxsize - 1)
+        return ValueRanges(lower, int_oo)
 
     def _default_unspecified_value_range(self) -> ValueRanges:
-        return ValueRanges(-sys.maxsize - 1, sys.maxsize)
+        return ValueRanges(-int_oo, int_oo)
 
     @_lru_cache
     def _simplify_floor_div(self, expr):
@@ -5366,7 +5433,6 @@ class ShapeEnv:
             lower, upper = vr.lower, vr.upper
 
             rhs_vr = bound_sympy(rhs, self.var_to_range)
-            _assert_bound_is_rational(rhs, rhs_vr)
 
             # Let's suppose that we have a preexisting range for x [0, 100].
             # Now, we issue a guard x > y, where the range for y is [50, 150].

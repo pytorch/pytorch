@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import collections
 import logging
 import operator
@@ -18,6 +19,7 @@ from typing import (
 import torch
 from torch._dynamo.utils import counters, optimus_scuba_log
 from torch._utils_internal import upload_graph
+from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 
 from .. import config
 from ..pattern_matcher import (
@@ -567,6 +569,22 @@ def is_node_meta_valid(node: Optional[torch.fx.Node]):
     return True
 
 
+# Poor person's check for if a node in the graph mutates its input.
+# (the graph is torch IR, so we will see torch fns and python operators)
+def _is_mutable_node(tgt):
+    if str(tgt).endswith("_"):
+        # e.g. torch.mul_, torch.Tensor.mul_
+        return True
+    if (
+        hasattr(tgt, "__module__")
+        and tgt.__module__ == "_operator"
+        and tgt.__name__.startswith("i")
+    ):
+        # e.g. operator.iand, operator.imul
+        return True
+    return False
+
+
 def is_linear_node_can_be_fused(node: torch.fx.Node):
     input = get_arg_value(node, 0, "input")
     weight = get_arg_value(node, 1, "weight")
@@ -576,6 +594,10 @@ def is_linear_node_can_be_fused(node: torch.fx.Node):
         and is_node_meta_valid(weight)
         and len(input.meta["example_value"].shape) == 2
         and len(weight.meta["example_value"].shape) == 2
+        # the mm -> bmm transform adds an unbind() op,
+        # which is not safe for autograd when the output of the mm is mutated.
+        # don't pattern match if any users of the mm mutate the input.
+        and not any(_is_mutable_node(user.target) for user in node.users)
     )
 
 
@@ -1241,5 +1263,10 @@ def group_batch_fusion_passes(graph: torch.fx.Graph, pre_grad=True):
         if has_fbgemm:
             fusions += generate_fusion_from_config(fbgemm_fusions, pre_grad=False)
 
-    for rule in fusions:
-        apply_group_batch_fusion(graph, rule)  # type: ignore[arg-type]
+    for i, rule in enumerate(fusions):
+        with GraphTransformObserver(
+            graph.owning_module,
+            f"group_batch_fusion_{i}",
+            config.trace.log_url_for_graph_xform,
+        ):
+            apply_group_batch_fusion(graph, rule)  # type: ignore[arg-type]

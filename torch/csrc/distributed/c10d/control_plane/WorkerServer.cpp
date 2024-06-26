@@ -6,6 +6,7 @@
 #include <unordered_map>
 
 #include <ATen/core/interned_strings.h>
+#include <c10/util/thread_name.h>
 #include <caffe2/utils/threadpool/WorkersPool.h>
 #include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
@@ -20,6 +21,10 @@ class RequestImpl : public Request {
 
   const std::string& body() override {
     return req_.body;
+  }
+
+  const std::multimap<std::string, std::string>& params() const override {
+    return req_.params;
   }
 
  private:
@@ -157,6 +162,8 @@ WorkerServer::WorkerServer(const std::string& hostOrFile, int port) {
   }
 
   serverThread_ = std::thread([this]() {
+    c10::setThreadName("pt_workerserver");
+
     try {
       if (!server_.listen_after_bind()) {
         throw std::runtime_error("failed to listen");

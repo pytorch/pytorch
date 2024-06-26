@@ -1042,10 +1042,10 @@ void InsertQuantDeQuantHelper::quantizeTensors(
       const auto& qparam = pr.second;
       size_t uid = 0;
       auto qparam_name =
-          original_value->debugName() + name + "_" + c10::to_string(uid++);
+          original_value->debugName() + name + "_" + std::to_string(uid++);
       while (module.hasattr(qparam_name)) {
         qparam_name =
-            original_value->debugName() + name + "_" + c10::to_string(uid++);
+            original_value->debugName() + name + "_" + std::to_string(uid++);
       }
       qparam_name_map_for_node_[n][name] = qparam_name;
       module.register_attribute(qparam_name, qparam.type(), qparam);

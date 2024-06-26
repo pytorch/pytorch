@@ -175,7 +175,7 @@ int Intrinsics::OpArgCount(IntrinsicsOp op_type) {
     case kRemainder:
       return 2;
     default:
-      throw std::runtime_error("invalid op_type: " + c10::to_string(op_type));
+      throw std::runtime_error("invalid op_type: " + std::to_string(op_type));
   }
 }
 

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import List, Optional, Type
 
 __all__ = ["SymDispatchMode", "handle_sym_dispatch", "sym_function_mode"]

@@ -13,19 +13,6 @@
   } else {                                                              \
   }
 
-#if IS_PYTHON_3_13_PLUS
-// Gave up after fixing a few of these
-// pycore_opcode.h is gone (new is pycore_opcode_metadata.h ?)
-// f_code is gone (new is f_executable?)
-
-// Fake definitions for what we removed
-const uint8_t* THP_PyOpcode_Caches = NULL;
-const int THP_PyOpcode_Caches_size = 0;
-
-#else
-
-// NOTE: all `assert`s below are converted to `CHECK`s
-
 #if IS_PYTHON_3_11_PLUS
 
 // Problem in CPython includes when mixing core and non-core build
@@ -37,16 +24,26 @@ const int THP_PyOpcode_Caches_size = 0;
 
 #define Py_BUILD_CORE
 #include <internal/pycore_pystate.h>
+
 #define NEED_OPCODE_TABLES // To get _PyOpcode_Deopt, _PyOpcode_Caches
+#if IS_PYTHON_3_13_PLUS
+#include <cpython/code.h> // To get PyUnstable_Code_GetFirstFree
+#define NEED_OPCODE_METADATA
+#include <internal/pycore_opcode_metadata.h>
+#undef NEED_OPCODE_METADATA
+#else
 #include <internal/pycore_opcode.h>
+#endif
 #undef NEED_OPCODE_TABLES
+
 #include <internal/pycore_frame.h>
+
 #undef Py_BUILD_CORE
 
 // As a simple way to reduce the impact of ABI changes on the CPython side, this check forces
 // us to manually re-check that the function didn't change on the next major version
-#if PY_VERSION_HEX >= 0x030D0000 // 3.13
-#error "Please ensure that the functions below still match the CPython implementation for 3.13"
+#if IS_PYTHON_3_14_PLUS
+#error "Please ensure that the functions below still match the CPython implementation for 3.14"
 #endif
 
 // https://github.com/python/cpython/blob/a7715ccfba5b86ab09f86ec56ac3755c93b46b48/Objects/frameobject.c#L1079
@@ -56,8 +53,8 @@ THP_PyFrame_OpAlreadyRan(_PyInterpreterFrame *frame, int opcode, int oparg)
     // This only works when opcode is a non-quickened form:
     CHECK(_PyOpcode_Deopt[opcode] == opcode);
     int check_oparg = 0;
-    for (_Py_CODEUNIT *instruction = _PyCode_CODE(frame->f_code);
-         instruction < frame->prev_instr; instruction++)
+    for (_Py_CODEUNIT *instruction = _PyCode_CODE(F_CODE(frame));
+         instruction < PREV_INSTR(frame) ; instruction++)
     {
         int check_opcode = _PyOpcode_Deopt[_Py_OPCODE(*instruction)];
         check_oparg |= _Py_OPARG(*instruction);
@@ -86,7 +83,7 @@ frame_init_get_vars(_PyInterpreterFrame *frame, int *free_vars_copied)
 {
     // COPY_FREE_VARS has no quickened forms, so no need to use _PyOpcode_Deopt
     // here:
-    PyCodeObject *co = frame->f_code;
+    PyCodeObject *co = F_CODE(frame);
     int lasti = _PyInterpreterFrame_LASTI(frame);
     if (!(lasti < 0 && _PyCode_CODE(co)->op.code == COPY_FREE_VARS
           && PyFunction_Check(frame->f_funcobj)))
@@ -97,13 +94,17 @@ frame_init_get_vars(_PyInterpreterFrame *frame, int *free_vars_copied)
 
     /* Free vars have not been initialized -- Do that */
     PyObject *closure = ((PyFunctionObject *)frame->f_funcobj)->func_closure;
+    #if IS_PYTHON_3_13_PLUS
+    int offset = PyUnstable_Code_GetFirstFree(co);
+    #else
     int offset = PyCode_GetFirstFree(co);
+    #endif
     for (int i = 0; i < co->co_nfreevars; ++i) {
         PyObject *o = PyTuple_GET_ITEM(closure, i);
         frame->localsplus[offset + i] = Py_NewRef(o);
     }
     // COPY_FREE_VARS doesn't have inline CACHEs, either:
-    frame->prev_instr = _PyCode_CODE(frame->f_code);
+    PREV_INSTR(frame) = _PyCode_CODE(F_CODE(frame));
 
     *free_vars_copied = 1;
 }
@@ -186,7 +187,7 @@ THP_PyFrame_GetLocals(_PyInterpreterFrame *frame, int include_hidden, int *free_
 
     frame_init_get_vars(frame, free_vars_copied);
 
-    PyCodeObject *co = frame->f_code;
+    PyCodeObject *co = F_CODE(frame);
     for (int i = 0; i < co->co_nlocalsplus; i++) {
         PyObject *value;  // borrowed reference
         if (!frame_get_var(frame, co, i, &value)) {
@@ -276,14 +277,14 @@ THP_PyFrame_FastToLocalsWithError(_PyInterpreterFrame *frame, int *free_vars_cop
         if (locals == NULL)
             return -1;
     }
-    co = frame->f_code;
+    co = F_CODE(frame);
     fast = _PyFrame_GetLocalsArray(frame);
     // COPY_FREE_VARS has no quickened forms, so no need to use _PyOpcode_Deopt
     // here:
     int lasti = _PyInterpreterFrame_LASTI(frame);
     if (lasti < 0 && _Py_OPCODE(_PyCode_CODE(co)[0]) == COPY_FREE_VARS) {
         /* Free vars have not been initialized -- Do that */
-        PyCodeObject *co = frame->f_code;
+        PyCodeObject *co = F_CODE(frame);
         PyObject *closure = frame->f_func->func_closure;
         int offset = co->co_nlocals + co->co_nplaincellvars;
         for (int i = 0; i < co->co_nfreevars; ++i) {
@@ -292,7 +293,7 @@ THP_PyFrame_FastToLocalsWithError(_PyInterpreterFrame *frame, int *free_vars_cop
             frame->localsplus[offset + i] = o;
         }
         // COPY_FREE_VARS doesn't have inline CACHEs, either:
-        frame->prev_instr = _PyCode_CODE(frame->f_code);
+        PREV_INSTR(frame) = _PyCode_CODE(F_CODE(frame));
 
         *free_vars_copied = 1;
     }
@@ -422,7 +423,11 @@ THP_PyFrame_New_NoTrack(const PyCodeObject *code)
     f->f_trace = NULL;
     f->f_trace_lines = 1;
     f->f_trace_opcodes = 0;
+#if IS_PYTHON_3_13_PLUS
+    f->f_extra_locals = NULL;
+#else
     f->f_fast_as_locals = 0;
+#endif
     f->f_lineno = 0;
     return f;
 }
@@ -435,7 +440,7 @@ THP_PyFrame_MakeAndSetFrameObject(_PyInterpreterFrame *frame)
     PyObject *error_type = NULL, *error_value = NULL, *error_traceback = NULL;
     PyErr_Fetch(&error_type, &error_value, &error_traceback);
 
-    PyFrameObject *f = THP_PyFrame_New_NoTrack(frame->f_code);
+    PyFrameObject *f = THP_PyFrame_New_NoTrack(F_CODE(frame));
     if (f == NULL) {
         Py_XDECREF(error_type);
         Py_XDECREF(error_value);
@@ -495,8 +500,8 @@ THP_take_ownership(PyFrameObject *f, _PyInterpreterFrame *frame)
     if (_PyFrame_IsIncomplete(frame)) {
         // This may be a newly-created generator or coroutine frame. Since it's
         // dead anyways, just pretend that the first RESUME ran:
-        PyCodeObject *code = frame->f_code;
-        frame->prev_instr = _PyCode_CODE(code) + code->_co_firsttraceable;
+        PyCodeObject *code = F_CODE(frame);
+        PREV_INSTR(frame) = _PyCode_CODE(code) + code->_co_firsttraceable;
     }
     CHECK(!_PyFrame_IsIncomplete(frame));
     CHECK(f->f_back == NULL);
@@ -534,7 +539,11 @@ THP_PyFrame_Clear(_PyInterpreterFrame *frame)
         _PyFrame_GetGenerator(frame)->gi_frame_state == FRAME_CLEARED);
     // GH-99729: Clearing this frame can expose the stack (via finalizers). It's
     // crucial that this frame has been unlinked, and is no longer visible:
+#if IS_PYTHON_3_13_PLUS
+    CHECK(_PyThreadState_GET()->current_frame != frame);
+#else
     CHECK(_PyThreadState_GET()->cframe->current_frame != frame);
+#endif
     if (frame->frame_obj) {
         PyFrameObject *f = frame->frame_obj;
         frame->frame_obj = NULL;
@@ -557,7 +566,7 @@ THP_PyFrame_Clear(_PyInterpreterFrame *frame)
     #else
     Py_DECREF(frame->f_func);
     #endif
-    Py_DECREF(frame->f_code);
+    Py_DECREF(F_CODE(frame));
 }
 
 // https://github.com/python/cpython/blob/fad48ea1816be3125ea51edcdfe2f999d6ade796/Objects/obmalloc.c#L635
@@ -688,5 +697,3 @@ const uint8_t* THP_PyOpcode_Caches = NULL;
 const int THP_PyOpcode_Caches_size = 0;
 
 #endif
-
-#endif // CPython 3.13

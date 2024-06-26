@@ -25,7 +25,6 @@
 
 #ifdef USE_C10D_NCCL
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupCudaP2P.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/intra_node_comm.hpp>
 #endif
@@ -41,6 +40,7 @@
 #include <fmt/format.h>
 #include <pybind11/chrono.h>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
+#include <torch/csrc/distributed/c10d/SymmetricMemory.hpp>
 
 #include <torch/csrc/distributed/c10d/comm.hpp>
 #include <torch/csrc/distributed/c10d/debug.h>
@@ -975,6 +975,44 @@ This class does not support ``__members__`` property.)");
           "global_ranks_in_group",
           &::c10d::DistributedBackendOptions::global_ranks_in_group);
 
+  using SymmetricMemory = ::c10d::symmetric_memory::SymmetricMemory;
+  py::class_<SymmetricMemory, c10::intrusive_ptr<SymmetricMemory>>(
+      module, "_SymmetricMemory")
+      .def_static("set_group_info", &::c10d::symmetric_memory::set_group_info)
+      .def_static(
+          "empty_strided_p2p",
+          ::c10d::symmetric_memory::empty_strided_p2p,
+          py::arg("size"),
+          py::arg("stride"),
+          py::arg("dtype"),
+          py::arg("device"),
+          py::arg("group_name"),
+          py::arg("alloc_id") = py::none())
+      .def_static("rendezvous", &::c10d::symmetric_memory::rendezvous)
+      .def_static(
+          "get_symmetric_memory",
+          &::c10d::symmetric_memory::get_symmetric_memory)
+      .def_property_readonly("rank", &SymmetricMemory::get_rank)
+      .def_property_readonly("world_size", &SymmetricMemory::get_world_size)
+      .def(
+          "get_buffer",
+          &SymmetricMemory::get_buffer,
+          py::arg("rank"),
+          py::arg("sizes"),
+          py::arg("dtype"),
+          py::arg("storage_offset") = 0)
+      .def("barrier", &SymmetricMemory::barrier, py::arg("channel") = 0)
+      .def(
+          "put_signal",
+          &SymmetricMemory::put_signal,
+          py::arg("dst_rank"),
+          py::arg("channel") = 0)
+      .def(
+          "wait_signal",
+          &SymmetricMemory::wait_signal,
+          py::arg("src_rank"),
+          py::arg("channel") = 0);
+
   auto store =
       py::class_<::c10d::Store, c10::intrusive_ptr<::c10d::Store>, PythonStore>(
           module,
@@ -1016,11 +1054,13 @@ Example::
                  const std::string& key,
                  const std::string& expected_value,
                  const std::string& desired_value) -> py::bytes {
-                auto value = store.compareSet(
-                    key, toVec8(expected_value), toVec8(desired_value));
+                auto value = [&]() {
+                  py::gil_scoped_release guard;
+                  return store.compareSet(
+                      key, toVec8(expected_value), toVec8(desired_value));
+                }();
                 return toPyBytes(value);
               },
-              py::call_guard<py::gil_scoped_release>(),
               R"(
 Inserts the key-value pair into the store based on the supplied ``key`` and
 performs comparison between ``expected_value`` and ``desired_value`` before inserting. ``desired_value``
@@ -2722,55 +2762,6 @@ Example::
           &::c10d::ProcessGroupNCCL::Options::global_ranks_in_group)
       .def_readwrite(
           "group_name", &::c10d::ProcessGroupNCCL::Options::group_name);
-
-  auto processGroupCudaP2P =
-      intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupCudaP2P>(
-          module, "ProcessGroupCudaP2P", backend)
-          .def(py::init<
-               const c10::intrusive_ptr<::c10d::Store>&,
-               int,
-               int,
-               c10::intrusive_ptr<::c10d::ProcessGroupCudaP2P::Options>>())
-          .def(
-              "is_p2p_available",
-              &::c10d::ProcessGroupCudaP2P::is_p2p_available)
-          .def("get_buffer_size", &::c10d::ProcessGroupCudaP2P::get_buffer_size)
-          .def("stream", &::c10d::ProcessGroupCudaP2P::stream)
-          .def(
-              "intra_node_barrier",
-              &::c10d::ProcessGroupCudaP2P::intra_node_barrier,
-              py::arg("ranks") = py::none())
-          .def(
-              "get_p2p_buffer",
-              [](c10::intrusive_ptr<::c10d::ProcessGroupCudaP2P> self,
-                 size_t rank,
-                 const std::vector<int64_t>& sizes,
-                 py::object data_type_obj,
-                 int64_t storage_offset) {
-                auto scalar_type =
-                    reinterpret_cast<THPDtype*>(data_type_obj.ptr())
-                        ->scalar_type;
-                return self->get_p2p_buffer(
-                    rank, sizes, scalar_type, storage_offset);
-              },
-              py::arg("rank"),
-              py::arg("sizes"),
-              py::arg("dtype"),
-              py::arg("storage_offset") = 0)
-          .def(
-              "_shutdown",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroupCudaP2P>& self) {
-                return self->shutdown();
-              });
-
-  intrusive_ptr_class_<::c10d::ProcessGroupCudaP2P::Options>(
-      processGroupCudaP2P, "Options", processGroupOptions)
-      .def(py::init<>())
-      .def_readwrite(
-          "nccl_options", &::c10d::ProcessGroupCudaP2P::Options::nccl_options)
-      .def_readwrite(
-          "buffer_size", &::c10d::ProcessGroupCudaP2P::Options::buffer_size);
-
 #endif
 
 #ifdef USE_C10D_MPI

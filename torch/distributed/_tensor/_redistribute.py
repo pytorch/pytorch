@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from functools import lru_cache
 from typing import cast, Dict, List, NamedTuple, Tuple

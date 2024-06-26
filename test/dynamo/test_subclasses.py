@@ -334,6 +334,41 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             res = fn(input)
             self.assertIsInstance(res, BadNewTorchFunction)
 
+    def test_no_torch_function_recompiles(self):
+        class NJT:
+            def __repr__(self):
+                return f"NJT(shape={self.shape})"
+
+            def __init__(self, values, offsets):
+                self._values = values
+                self._offsets = offsets
+
+            def sin(self):
+                return torch.sin(self)
+
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                if func == torch.sin:
+                    self = args[0]
+                    return NJT(func(self._values), self._offsets)
+                raise AssertionError("should not get here")
+
+        values1 = torch.randn(10, 3, 4, requires_grad=True)
+        values2 = torch.randn(10, 3, 4, requires_grad=True)
+        offsets = torch.tensor([0, 3, 10])
+        njt1 = NJT(values1, offsets)
+        njt2 = NJT(values2, offsets)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            return torch.sin(x)
+
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            f(njt1)
+            f(njt2)
+
     def test_base_torch_function_tracing(self):
         def fn(x):
             return torch.add(x, 1)
@@ -1383,14 +1418,16 @@ class GraphModule(torch.nn.Module):
 
     @parametrize("dynamic", [False, True])
     def test_subclass_views(self, dynamic):
-        def _get_views(t):
+        def _get_views(t):  # returns (view: Tensor, expects_raises_false)
             # Note that any closed-over SymInts will be symbolicized during fake-ification.
-            yield t.narrow(dim=-1, start=3, length=8)
-            yield t.split(5, -1)
-            yield t.split_with_sizes([9, 6], -1)
-            yield t.unsqueeze(-1).expand(4, 15, 10)
-            yield t.select(-1, 6)
-            yield t[2:3, 5:9]
+            yield t.narrow(dim=-1, start=3, length=8), False
+            yield t.split(5, -1)[2], False
+            yield t.split_with_sizes([9, 6], -1)[1], False
+            yield t.unsqueeze(-1).expand(4, 15, 10), False
+            yield t.select(-1, 6), False
+            # https://github.com/pytorch/pytorch/issues/128649
+            yield t[2:3, 5:9], dynamic
+            yield t.view(-1, 15), False
 
         def f(x):
             return x * 2
@@ -1401,10 +1438,15 @@ class GraphModule(torch.nn.Module):
 
         # Take a view of a subclass to pass as input.
         t = TwoTensor(torch.randn(4, 15), torch.randn(4, 15))
-        for view in _get_views(t):
+        for view, expects_raises in _get_views(t):
+            torch._dynamo.reset()
             out_ref = f(view)
-            out_test = compiled_f(view)
-            self.assertEqual(out_ref, out_test)
+            if expects_raises:
+                with self.assertRaises(AssertionError):
+                    out_test = compiled_f(view)
+            else:
+                out_test = compiled_f(view)
+                self.assertEqual(out_ref, out_test)
 
 
 instantiate_parametrized_tests(SubclassTests)
@@ -1566,6 +1608,25 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
 
         torch.compile(fn, fullgraph=True, backend="aot_eager")(nt)
 
+    # The test here: nn.Parameters that are secretly subclasses
+    # have a metaclass that overrides __isinstance__,
+    # that dynamo needs to respect when it inlines the if statement.
+    def test_param_subclass_isinstance_input(self):
+        x_inner = torch.randn(16, 16, requires_grad=True)
+        x = torch.nn.Parameter(TwoTensor(x_inner, x_inner))
+        m = torch.nn.Linear(16, 16)
+        m.weight = x
+
+        def fn():
+            if isinstance(m.weight, torch.nn.Parameter):
+                return m.weight + 1
+            else:
+                return m.weight + 2
+
+        out_ref = fn()
+        out_test = torch.compile(fn, backend="aot_eager")()
+        self.assertEqual(out_ref, out_test)
+
     def _input_view_test(self, nt_view_name):
         nt_view = VIEW_TEST_CASES[nt_view_name]()
 
@@ -1609,15 +1670,15 @@ Eq(s10, s8)""",
                     guard_str,
                     """\
 Eq(s3 - 1, s0)
-Eq(zf1, zf4)""",
+Eq(zf1, zf6)""",
                 )
             else:
                 self.assertExpectedInline(
                     guard_str,
                     """\
 Eq(s4 - 1, s1)
-Eq(s10 - 1, s5)
-Eq(s9, s7)""",
+Eq(s12 - 1, s7)
+Eq(s11, s9)""",
                 )
             return gm
 

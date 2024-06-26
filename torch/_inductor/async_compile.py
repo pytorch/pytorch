@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import functools
@@ -20,6 +21,7 @@ from torch._inductor.codecache import (
     CUDACodeCache,
     HalideCodeCache,
     LambdaFuture,
+    ROCmCodeCache,
     TritonCodeCache,
     TritonFuture,
 )
@@ -211,6 +213,14 @@ class AsyncCompile:
 
         def task():
             return CUDACodeCache.load(source_code, dst_file_ext)[0]
+
+        return self.submit(task)
+
+    def rocm(self, source_code, dst_file_ext):
+        kernel_code_log.info("ROCm Kernel:\n%s", source_code)
+
+        def task():
+            return ROCmCodeCache.load(source_code, dst_file_ext)[0]
 
         return self.submit(task)
 

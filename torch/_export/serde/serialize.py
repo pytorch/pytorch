@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import base64
 import copy
 import copyreg
@@ -26,8 +27,8 @@ from typing import (
     Optional,
     Set,
     Tuple,
-    Union,
     Type,
+    Union,
 )
 
 import sympy
@@ -36,11 +37,13 @@ import torch
 import torch.export.exported_program as ep
 from torch._export.serde.schema import SchemaVersion
 from torch._export.verifier import load_verifier
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental import symbolic_shapes
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import treespec_dumps, treespec_loads
 from torch.utils._sympy.value_ranges import ValueRanges
+from torch.utils._sympy.numbers import int_oo
 
 from .schema import (  # type: ignore[attr-defined]
     Argument,
@@ -170,6 +173,7 @@ _SYM_INT_OPS = {
     operator.floordiv,
     operator.mod,
     torch.sym_int,
+    torch.sym_float,
     torch.sym_ite,
     torch.sym_max,
     torch.sym_min,
@@ -319,9 +323,9 @@ def deserialize_torch_artifact(serialized: Union[Dict[str, Any], Tuple[Any, ...]
 
 def _sympy_int_to_int(val: sympy.Expr, adjust: str):
     # Convert simple sympy Integers into concrete int
-    if val == sympy.oo:
+    if val in (sympy.oo, int_oo):
         return math.inf
-    if val == -sympy.oo:
+    if val in (-sympy.oo, -int_oo):
         return -math.inf
     if isinstance(val, sympy.Integer):
         return int(val)
@@ -344,9 +348,9 @@ def _sympy_int_to_int(val: sympy.Expr, adjust: str):
 def _int_to_sympy_int(val) -> sympy.Expr:
     # Convert concrete int into simple sympy Integers
     if val == math.inf:
-        return sympy.oo
+        return int_oo
     if val == -math.inf:
-        return -sympy.oo
+        return -int_oo
     return sympy.Integer(val)
 
 
@@ -895,7 +899,7 @@ class GraphModuleSerializer(metaclass=Final):
             return Argument.create(
                 as_custom_obj=CustomObjArgument(custom_obj_name, class_fqn)
             )
-        elif isinstance(arg, torch._ops.OpOverload):
+        elif isinstance(arg, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)):
             return Argument.create(as_operator=self.serialize_operator(arg))
         else:
             raise SerializeError(f"Unsupported argument type: {type(arg)}")
@@ -1403,7 +1407,7 @@ class GraphModuleDeserializer(metaclass=Final):
         module_call_graph: List[ep.ModuleCallEntry]
         names_to_symbols: Dict[str, sympy.Symbol]
         state_dict: Dict[str, Union[torch.Tensor, torch.nn.Parameter]]
-        constants: Dict[str, Union[torch.Tensor, torch.ScriptObject]]
+        constants: Dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]]
         example_inputs: Optional[Tuple[Tuple[torch.Tensor, ...], Dict[str, Any]]]
 
     def __init__(self):
@@ -1474,10 +1478,15 @@ class GraphModuleDeserializer(metaclass=Final):
                 # Here we force symbols corresponding to SymInts to be at least integers.
                 # Otherwise some expressions that the shape env would otherwise evaluate to False,
                 # e.g., 2*s = 9, can have rational solutions, e.g., 9/2.
+                # TODO: This is HIGHLY SUSPICIOUS ezyang(May 2024)
                 sym = sym.subs(
                     {s: sympy.Symbol(s.name, integer=True) for s in sym.free_symbols}
                 )
-                if isinstance(sym, sympy.Symbol):
+                # We need to check if the symbol has already been allocated,
+                # self.symbol_name_to_symbol is not enough because the
+                # integer-ification of symbols can induce simplification;
+                # e.g., (2**s0 + 1) // 2  -->  s0 when we know s0 is integral
+                if isinstance(sym, sympy.Symbol) and sym not in self.shape_env.var_to_val:
                     self.symbol_name_to_symbol[val.expr_str] = sym
                     if hint is not None:
                         self.shape_env.add_var_to_val(sym, hint)
@@ -1496,7 +1505,7 @@ class GraphModuleDeserializer(metaclass=Final):
                     free_symbols = sym.free_symbols
                     for s in free_symbols:
                         if s.name not in self.symbol_name_to_symbol:
-                            self.symbol_name_to_symbol[s.name] = s
+                            self.symbol_name_to_symbol[s.name] = s  # type: ignore[assignment]
                         if vr := self.symbol_name_to_range.get(s.name):
                             self.shape_env.constrain_symbol_range(
                                 s,
@@ -1819,7 +1828,7 @@ class GraphModuleDeserializer(metaclass=Final):
             self.symbol_name_to_range = {}
             if symbol_name_to_range:
                 for k, vr in symbol_name_to_range.items():
-                    lower = int(vr.lower)
+                    lower = vr.lower
                     if vr.upper >= 2:  # max is >= 2, not sym bool range
                         lower = max(2, lower)
                     self.symbol_name_to_range[k] = symbolic_shapes.ValueRanges(_int_to_sympy_int(lower), vr.upper)
@@ -2239,7 +2248,6 @@ class ExportedProgramDeserializer(metaclass=Final):
             symbol_name_to_range,
             res.names_to_symbols,
         )
-        model_opset_version: Optional[Dict[str, int]] = exported_program.opset_version
 
         return ep.ExportedProgram(
             root=res.graph_module,
@@ -2608,7 +2616,7 @@ def _canonicalize_graph(
         for i in node.inputs:
             a = i.arg
             if a.type == "as_graph":
-                a.as_graph.graph = _canonicalize_graph(
+                a.as_graph.graph, _ = _canonicalize_graph(
                     a.as_graph.graph.inputs, a.as_graph.graph.outputs, a.as_graph.graph
                 )
                 a.as_graph.name = f"_g{counter}"

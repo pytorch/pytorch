@@ -3,7 +3,7 @@
 import unittest
 from itertools import product
 from functools import partial
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
 
@@ -204,7 +204,6 @@ class TestMatmulCuda(TestCase):
         self.assertEqual(out1_gpu, out2_gpu[0])
 
 
-
 f8_msg = "FP8 is only supported on H100+ and sm_89 and MI300+ devices"
 
 if torch.version.hip:
@@ -256,17 +255,21 @@ def amax_to_scale(
     scale.copy_(res)
     return scale
 
-def tensor_to_scale(x: torch.Tensor, float8_dtype: torch.dtype):
-    amax = torch.max(torch.abs(x))
+def tensor_to_scale(x: torch.Tensor, float8_dtype: torch.dtype, dim=None):
+    if dim is None:
+        amax = torch.max(torch.abs(x))
+    else:
+        amax = torch.max(torch.abs(x), dim=dim).values
+
     return amax_to_scale(amax, float8_dtype, x.dtype)
 
-def mm_float8_emulated(x, x_scale, y, y_scale, out_dtype):
+def mm_float8_emulated(x, x_scale, y, y_scale, out_dtype) -> torch.Tensor:
     # naive implementation: dq -> op -> q
     x_fp32 = x.to(torch.float) / x_scale
     y_fp32 = y.to(torch.float) / y_scale
     out_fp32 = torch.mm(x_fp32, y_fp32)
 
-    return out_fp32.to(out_dtype), torch.max(torch.abs(out_fp32))
+    return out_fp32.to(out_dtype)
 
 def addmm_float8_unwrapped(
     a_data: torch.Tensor,
@@ -276,31 +279,31 @@ def addmm_float8_unwrapped(
     output_dtype: torch.dtype,
     output_scale: Optional[torch.Tensor],
     bias: Optional[torch.Tensor] = None,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> torch.Tensor:
     a_inverse_scale = a_scale.reciprocal()
     b_inverse_scale = b_scale.reciprocal()
     if output_dtype == torch.float32 and bias is not None:
         # Bias is not supported by _scaled_mm when output is fp32
-        output, output_amax = torch._scaled_mm(
+        output = torch._scaled_mm(
             a_data,
             b_data,
-            out_dtype=output_dtype,
             scale_a=a_inverse_scale,
             scale_b=b_inverse_scale,
             scale_result=output_scale,
+            out_dtype=output_dtype,
         )
         output += bias
-        return output, output_amax
-    output, output_amax = torch._scaled_mm(
+        return output
+    output = torch._scaled_mm(
         a_data,
         b_data,
         bias=bias,
-        out_dtype=output_dtype,
         scale_a=a_inverse_scale,
         scale_b=b_inverse_scale,
         scale_result=output_scale,
+        out_dtype=output_dtype,
     )
-    return output, output_amax
+    return output
 
 def mm_float8(
     a: torch.Tensor,
@@ -309,38 +312,15 @@ def mm_float8(
     b_scale: torch.Tensor,
     output_dtype: torch.dtype,  # output dtype
     output_scale: Optional[torch.Tensor] = None,  # output scale, precomputed
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> torch.Tensor:
     return addmm_float8_unwrapped(
         a, a_scale, b, b_scale, output_dtype, output_scale
     )
 
 def to_fp8_saturated(
     x: torch.Tensor,
-    x_scale: torch.tensor,
     fp8_dtype: torch.dtype
 ):
-    """
-    Converts a tensor to a saturated fp8 tensor.
-
-    Args:
-        a: Input Tensor.
-        b: Input Tensor.
-        a_scale: scale associated with `a`.
-        b_scale: scale associated with `b`.
-        output_dtype: dtype of result.
-        output_scale: the output tensor's scale, precomputed.
-
-    Returns:
-        (torch.Tensor, torch.Tensor): (result of the matrix multiplication, associated amax)
-    Note:
-        The default behavior in PyTorch for casting to `e4m3_type`
-        and `e5m2_type` is to not saturate. In this context, we should
-        saturate. A common case where we want to saturate is when the history
-        of a tensor has a maximum value of `amax1`, and the current amax value
-        is `amax2`, where `amax1 < amax2`.
-    """
-    x_scaled = x * x_scale
-
     if fp8_dtype == e4m3_type:
         x = x.clamp(min=-1 * E4M3_MAX_POS, max=E4M3_MAX_POS)
     elif fp8_dtype == e5m2_type:
@@ -353,8 +333,6 @@ def to_fp8_saturated(
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA not found")
 class TestFP8MatmulCuda(TestCase):
 
-
-
     @unittest.skipIf(not scaled_mm_supported_device(), f8_msg)
     def _test_tautological_mm(self, device: str = "cuda",
                               x_dtype: torch.dtype = e4m3_type,
@@ -364,11 +342,11 @@ class TestFP8MatmulCuda(TestCase):
         x_fp8 = torch.rand(size, size, device=device).to(x_dtype)
         y_fp8 = torch.eye(size, device=device, dtype=y_dtype).t()
         out_fp32 = torch.mm(x_fp8.to(torch.float), y_fp8.to(torch.float))
-        (out_fp8, amax_fp8) = torch._scaled_mm(x_fp8, y_fp8, out_dtype=out_dtype)
+        scale_a = torch.tensor(1.0, device=device)
+        scale_b = torch.tensor(1.0, device=device)
+        out_fp8 = torch._scaled_mm(x_fp8, y_fp8, scale_a, scale_b, out_dtype=out_dtype)
         if out_dtype is not None:
             self.assertEqual(out_dtype, out_fp8.dtype)
-        if out_dtype not in [torch.float16, torch.bfloat16, torch.float]:
-            self.assertEqual(out_fp32.amax(), amax_fp8)
         self.assertEqual(out_fp32, out_fp8.to(torch.float))
 
     @unittest.skipIf(not scaled_mm_supported_device(), f8_msg)
@@ -399,9 +377,9 @@ class TestFP8MatmulCuda(TestCase):
         y = torch.full(size, .5, device=device, dtype=y_type).t()
         scale_a = torch.tensor(1.5, device=device)
         scale_b = torch.tensor(0.66, device=device)
-        out_fp8, amax_fp8 = torch._scaled_mm(x, y)
+        out_fp8 = torch._scaled_mm(x, y, scale_a=scale_a, scale_b=scale_b)
         self.assertEqual(out_fp8.to(torch.float), torch.full(size, 4., device=device))
-        out_fp8_s, amax_fp8_s = torch._scaled_mm(x, y, scale_a=scale_a, scale_b=scale_b)
+        out_fp8_s = torch._scaled_mm(x, y, scale_a=scale_a, scale_b=scale_b)
         self.assertEqual(out_fp8, out_fp8_s)
 
     @unittest.skipIf(not scaled_mm_supported_device(), f8_msg)
@@ -418,11 +396,11 @@ class TestFP8MatmulCuda(TestCase):
         x_scale = tensor_to_scale(x, input_dtype).float()
         y_scale = tensor_to_scale(y, input_dtype).float()
 
-        x_fp8 = to_fp8_saturated(x, x_scale, e4m3_type)
-        y_fp8 = to_fp8_saturated(y, y_scale, e4m3_type)
+        x_fp8 = to_fp8_saturated(x * x_scale, input_dtype)
+        y_fp8 = to_fp8_saturated(y * y_scale, input_dtype)
 
         # Calculate actual F8 mm
-        out_scaled_mm, output_amax_scaled = mm_float8(
+        out_scaled_mm = mm_float8(
             x_fp8,
             y_fp8,
             a_scale=x_scale,
@@ -431,7 +409,7 @@ class TestFP8MatmulCuda(TestCase):
         )
 
         # Calculate emulated F8 mm
-        out_emulated, output_amax_emulated = mm_float8_emulated(
+        out_emulated = mm_float8_emulated(
             x_fp8,
             x_scale,
             y_fp8,
@@ -441,43 +419,45 @@ class TestFP8MatmulCuda(TestCase):
 
         if output_dtype != base_dtype:
             out_scaled_mm = out_scaled_mm.to(compare_type)
-            out_emulated = out_emulated.to(compare_type)
+            out_scaled_mm = out_scaled_mm / tensor_to_scale(out_scaled_mm, input_dtype)
 
-            out_scaled_mm = out_scaled_mm / amax_to_scale(
-                output_amax_scaled, input_dtype
-            )
-            out_emulated = out_emulated / amax_to_scale(
-                output_amax_emulated, input_dtype
-            )
+            out_emulated = out_emulated.to(compare_type)
+            out_emulated = out_emulated / tensor_to_scale(out_emulated, input_dtype)
 
         if base_dtype in {torch.bfloat16, torch.float16}:
             atol, rtol = 7e-2, 7e-2
         else:
-            atol, rtol = 2e-3, 2e-3
+            atol, rtol = 3e-3, 3e-3
 
         torch.testing.assert_close(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
 
     @unittest.skipIf(not scaled_mm_supported_device(), f8_msg)
     def test_float8_bias(self, device) -> None:
         (k, l, m) = (16, 48, 32)
-        x = torch.rand((k, l), device=device).to(e4m3_type)
+        x = torch.ones((k, l), device=device).to(e4m3_type)
         y = torch.full((m, l), .25, device=device, dtype=e4m3_type).t()
         bias = torch.full((m,), 4.0, device=device, dtype=torch.half)
-        out_fp8, amax_fp8 = torch._scaled_mm(x, y)
-        outb_fp8, amaxb_fp8 = torch._scaled_mm(x, y, bias=bias)
+        scale_a = torch.tensor(1.0, device=device)
+        scale_b = torch.tensor(1.0, device=device)
+        out_fp8 = torch._scaled_mm(x, y, scale_a=scale_a, scale_b=scale_b)
+        outb_fp8 = torch._scaled_mm(x, y, scale_a=scale_a, scale_b=scale_b, bias=bias)
         # this fails on ROCm currently because hipblaslt doesn't have amax op
-        if torch.version.hip is None:
-            self.assertEqual((amaxb_fp8 - amax_fp8).item(), 4.0)
+        out_fp32 = out_fp8.to(torch.float32)
+        outb_fp32 = outb_fp8.to(torch.float32)
+        difference = torch.abs(out_fp32 - outb_fp32)
+        self.assertEqual(difference, torch.tensor(4.0, device=device).expand_as(out_fp32))
 
     @unittest.skipIf(not scaled_mm_supported_device(), f8_msg)
     @parametrize("bias", [True, False])
-    def test_non_divisible_leading_dim(self, device, bias: torch.bool) -> None:
+    def test_non_divisible_leading_dim(self, device, bias: bool) -> None:
         x = torch.rand((17, 16), device=device).to(e4m3_type)
         y = torch.rand((16, 16), device=device).to(e4m3_type).t()
+        scale_a = torch.tensor(1.0, device=device)
+        scale_b = torch.tensor(1.0, device=device)
         input_bias = None
         if bias:
             input_bias = torch.rand((16,), device=device).to(torch.half)
-        out_fp8, amax_fp8 = torch._scaled_mm(x, y, bias=input_bias)
+        _ = torch._scaled_mm(x, y, scale_a, scale_b, bias=input_bias)
 
     @unittest.skipIf(not scaled_mm_supported_device(), f8_msg)
     def test_float8_bias_relu_edgecase(self, device) -> None:
@@ -485,19 +465,24 @@ class TestFP8MatmulCuda(TestCase):
         x = torch.full((k, l), 0.0, device=device).to(e4m3_type)
         y = torch.full((m, l), 1.0, device=device, dtype=e4m3_type).t()
         bias = torch.full((m,), -3.0, device=device, dtype=torch.half)
-        outb_fp8, amaxb_fp8 = torch._scaled_mm(x, y, bias=bias)
-        self.assertEqual(amaxb_fp8.item(), 3.0)
+        scale_a = torch.tensor(1.0, device=device)
+        scale_b = torch.tensor(1.0, device=device)
+        outb_fp8 = torch._scaled_mm(x, y, scale_a, scale_b, bias=bias)
+        outb_fp32 = outb_fp8.to(torch.float32)
+        self.assertEqual(outb_fp32, torch.tensor(-3.0, device=device).expand_as(outb_fp32))
 
     @unittest.skipIf(not scaled_mm_supported_device(), f8_msg)
     def test_float32_output_errors_with_bias(self, device) -> None:
         (k, l, m) = (16, 48, 32)
         x = torch.rand((k, l), device=device).to(e4m3_type)
         y = torch.full((m, l), .25, device=device, dtype=e4m3_type).t()
+        scale_a = torch.tensor(1.0, device=device)
+        scale_b = torch.tensor(1.0, device=device)
         bias = torch.full((m,), 4.0, device=device, dtype=torch.bfloat16)
         self.assertRaisesRegex(
             RuntimeError,
             "Bias is not supported when out_dtype is set to Float32",
-            lambda: torch._scaled_mm(x, y, bias=bias, out_dtype=torch.float32),
+            lambda: torch._scaled_mm(x, y, scale_a, scale_b, bias=bias, out_dtype=torch.float32),
         )
 
     @unittest.skipIf(scaled_mm_supported_device(),
@@ -506,10 +491,12 @@ class TestFP8MatmulCuda(TestCase):
         (k, l, m) = (16, 48, 32)
         x = torch.rand((k, l), device=device).to(e4m3_type)
         y = torch.rand((m, l), device=device).to(e4m3_type).t()
+        scale_a = torch.tensor(1.0, device=device)
+        scale_b = torch.tensor(1.0, device=device)
         self.assertRaisesRegex(
             RuntimeError,
             r"torch\.\_scaled\_mm is only supported on CUDA devices with compute capability \>\= 9\.0 or 8\.9, or ROCm MI300\+",
-            lambda: torch._scaled_mm(x, y, out_dtype=torch.float32),
+            lambda: torch._scaled_mm(x, y, scale_a, scale_b, out_dtype=torch.float32),
         )
 
     @unittest.skipIf(not scaled_mm_supported_device(), f8_msg)
@@ -521,10 +508,141 @@ class TestFP8MatmulCuda(TestCase):
         y = torch.full(size, .5, device=device, dtype=y_type).t()
         scale_a = torch.tensor(1.5, device=device)
         scale_b = torch.tensor(0.66, device=device)
-        out_fp8, amax_fp8 = torch._scaled_mm(x, y, use_fast_accum=True)
+        out_fp8 = torch._scaled_mm(x, y, scale_a, scale_b, use_fast_accum=True)
         self.assertEqual(out_fp8.to(torch.float), torch.full(size, 4., device=device))
-        out_fp8_s, amax_fp8_s = torch._scaled_mm(x, y, scale_a=scale_a, scale_b=scale_b, use_fast_accum=True)
+        out_fp8_s = torch._scaled_mm(x, y, scale_a=scale_a, scale_b=scale_b, use_fast_accum=True)
         self.assertEqual(out_fp8, out_fp8_s)
+
+    @unittest.skipIf(not scaled_mm_supported_device() or IS_WINDOWS, f8_msg)
+    @skipIfRocm()
+    @parametrize("use_fast_accum", [True, False])
+    def test_float8_rowwise_scaling_sanity(self, device, use_fast_accum: bool) -> None:
+        M, K, N = (1024, 512, 2048)
+        fill_value = 0.5
+        x = torch.full((M, K), fill_value, device=device)
+        y = torch.full((N, K), fill_value, device=device)
+
+        x_scales = torch.ones(x.shape[0], device=device, dtype=torch.float32)
+        y_scales = torch.ones(y.shape[0], device=device, dtype=torch.float32)
+
+        x_fp8 = x.to(torch.float8_e4m3fn)
+        y_fp8 = y.to(torch.float8_e4m3fn).t()
+
+        out_fp8 = torch._scaled_mm(
+            x_fp8,
+            y_fp8,
+            scale_a=x_scales,
+            scale_b=y_scales,
+            out_dtype=torch.bfloat16,
+            use_fast_accum=use_fast_accum,
+        )
+        self.assertEqual(
+            out_fp8.to(torch.float32), torch.full((M, N), K * (fill_value**2), device=device)
+        )
+
+    @unittest.skipIf(not scaled_mm_supported_device() or IS_WINDOWS, f8_msg)
+    @skipIfRocm()
+    def test_float8_error_messages(self, device) -> None:
+        M, K, N = (1024, 512, 2048)
+        fill_value = 0.5
+        x = torch.full((M, K), fill_value, device=device)
+        y = torch.full((N, K), fill_value, device=device)
+
+        x_fp8 = x.to(torch.float8_e4m3fn)
+        y_fp8 = y.to(torch.float8_e4m3fn).t()
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "For row-wise scaling, scale_a must be size 1024 but got 1 and scale_b must be size 2048 but got 2",
+        ):
+            torch._scaled_mm(
+                x_fp8,
+                y_fp8,
+                scale_a=torch.ones((), device="cuda"),
+                scale_b=torch.ones((2), device="cuda"),
+                out_dtype=torch.bfloat16,
+            )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "For row-wise scaling, scale_b must have size 2048 but got 2049.",
+        ):
+            torch._scaled_mm(
+                x_fp8,
+                y_fp8,
+                scale_a=torch.ones((M), device="cuda"),
+                scale_b=torch.ones((N + 1), device="cuda"),
+                out_dtype=torch.bfloat16,
+            )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Both scale_a and scale_b must be 1-dimensional tensors",
+        ):
+            torch._scaled_mm(
+                x_fp8,
+                y_fp8,
+                scale_a=torch.ones((M), device="cuda"),
+                scale_b=torch.ones((N, N), device="cuda"),
+                out_dtype=torch.bfloat16,
+            )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Both scale_a and scale_b must be contiguous.",
+        ):
+            torch._scaled_mm(
+                x_fp8,
+                y_fp8,
+                scale_a=torch.ones((M), device="cuda"),
+                scale_b=torch.ones((N * 2), device="cuda")[::2],
+                out_dtype=torch.bfloat16,
+            )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "For row-wise scaling the second input is required to be a float8_e4m3fn dtype.",
+        ):
+            torch._scaled_mm(
+                x_fp8,
+                y_fp8.to(torch.float8_e5m2),
+                scale_a=torch.ones((M), device="cuda"),
+                scale_b=torch.ones((N), device="cuda"),
+                out_dtype=torch.bfloat16,
+            )
+
+    @unittest.skipIf(not scaled_mm_supported_device() or IS_WINDOWS, f8_msg)
+    @skipIfRocm()
+    @parametrize("base_dtype", [torch.bfloat16])
+    def test_scaled_mm_vs_emulated_row_wise(self, base_dtype):
+        torch.manual_seed(42)
+        input_dtype = e4m3_type
+        output_dtype = base_dtype
+
+        x = torch.randn(16, 16, device="cuda", dtype=base_dtype)
+        y = torch.randn(32, 16, device="cuda", dtype=base_dtype).t()
+
+        x_scales = tensor_to_scale(x, input_dtype, dim=1).float()
+        y_scales = tensor_to_scale(y, input_dtype, dim=0).float()
+
+        x_fp8 = to_fp8_saturated(x * x_scales[:, None], e4m3_type)
+        y_fp8 = to_fp8_saturated(y * y_scales[None, :], e4m3_type)
+
+        # Calculate actual F8 mm
+        out_scaled_mm = mm_float8(
+            x_fp8, y_fp8, a_scale=x_scales, b_scale=y_scales, output_dtype=output_dtype
+        )
+
+        # Calculate emulated F8 mm
+        out_emulated = mm_float8_emulated(
+            x_fp8, x_scales[:, None], y_fp8, y_scales[None, :], output_dtype
+        )
+
+        if base_dtype in {torch.bfloat16, torch.float16}:
+            atol, rtol = 7e-2, 7e-2
+        else:
+            atol, rtol = 2e-3, 2e-3
+
+        torch.testing.assert_close(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
 
 
 @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
