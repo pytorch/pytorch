@@ -724,7 +724,7 @@ def max_pool2d_with_indices(
     if padding == 0:
         padding = [0, 0]
 
-    if stride is None:
+    if not stride:
         stride = kernel_size
 
     kernel_size = pad_listlike(kernel_size, 2)

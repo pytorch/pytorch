@@ -5,6 +5,7 @@ import torch._dynamo.compiled_autograd as ca
 import torch.distributed as dist
 from torch.distributed._tensor import DTensor
 from torch.distributed.distributed_c10d import ReduceOp
+
 from ._fsdp_common import (
     _get_dim0_padded_size,
     _raise_assert_with_print,
@@ -99,6 +100,20 @@ def split_with_sizes_copy(
 ) -> None:
     torch.split_with_sizes_copy(
         all_gather_output, all_gather_input_split_sizes, dim=dim, out=out
+    )
+
+
+@torch.library.impl(lib, "split_with_sizes_copy", "Functionalize")
+def split_with_sizes_copy_functionalize(
+    all_gather_output: torch.Tensor,
+    all_gather_input_split_sizes: List[int],
+    dim: int,
+    out: List[torch.Tensor],
+) -> None:
+    ag_output_elem = torch._from_functional_tensor(all_gather_output)
+    out_elem = [torch._from_functional_tensor(x) for x in out]
+    torch.split_with_sizes_copy(
+        ag_output_elem, all_gather_input_split_sizes, dim=dim, out=out_elem
     )
 
 
