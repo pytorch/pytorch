@@ -896,15 +896,15 @@ Tensor _nested_strided_to_jagged(const Tensor& self) {
   auto ragged_offsets_sizes = ragged_offsets.sizes();
   auto metadata_tensor_options = self_ptr->get_buffer().options().dtype(kLong).device(at::kCPU);
   auto jagged_offsets = at::empty({ragged_offsets_sizes[0]+1}, metadata_tensor_options);
-  long* jagged_offsets_ptr = jagged_offsets.mutable_data_ptr<long>();
+  int64_t* jagged_offsets_ptr = jagged_offsets.mutable_data_ptr<int64_t>();
   auto jagged_lengths = at::empty({ragged_offsets_sizes[0]}, metadata_tensor_options);
-  long* jagged_lengths_ptr = jagged_lengths.mutable_data_ptr<long>();
+  int64_t* jagged_lengths_ptr = jagged_lengths.mutable_data_ptr<int64_t>();
   bool lengths_needed = false;
   int64_t ragged_sizes_stride_0 = ragged_sizes.stride(0);
   int64_t num_offsets = ragged_offsets.size(0);
   for (int64_t i : c10::irange(num_offsets)) {
-    jagged_offsets_ptr[i] = long(ragged_offsets_ptr[i] / post_ragged_stride);
-    jagged_lengths_ptr[i] = long(ragged_sizes_ptr[i * ragged_sizes_stride_0 + (ragged_idx-1)]);
+    jagged_offsets_ptr[i] = int64_t(ragged_offsets_ptr[i] / post_ragged_stride);
+    jagged_lengths_ptr[i] = int64_t(ragged_sizes_ptr[i * ragged_sizes_stride_0 + (ragged_idx-1)]);
     if (i > 0) {
       auto offsets_diff = jagged_offsets_ptr[i] - jagged_offsets_ptr[i-1];
       if (offsets_diff != jagged_lengths_ptr[i-1]) {
