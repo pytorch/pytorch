@@ -341,12 +341,9 @@ void cacheAllocatorDeregisterHook(
   }
 }
 
+std::unordered_map<std::string, std::unordered_map<std::string, std::string>>
+getNCCLCommDumpMap() {
 #if defined(IS_NCCLX) && defined(NCCL_COMM_DUMP)
-std::string dump_nccl_trace_helper(
-    bool includeCollectives,
-    bool includeStackTraces,
-    bool onlyActive,
-    bool json) {
   std::unordered_map<
       std::string /* ncclUniqueID */,
       std::unordered_map<std::string, std::string> /* dump from this comm */>
@@ -366,43 +363,27 @@ std::string dump_nccl_trace_helper(
     std::string ncclUniqueIDStr = buildNcclUniqueIdStr(ncclComm->getNcclId());
     ncclDumpMap[ncclUniqueIDStr] = ncclComm->ncclCommDump();
   }
-  if (json) {
-    return NCCLTraceBuffer::get()->dump_json(
-        ncclDumpMap, includeCollectives, onlyActive);
-  }
-  return NCCLTraceBuffer::get()->dump(
-      ncclDumpMap, includeCollectives, includeStackTraces, onlyActive);
-}
-
+  return ncclDumpMap;
 #else
-std::string dump_nccl_trace_helper(
-    bool includeCollectives,
-    bool includeStackTraces,
-    bool onlyActive,
-    bool json) {
-  if (json) {
-    return NCCLTraceBuffer::get()->dump_json(
-        std::nullopt, includeCollectives, onlyActive);
-  }
-  return NCCLTraceBuffer::get()->dump(
-      c10::nullopt, includeCollectives, includeStackTraces, onlyActive);
-}
+  return std::unordered_map<
+      std::string,
+      std::unordered_map<std::string, std::string>>();
 #endif
+}
 
 std::string dump_nccl_trace(
     bool includeCollectives,
     bool includeStackTraces,
     bool onlyActive) {
-  return dump_nccl_trace_helper(
-      includeCollectives, includeStackTraces, onlyActive, false /* json */);
+  auto ncclDumpMap = getNCCLCommDumpMap();
+  return NCCLTraceBuffer::get()->dump(
+      ncclDumpMap, includeCollectives, includeStackTraces, onlyActive);
 }
 
 std::string dump_nccl_trace_json(bool includeCollectives, bool onlyActive) {
-  return dump_nccl_trace_helper(
-      includeCollectives,
-      false /* includeStackTraces */,
-      onlyActive,
-      true /* json */);
+  auto ncclDumpMap = getNCCLCommDumpMap();
+  return NCCLTraceBuffer::get()->dump_json(
+      ncclDumpMap, includeCollectives, onlyActive);
 }
 
 std::optional<std::function<void(std::function<void(const std::string&)>)>>&

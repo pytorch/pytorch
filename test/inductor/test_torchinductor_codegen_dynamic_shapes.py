@@ -243,6 +243,8 @@ test_failures = {
     "test_single_elem_dynamic_shapes": TestFailure(("cpu",)),
     "test_single_elem_indirect_dynamic_shapes": TestFailure(("cpu",)),
     "test_sort_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_sort_stable_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_sort_transpose_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_split_cumsum_dynamic_shapes": TestFailure(("cpu",)),
     "test_split_cumsum_low_prec_dynamic_shapes": TestFailure(("cpu",)),
     "test_split_cumprod_dynamic_shapes": TestFailure(("cpu",)),
