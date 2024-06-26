@@ -805,15 +805,6 @@ def _normalize_start_end(
     return start, end
 
 
-def _validate_dim(x: Tensor, dim: int) -> int:
-    res = dim
-    ndim = x.dim()
-    if dim < 0:
-        res += ndim
-    torch._check(0 <= res < ndim, lambda: f"invalid dim: {dim}")
-    return res
-
-
 # This is not in torch._refs because aten.index used by
 # aten._unsafe_masked_index does not have a decomposition.
 @register_decomposition(aten.slice_scatter)
@@ -826,7 +817,7 @@ def slice_scatter(
     end: Optional[int] = None,
     step: int = 1,
 ):
-    dim = _validate_dim(input, dim)
+    dim = utils.canonicalize_dim(input.ndim, dim)
     dim_size = input.shape[dim]
     start, end = _normalize_start_end(input, dim, start, end)
 
