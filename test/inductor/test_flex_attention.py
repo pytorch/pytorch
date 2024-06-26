@@ -606,18 +606,29 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("decoding", [False, True])
+    def test_captured_buffers_query(self, dtype: torch.dtype, decoding):
+        q_scale = torch.randn(Hq // Hkv if decoding else S, device="cuda")
+
+        def all_bias(score, batch, head, token_q, token_kv):
+            score = score + q_scale[token_q]
+            return score
+
+        self.run_test(all_bias, dtype, decoding=decoding)
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes)
+    @common_utils.parametrize("decoding", [False, True])
     def test_captured_buffers_all_dims(self, dtype: torch.dtype, decoding):
         head_scale = torch.randn(Hkv if decoding else H, device="cuda")
         batch_scale = torch.randn(B, device="cuda")
         kv_scale = torch.randn(S, device="cuda")
         q_scale = torch.randn(Hq // Hkv if decoding else S, device="cuda")
-        if q_scale.shape[-1] < 16:
-            q_scale = torch.nn.functional.pad(q_scale, (0, 16 - Hq // Hkv))
 
         def all_bias(score, batch, head, token_q, token_kv):
             score = score + kv_scale[token_kv]
             score = score + q_scale[token_q]
             score = score + head_scale[head]
+            score = score + batch_scale[batch]
             return score
 
         self.run_test(all_bias, dtype, decoding=decoding)
@@ -635,13 +646,7 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
-    @common_utils.parametrize(
-        "decoding",
-        [
-            False,
-        ],
-    )
-    # @common_utils.parametrize("decoding", [False, True]) # TODO: Fix decoding
+    @common_utils.parametrize("decoding", [False, True])  # TODO: Fix decoding
     def test_load_from_bias_seq_only(self, dtype, decoding):
         bias = torch.randn(Hq // Hkv if decoding else S, S, device="cuda", dtype=dtype)
 
@@ -651,8 +656,7 @@ class TestFlexAttention(InductorTestCase):
         self.run_test(bias_mod, dtype, decoding=decoding)
 
     @supported_platform
-    @common_utils.parametrize("decoding", [False])
-    # @common_utils.parametrize("decoding", [False, True]) # TODO: Fix decoding
+    @common_utils.parametrize("decoding", [False, True])  # TODO: Fix decoding
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_load_from_bias_seq_batch(self, dtype, decoding):
         bias = torch.randn(
@@ -665,14 +669,13 @@ class TestFlexAttention(InductorTestCase):
         self.run_test(bias_mod, dtype, decoding=decoding)
 
     @supported_platform
-    @common_utils.parametrize("decoding", [False])
-    # @common_utils.parametrize("decoding", [False, True]) # TODO: Fix decoding
+    @common_utils.parametrize("decoding", [False, True])  # TODO: Fix decoding
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_load_from_bias_head_seq_batch(self, dtype, decoding):
         bias = torch.randn(
             B,
             Hkv if decoding else H,
-            Hkv // Hq if decoding else S,
+            Hq // Hkv if decoding else S,
             S,
             device="cuda",
             dtype=dtype,

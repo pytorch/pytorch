@@ -69,9 +69,9 @@ flex_decoding_template = TritonTemplate(
 
     Z = {{size("Q", 0)}}
     H = {{size("Q", 1)}}
-    Q_CTX = {{size("Q", 2)}}
-    N_CTX = {{size("K", 2)}}
-    TILE_KV = N_CTX // SPLIT_KV # lenth of key/value assigned to a single CTA
+    Q_LEN = {{size("Q", 2)}}
+    KV_LEN = {{size("K", 2)}}
+    TILE_KV = KV_LEN // SPLIT_KV # lenth of key/value assigned to a single CTA
 
 
     qk_scale = 1.0
@@ -87,7 +87,7 @@ flex_decoding_template = TritonTemplate(
     v_offset = off_z * stride_vz + off_h * stride_vh
     Q_block_ptr = tl.make_block_ptr(
         base=Q + q_offset,
-        shape=(Q_CTX, BLOCK_DMODEL),        # (M, d)
+        shape=(Q_LEN, BLOCK_DMODEL),        # (M, d)
         strides=(stride_qm, stride_qk),
         offsets=(0, 0),                     # No offset: one CTA per query
         block_shape=(BLOCK_M, BLOCK_DMODEL),
@@ -96,7 +96,7 @@ flex_decoding_template = TritonTemplate(
 
     K_block_ptr = tl.make_block_ptr(
         base=K + k_offset,
-        shape=(BLOCK_DMODEL, N_CTX),                # (d, N)
+        shape=(BLOCK_DMODEL, KV_LEN),                # (d, N)
         strides=(stride_kk, stride_kn),
         offsets=(0, off_t * TILE_KV),
         block_shape=(BLOCK_DMODEL, BLOCK_N),
@@ -104,7 +104,7 @@ flex_decoding_template = TritonTemplate(
     )
     V_block_ptr = tl.make_block_ptr(
         base=V + v_offset,
-        shape=(N_CTX, BLOCK_DMODEL),
+        shape=(KV_LEN, BLOCK_DMODEL),
         strides=(stride_vk, stride_vn),
         offsets=(off_t * TILE_KV, 0),
         block_shape=(BLOCK_N, BLOCK_DMODEL),
@@ -115,7 +115,7 @@ flex_decoding_template = TritonTemplate(
     l_offset = off_h * stride_lh + off_z * stride_lz
     M_block_ptr = tl.make_block_ptr(
         base=M + m_offset,
-        shape=(SPLIT_KV, Q_CTX),                      # (T, M)
+        shape=(SPLIT_KV, Q_LEN),                      # (T, M)
         strides=(stride_mt, stride_mm),
         offsets=(off_t, 0),
         block_shape=(1, BLOCK_M),
@@ -123,7 +123,7 @@ flex_decoding_template = TritonTemplate(
     )
     L_block_ptr = tl.make_block_ptr(
         base=L + l_offset,
-        shape=(SPLIT_KV, Q_CTX),                      # (T, M)
+        shape=(SPLIT_KV, Q_LEN),                      # (T, M)
         strides=(stride_lt, stride_lm),
         offsets=(off_t, 0),
         block_shape=(1, BLOCK_M),
@@ -163,12 +163,21 @@ flex_decoding_template = TritonTemplate(
         # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
         m = offs_m[:, None]
         n = start_n + offs_n[None, :]
+
+        # All the inputs must be broadcasted to qk shape.
+        m = tl.broadcast(m, qk)
+        n = tl.broadcast(n, qk)
+        b = tl.broadcast(off_z, qk)
+        h = tl.broadcast(off_h, qk)
+        mod_mask = (m < Q_LEN) & (n < KV_LEN)
+
         {{ modification(
             subgraph_number=0,
             output_name="post_mod_scores",
+            load_mask="mod_mask",
             score="qk",
-            b="off_z",
-            h="off_h",
+            b="b",
+            h="h",
             m="m",
             n="n",
             out="qk"
@@ -214,7 +223,7 @@ flex_decoding_template = TritonTemplate(
     idx_m = offs_m[:, None]
     idx_d = offs_d[None, :]
     # TODO generalize and add proper mask support
-    mask = (idx_m < Q_CTX) & (idx_d != -1)
+    mask = (idx_m < Q_LEN) & (idx_d != -1)
     {{store_output(("idx_z", "idx_h", "idx_t", "idx_m", "idx_d"), "acc", "mask")}}
  """,
 )
@@ -274,7 +283,7 @@ flex_decoding_reduction_template = TritonTemplate(
     stride_lseh = {{stride("LSE", 1)}}
     stride_lsem = {{stride("LSE", 2)}}
 
-    Q_CTX = {{size("ACC", 3)}} # M
+    Q_LEN = {{size("ACC", 3)}} # M
     MODEL_D = {{size("ACC", 4)}} # D
     H = {{size("ACC", 1)}}
 
@@ -287,7 +296,7 @@ flex_decoding_reduction_template = TritonTemplate(
     l_offset = off_h * stride_lh + off_z * stride_lz
     M_block_ptr = tl.make_block_ptr(
         base=M + m_offset,
-        shape=(SPLIT_KV, Q_CTX),
+        shape=(SPLIT_KV, Q_LEN),
         strides=(stride_mt, stride_mm),
         offsets=(0, off_m),
         block_shape=(SPLIT_KV, BLOCK_M),           # (T, BLOCK_M)
@@ -295,7 +304,7 @@ flex_decoding_reduction_template = TritonTemplate(
     )
     L_block_ptr = tl.make_block_ptr(
         base=L + l_offset,
-        shape=(SPLIT_KV, Q_CTX),                      # (T, BLOCK_M)
+        shape=(SPLIT_KV, Q_LEN),                      # (T, BLOCK_M)
         strides=(stride_lt, stride_lm),
         offsets=(0, off_m),
         block_shape=(SPLIT_KV, BLOCK_M),
@@ -305,7 +314,7 @@ flex_decoding_reduction_template = TritonTemplate(
     acc_offset = off_h * stride_acch + off_z * stride_accz
     ACC_block_ptr = tl.make_block_ptr(
         base=ACC + acc_offset,
-        shape=(SPLIT_KV, Q_CTX, MODEL_D),               # (T, M, BLOCK_D)
+        shape=(SPLIT_KV, Q_LEN, MODEL_D),               # (T, M, BLOCK_D)
         strides=(stride_acct, stride_accm, stride_accd),
         offsets=(0, off_m, off_d),
         block_shape=(SPLIT_KV, BLOCK_M, BLOCK_D),
@@ -315,7 +324,7 @@ flex_decoding_reduction_template = TritonTemplate(
     lse_offset = off_h * stride_lseh + off_z * stride_lsez
     LSE_block_ptr = tl.make_block_ptr(
         base=LSE + lse_offset,
-        shape=(Q_CTX,),
+        shape=(Q_LEN,),
         strides=(stride_lsem,),
         offsets=(off_m,),
         block_shape=(BLOCK_M,),

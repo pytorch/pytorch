@@ -328,7 +328,7 @@ class TritonTemplateKernel(TritonKernel):
         return texpr(self.rename_indexing(val))
 
     def modification(
-        self, subgraph_number: int, output_name: str, **fixed_inputs
+        self, subgraph_number: int, load_mask: str, output_name: str, **fixed_inputs
     ) -> str:
         """This creates a modification function for a subgraph.
         To use this inside a template, the first argument should specify which subgraph to codegen for
@@ -364,8 +364,7 @@ class TritonTemplateKernel(TritonKernel):
                         # If it's not a fixed input, it's a load from a captured
                         # tensor
                         var = add_input(name)
-                        return f"tl.load({var} + {index})"
-
+                        return f"tl.load({var} + {index}, {load_mask})"
                     return f"({fixed_inputs[name]})"
 
                 def indirect_indexing(self, index_var, size, check):
