@@ -49,7 +49,7 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     StrideType,
 )
-from torch._subclasses.fake_tensor import get_schema_info
+from torch._subclasses.fake_tensor import extract_tensor_metadata, get_schema_info
 from torch.fx.experimental.symbolic_shapes import (
     CallMethodKey,
     compute_unbacked_bindings,
@@ -4282,6 +4282,11 @@ class ExternKernel(InputsKernel):
             r = pytree.tree_unflatten(result, args_spec)
             return r.get("args", []), r.get("kwargs", {})
 
+        out_arg_idx_list = []
+        if cls is FallbackKernel and "out" in kwargs:
+            out_flat, _ = pytree.tree_flatten(kwargs["out"])
+            out_arg_idx_list = [i for i, x in enumerate(tensor_args) if x in out_flat]
+
         tensor_args = [cls.realize_input(x) for x in tensor_args]
 
         # freeze layout otherwise our output stride calculation might
@@ -4306,8 +4311,22 @@ class ExternKernel(InputsKernel):
             else:
                 example_args.append(ir_node_to_tensor(x, guard_shape=True))
 
+        out_arg_metadata_pre_call = [
+            extract_tensor_metadata(example_args[idx]) for idx in out_arg_idx_list  # type: ignore[arg-type]
+        ]
+
         new_args, new_kwargs = unflatten_args(example_args, non_tensor_args)
+
         example_output = kernel(*new_args, **new_kwargs)
+
+        out_arg_metadata_post_call = [
+            extract_tensor_metadata(example_args[idx]) for idx in out_arg_idx_list  # type: ignore[arg-type]
+        ]
+
+        assert all(
+            pre == post
+            for pre, post in zip(out_arg_metadata_pre_call, out_arg_metadata_post_call)
+        ), "out= op cannot mutate metadata of out arg"
 
         unbacked_bindings: Optional[Dict[sympy.Symbol, pytree.KeyPath]] = None
         if shape_env := V.fake_mode.shape_env:
@@ -5446,7 +5465,7 @@ class FallbackKernel(ExternKernelAlloc):
             if isinstance(arg, (list, tuple)):
                 for a in arg:
                     _mark_all_nodes_as_mutating(a)
-            elif isinstance(arg, (TensorBox, BaseView)):
+            elif isinstance(arg, Buffer):
                 self.mutable_args.append(arg)
                 mark_node_as_mutating(self, arg)
             else:

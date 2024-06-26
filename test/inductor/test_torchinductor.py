@@ -7515,6 +7515,69 @@ class CommonTemplate:
             ):
                 compiled_f = compile_fx_inner(mod, cloned_args)
 
+    @config.patch(implicit_fallbacks=True)
+    def test_out_variant_custom_op(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define(
+                "split_with_sizes_copy(Tensor all_gather_output, SymInt[] all_gather_input_split_sizes, int dim=0, *, Tensor(a!)[] out) -> ()"  # noqa: B950
+            )
+
+            @torch.library.impl(lib, "split_with_sizes_copy", "Meta")
+            @torch.library.impl(lib, "split_with_sizes_copy", "CPU")
+            def split_with_sizes_copy(
+                all_gather_output: torch.Tensor,
+                all_gather_input_split_sizes: typing.List[int],
+                dim: int,
+                out: typing.List[torch.Tensor],
+            ) -> None:
+                # Intentionally change metadata of out arg
+                out[0].untyped_storage().resize_(0)
+
+            @torch.library.impl(lib, "split_with_sizes_copy", "Functionalize")
+            def split_with_sizes_copy_functionalize(
+                all_gather_output: torch.Tensor,
+                all_gather_input_split_sizes: typing.List[int],
+                dim: int,
+                out: typing.List[torch.Tensor],
+            ) -> None:
+                ag_output_elem = torch._from_functional_tensor(all_gather_output)
+                out_elem = [torch._from_functional_tensor(x) for x in out]
+                with torch._C._ExcludeDispatchKeyGuard(
+                    torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
+                ):
+                    torch.ops.mylib.split_with_sizes_copy(
+                        ag_output_elem,
+                        all_gather_input_split_sizes,
+                        dim=dim,
+                        out=out_elem,
+                    )
+
+            torch.fx.node.has_side_effect(torch.ops.mylib.split_with_sizes_copy.default)
+            torch._functorch._aot_autograd.functional_utils.avoid_functionalize_ops.add(
+                torch.ops.mylib.split_with_sizes_copy.default
+            )
+
+            @torch.compile(backend="inductor", fullgraph=True)
+            def f1(all_gather_output, all_gather_input_split_sizes, dim, out):
+                return torch.ops.mylib.split_with_sizes_copy(
+                    all_gather_output, all_gather_input_split_sizes, dim, out=out
+                )
+
+            all_gather_output = torch.randn(2, 272)
+            all_gather_input_split_sizes = [128, 8, 128, 8]
+            dim = 1
+            out = [
+                torch.empty(2, 128),
+                torch.empty(2, 8),
+                torch.empty(2, 128),
+                torch.empty(2, 8),
+            ]
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.BackendCompilerFailed,
+                "out= op cannot mutate metadata of out arg",
+            ):
+                f1(all_gather_output, all_gather_input_split_sizes, dim, out)
+
     @expectedFailureXPU
     def test_functionalize_rng_wrappers(self):
         # Ideally, we would like to use torch.compile for these operators. But

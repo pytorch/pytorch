@@ -8,7 +8,7 @@ This file contains utilities related to functionalization in AOTAutograd:
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Callable, Optional, Set
 
 import torch
 from torch import Tensor
@@ -25,6 +25,10 @@ from torch.utils._python_dispatch import (
 from .. import config
 
 aot_joint_log = getArtifactLogger(__name__, "aot_joint_graph")
+
+# These are mutation ops that can show up in the middle of the graph,
+# because they are ops that we explicitly do **not** functionalize
+avoid_functionalize_ops: Set[Callable] = {}  # type: ignore[assignment]
 
 
 def to_fun(t):
@@ -416,11 +420,7 @@ def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
                     ), f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
                     placeholders.remove(n.args[0])
                 mutation_count += 1
-            elif hasattr(torch.ops, "fsdp") and n.target in [
-                torch.ops.fsdp.split_with_sizes_copy.default
-            ]:
-                # These are mutation ops that can show up in the middle of the graph,
-                # because they are ops that we explicitly do **not** functinoalize
+            elif n.target in avoid_functionalize_ops:
                 continue
             else:
                 assert (
