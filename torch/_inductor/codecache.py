@@ -110,6 +110,7 @@ from torch._inductor.utils import (
     is_windows,
     set_tracing_context_output_strides,
 )
+from torch._library.fake_class_registry import FakeScriptObject  # noqa: TCH001
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
@@ -1420,7 +1421,7 @@ class CompiledFxGraph:
     mutated_inputs: Set[str]
     mutated_input_idxs: Set[int]
     constants: Dict[str, torch.Tensor]
-    torchbind_constants: Dict[str, torch._C.ScriptObject]
+    torchbind_constants: Dict[str, FakeScriptObject]
     output_strides: Optional[List[Optional[Tuple[_StrideExprStr, ...]]]]
     disabled_cudagraphs_reason: Optional[str]
     metrics_deltas: metrics.CachedMetricsDeltas

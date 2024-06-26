@@ -565,12 +565,15 @@ class BaseSchedulerNode:
 
         for buf_name in reads | writes:
             buf_accessed_elems = sum(node_numel for dep in buf_accesses[buf_name])
-            buf: Union[ir.Buffer, ir.TensorBox]
+            buf: Union[ir.Buffer, ir.TensorBox, ir.TorchBindObject]
             if buf_name in V.graph.name_to_buffer:
                 buf = V.graph.name_to_buffer[buf_name]
             elif buf_name in V.graph.graph_inputs:
                 buf = V.graph.graph_inputs[buf_name]
             else:
+                continue
+
+            if not isinstance(buf, (ir.Buffer, ir.TensorBox)):
                 continue
 
             def get_buf_bytes(buf: Optional[Union[ir.Buffer, ir.TensorBox]]) -> int:
@@ -3243,7 +3246,10 @@ class Scheduler:
                 if buf.can_free():
                     V.graph.wrapper_code.codegen_free(buf.node)
             elif name in V.graph.graph_inputs:
-                storage = V.graph.graph_inputs[name].data
+                inp = V.graph.graph_inputs[name]
+                if isinstance(inp, ir.TorchBindObject):
+                    continue
+                storage = inp.data
                 assert isinstance(storage, ir.StorageBox) and storage.is_input_buffer()
                 V.graph.wrapper_code.codegen_free(storage.data)
 

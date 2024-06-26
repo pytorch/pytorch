@@ -1412,7 +1412,7 @@ def forward(self, token, obj, x):
         )
         self.assertEqual(cnt.frame_count, 4)
 
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_compile_obj_attributes(self, backend):
         if backend == "eager":
             backend = EagerAndRecordGraphs()
@@ -1444,7 +1444,7 @@ def forward(self, token, obj, x):
         return (call_torchbind_1,)""",
             )
 
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_compile_obj_torchbind_op(self, backend):
         def f(tq, x):
             torch.ops._TorchScriptTesting.queue_push(tq, x.cos())
@@ -1453,7 +1453,7 @@ def forward(self, token, obj, x):
             torch.ops._TorchScriptTesting.queue_push(tq, x.sin())
             return tq.pop(), tq.pop() + tq.size(), tq
 
-        opt_f = torch.compile(f, backend=backend)
+        opt_f = torch.compile(f, backend=backend, fullgraph=True)
         x = torch.randn(2)
         _assertEqualScriptObject(
             self, f(_empty_tensor_queue(), x), opt_f(_empty_tensor_queue(), x)

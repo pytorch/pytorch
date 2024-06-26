@@ -640,7 +640,7 @@ class WrapperCodeGen(CodeGen):
 
     def codegen_input_size_asserts(self) -> None:
         for name, buf in V.graph.graph_inputs.items():
-            if isinstance(buf, sympy.Expr):
+            if isinstance(buf, (sympy.Expr, ir.TorchBindObject)):
                 continue
 
             # comparing strides for 0 size tensor is tricky. Ignore them for now.
@@ -653,7 +653,7 @@ class WrapperCodeGen(CodeGen):
     def codegen_input_nan_asserts(self) -> None:
         self.prefix.writeline("# make sure graph inputs are not nan/inf")
         for name, buf in V.graph.graph_inputs.items():
-            if isinstance(buf, sympy.Expr):
+            if isinstance(buf, (sympy.Expr, ir.TorchBindObject)):
                 continue
 
             line = f"assert not {name}.isnan().any().item()"
@@ -1009,7 +1009,9 @@ class WrapperCodeGen(CodeGen):
         )
 
     def codegen_inputs(
-        self, code: IndentedBuffer, graph_inputs: Dict[str, ir.TensorBox]
+        self,
+        code: IndentedBuffer,
+        graph_inputs: Dict[str, Union[ir.TensorBox, ir.TorchBindObject]],
     ):
         """Assign all symbolic shapes to locals"""
 
@@ -1026,12 +1028,17 @@ class WrapperCodeGen(CodeGen):
         # Assign all symbolic shapes needed to local variables
         bound_vars: Set[sympy.Symbol] = set()
 
-        def is_expr(x):
-            return isinstance(x[1], sympy.Expr)
-
-        graph_inputs_expr = list(filter(is_expr, graph_inputs.items()))
+        graph_inputs_expr = list(
+            filter(lambda x: isinstance(x[1], sympy.Expr), graph_inputs.items())
+        )
+        graph_inputs_custom_obj = list(
+            filter(lambda x: isinstance(x[1], ir.TorchBindObject), graph_inputs.items())
+        )
         graph_inputs_tensors = list(
-            filter(lambda x: not is_expr(x), graph_inputs.items())
+            filter(
+                lambda x: not isinstance(x[1], (sympy.Expr, ir.TorchBindObject)),
+                graph_inputs.items(),
+            )
         )
 
         for name, shape in graph_inputs_expr:
@@ -1212,6 +1219,9 @@ class WrapperCodeGen(CodeGen):
                     # is actually a valid value for the kernel in question.
                     # See https://github.com/pytorch/pytorch/issues/124686
                     add_expr_input(name, V.graph.sizevars.size_hint(value, fallback=42))
+                elif isinstance(value, ir.TorchBindObject):
+                    # TODO: Not sure how to create a "random" torchbind object
+                    pass
                 else:
                     shape = [
                         V.graph.sizevars.size_hint(x, fallback=42)
