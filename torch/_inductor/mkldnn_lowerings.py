@@ -878,7 +878,7 @@ def register_onednn_fusion_ops():
             x_size = x.get_size()
             x2_size = x2.get_size()
             assert len(x_size) == len(x2_size)
-            if len(x_size) > 2:
+            if len(x_size) > 2 and binary_attr == "add":
                 # GEMM template needs 2D input, normalize input shape here
                 x = view(x, [-1, x_size[-1]])
                 x2 = view(x2, [-1, x2_size[-1]])
@@ -924,7 +924,9 @@ def register_onednn_fusion_ops():
             x2_dtype = x2.get_dtype()
             bias_dtype = bias.get_dtype() if bias is not None else None
             choices: List[ChoiceCaller] = []
-            if use_max_autotune():
+            if (
+                use_max_autotune() and binary_attr == "add"
+            ):  # <TODO> Support inplace sum fusion
                 *_, layout, x, packed_weight, x2 = mm_args(
                     x, packed_weight, x2, layout=layout, out_dtype=output_dtype
                 )
@@ -939,7 +941,6 @@ def register_onednn_fusion_ops():
                         V.graph.constants[w_zp.get_name()],
                     )  # We only compensate MatrixB and assume B_zp is 0 to avoid the compensation of MatrixA
                     and use_cpp_packed_gemm_template(layout, x, packed_weight)
-                    and binary_attr == "add"  # <TODO> Support inplace sum fusion
                 ):
                     W_tensor = V.graph.constants[packed_weight.get_name()]
                     W_tensor = W_tensor.to_dense()
@@ -1138,7 +1139,7 @@ def register_onednn_fusion_ops():
                 layout,
                 input_gen_fns=input_gen_fns,
             )
-            if len(x_size) > 2:
+            if len(x_size) > 2 and binary_attr == "add":
                 result = view(result, (*x_size[:-1], result.get_size()[-1]))
             return result
 
