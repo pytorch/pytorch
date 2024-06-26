@@ -1443,7 +1443,7 @@ def export(
                 shape_env=ShapeEnv(), export=True
             )
             if out_guards is None:
-                our_guards = _guards.GuardsSet()
+                out_guards = _guards.GuardsSet()
             assert out_guards is not None  # suppress mypy error
             parameter_names = list(original_signature.parameters.keys())
             fx_graph = torch.fx.Graph()
