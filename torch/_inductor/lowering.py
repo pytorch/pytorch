@@ -2272,6 +2272,16 @@ make_fallback(
     warn=False,
 )
 make_fallback(
+    aten._scaled_dot_product_cudnn_attention.default,
+    sdpa_constraint,
+    warn=False,
+)
+make_fallback(
+    aten._scaled_dot_product_cudnn_attention_backward.default,
+    sdpa_constraint,
+    warn=False,
+)
+make_fallback(
     aten._scaled_dot_product_flash_attention_for_cpu.default,
     sdpa_constraint,
     warn=False,
