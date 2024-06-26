@@ -2079,7 +2079,8 @@ Call this whenever a new thread is created in order to propagate values from
 
   py::enum_<at::BlasBackend>(py_module, "_BlasBackend")
       .value("Cublas", at::BlasBackend::Cublas)
-      .value("Cublaslt", at::BlasBackend::Cublaslt);
+      .value("Cublaslt", at::BlasBackend::Cublaslt)
+      .value("Ck", at::BlasBackend::Ck);
 
   py_module.def("_set_blas_preferred_backend", [](at::BlasBackend b) {
     at::globalContext().setBlasPreferredBackend(b);
