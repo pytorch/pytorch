@@ -651,7 +651,7 @@ class HalideKernel(SIMDKernel):
         mutations: Optional[Set[str]] = None,
         pid_cache=None,
         reduction_hint=ReductionHint.DEFAULT,
-        disable_persistent_reduction=False,
+        override_persistent_reduction=None,
     ):
         super().__init__(
             *groups,
@@ -659,7 +659,7 @@ class HalideKernel(SIMDKernel):
             mutations=mutations,
             reduction_hint=reduction_hint,
             pid_cache=pid_cache,
-            disable_persistent_reduction=disable_persistent_reduction,
+            override_persistent_reduction=override_persistent_reduction,
         )
         # For halide, we just write directly to the body
         self.compute = self.body
