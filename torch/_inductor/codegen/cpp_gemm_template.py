@@ -305,7 +305,7 @@ class CppPackedGemmTemplate(CppTemplate):
         new_inputs, _ = normalize_shapes(
             *maybe_to_dense(*reorder_and_filter(input_nodes, layout))
         )
-        m, n, k, *_ = mm_args(new_inputs[0], new_inputs[1])
+        m, n, k, *_ = mm_args(new_inputs[0], new_inputs[CppPackedGemmTemplate.WGT_IDX])
         output_dtype, compute_dtype = get_gemm_template_output_and_compute_dtype(
             new_inputs[0].get_dtype()
         )
@@ -315,7 +315,7 @@ class CppPackedGemmTemplate(CppTemplate):
             n,
             k,
             input_dtype=new_inputs[0].get_dtype(),
-            input2_dtype=new_inputs[1].get_dtype(),
+            input2_dtype=new_inputs[CppPackedGemmTemplate.WGT_IDX].get_dtype(),
             output_dtype=output_dtype,
             compute_dtype=compute_dtype,
             alpha=alpha,
@@ -482,7 +482,7 @@ class CppPackedGemmTemplate(CppTemplate):
 
         if template_buffer_node is not None:
             # Use the updated prepacked weight buffer
-            W = template_buffer_node.inputs[1]
+            W = template_buffer_node.inputs[CppPackedGemmTemplate.WGT_IDX]
             Y = template_buffer_node
 
         template_buffer = Y
