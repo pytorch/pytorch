@@ -972,18 +972,18 @@ class TestBinaryUfuncs(TestCase):
     @dtypes(*floating_types_and(torch.bfloat16, torch.float16))
     def test_floor_div_extremal(self, device, dtype):
         for num, denom, shape in itertools.product(
-                [torch.finfo(dtype).max * 0.7],
-                [0.5, -0.5, 0.],
-                [(), (32,)], # Scalar and vectorized
+            [torch.finfo(dtype).max * 0.7],
+            [0.5, -0.5, 0.0],
+            [(), (32,)],  # Scalar and vectorized
         ):
             a = torch.full(shape, num, dtype=dtype, device=device)
             b = torch.full(shape, denom, dtype=dtype, device=device)
 
             ref = np.floor_divide(num, denom).item()
             if ref > torch.finfo(dtype).max:
-                ref = float('inf')
+                ref = np.inf
             elif ref < torch.finfo(dtype).min:
-                ref = -float('inf')
+                ref = -np.inf
             expect = torch.full(shape, ref, dtype=dtype, device=device)
             actual = torch.div(a, b, rounding_mode="floor")
             self.assertEqual(expect, actual)
