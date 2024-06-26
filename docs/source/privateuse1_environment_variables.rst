@@ -1,7 +1,7 @@
 .. _privateuse1_environment_variables:
 
 PrivateUse1 Environment Variables
-===============================
+=================================
 .. list-table::
   :header-rows: 1
 
