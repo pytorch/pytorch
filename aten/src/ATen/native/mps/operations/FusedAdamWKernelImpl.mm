@@ -28,8 +28,16 @@ void _fused_adamw_mps_impl_(at::TensorList params,
   const std::string kernel_name = "fused_adamw_" + scalarToMetalTypeString(params[0].scalar_type()) + "_" +
       scalarToMetalTypeString(state_steps[0].scalar_type());
 
-  multi_tensor_apply_for_fused_adam<4, 512>(
-      kernel_name, tensor_lists, state_steps, lr, beta1, beta2, weight_decay, eps, maximize);
+  multi_tensor_apply_for_fused_optimizer<4, 512>(kernel_name,
+                                                 tensor_lists,
+                                                 state_steps,
+                                                 FusedAdamEncodingFunctor(),
+                                                 lr,
+                                                 beta1,
+                                                 beta2,
+                                                 weight_decay,
+                                                 eps,
+                                                 maximize);
 }
 } // namespace mps
 } // namespace at::native
