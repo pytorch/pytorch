@@ -45,7 +45,7 @@ def create_subclass_meta(
     # Each tensor subclass i adds K_i extra arguments.
     num_extra_sizes = sum(
         [
-            len(a.size())
+            sum(1 for s in a.size() if isinstance(s, SymInt))
             for a in curr_args
             if isinstance(a, Tensor) and is_traceable_wrapper_subclass(a)
         ]
