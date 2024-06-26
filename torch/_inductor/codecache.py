@@ -902,10 +902,6 @@ class FxGraphCache:
             # Not expected, but in case the PyCodeCache entry is removed from
             # underneath us, treat it as a cache miss and recompile.
             log.error("Failed to load cached artifact: %s", artifact_path)
-            trace_structured(
-                "inductor_output_code",  # Omit filename when there's an error
-                payload_fn=lambda: code,
-            )
             return None
 
         # Now re-evaluate with the symints to add any guards to the current env.
