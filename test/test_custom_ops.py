@@ -874,6 +874,16 @@ class TestCustomOp(CustomOpTestCaseBase):
 
             del foo
 
+        with self.assertRaises(ValueError) as cm:
+
+            @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
+            def foo(x: Tensor, y: Tuple[int, float]) -> Tensor:
+                raise NotImplementedError
+
+            del foo
+        print(cm.exception)
+        self.assertTrue("example" not in str(cm.exception))
+
         with self.assertRaisesRegex(ValueError, "unsupported type"):
 
             @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
