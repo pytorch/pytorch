@@ -65,24 +65,6 @@ class WorkRegistry {
 
 static WorkRegistry process_registry;
 
-void register_work(
-    const at::Tensor& tensor,
-    const c10::intrusive_ptr<c10d::Work>& work) {
-  if (c10d::get_thread_isolation_mode()) {
-    c10d::RankLocal<WorkRegistry>::get().register_work(tensor, work);
-  } else {
-    process_registry.register_work(tensor, work);
-  }
-}
-
-c10::intrusive_ptr<c10d::Work> pop_work(const at::Tensor& tensor) {
-  if (c10d::get_thread_isolation_mode()) {
-    return c10d::RankLocal<WorkRegistry>::get().pop_work(tensor);
-  } else {
-    return process_registry.pop_work(tensor);
-  }
-}
-
 const std::unordered_map<std::string, c10d::ReduceOp> str_to_reduce_op = {
     {"sum", c10d::ReduceOp(c10d::ReduceOp::RedOpType::SUM)},
     {"avg", c10d::ReduceOp(c10d::ReduceOp::RedOpType::AVG)},
@@ -199,7 +181,7 @@ at::Tensor all_gather_into_tensor(
 at::Tensor& all_gather_into_tensor_out(
     at::Tensor& input,
     int64_t group_size,
-    std::string group_name,
+    const std::string& group_name,
     at::Tensor& output) {
   c10d::AllgatherOptions opts;
 
@@ -463,9 +445,9 @@ class ReduceScatterTensor
   static torch::autograd::Variable forward(
       torch::autograd::AutogradContext* ctx,
       const at::Tensor& input,
-      std::string reduce_op,
+      const std::string& reduce_op,
       int64_t group_size,
-      std::string group_name) {
+      const std::string& group_name) {
     TORCH_CHECK(reduce_op == "sum", "Only sum reduce op is supported");
 
     ctx->saved_data["group_size"] = group_size;
@@ -510,9 +492,9 @@ class ReduceScatterTensor
 
 at::Tensor reduce_scatter_tensor_autograd(
     const at::Tensor& input,
-    std::string reduce_op,
+    const std::string& reduce_op,
     int64_t group_size,
-    std::string group_name) {
+    const std::string& group_name) {
   return ReduceScatterTensor::apply(input, reduce_op, group_size, group_name);
 }
 
@@ -523,7 +505,7 @@ class AllGatherIntoTensor
       torch::autograd::AutogradContext* ctx,
       const at::Tensor& input,
       int64_t group_size,
-      std::string group_name) {
+      const std::string& group_name) {
     ctx->saved_data["group_size"] = group_size;
     ctx->saved_data["group_name"] = group_name;
 
@@ -566,7 +548,7 @@ class AllGatherIntoTensor
 at::Tensor all_gather_into_tensor_autograd(
     const at::Tensor& input,
     int64_t group_size,
-    std::string group_name) {
+    const std::string& group_name) {
   return AllGatherIntoTensor::apply(input, group_size, group_name);
 }
 
@@ -607,7 +589,7 @@ at::Tensor shard_dim_alltoall(
     const at::Tensor& input,
     int64_t gather_dim,
     int64_t shard_dim,
-    std::string group_name) {
+    const std::string& group_name) {
   auto group = c10d::resolve_process_group(group_name);
   auto group_size = group->getSize();
   std::vector<int64_t> output_sizes = input.sizes().vec();
@@ -619,12 +601,14 @@ at::Tensor shard_dim_alltoall(
   }
   output_sizes[shard_dim] = output_sizes[shard_dim] / group_size;
   std::vector<at::Tensor> inputs;
+  inputs.reserve(group_size);
   auto length = output_sizes[shard_dim];
   for (int i = 0; i < group_size; i++) {
     inputs.push_back(input.narrow(shard_dim, i * length, length).contiguous());
   }
   // allocate outputs
   std::vector<at::Tensor> outputs;
+  outputs.reserve(group_size);
   for (int i = 0; i < group_size; i++) {
     outputs.push_back(input.new_empty(output_sizes).contiguous());
   }

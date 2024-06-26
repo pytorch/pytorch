@@ -4,7 +4,6 @@ from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 from torchgen.api.types import DispatcherSignature
 from torchgen.api.types.signatures import CppSignature, CppSignatureGroup
-
 from torchgen.context import method_with_native_function
 from torchgen.model import (
     Argument,
@@ -21,6 +20,7 @@ from torchgen.model import (
     Type,
 )
 from torchgen.utils import mapMaybe
+
 
 base_type_to_c_type = {
     BaseTy.Tensor: "AtenTensorHandle",
@@ -216,6 +216,7 @@ def gen_returns(schema: FunctionSchema) -> Tuple[List[str], List[str]]:
     for name in [
         "_scaled_dot_product_flash_attention",
         "_scaled_dot_product_efficient_attention",
+        "_scaled_dot_product_cudnn_attention",
         "convolution_backward",
     ]:
         if name in unambiguous_name:

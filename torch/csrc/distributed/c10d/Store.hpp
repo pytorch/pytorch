@@ -106,8 +106,7 @@ class StoreTimeoutGuard {
   explicit StoreTimeoutGuard(
       Store& store,
       const std::chrono::milliseconds& timeout)
-      : store_(store) {
-    oldTimeout_ = store.getTimeout();
+      : store_(store), oldTimeout_(store.getTimeout()) {
     store.setTimeout(timeout);
   }
 
@@ -123,7 +122,7 @@ class StoreTimeoutGuard {
 
  private:
   Store& store_;
-  std::chrono::milliseconds oldTimeout_;
+  std::chrono::milliseconds oldTimeout_{};
 };
 
 } // namespace c10d

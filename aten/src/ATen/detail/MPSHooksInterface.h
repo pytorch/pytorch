@@ -57,6 +57,9 @@ struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
   virtual size_t getDriverAllocatedMemory() const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
+  virtual size_t getRecommendedMaxMemory() const {
+    FAIL_MPSHOOKS_FUNC(__func__);
+  }
   virtual void setMemoryFraction(double /*ratio*/) const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }

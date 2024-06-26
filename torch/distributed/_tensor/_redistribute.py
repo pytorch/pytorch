@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from functools import lru_cache
 from typing import cast, Dict, List, NamedTuple, Tuple
@@ -7,11 +8,12 @@ import torch.distributed._functional_collectives as funcol
 import torch.distributed._tensor.api as dtensor
 from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.placement_types import (
-    _Partial,
     DTensorSpec,
+    Partial,
     Placement,
     Replicate,
     Shard,
+    TensorMeta,
 )
 
 
@@ -177,7 +179,7 @@ def redistribute_local_tensor(
         if target.is_replicate():
             # Case 1: target is Replicate
             if current.is_partial():
-                partial_spec = cast(_Partial, current)
+                partial_spec = cast(Partial, current)
                 new_local_tensor = partial_spec._reduce_value(
                     local_tensor, device_mesh, i
                 )
@@ -195,7 +197,7 @@ def redistribute_local_tensor(
             target_placement = cast(Shard, target)
             target_dim = target_placement.dim
             if current.is_partial():
-                partial_spec = cast(_Partial, current)
+                partial_spec = cast(Partial, current)
                 new_local_tensor = partial_spec._reduce_shard_value(
                     local_tensor, device_mesh, i, target_placement
                 )
@@ -219,7 +221,7 @@ def redistribute_local_tensor(
                     )
         elif target.is_partial():
             if current.is_replicate():
-                partial_spec = cast(_Partial, target)
+                partial_spec = cast(Partial, target)
                 # skip the replicate to partial transformation when we are in backward pass
                 # In this case we keep the grad as replicate, this is because we don't
                 # want to convert the replicated gradients back to partial, although
@@ -283,15 +285,12 @@ class Redistribute(torch.autograd.Function):
         else:
             # use the same local tensor if placements are the same.
             output = input._local_tensor
+            target_spec = current_spec
 
         return dtensor.DTensor(
             output,
-            device_mesh,
-            placements,
-            shape=input.shape,
-            dtype=input.dtype,
+            target_spec,
             requires_grad=input.requires_grad,
-            stride=input.stride(),
         )
 
     @staticmethod
@@ -316,14 +315,20 @@ class Redistribute(torch.autograd.Function):
                 normalized_placements.append(Replicate())
             else:
                 normalized_placements.append(previous_placement)
+
+        spec = DTensorSpec(
+            previous_spec.device_mesh,
+            tuple(normalized_placements),
+            tensor_meta=TensorMeta(
+                shape=grad_output.shape,
+                stride=grad_output.stride(),
+                dtype=grad_output.dtype,
+            ),
+        )
         output_dtensor = dtensor.DTensor(
             output,
-            previous_spec.mesh,
-            tuple(normalized_placements),
-            shape=grad_output.shape,
-            dtype=grad_output.dtype,
+            spec,
             requires_grad=grad_output.requires_grad,
-            stride=grad_output.stride(),
         )
 
         return (

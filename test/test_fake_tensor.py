@@ -619,6 +619,15 @@ class FakeTensorTest(TestCase):
 
             self.assertRaises(DynamicOutputShapeException, lambda: torch.nonzero(x))
 
+    def test_parameter_view(self):
+        x = torch.nn.Parameter(torch.randn(4))
+        x_view = x.view(4)
+        mode = FakeTensorMode()
+        fake_x_view = mode.from_tensor(x_view)
+        fake_x = mode.from_tensor(x)
+        self.assertFalse(isinstance(fake_x_view, torch.nn.Parameter))
+        self.assertTrue(isinstance(fake_x, torch.nn.Parameter))
+
     def test_tolist(self):
         shape_env = ShapeEnv()
         with FakeTensorMode(allow_fallback_kernels=False, shape_env=shape_env):
@@ -1027,7 +1036,7 @@ class FakeTensorConstHandling(TestCase):
 make_propagate_real_tensors_cls(FakeTensorConstHandling)
 
 
-def contains_type(type: torch._C.Type, maybe_contained_type: torch._C.Type):
+def contains_type(type: torch.Type, maybe_contained_type: torch.Type):
     return maybe_contained_type.isSubtypeOf(type) or any(
         contains_type(e, maybe_contained_type) for e in type.containedTypes()
     )

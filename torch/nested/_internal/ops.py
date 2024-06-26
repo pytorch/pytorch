@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import math
 import operator
@@ -293,6 +294,10 @@ def jagged_torch_function(func, *args, **kwargs):
     if func is torch._C._nn.scaled_dot_product_attention:
         return jagged_scaled_dot_product_attention(*args, **kwargs)
 
+    if func.__name__ == "apply_":
+        func(args[0]._values, *args[1:], **kwargs)
+        return args[0]
+
     # Handle flatten() here because it's CompositeImplicit.
     if func.__name__ == "flatten":
 
@@ -427,9 +432,9 @@ def linear_backward_default(func, *args, **kwargs):
 
     check_ragged_dim_same(func, inp, "self", grad_output, "grad_output")
     ds = NestedTensor(
-        torch.mm(grad_output._values, weight), **extract_kwargs(grad_output)
+        torch.matmul(grad_output._values, weight), **extract_kwargs(grad_output)
     )
-    dw = torch.mm(grad_output._values.T, inp._values)
+    dw = torch.matmul(grad_output._values.transpose(-2, -1), inp._values)
     db = None  # NYI: gradient for bias, need to reduce over ragged dim
     return (ds, dw, db)
 
@@ -467,9 +472,30 @@ register_jagged_func(
 )(jagged_unary_pointwise)
 
 
-register_jagged_func(
+@register_jagged_func(torch.ops.aten.zero_.default, "self: jt_all")
+def zero__default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+    func(inp._values)
+    return inp
+
+
+@register_jagged_func(
     torch.ops.aten._softmax.default, "self: jt, dim: any, half_to_float: any"
-)(jagged_unary_pointwise)
+)
+def _softmax_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+    dim = new_kwargs["dim"]
+    new_kwargs["dim"] = _wrap_jagged_dim(len(inp._size), dim, "softmax")
+
+    return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
 
 
 @register_jagged_func(
@@ -616,16 +642,23 @@ def unbind_int(func, *args, **kwargs):
     values = inp.values()
     offsets = inp.offsets()
     lengths = inp.lengths()
-
-    if inp._ragged_idx != 1:
-        raise RuntimeError(
-            "unbind(): only supported for NestedTensor when jagged dimension is 1"
-        )
+    ragged_idx = inp._ragged_idx
 
     if lengths is None:
-        return torch.split(values, offsets.diff().tolist())
+        return torch.split(values, offsets.diff().tolist(), dim=(ragged_idx - 1))
+
+    if ragged_idx <= 0:
+        raise RuntimeError(
+            "unbind(): nested tensor ragged_idx out of bounds (should be >= 1)"
+        )
+    for i in range(lengths.shape[0]):
+        if offsets[i] + lengths[i] > values.shape[ragged_idx - 1]:
+            raise RuntimeError(
+                "unbind(): nested tensor offsets and lengths do not match ragged_idx dimension"
+            )
     return [
-        values[offsets[i] : (offsets[i] + lengths[i])] for i in range(lengths.shape[0])
+        torch.narrow(values, dim=(ragged_idx - 1), start=offsets[i], length=lengths[i])
+        for i in range(lengths.shape[0])
     ]
 
 
@@ -1066,7 +1099,7 @@ def values_default(func, *args, **kwargs):
 
 @register_jagged_func(
     torch.ops.aten._nested_view_from_jagged.default,
-    "values: t, offsets: t, dummy: jt_all, lengths: t?, ragged_idx: any?",
+    "values: t, offsets: t, dummy: jt_all, lengths: t?, ragged_idx: any?, min_seqlen: t?, max_seqlen: t?",
 )
 def _nested_view_from_jagged_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
@@ -1079,8 +1112,21 @@ def _nested_view_from_jagged_default(func, *args, **kwargs):
         new_kwargs["lengths"],
     )
     ragged_idx = new_kwargs["ragged_idx"]
+    min_seqlen = new_kwargs["min_seqlen"]
+    max_seqlen = new_kwargs["max_seqlen"]
+    metadata_cache = {}
+    if min_seqlen is not None:
+        metadata_cache["min_seqlen"] = min_seqlen
+    if max_seqlen is not None:
+        metadata_cache["max_seqlen"] = max_seqlen
 
-    return NestedTensor(values, offsets, lengths=lengths, _ragged_idx=ragged_idx)
+    return NestedTensor(
+        values,
+        offsets,
+        lengths=lengths,
+        _ragged_idx=ragged_idx,
+        _metadata_cache=metadata_cache,
+    )
 
 
 @register_jagged_func(torch.ops.aten._nested_get_offsets.default, "self: jt_all")
@@ -1111,6 +1157,26 @@ def _nested_get_ragged_idx(func, *args, **kwargs):
 
     inp = new_kwargs.pop("input")
     return inp._ragged_idx
+
+
+@register_jagged_func(torch.ops.aten._nested_get_min_seqlen.default, "self: jt_all")
+def _nested_get_min_seqlen(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+    return inp._metadata_cache.get("min_seqlen", None)
+
+
+@register_jagged_func(torch.ops.aten._nested_get_max_seqlen.default, "self: jt_all")
+def _nested_get_max_seqlen(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+    return inp._metadata_cache.get("max_seqlen", None)
 
 
 # Make the dummy available on the C++ side.

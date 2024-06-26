@@ -63,11 +63,13 @@ struct TCPStoreOptions {
   std::optional<int> masterListenFd = c10::nullopt;
 
   // A boolean value indicating whether to use the experimental libUV backend.
-  bool useLibUV = false;
+  bool useLibUV = true;
 };
 
 class TORCH_API TCPStore : public Store {
  public:
+  static constexpr std::chrono::milliseconds kConnectRetryDelay{1000};
+
   explicit TCPStore(std::string host, const TCPStoreOptions& opts = {});
 
   [[deprecated("Use TCPStore(host, opts) instead.")]] explicit TCPStore(
@@ -158,7 +160,7 @@ class TORCH_API TCPStore : public Store {
   const std::string keyPrefix_ = "/";
   std::mutex activeOpLock_;
   std::unordered_map<std::string, detail::Counter> clientCounters_;
-  bool usingLibUv_ = false;
+  bool usingLibUv_ = true;
 };
 
 } // namespace c10d

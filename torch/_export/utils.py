@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import ast
 import dataclasses
 import inspect
@@ -299,9 +300,9 @@ def get_lifted_tensor_constant(
 
 def sequential_split(gm: torch.fx.GraphModule, node_call_back) -> torch.fx.GraphModule:
     """
-    Splits the graph module into multiple submodules based on the node_call_back.
-    The node_call_back should return True if the node is a delimiter. Delimiter will be
-    the first node in the next submodule.
+    sequential_split creates a new graph module that splits the input graph module into multiple submodules
+    based on the node_call_back. It doesn't mutate the input graph module. The node_call_back should return
+    True if the node is a delimiter.  Delimiter will be the first node in the next submodule.
     """
     from torch.fx.passes.split_module import split_module
 

@@ -1,3 +1,5 @@
+# mypy: allow-untyped-defs
+r"""Implementation for the RAdam algorithm."""
 from typing import cast, List, Optional, Tuple, Union
 
 import torch
@@ -23,7 +25,7 @@ from .optimizer import (
 __all__ = ["RAdam", "radam"]
 
 
-class RAdam(Optimizer):
+class RAdam(Optimizer):  # noqa: D101
     def __init__(
         self,
         params: ParamsT,
@@ -37,7 +39,7 @@ class RAdam(Optimizer):
         maximize: bool = False,
         capturable: bool = False,
         differentiable: bool = False,
-    ):
+    ):  # noqa: D107
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= eps:
@@ -62,7 +64,7 @@ class RAdam(Optimizer):
         )
         super().__init__(params, defaults)
 
-    def __setstate__(self, state):
+    def __setstate__(self, state):  # noqa: D105
         super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault("foreach", None)
@@ -119,7 +121,7 @@ class RAdam(Optimizer):
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
-        """Performs a single optimization step.
+        """Perform a single optimization step.
 
         Args:
             closure (Callable, optional): A closure that reevaluates the model
@@ -271,7 +273,7 @@ def _single_tensor_radam(
         step_t = state_steps[i]
 
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-        if not torch.compiler.is_compiling() and capturable:
+        if not torch._utils.is_compiling() and capturable:
             capturable_supported_devices = _get_capturable_supported_devices()
             assert (
                 param.device.type == step_t.device.type
@@ -369,7 +371,7 @@ def _multi_tensor_radam(
     assert not differentiable, "_foreach ops don't support autograd"
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-    if not torch.compiler.is_compiling() and capturable:
+    if not torch._utils.is_compiling() and capturable:
         capturable_supported_devices = _get_capturable_supported_devices(
             supports_xla=False
         )
@@ -559,7 +561,6 @@ def radam(
 
     See :class:`~torch.optim.RAdam` for details.
     """
-
     if not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError(
             "API has changed, `state_steps` argument must contain a list of singleton tensors"

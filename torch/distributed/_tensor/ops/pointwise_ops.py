@@ -2,7 +2,6 @@
 from typing import List, Sequence, Tuple
 
 import torch
-
 from torch.distributed._tensor._op_schema import (
     _is_inplace_op,
     _is_out_variant_op,
@@ -13,7 +12,6 @@ from torch.distributed._tensor._op_schema import (
     StrategyType,
     TupleStrategy,
 )
-
 from torch.distributed._tensor.ops.utils import (
     generate_redistribute_costs,
     infer_broadcast_dims_map,
@@ -22,8 +20,8 @@ from torch.distributed._tensor.ops.utils import (
     register_op_strategy,
 )
 from torch.distributed._tensor.placement_types import (
-    _Partial,
     DTensorSpec,
+    Partial,
     Placement,
     Replicate,
     Shard,
@@ -460,7 +458,7 @@ def common_pointwise_strategy(
                 common_ndim = len(common_shape)
                 new_shard_dim = common_ndim - len(spec_to_follow.shape) + shard_dim
                 out_placements.append(Shard(new_shard_dim))
-            elif isinstance(placement, _Partial) and not linearity:
+            elif isinstance(placement, Partial) and not linearity:
                 # clear the partial placemnet if op does not support linearity
                 # by default we just replicate the partial, need to see if this
                 # is optimal for all cases

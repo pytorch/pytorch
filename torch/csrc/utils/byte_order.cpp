@@ -110,8 +110,7 @@ static inline uint64_t decodeUInt64ByteSwapped(const uint8_t* data) {
 
 } // anonymous namespace
 
-namespace torch {
-namespace utils {
+namespace torch::utils {
 
 THPByteOrder THP_nativeByteOrder() {
   uint32_t x = 1;
@@ -481,5 +480,4 @@ void THP_encodeComplexDoubleBuffer(
   }
 }
 
-} // namespace utils
-} // namespace torch
+} // namespace torch::utils

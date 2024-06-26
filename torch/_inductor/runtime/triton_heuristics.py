@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import builtins
 import copy
 import functools
@@ -49,6 +50,7 @@ except ImportError:
 
 if triton is not None:
     from triton import Config
+    from triton.compiler import CompiledKernel
     from triton.runtime.autotuner import OutOfResources
     from triton.runtime.jit import KernelInterface
 
@@ -452,8 +454,8 @@ class CachingAutotuner(KernelInterface):
         scope = {
             "grid_meta": cfg.kwargs,
             "bin": binary,
-            "launch_enter_hook": binary.launch_enter_hook,
-            "launch_exit_hook": binary.launch_exit_hook,
+            "launch_enter_hook": CompiledKernel.launch_enter_hook,
+            "launch_exit_hook": CompiledKernel.launch_exit_hook,
             "metadata": binary.packed_metadata
             if hasattr(binary, "packed_metadata")
             else binary.metadata,
@@ -748,7 +750,6 @@ class CachingAutotuner(KernelInterface):
             # User defined triton kernels will have arbitrary kwarg names
             "meta": launcher.config.kwargs,
         }
-
         from torch._inductor.codecache import CudaKernelParamCache
 
         binary = (
@@ -778,7 +779,6 @@ class CachingAutotuner(KernelInterface):
             # skip triton template
             return launcher
 
-        cloned_args, _ = self.clone_args(*args)
         config2launcher = {launcher.config: launcher}
 
         def benchmark_one_config(config):
@@ -786,7 +786,7 @@ class CachingAutotuner(KernelInterface):
                 _, launcher = self._precompile_config(config, False)
             config2launcher[config] = launcher
 
-            out = self.bench(launcher, *cloned_args, **kwargs)
+            out = self.bench(launcher, *args, **kwargs)
             log.debug(
                 "COORDESC: %s: %f, nreg %d, nspill %d, #shared-mem %d",
                 launcher.config,
@@ -1031,7 +1031,7 @@ def should_use_remote_autotune_cache(inductor_meta):
     if inductor_meta.get("is_hip"):
         return False
 
-    from triton.runtime.fb_memcache import MEMCACHE_VERSION
+    from triton.fb.fb_memcache import MEMCACHE_VERSION
 
     return MEMCACHE_VERSION >= torch._utils_internal.justknobs_getval_int(
         "pytorch/remote_cache:autotune_memcache_version"
@@ -1075,11 +1075,17 @@ def cached_autotune(
 
                 try:
                     if inductor_meta.get("is_fbcode"):
-                        remote_cache = triton.runtime.fb_memcache.FbMemcacheRemoteAutotuneCacheBackend(
-                            key
+                        import triton.fb.fb_memcache
+
+                        remote_cache = (
+                            triton.fb.fb_memcache.FbMemcacheRemoteAutotuneCacheBackend(
+                                key
+                            )
                         )
                     else:
-                        remote_cache = triton.runtime.cache.RedisRemoteCacheBackend(key)
+                        from torch._inductor.remote_cache import RedisRemoteCacheBackend
+
+                        remote_cache = RedisRemoteCacheBackend(key)
                 except Exception:
                     remote_cache = None
                     log.warning("Unable to create a remote cache", exc_info=True)
@@ -1737,7 +1743,7 @@ def grid(*numels):
         max_y_grid = get_max_y_grid()
         if znumel is None:
             div = ceildiv(y_grid, max_y_grid)
-            y_grid = y_grid // div
+            y_grid = ceildiv(y_grid, div)
             z_grid = div
         else:
             z_grid = get_grid_dim(znumel, meta.get("ZBLOCK", None))

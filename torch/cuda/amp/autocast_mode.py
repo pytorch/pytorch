@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 from typing import Any
 from typing_extensions import deprecated
@@ -48,6 +49,16 @@ class autocast(torch.amp.autocast_mode.autocast):
         if torch._jit_internal.is_scripting():
             return func
         return super().__call__(func)
+
+
+# Preserved only for BC reasons
+@deprecated(
+    "`torch.cuda.amp.autocast_mode._cast(value, dtype)` is deprecated. "
+    "Please use `torch.amp.autocast_mode._cast(value, 'cuda', dtype)` instead.",
+    category=FutureWarning,
+)
+def _cast(value, dtype):
+    return torch.amp.autocast_mode._cast(value, "cuda", dtype)
 
 
 @deprecated(

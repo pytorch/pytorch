@@ -9,6 +9,7 @@ from typing import Dict, List, Optional
 
 import torch
 import torch.fx
+
 from ..._guards import Source
 
 from .. import polyfill, variables
@@ -176,18 +177,131 @@ class RangeVariable(BaseListVariable):
     def python_type(self):
         return range
 
+    def start(self):
+        return self.items[0].as_python_constant()
+
+    def stop(self):
+        return self.items[1].as_python_constant()
+
+    def step(self):
+        return self.items[2].as_python_constant()
+
+    def range_length(self):
+        lo = self.start()
+        hi = self.stop()
+        step = self.step()
+
+        assert step != 0
+        if step > 0 and lo < hi:
+            return 1 + (hi - 1 - lo) // step
+        elif step < 0 and lo > hi:
+            return 1 + (lo - 1 - hi) // (0 - step)
+        else:
+            return 0
+
+    def _get_slice_indices(self, length, slice):
+        step_is_negative = 0
+
+        if slice.step is None:
+            step = 1
+            step_is_negative = False
+        else:
+            step = slice.step
+            step_is_negative = slice.step < 0
+
+        # Find lower and upper bounds for start and stop.
+        if step_is_negative:
+            lower = -1
+            upper = length + lower
+        else:
+            lower = 0
+            upper = length
+
+        # Compute start
+        if slice.start is None:
+            start = upper if step_is_negative else lower
+        else:
+            start = slice.start
+
+        if start < 0:
+            start += length
+            if start < lower:
+                start = lower
+        else:
+            if start > upper:
+                start = upper
+
+        # Compute stop.
+        if slice.stop is None:
+            stop = lower if step_is_negative else upper
+
+        else:
+            stop = slice.stop
+
+            if stop < 0:
+                stop += length
+                if stop < lower:
+                    stop = lower
+            else:
+                if stop > upper:
+                    stop = upper
+
+        return [start, stop, step]
+
+    def apply_index(self, index):
+        length = self.range_length()
+        if index < 0:
+            index = length + index
+
+        if index < 0 or index >= length:
+            raise IndexError(f"index {index} is out of range")
+
+        return variables.ConstantVariable.create(self.start() + (index * self.step()))
+
+    def apply_slice(self, slice):
+        (slice_start, slice_stop, slice_step) = self._get_slice_indices(
+            self.range_length(), slice
+        )
+
+        def compute_item(index):
+            return self.start() + (index * self.step())
+
+        sub_step = self.step() * slice_step
+        sub_start = compute_item(slice_start)
+        sub_stop = compute_item(slice_stop)
+
+        result = RangeVariable(
+            [
+                variables.ConstantVariable.create(x)
+                for x in [sub_start, sub_stop, sub_step]
+            ],
+            mutable_local=MutableLocal() if self.mutable_local else None,
+        )
+        return result
+
     def as_python_constant(self):
         return range(*[x.as_python_constant() for x in self.items])
+
+    def getitem_const(self, arg: VariableTracker):
+        # implementations mimics https://github.com/python/cpython/blob/main/Objects/rangeobject.c
+        index = arg.as_python_constant()
+
+        if isinstance(index, slice):
+            return self.apply_slice(index)
+        else:
+            return self.apply_index(index)
 
     def as_proxy(self):
         return self.python_type()(*self._as_proxy())
 
-    def unpack_var_sequence(self, tx):
+    def unpack_var_sequence(self, tx=None):
         return [variables.ConstantVariable.create(x) for x in self.as_python_constant()]
 
     def reconstruct(self, codegen):
         assert "range" not in codegen.tx.f_globals
-        codegen.append_output(codegen.create_load_python_module(range, True))
+        codegen.add_push_null(
+            lambda: codegen.append_output(codegen.create_load_python_module(range))
+        )
         codegen.foreach(self.items)
         codegen.extend_output(create_call_function(3, False))
 
@@ -331,8 +445,10 @@ class DequeVariable(CommonListMethodsVariable):
 
     def reconstruct(self, codegen):
         assert "deque" not in codegen.tx.f_globals
-        codegen.append_output(
-            codegen.create_load_python_module(collections.deque, True)
+        codegen.add_push_null(
+            lambda: codegen.append_output(
+                codegen.create_load_python_module(collections.deque)
+            )
         )
         codegen.foreach(self.items)
         codegen.extend_output(create_call_function(len(self.items), False))
@@ -480,11 +596,11 @@ class SizeVariable(TupleVariable):
         return proxy
 
     def reconstruct(self, codegen):
-        codegen.load_import_from("torch", "Size")
+        codegen.add_push_null(lambda: codegen.load_import_from("torch", "Size"))
         codegen.foreach(self.items)
         build_torch_size = [
             create_instruction("BUILD_TUPLE", arg=len(self.items)),
-        ] + create_call_function(1, True)
+        ] + create_call_function(1, False)
         codegen.extend_output(build_torch_size)
 
     def unpack_var_sequence(self, tx):
@@ -577,13 +693,15 @@ class NamedTupleVariable(TupleVariable):
 
     def reconstruct(self, codegen):
         create_fn = getattr(self.tuple_cls, "_make", self.tuple_cls)
-        codegen.append_output(codegen._create_load_const(create_fn))
+        codegen.add_push_null(
+            lambda: codegen.append_output(codegen._create_load_const(create_fn))
+        )
         codegen.foreach(self.items)
         codegen.extend_output(
             [
                 create_instruction("BUILD_TUPLE", arg=len(self.items)),
             ]
-            + create_call_function(1, True)
+            + create_call_function(1, False)
         )
 
     def var_getattr(self, tx, name):
@@ -812,9 +930,9 @@ class RestrictedListSubclassVariable(ListVariable):
         )
 
     def reconstruct(self, codegen):
-        codegen(self.user_cls_source)
+        codegen.add_push_null(lambda: codegen(self.user_cls_source))
         super().reconstruct(codegen)
-        codegen.extend_output(create_call_function(1, True))
+        codegen.extend_output(create_call_function(1, False))
 
     def call_method(
         self,

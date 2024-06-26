@@ -7,7 +7,6 @@ from functools import reduce
 from typing import Any, List, Optional, Tuple, Union
 
 import torch
-
 from torch.distributed.checkpoint.metadata import (
     ChunkStorageMetadata,
     Metadata,

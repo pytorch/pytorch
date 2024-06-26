@@ -722,7 +722,7 @@ struct to_ir {
   std::vector<DefContext> def_stack_;
   size_t temp_name_count_ = 0;
   std::string createTempName(const std::string& prefix) {
-    return prefix + c10::to_string(temp_name_count_++);
+    return prefix + std::to_string(temp_name_count_++);
   }
 
   void pushFrame(Block* b, bool starts_def = false) {
@@ -3222,7 +3222,7 @@ struct to_ir {
       case TK_IN:
         return aten::__contains__;
       default:
-        throw std::runtime_error("unknown kind " + c10::to_string(kind));
+        throw std::runtime_error("unknown kind " + std::to_string(kind));
     }
   }
 
@@ -3269,7 +3269,7 @@ struct to_ir {
       case TK_RSHIFT:
         return "__rshift__";
       default:
-        throw std::runtime_error("unknown kind " + c10::to_string(kind));
+        throw std::runtime_error("unknown kind " + std::to_string(kind));
     }
   }
 

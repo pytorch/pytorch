@@ -1,5 +1,6 @@
 #include <c10/util/irange.h>
 #include <fmt/format.h>
+#include <torch/csrc/distributed/c10d/Backoff.hpp>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/TCPStoreBackend.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
@@ -152,19 +153,35 @@ class TCPClient {
  public:
   static std::unique_ptr<TCPClient> connect(
       const SocketAddress& addr,
-      const TCPStoreOptions& opts);
+      const TCPStoreOptions& opts,
+      std::shared_ptr<Backoff> backoff);
 
   void sendRaw(uint8_t* data, size_t lenght) {
-    tcputil::sendBytes(socket_.handle(), data, lenght);
+    try {
+      tcputil::sendBytes(socket_.handle(), data, lenght);
+    } catch (const std::exception& e) {
+      C10D_WARNING("sendBytes failed on {}: {}", socket_.repr(), e.what());
+      throw;
+    }
   }
 
   std::vector<std::uint8_t> receiveBits() {
-    return tcputil::recvVector<std::uint8_t>(socket_.handle());
+    try {
+      return tcputil::recvVector<std::uint8_t>(socket_.handle());
+    } catch (const std::exception& e) {
+      C10D_WARNING("recvVector failed on {}: {}", socket_.repr(), e.what());
+      throw;
+    }
   }
 
   template <typename T>
   T receiveValue() {
-    return tcputil::recvValue<T>(socket_.handle());
+    try {
+      return tcputil::recvValue<T>(socket_.handle());
+    } catch (const std::exception& e) {
+      C10D_WARNING("recvValue failed on {}: {}", socket_.repr(), e.what());
+      throw;
+    }
   }
   template <typename T>
   bool receiveValueWithTimeout(T& t, std::chrono::milliseconds timeout) {
@@ -183,10 +200,14 @@ class TCPClient {
 
 std::unique_ptr<TCPClient> TCPClient::connect(
     const SocketAddress& addr,
-    const TCPStoreOptions& opts) {
+    const TCPStoreOptions& opts,
+    std::shared_ptr<Backoff> backoff) {
   auto timeout = std::chrono::duration_cast<std::chrono::seconds>(opts.timeout);
   Socket socket = Socket::connect(
-      addr.host, addr.port, SocketOptions{}.connect_timeout(timeout));
+      addr.host,
+      addr.port,
+      SocketOptions{}.connect_timeout(timeout).connect_backoff(
+          std::move(backoff)));
 
   return std::make_unique<TCPClient>(std::move(socket));
 }
@@ -291,6 +312,17 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
     TORCH_CHECK(
         ::c10d::detail::is_libuv_tcpstore_backend_available(),
         "use_libuv was requested but PyTorch was build without libuv support");
+
+    if (opts.masterListenFd.has_value()) {
+      // TODO(xilunwu): support this init method after testing
+      constexpr auto* msg =
+          "The libuv TCPStore backend does not support initialization with an listen fd. "
+          "Please switch to the legacy TCPStore by setting environment variable USE_LIBUV "
+          "to \"0\".";
+      C10D_ERROR(msg);
+      C10_THROW_ERROR(NotImplementedError, msg);
+      return;
+    }
   }
 
   Socket::initialize();
@@ -324,22 +356,50 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
     addr_.port = opts.port;
   }
 
-  if (numWorkers_.has_value()) {
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<> distrib(1, *numWorkers_);
-    // TODO (xilunwu): this wait logic may be removed after fixing read_offset
-    // stagger connecting to the store when there are too many ranks to
-    // avoid causing a DDoS
-    std::this_thread::sleep_for(std::chrono::milliseconds(distrib(gen)));
-  }
+  // Try connecting several times -- if the server listen backlog is full it may
+  // fail on the first send in validate.
+  auto deadline = std::chrono::steady_clock::now() + opts.timeout;
+  auto backoff = std::make_shared<ExponentialBackoffWithJitter>();
 
-  client_ = detail::TCPClient::connect(addr_, opts);
-  // TCP connection established
-  C10D_DEBUG("TCP client connected to host {}:{}", addr_.host, addr_.port);
+  auto retry = 0;
+  do {
+    try {
+      client_ = detail::TCPClient::connect(addr_, opts, backoff);
+      // TCP connection established
+      C10D_DEBUG("TCP client connected to host {}:{}", addr_.host, addr_.port);
 
-  // client's first query for validation
-  validate();
+      // client's first query for validation
+      validate();
+
+      // success
+      break;
+    } catch (const c10::DistNetworkError& ex) {
+      if (deadline < std::chrono::steady_clock::now()) {
+        C10D_ERROR(
+            "TCP client failed to connect/validate to host {}:{} - timed out (try={}, timeout={}ms): {}",
+            addr_.host,
+            addr_.port,
+            retry,
+            opts.timeout.count(),
+            ex.what());
+        throw;
+      }
+
+      auto delayDuration = backoff->nextBackoff();
+
+      C10D_WARNING(
+          "TCP client failed to connect/validate to host {}:{} - retrying (try={}, timeout={}ms, delay={}ms): {}",
+          addr_.host,
+          addr_.port,
+          retry,
+          opts.timeout.count(),
+          delayDuration.count(),
+          ex.what());
+
+      std::this_thread::sleep_for(delayDuration);
+      retry += 1;
+    }
+  } while (true);
 
   if (opts.waitWorkers) {
     waitForWorkers();

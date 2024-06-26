@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import builtins
 import collections
 import inspect
@@ -232,10 +233,12 @@ __all__ = [
     # View & Shape Ops
     #
     "alias",
+    "alias_copy",
     "atleast_1d",
     "atleast_2d",
     "atleast_3d",
     "as_strided",
+    "as_strided_copy",
     "as_strided_scatter",
     "block_diag",
     "broadcast_shapes",
@@ -1709,6 +1712,15 @@ def sub(
 
     a, b = _maybe_broadcast(a, b)
 
+    if isinstance(a, TensorLike) and isinstance(b, TensorLike):
+        torch._check(
+            not utils.is_boolean_dtype(a.dtype) and not utils.is_boolean_dtype(b.dtype),
+            lambda: (
+                "Subtraction, the `-` operator, with two bool tensors is not supported. "
+                "Use the `^` or `logical_xor()` operator instead."
+            ),
+        )
+
     if alpha != 1:
         dtype = a.dtype if isinstance(a, TensorLike) else b.dtype  # type: ignore[union-attr]
         python_type = utils.dtype_to_type(dtype)
@@ -2651,6 +2663,9 @@ def as_strided(
         storage_offset if storage_offset is not None else a.storage_offset()
     )
     return prims.as_strided(a, size, stride, storage_offset_int)
+
+
+as_strided_copy = _make_copy_from_view(as_strided)
 
 
 @register_decomposition(aten.as_strided_scatter)
@@ -3649,6 +3664,16 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         else:
             return _a
 
+    if a.is_contiguous():
+        # Special-cases for nd_to_1d
+        if len(shape) == 1 and a.ndim > 1:
+            return torch.as_strided(a, [a.numel()], [1])
+        # Special-cases for 1d_to_2d
+        if len(shape) == 2 and a.ndim == 1:
+            dim0 = shape[0]
+            dim1 = shape[1]
+            return torch.as_strided(a, [dim0, dim1], [dim1, 1])
+
     # Handles general case: a 1+D tensor reshaped into a distinct 1+D shape
 
     # NOTE [Reshape Algorithm]
@@ -3823,7 +3848,7 @@ def rot90(
     elif k == 3:
         return torch.transpose(torch.flip(a, (dims[0],)), dims[0], dims[1])
     else:
-        return clone(a, memory_format=torch.contiguous_format)
+        return a.clone(memory_format=torch.contiguous_format)
 
 
 def _check_stack_inputs(tensors: TensorSequenceType) -> None:
@@ -4449,6 +4474,9 @@ def T(a: TensorLikeType) -> TensorLikeType:
 @register_decomposition(aten.alias)
 def alias(a: TensorLikeType) -> TensorLikeType:
     return prims.view_of(a)
+
+
+alias_copy = _make_copy_from_view(alias)
 
 
 @register_decomposition(aten.transpose)
@@ -5967,7 +5995,18 @@ def exponential(self, rate=1, generator=None):
         rate > 0.0,
         lambda: f"exponential_ expects lambda > 0.0, but found lambda={rate}",
     )
-    return -1 / rate * torch.log1p(-torch.rand_like(self))
+
+    uniform_val = torch.rand_like(self)
+
+    # copying numerics of transformation::exponential see comment:
+    # curand_uniform has (0,1] bounds. log(1) is 0 and exponential excludes 0.
+    # we need log to be not 0, and not underflow when converted to half
+    # fast __logf approximation can underflow, so set log to -epsilon/2 for 1 or close to 1 args
+    epsilon = torch.finfo(uniform_val.dtype).eps / 2
+    condition = uniform_val >= 1.0 - epsilon
+    log_uniform = torch.where(condition, -epsilon, torch.log(uniform_val))
+
+    return -1 / rate * log_uniform
 
 
 @register_decomposition(aten.geometric)

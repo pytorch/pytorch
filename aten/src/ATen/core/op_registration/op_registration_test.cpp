@@ -307,7 +307,6 @@ void stackBasedKernel(const OperatorHandle&, c10::Stack* stack) {
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsByNameAndNoneCanInferSchema_thenFails) {
-  bool called_kernel = false;
   expectThrows<c10::Error>([&] {
     auto registrar1 = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
       .kernel<&stackBasedKernel>(c10::DispatchKey::CPU)

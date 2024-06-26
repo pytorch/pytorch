@@ -20,7 +20,7 @@ from torch.optim.optimizer import (
     register_optimizer_step_post_hook,
     register_optimizer_step_pre_hook,
 )
-from torch.testing._internal.common_cuda import _create_scaling_case, TEST_MULTIGPU
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
@@ -32,6 +32,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_dtype import floating_types_and
 from torch.testing._internal.common_optimizers import (
+    _get_device_type,
     _get_optim_inputs_including_global_cliquey_kwargs,
     optim_db,
     OptimizerErrorEnum,
@@ -287,7 +288,7 @@ class TestOptimRenewed(TestCase):
             inpt = torch.randn(5, device=device, dtype=dtype)
 
             # avoid endless recompiles by wrapping LR in a tensor if we're compiling
-            lr = torch.tensor(0.01) if torch.compiler.is_compiling() else 0.01
+            lr = torch.tensor(0.01) if torch._utils.is_compiling() else 0.01
             optimizer = optim_cls([{"params": [weight]}, {"params": [bias], "lr": lr}])
             schedulers = [scheduler_c(optimizer) for scheduler_c in schedulers_c]
 
@@ -1004,7 +1005,6 @@ class TestOptimRenewed(TestCase):
 
             self.assertLessEqual(mt_max_mem, expected_max_mem)
 
-    @onlyNativeDeviceTypes
     @optims(
         [optim for optim in optim_db if "fused" in optim.supported_impls],
         dtypes=floating_types_and(
@@ -1013,10 +1013,15 @@ class TestOptimRenewed(TestCase):
         ),
     )
     def test_fused_matches_forloop(self, device, dtype, optim_info):
-        if device not in optim_info.supports_fused_on:
+        if _get_device_type(device) not in optim_info.supports_fused_on:
             self.skipTest(
                 f"{device} is not supported for fused on {optim_info.optim_cls.__name__}"
             )
+        if _get_device_type(device) == "mps" and dtype not in (
+            torch.float16,
+            torch.float32,
+        ):
+            self.skipTest("MPS supports only torch.float16 and torch.float32")
         self._test_derived_optimizers(device, dtype, optim_info, "fused")
 
     @onlyNativeDeviceTypes
@@ -1076,7 +1081,6 @@ class TestOptimRenewed(TestCase):
                         )
                 self.assertEqual(params, params_c)
 
-    @onlyCUDA
     @parametrize("impl", ["fused", "capturable"])
     @optims(
         [optim for optim in optim_db if "fused" in optim.supported_impls],
@@ -1100,8 +1104,15 @@ class TestOptimRenewed(TestCase):
         ):
             # Capturable SGD/Adagrad does not exist
             self.skipTest("SGD does not currently support capturable")
-        if impl == "fused" and device not in optim_info.supports_fused_on:
+        if _get_device_type(device) == "cpu":
+            self.skipTest("Test is only for non-cpu devices")
+        elif (
+            impl == "fused"
+            and _get_device_type(device) not in optim_info.supports_fused_on
+        ):
             self.skipTest(f"{device} is not supported for fused on {opt_name}")
+        elif impl == "capturable" and _get_device_type(device) == "mps":
+            self.skipTest("MPS does not support capturable")
 
         cpu_optim_inputs = optim_info.optim_inputs_func(device="cpu")
         for optim_input in cpu_optim_inputs:
@@ -1114,12 +1125,12 @@ class TestOptimRenewed(TestCase):
 
             # load
             optim_input.kwargs[impl] = True
-            param_cuda = param.clone().detach().to(device="cuda")
-            optimizer_cuda = optim_cls([param_cuda], **optim_input.kwargs)
-            optimizer_cuda.load_state_dict(optim_state_dict_cpu)
-            optimizer_cuda.zero_grad()
-            param_cuda.grad = torch.rand_like(param_cuda)
-            optimizer_cuda.step()
+            param_device = param.clone().detach().to(device=device)
+            optimizer_device = optim_cls([param_device], **optim_input.kwargs)
+            optimizer_device.load_state_dict(optim_state_dict_cpu)
+            optimizer_device.zero_grad()
+            param_device.grad = torch.rand_like(param_device)
+            optimizer_device.step()
 
     @optims(optim_db, dtypes=[torch.float32])
     def test_param_groups_weight_decay(self, device, dtype, optim_info):
@@ -1953,100 +1964,6 @@ class TestOptimRenewed(TestCase):
                 models.append(model)
                 optimizers.append(optimizer)
         self._compare_between(inpts, models, optimizers)
-
-    @onlyNativeDeviceTypes
-    @optims(
-        [optim for optim in optim_db if "fused" in optim.supported_impls],
-        dtypes=[torch.float32],
-    )
-    def test_grad_scaling_autocast_fused_optimizers(self, device, dtype, optim_info):
-        # This ut is from test_cuda.py test_grad_scaling_autocast_fused_optimizers
-        # but only test Adam/AdamW on CPU
-        # TODO: haozhe, support SGD and unified this ut with the CUDA only one
-        if device not in optim_info.supports_fused_on:
-            self.skipTest(
-                f"{device} is not supported for fused on {optim_info.optim_cls.__name__}"
-            )
-        optim_inputs = optim_info.optim_inputs_func(device=device)
-        optim_cls = optim_info.optim_cls
-        for optim_input in optim_inputs:
-            kwargs = optim_input.kwargs
-            kwargs["fused"] = True
-            for _separate_unscale in (True, False):
-                self._grad_scaling_autocast_fused_optimizers(
-                    device=device,
-                    optimizer_ctor=optim_cls,
-                    optimizer_kwargs=kwargs,
-                    separate_unscale=_separate_unscale,
-                )
-
-    def _grad_scaling_autocast_fused_optimizers(
-        self, device, optimizer_ctor, optimizer_kwargs, separate_unscale
-    ):
-        torch.manual_seed(20)
-        (
-            mod_control,
-            mod_scaling,
-            opt_control,
-            opt_scaling,
-            data,
-            loss_fn,
-            _,
-        ) = _create_scaling_case(
-            optimizer_ctor=optimizer_ctor,
-            optimizer_kwargs=optimizer_kwargs,
-            device="cpu",
-        )
-        kwargs = deepcopy(optimizer_kwargs)
-        kwargs["fused"] = False
-        if "lr" not in optimizer_kwargs:
-            # _create_scaling_case will set lr = 1.0 if optimizer_kwargs do not set lr
-            kwargs["lr"] = 1.0
-        opt_control = optimizer_ctor(mod_control.parameters(), **kwargs)
-
-        scaler_scaling = torch.amp.GradScaler(device, init_scale=128.0)
-        scaler_control = torch.amp.GradScaler(device, init_scale=128.0)
-        tracker = TensorTracker()
-        for input, target in data:
-            opt_control.zero_grad()
-            with torch.autocast(device_type=device, dtype=torch.half):
-                output_control = mod_control(input)
-                loss_control = loss_fn(output_control, target)
-            scaler_control.scale(loss_control).backward()
-            scaler_control.step(opt_control)
-            scaler_control.update()
-
-            opt_scaling.zero_grad()
-            with torch.autocast(device_type=device, dtype=torch.half):
-                output_scaling = mod_scaling(input)
-                loss_scaling = loss_fn(output_scaling, target)
-            scaler_scaling.scale(loss_scaling).backward()
-            if separate_unscale:
-                scaler_scaling.unscale_(opt_scaling)
-            scaler_scaling.step(opt_scaling)
-            scaler_scaling.update()
-
-            tracker.add(loss_control)
-            tracker.pop_check_set(loss_scaling, self)
-            for param_control, param_scaling in zip(
-                mod_control.parameters(), mod_scaling.parameters()
-            ):
-                tracker.add(param_control.grad)
-                tracker.pop_check_set(param_scaling.grad, self)
-                tracker.add(param_control)
-                tracker.pop_check_set(param_scaling, self)
-
-                state_control, state_scaling = (
-                    opt_control.state[param_control],
-                    opt_scaling.state[param_scaling],
-                )
-
-                for k in state_control:
-                    actual = state_scaling[k]
-                    if k == "step":
-                        actual = actual.squeeze()
-                    tracker.add(state_control[k])
-                    tracker.pop_check_set(actual, self)
 
     @onlyCUDA
     @optims(

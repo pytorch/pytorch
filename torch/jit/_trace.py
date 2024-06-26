@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Tracing.
 
 This module contains functionality to support the JIT's tracing frontend, notably:
@@ -646,10 +647,20 @@ def analyze_ts_result_with_export_result(export, trace):
     flat_trace = pytree.tree_leaves(trace)
 
     for orig, loaded in zip(flat_export, flat_trace):
+        if orig.layout != loaded.layout:
+            return False
+        # mkldnn is not supported for torch.allclose
+        if orig.layout == torch._mkldnn:  # type: ignore[attr-defined]
+            return True
         if type(orig) != type(loaded):
             return False
 
-        if isinstance(orig, torch.Tensor):
+        if isinstance(orig, torch._subclasses.FakeTensor):
+            # Skip for FakeTensor.
+            return True
+        elif isinstance(orig, torch.Tensor):
+            if orig.dtype != loaded.dtype:
+                return False
             if not torch.allclose(orig, loaded):
                 return False
         else:
@@ -981,6 +992,7 @@ def trace(
             "`optimize` is deprecated and has no effect. "
             "Use `with torch.jit.optimized_execution()` instead",
             FutureWarning,
+            stacklevel=2,
         )
 
     from torch._utils_internal import (
@@ -1012,11 +1024,35 @@ def trace(
             _process_jit_trace_inputs_for_export,
         )
 
+        traced_func_for_export = _trace_impl(
+            func,
+            example_inputs=example_inputs,
+            optimize=optimize,
+            check_trace=False,
+            check_inputs=check_inputs,
+            check_tolerance=check_tolerance,
+            strict=strict,
+            _force_outplace=_force_outplace,
+            _module_class=_module_class,
+            _compilation_unit=_compilation_unit,
+            example_kwarg_inputs=example_kwarg_inputs,
+            _store_inputs=_store_inputs,
+        )
+
         export_args, _ = _process_jit_trace_inputs_for_export(
             example_inputs, example_kwarg_inputs
         )
 
         def _log_exportability(func_to_export, export_func, export_args, export_type):
+            try:
+                traced_result = func_to_export(*export_args)
+            except Exception as e:
+                _ = e
+                log_torch_jit_trace_exportability(
+                    "trace", str(export_type), str(_ExportOutcome.SUCCESS), "succeeded"
+                )
+                return
+
             try:
                 ep_module = export_func(func_to_export, export_args)
             except Exception as e:
@@ -1033,15 +1069,6 @@ def trace(
             except Exception as e:
                 log_torch_jit_trace_exportability(
                     "trace", str(export_type), str(_ExportOutcome.FAILED_TO_RUN), str(e)
-                )
-                return
-
-            try:
-                traced_result = traced_func(*export_args)
-            except Exception as e:
-                _ = e
-                log_torch_jit_trace_exportability(
-                    "trace", str(export_type), str(_ExportOutcome.SUCCESS), "succeeded"
                 )
                 return
 
@@ -1065,22 +1092,22 @@ def trace(
             return TS2EPConverter(func, export_args).convert().module()
 
         # torch.jit.trace is noop when the original module is torch.jit.ScriptModule
-        if not isinstance(traced_func, torch.jit.ScriptModule):
+        if not isinstance(traced_func_for_export, torch.jit.ScriptModule):
             _log_exportability(
-                traced_func,
+                traced_func_for_export,
                 _direct_export_and_lower,
                 export_args,
                 _ExportType.DIRECT_EXPORT,
             )
 
         _log_exportability(
-            traced_func,
+            traced_func_for_export,
             _convert_ts_to_export_experimental,
             export_args,
             _ExportType.TRACE_AND_EXPORT,
         )
         _log_exportability(
-            traced_func,
+            traced_func_for_export,
             _convert_ts_to_export_source_to_source,
             export_args,
             _ExportType.SOURCE_TO_SOURCE,
@@ -1190,6 +1217,7 @@ def trace_module(
             "`optimize` is deprecated and has no effect. "
             "Use `with torch.jit.optimized_execution()` instead",
             FutureWarning,
+            stacklevel=2,
         )
 
     var_lookup_fn = _create_interpreter_name_lookup_fn(0)

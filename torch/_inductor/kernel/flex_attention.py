@@ -1,12 +1,11 @@
+# mypy: allow-untyped-defs
 """ Triton Implementation of the flex_attention Kernel"""
 
 import logging
-import math
 from enum import auto, Enum
 from typing import Any, List, Tuple
 
 import torch
-from torch._prims_common import make_contiguous_strides_for
 from .. import config
 from ..ir import (
     ComputedBuffer,
@@ -18,7 +17,7 @@ from ..ir import (
     Subgraph,
     TensorBox,
 )
-from ..lowering import empty_strided, full, lowerings, register_lowering
+from ..lowering import empty_strided, lowerings, register_lowering
 from ..select_algorithm import autotune_select_algorithm, TritonTemplate
 
 log = logging.getLogger(__name__)
@@ -189,34 +188,38 @@ flex_attention_template = TritonTemplate(
 
     Z = {{size("Q", 0)}}
     H = {{size("Q", 1)}}
-    N_CTX = {{size("Q", 2)}}
+    Q_LEN = {{size("Q", 2)}}
+    KV_LEN = {{size("K", 2)}}
 
     qk_scale = 1.0
     MATMUL_PRECISION = Q.dtype.element_ty
 
     start_m = tl.program_id(0)
-    off_hz = tl.program_id(1)
+    off_z = tl.program_id(1) // H
+    off_h = tl.program_id(1) % H
 
-    qkv_offset = off_hz * stride_qh
+    q_offset = off_z * stride_qz + off_h * stride_qh
+    k_offset = off_z * stride_kz + off_h * stride_kh
+    v_offset = off_z * stride_vz + off_h * stride_vh
     Q_block_ptr = tl.make_block_ptr(
-        base=Q + qkv_offset,
-        shape=(N_CTX, BLOCK_DMODEL),
+        base=Q + q_offset,
+        shape=(Q_LEN, BLOCK_DMODEL),
         strides=(stride_qm, stride_qk),
         offsets=(start_m * BLOCK_M, 0),
         block_shape=(BLOCK_M, BLOCK_DMODEL),
         order=(1, 0)
     )
     K_block_ptr = tl.make_block_ptr(
-        base=K + qkv_offset,
-        shape=(BLOCK_DMODEL, N_CTX),
+        base=K + k_offset,
+        shape=(BLOCK_DMODEL, KV_LEN),
         strides=(stride_kk, stride_kn),
         offsets=(0, 0),
         block_shape=(BLOCK_DMODEL, BLOCK_N),
         order=(0, 1)
     )
     V_block_ptr = tl.make_block_ptr(
-        base=V + qkv_offset,
-        shape=(N_CTX, BLOCK_DMODEL),
+        base=V + v_offset,
+        shape=(KV_LEN, BLOCK_DMODEL),
         strides=(stride_vk, stride_vn),
         offsets=(0, 0),
         block_shape=(BLOCK_N, BLOCK_DMODEL),
@@ -236,15 +239,13 @@ flex_attention_template = TritonTemplate(
     q = (q * qk_scale).to(MATMUL_PRECISION)
     # loop over k, v and update accumulator
     lo = 0
-    hi = N_CTX
+    hi = KV_LEN
     for start_n in range(lo, hi, BLOCK_N):
         start_n = tl.multiple_of(start_n, BLOCK_N)
         # -- load k, v --
         k = tl.load(K_block_ptr)
-        v = tl.load(V_block_ptr)
         # -- compute qk ---
-        qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
-        qk = tl.dot(q, k.to(MATMUL_PRECISION), acc=qk)
+        qk = tl.dot(q, k)
         # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
         m = offs_m[:, None]
         n = start_n + offs_n[None, :]
@@ -252,8 +253,8 @@ flex_attention_template = TritonTemplate(
             subgraph_number=0,
             output_name="post_mod_scores",
             score="qk",
-            b="off_hz // H",
-            h="off_hz % H",
+            b="off_z",
+            h="off_h",
             m="m",
             n="n",
             out="qk"
@@ -264,24 +265,26 @@ flex_attention_template = TritonTemplate(
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
         # -- compute scaling constant ---
-        row_max = tl.max(post_mod_scores, 1)
-        m_i_new = tl.maximum(m_i, row_max)
+        m_ij = tl.maximum(m_i, tl.max(post_mod_scores, 1))
 
-        alpha = tl.math.exp2(m_i - m_i_new)
-        p = tl.math.exp2(post_mod_scores - m_i_new[:, None])
+        alpha = tl.math.exp2(m_i - m_ij)
+        p = tl.math.exp2(post_mod_scores - m_ij[:, None])
         if not ROWS_GUARANTEED_SAFE:
-            masked_out_rows = (m_i_new == float("-inf"))
+            masked_out_rows = (m_ij == float("-inf"))
             alpha = tl.where(masked_out_rows, 0, alpha)
             p = tl.where(masked_out_rows[:, None], 0, p)
 
-        # -- scale and update acc --
-        acc_scale = l_i * 0 + alpha  # workaround some compiler bug
-        acc *= acc_scale[:, None]
-        acc = tl.dot(p.to(MATMUL_PRECISION), v.to(MATMUL_PRECISION), acc)
-
-        # -- update m_i and l_i --
+        # NB: l_i update is pulled up here since it's a bit faster
+        # NB: For headdim=256, it's faster to move it back down to after m_i =
+        # m_ij
         l_i = l_i * alpha + tl.sum(p, 1)
-        m_i = m_i_new
+        # # -- scale and update acc --
+        acc = acc * alpha[:, None]
+        v = tl.load(V_block_ptr)
+        acc = tl.dot(p.to(MATMUL_PRECISION), v, acc)
+
+        # -- update m_i
+        m_i = m_ij
         # update pointers
         K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
         V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
@@ -293,13 +296,14 @@ flex_attention_template = TritonTemplate(
     idx_m = offs_m[:, None]
     idx_d = tl.arange(0, BLOCK_DMODEL)[None, :]
 
+    mask = idx_m < Q_LEN
     # TODO generalize and add proper mask support
-    mask = (idx_m != -1) & (idx_d != -1)
     {{store_output(("idx_z", "idx_h", "idx_m", "idx_d"), "acc", "mask")}}
 
     # TODO dont want to write this if we dont require grad
     if OUTPUT_LOGSUMEXP:
-        l_ptrs = LSE + off_hz * N_CTX + offs_m
+        off_hz = tl.program_id(1)
+        l_ptrs = LSE + off_hz * Q_LEN + offs_m
         lse = m_i + tl.math.log2(l_i)
         tl.store(l_ptrs, lse)
  """,
@@ -313,6 +317,9 @@ _h100_default_config = {
     (torch.bfloat16, 64): (128, 64, 4, 3),
     (torch.bfloat16, 128): (64, 32, 4, 3),
     (torch.bfloat16, 256): (64, 32, 4, 3),
+    (torch.float16, 64): (128, 64, 4, 3),
+    (torch.float16, 128): (64, 32, 4, 3),
+    (torch.float16, 256): (64, 32, 4, 3),
 }
 
 _a100_default_config = {
@@ -320,8 +327,11 @@ _a100_default_config = {
     (torch.float32, 128): (128, 32, 4, 3),
     (torch.float32, 256): (64, 16, 4, 3),
     (torch.bfloat16, 64): (128, 64, 4, 3),
-    (torch.bfloat16, 128): (128, 32, 4, 3),
+    (torch.bfloat16, 128): (128, 128, 8, 2),
     (torch.bfloat16, 256): (32, 64, 4, 3),
+    (torch.float16, 64): (128, 64, 4, 3),
+    (torch.float16, 128): (128, 128, 8, 2),
+    (torch.float16, 256): (32, 64, 4, 3),
 }
 
 
@@ -355,12 +365,17 @@ def _get_default_config_bwd(query) -> Tuple[int, int, int, int]:
     head_dim = query.get_size()[-1]
     dtype = query.get_dtype()
 
+    if dtype == torch.float32:
+        return (16, 16, 4, 1)
     if head_dim <= 256 and torch.cuda.get_device_capability() >= (9, 0):  # H100
-        if dtype == torch.float32:
-            return (64, 64, 4, 1)
-        return (128, 128, 4, 3)
-    elif head_dim <= 256 and torch.cuda.get_device_capability() >= (8, 0):  # A100
-        return (32, 32, 4, 1)
+        return (32, 128, 4, 3)
+    elif torch.cuda.get_device_capability() >= (8, 0):  # A100
+        if head_dim == 64:
+            return (32, 128, 4, 3)
+        elif head_dim == 128:
+            return (64, 128, 8, 3)
+        else:
+            return (64, 64, 4, 2)
     else:  # modest hardware or extremely large head_dim
         return (16, 16, 4, 1)
 
@@ -388,7 +403,7 @@ def flex_attention(*args, **kwargs):
         query.get_device(),
         query.get_dtype(),
         query.get_size(),
-        make_contiguous_strides_for(query.get_size()),
+        query.get_stride(),
     )
     # see NOTE:[TritonTemplates with multiple outputs]
     logsumexp_shape = query.get_size()[:-1]  # [B, H, M]
@@ -426,6 +441,7 @@ def flex_attention(*args, **kwargs):
             ],
             num_stages=num_stages,
             num_warps=num_warps,
+            call_sizes=query.get_size(),
             BLOCK_M=BLOCK_M,
             BLOCK_N=BLOCK_N,
             BLOCK_DMODEL=query.get_size()[-1],
@@ -446,13 +462,22 @@ def flex_attention(*args, **kwargs):
 # ---------------------------- Backward HOP Implementation ----------------------------
 
 
-def flex_attention_backward_grid(batch_size, num_heads, num_key_value, d_model, meta):
+def flex_attention_backward_grid(
+    batch_size, num_heads, num_queries, d_model, num_key_value, meta
+):
     """How is this kernel parallelized?
     Currently this is only parallelizing over batch * num_heads, but we can, and want to
     parallelize over ceil_div(num_key_value, key_value_block_size). To do this will either require
     atomic updates to some grad values or to have a two pass kernel design.
     """
-    return (batch_size * num_heads, 1, 1)
+    import triton
+
+    return (
+        triton.cdiv(num_queries, meta["BLOCK_M2"])
+        + triton.cdiv(num_key_value, meta["BLOCK_N1"]),
+        1,
+        batch_size * num_heads,
+    )
 
 
 flex_attention_backward_template = TritonTemplate(
@@ -468,97 +493,96 @@ flex_attention_backward_template = TritonTemplate(
     # DK: Derivative of Key, is the written to via the store_output call due to some limitations with
     # inductor codegen
     # M: Number of queries, N: Number of keys/values, D: Model dimension
-    # z: Batch size, h: Number of heads, m: Number of queries per head, k: Number of keys per head
+    # z: Batch size, h: Number of heads, m: Number of queries or keys/values, d: Head dim
     # (Modifiable) Config options:
-    # BLOCK_M
-    # BLOCK_N
+    # BLOCK_M1: when calculating DK & DV, iterate over BLOCK_M1 across the seqlen dim of Q in each thread block.
+    # BLOCK_N1: when calculating DK & DV, the thread block size across the seqlen dim of K/V.
+    # BLOCK_M2: when calculating DQ, the thread block size across the seqlen dim of Q.
+    # BLOCK_N2: when calculating DQ, iterate over BLOCK_N2 across the seqlen dim of K/V in each thread block.
     # SCORE_MOD_IS_LINEAR: Is the score modifier linear? If so, we can lift the
     # change of base out of the loop
-    # ROWS_GUARANTEED_SAFE: Is it guaranteed that at least one value in each row
-    # is not masked out? If so, we can skip an extra safety check
-    # OUTPUT_LOGSUMEXP: We only need to store the logsumexp if we require grad
 
     # Define Q Strides
     stride_qz = {{stride("Q", 0)}}
     stride_qh = {{stride("Q", 1)}}
     stride_qm = {{stride("Q", 2)}}
-    stride_qk = {{stride("Q", 3)}}
+    stride_qd = {{stride("Q", 3)}}
     # Define K Strides
     stride_kz = {{stride("K", 0)}}
     stride_kh = {{stride("K", 1)}}
-    stride_kn = {{stride("K", 2)}}
-    stride_kk = {{stride("K", 3)}}
+    stride_km = {{stride("K", 2)}}
+    stride_kd = {{stride("K", 3)}}
     # Define V Strides
     stride_vz = {{stride("V", 0)}}
     stride_vh = {{stride("V", 1)}}
-    stride_vn = {{stride("V", 2)}}
-    stride_vk = {{stride("V", 3)}}
+    stride_vm = {{stride("V", 2)}}
+    stride_vd = {{stride("V", 3)}}
 
     Z = {{size("Q", 0)}}
     H = {{size("Q", 1)}}
-    N_CTX = {{size("Q", 2)}}
+    Q_LEN = {{size("Q", 2)}}
+    KV_LEN = {{size("K", 2)}}
 
-    qk_scale = 1.0
     MATMUL_PRECISION = Q.dtype.element_ty
 
-    off_hz = tl.program_id(0)
+    pid = tl.program_id(0)
+    NUM_KV_BLOCKS = KV_LEN // BLOCK_N1
+
+    off_hz = tl.program_id(2)
     off_z = off_hz // H # batch idx
     off_h = off_hz % H # head idx
 
+    off_chz = (off_hz * Q_LEN).to(tl.int64)
+    q_adj = (stride_qh * (off_hz % H) + stride_qz * (off_hz // H)).to(tl.int64)
+    k_adj = (stride_kh * (off_hz % H) + stride_kz * (off_hz // H)).to(tl.int64)
+    v_adj = (stride_vh * (off_hz % H) + stride_vz * (off_hz // H)).to(tl.int64)
+
     # offset pointers for batch/head
-    Q += off_z * stride_qz + off_h * stride_qh
-    K += off_z * stride_kz + off_h * stride_kh
-    V += off_z * stride_vz + off_h * stride_vh
+    Q += q_adj
+    K += k_adj
+    V += v_adj
+    DO += q_adj
+    DQ += q_adj
+    DV += v_adj
+    LSE += off_chz
+    DELTA += off_chz
 
-    # Asserting contiguous for now...
-    DO += off_z * stride_qz + off_h * stride_qh
-    DQ += off_z * stride_qz + off_h * stride_qh
-    DV += off_z * stride_vz + off_h * stride_vh
+    offs_k = tl.arange(0, BLOCK_DMODEL)
 
-    # TODO I think that this should be N_CTX/BLOCK_N blocks
-    for start_n in range(0, NUM_Q_BLOCKS):
-        # We are not doing the causal optimization yet allowing us to start further down the
-        # kv column
-        offs_n = start_n * BLOCK_N + tl.arange(0, BLOCK_N)
-        offs_m = tl.arange(0, BLOCK_M)
-        offs_k = tl.arange(0, BLOCK_DMODEL)
+    if pid >= NUM_KV_BLOCKS:
+        # THIS BLOCK DOES DQ
+        off_pid = pid - NUM_KV_BLOCKS
+        start_m2 = off_pid * BLOCK_M2
 
-        # initialize pointers to value-like data
-        q_ptrs = Q + (offs_m[:, None] * stride_qm + offs_k[None, :] * stride_qk)
-        k_ptrs = K + (offs_n[:, None] * stride_kn + offs_k[None, :] * stride_kk)
-        v_ptrs = V + (offs_n[:, None] * stride_vn + offs_k[None, :] * stride_vk)
-        do_ptrs = DO + (offs_m[:, None] * stride_qm + offs_k[None, :] * stride_qk)
-        dq_ptrs = DQ + (offs_m[:, None] * stride_qm + offs_k[None, :] * stride_qk)
+        offs_m2 = start_m2 + tl.arange(0, BLOCK_M2)
 
-        # pointer to row-wise quantities in value-like data
-        D_ptrs = DELTA + off_hz * N_CTX
-        l_ptrs = LSE + off_hz * N_CTX
+        q = tl.load(Q + offs_m2[:, None] * stride_qm + offs_k[None, :] * stride_qd)
+        dq = tl.zeros([BLOCK_M2, BLOCK_DMODEL], dtype=tl.float32)
+        do = tl.load(DO + offs_m2[:, None] * stride_qm + offs_k[None, :] * stride_qd)
 
-        # initialize dv and dk
-        dv = tl.zeros([BLOCK_N, BLOCK_DMODEL], dtype=tl.float32)
-        dk = tl.zeros([BLOCK_N, BLOCK_DMODEL], dtype=tl.float32)
+        lse = tl.load(LSE + offs_m2)
+        lse = lse[:, None]
 
-        # Key and Value stay in SRAM throughout
-        k = tl.load(k_ptrs)
-        v = tl.load(v_ptrs)
+        start_n2 = 0
+        offs_m2 = start_m2 + tl.arange(0, BLOCK_M2)
+        offs_n2 = start_n2 + tl.arange(0, BLOCK_N2)
+        kT_ptrs = K + offs_n2[None, :] * stride_km + offs_k[:, None] * stride_kd
+        vT_ptrs = V + offs_n2[None, :] * stride_vm + offs_k[:, None] * stride_vd
+        Di = tl.load(DELTA + offs_m2)
+        # BLOCK_M2 must be a multiple of BLOCK_N2, otherwise the code wouldn't work.
+        tl.static_assert(BLOCK_M2 % BLOCK_N2 == 0)
 
-        for start_m in range(0, NUM_Q_BLOCKS * BLOCK_M, BLOCK_M):
-            offs_m_curr = start_m + offs_m
-
-            # load q, k, v, do on-chip
-            q = tl.load(q_ptrs)
-
-            if SCORE_MOD_IS_LINEAR:
-                qk_scale *= 1.44269504
-            q = (q * qk_scale).to(MATMUL_PRECISION)
-
-            # -- compute qk ---
-            qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
-            qk = tl.dot(q, tl.trans(k.to(MATMUL_PRECISION)), acc=qk)
-            pre_mod_scores = qk
+        curr_n = start_n2
+        num_steps = KV_LEN // BLOCK_N2
+        for blk_idx in range(num_steps):
+            offs_n2 = curr_n + tl.arange(0, BLOCK_N2)
+            kT = tl.load(kT_ptrs)
+            vT = tl.load(vT_ptrs)
+            qk = tl.dot(q, kT)
             # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
-            m = offs_m_curr[:, None]
-            n = offs_n[None, :]
+            pre_mod_scores = qk
+            m = offs_m2[:, None]
+            n = offs_n2[None, :]
             {{ modification(
                 subgraph_number=0,
                 output_name="post_mod_scores",
@@ -569,25 +593,13 @@ flex_attention_backward_template = TritonTemplate(
                 n="n",
                 out="qk"
             ) | indent_except_first(3) }}
-            # TODO: In the case that score_mod is linear, this can be LICMed
+            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
             if not SCORE_MOD_IS_LINEAR:
                 post_mod_scores *= 1.44269504
-            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-            l_i = tl.load(l_ptrs + offs_m_curr)
-            p = tl.math.exp2(post_mod_scores - l_i[:, None])
-
-            # compute dv
-            do = tl.load(do_ptrs)
-            dv += tl.dot(tl.trans(p.to(MATMUL_PRECISION)), do)
-
-            # compute dp = dot(v, do)
-            Di = tl.load(D_ptrs + offs_m_curr) # [BLOCKM, 1]
-
-            # compute ds = p * (dp - delta[:, None])
-            dp = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32) - Di[:, None]
-            dp += tl.dot(do, tl.trans(v))
-            ds = p * dp
-
+            p = tl.math.exp2(post_mod_scores - lse).to(MATMUL_PRECISION)
+            # Compute dP and dS.
+            dp = tl.dot(do, vT)
+            ds = p * (dp - Di[:, None])
             # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
             {{ modification(
                 subgraph_number=1,
@@ -601,32 +613,101 @@ flex_attention_backward_template = TritonTemplate(
             ) | indent_except_first(3) }}
             ds = grad_scores
             # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-            # compute dk = dot(ds.T, q)
-            dk += tl.dot(tl.trans(ds.to(MATMUL_PRECISION)), q)
-            # compute dq
-            dq = tl.load(dq_ptrs)
-            dq += tl.dot(ds.to(MATMUL_PRECISION), k)
+            ds = ds.to(MATMUL_PRECISION)
+            # Compute dQ.
+            dq += tl.dot(ds, tl.trans(kT))
+            # Increment pointers.
+            curr_n += BLOCK_N2
+            kT_ptrs += BLOCK_N2 * stride_km
+            vT_ptrs += BLOCK_N2 * stride_km
+        # Write back dQ.
+        dq_ptrs = DQ + offs_m2[:, None] * stride_qm + offs_k[None, :] * stride_qd
+        tl.store(dq_ptrs, dq)
+    else:
+        # THIS BLOCK DOES DK & DV
+        start_n1 = pid * BLOCK_N1
+        start_m1 = 0
 
-            # Store grad_query
-            tl.store(dq_ptrs, dq)
+        offs_n1 = start_n1 + tl.arange(0, BLOCK_N1)
 
-            # increment pointers
-            dq_ptrs += BLOCK_M * stride_qm
-            q_ptrs += BLOCK_M * stride_qm
-            do_ptrs += BLOCK_M * stride_qm
+        dv = tl.zeros([BLOCK_N1, BLOCK_DMODEL], dtype=tl.float32)
+        dk = tl.zeros([BLOCK_N1, BLOCK_DMODEL], dtype=tl.float32)
 
-        # write-back
-        index_n = offs_n[:, None]
-        index_k = offs_k[None, :]
+        # load K and V: they stay in SRAM throughout the inner loop.
+        k = tl.load(K + offs_n1[:, None] * stride_km + offs_k[None, :] * stride_kd)
+        v = tl.load(V + offs_n1[:, None] * stride_vm + offs_k[None, :] * stride_vd)
 
-        # Store grad_key and grad_value
-        dv_ptrs = DV + (index_n * stride_vn + index_k * stride_vk)
+        offs_m1 = start_m1 + tl.arange(0, BLOCK_M1)
+        offs_n1 = start_n1 + tl.arange(0, BLOCK_N1)
+        qT_ptrs = Q + offs_m1[None, :] * stride_qm + offs_k[:, None] * stride_qd
+        do_ptrs = DO + offs_m1[:, None] * stride_qm + offs_k[None, :] * stride_qd
+        # BLOCK_N1 must be a multiple of BLOCK_M1, otherwise the code wouldn't work.
+        tl.static_assert(BLOCK_N1 % BLOCK_M1 == 0)
+
+        curr_m = start_m1
+        num_steps = Q_LEN // BLOCK_M1
+        for blk_idx in range(num_steps):
+            qT = tl.load(qT_ptrs)
+            # Load LSE before computing qk to reduce pipeline stall.
+            offs_m1 = curr_m + tl.arange(0, BLOCK_M1)
+            lse = tl.load(LSE + offs_m1)
+            qkT = tl.dot(k, qT)
+            # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
+            m = offs_m1[None, :]
+            n = offs_n1[:, None]
+            pre_mod_scores = qkT
+            {{ modification(
+                subgraph_number=0,
+                output_name="post_mod_scores",
+                score="qkT",
+                b="off_z",
+                h="off_h",
+                m="m",
+                n="n",
+                out="qkT"
+            ) | indent_except_first(3) }}
+            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            if not SCORE_MOD_IS_LINEAR:
+                post_mod_scores *= 1.44269504
+            pT = tl.math.exp2(post_mod_scores - lse[None, :])
+            do = tl.load(do_ptrs)
+            # Compute dV.
+            ppT = pT
+            dv += tl.dot(ppT.to(MATMUL_PRECISION), do)
+            Di = tl.load(DELTA + offs_m1)
+            # Compute dP and dS.
+            dpT = tl.dot(v, tl.trans(do))
+            dsT = pT * (dpT - Di[None, :])
+            # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
+            m = offs_m1[None, :]
+            n = offs_n1[:, None]
+            {{ modification(
+                subgraph_number=1,
+                output_name = "grad_scores",
+                score="pre_mod_scores",
+                b="off_z",
+                h="off_h",
+                m="m",
+                n="n",
+                grad_score_mod="dsT"
+            ) | indent_except_first(3) }}
+            dsT = grad_scores
+            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            dk += tl.dot(dsT.to(MATMUL_PRECISION), tl.trans(qT))
+            # Increment pointers.
+            curr_m += BLOCK_M1
+            qT_ptrs += BLOCK_M1 * stride_qm
+            do_ptrs += BLOCK_M1 * stride_qm
+
+        dv_ptrs = DV + offs_n1[:, None] * stride_vm + offs_k[None, :] * stride_vd
         tl.store(dv_ptrs, dv)
 
-        # TODO generalize and add proper mask support
-        mask = (index_n != -1) & (index_k != -1)
-        {{store_output(("off_z", "off_h", "index_n", "index_k"), "dk", "mask", indent_width=8)}}
+        # Write back dK.
+        index_n = offs_n1[:, None]
+        index_k = offs_k[None, :]
 
+        mask = index_n <= KV_LEN
+        {{store_output(("off_z", "off_h", "index_n", "index_k"), "dk", "mask", indent_width=8)}}
  """,
 )
 
@@ -678,7 +759,7 @@ def flex_attention_backward(*args, **kwargs):
         key.get_device(),
         key.get_dtype(),
         key.get_size(),
-        make_contiguous_strides_for(key.get_size()),
+        key.get_stride(),
     )
 
     # Create delta which will is needed for the bwd's kernel
@@ -686,24 +767,26 @@ def flex_attention_backward(*args, **kwargs):
     delta = lowerings[aten.sum](mul_delta, axis=-1)
 
     # see NOTE:[TritonTemplates with multiple outputs]
-    grad_query = full(
-        query.get_size(), 0.0, dtype=dtype, device=device
-    )  # torch.zeros equivalent
-    grad_query.realize()
-    grad_value = empty_strided(value.get_size(), None, dtype=dtype, device=device)
+    grad_query = empty_strided(
+        query.get_size(), query.get_stride(), dtype=dtype, device=device
+    )
+    grad_value = empty_strided(
+        value.get_size(), value.get_stride(), dtype=dtype, device=device
+    )
 
     choices: List[Any] = []
     configs: List[Tuple[int, int, int, int]] = []
     configs.append(_get_default_config_bwd(query))
     if config.max_autotune:
-        configs += [
-            (128, 128, 4, 3),
-            (128, 128, 8, 1),
-            (64, 64, 4, 3),
-            (64, 64, 8, 1),
-        ]
+        for BLOCK1 in [32, 64]:
+            for BLOCK2 in [32, 64, 128]:
+                if BLOCK2 % BLOCK1 != 0:
+                    continue
+                for w in [4, 8]:
+                    for s in [1, 3, 4, 5]:
+                        configs.append((BLOCK1, BLOCK2, w, s))
 
-    for BLOCK_M, BLOCK_N, num_warps, num_stages in configs:
+    for BLOCK1, BLOCK2, num_warps, num_stages in configs:
         flex_attention_backward_template.maybe_append_choice(
             choices=choices,
             input_nodes=[
@@ -720,12 +803,14 @@ def flex_attention_backward(*args, **kwargs):
             layout=layout_k,  # We use store_output only for grad_key
             subgraphs=[fw_subgraph_buffer, joint_subgraph_buffer],
             mutated_inputs=[grad_query, grad_value],
+            call_sizes=query.get_size() + [key.get_size()[2]],
             num_stages=num_stages,
             num_warps=num_warps,
-            BLOCK_M=BLOCK_M,
-            BLOCK_N=BLOCK_N,
+            BLOCK_M1=BLOCK1,
+            BLOCK_N1=BLOCK2,
+            BLOCK_M2=BLOCK2,
+            BLOCK_N2=BLOCK1,
             BLOCK_DMODEL=query.get_size()[-1],
-            NUM_Q_BLOCKS=math.ceil(query.get_size()[-2] / BLOCK_M),
             # For now, we always assume the "sound" option
             SCORE_MOD_IS_LINEAR=False,
         )

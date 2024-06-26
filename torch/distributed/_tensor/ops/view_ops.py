@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from dataclasses import dataclass
 from typing import (
@@ -14,7 +15,6 @@ from typing import (
 )
 
 import torch
-
 from torch import Tensor
 from torch.distributed._tensor._op_schema import (
     OpSchema,
@@ -31,9 +31,9 @@ from torch.distributed._tensor.ops.utils import (
     prod,
     register_op_strategy,
 )
-
 from torch.distributed._tensor.placement_types import DTensorSpec, Placement, Replicate
 from torch.distributed.device_mesh import DeviceMesh
+
 
 aten = torch.ops.aten
 
@@ -439,7 +439,7 @@ def dim_reduction(
     ndim: int, dim_or_dims: Optional[Union[int, Sequence[int]]], keepdim: bool
 ) -> DimMap:
     """
-    General fallback for reduction ops where _Partial() does not apply.
+    General fallback for reduction ops where Partial() does not apply.
 
     This will cause incoming tensor to be replicated on the reducing dimensions.
     """

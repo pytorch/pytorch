@@ -2,7 +2,6 @@ from typing import List, Optional, Sequence, Union
 
 from torchgen import local
 from torchgen.api import cpp
-
 from torchgen.api.types import (
     ArgName,
     BaseCType,
@@ -29,6 +28,7 @@ from torchgen.model import (
     Type,
 )
 from torchgen.utils import assert_never
+
 
 # This file describes the translation of JIT schema to the native functions API.
 # This looks a lot like the C++ API (which makes historical sense, because the

@@ -1,17 +1,28 @@
+# mypy: allow-untyped-defs
 import functools
 import itertools
 import operator
+import typing
 from typing import List, Optional, Union
 
 import torch
 import torch._inductor.runtime.runtime_utils
 from torch import Tensor
+from torch._dynamo.utils import counters
 from torch._inductor import utils
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._mode_utils import no_dispatch
+
 from ...utils._triton import has_triton
 
-from ..pattern_matcher import fwd_only, gen_register_replacement, joint_fwd_bwd, Match
+from ..pattern_matcher import (
+    fwd_only,
+    gen_register_replacement,
+    joint_fwd_bwd,
+    Match,
+    ReplaceFn,
+    SearchFn,
+)
 
 aten = torch.ops.aten
 
@@ -479,7 +490,16 @@ def should_pad_bench(
         # Shape padding introduces additional memory ops. Based on microbenchmarks, 1.1x represents a reasonable
         # tradeoff between performance improvement from shape padding and overhead from additional memory ops
         # TODO: Build a learned model which would be better than this heuristic
-        should_pad = _skip_do_bench_times or ori_time > pad_time * 1.1
+        multiplier = 1.1
+        if (
+            "shape_padding_multiplier"
+            in torch._inductor.config.post_grad_fusion_options
+        ):
+            multiplier = torch._inductor.config.post_grad_fusion_options[
+                "shape_padding_multiplier"
+            ].get("value", 1.1)
+            counters["inductor"]["shape_padding_multiplier"] += 1
+        should_pad = _skip_do_bench_times or ori_time > pad_time * multiplier
         set_cached_should_pad(key, should_pad)
         return should_pad
 
@@ -636,22 +656,22 @@ def _pad_mm_init():
 
     for pattern, replacement, args, workaround, extra_check in [
         (
-            mm_pattern,
-            mm_replace,
+            typing.cast(SearchFn, mm_pattern),
+            typing.cast(ReplaceFn, mm_replace),
             [dim2a(), dim2b()],
             {},
             should_pad_mm,
         ),
         (
-            bmm_pattern,
-            bmm_replace,
+            typing.cast(SearchFn, bmm_pattern),
+            typing.cast(ReplaceFn, bmm_replace),
             [dim3a(), dim3b()],
             {},
             should_pad_bmm,
         ),
         (
-            addmm_pattern,
-            addmm_replace,
+            typing.cast(SearchFn, addmm_pattern),
+            typing.cast(ReplaceFn, addmm_replace),
             [dim1a(), dim2a(), dim2b()],
             rep,
             should_pad_addmm,

@@ -5,7 +5,6 @@
 #include <ATen/TensorGeometry.h>
 #include <c10/core/ScalarTypeToTypeMeta.h>
 #include <c10/util/irange.h>
-#include <c10/util/string_utils.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/mkldnn_rewrite.h>
@@ -885,7 +884,7 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
         inner1->set_gpu_thread_index(0);
       } else {
         throw std::runtime_error(
-            "Invalid loop-level: " + c10::to_string(loopLevels));
+            "Invalid loop-level: " + std::to_string(loopLevels));
       }
     }
   }
@@ -953,7 +952,7 @@ std::string TensorExprKernel::getCodeGenName(BackendType backendType) {
     default:
       throw std::runtime_error(
           "invalid backend type: " +
-          c10::to_string(static_cast<int>(backendType)));
+          std::to_string(static_cast<int>(backendType)));
   }
 }
 
@@ -1190,7 +1189,7 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
           ToDtype(static_cast<ScalarType>(*tt->scalarType())));
 
       result = Compute(
-          "input" + c10::to_string(bufs_.size() + 1),
+          "input" + std::to_string(bufs_.size() + 1),
           size_handles,
           [&](const std::vector<VarHandle>& axes) {
             ExprHandle idx = 0;
