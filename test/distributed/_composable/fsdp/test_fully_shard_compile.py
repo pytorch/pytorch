@@ -4,6 +4,7 @@
 import contextlib
 import copy
 import unittest
+from typing import NamedTuple
 
 import torch
 import torch._dynamo.testing
@@ -15,6 +16,11 @@ from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._composable.fsdp._fsdp_common import TrainingState
 from torch.distributed._composable.fsdp._fsdp_param_group import FSDPParamGroup
 from torch.distributed._tensor import init_device_mesh
+
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    checkpoint_wrapper as ptd_checkpoint_wrapper,
+    CheckpointImpl,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, MLP
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
@@ -23,6 +29,48 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     Transformer,
 )
 from torch.utils._triton import has_triton
+
+from torch.utils.checkpoint import checkpoint
+
+
+class ACConfig(NamedTuple):
+    mode: str = "selective"
+    selective_ac_option: str = "2"
+
+
+# Uses PTD FSDP AC wrapper
+# currently selective per op and per layer checkpointing are supported
+def checkpoint_wrapper(module, config):
+    if config.mode == "selective" and config.selective_ac_option.isdigit():
+        """enables selective checkpointing of candidate layers.
+        Usage:
+        'selective_ac_option' with a positive 'int' value in config controls which layers to checkpoint.
+        1 == checkpointing every one (all).
+        2 == checkpoint every 2nd one
+        """
+        ac_freq = int(config.selective_ac_option)
+        assert (
+            ac_freq >= 0
+        ), f"selective layer AC policy (ac_freq) expects a positive integer, received {ac_freq}"
+
+        checkpoint_wrapper.__dict__.setdefault("_count", 0)
+
+        checkpoint_wrapper._count += 1
+        if not ac_freq or checkpoint_wrapper._count % ac_freq == 0:
+            return ptd_checkpoint_wrapper(
+                module,
+                checkpoint_impl=CheckpointImpl.NO_REENTRANT,
+                checkpoint_fn=checkpoint,
+                use_reentrant=False,
+                preserve_rng_state=False,
+            )
+        # skip activation checkpointing and store activations for this layer
+        else:
+            return module
+    else:
+        raise NotImplementedError(
+            f"Unknown AC type {config.mode} or AC config {config.selective_ac_option}"
+        )
 
 
 class TestFullyShardCompileCompute(FSDPTest):
@@ -247,7 +295,7 @@ class TestFullyShardCompile(FSDPTest):
             *self._create_simple_mlp_factory_fns(), "inductor", fullgraph=True
         )
 
-    def _create_transformer_factory_fns(self):
+    def _create_transformer_factory_fns(self, ac_config=None):
         seq_len = 16
         vocab_size = 8
 
@@ -257,6 +305,8 @@ class TestFullyShardCompile(FSDPTest):
             mesh = init_device_mesh("cuda", (self.world_size,))
             model_args = ModelArgs(vocab_size=vocab_size)
             model = Transformer(model_args)
+            if ac_config is not None:
+                model = checkpoint_wrapper(model, ac_config)
             for layer_id, mod in enumerate(model.layers):
                 fully_shard(mod, mesh=mesh, reshard_after_forward=True, **fsdp_config)
             model = fully_shard(
@@ -300,6 +350,22 @@ class TestFullyShardCompile(FSDPTest):
     def test_transformer_fullgraph_backend_inductor(self):
         self._test_traceable_fsdp(
             *self._create_transformer_factory_fns(), "inductor", fullgraph=True
+        )
+
+    @skipIfRocm
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    # TODO: native_dropout causes CUDA IMA error, need to figure out why
+    @torch._inductor.config.patch(fallback_random=True)
+    def test_transformer_fullgraph_backend_inductor_sac_every_2nd_layer(self):
+        ac_config = ACConfig(
+            mode="selective",
+            selective_ac_option="2",
+        )
+        self._test_traceable_fsdp(
+            *self._create_transformer_factory_fns(ac_config=ac_config),
+            "inductor",
+            fullgraph=True,
         )
 
 
