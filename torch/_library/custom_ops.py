@@ -504,6 +504,7 @@ class CustomOpDef:
             )
 
     def __call__(self, *args, **kwargs):
+        print(args, kwargs)
         return self._opoverload(*args, **kwargs)
 
 
