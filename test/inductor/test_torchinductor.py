@@ -7553,12 +7553,22 @@ class CommonTemplate:
                     )
 
             torch.fx.node.has_side_effect(torch.ops.mylib.split_with_sizes_copy.default)
-            torch._functorch._aot_autograd.functional_utils.avoid_functionalize_ops.add(
+            torch._functorch._aot_autograd.functional_utils._avoid_functionalize_ops.add(
                 torch.ops.mylib.split_with_sizes_copy.default
             )
 
             @torch.compile(backend="inductor", fullgraph=True)
-            def f1(all_gather_output, all_gather_input_split_sizes, dim, out):
+            def f_no_metadata_mutation(
+                all_gather_output, all_gather_input_split_sizes, dim, out
+            ):
+                return torch.ops.fsdp.split_with_sizes_copy(
+                    all_gather_output, all_gather_input_split_sizes, dim, out=out
+                )
+
+            @torch.compile(backend="inductor", fullgraph=True)
+            def f_has_metadata_mutation(
+                all_gather_output, all_gather_input_split_sizes, dim, out
+            ):
                 return torch.ops.mylib.split_with_sizes_copy(
                     all_gather_output, all_gather_input_split_sizes, dim, out=out
                 )
@@ -7572,11 +7582,23 @@ class CommonTemplate:
                 torch.empty(2, 128),
                 torch.empty(2, 8),
             ]
+
+            ref_out = copy.deepcopy(out)
+            torch.ops.fsdp.split_with_sizes_copy(
+                all_gather_output, all_gather_input_split_sizes, dim, out=ref_out
+            )
+            f_no_metadata_mutation(
+                all_gather_output, all_gather_input_split_sizes, dim, out
+            )
+            self.assertEqual(out, ref_out)
+
             with self.assertRaisesRegex(
                 torch._dynamo.exc.BackendCompilerFailed,
                 "out= op cannot mutate metadata of out arg",
             ):
-                f1(all_gather_output, all_gather_input_split_sizes, dim, out)
+                f_has_metadata_mutation(
+                    all_gather_output, all_gather_input_split_sizes, dim, out
+                )
 
     @expectedFailureXPU
     def test_functionalize_rng_wrappers(self):
