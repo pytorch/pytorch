@@ -81,8 +81,8 @@ Currently we don't functionalize `fsdp.set_` op or `inductor.resize_storage_byte
 (i.e. they show up as a mutation op in the middle of the AOT joint graph).
 
 Reason:
-Traceable FSDP2 graph have the following traits:
-(1) Two inputs of the graph were aliased to each other.
+Traceable FSDP2 compiled autograd BWD graph have the following traits:
+(1) Two inputs of the graph were aliased to each other (one from hook closed-over tensors, one from FWD saved tensors).
 (2) One of them is mutated (set_ and resize_ to handle the all-gathered param).
 (3) They are both subclasses.
 The combination of these traits is not supported by AOTAutograd (it's difficult to reason about subclass aliasing).
