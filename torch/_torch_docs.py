@@ -13677,6 +13677,7 @@ the correct task sequencing.
 
 Arguments:
     device (:class:`torch.device`, optional): the desired device for the Stream.
+    If not given, a default :ref:`accelerator<accelerators>` type will be used.
 
 Returns:
     Stream: An torch.Stream object.
@@ -13798,6 +13799,7 @@ Query and record Stream status to identify or control dependencies across Stream
 
 Arguments:
     device (:class:`torch.device`, optional): the desired device for the Event.
+    If not given, a default :ref:`accelerator<accelerators>` type will be used.
 
 Returns:
     Event: An torch.Event object.
@@ -13861,11 +13863,11 @@ add_docstr(
     r"""
 Event.record(stream) -> None
 
-Record the event in a given stream. Uses current stream if no stream is specified.
-The stream's device must match the event's device.
+Record the event in a given stream. The stream's device must match the event's device.
 
 Arguments:
     stream (:class:`torch.Stream`, Optional): A stream to be recorded.
+    If not given, the current stream will be used.
 
 Example::
 
@@ -13899,10 +13901,10 @@ add_docstr(
 Event.wait(stream) -> None
 
 Make all future work submitted to the given stream wait for this event.
-Use the current stream if no stream is specified.
 
 Arguments:
     stream (:class:`torch.Stream`, Optional): A stream to synchronize.
+    If not given, the current stream will be used.
 
 Example::
 
