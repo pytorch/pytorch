@@ -87,7 +87,7 @@ def all_gather_copy_in_cuda(
 
 
 lib.define(
-    "split_with_sizes_copy(Tensor all_gather_output, SymInt[] all_gather_input_split_sizes, int dim=0, *, Tensor(a!)[] ret) -> ()"
+    "split_with_sizes_copy(Tensor all_gather_output, SymInt[] all_gather_input_split_sizes, int dim=0, *, Tensor(a!)[] out) -> ()"
 )
 
 
@@ -98,15 +98,15 @@ def split_with_sizes_copy(
     all_gather_output: torch.Tensor,
     all_gather_input_split_sizes: List[int],
     dim: int,
-    ret: List[torch.Tensor],
+    out: List[torch.Tensor],
 ) -> None:
     torch.split_with_sizes_copy(
-        all_gather_output, all_gather_input_split_sizes, dim=dim, out=ret
+        all_gather_output, all_gather_input_split_sizes, dim=dim, out=out
     )
 
 
 lib.define(
-    "chunk_cat(Tensor[] tensors, int dim, int num_chunks, *, Tensor(a!) ret) -> ()"
+    "chunk_cat(Tensor[] tensors, int dim, int num_chunks, *, Tensor(a!) out) -> ()"
 )
 
 
@@ -117,9 +117,9 @@ def chunk_cat(
     tensors: List[torch.Tensor],
     dim: int,
     num_chunks: int,
-    ret: torch.Tensor,
+    out: torch.Tensor,
 ) -> None:
-    torch._chunk_cat(tensors, dim, num_chunks, out=ret)
+    torch._chunk_cat(tensors, dim, num_chunks, out=out)
 
 
 @torch.no_grad()
@@ -222,7 +222,7 @@ def foreach_all_gather_copy_out(
     else:
         out = [t.view(world_size, -1) for t in gen]
     torch.ops.fsdp.split_with_sizes_copy(
-        all_gather_output, all_gather_input_split_sizes, dim=1, ret=out
+        all_gather_output, all_gather_input_split_sizes, dim=1, out=out
     )
 
 
@@ -357,7 +357,7 @@ def foreach_reduce_scatter_copy_in(
 ) -> None:
     reduce_scatter_input = reduce_scatter_input.view(world_size, -1)
     torch.ops.fsdp.chunk_cat(
-        unsharded_grads, dim=0, num_chunks=world_size, ret=reduce_scatter_input
+        unsharded_grads, dim=0, num_chunks=world_size, out=reduce_scatter_input
     )
 
 

@@ -127,8 +127,8 @@ class TestFullyShardCompile(FSDPTest):
             buf_view2 = buf.view(-1)
             torch.ops.fsdp.set_(x, buf_view2)
 
-        x = torch.zeros(2)
-        ref_x = copy.deepcopy(x)
+        ref_x = torch.zeros(2)
+        x = copy.deepcopy(ref_x)
         f(ref_x)
         torch.compile(f, backend="aot_eager")(x)
         self.assertEqual(x, ref_x)
