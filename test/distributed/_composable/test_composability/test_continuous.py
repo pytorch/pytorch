@@ -4,8 +4,6 @@ import os
 import sys
 import tempfile
 
-from model_registry import MLPModule
-
 import torch
 import torch.distributed as dist
 import torch.nn as nn
