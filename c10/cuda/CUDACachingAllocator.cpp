@@ -1548,7 +1548,7 @@ class DeviceCachingAllocator {
       // instead check it is correctly formed then skip over allocating it.
       if (i == segment_len - 1 && curr_block->expandable_segment_) {
         TORCH_CHECK(curr_block->next == nullptr);
-        TORCH_CHECK(curr_block->mapped == false);
+        TORCH_CHECK(!curr_block->mapped);
         TORCH_CHECK(curr_block->allocated == false);
         continue;
       }
@@ -1568,7 +1568,9 @@ class DeviceCachingAllocator {
       // splitting a block depends on `max_split_size`, which may have changed
       // between whe checkpoint was taken and now, so we make sure to recreate
       // the behavior from the checkpoint. Keep splitting as long as there is
-      // space in the block.
+      // space left in the block because the block is already the size of how it
+      // appears in the segment, so any leftover space belongs to the next
+      // block.
       bool split = curr_block->size - block_state.size > 0;
 
       // curr_block will become next pointer if it is split, so reassign with
@@ -1592,16 +1594,18 @@ class DeviceCachingAllocator {
     curr_block = last_block;
 
     for (size_t i = 0; i < segment_len; ++i, curr_block = curr_block->next) {
+      if (i == segment_len - 1 && curr_block->expandable_segment_) {
+        TORCH_CHECK(curr_block->next == nullptr);
+        TORCH_CHECK(!curr_block->mapped);
+        TORCH_CHECK(curr_block->allocated == false);
+        continue;
+      }
+
       auto& block_state = segment.blocks.at(i);
       TORCH_INTERNAL_ASSERT(curr_block != nullptr);
 
       if (block_state.allocated) {
         rr.allocations_created.push_back(curr_block);
-        continue;
-      }
-
-      // unmapped blocks in the checkpoint state are already in the free pool
-      if (!curr_block->mapped) {
         continue;
       }
 
