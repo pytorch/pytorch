@@ -35,6 +35,7 @@ from torch._dynamo.debug_utils import (
     same_two_models,
 )
 from torch._dynamo.utils import clone_inputs, counters, same
+from torch._library.fake_class_registry import FakeScriptObject
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     fx_placeholder_targets,
@@ -244,6 +245,9 @@ isolate_fails_code_str = None
         elif isinstance(arg, torch.Tensor):
             # TODO: improve these names with FQN
             writer.tensor(placeholder, arg)
+        elif isinstance(arg, FakeScriptObject):
+            # TODO: Not sure how to write out the torchbind objects
+            pass
         else:
             raise TypeError(f"arg is neither SymInt/int nor torch.Tensor, {arg}")
 
@@ -286,7 +290,9 @@ def save_graph_repro(
         accuracy = "_accuracy" in compiler_name
     if tracing_mode is None:
         tracing_mode = "real"
-        if any(has_free_symbols(a) for a in args):
+        if any(
+            has_free_symbols(a) for a in args if not isinstance(a, FakeScriptObject)
+        ):
             tracing_mode = "symbolic"
     fd.write("if __name__ == '__main__':\n")
     fd.write("    from torch._dynamo.repro.after_aot import run_repro\n")

@@ -1656,7 +1656,7 @@ def _check_triton_bf16_support(graph: GraphLowering) -> None:
 
     for inp in graph.graph_inputs.values():
         device = getattr(inp, "get_device", lambda: torch.device("meta"))()
-        if device.type != "cuda" or inp.get_dtype() != torch.bfloat16:
+        if device is None or device.type != "cuda" or inp.get_dtype() != torch.bfloat16:
             continue
         # Print warning and skip frame if attempting to compile for bfloat16
         # on device without hardware support for dtype
