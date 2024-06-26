@@ -3,15 +3,15 @@
 namespace at {
 
 C10_API std::optional<DeviceType> getAccelerator(bool checked) {
-#define ASSIGN_ACCELERATOR_AND_CHECK_MUTEX(device_name) \
-  if (at::has##device_name()) {                         \
-    device_type = k##device_name;                       \
-    TORCH_CHECK(                                        \
-        !is_mutex_device_detected,                      \
-        "Cannot have ",                                 \
-        device_type.value(),                            \
-        " with other accelerators.");                   \
-    is_mutex_device_detected = true;                    \
+#define DETECT_AND_ASSIGN_ACCELERATOR(device_name) \
+  if (at::has##device_name()) {                    \
+    device_type = k##device_name;                  \
+    TORCH_CHECK(                                   \
+        !is_accelerator_detected,                  \
+        "Cannot have ",                            \
+        device_type.value(),                       \
+        " with other accelerators.");              \
+    is_accelerator_detected = true;                \
   }
 
   if (is_privateuse1_backend_registered()) {
@@ -21,17 +21,17 @@ C10_API std::optional<DeviceType> getAccelerator(bool checked) {
     return kPrivateUse1;
   }
   std::optional<DeviceType> device_type = std::nullopt;
-  bool is_mutex_device_detected = false;
-  ASSIGN_ACCELERATOR_AND_CHECK_MUTEX(CUDA)
-  ASSIGN_ACCELERATOR_AND_CHECK_MUTEX(MTIA)
-  ASSIGN_ACCELERATOR_AND_CHECK_MUTEX(XPU)
+  bool is_accelerator_detected = false;
+  DETECT_AND_ASSIGN_ACCELERATOR(CUDA)
+  DETECT_AND_ASSIGN_ACCELERATOR(MTIA)
+  DETECT_AND_ASSIGN_ACCELERATOR(XPU)
   if (checked) {
     TORCH_CHECK(
         device_type, "Cannot access accelerator device when none is available.")
   }
   return device_type;
 
-#undef ASSIGN_ACCELERATOR_AND_CHECK_MUTEX
+#undef DETECT_AND_ASSIGN_ACCELERATOR
 }
 
 } // namespace at
