@@ -3656,8 +3656,7 @@ class TritonTemplateBuffer(TemplateBuffer):
             ), f"Mutated inputs are only allowed for {allowed_set} but got {current_node}"
             device = self.inputs[0].get_device()
             self.outputs += [
-                MutationOutput(NoneLayout(device), buf, self)
-                for buf in mutated_inputs
+                MutationOutput(NoneLayout(device), buf, self) for buf in mutated_inputs
             ]
 
     def get_outputs(self) -> List[Buffer]:
@@ -3794,7 +3793,7 @@ class InputsKernel(OperationBuffer):
         return dependencies.StarDep(x.get_name())
 
     def get_read_writes(self):
-        reads: Set[Dep] = set()
+        reads: Set[dependencies.Dep] = set()
         StarDep = dependencies.StarDep
         for input in self.inputs:
             if isinstance(input, list):
@@ -3802,7 +3801,9 @@ class InputsKernel(OperationBuffer):
             else:
                 reads.add(StarDep(input.get_name()))
 
-        writes: Set[Dep] = {StarDep(buf.get_name()) for buf in self.get_outputs()}
+        writes: Set[dependencies.Dep] = {
+            StarDep(buf.get_name()) for buf in self.get_outputs()
+        }
 
         return dependencies.ReadWrites(
             reads=reads,
