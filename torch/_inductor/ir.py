@@ -5307,7 +5307,7 @@ class FallbackKernel(ExternKernelAlloc):
                 self.mutation_names.append(arg.get_name())
             else:
                 raise NotImplementedError(
-                    f"NYI: Unsupported out= arg type: {type(arg)}"
+                    f"NYI: Unsupported ret= arg type: {type(arg)}"
                 )
 
         if "ret" in kwargs:
