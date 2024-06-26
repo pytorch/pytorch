@@ -397,6 +397,7 @@ class TestTryMerge(TestCase):
         # self.assertGreater(len(pr.get_checkrun_conclusions()), 3)
         self.assertGreater(pr.get_commit_count(), 60)
 
+    @skip("GitHub doesn't keep this data anymore")
     def test_gql_retrieve_checksuites(self, *args: Any) -> None:
         "Fetch comments and conclusions for PR with 60 commits"
         pr = GitHubPR("pytorch", "pytorch", 94787)
@@ -894,6 +895,24 @@ class TestBypassFailures(TestCase):
         self.assertTrue(len(ignorable["FLAKY"]) == 1)
         self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 0)
 
+    def test_ignore_failures_older_run_same_workflow(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 129013)
+        checks = pr.get_checkrun_conclusions()
+        checks = get_classifications(
+            pr.pr_num,
+            pr.project,
+            checks,
+            [],
+        )
+        pending, failed, ignorable = categorize_checks(
+            checks,
+            list(checks.keys()),
+        )
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 0)
+        self.assertTrue(len(ignorable["FLAKY"]) == 2)
+        self.assertTrue(len(ignorable["UNSTABLE"]) == 13)
+
     @mock.patch("trymerge.read_merge_rules", side_effect=xla_merge_rules)
     def test_dont_ignore_flaky_failures(self, *args: Any) -> None:
         """
@@ -1022,7 +1041,7 @@ class TestGitHubPRGhstackDependencies(TestCase):
         )
 
     @skip(
-        reason="This test is run against a mutalbe PR that has changed, so it no longer works. The test should be changed"
+        reason="This test is run against a mutable PR that has changed, so it no longer works. The test should be changed"
     )
     @mock.patch("trymerge.read_merge_rules")
     @mock.patch("trymerge.GitRepo")
