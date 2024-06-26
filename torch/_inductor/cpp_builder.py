@@ -621,6 +621,7 @@ def _get_openmp_args(cpp_compiler):
             if valid_env:
                 include_dir_paths.append(os.path.join(omp_prefix, "include"))
                 lib_dir_paths.append(os.path.join(omp_prefix, "lib"))
+                print("!!!!! _get_openmp_args --> 1.")
             else:
                 warnings.warn("environment variable `OMP_PREFIX` is invalid.")
             omp_available = omp_available or valid_env
@@ -641,6 +642,7 @@ def _get_openmp_args(cpp_compiler):
                     os.path.join(conda_lib_path, "libiomp5.dylib")
                 ):
                     libs.append("iomp5")
+                    print("!!!!! _get_openmp_args --> 2.")
 
         # next, try to use openmp from `brew install libomp`
         if not omp_available:
@@ -648,10 +650,11 @@ def _get_openmp_args(cpp_compiler):
             if omp_available:
                 include_dir_paths.append(os.path.join(libomp_path, "include"))
                 lib_dir_paths.append(os.path.join(libomp_path, "lib"))
+                print("!!!!! _get_openmp_args --> 3.")
 
         # if openmp is still not available, we let the compiler to have a try,
         # and raise error together with instructions at compilation error later
-        cflags.append("fopenmp")
+        # cflags.append("fopenmp")
     elif _IS_WINDOWS:
         # /openmp, /openmp:llvm
         # llvm on Windows, new openmp: https://devblogs.microsoft.com/cppblog/msvc-openmp-update/
