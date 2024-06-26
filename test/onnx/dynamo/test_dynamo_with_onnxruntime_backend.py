@@ -22,6 +22,7 @@ from torch.onnx import (
 )
 
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import skipIfNNModuleInlined
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import onnx_test_common
@@ -391,6 +392,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
                 number_of_exported_onnx_models_for_all_graph_modules=(1, 1),
             )
 
+    @skipIfNNModuleInlined("https://github.com/pytorch/pytorch/issues/129456")
     @parameterized.expand(
         [
             (True, True),
@@ -471,11 +473,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         if test_local_backend:
             assert local_ort is not None
-            if torch._dynamo.config.inline_inbuilt_nn_modules:
-                # with inlining and dynamic=True, we have more graph captures
-                number_of_captured_graphs = 3 if test_backward else 2
-            else:
-                number_of_captured_graphs = 2 if test_backward else 1
+            number_of_captured_graphs = 2 if test_backward else 1
 
             execution_count = len(example_args_collection) * number_of_captured_graphs
             self._assert_counting_information(
@@ -490,6 +488,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
             )
             self._assert_dynamic_input_and_output_shapes_in_all_onnx_models(local_ort)
 
+    @skipIfNNModuleInlined("https://github.com/pytorch/pytorch/issues/129456")
     @parameterized.expand(
         [
             (True, False),
@@ -569,11 +568,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         if test_local_backend:
             assert local_ort is not None
-            if torch._dynamo.config.inline_inbuilt_nn_modules:
-                # with inlining and dynamic=True, we have more graph captures
-                number_of_captured_graphs = 3 if test_backward else 2
-            else:
-                number_of_captured_graphs = 2 if test_backward else 1
+            number_of_captured_graphs = 2 if test_backward else 1
 
             execution_count = len(example_args_collection) * number_of_captured_graphs
 
@@ -586,6 +581,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
             )
             self._assert_dynamic_input_and_output_shapes_in_all_onnx_models(local_ort)
 
+    @skipIfNNModuleInlined("https://github.com/pytorch/pytorch/issues/129456")
     @parameterized.expand(
         [
             (True, False),
@@ -660,11 +656,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         if test_local_backend:
             assert local_ort is not None
-            if torch._dynamo.config.inline_inbuilt_nn_modules:
-                # with inlining and dynamic=True, we have more graph captures
-                number_of_captured_graphs = 3 if test_backward else 2
-            else:
-                number_of_captured_graphs = 2 if test_backward else 1
+            number_of_captured_graphs = 2 if test_backward else 1
             execution_count = len(example_args_collection) * number_of_captured_graphs
             self._assert_counting_information(
                 local_ort,
