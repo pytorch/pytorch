@@ -17,12 +17,14 @@ try:
     try:
         from . import (
             test_cpu_repro,
+            test_cpu_select_algorithm,
             test_mkldnn_pattern_matcher,
             test_torchinductor,
             test_torchinductor_dynamic_shapes,
         )
     except ImportError:
         import test_cpu_repro
+        import test_cpu_select_algorithm
         import test_mkldnn_pattern_matcher
         import test_torchinductor
         import test_torchinductor_dynamic_shapes
@@ -233,6 +235,17 @@ if RUN_CPU:
         BaseTest("test_int_div", "", test_cpu_repro.CPUReproTests()),
         BaseTest("test_linear1"),
         BaseTest("test_linear2"),
+        # TODO: enable test for all of the below lists?
+        # *[
+        #     BaseTest(func, "", test_cpu_select_algorithm.TestSelectAlgorithmCPU())
+        #     for func in dir(test_cpu_select_algorithm.TestSelectAlgorithmCPU())
+        #     if func.startswith("test_linear_with_pointwise")
+        # ],
+        BaseTest(
+            "test_linear_with_pointwise_bias_False_epilogue_add_cpu_bfloat16",
+            "",
+            test_cpu_select_algorithm.TestSelectAlgorithmCPU(),
+        ),
         BaseTest("test_polar"),
         BaseTest(
             "test_linear_binary",
