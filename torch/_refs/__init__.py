@@ -3134,15 +3134,13 @@ def native_group_norm(
         [batch_size, num_groups, num_channels // num_groups, flattened_inner_size],
     )
     out, mean, rstd = _normalize(input_reshaped, reduction_dims, eps)
-    out = out.view(input.shape)
 
-    broadcast_dims = [0] + list(range(2, input.ndim))
     unsqueeze_bias = None
     if bias is not None:
-        unsqueeze_bias = _unsqueeze_multiple(bias, broadcast_dims)
+        unsqueeze_bias = torch.reshape(bias, [1, num_groups, num_channels // num_groups, 1])
     unsqueeze_weight = None
     if weight is not None:
-        unsqueeze_weight = _unsqueeze_multiple(weight, broadcast_dims)
+        unsqueeze_weight = torch.reshape(weight, [1, num_groups, num_channels // num_groups, 1])
 
     if unsqueeze_weight is not None:
         out = out * unsqueeze_weight
@@ -3152,6 +3150,8 @@ def native_group_norm(
     out = _maybe_convert_to_dtype(out, input.dtype)  # type: ignore[assignment]
     mean = _maybe_convert_to_dtype(mean, input.dtype)  # type: ignore[assignment]
     rstd = _maybe_convert_to_dtype(rstd, input.dtype)  # type: ignore[assignment]
+
+    out = out.as_strided(input.shape, utils.make_channels_last_2d_strides_for(input.shape))
 
     # remove broadcast dimensions from mean and rstd
     mean = torch.squeeze(mean, reduction_dims)
