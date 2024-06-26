@@ -688,7 +688,7 @@ class TS2FXGraphConverter:
         # the entire logic here, we simply keep first line from node string (getting rid
         # of sub-blocks IR prints).
         node_str = "".join(str(node).split("\n")[:1])
-        log.debug(f"[{handler_func.__name__}] converts [{node_str}]")
+        log.debug(f"[{handler_func.__name__}] converts [{node_str}]")  # noqa: G004
         try:
             handler_func(node)
         except Exception as e:
@@ -734,7 +734,8 @@ class TS2EPConverter:
         sample_args: Tuple[Any, ...],
         sample_kwargs: Optional[Dict[str, Any]] = None,
     ):
-        log.info(f"""
+        log.info(
+            """
 TS2EPConverter logging starts from here.
 
 INFO: (TORCH_LOGS="export" <cmd>)
@@ -742,11 +743,12 @@ INFO: (TORCH_LOGS="export" <cmd>)
 
 DEBUG: (TORCH_LOGS="+export" <cmd>), additionaly
     * Log conversion IR by IR in a format of [<conversion handler name>] converts [<IR>].
-        """)
+        """
+        )
 
         self.ts_model = ts_model
         self.ts_graph, self.params, _, _ = _create_jit_graph(ts_model, sample_args)
-        log.info(f"TorchScript graph\n\n{self.ts_graph}\n")
+        log.info(f"TorchScript graph\n\n{self.ts_graph}\n")  # noqa: G004
 
         self.sample_args = sample_args
         self.sample_kwargs = sample_kwargs
