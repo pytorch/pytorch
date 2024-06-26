@@ -21,6 +21,7 @@
 #include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
+#include <c10/util/thread_name.h>
 #include <torch/csrc/cuda/nccl.h>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
@@ -28,7 +29,6 @@
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
-#include <torch/csrc/distributed/c10d/control_plane/Handlers.hpp>
 #include <torch/csrc/distributed/c10d/logger.hpp>
 #include <torch/torch.h>
 
@@ -379,15 +379,6 @@ std::string dump_nccl_trace(
 }
 #endif
 
-// TODO(c-p-i-o): add a JSON endpoint.
-control_plane::RegisterHandler dumpHandler{
-    "dump_nccl_trace_pickle",
-    [](const control_plane::Request& req, control_plane::Response& res) {
-      // TODO: c-p-i-o: params from the request need to go to dump_nccl_trace.
-      res.setContent(
-          dump_nccl_trace(true, true, false), "application/octet-stream");
-    }};
-
 std::optional<std::function<void(std::function<void(const std::string&)>)>>&
 get_cpp_trace_dumper() {
   static std::optional<
@@ -406,6 +397,8 @@ std::future<bool> launchAsyncGilCheck() {
   std::future<bool> resultFuture = resultPromise.get_future();
   TORCH_CHECK(get_gil_checker(), "Can't check GIL with null GIL checker");
   std::thread workerThread([promise = std::move(resultPromise)]() mutable {
+    c10::setThreadName("pt_nccl_gil_chk");
+
     try {
       auto& gil_checker = get_gil_checker();
       promise.set_value((*gil_checker)());
@@ -1232,6 +1225,8 @@ int computeDeltaMS(
 }
 
 void ProcessGroupNCCL::heartbeatMonitor() {
+  c10::setThreadName("pt_nccl_heartbt");
+
   uint64_t heartBeatCounter = 0ULL;
   std::string errorMsg;
   std::string exitMsg;
@@ -1462,6 +1457,8 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     // Leave another two mins for desync report generation or process group
     // destroy.
     std::this_thread::sleep_for(std::chrono::seconds(heartbeatTimeoutInSec_));
+    LOG(INFO) << logPrefix() << "slept for " << heartbeatTimeoutInSec_
+              << " waiting for desync report or process group destroy.";
   }
 
   // At this point, we either already sleep for another `heartbeatTimeoutInSec_`
@@ -1491,6 +1488,8 @@ void ProcessGroupNCCL::heartbeatMonitor() {
 }
 
 void ProcessGroupNCCL::ncclCommWatchdog() {
+  c10::setThreadName("pt_nccl_watchdg");
+
   try {
     VLOG(2) << logPrefix() << "Process group watchdog thread started!";
     ncclHeartbeatMonitorThread_ =
@@ -1689,6 +1688,8 @@ void ProcessGroupNCCL::watchdogHandler() {
             // exception
             std::this_thread::sleep_for(
                 std::chrono::seconds(heartbeatTimeoutInSec_));
+            LOG(INFO) << logPrefix() << "slept for " << heartbeatTimeoutInSec_
+                      << " giving time for flight recorder dumps to finish.";
           } catch (const std::exception& e) {
             LOG(ERROR) << logPrefix()
                        << "Failed to set dump signal in tcpstore. "
@@ -1791,6 +1792,8 @@ void ProcessGroupNCCL::watchdogHandler() {
 }
 
 void ProcessGroupNCCL::runHookLoop() {
+  c10::setThreadName("pt_nccl_runhook");
+
   bool done = false;
   while (!done || !terminateProcessGroup_.load()) {
     std::unique_lock<std::mutex> lock(completedWorkListMutex_);
@@ -2044,8 +2047,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
     C10D_NCCL_CHECK(ncclGetUniqueId(&ncclID), c10::nullopt);
   }
 
-  // For point-to-point communication on the same process, don't need broadcast.
-  if (!isSendRecvSelf) {
+  if (shouldBroadcastNCCLUniqueID(isSendRecvSelf)) {
     // Broadcast so that each process can have a unique NCCL ID
     auto timeStarted = std::chrono::steady_clock::now();
     broadcastUniqueNCCLID(&ncclID, singleP2POp, deviceKey, p2pRank);
@@ -2110,7 +2112,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
     // Find a valid, healthy communicator to split from if possible.
     std::lock_guard<std::mutex> lock(options_->split_from->mutex_);
     auto& other_comms = options_->split_from->devNCCLCommMap_;
-    auto dit = other_comms.find(deviceKey);
+    auto dit = other_comms.find(getKeyFromDevice(device));
     if (dit != other_comms.end()) {
       auto& parentComm = dit->second;
       if (parentComm != nullptr && !parentComm->isAborted()) {
@@ -2356,6 +2358,7 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
         outputs,
         r->ncclStartEvent_.get(),
         r->ncclEndEvent_.get(),
+        options_->timeout,
         isP2P);
   }
   return r;
@@ -2966,6 +2969,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
         {tensor},
         nullptr,
         nullptr,
+        options_->timeout,
         /*isP2P=*/true);
     // TODO(whc) if we want to make the per-p2p-op flightrecorder entries get
     // their timings/states updated by proxy when the Work obj representing the
@@ -2999,6 +3003,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
         {tensor},
         work->ncclStartEvent_.get(),
         work->ncclEndEvent_.get(),
+        options_->timeout,
         /*isP2P=*/true);
   }
 

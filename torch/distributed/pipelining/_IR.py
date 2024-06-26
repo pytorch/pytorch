@@ -1,16 +1,17 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import copy
 import logging
 import operator
 from collections import defaultdict
-from dataclasses import dataclass
 from enum import Enum
-from inspect import Parameter, signature, Signature
+from inspect import Parameter, Signature, signature
 from types import MethodType
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import torch
 import torch.fx as fx
+from torch.distributed import ProcessGroup
 from torch.export import ExportedProgram
 from torch.export.unflatten import (
     _assign_attr,
@@ -23,6 +24,8 @@ from torch.fx.passes.split_module import split_module
 
 from ._backward import _null_coalesce_accumulate, stage_backward
 from ._unflatten import _outline_submodules
+from ._utils import PipeInfo
+from .stage import _PipelineStage
 
 
 logger = logging.getLogger(__name__)
@@ -484,13 +487,42 @@ def _direct_serialization_reduce(self):
     )
 
 
-class Pipe(torch.nn.Module):
-    @dataclass
-    class PipeInfo:
-        graph: fx.Graph
-        num_stages: int
-        has_loss_and_backward: bool
+def _modify_graph_op_device(
+    gm: torch.fx.GraphModule,
+    new_device: torch.device,
+):
+    """
+    Modify the device argument of all "call_function" nodes in the graph.  This
+    is useful for moving the graph to a different device. In particular for
+    generator ops, like torch.ones.
+    """
+    modified = False
+    for node in gm.graph.nodes:
+        if node.op == "call_function":
+            if "device" in node.kwargs and node.kwargs["device"] != new_device:
+                logger.debug(
+                    f"Changing device of Node {node.name} from {node.kwargs['device']} to {new_device}"  # noqa: G004
+                )
+                node.update_kwarg("device", new_device)
+                modified = True
+        elif node.op == "call_module":
+            # Recursively modify "device" in submodules
+            submod = gm.get_submodule(node.target)
+            if isinstance(submod, torch.fx.GraphModule):
+                _modify_graph_op_device(submod, new_device)
+            elif isinstance(submod, InterpreterModule):
+                # If unflattening has been performed, we need to access its graph module by `.graph_module`
+                _modify_graph_op_device(submod.graph_module, new_device)
+            else:
+                logger.warning(
+                    f"Skipping device modification for submodule {node.target} because it is a {type(submod)}"  # noqa: G004
+                )
 
+    if modified:
+        gm.recompile()
+
+
+class Pipe(torch.nn.Module):
     def __init__(
         self,
         split_gm: fx.GraphModule,
@@ -505,7 +537,6 @@ class Pipe(torch.nn.Module):
         self.num_stages: int = num_stages
         self.has_loss_and_backward = has_loss_and_backward
         self.loss_spec = loss_spec
-        self.pipe_info: Optional[Pipe.PipeInfo] = None
 
         for node in split_gm.graph.nodes:
             assert (
@@ -972,11 +1003,21 @@ class Pipe(torch.nn.Module):
         example_kwargs: Optional[Dict[str, Any]] = None,
     ) -> ExportedProgram:
         logger.info("Tracing model ...")
-        ep = torch.export.export(
-            mod,
-            example_args,
-            example_kwargs,
-        )
+        try:
+            ep = torch.export.export(
+                mod,
+                example_args,
+                example_kwargs,
+            )
+        except Exception as e:
+            raise RuntimeError(
+                "It seems that we cannot capture your model as a full graph. "
+                "Typical reasons include graph breaks, data/shape-dependent "
+                "control flow, or missing meta kernels for custom operators. "
+                "You can use our manual pipeline interfaces, or try to fix the "
+                "graph breaks, see https://pytorch.org/docs/stable/export.html"
+            ) from e
+
         return ep
 
     @staticmethod
@@ -1044,12 +1085,6 @@ class Pipe(torch.nn.Module):
             )
             submod0.recompile()
 
-        # Create pipe info
-        pipe.pipe_info = Pipe.PipeInfo(
-            graph=pipe.split_gm.graph,
-            num_stages=pipe.num_stages,
-            has_loss_and_backward=pipe.has_loss_and_backward,
-        )
         return pipe
 
     def __str__(self):
@@ -1059,11 +1094,53 @@ class Pipe(torch.nn.Module):
         return self.split_gm.__repr__()
 
     def info(self) -> PipeInfo:
-        if self.pipe_info is None:
-            raise RuntimeError(
-                "Pipe info is not available. Please use the `pipeline` method to create the `Pipe` object."
+        """
+        Get information about the pipe.
+
+        Returns
+        -------
+        PipeInfo
+            A dataclass containing information about the pipe.
+        """
+        return PipeInfo(
+            graph=self.split_gm.graph,
+            num_stages=self.num_stages,
+            has_loss_and_backward=self.has_loss_and_backward,
+        )
+
+    def build_stage(
+        self,
+        stage_index: int,
+        device: torch.device,
+        group: Optional[ProcessGroup] = None,
+    ) -> _PipelineStage:
+        """
+        Create a `PipelineStage` given a stage index and distributed group.
+        The `PipelineStage` can run with `PipelineSchedule`s.
+        """
+        # Find stage module
+        stage_module = self.get_stage_module(stage_index)
+
+        # Move ops argument to device
+        # Today PT2 tracer does not treat `x.device` as a symbolic device;
+        # instead, the device of tracing time got burned into the generated
+        # code.  Here we provide a workaround for users to manually modify the
+        # "device" kwarg of operations. Such operation may include:
+        # `torch.ones`, `torch.zeros`, `torch.rand`, etc.
+        if isinstance(stage_module, torch.fx.GraphModule):
+            _modify_graph_op_device(stage_module, device)
+        else:
+            logger.warning(
+                f"Expected a `torch.fx.GraphModule` but got {type(stage_module)}"  # noqa: G004
             )
-        return self.pipe_info
+
+        # Detach pipe info
+        # Note: be careful what's included in `pipe_info`. We don't want to keep
+        # a reference to `Pipe` or `Pipe.split_gm` which stops python from
+        # recycling them. When python recycles them, other stage modules (which
+        # are irrelevant to current rank) can be automatically freed.
+        pipe_info = self.info()
+        return _PipelineStage(stage_module, stage_index, pipe_info, device, group)
 
 
 class SplitPoint(Enum):
@@ -1100,7 +1177,8 @@ def annotate_split_points(mod: torch.nn.Module, spec: Dict[str, SplitPoint]):
                 predecessor_module = getattr(predecessor_module, atom)
             except AttributeError as e:
                 raise AttributeError(
-                    f'Specified target {qualname} referenced nonexistent module {".".join(atoms[:i+1])}'
+                    f"Specified target {qualname} referenced "
+                    f'nonexistent module {".".join(atoms[: i + 1])}'
                 ) from e
 
         mod_to_wrap = getattr(predecessor_module, atoms[-1])

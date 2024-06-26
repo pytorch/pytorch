@@ -36,8 +36,8 @@ static std::string getUniqueKey(const ScalarType& dtype,
                                 const bool consecutive,
                                 c10::optional<int64_t> dimOpt) {
   return "_unique2_mps:" + getMPSTypeString(dtype) + "[" + getArrayRefString(base_shape) + "]:[" +
-      (dimOpt.has_value() ? to_string(dimOpt.value()) : "None") + "]:[" + to_string(return_inverse) + "]:[" +
-      to_string(return_counts) + "]:[" + to_string(consecutive) + "]";
+      (dimOpt.has_value() ? std::to_string(dimOpt.value()) : "None") + "]:[" + std::to_string(return_inverse) + "]:[" +
+      std::to_string(return_counts) + "]:[" + std::to_string(consecutive) + "]";
 }
 
 // dim arg not supported when non consecutive, ie sorted

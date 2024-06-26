@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import dataclasses
@@ -44,6 +45,7 @@ from torch.distributed.checkpoint.planner_helpers import (
     _init_state_dict,
 )
 from torch.distributed.checkpoint.utils import find_state_dict_object
+
 
 logger: logging.Logger = logging.getLogger(__name__)
 

@@ -76,7 +76,6 @@ def mps_ops_grad_modifier(ops):
     XFAILLIST_GRAD = {
 
         # precision issues
-        'digamma': [torch.float32],
         'special.polygammaspecial_polygamma_n_0': [torch.float16],
         'polygammapolygamma_n_0': [torch.float16],
         'nn.functional.binary_cross_entropy': [torch.float16],
@@ -94,8 +93,8 @@ def mps_ops_grad_modifier(ops):
         'cdist': [torch.float32],
         'masked.scatter': [torch.float16, torch.float32],
         'index_fill': [torch.float16, torch.float32],  # missing `aten::_unique`.
+        'linalg.lu_factor': [torch.float16, torch.float32],  # missing `aten::lu_unpack`.
         'aminmax': [torch.float32, torch.float16],
-        'polar': [torch.float32],
 
         # Correctness issues
         'atanh': [torch.float32],
@@ -144,6 +143,10 @@ def mps_ops_grad_modifier(ops):
 
         # round not working properly for float16
         'round': [torch.float16],
+
+        # atomic operation in backward pass
+        '_unsafe_masked_index': [torch.float16],
+        '_unsafe_masked_index_put_accumulate': [torch.float16],
     }
 
     MACOS_12_3_XFAILLIST_GRAD = {
@@ -243,11 +246,13 @@ def mps_ops_modifier(ops):
         '__getitem__',
         'abs',
         'add',
+        'alias_copy',
         'argwhere',
         'atleast_1d',
         'atleast_2d',
         'atleast_3d',
         'as_strided',
+        'as_strided_copy',
         'as_strided_scatter',
         'broadcast_tensors',
         'broadcast_to',
@@ -269,6 +274,7 @@ def mps_ops_modifier(ops):
         'empty_permuted',
         'empty_strided',
         'eye',
+        'exp',
         'expand',
         'expand_as',
         'flatten',
@@ -305,6 +311,7 @@ def mps_ops_modifier(ops):
         'nn.functional.conv_transpose2d',
         'nn.functional.feature_alpha_dropoutwithout_train',
         'nn.functional.padcircular',
+        'nn.functional.tanhshrink',
         'nn.functional.unfold',
         'nonzero',
         'ones',
@@ -332,6 +339,7 @@ def mps_ops_modifier(ops):
         'sub',
         'svd',
         't',
+        'tanh',
         'tensor_split',
         'transpose',
         'T',
@@ -354,6 +362,7 @@ def mps_ops_modifier(ops):
         '__rdiv__',
         '__rmatmul__',
         '_chunk_cat',
+        '_unsafe_masked_index',
         'acos',
         'acosh',
         'all',
@@ -388,7 +397,6 @@ def mps_ops_modifier(ops):
         'eq',
         'equal',
         'exp2',
-        'exp',
         'expm1',
         'fft.fft',
         'fft.fft2',
@@ -446,7 +454,6 @@ def mps_ops_modifier(ops):
         'nn.functional.pixel_unshuffle',
         'nn.functional.rms_norm',
         'nn.functional.softsign',
-        'nn.functional.tanhshrink',
         'pinverse',
         'prod',
         'reciprocal',
@@ -464,7 +471,6 @@ def mps_ops_modifier(ops):
         'sum',
         'sum_to_size',
         'tan',
-        'tanh',
         'tensordot',
         'trace',
         'trapz',
@@ -567,7 +573,6 @@ def mps_ops_modifier(ops):
         'special.ndtr': [torch.uint8],
         'sqrt': [torch.uint8],
         'sub': [torch.uint8],
-        'tanh': [torch.uint8],
         'trapezoid': [torch.uint8],
         'trapz': [torch.uint8],
         'true_divide': [torch.uint8],
@@ -584,28 +589,13 @@ def mps_ops_modifier(ops):
         'square': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
 
         # cpu not giving nan for x/0.0
-        'atan2': [torch.bool, torch.float16, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'atan2': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
 
         # inconsistency errors between cpu and mps, max seen atol is 2
         'nn.functional.interpolatebilinear': [torch.uint8],
     }
 
     MACOS_BEFORE_13_3_XFAILLIST = {
-        # Failure due to precision issues (still present on 13.3+) as well as non-standard behavior of
-        # cpu ops for the negative integers.
-        # Example for torch.polygamma(1, tensor([-0.9, -1.0], dtype=torch.float32)):
-        # - CPU output: tensor([102.668, 1.129e+15])
-        # - MPS output: tensor([102.6681, inf])
-        # In the latter case, inf is probably correct (this is what scipy does).
-        'polygamma': [torch.float32, torch.uint8],
-        'polygammapolygamma_n_0': [torch.float32, torch.int16, torch.int8],
-        'polygammapolygamma_n_2': [torch.float32, torch.int16, torch.int8],
-        'polygammapolygamma_n_1': [torch.float32, torch.int16, torch.int8],
-        'polygammapolygamma_n_3': [torch.float32, torch.int16, torch.int8],
-        'polygammapolygamma_n_4': [torch.float32, torch.int16, torch.int8],
-        'special.polygamma': [torch.float32, torch.int16, torch.int32, torch.int8],
-        'special.polygammaspecial_polygamma_n_0': [torch.float32, torch.int16, torch.int8],
-
         # Failures due to precision issues (due to fast-math). These has been fixed in MacOS 13.3+
         'tan': [torch.float32],
         'cdist': [torch.float32],
@@ -654,20 +644,6 @@ def mps_ops_modifier(ops):
         # Same issue as `argsort` with duplicate indices. This test checks both the sorted values and the indices.
         # The values of the sorted tensor match the CPU, but in case of the returned indices this results in undefined behaviour.
         'sort': [torch.int8, torch.uint8, torch.bool, torch.float16],
-
-        # Failure due to precision issues as well as non-standard behavior of cpu ops for the
-        # negative integers. Example for torch.polygamma(1, tensor([-0.9, -1.0], dtype=torch.float32)):
-        # - CPU output: tensor([102.668, 1.129e+15])
-        # - MPS output: tensor([102.6681, inf])
-        # In the latter case, inf is probably correct (this is what scipy does).
-        'polygamma': [torch.float32, torch.uint8],
-        'polygammapolygamma_n_0': [torch.float32, torch.int16, torch.int8],
-        'polygammapolygamma_n_2': [torch.float32, torch.int16, torch.int8],
-        'polygammapolygamma_n_1': [torch.float32, torch.int16, torch.int8],
-        'polygammapolygamma_n_3': [torch.float32, torch.int16, torch.int8],
-        'polygammapolygamma_n_4': [torch.float32, torch.int16, torch.int8],
-        'special.polygamma': [torch.float32, torch.int16, torch.int32, torch.int8],
-        'special.polygammaspecial_polygamma_n_0': [torch.float32, torch.int16, torch.int8],
     }
 
     MACOS_BEFORE_14_4_XFAILLIST = {
@@ -729,7 +705,6 @@ def mps_ops_modifier(ops):
         'linalg.lstsq': None,
         'linalg.lstsqgrad_oriented': None,
         'linalg.lu': None,
-        'linalg.lu_factor': None,
         'linalg.lu_factor_ex': None,
         'linalg.lu_solve': None,
         'linalg.matrix_norm': [torch.float32],
@@ -761,9 +736,6 @@ def mps_ops_modifier(ops):
         'nn.functional.interpolatearea': None,
         'nn.functional.interpolatebicubic': None,
         'nn.functional.interpolatetrilinear': None,
-        # TODO: max_pool2d for integral types fails the numerical test
-        'nn.functional.max_pool2d': (integral_types() if product_version < 14.0 else
-                                     [torch.int64, torch.int32, torch.int16, torch.int8]),
         'nn.functional.max_unpool1dgrad': None,
         'nn.functional.max_unpool2dgrad': None,
         'nn.functional.max_unpool3dgrad': None,
@@ -913,6 +885,9 @@ def mps_ops_modifier(ops):
 
         # round not working properly for float16
         'round': [torch.float16],
+
+        # atomic operations not supported
+        '_unsafe_masked_index_put_accumulate': [torch.bool, torch.int8, torch.uint8, torch.float16, torch.int16, torch.int64],
     }
 
     if product_version < 14.0:
@@ -941,6 +916,7 @@ def mps_ops_modifier(ops):
             # Error in TestConsistencyCPU.test_output_match_isin_cpu fails for integers,
             # not reproducible in later OS. Added assert to op if used in < 14.0
             'isin': [torch.int64, torch.int32, torch.int16, torch.uint8, torch.int8],
+            'nn.functional.max_pool2d': [torch.uint8],
         })
 
     UNDEFINED_XFAILLIST = {
@@ -1611,14 +1587,27 @@ class TestAvgPool(TestCaseMPS):
 class TestMPS(TestCaseMPS):
     def test_exp(self, device="mps", dtype=torch.float):
         for v in (2, -2) + ((1j, 1 + 1j) if dtype.is_complex else ()):
-            b = torch.arange(18, device="cpu") / 3 * math.pi
-            a = torch.tensor(v, dtype=dtype, device="cpu") * b
-            a = a.to(dtype).to("mps")
+            b = torch.arange(18, dtype=dtype, device=device) / 3 * math.pi
+            a = torch.tensor(v, dtype=dtype, device="mps") * b
             self.compare_with_numpy(torch.exp, np.exp, a)
 
+    def test_triu_inf(self, device="mps", dtype=torch.float):
+        for diag in [-1, 0, 1]:
+            mask = torch.full((3, 6, 6), float("-inf"))
+            mask_mps = mask.clone().detach().to('mps')
+            cpu_ref = torch.triu(mask, diagonal=diag)
+            mps_out = torch.triu(mask_mps, diagonal=diag)
+            self.assertEqual(cpu_ref, mps_out)
+
     def test_exp1(self, device="mps", dtype=torch.float):
-        input = torch.tensor([-0.1, 3.0, -0.9]).to('mps')
-        output = torch.exp(input).to('cpu')
+        input = torch.tensor([-0.1, 1.0, -0.9, 0.1], device=device, dtype=dtype)
+        output = torch.exp(input)
+        output_cpu = torch.exp(input.cpu())
+        # If exponentWithTensor: MPS call is used on M1 running 14.5 test will fail with
+        # Mismatched elements: 3 / 4 (75.0%)
+        # Greatest absolute difference: 1.1920928955078125e-07 at index (3,) (up to 1e-08 allowed)
+        # Greatest relative difference: 1.0786502002702036e-07 at index (3,) (up to 1e-08 allowed)
+        self.assertEqual(output, output_cpu, atol=1e-8, rtol=1e-8)
 
     def test_exp_strided_output(self):
         x = torch.rand((256, 10), device='mps')
@@ -2848,6 +2837,25 @@ class TestMPS(TestCaseMPS):
                                track_running_stats=track_running_stats, test_module=test_module)
 
     def test_weight_norm(self):
+        def validate_weight_norm_equality(model, cpu_model, x, cpu_x, dim):
+            cpu_norm = torch.nn.utils.parametrizations.weight_norm(cpu_model, dim=dim)
+            norm = torch.nn.utils.parametrizations.weight_norm(model, dim=dim)
+
+            cpu_out = cpu_norm(cpu_x)
+            out = norm(x)
+
+            self.assertEqual(cpu_out, out)
+
+            cpu_grad = torch.randn(cpu_out.shape)
+            grad = cpu_grad.to('mps')
+            cpu_out.backward(gradient=cpu_grad)
+            out.backward(gradient=grad)
+
+            self.assertEqual(cpu_model.parametrizations.weight.original0.grad, model.parametrizations.weight.original0.grad)
+            self.assertEqual(cpu_model.parametrizations.weight.original1.grad, model.parametrizations.weight.original1.grad)
+
+            self.assertEqual(x.grad, cpu_x.grad)
+
         def helper(dim, layer='linear', dtype=torch.float32):
             # linear layer
             if layer == 'linear':
@@ -2868,24 +2876,7 @@ class TestMPS(TestCaseMPS):
                     cpu_linear.bias.copy_(cpu_bias)
                     linear.weight.copy_(weight)
                     linear.bias.copy_(bias)
-
-                cpu_norm = torch.nn.utils.weight_norm(cpu_linear, dim=dim)
-                norm = torch.nn.utils.weight_norm(linear, dim=dim)
-
-                cpu_out = cpu_norm(cpu_x)
-                out = norm(x)
-
-                self.assertEqual(cpu_out, out)
-
-                cpu_grad = torch.randn(cpu_out.shape)
-                grad = cpu_grad.to('mps')
-                cpu_out.backward(gradient=cpu_grad)
-                out.backward(gradient=grad)
-
-                self.assertEqual(cpu_linear.weight_g.grad, linear.weight_g.grad)
-                self.assertEqual(cpu_linear.weight_v.grad, linear.weight_v.grad)
-
-                self.assertEqual(x.grad, cpu_x.grad)
+                validate_weight_norm_equality(linear, cpu_linear, x, cpu_x, dim)
 
             # conv layer
             if layer == 'conv':
@@ -2899,25 +2890,9 @@ class TestMPS(TestCaseMPS):
                     conv.weight.copy_(cpu_conv.weight)
                     conv.bias.copy_(cpu_conv.bias)
 
-                cpu_norm = torch.nn.utils.weight_norm(cpu_conv, dim=dim)
-                norm = torch.nn.utils.weight_norm(conv, dim=dim)
+                validate_weight_norm_equality(conv, cpu_conv, x, cpu_x, dim)
 
-                cpu_out = cpu_norm(cpu_x)
-                out = norm(x)
-
-                self.assertEqual(cpu_out, out)
-
-                cpu_grad = torch.randn(cpu_out.shape)
-                grad = cpu_grad.to('mps')
-                cpu_out.backward(gradient=cpu_grad)
-                out.backward(gradient=grad)
-
-                self.assertEqual(cpu_conv.weight_g.grad, conv.weight_g.grad)
-                self.assertEqual(cpu_conv.weight_v.grad, conv.weight_v.grad)
-
-                self.assertEqual(x.grad, cpu_x.grad)
-
-                # conv layer
+            # conv3d layer
             if layer == 'conv3d':
                 cpu_x = torch.randn((3, 5, 5, 4), device='cpu', dtype=dtype, requires_grad=True)
                 x = cpu_x.detach().clone().to('mps').requires_grad_()
@@ -2929,23 +2904,7 @@ class TestMPS(TestCaseMPS):
                     conv.weight.copy_(cpu_conv.weight)
                     conv.bias.copy_(cpu_conv.bias)
 
-                cpu_norm = torch.nn.utils.weight_norm(cpu_conv, dim=dim)
-                norm = torch.nn.utils.weight_norm(conv, dim=dim)
-
-                cpu_out = cpu_norm(cpu_x)
-                out = norm(x)
-
-                self.assertEqual(cpu_out, out)
-
-                cpu_grad = torch.randn(cpu_out.shape)
-                grad = cpu_grad.to('mps')
-                cpu_out.backward(gradient=cpu_grad)
-                out.backward(gradient=grad)
-
-                self.assertEqual(cpu_conv.weight_g.grad, conv.weight_g.grad)
-                self.assertEqual(cpu_conv.weight_v.grad, conv.weight_v.grad)
-
-                self.assertEqual(x.grad, cpu_x.grad)
+                validate_weight_norm_equality(conv, cpu_conv, x, cpu_x, dim)
 
         helper(0, layer='linear')
         helper(1, layer='linear')
@@ -7892,6 +7851,11 @@ class TestMPS(TestCaseMPS):
         self.assertTrue(current_alloc_after > current_alloc_before)
         self.assertTrue(driver_alloc_after > driver_alloc_before)
 
+    def test_mps_allocator_stats(self):
+        max_memory = torch.mps.recommended_max_memory()
+        print(f"Recommended Max Memory : {max_memory/ 1024 ** 3} GB")
+        self.assertTrue(max_memory > 0)
+
     # to verify this test, run XCode Instruments "Metal System Trace" or "Logging" tool,
     # press record, then run this python test, and press stop. Next expand
     # the os_signposts->PyTorchMPS and check if events or intervals are logged
@@ -9204,8 +9168,8 @@ class TestLinalgMPS(TestCaseMPS):
                 b, n_bit=4, q_group_size=q_group
             )
             b_int4pack = torch._convert_weight_to_int4pack(
-                b_int32.cpu(), inner_k_tiles
-            ).to(device="mps")
+                b_int32, inner_k_tiles
+            )
 
             return b_int4pack, b_scales_and_zeros
 

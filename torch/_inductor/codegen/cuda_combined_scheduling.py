@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import Sequence, Union
 
 from ..scheduler import (
@@ -8,6 +9,7 @@ from ..scheduler import (
     SchedulerNode,
 )
 from .cuda.cuda_cpp_scheduling import CUDACPPScheduling
+from .rocm.rocm_cpp_scheduling import ROCmCPPScheduling
 
 from .triton import TritonScheduling
 
@@ -27,10 +29,16 @@ class CUDACombinedScheduling(BaseScheduling):
         self._scheduler = scheduler
         self._triton_scheduling = TritonScheduling(scheduler)
         self._cuda_cpp_scheduling = CUDACPPScheduling(scheduler)
+        self._rocm_cpp_scheduling = ROCmCPPScheduling(scheduler)
+
+    def get_backend_features(self, device):
+        return self._triton_scheduling.get_backend_features(device)
 
     def choose_node_backend(self, node: BaseSchedulerNode) -> BaseScheduling:
         if self._cuda_cpp_scheduling.is_cuda_cpp_template(node):
             return self._cuda_cpp_scheduling
+        if self._rocm_cpp_scheduling.is_rocm_cpp_template(node):
+            return self._rocm_cpp_scheduling
         return self._triton_scheduling
 
     def can_fuse_vertical(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode):
@@ -57,6 +65,11 @@ class CUDACombinedScheduling(BaseScheduling):
         if self._cuda_cpp_scheduling.is_cuda_cpp_template(template_node):
             assert epilogue_nodes is None or len(epilogue_nodes) == 0
             return self._cuda_cpp_scheduling.codegen_template(
+                template_node, epilogue_nodes
+            )
+        elif self._rocm_cpp_scheduling.is_rocm_cpp_template(template_node):
+            assert epilogue_nodes is None or len(epilogue_nodes) == 0
+            return self._rocm_cpp_scheduling.codegen_template(
                 template_node, epilogue_nodes
             )
         else:

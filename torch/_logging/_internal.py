@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import hashlib
 import itertools
@@ -178,6 +179,7 @@ DEFAULT_LOGGING = {
     "dynamo": logging.DEBUG,
     "aot": logging.DEBUG,
     "inductor": logging.DEBUG,
+    "fsdp": logging.DEBUG,
     "ddp_graphs": True,
     "graph_breaks": True,
     "guards": True,
@@ -226,6 +228,7 @@ def set_logs(
     cudagraphs: bool = False,
     sym_node: bool = False,
     compiled_autograd_verbose: bool = False,
+    fsdp: Optional[int] = None,
 ):
     """
     Sets the log level for individual components and toggles individual log
@@ -385,6 +388,9 @@ def set_logs(
         export (:class:`Optional[int]`):
             The log level for export. Default: ``logging.WARN``
 
+        fsdp (:class:`Optional[int]`):
+            The log level for the FSDP component. Default: ``logging.WARN``
+
         modules (dict):
             This argument provides an alternate way to specify the above log
             component and artifact settings, in the format of a keyword args
@@ -489,6 +495,7 @@ def set_logs(
         export=export,
         cudagraphs=cudagraphs,
         compiled_autograd_verbose=compiled_autograd_verbose,
+        fsdp=fsdp,
     )
 
 

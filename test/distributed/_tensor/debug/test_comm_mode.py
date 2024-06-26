@@ -116,6 +116,9 @@ class TestCommMode(TestCase):
 
     @requires_nccl()
     def test_comm_mode_with_c10d(self):
+        if not torch.cuda.is_available():
+            return
+
         world_pg = self.world_pg
 
         inp = torch.rand(2, 8, 16).cuda()

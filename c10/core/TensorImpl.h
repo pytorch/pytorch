@@ -1580,7 +1580,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         "If you're using torch.compile/export/fx, it is likely that we are erroneously "
         "tracing into a custom kernel. To fix this, please wrap the custom kernel into "
         "an opaque custom op. Please see the following for details: "
-        "https://pytorch.org/docs/main/notes/custom_operators.html\n"
+        "https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html\n"
         "If you're using Caffe2, Caffe2 uses a lazy allocation, so you will need to call "
         "mutable_data() or raw_mutable_data() to actually allocate memory.");
     // Caller does the type check.

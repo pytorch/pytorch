@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import contextlib
 import functools
 import logging
@@ -1712,13 +1713,13 @@ class FakeTensorMode(TorchDispatchMode):
 
         # Users can register FakeTensor rules for custom operators
         # Call them if they exist.
-        maybe_abstract_impl = torch._library.simple_registry.singleton.find(
+        maybe_fake_impl = torch._library.simple_registry.singleton.find(
             func.name()
-        ).abstract_impl.kernel
-        if maybe_abstract_impl:
-            ctx = torch._library.abstract_impl.AbstractImplCtx(self, func)
-            with torch._library.abstract_impl.set_ctx_getter(lambda: ctx), self:
-                result = maybe_abstract_impl(*args, **kwargs)
+        ).fake_impl.kernel
+        if maybe_fake_impl:
+            ctx = torch._library.fake_impl.FakeImplCtx(self, func)
+            with torch._library.fake_impl.set_ctx_getter(lambda: ctx), self:
+                result = maybe_fake_impl(*args, **kwargs)
                 return maybe_propagate_real_tensors(result)
 
         # special handling for funcs registered through `register_op_impl`,
@@ -1727,7 +1728,7 @@ class FakeTensorMode(TorchDispatchMode):
         for run_impl_check, op_impl in op_implementations_checks:
             if run_impl_check(func):
                 op_impl_out = op_impl(self, func, *args, **kwargs)
-                if op_impl_out != NotImplemented:
+                if op_impl_out is not NotImplemented:
                     return maybe_propagate_real_tensors(op_impl_out)
 
         def maybe_run_unsafe_fallback(error=None):

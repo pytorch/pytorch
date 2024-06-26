@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Functions to verify exported ONNX model is functionally equivalent to original PyTorch model.
 
 ONNX Runtime is required, and is used as the ONNX backend for export verification.
@@ -632,10 +633,7 @@ def _onnx_graph_from_model(
     utils._setup_trace_module_map(model, export_modules_as_functions)
 
     if not operator_export_type:
-        if _C_onnx._CAFFE2_ATEN_FALLBACK:
-            operator_export_type = _C_onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
-        else:
-            operator_export_type = _C_onnx.OperatorExportTypes.ONNX
+        operator_export_type = _C_onnx.OperatorExportTypes.ONNX
 
     GLOBALS.export_onnx_opset_version = opset_version
     GLOBALS.operator_export_type = operator_export_type

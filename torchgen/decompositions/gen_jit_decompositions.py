@@ -4,6 +4,7 @@ from pathlib import Path
 
 from torch.jit._decompositions import decomposition_table
 
+
 # from torchgen.code_template import CodeTemplate
 
 DECOMP_HEADER = r"""

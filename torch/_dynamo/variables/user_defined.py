@@ -37,7 +37,13 @@ from .. import variables
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import ObservedException, unimplemented
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, GetItemSource, ODictGetItemSource, RandomValueSource
+from ..source import (
+    AttrSource,
+    GetItemSource,
+    ODictGetItemSource,
+    RandomValueSource,
+    WeakRefCallSource,
+)
 from ..utils import (
     all_hook_names,
     build_checkpoint_variable,
@@ -51,6 +57,7 @@ from ..utils import (
     object_has_getattribute,
     proxy_args_kwargs,
     tensortype_to_dtype,
+    unpatched_nn_module_getattr,
 )
 from .base import MutableLocal, VariableTracker
 from .ctx_manager import GenericContextWrappingVariable, NullContextVariable
@@ -384,9 +391,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.CustomizedDictVariable.create(
                 self.value, args, kwargs, options
             )
-        elif variables.DataClassVariable.is_matching_cls(self.value):
-            options = {"mutable_local": MutableLocal()}
-            return variables.DataClassVariable.create(self.value, args, kwargs, options)
         elif (
             variables.RestrictedListSubclassVariable.is_matching_cls(self.value)
             and self.source
@@ -841,12 +845,35 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if isinstance(getattr_fn, types.FunctionType):
                 # Dynamo is going to trace the __getattr__ function with
                 # args=name. Set the source accordingly.
-                new_source = None
-                if self.source:
-                    new_source = AttrSource(self.source, "__getattr__")
-                return variables.UserMethodVariable(
-                    getattr_fn, self, source=new_source
-                ).call_function(tx, [ConstantVariable.create(name)], {})
+                if getattr_fn is unpatched_nn_module_getattr and isinstance(
+                    self, variables.UnspecializedNNModuleVariable
+                ):
+                    # Manually trace out the nn module __getattr__ to avoid large compilation latency.
+                    out = self.manually_trace_nn_module_getattr(tx, name)
+                else:
+                    new_source = None
+                    if self.source:
+                        new_source = AttrSource(self.source, "__getattr__")
+                    out = variables.UserMethodVariable(
+                        getattr_fn, self, source=new_source
+                    ).call_function(tx, [ConstantVariable.create(name)], {})
+
+                if self.source and getattr_fn is torch.nn.Module.__getattr__:
+                    if isinstance(
+                        out,
+                        (
+                            variables.UnspecializedNNModuleVariable,
+                            variables.NNModuleVariable,
+                        ),
+                    ):
+                        # nn_module_stack source is BC surface area. Ensure that
+                        # mod._modules["linear"] is reflected as mod.linear for
+                        # nn_module_stack.
+                        out.set_nn_module_stack_source(
+                            AttrSource(self.get_nn_module_stack_source(), name)
+                        )
+                return out
+
             elif getattr_fn is not None:
                 unimplemented("UserDefined with non-function __getattr__")
 
@@ -921,8 +948,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
         ):
             if source:
-                install_guard(source.make_guard(GuardBuilder.HASATTR))
-                return VariableBuilder(tx, source)(subobj)
+                return variables.LazyVariableTracker.create(subobj, source)
             elif ConstantVariable.is_literal(subobj):
                 return ConstantVariable.create(subobj)
             elif (
@@ -935,7 +961,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return SourcelessBuilder.create(tx, subobj)
 
         if (
-            name not in getattr(value, "__dict__", {})
+            subobj is not NO_SUCH_SUBOBJ
+            and name not in getattr(value, "__dict__", {})
             and (
                 type(value).__module__.startswith("torch.")
                 or isinstance(subobj, re.Pattern)
@@ -1064,6 +1091,29 @@ class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
         )
 
 
+class WeakRefVariable(UserDefinedObjectVariable):
+    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
+
+    def __init__(self, value, **kwargs):
+        super().__init__(value, **kwargs)
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        call_source = None
+        referent = self.value()
+
+        if self.source:
+            from .builder import VariableBuilder
+
+            call_source = WeakRefCallSource(self.source)
+            return VariableBuilder(tx, call_source)(referent)
+        else:
+            from .builder import SourcelessBuilder
+
+            return SourcelessBuilder.create(tx, referent)
+
+
 class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
     @staticmethod
     def is_matching_object(obj):
@@ -1118,8 +1168,12 @@ class RemovableHandleVariable(VariableTracker):
     def reconstruct(self, codegen):
         if self.idx == self.REMOVED:
             # Hook has already been removed, return a dummy handle
-            codegen.load_import_from("torch._dynamo.utils", "invalid_removeable_handle")
-            codegen.extend_output(create_call_function(0, True))
+            codegen.add_push_null(
+                lambda: codegen.load_import_from(
+                    "torch._dynamo.utils", "invalid_removeable_handle"
+                )
+            )
+            codegen.extend_output(create_call_function(0, False))
             return
         # unreachable due to codegen.add_cache() when the hook is installed
         super().reconstruct(codegen)

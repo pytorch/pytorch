@@ -49,9 +49,7 @@ constexpr auto kETProcessGroupName = "pg_name";
 constexpr auto kETProcessGroupDesc = "pg_desc";
 #endif // USE_DISTRIBUTED
 
-namespace torch {
-namespace profiler {
-namespace impl {
+namespace torch::profiler::impl {
 
 //******************************************************************************
 // JSON output utility functions. To be merged with PyTorch profiler.
@@ -277,6 +275,7 @@ static std::ofstream openOutputFile(const std::string& name) {
   return stream;
 }
 
+#ifdef USE_DISTRIBUTED
 static inline std::string getAttrJson(
     const std::string& name,
     const std::string& type,
@@ -289,6 +288,7 @@ static inline std::string getAttrJson(
       type,
       value);
 }
+#endif
 
 static void writeJsonNode(
     std::ofstream& out,
@@ -567,7 +567,7 @@ inline std::string getCommsNodeAttrs(const RecordFunction& fn) {
 #endif // USE_DISTRIBUTED
 
   // XXX consider using as string stream?
-  return attrs.size() == 0 ? "" : fmt::format(", {}", fmt::join(attrs, ", "));
+  return attrs.empty() ? "" : fmt::format(", {}", fmt::join(attrs, ", "));
 }
 
 static void recordOperatorStart(
@@ -601,7 +601,7 @@ static void recordOperatorStart(
     auto num_inputs = fn.num_inputs();
     const auto inputs = fn.inputs();
 
-    VLOG(2) << "inputs: " << num_inputs << " " << inputs.size() << std::endl;
+    VLOG(2) << "inputs: " << num_inputs << " " << inputs.size() << '\n';
     // We have two cases: for unboxed kernel, we have num_inputs ==
     // inputs.size() for boxed kernel using stack, there could be more elements
     // on the stack from previous ops.
@@ -699,7 +699,7 @@ static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
     // We have two cases: for unboxed kernel, we have num_outputs ==
     // outputs.size() for boxed kernel using stack, there could be more elements
     // on the stack from previous ops.
-    VLOG(2) << "outputs: " << num_outputs << " " << outputs.size() << std::endl;
+    VLOG(2) << "outputs: " << num_outputs << " " << outputs.size() << '\n';
     // TORCH_INTERNAL_ASSERT(num_outputs <= outputs.size());
     if (num_outputs > outputs.size()) {
       LOG(WARNING) << "RecordFunction " << fc.name
@@ -837,6 +837,4 @@ void disableExecutionTraceObserver() {
         << "Trying to disable Execution Trace Observer when it's already disabled.";
   }
 }
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl

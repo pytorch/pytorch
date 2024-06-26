@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 Functions in this module do most of the "work" of AOTAutograd.
 An aot_dispatch_* function:
@@ -23,6 +24,12 @@ from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals
 from .. import config
+from .autograd_cache import (
+    AOTAutogradCache,
+    AOTAutogradCacheEntry,
+    CompiledBackward,
+    CompiledForward,
+)
 from .dispatch_and_compile_graph import (
     aot_dispatch_autograd_graph,
     aot_dispatch_base_graph,
@@ -39,6 +46,7 @@ from .runtime_wrappers import (
     DebugAssertWrapper,
     FakifiedOutWrapper,
     FunctionalizedRngRuntimeWrapper,
+    make_runtime_safe,
     post_compile,
     pre_compile,
     RuntimeWrapper,
@@ -169,6 +177,8 @@ def aot_dispatch_base(
         if fakified_out_wrapper.needs_post_compile:
             fakified_out_wrapper.set_fwd_output_strides(fwd_output_strides)
 
+    make_runtime_safe(fw_metadata, maybe_subclass_meta)
+
     # However, RuntimeWrapper does not expect the rng offsets in the
     # output. So, we have to create another wrapper and take out the offset. As
     # a result, we have to account for not boxed_call compilers as well.
@@ -179,11 +189,26 @@ def aot_dispatch_base(
     compiled_fw = functionalized_rng_wrapper.post_compile(
         compiled_fw, aot_config, runtime_metadata=fw_metadata
     )
+
+    if config.enable_autograd_cache and aot_config.cache_key:
+        if fw_key := getattr(compiled_fw, "_fx_graph_cache_key", None):
+            entry = AOTAutogradCacheEntry(
+                compiled_fw=CompiledForward(fw_key),
+                compiled_bw=None,
+                runtime_metadata=fw_metadata,
+                dispatch_wrappers=wrappers,
+                maybe_subclass_meta=maybe_subclass_meta,
+                num_fw_outs_saved_for_bw=None,
+                indices_of_inps_to_detach=[],
+            )
+            AOTAutogradCache.save(aot_config.cache_key, entry)
+
     compiled_fw = fakified_out_wrapper.post_compile(
         compiled_fw,
         aot_config,
         runtime_metadata=fw_metadata,
     )
+
     # Why do we need to pass in num_fw_outs_saved_for_bw?
     # See Note: [Partitioner handling for Subclasses, Part 2]
     compiled_fw_func = AOTDispatchSubclassWrapper(
@@ -247,11 +272,21 @@ def aot_dispatch_autograd(
 
     if aot_config.enable_log:
         aot_joint_log.info(
-            "%s", lazy_format_graph_code("Joint graph", fx_g, aot_config.aot_id)
+            "%s",
+            lazy_format_graph_code(
+                "Joint graph",
+                fx_g,
+                aot_config.aot_id,
+                include_stride=True,
+                include_device=True,
+                colored=True,
+            ),
         )
         trace_structured(
             "aot_joint_graph",
-            payload_fn=lambda: fx_g.print_readable(print_output=False),
+            payload_fn=lambda: fx_g.print_readable(
+                print_output=False, include_stride=True, include_device=True
+            ),
         )
 
     with torch.no_grad():
@@ -389,19 +424,37 @@ def aot_dispatch_autograd(
         if aot_config.enable_log:
             aot_graphs_log.info(
                 "%s",
-                lazy_format_graph_code("Forward graph", fw_module, aot_config.aot_id),
+                lazy_format_graph_code(
+                    "Forward graph",
+                    fw_module,
+                    aot_config.aot_id,
+                    include_stride=True,
+                    include_device=True,
+                    colored=True,
+                ),
             )
             aot_graphs_log.info(
                 "%s",
-                lazy_format_graph_code("Backward graph", bw_module, aot_config.aot_id),
+                lazy_format_graph_code(
+                    "Backward graph",
+                    bw_module,
+                    aot_config.aot_id,
+                    include_stride=True,
+                    include_device=True,
+                    colored=True,
+                ),
             )
             trace_structured(
                 "aot_forward_graph",
-                payload_fn=lambda: fw_module.print_readable(print_output=False),
+                payload_fn=lambda: fw_module.print_readable(
+                    print_output=False, include_stride=True, include_device=True
+                ),
             )
             trace_structured(
                 "aot_backward_graph",
-                payload_fn=lambda: bw_module.print_readable(print_output=False),
+                payload_fn=lambda: bw_module.print_readable(
+                    print_output=False, include_stride=True, include_device=True
+                ),
             )
 
         with track_graph_compiling(aot_config, "forward"):
@@ -540,7 +593,7 @@ def aot_dispatch_autograd(
             # becomes the lazy version again. One example is when dynamic shape is enabled
             # upfront, the bw_compiler will be called above which can cause extra
             # graph module recompilation on bw_module.
-            if torch._dynamo.compiled_autograd.compiled_autograd_enabled_count:
+            if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
                 from torch.fx._lazy_graph_module import _LazyGraphModule
 
                 _LazyGraphModule.force_recompile(bw_module)
@@ -560,6 +613,33 @@ def aot_dispatch_autograd(
         saved_compile_context,
     )
 
+    make_runtime_safe(fw_metadata, maybe_subclass_meta)
+
+    try_save_cache_entry: Optional[Callable] = None
+    if config.enable_autograd_cache:
+
+        def try_save_cache_entry(compiled_bw_func):  # noqa: F811
+            fw_key = getattr(compiled_fw_func, "_fx_graph_cache_key", None)
+            bw_key = getattr(compiled_bw_func, "_fx_graph_cache_key", None)
+            if aot_config.cache_key and fw_key and bw_key:
+                entry = AOTAutogradCacheEntry(
+                    CompiledForward(fw_key),
+                    CompiledBackward(
+                        bw_key, backward_state_indices, num_symints_saved_for_bw
+                    ),
+                    fw_metadata,
+                    wrappers,
+                    maybe_subclass_meta,
+                    num_fw_outs_saved_for_bw,
+                    _indices_of_inps_to_detach,
+                )
+                AOTAutogradCache.save(aot_config.cache_key, entry)
+
+        if compiled_bw_func is not None:
+            # If we already compiled it we can just run it right now without waiting
+            try_save_cache_entry(compiled_bw_func)
+            try_save_cache_entry = None
+
     compiled_fn = AOTDispatchAutograd.post_compile(
         compiled_fw_func,
         compiled_bw_func,
@@ -571,6 +651,7 @@ def aot_dispatch_autograd(
         lazy_backward_info,
         aot_config,
         fw_metadata=fw_metadata,
+        try_save_cache_entry=try_save_cache_entry,
     )
 
     if config.debug_assert:
