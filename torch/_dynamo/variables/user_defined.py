@@ -894,8 +894,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.UserMethodVariable(
                 subobj.__get__.__func__, subobj_var, source=source
             ).call_function(tx, [self], {})
-        elif self.is_supported_nn_module_method(subobj):
-            return variables.GetAttrVariable(self, name, source=source)
         elif isinstance(subobj, staticmethod):
             func = subobj.__get__(self.value)
             if source is not None:
@@ -910,6 +908,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             isinstance(subobj, types.MethodType)
             and isinstance(self.value, torch.nn.Module)
         ):
+            if self.is_supported_nn_module_method(subobj):
+                return variables.GetAttrVariable(self, name, source=source)
+
             # Since we get subobj via self._getattr_static, which may not trigger dynamic lookup.
             # Static lookup can't tell us it's a method or function correctly,
             # so we trigger dynamic lookup here to get the correct type.
