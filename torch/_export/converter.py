@@ -241,6 +241,11 @@ def get_op_overload(node: torch._C.Node):
     try:
         op_overload_mod = getattr(torch.ops, ns)
         op_overload_packet = getattr(op_overload_mod, op_name)
+
+        # To match the behavior of direct export, we replace specialized operator
+        # with its symbolic counterpart if exists.
+        op_overload_packet = getattr(op_overload_mod, f"sym_{op_name}", op_overload_packet)
+
         if override:
             op_overload = getattr(op_overload_packet, override)
         else:
