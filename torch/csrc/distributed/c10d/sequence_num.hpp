@@ -59,7 +59,7 @@ class TORCH_API SequenceNum {
   SequenceNum(const SequenceNum& other);
 
  private:
-  c10::optional<uint64_t> num_;
+  std::optional<uint64_t> num_;
   mutable std::mutex lock_;
 };
 

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import Any, NamedTuple, Tuple
 
 import torch
@@ -680,6 +681,15 @@ def reductify_leaf(
     if input_bdim != grad_input_bdim:
         grad_input = grad_input.movedim(grad_input_bdim, input_bdim)
     return grad_input
+
+
+def autograd_function_forward_rewritten(original_forward, original_setup_context):
+    def new_forward(ctx, *args, **kwargs):
+        output = original_forward(*args, **kwargs)
+        original_setup_context(ctx, args, output)
+        return output
+
+    return new_forward
 
 
 class AutogradFunctionApply(HigherOrderOperator):

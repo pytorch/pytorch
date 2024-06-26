@@ -91,12 +91,12 @@ class StaticTCPRendezvousTest(unittest.TestCase):
         rdzv_handler = create_rdzv_handler(rdzv_params)
 
         # Call rendezvous two times
-        store, rank, world_size = rdzv_handler.next_rendezvous()
-        self.assertIsNotNone(store)
-        self.assertEqual(0, rank)
-        self.assertEqual(1, world_size)
+        rdzv_info = rdzv_handler.next_rendezvous()
+        self.assertIsNotNone(rdzv_info.store)
+        self.assertEqual(0, rdzv_info.rank)
+        self.assertEqual(1, rdzv_info.world_size)
 
-        store, rank, world_size = rdzv_handler.next_rendezvous()
-        self.assertIsNotNone(store)
-        self.assertEqual(0, rank)
-        self.assertEqual(1, world_size)
+        rdzv_info = rdzv_handler.next_rendezvous()
+        self.assertIsNotNone(rdzv_info.store)
+        self.assertEqual(0, rdzv_info.rank)
+        self.assertEqual(1, rdzv_info.world_size)

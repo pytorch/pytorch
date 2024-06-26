@@ -1,7 +1,6 @@
+# mypy: allow-untyped-defs
 import weakref
-from typing import Any, cast, Dict, Iterable, List, Optional, Set, Tuple
-
-import typing_extensions
+from typing import Any, cast, Dict, Iterable, List, NoReturn, Optional, Set, Tuple
 
 import torch
 import torch.nn as nn
@@ -9,6 +8,7 @@ from torch.distributed._composable_state import _State
 from torch.nn.parallel import DistributedDataParallel
 
 from .contract import _get_registry, contract
+
 
 _ROOT_MODULE_PREFIX = ""
 
@@ -61,7 +61,7 @@ class _ReplicateState(_State):
             )
 
     def lazy_init(self) -> None:
-        @torch._dynamo.disable(recursive=True)
+        @torch._disable_dynamo(recursive=True)
         def _lazy_init():
             assert self._init_args is not None
             self.init(*self._init_args, **self._init_kwargs)
@@ -138,7 +138,7 @@ class _ReplicateState(_State):
         return self._ddp._post_forward(output)
 
 
-def unimplemented_deepcopy(*args: Any, **kwargs: Any) -> typing_extensions.Never:
+def unimplemented_deepcopy(*args: Any, **kwargs: Any) -> NoReturn:
     raise AssertionError(
         "DDP does not support deepcopy. Please use state dict for serialization."
     )

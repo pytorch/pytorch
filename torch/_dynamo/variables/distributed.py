@@ -107,6 +107,9 @@ class PlacementClassVariable(DistributedVariable):
 
         return type(value) is type and issubclass(value, Placement)
 
+    def as_python_constant(self):
+        return self.value
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# mypy: allow-untyped-defs
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -65,7 +66,14 @@ from torch.distributed.elastic.utils.logging import get_logger
 from .error_handler import ErrorHandler  # noqa: F401
 from .handlers import get_error_handler  # noqa: F401
 
-__all__ = ["ProcessFailure", "ChildFailedError", "record", "ErrorHandler", "get_error_handler"]
+
+__all__ = [
+    "ProcessFailure",
+    "ChildFailedError",
+    "record",
+    "ErrorHandler",
+    "get_error_handler",
+]
 
 logger = get_logger(__name__)
 
@@ -112,7 +120,8 @@ class ProcessFailure:
                 with open(self.error_file) as fp:
                     self.error_file_data = json.load(fp)
                     logger.debug(
-                        "User process failed with error data: %s", json.dumps(self.error_file_data, indent=2)
+                        "User process failed with error data: %s",
+                        json.dumps(self.error_file_data, indent=2),
                     )
                     self.message, self.timestamp = self._get_error_data(
                         self.error_file_data
@@ -263,7 +272,6 @@ class ChildFailedError(Exception):
     def _format_failure(
         self, idx: int, rank: int, failure: ProcessFailure
     ) -> Tuple[str, int]:
-
         # failure.message is either a str (when the failure does not generate a traceback - e.g. signals)
         # or a dict (json) of the form
         # {"message": $ERROR_MSG, "extraInfo": {"py_callstack": $TRACEBACK, timestamp: $TS}}
@@ -362,7 +370,7 @@ def record(
                             "local_rank %s FAILED with no error file."
                             " Decorate your entrypoint fn with @record for traceback info."
                             " See: https://pytorch.org/docs/stable/elastic/errors.html",
-                            rank
+                            rank,
                         )
                     )
                 raise

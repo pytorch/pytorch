@@ -58,7 +58,7 @@ void calc_col_offsets_transpose(
 
 c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::prepack(
     at::Tensor weight,
-    c10::optional<at::Tensor> bias) {
+    std::optional<at::Tensor> bias) {
   TORCH_CHECK(
       weight.dim() == 2,
       "The weight tensor for quantized::linear_prepack (fbgemm) should"
@@ -102,7 +102,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::prepack(
       /*col_offsets=*/col_offsets.data(),
       /*qtype=*/qtype);
 
-  c10::optional<at::Tensor> bias_contig;
+  std::optional<at::Tensor> bias_contig;
   if (bias.has_value()) {
     at::Tensor bias_vec = bias.value();
     TORCH_CHECK(bias_vec.dim() == 1, "bias should be a vector (1D Tensor)");
@@ -132,7 +132,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::prepack(
 #ifdef USE_PYTORCH_QNNPACK
 c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsQnnp::prepack(
     at::Tensor weight,
-    c10::optional<at::Tensor> bias_in) {
+    std::optional<at::Tensor> bias_in) {
   TORCH_CHECK(
       weight.dim() == 2,
       "quantized::linear_prepack (qnnpack): Weight tensor rank should be == 2");
@@ -181,7 +181,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsQnnp::prepack(
 
 c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightFp16::prepack(
     at::Tensor weight,
-    c10::optional<at::Tensor> bias) {
+    std::optional<at::Tensor> bias) {
 
   weight = at::_saturate_weight_to_fp16(weight);
 
@@ -208,7 +208,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightFp16::prepack(
 #if AT_MKLDNN_ENABLED()
 c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsOnednn::prepack(
     at::Tensor weight,
-    c10::optional<at::Tensor> bias) {
+    std::optional<at::Tensor> bias) {
   TORCH_CHECK(
       weight.dim() == 2,
       "The weight tensor for quantized::linear_prepack (onednn) should"
@@ -257,7 +257,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsOnednn::prepack(
   packed_weight_p->set_zero_point(wgt_zero_points);
   std::unique_ptr<ideep::tensor> weight_ptr(packed_weight_p);
   // Bias
-  c10::optional<ideep::tensor> onednn_bias{c10::nullopt};
+  std::optional<ideep::tensor> onednn_bias{c10::nullopt};
   if (bias.has_value()) {
     auto& b = bias.value();
     auto bias_size = b.sizes().vec();
@@ -270,7 +270,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsOnednn::prepack(
     auto bias_desc = ideep::tensor::desc(bias_size, dnnl::memory::data_type::f32);
     ideep::tensor packed_bias;
     packed_bias.init(bias_desc, b.data_ptr());
-    onednn_bias = c10::optional<ideep::tensor>(packed_bias);
+    onednn_bias = std::optional<ideep::tensor>(packed_bias);
   }
   auto ret_ptr = c10::make_intrusive<PackedLinearWeightsOnednn>(
       PackedLinearWeightsOnednn{
@@ -283,7 +283,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsOnednn::prepack(
 
 inline at::Tensor pack_weight_to_onednn_tensor(
     const at::Tensor& weight,
-    c10::optional<torch::List<int64_t>>& input_shape) {
+    std::optional<torch::List<int64_t>>& input_shape) {
   std::vector<int64_t> w_dims = weight.sizes().vec();
   ideep::tensor wei = ideep::tensor({w_dims, dnnl::memory::data_type::s8}, weight.data_ptr());
   wei.transpose_(0, 1); // oneDNN requires transposed weight
@@ -319,7 +319,7 @@ class QLinearPackWeightInt8 final {
  public:
   static c10::intrusive_ptr<LinearPackedParamsBase> run(
       at::Tensor weight,
-      c10::optional<Tensor> bias) {
+      std::optional<Tensor> bias) {
     auto& ctx = at::globalContext();
 
 #ifdef USE_FBGEMM
@@ -350,7 +350,7 @@ class QLinearPackWeightFp16 final {
  public:
   static c10::intrusive_ptr<LinearPackedParamsBase> run(
       at::Tensor weight,
-      c10::optional<Tensor> bias) {
+      std::optional<Tensor> bias) {
     auto& ctx = at::globalContext();
 #ifdef USE_FBGEMM
     // temporarily convert weight back to fp32, needs to be fixed
@@ -387,7 +387,7 @@ class QLinearPackWeightFp16 final {
 
 class QLinearPackWeightInt8Legacy final {
  public:
-  static Tensor run(at::Tensor weight, c10::optional<Tensor> bias) {
+  static Tensor run(at::Tensor weight, std::optional<Tensor> bias) {
     TORCH_CHECK(false,
         "This model uses an outdated version of quantized.linear_prepack. "
         "Please re-export your model using the newer definitions in torch.jit.quantized");
@@ -396,7 +396,7 @@ class QLinearPackWeightInt8Legacy final {
 
 class QLinearPackWeightFp16Legacy final {
  public:
-  static Tensor run(at::Tensor weight, c10::optional<Tensor> bias) {
+  static Tensor run(at::Tensor weight, std::optional<Tensor> bias) {
     TORCH_CHECK(false,
         "This model uses an outdated version of quantized.linear_prepack_fp16. "
         "Please re-export your model using the newer definitions in torch.jit.quantized");
@@ -407,7 +407,7 @@ class QLinearPackWeightInt8Onednn final {
  public:
   static at::Tensor run(
     at::Tensor weight, // Not QTensor
-    c10::optional<torch::List<int64_t>> input_shape) {
+    std::optional<torch::List<int64_t>> input_shape) {
 #if AT_MKLDNN_ENABLED()
     return pack_weight_to_onednn_tensor(weight, input_shape);
 #else

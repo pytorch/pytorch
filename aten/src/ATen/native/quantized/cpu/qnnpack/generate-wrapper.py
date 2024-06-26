@@ -124,9 +124,9 @@ if __name__ == "__main__":
                 # because they are ignored by arc focus & buck project.
 
                 if condition is None:
-                    print("#include <%s>" % filename, file=wrapper)
+                    print(f"#include <{filename}>", file=wrapper)
                 else:
                     # Include source file only if condition is satisfied
-                    print("#if %s" % condition, file=wrapper)
-                    print("#include <%s>" % filename, file=wrapper)
-                    print("#endif /* %s */" % condition, file=wrapper)
+                    print(f"#if {condition}", file=wrapper)
+                    print(f"#include <{filename}>", file=wrapper)
+                    print(f"#endif /* {condition} */", file=wrapper)

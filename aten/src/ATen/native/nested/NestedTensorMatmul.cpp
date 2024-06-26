@@ -320,7 +320,7 @@ Tensor& matmul_out_nested(
   //       if an accessor is provided in the future, can replace this
   std::vector<int64_t> sizes;
   for (int64_t i = 0; i < function_result_ptr->dim(); i++) {
-    c10::optional<int64_t> opt_size = function_result_ptr->opt_size(i);
+    std::optional<int64_t> opt_size = function_result_ptr->opt_size(i);
     if (opt_size.has_value()) {
       sizes.push_back(*opt_size);
     } else {

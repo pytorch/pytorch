@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import inspect
 import weakref
 from typing import (
@@ -25,6 +26,7 @@ device_types_t = Optional[Union[str, Sequence[str]]]
 @exposed_in("torch.library")
 def custom_op(
     name: str,
+    fn: Optional[Callable] = None,
     /,
     *,
     mutates_args: Iterable[str],
@@ -135,7 +137,9 @@ def custom_op(
         result.register_kernel(device_types)(fn)
         return result
 
-    return inner
+    if fn is None:
+        return inner
+    return inner(fn)
 
 
 class CustomOpDef:
@@ -466,7 +470,7 @@ class CustomOpDef:
                 )
             return self._abstract_fn(*args, **kwargs)
 
-        lib._register_fake(self._name, fake_impl)
+        lib._register_fake(self._name, fake_impl, _stacklevel=4)
 
         autograd_impl = _library.autograd.make_autograd_impl(self._opoverload, self)
         lib.impl(self._name, autograd_impl, "Autograd", with_keyset=True)

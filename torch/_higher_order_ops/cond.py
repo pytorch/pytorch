@@ -1,10 +1,9 @@
+# mypy: allow-untyped-defs
 import contextlib
 
 import torch
 import torch._subclasses.functional_tensor
-
 import torch.utils._pytree as pytree
-
 from torch._C import DispatchKey
 from torch._C._functorch import (
     _add_batch_dim,
@@ -14,7 +13,6 @@ from torch._C._functorch import (
 )
 from torch._functorch.utils import exposed_in
 from torch._guards import detect_fake_mode
-
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
@@ -24,12 +22,10 @@ from torch._higher_order_ops.utils import (
     unique_graph_id,
     UnsupportedAliasMutationException,
 )
-
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_pre_dispatch_torch_function_mode,
-    disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
@@ -159,11 +155,8 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
         isinstance(o, torch.Tensor) for o in operands
     ), "Cond operands must be a list of tensors"
 
-    pre_dispatch = getattr(proxy_mode, "pre_dispatch", False)
-
-    with disable_proxy_modes_tracing():
-        true_graph = reenter_make_fx(true_fn, pre_dispatch)(*operands)
-        false_graph = reenter_make_fx(false_fn, pre_dispatch)(*operands)
+    true_graph = reenter_make_fx(true_fn)(*operands)
+    false_graph = reenter_make_fx(false_fn)(*operands)
 
     true_outs = []
     false_outs = []

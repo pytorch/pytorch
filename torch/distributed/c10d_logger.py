@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# mypy: allow-untyped-defs
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -14,8 +15,8 @@ from typing_extensions import ParamSpec
 
 import torch
 import torch.distributed as dist
-
 from torch.distributed.logging_handlers import _log_handlers
+
 
 __all__: List[str] = []
 
@@ -35,7 +36,9 @@ def _get_or_create_logger(destination: str = _DEFAULT_DESTINATION) -> logging.Lo
     return logger
 
 
-def _get_logging_handler(destination: str = _DEFAULT_DESTINATION) -> Tuple[logging.Handler, str]:
+def _get_logging_handler(
+    destination: str = _DEFAULT_DESTINATION,
+) -> Tuple[logging.Handler, str]:
     log_handler = _log_handlers[destination]
     log_handler_name = type(log_handler).__name__
     return (log_handler, log_handler_name)
@@ -68,8 +71,10 @@ def _get_msg_dict(func_name, *args, **kwargs) -> Dict[str, Any]:
         }
     return msg_dict
 
-_T = TypeVar('_T')
-_P = ParamSpec('_P')
+
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
+
 
 def _exception_logger(func: Callable[_P, _T]) -> Callable[_P, _T]:
     @functools.wraps(func)

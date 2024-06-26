@@ -1,10 +1,10 @@
+# mypy: allow-untyped-defs
 """
 The following example contains a simple MLP model that uses
 different DTensor layouts, and use the checkpointing API to
 checkpoint save/load the model.
 """
 import os
-
 from typing import cast, List
 
 import torch
@@ -12,7 +12,6 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 import torch.nn as nn
 import torch.nn.functional as F
-
 from torch.distributed._tensor import (
     DeviceMesh,
     distribute_module,

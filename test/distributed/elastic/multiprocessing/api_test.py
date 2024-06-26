@@ -465,6 +465,30 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                     self.assertTrue(pc._stderr_tail.stopped())
                     self.assertTrue(pc._stdout_tail.stopped())
 
+        def test_wait_for_all_child_procs_to_exit(self):
+            """
+            Tests that MultiprocessingContext actually waits for
+            the child process to exit (not just that the entrypoint fn has
+            finished running).
+            """
+
+            mpc = MultiprocessContext(
+                name="echo",
+                entrypoint=echo0,
+                args={},
+                envs={},
+                start_method="spawn",
+                logs_specs=DefaultLogsSpecs(log_dir=self.log_dir()),
+            )
+
+            with mock.patch.object(
+                mpc, "_is_done", return_value=True
+            ), mock.patch.object(mpc, "_pc"), mock.patch.object(
+                mpc._pc, "join", side_effect=[True, False, False, True]
+            ) as mock_join:
+                mpc._poll()
+                self.assertEqual(4, mock_join.call_count)
+
         ########################################
         # start_processes as binary tests
         ########################################

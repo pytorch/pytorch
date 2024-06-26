@@ -1265,7 +1265,7 @@ int64_t ret_single_non_tensor(
 
 torch::Tensor opt_op(
     const torch::Tensor& self,
-    const c10::optional<at::Tensor>& other) {
+    const std::optional<at::Tensor>& other) {
   if (other.has_value()) {
     return self + other.value();
   } else {
@@ -1461,11 +1461,11 @@ TEST(TestAutogradNotImplementedFallback, OptOp) {
   auto opHandle =
       c10::Dispatcher::singleton().findSchemaOrThrow("_test::opt_op", "");
   auto op = [&](const torch::Tensor& _1,
-                const c10::optional<torch::Tensor>& _2) {
+                const std::optional<torch::Tensor>& _2) {
     return callOpUnboxed<
         torch::Tensor,
         const torch::Tensor&,
-        const c10::optional<torch::Tensor>&>(opHandle, _1, _2);
+        const std::optional<torch::Tensor>&>(opHandle, _1, _2);
   };
 
   auto a = torch::tensor({1.}, {torch::kFloat32}).set_requires_grad(true);

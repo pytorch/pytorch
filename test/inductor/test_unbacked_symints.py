@@ -1,16 +1,16 @@
 # Owner(s): ["module: inductor"]
 
+import functools
 import unittest
 
 import torch
-
 from torch._dynamo import config as dynamo_config
 from torch._inductor import config as inductor_config
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import is_big_gpu
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import IS_LINUX
+from torch.testing._internal.common_utils import IS_LINUX, parametrize
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA, skipCUDAIf
 
 
@@ -38,14 +38,14 @@ class TestUnbackedSymints(InductorTestCase):
 
     @skipCUDAIf(not HAS_CUDA, "requires cuda")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
-    def test_expand_mismatch(self, device):
+    def test_expand_ok_with_runtime_assert(self, device):
         def fn(x):
             nz = x.nonzero()
-            return nz.expand([-1, 128])
+            torch._check(nz.size(0) == 128)
+            return nz.expand([128, -1, 2])
 
         x = make_tensor(32, 4, device=device, dtype=torch.float32, exclude_zero=True)
-        with self.assertRaises(torch._dynamo.exc.TorchRuntimeError):
-            actual = torch.compile(fn, fullgraph=True)(x)
+        actual = torch.compile(fn, fullgraph=True)(x)
 
     @skipCUDAIf(not HAS_CUDA, "requires cuda")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
@@ -185,6 +185,70 @@ class TestUnbackedSymints(InductorTestCase):
         torch._dynamo.mark_dynamic(backed, 0)  # create backed symint
 
         actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
+    @skipCUDAIf(not HAS_CUDA, "requires cuda")
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_vertical_pointwise_reduction_fusion(self, device):
+        # Tests fusing a pointwise & reduction op with unbacked numel/rnumel.
+        def fn(x, y, repeats):
+            u0 = repeats.item()
+            unbacked = y.expand(u0, *y.shape)  # [u0, 1, 16]
+
+            # Note: We add x to both pointwise and reduction. Otherwise, the
+            # scheduler will refuse to fuse ops whose only common buffer has
+            # unbacked symints.
+            pointwise = unbacked + x
+            reduction = torch.sum(pointwise + x)
+            return pointwise, reduction
+
+        example_inputs = (
+            torch.randn(32, 16).cuda(),
+            torch.randn(1, 16).cuda(),
+            torch.tensor(32).cuda(),
+        )
+
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    @parametrize(
+        "torch_fn", [torch.mm, torch.bmm, torch.addmm], name_fn=lambda fn: fn.__name__
+    )
+    @parametrize("coordinate_descent_tuning", [True, False], name_fn=str)
+    def test_mm_and_friends(self, device, torch_fn, coordinate_descent_tuning):
+        if torch_fn == torch.addmm:
+            torch_fn = functools.partial(torch_fn, torch.ones(1, device=device))
+
+        def fn(x, w, repeats, is_bmm):
+            u0 = repeats.item()
+            torch._check_is_size(u0)
+
+            x_unbacked = x.expand(u0, 32)
+            w_unbacked = w.expand(32, u0)
+            if is_bmm:
+                # Make sure inputs are batched.
+                x_unbacked = x_unbacked.expand(10, *x_unbacked.shape)
+                w_unbacked = w_unbacked.expand(10, *w_unbacked.shape)
+
+            return torch_fn(x_unbacked, w_unbacked)
+
+        example_inputs = (
+            torch.randn(1, 32, device=device),
+            torch.randn(32, 1, device=device),
+            torch.tensor(100, device=device),
+            torch_fn == torch.bmm,
+        )
+        with inductor_config.patch(
+            {
+                # coordinate_descent_tuning has its own path during decomp
+                "coordinate_descent_tuning": coordinate_descent_tuning,
+            }
+        ):
+            actual = torch.compile(fn, fullgraph=True)(*example_inputs)
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 

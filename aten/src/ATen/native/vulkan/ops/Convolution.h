@@ -21,7 +21,7 @@ namespace conv2d {
 Tensor rearrange_weights_dw(const Tensor& weight_in);
 Tensor rearrange_weights_2d(const Tensor& weight_in, bool tconv);
 Tensor rearrange_bias(
-    const c10::optional<Tensor>& bias_in,
+    const std::optional<Tensor>& bias_in,
     const at::Tensor& weight_in,
     bool tconv);
 
@@ -60,7 +60,7 @@ class Conv2dPackedContext final : virtual public VulkanPackedContext,
  public:
   Conv2dPackedContext(
       const Tensor& weight,
-      const c10::optional<Tensor>& bias,
+      const std::optional<Tensor>& bias,
       const IntArrayRef stride_arg,
       const IntArrayRef padding_arg,
       const IntArrayRef dilation_arg,
@@ -68,8 +68,8 @@ class Conv2dPackedContext final : virtual public VulkanPackedContext,
       const bool quantized,
       const IntArrayRef output_padding_arg,
       const int64_t groups,
-      const c10::optional<Scalar>& output_min = c10::nullopt,
-      const c10::optional<Scalar>& output_max = c10::nullopt);
+      const std::optional<Scalar>& output_min = c10::nullopt,
+      const std::optional<Scalar>& output_max = c10::nullopt);
 
   /*
    * Assigns a name to each index in the unpacked list.
@@ -127,13 +127,13 @@ class Conv2dPackedContext final : virtual public VulkanPackedContext,
 
 c10::intrusive_ptr<Conv2dPackedContext> create_conv2d_context(
     Tensor&& weight,
-    c10::optional<Tensor>&& bias,
+    std::optional<Tensor>&& bias,
     std::vector<int64_t>&& stride,
     std::vector<int64_t>&& padding,
     std::vector<int64_t>&& dilation,
     const int64_t groups,
-    const c10::optional<Scalar>& output_min = c10::nullopt,
-    const c10::optional<Scalar>& output_max = c10::nullopt);
+    const std::optional<Scalar>& output_min = c10::nullopt,
+    const std::optional<Scalar>& output_max = c10::nullopt);
 
 Tensor run_conv2d_context(
     const Tensor& input,
@@ -141,14 +141,14 @@ Tensor run_conv2d_context(
 
 c10::intrusive_ptr<Conv2dPackedContext> create_tconv2d_context(
     Tensor&& weight,
-    c10::optional<Tensor>&& bias,
+    std::optional<Tensor>&& bias,
     std::vector<int64_t>&& stride,
     std::vector<int64_t>&& padding,
     std::vector<int64_t>&& output_padding,
     std::vector<int64_t>&& dilation,
     const int64_t groups,
-    const c10::optional<Scalar>& output_min = c10::nullopt,
-    const c10::optional<Scalar>& output_max = c10::nullopt);
+    const std::optional<Scalar>& output_min = c10::nullopt,
+    const std::optional<Scalar>& output_max = c10::nullopt);
 
 Tensor run_tconv2d_context(
     const Tensor& input,
@@ -156,13 +156,13 @@ Tensor run_tconv2d_context(
 
 c10::intrusive_ptr<Conv2dPackedContext> create_qconv2d_context(
     Tensor&& weight,
-    c10::optional<Tensor>&& bias,
+    std::optional<Tensor>&& bias,
     std::vector<int64_t>&& stride,
     std::vector<int64_t>&& padding,
     std::vector<int64_t>&& dilation,
     const int64_t groups,
-    const c10::optional<Scalar>& output_min = c10::nullopt,
-    const c10::optional<Scalar>& output_max = c10::nullopt);
+    const std::optional<Scalar>& output_min = c10::nullopt,
+    const std::optional<Scalar>& output_max = c10::nullopt);
 
 Tensor run_qconv2d_context(
     const Tensor& input_arg,
@@ -172,39 +172,39 @@ Tensor run_qconv2d_context(
 
 c10::intrusive_ptr<Conv2dPackedContext> create_qtconv2d_context(
     Tensor&& weight,
-    c10::optional<Tensor>&& bias,
+    std::optional<Tensor>&& bias,
     std::vector<int64_t>&& stride,
     std::vector<int64_t>&& padding,
     std::vector<int64_t>&& output_padding,
     std::vector<int64_t>&& dilation,
     const int64_t groups,
-    const c10::optional<Scalar>& output_min = c10::nullopt,
-    const c10::optional<Scalar>& output_max = c10::nullopt);
+    const std::optional<Scalar>& output_min = c10::nullopt,
+    const std::optional<Scalar>& output_max = c10::nullopt);
 
 // Backwards compatibility
 class Conv2dOpContext final : public torch::jit::CustomClassHolder {
  public:
   static Conv2dOpContext create(
       const Tensor& weight,
-      const c10::optional<Tensor>& bias,
+      const std::optional<Tensor>& bias,
       IntArrayRef stride,
       IntArrayRef padding,
       IntArrayRef dilation,
       bool transposed,
       IntArrayRef output_padding,
       int64_t groups,
-      const c10::optional<Scalar>& output_min = c10::nullopt,
-      const c10::optional<Scalar>& output_max = c10::nullopt);
+      const std::optional<Scalar>& output_min = c10::nullopt,
+      const std::optional<Scalar>& output_max = c10::nullopt);
 
   using State = std::tuple<
       Tensor,
-      c10::optional<Tensor>,
+      std::optional<Tensor>,
       std::vector<int64_t>,
       std::vector<int64_t>,
       std::vector<int64_t>,
       int64_t,
-      c10::optional<Scalar>,
-      c10::optional<Scalar>>;
+      std::optional<Scalar>,
+      std::optional<Scalar>>;
 
   Tensor run(const Tensor& input) const;
   State unpack() const;
@@ -220,13 +220,13 @@ Tensor conv2d_clamp_run(
 
 c10::intrusive_ptr<Conv2dOpContext> conv2d_clamp_prepack(
     Tensor&& weight,
-    c10::optional<Tensor>&& bias,
+    std::optional<Tensor>&& bias,
     std::vector<int64_t>&& stride,
     std::vector<int64_t>&& padding,
     std::vector<int64_t>&& dilation,
     const int64_t groups,
-    const c10::optional<Scalar>& output_min,
-    const c10::optional<Scalar>& output_max);
+    const std::optional<Scalar>& output_min,
+    const std::optional<Scalar>& output_max);
 
 class Conv1dPackedContext final : virtual public VulkanPackedContext,
                                   public torch::jit::CustomClassHolder {
@@ -237,7 +237,7 @@ class Conv1dPackedContext final : virtual public VulkanPackedContext,
  public:
   Conv1dPackedContext(
       const Tensor& weight,
-      const c10::optional<Tensor>& bias,
+      const std::optional<Tensor>& bias,
       const IntArrayRef stride_arg,
       const IntArrayRef padding_arg,
       const IntArrayRef dilation_arg,
@@ -287,7 +287,7 @@ class Conv1dPackedContext final : virtual public VulkanPackedContext,
 
 c10::intrusive_ptr<Conv1dPackedContext> create_conv1d_context(
     Tensor&& weight,
-    c10::optional<Tensor>&& bias,
+    std::optional<Tensor>&& bias,
     std::vector<int64_t>&& stride,
     std::vector<int64_t>&& padding,
     std::vector<int64_t>&& dilation,

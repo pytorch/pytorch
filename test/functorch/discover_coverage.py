@@ -7,9 +7,10 @@ from enum import Enum
 # Importing these files make modifications to the op_db that we need
 import test_ops  # noqa: F401
 import test_vmap  # noqa: F401
+from functorch_additional_op_db import additional_op_db
+
 import torch
 import torch._functorch.top_operators_github_usage as top_ops
-from functorch_additional_op_db import additional_op_db
 from torch.testing._internal.common_device_type import toleranceOverride
 from torch.testing._internal.common_methods_invocations import op_db
 

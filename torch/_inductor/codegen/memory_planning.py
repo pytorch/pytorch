@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import collections
@@ -10,7 +11,7 @@ import sympy
 
 import torch
 from .. import config, ir
-from ..utils import cache_on_self, CachedMethod, IndentedBuffer
+from ..utils import _align, align, cache_on_self, CachedMethod, IndentedBuffer
 from ..virtualized import V
 
 from .wrapper import (
@@ -20,36 +21,6 @@ from .wrapper import (
     NullLine,
     ReuseLine,
 )
-
-
-ALIGN_BYTES = 64
-assert (ALIGN_BYTES & (ALIGN_BYTES - 1)) == 0 and ALIGN_BYTES >= 8, "must be power of 2"
-
-
-def _align(nbytes):
-    """Round up to the nearest multiple of ALIGN_BYTES"""
-    return (nbytes + ALIGN_BYTES - 1) & -ALIGN_BYTES
-
-
-def _is_aligned(v: sympy.Expr):
-    """v can be statically proven to be a multiple of ALIGN_BYTES"""
-    if isinstance(v, (sympy.Add, sympy.Max)):
-        return all(map(_is_aligned, v.args))
-    return isinstance(v, align) or sympy.gcd(v, ALIGN_BYTES) == ALIGN_BYTES
-
-
-class align(sympy.Function):
-    """Symbolically round up to the nearest multiple of ALIGN_BYTES"""
-
-    nargs = (1,)
-    is_integer = True
-
-    @classmethod
-    def eval(cls, value):
-        if isinstance(value, (int, sympy.Integer)):
-            return _align(int(value))
-        if _is_aligned(value):
-            return value
 
 
 @dataclasses.dataclass
