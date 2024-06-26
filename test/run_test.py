@@ -605,8 +605,6 @@ def run_test_retries(
             break  # Got to the end of the test suite successfully
         signal_name = f" ({SIGNALS_TO_NAMES_DICT[-ret_code]})" if ret_code < 0 else ""
         print_to_file(f"Got exit code {ret_code}{signal_name}")
-        if sc_command.startswith("--rs=") and ret_code == 0:
-            print_to_file("Test passed on retry, continuing to run rest of test suite")
 
         # Read what just failed/ran
         try:

@@ -146,8 +146,6 @@ class TestCheckpoint(TestCase):
                     self.assertEqual(m.counter, 1)
 
     def test_checkpoint_valid(self):
-        import time
-        self.assertEqual(int(time.time()) % 3, 0)
         model = nn.Sequential(
             nn.Linear(100, 50),
             nn.ReLU(),
@@ -1220,7 +1218,6 @@ def f(x):
             self.assertIn("HEYA", "".join(traceback.format_tb(e.__traceback__)))
 
     def test_format_traceback_short(self):
-        self.assertEqual(1, 2)
         try:
             raise RuntimeError
         except RuntimeError as e:
