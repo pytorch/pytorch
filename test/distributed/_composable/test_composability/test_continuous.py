@@ -9,8 +9,7 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable.fsdp import fully_shard
-from torch.distributed._composable.fsdp.fully_shard import (
-    MixedPrecisionPolicy,
+from torch.distributed._composable.fsdp.fully_shard import MixedPrecisionPolicy
 )
 from torch.distributed._tensor import DTensor, init_device_mesh
 
@@ -33,6 +32,7 @@ from torch.testing._internal.common_utils import (
     skip_but_pass_in_sandcastle_if,
 )
 
+
 # MLP Layer
 class MLPModule(torch.nn.Module):
     def __init__(self, d_hid: int):
@@ -46,6 +46,7 @@ class MLPModule(torch.nn.Module):
         x = self.relu(x)
         x = self.net2(x)
         return x
+
 
 class ComposabilityTest(MultiProcContinousTest):
     @classmethod
