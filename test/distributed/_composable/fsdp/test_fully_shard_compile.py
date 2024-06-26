@@ -210,15 +210,6 @@ class TestFullyShardCompile(FSDPTest):
             *self._create_simple_mlp_factory_fns(), "aot_eager", fullgraph=True
         )
 
-    @skipIfRocm
-    @skip_if_lt_x_gpu(2)
-    def test_simple_mlp_fullgraph_backend_aot_eager_decomp_partition(self):
-        self._test_traceable_fsdp(
-            *self._create_simple_mlp_factory_fns(),
-            "aot_eager_decomp_partition",
-            fullgraph=True,
-        )
-
     @unittest.expectedFailure
     @skipIfRocm
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")

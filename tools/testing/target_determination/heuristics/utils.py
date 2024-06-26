@@ -11,7 +11,8 @@ from warnings import warn
 
 from tools.testing.test_run import TestRun
 
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
+
+REPO_ROOT = Path(__file__).resolve().parents[4]
 
 
 def python_test_file_to_test_name(tests: Set[str]) -> Set[str]:
