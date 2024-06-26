@@ -1577,9 +1577,8 @@ class OutputGraph:
                     if isinstance(node.meta["grapharg"].example, torch.ScriptObject):
                         real_script_obj = node.meta["grapharg"].example
                         fake_script_obj = node.meta["grapharg"].example_strong_ref
-                        if (
-                            not hasattr(real_script_obj, "safe_to_trace_with_real_obj")
-                            or not real_script_obj.safe_to_trace_with_real_obj()
+                        if not torch._library.fake_class_registry.tracing_with_real(
+                            real_script_obj
                         ):
                             flat_dict = dict(real_script_obj.__obj_flatten__())  # type: ignore[attr-defined]
                             for attr in flat_dict.keys():

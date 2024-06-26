@@ -995,10 +995,7 @@ class VariableBuilder:
                 ScriptObjectQualifiedNameSource,
             )
 
-            if (
-                hasattr(value, "safe_to_trace_with_real_obj")
-                and value.safe_to_trace_with_real_obj()
-            ):
+            if torch._library.fake_class_registry.tracing_with_real(value):
                 proxy = self.tx.output.root_tracer.create_graph_input(
                     re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
                     type(value),
