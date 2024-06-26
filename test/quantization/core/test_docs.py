@@ -50,7 +50,7 @@ class TestQuantizationDocs(QuantizationTestCase):
                 "been updated to have the correct relative path between "
                 "test_docs.py and the docs."
             )
-            pytorch_root = core_dir.parent.parent.parent
+            pytorch_root = core_dir.parents[2]
             return pytorch_root / path_from_pytorch
 
         path_to_file = get_correct_path(path_from_pytorch)
