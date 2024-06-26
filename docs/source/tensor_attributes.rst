@@ -213,7 +213,7 @@ non-None device argument.  To globally change the default device, see also
 
 .. note::
    For legacy reasons, a device can be constructed via a single device ordinal, which is treated
-   as a :ref:`default_accelerator` type.
+   as a default :ref:`accelerator<accelerators>` type.
    This matches :meth:`Tensor.get_device`, which returns an ordinal for device
    tensors and is not supported for cpu tensors.
 
