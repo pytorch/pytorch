@@ -3265,7 +3265,7 @@ class TestTypeConversion(TestCase):
             self.assertEqual(result_type, List[Optional[t]])
 
             result_type = tuple_to_list(Tuple[t, ...])
-            self.assertEqual(result_type, List[Optional[t]])
+            self.assertEqual(result_type, List[t])
 
 
 only_for = ("cpu", "cuda")
