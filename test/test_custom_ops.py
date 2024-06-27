@@ -876,13 +876,13 @@ class TestCustomOp(CustomOpTestCaseBase):
 
         with self.assertRaises(ValueError) as cm:
 
-            @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
+            @torch.library.custom_op(f"{TestCustomOp.test_ns}::foo", mutates_args={})
             def foo(x: Tensor, y: Tuple[int, float]) -> Tensor:
                 raise NotImplementedError
 
             del foo
-        print(cm.exception)
-        self.assertTrue("example" not in str(cm.exception))
+
+            self.assertNotIn("example", str(cm.exception), "")
 
         with self.assertRaisesRegex(ValueError, "unsupported type"):
 
