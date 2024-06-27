@@ -172,7 +172,7 @@
       abort();                                           \
     }                                                    \
   } while (0)
-
+namespace c10d {
 using json = nlohmann::json;
 #define DEFINE_CONSTANT(name, value) \
   static c10::IValue name = value;   \
@@ -213,7 +213,6 @@ DEFINE_CONSTANT(completed_state, "completed");
 DEFINE_CONSTANT(scheduled_state, "scheduled");
 DEFINE_CONSTANT(started_state, "started");
 #undef DEFINE_CONSTANT
-namespace c10d {
 
 TORCH_API size_t hashTensors(const std::vector<at::Tensor>& tensors);
 TORCH_API std::string getNcclVersion();
@@ -566,7 +565,6 @@ float getDurationFromEvent(
     at::cuda::CUDAEvent& ncclStartEvent,
     at::cuda::CUDAEvent& ncclEndEvent);
 
-using json = nlohmann::json;
 struct NCCLTraceBuffer {
   static NCCLTraceBuffer* get() {
     // intentionally leak on exit
