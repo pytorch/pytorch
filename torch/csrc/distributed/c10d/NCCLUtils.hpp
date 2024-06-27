@@ -664,6 +664,7 @@ struct NCCLTraceBuffer {
     auto traceback =
         torch::CapturedTraceback::gather(true, true, capture_cpp_stack_);
     std::lock_guard<std::mutex> guard(mutex_);
+
     auto te = Entry{
         id_,
         pg_id,
@@ -693,12 +694,14 @@ struct NCCLTraceBuffer {
       te.input_dims_.push_back(sizes.size());
       te.sizes_.insert(te.sizes_.end(), sizes.begin(), sizes.end());
     }
+
     for (const auto& output : outputs) {
       c10::IntArrayRef sizes = output.sizes();
       te.output_dtypes_.push_back(output.dtype().toScalarType());
       te.output_dims_.push_back(sizes.size());
       te.sizes_.insert(te.sizes_.end(), sizes.begin(), sizes.end());
     }
+
     if (entries_.size() < max_entries_) {
       entries_.emplace_back(std::move(te));
     } else {
@@ -709,6 +712,7 @@ struct NCCLTraceBuffer {
     }
     return id_++;
   }
+
   void record_pg_ranks(
       const std::tuple<std::string, std::string>& pg_name,
       std::vector<uint64_t> ranks) {
@@ -718,6 +722,7 @@ struct NCCLTraceBuffer {
     std::lock_guard<std::mutex> guard(mutex_);
     pg_name_to_ranks_[pg_name] = ranks;
   }
+
   void update_state(Entry& r) {
     if (r.start_ != nullptr) {
       bool started = r.start_->query();
@@ -732,6 +737,7 @@ struct NCCLTraceBuffer {
       }
     }
   }
+
   std::vector<Entry> dump_entries() {
     std::lock_guard<std::mutex> guard(mutex_);
     std::vector<Entry> result;
@@ -745,6 +751,7 @@ struct NCCLTraceBuffer {
     }
     return result;
   }
+
   /*
   Mark an Event as completed and free its events.
   This is called by the watchdog thread, and is asynchronous from the
@@ -759,14 +766,18 @@ struct NCCLTraceBuffer {
     if (!enabled_ || !id) {
       return;
     }
+
     bool can_compute_duration = false;
     Event* startEvent = nullptr;
     Event* endEvent = nullptr;
     std::optional<float> duration = c10::nullopt;
+
     std::unique_lock<std::mutex> guard(mutex_);
+
     Entry* entry = &entries_.at(*id % max_entries_);
     if (entry->id_ == *id) {
       update_state(*entry);
+
       if (compute_duration) {
         can_compute_duration = entry->time_discovered_completed_.has_value() &&
             entry->start_ && entry->end_;
@@ -776,6 +787,7 @@ struct NCCLTraceBuffer {
       entry->retired_ = true;
       entry->start_ = entry->end_ = nullptr;
     }
+
     if (can_compute_duration) {
       // Compute duration without without holding the lock, because
       // cudaEventDuration() can hang, and we need to acquire the lock before we
@@ -783,6 +795,7 @@ struct NCCLTraceBuffer {
       guard.unlock();
       duration = getDurationFromEvent(*startEvent, *endEvent);
       guard.lock();
+
       // Refresh the entry pointer, see if the entry has been overwritten
       entry = &entries_.at(*id % max_entries_);
       if (entry->id_ != *id) {
@@ -904,6 +917,7 @@ struct NCCLTraceBuffer {
         }
         dict.insert(frames_key, frames);
       }
+
       dict.insert(record_id_key, int64_t(e.id_));
       dict.insert(pg_id_key, int64_t(e.pg_id_));
       dict.insert(pg_name_key, e.pg_name_);
@@ -915,6 +929,7 @@ struct NCCLTraceBuffer {
       if (e.duration_) {
         dict.insert(duration_key, *e.duration_);
       }
+
       auto it = e.sizes_.begin();
       auto read_sizes = [&](const c10::SmallVector<int, 4>& dims) {
         auto sizes = new_list();
@@ -928,6 +943,7 @@ struct NCCLTraceBuffer {
         }
         return sizes;
       };
+
       dict.insert(input_sizes_key, read_sizes(e.input_dims_));
       std::vector<std::string> input_dtypes_strs;
       input_dtypes_strs.reserve(e.input_dtypes_.size());
@@ -963,10 +979,12 @@ struct NCCLTraceBuffer {
       dict.insert(retired_key, e.retired_);
       dict.insert(timeout_key, e.timeout_ms_);
       dict.insert(is_p2p_key, e.isP2P_);
+
       entries.push_back(dict);
     }
     return entries;
   }
+
   // dump pg_entries
   const c10::Dict<c10::IValue, c10::IValue> getPgConfig() {
     auto pg_config = new_dict();
@@ -1030,11 +1048,13 @@ struct NCCLTraceBuffer {
     // common values
     result.insert(version_key, version_val);
     result.insert(pg_config_key, getPgConfig());
+
     // collective trace
     if (includeCollectives) {
       result.insert(
           entries_key, getCollectiveTrace(includeStackTraces, onlyActive));
     }
+
     // convert ncclDumpMap into a dictionary
     auto per_comm_dict = new_dict();
     if (ncclDumpMap.has_value()) {
