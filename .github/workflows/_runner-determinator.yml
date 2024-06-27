@@ -56,10 +56,9 @@ jobs:
       - name: Hardcode runner-determinator script
         run: |
           cat <<EOF > runner_determinator.py
-          import sys
           import json
           from argparse import ArgumentParser
-          from typing import Any, Tuple, Iterable
+          from typing import Any, Iterable, Tuple
 
           from github import Auth, Github
           from github.Issue import Issue
@@ -158,7 +157,10 @@ jobs:
                       return WORKFLOW_LABEL_LF, MESSAGE
                   else:
                       user_set = {
-                          usr for usr in (usr_raw.strip("\n\t@ ") for usr_raw in first_comment.split())
+                          usr
+                          for usr in (
+                              usr_raw.strip("\n\t@ ") for usr_raw in first_comment.split()
+                          )
                       }
                       if any(map(lambda uc: uc in user_set, username_check)):
                           MESSAGE = f"LF Workflows are enabled for {', '.join(username_check)}. Using LF runners."
@@ -209,6 +211,7 @@ jobs:
 
           if __name__ == "__main__":
               main()
+
           EOF
 
           cat runner_determinator.py

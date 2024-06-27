@@ -1,7 +1,6 @@
-import sys
 import json
 from argparse import ArgumentParser
-from typing import Any, Tuple, Iterable
+from typing import Any, Iterable, Tuple
 
 from github import Auth, Github
 from github.Issue import Issue
@@ -66,7 +65,10 @@ def get_workflow_type(issue: Issue, username_check: Iterable[str]) -> Tuple[str,
             return WORKFLOW_LABEL_LF, MESSAGE
         else:
             user_set = {
-                usr for usr in (usr_raw.strip("\n\t@ ") for usr_raw in first_comment.split())
+                usr
+                for usr in (
+                    usr_raw.strip("\n\t@ ") for usr_raw in first_comment.split()
+                )
             }
             if any(map(lambda uc: uc in user_set, username_check)):
                 MESSAGE = f"LF Workflows are enabled for {', '.join(username_check)}. Using LF runners."
@@ -93,7 +95,13 @@ def main() -> None:
             gh = get_gh_client(args.github_token)
             # The default issue we use - https://github.com/pytorch/test-infra/issues/5132
             issue = get_issue(gh, args.github_repo, args.github_issue)
-            label_type, message = get_workflow_type(issue, (args.github_issue_owner, args.github_actor, ))
+            label_type, message = get_workflow_type(
+                issue,
+                (
+                    args.github_issue_owner,
+                    args.github_actor,
+                ),
+            )
             output = {
                 LABEL_TYPE_KEY: label_type,
                 MESSAGE_KEY: message,
