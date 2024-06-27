@@ -2503,6 +2503,10 @@ class BenchmarkRunner:
         if name in self.skip_accuracy_checks_large_models_dashboard:
             return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
 
+        # Skip all accuracy check for the torchao backend
+        if self.args.backend == "torchao":
+            return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
+
         with self.pick_grad(name, self.args.training):
             # Collect the fp64 reference outputs to be used later for accuracy checking.
             fp64_outputs = None

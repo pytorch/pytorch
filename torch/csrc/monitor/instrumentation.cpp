@@ -1,3 +1,4 @@
+#ifndef FBCODE_CAFFE2
 #include <torch/csrc/monitor/instrumentation.h>
 
 #include <chrono>
@@ -29,3 +30,4 @@ void WaitCounterHandle::stop(std::chrono::steady_clock::time_point now) {
 
 } // namespace monitor
 } // namespace torch
+#endif
