@@ -26,13 +26,13 @@ from typing import (
     Callable as _Callable,
     Dict as _Dict,
     Optional as _Optional,
+    overload,
     Set as _Set,
     Tuple as _Tuple,
     Type as _Type,
     TYPE_CHECKING,
     TypeVar as _TypeVar,
     Union as _Union,
-    overload,
 )
 from typing_extensions import ParamSpec as _ParamSpec, TypeGuard as _TypeGuard
 
