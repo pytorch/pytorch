@@ -1192,7 +1192,9 @@ Tensor sparse_coo_tensor_ctor(
         /*copy_numpy=*/true,
         /*type_inference=*/false);
     return at::sparse_coo_tensor(
-         indices, values, values.options().layout(at::kSparse).pinned_memory(pin_memory))
+               indices,
+               values,
+               values.options().layout(at::kSparse).pinned_memory(pin_memory))
         .set_requires_grad(r.toBool(ARG_REQUIRES_GRAD));
   } else if (r.idx == 1) {
     bool pin_memory = r.toBool(ARG_PIN_MEMORY1);

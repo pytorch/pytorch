@@ -425,7 +425,7 @@ Tensor sparse_compressed_tensor_with_dims(
   auto values = at::empty(values_size, options_.dtype(dtype));
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout_).device(device).pinned_memory(pin_memory);
   SparseCsrTensor self = new_compressed_tensor(options);
-  if (pin_memory.value_or(false)) {
+  if (pin_memory.value_or(false) && !values.is_pinned()) {
     get_sparse_csr_impl(self)->set_member_tensors(compressed_indices.pin_memory(), plain_indices.pin_memory(), values.pin_memory(), size);
   } else {
     get_sparse_csr_impl(self)->set_member_tensors(compressed_indices, plain_indices, values, size);
@@ -452,7 +452,7 @@ Tensor _sparse_compressed_tensor_unsafe_symint(
   }
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout_).device(device).pinned_memory(pin_memory);
   SparseCsrTensor self = new_compressed_tensor(options);
-  if (pin_memory.value_or(false)) {
+  if (pin_memory.value_or(false) && !values.is_pinned()) {
     get_sparse_csr_impl(self)->set_member_tensors(compressed_indices.pin_memory(), plain_indices.pin_memory(), values.pin_memory(), size);
   } else {
     get_sparse_csr_impl(self)->set_member_tensors(compressed_indices, plain_indices, values, size);
@@ -476,7 +476,7 @@ Tensor _sparse_compressed_tensor_unsafe_template(const Tensor& compressed_indice
   }
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout_).device(device).pinned_memory(pin_memory);
   SparseCsrTensor self = new_compressed_tensor(options);
-  if (pin_memory.value_or(false)) {
+  if (pin_memory.value_or(false) && !values.is_pinned()) {
     get_sparse_csr_impl(self)->set_member_tensors(compressed_indices.pin_memory(), plain_indices.pin_memory(), values.pin_memory(), size);
   } else {
     get_sparse_csr_impl(self)->set_member_tensors(compressed_indices, plain_indices, values, size);
