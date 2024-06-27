@@ -1259,7 +1259,7 @@ class TestMemoryLeak(TestCaseMPS):
         step(a)
         torch.mps.empty_cache()
         driver_after = torch.mps.driver_allocated_memory()
-        self.assertTrue(driver_before == driver_after, f"Detected {driver_after-driver_before} bytes leak of GPU memory")
+        self.assertEqual(driver_before, driver_after, f"Detected {driver_after-driver_before} bytes leak of GPU memory")
 
 
 class TestPixelShuffle(TestCaseMPS):
@@ -1577,11 +1577,11 @@ class TestAvgPool(TestCaseMPS):
         y = torch.nn.functional.avg_pool2d(
             x, ceil_mode=True, count_include_pad=True, kernel_size=(1, 2),
             padding=(0, 1), stride=2)
-        self.assertTrue(not torch.isnan(y).any())
+        self.assertFalse(torch.isnan(y).any())
         y = torch.nn.functional.avg_pool2d(
             x.to('mps'), ceil_mode=True, count_include_pad=True, kernel_size=(1, 2),
             padding=(0, 1), stride=2)
-        self.assertTrue(not torch.isnan(y).any())
+        self.assertFalse(torch.isnan(y).any())
 
 
 class TestMPS(TestCaseMPS):
@@ -2333,7 +2333,7 @@ class TestMPS(TestCaseMPS):
                 mask = dst.abs() > 0
             else:
                 mask = dst > 0
-            self.assertTrue(not dst.is_contiguous())
+            self.assertFalse(dst.is_contiguous())
             self.assertTrue(dst2.is_contiguous())
             dst.masked_fill_(mask.to(mask_dtype), val)
             dst2.masked_fill_(mask.to(mask_dtype), val)
@@ -7838,7 +7838,7 @@ class TestMPS(TestCaseMPS):
         current_alloc_before = torch.mps.current_allocated_memory()
         # after garbage collection and emptying the cache the
         # current_allocated_memory must be zero
-        self.assertTrue(current_alloc_before == 0)
+        self.assertEqual(current_alloc_before, 0)
         # measure total memory allocations from Metal driver
         driver_alloc_before = torch.mps.driver_allocated_memory()
         # allocate a new 8 MB tensor to force allocation of a new Metal Heap
@@ -7848,13 +7848,13 @@ class TestMPS(TestCaseMPS):
         driver_alloc_after = torch.mps.driver_allocated_memory()
         # current and driver memory allocations must have
         # grown at this point
-        self.assertTrue(current_alloc_after > current_alloc_before)
-        self.assertTrue(driver_alloc_after > driver_alloc_before)
+        self.assertGreater(current_alloc_after, current_alloc_before)
+        self.assertGreater(driver_alloc_after, driver_alloc_before)
 
     def test_mps_allocator_stats(self):
         max_memory = torch.mps.recommended_max_memory()
         print(f"Recommended Max Memory : {max_memory/ 1024 ** 3} GB")
-        self.assertTrue(max_memory > 0)
+        self.assertGreater(max_memory, 0)
 
     # to verify this test, run XCode Instruments "Metal System Trace" or "Logging" tool,
     # press record, then run this python test, and press stop. Next expand
@@ -7885,7 +7885,7 @@ class TestMPS(TestCaseMPS):
         endEvent = torch.mps.Event(enable_timing=True)
         endEvent.record()
         elapsedTime = startEvent.elapsed_time(endEvent)
-        self.assertTrue(elapsedTime > 0.0)
+        self.assertGreater(elapsedTime, 0.0)
 
     def test_jit_save_load(self):
         m = torch.nn.Module()
@@ -9188,7 +9188,7 @@ class TestLinalgMPS(TestCaseMPS):
             res = weight_int4pack_mm(a, b_int4pack, b_scales_and_zeros)
 
             mean_err = ((res - ref).abs() / ref).mean()
-            self.assertTrue(mean_err < 0.05)
+            self.assertLess(mean_err, 0.05)
 
     @parametrize("m", [1, 32, 64])
     @parametrize("k", [32, 64])
@@ -9216,7 +9216,7 @@ class TestLinalgMPS(TestCaseMPS):
             ref = torch.mm(a, b.transpose(0, 1))
 
             mean_err = ((res - ref).abs() / ref).mean()
-            self.assertTrue(mean_err < 0.05)
+            self.assertLess(mean_err, 0.05)
 
 
 
@@ -9474,7 +9474,7 @@ class TestViewOpsMPS(TestCaseMPS):
         v = torch.squeeze(t)
         self.assertTrue(self.is_view_of(t, v))
         v[0, 1] = 0
-        self.assertTrue(t is v._base)
+        self.assertIs(t, v._base)
 
     def test_squeeze_inplace_view(self, device="mps"):
         t = torch.ones(5, 5, device=device)
@@ -9482,7 +9482,7 @@ class TestViewOpsMPS(TestCaseMPS):
         v = v.squeeze_()
         self.assertTrue(self.is_view_of(t, v))
         v[0, 1] = 0
-        self.assertTrue(t is v._base)
+        self.assertIs(t, v._base)
 
     def test_unsqueeze_view(self, device="mps"):
         t = torch.ones(5, 5, device=device)
@@ -9536,12 +9536,12 @@ class TestViewOpsMPS(TestCaseMPS):
     def test_contiguous_self(self, device="mps"):
         t = torch.ones(5, 5, device=device)
         s = t.contiguous()
-        self.assertTrue(s is t)
+        self.assertIs(s, t)
 
     def test_contiguous_nonview(self, device="mps"):
         t = torch.ones(5, 5, device=device)
         nv = t.t().contiguous()
-        self.assertTrue(not self.is_view_of(t, nv))
+        self.assertFalse(self.is_view_of(t, nv))
 
         nv[0, 0] = 0
         self.assertNotEqual(t[0, 0], nv[0, 0])
@@ -9566,7 +9566,7 @@ class TestViewOpsMPS(TestCaseMPS):
     def test_reshape_nonview(self, device="mps"):
         t = torch.ones(5, 5, device=device)
         nv = torch.reshape(t.t(), (25,))
-        self.assertTrue(not self.is_view_of(t, nv))
+        self.assertFalse(self.is_view_of(t, nv))
 
         nv[6] = 0
         self.assertNotEqual(t[1, 1], nv[6])
@@ -9612,7 +9612,7 @@ class TestViewOpsMPS(TestCaseMPS):
         def assert_is_nonview(t, nv):
             idx_t = (0,) * t.ndim
             idx_nv = (0,) * nv.ndim
-            self.assertTrue(not nv._is_view())
+            self.assertFalse(nv._is_view())
             nv[idx_nv] = 0
             self.assertNotEqual(t[idx_t], nv[idx_nv])
         t = torch.ones(2, 3, 2, 3, device=device).transpose(2, 3)
@@ -9626,7 +9626,7 @@ class TestViewOpsMPS(TestCaseMPS):
         # flatten returns the original object if start_dim=end_dim
         t = t = torch.ones(2, 2, device=device)
         nv = t.flatten(1, 1)
-        self.assertTrue(t is nv)
+        self.assertIs(t, nv)
 
     def test_basic_indexing_slice_view(self, device="mps"):
         t = torch.ones(5, 5, device=device)
@@ -10345,7 +10345,7 @@ class TestConvolutionMPS(TestCaseMPS):
                     grid_cpu = get_grid().requires_grad_()
                     out_cpu = F.grid_sample(input_cpu, grid_cpu, mode=mode, padding_mode=padding_mode,
                                             align_corners=align_corners)
-                    self.assertTrue(out_cpu.size() == torch.Size([N, C, H, W]))
+                    self.assertEqual(out_cpu.size(), torch.Size([N, C, H, W]))
 
                     gradients = torch.randn_like(out_cpu)
                     out_cpu.backward(gradients)
@@ -10982,16 +10982,16 @@ class TestAdvancedIndexing(TestCaseMPS):
         t_dev = t.to(device)
         t1 = t_dev[:, 0, :]
         t2 = t[:, 0, :]
-        self.assertTrue(not t1.is_contiguous())
-        self.assertTrue(not t2.is_contiguous())
+        self.assertFalse(t1.is_contiguous())
+        self.assertFalse(t2.is_contiguous())
 
         indices = [torch.tensor([0, 1]), ]
         indices_dev = [i.to(device) for i in indices]
         value = torch.randn(2, 2)
         out_mps = t1.index_put_(indices_dev, value.to(device), accumulate=True)
         out_cpu = t2.index_put_(indices, value, accumulate=True)
-        self.assertTrue(not t1.is_contiguous())
-        self.assertTrue(not t2.is_contiguous())
+        self.assertFalse(t1.is_contiguous())
+        self.assertFalse(t2.is_contiguous())
 
         self.assertEqual(out_mps.cpu(), out_cpu)
 
