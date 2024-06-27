@@ -18,10 +18,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  linux-ubuntu-24_04-py3-cpu-s390x-build:
+  linux-manylinux-2_28-py3-cpu-s390x-build:
     # don't run build twice on main
     if: github.event_name == 'pull_request'
-    name: linux-ubuntu-24_04-py3-cpu-s390x
+    name: linux-manylinux-2_28-py3-cpu-s390x
     uses: ./.github/workflows/_linux-build-s390x.yml
     with:
       build-environment: linux-s390x-binary-manywheel
