@@ -118,6 +118,39 @@ class WorkerServerTest(TestCase):
             )
             self.assertEqual(resp.status, 200)
 
+    @requires_cuda
+    def test_dump_nccl_trace_pickle_with_json(self) -> None:
+        with local_worker_server() as pool:
+            # bad key - not lower case
+            resp = pool.request(
+                "POST", "/handler/dump_nccl_trace_json?includeCollectives=true"
+            )
+            self.assertEqual(resp.status, 400)
+            # unknown key
+            resp = pool.request("POST", "/handler/dump_nccl_trace_json?unknownkey=true")
+            self.assertEqual(resp.status, 400)
+            # bad value - not a bool
+            resp = pool.request(
+                "POST", "/handler/dump_nccl_trace_json?includecollectives=notabool"
+            )
+            self.assertEqual(resp.status, 400)
+            # bad value - value not lowercase
+            resp = pool.request(
+                "POST", "/handler/dump_nccl_trace_json?includecollectives=True"
+            )
+            self.assertEqual(resp.status, 400)
+            # good key and value
+            resp = pool.request(
+                "POST", "/handler/dump_nccl_trace_json?includecollectives=true"
+            )
+            self.assertEqual(resp.status, 200)
+            # multiple good keys and values
+            resp = pool.request(
+                "POST",
+                "/handler/dump_nccl_trace_json?includecollectives=true&onlyactive=true",
+            )
+            self.assertEqual(resp.status, 200)
+
     def test_tcp(self) -> None:
         import requests
 
