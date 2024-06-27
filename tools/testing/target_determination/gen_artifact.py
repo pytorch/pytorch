@@ -1,10 +1,9 @@
 import json
 import os
-from pathlib import Path
+import pathlib
 from typing import Any, List
 
-
-REPO_ROOT = Path(__file__).resolve().parents[3]
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent.parent
 
 
 def gen_ci_artifact(included: List[Any], excluded: List[Any]) -> None:
