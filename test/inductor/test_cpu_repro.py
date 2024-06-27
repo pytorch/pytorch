@@ -2613,7 +2613,7 @@ class CPUReproTests(TestCase):
             )
 
     @config.patch(fx_graph_cache=False)
-    def test_share_local_buffers_in_outer_loop_fusion_case2(self):
+    def test_two_local_buffers_in_outer_loop_fusion_case2(self):
         # exp and exp2 should be replaced by local buffer
         # since exp will be used after exp2, exp2 can't share the same
         # local buffer as exp
