@@ -1610,6 +1610,10 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             lse_meta = query_meta.new_empty(logsumexp_shape, dtype=torch.float32)
         example_value = (out_meta, lse_meta)
 
+        # Compose the ordered HOO args from two parts:
+        # - inp_args: [query, key, value, sparse_kv_num_blocks, sparse_kv_indices,
+        #   sparse_q_num_blocks, sparse_q_indices, SPARSE_KV_BLOCK_SIZE, SPARSE_Q_BLOCK_SIZE]
+        # - p_args: [score_mod, *other_buffers]
         return wrap_fx_proxy(
             tx=tx,
             proxy=tx.output.create_proxy(
