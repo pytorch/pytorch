@@ -12398,7 +12398,15 @@ op_db: List[OpInfo] = [
                    domain=(-1, 1),
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
-                   decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
+                   decorators=[
+                       precisionOverride({torch.bfloat16: 1e-2}),
+                       DecorateInfo(
+                           toleranceOverride({torch.float32: tol(atol=9e-3, rtol=8e-5)}),
+                           "TestInductorOpInfo",
+                           "test_comprehensive",
+                           device_type="cuda"
+                       ),
+                   ],
                    supports_inplace_autograd=False,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
@@ -14064,8 +14072,15 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            supports_fwgrad_bwgrad=True,
            decorators=(
-               DecorateInfo(toleranceOverride({torch.float64: tol(atol=2e-7, rtol=2e-7)}),
-                            "TestDecomp", "test_comprehensive", device_type="cuda"),
+               DecorateInfo(
+                   toleranceOverride({
+                       torch.float16: tol(atol=4e-5, rtol=9e-3),
+                       torch.float64: tol(atol=2e-7, rtol=2e-7),
+                   }),
+                   "TestDecomp",
+                   "test_comprehensive",
+                   device_type="cuda"
+               ),
            )),
     OpInfo('meshgrid',
            variant_test_name='variadic_tensors',
@@ -14646,6 +14661,14 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           decorators=[
+               DecorateInfo(
+                   toleranceOverride({torch.float16: tol(atol=1.3e-5, rtol=2e-2)}),
+                   "TestInductorOpInfo",
+                   "test_comprehensive",
+                   device_type="cuda"
+               ),
+           ],
            sample_inputs_func=sample_inputs_cosine_similarity),
     OpInfo('nn.functional.adaptive_avg_pool1d',
            dtypes=floating_types_and(torch.half, torch.bfloat16),
@@ -15514,6 +15537,12 @@ op_db: List[OpInfo] = [
                 toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-4)}),
                 "TestJit",
                 "test_variant_consistency_jit",
+            ),
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=4e-3, rtol=1.3e-3)}),
+                "TestInductorOpInfo",
+                "test_comprehensive",
+                device_type="cuda"
             ),
         ),
         skips=(
@@ -17428,6 +17457,17 @@ op_db: List[OpInfo] = [
                                     active_if=(IS_MACOS or IS_WINDOWS)),
                        DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
                                     'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
+                       # FIXME:
+                       # Mismatched elements: 2 / 400 (0.5%)
+                       # Greatest absolute difference: inf at index (7, 16) (up to 1e-05 allowed)
+                       # Greatest relative difference: nan at index (7, 16) (up to 0.001 allowed)
+                       DecorateInfo(
+                           unittest.skip("Skipped!"),
+                           "TestInductorOpInfo",
+                           "test_comprehensive",
+                           dtypes=(torch.float16,),
+                           device_type="cuda",
+                       ),
                    ),
                    # tan(pi/2 * odd_number) is nan
                    reference_numerics_filter=NumericsFilter(

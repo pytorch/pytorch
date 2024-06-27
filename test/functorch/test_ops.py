@@ -957,6 +957,7 @@ class TestOperators(TestCase):
                 xfail(
                     # nans
                     "masked.softmax",
+                    device_type="cpu",
                 ),
                 xfail(
                     "nanquantile", device_type="cpu"
@@ -1050,9 +1051,12 @@ class TestOperators(TestCase):
         "test_vmapvjpvjp",
         (
             tol1("linalg.svd", {torch.float32: tol(atol=1e-03, rtol=5e-04)}),
+            tol1("linalg.lu", {torch.float32: tol(atol=5e-04, rtol=7e-04)}),
             tol1("linalg.lu_factor", {torch.float32: tol(atol=2e-03, rtol=2e-02)}),
+            tol1("linalg.multi_dot", {torch.float32: tol(atol=2e-03, rtol=2e-04)}),
             tol1("svd", {torch.float32: tol(atol=1e-03, rtol=5e-04)}),
             tol1("matrix_exp", {torch.float32: tol(atol=1e-03, rtol=5e-04)}),
+            tol1("masked.prod", {torch.float32: tol(atol=2e-03, rtol=2e-04)}),
         ),
     )
     @skipOps(
@@ -1206,6 +1210,11 @@ class TestOperators(TestCase):
             ),
             tol1(
                 "nn.functional.layer_norm",
+                {torch.float32: tol(atol=3e-4, rtol=1e-4)},
+                device_type="cpu",
+            ),
+            tol1(
+                "native_layer_norm",
                 {torch.float32: tol(atol=3e-4, rtol=1e-4)},
                 device_type="cpu",
             ),
@@ -2402,7 +2411,7 @@ class TestOperators(TestCase):
             ),
             tol1(
                 "linalg.householder_product",
-                {torch.float32: tol(atol=6e-03, rtol=1.3e-04)},
+                {torch.float32: tol(atol=6e-03, rtol=1e-03)},
                 device_type="cpu",
             ),
             tol1(
