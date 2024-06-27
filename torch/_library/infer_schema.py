@@ -79,7 +79,11 @@ def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
                 )
 
         schema_type = SUPPORTED_PARAM_TYPES[annotation_type]
-        if mutates_args == UNKNOWN_MUTATES:
+        if type(mutates_args) == str:
+            if mutates_args != UNKNOWN_MUTATES:
+                raise ValueError(
+                    "Argument mutates_args is a string {mutates_args}. mutates_args can only be 'unknown' when it is a string. "
+                )
             if schema_type.startswith("Tensor"):
                 schema_type = f"Tensor(a{idx}!){schema_type[len('Tensor'):]}"
         elif name in mutates_args:
