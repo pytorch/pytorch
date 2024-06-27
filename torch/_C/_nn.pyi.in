@@ -1,7 +1,8 @@
 # mypy: disable-error-code="type-arg"
-from typing import Sequence, overload
 
-from torch import Tensor, memory_format
+from typing import overload, Sequence
+
+from torch import memory_format, Tensor
 from torch.types import _bool, _device, _dtype, _int, _size
 
 # Defined in tools/autograd/templates/python_nn_functions.cpp

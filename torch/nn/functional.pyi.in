@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, Literal, Sequence, overload
+from typing import Any, Callable, Literal, overload, Sequence
 from typing_extensions import TypeAlias
 
 from torch import Tensor

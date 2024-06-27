@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+# ruff: noqa: F401
 # ${generated_comment}
 
 from typing import (
@@ -12,26 +13,25 @@ from typing import (
     NamedTuple,
     NoReturn,
     Optional,
+    overload,
     Sequence,
     Tuple,
     Type,
     TypeVar,
     Union,
-    overload,
 )
 from typing_extensions import Self
 
 from torch import (
-    Generator,
-    SymInt,
-    Tensor,
     contiguous_format,
+    Generator,
     inf,
     memory_format,
     strided,
+    SymInt,
+    Tensor,
 )
 from torch.types import (
-    Number,
     _bool,
     _device,
     _dtype,
@@ -40,6 +40,7 @@ from torch.types import (
     _layout,
     _qscheme,
     _size,
+    Number,
 )
 
 ${structseq_defs}
