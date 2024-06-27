@@ -4139,8 +4139,6 @@ class TestSerialization(TestCase, SerializationMixin):
                 zip_file.write_record_metadata('data/0', weight_nbytes)
                 zip_file.write_record_metadata('data/1', bias_nbytes)
 
-            with zipfile.ZipFile(g) as zf:
-                zf.extractall()
             if not filename:
                 f.seek(0)
                 g.seek(0)
