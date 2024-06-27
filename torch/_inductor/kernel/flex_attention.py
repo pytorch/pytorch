@@ -186,17 +186,22 @@ flex_attention_template = TritonTemplate(
     source=r"""
 {{def_kernel("Q", "K", "V", "LSE", "SPARSE_KV_NUM_BLKS", "SPARSE_KV_IDX")}}
     # Sub notation for this kernel:
+    #
     # Q: Query, K: Key, V: Value
     # M: Number of queries, N: Number of keys/values, D: Model dimension
     # z: Batch size, h: Number of heads, m: Number of queries per head, k: Number of keys per head
     # (Modifiable) Config options:
-    # BLOCK_M
-    # BLOCK_N
+    # BLOCK_M: The thread block size across the seqlen dim of Q.
+    # BLOCK_N: Iterate over BLOCK_N across the seqlen dim of K/V in each thread block.
     # SCORE_MOD_IS_LINEAR: Is the score modifier linear? If so, we can lift the
     # change of base out of the loop
     # ROWS_GUARANTEED_SAFE: Is it guaranteed that at least one value in each row
     # is not masked out? If so, we can skip an extra safety check
     # OUTPUT_LOGSUMEXP: We only need to store the logsumexp if we require grad
+    #
+    # The following SPARSE_* is defined in the block sparse mask grid, rather than the thread block grid.
+    # SPARSE_KV_NUM_BLKS: The number of unmasked K/V blocks for each query.
+    # SPARSE_KV_IDX: The indices of unmasked K/V blocks for each query.
 
     tl.static_assert(SPARSE_Q_BLOCK_SIZE >= BLOCK_M and SPARSE_Q_BLOCK_SIZE % BLOCK_M == 0)
     tl.static_assert(SPARSE_KV_BLOCK_SIZE >= BLOCK_N and SPARSE_KV_BLOCK_SIZE % BLOCK_N == 0)
@@ -591,6 +596,7 @@ flex_attention_backward_template = TritonTemplate(
     source=r"""
 {{def_kernel("Q", "K", "V", "OUT", "LSE", "DELTA", "DO", "DQ", "DV", "SPARSE_KV_NUM_BLKS", "SPARSE_KV_IDX", "SPARSE_Q_NUM_BLKS", "SPARSE_Q_IDX")}}
     # Sub notation for this kernel:
+    #
     # Q: Query, K: Key, V: Value
     # OUT: Forward output, LSE: logsumexp (logsumexp is always stored in fp32 regardless of the input dtype)
     # DELTA: Precomputed sum(OUT* DO, axis=1)
@@ -606,6 +612,12 @@ flex_attention_backward_template = TritonTemplate(
     # BLOCK_N2: when calculating DQ, iterate over BLOCK_N2 across the seqlen dim of K/V in each thread block.
     # SCORE_MOD_IS_LINEAR: Is the score modifier linear? If so, we can lift the
     # change of base out of the loop
+    #
+    # The following SPARSE_* is defined in the block sparse mask grid, rather than the thread block grid.
+    # SPARSE_KV_NUM_BLKS: The number of unmasked K/V blocks for each query.
+    # SPARSE_KV_IDX: The indices of unmasked K/V blocks for each query.
+    # SPARSE_Q_NUM_BLKS: The number of unmasked Q blocks for each key/value.
+    # SPARSE_Q_IDX: The indices of unmasked Q blocks for each key/value.
 
     # Define Q Strides
     stride_qz = {{stride("Q", 0)}}
