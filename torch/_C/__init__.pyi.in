@@ -2074,6 +2074,7 @@ def _xpu_emptyCache() -> None: ...
 class _XpuDeviceProperties:
     name: str
     platform_name: str
+    device_arch: _int
     vendor: str
     driver_version: str
     version: str

@@ -126,6 +126,16 @@ namespace c10::xpu {
   /* the number of hardware threads per EU of GPU. */    \
   _(gpu_hw_threads_per_eu, 8)
 
+#define AT_FORALL_XPU_EXP_DEVICE_PROPERTIES(_)         \
+  /* the device architecture of this SYCL device.      \
+     0x9900000000000000 - should be unkown, but was    \
+     added only recentely at                           \
+     https://github.com/intel/llvm/pull/14077          \
+     In version before 2025 it represents x86_64       \
+     Use zero for now, since this is the default value \
+     for triton */                                     \
+  _(architecture, 0)
+
 #define AT_FORALL_XPU_DEVICE_ASPECT(_)                  \
   /* sycl::half is supported on device. */              \
   _(fp16)                                               \
@@ -148,6 +158,10 @@ namespace c10::xpu {
 #define DEFINE_EXT_DEVICE_PROP(property, ...) \
   _DEFINE_SYCL_PROP(sycl::ext::intel::info::device, property, property)
 
+#define DEFINE_EXP_DEVICE_PROP(property, ...) \
+  _DEFINE_SYCL_PROP(                          \
+      sycl::ext::oneapi::experimental::info::device, property, property)
+
 #define DEFINE_DEVICE_ASPECT(member) bool has_##member;
 
 struct C10_XPU_API DeviceProp {
@@ -157,6 +171,8 @@ struct C10_XPU_API DeviceProp {
   DEFINE_PLATFORM_PROP(name, platform_name);
 
   AT_FORALL_XPU_EXT_DEVICE_PROPERTIES(DEFINE_EXT_DEVICE_PROP);
+
+  AT_FORALL_XPU_EXP_DEVICE_PROPERTIES(DEFINE_EXP_DEVICE_PROP);
 
   AT_FORALL_XPU_DEVICE_ASPECT(DEFINE_DEVICE_ASPECT);
 };

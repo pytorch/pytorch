@@ -86,6 +86,14 @@ void initDeviceProperties(DeviceProp* device_prop, int device) {
       ? raw_device.get_info<intel::info::device::property>()                 \
       : default_value;
 
+#define ASSIGN_EXP_DEVICE_PROP(property, default_value)                      \
+  try {                                                                      \
+    device_prop->property =                                                  \
+        raw_device.get_info<oneapi::experimental::info::device::property>(); \
+  } catch (...) {                                                            \
+    device_prop->property = oneapi::experimental::property(default_value);   \
+  }
+
 #define ASSIGN_DEVICE_ASPECT(member) \
   device_prop->has_##member = raw_device.has(sycl::aspect::member);
 
@@ -95,6 +103,8 @@ void initDeviceProperties(DeviceProp* device_prop, int device) {
       raw_device.get_info<device::platform>().get_info<platform::name>();
 
   AT_FORALL_XPU_EXT_DEVICE_PROPERTIES(ASSIGN_EXT_DEVICE_PROP);
+
+  AT_FORALL_XPU_EXP_DEVICE_PROPERTIES(ASSIGN_EXP_DEVICE_PROP);
 
   AT_FORALL_XPU_DEVICE_ASPECT(ASSIGN_DEVICE_ASPECT);
   return;

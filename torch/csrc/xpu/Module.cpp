@@ -226,6 +226,9 @@ static void registerXpuDeviceProperties(PyObject* module) {
     }
     return stream.str();
   };
+  auto get_device_architecture = [](const DeviceProp& prop) {
+    return static_cast<uint64_t>(prop.architecture);
+  };
   auto gpu_subslice_count = [](const DeviceProp& prop) {
     return (prop.gpu_eu_count / prop.gpu_eu_count_per_subslice);
   };
@@ -247,12 +250,15 @@ static void registerXpuDeviceProperties(PyObject* module) {
       .def_readonly("has_fp64", &DeviceProp::has_fp64)
       .def_readonly("has_atomic64", &DeviceProp::has_atomic64)
       .def_property_readonly("type", get_device_type)
+      .def_property_readonly("device_arch", get_device_architecture)
       .def(
           "__repr__",
           [&get_device_type, &gpu_subslice_count](const DeviceProp& prop) {
             std::ostringstream stream;
             stream << "_XpuDeviceProperties(name='" << prop.name
-                   << "', platform_name='" << prop.platform_name << "', type='"
+                   << "', platform_name='" << prop.platform_name
+                   << "', device_arch='"
+                   << static_cast<uint64_t>(prop.architecture) << "', type='"
                    << get_device_type(prop) << "', driver_version='"
                    << prop.driver_version << "', total_memory="
                    << prop.global_mem_size / (1024ull * 1024)

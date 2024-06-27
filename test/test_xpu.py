@@ -105,6 +105,9 @@ class TestXpu(TestCase):
         self.assertEqual(
             device_properties.driver_version, device_capability["driver_version"]
         )
+        self.assertEqual(
+            device_properties.device_arch, device_capability["device_arch"]
+        )
         self.assertEqual(device_properties.has_fp16, device_capability["has_fp16"])
         self.assertEqual(device_properties.has_fp64, device_capability["has_fp64"])
         self.assertEqual(
