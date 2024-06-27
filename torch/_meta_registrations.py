@@ -5364,8 +5364,8 @@ def meta_scaled_mm(
     def is_row_major(stride):
         return stride[0] > stride[1] and stride[1] == 1
 
-    def is_col_major(shape, stride):
-        return stride[0] == 1 and stride[1] == shape[0]
+    def is_col_major(stride):
+        return stride[0] == 1 and stride[1] > 1
 
     def is_fp8_type(dtype):
         return dtype in (
@@ -5384,7 +5384,7 @@ def meta_scaled_mm(
         lambda: "self must be row_major",
     )
     torch._check(
-        is_col_major(mat2.shape, mat2.stride()),
+        is_col_major(mat2.stride()),
         lambda: "mat2 must be col_major",
     )
     torch._check(
