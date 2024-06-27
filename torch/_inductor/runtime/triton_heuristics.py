@@ -210,6 +210,7 @@ class CachingAutotuner(KernelInterface):
                 "triton",
                 str(self.triton_meta.get("device", 0)),
             )
+        log.debug("Triton cache dir: %s", os.environ["TRITON_CACHE_DIR"])
 
         self.size_hints = size_hints
         self.coordesc_tuner = CoordescTuner(
