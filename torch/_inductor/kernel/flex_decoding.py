@@ -9,9 +9,9 @@ from ..lowering import empty_strided, lowerings
 from ..select_algorithm import autotune_select_algorithm, TritonTemplate
 
 
-
 aten = torch.ops.aten
 prims = torch.ops.prims
+
 
 def flex_decoding_grid(batch_size, num_heads, n_keys, d_model, meta):
     """How is this kernel parallelized?
@@ -283,7 +283,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
             (32, 2, 1),
             (16, 2, 1),
         ]
-    
+
     SPLIT_KV = get_split_k(key.get_size()[0], key.get_size()[1], key.get_size()[2])
     MAX_SPLIT_KV = SPLIT_KV
     assert SPLIT_KV <= MAX_SPLIT_KV
@@ -355,7 +355,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
         "flex_decoding", choices, inputs_for_flex_decoding, layout_acc
     )
 
-    # Reduction 
+    # Reduction
 
     g_M = lowerings[aten.max](buf_M, dim=-2, keepdim=True)[0]
     adj_M = lowerings[aten.sub](buf_M, g_M)
@@ -365,7 +365,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
     g_L = lowerings[aten.sum](buf_L, axis=-2)
     logsumexp = lowerings[aten.log2](g_L)
     logsumexp = lowerings[aten.add](logsumexp, lowerings[aten.squeeze](g_M, dim=-2))
-    
+
     alpha_unseq = lowerings[aten.unsqueeze](alpha, 4)
     buf_ACC = lowerings[aten.mul](buf_ACC, alpha_unseq)
     output = lowerings[aten.sum](buf_ACC, axis=-3)
@@ -373,7 +373,6 @@ def create_flex_decoding_kernel(*args, **kwargs):
     output = lowerings[aten.div](output, L_unseq)
     output = lowerings[prims.convert_element_type](output, query.get_dtype())
 
-    
     return (
         output,
         logsumexp,

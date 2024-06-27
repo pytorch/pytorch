@@ -547,7 +547,7 @@ def flex_attention(*args, **kwargs):
         return create_flex_decoding_kernel(
             subgraph_buffer, query, key, value, subgraph, *other_buffers
         )
-    
+
     layout = FixedLayout(
         query.get_device(),
         query.get_dtype(),
