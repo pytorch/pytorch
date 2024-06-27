@@ -19,10 +19,11 @@ using streamType = c10::cuda::CUDAStream;
 
 std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
 getCurrentAllocator();
-std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
+TORCH_CUDA_CPP_API std::shared_ptr<
+    c10::cuda::CUDACachingAllocator::CUDAAllocator>
 createCustomAllocator(
     std::function<void*(size_t, int, cudaStream_t)> alloc_fn,
-    std::function<void(void*, size_t, int, cudaStream_t)> free_fn);
+    c10::DeleterFnPtr free_fn);
 void changeCurrentAllocator(
     const std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>&
         allocator);
@@ -42,7 +43,7 @@ struct CUDAPluggableAllocator
     : public c10::cuda::CUDACachingAllocator::CUDAAllocator {
   CUDAPluggableAllocator(
       std::function<void*(size_t, int, cudaStream_t)> alloc_fn,
-      std::function<void(void*, size_t, int, cudaStream_t)> free_fn);
+      c10::DeleterFnPtr free_fn);
 
   CUDAPluggableAllocator(CUDAPluggableAllocator& other);
 
@@ -132,7 +133,7 @@ struct CUDAPluggableAllocator
 
  protected:
   std::function<void*(size_t, int, cudaStream_t)> alloc_fn_;
-  std::function<void(void*, size_t, int, cudaStream_t)> free_fn_;
+  c10::DeleterFnPtr free_fn_;
   std::function<void(int)> init_fn_;
   std::function<void()> reset_fn_;
   std::function<void(double, int)> memory_fraction_fn_;

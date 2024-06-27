@@ -1177,13 +1177,12 @@ static void registerCudaPluggableAllocator(PyObject* module) {
           });
   m.def("_cuda_customAllocator", [](uint64_t malloc_ptr, uint64_t free_ptr) {
     using MallocFuncType = void*(size_t, int, cudaStream_t);
-    using FreeFuncType = void(void*, size_t, int, cudaStream_t);
     std::function<MallocFuncType> malloc_fn =
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         reinterpret_cast<MallocFuncType*>(malloc_ptr);
-    std::function<FreeFuncType> free_fn =
+    c10::DeleterFnPtr free_fn =
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
-        reinterpret_cast<FreeFuncType*>(free_ptr);
+        reinterpret_cast<c10::DeleterFnPtr>(free_ptr);
     return torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
         malloc_fn, free_fn);
   });
