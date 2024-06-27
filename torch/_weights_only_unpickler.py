@@ -68,17 +68,9 @@ from struct import unpack
 from sys import maxsize
 from typing import Any, Dict, List
 
-try:
-    # We rely on this module in private cPython which provides dicts of
-    # modules/functions that had their names changed from Python 2 to 3
-    has_compat_pickle = True
-    from _compat_pickle import IMPORT_MAPPING, NAME_MAPPING
-except ImportError:
-    # To prevent warning on import torch, we warn in the Unpickler.load below
-    has_compat_pickle = False
-    IMPORT_MAPPING, NAME_MAPPING = dict(), dict()
-
 import torch
+from torch._utils import IMPORT_MAPPING, NAME_MAPPING
+
 
 _marked_safe_globals_list: List[Any] = []
 
@@ -189,13 +181,6 @@ class Unpickler:
 
         Return the reconstituted object hierarchy specified in the file.
         """
-        if not has_compat_pickle:
-            warnings.warn(
-                "Could not import IMPORT_MAPPING and NAME_MAPPING from _compat_pickle. "
-                "If the default `pickle_protocol` was used at `torch.save` time, any functions or "
-                "classes that are in these maps might not behave correctly if allowlisted via "
-                "`torch.serialization.add_safe_globals()`."
-            )
         self.metastack = []
         self.stack: List[Any] = []
         self.append = self.stack.append
@@ -212,7 +197,7 @@ class Unpickler:
                 name = readline()[:-1].decode("utf-8")
                 # Patch since torch.save default protocol is 2
                 # users will be running this code in python > 3
-                if self.proto == 2 and has_compat_pickle:
+                if self.proto == 2:
                     if (module, name) in NAME_MAPPING:
                         module, name = NAME_MAPPING[(module, name)]
                     elif module in IMPORT_MAPPING:
