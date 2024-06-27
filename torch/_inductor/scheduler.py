@@ -2054,7 +2054,7 @@ class Scheduler:
                 # TODO - parallel compile triton templates
                 # TODO - should prune/skip choices that are not within certain % of best choice
                 with node1.node.swap_as_triton_caller(choice):
-                    ms_fused, _ = self.benchmark_fused_nodes(node_list_fused)
+                    ms_fused, _ = self.benchmark_fused_nodes(node_list_fused, memory_warmup_iters=1000)
 
                     if ms_fused < min_ms_fused:
                         min_ms_fused = ms_fused
