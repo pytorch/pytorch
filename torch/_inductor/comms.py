@@ -109,10 +109,16 @@ def decide_global_ordering_of_comms(nodes: List[BaseSchedulerNode]):
     TODO: Come up with a better approach
     """
     comm_nodes = [n for n in nodes if is_collective(n.node)]
+
+    def item(x: Set[str]) -> str:
+        assert len(x) == 1
+        return next(iter(x))
+
     for i in range(1, len(comm_nodes)):
         # Enforce ordering by making previous comm a `WeakDep` dependency of the next comm
         dep = WeakDep(
-            comm_nodes[i - 1].get_name(), mutating_buf=comm_nodes[i].get_name()
+            name=item(comm_nodes[i - 1].get_buffer_names()),
+            mutating_buf=item(comm_nodes[i].get_buffer_names()),
         )
         comm_nodes[i].add_fake_dep(dep)
 
@@ -146,8 +152,11 @@ def compute_node_users(
     for node in snodes:
         if isinstance(node, FusedSchedulerNode):
             for x in node.snodes:
-                buf_to_snode[x.get_name()] = node
-        buf_to_snode[node.get_name()] = node
+                for buf in x.get_outputs():
+                    buf_to_snode[buf.get_name()] = node
+
+        for buf in node.get_outputs():
+            buf_to_snode[buf.get_name()] = node
 
     # compute inverse_users
     inverse_users = {

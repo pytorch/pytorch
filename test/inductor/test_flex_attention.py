@@ -826,14 +826,21 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         q, k, v = (torch.randn(1, 8, 1024, 64, device="cuda") for _ in range(3))
         metrics.reset()
-        f(q, k, v)
+        _, code = run_and_get_code(f, q, k, v)
+        # Check that buf1 (the attention output) is not allocated
+        fc = FileCheck()
+        fc.check("buf0 = empty_strided_cuda")
+        fc.check("buf3 = empty_strided_cuda")
+        fc.run(code[0])
+        fc = FileCheck()
+        fc.check_not("buf1 =")  # Kernel local buffer, not allocated
+        fc.check_not("buf2 =")  # Mutation-buffer, not allocated
+        fc.run(code[0])
         accessed_bytes = 1 * 8 * 1024 * 64 * torch.float32.itemsize
         num_accesses = 4  # q, k, v reads, one output.
         # TODO: Get rid of this fudge factor
-        # We need this fudge factor for now, since
-        # 1. For some reason we materialize the output of the attention unnecessarily (it's related to the mutation somehow)
-        # 2. We also write the extraneous logsumexp
-        num_accesses += 2
+        # We need this fudge factor for now as we write the extraneous logsumexp
+        num_accesses += 1
         self.assertLess(metrics.num_bytes_accessed, accessed_bytes * num_accesses)
 
     @supported_platform

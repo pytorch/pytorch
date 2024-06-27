@@ -527,7 +527,7 @@ def extract_input_node_reduction_ranges(
     Otherwise returns (None, None).
     """
 
-    from .ir import ComputedBuffer, Loops
+    from .ir import ComputedBuffer, Loops, Operation
 
     if isinstance(input_node.data, ComputedBuffer):
         # Input node has already been realized. Return its size and reduction_size.
@@ -572,7 +572,7 @@ def extract_input_node_reduction_ranges(
                     or size != buffer.get_size()
                 ):
                     return (None, None)
-            else:
+            elif isinstance(buffer, Operation):
                 new_reads.extend(buffer.get_reads())
         if reads == new_reads:
             return (size, reduction_size)
