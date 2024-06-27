@@ -7,6 +7,7 @@ import re
 import types
 import warnings
 from collections import namedtuple
+from contextlib import contextmanager
 from typing import (
     Any,
     Callable,
@@ -19,6 +20,8 @@ from typing import (
     TYPE_CHECKING,
     Union,
 )
+
+from torch._higher_order_ops.utils import autograd_not_implemented
 
 from torch._library.fake_class_registry import FakeScriptObject
 
@@ -35,6 +38,7 @@ if TYPE_CHECKING:
 
 import torch
 import torch.utils._pytree as pytree
+from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.export._tree_utils import is_equivalent, reorder_kwargs
 from torch.fx._compatibility import compatibility
 
@@ -119,6 +123,127 @@ def _fx_collection_equivalence_fn(
     return spec1_type is spec2_type and spec1_context == spec2_context
 
 
+def _register_cia_to_meta(*args, **kwargs):
+    kernel = kwargs["kernel"]
+    del kwargs["kernel"]
+
+    assert torch._C._dispatch_has_kernel_for_dispatch_key(
+        kernel.name(), torch._C.DispatchKey.CompositeImplicitAutograd
+    )
+
+    return kernel._op_dk(
+        torch._C.DispatchKey.CompositeImplicitAutograd, *args, **kwargs
+    )
+
+
+# This list is compiled from DispatchKey.cpp.
+# The idea is that we use these keys to override
+# CIA decomp in export
+_AUTOGRAD_ALIAS_BACKEND_KEYS_TO_OVERRIDE = [
+    torch._C.DispatchKey.AutogradCPU,
+    torch._C.DispatchKey.AutogradCUDA,
+    torch._C.DispatchKey.AutogradMeta,
+    torch._C.DispatchKey.AutogradXLA,
+    torch._C.DispatchKey.AutogradLazy,
+    torch._C.DispatchKey.AutogradIPU,
+    torch._C.DispatchKey.AutogradXPU,
+    torch._C.DispatchKey.AutogradMPS,
+    torch._C.DispatchKey.AutogradHPU,
+    torch._C.DispatchKey.AutogradPrivateUse1,
+    torch._C.DispatchKey.AutogradPrivateUse2,
+    torch._C.DispatchKey.AutogradPrivateUse3,
+]
+
+
+@contextmanager
+def _override_composite_implicit_decomp(ops_to_preserve):
+    # This function overrides CompositeImplicitAutograd decomp for
+    # functional composite ops that user specified. Ideally we want to not-decompose
+    # ALL composite ops but today's C++ functinalization relies on
+    # the fact that it is working with the opset after decomp is run.
+    # Hence we can only do it for functional ops. One caveat is that
+    # there are some composite ops that lie about their schema (claimed to be
+    # functional but not really aka dropout), for these cases, we just decompose.
+    saved_tables = {}
+    patched_ops = set()
+    for op_overload in ops_to_preserve:
+        # Our strategy for deciding if we can preserve CIA is following:
+        # 1. The op should be known statically that it is functional
+        # 2. If it is maybe aliasing, we decompose because we must know if an op
+        #    is mutating or aliasing.
+        # TODO (tmanlaibaatar) make this utility function and share it with functional_tensor
+        # decomp part. (https://github.com/pytorch/pytorch/issues/129431)
+        def assert_valid_to_preserve(op_overload):
+            if op_overload in FunctionalTensor.maybe_aliasing_or_mutating_ops:
+                raise RuntimeError(
+                    f"We can't detect {op_overload} as a functional op statically, so we can't preserve it"
+                )
+            if op_overload in FunctionalTensor.metadata_fns:
+                raise RuntimeError(
+                    f"{op_overload} is a metadata query function, "
+                    "it will be preserved implicitly in our tracing system. "
+                    "Please file an issue on github if you see otherwise"
+                )
+
+            alias_info = len(
+                [i for i in op_overload._schema.arguments if i.alias_info is not None]
+            )
+
+            is_mutating_or_aliasing = alias_info != 0 or op_overload._schema.is_mutable
+
+            if is_mutating_or_aliasing:
+                raise RuntimeError(
+                    f"{op_overload} is a mutating/aliasing op, we can't preserve it as is"
+                )
+
+            if not torch._C._dispatch_has_kernel(op_overload.name()):
+                raise RuntimeError(
+                    f"{op_overload} is a TorchScript op, we can't preserve it as is"
+                )
+
+            if not torch._C._dispatch_has_kernel_for_dispatch_key(
+                op_overload.name(), torch._C.DispatchKey.CompositeImplicitAutograd
+            ):
+                raise RuntimeError(
+                    f"{op_overload} is not CompositeImplicitAutograd op, so we will preserve "
+                    "it as long as there is no python decomposition"
+                )
+
+            return True
+
+        # If we didn't error, it means we can go ahead
+        assert_valid_to_preserve(op_overload)
+
+        saved_tables[op_overload] = op_overload.py_kernels.copy()
+        patched_ops.add(op_overload)
+        for override_dispatch_key in _AUTOGRAD_ALIAS_BACKEND_KEYS_TO_OVERRIDE:
+            if override_dispatch_key not in op_overload.py_kernels:
+                # TODO (tmanlaibaatar)https://github.com/pytorch/pytorch/issues/129430
+                op_overload.py_impl(override_dispatch_key)(
+                    autograd_not_implemented(op_overload, deferred_error=True)
+                )
+        if torch._C.DispatchKey.CompositeImplicitAutograd in op_overload.py_kernels:
+            del op_overload.py_kernels[torch._C.DispatchKey.CompositeImplicitAutograd]
+
+        def _(*args, **kwargs):
+            return NotImplemented
+
+        op_overload.py_impl(torch._C.DispatchKey.CompositeImplicitAutograd)(_)
+
+        # For fake tensor prop, we do want to register meta kernel directly
+        if torch._C.DispatchKey.Meta not in op_overload.py_kernels:
+            op_overload.py_impl(torch._C.DispatchKey.Meta)(
+                functools.partial(_register_cia_to_meta, kernel=op_overload)
+            )
+    try:
+        yield
+    finally:
+        for op in patched_ops:
+            op.py_kernels.clear()
+            op.py_kernels.update(saved_tables[op])
+            op._dispatch_cache.clear()
+
+
 def _rename_without_collisions(
     name_map: Dict[str, str],
     orig_name: str,
@@ -194,6 +319,7 @@ def _decompose_exported_program(
     ep,
     *,
     decomp_table: Dict[torch._ops.OperatorBase, Callable],
+    _preserve_ops: Tuple[torch._ops.OpOverload],
     joint_loss_index: Optional[int],
 ):
     from torch._export.passes.lift_constants_pass import (
@@ -218,7 +344,9 @@ def _decompose_exported_program(
 
     fake_mode = detect_fake_mode(fake_args)
     fake_mode = contextlib.nullcontext() if fake_mode is None else fake_mode
-    with _ignore_backend_decomps(), fake_mode:
+    with _ignore_backend_decomps(), fake_mode, _override_composite_implicit_decomp(
+        _preserve_ops
+    ):
         gm, graph_signature = aot_export_module(
             ep.graph_module,
             fake_args,
@@ -722,7 +850,9 @@ class ExportedProgram:
 
     @_disable_prexisiting_fake_mode
     def run_decompositions(
-        self, decomp_table: Optional[Dict[torch._ops.OperatorBase, Callable]] = None
+        self,
+        decomp_table: Optional[Dict[torch._ops.OperatorBase, Callable]] = None,
+        _preserve_ops: Tuple[torch._ops.OpOverload] = (),  # type: ignore[assignment]
     ) -> "ExportedProgram":
         """
         Run a set of decompositions on the exported program and returns a new
@@ -740,6 +870,7 @@ class ExportedProgram:
         return _decompose_exported_program(
             self,
             decomp_table=decomp_table,
+            _preserve_ops=_preserve_ops,  # type: ignore[arg-type]
             joint_loss_index=None,
         )
 
