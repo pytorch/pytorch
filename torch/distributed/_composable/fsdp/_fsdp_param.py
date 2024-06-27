@@ -98,6 +98,19 @@ so it's safe to call .set_() in the middle of the graph to swap out its storage 
 (2) We always re-allocate the buffer for nn.Parameter to store the AllGather output and to be used in downstream user ops.
 So calling resize-to-0 in the middle of the graph to free nn.Parameter memory after use should always be okay
 (since we always allocate anew next time we need it, we strictly don't need to keep the old tensor storage around anymore).
+
+Q: But doesn't the torch.compile stack have the "functional graph" assumption in many places?
+A: Yes - this is WIP but we will try to get back to functional graph as early as possible in the lowering process.
+Specifically, we believe we can move both .set_ and .resize_ ops to end of graph in AOT joint graph before partitioner
+(i.e. effectively "re-functionalizing" those ops). Put it in another way, we avoid functionalization for those two ops just to
+make AOTAutograd alias analysis happy, and as soon as we are past that point, we "re-functionalize" the graph.
+This requires a custom FX pass but we believe it's not hard to write and maintain.
+
+Q: What's the importance of partitioner not saving views of nn.Parameter as FWD saved tensors?
+A: This is critical: we do want to save FWD nn.Parameter graph input (instead of its view) for BWD use,
+so that downstream ops in BWD graph uses the post-`.set_` nn.Parameter instead of any of its saved views as input.
+This is because .set_ will not update any of the nn.Parameter's views, so BWD downstream ops must use the original
+nn.Parameter in order to see the result of .set_.
 """
 
 
