@@ -21,6 +21,7 @@ from ..codegen import PyCodegen
 from ..create_parameter_op import (
     can_convert_to_tracable_parameter,
     new_parameter_placeholder,
+    new_parameter_placeholder_dtensor,
     tracable_create_parameter,
 )
 from ..device_interface import get_registered_device_interfaces
@@ -927,9 +928,26 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         except NotImplementedError as e:
             unimplemented(f"Parameter not python_constant: {e}")
 
-        placeholder = tx.output.synthetic_graph_input(
-            new_parameter_placeholder, [shape, dtype, device, requires_grad]
+        from torch.distributed._tensor import DTensor
+
+        example_value = data.proxy.node.meta["example_value"]
+        if isinstance(example_value, DTensor):
+            callable = lambda: new_parameter_placeholder_dtensor(  # noqa: E731
+                example_value._local_tensor.shape,
+                example_value._local_tensor.dtype,
+                example_value._local_tensor.device,
+                requires_grad,
+                example_value.device_mesh,
+                example_value.placements,
+            )
+        else:
+            callable = lambda: new_parameter_placeholder(  # noqa: E731
+                shape, dtype, device, requires_grad
+            )
+        callable_var_name = tx.output.install_global_by_id(
+            "_nn_param_callable", callable
         )
+        placeholder = tx.output.synthetic_graph_input(callable_var_name, callable())
         if data.requires_grad:
             data = data.call_method(tx, "detach", [], {})
 
@@ -945,6 +963,7 @@ Either create the tensor outside the compiled region, or do not set the tensor t
             ),
         )
         assert isinstance(result, variables.TensorVariable)
+        result.requires_grad = requires_grad
         result.class_type = torch.nn.Parameter
 
         # TODO(jansel/bdhirsh) - There is some issue with

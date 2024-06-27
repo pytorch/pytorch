@@ -18,7 +18,13 @@ class TracableCreateParameter(torch.autograd.Function):
     @staticmethod
     def forward(ctx, tensor, placeholder):
         assert not tensor.requires_grad
-        return placeholder.set_(tensor)
+        if isinstance(tensor, torch.distributed._tensor.api.DTensor):
+            with torch.no_grad():
+                # DTensor doesn't have .set_(), so have to use .copy_()
+                placeholder.copy_(tensor)
+        else:
+            placeholder.set_(tensor)
+        return placeholder
 
     @staticmethod
     def backward(ctx, grad):
@@ -39,6 +45,29 @@ def new_parameter_placeholder(size, dtype, device, requires_grad):
     # TODO(jansel): alloc followed by free is inefficient, need a way to allocate an unbacked tensor.
     # Allocating a zero tensor would causes assert failures in autograd.
     result.untyped_storage().resize_(0)
+    return result
+
+
+def new_parameter_placeholder_dtensor(
+    local_tensor_size,
+    local_tensor_dtype,
+    local_tensor_device,
+    requires_grad,
+    device_mesh,
+    placements,
+):
+    """Create a placeholder to be passed to the above functions"""
+    data_tensor = torch.empty(
+        local_tensor_size, dtype=local_tensor_dtype, device=local_tensor_device
+    )
+    # data_tensor.untyped_storage().resize_(0)  # this causes segfault, need to figure out why
+    # NOTE: allocate a placeholder nn.Parameter(DTensor), whose content will get swapped out in TracableCreateParameter.forward
+    data_tensor = torch.distributed._tensor.api.DTensor.from_local(
+        data_tensor,
+        device_mesh=device_mesh,
+        placements=placements,
+    )
+    result = torch.nn.Parameter(data_tensor, requires_grad=requires_grad)
     return result
 
 

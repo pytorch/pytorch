@@ -469,23 +469,17 @@ class OutputGraph:
                 GlobalStateSource().make_guard(GuardBuilder.FUNCTORCH_STACK_MATCH)
             )
 
-    def synthetic_graph_input(self, fn, args):
+    def synthetic_graph_input(self, callable_var_name, example_value):
         """
         call fn(*args) before the graph runs and turn the result into a fake input.
         """
-        example_value = fn(*args)
         varname = self.new_var()
         cg = PyCodegen(self.root_tx)
-        cg.add_push_null(
-            lambda: cg.load_import_from(
-                fn.__module__,
-                fn.__name__,
-            )
-        )
-        cg.foreach(map(variables.ConstantVariable.create, args))
-        cg.call_function(len(args), False)
+        cg.append_output(cg.create_load_global(callable_var_name, add=True))
+        cg.call_function(0, True)
         cg.store(varname)
-        self.pregraph_bytecode.extend(cg.get_instructions())
+        insts = cg.get_instructions()
+        self.pregraph_bytecode.extend(insts)
         source = SyntheticLocalSource(varname)
         result = VariableBuilder(self.root_tx, source)(example_value)
         TracingContext.get().guards_context.dynamo_guards.remove_guards_with_source(
