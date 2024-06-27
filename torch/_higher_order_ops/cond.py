@@ -213,7 +213,7 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)
 
     out_proxy = proxy_mode.tracer.create_proxy(
-        "call_function", func_overload, proxy_args, {}, name="conditional"
+        "call_function", func_overload, proxy_args, {}
     )
 
     # At this point, we're *guaranteed* that whether an output came from the
