@@ -2,7 +2,6 @@ import argparse
 import collections
 import importlib
 import sys
-
 from pprint import pformat
 from typing import Dict, List, Sequence
 from unittest.mock import Mock, patch
@@ -20,9 +19,9 @@ from torchgen.api.python import (
     returns_structseq_pyi,
 )
 from torchgen.gen import parse_native_yaml, parse_tags_yaml
-
 from torchgen.model import _TorchDispatchModeKey, DispatchKey, Variant
 from torchgen.utils import FileManager
+
 
 """
 This module implements generation of type stubs for PyTorch,
@@ -1087,12 +1086,12 @@ def gen_pyi(
                 "def __init__(self, other: Tensor) -> None: ...",
                 f"def __init__(self, size: _size, *, {DEVICE_PARAM}) -> None: ...",
             ],
-            "as_subclass": ["def as_subclass(self, cls: Type[S]) -> S: ..."],
+            "as_subclass": ["def as_subclass(self, cls: _Type[S]) -> S: ..."],
             "_make_subclass": [
                 "@staticmethod    \ndef _make_subclass({}) -> S: ...".format(
                     ", ".join(
                         [
-                            "cls: Type[S]",
+                            "cls: _Type[S]",
                             "data: Tensor",
                             "require_grad: _bool = False",
                             "dispatch_strides: _bool = False",

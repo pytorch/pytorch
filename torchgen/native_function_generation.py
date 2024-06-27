@@ -1,5 +1,4 @@
 from collections import defaultdict
-
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import torchgen.api.dispatcher as dispatcher
@@ -26,6 +25,7 @@ from torchgen.model import (
     Variant,
 )
 from torchgen.utils import concatMap
+
 
 # See Note: [Out ops with functional variants that don't get grouped properly]
 OUT_OPS_THAT_DONT_GET_GROUPED_PROPERLY = [

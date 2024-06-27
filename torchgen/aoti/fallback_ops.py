@@ -93,6 +93,7 @@ inductor_fallback_ops = {
     "aten.ormqr.default",
     "aten._pdist_backward.default",
     "aten._pdist_forward.default",
+    "aten.polar.default",
     "aten.pow.Scalar",
     "aten.pow.Tensor_Scalar",
     "aten.pow.Tensor_Tensor",

@@ -24,7 +24,7 @@ from torch._inductor.pattern_matcher import (
     stable_topological_sort,
 )
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import get_gpu_shared_memory, run_and_get_code
+from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
@@ -32,9 +32,11 @@ from torch.testing._internal.common_utils import IS_LINUX, LazyVal, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.utils import _pytree as pytree
 
-
-is_A100 = LazyVal(
-    lambda: torch.cuda.is_available() and get_gpu_shared_memory() == 166912
+# NVIDIA A100-SXM4-40GB
+is_a100_linux = LazyVal(
+    lambda: IS_LINUX
+    and torch.cuda.is_available()
+    and "A100" in torch.cuda.get_device_name(0)
 )
 
 
@@ -281,7 +283,7 @@ class TestPatternMatcher(TestCase):
             self._test_mixed_impl(fn, args, True, False)
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
-    @unittest.skipIf(not is_A100, "heuristic only run on A100")
+    @unittest.skipIf(not is_a100_linux, "heuristic only run on Linux A100")
     @inductor_config.patch(mixed_mm_choice="heuristic")
     def test_mixed_mm_heuristic_no(self):
         def fn(a, b):
@@ -328,7 +330,7 @@ class TestPatternMatcher(TestCase):
             self._test_mixed_impl(fn, args, True, True)
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
-    @unittest.skipIf(not is_A100, "heuristic only run on A100")
+    @unittest.skipIf(not is_a100_linux, "heuristic only run on Linux A100")
     @inductor_config.patch(mixed_mm_choice="heuristic")
     def test_mixed_mm_heuristic_yes(self):
         def fn(a, b):
@@ -442,7 +444,15 @@ class TestPatternMatcher(TestCase):
                 .sub(8),
             )
 
-        args_list = [
+        def check_uint4x2_mixed_mm(args, expect_mixed_mm):
+            torch._dynamo.reset()
+            counters.clear()
+            ref = fn(*args)
+            test, (code,) = run_and_get_code(torch.compile(fn), *args)
+            torch.testing.assert_close(ref, test)
+            self.assertEqual("uint4x2_mixed_mm" in code, expect_mixed_mm)
+
+        args_expect_mixed_mm = [
             (
                 torch.randn(8, 8, device="cuda"),
                 torch.randint(0, 255, (4, 8), dtype=torch.uint8, device="cuda"),
@@ -454,6 +464,13 @@ class TestPatternMatcher(TestCase):
                 .contiguous()
                 .t(),
             ),
+        ]
+
+        for args in args_expect_mixed_mm:
+            check_uint4x2_mixed_mm(args, True)
+
+        # mixed mm is only enabled when casting from a lower-bitwidth dtype to a higher one
+        args_expect_no_mixed_mm = [
             (
                 torch.randn(8, 8, device="cuda"),
                 torch.randint(0, 255, (4, 8), dtype=torch.int32, device="cuda"),
@@ -464,13 +481,8 @@ class TestPatternMatcher(TestCase):
             ),
         ]
 
-        for args in args_list:
-            torch._dynamo.reset()
-            counters.clear()
-            ref = fn(*args)
-            test, (code,) = run_and_get_code(torch.compile(fn), *args)
-            torch.testing.assert_close(ref, test)
-            self.assertTrue("uint4x2_mixed_mm" in code)
+        for args in args_expect_no_mixed_mm:
+            check_uint4x2_mixed_mm(args, False)
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(use_mixed_mm=True)
