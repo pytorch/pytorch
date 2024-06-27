@@ -13,11 +13,11 @@ from torch.utils.data.datapipes.utils.common import (
 
 __all__ = ["FilterIterDataPipe"]
 
-T = TypeVar('T')
-T_co = TypeVar('T_co', covariant=True)
+T = TypeVar("T")
+T_co = TypeVar("T_co", covariant=True)
 
 
-@functional_datapipe('filter')
+@functional_datapipe("filter")
 class FilterIterDataPipe(IterDataPipe[T_co]):
     r"""
     Filters out elements from the source datapipe according to input ``filter_fn`` (functional name: ``filter``).
@@ -92,6 +92,9 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
                 return False, None  # type: ignore[return-value]
 
         if not isinstance(condition, bool):
-            raise ValueError("Boolean output is required for `filter_fn` of FilterIterDataPipe, got", type(condition))
+            raise ValueError(
+                "Boolean output is required for `filter_fn` of FilterIterDataPipe, got",
+                type(condition),
+            )
 
         return condition, data

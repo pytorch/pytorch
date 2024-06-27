@@ -41,22 +41,23 @@ class FileOpenerIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
     """
 
     def __init__(
-            self,
-            datapipe: Iterable[str],
-            mode: str = 'r',
-            encoding: Optional[str] = None,
-            length: int = -1):
+        self,
+        datapipe: Iterable[str],
+        mode: str = "r",
+        encoding: Optional[str] = None,
+        length: int = -1,
+    ):
         super().__init__()
         self.datapipe: Iterable = datapipe
         self.mode: str = mode
         self.encoding: Optional[str] = encoding
 
-        if self.mode not in ('b', 't', 'rb', 'rt', 'r'):
+        if self.mode not in ("b", "t", "rb", "rt", "r"):
             raise ValueError(f"Invalid mode {mode}")
         # TODO: enforce typing for each instance based on mode, otherwise
         #       `argument_validation` with this DataPipe may be potentially broken
 
-        if 'b' in mode and encoding is not None:
+        if "b" in mode and encoding is not None:
             raise ValueError("binary mode doesn't take an encoding argument")
 
         self.length: int = length
@@ -65,7 +66,9 @@ class FileOpenerIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
     # is determined at runtime based on mode. Some `DataPipe` requiring
     # a subtype would cause mypy error.
     def __iter__(self):
-        yield from get_file_binaries_from_pathnames(self.datapipe, self.mode, self.encoding)
+        yield from get_file_binaries_from_pathnames(
+            self.datapipe, self.mode, self.encoding
+        )
 
     def __len__(self):
         if self.length == -1:

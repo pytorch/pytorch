@@ -52,24 +52,35 @@ class DataFrameTracedOps(DFIterDataPipe):
 
 
 #  TODO(VitalyFedyunin): Extract this list from the DFIterDataPipe registred functions
-DATAPIPES_OPS = ['_dataframes_as_tuples', 'groupby', '_dataframes_filter', 'map', 'to_datapipe',
-                 'shuffle', 'concat', 'batch', '_dataframes_per_row', '_dataframes_concat', '_dataframes_shuffle']
+DATAPIPES_OPS = [
+    "_dataframes_as_tuples",
+    "groupby",
+    "_dataframes_filter",
+    "map",
+    "to_datapipe",
+    "shuffle",
+    "concat",
+    "batch",
+    "_dataframes_per_row",
+    "_dataframes_concat",
+    "_dataframes_shuffle",
+]
 
-UNIMPLEMENTED_ATTR = ['__deepcopy__', '__setstate__', 'is_shardable', 'apply_sharding']
+UNIMPLEMENTED_ATTR = ["__deepcopy__", "__setstate__", "is_shardable", "apply_sharding"]
 
 
 class Capture:
     # TODO: All operations are shared across entire InitialCapture, need to figure out what if we join two captures
 
     def __init__(self, schema_df=None):
-        self.ctx = {'operations': [], 'variables': [], 'schema_df': schema_df}
+        self.ctx = {"operations": [], "variables": [], "schema_df": schema_df}
 
     def __str__(self):
         return self._ops_str()
 
     def _ops_str(self):
         res = ""
-        for op in self.ctx['operations']:
+        for op in self.ctx["operations"]:
             if len(res) > 0:
                 res += "\n"
             res += str(op)
@@ -77,8 +88,8 @@ class Capture:
 
     def __getstate__(self):
         # TODO(VitalyFedyunin): Currently can't pickle (why?)
-        self.ctx['schema_df'] = None
-        for var in self.ctx['variables']:
+        self.ctx["schema_df"] = None
+        for var in self.ctx["variables"]:
             var.calculated_value = None
         state = {}
         for item in self.__dict__:
@@ -90,9 +101,9 @@ class Capture:
             setattr(self, k, v)
 
     def __getattr__(self, attrname):
-        if attrname == 'kwarg' or attrname == 'kwargs':
-            raise Exception('no kwargs!')  # noqa: TRY002
-        if attrname in ['__deepcopy__']:
+        if attrname == "kwarg" or attrname == "kwargs":
+            raise RuntimeError("no kwargs!")
+        if attrname in ["__deepcopy__"]:
             raise AttributeError
         result = CaptureGetAttr(self, attrname, ctx=self.ctx)
         return result
@@ -101,42 +112,43 @@ class Capture:
         return CaptureGetItem(self, key, ctx=self.ctx)
 
     def __setitem__(self, key, value):
-        self.ctx['operations'].append(
-            CaptureSetItem(self, key, value, ctx=self.ctx))
+        self.ctx["operations"].append(CaptureSetItem(self, key, value, ctx=self.ctx))
 
     def __add__(self, add_val):
         res = CaptureAdd(self, add_val, ctx=self.ctx)
         var = CaptureVariable(res, ctx=self.ctx)
-        self.ctx['operations'].append(
-            CaptureVariableAssign(variable=var, value=res, ctx=self.ctx))
+        self.ctx["operations"].append(
+            CaptureVariableAssign(variable=var, value=res, ctx=self.ctx)
+        )
         return var
 
     def __sub__(self, add_val):
         res = CaptureSub(self, add_val, ctx=self.ctx)
         var = CaptureVariable(res, ctx=self.ctx)
-        self.ctx['operations'].append(
-            CaptureVariableAssign(variable=var, value=res, ctx=self.ctx))
+        self.ctx["operations"].append(
+            CaptureVariableAssign(variable=var, value=res, ctx=self.ctx)
+        )
         return var
 
     def __mul__(self, add_val):
         res = CaptureMul(self, add_val, ctx=self.ctx)
         var = CaptureVariable(res, ctx=self.ctx)
         t = CaptureVariableAssign(variable=var, value=res, ctx=self.ctx)
-        self.ctx['operations'].append(t)
+        self.ctx["operations"].append(t)
         return var
 
     def _is_context_empty(self):
-        return len(self.ctx['operations']) == 0 and len(self.ctx['variables']) == 0
+        return len(self.ctx["operations"]) == 0 and len(self.ctx["variables"]) == 0
 
     def apply_ops_2(self, dataframe):
         # TODO(VitalyFedyunin): Make this calculation thread safe (as currently it updates pointer)
-        self.ctx['variables'][0].calculated_value = dataframe
-        for op in self.ctx['operations']:
+        self.ctx["variables"][0].calculated_value = dataframe
+        for op in self.ctx["operations"]:
             op.execute()
 
     @property
     def columns(self):
-        self.apply_ops_2(self.ctx['schema_df'])
+        self.apply_ops_2(self.ctx["schema_df"])
         value = self.execute()
         return value.columns
 
@@ -163,14 +175,14 @@ class Capture:
         res = CaptureCall(self, ctx=self.ctx, args=args, kwargs=kwargs)
         var = CaptureVariable(None, ctx=self.ctx)
         t = CaptureVariableAssign(ctx=self.ctx, variable=var, value=res)
-        self.ctx['operations'].append(t)
+        self.ctx["operations"].append(t)
         return var
 
 
 class CaptureF(Capture):
     def __init__(self, ctx=None, **kwargs):
         if ctx is None:
-            self.ctx = {'operations': [], 'variables': []}
+            self.ctx = {"operations": [], "variables": []}
         else:
             self.ctx = ctx
         self.kwargs = kwargs
@@ -181,7 +193,7 @@ class CaptureA(CaptureF):
         return f"{self.kwargs['name']}"
 
     def execute(self):
-        value = self.kwargs['real_attribute']
+        value = self.kwargs["real_attribute"]
         return value
 
 
@@ -205,39 +217,39 @@ class CaptureLikeMock:
 
 
 class CaptureCall(Capture):
-
     def __init__(self, callable, ctx=None, **kwargs):
         if ctx is None:
-            self.ctx = {'operations': [], 'variables': []}
+            self.ctx = {"operations": [], "variables": []}
         else:
             self.ctx = ctx
         self.kwargs = kwargs
         self.callable = callable
 
     def __str__(self):
-        return "{callable}({args},{kwargs})".format(callable=self.callable, **self.kwargs)
+        return "{callable}({args},{kwargs})".format(
+            callable=self.callable, **self.kwargs
+        )
 
     def execute(self):
-
         # TODO: VitalyFedyunin execute kwargs and maybe nested structures
         executed_args = []
-        for arg in self.kwargs['args']:
+        for arg in self.kwargs["args"]:
             if isinstance(arg, Capture):
                 executed_args.append(arg.execute())
             else:
                 executed_args.append(arg)
         left = get_val(self.callable)
-        return left(*executed_args, **self.kwargs['kwargs'])
+        return left(*executed_args, **self.kwargs["kwargs"])
 
 
 class CaptureVariableAssign(CaptureF):
     def __str__(self):
-        variable = self.kwargs['variable']
-        value = self.kwargs['value']
+        variable = self.kwargs["variable"]
+        value = self.kwargs["value"]
         return f"{variable} = {value}"
 
     def execute(self):
-        self.kwargs['variable'].calculated_value = self.kwargs['value'].execute()
+        self.kwargs["variable"].calculated_value = self.kwargs["value"].execute()
 
 
 class CaptureVariable(Capture):
@@ -246,12 +258,12 @@ class CaptureVariable(Capture):
 
     def __init__(self, value, ctx):
         if CaptureControl.disabled:
-            raise Exception('Attempting to create capture variable with capture off')  # noqa: TRY002
+            raise RuntimeError("Attempting to create capture variable with capture off")
         self.ctx = ctx
         self.value = value
-        self.name = f'var_{CaptureVariable.names_idx}'
+        self.name = f"var_{CaptureVariable.names_idx}"
         CaptureVariable.names_idx += 1
-        self.ctx['variables'].append(self)
+        self.ctx["variables"].append(self)
 
     def __str__(self):
         return self.name
@@ -261,8 +273,8 @@ class CaptureVariable(Capture):
 
     def apply_ops(self, dataframe):
         # TODO(VitalyFedyunin): Make this calculation thread safe (as currently it updates pointer)
-        self.ctx['variables'][0].calculated_value = dataframe
-        for op in self.ctx['operations']:
+        self.ctx["variables"][0].calculated_value = dataframe
+        for op in self.ctx["operations"]:
             op.execute()
         return self.calculated_value
 
@@ -361,9 +373,13 @@ def get_val(capture):
 
 class CaptureInitial(CaptureVariable):
     def __init__(self, schema_df=None):
-        new_ctx: Dict[str, List[Any]] = {'operations': [], 'variables': [], 'schema_df': schema_df}
+        new_ctx: Dict[str, List[Any]] = {
+            "operations": [],
+            "variables": [],
+            "schema_df": schema_df,
+        }
         super().__init__(None, new_ctx)
-        self.name = f'input_{self.name}'
+        self.name = f"input_{self.name}"
 
 
 class CaptureDataFrame(CaptureInitial):
@@ -372,8 +388,7 @@ class CaptureDataFrame(CaptureInitial):
 
 class CaptureDataFrameWithDataPipeOps(CaptureDataFrame):
     def as_datapipe(self):
-        return DataFrameTracedOps(
-            self.ctx['variables'][0].source_datapipe, self)
+        return DataFrameTracedOps(self.ctx["variables"][0].source_datapipe, self)
 
     def raw_iterator(self):
         return self.as_datapipe().__iter__()
@@ -387,16 +402,23 @@ class CaptureDataFrameWithDataPipeOps(CaptureDataFrame):
         dp._dp_contains_dataframe = True
         return dp
 
-    def groupby(self,
-                group_key_fn,
-                *,
-                buffer_size=10000,
-                group_size=None,
-                guaranteed_group_size=None,
-                drop_remaining=False):
+    def groupby(
+        self,
+        group_key_fn,
+        *,
+        buffer_size=10000,
+        group_size=None,
+        guaranteed_group_size=None,
+        drop_remaining=False,
+    ):
         dp = self._dataframes_per_row()
-        dp = dp.as_datapipe().groupby(group_key_fn, buffer_size=buffer_size, group_size=group_size,
-                                      guaranteed_group_size=guaranteed_group_size, drop_remaining=drop_remaining)
+        dp = dp.as_datapipe().groupby(
+            group_key_fn,
+            buffer_size=buffer_size,
+            group_size=group_size,
+            guaranteed_group_size=guaranteed_group_size,
+            drop_remaining=drop_remaining,
+        )
         return dp
 
     def shuffle(self, *args, **kwargs):
@@ -406,17 +428,17 @@ class CaptureDataFrameWithDataPipeOps(CaptureDataFrame):
         return self._dataframes_filter(*args, **kwargs)
 
     def collate(self, *args, **kwargs):
-        raise Exception("Can't collate unbatched DataFrames stream")  # noqa: TRY002
+        raise RuntimeError("Can't collate unbatched DataFrames stream")
 
     def __getattr__(self, attrname):  # ?
         if attrname in UNIMPLEMENTED_ATTR:
-            raise AttributeError('Attempting to get ', attrname)
+            raise AttributeError("Attempting to get ", attrname)
         if attrname in DATAPIPES_OPS:
             return (self.as_datapipe()).__getattr__(attrname)
         return super().__getattr__(attrname)
 
 
-@functional_datapipe('trace_as_dataframe')
+@functional_datapipe("trace_as_dataframe")
 class DataFrameTracer(CaptureDataFrameWithDataPipeOps, IterDataPipe):  # type: ignore[misc]
     source_datapipe: Optional[Any] = None
 
