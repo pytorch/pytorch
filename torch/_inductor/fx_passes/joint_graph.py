@@ -1,15 +1,18 @@
 # mypy: allow-untyped-defs
 import itertools
 import logging
-from typing import Dict, List, Set, Union
+import typing
+from collections import Counter
+from typing import Any, Dict, List, Set, Union
 
 import torch
 import torch._guards
+import torch.utils._pytree as pytree
 from torch._inductor.constant_folding import ConstantFolder
+from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
 from torch.fx.experimental.symbolic_shapes import statically_known_true
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.multiprocessing.reductions import StorageWeakRef
-from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import config
 from ..pattern_matcher import (
@@ -200,6 +203,8 @@ class UniformValueConstantFolder(ConstantFolder):
         # see: [constant folding refining of symints]
         self.node_replacements_shapes: Dict[torch.fx.Node, List[int]] = {}
 
+        self.symint_nodes = _SymHashingDict()
+
         # reference from torch/_funtorch/partitioners.py:get_default_op_list
         self.view_op_packets = [
             aten.squeeze,
@@ -224,6 +229,16 @@ class UniformValueConstantFolder(ConstantFolder):
     def add_node_replacement(self, node: torch.fx.Node, tensor: torch.Tensor) -> None:
         self.node_replacements[node] = tensor.flatten()[0].item()
         self.node_replacements_shapes[node] = node.meta["val"].shape
+        self.constant_data_ptrs[node] = StorageWeakRef(tensor.untyped_storage())
+
+    def insert_placerholder_values(self, env: Dict[torch.fx.Node, Any]) -> None:
+        for n in self.module.graph.find_nodes(op="placeholder"):
+            if "val" in n.meta and isinstance(n.meta["val"], torch.SymInt):
+                s = n.meta["val"]
+                env[n] = s
+                self.symint_nodes[s] = n
+            else:
+                env[n] = self.unknown_value
 
     def _deduce_value(self, node: torch.fx.Node):
         # deduce value for full-like nodes
@@ -241,41 +256,37 @@ class UniformValueConstantFolder(ConstantFolder):
             and len(node.args) == 2
         ):
             new_args = [[1], node.args[1]]
-            out = node.target(*new_args, **node.kwargs)
-            return out
+            return aten.full.default(*new_args, **node.kwargs)
 
         # view ops, return input tensor, the first argument
         if (
             hasattr(node.target, "overloadpacket")
             and node.target.overloadpacket in self.view_op_packets
         ):
+            assert isinstance(node.args[0], torch.fx.Node)
             return self.env[node.args[0]]
 
-        # pointwise ops
-        if hasattr(node.target, "tags") and torch.Tag.pointwise in node.target.tags:
-            args, kwargs = self.fetch_args_kwargs_from_env(node)
-            out = node.target(*args, **kwargs)
-            return out
-
-        # here we deal with some cases
-
-        # symbolic / unback symbolic int value
+        # we don't want to return unknown value for symints so that we can
+        # still constant fold through their use in constructors or views
+        # if we see them in a pointwise node (e.g., tensor * symint)
+        # we will bail
         if "val" in node.meta and isinstance(node.meta["val"], torch.SymInt):
             s = node.meta["val"]
+            self.symint_nodes[node] = s
+            return s
 
-            # symbolic int value for size
-            if s.node.shape_env.has_hint(s.node.expr):
-                val = s.node.shape_env.size_hint(s.node.expr)
-                self.symint_nodes[str(s)] = node
-                return val
+        # pointwise ops
+        if (
+            isinstance(node.target, torch._ops.OpOverload)
+            and torch.Tag.pointwise in node.target.tags
+        ):
+            args, kwargs = self.fetch_args_kwargs_from_env(node)
+            flattened_inputs = pytree.arg_tree_leaves(*args, **kwargs)
 
-            # unbacked symbolic value, run node to get value
-            # the reason for doing this is to allow the derivation to continue, rather than return unknown value
-            if symbol_is_type(s.node.expr, SymT.UNBACKED_INT):
-                args, kwargs = self.fetch_args_kwargs_from_env(node)
-                out = node.target(*args, **kwargs)
-                self.symint_nodes[str(s)] = node
-                return out
+            if any(isinstance(inp, torch.SymInt) for inp in flattened_inputs):
+                return self.unknown_value
+
+            return node.target(*args, **kwargs)
 
         return self.unknown_value
 
@@ -306,6 +317,13 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
     zeros = set()
     ones = set()
 
+    # Got failures in `test_is_set_to_cuda` if we change aliasing on constants,
+    # so just constant-ify if a Tensor is unaliased
+    constant_data_ptr_count: typing.Counter[StorageWeakRef] = Counter()
+
+    for node in cf.node_replacements:
+        constant_data_ptr_count[cf.constant_data_ptrs[node]] += 1
+
     for node, value in node_replacements.items():
         # we dont have a functional way right now of instantiating a non-contiguous tensor with full/zeros/ones right now
         # hasn't shown up to be important yet
@@ -315,6 +333,9 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
 
         fake_tensor = node.meta["val"]
         if not fake_tensor.is_contiguous(memory_format=torch.contiguous_format):
+            continue
+
+        if constant_data_ptr_count[cf.constant_data_ptrs[node]] > 1:
             continue
 
         with graph.inserting_after(node):
@@ -335,7 +356,7 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
             # replace SymInt as Node before creating a new full node
             # e.g. (1, s0) -> (1, arg0_1)
             shapes = [
-                cf.symint_nodes[str(s)] if isinstance(s, torch.SymInt) else s
+                cf.symint_nodes[s] if isinstance(s, torch.SymInt) else s
                 for s in node_replacements_shapes[node]
             ]
 

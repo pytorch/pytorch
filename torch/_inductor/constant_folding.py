@@ -60,8 +60,6 @@ class ConstantFolder(torch.fx.Interpreter):
         # is the output
         self.user_to_last_uses = self.node_to_last_non_output_use()
 
-        self.symint_nodes: Dict[str, torch.fx.Node] = {}
-
     def _support_dynamic_shape(self):
         # ConstantFolder not support dynamic shape now
         return False
@@ -205,19 +203,13 @@ class ConstantFolder(torch.fx.Interpreter):
         self.node_replacements[node] = tensor
 
     def run(self):
-        env = {}
-        for n in self.module.graph.find_nodes(op="placeholder"):
-            if (
-                self._support_dynamic_shape()
-                and "val" in n.meta
-                and isinstance(n.meta["val"], torch.SymInt)
-            ):
-                s = n.meta["val"]
-                env[n] = s.node.shape_env.size_hint(s.node.expr)
-                self.symint_nodes[str(s)] = n
-            else:
-                env[n] = self.unknown_value
+        env: Dict[torch.fx.Node, Any] = {}
+        self.insert_placerholder_values(env)
         return super().run(initial_env=env)
+
+    def insert_placerholder_values(self, env: Dict[torch.fx.Node, Any]) -> None:
+        for n in self.module.graph.find_nodes(op="placeholder"):
+            env[n] = self.unknown_value
 
 
 @torch.utils._python_dispatch._disable_current_modes()
