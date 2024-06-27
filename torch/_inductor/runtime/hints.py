@@ -112,7 +112,7 @@ class DeviceProperties(typing.NamedTuple):
 
         device_type = device.type if torch.version.hip is None else "hip"
         device_interface = get_interface_for_device(device)
-        if device_type == "cuda":
+        if any(accepted_type in device_type for accepeted_type in ["cuda", "hip"]):
             props = device_interface.get_device_properties(device)
             return cls(
                 type=device_type,
@@ -122,6 +122,7 @@ class DeviceProperties(typing.NamedTuple):
                 regs_per_multiprocessor=props.regs_per_multiprocessor,
                 max_threads_per_multi_processor=props.max_threads_per_multi_processor,
                 multi_processor_count=props.multi_processor_count,
+                warp_size = 64 if torch.version.hip else 32
             )
         return cls(
             type=device_type,
