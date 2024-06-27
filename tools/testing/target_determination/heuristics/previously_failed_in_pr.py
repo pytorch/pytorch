@@ -8,6 +8,7 @@ from tools.stats.import_test_stats import (
     TD_HEURISTIC_PREVIOUSLY_FAILED,
     TD_HEURISTIC_PREVIOUSLY_FAILED_ADDITIONAL,
 )
+
 from tools.testing.target_determination.heuristics.interface import (
     HeuristicInterface,
     TestPrioritizations,
@@ -17,8 +18,7 @@ from tools.testing.target_determination.heuristics.utils import (
 )
 from tools.testing.test_run import TestRun
 
-
-REPO_ROOT = Path(__file__).resolve().parents[4]
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
 
 
 class PreviouslyFailedInPR(HeuristicInterface):
