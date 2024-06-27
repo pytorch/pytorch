@@ -23,7 +23,7 @@ from torch._utils_internal import get_file_path_2
 from torch._utils import _rebuild_tensor
 from torch.utils._import_utils import import_dill
 from torch.serialization import check_module_version_greater_or_equal, get_default_load_endianness, \
-    set_default_load_endianness, LoadEndianness
+    set_default_load_endianness, LoadEndianness, SourceChangeWarning
 
 from torch.testing._internal.common_utils import (
     IS_FILESYSTEM_UTF8_ENCODING, TemporaryDirectoryName,
@@ -837,6 +837,7 @@ class TestBothSerialization(TestCase):
                 test(f_new, f_old)
             self.assertTrue(len(w) == 0, msg=f"Expected no warnings but got {[str(x) for x in w]}")
 
+
 class TestOldSerialization(TestCase, SerializationMixin):
     # unique_key is necessary because on Python 2.7, if a warning passed to
     # the warning module is the same, it is not raised again.
@@ -866,6 +867,7 @@ class TestOldSerialization(TestCase, SerializationMixin):
                 if can_retrieve_source:
                     self.assertEqual(len(w), 1)
                     self.assertEqual(w[0].category, FutureWarning)
+                    self.assertTrue("You are using `torch.load` with `weights_only=False`" in str(w[0].message))
 
             # Replace the module with different source
             fname = get_file_path_2(os.path.dirname(os.path.dirname(torch.__file__)), 'torch', 'testing',
@@ -877,7 +879,8 @@ class TestOldSerialization(TestCase, SerializationMixin):
                 self.assertTrue(isinstance(loaded, module.Net))
                 if can_retrieve_source:
                     self.assertEqual(len(w), 2)
-                    self.assertTrue(w[1].category, 'SourceChangeWarning')
+                    self.assertEqual(w[0].category, FutureWarning)
+                    self.assertEqual(w[1].category, SourceChangeWarning)
 
     def test_serialization_container(self):
         self._test_serialization_container('file', tempfile.NamedTemporaryFile)

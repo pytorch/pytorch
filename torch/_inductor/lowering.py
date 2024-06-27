@@ -2272,6 +2272,16 @@ make_fallback(
     warn=False,
 )
 make_fallback(
+    aten._scaled_dot_product_cudnn_attention.default,
+    sdpa_constraint,
+    warn=False,
+)
+make_fallback(
+    aten._scaled_dot_product_cudnn_attention_backward.default,
+    sdpa_constraint,
+    warn=False,
+)
+make_fallback(
     aten._scaled_dot_product_flash_attention_for_cpu.default,
     sdpa_constraint,
     warn=False,
@@ -3157,42 +3167,6 @@ def index_put_impl_(self, indices, values, accumulate, check):
     if x_ndim == 0:
         self = view(self, [])
     return self
-
-
-@register_lowering(
-    inductor_prims.masked_scatter_with_index, type_promotion_kind=None, broadcast=False
-)
-def masked_scatter_with_index(self, mask, source_idx, source):
-    self_flat, mask_flat, source_flat = (view(x, (-1,)) for x in (self, mask, source))
-
-    assert self.get_size() == mask.get_size()
-    assert mask.get_dtype() in {torch.bool, torch.uint8}
-
-    self_loader = self_flat.make_loader()
-    mask_loader = mask_flat.make_loader()
-    source_idx_loader = source_idx.make_loader()
-    source_loader = source_flat.make_loader()
-    source_numel = source.get_numel()
-
-    def inner_fn(idx):
-        self_val = self_loader(idx)
-        mask_val = ops.to_dtype(mask_loader(idx), torch.bool)
-
-        def load_source_val():
-            source_idx_val = source_idx_loader(idx)
-            i = ops.indirect_indexing(source_idx_val, source_numel)
-            return source_loader([i])
-
-        source_val = ops.masked(mask_val, load_source_val, 0)
-        return ops.where(mask_val, source_val, self_val)
-
-    result_flat = Pointwise.create(
-        device=self.get_device(),
-        dtype=self.get_dtype(),
-        inner_fn=inner_fn,
-        ranges=self_flat.get_size(),
-    )
-    return view(result_flat, self.get_size())
 
 
 fallback__unsafe_masked_index = fallback_handler(
@@ -5756,6 +5730,49 @@ reduce_argmin = register_lowering(aten.argmin)(
 add = register_pointwise(
     aten.add, allow_alpha=True, override_fn_when_input_bool="logical_or"
 )
+
+sort_fallback = fallback_handler(aten.sort.stable, add_to_fallback_set=False)
+
+
+@register_lowering(aten.sort.stable, type_promotion_kind=None)
+def sort_stable(x, *, stable=None, dim=-1, descending=False):
+    if stable is None:
+        stable = False
+
+    shape = x.get_size()
+    device = x.get_device()
+    dim = canonicalize_dim(len(shape), dim)
+    if len(shape) == 0:
+        return clone(x), _full(0, device, torch.int64, shape)
+
+    dim_size = shape[dim] if len(shape) else 1
+    indices = iota(
+        dim_size, start=0, step=1, dtype=torch.int64, device=device, requires_grad=False
+    )
+    view_shape = [1] * len(shape)
+    if len(shape):
+        view_shape[dim] = dim_size
+    indices = view(indices, view_shape)
+    indices = expand(indices, shape)
+
+    values, indices = ir.Sort.create(
+        device=device,
+        dtypes=(x.dtype, indices.dtype),
+        inner_fns=(x.make_loader(), indices.make_loader()),
+        size=shape,
+        axis=dim,
+        stable=stable,
+        descending=descending,
+    )
+    if values is None:
+        return sort_fallback(x, stable=stable, dim=dim, descending=descending)
+
+    return values, indices
+
+
+@register_lowering(aten.sort.default, type_promotion_kind=None)
+def sort(x, dim=-1, descending=False):
+    return sort_stable(x, stable=False, dim=dim, descending=descending)
 
 
 def register_pointwise_numeric(op, name=None, triton_fallback=None):
