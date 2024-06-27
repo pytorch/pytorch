@@ -750,21 +750,25 @@ copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
       POLICY)
 
 // KERNEL_MPS registration for AutocastMPS
-#define KERNEL_MPS(OP, POLICY) \
-  m.impl(TORCH_SELECTIVE_NAME("aten::" #OP),                  \
-    &WrapFunction<CastPolicy::POLICY,                         \
-    DeviceType::MPS,                                          \
-    decltype(ATEN_FN(OP)),                                    \
-    decltype(ATEN_FN(OP)),                                    \
-    &ATEN_FN(OP)>::type::call);
+#define KERNEL_MPS(OP, POLICY)            \
+  m.impl(                                 \
+      TORCH_SELECTIVE_NAME("aten::" #OP), \
+      &WrapFunction<                      \
+          CastPolicy::POLICY,             \
+          DeviceType::MPS,                \
+          decltype(ATEN_FN(OP)),          \
+          decltype(ATEN_FN(OP)),          \
+          &ATEN_FN(OP)>::type::call);
 
-#define KERNEL_MPS2(OP, OVERLOAD, POLICY)                     \
-  m.impl(TORCH_SELECTIVE_NAME("aten::" #OP "." #OVERLOAD),    \
-    &WrapFunction<CastPolicy::POLICY,                         \
-    DeviceType::MPS,                                          \
-    decltype(ATEN_FN2(OP, OVERLOAD)),                         \
-    decltype(ATEN_FN2(OP, OVERLOAD)),                         \
-    &ATEN_FN2(OP, OVERLOAD)>::type::call);
+#define KERNEL_MPS2(OP, OVERLOAD, POLICY)               \
+  m.impl(                                               \
+      TORCH_SELECTIVE_NAME("aten::" #OP "." #OVERLOAD), \
+      &WrapFunction<                                    \
+          CastPolicy::POLICY,                           \
+          DeviceType::MPS,                              \
+          decltype(ATEN_FN2(OP, OVERLOAD)),             \
+          decltype(ATEN_FN2(OP, OVERLOAD)),             \
+          &ATEN_FN2(OP, OVERLOAD)>::type::call);
 
 // Op lists for different policies.
 // To make sure other backends can reuse the policy op list.
