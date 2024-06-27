@@ -254,10 +254,26 @@ class TS2FXGraphConverter:
             str, Union[torch.fx.Node, List[torch.fx.Node], Dict[Any, torch.fx.Node]]
         ] = {}
         self.constant_map: Dict[str, Any] = {}
+
+        # Mapping from torchscript node output name to attribute fully qualified name
         self.name_to_attribute_fqn: Dict[str, str] = {}
+
         self.name_to_tensor_constants: Dict[str, torch.Tensor] = {}
-        self.name_to_non_tensor_attribute: Dict[str, Any] = name_to_non_tensor_attribute
+
+        # Mapping from fully qualified name to real values or a fx graph node
+        # During convert, this represents the current value of a non-tensor attribute
+        # One use case is:
+        #   def forward(self, x):
+        #        c1 = self.count
+        #        self.count += 1
+        #        c2 = self.count
+        #        return x + c1 + c2
         self.name_to_non_tensor_attribute_node: Dict[str, Any] = {}
+
+        # Mapping from fully qualified name to initial real values inputs
+        # We separate it from self.name_to_non_tensor_attribute_node since we need initial 
+        # real value input when we construct fx.GraphModule
+        self.name_to_non_tensor_attribute: Dict[str, Any] = name_to_non_tensor_attribute
 
         self.subgraphs: Dict[str, torch.fx.GraphModule] = {}
 
@@ -444,6 +460,8 @@ class TS2FXGraphConverter:
                     attr_fqn
                 ]
         else:
+            # Special support for if blocks which do not allow SetAttr TorchScript node and get_attr
+            # FX Graph Node.
             if attr_value.type().annotation_str == "Tensor":
                 self.name_to_node[output_name] = self.name_to_node[attr_fqn]
 
