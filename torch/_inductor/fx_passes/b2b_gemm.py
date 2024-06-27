@@ -31,7 +31,6 @@ b2b_gemm_template = TritonTemplate(
 
 
     # B2B_GEMM_TRITON_ENTRANCE
-    # TODO: handle the non-divisible case
     M = {{size("A", 0)}}
     N = {{size("A", 1)}}
     O = {{size("C", 0)}}
@@ -45,9 +44,11 @@ b2b_gemm_template = TritonTemplate(
     stride_cp = {{stride("C", 1)}}
 
     # output (M * P) block ids
+    num_m_block = tl.cdiv(M, BLOCK_SIZE_M)
+    num_p_block = tl.cdiv(P, BLOCK_SIZE_P)
     pid = tl.program_id(axis=0)
-    m_block_id = pid // (P // BLOCK_SIZE_P)
-    p_block_id = pid % (P // BLOCK_SIZE_P)
+    m_block_id = pid // num_p_block
+    p_block_id = pid % num_p_block
 
     # internal block numbers
     num_n_block = tl.cdiv(N, BLOCK_SIZE_N)
@@ -57,30 +58,30 @@ b2b_gemm_template = TritonTemplate(
     acc = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_P), dtype=tl.float32)
 
     for n_block_id in range(num_n_block):
-        a_ptrs = A + (
-            (m_block_id * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M))[:, None] * stride_am +
-            (n_block_id * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N))[None, :] * stride_an
-        )
-        a = tl.load(a_ptrs)
+        a_offs_m = (m_block_id * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M))[:, None]
+        a_offs_n = (n_block_id * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N))[None, :]
+        a_mask = (a_offs_m < M) & (a_offs_n < N)
+        a_ptrs = A + (a_offs_m * stride_am + a_offs_n * stride_an)
+        a = tl.load(a_ptrs, mask=a_mask, other=0.0)
         for o_block_id in range(num_o_block):
-            b_ptrs = B + (
-                (n_block_id * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N))[:, None] * stride_bn +
-                (o_block_id * BLOCK_SIZE_O + tl.arange(0, BLOCK_SIZE_O))[None, :] * stride_bo
-            )
-            b = tl.load(b_ptrs)
-            c_ptrs = C + (
-                (o_block_id * BLOCK_SIZE_O + tl.arange(0, BLOCK_SIZE_O))[:, None] * stride_co +
-                (p_block_id * BLOCK_SIZE_P + tl.arange(0, BLOCK_SIZE_P))[None, :] * stride_cp
-            )
-            c = tl.load(c_ptrs)
+            b_offs_n = (n_block_id * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N))[:, None]
+            b_offs_o = (o_block_id * BLOCK_SIZE_O + tl.arange(0, BLOCK_SIZE_O))[None, :]
+            b_mask = (b_offs_n < N) & (b_offs_o < O)
+            b_ptrs = B + (b_offs_n * stride_bn + b_offs_o * stride_bo)
+            b = tl.load(b_ptrs, mask=b_mask, other=0.0)
+            c_offs_o = (o_block_id * BLOCK_SIZE_O + tl.arange(0, BLOCK_SIZE_O))[:, None]
+            c_offs_p = (p_block_id * BLOCK_SIZE_P + tl.arange(0, BLOCK_SIZE_P))[None, :]
+            c_mask = (c_offs_o < O) & (c_offs_p < P)
+            c_ptrs = C + (c_offs_o * stride_co + c_offs_p * stride_cp)
+            c = tl.load(c_ptrs, mask=c_mask, other=0.0)
             acc += tl.dot(tl.dot(a, b, out_dtype=tl.float16), c, out_dtype=tl.float16)
 
     # store
-    idx_m = (m_block_id * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M))[:, None]
-    idx_p = (p_block_id * BLOCK_SIZE_P + tl.arange(0, BLOCK_SIZE_P))[None, :]
-    mask = (idx_m < M) & (idx_p < P)
+    d_offs_m = (m_block_id * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M))[:, None]
+    d_offs_p = (p_block_id * BLOCK_SIZE_P + tl.arange(0, BLOCK_SIZE_P))[None, :]
+    d_mask = (d_offs_m < M) & (d_offs_p < P)
 
-    {{store_output(("idx_m", "idx_p"), "acc", "mask")}}
+    {{store_output(("d_offs_m", "d_offs_p"), "acc", "d_mask")}}
 """,
 )
 
@@ -103,12 +104,7 @@ def can_apply_b2b_gemm(match: Match) -> bool:
     if not ((mat1.shape[1] == mat2.shape[0]) and (mat2.shape[1] == mat3.shape[0])):
         return False
     # TODO: change to a real-check for size restrictions (may consider hardware limit?)
-    m, n, o, p = mat1.shape[0], mat1.shape[1], mat3.shape[0], mat3.shape[1]
-    m_ok = (m % 64 == 0) and (m >= 64)
-    n_ok = (n % 64 == 0) and (n >= 64)
-    o_ok = (o % 64 == 0) and (o >= 64)
-    p_ok = (p % 64 == 0) and (p >= 64)
-    return m_ok and n_ok and o_ok and p_ok
+    return True
 
 
 def tuned_b2b_gemm(mat1, mat2, mat3, *, layout=None):
