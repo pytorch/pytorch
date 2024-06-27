@@ -7,12 +7,12 @@ from typing import Any, cast, List, Optional, Sequence, Tuple
 import torch
 import torch._dynamo.compiled_autograd as ca
 import torch.nn as nn
-
 from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed._tensor import DTensor, Replicate, Shard
 from torch.distributed._tensor.device_mesh import _mesh_resources
 from torch.distributed._tensor.placement_types import DTensorSpec, Placement, TensorMeta
+
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_common import (
     _chunk_with_empty,
@@ -23,6 +23,7 @@ from ._fsdp_common import (
     FSDPMeshInfo,
     HSDPMeshInfo,
 )
+
 
 """
 [Note: FSDP tensors]
@@ -60,6 +61,24 @@ it in-place thereafter. For the default ``torch.Tensor` original parameter
 case, the all-gather output and unsharded parameter share the same
 data, so we use storage resizing on the all-gather output.
 """
+
+lib = torch.library.Library("fsdp", "FRAGMENT")  # noqa: TOR901
+
+lib.define("set_(Tensor(a!) tensor, Tensor data) -> ()")
+
+
+@torch.library.impl(lib, "set_", "Meta")
+@torch.library.impl(lib, "set_", "CUDA")
+@torch.library.impl(lib, "set_", "CPU")
+def set_(tensor, data):
+    tensor.set_(data)
+
+
+@torch.library.impl(lib, "set_", "Functionalize")
+def set__functionalize(tensor, data):
+    tensor_inner = torch._from_functional_tensor(tensor)
+    data_inner = torch._from_functional_tensor(data)
+    tensor_inner.set_(data_inner)  # type: ignore[call-overload]
 
 
 class ShardedState(Enum):
@@ -384,8 +403,7 @@ class FSDPParam:
         if hasattr(self, "_unsharded_param"):
             assert ca.compiled_autograd_enabled
             with torch.no_grad():
-                alloc_storage(self._unsharded_param)
-                self._unsharded_param.copy_(unsharded_param)
+                torch.ops.fsdp.set_(self._unsharded_param, unsharded_param)
         else:
             self._unsharded_param = nn.Parameter(
                 unsharded_param, requires_grad=self.sharded_param.requires_grad

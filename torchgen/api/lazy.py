@@ -20,7 +20,6 @@ from torchgen.api.types import (
     SymIntT,
     VectorCType,
 )
-
 from torchgen.model import (
     Argument,
     BaseTy,

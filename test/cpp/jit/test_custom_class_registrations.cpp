@@ -190,6 +190,15 @@ struct TensorQueue : torch::CustomClassHolder {
     return queue_.size();
   }
 
+  bool is_empty() {
+    std::lock_guard<std::mutex> guard(mutex_);
+    return queue_.empty();
+  }
+
+  double float_size() {
+    return 1. * queue_.size();
+  }
+
   std::vector<at::Tensor> clone_queue() {
     std::lock_guard<std::mutex> guard(mutex_);
     std::vector<at::Tensor> ret;
@@ -580,6 +589,8 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
       .def("push", &TensorQueue::push)
       .def("pop", &TensorQueue::pop)
       .def("top", &TensorQueue::top)
+      .def("is_empty", &TensorQueue::is_empty)
+      .def("float_size", &TensorQueue::float_size)
       .def("size", &TensorQueue::size)
       .def("clone_queue", &TensorQueue::clone_queue)
       .def("get_raw_queue", &TensorQueue::get_raw_queue)

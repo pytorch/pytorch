@@ -1014,6 +1014,23 @@ Tensor unbind_backward_nested(
   return at::_nested_tensor_from_tensor_list(grads_tensors);
 }
 
+Tensor unbind_backward_nested_jagged(
+    const variable_list& grads,
+    const Tensor& self,
+    int64_t dim) {
+  TORCH_INTERNAL_ASSERT(
+      dim == 0, "unbind_backward_nested_jagged() only supports dim=0")
+  auto grad_nt = at::zeros_like(self);
+  auto unbound_grads = grad_nt.unbind();
+  for (int64_t i : c10::irange(static_cast<int64_t>(grads.size()))) {
+    if (grads[i].defined()) {
+      unbound_grads[i].copy_(static_cast<Tensor>(grads[i]));
+    }
+  }
+
+  return grad_nt;
+}
+
 Tensor unsqueeze_to(const Tensor& self, c10::SymIntArrayRef sym_sizes) {
   auto result = self;
 
