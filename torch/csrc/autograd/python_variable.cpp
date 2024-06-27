@@ -1084,15 +1084,13 @@ int THPVariable_set_grad(THPVariable* self, PyObject* py_grad, void* unused) {
         grad.options().type_equal(var.options()),
         "attempting to assign a gradient to a tensor that has data of a different type");
   }
-  if (var.is_cuda()) {
-    TORCH_CHECK(
-        grad.get_device() == var.get_device(),
-        "attempting to assign a gradient located on device with index '",
-        grad.get_device(),
-        "' to a tensor located on device with index '",
-        var.get_device(),
-        "'. Please ensure that the gradient and the tensor are on the same device");
-  }
+  TORCH_CHECK(
+      grad.get_device() == var.get_device(),
+      "attempting to assign a gradient located on device with index '",
+      grad.get_device(),
+      "' to a tensor located on device with index '",
+      var.get_device(),
+      "'. Please ensure that the gradient and the tensor are on the same device");
   TORCH_CHECK(
       grad.sym_sizes().equals(var.sym_sizes()),
       "attempting to assign a gradient of size '",
