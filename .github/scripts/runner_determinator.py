@@ -56,7 +56,7 @@ def set_github_output(key: str, value: str) -> None:
 
     with open(GITHUB_OUTPUT, "a") as f:
         log.info(f"Setting output: {key}='{value}'")
-        f.write(f"{key}-{value}\n")
+        f.write(f"{key}={value}\n")
 
 
 def parse_args() -> Any:
