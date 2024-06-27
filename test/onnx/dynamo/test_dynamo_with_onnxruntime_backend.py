@@ -392,13 +392,13 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
                 number_of_exported_onnx_models_for_all_graph_modules=(1, 1),
             )
 
-    @skipIfNNModuleInlined("https://github.com/pytorch/pytorch/issues/129456")
     @parameterized.expand(
         [
             (True, True),
             (True, False),
         ]
     )
+    @skipIfNNModuleInlined("https://github.com/pytorch/pytorch/issues/129456")
     def test_llama_attention_with_local_backend(
         self, test_local_backend: bool, test_backward: bool
     ):
@@ -488,13 +488,13 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
             )
             self._assert_dynamic_input_and_output_shapes_in_all_onnx_models(local_ort)
 
-    @skipIfNNModuleInlined("https://github.com/pytorch/pytorch/issues/129456")
     @parameterized.expand(
         [
             (True, False),
             (True, True),
         ]
     )
+    @skipIfNNModuleInlined("https://github.com/pytorch/pytorch/issues/129456")
     def test_llama_decoder_with_local_backend(
         self, test_local_backend: bool, test_backward: bool
     ):
@@ -581,13 +581,13 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
             )
             self._assert_dynamic_input_and_output_shapes_in_all_onnx_models(local_ort)
 
-    @skipIfNNModuleInlined("https://github.com/pytorch/pytorch/issues/129456")
     @parameterized.expand(
         [
             (True, False),
             (True, True),
         ]
     )
+    @skipIfNNModuleInlined("https://github.com/pytorch/pytorch/issues/129456")
     def test_llama_with_local_backend(
         self, test_local_backend: bool, test_backward: bool
     ):
