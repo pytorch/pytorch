@@ -491,9 +491,10 @@ class TestConverter(TestCase):
             def __init__(self) -> None:
                 super().__init__()
                 self.register_buffer("w", torch.randn(1))
+                self.count = 1
 
             def forward(self, x: torch.Tensor):
-                return self.w + x
+                return self.w + x + self.count
 
         class NestedM(torch.nn.Module):
             def __init__(self) -> None:
@@ -902,9 +903,7 @@ class TestConverter(TestCase):
                 return x + count1 + count2 + count3
 
         inp = (torch.ones(1),)
-        self._check_equal_ts_ep_converter(
-            M(), inp, ["script"], check_persistent=False
-        )
+        self._check_equal_ts_ep_converter(M(), inp, ["script"], check_persistent=False)
 
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -916,9 +915,7 @@ class TestConverter(TestCase):
                 return self.w2
 
         inp = (torch.ones(1),)
-        self._check_equal_ts_ep_converter(
-            M, inp, ["script"], check_persistent=True
-        )
+        self._check_equal_ts_ep_converter(M, inp, ["script"], check_persistent=True)
 
 
 if __name__ == "__main__":

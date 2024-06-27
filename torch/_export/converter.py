@@ -187,7 +187,9 @@ def get_block_to_lifted_attrs(graph: torch._C.Graph) -> Dict[torch._C.Block, Set
     return blocks_to_lifted_attrs
 
 
-def get_attribute_fqn_from_ts_node(name_to_attribute_fqn: Dict[str, str], node: torch._C.Node) -> str:
+def get_attribute_fqn_from_ts_node(
+    name_to_attribute_fqn: Dict[str, str], node: torch._C.Node
+) -> str:
     def get_attr(name: str):
         if name in name_to_attribute_fqn:
             return name_to_attribute_fqn[name]
@@ -195,9 +197,13 @@ def get_attribute_fqn_from_ts_node(name_to_attribute_fqn: Dict[str, str], node: 
             raise ValueError(f"Attribute {name} not found")
 
     if node.kind() == "prim::SetAttr":
-        input_name = tuple(node.inputs())[0].debugName()
+        input_name = next(node.inputs()).debugName()
     elif node.kind() == "prim::GetAttr":
         input_name = node.input().debugName()
+    else:
+        raise RuntimeError(
+            f"Unexpected node kind when getting attribute fqn. node: {node} "
+        )
 
     attr_name = node.s("name")
     root_attr_name = get_attr(input_name)
@@ -422,7 +428,7 @@ class TS2FXGraphConverter:
 
         attr_value = node.output()
         if isinstance(self.ts_graph, torch.Graph):
-            if attr_value.type().str() == 'Tensor':
+            if attr_value.type().annotation_str == "Tensor":
                 # We insert a get_attr node due to two reasons.
                 # First, ts graph does not lift tensor constants as input nodes. So tensor constants may
                 # be ignored by in convert_graph_inputs().
@@ -431,17 +437,21 @@ class TS2FXGraphConverter:
                 self.name_to_node[output_name] = self.fx_graph.get_attr(attr_fqn)
             else:
                 if attr_fqn not in self.name_to_non_tensor_attribute_node:
-                    self.name_to_non_tensor_attribute_node[attr_fqn] = self.name_to_non_tensor_attribute[attr_fqn]
-                self.name_to_node[output_name] = self.name_to_non_tensor_attribute_node[attr_fqn]
+                    self.name_to_non_tensor_attribute_node[
+                        attr_fqn
+                    ] = self.name_to_non_tensor_attribute[attr_fqn]
+                self.name_to_node[output_name] = self.name_to_non_tensor_attribute_node[
+                    attr_fqn
+                ]
         else:
-            if attr_value.type().str() == 'Tensor':
+            if attr_value.type().annotation_str == "Tensor":
                 self.name_to_node[output_name] = self.name_to_node[attr_fqn]
 
     def convert_prim_SetAttr(self, node: torch._C.Node):
         attr_fqn = get_attribute_fqn_from_ts_node(self.name_to_attribute_fqn, node)
         attr_value = tuple(node.inputs())[1]
         ts_graph_tensor_input = self.get_fx_value(attr_value)
-        if attr_value.type().str() == 'Tensor':
+        if attr_value.type().annotation_str == "Tensor":
             fx_attr_node = self.fx_graph.get_attr(attr_fqn)
             self.fx_graph.call_function(
                 torch.Tensor.copy_, (fx_attr_node, ts_graph_tensor_input)
@@ -605,7 +615,8 @@ class TS2FXGraphConverter:
                     raise RuntimeError(
                         "During converting prim::If to torch.cond, found prim::SetAttr op"
                         " which is not supported yet. Please file an issue if you come "
-                        "across this error.")
+                        "across this error."
+                    )
 
     def convert_prim_If(self, node: torch._C.Node):
         self._check_set_attr_in_if_block(node)
@@ -637,15 +648,9 @@ class TS2FXGraphConverter:
         # Convert blocks to subgraphs
         subgraph_nodes = []
         for block in node.blocks():
-            # TODO: Double check here
             subgraph_converter = TS2FXGraphConverter(
-                block,
-                dict(),
-                dict(),
-                self.blocks_to_lifted_attrs,
-                dict()
+                block, dict(), dict(), self.blocks_to_lifted_attrs, dict()
             )
-            subgraph_converter.name_to_non_tensor_attribute = self.name_to_non_tensor_attribute # TODO: Issue here
             subgraph_converter.constant_map = self.constant_map
             subgraph_converter.name_to_attribute_fqn = self.name_to_attribute_fqn
 
@@ -662,7 +667,20 @@ class TS2FXGraphConverter:
 
         assert len(subgraph_nodes) == 2
 
-        fx_block_args = [self.name_to_node[arg_name] for arg_name in arguments]
+        fx_block_args = []
+        for arg_name in arguments:
+            if arg_name in self.name_to_node:
+                arg_node = self.name_to_node[arg_name]
+                fx_block_args.append(arg_node)
+            elif arg_name in self.name_to_non_tensor_attribute_node:
+                arg_node = self.name_to_non_tensor_attribute_node[arg_name]
+                fx_block_args.append(arg_node)
+            elif arg_name in self.name_to_non_tensor_attribute:
+                arg_value = self.name_to_non_tensor_attribute[arg_name]
+                fx_block_args.append(arg_value)
+            else:
+                raise ValueError(f"Attribute {arg_name} not found")
+
         args = (
             predicate,
             subgraph_nodes[0],
@@ -834,7 +852,7 @@ class TS2EPConverter:
     def lift_tensor_constants_to_buffer(self):
         # torchscript does not lift tensor constants to buffers. So we cannot access tensor
         # constants during `graph_converter.convert()`.
-        name_to_attribute_fqn = {}
+        name_to_attribute_fqn: Dict[str, str] = {}
 
         def get_attr(fqn: str):
             name = fqn.split(".")
@@ -847,9 +865,7 @@ class TS2EPConverter:
             attr_name = node.s("name")
             input_name = node.input().debugName()
             root_attr_name = name_to_attribute_fqn[input_name]
-            attr_fqn = (
-                f"{root_attr_name}.{attr_name}" if root_attr_name else attr_name
-            )
+            attr_fqn = f"{root_attr_name}.{attr_name}" if root_attr_name else attr_name
             return attr_fqn
 
         def _dfs_get_attr(block):
