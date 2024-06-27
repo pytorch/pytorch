@@ -611,33 +611,6 @@ def _resolve_process_group(group_name: str) -> ProcessGroup: ...
 def _unregister_all_process_groups() -> None: ...
 def _unregister_process_group(group_name: str) -> None: ...
 
-class ProcessGroupCudaP2P(Backend):
-    class Options:
-        nccl_options: Optional[ProcessGroupNCCL.Options]
-        buffer_size: Optional[int]
-
-        def __init__(self) -> None: ...
-
-    def __init__(
-        self,
-        store: Store,
-        rank: int,
-        size: int,
-        options: ProcessGroupCudaP2P.Options,
-    ) -> None: ...
-    def is_p2p_available(self) -> bool: ...
-    def get_buffer_size(self) -> int: ...
-    def stream(self) -> torch.cuda.Stream: ...
-    def intra_node_barrier(self) -> Work: ...
-    def get_p2p_buffer(
-        self,
-        rank: int,
-        sizes: torch.Size,
-        dtype: torch.dtype,
-        storage_offset: Optional[int] = 0,
-    ) -> torch.Tensor: ...
-    def _shutdown(self) -> None: ...
-
 class _SymmetricMemory:
     @staticmethod
     def set_group_info(
@@ -660,7 +633,7 @@ class _SymmetricMemory:
     def get_buffer(
         self,
         rank: int,
-        sizes: torch.Size,
+        sizes: torch.types._size,
         dtype: torch.dtype,
         storage_offset: Optional[int] = 0,
     ) -> torch.Tensor: ...
