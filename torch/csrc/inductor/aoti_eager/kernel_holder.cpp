@@ -368,7 +368,7 @@ std::shared_ptr<AOTIModelContainerRunner> AOTIPythonKernelHolder::
       " now.");
   if (device_.type() == c10::DeviceType::CUDA) {
 #ifdef USE_CUDA
-    return std::make_shared<AOTIModelContainerRunnerCpu>(so_path);
+    return std::make_shared<AOTIModelContainerRunnerCuda>(so_path);
 #else
     return nullptr;
 #endif
