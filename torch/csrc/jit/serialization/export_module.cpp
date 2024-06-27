@@ -36,6 +36,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace torch::jit {
@@ -344,8 +345,8 @@ void pushMobileFunctionsToIValues(
 }
 
 struct ModuleMethod {
-  ModuleMethod(const Module& m, const GraphFunction& f, c10::QualifiedName n)
-      : module(m), function(f), exportName(std::move(n)) {}
+  ModuleMethod(Module m, const GraphFunction& f, c10::QualifiedName n)
+      : module(std::move(m)), function(f), exportName(std::move(n)) {}
   Module module;
   const GraphFunction& function;
   c10::QualifiedName exportName;
@@ -481,7 +482,7 @@ void ScriptModuleSerializer::serialize(
         /*archive_dir=*/"",
         /*tensor_dir=*/"constants/");
   }
-  if (module.retrieve_traced_inputs().size() > 0) {
+  if (!module.retrieve_traced_inputs().empty()) {
     writeArchive(
         module.retrieve_traced_inputs(),
         /*archive_name=*/"traced_inputs",
@@ -543,7 +544,6 @@ void ScriptModuleSerializer::writeArchive(
   data_pickle.stop();
   // write out tensor data
   size_t i = 0;
-  std::string prefix = archive_name + "/";
 
   TORCH_INTERNAL_ASSERT(tensor_names.size() == data_pickle.tensorData().size());
 
@@ -870,8 +870,7 @@ void ExportModule(
     if (errno == ENOENT) {
       message << "Parent directory of " << filename << " does not exist.\n";
     } else {
-      message << "Error while opening file: " << errno << std::endl;
-      ;
+      message << "Error while opening file: " << errno << '\n';
     }
     TORCH_CHECK(false, message.str());
   }

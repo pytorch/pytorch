@@ -738,6 +738,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   py::str snapshot_s = "snapshot";
   py::str oom_s = "oom";
   py::str device_free_s = "device_free";
+  py::str user_defined_s = "user_defined";
 
   using namespace c10::cuda::CUDACachingAllocator;
 
@@ -761,6 +762,8 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
         return segment_unmap_s;
       case TraceEntry::SEGMENT_MAP:
         return segment_map_s;
+      case TraceEntry::USER_DEFINED:
+        return user_defined_s;
     }
     throw std::runtime_error("unreachable");
   };

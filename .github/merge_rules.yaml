@@ -375,13 +375,21 @@
 
 - name: CPU inductor
   patterns:
+  - torch/_inductor/mkldnn_ir.py
   - torch/_inductor/mkldnn_lowerings.py
   - torch/_inductor/fx_passes/mkldnn_fusion.py
   - torch/_inductor/fx_passes/quantization.py
+  - torch/_inductor/codegen/cpp_prefix.h
   - torch/_inductor/codegen/cpp.py
+  - torch/_inductor/codegen/cpp_utils.py
+  - torch/_inductor/codegen/cpp_micro_gemm.py
+  - torch/_inductor/codegen/cpp_template_kernel.py
+  - torch/_inductor/codegen/cpp_template.py
+  - torch/_inductor/codegen/cpp_gemm_template.py
   - test/inductor/test_mkldnn_pattern_matcher.py
   - test/inductor/test_cpu_repo.py
   - test/inductor/test_cpu_cpp_wrapper.py
+  - test/inductor/test_cpu_select_algorithm.py
   - aten/src/ATen/cpu/**
   - aten/src/ATen/native/quantized/cpu/**
   - test/quantization/core/test_quantized_op.py

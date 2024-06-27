@@ -76,7 +76,6 @@ def mps_ops_grad_modifier(ops):
     XFAILLIST_GRAD = {
 
         # precision issues
-        'digamma': [torch.float32],
         'special.polygammaspecial_polygamma_n_0': [torch.float16],
         'polygammapolygamma_n_0': [torch.float16],
         'nn.functional.binary_cross_entropy': [torch.float16],
@@ -94,8 +93,8 @@ def mps_ops_grad_modifier(ops):
         'cdist': [torch.float32],
         'masked.scatter': [torch.float16, torch.float32],
         'index_fill': [torch.float16, torch.float32],  # missing `aten::_unique`.
+        'linalg.lu_factor': [torch.float16, torch.float32],  # missing `aten::lu_unpack`.
         'aminmax': [torch.float32, torch.float16],
-        'polar': [torch.float32],
 
         # Correctness issues
         'atanh': [torch.float32],
@@ -144,6 +143,10 @@ def mps_ops_grad_modifier(ops):
 
         # round not working properly for float16
         'round': [torch.float16],
+
+        # atomic operation in backward pass
+        '_unsafe_masked_index': [torch.float16],
+        '_unsafe_masked_index_put_accumulate': [torch.float16],
     }
 
     MACOS_12_3_XFAILLIST_GRAD = {
@@ -359,6 +362,7 @@ def mps_ops_modifier(ops):
         '__rdiv__',
         '__rmatmul__',
         '_chunk_cat',
+        '_unsafe_masked_index',
         'acos',
         'acosh',
         'all',
@@ -569,7 +573,6 @@ def mps_ops_modifier(ops):
         'special.ndtr': [torch.uint8],
         'sqrt': [torch.uint8],
         'sub': [torch.uint8],
-        'tanh': [torch.uint8],
         'trapezoid': [torch.uint8],
         'trapz': [torch.uint8],
         'true_divide': [torch.uint8],
@@ -586,28 +589,13 @@ def mps_ops_modifier(ops):
         'square': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
 
         # cpu not giving nan for x/0.0
-        'atan2': [torch.bool, torch.float16, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'atan2': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
 
         # inconsistency errors between cpu and mps, max seen atol is 2
         'nn.functional.interpolatebilinear': [torch.uint8],
     }
 
     MACOS_BEFORE_13_3_XFAILLIST = {
-        # Failure due to precision issues (still present on 13.3+) as well as non-standard behavior of
-        # cpu ops for the negative integers.
-        # Example for torch.polygamma(1, tensor([-0.9, -1.0], dtype=torch.float32)):
-        # - CPU output: tensor([102.668, 1.129e+15])
-        # - MPS output: tensor([102.6681, inf])
-        # In the latter case, inf is probably correct (this is what scipy does).
-        'polygamma': [torch.float32, torch.uint8],
-        'polygammapolygamma_n_0': [torch.float32, torch.int16, torch.int8],
-        'polygammapolygamma_n_2': [torch.float32, torch.int16, torch.int8],
-        'polygammapolygamma_n_1': [torch.float32, torch.int16, torch.int8],
-        'polygammapolygamma_n_3': [torch.float32, torch.int16, torch.int8],
-        'polygammapolygamma_n_4': [torch.float32, torch.int16, torch.int8],
-        'special.polygamma': [torch.float32, torch.int16, torch.int32, torch.int8],
-        'special.polygammaspecial_polygamma_n_0': [torch.float32, torch.int16, torch.int8],
-
         # Failures due to precision issues (due to fast-math). These has been fixed in MacOS 13.3+
         'tan': [torch.float32],
         'cdist': [torch.float32],
@@ -656,20 +644,6 @@ def mps_ops_modifier(ops):
         # Same issue as `argsort` with duplicate indices. This test checks both the sorted values and the indices.
         # The values of the sorted tensor match the CPU, but in case of the returned indices this results in undefined behaviour.
         'sort': [torch.int8, torch.uint8, torch.bool, torch.float16],
-
-        # Failure due to precision issues as well as non-standard behavior of cpu ops for the
-        # negative integers. Example for torch.polygamma(1, tensor([-0.9, -1.0], dtype=torch.float32)):
-        # - CPU output: tensor([102.668, 1.129e+15])
-        # - MPS output: tensor([102.6681, inf])
-        # In the latter case, inf is probably correct (this is what scipy does).
-        'polygamma': [torch.float32, torch.uint8],
-        'polygammapolygamma_n_0': [torch.float32, torch.int16, torch.int8],
-        'polygammapolygamma_n_2': [torch.float32, torch.int16, torch.int8],
-        'polygammapolygamma_n_1': [torch.float32, torch.int16, torch.int8],
-        'polygammapolygamma_n_3': [torch.float32, torch.int16, torch.int8],
-        'polygammapolygamma_n_4': [torch.float32, torch.int16, torch.int8],
-        'special.polygamma': [torch.float32, torch.int16, torch.int32, torch.int8],
-        'special.polygammaspecial_polygamma_n_0': [torch.float32, torch.int16, torch.int8],
     }
 
     MACOS_BEFORE_14_4_XFAILLIST = {
@@ -731,7 +705,6 @@ def mps_ops_modifier(ops):
         'linalg.lstsq': None,
         'linalg.lstsqgrad_oriented': None,
         'linalg.lu': None,
-        'linalg.lu_factor': None,
         'linalg.lu_factor_ex': None,
         'linalg.lu_solve': None,
         'linalg.matrix_norm': [torch.float32],
@@ -763,9 +736,6 @@ def mps_ops_modifier(ops):
         'nn.functional.interpolatearea': None,
         'nn.functional.interpolatebicubic': None,
         'nn.functional.interpolatetrilinear': None,
-        # TODO: max_pool2d for integral types fails the numerical test
-        'nn.functional.max_pool2d': (integral_types() if product_version < 14.0 else
-                                     [torch.int64, torch.int32, torch.int16, torch.int8]),
         'nn.functional.max_unpool1dgrad': None,
         'nn.functional.max_unpool2dgrad': None,
         'nn.functional.max_unpool3dgrad': None,
@@ -915,6 +885,9 @@ def mps_ops_modifier(ops):
 
         # round not working properly for float16
         'round': [torch.float16],
+
+        # atomic operations not supported
+        '_unsafe_masked_index_put_accumulate': [torch.bool, torch.int8, torch.uint8, torch.float16, torch.int16, torch.int64],
     }
 
     if product_version < 14.0:
@@ -943,6 +916,7 @@ def mps_ops_modifier(ops):
             # Error in TestConsistencyCPU.test_output_match_isin_cpu fails for integers,
             # not reproducible in later OS. Added assert to op if used in < 14.0
             'isin': [torch.int64, torch.int32, torch.int16, torch.uint8, torch.int8],
+            'nn.functional.max_pool2d': [torch.uint8],
         })
 
     UNDEFINED_XFAILLIST = {
@@ -7855,7 +7829,6 @@ class TestMPS(TestCaseMPS):
         x.backward(torch.randn_like(x))
         torch.mps.synchronize()
 
-    @unittest.expectedFailure
     def test_mps_allocator_module(self):
         # first garbage collect and empty the cached blocks
         gc.collect()
@@ -9194,8 +9167,8 @@ class TestLinalgMPS(TestCaseMPS):
                 b, n_bit=4, q_group_size=q_group
             )
             b_int4pack = torch._convert_weight_to_int4pack(
-                b_int32.cpu(), inner_k_tiles
-            ).to(device="mps")
+                b_int32, inner_k_tiles
+            )
 
             return b_int4pack, b_scales_and_zeros
 
