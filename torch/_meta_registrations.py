@@ -3653,17 +3653,12 @@ def meta_index_put(self, indices, values, accumulate=False):
         lambda: "Passing an empty index list to torch.index_put() is not valid syntax",
     )
     torch._check(
-        self.device == values.device,
-        lambda: "Tensor and value must be on the same device",
-    )
-
-    torch._check(
         self.dim() >= len(indices),
         lambda: f"too many indices for tensor of dimension {self.dim()} (got {len(indices)})",
     )
 
     torch._check(
-        len(indices) != 0 or utils.is_expandable_to(values.size(), self.size()),
+        utils.is_expandable_to(values.size(), self.size()),
         lambda: (
             f"shape mismatch: value tensor of shape {values.size()} "
             f"cannot be broadcast to indexing result of shape {self.size()}"
