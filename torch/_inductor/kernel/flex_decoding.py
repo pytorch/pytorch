@@ -5,9 +5,13 @@ from typing import Any, List, Tuple
 import torch
 from .. import config
 from ..ir import FixedLayout, FlexibleLayout
-from ..lowering import empty_strided
+from ..lowering import empty_strided, lowerings
 from ..select_algorithm import autotune_select_algorithm, TritonTemplate
 
+
+
+aten = torch.ops.aten
+prims = torch.ops.prims
 
 def flex_decoding_grid(batch_size, num_heads, n_keys, d_model, meta):
     """How is this kernel parallelized?
@@ -429,7 +433,7 @@ def _get_reduction_default_config(buf_ACC, dtype) -> Tuple[int, int, int, int]:
 
 
 def create_flex_decoding_kernel(*args, **kwargs):
-    (subgraph_buffer, layout, query, key, value, subgraph, *other_buffers) = args
+    (subgraph_buffer, query, key, value, subgraph, *other_buffers) = args
     # see NOTE:[TritonTemplates with multiple outputs]
     logsumexp_shape = query.get_size()[:-1]  # [B, H, M]
     logsumexp = empty_strided(
@@ -520,39 +524,21 @@ def create_flex_decoding_kernel(*args, **kwargs):
         "flex_decoding", choices, inputs_for_flex_decoding, layout_acc
     )
 
-    reduction_choices: List[Any] = []
-    reduction_configs: List[Tuple[int, int, int, int]] = []
-    reduction_configs.append(_get_reduction_default_config(buf_ACC, key.get_dtype()))
+    g_M = lowerings[aten.max](buf_M, dim=-2, keepdim=True)[0]
+    g_M = lowerings[aten.sub](buf_M, g_M)
+    alpha = lowerings[aten.exp2](g_M)
 
-    for BLOCK_M, BLOCK_D, num_warps, num_stages in reduction_configs:
-        assert buf_ACC.get_size()[-2] % BLOCK_M == 0
-        flex_decoding_reduction_template.maybe_append_choice(
-            choices=reduction_choices,
-            input_nodes=[logsumexp, buf_M, buf_L, buf_ACC],
-            layout=layout,
-            mutated_inputs=[
-                logsumexp,
-            ],
-            num_stages=num_stages,
-            num_warps=num_warps,
-            call_sizes=buf_ACC.get_size(),
-            BLOCK_M=BLOCK_M,
-            BLOCK_D=BLOCK_D,
-            SPLIT_KV=SPLIT_KV,
-            # For now, we always assume the "sound" option
-            SCORE_MOD_IS_LINEAR=False,
-            ROWS_GUARANTEED_SAFE=False,
-            OUTPUT_LOGSUMEXP=True,
-        )
+    buf_L = lowerings[aten.mul](buf_L, alpha)
+    logsumexp = lowerings[aten.sum](buf_L, axis=-2)
+    
+    alpha_unseq = lowerings[aten.unsqueeze](alpha, 4)
+    buf_ACC = lowerings[aten.mul](buf_ACC, alpha_unseq)
+    output = lowerings[aten.sum](buf_ACC, axis=-3)
+    L_unseq = lowerings[aten.unsqueeze](logsumexp, 3)
+    output = lowerings[aten.div](output, L_unseq)
+    output = lowerings[prims.convert_element_type](output, query.get_dtype())
 
-    inputs_for_flex_decoding_reduction = [logsumexp, buf_M, buf_L, buf_ACC]
-    output = autotune_select_algorithm(
-        "flex_decoding_reduction",
-        reduction_choices,
-        inputs_for_flex_decoding_reduction,
-        layout,
-    )
-
+    
     return (
         output,
         logsumexp,

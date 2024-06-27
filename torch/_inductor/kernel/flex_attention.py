@@ -542,17 +542,18 @@ def flex_attention(*args, **kwargs):
     subgraph_buffer = build_subgraph_buffer(
         args, placeholder_inps, subgraph, graph_type=SubgraphType.FWD
     )
+
+    if _use_flex_decoding(query):
+        return create_flex_decoding_kernel(
+            subgraph_buffer, query, key, value, subgraph, *other_buffers
+        )
+    
     layout = FixedLayout(
         query.get_device(),
         query.get_dtype(),
         query.get_size(),
         query.get_stride(),
     )
-
-    if _use_flex_decoding(query):
-        return create_flex_decoding_kernel(
-            subgraph_buffer, layout, query, key, value, subgraph, *other_buffers
-        )
     # see NOTE:[TritonTemplates with multiple outputs]
     logsumexp_shape = query.get_size()[:-1]  # [B, H, M]
     logsumexp = empty_strided(
