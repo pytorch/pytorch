@@ -1897,9 +1897,23 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         CompiledFunction.maybe_subclass_metadata.grad_input_metas
                         is not None
                     )
+                    # map "None" values to input symints
+                    n_symints = len(ctx.symints)
+                    assert (
+                        n_symints == CompiledFunction.metadata.num_symints_saved_for_bw
+                    )
+                    out = out[:-n_symints] + (*ctx.symints,) if n_symints > 0 else out
                     outs_wrapped = wrap_tensor_subclasses(
                         out,
                         subclass_metas=CompiledFunction.maybe_subclass_metadata.grad_input_metas,
+                        is_runtime=True,
+                    )
+                    # remap symints back to "None" values
+
+                    outs_wrapped = (
+                        outs_wrapped[:-n_symints] + (None,) * n_symints
+                        if n_symints > 0
+                        else outs_wrapped
                     )
                     return (*[None] * num_tokens, *outs_wrapped)
                 return (*[None] * num_tokens, *out)
