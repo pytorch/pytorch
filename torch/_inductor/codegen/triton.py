@@ -2983,7 +2983,7 @@ class TritonScheduling(SIMDScheduling):
         return kernel_name
 
     @preserve_rng_state()
-    def benchmark_fused_nodes(self, nodes, memory_warmup_iters=100):
+    def benchmark_fused_nodes(self, nodes):
         src_code = self.generate_kernel_code_from_nodes(nodes, benchmark_kernel=True)
         mod = PyCodeCache.load(src_code)
 
@@ -3037,13 +3037,13 @@ class TritonScheduling(SIMDScheduling):
         else:
             # We have to clone the inplace updated arguments to avoid earlier calls
             # generating out of range indices for later calls.
-            ms = do_bench_gpu(lambda: call(wrapped_jit_function.clone_args(*args)[0]), memory_warmup_iters=memory_warmup_iters)
+            ms = do_bench_gpu(lambda: call(wrapped_jit_function.clone_args(*args)[0]), memory_warmup_iters=1000)
 
             # overhead of cloning args gives bias for fusing the kernel
             # in the case of mutating/in-placeable second fusion
             # TODO - would be better as a hook in triton do_bench that reset
             # the input values between benchmarking
-            ms = ms - do_bench_gpu(lambda: wrapped_jit_function.clone_args(*args), memory_warmup_iters=memory_warmup_iters)
+            ms = ms - do_bench_gpu(lambda: wrapped_jit_function.clone_args(*args), memory_warmup_iters=1000)
 
         log.debug(
             "The fused kernel for %s took %.3f ms to run",
