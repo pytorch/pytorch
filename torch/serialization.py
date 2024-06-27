@@ -1129,7 +1129,7 @@ def load(
             )
         else:
             updated_message = (
-                f"Weights only load failed. {UNSAFE_MESSAGE}.\n Please file an issue with the following "
+                f"Weights only load failed. {UNSAFE_MESSAGE}\n Please file an issue with the following "
                 "so that we can make `weights_only=True` compatible with your use case: WeightsUnpickler "
                 "error: " + message
             )
