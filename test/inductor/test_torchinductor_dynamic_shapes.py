@@ -158,24 +158,34 @@ class TestInductorDynamic(TestCase):
             a = a[:, None]
             return x * a
 
+        def full_mul_symint(x):
+            a = torch.full(x.shape, -1, dtype=x.dtype, device=x.device)
+            b = 2 + a
+            return b * x.shape[0]
+
         fns = (full_add_zero, full_mul_one, full_view_op)
 
         x = torch.randn((2, 4), device=device)
+        y = torch.randn((3, 4), device=device)
 
         for dynamic in [False, True]:
+            torch._dynamo.reset()
             for fn in fns:
                 ref = fn(x)
-                actual, source_codes = run_and_get_code(
-                    torch.compile(fn, dynamic=dynamic), x
-                )
+                fn_c = torch.compile(fn, dynamic=dynamic)
 
-                # due to constant folding, fn returns x directly.
-                if device == "cpu":
-                    FileCheck().check_not("cpp_fused").run(source_codes[0])
-                else:
-                    FileCheck().check_not("triton.jit").run(source_codes[0])
+                actual, source_codes = run_and_get_code(fn_c, x)
+
+                if fn is not full_mul_symint:
+                    # due to constant folding, fn returns x directly.
+                    if device == "cpu":
+                        FileCheck().check_not("cpp_fused").run(source_codes[0])
+                    else:
+                        FileCheck().check_not("triton.jit").run(source_codes[0])
 
                 self.assertEqual(ref, actual)
+                self.assertEqual(fn(x), fn_c(x))
+                self.assertEqual(fn(y), fn_c(y))
 
     def test_arange_dynamic(self, device):
         def fn(a):
