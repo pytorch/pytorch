@@ -8,19 +8,10 @@ appropriate file under the `torch/ao/nn/quantized/modules`,
 while adding an import statement here.
 """
 
-from torch.ao.nn.quantized.modules.normalization import (
-    GroupNorm,
-    InstanceNorm1d,
-    InstanceNorm2d,
-    InstanceNorm3d,
-    LayerNorm,
-)
+__all__ = ['LayerNorm', 'GroupNorm', 'InstanceNorm1d', 'InstanceNorm2d', 'InstanceNorm3d']
 
-
-__all__ = [
-    "LayerNorm",
-    "GroupNorm",
-    "InstanceNorm1d",
-    "InstanceNorm2d",
-    "InstanceNorm3d",
-]
+from torch.ao.nn.quantized.modules.normalization import LayerNorm
+from torch.ao.nn.quantized.modules.normalization import GroupNorm
+from torch.ao.nn.quantized.modules.normalization import InstanceNorm1d
+from torch.ao.nn.quantized.modules.normalization import InstanceNorm2d
+from torch.ao.nn.quantized.modules.normalization import InstanceNorm3d
