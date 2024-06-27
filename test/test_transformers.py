@@ -3147,34 +3147,84 @@ class TestSDPACudaOnly(NNTestCase):
         with sdpa_kernel(backends=[SDPBackend.MATH]):
             F.scaled_dot_product_attention(rand_query, rand_key, rand_value, dropout_p=0.0, is_causal=False)
 
-        # with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
-        #     F.scaled_dot_product_attention(rand_query, rand_key, rand_value, dropout_p=0.0, is_causal=False)
+        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
+            with self.assertRaisesRegex(RuntimeError, "No available kernel"):
+                F.scaled_dot_product_attention(rand_query, rand_key, rand_value, dropout_p=0.0, is_causal=False)
+    
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
+    @unittest.skipIf(IS_JETSON, "causing sigkill on Jetson")
+    @parametrize("batch_size", [1, 8])
+    @parametrize("seq_len_q", [4, 8, 64, 143, 256, 512, 1024, 2048])
+    @parametrize("seq_len_k", [4, 8, 64, 128, 256, 587, 1024, 2048])
+    @parametrize("embedding_dim", [8, 16, 21, 32, 64, 72, 96, 128, 160, 192, 203, 256])
+    @parametrize("is_causal", [True, False])
+    @parametrize("dropout_p", [0.0, 0.22, 0.48])
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    @parametrize("n_heads", [[16, 8], [64, 8], [10, 2]])
+    def test_flash_attention_vs_math_ref_grads_grouped_query_attention(self, device, batch_size: int, seq_len_q: int, seq_len_k: int, 
+                                                                       embedding_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype, n_heads: List):
+        # if isSM8XDevice and embedding_dim in range(193, 256 + 1):
+        #     self.skipTest("Flash attention on sm86, sm87, and sm89 for headdim > 192 currently disabled")
+        # if is_causal and seq_len_q != seq_len_k:
+        #     self.skipTest("Flash V2 does not accept is_casual when seq_len_q != seq_len_k")
+        # if TEST_WITH_ROCM and seq_len_q >= 1024 and seq_len_k >= 1024 and batch_size > 1:
+        #     torch.cuda.empty_cache()  # Prevent memory fragmentation
 
-    # def test_flash_gqa(self, device):
-    #     rand_query = torch.rand(8, 8, 64, 64, device=device, dtype=torch.float16, requires_grad=True)
-    #     rand_key = torch.rand(8, 4, 64, 64, device=device, dtype=torch.float16, requires_grad=True)
-    #     rand_value = torch.rand(8, 4, 64, 64, device=device, dtype=torch.float16, requires_grad=True)
+        query = torch.rand(batch_size, n_heads[0], seq_len_q, embedding_dim,
+                           device=device, dtype=dtype, requires_grad=True)
+        key = torch.rand(batch_size, n_heads[1], seq_len_k, embedding_dim, device=device,
+                         dtype=dtype, requires_grad=True)
+        value = torch.rand(batch_size, n_heads[1], seq_len_k, embedding_dim,
+                           device=device, dtype=dtype, requires_grad=True)
 
-    #     query_ref, key_ref, value_ref = query_key_value_clones(rand_query, rand_key, rand_value, dtype=rand_query.dtype)
+        # Run the math kernel on low precision references
+        query_ref_lp, key_ref_lp, value_ref_lp = query_key_value_clones(query, key, value, dtype=dtype)
 
-    #     with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
-    #         out = F.scaled_dot_product_attention(rand_query, rand_key, rand_value, dropout_p=0.0, is_causal=False)
+        higher_precision_dtype = torch.float64 if dtype == torch.float32 else torch.float32
+        query_ref, key_ref, value_ref = query_key_value_clones(query, key, value, dtype=higher_precision_dtype)
+        
+        with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
+            out = F.scaled_dot_product_attention(query, key, value, dropout_p=dropout_p, is_causal=is_causal)
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            # High Precision Math Reference
+            out_ref = F.scaled_dot_product_attention(
+                query_ref, key_ref, value_ref, is_causal=is_causal)
+            # Low Precision Math Reference
+            out_lp_ref = F.scaled_dot_product_attention(
+                query_ref_lp, key_ref_lp, value_ref_lp, is_causal=is_causal)
+        
 
-    #     with sdpa_kernel(backends=[SDPBackend.MATH]):
-    #         out_math = F.scaled_dot_product_attention(query_ref, key_ref, value_ref, dropout_p=0.0, is_causal=False)
+        upstream_grad = torch.rand_like(out, requires_grad=False)
 
-    #     with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
-    #         out_math = F.scaled_dot_product_attention(query_ref, key_ref, value_ref, dropout_p=0.0, is_causal=False)
+        # backward for flash attention on sm86, sm87, and sm89 for headdim >= 193 currently disabled
+        if isSM8XDevice and embedding_dim in range(193, 256):
+            self.assertRaises(RuntimeError, lambda: out.backward(upstream_grad))
+            return
+        out.backward(upstream_grad)
+        out_ref.backward(upstream_grad.to(out_ref.dtype))
+        out_lp_ref.backward(upstream_grad.to(out_lp_ref.dtype))
 
-    #     upstream_grad = torch.rand_like(out, requires_grad=False)
+        output_fudge_factor = 7  # if embedding_dim % 8 != 0 or TEST_WITH_ROCM else 1
+        output_ref_atol, output_ref_rtol = get_tolerances(out_ref, out_lp_ref, output_fudge_factor)
+        
+        query_fudge_factor = 7
+        grad_q_ref_atol, grad_q_ref_rtol = get_tolerances(query_ref.grad, query_ref_lp.grad, query_fudge_factor)
 
-    #     out.backward(upstream_grad)
-    #     out_math.backward(upstream_grad)
+        key_fudge_factor = 7
+        grad_k_ref_atol, grad_k_ref_rtol = get_tolerances(key_ref.grad, key_ref_lp.grad, key_fudge_factor)
 
-    #     torch.testing.assert_close(out, out_math, atol=1e-3, rtol=1e-2)
-    #     torch.testing.assert_close(rand_query.grad, query_ref.grad, atol=1e-3, rtol=1e-2)
-    #     torch.testing.assert_close(rand_key.grad, key_ref.grad, atol=1e-3, rtol=1e-2)
-    #     torch.testing.assert_close(rand_value.grad, value_ref.grad, atol=1e-3, rtol=1e-2)
+        value_fudge_factor = 7
+        grad_v_ref_atol, grad_v_ref_rtol = get_tolerances(value_ref.grad, value_ref_lp.grad, value_fudge_factor)
+
+        self.assertEqual(out, out_ref.to(out.dtype), atol=output_ref_atol, rtol=output_ref_rtol)
+        self.assertEqual(query.grad, query_ref.grad.to(query.grad.dtype),
+                         atol=grad_q_ref_atol, rtol=grad_q_ref_rtol)
+        self.assertEqual(key.grad, key_ref.grad.to(key.grad.dtype),
+                         atol=grad_k_ref_atol, rtol=grad_k_ref_rtol)
+        self.assertEqual(value.grad, value_ref.grad.to(value.grad.dtype),
+                         atol=grad_v_ref_atol, rtol=grad_v_ref_rtol)
+
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if
