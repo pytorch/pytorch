@@ -235,8 +235,6 @@ class TestFlexAttention(InductorTestCase):
         Hkv: int = Hkv,
         decoding: bool = False,
     ):
-<<<<<<< HEAD
-=======
         if decoding:
             assert Hq % Hkv == 0
             Q_H = Hkv
@@ -244,7 +242,6 @@ class TestFlexAttention(InductorTestCase):
             KV_H = Hkv
         sdpa_partial = create_attention(score_mod)
         compiled_sdpa = torch.compile(sdpa_partial)
->>>>>>> 66cae65fef (Manual merge)
         q = torch.randn(
             (Q_B, Q_H, Q_S, Q_D), dtype=dtype, device="cuda", requires_grad=True
         )
@@ -1192,10 +1189,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("score_mod", [_identity, _causal])
-<<<<<<< HEAD
-    def test_logsumexp_correctness(self, dtype, score_mod):
-        make_tensor = functools.partial(
-=======
     @common_utils.parametrize("decoding", [False, True])
     def test_logsumexp_correctness(self, dtype, score_mod, decoding):
         @torch.compile
@@ -1210,17 +1203,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             """
             return flex_attention_hop(q, k, v, score_mod)
 
-        make_kv = functools.partial(
->>>>>>> 66cae65fef (Manual merge)
-            torch.randn,
-            (B, Hkv if decoding else H, S, D),
-            dtype=dtype,
-            device="cuda",
-            requires_grad=True,
-        )
-<<<<<<< HEAD
-        q, k, v = make_tensor(), make_tensor(), make_tensor()
-        block_mask = _create_empty_block_sparse_mask(q, k, v)
 
         @torch.compile
         def sdpa_hop(q, k, v, score_mod, block_mask):
@@ -1237,26 +1219,14 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 block_mask.Q_BLOCK_SIZE,
             )
 
-        @torch.compile(backend="aot_eager")
-        def eager_sdpa_hop(q, k, v, score_mod, block_mask):
-            """The main entrypoint for FlexAttention doesnt return LSE.
-            Besides dropping LSE it also ensures that the hop is compiled with aot-eager
-            backend. We need to replicate this.
-            """
-            return flex_attention_hop(
-                q,
-                k,
-                v,
-                score_mod,
-                block_mask.kv_num_blocks,
-                block_mask.kv_indices,
-                block_mask.q_num_blocks,
-                block_mask.q_indices,
-                block_mask.KV_BLOCK_SIZE,
-                block_mask.Q_BLOCK_SIZE,
-            )
-=======
 
+        make_kv = functools.partial(
+            torch.randn,
+            (B, Hkv if decoding else H, S, D),
+            dtype=dtype,
+            device="cuda",
+            requires_grad=True,
+        )
         make_q = functools.partial(
             torch.randn,
             (B, Hkv if decoding else H, Hq // Hkv if decoding else S, D),
@@ -1264,9 +1234,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             device="cuda",
             requires_grad=True,
         )
-
         q, k, v = make_q(), make_kv(), make_kv()
->>>>>>> 66cae65fef (Manual merge)
+        block_mask = _create_empty_block_sparse_mask(q, k, v)
 
         ref_out, ref_lse = eager_sdpa_hop(
             q.to(torch.float64),
@@ -1275,12 +1244,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             score_mod,
             block_mask,
         )
-<<<<<<< HEAD
-        compiled_out, compiled_lse = sdpa_hop(q, k, v, score_mod, block_mask)
-=======
         compiled_out, compiled_lse = sdpa_hop(q, k, v, score_mod)
         eager_out, eager_lse = eager_sdpa_hop(q, k, v, score_mod)
->>>>>>> 66cae65fef (Manual merge)
 
         # Comparing LSE for the ref and the compiled version
         # The compiled uses a change of base trick to more efficiently compute the LSE
@@ -1305,30 +1270,17 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             )
 
     @supported_platform
-    @common_utils.parametrize("decoding", [False, True])
-    def test_logsumexp_only_return(self, decoding):
-        make_kv = functools.partial(
+    def test_logsumexp_only_return(self):
+        make_tensor = functools.partial(
             torch.randn,
-            (B, Hkv if decoding else H, S, D),
+            (B, H, S, D),
             dtype=torch.float32,
             device="cuda",
             requires_grad=True,
         )
-<<<<<<< HEAD
+
         q, k, v = make_tensor(), make_tensor(), make_tensor()
         block_mask = _create_empty_block_sparse_mask(q, k, v)
-=======
-
-        make_q = functools.partial(
-            torch.randn,
-            (B, Hkv if decoding else H, Hq // Hkv if decoding else S, D),
-            dtype=torch.float32,
-            device="cuda",
-            requires_grad=True,
-        )
-
-        q, k, v = make_q(), make_kv(), make_kv()
->>>>>>> 66cae65fef (Manual merge)
 
         @torch.compile
         def func(q, k, v, score_mod, block_mask):
@@ -1349,32 +1301,19 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         _, code = run_and_get_code(func, q, k, v, _identity, block_mask)
         # Ensure that two kernels are generated
-        FileCheck().check_count(".run(", 3 if decoding else 2, True).run(code[0])
+        FileCheck().check_count(".run(", 2, True).run(code[0])
 
     @supported_platform
-    @common_utils.parametrize("decoding", [False, True])
-    def test_logsumexp_is_not_fused(self, decoding):
-        make_kv = functools.partial(
+    def test_logsumexp_is_not_fused(self):
+        make_tensor = functools.partial(
             torch.randn,
-            (B, Hkv if decoding else H, S, D),
+            (B, H, S, D),
             dtype=torch.float32,
             device="cuda",
             requires_grad=True,
         )
-<<<<<<< HEAD
         q, k, v = make_tensor(), make_tensor(), make_tensor()
         block_mask = _create_empty_block_sparse_mask(q, k, v)
-=======
-        make_q = functools.partial(
-            torch.randn,
-            (B, Hkv if decoding else H, Hq // Hkv if decoding else S, D),
-            dtype=torch.float32,
-            device="cuda",
-            requires_grad=True,
-        )
-
-        q, k, v = make_q(), make_kv(), make_kv()
->>>>>>> 66cae65fef (Manual merge)
 
         @torch.compile
         def func(q, k, v, score_mod, block_mask):
@@ -1395,7 +1334,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         _, code = run_and_get_code(func, q, k, v, _identity, block_mask)
         # Ensure that two kernels are generated
-        FileCheck().check_count(".run(", 3 if decoding else 2, True).run(code[0])
+        FileCheck().check_count(".run(", 2, True).run(code[0])
 
     @supported_platform
     @common_utils.parametrize(
