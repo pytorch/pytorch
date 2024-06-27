@@ -549,7 +549,20 @@ def _load_model_state_dict(
                 state_dict[fqn_with_prefix] = state_dict.pop(fqn)
             local_state_dict[fqn_with_prefix] = value
 
-    if info.broadcast_from_rank0:
+    if info.fsdp_context() and info.full_state_dict and not info.broadcast_from_rank0:
+        device = None
+        for key, value in local_state_dict.items():
+            if torch.is_tensor(value):
+                if device is None:
+                    device = value.device
+                else:
+                    assert device == value.device
+        assert device is not None
+        _distribute_state_dict(state_dict, local_state_dict, device=device)
+        state_dict = {}
+        for fqn, local_state in local_state_dict.items():
+            state_dict[fqn] = local_state
+    elif info.broadcast_from_rank0:
         device = None
         for key, value in local_state_dict.items():
             if torch.is_tensor(value) and value.dim() > 0:
