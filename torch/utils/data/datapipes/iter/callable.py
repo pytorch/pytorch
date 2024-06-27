@@ -130,16 +130,14 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
     def __len__(self) -> int:
         if isinstance(self.datapipe, Sized):
             return len(self.datapipe)
-        raise TypeError(
-            f"{type(self).__name__} instance doesn't have valid length"
-        )
+        raise TypeError(f"{type(self).__name__} instance doesn't have valid length")
 
 
 def _collate_helper(conversion, item):
     # TODO(VitalyFedyunin): Verify that item is any sort of batch
     if len(item.items) > 1:
         # TODO(VitalyFedyunin): Compact all batch dataframes into one
-        raise Exception("Only supports one DataFrame per batch")  # noqa: TRY002
+        raise RuntimeError("Only supports one DataFrame per batch")
     df = item[0]
     columns_name = df_wrapper.get_columns(df)
     tuple_names: List = []
@@ -147,20 +145,25 @@ def _collate_helper(conversion, item):
 
     for name in conversion.keys():
         if name not in columns_name:
-            raise Exception("Conversion keys missmatch")  # noqa: TRY002
+            raise RuntimeError("Conversion keys missmatch")
 
     for name in columns_name:
         if name in conversion:
             if not callable(conversion[name]):
-                raise Exception('Collate (DF)DataPipe requires callable as dict values')  # noqa: TRY002
+                raise RuntimeError(
+                    "Collate (DF)DataPipe requires callable as dict values"
+                )
             collation_fn = conversion[name]
         else:
             # TODO(VitalyFedyunin): Add default collation into df_wrapper
             try:
                 import torcharrow.pytorch as tap  # type: ignore[import]
+
                 collation_fn = tap.rec.Default()
             except Exception as e:
-                raise Exception("unable to import default collation function from the TorchArrow") from e  # noqa: TRY002
+                raise RuntimeError(
+                    "unable to import default collation function from the TorchArrow"
+                ) from e
 
         tuple_names.append(str(name))
         value = collation_fn(df[name])
@@ -221,8 +224,8 @@ class CollatorIterDataPipe(MapperIterDataPipe):
         datapipe: IterDataPipe,
         conversion: Optional[
             Union[
-            Callable[..., Any],
-            Dict[Union[str, Any], Union[Callable, Any]],
+                Callable[..., Any],
+                Dict[Union[str, Any], Union[Callable, Any]],
             ]
         ] = default_collate,
         collate_fn: Optional[Callable] = None,

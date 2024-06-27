@@ -13,7 +13,7 @@ __all__ = [
     "ShufflerIterDataPipe",
 ]
 
-T_co = TypeVar('T_co', covariant=True)
+T_co = TypeVar("T_co", covariant=True)
 
 
 class SamplerIterDataPipe(IterDataPipe[T_co]):
@@ -29,14 +29,16 @@ class SamplerIterDataPipe(IterDataPipe[T_co]):
     datapipe: IterDataPipe
     sampler: Sampler
 
-    def __init__(self,
-                 datapipe: IterDataPipe,
-                 sampler: Type[Sampler] = SequentialSampler,
-                 sampler_args: Optional[Tuple] = None,
-                 sampler_kwargs: Optional[Dict] = None
-                 ) -> None:
-        assert isinstance(datapipe, Sized), \
-            "Sampler class requires input datapipe implemented `__len__`"
+    def __init__(
+        self,
+        datapipe: IterDataPipe,
+        sampler: Type[Sampler] = SequentialSampler,
+        sampler_args: Optional[Tuple] = None,
+        sampler_kwargs: Optional[Dict] = None,
+    ) -> None:
+        assert isinstance(
+            datapipe, Sized
+        ), "Sampler class requires input datapipe implemented `__len__`"
         super().__init__()
         self.datapipe = datapipe
         self.sampler_args = () if sampler_args is None else sampler_args
@@ -54,7 +56,7 @@ class SamplerIterDataPipe(IterDataPipe[T_co]):
         raise TypeError(f"{type(self).__name__} instance doesn't have valid length")
 
 
-@functional_datapipe('shuffle')
+@functional_datapipe("shuffle")
 class ShufflerIterDataPipe(IterDataPipe[T_co]):
     r"""
     Shuffle the input DataPipe with a buffer (functional name: ``shuffle``).
@@ -96,12 +98,13 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
     _seed: Optional[int]
     _rng: random.Random
 
-    def __init__(self,
-                 datapipe: IterDataPipe[T_co],
-                 *,
-                 buffer_size: int = 10000,
-                 unbatch_level: int = 0
-                 ) -> None:
+    def __init__(
+        self,
+        datapipe: IterDataPipe[T_co],
+        *,
+        buffer_size: int = 10000,
+        unbatch_level: int = 0,
+    ) -> None:
         super().__init__()
         # TODO: Performance optimization
         #       buffer can be a fixed size and remove expensive `append()` and `len()` operations

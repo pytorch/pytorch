@@ -111,6 +111,7 @@ imagespecs = {
     "pilrgba": ("pil", None, "rgba"),
 }
 
+
 def handle_extension(extensions, f):
     """
     Return a decoder handler function for the list of extensions.
@@ -133,9 +134,10 @@ def handle_extension(extensions, f):
             if len(target) > len(extension):
                 continue
 
-            if extension[-len(target):] == target:
+            if extension[-len(target) :] == target:
                 return f(data)
             return None
+
     return g
 
 
@@ -167,7 +169,9 @@ class ImageHandler:
     """
 
     def __init__(self, imagespec):
-        assert imagespec in list(imagespecs.keys()), f"unknown image specification: {imagespec}"
+        assert imagespec in list(
+            imagespecs.keys()
+        ), f"unknown image specification: {imagespec}"
         self.imagespec = imagespec.lower()
 
     def __call__(self, extension, data):
@@ -201,14 +205,18 @@ class ImageHandler:
                 return img
             elif atype == "numpy":
                 result = np.asarray(img)
-                assert result.dtype == np.uint8, f"numpy image array should be type uint8, but got {result.dtype}"
+                assert (
+                    result.dtype == np.uint8
+                ), f"numpy image array should be type uint8, but got {result.dtype}"
                 if etype == "uint8":
                     return result
                 else:
                     return result.astype("f") / 255.0
             elif atype == "torch":
                 result = np.asarray(img)
-                assert result.dtype == np.uint8, f"numpy image array should be type uint8, but got {result.dtype}"
+                assert (
+                    result.dtype == np.uint8
+                ), f"numpy image array should be type uint8, but got {result.dtype}"
 
                 if etype == "uint8":
                     result = np.array(result.transpose(2, 0, 1))
@@ -217,6 +225,7 @@ class ImageHandler:
                     result = np.array(result.transpose(2, 0, 1))
                     return torch.tensor(result) / 255.0
             return None
+
 
 def imagehandler(imagespec):
     return ImageHandler(imagespec)
@@ -232,9 +241,11 @@ def videohandler(extension, data):
     try:
         import torchvision.io
     except ImportError as e:
-        raise ModuleNotFoundError("Package `torchvision` is required to be installed for default video file loader."
-                                  "Please use `pip install torchvision` or `conda install torchvision -c pytorch`"
-                                  "to install the package") from e
+        raise ModuleNotFoundError(
+            "Package `torchvision` is required to be installed for default video file loader."
+            "Please use `pip install torchvision` or `conda install torchvision -c pytorch`"
+            "to install the package"
+        ) from e
 
     with tempfile.TemporaryDirectory() as dirname:
         fname = os.path.join(dirname, f"file.{extension}")
@@ -253,9 +264,11 @@ def audiohandler(extension, data):
     try:
         import torchaudio  # type: ignore[import]
     except ImportError as e:
-        raise ModuleNotFoundError("Package `torchaudio` is required to be installed for default audio file loader."
-                                  "Please use `pip install torchaudio` or `conda install torchaudio -c pytorch`"
-                                  "to install the package") from e
+        raise ModuleNotFoundError(
+            "Package `torchaudio` is required to be installed for default audio file loader."
+            "Please use `pip install torchaudio` or `conda install torchaudio -c pytorch`"
+            "to install the package"
+        ) from e
 
     with tempfile.TemporaryDirectory() as dirname:
         fname = os.path.join(dirname, f"file.{extension}")
@@ -272,17 +285,20 @@ class MatHandler:
         try:
             import scipy.io as sio
         except ImportError as e:
-            raise ModuleNotFoundError("Package `scipy` is required to be installed for mat file."
-                                      "Please use `pip install scipy` or `conda install scipy`"
-                                      "to install the package") from e
+            raise ModuleNotFoundError(
+                "Package `scipy` is required to be installed for mat file."
+                "Please use `pip install scipy` or `conda install scipy`"
+                "to install the package"
+            ) from e
         self.sio = sio
         self.loadmat_kwargs = loadmat_kwargs
 
     def __call__(self, extension, data):
-        if extension != 'mat':
+        if extension != "mat":
             return None
         with io.BytesIO(data) as stream:
             return self.sio.loadmat(stream, **self.loadmat_kwargs)
+
 
 def mathandler(**loadmat_kwargs):
     return MatHandler(**loadmat_kwargs)
