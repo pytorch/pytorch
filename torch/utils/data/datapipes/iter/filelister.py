@@ -1,14 +1,13 @@
 # mypy: allow-untyped-defs
 from typing import Iterator, List, Sequence, Union
 
-
 from torch.utils.data.datapipes._decorator import functional_datapipe
-
 from torch.utils.data.datapipes.datapipe import IterDataPipe
-from torch.utils.data.datapipes.iter import IterableWrapper
+from torch.utils.data.datapipes.iter.utils import IterableWrapperIterDataPipe
 from torch.utils.data.datapipes.utils.common import get_file_pathnames_from_root
 
-__all__ = ["FileListerIterDataPipe", ]
+
+__all__ = ["FileListerIterDataPipe"]
 
 
 @functional_datapipe("list_files")
@@ -49,7 +48,7 @@ class FileListerIterDataPipe(IterDataPipe[str]):
         if isinstance(root, str):
             root = [root, ]
         if not isinstance(root, IterDataPipe):
-            root = IterableWrapper(root)
+            root = IterableWrapperIterDataPipe(root)
         self.datapipe: IterDataPipe = root
         self.masks: Union[str, List[str]] = masks
         self.recursive: bool = recursive

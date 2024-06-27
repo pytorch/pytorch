@@ -10,9 +10,9 @@ import copy
 import queue
 
 import torch
-from . import MP_STATUS_CHECK_INTERVAL
 from torch._utils import ExceptionWrapper
-import torch.multiprocessing
+
+from . import MP_STATUS_CHECK_INTERVAL
 
 
 def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device):

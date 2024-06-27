@@ -1,17 +1,16 @@
 # mypy: allow-untyped-defs
 import inspect
 import warnings
-
 from typing import Any, List, Optional, Set
 from typing_extensions import deprecated
 
 import torch
-
 from torch.utils.data.datapipes.iter.sharding import (
     _ShardingIterDataPipe,
     SHARDING_PRIORITIES,
 )
 from torch.utils.data.graph import DataPipe, DataPipeGraph, traverse_dps
+
 
 __all__ = [
     "apply_random_seed",

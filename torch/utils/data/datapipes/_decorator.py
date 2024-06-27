@@ -1,9 +1,10 @@
 # mypy: allow-untyped-defs
 import inspect
 from functools import wraps
-from typing import Any, Callable, Optional, Type, Union, get_type_hints
-from torch.utils.data.datapipes.datapipe import IterDataPipe, MapDataPipe
+from typing import Any, Callable, get_type_hints, Optional, Type, Union
+
 from torch.utils.data.datapipes._typing import _DataPipeMeta
+from torch.utils.data.datapipes.datapipe import IterDataPipe, MapDataPipe
 
 
 ######################################################

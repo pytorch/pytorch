@@ -2,16 +2,16 @@
 from typing import Callable, Iterator, Tuple, TypeVar
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
-from torch.utils.data.datapipes.datapipe import IterDataPipe
 from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
+from torch.utils.data.datapipes.datapipe import IterDataPipe
 from torch.utils.data.datapipes.utils.common import (
     _check_unpickable_fn,
     StreamWrapper,
-    validate_input_col
+    validate_input_col,
 )
 
 
-__all__ = ["FilterIterDataPipe", ]
+__all__ = ["FilterIterDataPipe"]
 
 T = TypeVar('T')
 T_co = TypeVar('T_co', covariant=True)

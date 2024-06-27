@@ -1,9 +1,9 @@
 from torch.utils.data.datapipes.dataframe.dataframes import (
-    CaptureDataFrame, DFIterDataPipe,
+    CaptureDataFrame,
+    DFIterDataPipe,
 )
-from torch.utils.data.datapipes.dataframe.datapipes import (
-    DataFramesAsTuplesPipe,
-)
+from torch.utils.data.datapipes.dataframe.datapipes import DataFramesAsTuplesPipe
+
 
 __all__ = ['CaptureDataFrame', 'DFIterDataPipe', 'DataFramesAsTuplesPipe']
 

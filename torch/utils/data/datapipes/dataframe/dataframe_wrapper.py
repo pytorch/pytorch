@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from typing import Any, Optional
 
+
 _pandas: Any = None
 _WITH_PANDAS: Optional[bool] = None
 

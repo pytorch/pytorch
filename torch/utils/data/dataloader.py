@@ -20,18 +20,16 @@ import torch
 import torch.distributed as dist
 import torch.utils.data.graph_settings
 from torch._utils import ExceptionWrapper
+from torch.utils.data import _utils
 from torch.utils.data.datapipes.datapipe import (
     _IterDataPipeSerializationWrapper,
     _MapDataPipeSerializationWrapper,
-)
-
-from . import (
-    _utils,
-    BatchSampler,
-    Dataset,
-    IterableDataset,
     IterDataPipe,
     MapDataPipe,
+)
+from torch.utils.data.dataset import Dataset, IterableDataset
+from torch.utils.data.sampler import (
+    BatchSampler,
     RandomSampler,
     Sampler,
     SequentialSampler,
