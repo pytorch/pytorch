@@ -224,27 +224,24 @@ class AliasOfIntermediateHandler:
         )
 
 
+_HANDLER_MAP = {
+    OutputType.non_alias: NoopAliasHandler,
+    OutputType.unsafe_view_alias: NoopAliasHandler,
+    OutputType.custom_function_view: NoopAliasHandler,
+
+    OutputType.alias_of_input: AliasOfInputHandler,
+
+    OutputType.is_input: IsInputHandler,
+
+    OutputType.alias_of_intermediate: AliasOfIntermediateHandler,
+    OutputType.alias_of_intermediate_save_as_output: AliasOfIntermediateHandler,
+    OutputType.alias_of_intermediate_base_is_user_output: AliasOfIntermediateHandler,
+}
+
+
 def make_output_handler(info, runtime_metadata, trace_joint):
-    if info.output_type in (
-        OutputType.non_alias,
-        OutputType.unsafe_view_alias,
-        OutputType.custom_function_view,
-    ):
-        return NoopAliasHandler(info, runtime_metadata, trace_joint)
-    elif info.output_type == OutputType.alias_of_input:
-        return AliasOfInputHandler(info, runtime_metadata, trace_joint)
-    elif info.output_type == OutputType.is_input:
-        return IsInputHandler(info, runtime_metadata, trace_joint)
-    elif info.output_type in (
-        OutputType.alias_of_intermediate,
-        OutputType.alias_of_intermediate_save_as_output,
-        OutputType.alias_of_intermediate_base_is_user_output,
-    ):
-        return AliasOfIntermediateHandler(info, runtime_metadata, trace_joint)
-    # TODO: handle the custom autograd function case here.
-    # We need a way to check whether a tensor came from a custom autograd fn from python,
-    # AND a way to replay that custom view fn.
-    raise AssertionError(f"Unhandled output type {info.output_type}")
+    handler_type = _HANDLER_MAP[info.output_type]
+    return handler_type(info, runtime_metadata, trace_joint)
 
 
 def _create_runtime_wrapper(
