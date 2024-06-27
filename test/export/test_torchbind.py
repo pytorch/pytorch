@@ -148,15 +148,16 @@ class TestExportTorchbind(TestCase):
         reversed_kwargs = {key: kwargs[key] for key in reversed(kwargs)}
         unlifted = exported_program.module()
         exp = f(*args, **kwargs)
-        self.assertEqual(unlifted(*args, **kwargs), exp)
-        self.assertEqual(
+        _assertEqualScriptObject(self, unlifted(*args, **kwargs), exp)
+        _assertEqualScriptObject(
+            self,
             unlifted(*args, **reversed_kwargs),
             exp,
         )
 
         # check re-tracing
         retraced_ep = export_wrapper(unlifted, args, kwargs, strict, pre_dispatch)
-        self.assertEqual(retraced_ep.module()(*args, **kwargs), exp)
+        _assertEqualScriptObject(self, retraced_ep.module()(*args, **kwargs), exp)
         return exported_program
 
     @parametrize("pre_dispatch", [True, False])
@@ -950,6 +951,44 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     getitem_10 = with_effects_5[0];  with_effects_5 = None
     add = torch.ops.aten.add.Tensor(getitem_9, 0);  getitem_9 = None
     return (getitem_10, sub, add, arg1_1)""",  # noqa: B950
+        )
+
+    def test_export_inplace_custom_op(self):
+        class Model(torch.nn.Module):
+            def forward(self, tq: torch.ScriptObject, x: torch.Tensor) -> None:
+                torch.ops._TorchScriptTesting.queue_push(tq, x)
+                return tq
+
+        mod = Model()
+        ep = self._test_export_same_as_eager(
+            mod,
+            (_empty_tensor_queue(), torch.randn(3, 3)),
+            strict=False,
+            pre_dispatch=True,
+        )
+        self.assertExpectedInline(
+            ep.module().code.strip(),
+            """\
+def forward(self, tq, x):
+    tq, x, = fx_pytree.tree_flatten_spec(([tq, x], {}), self._in_spec)
+    queue_push_default = torch.ops._TorchScriptTesting.queue_push.default(tq, x);  x = None
+    return pytree.tree_unflatten((tq,), self._out_spec)""",
+        )
+        self.assertExpectedInline(
+            ep.graph_module.code.strip(),
+            """\
+def forward(self, tq, x):
+    queue_push_default = torch.ops._TorchScriptTesting.queue_push.default(tq, x);  x = None
+    return (tq,)""",
+        )
+        self.assertExpectedInline(
+            str(ep.graph_module.graph).strip(),
+            """\
+graph():
+    %tq : [num_users=2] = placeholder[target=tq]
+    %x : [num_users=1] = placeholder[target=x]
+    %queue_push_default : [num_users=0] = call_function[target=torch.ops._TorchScriptTesting.queue_push.default](args = (%tq, %x), kwargs = {})
+    return (tq,)""",  # noqa: B950
         )
 
 
