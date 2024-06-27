@@ -702,7 +702,28 @@ class TS2FXGraphConverter:
         for block in node.blocks():
             arguments = arguments.union(self.blocks_to_lifted_attrs[block])
 
-        arguments = list(arguments)
+        arguments_orig = list(arguments)
+
+        # Rename variables that only have digit e.g., 20, which
+        # will cause error when it is embedded into a codegen function
+        # (invalid argument name). We rename if the name is not valid for
+        # code generation.
+        # E.g.,
+        #     Graph[x.1]                 Graph[x.1]
+        #     %1 = ...          -->      %1 = ... // reaming_map["1"] = "n_1"
+        #         Block[%1]                  Block[%n_1] // sub-block: name_to_node["n_1"] = fx.node
+        #         %2 = %1 ...                %2 = %1 ... // name_to_node[renaming_map["1"]]
+        arguments_renamed = []
+        for i, argument in enumerate(arguments_orig):
+            if not is_valid_for_codegen(argument):
+                prefix = self.name_to_node[argument].name  # type: ignore[union-attr]
+                argument_renamed = f"{prefix}_{argument}"
+                self.renaming_map[
+                    argument
+                ] = argument_renamed  # For sub-block getting new name.
+                arguments_renamed.append(argument_renamed)
+            else:
+                arguments_renamed.append(argument)
 
         # Convert blocks to subgraphs
         subgraph_nodes = []

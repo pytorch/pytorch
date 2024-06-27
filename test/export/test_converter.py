@@ -448,9 +448,9 @@ class TestConverter(TestCase):
 
         inp = (torch.ones(3),)
         orig_m = NestedM(3)
-        ep = self._check_equal_ts_ep_converter(orig_m, inp)
+        self._check_equal_ts_ep_converter(orig_m, inp)
         orig_m = SuperNestedM(3)
-        ep = self._check_equal_ts_ep_converter(orig_m, inp)
+        self._check_equal_ts_ep_converter(orig_m, inp)
 
     def test_convert_nn_module_with_nested_if_and_param(self):
         class M(torch.nn.Module):
