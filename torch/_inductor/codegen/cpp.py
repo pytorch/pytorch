@@ -3879,18 +3879,38 @@ class CppScheduling(BaseScheduling):
                         size_offset = node.outer_loop_fusion_depth - len(
                             get_call_ranges(scheduler_node)
                         )
-                        if (
-                            not global_buffer_layout.is_contiguous()
-                            and not scheduler_node.is_reduction()
-                            and sympy_product(global_buffer_layout.size[:size_offset])
-                            == sympy_product(scheduler_node.group[1][0][:size_offset])
-                            and all(
-                                scheduler_node.group[1][0][size_offset:][idx]
-                                == global_buffer_layout.size[size_offset:][idx]
-                                for idx in range(
-                                    len(scheduler_node.group[1][0][size_offset:])
+
+                        def is_all_write_read_contiguous(scheduler_node):
+                            def is_contiguous_index(index_expr, sizes):
+                                index = sorted(
+                                    index_expr.free_symbols, key=lambda s: s.name
                                 )
+                                return all(
+                                    stride_at(index_expr, index[idx]) == sizes[idx + 1]
+                                    if ((idx + 1) < len(sizes))
+                                    else 1
+                                    for idx in range(len(sizes))
+                                )
+
+                            write_index_expr = scheduler_node._body.writes_name2expr[
+                                scheduler_node.get_name()
+                            ]
+                            sizes = scheduler_node._sizes[0]
+
+                            return is_contiguous_index(write_index_expr, sizes) and all(
+                                is_contiguous_index(
+                                    user.node._body.reads_name2expr[
+                                        scheduler_node.get_name()
+                                    ],
+                                    sizes,
+                                )
+                                for user in scheduler_node.users
                             )
+
+                        if not (
+                            global_buffer_layout.is_contiguous()
+                            and not scheduler_node.is_reduction()
+                            and is_all_write_read_contiguous(scheduler_node)
                         ):
                             continue
                         # Local Buffer is a view of global buffer
