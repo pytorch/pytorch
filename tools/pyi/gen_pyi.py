@@ -15,7 +15,7 @@ from tools.autograd.gen_python_functions import (
 )
 
 from torchgen.api.python import (
-    format_function_signature as ffs,
+    format_function_signature as defs,
     PythonSignatureGroup,
     PythonSignatureNativeFunctionPair,
     returns_structseq_pyi,
@@ -308,13 +308,13 @@ def get_max_pool_dispatch(name: str, arg_list: list[str]) -> dict[str, list[str]
     arg_list_keyword.insert(flag_pos, "*")
     return {
         name: [
-            ffs(name, arg_list, "Tensor").format(
+            defs(name, arg_list, "Tensor").format(
                 return_indices="return_indices: Literal[False] = False",
             ),
-            ffs(name, arg_list_positional, "tuple[Tensor, Tensor]").format(
+            defs(name, arg_list_positional, "tuple[Tensor, Tensor]").format(
                 return_indices="return_indices: Literal[True]",
             ),
-            ffs(name, arg_list_keyword, "tuple[Tensor, Tensor]").format(
+            defs(name, arg_list_keyword, "tuple[Tensor, Tensor]").format(
                 return_indices="return_indices: Literal[True]",
             ),
         ]
@@ -336,7 +336,7 @@ def gen_nn_functional(fm: FileManager) -> None:
         unsorted_c_nn_function_hints.update(
             {
                 f"avg_pool{d}d": [
-                    ffs(
+                    defs(
                         f"avg_pool{d}d",
                         [
                             INPUT,
@@ -350,7 +350,7 @@ def gen_nn_functional(fm: FileManager) -> None:
                     )
                 ],
                 f"fractional_max_pool{d}d": [
-                    ffs(
+                    defs(
                         f"fractional_max_pool{d}d",
                         [
                             INPUT,
@@ -362,7 +362,7 @@ def gen_nn_functional(fm: FileManager) -> None:
                     )
                 ],
                 f"adaptive_max_pool{d}d": [
-                    ffs(
+                    defs(
                         f"adaptive_max_pool{d}d",
                         [
                             INPUT,
@@ -377,7 +377,7 @@ def gen_nn_functional(fm: FileManager) -> None:
     unsorted_c_nn_function_hints.update(
         {
             "hardtanh": [
-                ffs(
+                defs(
                     "hardtanh",
                     [
                         "input: Tensor",
@@ -390,15 +390,15 @@ def gen_nn_functional(fm: FileManager) -> None:
                 )
             ],
             "hardtanh_": [
-                ffs(
+                defs(
                     "hardtanh_",
                     ["input: Tensor", "min_val: float = ...", "max_val: float = ..."],
                     "Tensor",
                 ),
             ],
-            "elu_": [ffs("elu_", ["input: Tensor", "alpha: float = ..."], "Tensor")],
+            "elu_": [defs("elu_", ["input: Tensor", "alpha: float = ..."], "Tensor")],
             "leaky_relu": [
-                ffs(
+                defs(
                     "leaky_relu",
                     [
                         "input: Tensor",
@@ -410,42 +410,42 @@ def gen_nn_functional(fm: FileManager) -> None:
                 )
             ],
             "leaky_relu_": [
-                ffs(
+                defs(
                     "leaky_relu_",
                     ["input: Tensor", "negative_slope: float = ..."],
                     "Tensor",
                 )
             ],
-            "log_sigmoid": [ffs("log_sigmoid", ["input: Tensor"], "Tensor")],
+            "log_sigmoid": [defs("log_sigmoid", ["input: Tensor"], "Tensor")],
             "gelu": [
-                ffs("gelu", ["input: Tensor", "approximate: str = ..."], "Tensor")
+                defs("gelu", ["input: Tensor", "approximate: str = ..."], "Tensor")
             ],
             "softplus": [
-                ffs(
+                defs(
                     "softplus",
                     ["input: Tensor", "beta: float = ...", "threshold: float = ..."],
                     "Tensor",
                 )
             ],
             "softshrink": [
-                ffs("softshrink", ["input: Tensor", "lambd: float = ..."], "Tensor")
+                defs("softshrink", ["input: Tensor", "lambd: float = ..."], "Tensor")
             ],
             "hardsigmoid": [
-                ffs(
+                defs(
                     "hardsigmoid",
                     ["input: Tensor", "*", "out: Tensor | None = None"],
                     "Tensor",
                 )
             ],
             "linear": [
-                ffs(
+                defs(
                     "linear",
                     ["input: Tensor", "weight: Tensor", "bias: Tensor | None = None"],
                     "Tensor",
                 )
             ],
             "pad": [
-                ffs(
+                defs(
                     "pad",
                     [
                         "input: Tensor",
@@ -457,10 +457,10 @@ def gen_nn_functional(fm: FileManager) -> None:
                 )
             ],
             "one_hot": [
-                ffs("one_hot", ["tensor: Tensor", "num_classes: int = ..."], "Tensor")
+                defs("one_hot", ["tensor: Tensor", "num_classes: int = ..."], "Tensor")
             ],
             "scaled_dot_product_attention": [
-                ffs(
+                defs(
                     "scaled_dot_product_attention",
                     [
                         "query: Tensor",
@@ -680,7 +680,7 @@ def gen_pyi(
         unsorted_function_hints.update(
             {
                 f"sparse_{n}_tensor": [
-                    ffs(
+                    defs(
                         f"sparse_{n}_tensor",
                         [
                             f"{n1}_indices: Tensor | list",
@@ -701,10 +701,12 @@ def gen_pyi(
 
     unsorted_function_hints.update(
         {
-            "set_flush_denormal": [ffs("set_flush_denormal", ["mode: _bool"], "_bool")],
-            "get_default_dtype": [ffs("get_default_dtype", [], "_dtype")],
+            "set_flush_denormal": [
+                defs("set_flush_denormal", ["mode: _bool"], "_bool")
+            ],
+            "get_default_dtype": [defs("get_default_dtype", [], "_dtype")],
             "asarray": [
-                ffs(
+                defs(
                     "asarray",
                     [
                         "obj: Any",
@@ -717,9 +719,9 @@ def gen_pyi(
                     "Tensor",
                 )
             ],
-            "from_numpy": [ffs("from_numpy", ["ndarray"], "Tensor")],
+            "from_numpy": [defs("from_numpy", ["ndarray"], "Tensor")],
             "frombuffer": [
-                ffs(
+                defs(
                     "frombuffer",
                     [
                         "buffer: Any",
@@ -732,27 +734,27 @@ def gen_pyi(
                     "Tensor",
                 )
             ],
-            "numel": [ffs("numel", ["self: Tensor"], "_int")],
+            "numel": [defs("numel", ["self: Tensor"], "_int")],
             "as_tensor": [
-                ffs(
+                defs(
                     "as_tensor",
                     ["data: Any", "dtype: _dtype | None = None", DEVICE_PARAM],
                     "Tensor",
                 )
             ],
-            "get_num_threads": [ffs("get_num_threads", [], "_int")],
-            "set_num_threads": [ffs("set_num_threads", ["num: _int"], "None")],
-            "init_num_threads": [ffs("init_num_threads", [], "None")],
-            "get_num_interop_threads": [ffs("get_num_interop_threads", [], "_int")],
+            "get_num_threads": [defs("get_num_threads", [], "_int")],
+            "set_num_threads": [defs("set_num_threads", ["num: _int"], "None")],
+            "init_num_threads": [defs("init_num_threads", [], "None")],
+            "get_num_interop_threads": [defs("get_num_interop_threads", [], "_int")],
             "set_num_interop_threads": [
-                ffs("set_num_interop_threads", ["num: _int"], "None")
+                defs("set_num_interop_threads", ["num: _int"], "None")
             ],
             # These functions are explicitly disabled by
             # SKIP_PYTHON_BINDINGS because they are hand bound.
             # Correspondingly, we must hand-write their signatures.
-            "tensor": [ffs("tensor", ["data: Any", *FACTORY_PARAMS], "Tensor")],
+            "tensor": [defs("tensor", ["data: Any", *FACTORY_PARAMS], "Tensor")],
             "sparse_coo_tensor": [
-                ffs(
+                defs(
                     "sparse_coo_tensor",
                     [
                         "indices: Tensor",
@@ -769,7 +771,7 @@ def gen_pyi(
                 )
             ],
             "sparse_compressed_tensor": [
-                ffs(
+                defs(
                     "sparse_compressed_tensor",
                     [
                         "compressed_indices: Tensor | list",
@@ -786,79 +788,81 @@ def gen_pyi(
                     "Tensor",
                 )
             ],
-            "_sync": [ffs("_sync", ["t: Tensor"], "None")],
+            "_sync": [defs("_sync", ["t: Tensor"], "None")],
             "_is_functional_tensor": [
-                ffs("_is_functional_tensor", ["t: Tensor"], "_bool")
+                defs("_is_functional_tensor", ["t: Tensor"], "_bool")
             ],
             "_from_functional_tensor": [
-                ffs("_from_functional_tensor", ["t: Tensor"], "Tensor")
+                defs("_from_functional_tensor", ["t: Tensor"], "Tensor")
             ],
             "_to_functional_tensor": [
-                ffs("_to_functional_tensor", ["t: Tensor"], "Tensor")
+                defs("_to_functional_tensor", ["t: Tensor"], "Tensor")
             ],
             "_functionalize_replace": [
-                ffs(
+                defs(
                     "_functionalize_replace", ["self_: Tensor", "other: Tensor"], "None"
                 )
             ],
             "_functionalize_commit_update": [
-                ffs("_functionalize_commit_update", ["t: Tensor"], "None")
+                defs("_functionalize_commit_update", ["t: Tensor"], "None")
             ],
             "_functionalize_mark_mutation_hidden_from_autograd": [
-                ffs(
+                defs(
                     "_functionalize_mark_mutation_hidden_from_autograd",
                     ["t: Tensor"],
                     "None",
                 )
             ],
             "_functionalize_are_all_mutations_hidden_from_autograd": [
-                ffs(
+                defs(
                     "_functionalize_are_all_mutations_hidden_from_autograd",
                     ["t: Tensor"],
                     "_bool",
                 )
             ],
             "_functionalize_are_all_mutations_under_no_grad_or_inference_mode": [
-                ffs(
+                defs(
                     "_functionalize_are_all_mutations_under_no_grad_or_inference_mode",
                     ["t: Tensor"],
                     "_bool",
                 )
             ],
             "_functionalize_was_inductor_storage_resized": [
-                ffs(
+                defs(
                     "_functionalize_was_inductor_storage_resized",
                     ["t: Tensor"],
                     "_bool",
                 )
             ],
-            "_functionalize_sync": [ffs("_functionalize_sync", ["t: Tensor"], "None")],
+            "_functionalize_sync": [defs("_functionalize_sync", ["t: Tensor"], "None")],
             "_functionalize_was_storage_changed": [
-                ffs("_functionalize_was_storage_changed", ["tensor: Tensor"], "_bool")
+                defs("_functionalize_was_storage_changed", ["tensor: Tensor"], "_bool")
             ],
             "_functionalize_has_metadata_mutation": [
-                ffs("_functionalize_has_metadata_mutation", ["tensor: Tensor"], "_bool")
+                defs(
+                    "_functionalize_has_metadata_mutation", ["tensor: Tensor"], "_bool"
+                )
             ],
             "_functionalize_apply_view_metas": [
-                ffs(
+                defs(
                     "_functionalize_apply_view_metas",
                     ["tensor: Tensor", "base: Tensor"],
                     "Tensor",
                 )
             ],
             "_functionalize_is_symbolic": [
-                ffs("_functionalize_is_symbolic", ["tensor: Tensor"], "_bool")
+                defs("_functionalize_is_symbolic", ["tensor: Tensor"], "_bool")
             ],
             "_enable_functionalization": [
-                ffs(
+                defs(
                     "_enable_functionalization",
                     ["*", "reapply_views: _bool = False"],
                     "None",
                 )
             ],
-            "_disable_functionalization": [ffs("_disable_functionalization")],
+            "_disable_functionalization": [defs("_disable_functionalization")],
             "range": [
-                ffs(
+                defs(
                     "range",
                     [
                         "start: Number",
@@ -872,7 +876,7 @@ def gen_pyi(
                 )
             ],
             "arange": [
-                ffs(
+                defs(
                     "arange",
                     [
                         "start: Number",
@@ -884,7 +888,7 @@ def gen_pyi(
                     ],
                     "Tensor",
                 ),
-                ffs(
+                defs(
                     "arange",
                     [
                         "start: Number",
@@ -895,14 +899,14 @@ def gen_pyi(
                     ],
                     "Tensor",
                 ),
-                ffs(
+                defs(
                     "arange",
                     ["end: Number", "*", "out: Tensor | None = None", *FACTORY_PARAMS],
                     "Tensor",
                 ),
             ],
             "linspace": [
-                ffs(
+                defs(
                     "linspace",
                     [
                         "start: Number",
@@ -916,7 +920,7 @@ def gen_pyi(
                 )
             ],
             "logspace": [
-                ffs(
+                defs(
                     "logspace",
                     [
                         "start: Number",
@@ -931,7 +935,7 @@ def gen_pyi(
                 )
             ],
             "randint": [
-                ffs(
+                defs(
                     "randint",
                     [
                         "low: _int",
@@ -943,7 +947,7 @@ def gen_pyi(
                     ],
                     "Tensor",
                 ),
-                ffs(
+                defs(
                     "randint",
                     [
                         "high: _int",
@@ -956,7 +960,7 @@ def gen_pyi(
                 ),
             ],
             "full": [
-                ffs(
+                defs(
                     "full",
                     [
                         "size: _size",
@@ -968,7 +972,7 @@ def gen_pyi(
                     ],
                     "Tensor",
                 ),
-                ffs(
+                defs(
                     "full",
                     [
                         "size: _size",
@@ -981,12 +985,12 @@ def gen_pyi(
                     "Tensor",
                 ),
             ],
-            "is_grad_enabled": [ffs("is_grad_enabled", [], "_bool")],
+            "is_grad_enabled": [defs("is_grad_enabled", [], "_bool")],
             "is_inference_mode_enabled": [
-                ffs("is_inference_mode_enabled", [], "_bool")
+                defs("is_inference_mode_enabled", [], "_bool")
             ],
             "nonzero": [
-                ffs(
+                defs(
                     "nonzero",
                     [
                         "input: Tensor",
@@ -996,16 +1000,16 @@ def gen_pyi(
                     ],
                     "Tensor",
                 ),
-                ffs(
+                defs(
                     "nonzero",
                     ["input: Tensor", "*", "as_tuple: Literal[True]"],
                     "tuple[Tensor, ...]",
                 ),
             ],
-            "dsmm": [ffs("dsmm", ["input: Tensor", "mat2: Tensor"], "Tensor")],
-            "hsmm": [ffs("hsmm", ["input: Tensor", "mat2: Tensor"], "Tensor")],
+            "dsmm": [defs("dsmm", ["input: Tensor", "mat2: Tensor"], "Tensor")],
+            "hsmm": [defs("hsmm", ["input: Tensor", "mat2: Tensor"], "Tensor")],
             "saddmm": [
-                ffs(
+                defs(
                     "saddmm",
                     [
                         "input: Tensor",
@@ -1019,9 +1023,9 @@ def gen_pyi(
                     "Tensor",
                 )
             ],
-            "spmm": [ffs("spmm", ["input: Tensor", "mat2: Tensor"], "Tensor")],
+            "spmm": [defs("spmm", ["input: Tensor", "mat2: Tensor"], "Tensor")],
             "div": [
-                ffs(
+                defs(
                     "div",
                     [
                         "input: Tensor | Number",
@@ -1037,7 +1041,7 @@ def gen_pyi(
     )
     for binop in ["true_divide", "floor_divide"]:
         unsorted_function_hints[binop].append(
-            ffs(
+            defs(
                 binop,
                 [
                     "input: Tensor | Number",
@@ -1050,7 +1054,7 @@ def gen_pyi(
         )
     for binop in ["mul"]:
         unsorted_function_hints[binop].append(
-            ffs(
+            defs(
                 binop,
                 [
                     "input: Tensor | Number | _complex",
@@ -1063,7 +1067,7 @@ def gen_pyi(
         )
     for binop in ["add", "sub"]:
         unsorted_function_hints[binop].append(
-            ffs(
+            defs(
                 binop,
                 [
                     "input: Tensor | Number | _complex",
@@ -1130,38 +1134,38 @@ def gen_pyi(
     unsorted_tensor_method_hints.update(
         {
             "size": [
-                ffs("size", ["self", "dim: None = None"], "Size"),
-                ffs("size", ["self", "dim: _int"], "_int"),
+                defs("size", ["self", "dim: None = None"], "Size"),
+                defs("size", ["self", "dim: _int"], "_int"),
             ],
             "stride": [
-                ffs("stride", ["self", "dim: None = None"], "tuple[_int, ...]"),
-                ffs("stride", ["self", "dim: _int"], "_int"),
+                defs("stride", ["self", "dim: None = None"], "tuple[_int, ...]"),
+                defs("stride", ["self", "dim: _int"], "_int"),
             ],
             "new_ones": [
-                ffs("new_ones", ["self", "size: _size", *FACTORY_PARAMS], "Tensor")
+                defs("new_ones", ["self", "size: _size", *FACTORY_PARAMS], "Tensor")
             ],
             "new_tensor": [
-                ffs("new_tensor", ["self", "data: Any", *FACTORY_PARAMS], "Tensor")
+                defs("new_tensor", ["self", "data: Any", *FACTORY_PARAMS], "Tensor")
             ],
-            "__new__": [ffs("__new__", ["cls", "*args", "**kwargs"], "Self")],
+            "__new__": [defs("__new__", ["cls", "*args", "**kwargs"], "Self")],
             # new and __init__ have the same signatures differ only in return type
             # Adapted from legacy_tensor_ctor and legacy_tensor_new
             "new": [
-                ffs("new", ["cls", "*args: Any", DEVICE_PARAM], "Self"),
-                ffs("new", ["cls", "storage: Storage"], "Self"),
-                ffs("new", ["cls", "other: Tensor"], "Self"),
-                ffs("new", ["cls", "size: _size", "*", DEVICE_PARAM], "Self"),
+                defs("new", ["cls", "*args: Any", DEVICE_PARAM], "Self"),
+                defs("new", ["cls", "storage: Storage"], "Self"),
+                defs("new", ["cls", "other: Tensor"], "Self"),
+                defs("new", ["cls", "size: _size", "*", DEVICE_PARAM], "Self"),
             ],
             "__init__": [
-                ffs("__init__", ["self", "*args: Any", DEVICE_PARAM], "None"),
-                ffs("__init__", ["self", "storage: Storage"], "None"),
-                ffs("__init__", ["self", "other: Tensor"], "None"),
-                ffs("__init__", ["self", "size: _size", "*", DEVICE_PARAM], "None"),
+                defs("__init__", ["self", "*args: Any", DEVICE_PARAM], "None"),
+                defs("__init__", ["self", "storage: Storage"], "None"),
+                defs("__init__", ["self", "other: Tensor"], "None"),
+                defs("__init__", ["self", "size: _size", "*", DEVICE_PARAM], "None"),
             ],
-            "as_subclass": [ffs("as_subclass", ["self", "cls: type[S]"], "S")],
+            "as_subclass": [defs("as_subclass", ["self", "cls: type[S]"], "S")],
             "_make_subclass": [
                 "@staticmethod\n"
-                + ffs(
+                + defs(
                     "_make_subclass",
                     [
                         "cls: type[S]",
@@ -1175,14 +1179,14 @@ def gen_pyi(
                 )
             ],
             "__getitem__": [
-                ffs(
+                defs(
                     "__getitem__",
                     ["self", "indices: _Index | tuple[_Index, ...]"],
                     "Tensor",
                 )
             ],
             "__setitem__": [
-                ffs(
+                defs(
                     "__setitem__",
                     [
                         "self",
@@ -1192,30 +1196,30 @@ def gen_pyi(
                     "None",
                 )
             ],
-            "tolist": [ffs("tolist", ["self"], "list")],
+            "tolist": [defs("tolist", ["self"], "list")],
             "requires_grad_": [
-                ffs("requires_grad_", ["self", "mode: _bool = True"], "Tensor")
+                defs("requires_grad_", ["self", "mode: _bool = True"], "Tensor")
             ],
-            "element_size": [ffs("element_size", ["self"], "_int")],
-            "data_ptr": [ffs("data_ptr", ["self"], "_int")],
-            "dim": [ffs("dim", ["self"], "_int")],
+            "element_size": [defs("element_size", ["self"], "_int")],
+            "data_ptr": [defs("data_ptr", ["self"], "_int")],
+            "dim": [defs("dim", ["self"], "_int")],
             "nonzero": [
-                ffs(
+                defs(
                     "nonzero",
                     ["self", "*", "as_tuple: Literal[False] = False"],
                     "Tensor",
                 ),
-                ffs(
+                defs(
                     "nonzero",
                     ["self", "*", "as_tuple: Literal[True]"],
                     "tuple[Tensor, ...]",
                 ),
             ],
-            "numel": [ffs("numel", ["self"], "_int")],
-            "ndimension": [ffs("ndimension", ["self"], "_int")],
-            "nelement": [ffs("nelement", ["self"], "_int")],
+            "numel": [defs("numel", ["self"], "_int")],
+            "ndimension": [defs("ndimension", ["self"], "_int")],
+            "nelement": [defs("nelement", ["self"], "_int")],
             "cuda": [
-                ffs(
+                defs(
                     "cuda",
                     [
                         "self",
@@ -1227,7 +1231,7 @@ def gen_pyi(
                 )
             ],
             "xpu": [
-                ffs(
+                defs(
                     "xpu",
                     [
                         "self",
@@ -1239,7 +1243,7 @@ def gen_pyi(
                 )
             ],
             "cpu": [
-                ffs(
+                defs(
                     "cpu",
                     [
                         "self",
@@ -1249,36 +1253,36 @@ def gen_pyi(
                 )
             ],
             "numpy": [
-                ffs("numpy", ["self", "*", "force: _bool = False"], "numpy.ndarray")
+                defs("numpy", ["self", "*", "force: _bool = False"], "numpy.ndarray")
             ],
-            "apply_": [ffs("apply_", ["self", "callable: Callable"], "Tensor")],
+            "apply_": [defs("apply_", ["self", "callable: Callable"], "Tensor")],
             "map_": [
-                ffs("map_", ["self", "tensor: Tensor", "callable: Callable"], "Tensor")
+                defs("map_", ["self", "tensor: Tensor", "callable: Callable"], "Tensor")
             ],
             "map2_": [
-                ffs(
+                defs(
                     "map2_",
                     ["self", "x: Tensor", "y: Tensor", "callable: Callable"],
                     "Tensor",
                 )
             ],
-            "storage": [ffs("untyped_storage", ["self"], "UntypedStorage")],
-            "storage_type": [ffs("storage_type", ["self"], "Storage")],
+            "storage": [defs("untyped_storage", ["self"], "UntypedStorage")],
+            "storage_type": [defs("storage_type", ["self"], "Storage")],
             "type": [
-                ffs(
+                defs(
                     "type",
                     ["self", "dtype: None = None", "non_blocking: _bool = False"],
                     "str",
                 ),
-                ffs(
+                defs(
                     "type",
                     ["self", "dtype: str | _dtype", "non_blocking: _bool = False"],
                     "Tensor",
                 ),
             ],
-            "get_device": [ffs("get_device", ["self"], "_int")],
+            "get_device": [defs("get_device", ["self"], "_int")],
             "contiguous": [
-                ffs(
+                defs(
                     "contiguous",
                     [
                         "self",
@@ -1287,9 +1291,9 @@ def gen_pyi(
                     "Tensor",
                 )
             ],
-            "has_names": [ffs("has_names", ["self"], "_bool")],
+            "has_names": [defs("has_names", ["self"], "_bool")],
             "is_contiguous": [
-                ffs(
+                defs(
                     "is_contiguous",
                     [
                         "self",
@@ -1298,7 +1302,7 @@ def gen_pyi(
                     "_bool",
                 )
             ],
-            "_is_view": [ffs("_is_view", ["self"], "_bool")],
+            "_is_view": [defs("_is_view", ["self"], "_bool")],
             "is_cpu": ["is_cpu: _bool"],
             "is_cuda": ["is_cuda: _bool"],
             "is_leaf": ["is_leaf: _bool"],
@@ -1313,10 +1317,10 @@ def gen_pyi(
             "is_mkldnn": ["is_mkldnn: _bool"],
             "is_vulkan": ["is_vulkan: _bool"],
             "is_ipu": ["is_ipu: _bool"],
-            "storage_offset": [ffs("storage_offset", ["self"], "_int")],
+            "storage_offset": [defs("storage_offset", ["self"], "_int")],
             "to": [
                 (
-                    ffs(
+                    defs(
                         "to",
                         [
                             "self",
@@ -1338,16 +1342,16 @@ def gen_pyi(
                     ["other: Tensor"],
                 ]
             ],
-            "item": [ffs("item", ["self"], "Number")],
+            "item": [defs("item", ["self"], "Number")],
             "copy_": [
-                ffs(
+                defs(
                     "copy_",
                     ["self", "src: Tensor", "non_blocking: _bool = False"],
                     "Tensor",
                 )
             ],
             "set_": [
-                ffs(
+                defs(
                     "set_",
                     [
                         "self",
@@ -1358,26 +1362,26 @@ def gen_pyi(
                     ],
                     "Tensor",
                 ),
-                ffs(
+                defs(
                     "set_",
                     ["self", "storage: Storage | TypedStorage | UntypedStorage"],
                     "Tensor",
                 ),
             ],
             "split": [
-                ffs(
+                defs(
                     "split",
                     ["self", "split_size: _int", "dim: _int = 0"],
                     "Sequence[Tensor]",
                 ),
-                ffs(
+                defs(
                     "split",
                     ["self", "split_size: tuple[_int, ...]", "dim: _int = 0"],
                     "Sequence[Tensor]",
                 ),
             ],
             "div": [
-                ffs(
+                defs(
                     "div",
                     [
                         "self",
@@ -1389,7 +1393,7 @@ def gen_pyi(
                 )
             ],
             "div_": [
-                ffs(
+                defs(
                     "div_",
                     [
                         "self",
@@ -1409,7 +1413,7 @@ def gen_pyi(
                 binop += "_"
                 out_args = []
             unsorted_tensor_method_hints[binop].append(
-                ffs(
+                defs(
                     binop,
                     [
                         "self",
@@ -1426,7 +1430,7 @@ def gen_pyi(
                 binop += "_"
                 out_args = []
             unsorted_tensor_method_hints[binop].append(
-                ffs(
+                defs(
                     binop,
                     [
                         "self",
@@ -1443,7 +1447,7 @@ def gen_pyi(
                 binop += "_"
                 out_args = []
             unsorted_tensor_method_hints[binop].append(
-                ffs(
+                defs(
                     binop,
                     [
                         "self",
