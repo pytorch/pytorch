@@ -1109,11 +1109,11 @@ def load(
     torch._C._log_api_usage_once("torch.load")
     UNSAFE_MESSAGE = (
         "Re-running `torch.load` with `weights_only` set to `False` will likely succeed, "
-        "but it can result in arbitrary code execution. Do it only if you get the file from a "
+        "but it can result in arbitrary code execution. Do it only if you got the file from a "
         "trusted source."
     )
     DOCS_MESSAGE = (
-        "\n\nCheck the doc of torch.load to learn more about types accepted by default with "
+        "\n\nCheck the documentation of torch.load to learn more about types accepted by default with "
         "weights_only https://pytorch.org/docs/stable/generated/torch.load.html."
     )
 
@@ -1122,9 +1122,9 @@ def load(
         has_unsafe_global = re.search(pattern, message) is not None
         if has_unsafe_global:
             updated_message = (
-                "Weights only load failed. This file can still be loaded but to do so you have two options "
+                "Weights only load failed. This file can still be loaded, to do so you have two options "
                 f"\n\t(1) {UNSAFE_MESSAGE}\n\t(2) Alternatively, to load with `weights_only=True` please check "
-                "the recommended steps in the following error message. WeightsUnpickler error: "
+                "the recommended steps in the following error message.\n\tWeightsUnpickler error: "
                 + message
             )
         else:

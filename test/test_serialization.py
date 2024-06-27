@@ -1128,9 +1128,6 @@ class TestSerialization(TestCase, SerializationMixin):
                                             "file an issue with the following so that we can make `weights_only=True`"):
                     torch.load(f, weights_only=True)
 
-
-
-
     @parametrize('weights_only', (False, True))
     def test_serialization_math_bits(self, weights_only):
         t = torch.randn(1, dtype=torch.cfloat)
