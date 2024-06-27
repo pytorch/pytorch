@@ -1203,6 +1203,7 @@ def main():
         "fx/*.pyi",
         "optim/*.pyi",
         "autograd/*.pyi",
+        "jit/*.pyi",
         "nn/*.pyi",
         "nn/modules/*.pyi",
         "nn/parallel/*.pyi",
