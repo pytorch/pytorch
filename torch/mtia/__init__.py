@@ -19,8 +19,6 @@ _device_t = Union[_device, str, int, None]
 # torch.mtia.Event/Stream is alias of torch.Event/Stream
 Event = torch.Event
 Stream = torch.Stream
-Event.__doc__ = """An alias of :class:`torch.Event`"""
-Stream.__doc__ = """An alias of :class:`torch.Stream`"""
 
 _initialized = False
 _queued_calls: List[
