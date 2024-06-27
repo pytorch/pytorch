@@ -1702,7 +1702,9 @@ class Scheduler:
                         for other_name in user.node.get_buffer_names():
                             # this node must run after all prior readers
                             other_name = rename(other_name)
-                            node.add_fake_dep(WeakDep(other_name, mutating_buf=buf.get_name()))
+                            node.add_fake_dep(
+                                WeakDep(other_name, mutating_buf=buf.get_name())
+                            )
                             add_user(other_name, node, is_weak=True)
 
             # add normal non-mutation dependencies
