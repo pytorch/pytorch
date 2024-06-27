@@ -1890,7 +1890,7 @@ class Scheduler:
                 break
 
     def benchmark_fused_nodes(
-        self, nodes: Sequence[BaseSchedulerNode], memory_warmup_iters=100
+        self, nodes: Sequence[BaseSchedulerNode]
     ) -> Tuple[float, str]:
         """
         Benchmark fused list of nodes and return the execution time
@@ -1900,7 +1900,7 @@ class Scheduler:
         device = nodes[0].get_device()
         self.current_device = device
         backend = self.get_backend(device)
-        return backend.benchmark_fused_nodes(nodes, memory_warmup_iters=memory_warmup_iters)
+        return backend.benchmark_fused_nodes(nodes)
 
     def finalize_multi_template_buffers(self) -> None:
         def replace_operation_buffer(
@@ -2033,7 +2033,7 @@ class Scheduler:
             choice_timings = multi_node.choice_timings
 
             _, ms1 = multi_node.get_min_choice()
-            ms2, path2 = self.benchmark_fused_nodes(node_list_2, memory_warmup_iters=1000)
+            ms2, path2 = self.benchmark_fused_nodes(node_list_2)
 
             min_ms_fused = float("inf")
             ms_fused_choice = None
@@ -2054,7 +2054,7 @@ class Scheduler:
                 # TODO - parallel compile triton templates
                 # TODO - should prune/skip choices that are not within certain % of best choice
                 with node1.node.swap_as_triton_caller(choice):
-                    ms_fused, _ = self.benchmark_fused_nodes(node_list_fused, memory_warmup_iters=1000)
+                    ms_fused, _ = self.benchmark_fused_nodes(node_list_fused)
 
                     if ms_fused < min_ms_fused:
                         min_ms_fused = ms_fused
@@ -2915,7 +2915,7 @@ class BaseScheduling:
         raise NotImplementedError
 
     def benchmark_fused_nodes(
-        self, nodes: Sequence[BaseSchedulerNode], memory_warmup_iters=100
+        self, nodes: Sequence[BaseSchedulerNode]
     ) -> Tuple[float, str]:
         """
         Benchmark fused list of nodes and return the execution time
