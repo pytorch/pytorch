@@ -8485,7 +8485,7 @@ class TestNNDeviceType(NNTestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "numpy not found")
     def test_pad_symmetric(self):
-        """Test support for symetric padding."""        
+        """Test support for symetric padding."""
         for pad_list in [[(6, 6), (6, 6)],
                          [(5, 6), (6, 5)],
                          [(6, 5), (5, 6)],
@@ -8503,7 +8503,7 @@ class TestNNDeviceType(NNTestCase):
                     th_array = th_array.unsqueeze(0)
                 my_pad = F.pad(th_array, th_sym_array_compatible, mode="symmetric")
                 # numpy expects padding information for every dimension.
-                np_pad = np.pad(array, [(0, 0)]*(len(size) - len(pad_list)) + pad_list, mode="symmetric")
+                np_pad = np.pad(array, [(0, 0)] * (len(size) - len(pad_list)) + pad_list, mode="symmetric")
                 if len(pad_list) == 3:
                     my_pad = my_pad.squeeze(0)
                 assert np.allclose(my_pad.numpy(), np_pad)
