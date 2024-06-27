@@ -11,6 +11,7 @@ import torch._dynamo.config
 import torch._dynamo.test_case
 import torch._functorch.config
 import torch.distributed as dist
+import torch.nn as nn
 import torch.utils.checkpoint
 
 from functorch.compile import min_cut_rematerialization_partition
@@ -24,6 +25,7 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.two_tensor import TwoTensor
+
 from torch.utils.checkpoint import (
     checkpoint,
     CheckpointPolicy,
@@ -1003,15 +1005,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
     def test_compile_selective_checkpoint_reparameterization(self):
-        import torch
-        import torch.nn as nn
-
-        from torch.utils.checkpoint import (
-            checkpoint,
-            CheckpointPolicy,
-            create_selective_checkpoint_contexts,
-        )
-
         def sac_policy():
             def _recomp_policy():
                 def _custom_policy(ctx, func, *args, **kwargs):
