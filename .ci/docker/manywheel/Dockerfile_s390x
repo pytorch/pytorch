@@ -102,5 +102,7 @@ COPY --from=patchelf           /usr/local/bin/patchelf               /usr/local/
 RUN alternatives --set python /usr/bin/python3.12
 RUN alternatives --set python3 /usr/bin/python3.12
 
+RUN pip-3.12 install typing_extensions
+
 ENTRYPOINT []
 CMD ["/bin/bash"]
