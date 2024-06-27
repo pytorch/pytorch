@@ -1003,7 +1003,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             self._validate(fn, backend, x, y)
 
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
-    def test_compile_selective_checkpoint_reparameterization(self):
+    def test_compile_selective_checkpoint_parametrization(self):
         def sac_policy():
             def _recomp_policy():
                 def _custom_policy(ctx, func, *args, **kwargs):
@@ -1021,19 +1021,19 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
             return create_selective_checkpoint_contexts(_recomp_policy())
 
-        class Reparam(torch.nn.Module):
+        class Parametrization(torch.nn.Module):
             def __init__(self):
                 super().__init__()
 
-            def reparam(self, x):
+            def parametrization(self, x):
                 return torch.sigmoid(torch.mul(x, x))
 
             def forward(self, x):
                 return checkpoint(
-                    self.reparam, x, use_reentrant=False, context_fn=sac_policy
+                    self.parametrization, x, use_reentrant=False, context_fn=sac_policy
                 )
 
-        def apply_reparam(model):
+        def apply_parametrization(model):
             modules = list(model.modules())
 
             for mod in modules:
@@ -1041,7 +1041,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 for p_name, p in params_dict.items():
                     mod.register_parameter(p_name, nn.Parameter(p))
                     nn.utils.parametrize.register_parametrization(
-                        mod, p_name, Reparam(), unsafe=True
+                        mod, p_name, Parametrization(), unsafe=True
                     )
 
             return model
@@ -1079,7 +1079,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
 
         model = MLPModule()
-        model = apply_reparam(model)
+        model = apply_parametrization(model)
         model_compiled = torch.compile(
             copy.deepcopy(model), backend=backend, fullgraph=True
         )
