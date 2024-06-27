@@ -673,6 +673,11 @@ class TestCustomOp(CustomOpTestCaseBase):
             """(Tensor(a0!) x, Tensor[] y, Tensor(a2!)[] z, Tensor(a3!)?[] w) -> ()""",
         )
 
+        self.assertExpectedInline(
+            infer_schema(g, mutates_args="unknown"),
+            """(Tensor(a0!) x, Tensor(a1!)[] y, Tensor(a2!)[] z, Tensor(a3!)?[] w) -> ()""",
+        )
+
     def test_infer_schema_unsupported(self):
         with self.assertRaisesRegex(ValueError, "varargs"):
 
@@ -2488,6 +2493,44 @@ class TestCustomOpAPI(TestCase):
             torch.Tensor, lambda x: x._version, (x, y, z, w)
         )
         f(x, y, z, w)
+        new_versions = pytree.tree_map_only(
+            torch.Tensor, lambda x: x._version, (x, y, z, w)
+        )
+
+        self.assertEqual(initial_versions[0], new_versions[0])
+        initial_versions, _ = pytree.tree_flatten(initial_versions[1:])
+        new_versions, _ = pytree.tree_flatten(new_versions[1:])
+        for prev, after in zip(initial_versions, new_versions):
+            if prev is None and after is None:
+                continue
+            self.assertGreater(after, prev)
+
+    def test_mutated_unknown(self):
+        @torch.library.custom_op("_torch_testing::f", mutates_args="unknown")
+        def f(x: Tensor) -> Tensor:
+            x.sin_()
+
+        x = torch.randn(3)
+        version = x._version
+        expected = x.sin()
+        f(x)
+        self.assertEqual(x, expected)
+        self.assertGreater(x._version, version)
+
+        @torch.library.custom_op("_torch_testing::f2", mutates_args={"y", "z", "w"})
+        def f2(
+            x: Tensor, y: Optional[Tensor], z: List[Tensor], w: List[Optional[Tensor]]
+        ) -> None:
+            return
+
+        x = torch.randn(3)
+        y = torch.randn(3)
+        z = [torch.randn(3), torch.randn(3)]
+        w = [torch.randn(3), None, torch.randn(3)]
+        initial_versions = pytree.tree_map_only(
+            torch.Tensor, lambda x: x._version, (x, y, z, w)
+        )
+        f2(x, y, z, w)
         new_versions = pytree.tree_map_only(
             torch.Tensor, lambda x: x._version, (x, y, z, w)
         )
