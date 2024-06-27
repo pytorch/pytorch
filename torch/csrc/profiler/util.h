@@ -168,6 +168,7 @@ constexpr auto kGroupSize = "Group size";
 constexpr auto kProcessGroupName = "Process Group Name";
 constexpr auto kProcessGroupDesc = "Process Group Description";
 constexpr auto kGroupRanks = "Process Group Ranks";
+constexpr auto kRank = "Rank";
 #endif // USE_DISTRIBUTED
 
 } // namespace torch::profiler::impl
