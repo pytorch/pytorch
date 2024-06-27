@@ -87,7 +87,7 @@ def do_bench(fn, fn_args, fn_kwargs, **kwargs):
         return do_bench_gpu(lambda: fn(*fn_args, **fn_kwargs), **kwargs)
 
 
-def do_bench_gpu(fn, estimation_iters=5, benchmark_iters=20, max_benchmark_duration=10, memory_warmup=100):
+def do_bench_gpu(fn, estimation_iters=5, memory_warmup_iters=100, benchmark_iters=20, max_benchmark_duration=10):
     @functools.lru_cache(None)
     def get_cache_size():
         device = torch.cuda.current_device()
@@ -119,12 +119,10 @@ def do_bench_gpu(fn, estimation_iters=5, benchmark_iters=20, max_benchmark_durat
     buffer = torch.empty(int(get_cache_size() // 4), dtype=torch.int, device="cuda")
 
     estimation_timing = benchmark(fn, buffer, estimation_iters)
-
     benchmark_iters = min(benchmark_iters, max(int(max_benchmark_duration / estimation_timing), 1))
-    if memory_warmup > 0:
-        temp_buffer = torch.empty(int((get_cache_size() * memory_warmup) // 4), dtype=torch.int, device="cuda")
-        temp_buffer.zero_()
-        del temp_buffer
+
+    for _ in range(memory_warmup_iters):
+        buffer.zero_()
     benchmark_timing = benchmark(fn, buffer, benchmark_iters)
 
     del buffer
