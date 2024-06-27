@@ -16,8 +16,7 @@ def materialize_lines(lines: list[str], indentation: int) -> str:
         if i != 0:
             output += new_line_with_indent
         output += line.replace('\n', new_line_with_indent)
-    output = re.sub(r"\n\s+\n", "\n\n", output)
-    return output
+    return "\n".join(line.rstrip() for line in output.split("\n")).rstrip()
 
 
 def gen_from_template(dir: str, template_name: str, output_name: str, replacements: list[tuple[str, Any, int]]):

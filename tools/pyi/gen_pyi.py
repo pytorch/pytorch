@@ -312,10 +312,10 @@ def get_max_pool_dispatch(name: str, arg_list: list[str]) -> dict[str, list[str]
                 return_indices="return_indices: Literal[False] = False",
             ),
             ffs(name, arg_list_positional, "tuple[Tensor, Tensor]").format(
-                return_indices="return_indices: Literal[True] = True",
+                return_indices="return_indices: Literal[True]",
             ),
             ffs(name, arg_list_keyword, "tuple[Tensor, Tensor]").format(
-                return_indices="return_indices: Literal[True] = True",
+                return_indices="return_indices: Literal[True]",
             ),
         ]
     }
@@ -998,7 +998,7 @@ def gen_pyi(
                 ),
                 ffs(
                     "nonzero",
-                    ["input: Tensor", "*", "as_tuple: Literal[True] = True"],
+                    ["input: Tensor", "*", "as_tuple: Literal[True]"],
                     "tuple[Tensor, ...]",
                 ),
             ],
@@ -1207,7 +1207,7 @@ def gen_pyi(
                 ),
                 ffs(
                     "nonzero",
-                    ["self", "*", "as_tuple: Literal[True] = True"],
+                    ["self", "*", "as_tuple: Literal[True]"],
                     "tuple[Tensor, ...]",
                 ),
             ],
