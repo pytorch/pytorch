@@ -184,6 +184,7 @@ def _unlift(
     )
     gm.graph._codegen = _get_codegen(in_spec, out_spec, forward_arg_names)
     gm.graph.lint()
+    gm.graph.eliminate_dead_code()
     gm.recompile()
     return gm
 

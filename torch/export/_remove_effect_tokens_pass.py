@@ -73,6 +73,10 @@ def _remove_effect_tokens_from_graph_helper(
             new_node.meta[k] = v
 
         node.replace_all_uses_with(new_node)
+        from torch.fx.node import has_side_effect
+
+        # To aoivd being DCEed.
+        has_side_effect(new_node.target)
 
         # Update user getitem nodes
         for user in list(new_node.users.keys()):
@@ -114,6 +118,7 @@ def _remove_effect_tokens_from_graph_helper(
         assert inp_token.name in input_token_names
         ep.graph.erase_node(inp_token)
 
+    ep.graph.eliminate_dead_code()
     ep.graph_module.recompile()
 
 
