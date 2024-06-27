@@ -89,8 +89,8 @@ class CUDACombinedScheduling(BaseScheduling):
     def codegen_foreach(self, *args, **kwargs):
         return self._triton_scheduling.codegen_foreach(*args, **kwargs)
 
-    def benchmark_fused_nodes(self, nodes):
-        return self._triton_scheduling.benchmark_fused_nodes(nodes)
+    def benchmark_fused_nodes(self, nodes, memory_warmup_iters=100):
+        return self._triton_scheduling.benchmark_fused_nodes(nodes, memory_warmup_iters=memory_warmup_iters)
 
     def generate_kernel_code_from_nodes(self, nodes, benchmark_kernel=False):
         return self._triton_scheduling.generate_kernel_code_from_nodes(
