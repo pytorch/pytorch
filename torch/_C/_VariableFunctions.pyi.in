@@ -42,6 +42,6 @@ from torch.types import (
     Number,
 )
 
-${function_hints}
-
 ${all_directive}
+
+${function_hints}

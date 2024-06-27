@@ -15,6 +15,7 @@ from tools.autograd.gen_python_functions import (
 )
 
 from torchgen.api.python import (
+    format_function_signature,
     PythonSignatureGroup,
     PythonSignatureNativeFunctionPair,
     returns_structseq_pyi,
@@ -80,7 +81,12 @@ def get_py_torch_functions(
 # the stubs to read on the human eye.
 
 DEVICE_PARAM = "device: DeviceLikeType | None = None"
-FACTORY_PARAMS = f"dtype: _dtype | None = None, {DEVICE_PARAM}, requires_grad: _bool = False, pin_memory: _bool = False"
+FACTORY_PARAMS = [
+    "dtype: _dtype | None = None",
+    DEVICE_PARAM,
+    "requires_grad: _bool = False",
+    "pin_memory: _bool = False",
+]
 
 # NOTE: specifying indices for Tensor.__getitem__
 # We can imitate numpy's definition of ndarray.__getitem__ found in numpy/__init__.pyi:
@@ -116,14 +122,13 @@ FACTORY_PARAMS = f"dtype: _dtype | None = None, {DEVICE_PARAM}, requires_grad: _
 # _ArrayLikeInt_co -> [bool | int | | Tensor | NestedSequence[bool | int] | NestedSequence[Tensor]]
 # which leaves us with key: T | tuple[T, ...], where T is:
 # T = (
-#     bool | int | slice | EllipsisType | SupportsIndex | None
+#     SupportsIndex | bool | int | slice | EllipsisType | None
 #     | Tensor | _NestedSequence[Tensor] | _NestedSequence[bool | int]
 # )
 _leaf_types = (
     "_bool | _int | slice | EllipsisType | Tensor | None"  # not SupportsIndex!
 )
-_index = f"SupportsIndex | {_leaf_types} | _NestedSequence[{_leaf_types}]"
-INDICES = f"indices: {_index} | tuple[{_index}, ...]"
+_index_types = f"SupportsIndex | {_leaf_types} | _NestedSequence[{_leaf_types}]"
 
 blocklist = [
     "__init_subclass__",
@@ -232,16 +237,18 @@ def sig_for_ops(opname: str) -> list[str]:
 
     name = opname[2:-2]
     if name in binary_ops:
+        if name.startswith("i"):
+            return [f"def {opname}(self, other: Any) -> Self: ..."]
         return [f"def {opname}(self, other: Any) -> Tensor: ..."]
-    elif name in comparison_ops:
+    if name in comparison_ops:
         sig = f"def {opname}(self, other: Any) -> Tensor: ..."
         if name in symmetric_comparison_ops:
             # unsafe override https://github.com/python/mypy/issues/5704
             sig += "  # type: ignore[override]"
         return [sig]
-    elif name in unary_ops:
+    if name in unary_ops:
         return [f"def {opname}(self) -> Tensor: ..."]
-    elif name in to_py_type_ops:
+    if name in to_py_type_ops:
         if name in {"bool", "float", "complex"}:
             tname = name
         elif name == "nonzero":
@@ -249,10 +256,9 @@ def sig_for_ops(opname: str) -> list[str]:
         else:
             tname = "int"
         if tname in {"float", "int", "bool", "complex"}:
-            tname = "builtins." + tname
+            tname = "_" + tname
         return [f"def {opname}(self) -> {tname}: ..."]
-    else:
-        raise Exception("unknown op", opname)  # noqa: TRY002
+    raise ValueError(f"unknown op {opname!r}")
 
 
 def generate_type_hints(sig_group: PythonSignatureGroup) -> list[str]:
@@ -300,20 +306,20 @@ def get_max_pool_dispatch(name: str, arg_list: list[str]) -> dict[str, list[str]
     # Otherwise force return_indices to be kwarg
     arg_list_keyword = arg_list.copy()
     arg_list_keyword.insert(flag_pos, "*")
-    tmpl = "def {name}({args}) -> {{return_type}}: ..."
     return {
         name: [
-            tmpl.format(name=name, args=", ".join(arg_list)).format(
+            format_function_signature(name, arg_list, "Tensor").format(
                 return_indices="return_indices: Literal[False] = False",
-                return_type="Tensor",
             ),
-            tmpl.format(name=name, args=", ".join(arg_list_positional)).format(
+            format_function_signature(
+                name, arg_list_positional, "tuple[Tensor, Tensor]"
+            ).format(
                 return_indices="return_indices: Literal[True]",
-                return_type="tuple[Tensor, Tensor]",
             ),
-            tmpl.format(name=name, args=", ".join(arg_list_keyword)).format(
+            format_function_signature(
+                name, arg_list_keyword, "tuple[Tensor, Tensor]"
+            ).format(
                 return_indices="return_indices: Literal[True]",
-                return_type="tuple[Tensor, Tensor]",
             ),
         ]
     }
@@ -322,12 +328,10 @@ def get_max_pool_dispatch(name: str, arg_list: list[str]) -> dict[str, list[str]
 def gen_nn_functional(fm: FileManager) -> None:
     INPUT = "input: Tensor"
     KERNEL_SIZE = "kernel_size: _int | _size"
-    STRIDE_PADDING = ", ".join(
-        [
-            "stride: _int | _size | None = None",
-            "padding: _int | _size = 0",
-        ]
-    )
+    STRIDE_PADDING = [
+        "stride: _int | _size | None = None",
+        "padding: _int | _size = 0",
+    ]
 
     # TODO the list for `torch._C._nn` is nonexhaustive
     unsorted_c_nn_function_hints: dict[str, list[str]] = {}
@@ -336,35 +340,38 @@ def gen_nn_functional(fm: FileManager) -> None:
         unsorted_c_nn_function_hints.update(
             {
                 f"avg_pool{d}d": [
-                    f"def avg_pool{d}d({{}}) -> Tensor: ...".format(
-                        ", ".join(
-                            [
-                                f"{INPUT}",
-                                f"{KERNEL_SIZE}",
-                                f"{STRIDE_PADDING}",
-                                "ceil_mode: bool = False",
-                                "count_include_pad: bool = True",
-                                "divisor_override: int | None = None",
-                            ]
-                        )
+                    format_function_signature(
+                        f"avg_pool{d}d",
+                        [
+                            INPUT,
+                            KERNEL_SIZE,
+                            *STRIDE_PADDING,
+                            "ceil_mode: bool = False",
+                            "count_include_pad: bool = True",
+                            "divisor_override: int | None = None",
+                        ],
+                        "Tensor",
                     )
                 ],
                 f"fractional_max_pool{d}d": [
-                    f"def fractional_max_pool{d}d({{}}) -> {{}}: ...".format(
-                        ", ".join(
-                            [
-                                f"{INPUT}",
-                                f"{KERNEL_SIZE}",
-                                "output_size: _int | _size",
-                                "_random_samples: Tensor",
-                            ]
-                        ),
+                    format_function_signature(
+                        f"fractional_max_pool{d}d",
+                        [
+                            INPUT,
+                            KERNEL_SIZE,
+                            "output_size: _int | _size",
+                            "_random_samples: Tensor",
+                        ],
                         "tuple[Tensor, Tensor]",
                     )
                 ],
                 f"adaptive_max_pool{d}d": [
-                    f"def adaptive_max_pool{d}d({{}}) -> {{}}: ...".format(
-                        ", ".join([f"{INPUT}", "output_size: _int | _size"]),
+                    format_function_signature(
+                        f"adaptive_max_pool{d}d",
+                        [
+                            INPUT,
+                            "output_size: _int | _size",
+                        ],
                         "tuple[Tensor, Tensor]",
                     )
                 ],
@@ -374,99 +381,158 @@ def gen_nn_functional(fm: FileManager) -> None:
     unsorted_c_nn_function_hints.update(
         {
             "hardtanh": [
-                "def hardtanh({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "input: Tensor",
-                            "min_val: float = ...",
-                            "max_val: float = ...",
-                            "*",
-                            "out: Tensor | None = None",
-                        ]
-                    )
+                format_function_signature(
+                    "hardtanh",
+                    [
+                        "input: Tensor",
+                        "min_val: float = ...",
+                        "max_val: float = ...",
+                        "*",
+                        "out: Tensor | None = None",
+                    ],
+                    "Tensor",
                 )
             ],
             "hardtanh_": [
-                "def hardtanh_({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "input: Tensor",
-                            "min_val: float = ...",
-                            "max_val: float = ...",
-                        ]
-                    )
+                format_function_signature(
+                    "hardtanh_",
+                    [
+                        "input: Tensor",
+                        "min_val: float = ...",
+                        "max_val: float = ...",
+                    ],
+                    "Tensor",
+                ),
+            ],
+            "elu_": [
+                format_function_signature(
+                    "elu_",
+                    [
+                        "input: Tensor",
+                        "alpha: float = ...",
+                    ],
+                    "Tensor",
                 )
             ],
-            "elu_": ["def elu_(input: Tensor, alpha: float = ...) -> Tensor: ..."],
             "leaky_relu": [
-                "def leaky_relu({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "input: Tensor",
-                            "negative_slope: float = ...",
-                            "*",
-                            "out: Tensor | None = None",
-                        ]
-                    )
+                format_function_signature(
+                    "leaky_relu",
+                    [
+                        "input: Tensor",
+                        "negative_slope: float = ...",
+                        "*",
+                        "out: Tensor | None = None",
+                    ],
+                    "Tensor",
                 )
             ],
             "leaky_relu_": [
-                f"def leaky_relu_({', '.join(['input: Tensor', 'negative_slope: float = ...'])}) -> Tensor: ..."
+                format_function_signature(
+                    "leaky_relu_",
+                    [
+                        "input: Tensor",
+                        "negative_slope: float = ...",
+                    ],
+                    "Tensor",
+                )
             ],
-            "log_sigmoid": ["def log_sigmoid(input: Tensor) -> Tensor: ..."],
-            "gelu": ["def gelu(input: Tensor, approximate: str = ...) -> Tensor: ..."],
+            "log_sigmoid": [
+                format_function_signature(
+                    "log_sigmoid",
+                    [
+                        "input: Tensor",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "gelu": [
+                format_function_signature(
+                    "gelu",
+                    [
+                        "input: Tensor",
+                        "approximate: str = ...",
+                    ],
+                    "Tensor",
+                )
+            ],
             "softplus": [
-                "def softplus({}) -> Tensor: ...".format(
-                    ", ".join(
-                        ["input: Tensor", "beta: float = ...", "threshold: float = ..."]
-                    )
+                format_function_signature(
+                    "softplus",
+                    [
+                        "input: Tensor",
+                        "beta: float = ...",
+                        "threshold: float = ...",
+                    ],
+                    "Tensor",
                 )
             ],
             "softshrink": [
-                "def softshrink(input: Tensor, lambd: float = ...) -> Tensor: ..."
+                format_function_signature(
+                    "softshrink",
+                    [
+                        "input: Tensor",
+                        "lambd: float = ...",
+                    ],
+                    "Tensor",
+                )
             ],
             "hardsigmoid": [
-                f"def hardsigmoid({', '.join(['input: Tensor', '*', 'out: Tensor | None = None'])}) -> Tensor: ..."
+                format_function_signature(
+                    "hardsigmoid",
+                    [
+                        "input: Tensor",
+                        "*",
+                        "out: Tensor | None = None",
+                    ],
+                    "Tensor",
+                )
             ],
             "linear": [
-                "def linear({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "input: Tensor",
-                            "weight: Tensor",
-                            "bias: Tensor | None = None",
-                        ]
-                    )
+                format_function_signature(
+                    "linear",
+                    [
+                        "input: Tensor",
+                        "weight: Tensor",
+                        "bias: Tensor | None = None",
+                    ],
+                    "Tensor",
                 )
             ],
             "pad": [
-                "def pad({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "input: Tensor",
-                            "pad: Sequence[int]",
-                            "mode: str = ...",
-                            "value: float | None = None",
-                        ]
-                    )
+                format_function_signature(
+                    "pad",
+                    [
+                        "input: Tensor",
+                        "pad: Sequence[int]",
+                        "mode: str = ...",
+                        "value: float | None = None",
+                    ],
+                    "Tensor",
                 )
             ],
             "one_hot": [
-                "def one_hot(tensor: Tensor, num_classes: int = ...) -> Tensor: ..."
+                format_function_signature(
+                    "one_hot",
+                    [
+                        "tensor: Tensor",
+                        "num_classes: int = ...",
+                    ],
+                    "Tensor",
+                )
             ],
             "scaled_dot_product_attention": [
-                "def scaled_dot_product_attention({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "query: Tensor",
-                            "key: Tensor",
-                            "value: Tensor",
-                            "attn_mask: Tensor | None = None",
-                            "dropout_p: float = 0.0",
-                            "is_causal: bool = False",
-                            "scale: float | None = None",
-                        ]
-                    )
+                format_function_signature(
+                    "scaled_dot_product_attention",
+                    [
+                        "query: Tensor",
+                        "key: Tensor",
+                        "value: Tensor",
+                        "attn_mask: Tensor | None = None",
+                        "dropout_p: float = 0.0",
+                        "is_causal: bool = False",
+                        "scale: float | None = None",
+                    ],
+                    "Tensor",
                 )
             ],
         }
@@ -481,33 +547,33 @@ def gen_nn_functional(fm: FileManager) -> None:
     # Functions imported into `torch.nn.functional` from `torch`, perhaps being filtered
     # through an `_add_docstr` call
     torch_imports = [
-        "conv1d",
-        "conv2d",
-        "conv3d",
+        "adaptive_avg_pool1d",
+        "avg_pool1d",
+        "bilinear",
+        "celu_",
+        "channel_shuffle",
+        "conv_tbc",
         "conv_transpose1d",
         "conv_transpose2d",
         "conv_transpose3d",
-        "conv_tbc",
-        "avg_pool1d",
-        "adaptive_avg_pool1d",
-        "relu_",
-        "selu_",
-        "celu_",
-        "prelu",
-        "rrelu_",
+        "conv1d",
+        "conv2d",
+        "conv3d",
+        "cosine_similarity",
         "hardshrink",
-        "bilinear",
-        "pixel_shuffle",
-        "pixel_unshuffle",
-        "channel_shuffle",
         "native_channel_shuffle",
         "pairwise_distance",
         "pdist",
-        "cosine_similarity",
+        "pixel_shuffle",
+        "pixel_unshuffle",
+        "prelu",
+        "relu_",
+        "rrelu_",
+        "selu_",
     ]
     imported_hints = [
         "from torch import (",
-        *(f"    {_} as {_}," for _ in sorted(torch_imports)),
+        *sorted(f"    {_} as {_}," for _ in torch_imports),
         ")",
     ]
 
@@ -515,25 +581,24 @@ def gen_nn_functional(fm: FileManager) -> None:
     c_nn_imports = [
         "avg_pool2d",
         "avg_pool3d",
-        "hardtanh_",
         "elu_",
-        "leaky_relu_",
         "gelu",
+        "hardtanh_",
+        "leaky_relu_",
+        "linear",
         "log_sigmoid",
+        "one_hot",
+        "pad",
+        "scaled_dot_product_attention",
         "softplus",
         "softshrink",
-        "linear",
-        "pad",
-        "one_hot",
-        "scaled_dot_product_attention",
     ]
+    renamed = {"log_sigmoid": "logsigmoid"}
     imported_hints += [
         "from torch._C._nn import (",
-        *(f"    {_} as {_}," for _ in sorted(c_nn_imports)),
+        *sorted(f"    {_} as {renamed.get(_, _)}," for _ in c_nn_imports),
         ")",
     ]
-    # This is from `torch._C._nn` but renamed
-    imported_hints.extend(["", "logsigmoid = log_sigmoid"])
 
     # Functions generated by `torch._jit_internal.boolean_dispatch` in `nn.functional`
     unsorted_dispatched_hints: dict[str, list[str]] = {}
@@ -543,9 +608,9 @@ def gen_nn_functional(fm: FileManager) -> None:
             **get_max_pool_dispatch(
                 f"max_pool{d}d",
                 [
-                    f"{INPUT}",
-                    f"{KERNEL_SIZE}",
-                    f"{STRIDE_PADDING}",
+                    INPUT,
+                    KERNEL_SIZE,
+                    *STRIDE_PADDING,
                     "dilation: _int | _size = 1",
                     "ceil_mode: bool = False",
                     "{return_indices}",
@@ -554,8 +619,8 @@ def gen_nn_functional(fm: FileManager) -> None:
             **get_max_pool_dispatch(
                 f"fractional_max_pool{d}d",
                 [
-                    f"{INPUT}",
-                    f"{KERNEL_SIZE}",
+                    INPUT,
+                    KERNEL_SIZE,
                     "output_size: _int | _size | None = None",
                     "output_ratio: _ratio_any_t | None = None",
                     "{return_indices}",
@@ -564,7 +629,11 @@ def gen_nn_functional(fm: FileManager) -> None:
             ),
             **get_max_pool_dispatch(
                 f"adaptive_max_pool{d}d",
-                [f"{INPUT}", "output_size: _int | _size", "{return_indices}"],
+                [
+                    INPUT,
+                    "output_size: _int | _size",
+                    "{return_indices}",
+                ],
             ),
         )
 
@@ -632,7 +701,7 @@ def add_docstr_to_hint(docstr: str, hint: str) -> str:
     if "..." in hint:  # function or method
         assert hint.endswith("..."), f"Hint `{hint}` does not end with '...'"
         hint = hint[:-3]  # remove "..."
-        return "\n    ".join([hint, 'r"""'] + docstr.split("\n") + ['"""'])
+        return "\n    ".join((hint.rstrip(), 'r"""', *docstr.split("\n"), '"""'))
     else:  # attribute or property
         return f'{hint}\nr"""{docstr}"""\n'
 
@@ -672,20 +741,20 @@ def gen_pyi(
         unsorted_function_hints.update(
             {
                 f"sparse_{n}_tensor": [
-                    f"def sparse_{n}_tensor({{}}) -> Tensor: ...".format(
-                        ", ".join(
-                            [
-                                f"{n1}_indices: Tensor | list",
-                                f"{n2}_indices: Tensor | list",
-                                "values: Tensor | list",
-                                "size: _size | None = None",
-                                "*",
-                                "dtype: _dtype | None = None",
-                                "device: DeviceLikeType | None = None",
-                                "requires_grad: _bool = False",
-                                "check_invariants: _bool | None = None",
-                            ]
-                        ),
+                    format_function_signature(
+                        f"sparse_{n}_tensor",
+                        [
+                            f"{n1}_indices: Tensor | list",
+                            f"{n2}_indices: Tensor | list",
+                            "values: Tensor | list",
+                            "size: _size | None = None",
+                            "*",
+                            "dtype: _dtype | None = None",
+                            "device: DeviceLikeType | None = None",
+                            "requires_grad: _bool = False",
+                            "check_invariants: _bool | None = None",
+                        ],
+                        "Tensor",
                     )
                 ],
             }
@@ -696,44 +765,44 @@ def gen_pyi(
             "set_flush_denormal": ["def set_flush_denormal(mode: _bool) -> _bool: ..."],
             "get_default_dtype": ["def get_default_dtype() -> _dtype: ..."],
             "asarray": [
-                "def asarray({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "obj: Any",
-                            "*",
-                            "dtype: _dtype | None = None",
-                            "device: DeviceLikeType | None = None",
-                            "copy: _bool | None = None",
-                            "requires_grad: _bool = False",
-                        ]
-                    )
+                format_function_signature(
+                    "asarray",
+                    [
+                        "obj: Any",
+                        "*",
+                        "dtype: _dtype | None = None",
+                        "device: DeviceLikeType | None = None",
+                        "copy: _bool | None = None",
+                        "requires_grad: _bool = False",
+                    ],
+                    "Tensor",
                 )
             ],
             "from_numpy": ["def from_numpy(ndarray) -> Tensor: ..."],
             "frombuffer": [
-                "def frombuffer({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "buffer: Any",
-                            "*",
-                            "dtype: _dtype",
-                            "count: int = -1",
-                            "offset: int = 0",
-                            "requires_grad: _bool = False",
-                        ]
-                    )
+                format_function_signature(
+                    "frombuffer",
+                    [
+                        "buffer: Any",
+                        "*",
+                        "dtype: _dtype",
+                        "count: int = -1",
+                        "offset: int = 0",
+                        "requires_grad: _bool = False",
+                    ],
+                    "Tensor",
                 )
             ],
             "numel": ["def numel(self: Tensor) -> _int: ..."],
             "as_tensor": [
-                "def as_tensor({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "data: Any",
-                            "dtype: _dtype | None = None",
-                            DEVICE_PARAM,
-                        ]
-                    )
+                format_function_signature(
+                    "as_tensor",
+                    [
+                        "data: Any",
+                        "dtype: _dtype | None = None",
+                        DEVICE_PARAM,
+                    ],
+                    "Tensor",
                 )
             ],
             "get_num_threads": ["def get_num_threads() -> _int: ..."],
@@ -746,40 +815,49 @@ def gen_pyi(
             # These functions are explicitly disabled by
             # SKIP_PYTHON_BINDINGS because they are hand bound.
             # Correspondingly, we must hand-write their signatures.
-            "tensor": [f"def tensor(data: Any, {FACTORY_PARAMS}) -> Tensor: ..."],
+            "tensor": [
+                format_function_signature(
+                    "tensor",
+                    [
+                        "data: Any",
+                        *FACTORY_PARAMS,
+                    ],
+                    "Tensor",
+                )
+            ],
             "sparse_coo_tensor": [
-                "def sparse_coo_tensor({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "indices: Tensor",
-                            "values: Tensor | list",
-                            "size: _size | None = None",
-                            "*",
-                            "dtype: _dtype | None = None",
-                            "device: DeviceLikeType | None = None",
-                            "requires_grad: _bool = False",
-                            "check_invariants: _bool | None = None",
-                            "is_coalesced: _bool | None = None",
-                        ]
-                    )
+                format_function_signature(
+                    "sparse_coo_tensor",
+                    [
+                        "indices: Tensor",
+                        "values: Tensor | list",
+                        "size: _size | None = None",
+                        "*",
+                        "dtype: _dtype | None = None",
+                        "device: DeviceLikeType | None = None",
+                        "requires_grad: _bool = False",
+                        "check_invariants: _bool | None = None",
+                        "is_coalesced: _bool | None = None",
+                    ],
+                    "Tensor",
                 )
             ],
             "sparse_compressed_tensor": [
-                "def sparse_compressed_tensor({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "compressed_indices: Tensor | list",
-                            "plain_indices: Tensor | list",
-                            "values: Tensor | list",
-                            "size: _size | None = None",
-                            "*",
-                            "dtype: _dtype | None = None",
-                            "layout: _layout | None = None",
-                            "device: DeviceLikeType | None = None",
-                            "requires_grad: _bool = False",
-                            "check_invariants: _bool | None = None",
-                        ]
-                    )
+                format_function_signature(
+                    "sparse_compressed_tensor",
+                    [
+                        "compressed_indices: Tensor | list",
+                        "plain_indices: Tensor | list",
+                        "values: Tensor | list",
+                        "size: _size | None = None",
+                        "*",
+                        "dtype: _dtype | None = None",
+                        "layout: _layout | None = None",
+                        "device: DeviceLikeType | None = None",
+                        "requires_grad: _bool = False",
+                        "check_invariants: _bool | None = None",
+                    ],
+                    "Tensor",
                 )
             ],
             "_sync": ["def _sync(t: Tensor) -> None: ..."],
@@ -818,7 +896,7 @@ def gen_pyi(
                 "def _functionalize_has_metadata_mutation(tensor: Tensor) -> _bool: ..."
             ],
             "_functionalize_apply_view_metas": [
-                "def _functionalize_apply_view_metas(tensor: Tensor,  base: Tensor) -> Tensor: ..."
+                "def _functionalize_apply_view_metas(tensor: Tensor, base: Tensor) -> Tensor: ..."
             ],
             "_functionalize_is_symbolic": [
                 "def _functionalize_is_symbolic(tensor: Tensor) -> _bool: ..."
@@ -828,132 +906,132 @@ def gen_pyi(
             ],
             "_disable_functionalization": ["def _disable_functionalization(): ..."],
             "range": [
-                "def range({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "start: Number",
-                            "end: Number",
-                            "step: Number = 1",
-                            "*",
-                            "out: Tensor | None = None",
-                            FACTORY_PARAMS,
-                        ]
-                    )
+                format_function_signature(
+                    "range",
+                    [
+                        "start: Number",
+                        "end: Number",
+                        "step: Number = 1",
+                        "*",
+                        "out: Tensor | None = None",
+                        *FACTORY_PARAMS,
+                    ],
+                    "Tensor",
                 )
             ],
             "arange": [
-                "def arange({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "start: Number",
-                            "end: Number",
-                            "step: Number",
-                            "*",
-                            "out: Tensor | None = None",
-                            FACTORY_PARAMS,
-                        ]
-                    )
+                format_function_signature(
+                    "arange",
+                    [
+                        "start: Number",
+                        "end: Number",
+                        "step: Number",
+                        "*",
+                        "out: Tensor | None = None",
+                        *FACTORY_PARAMS,
+                    ],
+                    "Tensor",
                 ),
-                "def arange({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "start: Number",
-                            "end: Number",
-                            "*",
-                            "out: Tensor | None = None",
-                            FACTORY_PARAMS,
-                        ]
-                    )
+                format_function_signature(
+                    "arange",
+                    [
+                        "start: Number",
+                        "end: Number",
+                        "*",
+                        "out: Tensor | None = None",
+                        *FACTORY_PARAMS,
+                    ],
+                    "Tensor",
                 ),
-                "def arange({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "end: Number",
-                            "*",
-                            "out: Tensor | None = None",
-                            FACTORY_PARAMS,
-                        ]
-                    )
+                format_function_signature(
+                    "arange",
+                    [
+                        "end: Number",
+                        "*",
+                        "out: Tensor | None = None",
+                        *FACTORY_PARAMS,
+                    ],
+                    "Tensor",
                 ),
             ],
             "linspace": [
-                "def linspace({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "start: Number",
-                            "end: Number",
-                            "steps: _int | None = None",
-                            "*",
-                            "out: Tensor | None = None",
-                            FACTORY_PARAMS,
-                        ]
-                    )
+                format_function_signature(
+                    "linspace",
+                    [
+                        "start: Number",
+                        "end: Number",
+                        "steps: _int | None = None",
+                        "*",
+                        "out: Tensor | None = None",
+                        *FACTORY_PARAMS,
+                    ],
+                    "Tensor",
                 )
             ],
             "logspace": [
-                "def logspace({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "start: Number",
-                            "end: Number",
-                            "steps: _int | None = None",
-                            "base: _float = 10.0",
-                            "*",
-                            "out: Tensor | None = None",
-                            FACTORY_PARAMS,
-                        ]
-                    )
+                format_function_signature(
+                    "logspace",
+                    [
+                        "start: Number",
+                        "end: Number",
+                        "steps: _int | None = None",
+                        "base: _float = 10.0",
+                        "*",
+                        "out: Tensor | None = None",
+                        *FACTORY_PARAMS,
+                    ],
+                    "Tensor",
                 )
             ],
             "randint": [
-                "def randint({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "low: _int",
-                            "high: _int",
-                            "size: _size",
-                            "*",
-                            "generator: Generator | None = None",
-                            FACTORY_PARAMS,
-                        ]
-                    )
+                format_function_signature(
+                    "randint",
+                    [
+                        "low: _int",
+                        "high: _int",
+                        "size: _size",
+                        "*",
+                        "generator: Generator | None = None",
+                        *FACTORY_PARAMS,
+                    ],
+                    "Tensor",
                 ),
-                "def randint({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "high: _int",
-                            "size: _size",
-                            "*",
-                            "generator: Generator | None = None",
-                            FACTORY_PARAMS,
-                        ]
-                    )
+                format_function_signature(
+                    "randint",
+                    [
+                        "high: _int",
+                        "size: _size",
+                        "*",
+                        "generator: Generator | None = None",
+                        *FACTORY_PARAMS,
+                    ],
+                    "Tensor",
                 ),
             ],
             "full": [
-                "def full({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "size: _size",
-                            "fill_value: Number | _complex",
-                            "*",
-                            "out: Tensor | None = None",
-                            "layout: _layout = strided",
-                            FACTORY_PARAMS,
-                        ]
-                    )
+                format_function_signature(
+                    "full",
+                    [
+                        "size: _size",
+                        "fill_value: Number | _complex",
+                        "*",
+                        "out: Tensor | None = None",
+                        "layout: _layout = strided",
+                        *FACTORY_PARAMS,
+                    ],
+                    "Tensor",
                 ),
-                "def full({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "size: _size",
-                            "fill_value: Number | _complex",
-                            "*",
-                            "names: list[str | None]",
-                            "layout: _layout = strided",
-                            FACTORY_PARAMS,
-                        ]
-                    )
+                format_function_signature(
+                    "full",
+                    [
+                        "size: _size",
+                        "fill_value: Number | _complex",
+                        "*",
+                        "names: list[str | None]",
+                        "layout: _layout = strided",
+                        *FACTORY_PARAMS,
+                    ],
+                    "Tensor",
                 ),
             ],
             "is_grad_enabled": ["def is_grad_enabled() -> _bool: ..."],
@@ -967,32 +1045,32 @@ def gen_pyi(
             "dsmm": ["def dsmm(input: Tensor, mat2: Tensor) -> Tensor: ..."],
             "hsmm": ["def hsmm(input: Tensor, mat2: Tensor) -> Tensor: ..."],
             "saddmm": [
-                "def saddmm({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "input: Tensor",
-                            "mat1: Tensor",
-                            "mat2: Tensor",
-                            "*",
-                            "beta: Number = 1",
-                            "alpha: Number = 1",
-                            "out: Tensor | None = None",
-                        ]
-                    )
+                format_function_signature(
+                    "saddmm",
+                    [
+                        "input: Tensor",
+                        "mat1: Tensor",
+                        "mat2: Tensor",
+                        "*",
+                        "beta: Number = 1",
+                        "alpha: Number = 1",
+                        "out: Tensor | None = None",
+                    ],
+                    "Tensor",
                 )
             ],
             "spmm": ["def spmm(input: Tensor, mat2: Tensor) -> Tensor: ..."],
             "div": [
-                "def div({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "input: Tensor | Number",
-                            "other: Tensor | Number",
-                            "*",
-                            "rounding_mode: str | None = None",
-                            "out: Tensor | None = None",
-                        ]
-                    )
+                format_function_signature(
+                    "div",
+                    [
+                        "input: Tensor | Number",
+                        "other: Tensor | Number",
+                        "*",
+                        "rounding_mode: str | None = None",
+                        "out: Tensor | None = None",
+                    ],
+                    "Tensor",
                 )
             ],
         }
@@ -1062,6 +1140,7 @@ def gen_pyi(
     # Generate type signatures for Tensor methods
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+    index_type_def = [f"_Index: TypeAlias = {_index_types}"]
     unsorted_tensor_method_hints: dict[str, list[str]] = collections.defaultdict(list)
     unsorted_tensor_method_hints.update(
         {
@@ -1074,10 +1153,26 @@ def gen_pyi(
                 "def stride(self, dim: _int) -> _int: ...",
             ],
             "new_ones": [
-                f"def new_ones(self, size: _size, {FACTORY_PARAMS}) -> Tensor: ..."
+                format_function_signature(
+                    "new_ones",
+                    [
+                        "self",
+                        "size: _size",
+                        *FACTORY_PARAMS,
+                    ],
+                    "Tensor",
+                )
             ],
             "new_tensor": [
-                f"def new_tensor(self, data: Any, {FACTORY_PARAMS}) -> Tensor: ..."
+                format_function_signature(
+                    "new_tensor",
+                    [
+                        "self",
+                        "data: Any",
+                        *FACTORY_PARAMS,
+                    ],
+                    "Tensor",
+                )
             ],
             "__new__": ["def __new__(cls, *args, **kwargs) -> Self: ..."],
             # new and __init__ have the same signatures differ only in return type
@@ -1109,9 +1204,11 @@ def gen_pyi(
                     )
                 )
             ],
-            "__getitem__": [f"def __getitem__(self, {INDICES}) -> Tensor: ..."],
+            "__getitem__": [
+                "def __getitem__(self, indices: _Index | tuple[_Index, ...]) -> Tensor: ..."
+            ],
             "__setitem__": [
-                f"def __setitem__(self, {INDICES}, val: Tensor | Number) -> None: ..."
+                "def __setitem__(self, indices: _Index | tuple[_Index, ...], value: Tensor | Number) -> None: ..."
             ],
             "tolist": ["def tolist(self) -> list: ..."],
             "requires_grad_": [
@@ -1128,27 +1225,27 @@ def gen_pyi(
             "ndimension": ["def ndimension(self) -> _int: ..."],
             "nelement": ["def nelement(self) -> _int: ..."],
             "cuda": [
-                "def cuda({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "self",
-                            "device: _device | _int | str | None = None",
-                            "non_blocking: _bool = False",
-                            "memory_format: torch.memory_format = torch.preserve_format",
-                        ]
-                    )
+                format_function_signature(
+                    "cuda",
+                    [
+                        "self",
+                        "device: _device | _int | str | None = None",
+                        "non_blocking: _bool = False",
+                        "memory_format: torch.memory_format = torch.preserve_format",
+                    ],
+                    "Tensor",
                 )
             ],
             "xpu": [
-                "def xpu({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "self",
-                            "device: _device | _int | str | None = None",
-                            "non_blocking: _bool = False",
-                            "memory_format: torch.memory_format = torch.preserve_format",
-                        ]
-                    )
+                format_function_signature(
+                    "xpu",
+                    [
+                        "self",
+                        "device: _device | _int | str | None = None",
+                        "non_blocking: _bool = False",
+                        "memory_format: torch.memory_format = torch.preserve_format",
+                    ],
+                    "Tensor",
                 )
             ],
             "cpu": [
@@ -1170,11 +1267,11 @@ def gen_pyi(
             ],
             "get_device": ["def get_device(self) -> _int: ..."],
             "contiguous": [
-                "def contiguous(self, memory_format=torch.contiguous_format) -> Tensor: ..."
+                "def contiguous(self, memory_format: torch.memory_format = torch.contiguous_format) -> Tensor: ..."
             ],
             "has_names": ["def has_names(self) -> _bool: ..."],
             "is_contiguous": [
-                "def is_contiguous(self, memory_format=torch.contiguous_format) -> _bool: ..."
+                "def is_contiguous(self, memory_format: torch.memory_format = torch.contiguous_format) -> _bool: ..."
             ],
             "_is_view": ["def _is_view(self) -> _bool: ..."],
             "is_cpu": ["is_cpu: _bool"],
@@ -1314,12 +1411,20 @@ def gen_pyi(
     # Generate structseq definitions
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+    structseqs = dict(sorted(structseqs.items()))
     structseq_defs = [f"{defn}\n" for defn in structseqs.values()]
+    return_types___all__ = [
+        "__all__ = [",
+        '    "pytree_register_structseq",',
+        '    "all_return_types",',
+        *(f'    "{name}",' for name in structseqs),
+        "]",
+    ]
 
     # Generate type signatures for legacy classes
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    legacy_storage_base_hints = ["class StorageBase(object): ..."]
+    legacy_storage_base_hints = ["class StorageBase: ..."]
 
     legacy_class_hints = []
     for c in (
@@ -1343,47 +1448,49 @@ def gen_pyi(
     # source
     dtype_class_hints = [
         f"{n}: dtype = ..."
-        for n in [
-            "float32",
-            "float",
-            "float64",
-            "double",
-            "float16",
-            "bfloat16",
-            "float8_e4m3fn",
-            "float8_e4m3fnuz",
-            "float8_e5m2",
-            "float8_e5m2fnuz",
-            "half",
-            "uint8",
-            "uint16",
-            "uint32",
-            "uint64",
-            "int8",
-            "int16",
-            "short",
-            "int32",
-            "int",
-            "int64",
-            "long",
-            "complex32",
-            "complex64",
-            "chalf",
-            "cfloat",
-            "complex128",
-            "cdouble",
-            "quint8",
-            "qint8",
-            "qint32",
-            "bool",
-            "quint4x2",
-            "quint2x4",
-            "bits1x8",
-            "bits2x4",
-            "bits4x2",
-            "bits8",
-            "bits16",
-        ]
+        for n in sorted(
+            [
+                "float32",
+                "float",
+                "float64",
+                "double",
+                "float16",
+                "bfloat16",
+                "float8_e4m3fn",
+                "float8_e4m3fnuz",
+                "float8_e5m2",
+                "float8_e5m2fnuz",
+                "half",
+                "uint8",
+                "uint16",
+                "uint32",
+                "uint64",
+                "int8",
+                "int16",
+                "short",
+                "int32",
+                "int",
+                "int64",
+                "long",
+                "complex32",
+                "complex64",
+                "chalf",
+                "cfloat",
+                "complex128",
+                "cdouble",
+                "quint8",
+                "qint8",
+                "qint32",
+                "bool",
+                "quint4x2",
+                "quint2x4",
+                "bits1x8",
+                "bits2x4",
+                "bits4x2",
+                "bits8",
+                "bits16",
+            ]
+        )
     ]
 
     # Generate __all__ directive
@@ -1394,10 +1501,12 @@ def gen_pyi(
     hinted_function_names = [
         name for name, hint in unsorted_function_hints.items() if hint
     ]
-    all_symbols = sorted(list(structseqs.keys()) + hinted_function_names)
-    all_directive = "\n".join(
-        ("__all__ = [", *(f'    "{name}",' for name in all_symbols), "]")
-    )
+    all_symbols = sorted(list(structseqs) + hinted_function_names)
+    all_directive = [
+        "__all__ = [",
+        *(f'    "{name}",' for name in all_symbols),
+        "]",
+    ]
 
     # Dispatch key hints
     # ~~~~~~~~~~~~~~~~~~
@@ -1419,7 +1528,9 @@ def gen_pyi(
 
     env = {
         "structseq_defs": structseq_defs,
+        "return_types___all__": return_types___all__,
         "function_hints": function_hints,
+        "index_type_def": index_type_def,
         "tensor_method_hints": tensor_method_hints,
         "legacy_class_hints": legacy_class_hints,
         "legacy_storage_base_hints": legacy_storage_base_hints,
@@ -1433,7 +1544,7 @@ def gen_pyi(
         "torch/_C/__init__.pyi",
         "torch/_C/__init__.pyi.in",
         lambda: {
-            "generated_comment": "@" + "generated from torch/_C/__init__.pyi.in",
+            "generated_comment": "@generated from torch/_C/__init__.pyi.in",
             **env,
         },
     )
@@ -1441,8 +1552,7 @@ def gen_pyi(
         "torch/_C/_VariableFunctions.pyi",
         "torch/_C/_VariableFunctions.pyi.in",
         lambda: {
-            "generated_comment": "@"
-            + "generated from torch/_C/_VariableFunctions.pyi.in",
+            "generated_comment": "@generated from torch/_C/_VariableFunctions.pyi.in",
             **env,
         },
     )
@@ -1450,8 +1560,7 @@ def gen_pyi(
         "torch/_VF.pyi",
         "torch/_C/_VariableFunctions.pyi.in",
         lambda: {
-            "generated_comment": "@"
-            + "generated from torch/_C/_VariableFunctions.pyi.in",
+            "generated_comment": "@generated from torch/_C/_VariableFunctions.pyi.in",
             **env,
         },
     )
@@ -1459,7 +1568,7 @@ def gen_pyi(
         "torch/return_types.pyi",
         "torch/_C/return_types.pyi.in",
         lambda: {
-            "generated_comment": "@" + "generated from torch/_C/return_types.pyi",
+            "generated_comment": "@generated from torch/_C/return_types.pyi",
             **env,
         },
     )
@@ -1487,12 +1596,18 @@ def main() -> None:
         help="path to deprecated.yaml",
     )
     parser.add_argument(
-        "--out", metavar="OUT", default=".", help="path to output directory"
+        "--out",
+        metavar="OUT",
+        default=".",
+        help="path to output directory",
     )
     args = parser.parse_args()
     fm = FileManager(install_dir=args.out, template_dir=".", dry_run=False)
     gen_pyi(
-        args.native_functions_path, args.tags_path, args.deprecated_functions_path, fm
+        args.native_functions_path,
+        args.tags_path,
+        args.deprecated_functions_path,
+        fm,
     )
 
 

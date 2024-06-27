@@ -43,6 +43,8 @@ from torch.types import (
     Number,
 )
 
+${return_types___all__}
+
 ${structseq_defs}
 
-all_return_types: list[type] = []
+all_return_types: list[type] = ...

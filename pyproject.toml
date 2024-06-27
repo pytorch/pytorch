@@ -143,6 +143,12 @@ select = [
 "__init__.py" = [
     "F401",
 ]
+"*.pyi" = [
+    "PYI011",
+    "PYI021",
+    "PYI053",
+    "PYI054",
+]
 "functorch/notebooks/**" = [
     "F401",
 ]

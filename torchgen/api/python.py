@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Iterable, Sequence
 
 from torchgen.api import cpp
 from torchgen.api.types import Binding, CppSignature, CppSignatureGroup
@@ -195,6 +195,26 @@ from torchgen.model import (
 # These differences have been encapsulated in signature_str() vs. signature_str_pyi()
 # to display the full signatures, and argument_str() vs argument_str_pyi() to display arguments.
 # For examples, only pyi signatures include return types.
+
+
+def format_function_signature(
+    name: str, arguments: Iterable[str] = (), return_type: str | None = None
+) -> str:
+    if not isinstance(arguments, (list, tuple)):
+        arguments = tuple(arguments)
+    return_type = f" -> {return_type}" if return_type is not None else ""
+
+    sig = f"def {name}({', '.join(arguments)}){return_type}: ..."
+    if len(sig) < 80 or len(arguments) == 0 or tuple(arguments) == ("self",):
+        return sig
+
+    return "\n".join(
+        (
+            f"def {name}(",
+            *(f"    {arg}," for arg in arguments),
+            f"){return_type}: ...",
+        )
+    )
 
 
 @dataclass(frozen=True)
@@ -417,7 +437,7 @@ class PythonSignature:
         # pyi also includes self (with no typing/defaults) for methods
         if self.method:
             schema_formals.insert(0, "self")
-        return f'def {self.name}({", ".join(schema_formals)}) -> {returns_str}: ...'
+        return format_function_signature(self.name, schema_formals, returns_str)
 
     def signature_str_pyi_vararg(self, *, skip_outputs: bool = False) -> str | None:
         # only pyi uses vararg signatures
@@ -453,7 +473,7 @@ class PythonSignature:
         # pyi also includes self (with no typing/defaults) for methods
         if self.method:
             schema_formals.insert(0, "self")
-        return f'def {self.name}({", ".join(schema_formals)}) -> {returns_str}: ...'
+        return format_function_signature(self.name, schema_formals, returns_str)
 
 
 # The deprecated python signature involves some special logic, so create a
@@ -494,7 +514,7 @@ class PythonSignatureDeprecated(PythonSignature):
             schema_formals.insert(positional_argc, "*")
 
         returns_str = returns_str_pyi(self)
-        return f'def {self.name}({", ".join(schema_formals)}) -> {returns_str}: ...'
+        return format_function_signature(self.name, schema_formals, returns_str)
 
     def signature_str_pyi_vararg(self, *, skip_outputs: bool = False) -> str | None:
         # the codegen doesn't include vararg variants for deprecated signatures
