@@ -8,11 +8,8 @@ appropriate file under the `torch/ao/nn/quantized/modules`,
 while adding an import statement here.
 """
 
-from torch.ao.nn.quantized.modules.functional_modules import (
-    FloatFunctional,
-    FXFloatFunctional,
-    QFunctional,
-)
+__all__ = ['FloatFunctional', 'FXFloatFunctional', 'QFunctional']
 
-
-__all__ = ["FloatFunctional", "FXFloatFunctional", "QFunctional"]
+from torch.ao.nn.quantized.modules.functional_modules import FloatFunctional
+from torch.ao.nn.quantized.modules.functional_modules import FXFloatFunctional
+from torch.ao.nn.quantized.modules.functional_modules import QFunctional
