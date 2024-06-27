@@ -4545,8 +4545,8 @@
   dispatch:
     NestedTensorCUDA, CUDA: is_pinned_cuda
     MPS: is_pinned_mps
-    SparseCsrCPU, SparseCsrCUDA: is_pinned_sparse_compressed
-    SparseCPU, SparseCUDA: is_pinned_sparse_coo
+    SparseCsrCUDA: is_pinned_sparse_compressed
+    SparseCUDA: is_pinned_sparse_coo
     CompositeExplicitAutograd: is_pinned_default
 
 # TODO: add a copy kwarg that guarantees that the tensor is put into fresh
