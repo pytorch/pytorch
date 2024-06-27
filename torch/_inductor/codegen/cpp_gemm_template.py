@@ -146,8 +146,6 @@ extern "C"
 
 
 class CppPackedGemmTemplate(CppTemplate):
-    WGT_IDX = 1
-
     def __init__(
         self,
         input_nodes,
@@ -263,11 +261,9 @@ class CppPackedGemmTemplate(CppTemplate):
 
         def maybe_to_dense(inputs, layout_or_out):
             new_inputs = list(inputs)
-            if isinstance(inputs[CppPackedGemmTemplate.WGT_IDX], torch.Tensor):
-                W = inputs[CppPackedGemmTemplate.WGT_IDX]
-                new_inputs[CppPackedGemmTemplate.WGT_IDX] = (
-                    W.to_dense() if W.is_mkldnn else W
-                )
+            if isinstance(inputs[1], torch.Tensor):
+                W = inputs[1]
+                new_inputs[1] = W.to_dense() if W.is_mkldnn else W
             return new_inputs, layout_or_out
 
         def normalize_shapes(inputs, layout_or_out):
@@ -305,7 +301,7 @@ class CppPackedGemmTemplate(CppTemplate):
         new_inputs, _ = normalize_shapes(
             *maybe_to_dense(*reorder_and_filter(input_nodes, layout))
         )
-        m, n, k, *_ = mm_args(new_inputs[0], new_inputs[CppPackedGemmTemplate.WGT_IDX])
+        m, n, k, *_ = mm_args(new_inputs[0], new_inputs[1])
         output_dtype, compute_dtype = get_gemm_template_output_and_compute_dtype(
             new_inputs[0].get_dtype()
         )
@@ -315,7 +311,7 @@ class CppPackedGemmTemplate(CppTemplate):
             n,
             k,
             input_dtype=new_inputs[0].get_dtype(),
-            input2_dtype=new_inputs[CppPackedGemmTemplate.WGT_IDX].get_dtype(),
+            input2_dtype=new_inputs[1].get_dtype(),
             output_dtype=output_dtype,
             compute_dtype=compute_dtype,
             alpha=alpha,
@@ -325,7 +321,7 @@ class CppPackedGemmTemplate(CppTemplate):
         _, block_n, _ = micro_gemm.register_blocking
 
         def pack_weight(inputs, layout_or_out):
-            W = inputs[CppPackedGemmTemplate.WGT_IDX]
+            W = inputs[1]
             new_inputs = list(inputs)
             if isinstance(W, ir.IRNode):
                 if not isinstance(W, ir.TensorBox):
@@ -384,7 +380,7 @@ class CppPackedGemmTemplate(CppTemplate):
                 for sz in reversed(blocked_w.shape[1:]):
                     new_stride.insert(0, new_stride[0] * sz)
                 blocked_w = blocked_w.as_strided(blocked_w.shape, new_stride)
-            new_inputs[CppPackedGemmTemplate.WGT_IDX] = blocked_w
+            new_inputs[1] = blocked_w
 
             def _is_int8_gemm(inputs):
                 return (
@@ -421,18 +417,18 @@ class CppPackedGemmTemplate(CppTemplate):
                 assert isinstance(template_buffer, ir.CppTemplateBuffer)
                 new_input_nodes, _ = reorder_and_filter(input_nodes, layout)
 
-                W_node = new_input_nodes[CppPackedGemmTemplate.WGT_IDX]
+                W_node = new_input_nodes[1]
                 assert W_node.get_name() in V.graph.constants
                 W = V.graph.constants[W_node.get_name()]
-                new_input_nodes[CppPackedGemmTemplate.WGT_IDX] = W
+                new_input_nodes[1] = W
                 new_input_nodes, _ = pack_weight(
                     *normalize_shapes(*maybe_to_dense(new_input_nodes, layout))
                 )
-                W_packed = new_input_nodes[CppPackedGemmTemplate.WGT_IDX]
+                W_packed = new_input_nodes[1]
                 W_packed_constant = V.graph.add_tensor_constant(W_packed)
-                template_buffer.inputs[
-                    CppPackedGemmTemplate.WGT_IDX
-                ] = ir.InputsKernel.unwrap_storage_for_input(W_packed_constant)
+                template_buffer.inputs[1] = ir.InputsKernel.unwrap_storage_for_input(
+                    W_packed_constant
+                )
             return output
 
         template = DataProcessorTemplateWrapper(
@@ -482,7 +478,7 @@ class CppPackedGemmTemplate(CppTemplate):
 
         if template_buffer_node is not None:
             # Use the updated prepacked weight buffer
-            W = template_buffer_node.inputs[CppPackedGemmTemplate.WGT_IDX]
+            W = template_buffer_node.inputs[1]
             Y = template_buffer_node
 
         template_buffer = Y
