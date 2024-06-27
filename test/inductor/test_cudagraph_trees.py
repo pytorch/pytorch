@@ -1640,6 +1640,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             out2.sum().backward()
             self.assertFalse(self.get_manager().running_forwards_with_pending_backwards)
 
+            ones.grad = None
             del out
             del out2
 
