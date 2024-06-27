@@ -3147,6 +3147,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                                device=None,
                                dtype=None,
                                index_dtype=None,
+                               pin_memory=None,
                                enable_batch=True,
                                enable_hybrid=True,
                                enable_zero_sized=True,
@@ -3170,10 +3171,11 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         constructors:
 
           - sparse compressed input is defined as
-            (compressed_indices, plain_indices, values), dict(size=expected_size_from_shape_inference, device=device, dtype=dtype)
+            (compressed_indices, plain_indices, values), dict(size=expected_size_from_shape_inference, device=device, dtype=dtype,
+                                                              pin_memory=pin_memory)
 
           - sparse COO input is defined as
-            (indices, values), dict(size=expected_size_from_shape_inference, device=device, dtype=dtype)
+            (indices, values), dict(size=expected_size_from_shape_inference, device=device, dtype=dtype, pin_memory=pin_memory)
 
           - strided input is defined as
             (values,), dict(device=device, dtype=dtype)
@@ -3185,6 +3187,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
 
         if output_tensor:
             for args, kwargs in self.generate_simple_inputs(layout, device=device, dtype=dtype, index_dtype=index_dtype,
+                                                            pin_memory=pin_memory,
                                                             enable_batch=enable_batch, enable_hybrid=enable_hybrid,
                                                             enable_zero_sized=enable_zero_sized,
                                                             enable_non_contiguous_indices=enable_non_contiguous_indices,
@@ -3195,7 +3198,10 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                     assert len(args) == 1
                     size = kwargs.pop('size', None)  # to ensure that a zero-sized tensor has the desired shape
                     assert size is not None
-                    yield args[0].reshape(size)
+                    if pin_memory:
+                        yield args[0].reshape(size).pin_memory()
+                    else:
+                        yield args[0].reshape(size)
                 elif layout is torch.sparse_coo:
                     yield torch.sparse_coo_tensor(*args, **kwargs)
                 elif is_compressed_sparse_layout:
@@ -3412,24 +3418,27 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                     indices = [a.to(device=device, dtype=index_dtype) for a in data[:-1]]
                     values = generate_values(data[-1], densesize).to(device=device, dtype=dtype)
                     yield (*indices, values), dict(device=device, dtype=dtype,
-                                                   size=pattern.shape + densesize)
+                                                   size=pattern.shape + densesize, pin_memory=pin_memory)
 
                     if enable_non_contiguous_indices and pattern.ndim > 2:
                         # sparse compressed indices can be sliced only along batch dimensions
                         for (dim, offset) in {(0, 1), (-2, 0)}:
                             indices_copy = [non_contiguous_copy(a, dim=dim, offset=offset) for a in indices]
                             yield (*indices_copy, values), dict(device=device, dtype=dtype,
-                                                                size=pattern.shape + densesize)
+                                                                size=pattern.shape + densesize,
+                                                                pin_memory=pin_memory)
 
                             if enable_non_contiguous_values:
                                 values_copy = non_contiguous_copy(values, dim=-1, offset=1)
                                 yield (*indices_copy, values_copy), dict(device=device, dtype=dtype,
-                                                                         size=pattern.shape + densesize)
+                                                                         size=pattern.shape + densesize,
+                                                                         pin_memory=pin_memory)
 
                     if enable_non_contiguous_values:
                         values_copy = non_contiguous_copy(values, dim=-1, offset=1)
                         yield (*indices, values_copy), dict(device=device, dtype=dtype,
-                                                            size=pattern.shape + densesize)
+                                                            size=pattern.shape + densesize,
+                                                            pin_memory=pin_memory)
 
         # zero-sized tensor inputs, non-batch, non-hybrid/hybrid
         if enable_zero_sized:
@@ -3468,7 +3477,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                             values = torch.empty((0, *blocksize, *densesize), device=device, dtype=dtype)
                         else:
                             assert 0  # unreachable
-                        yield (*indices, values), dict(device=device, dtype=dtype, size=basesize + densesize)
+                        yield (*indices, values), dict(device=device, dtype=dtype, size=basesize + densesize, pin_memory=pin_memory)
 
     def safeToDense(self, t):
         # coalesce is only implemented for COO

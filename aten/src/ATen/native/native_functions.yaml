@@ -4545,6 +4545,8 @@
   dispatch:
     NestedTensorCUDA, CUDA: is_pinned_cuda
     MPS: is_pinned_mps
+    SparseCsrCPU, SparseCsrCUDA: is_pinned_sparse_compressed
+    SparseCPU, SparseCUDA: is_pinned_sparse_coo
     CompositeExplicitAutograd: is_pinned_default
 
 # TODO: add a copy kwarg that guarantees that the tensor is put into fresh
@@ -4558,6 +4560,8 @@
     CUDA: _pin_memory_cuda
     MPS: _pin_memory_mps
     NestedTensorCUDA, NestedTensorCPU: _pin_memory_nested
+    SparseCUDA: _pin_memory_sparse_coo
+    SparseCsrCUDA: _pin_memory_sparse_compressed
   autogen: _pin_memory.out
 
 - func: pinverse(Tensor self, float rcond=1e-15) -> Tensor

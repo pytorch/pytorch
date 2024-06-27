@@ -423,10 +423,13 @@ Tensor sparse_compressed_tensor_with_dims(
   auto compressed_indices = at::empty(compressed_indices_size, options_.dtype(index_dtype));
   auto plain_indices = at::empty(plain_indices_size, options_.dtype(index_dtype));
   auto values = at::empty(values_size, options_.dtype(dtype));
-
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout_).device(device).pinned_memory(pin_memory);
   SparseCsrTensor self = new_compressed_tensor(options);
-  get_sparse_csr_impl(self)->set_member_tensors(compressed_indices, plain_indices, values, size);
+  if (pin_memory.value_or(false)) {
+    get_sparse_csr_impl(self)->set_member_tensors(compressed_indices.pin_memory(), plain_indices.pin_memory(), values.pin_memory(), size);
+  } else {
+    get_sparse_csr_impl(self)->set_member_tensors(compressed_indices, plain_indices, values, size);
+  }
   return self;
 }
 
@@ -449,7 +452,11 @@ Tensor _sparse_compressed_tensor_unsafe_symint(
   }
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout_).device(device).pinned_memory(pin_memory);
   SparseCsrTensor self = new_compressed_tensor(options);
-  get_sparse_csr_impl(self)->set_member_tensors(compressed_indices, plain_indices, values, size);
+  if (pin_memory.value_or(false)) {
+    get_sparse_csr_impl(self)->set_member_tensors(compressed_indices.pin_memory(), plain_indices.pin_memory(), values.pin_memory(), size);
+  } else {
+    get_sparse_csr_impl(self)->set_member_tensors(compressed_indices, plain_indices, values, size);
+  }
   return self;
 }
 
@@ -469,7 +476,11 @@ Tensor _sparse_compressed_tensor_unsafe_template(const Tensor& compressed_indice
   }
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout_).device(device).pinned_memory(pin_memory);
   SparseCsrTensor self = new_compressed_tensor(options);
-  get_sparse_csr_impl(self)->set_member_tensors(compressed_indices, plain_indices, values, size);
+  if (pin_memory.value_or(false)) {
+    get_sparse_csr_impl(self)->set_member_tensors(compressed_indices.pin_memory(), plain_indices.pin_memory(), values.pin_memory(), size);
+  } else {
+    get_sparse_csr_impl(self)->set_member_tensors(compressed_indices, plain_indices, values, size);
+  }
   return self;
 }
 

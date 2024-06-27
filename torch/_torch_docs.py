@@ -10289,7 +10289,7 @@ Example::
 add_docstr(
     torch.sparse_compressed_tensor,
     r"""sparse_compressed_tensor(compressed_indices, plain_indices, values, size=None, """
-    r"""*, dtype=None, layout=None, device=None, requires_grad=False, check_invariants=None) -> Tensor
+    r"""*, dtype=None, layout=None, device=None, pin_memory=False, requires_grad=False, check_invariants=None) -> Tensor
 
 Constructs a :ref:`sparse tensor in Compressed Sparse format - CSR,
 CSC, BSR, or BSC - <sparse-compressed-docs>` with specified values at
@@ -10340,6 +10340,7 @@ Keyword args:
         :func:`torch.set_default_device`). :attr:`device` will be
         the CPU for CPU tensor types and the current CUDA device for
         CUDA tensor types.
+    {pin_memory}
     {requires_grad}
     {check_invariants}
 
@@ -10362,7 +10363,7 @@ Example::
 add_docstr(
     torch.sparse_csr_tensor,
     r"""sparse_csr_tensor(crow_indices, col_indices, values, size=None, """
-    r"""*, dtype=None, device=None, requires_grad=False, check_invariants=None) -> Tensor
+    r"""*, dtype=None, device=None, pin_memory=False, requires_grad=False, check_invariants=None) -> Tensor
 
 Constructs a :ref:`sparse tensor in CSR (Compressed Sparse Row) <sparse-csr-docs>` with specified
 values at the given :attr:`crow_indices` and :attr:`col_indices`. Sparse matrix multiplication operations
@@ -10401,6 +10402,7 @@ Keyword args:
         :func:`torch.set_default_device`). :attr:`device` will be
         the CPU for CPU tensor types and the current CUDA device for
         CUDA tensor types.
+    {pin_memory}
     {requires_grad}
     {check_invariants}
 
@@ -10423,7 +10425,7 @@ Example::
 add_docstr(
     torch.sparse_csc_tensor,
     r"""sparse_csc_tensor(ccol_indices, row_indices, values, size=None, """
-    r"""*, dtype=None, device=None, requires_grad=False, check_invariants=None) -> Tensor
+    r"""*, dtype=None, device=None, pin_memory=False, requires_grad=False, check_invariants=None) -> Tensor
 
 Constructs a :ref:`sparse tensor in CSC (Compressed Sparse Column)
 <sparse-csc-docs>` with specified values at the given
@@ -10464,6 +10466,7 @@ Keyword args:
         :func:`torch.set_default_device`). :attr:`device` will be
         the CPU for CPU tensor types and the current CUDA device for
         CUDA tensor types.
+    {pin_memory}
     {requires_grad}
     {check_invariants}
 
@@ -10486,7 +10489,7 @@ Example::
 add_docstr(
     torch.sparse_bsr_tensor,
     r"""sparse_bsr_tensor(crow_indices, col_indices, values, size=None, """
-    r"""*, dtype=None, device=None, requires_grad=False, check_invariants=None) -> Tensor
+    r"""*, dtype=None, device=None, pin_memory=False, requires_grad=False, check_invariants=None) -> Tensor
 
 Constructs a :ref:`sparse tensor in BSR (Block Compressed Sparse Row))
 <sparse-bsr-docs>` with specified 2-dimensional blocks at the given
@@ -10529,6 +10532,7 @@ Keyword args:
         :func:`torch.set_default_device`). :attr:`device` will be
         the CPU for CPU tensor types and the current CUDA device for
         CUDA tensor types.
+    {pin_memory}
     {requires_grad}
     {check_invariants}
 
@@ -10554,7 +10558,7 @@ Example::
 add_docstr(
     torch.sparse_bsc_tensor,
     r"""sparse_bsc_tensor(ccol_indices, row_indices, values, size=None, """
-    r"""*, dtype=None, device=None, requires_grad=False, check_invariants=None) -> Tensor
+    r"""*, dtype=None, device=None, pin_memory=False, requires_grad=False, check_invariants=None) -> Tensor
 
 Constructs a :ref:`sparse tensor in BSC (Block Compressed Sparse
 Column)) <sparse-bsc-docs>` with specified 2-dimensional blocks at the
@@ -10596,6 +10600,7 @@ Keyword args:
         :func:`torch.set_default_device`). :attr:`device` will be
         the CPU for CPU tensor types and the current CUDA device for
         CUDA tensor types.
+    {pin_memory}
     {requires_grad}
     {check_invariants}
 
@@ -10621,7 +10626,7 @@ Example::
 add_docstr(
     torch.sparse_coo_tensor,
     r"""sparse_coo_tensor(indices, values, size=None, """
-    r"""*, dtype=None, device=None, requires_grad=False, check_invariants=None, is_coalesced=None) -> Tensor
+    r"""*, dtype=None, device=None, pin_memory=False, requires_grad=False, check_invariants=None, is_coalesced=None) -> Tensor
 
 Constructs a :ref:`sparse tensor in COO(rdinate) format
 <sparse-coo-docs>` with specified values at the given
@@ -10654,6 +10659,7 @@ Keyword args:
         Default: if None, uses the current device for the default tensor type
         (see :func:`torch.set_default_device`). :attr:`device` will be the CPU
         for CPU tensor types and the current CUDA device for CUDA tensor types.
+    {pin_memory}
     {requires_grad}
     {check_invariants}
     is_coalesced (bool, optional): When``True``, the caller is

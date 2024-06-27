@@ -205,7 +205,11 @@ SparseTensor new_with_dims_and_tensor_sparse_symint(
       Tensor(values.unsafeGetTensorImpl()->shallow_copy_and_detach(
           /*version_counter=*/values.unsafeGetTensorImpl()->version_counter(),
           /*allow_tensor_metadata_change=*/true));
-  alias_into_sparse(self, indices_shallow_copy, values_shallow_copy);
+  if (pin_memory.value_or(false)) {
+    alias_into_sparse(self, indices_shallow_copy.pin_memory(), values_shallow_copy.pin_memory());
+  } else {
+    alias_into_sparse(self, indices_shallow_copy, values_shallow_copy);
+  }
   // alias_into_sparse overrides coalesced flag, so resetting the flag to
   // the desired state here:
   if (is_coalesced.has_value()) {
@@ -480,14 +484,13 @@ Tensor _sparse_coo_tensor_unsafe_symint(const Tensor& indices, const Tensor& val
   // indices dimension because that implies variable dimensionality
   auto sparse_dim = indices.sym_size(0).guard_int(__FILE__, __LINE__);
   auto dense_dim = values.dim() - 1;
-
   return at::_sparse_coo_tensor_with_dims_and_tensors_symint(
       sparse_dim,
       dense_dim,
       size,
       indices,
       values,
-      values.options().layout(kSparse),
+      values.options().layout(kSparse).pinned_memory(pin_memory),
       is_coalesced);
 }
 

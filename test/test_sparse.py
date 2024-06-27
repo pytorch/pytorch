@@ -5340,6 +5340,59 @@ class TestSparseAny(TestCase):
         with self.assertRaisesRegex(RuntimeError, ".*blocksize.*, but got 3"):
             torch.randn(1).to_sparse(blocksize=torch.Size((1, 1, 1)))
 
+    @onlyCPU
+    @all_sparse_layouts('layout', include_strided=not False)
+    def test_constructor_pin_memory(self, device, layout):
+
+        for t in self.generate_simple_inputs(
+                layout, device=device, dtype=torch.float64,
+                enable_zero_sized=False,  # pinning zero-sized tensors is no-op
+                pin_memory=True,
+                enable_batch=False,  # TODO: remove after gh-104868 is resolved
+        ):
+            if layout is torch.sparse_coo:
+                self.assertTrue(t._indices().is_pinned())
+                self.assertTrue(t._values().is_pinned())
+            elif layout in {torch.sparse_csr, torch.sparse_bsr}:
+                self.assertTrue(t.crow_indices().is_pinned())
+                self.assertTrue(t.col_indices().is_pinned())
+                self.assertTrue(t.values().is_pinned())
+            elif layout in {torch.sparse_csc, torch.sparse_bsc}:
+                self.assertTrue(t.ccol_indices().is_pinned())
+                self.assertTrue(t.row_indices().is_pinned())
+                self.assertTrue(t.values().is_pinned())
+            elif layout is torch.strided:
+                self.assertTrue(t.is_pinned())
+            else:
+                assert 0  # unreachable
+
+    @onlyCPU
+    @all_sparse_layouts('layout', include_strided=not False)
+    def test_method_pin_memory(self, device, layout):
+
+        for t_ in self.generate_simple_inputs(
+                layout, device=device, dtype=torch.float64,
+                enable_zero_sized=False,  # pinning zero-sized tensors is no-op
+                pin_memory=False,
+                enable_batch=False,  # TODO: remove after gh-104868 is resolved
+        ):
+            t = t_.pin_memory()
+            if layout is torch.sparse_coo:
+                self.assertTrue(t._indices().is_pinned())
+                self.assertTrue(t._values().is_pinned())
+            elif layout in {torch.sparse_csr, torch.sparse_bsr}:
+                self.assertTrue(t.crow_indices().is_pinned())
+                self.assertTrue(t.col_indices().is_pinned())
+                self.assertTrue(t.values().is_pinned())
+            elif layout in {torch.sparse_csc, torch.sparse_bsc}:
+                self.assertTrue(t.ccol_indices().is_pinned())
+                self.assertTrue(t.row_indices().is_pinned())
+                self.assertTrue(t.values().is_pinned())
+            elif layout is torch.strided:
+                self.assertTrue(t.is_pinned())
+            else:
+                assert 0  # unreachable
+
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
 instantiate_device_type_tests(TestSparseUnaryUfuncs, globals(), except_for='meta')
