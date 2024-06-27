@@ -182,7 +182,7 @@ inline bool is_autocast_available(c10::DeviceType device_type) {
   if (device_type == at::kCPU || device_type == at::kCUDA ||
       device_type == at::kXPU || device_type == at::kIPU ||
       device_type == at::kHPU || device_type == at::kXLA ||
-      device_type == at::kPrivateUse1) {
+      device_type == at::kPrivateUse1 || device_type == at::kMPS) {
     return true;
   } else {
     return false;
