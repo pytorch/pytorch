@@ -172,6 +172,7 @@
       abort();                                           \
     }                                                    \
   } while (0)
+
 namespace c10d {
 using json = nlohmann::json;
 #define DEFINE_CONSTANT(name, value) \
@@ -645,6 +646,7 @@ struct NCCLTraceBuffer {
   size_t id_ = 0;
   std::map<std::tuple<std::string, std::string>, std::vector<uint64_t>>
       pg_name_to_ranks_ = {};
+
   std::optional<size_t> record(
       size_t pg_id,
       const std::tuple<std::string, std::string>& pg_name,
@@ -688,6 +690,7 @@ struct NCCLTraceBuffer {
         {},
         {},
         false};
+
     for (const auto& input : inputs) {
       c10::IntArrayRef sizes = input.sizes();
       te.input_dtypes_.push_back(input.dtype().toScalarType());
