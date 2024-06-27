@@ -718,7 +718,25 @@ python_ref_db: List[OpInfo] = [
                 precisionOverride({torch.float: 2e-4}),
                 "TestFFT",
                 "test_reference_nd",
-            )
+            ),
+            # AssertionError: Reference result was farther (0.09746177145360499) from the precise
+            # computation than the torch result was (0.09111555632069855)
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_python_ref_torch_fallback",
+                dtypes=(torch.float16,),
+                device_type="cuda",
+            ),
+            # AssertionError: Reference result was farther (0.0953431016138116) from the precise
+            # computation than the torch result was (0.09305490684430734)
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_python_ref_executor",
+                dtypes=(torch.float16,),
+                device_type="cuda",
+            ),
         ],
     ),
     SpectralFuncPythonRefInfo(

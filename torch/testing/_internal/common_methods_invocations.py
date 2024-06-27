@@ -13238,6 +13238,14 @@ op_db: List[OpInfo] = [
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients',
                                      'test_fn_grad', device_type='cpu',
                                      dtypes=(torch.float64,)),
+                        DecorateInfo(
+                            toleranceOverride({
+                                torch.float16: tol(atol=5e-4, rtol=3e-3),
+                            }),
+                            "TestInductorOpInfo",
+                            "test_comprehensive",
+                            device_type="cuda"
+                        ),
                     )),
     UnaryUfuncInfo('frac',
                    ref=lambda x: np.modf(x)[0],
@@ -14078,6 +14086,15 @@ op_db: List[OpInfo] = [
                        torch.float64: tol(atol=2e-7, rtol=2e-7),
                    }),
                    "TestDecomp",
+                   "test_comprehensive",
+                   device_type="cuda"
+               ),
+               DecorateInfo(
+                   toleranceOverride({
+                       torch.float16: tol(atol=4e-5, rtol=9e-3),
+                       torch.float64: tol(atol=2e-7, rtol=2e-7),
+                   }),
+                   "TestInductorOpInfo",
                    "test_comprehensive",
                    device_type="cuda"
                ),
@@ -19729,6 +19746,14 @@ op_db: List[OpInfo] = [
                # Falling back to non-numerically stablized exp, causing nan in the results.
                DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_forward_mode_AD', dtypes=[torch.complex128]),
                DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_fn_fwgrad_bwgrad', dtypes=[torch.complex128]),
+               DecorateInfo(
+                   toleranceOverride({
+                       torch.float16: tol(atol=7e-5, rtol=6e-3),
+                   }),
+                   "TestInductorOpInfo",
+                   "test_comprehensive",
+                   device_type="cuda"
+               ),
            ),
            sample_inputs_func=sample_inputs_logcumsumexp,
            error_inputs_func=error_inputs_logcumsumexp),

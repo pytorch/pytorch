@@ -961,6 +961,16 @@ op_db: List[OpInfo] = [
                 "TestMasked",
                 "test_reference_masked",
             ),
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.float16: tol(atol=4e-5, rtol=2e-2),
+                    }
+                ),
+                "TestInductorOpInfo",
+                "test_comprehensive",
+                device_type="cuda",
+            ),
         ],
         sample_inputs_func=sample_inputs_masked_std_var,
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
