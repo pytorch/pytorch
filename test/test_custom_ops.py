@@ -868,7 +868,7 @@ class TestCustomOp(CustomOpTestCaseBase):
 
         with self.assertRaisesRegex(ValueError, r"For example, typing.List\[int\]"):
             # test that we propose a correct and supported type.
-            @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
+            @torch.library.custom_op(f"{TestCustomOp.test_ns}::foo", mutates_args={})
             def foo(x: Tensor, y: Tuple[int, int]) -> Tensor:
                 raise NotImplementedError
 
