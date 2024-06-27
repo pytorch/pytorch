@@ -1719,6 +1719,7 @@ class Scheduler:
                     node.add_fake_dep(StarDep(alt_name, mode=node_mode))
                     known_dep_node_names = dep_closure(node)
                     for user in name_to_users[alt_name].items:
+                        assert isinstance(user.node, BaseSchedulerNode)
                         for other_name in user.node.get_buffer_names():
                             # this node must run after all prior readers
                             other_name = rename(other_name)
