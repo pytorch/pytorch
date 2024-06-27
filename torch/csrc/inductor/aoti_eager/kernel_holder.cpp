@@ -242,7 +242,8 @@ bool AOTIPythonKernelHolder::cache_lookup(
     AOTIKernelMetadata& aoti_kernel_metadata) {
   TORCH_CHECK_NOT_IMPLEMENTED(
       op.schema().returns().size() == 1,
-      "Not implemented for operations that return either multiple values or no value.");
+      "Not implemented for operations that return either multiple values or no value. schema: ",
+      op.schema());
   TORCH_CHECK_NOT_IMPLEMENTED(
       op.schema().returns()[0].type()->isSubtypeOf(c10::TensorType::get()),
       "Not implemented for operations that return a non-Tensor value.");
