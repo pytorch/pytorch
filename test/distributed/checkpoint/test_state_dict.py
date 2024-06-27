@@ -911,7 +911,8 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         ptd_state_dict.set_model_state_dict(
             meta_model,
             model_state_dict=full_sd,
-            # 'aten.copy_.default: got mixed torch.Tensor and DTensor, need to convert all torch.Tensor to DTensor before calling distributed operators!',).
+            # 'aten.copy_.default: got mixed torch.Tensor and DTensor, need to convert all 
+            # torch.Tensor to DTensor before calling distributed operators!',).
             options=ptd_state_dict.StateDictOptions(
                 full_state_dict=True, strict=False
             )
