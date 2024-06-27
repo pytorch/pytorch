@@ -391,6 +391,8 @@ class TS2FXGraphConverter:
                     self.fx_graph, name, self.is_top_level_graph()
                 )
             else:
+                if not is_valid_for_codegen(normalized_name):
+                    normalized_name = f"input_{normalized_name}"
                 self.input_specs.append(
                     InputSpec(
                         InputKind.USER_INPUT,

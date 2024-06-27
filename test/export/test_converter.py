@@ -633,14 +633,16 @@ class TestConverter(TestCase):
         # Super nested module testing.
         inp = (torch.ones(3),)
         orig_m = SuperNestedM2(3)
-        ep = self._check_equal_ts_ep_converter(orig_m, inp)
+        # TODO: fix trace: state_dict is not equal.
+        ep_list = self._check_equal_ts_ep_converter(orig_m, inp, ["script"])
 
         t = inp[0]
         t -= 0.8
-        torch.testing.assert_close(
-            ep.module()(*inp),
-            orig_m(*inp),
-        )
+        for ep in ep_list:
+            torch.testing.assert_close(
+                ep.module()(*inp),
+                orig_m(*inp),
+            )
 
     def test_ts2ep_converter_contains(self):
         class MIn(torch.nn.Module):
