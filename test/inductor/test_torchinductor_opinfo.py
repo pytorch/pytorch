@@ -19,9 +19,11 @@ from torch._subclasses.fake_tensor import (
     DynamicOutputShapeException,
     FakeTensorMode,
 )
+from torch.library import _scoped_library
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    onlyCUDA,
     onlyNativeDeviceTypes,
     OpDTypes,
     ops,
@@ -36,12 +38,14 @@ from torch.testing._internal.common_utils import (
     skipCUDAMemoryLeakCheckIf,
     skipIfCrossRef,
     skipIfTorchDynamo,
+    slowTest,
     suppress_warnings,
     TEST_MKL,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA
+from torch.testing._internal.opinfo.core import BinaryUfuncInfo, UnaryUfuncInfo
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
 
@@ -548,12 +552,169 @@ def collection_decorator(fn):
     return inner
 
 
+def register_ops_with_aoti_compile(ns, op_set, dispatch_key, torch_compile_op_lib_impl):
+    for _op_name in op_set:
+        qualified_op_name = f"{ns}::{_op_name}"
+        _, overload_names = torch._C._jit_get_operation(qualified_op_name)
+        for overload_name in overload_names:
+            try:
+                reg_op_name = qualified_op_name
+                schema = torch._C._get_schema(qualified_op_name, overload_name)
+                if schema.overload_name:
+                    reg_op_name = f"{qualified_op_name}.{schema.overload_name}"
+                torch_compile_op_lib_impl._impl_with_aoti_compile(  # noqa: F821
+                    reg_op_name, dispatch_key
+                )
+            except Exception as e:
+                print(str(e))
+                continue
+
+
+def test_aoti_op_db():
+    _op_db = []
+    skip_unary_op_name_pattern = [
+        "digamma",
+        "polygamma",
+        "nn.functional",
+        "special",
+        "bfloat16",
+        "bool",
+        "byte",
+        "cdouble",
+        "cfloat",
+        "char",
+        "double",
+        "float",
+        "half",
+        "int",
+        "long",
+        "short",
+    ]
+    skip_binary_op_name_pattern = ["complex", "floor_divide", "remainder"]
+    skip_variant_test_name = ["floor_rounding", "trunc_rounding"]
+    skip_op_name = [
+        "argsort",
+        "atleast_1d",
+        "atleast_2d",
+        "atleast_3d",
+        "clone",
+        "index_reduce",
+    ]
+    skip_conv_gemm = ["addbmm", "addmm", "addmv"]
+    multiple_returns = ["frexp"]
+    for op in op_db:
+        if isinstance(op, UnaryUfuncInfo):
+            if any(
+                item in op.name
+                for item in skip_unary_op_name_pattern + multiple_returns
+            ):
+                pass
+            else:
+                _op_db.append(op)
+
+        elif isinstance(op, BinaryUfuncInfo):
+            if any(
+                item in op.name
+                for item in skip_unary_op_name_pattern + skip_binary_op_name_pattern
+            ):
+                pass
+            elif op.name.startswith("__"):
+                pass
+            elif any(item in op.variant_test_name for item in skip_variant_test_name):
+                pass
+            else:
+                _op_db.append(op)
+
+        elif any(
+            item in op.name or item in op.variant_test_name
+            for item in skip_unary_op_name_pattern
+            + skip_binary_op_name_pattern
+            + skip_variant_test_name
+            + skip_op_name
+            + skip_conv_gemm
+            + multiple_returns
+        ):
+            pass
+
+        else:
+            _op_db.append(op)
+
+    return _op_db
+
+
+aoti_op_db = test_aoti_op_db()
+
+
 class TestInductorOpInfo(TestCase):
     def tearDown(self):
         torch._dynamo.reset()
 
     check_model = check_model
     check_model_gpu = check_model_gpu
+
+    @slowTest
+    @onlyNativeDeviceTypes
+    @suppress_warnings
+    @skipCUDAMemoryLeakCheckIf(
+        True
+    )  # inductor kernels failing this test intermittently
+    @onlyCUDA
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @skipIfTorchDynamo("Test uses dynamo already")
+    @skipIfCrossRef
+    @_ops(aoti_op_db)
+    @skipOps("TestInductorOpInfo", "test_aoti_eager_comprehensive", test_skips_or_fails)
+    @patch("torch._dynamo.config.raise_on_unsafe_aot_autograd", True)
+    @torch._inductor.config.patch(
+        {"implicit_fallbacks": False, "triton.autotune_pointwise": False}
+    )
+    @collection_decorator
+    def test_aoti_eager_comprehensive(self, device, dtype, op):
+        namespace_name = "aten"
+        device_type = torch.device(device).type
+
+        allowed_dtypes = [f16]
+        if dtype not in allowed_dtypes:
+            raise unittest.SkipTest("Skipped!")
+        samples = op.sample_inputs(device, dtype, requires_grad=False)
+
+        input_shapes = []
+        expect_tensors = []
+        input_tensors = []
+        real_tensors = []
+        with torch.no_grad():
+            for sample_input in samples:
+                input_tensors.append(sample_input)
+                args = [sample_input.input] + list(sample_input.args)
+                op_shapes = []
+                for item in args:
+                    if isinstance(item, torch.Tensor):
+                        op_shapes.append(item.shape)
+                input_shapes.append(op_shapes)
+                kwargs = sample_input.kwargs
+                func = op.get_op()
+                ref = func(*args, **kwargs)
+                expect_tensors.append(ref)
+
+        torch._dynamo.reset()
+        with torch.no_grad(), _scoped_library(
+            namespace_name, "IMPL"
+        ) as torch_compile_op_lib_impl:
+            torch.cuda.empty_cache()
+
+            register_ops_with_aoti_compile(
+                namespace_name, [op.name], "CUDA", torch_compile_op_lib_impl
+            )
+
+            for sample_input in input_tensors:
+                args = [sample_input.input] + list(sample_input.args)
+                kwargs = sample_input.kwargs
+                func = op.get_op()
+                res = func(*args, **kwargs)
+                real_tensors.append(res)
+
+        for shape, expect, real in zip(input_shapes, expect_tensors, real_tensors):
+            self.assertEqual(expect, real, atol=1e-3, rtol=1e-3)
 
     @onlyNativeDeviceTypes
     @suppress_warnings
