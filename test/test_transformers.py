@@ -2211,7 +2211,7 @@ class TestSDPACudaOnly(NNTestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
     def test_cudnn_attention_fail_d128(self, device):
         # Test that cuDNN attention dispatching correctly bails out on d > 128
-        b, h = 8, 2
+        b, h = 1, 2
         s_q, s_kv = 128, 128
         d_qk, d_v = 128, 144
 
