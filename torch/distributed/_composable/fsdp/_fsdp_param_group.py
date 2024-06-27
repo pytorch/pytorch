@@ -43,10 +43,12 @@ reference to avoid holding onto memory after forward.
 class FSDPCommContext:
     """This has the communication state shared across FSDP states/parameter groups."""
 
-    def init(self):
+    def lazy_init(self):
+        if not torch.cuda.is_available():
+            raise RuntimeError("FSDP requires CUDA for streams")
         # Setting the all-gather/reduce-scatter streams to be higher priority
         # can help avoid some issues where their copies in/out are delayed and
-        # block computation
+        # block computation (this is different from high-pri NCCL streams)
         high_priority = -1
         # All-gather state and copy-in stream allow overlapping the next
         # copy-in with the current all-gather in forward; copy-in overlaps with
@@ -249,8 +251,11 @@ class FSDPParamGroup:
         self._all_gather_result = None  # free unless saved in `all_gather_state`
 
     def _wait_all_gather_streams_on_event(self, event: torch.cuda.Event):
-        self.comm_ctx.all_gather_copy_in_stream.wait_event(event)
-        self.comm_ctx.all_gather_stream.wait_event(event)
+        # Calling `unshard` before lazy init means streams are not initialized
+        if hasattr(self.comm_ctx, "all_gather_copy_in_stream"):
+            self.comm_ctx.all_gather_copy_in_stream.wait_event(event)
+        if hasattr(self.comm_ctx, "all_gather_stream"):
+            self.comm_ctx.all_gather_stream.wait_event(event)
 
     def reshard(self):
         if self._training_state == TrainingState.FORWARD:
