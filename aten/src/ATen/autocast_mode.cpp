@@ -69,7 +69,7 @@ thread_local std::array<at::ScalarType, at::COMPILE_TIME_MAX_DEVICE_TYPES>
         at::ScalarType::Undefined, // Vulkan
         at::ScalarType::Undefined, // Metal
         at::kHalf, // XPU
-        at::ScalarType::kHalf, // MPS
+        at::kHalf, // MPS
         at::ScalarType::Undefined, // Meta (tensors with no data)
         at::kBFloat16, // HPU / HABANA
         at::ScalarType::Undefined, // SX-Aurora / NEC
