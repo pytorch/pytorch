@@ -132,14 +132,12 @@ def associative_scan(
 
     if not torch._dynamo.is_compiling():
         with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
-            leaves, spec = pytree.tree_flatten(input)
-            generic_scan_required = check_args(input, combine_fn, leaves, spec, dim)
-    
-            return torch.compile(associative_scan, fullgraph=True)(
-                    combine_fn, input, dim, reverse, generic_scan | generic_scan_required
+            return torch.compile(associative_scan, fullgraph=False)(
+                    combine_fn, input, dim, reverse, generic_scan
                 )
-
+            
     leaves, spec = pytree.tree_flatten(input)
+    generic_scan_required = check_args(input, combine_fn, leaves, spec, dim)
 
     if reverse:
         leaves = [torch.flip(elem, [dim]) for elem in leaves]
@@ -148,7 +146,7 @@ def associative_scan(
             wrap_combine_fn_flat, combine_fn=combine_fn, spec=spec, num_leaves=len(leaves)
         )
     
-    if generic_scan:
+    if generic_scan | generic_scan_required:
         result_flat = generic_associative_scan(combine_fn, leaves, dim, spec)
     else:
         result_flat = associative_scan_op(combine_fn, leaves, dim)
