@@ -87,6 +87,9 @@ ban_recompute_not_in_allowlist = True
 # the result of reductions is generally very small but recomputing reductions in
 # a fusion can be expensive.
 ban_recompute_reductions = True
+# Prevents the partitioner from ever saving views (i.e. always recompute them).
+# Generally a good idea since views are free to recompute.
+recompute_views = False
 
 # By default, the partitioner is purely trying to optimize for runtime (although
 # it should always use less memory than eager)
@@ -175,6 +178,9 @@ torch_compile_graph_format = os.environ.get("TORCH_COMPILE_GRAPH_FORMAT", "svg")
 
 enable_autograd_cache = os.environ.get("ENABLE_AOT_AUTOGRAD_CACHE", "0") == "1"
 
+# Error on BypassAOTAutogradCache instead of just a warning
+# Used for tests
+strict_autograd_cache = False
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403

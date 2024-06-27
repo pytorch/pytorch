@@ -189,6 +189,196 @@ def _name_hoo_subgraph_placeholders(gm: torch.fx.GraphModule) -> None:
         subgraph.recompile()
 
 
+def _decompose_exported_program(
+    ep,
+    *,
+    decomp_table: Dict[torch._ops.OperatorBase, Callable],
+    joint_loss_index: Optional[int],
+):
+    from torch._export.passes.lift_constants_pass import (
+        ConstantAttrMap,
+        lift_constants_pass,
+    )
+    from torch._functorch.aot_autograd import aot_export_module
+
+    old_placeholders = [
+        node for node in ep.graph_module.graph.nodes if node.op == "placeholder"
+    ]
+    fake_args = [node.meta["val"] for node in old_placeholders]
+
+    buffers_to_remove = [name for name, _ in ep.graph_module.named_buffers()]
+    for name in buffers_to_remove:
+        delattr(ep.graph_module, name)
+    # TODO(zhxhchen17) Return the new graph_signature directly.
+    from torch.export._trace import _ignore_backend_decomps
+
+    with _ignore_backend_decomps():
+        gm, graph_signature = aot_export_module(
+            ep.graph_module,
+            fake_args,
+            decompositions=decomp_table,
+            trace_joint=True if joint_loss_index is not None else False,
+            output_loss_index=joint_loss_index
+            if joint_loss_index is not None
+            else None,
+        )
+
+    # Update the signatures with the new placeholder names in case they
+    # changed when calling aot_export
+    def update_arg(old_arg, new_ph):
+        if isinstance(old_arg, ConstantArgument):
+            return old_arg
+        elif isinstance(old_arg, TensorArgument):
+            return TensorArgument(name=new_ph.name)
+        elif isinstance(old_arg, SymIntArgument):
+            return SymIntArgument(name=new_ph.name)
+        raise RuntimeError(f"Type of old_arg not supported: {type(old_arg)}")
+
+    new_placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
+    new_outputs = list(gm.graph.nodes)[-1].args[0]
+
+    # rename the placeholders
+    assert len(new_placeholders) == len(old_placeholders)
+    for old_ph, new_ph in zip(old_placeholders, new_placeholders):
+        new_ph.name = new_ph.target = old_ph.name
+
+    # handle name collisions with newly decomposed graph nodes
+    name_map = {ph.name: ph.name for ph in new_placeholders}
+    for node in gm.graph.nodes:
+        if node.op == "placeholder":
+            continue
+        node.name = _rename_without_collisions(name_map, node.name, node.name)
+
+    # propagate names to higher order op subgraphs
+    _name_hoo_subgraph_placeholders(gm)
+
+    # To match the output target with correct input for input mutations
+    # need to find the old to new placeholder map
+    old_new_placeholder_map = {
+        spec.arg.name: new_placeholders[i].name
+        for i, spec in enumerate(ep.graph_signature.input_specs)
+        if not isinstance(spec.arg, ConstantArgument)
+    }
+
+    input_specs = [
+        InputSpec(
+            spec.kind,
+            update_arg(spec.arg, new_placeholders[i]),
+            spec.target,
+            spec.persistent,
+        )
+        for i, spec in enumerate(ep.graph_signature.input_specs)
+    ]
+    output_specs = [
+        OutputSpec(
+            spec.kind,
+            update_arg(spec.arg, new_outputs[i]),
+            old_new_placeholder_map.get(spec.target, spec.target),
+        )
+        for i, spec in enumerate(ep.graph_signature.output_specs)
+    ]
+
+    if joint_loss_index is not None:
+        assert graph_signature.backward_signature is not None
+        gradients = graph_signature.backward_signature.gradients_to_user_inputs
+        assert len(graph_signature.user_inputs) == len(ep.graph_signature.input_specs)
+        specs = {
+            graph_signature.user_inputs[i]: spec
+            for i, spec in enumerate(ep.graph_signature.input_specs)
+            if isinstance(spec.arg, TensorArgument)
+        }
+        for i, node in enumerate(new_outputs[len(output_specs) :]):
+            source = gradients[node.name]
+            spec = specs[source]  # type: ignore[index]
+            if spec.kind == InputKind.PARAMETER:
+                kind = OutputKind.GRADIENT_TO_PARAMETER
+                target = spec.target
+            elif spec.kind == InputKind.USER_INPUT:
+                kind = OutputKind.GRADIENT_TO_USER_INPUT
+                target = source
+            else:
+                raise AssertionError(f"Unknown input kind: {spec.kind}")
+            output_specs.append(
+                OutputSpec(
+                    kind,
+                    TensorArgument(name=node.name),
+                    target,
+                )
+            )
+
+    assert len(new_placeholders) == len(old_placeholders)
+
+    new_graph_signature = ExportGraphSignature(
+        input_specs=input_specs, output_specs=output_specs
+    )
+    # NOTE: aot_export adds symint metadata for placeholders with int
+    # values; since these become specialized, we replace such metadata with
+    # the original values.
+    # Also, set the param/buffer metadata back to the placeholders.
+    for old_node, new_node in zip(old_placeholders, new_placeholders):
+        if not isinstance(old_node.meta["val"], torch.Tensor):
+            new_node.meta["val"] = old_node.meta["val"]
+
+        if (
+            new_node.target in new_graph_signature.inputs_to_parameters
+            or new_node.target in new_graph_signature.inputs_to_buffers
+        ):
+            for k, v in old_node.meta.items():
+                new_node.meta[k] = v
+
+    # TODO unfortunately preserving graph-level metadata is not
+    # working well with aot_export. So we manually copy it.
+    # (The node-level meta is addressed above.)
+    gm.meta.update(ep.graph_module.meta)
+
+    new_range_constraints = _get_updated_range_constraints(
+        gm,
+        ep.range_constraints,
+        _is_executorch=False,
+    )
+
+    constants = lift_constants_pass(gm, new_graph_signature, ConstantAttrMap())
+    for k, v in constants.items():
+        assert k not in ep.constants
+        ep.constants[k] = v
+
+    from torch._dynamo import config as _dynamo_config
+    from torch._export.passes._node_metadata_hook import (
+        _node_metadata_hook,
+        _set_node_metadata_hook,
+    )
+
+    if not _dynamo_config.do_not_emit_runtime_asserts:
+        stack_trace = (
+            'File "torch/fx/passes/runtime_assert.py", line 24, '
+            "in insert_deferred_runtime_asserts"
+        )
+        shape_env = _get_shape_env(gm)
+        if shape_env is not None:
+            with _set_node_metadata_hook(
+                gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
+            ):
+                insert_deferred_runtime_asserts(
+                    gm,
+                    shape_env,
+                    f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
+                    export=True,
+                )
+
+    exported_program = ExportedProgram(
+        root=gm,
+        graph=gm.graph,
+        graph_signature=new_graph_signature,
+        state_dict=ep.state_dict,
+        range_constraints=new_range_constraints,
+        module_call_graph=copy.deepcopy(ep.module_call_graph),
+        example_inputs=ep.example_inputs,
+        verifier=ep.verifier,
+        constants=ep.constants,
+    )
+    return exported_program
+
+
 class ExportedProgram:
     """
     Package of a program from :func:`export`. It contains
@@ -537,166 +727,15 @@ class ExportedProgram:
         For now, we do not decompose joint graphs.
         """
         from torch._decomp import core_aten_decompositions
-        from torch._export.passes.lift_constants_pass import (
-            ConstantAttrMap,
-            lift_constants_pass,
-        )
-        from torch._functorch.aot_autograd import aot_export_module
-
-        def _get_placeholders(gm):
-            placeholders = []
-            for node in gm.graph.nodes:
-                if node.op != "placeholder":
-                    break
-                placeholders.append(node)
-            return placeholders
 
         if decomp_table is None:
             decomp_table = core_aten_decompositions()
 
-        old_placeholders = _get_placeholders(self.graph_module)
-        fake_args = [node.meta["val"] for node in old_placeholders]
-
-        buffers_to_remove = [name for name, _ in self.graph_module.named_buffers()]
-        for name in buffers_to_remove:
-            delattr(self.graph_module, name)
-        # TODO(zhxhchen17) Return the new graph_signature directly.
-        from torch.export._trace import _ignore_backend_decomps
-
-        with _ignore_backend_decomps():
-            gm, graph_signature = aot_export_module(
-                self.graph_module,
-                fake_args,
-                decompositions=decomp_table,
-                trace_joint=False,
-            )
-
-        # Update the signatures with the new placeholder names in case they
-        # changed when calling aot_export
-        def update_arg(old_arg, new_ph):
-            if isinstance(old_arg, ConstantArgument):
-                return old_arg
-            elif isinstance(old_arg, TensorArgument):
-                return TensorArgument(name=new_ph.name)
-            elif isinstance(old_arg, SymIntArgument):
-                return SymIntArgument(name=new_ph.name)
-            raise RuntimeError(f"Type of old_arg not supported: {type(old_arg)}")
-
-        new_placeholders = _get_placeholders(gm)
-        new_outputs = list(gm.graph.nodes)[-1].args[0]
-
-        # rename the placeholders
-        assert len(new_placeholders) == len(old_placeholders)
-        for old_ph, new_ph in zip(old_placeholders, new_placeholders):
-            new_ph.name = new_ph.target = old_ph.name
-
-        # handle name collisions with newly decomposed graph nodes
-        name_map = {ph.name: ph.name for ph in new_placeholders}
-        for node in gm.graph.nodes:
-            if node.op == "placeholder":
-                continue
-            node.name = _rename_without_collisions(name_map, node.name, node.name)
-
-        # propagate names to higher order op subgraphs
-        _name_hoo_subgraph_placeholders(gm)
-
-        # To match the output target with correct input for input mutations
-        # need to find the old to new placeholder map
-        old_new_placeholder_map = {
-            spec.arg.name: new_placeholders[i].name
-            for i, spec in enumerate(self.graph_signature.input_specs)
-            if not isinstance(spec.arg, ConstantArgument)
-        }
-
-        input_specs = [
-            InputSpec(
-                spec.kind,
-                update_arg(spec.arg, new_placeholders[i]),
-                spec.target,
-                spec.persistent,
-            )
-            for i, spec in enumerate(self.graph_signature.input_specs)
-        ]
-        output_specs = [
-            OutputSpec(
-                spec.kind,
-                update_arg(spec.arg, new_outputs[i]),
-                old_new_placeholder_map.get(spec.target, spec.target),
-            )
-            for i, spec in enumerate(self.graph_signature.output_specs)
-        ]
-
-        assert len(new_placeholders) == len(old_placeholders)
-
-        new_graph_signature = ExportGraphSignature(
-            input_specs=input_specs, output_specs=output_specs
+        return _decompose_exported_program(
+            self,
+            decomp_table=decomp_table,
+            joint_loss_index=None,
         )
-        # NOTE: aot_export adds symint metadata for placeholders with int
-        # values; since these become specialized, we replace such metadata with
-        # the original values.
-        # Also, set the param/buffer metadata back to the placeholders.
-        for old_node, new_node in zip(old_placeholders, new_placeholders):
-            if not isinstance(old_node.meta["val"], torch.Tensor):
-                new_node.meta["val"] = old_node.meta["val"]
-
-            if (
-                new_node.target in new_graph_signature.inputs_to_parameters
-                or new_node.target in new_graph_signature.inputs_to_buffers
-            ):
-                for k, v in old_node.meta.items():
-                    new_node.meta[k] = v
-
-        # TODO unfortunately preserving graph-level metadata is not
-        # working well with aot_export. So we manually copy it.
-        # (The node-level meta is addressed above.)
-        gm.meta.update(self.graph_module.meta)
-
-        new_range_constraints = _get_updated_range_constraints(
-            gm,
-            self.range_constraints,
-            _is_executorch=False,
-        )
-
-        constants = lift_constants_pass(gm, new_graph_signature, ConstantAttrMap())
-        for k, v in constants.items():
-            assert k not in self.constants
-            self.constants[k] = v
-
-        from torch._dynamo import config as _dynamo_config
-        from torch._export.passes._node_metadata_hook import (
-            _node_metadata_hook,
-            _set_node_metadata_hook,
-        )
-
-        if not _dynamo_config.do_not_emit_runtime_asserts:
-            stack_trace = (
-                'File "torch/fx/passes/runtime_assert.py", line 24, '
-                "in insert_deferred_runtime_asserts"
-            )
-            shape_env = _get_shape_env(gm)
-            if shape_env is not None:
-                with _set_node_metadata_hook(
-                    gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
-                ):
-                    insert_deferred_runtime_asserts(
-                        gm,
-                        shape_env,
-                        f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
-                        export=True,
-                    )
-
-        exported_program = ExportedProgram(
-            root=gm,
-            graph=gm.graph,
-            graph_signature=new_graph_signature,
-            state_dict=self.state_dict,
-            range_constraints=new_range_constraints,
-            module_call_graph=copy.deepcopy(self.module_call_graph),
-            example_inputs=self.example_inputs,
-            verifier=self.verifier,
-            constants=self.constants,
-        )
-        return exported_program
 
     def _transform_do_not_use(self, *passes: PassType) -> "ExportedProgram":
         pm = PassManager(list(passes))

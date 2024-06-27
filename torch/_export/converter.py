@@ -91,6 +91,7 @@ kind_to_standard_operators = {
     "aten::__not__": operator.not_,
     "aten::__contains__": operator.contains,
     "prim::dtype": get_dtype_as_int,
+    "aten::len": len,
 }
 
 
@@ -187,7 +188,7 @@ def get_block_to_lifted_attrs(graph: torch._C.Graph) -> Dict[torch._C.Block, Set
 
 def get_op_overload(node: torch._C.Node):
     schema_str = node.schema()
-    schema = torch._C.parse_schema(schema_str)
+    schema: torch._C.FunctionSchema = torch._C.parse_schema(schema_str)
     ns, op_name = str(schema.name).split("::")
     override = schema.overload_name
 
@@ -650,6 +651,15 @@ class TS2FXGraphConverter:
         target = torch.ops.profiler._record_function_exit
         args = tuple(self.get_fx_value(input) for input in node.inputs())
         self.fx_graph.call_function(target, args)
+
+    def convert_prim_tolist(self, node: torch._C.Node):
+        # prim::tolist cannot be supported by `_convert_standard_operators`
+        # since it requires call_method instead of call_function.
+        target = "tolist"
+        args = (self.get_fx_value(next(node.inputs())),)
+        fx_node = self.fx_graph.call_method(target, args)
+        output_name = node.output().debugName()
+        self.name_to_node[output_name] = fx_node
 
     def _convert_standard_operators(self, node: torch._C.Node):
         target = kind_to_standard_operators[node.kind()]

@@ -1005,6 +1005,12 @@ class TritonKernelOverrides(TritonOverrides):
 
     @staticmethod
     def masked(mask, body, other):
+        if mask is not None and torch.version.hip is not None:
+            mask = V.kernel.cse.generate(
+                V.kernel.compute,
+                f"{mask}.to(tl.int1)",
+            )
+
         nodes = body.graph.find_nodes(op="output")
         assert nodes, "graph for body does not contain an output"
 
@@ -1771,7 +1777,7 @@ class TritonKernel(SIMDKernel):
         elif mode is None:
             line = f"tl.store({var} + ({indexing.index_str}), {value}, {indexing.mask_str})"
         elif mode == "atomic_add":
-            line = f"tl.atomic_add({var} + ({indexing.index_str}), {value}, {indexing.mask_str})"
+            line = f"tl.atomic_add({var} + ({indexing.index_str}), {value}, {indexing.mask_str}, sem='relaxed')"
         else:
             raise NotImplementedError(f"store mode={mode}")
         self.stores.writeline(DeferredLine(name, line))
@@ -2657,19 +2663,9 @@ class TritonKernel(SIMDKernel):
             if tree.grid_dim is not None:
                 grid.append(expr)
 
-    def get_call_args(self):
-        # arg_types is needed for cpp wrapper codegen
-        _, call_args, _, arg_types = self.args.python_argdefs()
-        # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
-        for i in range(len(call_args)):
-            if V.graph.is_unspec_arg(call_args[i]):
-                call_args[i] = call_args[i] + ".item()"
-
-        return call_args, arg_types
-
     def call_kernel(self, name: str, node: Optional[IRNode] = None):
         wrapper = V.graph.wrapper_code
-        call_args, arg_types = self.get_call_args()
+        _, call_args, _, arg_types = self.args.python_argdefs()
         grid: List[Any] = []
         self.add_numel_to_call_args_and_grid(name, call_args, arg_types, grid)
         current_device = V.graph.scheduler.get_current_device_or_throw()
