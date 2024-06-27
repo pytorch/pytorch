@@ -12,7 +12,6 @@ from torch.utils.checkpoint import checkpoint
 
 
 class TestMemTracker(TestCase):
-
     def _init_cublas_workspace(self, dev: torch.device):
         lin = torch.nn.Linear(768, 768, device=dev)
         inp = torch.randn(1, 768, device=dev)
