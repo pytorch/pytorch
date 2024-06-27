@@ -118,9 +118,9 @@ class TestNumbaIntegration(common.TestCase):
             torch.int16,
             torch.uint32,
             torch.int32,
-            torch.uint32,
+            torch.uint64,
             torch.int64,
-            torch.bool
+            torch.bool,
         ]
 
         for dt in torch_dtypes:
