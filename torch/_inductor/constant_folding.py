@@ -60,6 +60,13 @@ class ConstantFolder(torch.fx.Interpreter):
         # is the output
         self.user_to_last_uses = self.node_to_last_non_output_use()
 
+    def _support_dynamic_shape(self):
+        # ConstantFolder not support dynamic shape now
+        return False
+
+    def _deduce_value(self, node):
+        return super().run_node(node)
+
     def is_impure(self, node: torch.fx.node.Node):
         if (
             node.target == torch.ops.prims.convert_element_type.default
@@ -159,7 +166,9 @@ class ConstantFolder(torch.fx.Interpreter):
         ):
             return self.unknown_value
 
-        out = super().run_node(node)
+        out = self._deduce_value(node)
+        if out == self.unknown_value:
+            return self.unknown_value
 
         if node.op != "get_attr" and isinstance(out, torch.Tensor):
             if out.device.type == "meta":
@@ -194,10 +203,13 @@ class ConstantFolder(torch.fx.Interpreter):
         self.node_replacements[node] = tensor
 
     def run(self):
-        env = {}
+        env: Dict[torch.fx.Node, Any] = {}
+        self.insert_placerholder_values(env)
+        return super().run(initial_env=env)
+
+    def insert_placerholder_values(self, env: Dict[torch.fx.Node, Any]) -> None:
         for n in self.module.graph.find_nodes(op="placeholder"):
             env[n] = self.unknown_value
-        return super().run(initial_env=env)
 
 
 @torch.utils._python_dispatch._disable_current_modes()
