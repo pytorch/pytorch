@@ -1699,6 +1699,7 @@ class Scheduler:
                         if user.get_name() == node.get_name():
                             continue
 
+                        assert isinstance(user.node, BaseSchedulerNode)
                         for other_name in user.node.get_buffer_names():
                             # this node must run after all prior readers
                             other_name = rename(other_name)
