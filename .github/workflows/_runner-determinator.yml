@@ -288,3 +288,6 @@ jobs:
             --github-issue-owner "$ISSUE_OWNER" \
             --github-ref-type "$curr_ref_type" \
             --github-repo "$GITHUB_REPOSITORY"
+
+          echo $GITHUB_OUTPUT
+          cat $GITHUB_OUTPUT
