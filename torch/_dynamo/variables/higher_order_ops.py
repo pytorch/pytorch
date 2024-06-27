@@ -1535,31 +1535,10 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> "VariableTracker":
         from .builder import wrap_fx_proxy
 
-        (
-            query,
-            key,
-            value,
-            score_mod,
-            sparse_kv_num_blocks,
-            sparse_kv_indices,
-            sparse_q_num_blocks,
-            sparse_q_indices,
-            SPARSE_KV_BLOCK_SIZE,
-            SPARSE_Q_BLOCK_SIZE,
-        ) = self.normalize_to_args(args, kwargs)
+        query, key, value, score_mod = self.normalize_to_args(args, kwargs)
 
         p_args = self.create_wrapped_node(tx, query, score_mod)
-        proxied_args = [
-            query,
-            key,
-            value,
-            sparse_kv_num_blocks,
-            sparse_kv_indices,
-            sparse_q_num_blocks,
-            sparse_q_indices,
-            SPARSE_KV_BLOCK_SIZE,
-            SPARSE_Q_BLOCK_SIZE,
-        ]
+        proxied_args = [query, key, value]
 
         # Store the invocation as a call
         # Norm_kwargs contains the score_function and we dont want to proxy this because
@@ -1575,16 +1554,12 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             lse_meta = query_meta.new_empty(logsumexp_shape, dtype=torch.float32)
         example_value = (out_meta, lse_meta)
 
-        # Compose the ordered HOO args from two parts:
-        # - inp_args: [query, key, value, sparse_kv_num_blocks, sparse_kv_indices,
-        #   sparse_q_num_blocks, sparse_q_indices, SPARSE_KV_BLOCK_SIZE, SPARSE_Q_BLOCK_SIZE]
-        # - p_args: [score_mod, *other_buffers]
         return wrap_fx_proxy(
             tx=tx,
             proxy=tx.output.create_proxy(
                 "call_function",
                 self.value,
-                args=inp_args[:3] + p_args[:1] + inp_args[3:] + p_args[1:],
+                args=inp_args + p_args,
                 kwargs={},
             ),
             example_value=example_value,
