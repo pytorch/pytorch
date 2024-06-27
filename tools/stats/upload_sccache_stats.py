@@ -7,7 +7,10 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
-from tools.stats.upload_stats_lib import download_s3_artifacts, upload_to_rockset
+from tools.stats.upload_stats_lib import (
+    download_s3_artifacts,
+    upload_workflow_stats_to_s3,
+)
 
 
 def get_sccache_stats(
@@ -43,4 +46,6 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     stats = get_sccache_stats(args.workflow_run_id, args.workflow_run_attempt)
-    upload_to_rockset("sccache_stats", stats)
+    upload_workflow_stats_to_s3(
+        args.workflow_run_id, args.workflow_run_attempt, "sccache_stats", stats
+    )
