@@ -4007,7 +4007,7 @@ def check_if_test_is_skipped(fn):
         for skip in TEST_SKIPS.values():
             if self.processes[0].exitcode == skip.exit_code:
                 return MultiProcessTestCase()._check_return_codes(self)
-        return fn(*args, **kwargs)
+        return fn(self, *args, **kwargs)
 
     return wrapper
 
