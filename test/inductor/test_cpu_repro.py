@@ -2612,6 +2612,41 @@ class CPUReproTests(TestCase):
                 1,  # 2 global bufs share 1 local buf
             )
 
+    @config.patch(fx_graph_cache=False)
+    def test_share_local_buffers_in_outer_loop_fusion_case2(self):
+        # exp and exp2 should be replaced by local buffer
+        # since exp will be used after exp2, exp2 can't share the same
+        # local buffer as exp
+        def fn(x):
+            # softmax = torch.nn.functional.softmax(x, dim=-1)
+            a_max = torch.amax(x, -1, keepdim=True)
+            exp = torch.exp(x - a_max)
+            sum = torch.sum(exp, -1, keepdim=True)
+            exp2 = torch.exp(exp - sum)
+            sum2 = torch.sum(exp2, -1, keepdim=True)
+            sub = exp2 - sum2
+            sub2 = exp - sub
+            return sub2
+
+        x = torch.randn(4, 12, 1023, 1022)
+
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, (x,))
+            self.assertEqual(
+                len(metrics.cpp_outer_loop_fused_inner_counts),
+                1,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].inner_kernel_number,
+                4,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].local_buffer_number,
+                2,
+            )
+
     def test_argmin(self):
         def fn(x):
             return torch.argmin(x, -1)

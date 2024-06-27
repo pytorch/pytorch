@@ -3867,8 +3867,10 @@ class CppScheduling(BaseScheduling):
                 # 1115a25c36340554442f28f9570abd42f0aface2/aten/src/ATen/native/cpu/SoftMaxKernel.cpp#L159
                 # where the buffer is with size of last dim and contiguous.
                 # Only support this typical case at first.
+                visited_scheduler_nodes: Set[str] = set()
                 for scheduler_node in node.get_nodes():
                     # all users inside same OuterLoopFusedSchedulerNode
+                    visited_scheduler_nodes.add(scheduler_node.get_name())
                     if not scheduler_node.is_reduction() and all(
                         user.node in node.get_nodes() for user in scheduler_node.users
                     ):
@@ -3921,11 +3923,21 @@ class CppScheduling(BaseScheduling):
                         )
 
                         def try_share_local_buffer(local_buffer_layout, local_buffers):
-                            shared_buffers = [
-                                local_buf
-                                for local_buf in local_buffers
-                                if local_buffer_layout == local_buf.layout
-                            ]
+                            shared_buffers = []
+                            for local_buf in local_buffers:
+                                if local_buffer_layout == local_buf.layout and all(
+                                    all(
+                                        user.node.get_name() in visited_scheduler_nodes
+                                        for user in V.graph.scheduler.name_to_node[
+                                            global_buffer.name
+                                        ].users
+                                    )
+                                    for global_buffer in local_to_global_buffers[
+                                        local_buf.name
+                                    ]
+                                    if global_buffer.name is not None
+                                ):
+                                    shared_buffers.append(local_buf)
                             return shared_buffers[0] if shared_buffers else None
 
                         local_buf_prefix = "local_buffer_data"
