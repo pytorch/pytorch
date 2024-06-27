@@ -286,6 +286,10 @@ class UniformValueConstantFolder(ConstantFolder):
             if any(isinstance(inp, torch.SymInt) for inp in flattened_inputs):
                 return self.unknown_value
 
+            # we run the ops with dim 1, so remove memory_format to avoid error
+            kwargs = dict(kwargs)
+            kwargs.pop("memory_format", None)
+
             return node.target(*args, **kwargs)
 
         return self.unknown_value
