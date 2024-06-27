@@ -259,7 +259,7 @@ Tensor pad_symint(const Tensor &self, c10::SymIntArrayRef pad, c10::string_view 
 /**
  * Pads a 1-dimensional tensor symmetrically.
  */
-Tensor _pad_symmetric_1d(Tensor signal, pair<c10::SymInt, c10::SymInt> pad_tuple, int dim)
+static Tensor _pad_symmetric_1d(Tensor signal, pair<c10::SymInt, c10::SymInt> pad_tuple, int dim)
 {   auto padl = pad_tuple.first;
     auto padr = pad_tuple.second;
     auto dimlen = signal.size(dim);
