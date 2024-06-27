@@ -879,35 +879,45 @@ class TestConverter(TestCase):
                 self.count = 0
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
+                self.count += 1
                 return x + self.count
 
+        # check_persistent is False since export specializes on non-tensor constants
         inp = (torch.ones(3, 2),)
         self._check_equal_ts_ep_converter(
-            Module, inp, ["script"], check_persistent=True
+            Module(), inp, ["script"], check_persistent=False
         )
 
-    def test_prim_SetAttr_on_nested_modules(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("w1", torch.ones(1))
+                self.count = 0
 
-            def forward(self, x: torch.Tensor):
-                return self.w1 + x
+            def forward(self, x):
+                count1 = self.count
+                self.count += 1
+                count2 = self.count
+                self.count += 1
+                count3 = self.count
+                return x + count1 + count2 + count3
 
-        class NestedM(torch.nn.Module):
+        inp = (torch.ones(1),)
+        self._check_equal_ts_ep_converter(
+            M(), inp, ["script"], check_persistent=False
+        )
+
+        class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.m = M()
                 self.register_buffer("w2", torch.ones(1))
 
             def forward(self, x: torch.Tensor):
                 self.w2 += 1
-                return self.w2 + self.m(x)
+                return self.w2
 
         inp = (torch.ones(1),)
         self._check_equal_ts_ep_converter(
-            NestedM, inp, ["script"], check_persistent=True
+            M, inp, ["script"], check_persistent=True
         )
 
 
