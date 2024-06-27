@@ -3,7 +3,8 @@ from typing import Any, Dict, List, Optional, overload, Sequence, Tuple, TypeVar
 from typing_extensions import deprecated
 
 import torch
-from torch.nn.parallel._functions import Gather, Scatter
+
+from ._functions import Gather, Scatter
 
 
 __all__ = ["scatter", "scatter_kwargs", "gather"]
