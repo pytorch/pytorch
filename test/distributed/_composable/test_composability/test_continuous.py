@@ -60,10 +60,8 @@ class ComposabilityTest(MultiProcContinousTest):
         Class-scope test fixture. Run once for entire test class, before any test starts.
         Set up the device.
         """
-        print(cls.rank)
         super().setUpClass()
         dev_id = cls.rank % torch.cuda.device_count()
-        print(f"cuda:{dev_id}")
         cls.device = torch.device(f"cuda:{dev_id}")
         # TODO: investigate why this is needed to prevent multiple NCCL ranks from hitting the same device
         torch.cuda.set_device(cls.device)
@@ -236,7 +234,6 @@ if __name__ == "__main__":
         # Launched as a single process. Spawn subprocess to run the tests.
         # Also need a rendezvous file for `init_process_group` purpose.
         rdvz_file = tempfile.NamedTemporaryFile(delete=False).name
-        print(rank, world_size)
         torch.multiprocessing.spawn(
             ComposabilityTest.run_rank,
             nprocs=world_size,
