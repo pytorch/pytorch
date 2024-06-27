@@ -110,7 +110,7 @@ def get_workflow_type(
             opted_in_requestors = {
                 usr for usr in workflow_requestors if usr in all_opted_in_users
             }
-            if any(usr in all_opted_in_users for usr in workflow_requestors):
+            if opted_in_requestors:
                 MESSAGE = f"LF Workflows are enabled for {', '.join(opted_in_requestors)}. Using LF runners."
                 return WORKFLOW_LABEL_LF, MESSAGE
             else:
