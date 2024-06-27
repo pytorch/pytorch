@@ -359,7 +359,7 @@ inline bool check_grouped_query_attention(sdp_params const& params, bool debug) 
   const auto k_num_heads = params.key.sym_size(-3);
   const auto v_num_heads = params.value.sym_size(-3);
   const bool same_kv_heads = k_num_heads == v_num_heads;
-  
+
   if (!same_kv_heads){
     if (debug) {
       TORCH_WARN(
@@ -402,11 +402,11 @@ inline bool check_batch_size_and_num_heads_dense(sdp_params const& params, bool 
 
   bool same_batch_size =
       q_batch_size == k_batch_size && q_batch_size == v_batch_size;
-  
+
   auto q_num_heads = params.query.sym_size(1);
   auto k_num_heads = params.key.sym_size(1);
   auto v_num_heads = params.value.sym_size(1);
-  
+
   if (!(same_batch_size)){
     if (debug) {
       TORCH_WARN(
