@@ -7,18 +7,31 @@ import functools
 import numbers
 import sys
 
-from torch.utils.data.datapipes._hook_iterator import hook_iterator, _SnapshotState
-from typing import (Any, Dict, Iterator, Generic, List, Set, Tuple, TypeVar, Union,
-                    get_type_hints)
-from typing import _eval_type, _tp_cache, _type_check, _type_repr  # type: ignore[attr-defined]
-from typing import ForwardRef
-
-# TODO: Use TypeAlias when Python 3.6 is deprecated
 # Please check [Note: TypeMeta and TypeAlias]
 # In case of metaclass conflict due to ABCMeta or _ProtocolMeta
 # For Python 3.9, only Protocol in typing uses metaclass
 from abc import ABCMeta
-from typing import _GenericAlias  # type: ignore[attr-defined, no-redef]
+from typing import (  # type: ignore[attr-defined]
+    _eval_type,
+    _GenericAlias,  # TODO: Use TypeAlias when Python 3.6 is deprecated
+    _tp_cache,
+    _type_check,
+    _type_repr,
+    Any,
+    Dict,
+    ForwardRef,
+    Generic,
+    get_type_hints,
+    Iterator,
+    List,
+    Set,
+    Tuple,
+    TypeVar,
+    Union,
+)
+
+from torch.utils.data.datapipes._hook_iterator import _SnapshotState, hook_iterator
+
 
 class GenericMeta(ABCMeta):  # type: ignore[no-redef]
     pass

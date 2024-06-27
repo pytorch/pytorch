@@ -5,13 +5,14 @@ from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
 from torch.utils.data.datapipes.utils.common import _deprecation_warning
 from torch.utils.data.datapipes.utils.decoder import (
-    Decoder,
     basichandlers as decoder_basichandlers,
+    Decoder,
+    extension_extract_fn,
     imagehandler as decoder_imagehandler,
-    extension_extract_fn
 )
 
-__all__ = ["RoutedDecoderIterDataPipe", ]
+
+__all__ = ["RoutedDecoderIterDataPipe"]
 
 
 @functional_datapipe('routed_decode')

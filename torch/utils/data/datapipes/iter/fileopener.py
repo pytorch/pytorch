@@ -1,10 +1,11 @@
 # mypy: allow-untyped-defs
 from io import IOBase
-from typing import Iterable, Tuple, Optional
+from typing import Iterable, Optional, Tuple
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
 from torch.utils.data.datapipes.utils.common import get_file_binaries_from_pathnames
+
 
 __all__ = [
     "FileOpenerIterDataPipe",

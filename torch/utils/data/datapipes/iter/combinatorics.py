@@ -1,11 +1,12 @@
 # mypy: allow-untyped-defs
 import random
-import torch
+from typing import Dict, Iterator, List, Optional, Sized, Tuple, Type, TypeVar
 
-from torch.utils.data import Sampler, SequentialSampler
+import torch
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
-from typing import Dict, Iterator, List, Optional, Sized, Tuple, Type, TypeVar
+from torch.utils.data.sampler import Sampler, SequentialSampler
+
 
 __all__ = [
     "SamplerIterDataPipe",

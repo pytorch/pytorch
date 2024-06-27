@@ -1,15 +1,17 @@
 # mypy: allow-untyped-defs
 import functools
 from collections import namedtuple
+from typing import Any, Callable, Dict, Iterator, List, Optional, Sized, TypeVar, Union
 
-from typing import Callable, Iterator, Sized, TypeVar, Optional, Union, Any, Dict, List
-
-from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data._utils.collate import default_collate
+from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
 from torch.utils.data.datapipes.datapipe import IterDataPipe
-from torch.utils.data.datapipes.utils.common import (_check_unpickable_fn,
-                                                     validate_input_col)
+from torch.utils.data.datapipes.utils.common import (
+    _check_unpickable_fn,
+    validate_input_col,
+)
+
 
 __all__ = [
     "CollatorIterDataPipe",

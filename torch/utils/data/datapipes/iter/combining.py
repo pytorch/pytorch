@@ -1,15 +1,26 @@
 # mypy: allow-untyped-defs
+import copy as copymodule
 import warnings
-
 from abc import ABC, abstractmethod
 from collections import deque
-import copy as copymodule
-from typing import Any, Callable, Iterator, List, Literal, Optional, Sized, Tuple, TypeVar, Deque
+from typing import (
+    Any,
+    Callable,
+    Deque,
+    Iterator,
+    List,
+    Literal,
+    Optional,
+    Sized,
+    Tuple,
+    TypeVar,
+)
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes._hook_iterator import _SnapshotState
 from torch.utils.data.datapipes.datapipe import IterDataPipe
-from torch.utils.data.datapipes.utils.common import StreamWrapper, _check_unpickable_fn
+from torch.utils.data.datapipes.utils.common import _check_unpickable_fn, StreamWrapper
+
 
 __all__ = [
     "ConcaterIterDataPipe",

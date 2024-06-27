@@ -7,8 +7,8 @@ Therefore, for code tidiness we put these functions into different files in this
 folder.
 """
 
-import sys
 import atexit
+import sys
 
 # old private location of the ExceptionWrapper that some users rely on:
 from torch._utils import ExceptionWrapper
@@ -49,4 +49,4 @@ def _set_python_exit_flag():
 atexit.register(_set_python_exit_flag)
 
 
-from . import worker, signal_handling, pin_memory, collate, fetch
+from . import collate, fetch, pin_memory, signal_handling, worker

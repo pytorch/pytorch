@@ -1,8 +1,10 @@
 # mypy: allow-untyped-defs
-from torch.utils.data.datapipes.utils.common import _check_unpickable_fn
 from typing import Callable, TypeVar
+
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import MapDataPipe
+from torch.utils.data.datapipes.utils.common import _check_unpickable_fn
+
 
 __all__ = ["MapperMapDataPipe", "default_fn"]
 
