@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: pt2"]
+import os
 import sys
 import textwrap
 import unittest
@@ -124,7 +125,11 @@ if test_torchinductor.HAS_CPU and HAS_HALIDE:
     SweepInputsCpuHalideTest = make_halide(test_torchinductor.SweepInputsCpuTest)
     CpuHalideTests = make_halide(test_torchinductor.CpuTests)
 
-if test_torchinductor.HAS_GPU:
+if (
+    test_torchinductor.HAS_GPU
+    and HAS_HALIDE
+    and os.environ.get("TEST_HALIDE_GPU") == "1"
+):
     SweepInputsGPUHalideTest = make_halide(test_torchinductor.SweepInputsGPUTest)
     GPUHalideTests = make_halide(test_torchinductor.GPUTests)
 
