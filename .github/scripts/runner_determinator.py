@@ -3,16 +3,59 @@
 import logging
 import os
 from argparse import ArgumentParser
+from logging import LogRecord
 from typing import Any, Iterable
 
 from github import Auth, Github
 from github.Issue import Issue
 
-logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+class ColorFormatter(logging.Formatter):
+    """Color codes the log messages based on the log level"""
+
+    COLORS = {
+        "WARNING": "\033[33m",  # Yellow
+        "ERROR": "\033[31m",  # Red
+        "CRITICAL": "\033[31m",  # Red
+        "INFO": "\033[0m",  # Reset
+        "DEBUG": "\033[0m",  # Reset
+    }
+
+    def format(self, record: LogRecord) -> str:
+        log_color = self.COLORS.get(record.levelname, "\033[0m")  # Default to reset
+        record.msg = f"{log_color}{record.msg}\033[0m"
+        return super().format(record)
+
+
+handler = logging.StreamHandler()
+handler.setFormatter(ColorFormatter(fmt="%(levelname)-8s: %(message)s"))
+
 log = logging.getLogger(os.path.basename(__file__))
+log.addHandler(handler)
+log.setLevel(logging.INFO)
 
 WORKFLOW_LABEL_META = ""  # use meta runners
 WORKFLOW_LABEL_LF = "lf."  # use runners from the linux foundation
+
+GITHUB_OUTPUT = os.getenv("GITHUB_OUTPUT", "")
+GH_OUTPUT_KEY_LABEL_TYPE = "label-type"
+
+
+def set_github_output(key: str, value: str) -> None:
+    """
+    Defines outputs of the github action that invokes this script
+    """
+    if not GITHUB_OUTPUT:
+        # See https://github.blog/changelog/2022-10-11-github-actions-deprecating-save-state-and-set-output-commands/ for deprecation notice
+        log.warning(
+            "No env var found for GITHUB_OUTPUT, you must be running this code locally. Falling back to the deprecated print method."
+        )
+        print(f"::set-output name={key}::{value}")
+        return
+
+    with open(GITHUB_OUTPUT, "a") as f:
+        log.info(f"Setting output: {key}='{value}'")
+        f.write(f"name={key}::{value}\n")
 
 
 def parse_args() -> Any:
@@ -159,7 +202,7 @@ def main() -> None:
             )
             label_type = WORKFLOW_LABEL_META
 
-    print(f"::set-output name=label-type::{label_type}")
+    set_github_output(GH_OUTPUT_KEY_LABEL_TYPE, label_type)
 
 
 if __name__ == "__main__":
