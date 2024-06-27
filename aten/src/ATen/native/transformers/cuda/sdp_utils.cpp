@@ -17,6 +17,10 @@
 #include <c10/util/irange.h>
 #include <c10/util/CallOnce.h>
 
+#if AT_CUDNN_ENABLED()
+#include <ATen/cudnn/cudnn-wrapper.h>
+#endif
+
 #include <c10/core/SymInt.h>
 #include <c10/util/string_view.h>
 
@@ -49,8 +53,12 @@ namespace {
 // TODO(eqy): more benchmarking to determine whether this should include sm86/89
 // Needs to be kept in-sync with test_fused_chocie in test_transformers.py
 bool check_prefer_cudnn_attention() {
+#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 90000
   auto dprops = at::cuda::getCurrentDeviceProperties();
   return dprops->major >= 9;
+#else
+  return false;
+#endif
 }
 
 // flash_attention V2 is universally faster than efficient_attention and Math
@@ -526,15 +534,14 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
   // Replace with std::to_array when we migrate to c++20
   constexpr auto general_constraints =
       array_of<bool (*)(sdp_params const&, bool)>(
+          check_runtime_disabled_cudnn,
           check_for_nested_inputs,
           check_nonzero_sequence_lengths_dense,
           check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim>*/>,
           check_all_tensors_on_device,
           check_tensor_shapes,
           check_cudnn_tensor_shapes,
-          check_runtime_disabled_cudnn,
           check_cudnn_deterministic,
-          // check_cudnn_layout,
           // check_is_causal,
           check_dtypes_low_precision,
           check_for_attn_mask_cudnn,
@@ -683,7 +690,6 @@ SDPBackend select_sdp_backend(sdp_params const& kernel_params) {
     switch (backend) {
       case SDPBackend::cudnn_attention:
         if (sdp::can_use_cudnn_attention(kernel_params, print_debug)) {
-              TORCH_WARN("USING CUDNN SDPA");
               return SDPBackend::cudnn_attention;
         }
         break;

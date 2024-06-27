@@ -4,10 +4,8 @@ import importlib
 import inspect
 import json
 import os
-
 import pkgutil
 import unittest
-from importlib import import_module
 from itertools import chain
 from pathlib import Path
 from typing import Callable
@@ -63,6 +61,19 @@ def _discover_path_importables(pkg_pth, pkg_name):
 
 
 class TestPublicBindings(TestCase):
+    def test_no_new_reexport_callables(self):
+        """
+        This test aims to stop the introduction of new re-exported callables into
+        torch whose names do not start with _. Such callables are made available as
+        torch.XXX, which may not be desirable.
+        """
+        reexported_callables = sorted(
+            k
+            for k, v in vars(torch).items()
+            if callable(v) and not v.__module__.startswith('torch')
+        )
+        self.assertTrue(all(k.startswith('_') for k in reexported_callables), reexported_callables)
+
     def test_no_new_bindings(self):
         """
         This test aims to stop the introduction of new JIT bindings into torch._C
@@ -300,7 +311,7 @@ class TestPublicBindings(TestCase):
                 # which calls sys.exit() when we try to import it
                 if "__main__" in modname:
                     continue
-                import_module(modname)
+                importlib.import_module(modname)
             except Exception as e:
                 # Some current failures are not ImportError
 
@@ -354,7 +365,6 @@ class TestPublicBindings(TestCase):
             "torch.testing._internal.distributed.rpc.rpc_test",
             "torch.testing._internal.distributed.rpc.tensorpipe_rpc_agent_test_fixture",
             "torch.testing._internal.distributed.rpc_utils",
-            "torch.utils.tensorboard._caffe2_graph",
             "torch._inductor.codegen.cuda.cuda_template",
             "torch._inductor.codegen.cuda.gemm_template",
             "torch._inductor.runtime.triton_helpers",

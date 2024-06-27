@@ -4,6 +4,7 @@ import sys
 from types import ModuleType
 from typing import Set
 
+
 # log level (levels print what it says + all levels listed below it)
 # DEBUG print full traces <-- lowest level + print tracing of every instruction
 # INFO print compiler functions + distributed graphs

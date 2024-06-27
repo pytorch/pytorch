@@ -672,7 +672,16 @@ struct NCCLTraceBuffer {
         std::move(end),
         c10::getTime(),
         timeout_ms.count(),
-        isP2P};
+        isP2P,
+        std::nullopt,
+        std::nullopt,
+        std::nullopt,
+        {},
+        {},
+        {},
+        {},
+        {},
+        false};
 
     for (const auto& input : inputs) {
       c10::IntArrayRef sizes = input.sizes();
@@ -770,6 +779,8 @@ struct NCCLTraceBuffer {
         startEvent = entry->start_;
         endEvent = entry->end_;
       }
+      entry->retired_ = true;
+      entry->start_ = entry->end_ = nullptr;
     }
 
     if (can_compute_duration) {
@@ -792,9 +803,6 @@ struct NCCLTraceBuffer {
         entry->duration_ = duration.value();
       }
     }
-
-    entry->retired_ = true;
-    entry->start_ = entry->end_ = nullptr;
   }
 
   const c10::List<c10::IValue> getCollectiveTrace(

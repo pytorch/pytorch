@@ -478,8 +478,6 @@ namespace impl {
 // (maybe except for some internal prim ops).
 using GenericList = List<IValue>;
 
-const IValue* ptr_to_first_element(const GenericList& list);
-
 }
 }
 

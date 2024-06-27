@@ -27,12 +27,12 @@ if IS_WINDOWS and IS_CI:
     raise unittest.SkipTest("requires sympy/functorch/filelock")
 
 from inductor.test_inductor_freezing import TestCase
-from inductor.test_torchinductor import check_model, check_model_cuda, copy_tests
+from inductor.test_torchinductor import check_model, check_model_gpu, copy_tests
 
 importlib.import_module("functorch")
 importlib.import_module("filelock")
 
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
 aten = torch.ops.aten
 
@@ -243,14 +243,14 @@ if HAS_CPU and not torch.backends.mps.is_available():
 
     copy_tests(BinaryFoldingTemplate, FreezingCpuTests, "cpu")
 
-if HAS_CUDA and not TEST_WITH_ASAN:
+if HAS_GPU and not TEST_WITH_ASAN:
 
-    class FreezingCudaTests(TestCase):
-        common = check_model_cuda
-        device = "cuda"
-        autocast = torch.cuda.amp.autocast
+    class FreezingGpuTests(TestCase):
+        common = check_model_gpu
+        device = GPU_TYPE
+        autocast = torch.amp.autocast(device_type=GPU_TYPE)
 
-    copy_tests(BinaryFoldingTemplate, FreezingCudaTests, "cuda")
+    copy_tests(BinaryFoldingTemplate, FreezingGpuTests, GPU_TYPE)
 
 
 del BinaryFoldingTemplate
@@ -258,5 +258,5 @@ del BinaryFoldingTemplate
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_CUDA:
+    if HAS_CPU or HAS_GPU:
         run_tests(needs="filelock")

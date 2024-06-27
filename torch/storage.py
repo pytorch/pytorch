@@ -363,8 +363,10 @@ class UntypedStorage(torch._C.StorageBase, _StorageBase):
 
     @property
     def filename(self) -> _Optional[str]:
-        """Returns the file name associated with this storage if the storage was memory mapped from a file.
-           or ``None`` if the storage was not created by memory mapping a file."""
+        """Returns the file name associated with this storage.
+
+        The file name will be a string if the storage is on CPU and was created via
+        :meth:`~torch.from_file()` with ``shared`` as ``True``. This attribute is ``None`` otherwise."""
         return self._get_filename()
 
     @_share_memory_lock_protected

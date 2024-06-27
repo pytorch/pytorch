@@ -661,6 +661,38 @@ class TestExport(TestCase):
                 actual_result.append(node.meta.get("torch_fn"))
         self.assertEqual(actual_result, expected_result)
 
+    def test_export_preserve_linear_at_aot_level(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                x = self.linear(x)
+                return torch.ops.aten.chunk.default(x, 3, 0)
+
+        gm = (
+            torch.export.export(
+                Foo(),
+                (torch.randn(3, 3),),
+            )
+            .run_decompositions({}, _preserve_ops=(torch.ops.aten.linear.default,))
+            .graph_module
+        )
+        # linear is CompositeImplicitAutograd functional op so we should preserve it
+        # chunk is CompositeImplicitAutograd non-functional op we decompose.
+        self.assertExpectedInline(
+            str(gm.code).strip(),
+            """\
+def forward(self, p_linear_weight, p_linear_bias, x):
+    linear = torch.ops.aten.linear.default(x, p_linear_weight, p_linear_bias);  x = p_linear_weight = p_linear_bias = None
+    split = torch.ops.aten.split.Tensor(linear, 1);  linear = None
+    getitem = split[0]
+    getitem_1 = split[1]
+    getitem_2 = split[2];  split = None
+    return (getitem, getitem_1, getitem_2)""",
+        )
+
     # TODO(yidi)
     # Expected failure for test cases that calls run_decomposition().
     # The top-level cond node has pre-existing metadata,
@@ -1015,6 +1047,137 @@ class TestExport(TestCase):
                 "dy - 6 = 6" not in exc.args[0]
             )  # don't suggest fix for non-root dim
 
+    def test_keep_composite_ops_invalid(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                x = self.linear(x)
+                return torch.ops.aten.chunk.default(x, 3, 0)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "aten.chunk.default is a mutating/aliasing op"
+        ):
+            _ = torch.export.export(
+                Foo(),
+                (torch.randn(3, 3),),
+            ).run_decompositions({}, _preserve_ops=(torch.ops.aten.chunk.default,))
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "aten.add.Tensor is not CompositeImplicitAutograd op, so we will preserve it as",
+        ):
+            _ = torch.export.export(
+                Foo(),
+                (torch.randn(3, 3),),
+            ).run_decompositions({}, _preserve_ops=(torch.ops.aten.add.Tensor,))
+
+        with self.assertRaisesRegex(
+            RuntimeError, "aten.sym_size.default is a metadata query function"
+        ):
+            _ = torch.export.export(
+                Foo(),
+                (torch.randn(3, 3),),
+            ).run_decompositions({}, _preserve_ops=(torch.ops.aten.sym_size.default,))
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "We can't detect aten.native_batch_norm.default as a functional op statically",
+        ):
+            _ = torch.export.export(
+                Foo(),
+                (torch.randn(3, 3),),
+            ).run_decompositions(
+                {}, _preserve_ops=(torch.ops.aten.native_batch_norm.default,)
+            )
+
+    def test_keep_composite_ops_linear_convd(self):
+        class MyLinear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.randn(20, 98)
+                self.bias = torch.randn(20)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.weight, self.bias)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(16, 33, 3)
+                self.conv1d = torch.nn.Conv1d(16, 33, 3)
+                self.linear = MyLinear()
+
+            def forward(self, x, y):
+                x_conv = self.conv(x)
+                y_conv_1d = self.conv1d(y)
+                x_linear = self.linear(x_conv)
+                return x_linear.cos() + y_conv_1d.sum()
+
+        ep = torch.export.export(
+            Foo(), (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50))
+        )
+        ep_has_linear_convd = ep.run_decompositions(
+            decomp_table={},
+            _preserve_ops=testing._COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY,
+        )
+        self.assertExpectedInline(
+            str(ep_has_linear_convd.graph_module.code).strip(),
+            """\
+def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_weight, c_linear_bias, x, y):
+    conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
+    conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
+    linear = torch.ops.aten.linear.default(conv2d, c_linear_weight, c_linear_bias);  conv2d = c_linear_weight = c_linear_bias = None
+    cos = torch.ops.aten.cos.default(linear);  linear = None
+    sum_1 = torch.ops.aten.sum.default(conv1d);  conv1d = None
+    add = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
+    return (add,)""",
+        )
+
+        ep_has_convd = ep.run_decompositions(
+            decomp_table=None,
+            _preserve_ops=[
+                torch.ops.aten.conv2d.default,
+                torch.ops.aten.conv1d.default,
+            ],
+        )
+        self.assertExpectedInline(
+            str(ep_has_convd.graph_module.code).strip(),
+            """\
+def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_weight, c_linear_bias, x, y):
+    conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
+    conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
+    view = torch.ops.aten.view.default(conv2d, [31680, 98]);  conv2d = None
+    permute = torch.ops.aten.permute.default(c_linear_weight, [1, 0]);  c_linear_weight = None
+    addmm = torch.ops.aten.addmm.default(c_linear_bias, view, permute);  c_linear_bias = view = permute = None
+    view_1 = torch.ops.aten.view.default(addmm, [20, 33, 48, 20]);  addmm = None
+    cos = torch.ops.aten.cos.default(view_1);  view_1 = None
+    sum_1 = torch.ops.aten.sum.dim_IntList(conv1d, []);  conv1d = None
+    add = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
+    return (add,)""",
+        )
+
+        ep_has_convd = ep_has_convd.run_decompositions(
+            decomp_table=None, _preserve_ops=[torch.ops.aten.conv2d.default]
+        )
+        self.assertExpectedInline(
+            str(ep_has_convd.graph_module.code).strip(),
+            """\
+def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_weight, c_linear_bias, x, y):
+    conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
+    convolution = torch.ops.aten.convolution.default(y, p_conv1d_weight, p_conv1d_bias, [1], [0], [1], False, [0], 1);  y = p_conv1d_weight = p_conv1d_bias = None
+    view = torch.ops.aten.view.default(conv2d, [31680, 98]);  conv2d = None
+    permute = torch.ops.aten.permute.default(c_linear_weight, [1, 0]);  c_linear_weight = None
+    addmm = torch.ops.aten.addmm.default(c_linear_bias, view, permute);  c_linear_bias = view = permute = None
+    view_1 = torch.ops.aten.view.default(addmm, [20, 33, 48, 20]);  addmm = None
+    cos = torch.ops.aten.cos.default(view_1);  view_1 = None
+    sum_1 = torch.ops.aten.sum.dim_IntList(convolution, []);  convolution = None
+    add = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
+    return (add,)""",
+        )
+
     def test_derived_dim_out_of_order_simplified(self):
         _dimz = torch.export.Dim("_dimz", min=6, max=8)
         dimy = _dimz - 1
@@ -1061,6 +1224,172 @@ class TestExport(TestCase):
         self.assertEqual(
             ep.module()(torch.randn(6), torch.randn(7), torch.randn(8)).size()[0], 6
         )
+
+    def test_simple_export_for_training(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        eager_model = Foo()
+        ep_for_training = torch.export._trace._export_for_training(
+            eager_model, (torch.ones(2, 2),)
+        )
+        self.assertExpectedInline(
+            str(ep_for_training.graph_module.code).strip(),
+            """\
+def forward(self, p_linear_weight, p_linear_bias, x):
+    linear = torch.ops.aten.linear.default(x, p_linear_weight, p_linear_bias);  x = p_linear_weight = p_linear_bias = None
+    return (linear,)""",
+        )
+        gm = ep_for_training.module()
+        self.assertExpectedInline(
+            str(gm.code).strip(),
+            """\
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    linear_weight = self.linear.weight
+    linear_bias = self.linear.bias
+    linear = torch.ops.aten.linear.default(x, linear_weight, linear_bias);  x = linear_weight = linear_bias = None
+    return pytree.tree_unflatten((linear,), self._out_spec)""",
+        )
+
+        self.assertTrue(
+            torch.allclose(gm(torch.ones(2, 2)), eager_model(torch.ones(2, 2)))
+        )
+
+    def test_export_for_training_with_mutation(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.ones(4, 4))
+
+            def forward(self, x):
+                x.add_(5)
+                self.buffer.add_(5)
+                return x + self.buffer
+
+        eager_model_for_export = Foo()
+        eager_model_for_testing = Foo()
+        ep_for_training = torch.export._trace._export_for_training(
+            eager_model_for_export, (torch.ones(4, 4),)
+        )
+        self.assertExpectedInline(
+            str(ep_for_training.graph_module.code).strip(),
+            """\
+def forward(self, b_buffer, x):
+    add_ = torch.ops.aten.add_.Tensor(x, 5);  x = None
+    add__1 = torch.ops.aten.add_.Tensor(b_buffer, 5);  b_buffer = None
+    add = torch.ops.aten.add.Tensor(add_, add__1);  add_ = add__1 = None
+    return (add,)""",
+        )
+        gm = ep_for_training.module()
+        self.assertExpectedInline(
+            str(gm.code).strip(),
+            """\
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    buffer = self.buffer
+    add_ = torch.ops.aten.add_.Tensor(x, 5);  x = None
+    add__1 = torch.ops.aten.add_.Tensor(buffer, 5);  buffer = None
+    add = torch.ops.aten.add.Tensor(add_, add__1);  add_ = add__1 = None
+    return pytree.tree_unflatten((add,), self._out_spec)""",
+        )
+
+        self.assertTrue(
+            torch.allclose(
+                gm(torch.ones(4, 4)), eager_model_for_testing(torch.ones(4, 4))
+            )
+        )
+
+    def test_export_for_training_with_dynamic_shapes(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.ones(4, 4))
+
+            def forward(self, x):
+                x.add_(5)
+                self.buffer.add_(5)
+                return x + self.buffer.sum()
+
+        eager_model_for_export_training = Foo()
+        eager_model_for_export_inference = Foo()
+        eager_model_for_testing = Foo()
+        ep_for_training = torch.export._trace._export_for_training(
+            eager_model_for_export_training,
+            (torch.ones(4, 4),),
+            dynamic_shapes=({0: Dim("x")},),
+        )
+
+        self.assertTrue(
+            torch.allclose(
+                ep_for_training.module()(torch.ones(2, 4)),
+                eager_model_for_testing(torch.ones(2, 4)),
+            )
+        )
+
+        ep_for_real = export(
+            eager_model_for_export_inference,
+            (torch.ones(4, 4),),
+            dynamic_shapes=({0: Dim("x")},),
+        )
+
+        self.assertEqual(
+            str(ep_for_training.range_constraints), str(ep_for_real.range_constraints)
+        )
+
+    def test_export_for_training_with_container_type(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.ones(4, 4))
+
+            def forward(self, container):
+                x = container[0][0]
+                y = container[0][1]
+                x.add_(5)
+                y.add_(5)
+                return x + y + self.buffer.sum()
+
+        eager_model = Foo()
+        ep_for_training = torch.export._trace._export_for_training(
+            eager_model,
+            ([torch.ones(4, 4), torch.ones(4, 4)],),
+        )
+
+        self.assertTrue(
+            torch.allclose(
+                ep_for_training.module()(
+                    ([torch.ones(4, 4), torch.ones(4, 4)]),
+                ),
+                eager_model(([torch.ones(4, 4), torch.ones(4, 4)])),
+            )
+        )
+
+    # FIXME (tmanlaibaatar) run_decomp doesn't work rn because the graph signature is updated
+    @unittest.expectedFailure
+    def test_export_for_training_run_decomp(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.ones(2, 2))
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                self.buffer.add_(5)
+                return self.linear(x) + self.buffer.sum()
+
+        eager_model = Foo()
+        ep_for_training = torch.export._trace._export_for_training(
+            eager_model,
+            (torch.ones(2, 2),),
+        )
+        ep_for_inference = ep_for_training.run_decompositions()
+        self.assertExpectedInline(str(ep_for_inference.code).strip(), """""")
 
     def test_derived_dim_out_of_order_simplified_repeat_non_derived(self):
         class Foo(torch.nn.Module):
@@ -2750,10 +3079,7 @@ def forward(self, x):
         ep = export(M(), (torch.tensor(1), torch.ones(4, 5)))
 
         # This is because we insert sym_constrain_range in the graph now
-        if is_non_strict_test(self._testMethodName):
-            error_msg = r"Invalid value range for -1 between"
-        else:
-            error_msg = "is outside of inline constraint"
+        error_msg = r"Invalid value range for -1 between"
         with self.assertRaisesRegex(RuntimeError, error_msg):
             _ = ep.module()(torch.tensor(-1), torch.randn(4, 5))
 
@@ -5131,14 +5457,12 @@ def forward(self, x):
     item = torch.ops.aten.item.default(x);  x = None
     sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(item)
     sym_constrain_range_default = torch.ops.aten.sym_constrain_range.default(item, min = 3, max = 5)
-    mul = -1 * item
-    le = mul <= 0;  mul = None
-    _assert_scalar_default = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression -u1 <= 0 on node 'le'");  le = None
-    mul_1 = -1 * item
-    lt = mul_1 < -2;  mul_1 = None
-    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression -u1 < -2 on node 'lt'");  lt = None
-    lt_1 = item < 6
-    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(lt_1, "Runtime assertion failed for expression u1 < 6 on node 'lt_1'");  lt_1 = None
+    ge = item >= 0
+    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression 0 <= u1 on node 'ge'");  ge = None
+    gt = item > 2
+    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(gt, "Runtime assertion failed for expression 2 < u1 on node 'gt'");  gt = None
+    lt = item < 6
+    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression u1 < 6 on node 'lt'");  lt = None
     foo_unbacked = torch.ops.testlib.foo_unbacked.default(item);  item = None
     return foo_unbacked""",
         )
@@ -5152,14 +5476,12 @@ def forward(self, x, y):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x);  x = None
     sym_constrain_range_for_size = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense)
     sym_constrain_range = torch.ops.aten.sym_constrain_range.default(_local_scalar_dense, min = 3, max = 5)
-    mul = -1 * _local_scalar_dense
-    le = mul <= 0;  mul = None
-    _assert_scalar = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression -u1 <= 0 on node 'le'");  le = None
-    mul_1 = -1 * _local_scalar_dense
-    lt = mul_1 < -2;  mul_1 = None
-    _assert_scalar_1 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression -u1 < -2 on node 'lt'");  lt = None
-    lt_1 = _local_scalar_dense < 6;  _local_scalar_dense = None
-    _assert_scalar_2 = torch.ops.aten._assert_scalar.default(lt_1, "Runtime assertion failed for expression u1 < 6 on node 'lt_1'");  lt_1 = None
+    ge = _local_scalar_dense >= 0
+    _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression 0 <= u1 on node 'ge'");  ge = None
+    gt = _local_scalar_dense > 2
+    _assert_scalar_1 = torch.ops.aten._assert_scalar.default(gt, "Runtime assertion failed for expression 2 < u1 on node 'gt'");  gt = None
+    lt = _local_scalar_dense < 6;  _local_scalar_dense = None
+    _assert_scalar_2 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression u1 < 6 on node 'lt'");  lt = None
     full = torch.ops.aten.full.default([4, 4], 1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
     add = torch.ops.aten.add.Tensor(y, sum_1);  y = sum_1 = None
     sum_2 = torch.ops.aten.sum.dim_IntList(full, []);  full = None
@@ -5288,7 +5610,7 @@ def forward(self, x, y):
         self.assertEqual(out2.shape, torch.ones(40).shape)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Eq\(s0\*s1 \- s2\*s3, 0\) on node 'eq.*'",
+            r"Runtime assertion failed for expression Eq\(s0\*s1, s2\*s3\) on node 'eq.*'",
         ):  # fail only at runtime
             ep.module()(torch.randn(5, 8), torch.randn(4, 5), torch.randn(30))  # fail
 
@@ -5337,7 +5659,7 @@ def forward(self, x, y):
         self.assertEqual(out1.shape, torch.ones(126).shape)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Eq\(s0\*s1\*s2 \- s3, 0\) on node 'eq.*'",
+            r"Runtime assertion failed for expression Eq\(s0\*s1\*s2, s3\) on node 'eq.*'",
         ):  # fail only at runtime
             ep.module()(torch.randn(4, 3, 2), torch.randn(10))  # fail
 
@@ -5388,6 +5710,26 @@ def forward(self, x, y):
                 strict=False,
                 _disable_forced_specializations=True,
             )
+
+    # TODO requires_grad doesn't seem to work with serialization.
+    @testing.expectedFailureSerDer
+    def test_preserve_requires_grad_placeholders(self):
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p = torch.nn.Parameter(torch.randn(3, 3))
+
+            def forward(self, x, y):
+                return self.p + x + y
+
+        m = Module()
+        ep = export(m, (torch.randn(3, 3), torch.randn(3, 3, requires_grad=True)))
+        placeholders = [
+            node for node in ep.graph_module.graph.nodes if node.op == "placeholder"
+        ]
+        self.assertTrue(placeholders[0].meta["val"].requires_grad)
+        self.assertFalse(placeholders[1].meta["val"].requires_grad)
+        self.assertTrue(placeholders[2].meta["val"].requires_grad)
 
     def test_reshape_view_helper(self):
         # see: https://github.com/pytorch/pytorch/issues/126607
@@ -5453,17 +5795,17 @@ def forward(self, x, y):
         self.assertEqual(out1.shape, torch.ones(27).shape)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Ne\(s0 \- s1, 0\)",
+            r"Runtime assertion failed for expression Ne\(s0, s1\)",
         ):  # fail only at runtime
             ep.module()(torch.randn(4), torch.randn(4))  # fail
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Ne\(s0 \- s1\**3, 0\)",
+            r"Runtime assertion failed for expression Ne\(s0, s1\**3\)",
         ):
             ep.module()(torch.randn(64), torch.randn(4))  # fail
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Eq\(s0\**2 \- 3\*s1, 0\)",
+            r"Runtime assertion failed for expression Eq\(s0\**2, 3\*s1\)",
         ):
             ep.module()(torch.randn(10), torch.randn(9))  # fail
 

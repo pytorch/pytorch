@@ -1,14 +1,18 @@
 # mypy: allow-untyped-defs
-from datetime import timedelta
 import logging
 import os
 import threading
 import warnings
+from datetime import timedelta
 from typing import Generator, Tuple
 from urllib.parse import urlparse
 
 import torch
 import torch.distributed as dist
+
+
+__all__ = ["is_available"]
+
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +20,6 @@ logger = logging.getLogger(__name__)
 _init_counter = 0
 _init_counter_lock = threading.Lock()
 
-__all__ = ["is_available"]
 
 def is_available() -> bool:
     return hasattr(torch._C, "_rpc_init")
@@ -27,54 +30,51 @@ if is_available() and not torch._C._rpc_init():
 
 
 if is_available():
-    from torch._C._distributed_c10d import Store
-    from torch._C._distributed_rpc import (
-        _disable_jit_rref_pickle,
-        _enable_jit_rref_pickle,
-        _disable_server_process_global_profiler,
-        _enable_server_process_global_profiler,
-        _set_and_start_rpc_agent,
-        _reset_current_rpc_agent,
-        _delete_all_user_and_unforked_owner_rrefs,
-        _destroy_rref_context,
-        _set_profiler_node_id,
-        _is_current_rpc_agent_set,
-        _rref_context_get_debug_info,
-        _cleanup_python_rpc_handler,
-        _invoke_rpc_builtin,
-        _invoke_rpc_python_udf,
-        _invoke_rpc_torchscript,
-        _invoke_remote_builtin,
-        _invoke_remote_python_udf,
-        _invoke_remote_torchscript,
-        _set_rpc_timeout,
-        _get_current_rpc_agent,
-        get_rpc_timeout,
-        enable_gil_profiling,
-        RpcBackendOptions,
-        _TensorPipeRpcBackendOptionsBase,
-        RpcAgent,
-        PyRRef,
-        TensorPipeAgent,
-        RemoteProfilerManager,
-        WorkerInfo,
-        _DEFAULT_INIT_METHOD,
-        _DEFAULT_NUM_WORKER_THREADS,
-        _UNSET_RPC_TIMEOUT,
-        _DEFAULT_RPC_TIMEOUT_SEC,
-    )  # noqa: F401
-
-    from . import api, backend_registry, functions
-    from .api import *  # noqa: F401,F403
     import numbers
 
     import torch.distributed.autograd as dist_autograd
+    from torch._C._distributed_c10d import Store
+    from torch._C._distributed_rpc import (  # noqa: F401
+        _cleanup_python_rpc_handler,
+        _DEFAULT_INIT_METHOD,
+        _DEFAULT_NUM_WORKER_THREADS,
+        _DEFAULT_RPC_TIMEOUT_SEC,
+        _delete_all_user_and_unforked_owner_rrefs,
+        _destroy_rref_context,
+        _disable_jit_rref_pickle,
+        _disable_server_process_global_profiler,
+        _enable_jit_rref_pickle,
+        _enable_server_process_global_profiler,
+        _get_current_rpc_agent,
+        _invoke_remote_builtin,
+        _invoke_remote_python_udf,
+        _invoke_remote_torchscript,
+        _invoke_rpc_builtin,
+        _invoke_rpc_python_udf,
+        _invoke_rpc_torchscript,
+        _is_current_rpc_agent_set,
+        _reset_current_rpc_agent,
+        _rref_context_get_debug_info,
+        _set_and_start_rpc_agent,
+        _set_profiler_node_id,
+        _set_rpc_timeout,
+        _TensorPipeRpcBackendOptionsBase,
+        _UNSET_RPC_TIMEOUT,
+        enable_gil_profiling,
+        get_rpc_timeout,
+        PyRRef,
+        RemoteProfilerManager,
+        RpcAgent,
+        RpcBackendOptions,
+        TensorPipeAgent,
+        WorkerInfo,
+    )
 
+    from . import api, backend_registry, functions
+    from .api import *  # noqa: F401,F403
     from .backend_registry import BackendType
     from .options import TensorPipeRpcBackendOptions  # noqa: F401
-    from .server_process_global_profiler import (
-        _server_process_global_profile,
-    )
+    from .server_process_global_profiler import _server_process_global_profile
 
     rendezvous_iterator: Generator[Tuple[Store, int, int], None, None]
 
@@ -153,7 +153,7 @@ if is_available():
                     "corresponding to %(backend)s, hence that backend will be used "
                     "instead of the default BackendType.TENSORPIPE. To silence this "
                     "warning pass `backend=%(backend)s` explicitly.",
-                    {'backend': backend}
+                    {"backend": backend},
                 )
 
         if backend is None:
@@ -224,7 +224,6 @@ if is_available():
         world_size=None,
         rpc_backend_options=None,
     ):
-
         _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_options)
 
         if _is_current_rpc_agent_set():
