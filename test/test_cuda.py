@@ -118,6 +118,10 @@ class TestCuda(TestCase):
         del self.autocast_lists
         super().tearDown()
 
+    @property
+    def expandable_segments(self):
+        return EXPANDABLE_SEGMENTS
+
     def test_pinned_memory_with_cudaregister(self):
         torch.cuda.memory._set_allocator_settings(
             "pinned_use_cuda_host_register:True,pinned_num_register_threads:8"
@@ -2982,13 +2986,13 @@ exit(2)
 
                     # There will only ever be one expandable segment in each of the small and large pools. The way the
                     # bookeeping is done in the allocator means that we never increment the number of segments.
-                    if EXPANDABLE_SEGMENTS and "segment" in stat:
+                    if self.expandable_segments and "segment" in stat:
                         expected = 0
                     # These two cases hit an edge case where the PyTorch allocator won't immediately unmap part of an
                     # expandable segment (and as a result reduce the number of reserved bytes) if the block to unmap is
                     # smaller than the page size
                     if (
-                        EXPANDABLE_SEGMENTS
+                        self.expandable_segments
                         and "reserved" in stat
                         and (numel == cases[3][0] or numel == cases[4][0])
                     ):
@@ -3023,14 +3027,14 @@ exit(2)
 
                 # There will only ever be one expandable segment in each of the small and large pools. The way the
                 # bookeeping is done in the allocator means that we never increment the number of segments.
-                if EXPANDABLE_SEGMENTS and "segment" in stat:
+                if self.expandable_segments and "segment" in stat:
                     expected = 0
                 # These two cases hit an edge case where the PyTorch allocator won't immediately unmap part of an
                 # expandable segment (and as a result reduce the number of reserved bytes) if the block to unmap is
                 # smaller than the page size
-                if EXPANDABLE_SEGMENTS and "reserved" in stat and numel == cases[3][0]:
+                if self.expandable_segments and "reserved" in stat and numel == cases[3][0]:
                     expected = 2 * kLargeBuffer
-                if EXPANDABLE_SEGMENTS and "reserved" in stat and numel == cases[4][0]:
+                if self.expandable_segments and "reserved" in stat and numel == cases[4][0]:
                     expected = kLargeBuffer
 
                 self.assertEqual(
@@ -4624,6 +4628,10 @@ def reconstruct_from_tensor_metadata(metadata):
 @unittest.skipIf(TEST_CUDAMALLOCASYNC or TEST_WITH_ROCM, "NYI")
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestBlockStateAbsorption(TestCase):
+    @property
+    def expandable_segments(self):
+        return EXPANDABLE_SEGMENTS
+
     def checkCheckpointedBlock(self, before_block, after_block):
         for field in ("size", "state"):
             self.assertEqual(before_block[field], after_block[field])
@@ -4952,7 +4960,7 @@ class TestBlockStateAbsorption(TestCase):
         no_graph_thread.join()
 
         self.assertEqual(
-            len(get_cudagraph_segments(pool)), 2 if EXPANDABLE_SEGMENTS else 4
+            len(get_cudagraph_segments(pool)), 2 if self.expandable_segments else 4
         )
 
         del graph
