@@ -119,7 +119,9 @@ jobs:
               return repo.get_issue(number=issue_num)
 
 
-          def get_user(gh: Github, repo: str, username: str, ref_type: str, ref_name: str) -> str:
+          def get_potential_pr_author(
+              gh: Github, repo: str, username: str, ref_type: str, ref_name: str
+          ) -> str:
               # If the trigger was a new tag added by a bot, this is a ciflow case
               # Fetch the actual username from the original PR. The PR number is
               # embedded in the tag name: ciflow/<name>/<pr-number>
@@ -135,7 +137,9 @@ jobs:
                           repository = gh.get_repo(repo)
                           pull = repository.get_pull(number=int(pr_number))
                       except Exception as e:
-                          raise Exception(f"issue with pull request {pr_number} from repo {repository}") from e
+                          raise Exception(  # noqa: TRY002
+                              f"issue with pull request {pr_number} from repo {repository}"
+                          ) from e
                       return pull.user.login
               # In all other cases, return the original input username
               return username
@@ -145,7 +149,9 @@ jobs:
               return branch.split("/")[0] in {"main", "nightly", "release", "landchecks"}
 
 
-          def get_workflow_type(issue: Issue, username_check: Iterable[str]) -> Tuple[str, str]:
+          def get_workflow_type(
+              issue: Issue, workflow_requestors: Iterable[str]
+          ) -> Tuple[str, str]:
               try:
                   first_comment = issue.get_comments()[0].body.strip("\n\t ")
 
@@ -156,17 +162,17 @@ jobs:
                       MESSAGE = "LF Workflows are enabled for everyone. Using LF runners."
                       return WORKFLOW_LABEL_LF, MESSAGE
                   else:
-                      user_set = {
-                          usr
-                          for usr in (
-                              usr_raw.strip("\n\t@ ") for usr_raw in first_comment.split()
-                          )
+                      all_opted_in_users = {
+                          usr_raw.strip("\n\t@ ") for usr_raw in first_comment.split()
                       }
-                      if any(map(lambda uc: uc in user_set, username_check)):
-                          MESSAGE = f"LF Workflows are enabled for {', '.join(username_check)}. Using LF runners."
+                      opted_in_requestors = {
+                          usr for usr in workflow_requestors if usr in all_opted_in_users
+                      }
+                      if any(usr in all_opted_in_users for usr in workflow_requestors):
+                          MESSAGE = f"LF Workflows are enabled for {', '.join(opted_in_requestors)}. Using LF runners."
                           return WORKFLOW_LABEL_LF, MESSAGE
                       else:
-                          MESSAGE = f"LF Workflows are disabled for {', '.join(username_check)}. Using meta runners."
+                          MESSAGE = f"LF Workflows are disabled for {', '.join(workflow_requestors)}. Using meta runners."
                           return WORKFLOW_LABEL_META, MESSAGE
 
               except Exception as e:
@@ -187,14 +193,20 @@ jobs:
                       gh = get_gh_client(args.github_token)
                       # The default issue we use - https://github.com/pytorch/test-infra/issues/5132
                       issue = get_issue(gh, args.github_issue_repo, args.github_issue)
-                      username = get_user(
+                      username = get_potential_pr_author(
                           gh,
                           args.github_repo,
                           args.github_actor,
                           args.github_ref_type,
                           args.github_branch,
                       )
-                      label_type, message = get_workflow_type(issue, (args.github_issue_owner, username, ))
+                      label_type, message = get_workflow_type(
+                          issue,
+                          (
+                              args.github_issue_owner,
+                              username,
+                          ),
+                      )
                       output = {
                           LABEL_TYPE_KEY: label_type,
                           MESSAGE_KEY: message,
@@ -211,7 +223,6 @@ jobs:
 
           if __name__ == "__main__":
               main()
-
           EOF
 
           cat runner_determinator.py
