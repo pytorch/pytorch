@@ -1986,7 +1986,7 @@ def as_storage_and_layout(
         return buffer, x.layout
     if isinstance(x, DtypeView):
         buffer, _ = as_storage_and_layout(x.data, freeze=freeze)
-        return buffer, x.data.layout
+        return buffer, x.layout
     raise NotImplementedError
 
 
