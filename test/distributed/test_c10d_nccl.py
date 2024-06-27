@@ -4001,6 +4001,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         else:
             self.assertTrue("duration_ms" not in t["entries"][0])
 
+
 def check_if_test_is_skipped(fn):
     def wrapper(self, *args, **kwargs):
         for skip in TEST_SKIPS.values():
