@@ -151,7 +151,7 @@ def run_model(model, input):
     model_xpu = copy.deepcopy(model).to('xpu')
     loss_xpu = model_xpu(input_xpu).sum()
     loss = model(input).sum()
-    torch.isclose(loss_xpu.cpu(), loss)
+    assert torch.allclose(loss_xpu.cpu(), loss)
 
 def test_multi_process(model, input):
     p = Process(target=run_model, args=(model, input))
