@@ -711,9 +711,7 @@ class TS2FXGraphConverter:
         arguments_renamed = []
         for i, argument in enumerate(arguments_orig):
             if not is_valid_for_codegen(argument):
-                prefix = self.name_to_node[
-                    argument
-                ].name  # type: ignore[union-attr]
+                prefix = self.name_to_node[argument].name  # type: ignore[union-attr]
                 argument_renamed = f"{prefix}_{argument}"
                 self.renaming_map[
                     argument
