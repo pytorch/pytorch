@@ -1631,8 +1631,7 @@ class Scheduler:
         def dep_closure(node: BaseSchedulerNode) -> Set[str]:
             reachable_names = set(node.get_buffer_names())
             read_deps: Dict[
-                Tuple[sympy.Expr, Tuple[sympy.Expr, ...]],
-                List[MemoryDep]
+                Tuple[sympy.Expr, Tuple[sympy.Expr, ...]], List[MemoryDep]
             ] = collections.defaultdict(list)
 
             for rd in node.read_writes.reads:
