@@ -898,7 +898,6 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
     @with_comms
     @skip_if_lt_x_gpu(2)
     def test_full_state_dict_with_fsdp(self) -> None:
-        device = "cuda"
         torch.manual_seed(0)
         with torch.device("meta"):
             meta_model = nn.Sequential(*[nn.Linear(4, 4, bias=False) for _ in range(2)])
@@ -911,7 +910,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         ptd_state_dict.set_model_state_dict(
             meta_model,
             model_state_dict=full_sd,
-            # 'aten.copy_.default: got mixed torch.Tensor and DTensor, need to convert all 
+            # 'aten.copy_.default: got mixed torch.Tensor and DTensor, need to convert all
             # torch.Tensor to DTensor before calling distributed operators!',).
             options=ptd_state_dict.StateDictOptions(full_state_dict=True, strict=False)
             # NotImplementedError: c10d::broadcast_: attempted to run this operator with Meta tensors
@@ -919,7 +918,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             #     broadcast_from_rank0=True, full_state_dict=True, strict=False
             # )
         )
-        
+
 
 class TestNoComm(MultiProcessTestCase):
     def setUp(self) -> None:
