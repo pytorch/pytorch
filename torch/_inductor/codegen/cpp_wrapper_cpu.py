@@ -382,7 +382,6 @@ class CppWrapperCpu(WrapperCodeGen):
                     f"{CppWrapperCpu.get_input_cpp_type(x)}"
                     for x in V.graph.graph_inputs.values()
                 )
-
                 output_arrayref_types = ", ".join(
                     f"ArrayRefTensor<{DTYPE_TO_CPP[x.get_dtype()]}>"
                     for x in V.graph.graph_outputs
@@ -929,12 +928,8 @@ class CppWrapperCpu(WrapperCodeGen):
         writer = indented_buffer or self
         writer.writeline(f"{DTYPE_TO_CPP[dtype]} {scalar};")
 
-        # follow example in generate_c_shim_extern_kernel_call
-        # only need convert_arrayref_tensor_to_tensor for ArrayRefTensors
-        if isinstance(tensor, str) and tensor.startswith(
-            ("buf", "arg", "wrap_with_raii_handle_if_needed")
-        ):
-            tensor = f"convert_arrayref_tensor_to_tensor({tensor})"
+        # need convert_arrayref_tensor_to_tensor for ArrayRefTensors
+        tensor = f"convert_arrayref_tensor_to_tensor({tensor})"
 
         writer.writeline(
             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_{dtype_str}({tensor}, &{scalar}));"
