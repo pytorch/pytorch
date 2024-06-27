@@ -572,8 +572,9 @@ def run_test_retries(
     output,
     continue_through_error,
 ):
-    # Run the test with -x to stop at first failure. Repeat this test at most 2
-    # more times.  If it succeeds, the next subprocess will
+    # Run the test with -x to stop at first failure.  Rerun the test by itself.
+    # If it succeeds, move on to the rest of the tests in a new process.  If it
+    # still fails, see below
     #
     # If continue through error is not set, then we fail fast.
     #
@@ -1683,7 +1684,6 @@ def main():
 
     test_directory = str(REPO_ROOT / "test")
     selected_tests = get_selected_tests(options)
-    selected_tests = [x for x in selected_tests if x == "test_utils"]
 
     test_prioritizations = import_results()
     test_prioritizations.amend_tests(selected_tests)
