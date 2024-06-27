@@ -325,7 +325,7 @@ def out_wrapper(
             parameters=params, return_annotation=return_type  # type: ignore[arg-type]
         )
 
-        _fn.__annotations__ = dict(getattr(fn, "__annotations__", {}))
+        _fn.__annotations__ = dict(fn.__annotations__)
         _fn.__annotations__["out"] = out_type
         _fn.__annotations__["return"] = return_type
 

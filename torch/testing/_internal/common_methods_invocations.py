@@ -23488,10 +23488,18 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.diag",
         torch_opinfo_name="diag",
+        skips=(
+            # The view function this decompose into does not have a ref
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
+        ),
     ),
     PythonRefInfo(
         "_refs.diagonal",
         torch_opinfo_name="diagonal",
+        skips=(
+            # The view function this decompose into does not have a ref
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
+        ),
     ),
     PythonRefInfo(
         "_refs.diagonal_copy",
@@ -23979,6 +23987,11 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.trace",
         torch_opinfo_name="trace",
+        decorators=(
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref', dtypes=(torch.bfloat16,)
+            ),
+        ),
     ),
     PythonRefInfo(
         "_refs.norm",
