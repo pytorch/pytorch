@@ -2271,6 +2271,16 @@ make_fallback(
     warn=False,
 )
 make_fallback(
+    aten._scaled_dot_product_cudnn_attention.default,
+    sdpa_constraint,
+    warn=False,
+)
+make_fallback(
+    aten._scaled_dot_product_cudnn_attention_backward.default,
+    sdpa_constraint,
+    warn=False,
+)
+make_fallback(
     aten._scaled_dot_product_flash_attention_for_cpu.default,
     sdpa_constraint,
     warn=False,
@@ -2953,6 +2963,17 @@ def index_output_size_and_inner_fn(
 
 
 def index_impl(x, indices, check):
+    output_size, inner_fn, _ = index_impl_helper(x, indices, check)
+
+    return Pointwise.create(
+        device=x.get_device(),
+        dtype=x.get_dtype(),
+        inner_fn=inner_fn,
+        ranges=output_size,
+    )
+
+
+def index_impl_helper(x, indices, check):
     assert isinstance(indices, (list, tuple))
     x_loader = x.make_loader()
     indices, tensor_indices = check_and_broadcast_indices(indices, x.get_device())
@@ -2967,27 +2988,25 @@ def index_impl(x, indices, check):
     x_size = x.get_size()
 
     indexed_size = [x_size[i] for i in range(len(indices)) if indices[i] is not None]
-    if 0 in indexed_size and 0 not in tensor_size:
+    if check and 0 in indexed_size and 0 not in tensor_size:
         raise IndexError("index is out of bounds for dimension with size 0")
 
     indexed_size = [x_size[i] for i in range(len(indices))]
-    output_size, inner_fn = index_output_size_and_inner_fn(
+    output_size, index_inner_fn = index_output_size_and_inner_fn(
         x_size,
         indices,
         tensor_indices,
         tensor_size,
         indices_loaders,
         indexed_size,
-        x_loader,
+        None,
         check=check,
     )
 
-    return Pointwise.create(
-        device=x.get_device(),
-        dtype=x.get_dtype(),
-        inner_fn=inner_fn,
-        ranges=output_size,
-    )
+    def inner_fn(idx):
+        return x_loader(index_inner_fn(idx))
+
+    return output_size, inner_fn, index_inner_fn
 
 
 @register_lowering(aten.index, type_promotion_kind=None)
@@ -3149,40 +3168,52 @@ def index_put_impl_(self, indices, values, accumulate, check):
     return self
 
 
-@register_lowering(
-    inductor_prims.masked_scatter_with_index, type_promotion_kind=None, broadcast=False
+fallback__unsafe_masked_index = fallback_handler(
+    aten._unsafe_masked_index.default, add_to_fallback_set=False
 )
-def masked_scatter_with_index(self, mask, source_idx, source):
-    self_flat, mask_flat, source_flat = (view(x, (-1,)) for x in (self, mask, source))
 
-    assert self.get_size() == mask.get_size()
-    assert mask.get_dtype() in {torch.bool, torch.uint8}
+fallback__unsafe_masked_index_put_accumulate = fallback_handler(
+    aten._unsafe_masked_index_put_accumulate.default, add_to_fallback_set=False
+)
 
-    self_loader = self_flat.make_loader()
-    mask_loader = mask_flat.make_loader()
-    source_idx_loader = source_idx.make_loader()
-    source_loader = source_flat.make_loader()
-    source_numel = source.get_numel()
+
+@register_lowering(aten._unsafe_masked_index, type_promotion_kind=None)
+def _unsafe_masked_index(self, mask, indices, fill):
+    ranges, _, _unsafe_index_fn = index_impl_helper(self, indices, check=False)
+    mask_loader = mask.make_loader()
+    self_loader = self.make_loader()
 
     def inner_fn(idx):
-        self_val = self_loader(idx)
-        mask_val = ops.to_dtype(mask_loader(idx), torch.bool)
+        if mask.dtype != torch.bool:
+            mask_val = ops.to_dtype(mask_loader(idx), torch.bool)
+        else:
+            mask_val = mask_loader(idx)
+        return ops.masked(mask_val, lambda: self_loader(_unsafe_index_fn(idx)), fill)
 
-        def load_source_val():
-            source_idx_val = source_idx_loader(idx)
-            i = ops.indirect_indexing(source_idx_val, source_numel)
-            return source_loader([i])
-
-        source_val = ops.masked(mask_val, load_source_val, 0)
-        return ops.where(mask_val, source_val, self_val)
-
-    result_flat = Pointwise.create(
+    return Pointwise.create(
         device=self.get_device(),
         dtype=self.get_dtype(),
         inner_fn=inner_fn,
-        ranges=self_flat.get_size(),
+        ranges=ranges,
     )
-    return view(result_flat, self.get_size())
+
+
+@register_lowering(aten._unsafe_masked_index_put_accumulate, type_promotion_kind=None)
+def _unsafe_masked_index_put_accumulate(x, mask, indices, values):
+    masked_value = where(mask, values, 0)
+    shape = x.get_size()
+    clamped_indices = [
+        clamp(indices[i], -shape[i], shape[i] - 1) if indices[i] else None
+        for i in range(len(indices))
+    ]
+    # TODO: use a masked store for this. currently only triton
+    # supports masked stores and cpp backend does not.
+    return _unsafe_index_put(x, clamped_indices, masked_value, accumulate=True)
+
+
+@make_pointwise
+def clamp(a, min, max):
+    return ops.maximum(min, ops.minimum(max, a))
 
 
 @register_lowering(aten.as_strided_scatter, type_promotion_kind=None)
