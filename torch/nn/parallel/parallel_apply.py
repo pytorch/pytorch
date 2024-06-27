@@ -5,7 +5,8 @@ import torch
 from torch._utils import ExceptionWrapper
 from torch.cuda._utils import _get_device_index
 from torch.cuda.amp import autocast
-from torch.nn.modules import Module
+
+from ..modules import Module
 
 
 __all__ = ["get_a_var", "parallel_apply"]
