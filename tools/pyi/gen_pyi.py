@@ -1101,6 +1101,7 @@ def gen_pyi(
                     )
                 )
             ],
+            "__contains__": ["def __contains__(self, other: Any) -> _bool: ..."],
             "__getitem__": [f"def __getitem__(self, {INDICES}) -> Tensor: ..."],
             "__setitem__": [
                 f"def __setitem__(self, {INDICES}, val: Union[Tensor, Number]) -> None: ..."
