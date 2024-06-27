@@ -47,12 +47,14 @@ def conv2d_grid(n, c, h, w, meta):
         meta["GROUPS"],
     )
 
+
 def conv3d_grid(n, c, d, h, w, meta):
     return (
         ceildiv(n * d * h * w, meta["BLOCK_M"]),
         ceildiv(c, meta["BLOCK_N"]),
         meta["GROUPS"],
     )
+
 
 # List of dictionaries to store the kernel configs. Configs that evaluate to true
 # will be utilised on the target platform
