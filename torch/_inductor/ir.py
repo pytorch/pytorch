@@ -1985,9 +1985,7 @@ def as_storage_and_layout(
         )
         return buffer, x.layout
     if isinstance(x, DtypeView):
-        buffer, _ = as_storage_and_layout(
-            x.data, freeze=freeze
-        )
+        buffer, _ = as_storage_and_layout(x.data, freeze=freeze)
         return buffer, x.data.layout
     raise NotImplementedError
 
@@ -2518,29 +2516,30 @@ class ReinterpretView(BaseView):
         )
 
 
-
 @dataclasses.dataclass
 class DtypeView(BaseView):
     """Pretend our storage has a different type"""
+
     target_dtype: torch.dtype
+
     def __post_init__(self):
         super().__post_init__()
         if isinstance(self.data, BaseView):
             self.data = self.data.unwrap_view()
+        # self.layout = self.data.layout
 
     def __str__(self):
-        return self.str_helper(
-            [
-                self.data,
-                self.target_dtype
-            ]
-        )
+        return self.str_helper([self.data, self.target_dtype])
 
     __repr__ = __str__
 
     @property
     def dtype(self):
         return self.target_dtype
+
+    @property
+    def layout(self):
+        return self.data.get_layout()
 
     def get_size(self):
         return self.data.get_size()
@@ -2550,8 +2549,10 @@ class DtypeView(BaseView):
 
     def make_loader(self):
         inner = self.data.make_loader()
+
         def loader(idx):
             return ops.to_dtype_bitcast(inner(idx), self.target_dtype, self.data.dtype)
+
         return loader
 
     def codegen_reference(self, writer=None):
