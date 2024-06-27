@@ -308,7 +308,7 @@ coordinate_descent_search_radius = int(
     os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS", "1")
 )
 
-autoheuristic_mode = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_MODE", "OFF")
+autoheuristic_mode = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_MODE", "USE_HEURISTIC")
 autoheuristic_log_path = os.environ.get(
     "TORCHINDUCTOR_AUTOHEURISTIC_LOG_PATH", "DEFAULT"
 )
