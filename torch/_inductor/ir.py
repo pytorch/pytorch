@@ -1984,6 +1984,11 @@ def as_storage_and_layout(
             freeze=freeze,
         )
         return buffer, x.layout
+    if isinstance(x, DtypeView):
+        buffer, _ = as_storage_and_layout(
+            x.data, freeze=freeze
+        )
+        return buffer, x.data.layout
     raise NotImplementedError
 
 
@@ -3938,7 +3943,7 @@ class InputsKernel(Buffer):
             x = x.data
         if isinstance(x, StorageBox):
             x = x.data
-        if isinstance(x, BaseView) and not isinstance(x, ReinterpretView):
+        if isinstance(x, BaseView) and not isinstance(x, (ReinterpretView, DtypeView)):
             x = ExternKernel.realize_input(x)
         if isinstance(x, TensorBox):
             # when converting to ReinterpretView fails in the
@@ -3948,7 +3953,7 @@ class InputsKernel(Buffer):
             return cls.unwrap_storage_for_input(x)
         if isinstance(x, TorchBindObject):
             return x
-        assert isinstance(x, (Buffer, ReinterpretView)), x
+        assert isinstance(x, (Buffer, ReinterpretView, DtypeView)), x
         return x
 
     @staticmethod
@@ -4470,6 +4475,8 @@ class ExternKernel(InputsKernel):
             return cls.realize_input(x.data)
         if isinstance(x, ReinterpretView):
             return ReinterpretView(cls.realize_input(x.data), x.get_layout())
+        if isinstance(x, DtypeView):
+            return DtypeView(cls.realize_input(x.data), x.target_dtype)
         if isinstance(x, BaseView):
             x.realize()
             if is_storage_and_layout(x.unwrap_view()):
