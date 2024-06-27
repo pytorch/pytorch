@@ -1009,6 +1009,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 def _custom_policy(ctx, func, *args, **kwargs):
                     to_recompute = func in {
                         torch.ops.aten.mul.Tensor,
+                        torch.ops.aten.sigmoid.default,
                     }
                     return (
                         CheckpointPolicy.MUST_RECOMPUTE
@@ -1064,7 +1065,10 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
         bw_compiler = functools.partial(
             count_ops,
-            freqs=[1, 0],
+            freqs=[
+                2,  # 1 from mul recompute, 1 from mul backward
+                1,
+            ],
             ops=[torch.ops.aten.mul.Tensor, torch.ops.aten.sigmoid.default],
         )
 
