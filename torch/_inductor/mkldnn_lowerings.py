@@ -631,11 +631,15 @@ def register_onednn_fusion_ops():
                 x_scale = V.graph.add_tensor_constant(
                     torch.tensor(x_scale, dtype=torch.float32), name="x_scale"
                 )
+            else:
+                x_scale.realize()
             if not isinstance(x_zp, ir.TensorBox):
                 assert type(x_zp) == int
                 x_zp = V.graph.add_tensor_constant(
                     torch.tensor(x_zp, dtype=torch.int32), name="x_zp"
                 )
+            else:
+                x_zp.realize()
 
             # When channels less than 8, w_scale/w_zp is Pointwise instead of ConstantBuffer
             # Refer to https://github.com/pytorch/pytorch/blob
@@ -660,7 +664,11 @@ def register_onednn_fusion_ops():
                     x, packed_weight, layout=layout, out_dtype=output_dtype
                 )
                 if (
-                    len(x_zp.get_layout().size) == 0  # Per tensor quant of act
+                    isinstance(
+                        ir.InputsKernel.unwrap_storage_for_input(x_zp),
+                        ir.ConstantBuffer,
+                    )
+                    and len(x_zp.get_layout().size) == 0  # Per tensor quant of act
                     and isinstance(
                         ir.InputsKernel.unwrap_storage_for_input(w_zp),
                         ir.ConstantBuffer,
@@ -884,11 +892,15 @@ def register_onednn_fusion_ops():
                 x_scale = V.graph.add_tensor_constant(
                     torch.tensor(x_scale, dtype=torch.float32), name="x_scale"
                 )
+            else:
+                x_scale.realize()
             if not isinstance(x_zp, ir.TensorBox):
                 assert type(x_zp) == int
                 x_zp = V.graph.add_tensor_constant(
                     torch.tensor(x_zp, dtype=torch.int32), name="x_zp"
                 )
+            else:
+                x_zp.realize()
 
             # When channels less than 8, w_scale/w_zp is Pointwise instead of ConstantBuffer
             # Refer to https://github.com/pytorch/pytorch/blob
@@ -928,7 +940,11 @@ def register_onednn_fusion_ops():
                     x, packed_weight, x2, layout=layout, out_dtype=output_dtype
                 )
                 if (
-                    len(x_zp.get_layout().size) == 0  # Per tensor quant of act
+                    isinstance(
+                        ir.InputsKernel.unwrap_storage_for_input(x_zp),
+                        ir.ConstantBuffer,
+                    )
+                    and len(x_zp.get_layout().size) == 0  # Per tensor quant of act
                     and isinstance(
                         ir.InputsKernel.unwrap_storage_for_input(w_zp),
                         ir.ConstantBuffer,
