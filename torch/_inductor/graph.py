@@ -332,6 +332,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.device_idxs: Set[int] = const_module.device_idxs if const_module else set()
         self.cuda = False
         self.buffers: List[ir.Buffer] = []
+        self.operations: List[ir.Operation] = []
         self.const_output_index: Dict[str, int] = (
             const_output_index if const_output_index else {}
         )
@@ -343,6 +344,7 @@ class GraphLowering(torch.fx.Interpreter):
         )
         self.torchbind_constants: Dict[str, torch._C.ScriptObject] = {}
         self.constant_reprs: Dict[str, str] = {}
+        self.removed_operations: Set[str] = set()
         self.removed_buffers: Set[str] = set()
         self.removed_inplace_buffers: Set[str] = set()
         self.mutated_buffers: Set[str] = set()
@@ -361,6 +363,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.mutated_input_idxs: List[int] = []
         self.name_to_buffer: Dict[str, ir.Buffer] = {}
         self.name_to_users: DefaultDict[str, List[ir.IRNode]] = defaultdict(list)
+        self.name_to_op: Dict[str, ir.Operation] = {}
         self.creation_time = time.time()
         self.name = name
         self.cpp_wrapper = cpp_wrapper
@@ -716,6 +719,13 @@ class GraphLowering(torch.fx.Interpreter):
     def run(self, *args):
         return super().run(*args)
 
+    def register_operation(self, op: ir.Operation):
+        name = self.qualify_name(f"op{len(self.operations)}")
+        self.operations.append(op)
+        self.name_to_op[name] = op
+        op.operation_name = name
+        return name
+
     def register_buffer(self, buffer: ir.Buffer, *, set_name: bool = False):
         name = self.qualify_name(f"buf{len(self.buffers)}")
         self.buffers.append(buffer)
@@ -731,9 +741,9 @@ class GraphLowering(torch.fx.Interpreter):
             buffer.name = name
         return name
 
-    def register_list(self, buffer_names: List[str]):
-        name = self.qualify_name("list_" + "_".join(buffer_names))
-        self.lists[name] = buffer_names
+    def register_list(self, operation_names: List[str]):
+        name = self.qualify_name("list_" + "_".join(operation_names))
+        self.lists[name] = operation_names
         return name
 
     def register_users_of(self, node_output):
@@ -741,17 +751,7 @@ class GraphLowering(torch.fx.Interpreter):
             if isinstance(value, (list, tuple)):
                 for x in value:
                     register(x)
-            if isinstance(value, ir.IRNode):
-                if (
-                    not hasattr(value, "data")
-                    or not isinstance(value.data, ir.IRNode)
-                    or not (
-                        hasattr(value.data, "data")
-                        and isinstance(value.data.data, ir.IRNode)
-                    )
-                ):
-                    return
-
+            if isinstance(value, ir.TensorBox):
                 for read_name in value.get_read_names():
                     self.name_to_users[read_name].append(value)
 
@@ -1408,6 +1408,11 @@ class GraphLowering(torch.fx.Interpreter):
             # This is all doable, it just hasn't been done yet.
             shape_env = V.graph.sizevars.shape_env
 
+            def make_assert(expr, msg):
+                assert_op = ir.AssertScalar(expr, msg)
+                self.register_buffer(assert_op, set_name=True)
+                self.register_operation(assert_op)
+
             for i0 in new_unbacked_defs:
                 ras = self.ras_by_symbol.pop(i0, [])
                 # NB: size-like not needed, we won't retrace
@@ -1424,15 +1429,9 @@ class GraphLowering(torch.fx.Interpreter):
                             return False
 
                     if is_convertible(vr.lower):
-                        self.register_buffer(
-                            ir.AssertScalar(i0 >= vr.lower, f"{i0} >= {vr.lower}"),
-                            set_name=True,
-                        )
+                        make_assert(i0 >= vr.lower, f"{i0} >= {vr.lower}")
                     if is_convertible(vr.upper):
-                        self.register_buffer(
-                            ir.AssertScalar(i0 <= vr.upper, f"{i0} <= {vr.upper}"),
-                            set_name=True,
-                        )
+                        make_assert(i0 <= vr.upper, f"{i0} <= {vr.upper}")
 
                 for ra in ras:
                     fvs = free_unbacked_symbols(ra.expr)
@@ -1441,9 +1440,7 @@ class GraphLowering(torch.fx.Interpreter):
                         i1 = sorted(missing, key=lambda x: str(x))[0]
                         self.ras_by_symbol.setdefault(i1, []).append(ra)
                     else:
-                        self.register_buffer(
-                            ir.AssertScalar(ra.expr, f"{ra.expr}"), set_name=True
-                        )
+                        make_assert(ra.expr, f"{ra.expr}")
 
             self.bound_unbacked_symbols |= new_unbacked_defs
 
@@ -1624,7 +1621,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.init_wrapper_code()
 
-        self.scheduler = Scheduler(self.buffers)
+        self.scheduler = Scheduler(self.operations)
         V.debug.draw_orig_fx_graph(self.orig_gm, self.scheduler.nodes)
 
         self.wrapper_code.push_codegened_graph(self)
@@ -1649,7 +1646,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.device_ops = parent_graph.device_ops
         self.cpp_wrapper = parent_graph.cpp_wrapper
 
-        self.scheduler = Scheduler(self.buffers)
+        self.scheduler = Scheduler(self.operations)
         self.scheduler.codegen()
 
     def count_bytes(self):

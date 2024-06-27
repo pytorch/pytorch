@@ -515,7 +515,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
 
         outputs = [None] * len(a_list_input)
         for (device, use_foreach), group in groups.items():
-            buffer_list = []
+            operation_list: List[str] = []
             for (
                 output_ind,
                 args,
@@ -532,10 +532,11 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                     and use_foreach
                     and realize_outputs
                 ):
-                    buffer_list.append(output.realize())
+                    output.realize()
+                    operation_list.append(output.get_operation_name())
 
-            if buffer_list:
-                V.graph.register_list(buffer_list)
+            if operation_list:
+                V.graph.register_list(operation_list)
 
         assert all(x is not None for x in outputs)
         return outputs
@@ -1613,8 +1614,11 @@ def fallback_handler(kernel, add_to_fallback_set=True):
         fallbacks.add(kernel)
 
     def handler(*args, **kwargs):
+        def wrap_tensors(x):
+            return TensorBox.create(x) if isinstance(x, ir.IRNode) else x
+
         return pytree.tree_map(
-            TensorBox.create, ir.FallbackKernel.create(kernel, *args, **kwargs)
+            wrap_tensors, ir.FallbackKernel.create(kernel, *args, **kwargs)
         )
 
     return handler
@@ -2586,6 +2590,7 @@ def _local_scalar_dense(data):
     binding_sym, keypath = next(iter(unbacked_bindings.items()))
     buffer = ir.DynamicScalar(binding_sym, keypath, data)
     buffer.name = V.graph.register_buffer(buffer)
+    V.graph.register_operation(buffer)
     # NB: the replaced expr is OK to use directly downstream, we want
     # simplifications in this case!
     val = V.graph.current_node.meta["val"]
@@ -3163,46 +3168,11 @@ def index_put_impl_(self, indices, values, accumulate, check):
         scatter,
     )
     buffer.name = V.graph.register_buffer(buffer)
+    V.graph.register_operation(buffer)
 
     if x_ndim == 0:
         self = view(self, [])
     return self
-
-
-@register_lowering(
-    inductor_prims.masked_scatter_with_index, type_promotion_kind=None, broadcast=False
-)
-def masked_scatter_with_index(self, mask, source_idx, source):
-    self_flat, mask_flat, source_flat = (view(x, (-1,)) for x in (self, mask, source))
-
-    assert self.get_size() == mask.get_size()
-    assert mask.get_dtype() in {torch.bool, torch.uint8}
-
-    self_loader = self_flat.make_loader()
-    mask_loader = mask_flat.make_loader()
-    source_idx_loader = source_idx.make_loader()
-    source_loader = source_flat.make_loader()
-    source_numel = source.get_numel()
-
-    def inner_fn(idx):
-        self_val = self_loader(idx)
-        mask_val = ops.to_dtype(mask_loader(idx), torch.bool)
-
-        def load_source_val():
-            source_idx_val = source_idx_loader(idx)
-            i = ops.indirect_indexing(source_idx_val, source_numel)
-            return source_loader([i])
-
-        source_val = ops.masked(mask_val, load_source_val, 0)
-        return ops.where(mask_val, source_val, self_val)
-
-    result_flat = Pointwise.create(
-        device=self.get_device(),
-        dtype=self.get_dtype(),
-        inner_fn=inner_fn,
-        ranges=self_flat.get_size(),
-    )
-    return view(result_flat, self.get_size())
 
 
 fallback__unsafe_masked_index = fallback_handler(
@@ -3419,6 +3389,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
             zero_out,
         )
         buffer.name = V.graph.register_buffer(buffer)
+        V.graph.register_operation(buffer)
 
     # self[index[i][j][k]][j][k] += src[i][j][k]  # if dim == 0
     # self[i][index[i][j][k]][k] += src[i][j][k]  # if dim == 1
@@ -3437,6 +3408,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
         scatter,
     )
     buffer.name = V.graph.register_buffer(buffer)
+    V.graph.register_operation(buffer)
 
     if ndim == 0:
         self = view(self, [])

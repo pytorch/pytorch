@@ -52,17 +52,21 @@ class TestDebugTrace(test_torchinductor.TestCase):
         self.assertExpectedInline(
             open(filename / "ir_pre_fusion.txt").read().rstrip(),
             """\
-buf0: SchedulerNode(ComputedBuffer)
-buf0.writes = [MemoryDep('buf0', c0, {c0: 256}, None)]
-buf0.unmet_dependencies = []
-buf0.met_dependencies = [MemoryDep('arg0_1', c0, {c0: 256}, None)]
-buf0.users = [NodeUser(node=SchedulerNode(name='buf1'), can_inplace=True, is_weak=False)]
-buf0.group.device = cpu
-buf0.group.iteration = ((256,), ())
-buf0.sizes = ([256], [])
+op0: SchedulerNode(ComputedBuffer)
+op0.writes = [MemoryDep('buf0', c0, {c0: 256}, None)]
+op0.unmet_dependencies = []
+op0.met_dependencies = [MemoryDep('arg0_1', c0, {c0: 256}, None)]
+op0.outputs = [
+    buf0: ComputedBuffer
+    buf0.layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
+    buf0.users = [NodeUser(node=SchedulerNode(name='op1'), can_inplace=True, is_weak=False)]
+]
+op0.group.device = cpu
+op0.group.iteration = ((256,), ())
+op0.sizes = ([256], [])
 arg0_1_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
 buf0_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
-class buf0_loop_body:
+class op0_loop_body:
     var_ranges = {z0: 256}
     index0 = z0
     def body(self, ops):
@@ -75,17 +79,21 @@ class buf0_loop_body:
         return store
 
 
-buf1: SchedulerNode(ComputedBuffer)
-buf1.writes = [MemoryDep('buf1', c0, {c0: 256}, None)]
-buf1.unmet_dependencies = [MemoryDep('buf0', c0, {c0: 256}, None)]
-buf1.met_dependencies = []
-buf1.users = [NodeUser(node=ExternKernelSchedulerNode(name='buf2'), can_inplace=False, is_weak=False)]
-buf1.group.device = cpu
-buf1.group.iteration = ((256,), ())
-buf1.sizes = ([256], [])
+op1: SchedulerNode(ComputedBuffer)
+op1.writes = [MemoryDep('buf1', c0, {c0: 256}, None)]
+op1.unmet_dependencies = [MemoryDep('buf0', c0, {c0: 256}, None)]
+op1.met_dependencies = []
+op1.outputs = [
+    buf1: ComputedBuffer
+    buf1.layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
+    buf1.users = [NodeUser(node=ExternKernelSchedulerNode(name='op2'), can_inplace=False, is_weak=False)]
+]
+op1.group.device = cpu
+op1.group.iteration = ((256,), ())
+op1.sizes = ([256], [])
 buf0_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
 buf1_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
-class buf1_loop_body:
+class op1_loop_body:
     var_ranges = {z0: 256}
     index0 = z0
     def body(self, ops):
@@ -98,73 +106,96 @@ class buf1_loop_body:
         return store
 
 
-buf2: ExternKernelSchedulerNode(ExternKernelOut)
-buf2.writes = [StarDep(name='buf2', mode=None)]
-buf2.unmet_dependencies = [StarDep(name='buf1', mode=None)]
-buf2.met_dependencies = [StarDep(name='arg1_1', mode=None)]
-buf2.users = [NodeUser(node=OUTPUT, can_inplace=False, is_weak=False)]
-buf2.node.kernel = extern_kernels.mm""",
+op2: ExternKernelSchedulerNode(ExternKernelOut)
+op2.writes = [StarDep(name='buf2', mode=None)]
+op2.unmet_dependencies = [StarDep(name='buf1', mode=None)]
+op2.met_dependencies = [StarDep(name='arg1_1', mode=None)]
+op2.outputs = [
+    buf2: ExternKernelOut
+    buf2.layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
+    buf2.users = [NodeUser(node=OUTPUT, can_inplace=False, is_weak=False)]
+]
+op2.node.kernel = extern_kernels.mm""",
         )
         self.assertExpectedInline(
             open(filename / "ir_post_fusion.txt").read().rstrip(),
             """\
-buf0_buf1: FusedSchedulerNode(SchedulerNode,SchedulerNode)
-buf0_buf1.writes = [MemoryDep('buf0', c0, {c0: 256}, None), MemoryDep('buf1', c0, {c0: 256}, None)]
-buf0_buf1.unmet_dependencies = []
-buf0_buf1.met_dependencies = [MemoryDep('arg0_1', c0, {c0: 256}, None)]
-buf0_buf1.users = []
-    buf0_buf1.snodes[0] =
-    buf0: SchedulerNode(ComputedBuffer)
-    buf0.writes = [MemoryDep('buf0', c0, {c0: 256}, None)]
-    buf0.unmet_dependencies = []
-    buf0.met_dependencies = [MemoryDep('arg0_1', c0, {c0: 256}, None)]
-    buf0.users = [NodeUser(node=SchedulerNode(name='buf1'), can_inplace=True, is_weak=False)]
-    buf0.group.device = cpu
-    buf0.group.iteration = ((256,), ())
-    buf0.sizes = ([256], [])
-    arg0_1_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
-    buf0_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
-    class buf0_loop_body:
-        var_ranges = {z0: 256}
-        index0 = z0
-        def body(self, ops):
-            get_index = self.get_index('index0')
-            load = ops.load('arg0_1', get_index)
-            constant = ops.constant(1.0, torch.float32)
-            add = ops.add(load, constant)
-            get_index_1 = self.get_index('index0')
-            store = ops.store('buf0', get_index_1, add, None)
-            return store
-    buf0_buf1.snodes[1] =
-    buf1: SchedulerNode(ComputedBuffer)
-    buf1.writes = [MemoryDep('buf1', c0, {c0: 256}, None)]
-    buf1.unmet_dependencies = [MemoryDep('buf0', c0, {c0: 256}, None)]
-    buf1.met_dependencies = []
-    buf1.users = [NodeUser(node=ExternKernelSchedulerNode(name='buf2'), can_inplace=False, is_weak=False)]
-    buf1.group.device = cpu
-    buf1.group.iteration = ((256,), ())
-    buf1.sizes = ([256], [])
-    buf0_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
-    buf1_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
-    class buf1_loop_body:
-        var_ranges = {z0: 256}
-        index0 = z0
-        def body(self, ops):
-            get_index = self.get_index('index0')
-            load = ops.load('buf0', get_index)
-            constant = ops.constant(2.0, torch.float32)
-            add = ops.add(load, constant)
-            get_index_1 = self.get_index('index0')
-            store = ops.store('buf1', get_index_1, add, None)
-            return store
+op0_op1: FusedSchedulerNode(SchedulerNode,SchedulerNode)
+op0_op1.writes = [MemoryDep('buf0', c0, {c0: 256}, None), MemoryDep('buf1', c0, {c0: 256}, None)]
+op0_op1.unmet_dependencies = []
+op0_op1.met_dependencies = [MemoryDep('arg0_1', c0, {c0: 256}, None)]
+op0_op1.outputs = [
+    buf0: ComputedBuffer
+    buf0.layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
+    buf0.users = [NodeUser(node=SchedulerNode(name='op1'), can_inplace=True, is_weak=False)]
+    buf1: ComputedBuffer
+    buf1.layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
+    buf1.users = [NodeUser(node=ExternKernelSchedulerNode(name='op2'), can_inplace=False, is_weak=False)]
+]
+op0_op1.snodes[0] =
+op0: SchedulerNode(ComputedBuffer)
+op0.writes = [MemoryDep('buf0', c0, {c0: 256}, None)]
+op0.unmet_dependencies = []
+op0.met_dependencies = [MemoryDep('arg0_1', c0, {c0: 256}, None)]
+op0.outputs = [
+    buf0: ComputedBuffer
+    buf0.layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
+    buf0.users = [NodeUser(node=SchedulerNode(name='op1'), can_inplace=True, is_weak=False)]
+]
+op0.group.device = cpu
+op0.group.iteration = ((256,), ())
+op0.sizes = ([256], [])
+arg0_1_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
+buf0_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
+class op0_loop_body:
+    var_ranges = {z0: 256}
+    index0 = z0
+    def body(self, ops):
+        get_index = self.get_index('index0')
+        load = ops.load('arg0_1', get_index)
+        constant = ops.constant(1.0, torch.float32)
+        add = ops.add(load, constant)
+        get_index_1 = self.get_index('index0')
+        store = ops.store('buf0', get_index_1, add, None)
+        return store
+op0_op1.snodes[1] =
+op1: SchedulerNode(ComputedBuffer)
+op1.writes = [MemoryDep('buf1', c0, {c0: 256}, None)]
+op1.unmet_dependencies = [MemoryDep('buf0', c0, {c0: 256}, None)]
+op1.met_dependencies = []
+op1.outputs = [
+    buf1: ComputedBuffer
+    buf1.layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
+    buf1.users = [NodeUser(node=ExternKernelSchedulerNode(name='op2'), can_inplace=False, is_weak=False)]
+]
+op1.group.device = cpu
+op1.group.iteration = ((256,), ())
+op1.sizes = ([256], [])
+buf0_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
+buf1_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
+class op1_loop_body:
+    var_ranges = {z0: 256}
+    index0 = z0
+    def body(self, ops):
+        get_index = self.get_index('index0')
+        load = ops.load('buf0', get_index)
+        constant = ops.constant(2.0, torch.float32)
+        add = ops.add(load, constant)
+        get_index_1 = self.get_index('index0')
+        store = ops.store('buf1', get_index_1, add, None)
+        return store
 
 
-buf2: ExternKernelSchedulerNode(ExternKernelOut)
-buf2.writes = [StarDep(name='buf2', mode=None)]
-buf2.unmet_dependencies = [StarDep(name='buf1', mode=None)]
-buf2.met_dependencies = [StarDep(name='arg1_1', mode=None)]
-buf2.users = [NodeUser(node=OUTPUT, can_inplace=False, is_weak=False)]
-buf2.node.kernel = extern_kernels.mm""",
+op2: ExternKernelSchedulerNode(ExternKernelOut)
+op2.writes = [StarDep(name='buf2', mode=None)]
+op2.unmet_dependencies = [StarDep(name='buf1', mode=None)]
+op2.met_dependencies = [StarDep(name='arg1_1', mode=None)]
+op2.outputs = [
+    buf2: ExternKernelOut
+    buf2.layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
+    buf2.users = [NodeUser(node=OUTPUT, can_inplace=False, is_weak=False)]
+]
+op2.node.kernel = extern_kernels.mm""",
         )
         # intentionally only cleanup on success so debugging test is easier
         shutil.rmtree(filename)
