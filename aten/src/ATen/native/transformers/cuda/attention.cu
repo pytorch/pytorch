@@ -985,8 +985,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
   TORCH_CHECK(key.size(1) == value.size(1));
 
   // Num heads
-  std::cout << "Print statements" << query.sizes();
-  std::cout << query.size(2) << key.size(2);
   TORCH_CHECK(query.size(2) == key.size(2));
   TORCH_CHECK(query.size(2) == value.size(2));
 
