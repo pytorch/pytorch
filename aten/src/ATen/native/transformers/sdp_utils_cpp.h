@@ -388,22 +388,6 @@ inline bool check_grouped_query_attention(sdp_params const& params, bool debug) 
     }
     return false;
   }
-  // If grouped query attention is not supported, ensure query and key have the
-  // same number of heads
-  else if (!supports_gqa && q_num_heads != k_num_heads) {
-    if (debug) {
-      TORCH_WARN(
-          "MemoryEfficient attention requires query, key and value to have the same num_heads but got: ",
-          "Query.sizes(): ",
-          params.query.sym_size(-3),
-          ", Key sizes(): ",
-          params.key.sym_size(-3),
-          ", Value sizes(): ",
-          params.value.sym_size(-3),
-          " instead.");
-    }
-    return false;
-  }
   return true;
 }
 
@@ -440,6 +424,22 @@ inline bool check_batch_size_and_num_heads_dense(sdp_params const& params, bool 
   if(supports_gqa)
   {
     return check_grouped_query_attention<supports_gqa>(params, debug);
+  }
+  // If grouped query attention is not supported, ensure query and key have the
+  // same number of heads
+  else if (!supports_gqa && q_num_heads != k_num_heads) {
+    if (debug) {
+      TORCH_WARN(
+          "MemoryEfficient attention requires query, key and value to have the same num_heads but got: ",
+          "Query.sizes(): ",
+          params.query.sym_size(-3),
+          ", Key sizes(): ",
+          params.key.sym_size(-3),
+          ", Value sizes(): ",
+          params.value.sym_size(-3),
+          " instead.");
+    }
+    return false;
   }
   // If all checks pass, return true
   return true;
