@@ -1,10 +1,10 @@
-# mypy: allow-untyped-defs
-
 import os
 
-from typing import Callable, Dict
+from typing import Callable, Dict, Union
 
 import torch
+import torch.nn as nn
+
 from torch.distributed._tensor import DeviceMesh
 from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed._tensor.examples.comm_mode_features_example_argparser import args
@@ -47,9 +47,10 @@ class CommDebugModeExample:
         self.world_size = world_size
         self.rank = rank
         self.device_type = get_device_type()
-        torch.manual_seed(0)
 
-    def _MLP_model_setup(self, model_type, parallelize_plan=None):
+    def _MLP_model_setup(
+        self, model_type: type, parallelize_plan: Union[None, dict] = None
+    ) -> tuple[nn.Module, torch.Tensor]:
         """
         Creates MLP or MLPStacked model for examples
         """
@@ -70,10 +71,11 @@ class CommDebugModeExample:
 
         model = model_type(self.device_type)
         model = parallelize_module(model, device_mesh, parallelize_plan)
-
         return model, inp
 
-    def _transformer_model_setup(self, is_seq_parallel=False):
+    def _transformer_model_setup(
+        self, is_seq_parallel: bool = False
+    ) -> tuple[nn.Module, torch.Tensor]:
         """
         Creates transformer model for examples
         """
@@ -102,6 +104,7 @@ class CommDebugModeExample:
         MLPModule.net2.bias: (Replicate(),)
         """
 
+        torch.manual_seed(0)
         model, inp = self._MLP_model_setup(model_type=MLPModule)
 
         comm_mode = CommDebugMode()
@@ -127,6 +130,8 @@ class CommDebugModeExample:
         MLPStacked.layers.1.net2.weight: (Shard(dim=1),)
         MLPStacked.layers.1.net2.bias: (Replicate(),)
         """
+
+        torch.manual_seed(0)
 
         parallelize_plan = {
             "MLPStacked.layers.0.net1": ColwiseParallel(),
@@ -165,6 +170,8 @@ class CommDebugModeExample:
                   FORWARD PASS
                     *c10d_functional.all_reduce: 1
         """
+
+        torch.manual_seed(0)
 
         model, inp = self._MLP_model_setup(model_type=MLPModule)
 
@@ -253,6 +260,9 @@ class CommDebugModeExample:
                     *c10d_functional.all_gather_into_tensor: 1
 
         """
+
+        torch.manual_seed(0)
+
         model, inp = self._transformer_model_setup()
 
         comm_mode = CommDebugMode()
@@ -465,6 +475,7 @@ class CommDebugModeExample:
                     **aten.detach.default
                     **aten.detach.default
         """
+        torch.manual_seed(0)
 
         model, inp = self._MLP_model_setup(model_type=MLPModule)
 
@@ -483,6 +494,9 @@ class CommDebugModeExample:
         Example code to demonstrate CommModeDebug's module operation level tracing using a distributed transformer model.
         Prints a table of module opoeration level collective tracing information and logs table to output.txt
         """
+
+        torch.manual_seed(0)
+
         model, inp = self._transformer_model_setup()
 
         comm_mode = CommDebugMode()
