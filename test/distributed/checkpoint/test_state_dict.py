@@ -913,7 +913,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             model_state_dict=full_sd,
             # 'aten.copy_.default: got mixed torch.Tensor and DTensor, need to convert all torch.Tensor to DTensor before calling distributed operators!',).
             options=ptd_state_dict.StateDictOptions(
-                broadcast_from_rank0=True, full_state_dict=True, strict=False
+                full_state_dict=True, strict=False
             )
             # NotImplementedError: c10d::broadcast_: attempted to run this operator with Meta tensors
             # options=ptd_state_dict.StateDictOptions(
