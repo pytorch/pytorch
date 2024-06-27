@@ -158,6 +158,13 @@ ParameterMetadata::ParameterMetadata(
   value_ = str;
 }
 
+ParameterMetadata::ParameterMetadata(
+    const c10::Device& device,
+    uint64_t input_order)
+    : tag_(DEVICE), order_(input_order) {
+  value_ = device;
+}
+
 bool ParameterMetadata::operator==(const ParameterMetadata& other) const {
   // Same type
   if (tag_ != other.tag_) {
@@ -184,6 +191,9 @@ bool ParameterMetadata::operator==(const ParameterMetadata& other) const {
     case STRING:
       return std::get<std::string>(value_) ==
           std::get<std::string>(other.value_);
+    case DEVICE:
+      return std::get<c10::Device>(value_) ==
+          std::get<c10::Device>(other.value_);
     default:
       return false;
   }
