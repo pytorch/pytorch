@@ -1252,6 +1252,10 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         reason=onnx_test_common.reason_onnx_script_does_not_support("Floor", "bool, int"),
     ),
     xfail(
+        "unsqueeze_copy",
+        reason="OnnxExporterError: Failed to export model",
+    ),
+    xfail(
         "where",
         dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("Where", "bool"),

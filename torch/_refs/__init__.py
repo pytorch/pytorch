@@ -2206,7 +2206,7 @@ def _make_copy_from_view(fn):
     """
     Given a view function (e.g. torch.diagonal) generates its copy variant (e.g. torch.diagonal_copy)
     """
-    fn = out_wrapper()(fn)
+    fn = out_wrapper()(getattr(aten, fn.__name__))
 
     @wraps(fn)
     def _fn(*args, out=None, **kwargs):

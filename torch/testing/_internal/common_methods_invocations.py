@@ -21347,6 +21347,11 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.view_copy",
         torch_opinfo_name="view_copy",
+        supports_out=True,
+        skips=(
+            # The view function this decompose into does not have a ref
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
+        ),
     ),
     PythonRefInfo(
         "_refs.ones",
@@ -23358,6 +23363,11 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.alias_copy",
         torch_opinfo_name="alias_copy",
+        supports_out=True,
+        skips=(
+            # The view function this decompose into does not have a ref
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
+        ),
     ),
     PythonRefInfo(
         "_refs.atleast_1d",
@@ -23389,6 +23399,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.as_strided_copy",
         torch_opinfo_name="as_strided_copy",
+        supports_out=True,
         # FIXME: doesn't support chalf
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         skips=(
@@ -23396,6 +23407,8 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_conj_view'),
             DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_neg_conj_view'),
+            # The view function this decompose into does not have a ref
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
         ),
     ),
     PythonRefInfo(
@@ -23483,6 +23496,11 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.diagonal_copy",
         torch_opinfo_name="diagonal_copy",
+        supports_out=True,
+        skips=(
+            # The view function this decompose into does not have a ref
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
+        ),
     ),
     PythonRefInfo(
         "_refs.diagonal_scatter",
@@ -23545,6 +23563,10 @@ python_ref_db = [
         torch_opinfo_name="narrow_copy",
         supports_out=True,
         error_inputs_func=partial(error_inputs_narrow_narrow_copy, is_narrow=False, is_ref=True),
+        skips=(
+            # The view function this decompose into does not have a ref
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
+        ),
     ),
     PythonRefInfo(
         "_refs.nn.functional.group_norm",
@@ -23618,6 +23640,11 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.squeeze_copy",
         torch_opinfo_name="squeeze_copy",
+        supports_out=True,
+        skips=(
+            # The view function this decompose into does not have a ref
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
+        ),
     ),
     PythonRefInfo(
         "_refs.squeeze",
@@ -23671,6 +23698,11 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.transpose_copy",
         torch_opinfo_name="transpose_copy",
+        supports_out=True,
+        skips=(
+            # The view function this decompose into does not have a ref
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
+        ),
     ),
     PythonRefInfo(
         "_refs.t",
@@ -23679,6 +23711,11 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.t_copy",
         torch_opinfo_name="t_copy",
+        supports_out=True,
+        skips=(
+            # The view function this decompose into does not have a ref
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
+        ),
     ),
     PythonRefInfo(
         "_refs.T",
@@ -23693,6 +23730,10 @@ python_ref_db = [
         "_refs.unfold_copy",
         torch_opinfo_name="unfold_copy",
         supports_out=True,
+        skips=(
+            # The view function this decompose into does not have a ref
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
+        ),
     ),
     PythonRefInfo(
         "_refs.unsqueeze",
@@ -23701,6 +23742,11 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.unsqueeze_copy",
         torch_opinfo_name="unsqueeze_copy",
+        supports_out=True,
+        skips=(
+            # The view function this decompose into does not have a ref
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
+        ),
     ),
     PythonRefInfo(
         "_refs.view",
@@ -24157,6 +24203,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.index_copy",
         torch_opinfo_name="index_copy",
+        supports_out=True,
         # empty_strided
         skips=(
             # no _refs support for Tensor.__setitem__
