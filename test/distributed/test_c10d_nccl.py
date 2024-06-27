@@ -48,6 +48,7 @@ from torch.testing._internal.common_distributed import (
     requires_nccl_version,
     skip_if_lt_x_gpu,
     skip_if_rocm,
+    TEST_SKIPS,
     with_dist_debug_levels,
     with_nccl_blocking_wait,
 )
@@ -3458,7 +3459,10 @@ class NCCLTraceTestBase(MultiProcessTestCase):
         return torch.device("cuda", self.rank_to_GPU[self.rank][0])
 
     def _join_processes(self, fn):
-        fn()
+        # We need to patch sys.exit() as skip_if will use sys.exit() and
+        # the exit code from the this process will not be catched.
+        with mock.patch("sys.exit") as exit_mock:
+            fn()
         super()._join_processes(fn)
 
     def _spawn_processes(self) -> None:
@@ -4021,6 +4025,16 @@ class NCCLTraceTest(NCCLTraceTestBase):
             self.assertTrue("duration_ms" not in t["entries"][0])
 
 
+def check_if_test_is_skipped(fn):
+    def wrapper(self, *args, **kwargs):
+        for skip in TEST_SKIPS.values():
+            if self.processes[0].exitcode == skip.exit_code:
+                return MultiProcessTestCase()._check_return_codes(self)
+        return fn(self, *args, **kwargs)
+
+    return wrapper
+
+
 class NCCLTraceTestDumpOnTimeoutBase(NCCLTraceTestBase):
     timeout_sec = 1
 
@@ -4036,6 +4050,7 @@ class NCCLTraceTestDumpOnTimeoutBase(NCCLTraceTestBase):
         pg = c10d.distributed_c10d._get_default_group()
         return pg
 
+    @check_if_test_is_skipped
     def _check_return_codes(self, elapsed_time):
         # the base test infra assumes processes exit with matching return codes,
         # but we want rank0 to abort and rank1 to exit cleanly in this test
@@ -4102,6 +4117,7 @@ instantiate_parametrized_tests(NCCLTraceTest)
 
 
 class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
+    @check_if_test_is_skipped
     def _check_return_codes(self, elapsed_time):
         # the base test infra assumes processes exit with matching return codes,
         # but we want rank0 to abort and rank1 to exit cleanly in this test
@@ -4161,6 +4177,7 @@ class NcclErrorDumpTest(NCCLTraceTestBase):
         except TimeoutError:
             return None
 
+    @check_if_test_is_skipped
     def _check_return_codes(self, elapsed_time):
         # the base test infra assumes processes exit with matching return codes,
         # but we want rank0 to abort with exception and rank1 to exit with exit 1
