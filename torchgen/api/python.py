@@ -205,7 +205,7 @@ def format_function_signature(
     return_type = f" -> {return_type}" if return_type is not None else ""
 
     sig = f"def {name}({', '.join(arguments)}){return_type}: ..."
-    if len(sig) < 80 or len(arguments) == 0 or tuple(arguments) == ("self",):
+    if len(sig) <= 80 or len(arguments) == 0 or tuple(arguments) == ("self",):
         return sig
 
     return "\n".join(
