@@ -152,12 +152,15 @@ class CppPackedGemmTemplate(CppTemplate):
     ):
         assert layout.dtype in [torch.float, torch.bfloat16, torch.half]
         super().__init__(
-            "packed_gemm", input_nodes, layout, epilogue_creator=epilogue_creator
+            "packed_gemm",
+            input_nodes,
+            layout,
+            num_threads,
+            epilogue_creator=epilogue_creator,
         )
         self.beta = beta
         self.alpha = alpha
         self.has_bias = has_bias
-        self.num_threads = num_threads
         self.register_blocking = register_blocking
         m, n = layout.size
         _, k = input_nodes[0].get_size()
