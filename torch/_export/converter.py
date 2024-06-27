@@ -324,8 +324,10 @@ class TS2FXGraphConverter:
     def get_fx_value(self, value: torch._C.Value):
         value_name = value.debugName()
 
-        # Traverse down renaming path.
-        while value_name in self.renaming_map:
+        # If the value name is not in self.name_to_node, it means it has been renamed
+        # and it very likely happens at sub-blocks. Then it needs to find the new name
+        # through the rename map.
+        if value_name not in self.name_to_node and value_name in self.renaming_map:
             value_name = self.renaming_map[value_name]
 
         if value_name in self.name_to_node:
@@ -682,31 +684,7 @@ class TS2FXGraphConverter:
                 for block_node in block.nodes():
                     for block_node_in in block_node.inputs():
                         if block_node_in.debugName() in self.name_to_node:
-                            debug_name = block_node_in.debugName()
-
-                            # The edge case is some variable only has digit e.g., 20, which
-                            # will cause error when it is embedded into a codegen function
-                            # (invalid argument name). We rename if the name is not valid for
-                            # code generation.
-                            # E.g.,
-                            #     Graph[x.1]                 Graph[x.1]
-                            #     %1 = ...          -->      %1 = ... // name_to_node["n_1"] = name_to_node["1"]
-                            #         Block[%1]                  Block[%n_1]
-                            #         %2 = %1 ...                %2 = %1 ... // renaming_map["1"] = "n_1"
-                            if not is_valid_for_codegen(debug_name):
-                                prefix = self.name_to_node[
-                                    debug_name
-                                ].name  # type: ignore[union-attr]
-                                rename_debug_name = f"{prefix}_{debug_name}"
-                                self.renaming_map[
-                                    debug_name
-                                ] = rename_debug_name  # For sub-block tracing.
-                                self.name_to_node[
-                                    rename_debug_name
-                                ] = self.name_to_node[debug_name]
-                                debug_name = rename_debug_name
-
-                            arguments.add(debug_name)
+                            arguments.add(block_node_in.debugName())
                     arguments = arguments.union(
                         _identify_inputs_as_arguments(block_node)
                     )
@@ -719,7 +697,30 @@ class TS2FXGraphConverter:
         for block in node.blocks():
             arguments = arguments.union(self.blocks_to_lifted_attrs[block])
 
-        arguments = list(arguments)
+        arguments_orig = list(arguments)
+
+        # Rename variables that only have digit e.g., 20, which
+        # will cause error when it is embedded into a codegen function
+        # (invalid argument name). We rename if the name is not valid for
+        # code generation.
+        # E.g.,
+        #     Graph[x.1]                 Graph[x.1]
+        #     %1 = ...          -->      %1 = ... // reaming_map["1"] = "n_1"
+        #         Block[%1]                  Block[%n_1] // sub-block: name_to_node["n_1"] = fx.node
+        #         %2 = %1 ...                %2 = %1 ... // name_to_node[renaming_map["1"]]
+        arguments_renamed = []
+        for i, argument in enumerate(arguments_orig):
+            if not is_valid_for_codegen(argument):
+                prefix = self.name_to_node[
+                    argument
+                ].name  # type: ignore[union-attr]
+                argument_renamed = f"{prefix}_{argument}"
+                self.renaming_map[
+                    argument
+                ] = argument_renamed  # For sub-block getting new name.
+                arguments_renamed.append(argument_renamed)
+            else:
+                arguments_renamed.append(argument)
 
         # Convert blocks to subgraphs
         subgraph_nodes = []
@@ -730,7 +731,7 @@ class TS2FXGraphConverter:
             subgraph_converter.constant_map = self.constant_map
             subgraph_converter.name_to_attribute_fqn = self.name_to_attribute_fqn
 
-            for block_arg in arguments:
+            for block_arg in arguments_renamed:
                 normalized_block_arg_name = normalize_name(block_arg)
                 placeholder_node = subgraph_converter.fx_graph.placeholder(
                     normalized_block_arg_name
@@ -959,7 +960,6 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionaly
         self.ts_model = ts_model
         self.ts_graph, self.params, _, _ = _create_jit_graph(ts_model, sample_args)
         log.info(f"TorchScript graph\n\n{self.ts_graph}\n")  # noqa: G004
-        breakpoint()
 
         self.sample_args = sample_args
         self.sample_kwargs = sample_kwargs
