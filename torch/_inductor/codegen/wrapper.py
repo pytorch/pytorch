@@ -49,6 +49,7 @@ from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import CodeGen, DeferredLine, IndentedBuffer, PythonPrinter
 from .triton_utils import config_of, signature_to_meta
+from ..streamscheduler import CRITICAL_PATH_STREAM_ID
 
 if TYPE_CHECKING:
     import triton
@@ -333,7 +334,11 @@ class MemoryPlanningLine(WrapperLine):
 @dataclasses.dataclass
 class AllocateLine(MemoryPlanningLine):
     node: ir.Buffer
+    def set_user_stream(self, stream_id):
+        self.user_streams = [stream_id, ]
 
+    def add_user_stream(self, stream_id):
+        self.user_streams.append(stream_id)
     def plan(self, state: MemoryPlanningState) -> MemoryPlanningLine:
         if self.node.get_name() in V.graph.removed_buffers:
             return NullLine(self.wrapper)
@@ -357,7 +362,33 @@ class AllocateLine(MemoryPlanningLine):
     def codegen(self, code: IndentedBuffer) -> None:
         assert self.node.get_name() not in V.graph.removed_buffers
         line = self.wrapper.make_buffer_allocation(self.node)
-        code.writeline(line)
+        # if self has attribution named user_streams, it is used by multiple streams
+        if hasattr(self, "user_streams"):
+            # the redundant stream_id have been removed when user_streams is set
+            if len(self.user_streams) == 1:
+                if self.user_streams[0] != CRITICAL_PATH_STREAM_ID:
+                    code.writeline(f"torch.cuda.set_stream(stream{self.user_streams[0]}_raw)")
+                    code.writeline(line)
+                    code.writeline(f"torch.cuda.set_stream(stream{CRITICAL_PATH_STREAM_ID}_raw)")
+                else:
+                    code.writeline(line)
+            elif len(self.user_streams) > 1:
+                # assign the `empty_strided` to the first user_stream
+                assign_stream = self.user_streams[0]
+                event_name = f"event_allocate_{self.node.get_name()}"
+                code.writeline(f"{event_name} = torch.cuda.Event()")
+                if assign_stream != CRITICAL_PATH_STREAM_ID:
+                    code.writeline(f"torch.cuda.set_stream(stream{assign_stream}_raw)")
+                code.writeline(line)
+                if assign_stream != CRITICAL_PATH_STREAM_ID:
+                    code.writeline(f"torch.cuda.set_stream(stream{CRITICAL_PATH_STREAM_ID}_raw)")
+                code.writeline(f"{event_name}.record(stream{assign_stream}_raw)")
+                for user_stream in self.user_streams[1:]:
+                    code.writeline(f"stream{user_stream}_raw.wait_event({event_name})")
+            else:
+                raise AssertionError(f"invalid user_streams: {self.user_streams}")
+        else:
+            code.writeline(line)
 
 
 @dataclasses.dataclass
@@ -526,10 +557,8 @@ class WrapperCodeGen(CodeGen):
             import triton
             import triton.language as tl
             from {} import grid, split_scan_grid, start_graph, end_graph
-            {}
             """.format(
                 triton_heuristics.__name__,
-                V.graph.device_ops.import_get_raw_stream_as("get_raw_stream"),
             )
         )
 
@@ -592,6 +621,7 @@ class WrapperCodeGen(CodeGen):
                 self.prefix.writeline("args.clear()")
 
             self.codegen_inputs(self.prefix, V.graph.graph_inputs)
+            self.generate_stream_creation_in_body()
             if config.size_asserts:
                 self.codegen_input_size_asserts()
             if config.nan_asserts:
@@ -603,7 +633,6 @@ class WrapperCodeGen(CodeGen):
     def write_get_raw_stream(self, device_idx: int, graph=None) -> str:
         self.write_triton_header_once()
         name = f"stream{device_idx}"
-        self.writeline(f"{name} = get_raw_stream({device_idx})")
         return name
 
     def get_codegened_graph(self):
