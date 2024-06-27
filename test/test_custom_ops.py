@@ -343,8 +343,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
 
     def test_opcheck_fails_basic(self, device):
         @custom_op(f"{self.test_ns}::foo")
-        def foo(x: torch.Tensor) -> torch.Tensor:
-            ...
+        def foo(x: torch.Tensor) -> torch.Tensor: ...
 
         @foo.impl(["cpu", "cuda"])
         def foo_impl(x):
@@ -2542,6 +2541,14 @@ class TestCustomOpAPI(TestCase):
             if prev is None and after is None:
                 continue
             self.assertGreater(after, prev)
+
+        with self.assertRaisesRegex(ValueError, "string"):
+
+            @torch.library.custom_op("_torch_testing::f3", mutates_args="x")
+            def f3(
+                x: Tensor,
+            ) -> None:
+                return
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     @parametrize("idx", [0, 1, 2, 3, 4, 5])
