@@ -1160,23 +1160,24 @@ def gen_pyi(
             ],
             "as_subclass": [ffs("as_subclass", ["self", "cls: type[S]"], "S")],
             "_make_subclass": [
-                "@staticmethod    \ndef _make_subclass({}) -> S: ...".format(
-                    ", ".join(
-                        [
-                            "cls: type[S]",
-                            "data: Tensor",
-                            "require_grad: _bool = False",
-                            "dispatch_strides: _bool = False",
-                            "dispatch_device: _bool = False",
-                            "device_for_backend_keys: _device | None = None",
-                        ]
-                    )
+                "@staticmethod\n"
+                + ffs(
+                    "_make_subclass",
+                    [
+                        "cls: type[S]",
+                        "data: Tensor",
+                        "require_grad: _bool = False",
+                        "dispatch_strides: _bool = False",
+                        "dispatch_device: _bool = False",
+                        "device_for_backend_keys: _device | None = None",
+                    ],
+                    "S",
                 )
             ],
             "__getitem__": [
                 ffs(
                     "__getitem__",
-                    ["self", "indices: _Index | tuple[_Index", "...]"],
+                    ["self", "indices: _Index | tuple[_Index, ...]"],
                     "Tensor",
                 )
             ],
@@ -1185,8 +1186,7 @@ def gen_pyi(
                     "__setitem__",
                     [
                         "self",
-                        "indices: _Index | tuple[_Index",
-                        "...]",
+                        "indices: _Index | tuple[_Index, ...]",
                         "value: Tensor | Number",
                     ],
                     "None",
@@ -1372,7 +1372,7 @@ def gen_pyi(
                 ),
                 ffs(
                     "split",
-                    ["self", "split_size: tuple[_int", "...]", "dim: _int = 0"],
+                    ["self", "split_size: tuple[_int, ...]", "dim: _int = 0"],
                     "Sequence[Tensor]",
                 ),
             ],
