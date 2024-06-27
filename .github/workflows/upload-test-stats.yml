@@ -28,7 +28,9 @@ jobs:
     if:
       github.repository_owner == 'pytorch' &&
       (github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure' ||
-      needs.get_workflow_conclusion.outputs.conclusion == 'success' || needs.get_workflow_conclusion.outputs.conclusion == 'failure')
+      github.event.workflow_run.conclusion == 'cancelled' ||
+      needs.get_workflow_conclusion.outputs.conclusion == 'success' || needs.get_workflow_conclusion.outputs.conclusion == 'failure' ||
+      needs.get_workflow_conclusion.outputs.conclusion == 'cancelled')
     runs-on: ubuntu-22.04
     environment: upload-stats
     name: Upload test stats for ${{ github.event.workflow_run.id }}, attempt ${{ github.event.workflow_run.run_attempt }}
