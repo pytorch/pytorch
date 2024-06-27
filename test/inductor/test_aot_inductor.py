@@ -1305,6 +1305,23 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.rand(4, 4, device=self.device),)
         self.check_model(Model(self.device), example_inputs)
 
+    def test_aot_compile_dynamic_shapes(self):
+        inp_tensor = torch.randn((3, 2), dtype=torch.float, device=self.device).fill_(
+            1.0
+        )
+        min_tensor = inp_tensor - 0.05
+        max_tensor = inp_tensor + 0.05
+        so_path = torch._export.aot_compile(
+            torch.ops.aten.clamp,
+            (inp_tensor, min_tensor, max_tensor),
+            assume_static_by_default=False,
+        )
+        with open(os.path.splitext(so_path)[0] + ".cpp") as cpp:
+            src_code = cpp.read()
+            FileCheck().check("auto s0 = arg0_1_size[0]").check(
+                "auto s1 = arg0_1_size[1]"
+            ).run(src_code)
+
     def test_non_tensor_input(self):
         def fn(a, b, alpha=1.0):
             return torch.add(a, b, alpha=alpha)

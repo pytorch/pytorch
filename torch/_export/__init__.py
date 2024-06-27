@@ -345,6 +345,7 @@ def aot_compile(
     remove_runtime_assertions: bool = False,
     disable_constraint_solver: bool = False,
     same_signature: bool = True,
+    assume_static_by_default: bool = True,
 ) -> str:
     """
     Note: this function is not stable yet
@@ -399,6 +400,7 @@ def aot_compile(
             # Disabling this flag, because instead we can rely on the mapping
             # dynamo_flat_name_to_original_fqn which is coming from Dynamo.
             restore_fqn=False,
+            assume_static_by_default=assume_static_by_default,
         )
 
     with torch.no_grad():
