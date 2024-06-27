@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include <nlohmann/json.hpp>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -173,39 +174,46 @@
   } while (0)
 
 namespace c10d {
-
-static c10::IValue entries_key = "entries";
-static c10::IValue nccl_comm_key = "nccl_comm_state";
-static c10::IValue version_key = "version";
+using json = nlohmann::json;
+#define DEFINE_CONSTANT(name, value) \
+  static c10::IValue name = value;   \
+  static std::string name##_str = value;
+DEFINE_CONSTANT(entries_key, "entries");
+DEFINE_CONSTANT(nccl_comm_key, "nccl_comm_state");
+DEFINE_CONSTANT(version_key, "version");
 // Update whenever changing contents or formatting of the dump
 // (minor when adding fields, major when changing existing fields)
-static c10::IValue version_val = "2.2";
-static c10::IValue pg_config_key = "pg_config";
-static c10::IValue record_id_key = "record_id";
-static c10::IValue pg_id_key = "pg_id";
-static c10::IValue pg_name_key = "process_group";
-static c10::IValue collective_seq_id_key = "collective_seq_id";
-static c10::IValue p2p_seq_id_key = "p2p_seq_id";
-static c10::IValue is_p2p_key = "is_p2p";
-static c10::IValue op_id_key = "op_id";
-static c10::IValue profiling_name_key = "profiling_name";
-static c10::IValue input_sizes_key = "input_sizes";
-static c10::IValue input_dtypes_key = "input_dtypes";
-static c10::IValue output_sizes_key = "output_sizes";
-static c10::IValue output_dtypes_key = "output_dtypes";
-static c10::IValue time_created_key = "time_created_ns";
-static c10::IValue duration_key = "duration_ms";
-static c10::IValue timeout_key = "timeout_ms";
-
-static c10::IValue frames_key = "frames";
-static c10::IValue state_key = "state";
-static c10::IValue line_key = "line";
-static c10::IValue name_key = "name";
-static c10::IValue filename_key = "filename";
-static c10::IValue retired_key = "retired";
-static c10::IValue time_discovered_started_key = "time_discovered_started_ns";
-static c10::IValue time_discovered_completed_key =
-    "time_discovered_completed_ns";
+// Also update both JSON and Pickle dumps to make use of the newly defined
+// field(s).
+DEFINE_CONSTANT(version_val, "2.2");
+DEFINE_CONSTANT(pg_config_key, "pg_config");
+DEFINE_CONSTANT(record_id_key, "record_id");
+DEFINE_CONSTANT(pg_id_key, "pg_id");
+DEFINE_CONSTANT(pg_name_key, "process_group");
+DEFINE_CONSTANT(collective_seq_id_key, "collective_seq_id");
+DEFINE_CONSTANT(p2p_seq_id_key, "p2p_seq_id");
+DEFINE_CONSTANT(is_p2p_key, "is_p2p");
+DEFINE_CONSTANT(op_id_key, "op_id");
+DEFINE_CONSTANT(profiling_name_key, "profiling_name");
+DEFINE_CONSTANT(input_sizes_key, "input_sizes");
+DEFINE_CONSTANT(input_dtypes_key, "input_dtypes");
+DEFINE_CONSTANT(output_sizes_key, "output_sizes");
+DEFINE_CONSTANT(output_dtypes_key, "output_dtypes");
+DEFINE_CONSTANT(time_created_key, "time_created_ns");
+DEFINE_CONSTANT(duration_key, "duration_ms");
+DEFINE_CONSTANT(timeout_key, "timeout_ms");
+DEFINE_CONSTANT(frames_key, "frames");
+DEFINE_CONSTANT(state_key, "state");
+DEFINE_CONSTANT(line_key, "line");
+DEFINE_CONSTANT(name_key, "name");
+DEFINE_CONSTANT(filename_key, "filename");
+DEFINE_CONSTANT(retired_key, "retired");
+DEFINE_CONSTANT(time_discovered_started_key, "time_discovered_started_ns");
+DEFINE_CONSTANT(time_discovered_completed_key, "time_discovered_completed_ns");
+DEFINE_CONSTANT(completed_state, "completed");
+DEFINE_CONSTANT(scheduled_state, "scheduled");
+DEFINE_CONSTANT(started_state, "started");
+#undef DEFINE_CONSTANT
 
 TORCH_API size_t hashTensors(const std::vector<at::Tensor>& tensors);
 TORCH_API std::string getNcclVersion();
@@ -805,6 +813,77 @@ struct NCCLTraceBuffer {
     }
   }
 
+  std::list<json> getCollectiveTraceJson(bool onlyActive) {
+    auto result = dump_entries();
+
+    std::list<json> entries;
+    for (auto i : c10::irange(result.size())) {
+      json j;
+      auto& e = result.at(i);
+      if (onlyActive && e.time_discovered_completed_.has_value()) {
+        continue;
+      }
+      j[record_id_key_str] = int64_t(e.id_);
+      j[pg_id_key_str] = int64_t(e.pg_id_);
+      j[pg_name_key_str] = e.pg_name_;
+      j[collective_seq_id_key_str] = int64_t(e.collective_seq_id_);
+      j[p2p_seq_id_key_str] = int64_t(e.p2p_seq_id_);
+      j[op_id_key_str] = int64_t(e.op_id_);
+      j[profiling_name_key_str] = e.profiling_name_;
+      j[time_created_key_str] = int64_t(e.time_created_);
+      if (e.duration_) {
+        j[duration_key_str] = *e.duration_;
+      }
+      auto it = e.sizes_.begin();
+      auto read_sizes = [&](const c10::SmallVector<int, 4>& dims) {
+        auto sizes = std::list<std::list<int>>();
+        for (auto dim : dims) {
+          auto arg_sizes = std::list<int>();
+          for (auto i : c10::irange(dim)) {
+            (void)i;
+            arg_sizes.push_back(*it++);
+          }
+          sizes.push_back(arg_sizes);
+        }
+        return sizes;
+      };
+      j[input_sizes_key_str] = read_sizes(e.input_dims_);
+      std::vector<std::string> input_dtypes_strs;
+      input_dtypes_strs.reserve(e.input_dtypes_.size());
+      for (const auto& input_dtype : e.input_dtypes_) {
+        input_dtypes_strs.push_back(c10::toString(input_dtype));
+      }
+      j[input_dtypes_key_str] = input_dtypes_strs;
+      j[output_sizes_key_str] = read_sizes(e.output_dims_);
+      std::vector<std::string> output_dtypes_strs;
+      output_dtypes_strs.reserve(e.output_dtypes_.size());
+      for (const auto& output_dtype : e.output_dtypes_) {
+        output_dtypes_strs.push_back(c10::toString(output_dtype));
+      }
+      j[output_dtypes_key_str] = output_dtypes_strs;
+      if (e.time_discovered_completed_.has_value()) {
+        j[state_key_str] = completed_state_str;
+      } else if (e.time_discovered_started_.has_value()) {
+        j[state_key_str] = started_state_str;
+      } else {
+        j[state_key_str] = scheduled_state_str;
+      }
+      j[time_discovered_started_key_str] =
+          e.time_discovered_started_.has_value()
+          ? int64_t(*e.time_discovered_started_)
+          : 0;
+      j[time_discovered_completed_key_str] =
+          e.time_discovered_completed_.has_value()
+          ? int64_t(*e.time_discovered_completed_)
+          : 0;
+      j[retired_key_str] = e.retired_;
+      j[timeout_key_str] = e.timeout_ms_;
+      j[is_p2p_key_str] = e.isP2P_;
+      entries.emplace_back(j);
+    }
+    return entries;
+  }
+
   const c10::List<c10::IValue> getCollectiveTrace(
       bool includeStacktraces,
       bool onlyActive) {
@@ -833,7 +912,6 @@ struct NCCLTraceBuffer {
       if (onlyActive && e.time_discovered_completed_.has_value()) {
         continue;
       }
-
       if (includeStacktraces) {
         auto& tb = stracebacks.tracebacks.at(i);
         auto frames = new_list();
@@ -884,11 +962,11 @@ struct NCCLTraceBuffer {
       }
       dict.insert(output_dtypes_key, output_dtypes_strs);
       if (e.time_discovered_completed_.has_value()) {
-        dict.insert(state_key, "completed");
+        dict.insert(state_key, completed_state);
       } else if (e.time_discovered_started_.has_value()) {
-        dict.insert(state_key, "started");
+        dict.insert(state_key, started_state);
       } else {
-        dict.insert(state_key, "scheduled");
+        dict.insert(state_key, scheduled_state);
       }
 
       dict.insert(
@@ -921,6 +999,44 @@ struct NCCLTraceBuffer {
       pg_config.insert(std::get<0>(pg_name), pg_info);
     }
     return pg_config;
+  }
+
+  const std::map<std::string, std::map<std::string, std::string>>
+  getPgConfigJson() {
+    std::map<std::string, std::map<std::string, std::string>> result;
+    for (const auto& [pg_name, ranks] : pg_name_to_ranks_) {
+      auto pg_info = std::map<std::string, std::string>();
+      pg_info["name"] = std::get<0>(pg_name);
+      pg_info["desc"] = std::get<1>(pg_name);
+      pg_info["ranks"] = ranks_str(ranks);
+      result.emplace(std::get<0>(pg_name), pg_info);
+    }
+    return result;
+  }
+
+  std::string dump_json(
+      const std::optional<std::unordered_map<
+          std::string,
+          std::unordered_map<std::string, std::string>>>& ncclDumpMap,
+      bool includeCollectives,
+      bool onlyActive) {
+    json result;
+    result[version_key_str] = version_val_str;
+    result[pg_config_key_str] = getPgConfigJson();
+
+    // collective trace
+    if (includeCollectives) {
+      auto entries = getCollectiveTraceJson(onlyActive);
+      if (entries.size() > 0) {
+        result[entries_key_str] = entries;
+      }
+    }
+
+    if (ncclDumpMap.has_value()) {
+      result[nccl_comm_key_str] = ncclDumpMap.value();
+    }
+
+    return result.dump();
   }
 
   // dump all collectives + ncclDumpMap
@@ -959,7 +1075,6 @@ struct NCCLTraceBuffer {
     return pickle_str(result);
   }
 };
-
 } // namespace c10d
 
 #endif // USE_C10D_NCCL
