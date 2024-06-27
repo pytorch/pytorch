@@ -3,13 +3,12 @@
 import datetime
 import json
 import os
+import pathlib
 import shutil
-from pathlib import Path
 from typing import Any, Callable, cast, Dict, List, Optional, Union
 from urllib.request import urlopen
 
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 
 
 def get_disabled_issues() -> List[str]:
@@ -21,7 +20,7 @@ def get_disabled_issues() -> List[str]:
 
 SLOW_TESTS_FILE = ".pytorch-slow-tests.json"
 DISABLED_TESTS_FILE = ".pytorch-disabled-tests.json"
-ADDITIONAL_CI_FILES_FOLDER = Path(".additional_ci_files")
+ADDITIONAL_CI_FILES_FOLDER = pathlib.Path(".additional_ci_files")
 TEST_TIMES_FILE = "test-times.json"
 TEST_CLASS_TIMES_FILE = "test-class-times.json"
 TEST_FILE_RATINGS_FILE = "test-file-ratings.json"
@@ -35,7 +34,7 @@ FILE_CACHE_LIFESPAN_SECONDS = datetime.timedelta(hours=3).seconds
 
 
 def fetch_and_cache(
-    dirpath: Union[str, Path],
+    dirpath: Union[str, pathlib.Path],
     name: str,
     url: str,
     process_fn: Callable[[Dict[str, Any]], Dict[str, Any]],
@@ -43,7 +42,7 @@ def fetch_and_cache(
     """
     This fetch and cache utils allows sharing between different process.
     """
-    Path(dirpath).mkdir(exist_ok=True)
+    pathlib.Path(dirpath).mkdir(exist_ok=True)
 
     path = os.path.join(dirpath, name)
     print(f"Downloading {url} to {path}")
@@ -51,7 +50,7 @@ def fetch_and_cache(
     def is_cached_file_valid() -> bool:
         # Check if the file is new enough (see: FILE_CACHE_LIFESPAN_SECONDS). A real check
         # could make a HEAD request and check/store the file's ETag
-        fname = Path(path)
+        fname = pathlib.Path(path)
         now = datetime.datetime.now()
         mtime = datetime.datetime.fromtimestamp(fname.stat().st_mtime)
         diff = now - mtime
