@@ -10,6 +10,13 @@ from github import Auth, Github
 from github.Issue import Issue
 
 
+WORKFLOW_LABEL_META = ""  # use meta runners
+WORKFLOW_LABEL_LF = "lf."  # use runners from the linux foundation
+
+GITHUB_OUTPUT = os.getenv("GITHUB_OUTPUT", "")
+GH_OUTPUT_KEY_LABEL_TYPE = "label-type"
+
+
 class ColorFormatter(logging.Formatter):
     """Color codes the log messages based on the log level"""
 
@@ -34,12 +41,6 @@ log = logging.getLogger(os.path.basename(__file__))
 log.addHandler(handler)
 log.setLevel(logging.INFO)
 
-WORKFLOW_LABEL_META = ""  # use meta runners
-WORKFLOW_LABEL_LF = "lf."  # use runners from the linux foundation
-
-GITHUB_OUTPUT = os.getenv("GITHUB_OUTPUT", "")
-GH_OUTPUT_KEY_LABEL_TYPE = "label-type"
-
 
 def set_github_output(key: str, value: str) -> None:
     """
@@ -55,7 +56,7 @@ def set_github_output(key: str, value: str) -> None:
 
     with open(GITHUB_OUTPUT, "a") as f:
         log.info(f"Setting output: {key}='{value}'")
-        f.write(f"name={key}::{value}\n")
+        f.write(f"{key}-{value}\n")
 
 
 def parse_args() -> Any:
