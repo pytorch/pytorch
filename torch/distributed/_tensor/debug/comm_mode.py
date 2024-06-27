@@ -151,21 +151,29 @@ class CommDebugMode(TorchDispatchMode):
         Inspired by flop counter, generates a detailed table displaying collective tracing
         information on a module level
         """
+
         table = ""
         for fqn in self.advanced_module_tracker.module_depth_dict:
-            indent = "  " * (self.advanced_module_tracker.module_depth_dict[fqn])
+            indent = "    " * (self.advanced_module_tracker.module_depth_dict[fqn])
             table += f"{indent}{fqn}\n"
-
+            indent += "  "
+            collective_indent = indent
+            collective_indent += "  "
             # prints out all collectives in the respective sub-module
             if fqn in self.comm_module_counts:
-                for collective, count in self.comm_module_counts[fqn].items():
-                    collective_indent = "  " * (
-                        (self.advanced_module_tracker.module_depth_dict[fqn]) + 1
-                    )
-                    table += (
-                        f"\033[1;33m{collective_indent}*{collective}: {count}\033[0m\n"
-                    )
+                if len(self.comm_module_counts[fqn]["forward"]):
+                    table += f"{indent}FORWARD PASS\n"
+                    for collective, count in self.comm_module_counts[fqn][
+                        "forward"
+                    ].items():
+                        table += f"\033[1;33m{collective_indent}*{collective}: {count}\033[0m\n"
 
+                if len(self.comm_module_counts[fqn]["backward"]):
+                    table += f"{indent}BACKWARD PASS\n"
+                    for collective, count in self.comm_module_counts[fqn][
+                        "backward"
+                    ].items():
+                        table += f"\033[1;33m{collective_indent}*{collective}: {count}\033[0m\n"
         return table
 
     def generate_operation_tracing_table(self):
@@ -176,47 +184,69 @@ class CommDebugMode(TorchDispatchMode):
 
         table = ""
         for fqn in self.advanced_module_tracker.module_depth_dict:
-            indent = "  " * (self.advanced_module_tracker.module_depth_dict[fqn])
+            # setting up indentations for table formatting
+            indent = "  " * (2 * self.advanced_module_tracker.module_depth_dict[fqn])
             table += f"{indent}{fqn}\n"
+            indent += "  "
+            collective_indent = "  " * (
+                2 * self.advanced_module_tracker.module_depth_dict[fqn] + 2
+            )
+            operation_indent = "  " * (
+                2 * self.advanced_module_tracker.module_depth_dict[fqn] + 3
+            )
 
-            indent += " "
-            bw = False
-
-            # prints out all collectives in the respective sub-module
+            # separate the module's collective and operations by forward and backward
+            forward_collectives = {}
+            backward_collectives = {}
             if fqn in self.comm_module_counts:
-                for collective, count in self.comm_module_counts[fqn].items():
-                    collective_indent = "  " * (
-                        (self.advanced_module_tracker.module_depth_dict[fqn]) + 1
-                    )
+                forward_collectives = self.comm_module_counts[fqn]["forward"]
+                backward_collectives = self.comm_module_counts[fqn]["backward"]
+
+            forward_operations = []
+            backward_operations = []
+            if fqn in self.comm_module_operation_counts:
+                forward_operations = [
+                    op
+                    for op in self.comm_module_operation_counts[fqn]["operations_list"]
+                    if not op["is_bw"]
+                ]
+                backward_operations = [
+                    op
+                    for op in self.comm_module_operation_counts[fqn]["operations_list"]
+                    if op["is_bw"]
+                ]
+
+            # adds tracing information for module's forward or backward
+            def add_tracing_information(table, collectives_dict, operation_list):
+                for collective, count in collectives_dict.items():
                     table += (
                         f"\033[1;33m{collective_indent}*{collective}: {count}\033[0m\n"
                     )
 
-            if fqn in self.comm_module_operation_counts:
-                table += f"{indent} FORWARD PASS\n"
-                for operation in self.comm_module_operation_counts[fqn][
-                    "operations_list"
-                ]:
-                    # checks to see where backward pass of a module occurs
-                    if not bw and operation["is_bw"]:
-                        bw = True
-                        table += f"\n{indent} BACKWARD PASS\n"
-                    collective_indent = "  " * (
-                        (self.advanced_module_tracker.module_depth_dict[fqn]) + 2
-                    )
-
-                    # prints the operations in the respective sub-module
+                for operation in operation_list:
                     operation_name = operation["name"]
-                    table += f"\033[1;33m{collective_indent}*{operation_name} \033[0m\n"
+                    table += f"\033[1;33m{collective_indent}**{operation_name}\033[0m\n"
 
                     if len(operation["input_shape"]):
-                        collective_indent = "  " * (
-                            (self.advanced_module_tracker.module_depth_dict[fqn]) + 3
-                        )
                         operation_shape = operation["input_shape"]
                         operation_sharding = operation["input_sharding"]
-                        table += f"\033[1;31m{collective_indent}shape: {operation_shape} \033[0m\n"
-                        table += f"\033[1;31m{collective_indent}sharding: {operation_sharding} \033[0m\n"
+                        table += f"\033[1;31m{operation_indent}shape: {operation_shape}\033[0m\n"
+
+                        table += f"\033[1;31m{operation_indent}sharding: {operation_sharding}\033[0m\n"
+
+                return table
+
+            if len(forward_collectives) or len(forward_operations):
+                table += f"{indent}FORWARD PASS\n"
+                table = add_tracing_information(
+                    table, forward_collectives, forward_operations
+                )
+
+            if len(backward_collectives) or len(backward_operations):
+                table += f"{indent}BACKWARD PASS\n"
+                table = add_tracing_information(
+                    table, backward_collectives, backward_operations
+                )
 
         return table
 
@@ -328,20 +358,32 @@ class CommDebugMode(TorchDispatchMode):
                 func_packet = NATIVE_TO_PY_MAPPING[func_packet]
             self.comm_counts[func_packet] += 1
 
+            key = "forward"
+            if self.advanced_module_tracker.is_bw:
+                key = "backward"
+
             # adds collective count to current module
             if self.advanced_module_tracker.name not in self.comm_module_counts:
-                self.comm_module_counts[
-                    self.advanced_module_tracker.name
+                self.comm_module_counts[self.advanced_module_tracker.name] = {}
+                self.comm_module_counts[self.advanced_module_tracker.name][
+                    "forward"
                 ] = defaultdict(int)
-            self.comm_module_counts[self.advanced_module_tracker.name][func_packet] += 1
+                self.comm_module_counts[self.advanced_module_tracker.name][
+                    "backward"
+                ] = defaultdict(int)
+            self.comm_module_counts[self.advanced_module_tracker.name][key][
+                func_packet
+            ] += 1
 
             # adds collective count to parent modules
             for par in self.advanced_module_tracker.parents:
                 # makes sure we aren't double counting when current sub-module hasn't been removed from parents
                 if par != self.advanced_module_tracker.name:
                     if par not in self.comm_module_counts:
-                        self.comm_module_counts[par] = defaultdict(int)
-                    self.comm_module_counts[par][func_packet] += 1
+                        self.comm_module_counts[par] = {}
+                        self.comm_module_counts[par]["forward"] = defaultdict(int)
+                        self.comm_module_counts[par]["backward"] = defaultdict(int)
+                    self.comm_module_counts[par][key][func_packet] += 1
 
         # if tensor op uses fake tensors, return
         if detect_fake_mode(args):

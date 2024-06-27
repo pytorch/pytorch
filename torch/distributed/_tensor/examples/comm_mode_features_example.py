@@ -132,15 +132,18 @@ class CommDebugModeExample:
         Example code to demonstrate CommModeDebug's module level tracing using a MLP model.
         Prints a table of module level collective tracing information and logs table to output.txt
 
-        Expected Output
+        Expected Output:
         Global
-        *c10d_functional.all_reduce: 1
-        MLPModule
+          FORWARD PASS
             *c10d_functional.all_reduce: 1
-            MLPModule.net1
-            MLPModule.relu
-            MLPModule.net2
-            *c10d_functional.all_reduce: 1
+            MLPModule
+              FORWARD PASS
+                *c10d_functional.all_reduce: 1
+                MLPModule.net1
+                MLPModule.relu
+                MLPModule.net2
+                  FORWARD PASS
+                    *c10d_functional.all_reduce: 1
         """
 
         device_mesh = DeviceMesh(
@@ -179,57 +182,72 @@ class CommDebugModeExample:
 
         Expected output:
         Global
-        *c10d_functional.all_reduce: 6
-        *c10d_functional.all_gather_into_tensor: 1
-        Transformer
+          FORWARD PASS
             *c10d_functional.all_reduce: 6
             *c10d_functional.all_gather_into_tensor: 1
-            Transformer.tok_embeddings
-            *c10d_functional.all_reduce: 1
-            Transformer.pos_embeddings
-            *c10d_functional.all_reduce: 1
-            Transformer.dropout
-            Transformer.layers.0
-            *c10d_functional.all_reduce: 2
-            Transformer.layers.0.attention_norm
-            Transformer.layers.0.attention
-                *c10d_functional.all_reduce: 1
-                Transformer.layers.0.attention.wq
-                Transformer.layers.0.attention.wk
-                Transformer.layers.0.attention.wv
-                Transformer.layers.0.attention.wo
-                *c10d_functional.all_reduce: 1
-                Transformer.layers.0.attention.resid_dropout
-            Transformer.layers.0.ffn_norm
-            Transformer.layers.0.feed_forward
-                *c10d_functional.all_reduce: 1
-                Transformer.layers.0.feed_forward.w1
-                Transformer.layers.0.feed_forward.gelu
-                Transformer.layers.0.feed_forward.w2
-                *c10d_functional.all_reduce: 1
-                Transformer.layers.0.feed_forward.resid_dropout
-            Transformer.layers.1
-            *c10d_functional.all_reduce: 2
-            Transformer.layers.1.attention_norm
-            Transformer.layers.1.attention
-                *c10d_functional.all_reduce: 1
-                Transformer.layers.1.attention.wq
-                Transformer.layers.1.attention.wk
-                Transformer.layers.1.attention.wv
-                Transformer.layers.1.attention.wo
-                *c10d_functional.all_reduce: 1
-                Transformer.layers.1.attention.resid_dropout
-            Transformer.layers.1.ffn_norm
-            Transformer.layers.1.feed_forward
-                *c10d_functional.all_reduce: 1
-                Transformer.layers.1.feed_forward.w1
-                Transformer.layers.1.feed_forward.gelu
-                Transformer.layers.1.feed_forward.w2
-                *c10d_functional.all_reduce: 1
-                Transformer.layers.1.feed_forward.resid_dropout
-            Transformer.norm
-            Transformer.output
-            *c10d_functional.all_gather_into_tensor: 1
+            Transformer
+              FORWARD PASS
+                *c10d_functional.all_reduce: 6
+                *c10d_functional.all_gather_into_tensor: 1
+                Transformer.tok_embeddings
+                  FORWARD PASS
+                    *c10d_functional.all_reduce: 1
+                Transformer.pos_embeddings
+                  FORWARD PASS
+                    *c10d_functional.all_reduce: 1
+                Transformer.dropout
+                Transformer.layers.0
+                  FORWARD PASS
+                    *c10d_functional.all_reduce: 2
+                    Transformer.layers.0.attention_norm
+                    Transformer.layers.0.attention
+                      FORWARD PASS
+                        *c10d_functional.all_reduce: 1
+                        Transformer.layers.0.attention.wq
+                        Transformer.layers.0.attention.wk
+                        Transformer.layers.0.attention.wv
+                        Transformer.layers.0.attention.wo
+                          FORWARD PASS
+                            *c10d_functional.all_reduce: 1
+                        Transformer.layers.0.attention.resid_dropout
+                    Transformer.layers.0.ffn_norm
+                    Transformer.layers.0.feed_forward
+                      FORWARD PASS
+                        *c10d_functional.all_reduce: 1
+                        Transformer.layers.0.feed_forward.w1
+                        Transformer.layers.0.feed_forward.gelu
+                        Transformer.layers.0.feed_forward.w2
+                          FORWARD PASS
+                            *c10d_functional.all_reduce: 1
+                        Transformer.layers.0.feed_forward.resid_dropout
+                Transformer.layers.1
+                  FORWARD PASS
+                    *c10d_functional.all_reduce: 2
+                    Transformer.layers.1.attention_norm
+                    Transformer.layers.1.attention
+                      FORWARD PASS
+                        *c10d_functional.all_reduce: 1
+                        Transformer.layers.1.attention.wq
+                        Transformer.layers.1.attention.wk
+                        Transformer.layers.1.attention.wv
+                        Transformer.layers.1.attention.wo
+                          FORWARD PASS
+                            *c10d_functional.all_reduce: 1
+                        Transformer.layers.1.attention.resid_dropout
+                    Transformer.layers.1.ffn_norm
+                    Transformer.layers.1.feed_forward
+                      FORWARD PASS
+                        *c10d_functional.all_reduce: 1
+                        Transformer.layers.1.feed_forward.w1
+                        Transformer.layers.1.feed_forward.gelu
+                        Transformer.layers.1.feed_forward.w2
+                          FORWARD PASS
+                            *c10d_functional.all_reduce: 1
+                        Transformer.layers.1.feed_forward.resid_dropout
+                Transformer.norm
+                Transformer.output
+                  FORWARD PASS
+                    *c10d_functional.all_gather_into_tensor: 1
 
         """
         device_mesh = DeviceMesh(
@@ -262,199 +280,200 @@ class CommDebugModeExample:
 
         Expected output:
         Global
-          *c10d_functional.all_reduce: 1
-          MLPModule
+          FORWARD PASS
             *c10d_functional.all_reduce: 1
-            MLPModule.net1
+            MLPModule
               FORWARD PASS
-                *aten.detach.default
-                  shape: [torch.Size([16, 10])]
-                  sharding: [(Shard(dim=0),)]
-                *aten.detach.default
-                *aten.detach.default
-                *aten.detach.default
-                  shape: [torch.Size([16, 10])]
-                  sharding: [(Shard(dim=0),)]
-                *aten.detach.default
-                *aten.detach.default
-                *aten.detach.default
-                  shape: [torch.Size([16, 10])]
-                  sharding: [(Shard(dim=0),)]
-                *aten.detach.default
-                *aten.detach.default
-                *aten.detach.default
-                  shape: [torch.Size([16])]
-                  sharding: [(Shard(dim=0),)]
-                *aten.detach.default
-                *aten.detach.default
-                *aten.detach.default
-                  shape: [torch.Size([16])]
-                  sharding: [(Shard(dim=0),)]
-                *aten.detach.default
-                *aten.detach.default
-                *aten.detach.default
-                  shape: [torch.Size([16])]
-                  sharding: [(Shard(dim=0),)]
-                *aten.detach.default
-                *aten.detach.default
-                *aten.view.default
-                *aten.t.default
-                  shape: [torch.Size([16, 10])]
-                  sharding: [(Shard(dim=0),)]
-                *aten.t.default
-                *aten.addmm.default
-                  shape: [torch.Size([16]), torch.Size([8, 10]), torch.Size([10, 16])]
-                  sharding: [(Shard(dim=0),), (Replicate(),), (Shard(dim=1),)]
-                *aten.addmm.default
-                *aten.view.default
-            MLPModule.relu
-              FORWARD PASS
-                *aten.relu.default
-                *aten.detach.default
-            MLPModule.net2
-              *c10d_functional.all_reduce: 1
-              FORWARD PASS
-                *aten.detach.default
-                  shape: [torch.Size([10, 16])]
-                  sharding: [(Shard(dim=1),)]
-                *aten.detach.default
-                *aten.detach.default
-                *aten.detach.default
-                  shape: [torch.Size([10, 16])]
-                  sharding: [(Shard(dim=1),)]
-                *aten.detach.default
-                *aten.detach.default
-                *aten.detach.default
-                  shape: [torch.Size([10, 16])]
-                  sharding: [(Shard(dim=1),)]
-                *aten.detach.default
-                *aten.detach.default
-                *aten.detach.default
-                  shape: [torch.Size([10])]
-                  sharding: [(Replicate(),)]
-                *aten.detach.default
-                *aten.detach.default
-                *aten.detach.default
-                  shape: [torch.Size([10])]
-                  sharding: [(Replicate(),)]
-                *aten.detach.default
-                *aten.detach.default
-                *aten.detach.default
-                  shape: [torch.Size([10])]
-                  sharding: [(Replicate(),)]
-                *aten.detach.default
-                *aten.detach.default
-                *aten.view.default
-                *aten.t.default
-                  shape: [torch.Size([10, 16])]
-                  sharding: [(Shard(dim=1),)]
-                *aten.t.default
-                *aten.addmm.default
-                  shape: [torch.Size([10]), torch.Size([8, 16]), torch.Size([16, 10])]
-                  sharding: [(Replicate(),), (Shard(dim=1),), (Shard(dim=0),)]
-                *aten.div.Tensor
-                *aten.addmm.default
-                *_c10d_functional.all_reduce.default
-                *aten.view.default
-                *aten.sum.default
-                *aten.ones_like.default
-
-              BACKWARD PASS
-                *aten.expand.default
-                *aten.t.default
-                  shape: [torch.Size([16, 10])]
-                  sharding: [(Shard(dim=0),)]
-                *aten.t.default
-                *aten.mm.default
-                  shape: [torch.Size([8, 10]), torch.Size([10, 16])]
-                  sharding: [(Replicate(),), (Shard(dim=1),)]
-                *aten.mm.default
-                *aten.t.default
-                  shape: [torch.Size([8, 10])]
-                  sharding: [(Replicate(),)]
-                *aten.t.default
-                *aten.mm.default
-                  shape: [torch.Size([10, 8]), torch.Size([8, 16])]
-                  sharding: [(Replicate(),), (Shard(dim=1),)]
-                *aten.mm.default
-                *aten.t.default
-                  shape: [torch.Size([10, 16])]
-                  sharding: [(Shard(dim=1),)]
-                *aten.t.default
-                *aten.sum.dim_IntList
-                  shape: [torch.Size([8, 10])]
-                  sharding: [(Replicate(),)]
-                *aten.sum.dim_IntList
-                *aten.view.default
-                  shape: [torch.Size([1, 10])]
-                  sharding: [(Replicate(),)]
-                *aten.view.default
-                *aten.detach.default
-                  shape: [torch.Size([10])]
-                  sharding: [(Replicate(),)]
-                *aten.detach.default
-                *aten.detach.default
-                  shape: [torch.Size([10])]
-                  sharding: [(Replicate(),)]
-                *aten.detach.default
-                *aten.detach.default
-                *aten.t.default
-                  shape: [torch.Size([16, 10])]
-                  sharding: [(Shard(dim=0),)]
-                *aten.t.default
-                *aten.detach.default
-                  shape: [torch.Size([10, 16])]
-                  sharding: [(Shard(dim=1),)]
-                *aten.detach.default
-                *aten.detach.default
-                  shape: [torch.Size([10, 16])]
-                  sharding: [(Shard(dim=1),)]
-                *aten.detach.default
-                *aten.detach.default
-                *aten.detach.default
-                *aten.threshold_backward.default
-                *aten.t.default
-                  shape: [torch.Size([8, 16])]
-                  sharding: [(Shard(dim=1),)]
-                *aten.t.default
-                *aten.mm.default
-                  shape: [torch.Size([16, 8]), torch.Size([8, 10])]
-                  sharding: [(Shard(dim=0),), (Replicate(),)]
-                *aten.mm.default
-                *aten.t.default
-                  shape: [torch.Size([16, 10])]
-                  sharding: [(Shard(dim=0),)]
-                *aten.t.default
-                *aten.sum.dim_IntList
-                  shape: [torch.Size([8, 16])]
-                  sharding: [(Shard(dim=1),)]
-                *aten.sum.dim_IntList
-                *aten.view.default
-                  shape: [torch.Size([1, 16])]
-                  sharding: [(Shard(dim=1),)]
-                *aten.view.default
-                *aten.detach.default
-                  shape: [torch.Size([16])]
-                  sharding: [(Shard(dim=0),)]
-                *aten.detach.default
-                *aten.detach.default
-                  shape: [torch.Size([16])]
-                  sharding: [(Shard(dim=0),)]
-                *aten.detach.default
-                *aten.detach.default
-                *aten.t.default
-                  shape: [torch.Size([10, 16])]
-                  sharding: [(Shard(dim=1),)]
-                *aten.t.default
-                *aten.detach.default
-                  shape: [torch.Size([16, 10])]
-                  sharding: [(Shard(dim=0),)]
-                *aten.detach.default
-                *aten.detach.default
-                  shape: [torch.Size([16, 10])]
-                  sharding: [(Shard(dim=0),)]
-                *aten.detach.default
-                *aten.detach.default
+                *c10d_functional.all_reduce: 1
+                MLPModule.net1
+                  FORWARD PASS
+                    **aten.detach.default
+                      shape: [torch.Size([16, 10])]
+                      sharding: [(Shard(dim=0),)]
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.detach.default
+                      shape: [torch.Size([16, 10])]
+                      sharding: [(Shard(dim=0),)]
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.detach.default
+                      shape: [torch.Size([16, 10])]
+                      sharding: [(Shard(dim=0),)]
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.detach.default
+                      shape: [torch.Size([16])]
+                      sharding: [(Shard(dim=0),)]
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.detach.default
+                      shape: [torch.Size([16])]
+                      sharding: [(Shard(dim=0),)]
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.detach.default
+                      shape: [torch.Size([16])]
+                      sharding: [(Shard(dim=0),)]
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.view.default
+                    **aten.t.default
+                      shape: [torch.Size([16, 10])]
+                      sharding: [(Shard(dim=0),)]
+                    **aten.t.default
+                    **aten.addmm.default
+                      shape: [torch.Size([16]), torch.Size([8, 10]), torch.Size([10, 16])]
+                      sharding: [(Shard(dim=0),), (Replicate(),), (Shard(dim=1),)]
+                    **aten.addmm.default
+                    **aten.view.default
+                MLPModule.relu
+                  FORWARD PASS
+                    **aten.relu.default
+                    **aten.detach.default
+                MLPModule.net2
+                  FORWARD PASS
+                    *c10d_functional.all_reduce: 1
+                    **aten.detach.default
+                      shape: [torch.Size([10, 16])]
+                      sharding: [(Shard(dim=1),)]
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.detach.default
+                      shape: [torch.Size([10, 16])]
+                      sharding: [(Shard(dim=1),)]
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.detach.default
+                      shape: [torch.Size([10, 16])]
+                      sharding: [(Shard(dim=1),)]
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.detach.default
+                      shape: [torch.Size([10])]
+                      sharding: [(Replicate(),)]
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.detach.default
+                      shape: [torch.Size([10])]
+                      sharding: [(Replicate(),)]
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.detach.default
+                      shape: [torch.Size([10])]
+                      sharding: [(Replicate(),)]
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.view.default
+                    **aten.t.default
+                      shape: [torch.Size([10, 16])]
+                      sharding: [(Shard(dim=1),)]
+                    **aten.t.default
+                    **aten.addmm.default
+                      shape: [torch.Size([10]), torch.Size([8, 16]), torch.Size([16, 10])]
+                      sharding: [(Replicate(),), (Shard(dim=1),), (Shard(dim=0),)]
+                    **aten.div.Tensor
+                    **aten.addmm.default
+                    **_c10d_functional.all_reduce.default
+                    **aten.view.default
+                    **aten.sum.default
+                    **aten.ones_like.default
+                  BACKWARD PASS
+                    **aten.expand.default
+                    **aten.t.default
+                      shape: [torch.Size([16, 10])]
+                      sharding: [(Shard(dim=0),)]
+                    **aten.t.default
+                    **aten.mm.default
+                      shape: [torch.Size([8, 10]), torch.Size([10, 16])]
+                      sharding: [(Replicate(),), (Shard(dim=1),)]
+                    **aten.mm.default
+                    **aten.t.default
+                      shape: [torch.Size([8, 10])]
+                      sharding: [(Replicate(),)]
+                    **aten.t.default
+                    **aten.mm.default
+                      shape: [torch.Size([10, 8]), torch.Size([8, 16])]
+                      sharding: [(Replicate(),), (Shard(dim=1),)]
+                    **aten.mm.default
+                    **aten.t.default
+                      shape: [torch.Size([10, 16])]
+                      sharding: [(Shard(dim=1),)]
+                    **aten.t.default
+                    **aten.sum.dim_IntList
+                      shape: [torch.Size([8, 10])]
+                      sharding: [(Replicate(),)]
+                    **aten.sum.dim_IntList
+                    **aten.view.default
+                      shape: [torch.Size([1, 10])]
+                      sharding: [(Replicate(),)]
+                    **aten.view.default
+                    **aten.detach.default
+                      shape: [torch.Size([10])]
+                      sharding: [(Replicate(),)]
+                    **aten.detach.default
+                    **aten.detach.default
+                      shape: [torch.Size([10])]
+                      sharding: [(Replicate(),)]
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.t.default
+                      shape: [torch.Size([16, 10])]
+                      sharding: [(Shard(dim=0),)]
+                    **aten.t.default
+                    **aten.detach.default
+                      shape: [torch.Size([10, 16])]
+                      sharding: [(Shard(dim=1),)]
+                    **aten.detach.default
+                    **aten.detach.default
+                      shape: [torch.Size([10, 16])]
+                      sharding: [(Shard(dim=1),)]
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.threshold_backward.default
+                    **aten.t.default
+                      shape: [torch.Size([8, 16])]
+                      sharding: [(Shard(dim=1),)]
+                    **aten.t.default
+                    **aten.mm.default
+                      shape: [torch.Size([16, 8]), torch.Size([8, 10])]
+                      sharding: [(Shard(dim=0),), (Replicate(),)]
+                    **aten.mm.default
+                    **aten.t.default
+                      shape: [torch.Size([16, 10])]
+                      sharding: [(Shard(dim=0),)]
+                    **aten.t.default
+                    **aten.sum.dim_IntList
+                      shape: [torch.Size([8, 16])]
+                      sharding: [(Shard(dim=1),)]
+                    **aten.sum.dim_IntList
+                    **aten.view.default
+                      shape: [torch.Size([1, 16])]
+                      sharding: [(Shard(dim=1),)]
+                    **aten.view.default
+                    **aten.detach.default
+                      shape: [torch.Size([16])]
+                      sharding: [(Shard(dim=0),)]
+                    **aten.detach.default
+                    **aten.detach.default
+                      shape: [torch.Size([16])]
+                      sharding: [(Shard(dim=0),)]
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.t.default
+                      shape: [torch.Size([10, 16])]
+                      sharding: [(Shard(dim=1),)]
+                    **aten.t.default
+                    **aten.detach.default
+                      shape: [torch.Size([16, 10])]
+                      sharding: [(Shard(dim=0),)]
+                    **aten.detach.default
+                    **aten.detach.default
+                      shape: [torch.Size([16, 10])]
+                      sharding: [(Shard(dim=0),)]
+                    **aten.detach.default
+                    **aten.detach.default
         """
 
         device_mesh = DeviceMesh(
