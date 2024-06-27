@@ -75,20 +75,20 @@ def set_(tensor, data):
 
 
 """
-[Note: Avoiding functionalization for fsdp.set_ and inductor.resize_storage_bytes_]
+[Note: Avoiding functionalization for fsdp.set_ and inductor.resize_storage_bytes_(0)]
 
-Currently we don't functionalize `fsdp.set_` op or `inductor.resize_storage_bytes_` op
+Currently we don't functionalize `fsdp.set_` op or `inductor.resize_storage_bytes_(0)` op
 (i.e. they show up as a mutation op in the middle of the AOT joint graph).
 
 Reason:
 Traceable FSDP2 compiled autograd BWD graph have the following traits:
 (1) Two inputs of the graph were aliased to each other (one from hook closed-over tensors, one from FWD saved tensors).
-(2) One of them is mutated (set_ and resize_ to handle the all-gathered param).
+(2) One of them is mutated (set_ and resize_(0) to handle the all-gathered param).
 (3) They are both subclasses.
 The combination of these traits is not supported by AOTAutograd (it's difficult to reason about subclass aliasing).
 So this doesn't work at all for Traceable FSDP2.
 
-The compromise we use is to avoid functionalization for the FSDP2 set_ and resize_ ops.
+The compromise we use is to avoid functionalization for the FSDP2 set_ and resize_(0) ops.
 This avoids the problem above, because from AOTAutograd point-of-view there are no mutations
 that functionalization needs to handle. (Although we need to be careful not to DCE those mutable ops.)
 
@@ -101,7 +101,7 @@ So calling resize-to-0 in the middle of the graph to free nn.Parameter memory af
 
 Q: But doesn't the torch.compile stack have the "functional graph" assumption in many places?
 A: Yes - this is WIP but we will try to get back to functional graph as early as possible in the lowering process.
-Specifically, we believe we can move both .set_ and .resize_ ops to end of graph in AOT joint graph before partitioner
+Specifically, we believe we can move both .set_ and .resize_(0) ops to end of graph in AOT joint graph before partitioner
 (i.e. effectively "re-functionalizing" those ops). Put it in another way, we avoid functionalization for those two ops just to
 make AOTAutograd alias analysis happy, and as soon as we are past that point, we "re-functionalize" the graph.
 This requires a custom FX pass but we believe it's not hard to write and maintain.
