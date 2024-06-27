@@ -14,7 +14,12 @@ on:
       curr_branch:
         required: true
         type: string
-        description: Current branch.
+        description: Current branch or tag.
+      curr_ref_type:
+        required: false
+        type: string
+        default: branch
+        description: The value of "github.ref_type", "branch" or "tag"
       issue_number:
         required: false
         type: string
@@ -71,11 +76,17 @@ jobs:
               parser = ArgumentParser("Get dynamic rollout settings")
               parser.add_argument("--github-token", type=str, required=True, help="GitHub token")
               parser.add_argument(
-                  "--github-repo",
+                  "--github-issue-repo",
                   type=str,
                   required=False,
                   default="pytorch/test-infra",
                   help="GitHub repo to get the issue",
+              )
+              parser.add_argument(
+                  "--github-repo",
+                  type=str,
+                  required=True,
+                  help="GitHub repo where CI is running",
               )
               parser.add_argument(
                   "--github-issue", type=int, required=True, help="GitHub issue number"
@@ -87,7 +98,13 @@ jobs:
                   "--github-issue-owner", type=str, required=True, help="GitHub issue owner"
               )
               parser.add_argument(
-                  "--github-branch", type=str, required=True, help="Current GitHub branch"
+                  "--github-branch", type=str, required=True, help="Current GitHub branch or tag"
+              )
+              parser.add_argument(
+                  "--github-ref-type",
+                  type=str,
+                  required=True,
+                  help="Current GitHub ref type, branch or tag",
               )
 
               return parser.parse_args()
@@ -101,6 +118,28 @@ jobs:
           def get_issue(gh: Github, repo: str, issue_num: int) -> Issue:
               repo = gh.get_repo(repo)
               return repo.get_issue(number=issue_num)
+
+
+          def get_user(gh: Github, repo: str, username: str, ref_type: str, ref_name: str) -> str:
+              # If the trigger was a new tag added by a bot, this is a ciflow case
+              # Fetch the actual username from the original PR. The PR number is
+              # embedded in the tag name: ciflow/<name>/<pr-number>
+              if username == "pytorch-bot[bot]" and ref_type == "tag":
+                  split_tag = ref_name.split("/")
+                  if (
+                      len(split_tag) == 3
+                      and split_tag[0] == "ciflow"
+                      and split_tag[2].isnumeric()
+                  ):
+                      pr_number = split_tag[2]
+                      try:
+                          repository = gh.get_repo(repo)
+                          pull = repository.get_pull(number=int(pr_number))
+                      except Exception as e:
+                          raise Exception(f"issue with pull request {pr_number} from repo {repository}") from e
+                      return pull.user.login
+              # In all other cases, return the original input username
+              return username
 
 
           def is_exception_branch(branch: str) -> bool:
@@ -137,7 +176,7 @@ jobs:
           def main() -> None:
               args = parse_args()
 
-              if is_exception_branch(args.github_branch):
+              if args.github_ref_type == "branch" and is_exception_branch(args.github_branch):
                   output = {
                       LABEL_TYPE_KEY: WORKFLOW_LABEL_META,
                       MESSAGE_KEY: f"Exception branch: '{args.github_branch}', using meta runners",
@@ -146,8 +185,15 @@ jobs:
                   try:
                       gh = get_gh_client(args.github_token)
                       # The default issue we use - https://github.com/pytorch/test-infra/issues/5132
-                      issue = get_issue(gh, args.github_repo, args.github_issue)
-                      label_type, message = get_workflow_type(issue, (args.github_issue_owner, args.github_actor, ))
+                      issue = get_issue(gh, args.github_issue_repo, args.github_issue)
+                      username = get_user(
+                          gh,
+                          args.github_repo,
+                          args.github_actor,
+                          args.github_ref_type,
+                          args.github_branch,
+                      )
+                      label_type, message = get_workflow_type(issue, (args.github_issue_owner, username, ))
                       output = {
                           LABEL_TYPE_KEY: label_type,
                           MESSAGE_KEY: message,
@@ -174,6 +220,7 @@ jobs:
         id: set-condition
         run: |
           curr_branch="${{ inputs.curr_branch }}"
+          curr_ref_type="${{ inputs.curr_ref_type }}"
           echo "Current branch is '$curr_branch'"
 
           output="$(python3 get_workflow_type.py \
@@ -181,7 +228,9 @@ jobs:
             --github-issue "$ISSUE_NUMBER" \
             --github-branch "$curr_branch" \
             --github-actor "$TRIGGERING_ACTOR" \
-            --github-issue-owner "$ISSUE_OWNER")"
+            --github-issue-owner "$ISSUE_OWNER" \
+            --github-ref-type "$curr_ref_type" \
+            --github-repo "$GITHUB_REPOSITORY")"
 
           echo "Output: '${output}'"
 
