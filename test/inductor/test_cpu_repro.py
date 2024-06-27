@@ -2618,7 +2618,6 @@ class CPUReproTests(TestCase):
         # since exp will be used after exp2, exp2 can't share the same
         # local buffer as exp
         def fn(x):
-            # softmax = torch.nn.functional.softmax(x, dim=-1)
             a_max = torch.amax(x, -1, keepdim=True)
             exp = torch.exp(x - a_max)
             sum = torch.sum(exp, -1, keepdim=True)
