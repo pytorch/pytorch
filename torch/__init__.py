@@ -2328,7 +2328,7 @@ def compile(
     # Decorator mode
     if model is None:
 
-        def fn(model: Callable[_InputT, _RetT]) -> Callable[_InputT, _RetT]:
+        def fn(model: _Callable[_InputT, _RetT]) -> _Callable[_InputT, _RetT]:
             if model is None:
                 raise RuntimeError("Model can't be None")
             return compile(
