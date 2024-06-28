@@ -377,12 +377,23 @@ class CppPackedGemmTemplate(CppTemplate):
                     W.reshape(k, n // block_n, block_n).transpose(0, 1).contiguous()
                 )
                 if micro_gemm.get_b_layout() != LayoutType.NORMAL:
+                    layout_str = (
+                        "VNNI4"
+                        if micro_gemm.get_b_layout() == LayoutType.VNNI4
+                        else "VNNI2"
+                    )
+                    assert micro_gemm.get_b_layout() in [
+                        LayoutType.VNNI2,
+                        LayoutType.VNNI4,
+                    ], f"We only support {layout_str} for now"
+                    vnni_size = (
+                        4 if micro_gemm.get_b_layout() == LayoutType.VNNI4 else 2
+                    )
                     assert (
-                        micro_gemm.get_b_layout() == LayoutType.VNNI2
-                    ), "We only support VNNI2 for now"
-                    assert k % 2 == 0, "k should be even for VNNI2 layout"
+                        k % vnni_size == 0
+                    ), f"k should be divisible by vnni_size for {layout_str} layout"
                     blocked_w = (
-                        blocked_w.view(n // block_n, k // 2, 2, block_n)
+                        blocked_w.view(n // block_n, k // vnni_size, vnni_size, block_n)
                         .transpose(-1, -2)
                         .contiguous()
                         .view(n // block_n, k, block_n)
