@@ -821,6 +821,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         return key in self.value.__dict__
 
+    def is_supported_nn_module_method(self, method):
+        return torch._dynamo.config.inline_inbuilt_nn_modules and method in (
+            torch.nn.Module.parameters,
+        )
+
     def var_getattr(self, tx, name):
         from .. import trace_rules
         from . import ConstantVariable
@@ -905,6 +910,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             isinstance(subobj, types.MethodType)
             and isinstance(self.value, torch.nn.Module)
         ):
+            if self.is_supported_nn_module_method(subobj):
+                return variables.GetAttrVariable(self, name, source=source)
+
             # Since we get subobj via self._getattr_static, which may not trigger dynamic lookup.
             # Static lookup can't tell us it's a method or function correctly,
             # so we trigger dynamic lookup here to get the correct type.
