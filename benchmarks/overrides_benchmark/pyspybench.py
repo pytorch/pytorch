@@ -4,7 +4,6 @@ from common import SubTensor, SubWithTorchFunction, WithTorchFunction  # noqa: F
 
 import torch
 
-
 Tensor = torch.tensor
 
 NUM_REPEATS = 1000000

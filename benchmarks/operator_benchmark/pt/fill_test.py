@@ -1,8 +1,7 @@
 import operator_benchmark as op_bench
-
 import torch
-from torch.testing._internal.common_device_type import get_all_device_types
 
+from torch.testing._internal.common_device_type import get_all_device_types
 
 """Microbenchmark for Fill_ operator."""
 

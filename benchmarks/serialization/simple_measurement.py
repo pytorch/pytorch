@@ -2,7 +2,6 @@ from pyarkbench import Benchmark, default_args, Timer
 
 import torch
 
-
 use_new = True
 
 
