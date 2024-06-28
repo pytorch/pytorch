@@ -3,6 +3,7 @@ import io
 import os
 
 import onnx
+
 from beartype import roar
 
 import torch
@@ -15,7 +16,6 @@ from torch.onnx._internal.exporter import (
     ResolvedExportOptions,
 )
 from torch.onnx._internal.fx import diagnostics
-
 from torch.testing._internal import common_utils
 
 

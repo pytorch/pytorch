@@ -7,7 +7,6 @@ import warnings
 import weakref
 from collections import namedtuple, OrderedDict
 from copy import deepcopy
-
 from functools import partial
 from tempfile import NamedTemporaryFile
 from typing import Any, Dict, List, Tuple
