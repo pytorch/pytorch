@@ -1,9 +1,9 @@
 # Generates RegisterCodegenUnboxedKernels.cpp, UnboxingFunctions.h and UnboxingFunctions.cpp.
 import argparse
 import os
-import pathlib
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import List, Literal, Sequence, Union
 
 import yaml
@@ -272,7 +272,7 @@ def main(args: List[str]) -> None:
     gen_unboxing(native_functions=native_functions, cpu_fm=cpu_fm, selector=selector)
 
     if options.output_dependencies:
-        depfile_path = pathlib.Path(options.output_dependencies).resolve()
+        depfile_path = Path(options.output_dependencies).resolve()
         depfile_name = depfile_path.name
         depfile_stem = depfile_path.stem
 
