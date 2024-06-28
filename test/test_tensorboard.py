@@ -23,15 +23,6 @@ except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
-TEST_CAFFE2 = True
-try:
-    import caffe2.python.caffe2_pybind11_state as _caffe2_pybind11_state  # noqa: F401
-    from caffe2.python import brew, cnn, core, workspace
-    from caffe2.python.model_helper import ModelHelper
-except ImportError:
-    TEST_CAFFE2 = False
-skipIfNoCaffe2 = unittest.skipIf(not TEST_CAFFE2, "no caffe2")
-
 TEST_MATPLOTLIB = True
 try:
     import matplotlib
@@ -48,7 +39,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     TestCase,
     run_tests,
-    TEST_WITH_ASAN,
     TEST_WITH_CROSSREF,
     IS_WINDOWS,
     IS_MACOS,
@@ -94,8 +84,6 @@ if TEST_TENSORBOARD:
     from torch.utils.tensorboard._pytorch_graph import graph
     from google.protobuf import text_format
     from PIL import Image
-if TEST_TENSORBOARD and TEST_CAFFE2:
-    from torch.utils.tensorboard import _caffe2_graph as c2_graph
 
 class TestTensorBoardPyTorchNumpy(BaseTestCase):
     def test_pytorch_np(self):
@@ -754,80 +742,11 @@ class TestTensorBoardNumpy(BaseTestCase):
         res = make_np(np.int64(100000000000))
         self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))
 
-    @skipIfNoCaffe2
-    def test_caffe2_np(self):
-        workspace.FeedBlob("testBlob", tensor_N(shape=(1, 3, 64, 64)))
-        self.assertIsInstance(make_np('testBlob'), np.ndarray)
-
-    @skipIfNoCaffe2
-    def test_caffe2_np_expect_fail(self):
-        with self.assertRaises(RuntimeError):
-            res = make_np('This_blob_does_not_exist')
-
     def test_pytorch_np_expect_fail(self):
         with self.assertRaises(NotImplementedError):
             res = make_np({'pytorch': 1.0})
 
-    @skipIfNoCaffe2
-    @unittest.skipIf(TEST_WITH_ASAN, "Caffe2 failure with ASAN")
-    def test_caffe2_simple_model(self):
-        model = ModelHelper(name="mnist")
-        # how come those inputs don't break the forward pass =.=a
-        workspace.FeedBlob("data", np.random.randn(1, 3, 64, 64).astype(np.float32))
-        workspace.FeedBlob("label", np.random.randn(1, 1000).astype(int))
 
-        with core.NameScope("conv1"):
-            conv1 = brew.conv(model, "data", 'conv1', dim_in=1, dim_out=20, kernel=5)
-            # Image size: 24 x 24 -> 12 x 12
-            pool1 = brew.max_pool(model, conv1, 'pool1', kernel=2, stride=2)
-            # Image size: 12 x 12 -> 8 x 8
-            conv2 = brew.conv(model, pool1, 'conv2', dim_in=20, dim_out=100, kernel=5)
-            # Image size: 8 x 8 -> 4 x 4
-            pool2 = brew.max_pool(model, conv2, 'pool2', kernel=2, stride=2)
-        with core.NameScope("classifier"):
-            # 50 * 4 * 4 stands for dim_out from previous layer multiplied by the image size
-            fc3 = brew.fc(model, pool2, 'fc3', dim_in=100 * 4 * 4, dim_out=500)
-            relu = brew.relu(model, fc3, fc3)
-            pred = brew.fc(model, relu, 'pred', 500, 10)
-            softmax = brew.softmax(model, pred, 'softmax')
-            xent = model.LabelCrossEntropy([softmax, "label"], 'xent')
-            # compute the expected loss
-            loss = model.AveragedLoss(xent, "loss")
-        model.net.RunAllOnMKL()
-        model.param_init_net.RunAllOnMKL()
-        model.AddGradientOperators([loss], skip=1)
-        blob_name_tracker = {}
-        graph = c2_graph.model_to_graph_def(
-            model,
-            blob_name_tracker=blob_name_tracker,
-            shapes={},
-            show_simplified=False,
-        )
-        compare_proto(graph, self)
-
-    @skipIfNoCaffe2
-    def test_caffe2_simple_cnnmodel(self):
-        model = cnn.CNNModelHelper("NCHW", name="overfeat")
-        workspace.FeedBlob("data", np.random.randn(1, 3, 64, 64).astype(np.float32))
-        workspace.FeedBlob("label", np.random.randn(1, 1000).astype(int))
-        with core.NameScope("conv1"):
-            conv1 = model.Conv("data", "conv1", 3, 96, 11, stride=4)
-            relu1 = model.Relu(conv1, conv1)
-            pool1 = model.MaxPool(relu1, "pool1", kernel=2, stride=2)
-        with core.NameScope("classifier"):
-            fc = model.FC(pool1, "fc", 4096, 1000)
-            pred = model.Softmax(fc, "pred")
-            xent = model.LabelCrossEntropy([pred, "label"], "xent")
-            loss = model.AveragedLoss(xent, "loss")
-
-        blob_name_tracker = {}
-        graph = c2_graph.model_to_graph_def(
-            model,
-            blob_name_tracker=blob_name_tracker,
-            shapes={},
-            show_simplified=False,
-        )
-        compare_proto(graph, self)
 
 class TestTensorProtoSummary(BaseTestCase):
     @parametrize(

@@ -17,6 +17,7 @@
 
 #include <c10/util/thread_name.h>
 #include <torch/csrc/distributed/c10d/TCPStoreBackend.hpp>
+#include <torch/csrc/distributed/c10d/logging.h>
 
 #ifdef _WIN32
 #include <torch/csrc/distributed/c10d/WinSockUtils.hpp>
@@ -546,61 +547,70 @@ void TCPStoreMasterDaemon::run() {
 }
 #else
 void TCPStoreMasterDaemon::run() {
-  c10::setThreadName("pt_tcpstore");
+  try {
+    c10::setThreadName("pt_tcpstore");
 
-  std::vector<struct pollfd> fds;
-  tcputil::addPollfd(fds, storeListenSocket_.handle(), POLLIN);
-  // Although we haven't found any documentation or literature describing this,
-  // we've seen cases that, under certain circumstances, the read end of the
-  // pipe won't receive POLLHUP when the write end is closed. However, under
-  // the same circumstances, writing to the pipe will guarantee POLLIN to be
-  // received on the read end.
-  //
-  // For more reliable termination, the main thread will write a byte to the
-  // pipe before closing it, and the background thread will poll for both
-  // POLLIN and POLLHUP.
-  tcputil::addPollfd(fds, controlPipeFd_[0], POLLIN | POLLHUP);
+    std::vector<struct pollfd> fds;
+    tcputil::addPollfd(fds, storeListenSocket_.handle(), POLLIN);
+    // Although we haven't found any documentation or literature describing
+    // this, we've seen cases that, under certain circumstances, the read end of
+    // the pipe won't receive POLLHUP when the write end is closed. However,
+    // under the same circumstances, writing to the pipe will guarantee POLLIN
+    // to be received on the read end.
+    //
+    // For more reliable termination, the main thread will write a byte to the
+    // pipe before closing it, and the background thread will poll for both
+    // POLLIN and POLLHUP.
+    tcputil::addPollfd(fds, controlPipeFd_[0], POLLIN | POLLHUP);
 
-  // receive the queries
-  bool finished = false;
-  while (!finished) {
-    for (const auto i : c10::irange(sockets_.size())) {
-      fds[i].revents = 0;
-    }
-
-    SYSCHECK_ERR_RETURN_NEG1(::poll(fds.data(), fds.size(), -1));
-
-    // TCPStore's listening socket has an event and it should now be able to
-    // accept new connections.
-    if (fds[0].revents != 0) {
-      if (fds[0].revents ^ POLLIN) {
-        C10_THROW_ERROR(
-            DistStoreError,
-            "Unexpected poll revent on the master's listening socket: " +
-                std::to_string(fds[0].revents));
+    // receive the queries
+    bool finished = false;
+    while (!finished) {
+      for (const auto i : c10::irange(sockets_.size())) {
+        fds[i].revents = 0;
       }
-      Socket socket = storeListenSocket_.accept();
-      int rawSocket = socket.handle();
-      sockets_.emplace_back(std::move(socket));
-      tcputil::addPollfd(fds, rawSocket, POLLIN);
-      // all clients are miscellaneous before getting its validation query
-      addMiscellaneousSocket(rawSocket);
-    }
 
-    // The pipe receives an event which tells us to shutdown the daemon
-    if (fds[1].revents != 0) {
-      // The main thread will write a byte to the pipe then close it before
-      // joining the background thread
-      if (fds[1].revents & ~(POLLIN | POLLHUP)) {
-        C10_THROW_ERROR(
-            DistStoreError,
-            "Unexpected poll revent on the control pipe's reading fd: " +
-                std::to_string(fds[1].revents));
+      SYSCHECK_ERR_RETURN_NEG1(::poll(fds.data(), fds.size(), -1));
+
+      // TCPStore's listening socket has an event and it should now be able to
+      // accept new connections.
+      if (fds[0].revents != 0) {
+        if (fds[0].revents ^ POLLIN) {
+          C10_THROW_ERROR(
+              DistStoreError,
+              "Unexpected poll revent on the master's listening socket: " +
+                  std::to_string(fds[0].revents));
+        }
+        Socket socket = storeListenSocket_.accept();
+        int rawSocket = socket.handle();
+        sockets_.emplace_back(std::move(socket));
+        tcputil::addPollfd(fds, rawSocket, POLLIN);
+        // all clients are miscellaneous before getting its validation query
+        addMiscellaneousSocket(rawSocket);
       }
-      finished = true;
-      break;
+
+      // The pipe receives an event which tells us to shutdown the daemon
+      if (fds[1].revents != 0) {
+        // The main thread will write a byte to the pipe then close it before
+        // joining the background thread
+        if (fds[1].revents & ~(POLLIN | POLLHUP)) {
+          C10_THROW_ERROR(
+              DistStoreError,
+              "Unexpected poll revent on the control pipe's reading fd: " +
+                  std::to_string(fds[1].revents));
+        }
+        finished = true;
+        break;
+      }
+      queryFds(fds);
     }
-    queryFds(fds);
+  } catch (const std::exception& ex) {
+    C10D_ERROR(
+        "TCPStoreMasterDaemon::run() failed with exception: ", ex.what());
+    throw;
+  } catch (...) {
+    C10D_ERROR("TCPStoreMasterDaemon::run() failed with unknown exception");
+    throw;
   }
 }
 #endif

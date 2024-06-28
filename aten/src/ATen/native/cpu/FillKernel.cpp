@@ -43,6 +43,14 @@ void fill_kernel(TensorIterator& iter, const Scalar& value_scalar) {
     fill_non_native_type<at::BFloat16>(iter, value_scalar);
   } else if (iter.dtype() == ScalarType::ComplexHalf) {
     fill_non_native_type<c10::complex<at::Half>>(iter, value_scalar);
+  } else if (iter.dtype() == ScalarType::Float8_e4m3fn) {
+    fill_non_native_type<at::Float8_e4m3fn>(iter, value_scalar);
+  } else if (iter.dtype() == ScalarType::Float8_e5m2) {
+    fill_non_native_type<at::Float8_e5m2>(iter, value_scalar);
+  } else if (iter.dtype() == ScalarType::Float8_e4m3fnuz) {
+    fill_non_native_type<at::Float8_e4m3fnuz>(iter, value_scalar);
+  } else if (iter.dtype() == ScalarType::Float8_e5m2fnuz) {
+    fill_non_native_type<at::Float8_e5m2fnuz>(iter, value_scalar);
   } else {
     AT_DISPATCH_V2(
       iter.dtype(), "fill_cpu", AT_WRAP([&]() {

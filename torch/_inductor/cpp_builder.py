@@ -320,32 +320,24 @@ def _get_optimization_cflags() -> List[str]:
         if not config.cpp.enable_floating_point_contract_flag:
             cflags.append("ffp-contract=off")
 
-        if config.is_fbcode():
-            # FIXME: passing `-fopenmp` adds libgomp.so to the generated shared library's dependencies.
-            # This causes `ldopen` to fail in fbcode, because libgomp does not exist in the default paths.
-            # We will fix it later by exposing the lib path.
-            return cflags
-
-        if sys.platform == "darwin":
-            # Per https://mac.r-project.org/openmp/ right way to pass `openmp` flags to MacOS is via `-Xclang`
-            # Also, `-march=native` is unrecognized option on M1
-            cflags.append("Xclang")
-        else:
+        if sys.platform != "darwin":
+            # https://stackoverflow.com/questions/65966969/why-does-march-native-not-work-on-apple-m1
+            # `-march=native` is unrecognized option on M1
             if platform.machine() == "ppc64le":
                 cflags.append("mcpu=native")
             else:
                 cflags.append("march=native")
-
-        # Internal cannot find libgomp.so
-        if not config.is_fbcode():
-            cflags.append("fopenmp")
 
         return cflags
 
 
 def _get_shared_cflag(compile_only: bool) -> List[str]:
     if _IS_WINDOWS:
-        SHARED_FLAG = ["DLL"]
+        """
+        MSVC `/MD` using python `ucrtbase.dll` lib as runtime.
+        https://learn.microsoft.com/en-us/cpp/c-runtime-library/crt-library-features?view=msvc-170
+        """
+        SHARED_FLAG = ["DLL", "MD"]
     else:
         if compile_only:
             return ["fPIC"]
@@ -543,13 +535,13 @@ def _get_build_args_of_chosen_isa(vec_isa: VecISA):
 
         build_flags = [vec_isa.build_arch_flags()]
 
-    if config.is_fbcode() and vec_isa != invalid_vec_isa:
-        cap = str(vec_isa).upper()
-        macros = [
-            f"CPU_CAPABILITY={cap}",
-            f"CPU_CAPABILITY_{cap}",
-            f"HAVE_{cap}_CPU_DEFINITION",
-        ]
+        if config.is_fbcode():
+            cap = str(vec_isa).upper()
+            macros = [
+                f"CPU_CAPABILITY={cap}",
+                f"CPU_CAPABILITY_{cap}",
+                f"HAVE_{cap}_CPU_DEFINITION",
+            ]
 
     return macros, build_flags
 
@@ -567,10 +559,13 @@ def _get_torch_related_args(include_pytorch: bool, aot_mode: bool):
     ]
     libraries_dirs = [TORCH_LIB_PATH]
     libraries = []
-    if sys.platform == "linux" and not config.is_fbcode():
+    if sys.platform != "darwin" and not config.is_fbcode():
         libraries = ["torch", "torch_cpu"]
         if not aot_mode:
             libraries.append("torch_python")
+
+    if _IS_WINDOWS:
+        libraries.append("sleef")
 
     # Unconditionally import c10 for non-abi-compatible mode to use TORCH_CHECK - See PyTorch #108690
     if not config.abi_compatible:
@@ -608,6 +603,10 @@ def _get_openmp_args(cpp_compiler):
     libs: List[str] = []
     passthough_args: List[str] = []
     if _IS_MACOS:
+        # Per https://mac.r-project.org/openmp/ right way to pass `openmp` flags to MacOS is via `-Xclang`
+        cflags.append("Xclang")
+        cflags.append("fopenmp")
+
         from torch._inductor.codecache import (
             homebrew_libomp,
             is_conda_llvm_openmp_installed,
@@ -658,9 +657,8 @@ def _get_openmp_args(cpp_compiler):
         # /openmp, /openmp:llvm
         # llvm on Windows, new openmp: https://devblogs.microsoft.com/cppblog/msvc-openmp-update/
         # msvc openmp: https://learn.microsoft.com/zh-cn/cpp/build/reference/openmp-enable-openmp-2-0-support?view=msvc-170
-
         cflags.append("openmp")
-        libs = []
+        cflags.append("openmp:experimental")  # MSVC CL
     else:
         if config.is_fbcode():
             include_dir_paths.append(build_paths.openmp())
@@ -998,11 +996,11 @@ class CppBuilder:
             3. Final target file: output_dir/name.ext
     """
 
-    def get_shared_lib_ext(self) -> str:
-        SHARED_LIB_EXT = ".dll" if _IS_WINDOWS else ".so"
+    def __get_python_module_ext(self) -> str:
+        SHARED_LIB_EXT = ".pyd" if _IS_WINDOWS else ".so"
         return SHARED_LIB_EXT
 
-    def get_object_ext(self) -> str:
+    def __get_object_ext(self) -> str:
         EXT = ".obj" if _IS_WINDOWS else ".o"
         return EXT
 
@@ -1040,7 +1038,9 @@ class CppBuilder:
 
         self._compile_only = BuildOption.get_compile_only()
         file_ext = (
-            self.get_object_ext() if self._compile_only else self.get_shared_lib_ext()
+            self.__get_object_ext()
+            if self._compile_only
+            else self.__get_python_module_ext()
         )
         self._target_file = os.path.join(self._output_dir, f"{self._name}{file_ext}")
 
@@ -1148,17 +1148,6 @@ class CppBuilder:
 
     def get_target_file_path(self):
         return self._target_file
-
-    def convert_to_cpp_extension_args(self):
-        include_dirs = self._include_dirs_args
-        cflags = (
-            self._cflags_args
-            + self._definations_args
-            + self._passthough_parameters_args
-        )
-        ldflags = self._ldflags_args + self._libraries_args + self._libraries_dirs_args
-
-        return include_dirs, cflags, ldflags
 
     def build(self) -> Tuple[int, str]:
         """

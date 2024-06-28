@@ -19,6 +19,7 @@ from typing import (
     Union,
 )
 
+
 T = TypeVar("T")
 
 RE_GITHUB_URL_MATCH = re.compile("^https://.*@?github.com/(.+)/(.+)$")
@@ -31,7 +32,7 @@ def get_git_remote_name() -> str:
 def get_git_repo_dir() -> str:
     from pathlib import Path
 
-    return os.getenv("GIT_REPO_DIR", str(Path(__file__).resolve().parent.parent.parent))
+    return os.getenv("GIT_REPO_DIR", str(Path(__file__).resolve().parents[2]))
 
 
 def fuzzy_list_to_dict(items: List[Tuple[str, str]]) -> Dict[str, List[str]]:

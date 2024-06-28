@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import logging
 import operator
 
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
@@ -18,7 +19,7 @@ from torch.export.graph_signature import (
 from torch.fx import subgraph_rewriter
 from torch.onnx.utils import _create_jit_graph
 
-from torchgen.model import FunctionSchema
+log = logging.getLogger(__name__)
 
 
 def inplace_optimize_sym_size_div(gm: torch.fx.GraphModule):
@@ -93,6 +94,7 @@ kind_to_standard_operators = {
     "aten::__not__": operator.not_,
     "aten::__contains__": operator.contains,
     "prim::dtype": get_dtype_as_int,
+    "aten::len": len,
 }
 
 
@@ -189,9 +191,9 @@ def get_block_to_lifted_attrs(graph: torch._C.Graph) -> Dict[torch._C.Block, Set
 
 def get_op_overload(node: torch._C.Node):
     schema_str = node.schema()
-    schema = FunctionSchema.parse(schema_str)
-    ns, op_name = str(schema.name.name).split("::")
-    override = schema.name.overload_name
+    schema: torch._C.FunctionSchema = torch._C.parse_schema(schema_str)
+    ns, op_name = str(schema.name).split("::")
+    override = schema.overload_name
 
     try:
         op_overload_mod = getattr(torch.ops, ns)
@@ -292,7 +294,12 @@ class TS2FXGraphConverter:
 
         # Pass parameter and buffer to the root for lookup.
         gm = torch.fx.GraphModule(
-            {**self.subgraphs, **self.name_to_param_map, **self.name_to_buffer_map},
+            {
+                **self.subgraphs,
+                **self.name_to_param_map,
+                **self.name_to_buffer_map,
+                **self.tensor_constants,
+            },
             self.fx_graph,
         )
 
@@ -342,6 +349,20 @@ class TS2FXGraphConverter:
 
             self.name_to_node[name] = fx_node
 
+    def convert_aten_tensor(self, node: torch._C.Node):
+        """aten::tensor creates a constant tensor ad-hoc --> GetAttr"""
+        args, kwargs = self.get_args_kwargs(node, torch.ops.aten.tensor.default._schema)
+        for k in kwargs:
+            if k == "requires_grad":
+                kwargs[k] = bool(kwargs[k])  # 0 -> False, 1 -> True
+        tensor = torch.tensor(*args, **kwargs)
+
+        output_name = node.output().debugName()
+        alias_name = f"lifted_tensor_{output_name}"
+        fx_node = self.fx_graph.get_attr(alias_name)
+        self.name_to_node[output_name] = fx_node
+        self.tensor_constants[alias_name] = tensor
+
     def convert_prim_Constant(self, node: torch._C.Node):
         name = node.output().debugName()
 
@@ -355,20 +376,11 @@ class TS2FXGraphConverter:
             elif constant_kind == "s":
                 value = node.s("value")
             elif constant_kind == "t":
-                # lift tensor constant as a placeholder
-                placeholder_name = f"constant_{name}"
-                fx_node = self.fx_graph.placeholder(placeholder_name)
-                self.name_to_node[name] = fx_node
-                self.tensor_constants[placeholder_name] = node.t("value")
-
-                self.input_specs.append(
-                    InputSpec(
-                        InputKind.CONSTANT_TENSOR,
-                        arg=TensorArgument(name=placeholder_name),
-                        target=placeholder_name,
-                    )
+                alias_name = (
+                    f"lifted_tensor_{name}"  # Follow naming convention from EP tracing.
                 )
-
+                fx_node = self.fx_graph.get_attr(alias_name)
+                self.tensor_constants[alias_name] = node.t("value")
                 value = fx_node
             elif constant_kind == "ival":
                 value = node.ival("value")
@@ -489,12 +501,16 @@ class TS2FXGraphConverter:
         self.name_to_node[output_name] = fx_node
 
     def convert_prim_NumToTensor(self, node: torch._C.Node):
-        # converts prim::NumToTensor as aten.scalar_tensor
+        # Converts prim::NumToTensor as aten.scalar_tensor.
+        # prim::NumToTensor IRs are currently triggered by:
+        # .size() https://github.com/pytorch/pytorch/blob/main/torch/csrc/jit/frontend/tracer.cpp#L950
+        # .numel() https://github.com/pytorch/pytorch/blob/main/torch/csrc/jit/frontend/tracer.cpp#L971
+        # For both of those APIs, torch.jit.trace implicitly sets the output tensor type
+        # to be LongTensor.
         target = torch.ops.aten.scalar_tensor
         args = tuple(self.get_fx_value(input) for input in node.inputs())
 
-        fx_node = self.fx_graph.call_function(target, args)
-
+        fx_node = self.fx_graph.call_function(target, args, {"dtype": torch.long})
         output_name = node.output().debugName()
         self.name_to_node[output_name] = fx_node
 
@@ -643,6 +659,15 @@ class TS2FXGraphConverter:
         args = tuple(self.get_fx_value(input) for input in node.inputs())
         self.fx_graph.call_function(target, args)
 
+    def convert_prim_tolist(self, node: torch._C.Node):
+        # prim::tolist cannot be supported by `_convert_standard_operators`
+        # since it requires call_method instead of call_function.
+        target = "tolist"
+        args = (self.get_fx_value(next(node.inputs())),)
+        fx_node = self.fx_graph.call_method(target, args)
+        output_name = node.output().debugName()
+        self.name_to_node[output_name] = fx_node
+
     def _convert_standard_operators(self, node: torch._C.Node):
         target = kind_to_standard_operators[node.kind()]
         args = tuple(self.get_fx_value(input) for input in node.inputs())
@@ -658,7 +683,16 @@ class TS2FXGraphConverter:
         # matching converter for that.
         handler_func_name = ir_name_to_func_name(node_kind)
         handler_func = getattr(self, handler_func_name, self.convert_call_function_op)
-        handler_func(node)
+
+        # str calls print function implemented in CPP. To avoid repeating
+        # the entire logic here, we simply keep first line from node string (getting rid
+        # of sub-blocks IR prints).
+        node_str = "".join(str(node).split("\n")[:1])
+        log.debug(f"[{handler_func.__name__}] converts [{node_str}]")  # noqa: G004
+        try:
+            handler_func(node)
+        except Exception as e:
+            raise RuntimeError(f"TS2EPConverter failed for node {node_kind}") from e
 
     def convert_graph_outputs(self):
         args = []
@@ -700,8 +734,21 @@ class TS2EPConverter:
         sample_args: Tuple[Any, ...],
         sample_kwargs: Optional[Dict[str, Any]] = None,
     ):
+        log.info(
+            """
+TS2EPConverter logging starts from here.
+
+INFO: (TORCH_LOGS="export" <cmd>)
+    * Log TorchScript IR.
+
+DEBUG: (TORCH_LOGS="+export" <cmd>), additionaly
+    * Log conversion IR by IR in a format of [<conversion handler name>] converts [<IR>].
+        """
+        )
+
         self.ts_model = ts_model
         self.ts_graph, self.params, _, _ = _create_jit_graph(ts_model, sample_args)
+        log.info(f"TorchScript graph\n\n{self.ts_graph}\n")  # noqa: G004
 
         self.sample_args = sample_args
         self.sample_kwargs = sample_kwargs
@@ -730,7 +777,9 @@ class TS2EPConverter:
         ep = self.retrace_as_exported_program(gm, graph_converter.tensor_constants)
         return ep
 
-    def retrace_as_exported_program(self, gm: torch.fx.GraphModule, tensor_constants):
+    def retrace_as_exported_program(
+        self, gm: torch.fx.GraphModule, tensor_constants: Dict[str, torch.Tensor]
+    ):
         # TODO: adjust input orders to match GraphSignature convention
         ep = torch.export._trace._export(
             gm,
@@ -738,4 +787,18 @@ class TS2EPConverter:
             strict=False,
             pre_dispatch=True,
         )
+
+        # Post-processing to make sure the ExportedProgram states are correct.
+        # Because during conversion, we set tensor constants as GetAttr,
+        # retracing cannot recognize them as tensor constants but instead
+        # treat them as buffers. We need to set them again here.
+        ep._constants = tensor_constants
+        for k in tensor_constants:
+            ep.state_dict.pop(k, None)
+        for spec in ep.graph_signature.input_specs:
+            # Mark as constant tensors for erroneously traced buffers.
+            if spec.kind == InputKind.BUFFER and spec.target in tensor_constants:
+                spec.kind = InputKind.CONSTANT_TENSOR
+        ep.verifier().check(ep)
+
         return ep

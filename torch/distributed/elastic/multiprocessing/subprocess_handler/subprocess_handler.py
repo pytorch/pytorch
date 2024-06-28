@@ -9,8 +9,8 @@ import os
 import signal
 import subprocess
 import sys
-
 from typing import Any, Dict, Optional, Tuple
+
 
 __all__ = ["SubprocessHandler"]
 

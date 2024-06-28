@@ -132,7 +132,6 @@ def fn():
     @skipIfNotPy311
     def test_py311_jump_offset(self):
         new_inst = bytecode_transformation.create_instruction
-        load_global = bytecode_transformation.create_load_global
         consts = (None, 1, 2, 3, 4)
 
         def create_test_code(jump_opname, target_idx):
@@ -159,12 +158,12 @@ def fn():
                 new_inst("RESUME", arg=0),
                 new_inst("JUMP_FORWARD", target=jump_to_target_inst),
                 targets[0],
-                load_global("print", False),
+                new_inst("LOAD_GLOBAL", arg=0, argval="print"),
                 new_inst("POP_TOP"),
                 new_inst("RETURN_VALUE"),
                 jump_to_target_inst,
                 new_inst("LOAD_CONST", argval=2),
-                load_global("print", False),
+                new_inst("LOAD_GLOBAL", arg=0, argval="print"),
                 new_inst("POP_TOP"),
                 new_inst("RETURN_VALUE"),
                 targets[1],

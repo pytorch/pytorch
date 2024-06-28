@@ -4,6 +4,7 @@
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
 
+
 def _faulty_tensorpipe_construct_rpc_backend_options_handler(
     rpc_timeout,
     init_method,
@@ -11,7 +12,7 @@ def _faulty_tensorpipe_construct_rpc_backend_options_handler(
     messages_to_fail,
     messages_to_delay,
     num_fail_sends,
-    **kwargs
+    **kwargs,
 ):
     from . import FaultyTensorPipeRpcBackendOptions
 
@@ -28,16 +29,14 @@ def _faulty_tensorpipe_construct_rpc_backend_options_handler(
 def _faulty_tensorpipe_init_backend_handler(
     store, name, rank, world_size, rpc_backend_options
 ):
-    from . import FaultyTensorPipeAgent
-    from . import FaultyTensorPipeRpcBackendOptions
     from torch.distributed.rpc import api
+
+    from . import FaultyTensorPipeAgent, FaultyTensorPipeRpcBackendOptions
 
     if not isinstance(store, dist.Store):
         raise TypeError(f"`store` must be a c10d::Store. {store}")
 
-    if not isinstance(
-        rpc_backend_options, FaultyTensorPipeRpcBackendOptions
-    ):
+    if not isinstance(rpc_backend_options, FaultyTensorPipeRpcBackendOptions):
         raise TypeError(
             f"`rpc_backend_options` must be a `FaultyTensorPipeRpcBackendOptions`. {rpc_backend_options}"
         )

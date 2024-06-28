@@ -32,6 +32,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_dtype import floating_types_and
 from torch.testing._internal.common_optimizers import (
+    _get_device_type,
     _get_optim_inputs_including_global_cliquey_kwargs,
     optim_db,
     OptimizerErrorEnum,
@@ -1004,7 +1005,6 @@ class TestOptimRenewed(TestCase):
 
             self.assertLessEqual(mt_max_mem, expected_max_mem)
 
-    @onlyNativeDeviceTypes
     @optims(
         [optim for optim in optim_db if "fused" in optim.supported_impls],
         dtypes=floating_types_and(
@@ -1013,10 +1013,15 @@ class TestOptimRenewed(TestCase):
         ),
     )
     def test_fused_matches_forloop(self, device, dtype, optim_info):
-        if device not in optim_info.supports_fused_on:
+        if _get_device_type(device) not in optim_info.supports_fused_on:
             self.skipTest(
                 f"{device} is not supported for fused on {optim_info.optim_cls.__name__}"
             )
+        if _get_device_type(device) == "mps" and dtype not in (
+            torch.float16,
+            torch.float32,
+        ):
+            self.skipTest("MPS supports only torch.float16 and torch.float32")
         self._test_derived_optimizers(device, dtype, optim_info, "fused")
 
     @onlyNativeDeviceTypes
@@ -1076,7 +1081,6 @@ class TestOptimRenewed(TestCase):
                         )
                 self.assertEqual(params, params_c)
 
-    @onlyCUDA
     @parametrize("impl", ["fused", "capturable"])
     @optims(
         [optim for optim in optim_db if "fused" in optim.supported_impls],
@@ -1100,8 +1104,15 @@ class TestOptimRenewed(TestCase):
         ):
             # Capturable SGD/Adagrad does not exist
             self.skipTest("SGD does not currently support capturable")
-        if impl == "fused" and device not in optim_info.supports_fused_on:
+        if _get_device_type(device) == "cpu":
+            self.skipTest("Test is only for non-cpu devices")
+        elif (
+            impl == "fused"
+            and _get_device_type(device) not in optim_info.supports_fused_on
+        ):
             self.skipTest(f"{device} is not supported for fused on {opt_name}")
+        elif impl == "capturable" and _get_device_type(device) == "mps":
+            self.skipTest("MPS does not support capturable")
 
         cpu_optim_inputs = optim_info.optim_inputs_func(device="cpu")
         for optim_input in cpu_optim_inputs:
@@ -1114,12 +1125,12 @@ class TestOptimRenewed(TestCase):
 
             # load
             optim_input.kwargs[impl] = True
-            param_cuda = param.clone().detach().to(device="cuda")
-            optimizer_cuda = optim_cls([param_cuda], **optim_input.kwargs)
-            optimizer_cuda.load_state_dict(optim_state_dict_cpu)
-            optimizer_cuda.zero_grad()
-            param_cuda.grad = torch.rand_like(param_cuda)
-            optimizer_cuda.step()
+            param_device = param.clone().detach().to(device=device)
+            optimizer_device = optim_cls([param_device], **optim_input.kwargs)
+            optimizer_device.load_state_dict(optim_state_dict_cpu)
+            optimizer_device.zero_grad()
+            param_device.grad = torch.rand_like(param_device)
+            optimizer_device.step()
 
     @optims(optim_db, dtypes=[torch.float32])
     def test_param_groups_weight_decay(self, device, dtype, optim_info):
