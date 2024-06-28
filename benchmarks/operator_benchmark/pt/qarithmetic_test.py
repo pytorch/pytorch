@@ -1,6 +1,8 @@
 import operator_benchmark as op_bench
+
 import torch
 from torch._ops import ops
+
 
 qarithmetic_binary_configs = op_bench.cross_product_configs(
     N=(2, 8, 64, 512),
