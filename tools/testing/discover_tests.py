@@ -1,8 +1,9 @@
+from __future__ import annotations
+
 import glob
 import os
 import sys
 from pathlib import Path
-from typing import List, Optional, Union
 
 
 CPP_TEST_PREFIX = "cpp"
@@ -17,11 +18,11 @@ def parse_test_module(test: str) -> str:
 
 def discover_tests(
     base_dir: Path = REPO_ROOT / "test",
-    cpp_tests_dir: Optional[Union[str, Path]] = None,
-    blocklisted_patterns: Optional[List[str]] = None,
-    blocklisted_tests: Optional[List[str]] = None,
-    extra_tests: Optional[List[str]] = None,
-) -> List[str]:
+    cpp_tests_dir: str | Path | None = None,
+    blocklisted_patterns: list[str] | None = None,
+    blocklisted_tests: list[str] | None = None,
+    extra_tests: list[str] | None = None,
+) -> list[str]:
     """
     Searches for all python files starting with test_ excluding one specified by patterns.
     If cpp_tests_dir is provided, also scan for all C++ tests under that directory. They
