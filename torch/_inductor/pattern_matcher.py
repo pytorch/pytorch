@@ -202,7 +202,7 @@ class Match:
 
     def erase_nodes(self, graph: torch.fx.Graph) -> None:
         for n in reversed(self.nodes):
-            if not n._erased:
+            if not n._erased and not n.users:
                 graph.erase_node(n)
 
     def output_nodes(self) -> List[Optional[torch.fx.Node]]:
@@ -1444,9 +1444,7 @@ def _serialize_pattern(
     return pattern
 
 
-SERIALIZED_PATTERN_PATH = (
-    Path(__file__).absolute().parent / "fx_passes" / "serialized_patterns"
-)
+SERIALIZED_PATTERN_PATH = Path(__file__).parent / "fx_passes" / "serialized_patterns"
 
 # This is the set of serialized patterns that we've registered.  Used by
 # test_serialized_patterns_up_to_date() to ensure the patterns are up
