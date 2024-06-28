@@ -1488,6 +1488,18 @@ class TestSDPAFailureModes(NNTestCase):
                     q, k, v, None, 0.0, False))
 
     @onlyCUDA
+    @skipIfRocm  # Nested Tensor
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
+    def test_invalid_mem_efficient_kernel_grouped_query_attention(self, device, ):
+        rand_query = torch.rand(8, 8, 64, 64, device=device, dtype=torch.float16, requires_grad=True)
+        rand_key = torch.rand(8, 4, 64, 64, device=device, dtype=torch.float16, requires_grad=True)
+        rand_value = torch.rand(8, 4, 64, 64, device=device, dtype=torch.float16, requires_grad=True)
+
+        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
+            with self.assertRaisesRegex(RuntimeError, "No available kernel"):
+                F.scaled_dot_product_attention(rand_query, rand_key, rand_value, dropout_p=0.0, is_causal=False)
+
+    @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not flash_attention fused scaled dot product attention")
     @parametrize("kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION])
     def test_invalid_fused_inputs_head_dim(self, device, kernel: SDPBackend):
@@ -3133,17 +3145,6 @@ class TestSDPACudaOnly(NNTestCase):
                          atol=grad_k_ref_atol, rtol=grad_k_ref_rtol)
         self.assertEqual(value.grad, value_ref.grad.to(value.grad.dtype),
                          atol=grad_v_ref_atol, rtol=grad_v_ref_rtol)
-
-    @skipIfRocm  # Nested Tensor
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
-    def test_grouped_query_attention_error_case(self, device, ):
-        rand_query = torch.rand(8, 8, 64, 64, device=device, dtype=torch.float16, requires_grad=True)
-        rand_key = torch.rand(8, 4, 64, 64, device=device, dtype=torch.float16, requires_grad=True)
-        rand_value = torch.rand(8, 4, 64, 64, device=device, dtype=torch.float16, requires_grad=True)
-
-        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
-            with self.assertRaisesRegex(RuntimeError, "No available kernel"):
-                F.scaled_dot_product_attention(rand_query, rand_key, rand_value, dropout_p=0.0, is_causal=False)
 
 
     @skipIfRocm
