@@ -29,6 +29,7 @@
 #include <ATen/ops/_dimV_native.h>
 #include <ATen/ops/_indices_native.h>
 #include <ATen/ops/_nnz_native.h>
+#include <ATen/ops/_pin_memory_native.h>
 #include <ATen/ops/sparse_coo_tensor.h>
 #include <ATen/ops/_sparse_coo_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_coo_tensor_with_dims.h>
@@ -50,6 +51,7 @@
 #include <ATen/ops/index_select.h>
 #include <ATen/ops/indices_native.h>
 #include <ATen/ops/is_coalesced_native.h>
+#include <ATen/ops/is_pinned_native.h>
 #include <ATen/ops/resize_as_sparse.h>
 #include <ATen/ops/resize_as_sparse_native.h>
 #include <ATen/ops/sparse_coo_tensor.h>
@@ -847,6 +849,24 @@ Tensor empty_like_sparse_coo(
   } else {
     return at::native::empty_like(self, dtype, layout, device, pin_memory, optional_memory_format);
   }
+}
+
+bool is_pinned_sparse_coo(const Tensor& self, std::optional<Device> device) {
+  // Assuming that _indices has the same pin memory state as _values
+  return self._values().is_pinned(device);
+}
+
+Tensor _pin_memory_sparse_coo(const Tensor& self, std::optional<Device> device) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!device.has_value() || device->is_cuda());
+  TensorOptions options = self.options().pinned_memory(true);
+  return at::_sparse_coo_tensor_with_dims_and_tensors(
+      self.sparse_dim(),
+      self.dense_dim(),
+      self.sizes(),
+      self._indices().pin_memory(device),
+      self._values().pin_memory(device),
+      options,
+      self.is_coalesced());
 }
 
 } // namespace at::native
