@@ -227,6 +227,7 @@ if __name__ == "__main__":
 
     rank = int(os.getenv("RANK", -1))
     world_size = int(os.getenv("WORLD_SIZE", 4))
+    
     if rank != -1:
         # Launched with torchrun or other multi-proc launchers. Directly run the test.
         ComposabilityTest.run_rank(rank, world_size)
