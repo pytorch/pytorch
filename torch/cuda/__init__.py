@@ -636,11 +636,11 @@ def set_stream(stream: Stream):
 
 
 def _parse_visible_devices() -> Union[List[int], List[str]]:
-    r"""Parse CUDA_VISIBLE_DEVICES environment variable."""
-    var = os.getenv("CUDA_VISIBLE_DEVICES")
+    r"""Parse HIP_VISIBLE_DEVICES environment variable."""
+    var = os.getenv("HIP_VISIBLE_DEVICES")
 
     if var is None and torch.version.hip:
-        var = os.getenv("HIP_VISIBLE_DEVICES")
+        var = os.getenv("CUDA_VISIBLE_DEVICES")
 
     if var is None:
         return list(range(64))
@@ -1073,11 +1073,11 @@ def _get_amdsmi_device_index(device: Optional[Union[int, Device]]) -> int:
     idx = _get_device_index(device, optional=True)
     visible_devices = _parse_visible_devices()
     if type(visible_devices[0]) is str:
-        raise RuntimeError("CUDA_VISIBLE_DEVICES should be indices and not strings")
+        raise RuntimeError("HIP_VISIBLE_DEVICES should be indices and not strings")
     idx_map = dict(enumerate(cast(List[int], visible_devices)))
     if idx not in idx_map:
         raise RuntimeError(
-            f"device {idx} is not visible (CUDA_VISIBLE_DEVICES={visible_devices})"
+            f"device {idx} is not visible (HIP_VISIBLE_DEVICES={visible_devices})"
         )
     return idx_map[idx]
 
