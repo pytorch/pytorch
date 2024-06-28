@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+from __future__ import annotations
+
 import argparse
 import array
 import codecs
@@ -14,7 +16,7 @@ import textwrap
 from dataclasses import dataclass
 from itertools import product
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any
 
 import yaml
 from yaml.constructor import ConstructorError
@@ -33,14 +35,14 @@ sys.path.append(str(REPO_ROOT))
 CPP_H_NAME = "spv.h"
 CPP_SRC_NAME = "spv.cpp"
 
-DEFAULT_ENV: Dict[str, Any] = {
+DEFAULT_ENV: dict[str, Any] = {
     "PRECISION": "highp",
     "FLOAT_IMAGE_FORMAT": "rgba16f",
     "INT_IMAGE_FORMAT": "rgba32i",
     "UINT_IMAGE_FORMAT": "rgba32ui",
 }
 
-TYPES_ENV: Dict[str, Any] = {
+TYPES_ENV: dict[str, Any] = {
     "IMAGE_FORMAT": {
         "float": "rgba32f",
         "half": "rgba16f",
@@ -95,7 +97,7 @@ TYPES_ENV: Dict[str, Any] = {
     },
 }
 
-FUNCS_ENV: Dict[str, Any] = {
+FUNCS_ENV: dict[str, Any] = {
     "GET_POS": {
         3: lambda pos: pos,
         2: lambda pos: f"{pos}.xy",
@@ -173,7 +175,7 @@ def escape(line: str) -> str:
 
 # https://github.com/google/XNNPACK/blob/master/tools/xngen.py
 def preprocess(
-    input_text: str, variables: Dict[str, Any], input_path: str = "codegen"
+    input_text: str, variables: dict[str, Any], input_path: str = "codegen"
 ) -> str:
     input_lines = input_text.splitlines()
     python_lines = []
@@ -247,9 +249,9 @@ def preprocess(
 class SPVGenerator:
     def __init__(
         self,
-        src_dir_paths: Union[str, List[str]],
-        env: Dict[Any, Any],
-        glslc_path: Optional[str],
+        src_dir_paths: str | list[str],
+        env: dict[Any, Any],
+        glslc_path: str | None,
     ) -> None:
         if isinstance(src_dir_paths, str):
             self.src_dir_paths = [src_dir_paths]
@@ -259,18 +261,18 @@ class SPVGenerator:
         self.env = env
         self.glslc_path = glslc_path
 
-        self.glsl_src_files: Dict[str, str] = {}
-        self.template_yaml_files: List[str] = []
+        self.glsl_src_files: dict[str, str] = {}
+        self.template_yaml_files: list[str] = []
 
         self.addSrcAndYamlFiles(self.src_dir_paths)
-        self.shader_template_params: Dict[Any, Any] = {}
+        self.shader_template_params: dict[Any, Any] = {}
         for yaml_file in self.template_yaml_files:
             self.parseTemplateYaml(yaml_file)
 
-        self.output_shader_map: Dict[str, Tuple[str, Dict[str, str]]] = {}
+        self.output_shader_map: dict[str, tuple[str, dict[str, str]]] = {}
         self.constructOutputMap()
 
-    def addSrcAndYamlFiles(self, src_dir_paths: List[str]) -> None:
+    def addSrcAndYamlFiles(self, src_dir_paths: list[str]) -> None:
         for src_path in src_dir_paths:
             # Collect glsl source files
             glsl_files = glob.glob(
@@ -289,9 +291,9 @@ class SPVGenerator:
 
     def generateVariantCombinations(
         self,
-        iterated_params: Dict[str, Any],
-        exclude_params: Optional[Set[str]] = None,
-    ) -> List[Any]:
+        iterated_params: dict[str, Any],
+        exclude_params: set[str] | None = None,
+    ) -> list[Any]:
         if exclude_params is None:
             exclude_params = set()
         all_iterated_params = []
@@ -366,8 +368,8 @@ class SPVGenerator:
                         )
 
     def create_shader_params(
-        self, variant_params: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, str]:
+        self, variant_params: dict[str, Any] | None = None
+    ) -> dict[str, str]:
         if variant_params is None:
             variant_params = {}
         shader_params = copy.deepcopy(self.env)
@@ -413,7 +415,7 @@ class SPVGenerator:
                     self.create_shader_params(),
                 )
 
-    def generateSPV(self, output_dir: str) -> Dict[str, str]:
+    def generateSPV(self, output_dir: str) -> dict[str, str]:
         output_file_map = {}
         for shader_name in self.output_shader_map:
             source_glsl = self.output_shader_map[shader_name][0]
@@ -461,11 +463,11 @@ class SPVGenerator:
 
 @dataclass
 class ShaderInfo:
-    tile_size: List[int]
-    layouts: List[str]
+    tile_size: list[int]
+    layouts: list[str]
     weight_storage_type: str = ""
     bias_storage_type: str = ""
-    register_for: Optional[Tuple[str, List[str]]] = None
+    register_for: tuple[str, list[str]] | None = None
 
 
 def getName(filePath: str) -> str:
@@ -482,7 +484,7 @@ def isTileSizeLine(lineStr: str) -> bool:
     return re.search(tile_size_id, lineStr) is not None
 
 
-def findTileSizes(lineStr: str) -> List[int]:
+def findTileSizes(lineStr: str) -> list[int]:
     tile_size_id = r"^ \* TILE_SIZE = \(([0-9]+), ([0-9]+), ([0-9]+)\)"
     matches = re.search(tile_size_id, lineStr)
     if matches is None:
@@ -524,7 +526,7 @@ def isRegisterForLine(lineStr: str) -> bool:
     return re.search(register_for_id, lineStr) is not None
 
 
-def findRegisterFor(lineStr: str) -> Tuple[str, List[str]]:
+def findRegisterFor(lineStr: str) -> tuple[str, list[str]]:
     register_for_pattern = r"'([A-Za-z0-9_]+)'"
     matches = re.findall(register_for_pattern, lineStr)
     if matches is None:
@@ -613,7 +615,7 @@ static const api::ShaderRegisterInit register_shaders(&register_fn);
 """
 
 
-def generateSpvBinStr(spvPath: str, name: str) -> Tuple[int, str]:
+def generateSpvBinStr(spvPath: str, name: str) -> tuple[int, str]:
     with open(spvPath, "rb") as fr:
         next_bin = array.array("I", fr.read())
         sizeBytes = 4 * len(next_bin)
@@ -669,7 +671,7 @@ def generateShaderDispatchStr(shader_info: ShaderInfo, name: str) -> str:
 
 
 def genCppFiles(
-    spv_files: Dict[str, str], cpp_header_path: str, cpp_src_file_path: str
+    spv_files: dict[str, str], cpp_header_path: str, cpp_src_file_path: str
 ) -> None:
     spv_bin_strs = []
     register_shader_info_strs = []
@@ -709,7 +711,7 @@ def genCppFiles(
 ##########
 
 
-def parse_arg_env(items: Dict[Any, Any]) -> Dict[Any, Any]:
+def parse_arg_env(items: dict[Any, Any]) -> dict[Any, Any]:
     d = {}
     if items:
         for item in items:
@@ -720,7 +722,7 @@ def parse_arg_env(items: Dict[Any, Any]) -> Dict[Any, Any]:
     return d
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="")
     parser.add_argument(
         "-i",
