@@ -29,6 +29,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
 )
 
+
 assert_size_stride = torch._C._dynamo.guards.assert_size_stride
 AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32()
 if TEST_SCIPY:

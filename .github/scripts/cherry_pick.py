@@ -4,11 +4,9 @@ import json
 import os
 import re
 from typing import Any, cast, Dict, List, Optional
-
 from urllib.error import HTTPError
 
 from github_utils import gh_fetch_url, gh_post_pr_comment, gh_query_issues_by_labels
-
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from trymerge import get_pr_commit_sha, GitHubPR
 

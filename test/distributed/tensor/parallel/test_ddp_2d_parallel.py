@@ -9,17 +9,15 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.distributed.tensor.parallel.ddp import _pre_dp_module_transform
-
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-
 from torch.testing._internal.common_utils import run_tests
-
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     MLPModule,
     with_comms,
 )
+
 
 # Tensor-Parallel degree
 TP_DEGREE = 2
