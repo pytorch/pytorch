@@ -20,7 +20,6 @@ from worker.main import (
     WorkerUnpickler,
 )
 
-
 if TYPE_CHECKING:
     PopenType = subprocess.Popen[bytes]
 else:
