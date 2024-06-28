@@ -589,7 +589,9 @@ def gen_nn_functional(fm: FileManager) -> None:
         dispatched_hints += hints
 
     extra_nn_functional___all__ = [
-        "__all__ += [", *(f'    "{_}",' for _ in extra_nn_functional___all__), "]"
+        "__all__ += [",
+        *(f'    "{_}",' for _ in extra_nn_functional___all__),
+        "]",
     ]
 
     fm.write_with_template(
@@ -1667,7 +1669,8 @@ def gen_pyi(
         "torch/_C/_VariableFunctions.pyi",
         "torch/_C/_VariableFunctions.pyi.in",
         lambda: {
-            "generated_comment": "@" + "generated from torch/_C/_VariableFunctions.pyi.in",
+            "generated_comment": "@"
+            + "generated from torch/_C/_VariableFunctions.pyi.in",
             **env,
         },
     )
@@ -1675,7 +1678,8 @@ def gen_pyi(
         "torch/_VF.pyi",
         "torch/_C/_VariableFunctions.pyi.in",
         lambda: {
-            "generated_comment": "@" + "generated from torch/_C/_VariableFunctions.pyi.in",
+            "generated_comment": "@"
+            + "generated from torch/_C/_VariableFunctions.pyi.in",
             **env,
         },
     )
