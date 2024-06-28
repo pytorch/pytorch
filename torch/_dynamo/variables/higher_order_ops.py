@@ -12,7 +12,7 @@ import torch._C
 import torch.fx
 import torch.nn
 import torch.onnx.operators
-from torch._dynamo.utils import deepcopy_to_fake_tensor, get_fake_value, get_real_value
+from torch._dynamo.utils import get_fake_value
 from torch._dynamo.variables import ConstantVariable
 from torch._dynamo.variables.base import VariableTracker
 from torch._dynamo.variables.builtin import BuiltinVariable
@@ -595,6 +595,18 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 f"Expected 4 arguments but got {len(args)}.\n"
                 f"Usage: cond(pred, true_fn, false_fn, operands)",
             )
+
+        # Specialize into one of the branches since pred is constant
+        if type(args[0]) is ConstantVariable:
+            log.warning(
+                "Pred is a Python constant. When used with torch.cond, it executes only one of the branches."
+                " If you want torch.cond to perserve two branches, please make the predicate a boolean tensor or a SymBool."
+            )
+            if args[0].as_python_constant():
+                return args[1].call_function(tx, args[3].unpack_var_sequence(tx), {})
+            else:
+                return args[2].call_function(tx, args[3].unpack_var_sequence(tx), {})
+
         # predicate
         if type(args[0]) not in (ConstantVariable, TensorVariable, SymNodeVariable):
             unimplemented(
@@ -1149,17 +1161,16 @@ class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable
 
         p_args = tuple(arg.as_proxy() for arg in args[1:])
         real_sub_args = pytree.tree_map_only(
-            torch.fx.Proxy, lambda a: get_real_value(a.node, tx.output), p_args
+            torch.fx.Proxy, lambda a: get_fake_value(a.node, tx), p_args
         )
 
-        example_res = lowered_module.original_module.module()(*real_sub_args)
+        with tx.fake_mode:
+            example_value = lowered_module.original_module.module()(*real_sub_args)
 
         # NOTE [Guaranteeing the 1-1 correspondence of FakeTensors and real tensors]:
         # executorch modules promise not to alias inputs and outputs.
         # Thus, output FakeTensors will correctly not alias input FakeTensors.
-        _assert_tensors_nonaliasing(real_sub_args, example_res)
-
-        example_value = deepcopy_to_fake_tensor(example_res, tx.fake_mode)
+        _assert_tensors_nonaliasing(real_sub_args, example_value)
 
         p_args = (lowered_node,) + p_args
 

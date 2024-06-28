@@ -16,9 +16,14 @@ from typing import Any, Callable, List, Optional, Tuple, Type, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
+from torch._utils import _get_device_index
 from torch.autograd import Function, Variable
 from torch.distributed.algorithms.join import Join, Joinable, JoinHook
 from torch.utils._pytree import tree_flatten, tree_unflatten
+
+from ..modules import Module
+from .scatter_gather import gather, scatter_kwargs
+
 
 RPC_AVAILABLE = False
 if dist.is_available():
@@ -35,14 +40,9 @@ if dist.is_available():
         _to_kwargs,
         _verify_param_shape_across_processes,
     )
-if torch.distributed.rpc.is_available():
+if dist.rpc.is_available():
     RPC_AVAILABLE = True
     from torch.distributed.rpc import RRef
-
-from torch._utils import _get_device_index
-
-from ..modules import Module
-from .scatter_gather import gather, scatter_kwargs  # noqa: F401
 
 if TYPE_CHECKING:
     from torch.utils.hooks import RemovableHandle
@@ -804,7 +804,7 @@ class DistributedDataParallel(Module, Joinable):
         )
 
         # Initialize gradient buffers and register all reduce hook
-        self._delay_grad_buffer = None
+        self._delay_grad_buffer: Optional[torch.Tensor] = None
         self._delay_grad_views: List[torch.Tensor] = []
         self._delay_all_reduce_all_params = False
         if len(self._delay_all_reduce_params) != 0:
@@ -1482,7 +1482,7 @@ class DistributedDataParallel(Module, Joinable):
 
     def _should_disable_cpp_reducer(self) -> bool:
         return self._use_python_reducer and (
-            torch.compiler.is_compiling() or self._force_to_disable_cpp_reducer
+            torch._utils.is_compiling() or self._force_to_disable_cpp_reducer
         )
 
     def _pre_forward(self, *inputs, **kwargs):
@@ -1495,7 +1495,7 @@ class DistributedDataParallel(Module, Joinable):
                 h.remove()
             self._accum_grad_hooks.clear()
 
-        if not self._lazy_init_ran and not torch.compiler.is_compiling():
+        if not self._lazy_init_ran and not torch._utils.is_compiling():
             self._lazy_init()
 
         if self._delay_all_reduce_all_params:
@@ -1598,7 +1598,9 @@ class DistributedDataParallel(Module, Joinable):
                 treespec,
                 output_is_rref,
             ) = _tree_flatten_with_rref(output)
-            output_placeholders = [None for _ in range(len(output_tensor_list))]
+            output_placeholders: List[Optional[torch.Tensor]] = [
+                None for _ in range(len(output_tensor_list))
+            ]
             # Do not touch tensors that have no grad_fn, which can cause issues
             # such as https://github.com/pytorch/pytorch/issues/60733
             for i, output in enumerate(output_tensor_list):

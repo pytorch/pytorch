@@ -86,6 +86,7 @@ def _insert_copy_for_mutations(
     assert len(outputs) == len(mutated_outputs)
 
     user_output_nodes = []
+    return_nodes_to_copy = {}
     for return_node, mutated_node_name in zip(outputs, mutated_outputs):
         if mutated_node_name is None:
             user_output_nodes.append(return_node)
@@ -101,13 +102,18 @@ def _insert_copy_for_mutations(
             )
 
         with gm.graph.inserting_before(output_node):
-            _ = gm.graph.call_function(
+            copy_node = gm.graph.call_function(
                 torch.ops.aten.copy_.default, (mutated_node, return_node)
             )
+            return_nodes_to_copy[return_node] = copy_node
 
+    output_args = [
+        return_nodes_to_copy[node] if node in return_nodes_to_copy else node
+        for node in user_output_nodes
+    ]
     with gm.graph.inserting_before(output_node):
         # Only return user outputs
-        new_output = gm.graph.output(tuple(user_output_nodes))
+        new_output = gm.graph.output(tuple(output_args))
         output_node.replace_all_uses_with(new_output)
         gm.graph.erase_node(output_node)
 

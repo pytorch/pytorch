@@ -46,14 +46,20 @@ from unittest import mock
 import sympy
 
 import torch
-import torch._export
 import torch.utils._pytree as pytree
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import detect_fake_mode
 from torch.autograd import DeviceType
 from torch.autograd.profiler_util import EventList
+from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.passes.shape_prop import ShapeProp
-from torch.utils._sympy.functions import CeilDiv, CleanDiv, FloorDiv, ModularIndexing
+from torch.utils._sympy.functions import (
+    CeilDiv,
+    CleanDiv,
+    FloorDiv,
+    Identity,
+    ModularIndexing,
+)
 from torch.utils._sympy.symbol import make_symbol, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from . import config
@@ -574,7 +580,7 @@ def sympy_str(expr: sympy.Expr) -> str:
     if isinstance(expr, sympy.Mul):
         return " * ".join(map(sympy_str, expr.args))
 
-    if isinstance(expr, (ModularIndexing, CleanDiv, FloorDiv)):
+    if isinstance(expr, (ModularIndexing, CleanDiv, FloorDiv, Identity)):
         return f"{expr.func.__name__}({', '.join(map(sympy_str, expr.args))})"
     return str(expr)
 
@@ -677,6 +683,7 @@ def get_first_incompatible_cudagraph_node(gm):
         forbidden_set.update(
             {
                 "aten._unsafe_index_put.default",
+                "aten._unsafe_masked_index_put_accumulate.default",
                 "aten.index_put.default",
                 "aten.index_put_.default",
                 "aten.scatter.src",
@@ -732,7 +739,7 @@ def clear_inductor_caches():
 
 
 @contextlib.contextmanager
-def fresh_inductor_cache(cache_entries=None):
+def fresh_inductor_cache(cache_entries=None, dir=None, delete=True):
     """
     Contextmanager that provides a clean tmp cachedir for inductor.
 
@@ -741,11 +748,12 @@ def fresh_inductor_cache(cache_entries=None):
     """
     clear_inductor_caches()
 
-    inductor_cache_dir = tempfile.mkdtemp()
+    inductor_cache_dir = tempfile.mkdtemp(dir=dir)
     try:
         with mock.patch.dict(
             os.environ, {"TORCHINDUCTOR_CACHE_DIR": inductor_cache_dir}
         ):
+            log.debug("Using inductor cache dir %s", inductor_cache_dir)
             triton_cache_dir = os.path.join(inductor_cache_dir, "triton")
             with mock.patch.dict(os.environ, {"TRITON_CACHE_DIR": triton_cache_dir}):
                 yield
@@ -760,7 +768,8 @@ def fresh_inductor_cache(cache_entries=None):
                                 if ".lock" not in f
                             }
                         )
-        shutil.rmtree(inductor_cache_dir)
+        if delete:
+            shutil.rmtree(inductor_cache_dir)
     except Exception:
         log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
         raise
@@ -1040,6 +1049,92 @@ def use_cutlass_template(layout, m, n, k):
     return res
 
 
+@functools.lru_cache(None)
+def _rocm_native_device_arch_name(device):
+    return torch.cuda.get_device_properties(device).gcnArchName
+
+
+@functools.lru_cache(None)
+def try_import_ck_lib():
+    try:
+        import ck4inductor  # type: ignore[import]
+        from ck4inductor.universal_gemm.gen_instances import (  # type: ignore[import]
+            gen_ops_library,
+            gen_ops_preselected,
+        )
+        from ck4inductor.universal_gemm.op import (  # type: ignore[import]
+            CKGemmOperation,
+        )
+
+        package_dirname = os.path.dirname(ck4inductor.__file__)
+    except ImportError:
+
+        def gen_ops_library():
+            return []
+
+        def gen_ops_preselected():
+            return []
+
+        class CKGemmOperation:  # type: ignore[no-redef]
+            pass
+
+        package_dirname = None
+    return package_dirname, gen_ops_library, gen_ops_preselected, CKGemmOperation
+
+
+def use_ck_template(layout, m, n, k):
+    # config knobs check 1
+    if not use_max_autotune():
+        return False
+    # config knobs check 2
+    if not _use_autotune_backend("CK"):
+        return False
+    # platform check
+    if not torch.version.hip:
+        return False
+    # tensors must be on GPU
+    if not layout.device.type == "cuda":
+        return False
+    # hardware check
+    # if config arch list is not specified, get the native arch from the device properties
+    native_arch = _rocm_native_device_arch_name(layout.device)
+    requested_archs = {k.split(":")[0]: k for k in config.rocm.arch} or {
+        native_arch.split(":")[0]: native_arch
+    }
+    requested_supported_archs = [
+        requested_archs[k] for k in requested_archs.keys() & config.rocm.supported_arch
+    ]
+    if not requested_supported_archs:
+        return False
+    # supported input dtypes
+    if layout.dtype not in [torch.float16, torch.bfloat16]:
+        return False
+    # TBD: investigate if we need to disable backend based on number of available CUs similar to `is_big_gpu`
+    # check if shape is static and gemm size is not 0
+    from .virtualized import V
+
+    gemm_size = V.graph.sizevars.size_hint(m * n * k, fallback=-1)
+    if gemm_size <= 0:
+        return False
+    # TBD: investigate if backend needs to be disabled for small gemms similar to CUTLASS
+
+    ck_package_dirname, _, _, _ = try_import_ck_lib()
+
+    if not ck_package_dirname:
+        log.warning("Please pip install Composable Kernel package")
+        return False
+
+    if not config.rocm.ck_dir:
+        log.warning("Please set TORCHINDUCTOR_CK_DIR env variable")
+        return False
+
+    if ck_package_dirname != config.rocm.ck_dir:
+        log.warning("Invalid path to CK library")
+        return False
+
+    return True
+
+
 def _use_template_for_cpu(layout):
     return use_max_autotune() and layout.device.type == "cpu"
 
@@ -1055,7 +1150,7 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
     if not config.cpp.weight_prepack:
         return False
 
-    layout_dtypes = [torch.float32]
+    layout_dtypes = [torch.float32, torch.bfloat16, torch.half]
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2)
     # TODO(jgong5): support dynamic shapes for n or k
     if has_free_symbols((n, k)):
@@ -1063,7 +1158,13 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
     if isinstance(mat2, ir.BaseView):
         mat2 = mat2.unwrap_view()
     micro_gemm = create_micro_gemm(
-        "micro_gemm", m, n, k, layout.dtype, num_threads=parallel_num_threads()
+        "micro_gemm",
+        m,
+        n,
+        k,
+        input_dtype=layout.dtype,
+        output_dtype=torch.float,
+        num_threads=parallel_num_threads(),
     )
     # TODO(jgong5): support n % n_block_size != 0
     return (
@@ -1100,22 +1201,14 @@ class DebugDirManager:
 def run_and_get_code(fn, *args, **kwargs):
     from .graph import GraphLowering
 
-    compile_to_module = GraphLowering.compile_to_module
     source_codes: List[str] = []
 
-    def patched_compile_to_module(self):
-        mod = compile_to_module(self)
-        with open(mod.__file__) as f:
-            source_codes.append(f.read())
-        return mod
+    def save_output_code(code: str):
+        source_codes.append(code)
 
-    # If FX code caching is enabled, a hit prevents getting the code.
-    with config.patch({"fx_graph_cache": False}):
-        with mock.patch.object(
-            GraphLowering, "compile_to_module", patched_compile_to_module
-        ):
-            torch._dynamo.reset()
-            result = fn(*args, **kwargs)
+    with mock.patch.object(GraphLowering, "save_output_code", save_output_code):
+        torch._dynamo.reset()
+        result = fn(*args, **kwargs)
     return result, source_codes
 
 
@@ -1124,6 +1217,9 @@ def get_code(fn, *args, **kwargs):
     from .graph import GraphLowering
 
     source_codes: List[str] = []
+
+    def save_output_code(code: str):
+        source_codes.append(code)
 
     def patched_compile_to_module(self: GraphLowering):
         class DummyModule:
@@ -1140,18 +1236,17 @@ def get_code(fn, *args, **kwargs):
             self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
         )
         # Skip all the actual compiling.
+        nonlocal save_output_code
+        save_output_code(code)
 
-        source_codes.append(code)
         return DummyModule()
 
-    # If FX code caching is enabled, a hit prevents getting the code.
-    with config.patch({"fx_graph_cache": False}):
-        with mock.patch.object(
-            GraphLowering, "compile_to_module", patched_compile_to_module
-        ):
-            torch._dynamo.reset()
-            # Note the return here is None
-            _ = fn(*args, **kwargs)
+    with mock.patch.object(
+        GraphLowering, "compile_to_module", patched_compile_to_module
+    ), mock.patch.object(GraphLowering, "save_output_code", save_output_code):
+        torch._dynamo.reset()
+        # Note the return here is None
+        _ = fn(*args, **kwargs)
 
     return source_codes
 
@@ -1397,7 +1492,8 @@ def pass_execution_and_save(func, gm, inp, msg):
         print(f"Before:\n{gm.graph}", file=f)
         print(gm.graph, file=before_io)
         start_time = datetime.now()
-        func(gm.graph)
+        with GraphTransformObserver(gm, msg, config.trace.log_url_for_graph_xform):
+            func(gm.graph)
         time_elapsed = datetime.now() - start_time
         # recompile graph
         stable_topological_sort(gm.graph)
@@ -1495,6 +1591,7 @@ def get_cloned_parameter_buffer_name(name: str):
 
 
 def is_gpu(device: str):
+    assert isinstance(device, str) or device is None, device
     return device in ["cuda", "xpu"]
 
 
@@ -1516,6 +1613,13 @@ def use_scatter_fallback(
     src_device_type,
     src_is_tensor,
 ):
+    if (
+        op_overload.overloadpacket
+        in (torch.ops.aten.scatter_reduce_, torch.ops.aten.scatter_reduce)
+        and reduction_type is None
+    ):
+        return False
+
     reduce_ty = (
         "add" if op_overload.overloadpacket == torch.ops.aten.scatter_ else "sum"
     )
@@ -1671,6 +1775,8 @@ def aoti_compile_with_persistent_cache(
     Compile the given function with persistent cache for AOTI eager mode.
     """
     assert not dynamic, "Only support static shape for now"
+    from torch._export import aot_compile
+
     type_to_torch_dtype = {int: torch.int32, float: torch.float, bool: torch.bool}
     supported_scalar_types = tuple(type_to_torch_dtype.keys())
     flattened_inputs = pytree.arg_tree_leaves(*args, **kwargs)
@@ -1693,7 +1799,7 @@ def aoti_compile_with_persistent_cache(
         {"TORCHINDUCTOR_CACHE_DIR": persistent_cache_lib.absolute().as_posix()},
     ):
         try:
-            kernel_lib_path = torch._export.aot_compile(
+            kernel_lib_path = aot_compile(
                 f,
                 args,
                 kwargs,
@@ -1780,7 +1886,7 @@ def run_and_get_cpp_code(fn, *args, **kwargs):
 
         log_capture_string = io.StringIO()
         ch = logging.StreamHandler(log_capture_string)
-        from torch._inductor.graph import output_code_log
+        from torch._inductor.codecache import output_code_log
 
         output_code_log.addHandler(ch)
         prev_level = output_code_log.level

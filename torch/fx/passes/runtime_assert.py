@@ -65,7 +65,7 @@ def insert_deferred_runtime_asserts(
         ):
             assert len(node.args) == 1
             nodes_that_already_have_sym_constraint_range.add(
-                (node.args[0], node.kwargs["min"], node.kwargs["max"])
+                (node.args[0], node.kwargs.get("min"), node.kwargs.get("max"))
             )
         if (
             node.op == "call_function"
@@ -86,6 +86,7 @@ def insert_deferred_runtime_asserts(
         InnerTensorKey,
     )
     from torch.utils._sympy.interp import sympy_interp
+    from torch.utils._sympy.numbers import int_oo
     from torch.utils._sympy.reference import PythonReferenceAnalysis
 
     # TODO: Request simplification on runtime asserts before emitting them
@@ -97,7 +98,9 @@ def insert_deferred_runtime_asserts(
 
     graph_code_log.debug(
         "%s",
-        lazy_format_graph_code(f"pre insert_deferred_runtime_asserts {name}", gm),
+        lazy_format_graph_code(
+            f"pre insert_deferred_runtime_asserts {name}", gm, colored=True
+        ),
     )
 
     # deduplicate unassociated runtime assertions
@@ -367,6 +370,8 @@ def insert_deferred_runtime_asserts(
                     # (refinement should not be necessary once runtime
                     # asserts cause refinement, but that's NYI)
                     def convert(s):
+                        if s in (int_oo, -int_oo):
+                            return None
                         try:
                             return int(s)
                         except TypeError:

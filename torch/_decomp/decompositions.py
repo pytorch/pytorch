@@ -9,6 +9,7 @@ from itertools import chain, product
 from typing import Any, Callable, cast, Iterable, List, Optional, Tuple, Union
 
 import torch
+import torch._meta_registrations
 import torch._prims as prims
 import torch._prims_common as utils
 import torch.nn.functional as F
@@ -734,6 +735,11 @@ def slice_forward(
     end: Optional[int] = None,
     step: int = 1,
 ):
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_size_oblivious,
+        statically_known_true,
+    )
+
     ndim = self.dim()
     if ndim == 0:
         raise RuntimeError("slice() cannot be applied to a 0-dim tensor.")
@@ -760,7 +766,9 @@ def slice_forward(
 
     if end_val < start_val:
         end_val = start_val
-    elif end_val > sizes[dim]:
+    elif statically_known_true(end_val == sys.maxsize) or guard_size_oblivious(
+        end_val > sizes[dim]
+    ):
         end_val = sizes[dim]
 
     storage_offset = self.storage_offset() + start_val * strides[dim]
@@ -3713,8 +3721,60 @@ def _reshape_alias(x, shape, *args):
 
 
 @register_decomposition([aten._unsafe_index])
-def _index(x, indices):
+def _unsafe_index(x, indices):
     return aten.index(x, indices)
+
+
+@register_decomposition([aten._unsafe_masked_index])
+def _unsafe_masked_index(x, mask, indices, fill):
+    for index in indices:
+        if index is not None:
+            torch._check(
+                index.dtype in [torch.long, torch.int],
+                lambda: "tensors used as indices must be long or int tensors",
+            )
+
+    torch._check(
+        mask.dtype == torch.bool,
+        lambda: "tensors used as masks must be bool tensors",
+    )
+
+    if x.numel() == 0:
+        meta_result = torch._meta_registrations.meta_index_Tensor(x, indices)
+        return x.new_full(meta_result.shape, fill)
+
+    for i in range(len(indices)):
+        index = indices[i]
+        if index is not None:
+            indices[i] = index.clamp(min=0, max=x.size(i) - 1)
+
+    return aten._unsafe_index(x, indices).masked_fill(~mask, fill)
+
+
+@register_decomposition([aten._unsafe_masked_index_put_accumulate])
+def _unsafe_masked_index_put_accumulate(x, mask, indices, values):
+    for index in indices:
+        if index is not None:
+            torch._check(
+                index.dtype in [torch.long, torch.int],
+                lambda: "tensors used as indices must be long or int tensors",
+            )
+
+    torch._check(
+        mask.dtype == torch.bool,
+        lambda: "tensors used as masks must be bool tensors",
+    )
+
+    if x.numel() == 0:
+        return x.clone()
+
+    for i in range(len(indices)):
+        index = indices[i]
+        if index is not None:
+            indices[i] = index.clamp(min=-x.size(i), max=x.size(i) - 1)
+
+    masked_value = values.masked_fill(~mask, 0)
+    return aten._unsafe_index_put(x, indices, masked_value, accumulate=True)
 
 
 def _nll_loss_forward(
@@ -4763,11 +4823,13 @@ def squeeze_default(self: Tensor, dim: Optional[int] = None):
 
 
 @register_decomposition(torch.ops.aten._weight_norm_interface)
-def _weight_norm_interface(x, y, dim=0):
+def _weight_norm_interface(v, g, dim=0):
     # https://github.com/pytorch/pytorch/blob/852f8526c52190125446adc9a6ecbcc28fb66182/aten/src/ATen/native/WeightNorm.cpp#L58
-    keep_dim = tuple(i for i in range(len(x.shape)) if i != dim)
-    norm = x.norm(2, keep_dim, keepdim=True)
-    return x * (y / norm), norm
+    keep_dim = tuple(i for i in range(len(v.shape)) if i != dim)
+    # align with cuda behavior, keep norm in 'float' when g is 'bfloat16'
+    norm_dtype = torch.float if g.dtype == torch.bfloat16 else None
+    norm = v.norm(2, keep_dim, keepdim=True, dtype=norm_dtype)
+    return v * (g / norm.to(g.dtype)), norm
 
 
 @register_decomposition(aten.isin)

@@ -47,7 +47,7 @@ class TestGraphTransformObserver(TestCase):
             os.path.isfile(
                 os.path.join(
                     log_url,
-                    f"pass_{current_pass_count}_replace_neg_with_relu_input_graph.svg",
+                    f"pass_{current_pass_count}_replace_neg_with_relu_input_graph.dot",
                 )
             )
         )
@@ -55,7 +55,7 @@ class TestGraphTransformObserver(TestCase):
             os.path.isfile(
                 os.path.join(
                     log_url,
-                    f"pass_{current_pass_count}_replace_neg_with_relu_output_graph.svg",
+                    f"pass_{current_pass_count}_replace_neg_with_relu_output_graph.dot",
                 )
             )
         )

@@ -18,6 +18,7 @@ The MTIA backend is implemented out of the tree, only interfaces are be defined 
     init
     is_available
     is_initialized
+    set_device
     set_stream
     stream
     synchronize
