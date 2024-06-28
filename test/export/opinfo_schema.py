@@ -12,7 +12,6 @@ from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import TestCase
 from torch.utils._pytree import tree_map
 
-
 # Simplified naming for C++ classes
 SchemaArgument = torch._C._SchemaArgument
 SchemaArgType = torch._C._SchemaArgType
