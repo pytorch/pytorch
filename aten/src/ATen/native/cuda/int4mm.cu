@@ -342,7 +342,6 @@ struct ALayout_RM {
 #if !defined(USE_ROCM)
     auto aPtrPlus8Rows = aPtr + 8 * k;
 
-    bool m0InBounds = mLane < m;
     bool m1InBounds = (mLane + 8) < m;
 #endif
 
