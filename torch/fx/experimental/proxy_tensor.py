@@ -72,7 +72,7 @@ CONSTANT_NUMEL_LIMIT = 1
 
 T = TypeVar("T")
 U = TypeVar("U")
-P = ParamSpec("P")
+_P = ParamSpec("_P")
 R = TypeVar("R")
 
 null_ctx_type = type(nullcontext)
@@ -87,7 +87,7 @@ pytree.register_pytree_node(
         None,
     ),
 )
-def fake_signature(fn: Callable[P, R], nargs: int) -> Callable[P, R]:
+def fake_signature(fn: Callable[_P, R], nargs: int) -> Callable[_P, R]:
     """FX gets confused by varargs, de-confuse it"""
     argnames = ",".join(f"arg{i}" for i in range(nargs))
     return eval(f"lambda {argnames}: fn({argnames})", {"fn": fn})
@@ -329,7 +329,7 @@ def set_meta(proxy: Proxy, val: _ExtractValType) -> Proxy:
         proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
     return proxy
 
-def thunkify(f: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> Callable[[], R]:
+def thunkify(f: Callable[_P, R], *args: _P.args, **kwargs: _P.kwargs) -> Callable[[], R]:
     """
     Delays computation of f until it's called again
     Also caches the result
@@ -339,9 +339,9 @@ def thunkify(f: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> Callable[[
 def track_tensor(tensor: Tensor, proxy: Proxy, *, constant: Optional[Tensor], tracer: _ProxyTracer) -> None:
     def try_set_proxy_slot(
             outer_s: IntLikeType,
-            proxy_callable: Callable[Concatenate[PySymType, P], Proxy],
-            *args: P.args,
-            **kwargs: P.kwargs
+            proxy_callable: Callable[Concatenate[PySymType, _P], Proxy],
+            *args: _P.args,
+            **kwargs: _P.kwargs
     ) -> None:
         assert callable(proxy_callable)
         if isinstance(outer_s, SymInt):
@@ -871,11 +871,11 @@ def dispatch_trace(
     return fx._lazy_graph_module._make_graph_module(tracer.root, graph, name)
 
 
-def wrap_key(f: Callable[P, R], tensors: P.args, tracer: _ProxyTracer, pre_dispatch: bool) -> Callable[P, R]:
+def wrap_key(f: Callable[_P, R], tensors: _P.args, tracer: _ProxyTracer, pre_dispatch: bool) -> Callable[_P, R]:
     flat_tensors, tensors_spec = pytree.tree_flatten(tensors)
 
     @functools.wraps(f)
-    def wrapped(*proxies: P.args, **_unused: P.kwargs) -> R:
+    def wrapped(*proxies: _P.args, **_unused: _P.kwargs) -> R:
         flat_proxies, proxies_spec = pytree.tree_flatten(proxies)
         assert len(flat_proxies) == len(flat_tensors)
         with disable_proxy_modes_tracing() as m:
@@ -976,12 +976,12 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
     _managers: List[AbstractContextManager]
 
     def __init__(
-            self,
-            tracer: _ProxyTracer,
-            tracing_mode: str,
-            pre_dispatch: bool = False,
-            _allow_fake_constant: bool = False,
-            _error_on_data_dependent_ops: bool = True
+        self,
+        tracer: _ProxyTracer,
+        tracing_mode: str,
+        pre_dispatch: bool = False,
+        _allow_fake_constant: bool = False,
+        _error_on_data_dependent_ops: bool = True
     ) -> None:
         dk = torch._C.DispatchKey.PreDispatch if pre_dispatch else None
         super().__init__(dk)
@@ -1640,7 +1640,7 @@ class _MakefxTracer:
             }
             return pytree.tree_map(wrap_fn_map[self.tracing_mode], args)
 
-        def _wrap_func(f: Callable[P, R], phs: Sequence[PHBase]) -> Callable[P, R]:
+        def _wrap_func(f: Callable[_P, R], phs: Sequence[PHBase]) -> Callable[_P, R]:
             if not hasattr(inspect.unwrap(f), '__code__') or inspect.unwrap(f).__code__.co_flags & inspect.CO_VARARGS:
                 # FX doesn't support varargs, so we gotta fake up a wrapper
                 # TODO: Would be nice to fix this at the source...
