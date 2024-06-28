@@ -4561,7 +4561,7 @@
     MPS: _pin_memory_mps
     NestedTensorCUDA, NestedTensorCPU: _pin_memory_nested
     SparseCUDA: _pin_memory_sparse_coo
-    SparseCsrCUDA: _pin_memory_sparse_compressed
+    SparseCsrCUDA, SparseCsrCPU: _pin_memory_sparse_compressed
   autogen: _pin_memory.out
 
 - func: pinverse(Tensor self, float rcond=1e-15) -> Tensor

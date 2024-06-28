@@ -5341,10 +5341,11 @@ class TestSparseAny(TestCase):
             torch.randn(1).to_sparse(blocksize=torch.Size((1, 1, 1)))
 
     @onlyCPU
-    @all_sparse_layouts('layout', include_strided=not False)
+    @all_sparse_layouts('layout', include_strided=True)
     def test_constructor_pin_memory(self, device, layout):
         """Tests sparse_xyz_tensor(indices, values, pin_memory=True)
         """
+        self.assertEqual(device, "cpu")
         for t in self.generate_simple_inputs(
                 layout, device=device, dtype=torch.float64,
                 enable_zero_sized=False,  # pinning zero-sized tensors is a no-op
@@ -5369,7 +5370,7 @@ class TestSparseAny(TestCase):
             self.assertTrue(t.is_pinned())
 
     @onlyCPU
-    @all_sparse_layouts('layout', include_strided=not False)
+    @all_sparse_layouts('layout', include_strided=True)
     def test_method_pin_memory(self, device, layout):
         """Tests sparse_xyz_tensor(indices, values, pin_memory=False).pin_memory(device)
         """
@@ -5401,8 +5402,7 @@ class TestSparseAny(TestCase):
             self.assertTrue(t.is_pinned(pin_memory_device))
 
     @onlyCPU
-    # @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @all_sparse_layouts('layout', include_strided=not False)
+    @all_sparse_layouts('layout', include_strided=True)
     def test_constructor_pinned_memory(self, device, layout):
         """Tests sparse_xyz_tensor(indices.pin_memory(device), values.pin_memory(device))
         """
