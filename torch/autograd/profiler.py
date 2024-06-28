@@ -6,9 +6,11 @@ from typing import Any, Dict, List, Optional
 from warnings import warn
 
 import torch
+
 import torch.cuda
 from torch._C import _get_privateuse1_backend_name
 from torch._C._profiler import _ExperimentalConfig
+
 from torch.autograd import (
     _disable_profiler,
     _enable_profiler,
@@ -33,7 +35,6 @@ from torch.autograd.profiler_util import (
     OUT_OF_MEMORY_EVENT_NAME,
 )
 from torch.futures import Future
-
 
 __all__ = [
     "profile",

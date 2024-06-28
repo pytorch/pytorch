@@ -4,7 +4,6 @@ import unittest
 
 from torch._lazy.ts_backend import init as init_ts_backend
 
-
 init_ts_backend()
 import copy
 import dis

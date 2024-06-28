@@ -13,7 +13,6 @@ from typing import List, Optional, Tuple, TYPE_CHECKING
 
 import torch
 
-
 if TYPE_CHECKING:
     # See the note in api.py for why this is necessary.
     from torch.utils.benchmark.utils.timer import Language

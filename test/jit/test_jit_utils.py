@@ -5,14 +5,13 @@ import sys
 from textwrap import dedent
 
 import torch
-from torch.testing._internal import jit_utils
 
+from torch.testing._internal import jit_utils
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase
-
 
 if __name__ == "__main__":
     raise RuntimeError(

@@ -5,7 +5,6 @@ from typing import Any, Callable, Dict, Iterable, Optional, Tuple, Type, Union
 import torch
 from torch._streambase import _EventBase, _StreamBase
 
-
 get_cuda_stream: Optional[Callable[[int], int]]
 if torch.cuda._is_compiled():
     from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
