@@ -271,8 +271,8 @@ class TS2FXGraphConverter:
         self.name_to_non_tensor_attribute_node: Dict[str, Any] = {}
 
         # Mapping from fully qualified name to initial real values inputs
-        # We separate it from self.name_to_non_tensor_attribute_node since we need initial 
-        # real value input when we construct fx.GraphModule
+        # We separate it from self.name_to_non_tensor_attribute_node since
+        # we need initial real value input when we construct fx.GraphModule
         self.name_to_non_tensor_attribute: Dict[str, Any] = name_to_non_tensor_attribute
 
         self.subgraphs: Dict[str, torch.fx.GraphModule] = {}
@@ -443,13 +443,13 @@ class TS2FXGraphConverter:
         self.name_to_attribute_fqn[output_name] = attr_fqn
 
         attr_value = node.output()
-        if isinstance(self.ts_graph, torch.Graph):
+        if self.is_top_level_graph():
             if attr_value.type().annotation_str == "Tensor":
                 # We insert a get_attr node due to two reasons.
-                # First, ts graph does not lift tensor constants as input nodes. So tensor constants may
-                # be ignored by in convert_graph_inputs().
-                # Second, attr_fqn may have been written to via SetAttr. Two GetAttr may give different
-                # values.
+                # First, ts graph does not lift tensor constants as input nodes. So
+                # tensor constants may be ignored by in convert_graph_inputs().
+                # Second, attr_fqn may have been written to via SetAttr. Two
+                # GetAttr may give different values.
                 self.name_to_node[output_name] = self.fx_graph.get_attr(attr_fqn)
             else:
                 if attr_fqn not in self.name_to_non_tensor_attribute_node:
@@ -460,8 +460,8 @@ class TS2FXGraphConverter:
                     attr_fqn
                 ]
         else:
-            # Special support for if blocks which do not allow SetAttr TorchScript node and get_attr
-            # FX Graph Node.
+            # Special support for if blocks which do not allow SetAttr TorchScript
+            # node and get_attr FX Graph Node.
             if attr_value.type().annotation_str == "Tensor":
                 self.name_to_node[output_name] = self.name_to_node[attr_fqn]
 
@@ -868,8 +868,16 @@ class TS2EPConverter:
         return ep
 
     def lift_tensor_constants_to_buffer(self):
-        # torchscript does not lift tensor constants to buffers. So we cannot access tensor
-        # constants during `graph_converter.convert()`.
+        # This function lifts tensor constants attributes (e.g., self.data = torch.tensor([2,3]))
+        # to buffers. Currently, when there are tensor constants, export
+        # would error and ask users to register tensor constants as buffers.
+        # Since it is hard to manually do so for TorchScript models
+        # (e.g., source code is missing), this function automatically
+        # lifts tensor constants to be buffers.
+        # This function should happen in TS2EPConverter instead of
+        # TS2FXGraphConverter since it gets attributes from self.ts_model
+        # which is not accessable in TS2FXGraphConverter. It is similar to where
+        # we collect self.name_to_param_map and self.name_to_buffer_map.
         name_to_attribute_fqn: Dict[str, str] = {}
 
         def get_attr(fqn: str):
