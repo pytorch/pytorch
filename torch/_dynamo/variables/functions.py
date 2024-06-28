@@ -19,6 +19,7 @@ from ..utils import check_constant_args, get_first_attr, identity, istype, make_
 from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable
 
+
 if TYPE_CHECKING:
     from torch._guards import Source
 
