@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: quantization"]
 import copy
-
 import unittest
 from typing import List
 
@@ -12,9 +11,7 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer import (
     get_symmetric_quantization_config,
 )
 from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import OP_TO_ANNOTATOR
-
 from torch.fx import Node
-
 from torch.testing._internal.common_quantization import QuantizationTestCase
 from torch.testing._internal.common_utils import IS_WINDOWS
 
