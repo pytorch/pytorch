@@ -2526,7 +2526,6 @@ class DtypeView(BaseView):
         super().__post_init__()
         if isinstance(self.data, BaseView):
             self.data = self.data.unwrap_view()
-        # self.layout = self.data.layout
 
     def __str__(self):
         return self.str_helper([self.data, self.target_dtype])
