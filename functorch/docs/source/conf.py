@@ -273,13 +273,12 @@ intersphinx_mapping = {
 }
 
 import sphinx.ext.doctest
-from docutils import nodes
-from sphinx import addnodes
-from sphinx.util.docfields import TypedField
-
 
 # -- A patch that prevents Sphinx from cross-referencing ivar tags -------
 # See http://stackoverflow.com/a/41184353/3343043
+from docutils import nodes
+from sphinx import addnodes
+from sphinx.util.docfields import TypedField
 
 
 # Without this, doctest adds any example with a `>>>` as a test
