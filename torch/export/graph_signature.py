@@ -519,7 +519,7 @@ class ExportGraphSignature:
         """
         assert isinstance(old, str)
         assert isinstance(new, str)
-        arg_types = (TensorArgument, SymIntArgument, CustomObjArgument)
+        arg_types = (TensorArgument, SymIntArgument, CustomObjArgument, TokenArgument)
         for o in self.output_specs:
             if isinstance(o.arg, arg_types):
                 if o.arg.name == old:
