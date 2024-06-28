@@ -14,6 +14,7 @@ from torch._inductor import config
 _IS_WINDOWS = sys.platform == "win32"
 
 
+# TODO: Move to cpp_builder, when optimize it.
 def get_compiler_version_info(compiler: str) -> str:
     SUBPROCESS_DECODE_ARGS = ("oem",) if _IS_WINDOWS else ()
     env = os.environ.copy()
