@@ -8,12 +8,13 @@ import subprocess
 import time
 
 import numpy as np
+
 import torch
-import torch.nn as nn
 import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
 import torch.distributed.rpc as rpc
 import torch.multiprocessing as mp
+import torch.nn as nn
 import torch.optim as optim
 from torch.distributed.optim import DistributedOptimizer
 from torch.distributed.rpc import RRef, TensorPipeRpcBackendOptions
@@ -210,13 +211,12 @@ def run_worker(rank, world_size):
 
     # Rank 16. Master
     if rank == (NUM_TRAINERS + NUM_PS):
-
         rpc.init_rpc(
-            "master", rank=rank,
+            "master",
+            rank=rank,
             backend=BackendType.TENSORPIPE,  # type: ignore[attr-defined]
-            world_size=world_size
+            world_size=world_size,
         )
-
 
         # Build the Embedding tables on the Parameter Servers.
         emb_rref_list = []
@@ -256,7 +256,6 @@ def run_worker(rank, world_size):
 
     # Rank 0-7. Trainers
     elif rank >= 0 and rank < NUM_PS:
-
         # Initialize process group for Distributed DataParallel on trainers.
         dist.init_process_group(
             backend=dist.Backend.GLOO,
@@ -292,7 +291,7 @@ def run_worker(rank, world_size):
 
 
 if __name__ == "__main__":
-    """ Initializing the distributed environment. """
+    """Initializing the distributed environment."""
 
     output = _run_printable("nvidia-smi topo -m")
     print("-------------------------------------------")

@@ -250,7 +250,16 @@ def get_class_assigns(ctx, cls_ast):
 
 
 def get_jit_class_def(cls, self_name):
-    # Get defs for each method within the current class independently
+    """Get definitions for each method within the current class independently.
+
+    Args:
+        cls: The class to get definition of.
+        self_name: The name of the class that the properties should belong to.
+
+    Returns:
+        torch._C._jit_tree_views.ClassDef: A representation of the class,
+            the methods in the class and their definition as a tree.
+    """
     # TODO: proper overriding analysis when implementing class inheritance
     methods = inspect.getmembers(
         cls,
@@ -594,6 +603,15 @@ def build_ignore_context_manager(ctx, stmt):
 
 
 def get_default_args(fn):
+    """
+    Get a dictionary of default arguments for a function.
+
+    Args:
+        fn: Callable - The function to inspect for default arguments.
+    Returns:
+        (Dict[str, Any]): mapping argument names to their default values if
+        :attr:`fn` is not None, else empty dictionary.
+    """
     if fn is None:
         return {}
 

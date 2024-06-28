@@ -80,10 +80,12 @@ import torch.fx
 import torch.utils._pytree as pytree
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import counters
+from torch._inductor.config import trace as trace_config
 from torch._prims_common import is_integer_dtype
 from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
 from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
 from torch.fx.immutable_collections import immutable_dict, immutable_list
+from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 
 from .._functorch import config as functorch_config
 from .._functorch.aot_autograd import aot_function, make_boxed_func
@@ -1058,7 +1060,10 @@ class ReplacementPatternEntry(PatternEntry):
             last_node = min(indices, key=operator.itemgetter(0))[1]
 
         def percolate_tags(
-            node: torch.fx.Node, recompute_tag: str, input_stops: Set[torch.fx.Node]
+            node: torch.fx.Node,
+            tag_name: str,
+            tag_value: str,
+            input_stops: Set[torch.fx.Node],
         ) -> None:
             queue = [node]
             visited = set()
@@ -1071,7 +1076,7 @@ class ReplacementPatternEntry(PatternEntry):
                     and hasattr(arg, "meta")
                 ):
                     visited.add(arg)
-                    arg.meta["recompute"] = recompute_tag
+                    arg.meta[tag_name] = tag_value
                     queue.extend(arg.all_input_nodes)
 
         with graph.inserting_before(last_node):
@@ -1111,8 +1116,9 @@ class ReplacementPatternEntry(PatternEntry):
                     # many to many, there is no easy way to correctly map the
                     # recomputable tags. It is possible in some scenarios that we
                     # incorrectly tag some nodes as recomputables.
-                    if "recompute" in old.meta:
-                        percolate_tags(new, old.meta["recompute"], set(args))
+                    for tag_name in ["recompute", "ac_graph_id"]:
+                        if tag_name in old.meta:
+                            percolate_tags(new, tag_name, old.meta[tag_name], set(args))
 
                     old.replace_all_uses_with(new)
                     graph.erase_node(old)
@@ -1649,11 +1655,18 @@ class PatternMatcherPass:
     def __getitem__(self, item: Tuple[str, torch.fx.node.Target]) -> List[PatternEntry]:
         return self.patterns[item]
 
-    def apply(self, graph: torch.fx.GraphModule) -> int:
+    def apply(self, gm: torch.fx.GraphModule) -> int:
         if not self.patterns:
             return 0
-        if isinstance(graph, torch.fx.GraphModule):
-            graph = graph.graph
+        if isinstance(gm, torch.fx.GraphModule):
+            graph = gm.graph
+        elif isinstance(gm, torch.fx.Graph):
+            graph = gm
+            gm = graph.owning_module
+        else:
+            raise RuntimeError(
+                f"The input to PatternMatcherPass must be a GraphModule or a Graph, but got {type(gm)}"
+            )
         if self.prevent_match_across_mutations:
             if should_compute_mutation_region_ids(graph):
                 compute_mutation_region_ids(graph)
@@ -1670,36 +1683,40 @@ class PatternMatcherPass:
                 nodes.append(graph.find_nodes(op=op, target=target, sort=False))
         if has_call_module:
             nodes.append(graph.find_nodes(op="call_module", sort=False))
-        for node in sorted(itertools.chain.from_iterable(nodes), reverse=True):
-            target = extract_target(node)
-            if node.op == "call_module":
-                if (node.op, target) not in self.patterns:
+        pass_name = self.pass_name if self.pass_name is not None else "pattern_matcher"
+        with GraphTransformObserver(
+            gm, pass_name, trace_config.log_url_for_graph_xform
+        ):
+            for node in sorted(itertools.chain.from_iterable(nodes), reverse=True):
+                target = extract_target(node)
+                if node.op == "call_module":
+                    if (node.op, target) not in self.patterns:
+                        continue
+
+                # conservatively not applying pattern for cpu input,
+                # since some of the patterns induce codegen and split nodes.
+                # Note: we will only skip cpu compute if disable_cpp_codegen=True
+                if fallback_node_due_to_unsupported_type(node, allow_cpu_inputs=False):
                     continue
 
-            # conservatively not applying pattern for cpu input,
-            # since some of the patterns induce codegen and split nodes.
-            # Note: we will only skip cpu compute if disable_cpp_codegen=True
-            if fallback_node_due_to_unsupported_type(node, allow_cpu_inputs=False):
-                continue
-
-            for entry in self.patterns[(node.op, target)]:
-                if node._erased:
-                    break
-                m = entry.pattern.match(node)
-                # pattern match crosses mutation barrier - discard
-                if (
-                    self.prevent_match_across_mutations
-                    and is_match(m)
-                    and len(set(map(get_mutation_region_id_partial, m.nodes))) != 1  # type: ignore[possibly-undefined]
-                ):
-                    continue
-                if os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG") == node.name:
-                    log.warning("%s%s %s %s", node, node.args, m, entry.pattern)
-                if is_match(m) and entry.extra_check(m):
-                    count += 1
-                    entry.apply(m, graph, node)  # type: ignore[arg-type]
-                    counters["inductor"]["pattern_matcher_count"] += 1
-                    counters["inductor"]["pattern_matcher_nodes"] += len(m.nodes)
+                for entry in self.patterns[(node.op, target)]:
+                    if node._erased:
+                        break
+                    m = entry.pattern.match(node)
+                    # pattern match crosses mutation barrier - discard
+                    if (
+                        self.prevent_match_across_mutations
+                        and is_match(m)
+                        and len(set(map(get_mutation_region_id_partial, m.nodes))) != 1  # type: ignore[possibly-undefined]
+                    ):
+                        continue
+                    if os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG") == node.name:
+                        log.warning("%s%s %s %s", node, node.args, m, entry.pattern)
+                    if is_match(m) and entry.extra_check(m):
+                        count += 1
+                        entry.apply(m, graph, node)  # type: ignore[arg-type]
+                        counters["inductor"]["pattern_matcher_count"] += 1
+                        counters["inductor"]["pattern_matcher_nodes"] += len(m.nodes)
         return count
 
     def clear(self) -> None:

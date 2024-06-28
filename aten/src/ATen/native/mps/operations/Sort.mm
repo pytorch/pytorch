@@ -60,8 +60,8 @@ TORCH_IMPL_FUNC(sort_stable_out_mps)
     // Input as placeholders
     MPSShape* input_shape = getMPSShape(self);
     NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
-    string key = string("sort:") + [ns_shape_key UTF8String] + ":" + getMPSTypeString(self) + ":dim" + to_string(dim) +
-        ":descending" + to_string(descending);
+    string key = string("sort:") + [ns_shape_key UTF8String] + ":" + getMPSTypeString(self) + ":dim" +
+        std::to_string(dim) + ":descending" + std::to_string(descending);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       newCachedGraph->selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(self), input_shape);
 

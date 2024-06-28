@@ -224,7 +224,7 @@ struct Value {
     if (hasDebugName()) {
       return unique_name_;
     }
-    return c10::to_string(unique());
+    return std::to_string(unique());
   }
   TORCH_API std::string debugNameBase() const;
   Node* node() {

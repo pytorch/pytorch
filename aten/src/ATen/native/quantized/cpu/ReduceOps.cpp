@@ -172,16 +172,6 @@ Tensor mean_quantized_cpu(
   return result;
 }
 
-static Tensor& mean_out_quantized_cpu(
-    Tensor& result,
-    const Tensor& self,
-    DimnameList dim,
-    bool keepdim,
-    std::optional<ScalarType> opt_dtype) {
-  return mean_out_quantized_cpu(
-      self, dimnames_to_positions(self, dim), keepdim, opt_dtype, result);
-}
-
 // qstd
 inline bool is_std_inner_dim_fast_path(
     const Tensor& self,

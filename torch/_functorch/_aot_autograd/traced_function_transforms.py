@@ -40,6 +40,7 @@ from .functional_utils import (
     is_fun,
     sync_functional_tensor,
     to_fun,
+    was_inductor_storage_resized,
 )
 from .logging_utils import setup_stacktrace_preservation_hooks
 from .schemas import (
@@ -411,26 +412,41 @@ def create_functionalized_fn(
             # Only look at mutations that happened to forward inputs (e.g. fw buffers that were saved for bw)
             primals_before = args[0]
             primals_after = pytree.tree_map(from_fun, f_args[0])
-            for f_inpt, before, after, inpt_info in zip(
-                f_args[0], primals_before, primals_after, meta.input_info
+            for idx, (f_inpt, before, after, inpt_info) in enumerate(
+                zip(f_args[0], primals_before, primals_after, meta.input_info)
             ):
+                # Store information about mutations in joint(for backward analysis)
+                joint_mutates_data = has_data_mutation(f_inpt)
+
+                joint_mutates_metadata = has_metadata_mutation(
+                    f_inpt, before, check_only_storage_mutation=False
+                )
+
                 # Ban metadata mutations on fw inputs during the bw
                 if not inpt_info.mutates_metadata:
-                    assert not has_metadata_mutation(
-                        f_inpt, before, check_only_storage_mutation=False
+                    assert (
+                        not joint_mutates_metadata
                     ), "Found a graph input that had its metadata mutated in the backward. This is not supported"
+
+                # Ban storage resizing on fw inputs during the bw
+                if not inpt_info.mutation_inductor_storage_resize:
+                    assert not was_inductor_storage_resized(
+                        f_inpt
+                    ), "Found a graph input that had storage resizing in the backward. This is not supported"
+
                 # Allow data mutations on fw inputs during the bw, but only if they do not require grad
                 # So we can guarantee that we can keep the mutations in the graph
                 if (
-                    has_data_mutation(f_inpt)
+                    joint_mutates_data
                     and not inpt_info.mutates_data
                     and not inpt_info.mutates_storage_metadata
                 ):
-                    assert (
-                        not inpt_info.requires_grad
-                    ), "Found a graph input that requires_grad and was mutated in the backward. This is not supported"
-                    # Otherwise, put the mutation in the graph
+                    # Not banning here mutations on inpt_info.requires_grad -
+                    # we'll check at runtime and fail only when backward is under torch.is_grad_enabled (create_graph)
                     before.copy_(after)
+                    meta.indices_of_inputs_that_requires_grad_with_mutations_in_bw.append(
+                        idx
+                    )
             # Now that we covered mutations to *forward* inputs during the backward,
             # we also need to cover mutations to *backward-only* inputs during the backward (e.g. mutation to a grad_out).
             # Today, we will just error in all cases of this happening unless someone needs us to support it.

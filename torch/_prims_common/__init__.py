@@ -1046,17 +1046,17 @@ def type_to_dtype(typ: type) -> torch.dtype:
 
     assert isinstance(typ, type)
 
-    if typ is bool:
+    if typ in (bool, torch.SymBool):
         return torch.bool
-    if typ in [int, torch.SymInt]:
+    if typ in (int, torch.SymInt):
         return torch.long
-    if typ in [float, torch.SymFloat]:
+    if typ in (float, torch.SymFloat):
         return torch.get_default_dtype()
     # TODO: sym_complex_float?
     if typ is complex:
         return corresponding_complex_dtype(torch.get_default_dtype())
 
-    raise ValueError("Invalid type!")
+    raise ValueError(f"Invalid type {typ}!")
 
 
 def get_dtype(x: Union[torch.Tensor, NumberType]):
@@ -1363,8 +1363,12 @@ def number_type(
         return type(x)
 
 
-def expr_type(x: sympy.Expr) -> Type:
-    if x.is_integer:  # type: ignore[attr-defined]
+def expr_type(x: sympy.Basic) -> Type:
+    import sympy
+
+    if x.kind is sympy.core.kind.BooleanKind:
+        return bool
+    elif x.is_integer:  # type: ignore[attr-defined]
         return int
     else:
         # NB: Not strictly correct, but we don't support SymPy complex or bool.
@@ -1471,13 +1475,13 @@ def elementwise_dtypes(
     import sympy
 
     for x in args:
-        if not isinstance(x, (Number, TensorLike, sympy.Expr)):
+        if not isinstance(x, (Number, TensorLike, sympy.Basic)):
             msg = f"Unexpected type {str(type(x))} when computing elementwise type promotion!"
             raise ValueError(msg)
 
         if isinstance(x, Number):
             highest_type = get_higher_type(highest_type, number_type(x))
-        elif isinstance(x, sympy.Expr):
+        elif isinstance(x, sympy.Basic):
             highest_type = get_higher_type(highest_type, expr_type(x))
         else:
             # x is a TensorLike

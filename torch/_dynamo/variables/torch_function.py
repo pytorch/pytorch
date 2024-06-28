@@ -8,7 +8,7 @@ import torch.utils._pytree as pytree
 from torch.overrides import _get_overloaded_args, get_default_nowrap_functions
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, GlobalSource
+from ..source import AttrSource, GlobalSource, TypeSource
 from ..utils import has_torch_function, is_tensor_base_attr_getter
 from .constant import ConstantVariable
 from .lists import TupleVariable
@@ -88,7 +88,7 @@ def _get_subclass_type_var(tx, var):
         from .builder import SourcelessBuilder, VariableBuilder
 
         if var.source:
-            return VariableBuilder(tx, var.source)(var.python_type())
+            return VariableBuilder(tx, TypeSource(var.source))(var.python_type())
         else:
             return SourcelessBuilder.create(tx, var.python_type())
 
