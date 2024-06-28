@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import contextlib
-
 import logging
 
 import torch
@@ -33,6 +32,7 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils._python_dispatch import _get_current_dispatch_mode
+
 
 log = logging.getLogger(__name__)
 

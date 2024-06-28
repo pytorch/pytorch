@@ -9,7 +9,6 @@ from typing import Callable, Union
 import torch
 import torch._custom_op
 import torch._logging
-
 from torch._ops import OpOverload
 from torch._prims_common import (
     elementwise_dtypes,
@@ -18,7 +17,6 @@ from torch._prims_common import (
     is_float_dtype,
     is_integer_dtype,
 )
-
 from torch._subclasses.fake_tensor import (
     DataDependentOutputException,
     DynamicOutputShapeException,
@@ -28,8 +26,8 @@ from torch._subclasses.fake_tensor import (
     UnsupportedOperatorException,
 )
 from torch.fx.operator_schemas import normalize_function
-
 from torch.utils._stats import count_label
+
 
 pytree = torch.utils._pytree
 
