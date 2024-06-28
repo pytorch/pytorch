@@ -5340,6 +5340,7 @@ class TestSparseAny(TestCase):
         with self.assertRaisesRegex(RuntimeError, ".*blocksize.*, but got 3"):
             torch.randn(1).to_sparse(blocksize=torch.Size((1, 1, 1)))
 
+    @unittest.skipIf(not torch.cuda.is_available(), 'requires cuda')
     @onlyCPU
     @all_sparse_layouts('layout', include_strided=True)
     def test_constructor_pin_memory(self, device, layout):
@@ -5369,6 +5370,7 @@ class TestSparseAny(TestCase):
                 assert 0  # unreachable
             self.assertTrue(t.is_pinned())
 
+    @unittest.skipIf(not torch.cuda.is_available(), 'requires cuda')
     @onlyCPU
     @all_sparse_layouts('layout', include_strided=True)
     def test_method_pin_memory(self, device, layout):
@@ -5401,6 +5403,7 @@ class TestSparseAny(TestCase):
                 assert 0  # unreachable
             self.assertTrue(t.is_pinned(pin_memory_device))
 
+    @unittest.skipIf(not torch.cuda.is_available(), 'requires cuda')
     @onlyCPU
     @all_sparse_layouts('layout', include_strided=True)
     def test_constructor_pinned_memory(self, device, layout):
