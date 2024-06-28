@@ -678,6 +678,26 @@ class TestCustomOp(CustomOpTestCaseBase):
             """(Tensor(a0!) x, Tensor(a1!)[] y, Tensor(a2!)[] z, Tensor(a3!)?[] w) -> ()""",
         )
 
+        def h(
+            x: Tensor,
+            a: Optional[int] = None,
+            b: float = 3.14,
+            c: bool = True,
+            d: int = 3,
+            e: str = "foo",
+            f: torch.dtype = torch.float,
+            g: torch.dtype = torch.float32,
+            h: torch.dtype = torch.int,
+            i: torch.device = torch.device("cpu:0"),
+            j: torch.device = "cpu",
+        ) -> None:
+            pass
+
+        self.assertExpectedInline(
+            infer_schema(h),
+            """(Tensor x, SymInt? a=None, float b=3.14, bool c=True, SymInt d=3, str e="foo", ScalarType f=float32, ScalarType g=float32, ScalarType h=int32, Device i="cpu:0", Device j="cpu") -> ()""",
+        )
+
     def test_infer_schema_unsupported(self):
         with self.assertRaisesRegex(ValueError, "varargs"):
 
