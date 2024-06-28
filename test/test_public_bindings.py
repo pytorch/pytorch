@@ -1,19 +1,26 @@
 # Owner(s): ["module: autograd"]
 
-from torch.testing._internal.common_utils import TestCase, run_tests, IS_JETSON, IS_WINDOWS, IS_MACOS, skipIfTorchDynamo
-from torch._utils_internal import get_file_path_2
-
-import pkgutil
-import torch
 import importlib
-from typing import Callable
 import inspect
 import json
 import os
+import pkgutil
 import unittest
-from importlib import import_module
 from itertools import chain
 from pathlib import Path
+from typing import Callable
+
+import torch
+from torch._utils_internal import get_file_path_2
+from torch.testing._internal.common_utils import (
+    IS_JETSON,
+    IS_MACOS,
+    IS_WINDOWS,
+    run_tests,
+    skipIfTorchDynamo,
+    TestCase,
+)
+
 
 def _find_all_importables(pkg):
     """Find all importables in the project.
@@ -56,6 +63,19 @@ def _discover_path_importables(pkg_pth, pkg_name):
 
 
 class TestPublicBindings(TestCase):
+    def test_no_new_reexport_callables(self):
+        """
+        This test aims to stop the introduction of new re-exported callables into
+        torch whose names do not start with _. Such callables are made available as
+        torch.XXX, which may not be desirable.
+        """
+        reexported_callables = sorted(
+            k
+            for k, v in vars(torch).items()
+            if callable(v) and not v.__module__.startswith('torch')
+        )
+        self.assertTrue(all(k.startswith('_') for k in reexported_callables), reexported_callables)
+
     def test_no_new_bindings(self):
         """
         This test aims to stop the introduction of new JIT bindings into torch._C
@@ -278,7 +298,6 @@ class TestPublicBindings(TestCase):
                 return False
         return True
 
-
     @unittest.skipIf(IS_WINDOWS or IS_MACOS, "Inductor/Distributed modules hard fail on windows and macos")
     @skipIfTorchDynamo("Broken and not relevant for now")
     def test_modules_can_be_imported(self):
@@ -289,7 +308,7 @@ class TestPublicBindings(TestCase):
                 # which calls sys.exit() when we try to import it
                 if "__main__" in modname:
                     continue
-                import_module(modname)
+                importlib.import_module(modname)
             except Exception as e:
                 # Some current failures are not ImportError
                 failures.append((modname, type(e)))
