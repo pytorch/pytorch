@@ -13,7 +13,6 @@ from typing import Optional
 
 from . import _prctl_pr_set_pdeathsig  # type: ignore[attr-defined]
 
-
 log = logging.getLogger(__name__)
 
 

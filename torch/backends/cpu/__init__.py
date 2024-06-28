@@ -1,6 +1,5 @@
 import torch
 
-
 __all__ = [
     "get_cpu_capability",
 ]

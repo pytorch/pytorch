@@ -10,6 +10,7 @@ import inspect
 import logging
 import operator
 import re
+
 import tempfile
 from itertools import count
 from typing import (
@@ -40,6 +41,7 @@ from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import async_compile, config, ir
+
 from ..codecache import output_code_log
 from ..ir import ReinterpretView
 from ..runtime import triton_heuristics
@@ -55,7 +57,6 @@ from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import CodeGen, DeferredLine, IndentedBuffer, PythonPrinter
 from .triton_utils import config_of, signature_to_meta
-
 
 if TYPE_CHECKING:
     import triton

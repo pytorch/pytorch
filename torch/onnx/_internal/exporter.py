@@ -53,8 +53,8 @@ if TYPE_CHECKING:
     import onnx
     import onnxruntime  # type: ignore[import]
     import onnxscript  # type: ignore[import]
-    from onnxscript.function_libs.torch_lib import (
-        registration as torchlib_registry,  # type: ignore[import]
+    from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
+        registration as torchlib_registry,
     )
 
     from torch.onnx._internal.fx import diagnostics

@@ -7,7 +7,6 @@ from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import ExpTransform
 from torch.distributions.utils import broadcast_all, clamp_probs
 
-
 __all__ = ["ExpRelaxedCategorical", "RelaxedOneHotCategorical"]
 
 

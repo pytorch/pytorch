@@ -18,7 +18,6 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
     QuantizationConfig,
 )
 
-
 __all__ = [
     "get_embedding_operators_config",
     "EmbeddingQuantizer",

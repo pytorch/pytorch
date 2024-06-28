@@ -9,7 +9,6 @@ from typing import Dict, Iterable, List, Optional
 
 import torch
 
-
 _IS_MONKEYTYPE_INSTALLED = True
 try:
     import monkeytype  # type: ignore[import]

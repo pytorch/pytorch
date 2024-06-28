@@ -11,9 +11,7 @@ import sys
 # In case of metaclass conflict due to ABCMeta or _ProtocolMeta
 # For Python 3.9, only Protocol in typing uses metaclass
 from abc import ABCMeta
-
-# TODO: Use TypeAlias when Python 3.6 is deprecated
-from typing import (  # type: ignore[attr-defined]
+from typing import (  # TODO: Use TypeAlias when Python 3.6 is deprecated  # type: ignore[attr-defined]
     _eval_type,
     _GenericAlias,
     _tp_cache,

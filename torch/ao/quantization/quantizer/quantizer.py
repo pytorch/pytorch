@@ -9,7 +9,6 @@ from torch.ao.quantization import ObserverOrFakeQuantize
 from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
 from torch.fx import Node
 
-
 __all__ = [
     "Quantizer",
     "QuantizationSpecBase",

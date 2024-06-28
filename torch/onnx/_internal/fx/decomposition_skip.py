@@ -17,8 +17,8 @@ import abc
 import contextlib
 from typing import Callable, Sequence, Type
 
-from onnxscript.function_libs.torch_lib.ops import (
-    core as torchlib_core,  # type: ignore[import-not-found]
+from onnxscript.function_libs.torch_lib.ops import (  # type: ignore[import-not-found]
+    core as torchlib_core,
     nn as torchlib_nn,
 )
 

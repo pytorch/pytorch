@@ -12,6 +12,7 @@ import argparse
 import itertools
 import json
 import random
+
 import warnings
 from collections import defaultdict, OrderedDict
 from pathlib import Path
@@ -19,11 +20,11 @@ from pprint import pprint
 from typing import Optional
 
 import numpy as np
+
 from prettytable import PrettyTable
 from tqdm import tqdm
 
 import torch
-
 
 warnings.filterwarnings("ignore")
 

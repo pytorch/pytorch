@@ -11,7 +11,6 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
-
 requires_multigpu = functools.partial(
     unittest.skipIf, not TEST_MULTIGPU, "requires multiple cuda devices"
 )

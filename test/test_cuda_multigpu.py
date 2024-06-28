@@ -10,6 +10,7 @@ import sys
 import tempfile
 import threading
 import unittest
+
 from itertools import chain, repeat
 from typing import NamedTuple
 
@@ -35,7 +36,6 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA,
     TestCase,
 )
-
 
 TEST_CUDAMALLOCASYNC = TEST_CUDA and (
     torch.cuda.get_allocator_backend() == "cudaMallocAsync"

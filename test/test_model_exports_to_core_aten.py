@@ -5,6 +5,7 @@ import pytest
 
 import torch
 import torch._export as export
+
 from torch.testing._internal.common_quantization import skip_if_no_torchvision
 from torch.testing._internal.common_utils import TestCase
 

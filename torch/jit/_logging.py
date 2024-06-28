@@ -1,6 +1,5 @@
 import torch
 
-
 add_stat_value = torch.ops.prim.AddStatValue
 
 set_logger = torch._C._logging_set_logger

@@ -6,7 +6,6 @@ from enum import auto, Enum
 from typing import Any, List, Tuple
 
 import torch
-
 from .. import config
 from ..ir import (
     ComputedBuffer,
@@ -20,7 +19,6 @@ from ..ir import (
 )
 from ..lowering import empty_strided, lowerings, register_lowering
 from ..select_algorithm import autotune_select_algorithm, TritonTemplate
-
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
