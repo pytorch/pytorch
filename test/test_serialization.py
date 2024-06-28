@@ -1112,6 +1112,22 @@ class TestSerialization(TestCase, SerializationMixin):
                 torch.serialization.clear_safe_globals()
                 ClassThatUsesBuildInstruction.__setstate__ = None
 
+    @parametrize("unsafe_global", [True, False])
+    def test_weights_only_error(self, unsafe_global):
+        sd = {'t': TwoTensor(torch.randn(2), torch.randn(2))}
+        pickle_protocol = torch.serialization.DEFAULT_PROTOCOL if unsafe_global else 5
+        with BytesIOContext() as f:
+            torch.save(sd, f, pickle_protocol=pickle_protocol)
+            f.seek(0)
+            if unsafe_global:
+                with self.assertRaisesRegex(pickle.UnpicklingError,
+                                            r"use `torch.serialization.add_safe_globals\(\[TwoTensor\]\)` to allowlist"):
+                    torch.load(f, weights_only=True)
+            else:
+                with self.assertRaisesRegex(pickle.UnpicklingError,
+                                            "file an issue with the following so that we can make `weights_only=True`"):
+                    torch.load(f, weights_only=True)
+
     @parametrize('weights_only', (False, True))
     def test_serialization_math_bits(self, weights_only):
         t = torch.randn(1, dtype=torch.cfloat)
