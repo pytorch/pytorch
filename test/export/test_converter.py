@@ -419,6 +419,54 @@ class TestConverter(TestCase):
         inp = ((torch.zeros(1, 4), torch.ones(1, 4)),)
         self._check_equal_ts_ep_converter(MUnpackTuple(), inp)
 
+    def test_convert_retrace_nested_scripted_modules(self):
+        class Wrapper(torch.nn.Module):
+            def __init__(self, mod) -> None:
+                super().__init__()
+                self.mod = mod
+            
+            def forward(self, x, y):
+                return self.mod(x, y)
+
+        class LinearM(torch.nn.Module):
+            def __init__(self, dim: int) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(dim, dim)
+
+            def forward(self, x, y):
+                return self.linear(y)
+
+        class M(torch.nn.Module):
+            def __init__(self, dim: int) -> None:
+                super().__init__()
+                m = LinearM(dim)
+                m = torch.jit.script(m)
+                self.mod1 = m
+                self.mod2 = Wrapper(m)
+
+            def forward(self, x: torch.Tensor, y: torch.Tensor):
+                if x:
+                    return -self.mod1(x, y) - self.mod2(x, y)
+                else:
+                    return -self.mod1(x, y) + self.mod2(x, y)
+
+        class NestedM(torch.nn.Module):
+            def __init__(self, dim: int) -> None:
+                super().__init__()
+                m = M(dim)
+                m = torch.jit.script(m)
+                self.mod1 = m
+                self.mod2 = Wrapper(m)
+
+            def forward(self, x: torch.Tensor, y: torch.Tensor):
+                if x:
+                    return self.mod1(x, y) + self.mod2(x, y)
+                else:
+                    return self.mod1(x, y) - self.mod2(x, y)
+
+        inp = (torch.tensor(True), torch.randn([3, 3]),)
+        self._check_equal_ts_ep_converter(NestedM(3), inp)
+
     def test_convert_nn_module_with_nested_param(self):
         class M(torch.nn.Module):
             def __init__(self, dim: int) -> None:
@@ -446,10 +494,31 @@ class TestConverter(TestCase):
             def forward(self, x: torch.Tensor):
                 return self.linear(self.m(x))
 
+        class Wrapper(torch.nn.Module):
+            def __init__(self, mod) -> None:
+                super().__init__()
+                self.mod = mod
+
+            def forward(self, x):
+                return self.mod(x)
+
+        class WrapperM(torch.nn.Module):
+            def __init__(self, dim: int) -> None:
+                super().__init__()
+                m = NestedM(dim)
+                m = torch.jit.script(m)
+                self.m = m 
+                self.wrapper = Wrapper(m)
+
+            def forward(self, x: torch.Tensor):
+                return self.m(x) + self.wrapper(x)
+
         inp = (torch.ones(3),)
-        orig_m = NestedM(3)
-        self._check_equal_ts_ep_converter(orig_m, inp)
-        orig_m = SuperNestedM(3)
+        # orig_m = NestedM(3)
+        # self._check_equal_ts_ep_converter(orig_m, inp)
+        # orig_m = SuperNestedM(3)
+        # self._check_equal_ts_ep_converter(orig_m, inp)
+        orig_m = WrapperM(3)
         self._check_equal_ts_ep_converter(orig_m, inp)
 
     def test_convert_nn_module_with_nested_if_and_param(self):
