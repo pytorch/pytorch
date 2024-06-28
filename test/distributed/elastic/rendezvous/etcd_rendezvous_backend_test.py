@@ -12,6 +12,7 @@ from typing import cast, ClassVar
 from unittest import TestCase
 
 from etcd import EtcdKeyNotFound  # type: ignore[import]
+
 from rendezvous_backend_test import RendezvousBackendTestMixin
 
 from torch.distributed.elastic.rendezvous import (

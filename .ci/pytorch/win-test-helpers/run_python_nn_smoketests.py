@@ -4,7 +4,6 @@ import os
 import subprocess
 import sys
 
-
 COMMON_TESTS = [
     (
         "Checking that torch is available",

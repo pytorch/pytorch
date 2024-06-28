@@ -8,7 +8,6 @@ import warnings
 from typing import Callable
 
 import onnx
-
 import parameterized
 import pytorch_test_common
 import torchvision

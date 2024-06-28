@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import torch
 import torch.nn as nn
+
 from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
 from torch.func import functional_call
@@ -11,6 +12,7 @@ from ..pattern_matcher import (
     Match,
     register_graph_pattern,
 )
+
 from .pre_grad import efficient_conv_bn_eval_pass
 
 
