@@ -1103,7 +1103,7 @@ class Tensor(torch._C.TensorBase):
             array = array.astype("uint8")
         return torch.from_numpy(array)
 
-    def __contains__(self, element: Any) -> bool:
+    def __contains__(self, element: Any, /) -> bool:
         r"""Check if `element` is present in tensor
 
         Args:
