@@ -786,6 +786,10 @@ const c10::ArrayRef<std::string> KinetoEvent::moduleHierarchy() const {
   return {};
 }
 
+uint64_t KinetoEvent::endNs() const {
+  return result_->endTimeNS();
+}
+
 uint64_t KinetoEvent::durationNs() const {
   return (result_->endTimeNS() - result_->start_time_ns_);
 }
