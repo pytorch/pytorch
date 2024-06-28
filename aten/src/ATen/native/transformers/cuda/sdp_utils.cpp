@@ -531,7 +531,7 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
     TORCH_WARN("Torch was not compiled with cuDNN attention.");
   }
   return false;
-#elif !defined(CUDNN_VERSION) && CUDNN_VERSION < 90000
+#elif defined(CUDNN_VERSION) && CUDNN_VERSION < 90000
   if (debug) {
     TORCH_WARN(!debug, "cuDNN version too old to use Flash Attention! (< v9.0.0)");
   }
