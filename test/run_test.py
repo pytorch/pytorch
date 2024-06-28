@@ -38,6 +38,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_SLOW_GRADCHECK,
 )
 
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 # using tools/ to optimize test run.
@@ -61,7 +62,6 @@ from tools.testing.target_determination.heuristics.previously_failed_in_pr impor
     gen_additional_test_failures_file,
 )
 from tools.testing.target_determination.heuristics.utils import get_pr_number
-
 from tools.testing.test_run import TestRun
 from tools.testing.test_selections import (
     calculate_shards,
@@ -70,6 +70,7 @@ from tools.testing.test_selections import (
     ShardedTest,
     THRESHOLD,
 )
+
 
 HAVE_TEST_SELECTION_TOOLS = True
 # Make sure to remove REPO_ROOT after import is done

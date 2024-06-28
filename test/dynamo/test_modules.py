@@ -14,7 +14,6 @@ from typing import Dict, NamedTuple, Tuple
 from unittest.mock import patch
 
 import torch
-
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.nn.functional as F
@@ -24,6 +23,7 @@ from torch._dynamo.mutation_guard import GenerationTracker
 from torch._dynamo.testing import expectedFailureDynamic, same
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
+
 
 try:
     from . import test_functions

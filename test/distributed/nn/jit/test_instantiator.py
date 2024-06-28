@@ -9,6 +9,7 @@ import torch
 import torch.distributed as dist
 from torch import nn, Tensor
 
+
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
