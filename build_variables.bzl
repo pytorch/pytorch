@@ -398,7 +398,6 @@ core_sources_full_mobile_no_backend_interface = core_sources_full_mobile_no_back
     "torch/csrc/jit/mobile/upgrader_mobile.cpp",
 ]
 
-
 core_sources_full_mobile = core_sources_full_mobile_no_backend_interface + [
     "torch/csrc/jit/backends/backend_debug_info.cpp",
     "torch/csrc/jit/backends/backend_interface.cpp",
@@ -488,6 +487,7 @@ libtorch_core_sources = sorted(
 # These files are the only ones that are supported on Windows.
 libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/Backend.cpp",
+    "torch/csrc/distributed/c10d/Backoff.cpp",
     "torch/csrc/distributed/c10d/control_collectives/StoreCollectives.cpp",
     "torch/csrc/distributed/c10d/FileStore.cpp",
     "torch/csrc/distributed/c10d/Functional.cpp",
@@ -678,7 +678,6 @@ libtorch_cuda_distributed_base_sources = [
 # These files are only supported on Linux (and others) but not on Windows.
 libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/NCCLUtils.cpp",
-    "torch/csrc/distributed/c10d/ProcessGroupCudaP2P.cpp",
     "torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp",
     "torch/csrc/distributed/c10d/ProcessGroupUCC.cpp",
     "torch/csrc/distributed/c10d/UCCTracing.cpp",
@@ -689,6 +688,7 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/Utils.cu",
     "torch/csrc/distributed/rpc/tensorpipe_cuda.cpp",
     "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
+    "torch/csrc/monitor/instrumentation.cpp",
 ]
 
 libtorch_cuda_distributed_sources = libtorch_cuda_distributed_base_sources + libtorch_cuda_distributed_extra_sources
@@ -835,6 +835,7 @@ libtorch_python_core_sources = [
     "torch/csrc/inductor/aoti_runner/pybind.cpp",
     "torch/csrc/inductor/aoti_eager/kernel_holder.cpp",
     "torch/csrc/inductor/aoti_eager/kernel_meta_info.cpp",
+    "torch/csrc/inductor/resize_storage_bytes.cpp",
     "torch/csrc/jit/backends/backend_init.cpp",
     "torch/csrc/jit/python/init.cpp",
     "torch/csrc/jit/passes/onnx.cpp",

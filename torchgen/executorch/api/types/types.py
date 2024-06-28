@@ -15,6 +15,7 @@ from torchgen.api.types import (
 )
 from torchgen.model import BaseTy
 
+
 halfT = BaseCppType("torch::executor", "Half")
 bfloat16T = BaseCppType("torch::executor", "BFloat16")
 stringT = BaseCppType("torch::executor", "string_view")

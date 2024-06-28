@@ -815,6 +815,25 @@ PyObject* THPModule_deterministicCuDNN(PyObject* _unused, PyObject* noargs) {
     Py_RETURN_FALSE;
 }
 
+PyObject* THPModule_setDeterministicMkldnn(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      PyBool_Check(arg),
+      "set_deterministic_mkldnn expects a bool, "
+      "but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setDeterministicMkldnn(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPModule_deterministicMkldnn(PyObject* _unused, PyObject* noargs) {
+  if (at::globalContext().deterministicMkldnn())
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+}
+
 PyObject* THPModule_setDeterministicAlgorithms(
     PyObject* _unused,
     PyObject* args,
@@ -1345,6 +1364,14 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      nullptr},
     {"_set_cudnn_deterministic",
      THPModule_setDeterministicCuDNN,
+     METH_O,
+     nullptr},
+    {"_get_mkldnn_deterministic",
+     THPModule_deterministicMkldnn,
+     METH_NOARGS,
+     nullptr},
+    {"_set_mkldnn_deterministic",
+     THPModule_setDeterministicMkldnn,
      METH_O,
      nullptr},
     {"_get_deterministic_algorithms",
@@ -1919,6 +1946,15 @@ Call this whenever a new thread is created in order to propagate values from
       [](const sdp::sdp_params& params, bool debug) {
 #ifdef USE_CUDA
         return sdp::can_use_mem_efficient_attention(params, debug);
+#else
+        return false;
+#endif
+      });
+  py_module.def(
+      "_can_use_cudnn_attention",
+      [](const sdp::sdp_params& params, bool debug) {
+#ifdef USE_CUDA
+        return sdp::can_use_cudnn_attention(params, debug);
 #else
         return false;
 #endif

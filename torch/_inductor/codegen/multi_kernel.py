@@ -146,23 +146,19 @@ class MultiKernelState:
 {subkernel_hashes}
 def run(multi_kernel_call, {', '.join(get_all_kernel_argdefs(kernels))}, {', '.join(get_numel_argdefs(kernels[0]))}, grid, stream):
 {kernel_call_def_code}
-    multi_kernel_call.run_with_argless_kernels([call0, call1])
-        """  # noqa: B950 line too long
-        wrapper.header.splice(
-            f"""
-        {multi_kernel_name} = async_compile.multi_kernel({multi_kernel_name!r}, [
-            {", ".join(kernel_names)},
-        ],
-            '''
-        """
-        )
-        wrapper.header.splice(src_code)
-        wrapper.header.splice(
-            """
-            '''
-        )
-        """
-        )
+    multi_kernel_call.run_with_argless_kernels([call0, call1])"""  # noqa: B950 line too long
+
+        multi_kernel_compile = f"""
+{multi_kernel_name} = async_compile.multi_kernel({multi_kernel_name!r}, [
+    {", ".join(kernel_names)},
+],
+'''
+{src_code}
+'''
+)"""
+        wrapper.header.splice(multi_kernel_compile)
+        if config.triton.autotune_at_compile_time:
+            wrapper.kernel_autotune_defs.splice(multi_kernel_compile)
 
         return multi_kernel_name
 
