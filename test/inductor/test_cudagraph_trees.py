@@ -1553,6 +1553,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             streams_init = {seg["stream"] for seg in get_all_cudagraph_segments()}
             for _ in range(4):
                 foo(inp).sum().backward()
+                inp.grad = None
 
             streams = {
                 seg["stream"] for seg in get_all_cudagraph_segments()
