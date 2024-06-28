@@ -69,6 +69,7 @@ from ..source import (
     OptimizerSource,
     RandomValueSource,
     Source,
+    SubclassAttrListSource,
     TupleIteratorGetItemSource,
 )
 from ..trace_rules import (
@@ -1362,13 +1363,6 @@ class VariableBuilder:
         ):
             unimplemented("torch.compile does not support strided NestedTensor")
 
-        # Reject sparse, but not coo.
-        # TODO: remove this altogether when non-coo sparsity propagation is ready
-        if is_sparse_any(value) and not value.is_sparse:
-            unimplemented(
-                f"torch.compile does not support sparse Tensor with {value.layout} layout"
-            )
-
         tensor_variable = wrap_fx_proxy(
             tx=self.tx,
             proxy=tensor_proxy,
@@ -1396,6 +1390,10 @@ class VariableBuilder:
         # and recursively install corresponding guard for each inner attribute.
         if is_traceable_wrapper_subclass(value):
             self.install_guards(GuardBuilder.TYPE_MATCH)
+            install_guard(
+                SubclassAttrListSource(source).make_guard(GuardBuilder.EQUALS_MATCH)
+            )
+
             attrs, _ = value.__tensor_flatten__()
             for attr in attrs:
                 inner_value = getattr(value, attr)
