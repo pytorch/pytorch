@@ -26,7 +26,6 @@ ISORT_WHITELIST = re.compile(
         map(
             fnmatch.translate,
             [
-                "test/i*/**",
                 "test/j*/**",
                 "torch/**",
                 "torch/_[a-c]*/**",
