@@ -3,10 +3,10 @@ import inspect
 import itertools
 import logging
 
-import torch
-import torch._dynamo.config
+from torch._logging import warning_once
+
 from torch._ops import HigherOrderOperator
-from torch.utils.checkpoint import checkpoint
+from torch.utils.checkpoint import checkpoint, CheckpointPolicy
 
 
 log = logging.getLogger(__name__)
@@ -154,11 +154,17 @@ class TagActivationCheckpoint(HigherOrderOperator):
         }
         return checkpoint_kwargs, gmod_kwargs
 
-    def tag_nodes(self, gmod):
+    def tag_nodes(self, gmod, is_sac):
         unique_graph_id = next(uid)
         for node in gmod.graph.nodes:
             if node.op in ("call_function", "call_method", "call_module"):
-                node.meta["recompute"] = unique_graph_id
+                node.meta["ac_graph_id"] = unique_graph_id
+                if is_sac:
+                    # For selective checkpointing, we will populate this tag later in _CachingTorchDispatchMode.
+                    node.meta["recompute"] = None
+                else:
+                    # Under vanilla activation checkpointing, all nodes should be recomputed.
+                    node.meta["recompute"] = CheckpointPolicy.PREFER_RECOMPUTE
         return gmod
 
     def __call__(self, gmod, *args, **kwargs):
@@ -166,14 +172,12 @@ class TagActivationCheckpoint(HigherOrderOperator):
         from torch.fx import Interpreter
 
         if "_checkpoint_context_fn" in gmod.meta:
-            assert (
-                torch._dynamo.config._experimental_support_context_fn_in_torch_utils_checkpoint
-            ), "Passing context_fn to torch.utils.checkpoint is currently not supported under torch.compile"
-            log.warning(
+            warning_once(
+                log,
                 """
 Detected that context_fn is passed to torch.utils.checkpoint under torch.compile.
 Please make sure the checkpointed region does not contain in-place ops (e.g. torch.relu_).
-"""
+""",
             )
             # use_reentrant is set to False because this op is going to be traced.
             # And we ensure that AOT Autograd traces through the non reentrant
@@ -188,12 +192,12 @@ Please make sure the checkpointed region does not contain in-place ops (e.g. tor
             kwargs["context_fn"] = gmod.meta["_checkpoint_context_fn"]
             # We first tag all nodes as "recompute" in this graph, and then we undo the "recompute" tag
             # for specific nodes in _CachingTorchDispatchMode in torch/utils/checkpoint.py.
-            gmod = self.tag_nodes(gmod)
+            gmod = self.tag_nodes(gmod, is_sac=True)
             # Using interpreter allows preservation of metadata through torch.compile stack.
             with fx_traceback.preserve_node_meta():
                 return checkpoint(Interpreter(gmod).run, *args, **kwargs)
         else:
-            gmod = self.tag_nodes(gmod)
+            gmod = self.tag_nodes(gmod, is_sac=False)
             # Using interpreter allows preservation of metadata through torch.compile stack.
             # TODO: We want to use the same `checkpoint(Interpreter(gmod).run, *args, **kwargs)` here
             # as the `context_fn != None` case, but that depends on in-place op support in TorchDispatchMode + torch.compile.
