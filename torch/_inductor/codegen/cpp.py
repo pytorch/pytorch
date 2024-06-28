@@ -2039,9 +2039,7 @@ class CppKernel(Kernel):
                             ]
                         )
                         local_buf_dtype = DTYPE_TO_CPP[local_buffer.get_layout().dtype]
-                        allocate = (
-                            f"std::make_unique<{local_buf_dtype} []>({local_buf_size})"
-                        )
+                        allocate = f"std::make_unique<{local_buf_dtype} []>({cexpr(local_buf_size)})"
                         local_buffer_name = local_buffer.get_name()
                         code.splice(
                             f"std::unique_ptr<{local_buf_dtype} []> buf_{local_buffer_name} = {allocate};"
