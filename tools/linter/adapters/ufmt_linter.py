@@ -23,11 +23,40 @@ IS_WINDOWS: bool = os.name == "nt"
 REPO_ROOT = Path(__file__).absolute().parents[3]
 ISORT_WHITELIST = re.compile(
     "|".join(
-        map(
-            fnmatch.translate,
-            [
-                "torch/[o-z]*/**",
-            ],
+        (
+            r"\A\Z",  # empty string
+            *map(
+                fnmatch.translate,
+                [
+                    # **
+                    # .ci/**
+                    # .github/**
+                    # benchmarks/**
+                    # functorch/**
+                    # tools/**
+                    # torchgen/**
+                    # test/**
+                    # test/[a-c]*/**
+                    # test/d*/**
+                    # test/dy*/**
+                    # test/[e-h]*/**
+                    # test/i*/**
+                    # test/j*/**
+                    # test/[k-p]*/**
+                    # test/[q-z]*/**
+                    # torch/**
+                    # torch/_[a-c]*/**
+                    # torch/_d*/**
+                    # torch/_[e-h]*/**
+                    # torch/_i*/**
+                    # torch/_[j-z]*/**
+                    # torch/[a-c]*/**
+                    # torch/d*/**
+                    # torch/[e-n]*/**
+                    # torch/[o-z]*/**
+                    "torch/[o-z]*/**",
+                ],
+            ),
         )
     )
 )
