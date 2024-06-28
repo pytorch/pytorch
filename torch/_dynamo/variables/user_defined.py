@@ -57,6 +57,7 @@ from ..utils import (
     object_has_getattribute,
     proxy_args_kwargs,
     tensortype_to_dtype,
+    unpatched_nn_module_getattr,
 )
 from .base import MutableLocal, VariableTracker
 from .ctx_manager import GenericContextWrappingVariable, NullContextVariable
@@ -820,6 +821,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         return key in self.value.__dict__
 
+    def is_supported_nn_module_method(self, method):
+        return torch._dynamo.config.inline_inbuilt_nn_modules and method in (
+            torch.nn.Module.parameters,
+        )
+
     def var_getattr(self, tx, name):
         from .. import trace_rules
         from . import ConstantVariable
@@ -844,12 +850,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if isinstance(getattr_fn, types.FunctionType):
                 # Dynamo is going to trace the __getattr__ function with
                 # args=name. Set the source accordingly.
-                new_source = None
-                if self.source:
-                    new_source = AttrSource(self.source, "__getattr__")
-                out = variables.UserMethodVariable(
-                    getattr_fn, self, source=new_source
-                ).call_function(tx, [ConstantVariable.create(name)], {})
+                if getattr_fn is unpatched_nn_module_getattr and isinstance(
+                    self, variables.UnspecializedNNModuleVariable
+                ):
+                    # Manually trace out the nn module __getattr__ to avoid large compilation latency.
+                    out = self.manually_trace_nn_module_getattr(tx, name)
+                else:
+                    new_source = None
+                    if self.source:
+                        new_source = AttrSource(self.source, "__getattr__")
+                    out = variables.UserMethodVariable(
+                        getattr_fn, self, source=new_source
+                    ).call_function(tx, [ConstantVariable.create(name)], {})
 
                 if self.source and getattr_fn is torch.nn.Module.__getattr__:
                     if isinstance(
@@ -898,6 +910,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             isinstance(subobj, types.MethodType)
             and isinstance(self.value, torch.nn.Module)
         ):
+            if self.is_supported_nn_module_method(subobj):
+                return variables.GetAttrVariable(self, name, source=source)
+
             # Since we get subobj via self._getattr_static, which may not trigger dynamic lookup.
             # Static lookup can't tell us it's a method or function correctly,
             # so we trigger dynamic lookup here to get the correct type.

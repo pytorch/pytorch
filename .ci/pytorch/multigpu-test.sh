@@ -18,8 +18,8 @@ time python test/run_test.py --verbose -i distributed/test_c10d_gloo
 time python test/run_test.py --verbose -i distributed/test_c10d_nccl
 time python test/run_test.py --verbose -i distributed/test_c10d_spawn_gloo
 time python test/run_test.py --verbose -i distributed/test_c10d_spawn_nccl
-time python test/run_test.py --verbose -i distributed/test_cuda_p2p
 time python test/run_test.py --verbose -i distributed/test_store
+time python test/run_test.py --verbose -i distributed/test_symmetric_memory
 time python test/run_test.py --verbose -i distributed/test_pg_wrapper
 time python test/run_test.py --verbose -i distributed/rpc/cuda/test_tensorpipe_agent
 # FSDP tests
