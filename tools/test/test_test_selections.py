@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 
-REPO_ROOT = Path(__file__).absolute().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 try:
     # using tools/ to optimize test run.
     sys.path.append(str(REPO_ROOT))
