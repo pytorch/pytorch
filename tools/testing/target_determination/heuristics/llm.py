@@ -14,7 +14,7 @@ from tools.testing.target_determination.heuristics.utils import normalize_rating
 from tools.testing.test_run import TestRun
 
 
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
+REPO_ROOT = Path(__file__).resolve().parents[4]
 
 
 class LLM(HeuristicInterface):

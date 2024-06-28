@@ -2,16 +2,15 @@
 
 import argparse
 import fnmatch
-import pathlib
 import subprocess
 import textwrap
-
+from pathlib import Path
 from typing import Any, Dict, List
 
 import yaml
 
 
-REPO_ROOT = pathlib.Path(__file__).parent.parent.parent
+REPO_ROOT = Path(__file__).parents[2]
 CONFIG_YML = REPO_ROOT / ".circleci" / "config.yml"
 WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
 

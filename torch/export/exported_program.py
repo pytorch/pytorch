@@ -24,6 +24,7 @@ from typing import (
 from torch._higher_order_ops.utils import autograd_not_implemented
 
 from torch._library.fake_class_registry import FakeScriptObject
+from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 
@@ -39,6 +40,7 @@ if TYPE_CHECKING:
 import torch
 import torch.utils._pytree as pytree
 from torch._subclasses.functional_tensor import FunctionalTensor
+
 from torch.export._tree_utils import is_equivalent, reorder_kwargs
 from torch.fx._compatibility import compatibility
 
@@ -315,18 +317,87 @@ def _name_hoo_subgraph_placeholders(gm: torch.fx.GraphModule) -> None:
         subgraph.recompile()
 
 
-def _decompose_exported_program(
+def _decompose_and_get_gm_with_new_signature_constants(
     ep,
     *,
     decomp_table: Dict[torch._ops.OperatorBase, Callable],
     _preserve_ops: Tuple[torch._ops.OpOverload],
     joint_loss_index: Optional[int],
 ):
-    from torch._export.passes.lift_constants_pass import (
-        ConstantAttrMap,
-        lift_constants_pass,
+    from torch._export.non_strict_utils import (
+        _gather_constant_attrs,
+        make_fake_params_buffers,
     )
     from torch._functorch.aot_autograd import aot_export_module
+    from torch._guards import detect_fake_mode
+
+    from torch.export._trace import (
+        _export_to_aten_ir,
+        _get_params_buffers,
+        _ignore_backend_decomps,
+        _verify_nn_module_stack,
+        _verify_placeholder_names,
+        _verify_stack_trace,
+    )
+
+    if ep.verifier.dialect == "TRAINING":
+        mod = ep.module()
+        fake_args = []
+        for node in mod.graph.nodes:
+            if node.op == "placeholder":
+                fake_args.append(node.meta["val"])
+
+        fake_args_unwrapped = pytree.tree_unflatten(fake_args, mod._in_spec)
+        fake_mode = detect_fake_mode(fake_args)
+
+        # Fix the graph output signature to be tuple if scalar
+        out_spec = mod._out_spec
+
+        orig_arg_names = mod.graph._codegen.pytree_info.orig_args  # type: ignore[attr-defined]
+
+        # aot_export expect the return type to always be a tuple.
+        if out_spec.type not in (list, tuple):
+            out_spec = pytree.TreeSpec(tuple, None, [out_spec])
+
+        mod.graph._codegen = _PyTreeCodeGen(
+            _PyTreeInfo(
+                orig_arg_names,
+                mod._in_spec,
+                out_spec,
+            )
+        )
+
+        mod.recompile()
+
+        fake_params_buffers = make_fake_params_buffers(
+            fake_mode, _get_params_buffers(mod)
+        )
+        constant_attrs = _gather_constant_attrs(mod)
+        aten_export_artifact = _export_to_aten_ir(
+            mod,
+            fake_args_unwrapped[0],
+            fake_args_unwrapped[1],
+            fake_params_buffers,
+            constant_attrs,
+        )
+
+        gm = aten_export_artifact.gm
+        new_graph_signature = aten_export_artifact.sig
+
+        for node in gm.graph.nodes:
+            # nn_module_stack
+            if node.op not in ["placeholder", "output"]:
+                for key, (fqn, mod_cls) in node.meta["nn_module_stack"].items():
+                    if isinstance(mod_cls, type):
+                        node.meta["nn_module_stack"][key] = (
+                            fqn,
+                            mod_cls.__module__ + "." + mod_cls.__qualname__,
+                        )
+
+        _verify_nn_module_stack(gm)
+        _verify_stack_trace(gm)
+        _verify_placeholder_names(gm, new_graph_signature)
+        return gm, new_graph_signature
 
     old_placeholders = [
         node for node in ep.graph_module.graph.nodes if node.op == "placeholder"
@@ -340,7 +411,6 @@ def _decompose_exported_program(
     from torch._guards import detect_fake_mode
 
     # TODO(zhxhchen17) Return the new graph_signature directly.
-    from torch.export._trace import _ignore_backend_decomps
 
     fake_mode = detect_fake_mode(fake_args)
     fake_mode = contextlib.nullcontext() if fake_mode is None else fake_mode
@@ -459,6 +529,33 @@ def _decompose_exported_program(
         ):
             for k, v in old_node.meta.items():
                 new_node.meta[k] = v
+    return gm, new_graph_signature
+
+
+def _decompose_exported_program(
+    ep,
+    *,
+    decomp_table: Dict[torch._ops.OperatorBase, Callable],
+    _preserve_ops: Tuple[torch._ops.OpOverload],
+    joint_loss_index: Optional[int],
+):
+    from torch._dynamo import config as _dynamo_config
+    from torch._export.passes._node_metadata_hook import (
+        _node_metadata_hook,
+        _set_node_metadata_hook,
+    )
+
+    from torch._export.passes.lift_constants_pass import (
+        ConstantAttrMap,
+        lift_constants_pass,
+    )
+
+    gm, new_graph_signature = _decompose_and_get_gm_with_new_signature_constants(
+        ep,
+        decomp_table=decomp_table,
+        _preserve_ops=_preserve_ops,
+        joint_loss_index=joint_loss_index,
+    )
 
     # TODO unfortunately preserving graph-level metadata is not
     # working well with aot_export. So we manually copy it.
@@ -475,12 +572,6 @@ def _decompose_exported_program(
     for k, v in constants.items():
         assert k not in ep.constants
         ep.constants[k] = v
-
-    from torch._dynamo import config as _dynamo_config
-    from torch._export.passes._node_metadata_hook import (
-        _node_metadata_hook,
-        _set_node_metadata_hook,
-    )
 
     if not _dynamo_config.do_not_emit_runtime_asserts:
         stack_trace = (
@@ -507,7 +598,6 @@ def _decompose_exported_program(
         range_constraints=new_range_constraints,
         module_call_graph=copy.deepcopy(ep.module_call_graph),
         example_inputs=ep.example_inputs,
-        verifier=ep.verifier,
         constants=ep.constants,
     )
     return exported_program

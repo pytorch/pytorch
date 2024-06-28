@@ -913,6 +913,50 @@ PyObject* THCPModule_cudaGetSyncDebugMode(PyObject* self, PyObject* noargs) {
 static void registerCudaDeviceProperties(PyObject* module) {
   // Add _cudaDevicePropertires class to torch._C
   auto m = py::handle(module).cast<py::module>();
+  // until internal build is using a rocm version with uuid attr
+#ifndef FBCODE_CAFFE2
+  // CUuuid is defined in either cuda.h or driver_types.h
+  // hipified to hipUUID which is defined in hip_runtime_api.h
+  py::class_<CUuuid>(m, "_CUuuid")
+      .def_property_readonly(
+          "bytes",
+          [](const CUuuid& uuid) {
+            return std::vector<uint8_t>(uuid.bytes, uuid.bytes + 16);
+          })
+      .def("__str__", [](const CUuuid& uuid) {
+        // UUIDs are a 128-bit label. CUDA and HIP store this as char[16].
+        // For string representation, the code here expands this to
+        // 8-4-4-4-12 hex format, so each byte becomes 2 hex characters.
+        // Size is 16x2 hex characters + 4 hyphens + 1 null byte.
+        constexpr size_t size = sizeof(CUuuid) * 2 + 4 + 1;
+        char device_path_str[size] = {0};
+        snprintf(
+            device_path_str,
+            sizeof(device_path_str),
+            "%02x%02x%02x%02x-"
+            "%02x%02x-"
+            "%02x%02x-"
+            "%02x%02x-"
+            "%02x%02x%02x%02x%02x%02x",
+            (uint8_t)uuid.bytes[0],
+            (uint8_t)uuid.bytes[1],
+            (uint8_t)uuid.bytes[2],
+            (uint8_t)uuid.bytes[3],
+            (uint8_t)uuid.bytes[4],
+            (uint8_t)uuid.bytes[5],
+            (uint8_t)uuid.bytes[6],
+            (uint8_t)uuid.bytes[7],
+            (uint8_t)uuid.bytes[8],
+            (uint8_t)uuid.bytes[9],
+            (uint8_t)uuid.bytes[10],
+            (uint8_t)uuid.bytes[11],
+            (uint8_t)uuid.bytes[12],
+            (uint8_t)uuid.bytes[13],
+            (uint8_t)uuid.bytes[14],
+            (uint8_t)uuid.bytes[15]);
+        return std::string(device_path_str);
+      });
+#endif
   py::class_<cudaDeviceProp>(m, "_CudaDeviceProperties")
       .def_readonly("name", &cudaDeviceProp::name)
       .def_readonly("major", &cudaDeviceProp::major)
@@ -939,6 +983,9 @@ static void registerCudaDeviceProperties(PyObject* module) {
           &cudaDeviceProp::name
 #endif // USE_ROCM
           )
+#ifndef FBCODE_CAFFE2
+      .def_readonly("uuid", &cudaDeviceProp::uuid)
+#endif
       .def("__repr__", [](const cudaDeviceProp& prop) {
         std::ostringstream stream;
         stream << "_CudaDeviceProperties(name='" << prop.name
@@ -948,6 +995,9 @@ static void registerCudaDeviceProperties(PyObject* module) {
 #endif // USE_ROCM
                << ", total_memory=" << prop.totalGlobalMem / (1024ull * 1024)
                << "MB, multi_processor_count=" << prop.multiProcessorCount
+#ifndef FBCODE_CAFFE2
+               << ", uuid=" << std::string(prop.uuid.bytes, 16)
+#endif
                << ")";
         return stream.str();
       });

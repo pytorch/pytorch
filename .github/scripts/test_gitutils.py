@@ -68,7 +68,7 @@ class TestRetriesDecorator(TestCase):
 
 class TestGitRepo(TestCase):
     def setUp(self) -> None:
-        repo_dir = BASE_DIR.parent.parent.absolute()
+        repo_dir = BASE_DIR.absolute().parent.parent
         if not (repo_dir / ".git").is_dir():
             raise SkipTest(
                 "Can't find git directory, make sure to run this test on real repo checkout"

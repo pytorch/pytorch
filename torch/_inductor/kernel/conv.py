@@ -249,7 +249,7 @@ def conv_layout(
             ir.ir_node_to_tensor(bias, guard_shape=True),
             V.graph.sizevars.size_hints(stride),  # type: ignore[arg-type]
             V.graph.sizevars.size_hints(padding),  # type: ignore[arg-type]
-            dilation,
+            V.graph.sizevars.size_hints(dilation),  # type: ignore[arg-type]
             transposed,
             V.graph.sizevars.size_hints(output_padding),  # type: ignore[arg-type]
             groups,

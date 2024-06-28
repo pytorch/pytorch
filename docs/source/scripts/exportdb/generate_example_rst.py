@@ -5,16 +5,15 @@ from pathlib import Path
 
 import torch
 import torch._dynamo as torchdynamo
-
 from torch._export.db.case import ExportCase, normalize_inputs
 from torch._export.db.examples import all_examples
 from torch.export import export
 
 
 PWD = Path(__file__).absolute().parent
-ROOT = Path(__file__).absolute().parent.parent.parent.parent
-SOURCE = ROOT / Path("source")
-EXPORTDB_SOURCE = SOURCE / Path("generated") / Path("exportdb")
+ROOT = Path(__file__).absolute().parents[3]
+SOURCE = ROOT / "source"
+EXPORTDB_SOURCE = SOURCE / "generated" / "exportdb"
 
 
 def generate_example_rst(example_case: ExportCase):

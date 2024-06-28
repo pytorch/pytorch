@@ -662,8 +662,6 @@ aten::argmax
 aten::argmax.out
 aten::argmin
 aten::argmin.out
-aten::argsort.stable
-aten::argsort.stable_out
 aten::as_strided
 aten::as_strided_
 aten::avg_pool2d

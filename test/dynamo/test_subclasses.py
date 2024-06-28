@@ -1135,7 +1135,7 @@ class GraphModule(torch.nn.Module):
 
         @torch.compile(backend=backend)
         def fn(x):
-            if x.shape[0] < 10:
+            if x.shape[0] < 13:
                 return torch.mul(x, x)
             else:
                 return torch.div(x, x)
@@ -1161,7 +1161,7 @@ class GraphModule(torch.nn.Module):
             "\n".join(guards),
             """\
 Eq(2*s1, s0)
-2*s1 < 10
+2*s1 < 13
 s1 > 3""",
         )
 

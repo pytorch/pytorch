@@ -233,6 +233,12 @@ def _make_fn_with_mocked_export(fn, mocked_export_fn):
     return _fn
 
 
+# Controls tests generated in test/export/test_export_training_ir_to_run_decomp.py
+def expectedFailureTrainingIRToRunDecomp(fn):
+    fn._expected_failure_training_ir_to_run_decomp = True
+    return fn
+
+
 # Controls tests generated in test/export/test_export_nonstrict.py
 def expectedFailureNonStrict(fn):
     fn._expected_failure_non_strict = True

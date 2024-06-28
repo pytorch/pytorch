@@ -2,6 +2,7 @@
 
 import copy
 import os
+import unittest
 
 import torch
 from torch import nn
@@ -9,7 +10,7 @@ from torch._dynamo.utils import counters, same
 from torch._inductor import metrics
 from torch._inductor.runtime.runtime_utils import do_bench_gpu as do_bench
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 
@@ -182,6 +183,10 @@ class TestScatterOpt(TestCase):
         self.check_metric()
 
         if DO_PERF_TEST:
+            if GPU_TYPE == "xpu":
+                raise unittest.SkipTest(
+                    "torch.xpu.reset_peak_memory_stats not implemented."
+                )
             torch.cuda.reset_peak_memory_stats()
             for _ in range(3):
                 opt_f(opt_model, x, label)
@@ -191,7 +196,7 @@ class TestScatterOpt(TestCase):
 
 
 if HAS_GPU:
-    torch.set_default_device("cuda")
+    torch.set_default_device(GPU_TYPE)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
