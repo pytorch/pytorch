@@ -77,9 +77,9 @@ def insert_deferred_runtime_asserts(
 
     Redundant torch._check or torch.ops.aten._assert_scalar.default calls that assert
     the same expression, and redundant constrain_range calls are also deduplicated.
-    Additionally, if a constrain_range call exists for an unbacked symbol, then single-symbol
-    bound checks (e.g. u0 >= 0, u0 <= 5) will have accumulated information in the ShapeEnv,
-    and can be considered redundant and removed.
+    Additionally, because single-symbol bound checks (e.g. u0 >= 0, u0 <= 5) accumulate
+    information in the ShapeEnv, the ShapeEnv contains min/max bounds for each symbol,
+    and we delete all previous calls, adding bound checks at the end of this pass.
     """
 
     # Import sympy locally
@@ -166,8 +166,8 @@ def insert_deferred_runtime_asserts(
 
     def _is_bound_expr_for_symbol(expr: "sympy.Expr") -> bool:
         # This is probably unnecessary, but since torch._check() calls for single-symbol bounds
-        # like u0 >= 0, 10 >= u0 accumulate range info in the ShapeEnv, and we insert sym_constrain_range calls
-        # anyways, we designate these calls as redundant and remove them.
+        # like u0 >= 0, 10 >= u0 accumulate range info in the ShapeEnv, we designate these calls as redundant
+        # and instead add 2 runtime asserts at the end of this pass, if the min/max bounds are non-trivial.
         if (
             len(expr.args) != 2
             or expr.func not in (sympy.LessThan, sympy.GreaterThan)
@@ -450,7 +450,6 @@ def insert_deferred_runtime_asserts(
                 # be on a best effort basis, but since our grammar is not
                 # terribly difficult, chances are we could even fully
                 # normalise SymPy expressions... who knows.
-                # if ("sym_constrain_range", i0) in expr_to_proxy:
                 if i0 in constrained_unbacked_symbols:
                     continue  # constrain symbol just once
 
