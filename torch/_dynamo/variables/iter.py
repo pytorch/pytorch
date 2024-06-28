@@ -4,10 +4,12 @@ MAX_CYCLE = 3000
 
 import itertools
 import operator
+
 from typing import Dict, List, Optional
 
 from .. import polyfill, variables
 from ..exc import unimplemented
+
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 

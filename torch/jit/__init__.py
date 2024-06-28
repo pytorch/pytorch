@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import warnings
+
 from contextlib import contextmanager
 from typing import Any, Iterator
 
@@ -65,8 +66,8 @@ from torch.jit._trace import (
     TracerWarning,
     TracingCheckError,
 )
-from torch.utils import set_module
 
+from torch.utils import set_module
 
 __all__ = [
     "Attribute",

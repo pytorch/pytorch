@@ -4,7 +4,6 @@ import numpy as np
 
 import torch
 
-
 """Microbenchmarks for Tensor repeat operator. Supports PyTorch."""
 
 input_shapes = (

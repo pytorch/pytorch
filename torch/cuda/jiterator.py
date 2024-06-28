@@ -5,7 +5,6 @@ from typing import Callable, List
 import torch
 from torch import Tensor
 
-
 __all__: List[str] = []
 
 

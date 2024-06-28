@@ -31,7 +31,6 @@ from torch._inductor.codecache import (
 )
 from torch._inductor.runtime.runtime_utils import cache_dir
 
-
 if config.is_fbcode():
     from triton.fb import build_paths  # noqa: F401
 

@@ -7,7 +7,6 @@ from typing import Any
 
 from torch.backends import __allow_nonbracketed_mutation, ContextProp, PropModule
 
-
 try:
     import opt_einsum as _opt_einsum  # type: ignore[import]
 except ImportError:
