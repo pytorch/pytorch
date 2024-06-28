@@ -1,6 +1,5 @@
 import json
 import logging
-
 import math
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 
@@ -20,6 +19,7 @@ from torchgen.model import (
     Type,
 )
 from torchgen.static_runtime import config
+
 
 logger: logging.Logger = logging.getLogger()
 
