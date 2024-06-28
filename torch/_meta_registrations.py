@@ -5232,35 +5232,6 @@ def meta__scaled_dot_product_efficient_backward(
 
 @register_meta(
     [
-        aten._scaled_dot_product_cudnn_attention_backward,
-    ]
-)
-def meta__scaled_dot_product_cudnn_backward(
-    grad_out: Tensor,
-    query: Tensor,
-    key: Tensor,
-    value: Tensor,
-    out: Tensor,
-    logsumexp: Tensor,
-    philox_seed: Tensor,
-    philox_offset: Tensor,
-    attn_bias: Tensor,
-    cum_seq_q: Tensor,
-    cum_seq_k: Tensor,
-    max_q: int,
-    max_k: int,
-    dropout_p: float,
-    is_causal: bool,
-    scale: Optional[float] = None,
-):
-    grad_q = torch.empty_like(query)
-    grad_k = torch.empty_like(key)
-    grad_v = torch.empty_like(value)
-    return grad_q, grad_k, grad_v
-
-
-@register_meta(
-    [
         aten._flash_attention_backward,
     ]
 )
@@ -5576,11 +5547,6 @@ def meta_sort(self, stable=None, dim=-1, descending=False, values=None, indices=
         _safe_copy_out(copy_from=i, copy_to=indices)  # type: ignore[arg-type]
         return values, indices
     return v, i
-
-
-@register_meta(aten.argsort.stable)
-def meta_argsort(self, *, stable, dim=-1, descending=False):
-    return meta_sort(self, stable=stable, dim=dim, descending=descending)[1]
 
 
 def rnn_cell_checkSizes(

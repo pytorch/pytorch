@@ -6342,7 +6342,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
     def test_guard_failure_fn_shape_control(self):
         def fn(x, y):
-            if x.shape[0] < 3:
+            if x.shape[0] < 4:
                 if y.shape[0] < 3:
                     return x * y
                 else:
@@ -6377,7 +6377,7 @@ utils_device.CURRENT_DEVICE == None""".split(
                 first_guard_failure,
             )
         else:
-            self.assertIn("""2 <= L['x'].size()[0] <= 2""", first_guard_failure)
+            self.assertIn("""L['x'].size()[0] < 3""", first_guard_failure)
 
     def test_guard_failure_fn2(self):
         def fn(x, y):
@@ -7182,6 +7182,20 @@ utils_device.CURRENT_DEVICE == None""".split(
         torch._dynamo.mark_dynamic(y, 0)
         with self.assertRaises(ConstraintViolationError):
             torch._dynamo.optimize("eager")(my_dyn_fn)(y)
+
+    def test_raise_guard_indirect_full_constraint(self):
+        y = torch.randn([3, 3, 3])
+
+        def dyn_fn(x):
+            if x.shape[0] > 3:
+                return x.cos()
+            if x.shape[0] < 3:
+                return x * 2
+            return x.sin()
+
+        torch._dynamo.mark_dynamic(y, 0)
+        with self.assertRaises(ConstraintViolationError):
+            torch._dynamo.optimize("eager")(dyn_fn)(y)
 
     # Translation validation changes the exception type, don't run with it
     @torch.fx.experimental._config.patch(translation_validation=False)

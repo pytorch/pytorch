@@ -15,7 +15,7 @@ except ImportError:
 
 from pathlib import Path
 
-packaging_directory = Path(__file__).absolute().parent
+packaging_directory = Path(__file__).parent
 
 
 class TestSaveLoad(PackageTestCase):
