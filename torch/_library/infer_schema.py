@@ -82,7 +82,7 @@ def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
         if type(mutates_args) == str:
             if mutates_args != UNKNOWN_MUTATES:
                 raise ValueError(
-                    "Argument mutates_args is a string {mutates_args}. mutates_args can only be 'unknown' when it is a string. "
+                    "mutates_args must either be a sequence of the names of the arguments that are mutated or the string 'unknown'. "
                 )
             if schema_type.startswith("Tensor"):
                 schema_type = f"Tensor(a{idx}!){schema_type[len('Tensor'):]}"
@@ -119,7 +119,7 @@ def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
                 f"{mutates_args_not_seen} in mutates_args were not found in "
                 f"the custom op's signature. "
                 f"mutates_args should contain the names of all args that the "
-                f"custom op mutates."
+                f"custom op mutates, or just the string 'unknown' if you don't know."
             )
     return_annotation = sig.return_annotation
     if type(return_annotation) == str:
