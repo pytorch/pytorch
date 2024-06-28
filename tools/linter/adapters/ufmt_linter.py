@@ -102,7 +102,7 @@ def check_file(filename: str) -> list[LintMessage]:
                 r"\g<1>usort: skip",
                 isort.code(
                     re.sub(r"(#.*\b)usort:\s*skip\b", r"\g<1>isort: split", original),
-                    config=IsortConfig(settings_path=REPO_ROOT),
+                    config=IsortConfig(settings_path=str(REPO_ROOT)),
                     file_path=path,
                 ),
             )
