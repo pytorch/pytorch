@@ -408,6 +408,6 @@ fi
 
 # snadampal: skipping it till sccache support added for aarch64
 # https://github.com/pytorch/pytorch/issues/121559
-if [[ "$BUILD_ENVIRONMENT" != *aarch64* ]]; then
+if [[ "$BUILD_ENVIRONMENT" != *aarch64* &&  "$BUILD_ENVIRONMENT" != *s390x* ]]; then
   print_sccache_stats
 fi
