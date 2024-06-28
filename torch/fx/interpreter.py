@@ -169,6 +169,7 @@ class Interpreter:
         calling convention, where you pass a list of arguments, which will be cleared
         by the interpreter.  This ensures that input tensors are promptly deallocated.
         """
+        assert len(args_list) == len(self.graph.find_nodes(op="placeholder"))
         args_iter = iter(args_list)
         env = {}
         for n in self.graph.nodes:
