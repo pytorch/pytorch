@@ -649,7 +649,10 @@ class PipelineScheduleMulti(_PipelineSchedule):
             if self._has_backward:
                 stage._prepare_backward_infra(n_microbatches)
 
-    def dump_csv(self, filename):
+    def _dump_csv(self, filename):
+        """Dump a CSV representation of the schedule into a file with the provided filename.
+        This API will most likely get renamed/refactored so is marked as internal for now.
+        """
         with open(filename, "w", newline="") as csvfile:
             writer = csv.writer(csvfile)
             for rank in self.pipeline_order:
@@ -718,7 +721,10 @@ class PipelineScheduleMulti(_PipelineSchedule):
             self._n_microbatches,
         )
 
-    def load_csv(self, filename):
+    def _load_csv(self, filename):
+        """Load a CSV representation of the schedule from a file with the provided filename.
+        This API will most likely get renamed/refactored so is marked as internal for now.
+        """
         with open(filename, newline="") as csvfile:
             reader = csv.reader(csvfile)
             for rank, row in enumerate(reader):
