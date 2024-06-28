@@ -1,0 +1,129 @@
+name: docker-builds
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .ci/docker/**
+      - .github/workflows/docker-builds.yml
+      - .lintrunner.toml
+  push:
+    branches:
+      - main
+      - release/*
+      - landchecks/*
+    paths:
+      - .ci/docker/**
+      - .github/workflows/docker-builds.yml
+      - .lintrunner.toml
+  schedule:
+    - cron: 1 3 * * 3
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+env:
+  ALPINE_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine
+  AWS_DEFAULT_REGION: us-east-1
+
+permissions: read-all
+
+jobs:
+  docker-build:
+    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [linux.12xlarge]
+        docker-image-name: [
+          pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9,
+          pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9-inductor-benchmarks,
+          pytorch-linux-focal-cuda12.4-cudnn9-py3.12-gcc9-inductor-benchmarks,
+          pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9,
+          pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9-inductor-benchmarks,
+          pytorch-linux-focal-cuda12.1-cudnn9-py3.12-gcc9-inductor-benchmarks,
+          pytorch-linux-focal-cuda11.8-cudnn9-py3-gcc9,
+          pytorch-linux-focal-py3.8-clang10,
+          pytorch-linux-focal-py3.11-clang10,
+          pytorch-linux-focal-py3.12-clang10,
+          pytorch-linux-focal-rocm-n-1-py3,
+          pytorch-linux-focal-rocm-n-py3,
+          pytorch-linux-jammy-cuda11.8-cudnn9-py3.8-clang12,
+          pytorch-linux-focal-py3-clang9-android-ndk-r21e,
+          pytorch-linux-jammy-py3.8-gcc11,
+          pytorch-linux-jammy-py3.8-gcc11-inductor-benchmarks,
+          pytorch-linux-jammy-py3.12-halide,
+          pytorch-linux-jammy-xpu-2024.0-py3,
+          pytorch-linux-jammy-py3-clang15-asan,
+          pytorch-linux-focal-py3-clang10-onnx,
+          pytorch-linux-focal-linter,
+          pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-linter,
+          pytorch-linux-jammy-py3-clang12-executorch
+          ]
+        include:
+          - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc11
+            runner: linux.arm64.2xlarge
+    runs-on: [self-hosted, "${{ matrix.runner }}"]
+    env:
+      DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ matrix.docker-image-name }}
+    steps:
+      - name: Clean workspace
+        shell: bash
+        run: |
+          echo "${GITHUB_WORKSPACE}"
+          sudo rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+
+      # [see note: pytorch repo ref]
+      # deep clone (fetch-depth 0) required for git merge-base
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+
+      - name: Build docker image
+        id: build-docker-image
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+          docker-image-name: ${{ matrix.docker-image-name }}
+          always-rebuild: true
+          push: true
+
+      - name: Pull docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: ${{ steps.build-docker-image.outputs.docker-image }}
+
+      - uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
+        name: Push to https://https://ghcr.io/
+        id: push-to-ghcr-io
+        if: ${{ github.event_name == 'push' }}
+        env:
+          ECR_DOCKER_IMAGE: ${{ steps.build-docker-image.outputs.docker-image }}
+          GHCR_PAT: ${{ secrets.GHCR_PAT }}
+          IMAGE_NAME: ${{ matrix.docker-image-name }}
+        with:
+          shell: bash
+          timeout_minutes: 15
+          max_attempts: 5
+          retry_wait_seconds: 90
+          command: |
+            ghcr_image="ghcr.io/pytorch/ci-image"
+            tag=${ECR_DOCKER_IMAGE##*:}
+            # Push docker image to the ghcr.io
+            echo $GHCR_PAT | docker login ghcr.io -u pytorch --password-stdin
+            docker tag "${ECR_DOCKER_IMAGE}" "${ghcr_image}:${IMAGE_NAME}-${tag}"
+            docker push "${ghcr_image}:${IMAGE_NAME}-${tag}"
+
+      - name: Chown workspace
+        uses: ./.github/actions/chown-workspace
+        with:
+          ALPINE_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/${{ (matrix.runner == 'linux.arm64.2xlarge') && 'arm64v8' || 'tool' }}/alpine
+        if: always()
+
+      - name: Teardown Linux
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        if: always()
