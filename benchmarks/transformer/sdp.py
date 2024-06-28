@@ -1,6 +1,7 @@
 import argparse
 import itertools
 import random
+
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,7 +15,6 @@ from tqdm import tqdm
 import torch
 import torch.utils.benchmark as benchmark
 from torch.backends.cuda import sdp_kernel
-
 
 warnings.filterwarnings("ignore")
 
