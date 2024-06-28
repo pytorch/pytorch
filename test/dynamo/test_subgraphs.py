@@ -310,7 +310,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             x = torch.add(unsupported(x, x), 1)
             return a * x + len_(b)
 
-        self._common(fn, 2, ifdynstaticdefault(4, 5))
+        self._common(fn, 2, 4)
 
     def test_restore_range(self):
         def fn(a, b):

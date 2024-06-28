@@ -92,6 +92,7 @@ def insert_deferred_runtime_asserts(
         DivideByKey,
         free_symbols,
         InnerTensorKey,
+        resolve_unbacked_bindings,
     )
     from torch.utils._sympy.numbers import int_oo
     from torch.utils._sympy.reference import PythonReferenceAnalysis
@@ -107,9 +108,9 @@ def insert_deferred_runtime_asserts(
     )
 
     # We are going to mutate the dict
-    symbol_to_proxy: Dict[sympy.Symbol, fx.Proxy] = {}
+    expr_to_proxy: Dict[sympy.Symbol, fx.Proxy] = {}
     placeholders = set()
-    first_non_placeholder = next(iter(graph.nodes))
+    first_non_placeholder = None
     for node in graph.nodes:
         if node.op != "placeholder":
             first_non_placeholder = node
@@ -117,57 +118,27 @@ def insert_deferred_runtime_asserts(
         else:
             placeholders.add(node)
 
-    def _is_intermediate_tensor_shape_call(node: fx.Node) -> bool:
+    def _is_intermediate_tensor_sym_call(node: fx.Node) -> bool:
         """
         If a size/stride/storage offset call on an intermediate tensor,
         we can try to compute the value from input shapes instead.
         """
-        val = None
-        if (
-            node.target in (
-                torch.ops.aten.sym_size.int,
-                torch.ops.aten.sym_stride.int,
-                torch.ops.aten.storage_offset.default,
-            )
-            and node.args[0].op != "placeholder"  # type: ignore[union-attr]
-        ):  # export: sym_size.int(node, dim)
-            val = _get_sym_val(node)
-        if (
-            node.target == operator.getitem
-            and node.args[0].target in (
-                "size",
-                "stride",
-                "storage_offset",
-            )
-            and node.args[0].args[0].op != "placeholder"
-        ):  # dynamo export: getitem(size(node), dim)
-            val = _get_sym_val(node)
         return (
-            val is not None
+            (val := _get_sym_val(node)) is not None
             and not isinstance(val, sympy.Number)
+            and any(
+                isinstance(arg, fx.Node)
+                and isinstance(_get_example_value(arg), (torch.Tensor, torch.Size))
+                and arg.op != "placeholder"
+                for arg in node.args
+            )
         )
-
-    # Identify what symbols we need to reify.  This isn't strictly needed
-    # but helps reduce churn on the graph
-    needed_symbols: Set[sympy.Symbol] = set()
-    for ras in ras_by_symbol.values():
-        for ra in ras:
-            needed_symbols.update(free_symbols(ra.expr))
-    for node in gm.graph.nodes:
-        if (
-            node.op == "call_function"
-            and _is_intermediate_tensor_shape_call(node)
-        ):  # use symbols for intermediate shape calls, even if not in runtime asserts
-            sym_expr = _get_sym_val(node)
-            needed_symbols.update(sym_expr.free_symbols)
-
-    log.debug("needed_symbols = %s", needed_symbols)
 
     # Track asserts/checks we've added
     added_asserts: Set["sympy.Expr"] = set()
     constrained_unbacked_symbols: Set["sympy.Symbol"] = set()
 
-    def _sympy_interp(symbol_to_proxy, expr):
+    def _sympy_interp(expr_to_proxy, expr):
         # sympy_interp() with hash consing
         from sympy import Integer, Number, Symbol
         from sympy.logic.boolalg import BooleanAtom
@@ -176,27 +147,22 @@ def insert_deferred_runtime_asserts(
         # base cases, don't cache
         if isinstance(expr, (Integer, Number, Symbol, BooleanAtom)):
             return sympy_interp(
-                PythonReferenceAnalysis, symbol_to_proxy, expr
+                PythonReferenceAnalysis, expr_to_proxy, expr
             )
         # hash cons
-        if expr in symbol_to_proxy:
-            return symbol_to_proxy[expr]
+        if expr in expr_to_proxy:
+            return expr_to_proxy[expr]
 
-        # hash cons on arguments
-        fx_args = [
-            (
-                symbol_to_proxy[arg]
-                if arg in symbol_to_proxy
-                else _sympy_interp(symbol_to_proxy, arg)
-            )
-            for arg in expr.args
-        ]
-
-        # run expr handler
-        symbol_to_proxy[expr] = _run_sympy_handler(
-            PythonReferenceAnalysis, fx_args, expr
+        # hash cons on arguments, run expr handler
+        expr_to_proxy[expr] = _run_sympy_handler(
+            PythonReferenceAnalysis,
+            [
+                _sympy_interp(expr_to_proxy, arg)
+                for arg in expr.args
+            ],
+            expr,
         )
-        return symbol_to_proxy[expr]
+        return expr_to_proxy[expr]
 
     def _is_bound_expr_for_symbol(expr: "sympy.Expr") -> bool:
         # This is probably unnecessary, but since torch._check() calls for single-symbol bounds
@@ -230,7 +196,7 @@ def insert_deferred_runtime_asserts(
             log.debug("inserting runtime assert %s", ra.expr)
             # Need to process ALL free symbols, not just unbacked ones
             fvs = free_symbols(ra.expr)
-            missing = fvs - symbol_to_proxy.keys()
+            missing = fvs - expr_to_proxy.keys()
             if missing:
                 i1 = min(missing, key=str)
                 # TODO: Remove relaxing assert on unbacked_symint https://github.com/pytorch/pytorch/issues/119689
@@ -239,7 +205,7 @@ def insert_deferred_runtime_asserts(
             else:
                 # Convert the sympy expression into a sequence of FX
                 # nodes
-                res = _sympy_interp(symbol_to_proxy, ra.expr).node
+                res = _sympy_interp(expr_to_proxy, ra.expr).node
                 graph.call_function(
                     torch.ops.aten._assert_scalar.default,
                     # TODO: use ra.msg here, but it's pretty
@@ -273,11 +239,10 @@ def insert_deferred_runtime_asserts(
                         isinstance(symint, torch.SymInt)
                         and isinstance(symint.node, SymNode)
                         and isinstance(s := symint.node.expr, sympy.Symbol)
-                        and s not in symbol_to_proxy
-                        and s in needed_symbols
+                        and s not in expr_to_proxy
                     ):
-                        symbol_to_proxy[s] = fx.Proxy(cb())
-                        log.debug("symbol_to_proxy[%s] = %s", s, symbol_to_proxy[s])
+                        expr_to_proxy[s] = fx.Proxy(cb())
+                        log.debug("expr_to_proxy[%s] = %s", s, expr_to_proxy[s])
 
                 match_symbol(example_value, lambda: node)
                 if isinstance(t := example_value, torch.Tensor):
@@ -316,41 +281,42 @@ def insert_deferred_runtime_asserts(
             ):
                 if (
                     node.args[0] == True  # trivial
-                    or (assert_expr := _get_sym_val(node.args[0])) in added_asserts
+                    or (assert_expr := _get_sym_val(node.args[0])) in expr_to_proxy
+                    or (assert_expr is not None and _is_bound_expr_for_symbol(assert_expr))
                 ):
+                    arg = node.args[0]
                     gm.graph.erase_node(node)
+                    if isinstance(arg, fx.Node) and not arg.users:
+                        gm.graph.erase_node(arg)
                 else:
                     added_asserts.add(assert_expr)
 
-            # hash cons on symbolic values
+            # hash cons, replace function calls that return torch.SymInts with direct references to
+            # FX nodes built up to reify the sympy expression.
             if (
-                node.op == "call_function"
+                node.op != "placeholder"
                 and (sym_expr := _get_sym_val(node)) is not None
             ):
                 if (
-                    sym_expr in symbol_to_proxy  # example value is redundant
+                    sym_expr in expr_to_proxy  # example value is redundant
                     or (
-                        _is_intermediate_tensor_shape_call(node)
-                        and not (sym_expr.free_symbols - symbol_to_proxy.keys())
+                        _is_intermediate_tensor_sym_call(node)
+                        and not (sym_expr.free_symbols - expr_to_proxy.keys())
+                        # this guards against calls like item() that produce new untracked symbols
                     )  # shape call on intermediate tensor, turn into computation on input shapes
                 ):
-                    if _is_intermediate_tensor_shape_call(node):  # reify from input shapes
-                        symbol_to_proxy[sym_expr] = _sympy_interp(symbol_to_proxy, sym_expr)
+                    if _is_intermediate_tensor_sym_call(node):  # reify from input shapes
+                        expr_to_proxy[sym_expr] = _sympy_interp(expr_to_proxy, sym_expr)
                         # won't try DCE-ing tensor compute here
-                    hash_node = symbol_to_proxy[sym_expr].node
+                    hash_node = expr_to_proxy[sym_expr].node
                     node.replace_all_uses_with(hash_node)
                     gm.graph.erase_node(node)
                     log.debug("CSE node %s -> %s for expr %s", node, hash_node, sym_expr)
                 else:
-                    symbol_to_proxy[sym_expr] = fx.Proxy(node)
+                    expr_to_proxy[sym_expr] = fx.Proxy(node)
 
-            if not any(ras for ras in ras_by_symbol.values()):
-                # if no runtime asserts are present, only do CSE,
-                # don't proceed further and add refinement calls
-                continue
-
-            # If the symbol is used, we'll call sym_constrain_range(_for_size) later when we see it anyways,
-            # so delete calls before that
+            # We add sym_constrain_range calls for symbols later in any case if they're size-like or range-constrained,
+            # so calls before that are redundant.
             if node.target in (
                 torch._check_is_size,
                 torch.ops.aten.sym_constrain_range.default,
@@ -360,117 +326,88 @@ def insert_deferred_runtime_asserts(
 
             defs = []
 
-            if unbacked_bindings := node.meta.get("unbacked_bindings"):
+            # AOTAutograd will create new symbols as the unbacked_bindings keys, which PropagateSymInts will set as
+            # equivalent, but the refinement calls we perform in this pass may struggle with associating the two.
+            # More concretely, when re-exporting/tracing, constraining only the new symbol may not communicate enough
+            # information about the old symbol when we re-export, raising errors on data-dependent guards.
+            # Call resolve_unbacked_bindings() to get the original symbol if present, otherwise we take it as is.
+            if unbacked_bindings := resolve_unbacked_bindings(
+                shape_env, node.meta.get("unbacked_bindings")
+            ):
                 for s, keypath in unbacked_bindings.items():
                     defs.append(s)
-                    def unbacked_interp(node, keypath, signature):
+
+                    # TODO: some CSE when generating these nodes can probably
+                    # help reduce graph size and improve compile time
+                    def go(node, keypath):
                         if keypath == ():
                             return node
-                        if signature in symbol_to_proxy:
-                            hash_node = symbol_to_proxy[signature].node
-                            log.debug("CSE unbacked_bindings node for keypath %s on node %s", keypath, node)
-                            return hash_node
                         if (
                             len(keypath) >= 2
                             and isinstance(keypath[0], CallMethodKey)
                             and isinstance(keypath[1], pytree.SequenceKey)
                         ):
-                            signature = (("CallMethod", keypath[0].name, keypath[1].idx), signature)
-                            if signature in symbol_to_proxy:
-                                res = symbol_to_proxy[signature].node
-                            elif keypath[0].name == "size":
-                                res = unbacked_interp(
+                            if keypath[0].name == "size":
+                                return go(
                                     graph.call_function(
                                         torch.ops.aten.sym_size.int,
                                         (node, keypath[1].idx),
                                     ),
                                     keypath[2:],
-                                    signature,
                                 )
-                            elif keypath[0].name == "stride":
-                                res = unbacked_interp(
+                            if keypath[0].name == "stride":
+                                return go(
                                     graph.call_function(
                                         torch.ops.aten.stride.int,
                                         (node, keypath[1].idx),
                                     ),
                                     keypath[2:],
-                                    signature,
                                 )
-                            else:
-                                res = unbacked_interp(
-                                    graph.call_method(
-                                        keypath[0].name, (node, keypath[1].idx)
-                                    ),
-                                    keypath[2:],
-                                    signature,
-                                )
+                            return go(
+                                graph.call_method(
+                                    keypath[0].name, (node, keypath[1].idx)
+                                ),
+                                keypath[2:],
+                            )
                         elif isinstance(keypath[0], CallMethodKey):
-                            signature = (("CallMethod", keypath[0].name), signature)
-                            if signature in symbol_to_proxy:
-                                res = symbol_to_proxy[signature].node
-                            else:
-                                res = unbacked_interp(
-                                    graph.call_method(keypath[0].name, (node,)),
-                                    keypath[1:],
-                                    signature,
-                                )
+                            return go(
+                                graph.call_method(keypath[0].name, (node,)), keypath[1:]
+                            )
                         elif isinstance(keypath[0], pytree.SequenceKey):
-                            signature = (("SequenceKey", keypath[0].idx), signature)
-                            if signature in symbol_to_proxy:
-                                res = symbol_to_proxy[signature].node
-                            else:
-                                res = unbacked_interp(
-                                    graph.call_function(
-                                        operator.getitem, (node, keypath[0].idx)
-                                    ),
-                                    keypath[1:],
-                                    signature,
-                                )
+                            return go(
+                                graph.call_function(
+                                    operator.getitem, (node, keypath[0].idx)
+                                ),
+                                keypath[1:],
+                            )
                         elif isinstance(keypath[0], ConvertIntKey):
-                            signature = (("ConvertIntKey",), signature)
-                            if signature in symbol_to_proxy:
-                                res = symbol_to_proxy[signature].node
-                            else:
-                                res = unbacked_interp(
-                                    graph.call_function(
-                                        cast_symbool_to_symint_guardless, (node,)
-                                    ),
-                                    keypath[1:],
-                                    signature,
-                                )
+                            return go(
+                                graph.call_function(
+                                    cast_symbool_to_symint_guardless, (node,)
+                                ),
+                                keypath[1:],
+                            )
                         elif isinstance(keypath[0], DivideByKey):
-                            signature = (("DivideByKey", keypath[0].divisor), signature)
-                            if signature in symbol_to_proxy:
-                                res = symbol_to_proxy[signature].node
-                            else:
-                                res = unbacked_interp(
-                                    graph.call_function(
-                                        operator.floordiv, (node, keypath[0].divisor)
-                                    ),
-                                    keypath[1:],
-                                    signature,
-                                )
+                            # TODO: need to assert divisibility
+                            return go(
+                                graph.call_function(
+                                    operator.floordiv, (node, keypath[0].divisor)
+                                ),
+                                keypath[1:],
+                            )
                         elif isinstance(keypath[0], InnerTensorKey):
-                            signature = (("InnerTensorKey", keypath[0].inner_name), signature)
-                            if signature in symbol_to_proxy:
-                                res = symbol_to_proxy[signature].node
-                            else:
-                                res = unbacked_interp(
-                                    graph.call_function(
-                                        getattr, (node, keypath[0].inner_name)
-                                    ),
-                                    keypath[1:],
-                                )
+                            return go(
+                                graph.call_function(
+                                    getattr, (node, keypath[0].inner_name)
+                                ),
+                                keypath[1:],
+                            )
                         else:
                             raise AssertionError(f"unrecognized keypath {keypath}")
 
-                        if signature not in symbol_to_proxy:
-                            symbol_to_proxy[signature] = fx.Proxy(res)
-                        return res
-
-                    if s not in symbol_to_proxy:
-                        symbol_to_proxy[s] = fx.Proxy(unbacked_interp(node, keypath, s))
-                        log.debug("symbol_to_proxy[%s] = %s", s, symbol_to_proxy[s])
+                    if s not in expr_to_proxy:
+                        expr_to_proxy[s] = fx.Proxy(go(node, keypath))
+                        log.debug("expr_to_proxy[%s] = %s", s, expr_to_proxy[s])
 
             for i0 in defs:
                 ras = ras_by_symbol.pop(i0, [])
@@ -513,6 +450,7 @@ def insert_deferred_runtime_asserts(
                 # be on a best effort basis, but since our grammar is not
                 # terribly difficult, chances are we could even fully
                 # normalise SymPy expressions... who knows.
+                # if ("sym_constrain_range", i0) in expr_to_proxy:
                 if i0 in constrained_unbacked_symbols:
                     continue  # constrain symbol just once
 
@@ -520,11 +458,11 @@ def insert_deferred_runtime_asserts(
                     if export:
                         graph.call_function(
                             torch.ops.aten.sym_constrain_range_for_size.default,
-                            (symbol_to_proxy[i0].node,),
+                            (expr_to_proxy[i0].node,),
                         )
                     else:
                         graph.call_function(
-                            torch._check_is_size, (symbol_to_proxy[i0].node,)
+                            torch._check_is_size, (expr_to_proxy[i0].node,)
                         )
 
                 vr = shape_env.var_to_range[i0]
@@ -541,16 +479,36 @@ def insert_deferred_runtime_asserts(
                         except TypeError:
                             return None
 
-                    min_val = convert(vr.lower)
-                    max_val = convert(vr.upper)
-                    graph.call_function(
-                        torch.ops.aten.sym_constrain_range.default,
-                        (symbol_to_proxy[i0].node,),
-                        {
-                            "min": convert(vr.lower),
-                            "max": convert(vr.upper),
-                        },
-                    )
+                    if (min_val := convert(vr.lower)) is not None:
+                        ge = _sympy_interp(expr_to_proxy, i0 >= min_val).node
+                        graph.call_function(
+                            torch.ops.aten._assert_scalar.default,
+                            (
+                                ge,
+                                f"Runtime assertion failed for expression {i0 >= min_val} on node '{ge}'",
+                            ),
+                        )
+                        added_asserts.add(i0 >= min_val)
+                    if (max_val := convert(vr.upper)) is not None:
+                        le = _sympy_interp(expr_to_proxy, i0 <= max_val).node
+                        graph.call_function(
+                            torch.ops.aten._assert_scalar.default,
+                            (
+                                le,
+                                f"Runtime assertion failed for expression {i0 <= max_val} on node '{le}'",
+                            ),
+                        )
+                        added_asserts.add(i0 <= max_val)
 
                 constrained_unbacked_symbols.add(i0)
                 add_runtime_asserts(ras)
+
+    # delete unused reified symbols
+    for expr, proxy in expr_to_proxy.items():
+        if (
+            isinstance(expr, sympy.Symbol)
+            and proxy.node.op != "placeholder"  # keep placeholders intact
+            and not proxy.node.users
+        ):
+            log.debug("deleting unused reified symbol for %s", expr)
+            gm.graph.erase_node(proxy.node)
