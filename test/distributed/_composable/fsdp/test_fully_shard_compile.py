@@ -10,7 +10,6 @@ import torch._dynamo.testing
 import torch.distributed._composable.fsdp._fsdp_param
 from torch import nn
 from torch._dynamo import compiled_autograd
-from torch._dynamo.utils import counters
 from torch._inductor import comms
 
 from torch.distributed._composable.fsdp import fully_shard
@@ -25,7 +24,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     Transformer,
 )
 from torch.utils._triton import has_triton
-
 
 
 class TestFullyShardCompileCompute(FSDPTest):
@@ -143,10 +141,18 @@ class TestFullyShardCompile(FSDPTest):
             self.assertFalse(any(node.target is op for node in graph.nodes))
 
     def _reinplace_all_gather_with_checks(self, graph):
-        self._check_op_in_graph(graph, torch.ops._c10d_functional.all_gather_into_tensor_out.default, exist=False)
+        self._check_op_in_graph(
+            graph,
+            torch.ops._c10d_functional.all_gather_into_tensor_out.default,
+            exist=False,
+        )
         comms.reinplace_fsdp_all_gather(graph)
         print(f"after: graph: {graph}")
-        self._check_op_in_graph(graph, torch.ops._c10d_functional.all_gather_into_tensor_out.default, exist=True)
+        self._check_op_in_graph(
+            graph,
+            torch.ops._c10d_functional.all_gather_into_tensor_out.default,
+            exist=True,
+        )
 
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
     @torch._functorch.config.patch(recompute_views=True)
@@ -322,6 +328,7 @@ class TestFullyShardCompile(FSDPTest):
             self._test_traceable_fsdp(
                 *self._create_transformer_factory_fns(), "inductor", fullgraph=True
             )
+
 
 if __name__ == "__main__":
     run_tests()
