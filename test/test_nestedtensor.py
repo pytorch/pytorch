@@ -559,9 +559,16 @@ class TestNestedTensor(TestCase):
         nested_namespace_result = torch.nested.to_padded_tensor(nt, 4)
         self.assertEqual(result, nested_namespace_result)
 
-    def test_to(self):
+    @parametrize(
+        "layout",
+        [torch.strided, torch.jagged],
+        name_fn=lambda l: f"_with_{layout_name(l)}_layout",
+    )
+    def test_to(self, layout):
         ntensors = 4
-        nt = random_nt(torch.device("cpu"), torch.float32, ntensors, (4, 4))
+        nt = random_nt_from_dims(
+            (7, None, 10), torch.device("cpu"), torch.float32, layout=layout
+        )
 
         def test_copy_behavior(t, non_blocking=False):
             self.assertIs(t, t.to(t, non_blocking=non_blocking))
@@ -635,6 +642,15 @@ class TestNestedTensor(TestCase):
                     )
                     self.assertIs(torch.int32, nt2.to(dtype=torch.int32).dtype)
                     self.assertEqual(nt2.device, nt2.to(dtype=torch.int32).device)
+
+        # Jagged <-> strided
+        new_layout = torch.jagged if layout == torch.strided else torch.strided
+        new_layout_nt = torch.ops.aten._to_copy(nt, layout=new_layout)
+        self.assertIs(new_layout_nt.layout, new_layout)
+        self.assertEqual(new_layout_nt.device, nt.device)
+        self.assertEqual(new_layout_nt.size(2), nt.size(2))
+        self.assertEqual(new_layout_nt.unbind(), nt.unbind())
+        self.assertNotEqual(new_layout_nt.data_ptr(), nt.data_ptr())
 
     def test_copy_(self):
         ntensors = 4
@@ -3561,10 +3577,24 @@ class TestNestedTensorSubclass(TestCase):
         self.assertEqual(nt.dim(), 3)
         self.assertEqual(nt.numel(), 27)
 
-    def test_linear(self, device):
-        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
-        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
-        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64, device=device)
+    @parametrize("nt_dim", [3, 4, 5])
+    def test_linear(self, device, nt_dim):
+        if nt_dim == 3:
+            fixed_shape = (3,)
+        elif nt_dim == 4:
+            fixed_shape = (4, 3)
+        elif nt_dim == 5:
+            fixed_shape = (5, 4, 3)
+
+        a = torch.randn(
+            2, *fixed_shape, requires_grad=True, dtype=torch.float64, device=device
+        )
+        b = torch.randn(
+            3, *fixed_shape, requires_grad=True, dtype=torch.float64, device=device
+        )
+        c = torch.randn(
+            4, *fixed_shape, requires_grad=True, dtype=torch.float64, device=device
+        )
         weight = torch.randn(
             4, 3, requires_grad=True, dtype=torch.float64, device=device
         )
@@ -5174,18 +5204,26 @@ class TestNestedTensorSubclass(TestCase):
         # S: (constant) sequence length
         # D: embedding size
         query = random_nt_from_dims(
-            [4, None, 8, 10], device=device, dtype=dtype, layout=torch.jagged
+            [4, None, 8, 10],
+            device=device,
+            dtype=dtype,
+            layout=torch.jagged,
+            requires_grad=True,
         )
         key = random_nt_from_similar(query)
         value = random_nt_from_similar(query)
         output = F.scaled_dot_product_attention(query, key, value)
         self.assertTrue(isinstance(output, NestedTensor))
+        output.values().sum().backward()
 
+        query_dense = query.clone().detach().requires_grad_(True)
         # should be equivalent to just running the buffers through
         output_dense = F.scaled_dot_product_attention(
-            query._values, key._values, value._values
+            query_dense.values(), key.values(), value.values()
         )
-        self.assertEqual(output._values, output_dense)
+        torch._dynamo.disable(self.assertEqual)(output._values, output_dense)
+        output_dense.sum().backward()
+        torch._dynamo.disable(self.assertEqual)(query.grad, query_dense.grad)
 
     @onlyCUDA
     @unittest.skipIf(
@@ -5609,6 +5647,59 @@ class TestNestedTensorSubclass(TestCase):
 
         for dynamic in [False, True, None]:
             self.assertFalse(_recompiles_for_inputs(f, (nt,), (nt2,), dynamic=dynamic))
+
+    @dtypes(torch.float32, torch.double, torch.half)
+    def test_unbind_backward(self, device, dtype):
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(2, 4, device=device),
+                torch.randn(5, 4, device=device),
+                torch.randn(3, 4, device=device),
+            ],
+            layout=torch.jagged,
+            requires_grad=True,
+        )
+
+        a, b, c = nt.unbind()
+        b.sum().backward()
+
+        expected_grad = torch.zeros_like(nt)
+        expected_grad.unbind()[1].add_(1.0)
+        torch._dynamo.disable(self.assertEqual)(nt.grad, expected_grad)
+
+    def test_layout_conversion(self, device):
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(2, 4, device=device),
+                torch.randn(5, 4, device=device),
+                torch.randn(3, 4, device=device),
+            ],
+            layout=torch.jagged,
+        )
+        strided_nt = torch.ops.aten._nested_jagged_to_strided(nt)
+        self.assertEqual(strided_nt.unbind(), nt.unbind())
+        self.assertEqual(strided_nt.data_ptr(), nt.data_ptr())
+
+        jagged_nt = torch.ops.aten._nested_strided_to_jagged(strided_nt)
+        self.assertEqual(jagged_nt.unbind(), nt.unbind())
+        self.assertEqual(jagged_nt.data_ptr(), nt.data_ptr())
+
+    def test_layout_conversion_backward(self, device):
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(2, 4, device=device),
+                torch.randn(5, 4, device=device),
+                torch.randn(3, 4, device=device),
+            ],
+            layout=torch.jagged,
+            requires_grad=True,
+        )
+        strided_nt = torch.ops.aten._nested_jagged_to_strided(nt)
+        jagged_nt = torch.ops.aten._nested_strided_to_jagged(strided_nt)
+
+        jagged_nt.backward(torch.ones_like(jagged_nt))
+        expected_grad = torch.ones_like(nt)
+        torch._dynamo.disable(self.assertEqual)(expected_grad, nt.grad)
 
 
 instantiate_parametrized_tests(TestNestedTensor)
