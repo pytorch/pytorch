@@ -42,6 +42,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
+    skipIfRocm
 )
 
 if not dist.is_available():
@@ -728,6 +729,7 @@ class TestFSDPUseOrigParamsParamAccess(FSDPTest):
         # sharding strategy to check sharded parameter parity
         return 2
 
+    @skipIfRocm
     @skip_if_lt_x_gpu(2)
     def test_access_params_after_forward(self):
         """

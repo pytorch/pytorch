@@ -39,6 +39,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
+    skipIfRocm
 )
 
 STATE_DICT_TYPES = [StateDictType.FULL_STATE_DICT, StateDictType.SHARDED_STATE_DICT]
@@ -512,6 +513,7 @@ class TestFSDPOptimState(FSDPTest):
                     continue
                 self.assertEqual(full_osd_value, ref_osd_pg[name])
 
+    @skipIfRocm
     @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_type", STATE_DICT_TYPES)
     @parametrize("use_multiple_param_groups", [False, True])
@@ -653,6 +655,7 @@ class TestFSDPOptimState(FSDPTest):
         with self.assertRaisesRegex(RuntimeError, error_regex):
             FSDP.full_optim_state_dict(model, optim)
 
+    @skipIfRocm
     @skip_if_lt_x_gpu(2)
     @parametrize("use_multiple_param_groups", [False, True])
     @parametrize("wrap_alt", [False, True])
@@ -754,6 +757,7 @@ class TestFSDPOptimState(FSDPTest):
             num_iters=3,
         )
 
+    @skipIfRocm
     @skip_if_lt_x_gpu(2)
     @parametrize("use_multiple_param_groups", [False, True])
     @parametrize("wrap_alt", [False, True])
@@ -1133,6 +1137,7 @@ class TestFSDPOptimState(FSDPTest):
         optim2.load_state_dict(sharded_osd2)
         self._step_model(model2, optim2, num_iters=num_iters)
 
+    @skipIfRocm
     @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_type", STATE_DICT_TYPES)
     @parametrize("add_to_fsdp_module", [False, True])
@@ -1249,6 +1254,7 @@ class TestFSDPOptimState(FSDPTest):
             # Check that we can load the optimizer state dict
             optim.load_state_dict(flattened_osd)
 
+    @skipIfRocm
     @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_type", STATE_DICT_TYPES)
     @parametrize("use_multiple_param_groups", [False, True])

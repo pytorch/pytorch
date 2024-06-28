@@ -28,6 +28,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
+    skipIfRocm
 )
 
 if not dist.is_available():
@@ -301,6 +302,7 @@ class TestClipGradNorm(FSDPTest):
                 )
 
     @skip_if_lt_x_gpu(2)
+    @skipIfRocm
     def test_no_gradients(self):
         """
         Tests that calling ``clip_grad_norm_()`` when the FDSP module has no
