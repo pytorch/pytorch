@@ -93,11 +93,13 @@ from .utils import (
 )
 from .virtualized import NullHandler, V
 
+
 if TYPE_CHECKING:
     from torch._higher_order_ops.effects import _EffectType
     from .codegen.wrapper import WrapperCodeGen
 
 from torch._inductor.codecache import output_code_log
+
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")

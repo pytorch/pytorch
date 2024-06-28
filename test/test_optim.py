@@ -14,7 +14,6 @@ from optim.test_swa_utils import TestSWAUtils  # noqa: F401
 import torch
 from torch.nn import Parameter
 from torch.optim import Optimizer, SGD
-
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.optim.optimizer import (
     register_optimizer_step_post_hook,
@@ -46,6 +45,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
+
 
 FP16_REDUCED_PRECISION = {"atol": 1e-5, "rtol": 1e-4}
 

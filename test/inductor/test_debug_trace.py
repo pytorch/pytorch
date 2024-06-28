@@ -11,6 +11,7 @@ import torch
 from torch._inductor import config, test_operators
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
+
 try:
     try:
         from . import test_torchinductor

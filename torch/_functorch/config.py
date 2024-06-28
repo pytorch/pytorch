@@ -11,6 +11,7 @@ import os
 import sys
 from typing import TYPE_CHECKING
 
+
 # Converts torch rng ops to their functional philox rng equivalents. Note that
 # we functionalize only CUDA rng ops today.
 functionalize_rng_ops = False
@@ -58,6 +59,7 @@ cse = True
 # once XLA pin update works,
 # or default config to true and fix relevant bugs
 from torch._inductor.config import is_fbcode
+
 
 view_replay_for_aliased_outputs = not is_fbcode()
 
@@ -186,6 +188,7 @@ if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 
 from torch.utils._config_module import install_config_module
+
 
 # adds patch, save_config, invalid config checks, etc
 install_config_module(sys.modules[__name__])
