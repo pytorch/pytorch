@@ -529,6 +529,9 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
     (defined(CUDNN_VERSION) && CUDNN_VERSION < 8900)
   TORCH_WARN_ONCE(!debug, "Torch was not compiled with cuDNN attention.");
   return false;
+#elif CUDNN_VERSION < 90000
+  TORCH_WARN_ONCE(!debug, "cuDNN Attention version too old! (< v9.0.0)");
+  return false;
 #endif
   // Define gate functions that determine if a flash kernel can be ran
   // Replace with std::to_array when we migrate to c++20
