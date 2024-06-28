@@ -12,6 +12,7 @@ from torchgen.model import (
     Type,
 )
 
+
 connector = "\n\t"
 
 
@@ -57,7 +58,7 @@ class Unboxing:
         for arg in args:
             # expecting only Argument
             if not isinstance(arg.argument, Argument):
-                raise Exception(
+                raise Exception(  # noqa: TRY002
                     f"Unexpected argument type, expecting `Argument` but got {arg}"
                 )
             argument: Argument = arg.argument
@@ -99,7 +100,9 @@ class Unboxing:
                 arg_name=arg_name, out_name=out_name, t=t, ctype=ctype
             )
         else:
-            raise Exception(f"Cannot handle type {t}. arg_name: {arg_name}")
+            raise Exception(  # noqa: TRY002
+                f"Cannot handle type {t}. arg_name: {arg_name}"
+            )  # noqa: TRY002
         return out_name, ctype, code, decl
 
     def _gen_code_base_type(

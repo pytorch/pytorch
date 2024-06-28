@@ -1,22 +1,23 @@
+# mypy: allow-untyped-defs
 from typing import Callable, Iterator, Tuple, TypeVar
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
-from torch.utils.data.datapipes.datapipe import IterDataPipe
 from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
+from torch.utils.data.datapipes.datapipe import IterDataPipe
 from torch.utils.data.datapipes.utils.common import (
     _check_unpickable_fn,
     StreamWrapper,
-    validate_input_col
+    validate_input_col,
 )
 
 
-__all__ = ["FilterIterDataPipe", ]
+__all__ = ["FilterIterDataPipe"]
 
-T = TypeVar('T')
-T_co = TypeVar('T_co', covariant=True)
+T = TypeVar("T")
+T_co = TypeVar("T_co", covariant=True)
 
 
-@functional_datapipe('filter')
+@functional_datapipe("filter")
 class FilterIterDataPipe(IterDataPipe[T_co]):
     r"""
     Filters out elements from the source datapipe according to input ``filter_fn`` (functional name: ``filter``).
@@ -91,6 +92,9 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
                 return False, None  # type: ignore[return-value]
 
         if not isinstance(condition, bool):
-            raise ValueError("Boolean output is required for `filter_fn` of FilterIterDataPipe, got", type(condition))
+            raise ValueError(
+                "Boolean output is required for `filter_fn` of FilterIterDataPipe, got",
+                type(condition),
+            )
 
         return condition, data

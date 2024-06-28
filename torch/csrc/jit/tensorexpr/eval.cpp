@@ -1050,7 +1050,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     auto int_count = (total_byte_size + sizeof(int) - 1) / sizeof(int);
     GRAPH_DEBUG(
         "ALLOCATE: buf=", v->buf()->name_hint(), ", size=", total_byte_size);
-    std::unique_ptr<std::vector<int>> buffer(new std::vector<int>(int_count));
+    auto buffer = std::make_unique<std::vector<int>>(int_count);
     auto iter = buffer_mapping_.find(b);
     if (iter != buffer_mapping_.end() && iter->second != nullptr) {
       throw std::runtime_error(
@@ -1178,7 +1178,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       case kIsNan:
         return std::isnan(v);
       default:
-        throw std::runtime_error("Invalid op_type: " + c10::to_string(op_type));
+        throw std::runtime_error("Invalid op_type: " + std::to_string(op_type));
     }
   }
 
@@ -1198,7 +1198,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       }
       default:
         throw std::runtime_error(
-            "Invalid integral op_type: " + c10::to_string(op_type));
+            "Invalid integral op_type: " + std::to_string(op_type));
     }
   }
 
@@ -1208,7 +1208,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       case kIsNan:
         return std::isnan(v);
       default:
-        throw std::runtime_error("Invalid op_type: " + c10::to_string(op_type));
+        throw std::runtime_error("Invalid op_type: " + std::to_string(op_type));
     }
   }
 
@@ -1224,7 +1224,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       case kAtan2:
         return std::atan2(v1, v2);
       default:
-        throw std::runtime_error("Invalid op_type: " + c10::to_string(op_type));
+        throw std::runtime_error("Invalid op_type: " + std::to_string(op_type));
     }
   }
 
@@ -1300,7 +1300,7 @@ InterpValue SimpleIREvaluator::value() const {
   return impl_->value();
 }
 
-c10::optional<int64_t> evalInt(ExprPtr e) {
+std::optional<int64_t> evalInt(ExprPtr e) {
   try {
     return ExprEval<SimpleIREvaluator>(cast<int64_t>(ExprHandle(e)))
         .value<int64_t>();

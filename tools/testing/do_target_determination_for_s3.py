@@ -1,13 +1,14 @@
 import json
 import os
-import pathlib
 import sys
+from pathlib import Path
 
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
+REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
 from tools.stats.import_test_stats import (
+    copy_additional_previous_failures,
     copy_pytest_cache,
     get_td_heuristic_historial_edited_files_json,
     get_td_heuristic_profiling_json,
@@ -17,13 +18,13 @@ from tools.stats.import_test_stats import (
     get_test_times,
 )
 from tools.stats.upload_metrics import emit_metric
-
 from tools.testing.discover_tests import TESTS
 from tools.testing.target_determination.determinator import (
     AggregatedHeuristics,
     get_test_prioritizations,
     TestPrioritizations,
 )
+
 
 sys.path.remove(str(REPO_ROOT))
 
@@ -51,10 +52,14 @@ def main() -> None:
     get_td_heuristic_historial_edited_files_json()
     get_td_heuristic_profiling_json()
     copy_pytest_cache()
+    copy_additional_previous_failures()
 
     aggregated_heuristics = get_test_prioritizations(selected_tests)
 
     test_prioritizations = aggregated_heuristics.get_aggregated_priorities()
+
+    print("Aggregated Heuristics")
+    print(test_prioritizations.get_info_str(verbose=False))
 
     if os.getenv("CI") == "true":
         print("Emitting metrics")

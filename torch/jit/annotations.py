@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import ast
 import builtins
 import dis
@@ -321,7 +322,7 @@ def split_type_line(type_line):
         arrow_pos = type_line.index("->")
     except ValueError:
         raise RuntimeError(
-            "Syntax error in type annotation (cound't find `->`)"
+            "Syntax error in type annotation (couldn't find `->`)"
         ) from None
     return type_line[start_offset:arrow_pos].strip(), type_line[arrow_pos + 2 :].strip()
 

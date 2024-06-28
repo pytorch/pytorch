@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 from torch._subclasses import FakeTensor
 from torch.ao.quantization.fx.prepare import (
@@ -216,7 +217,7 @@ def _get_edge_or_node_to_group_id(edge_or_node_to_qspec: Dict[EdgeOrNode, Quanti
                 # sharing with other users of the producer node
                 # (arg, user)
                 if not isinstance(arg, Node) or not isinstance(n, Node):
-                    raise Exception(f"Expected input_edge to have type Tuple[Node, Node], but got: {arg, n}")
+                    raise Exception(f"Expected input_edge to have type Tuple[Node, Node], but got: {arg, n}")  # noqa: TRY002
                 for user in arg.users:
                     if user is n:
                         continue

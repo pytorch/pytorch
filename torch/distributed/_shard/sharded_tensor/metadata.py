@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import List
@@ -5,14 +6,16 @@ from typing import List
 import torch
 from torch.distributed._shard.metadata import ShardMetadata
 
+
 class MEM_FORMAT_ENCODING(Enum):
     TORCH_CONTIGUOUS_FORMAT = 0
     TORCH_CHANNELS_LAST = 1
     TORCH_PRESERVE_FORMAT = 2
 
+
 @dataclass
 class TensorProperties:
-    """ Properties used to create :class:`Tensor` """
+    """Properties used to create :class:`Tensor`"""
 
     # Regular tensor fields
     dtype: torch.dtype = field(default=torch.get_default_dtype())
@@ -31,7 +34,7 @@ class TensorProperties:
         elif memory_format == torch.preserve_format:
             mem_format_encoding = MEM_FORMAT_ENCODING.TORCH_PRESERVE_FORMAT
         else:
-            raise RuntimeError(f'Invalid torch.memory_format: {memory_format}')
+            raise RuntimeError(f"Invalid torch.memory_format: {memory_format}")
 
         return (
             self.dtype,
@@ -45,7 +48,13 @@ class TensorProperties:
         self,
         state,
     ):
-        (self.dtype, self.layout, self.requires_grad, mem_format_encoding, self.pin_memory) = state
+        (
+            self.dtype,
+            self.layout,
+            self.requires_grad,
+            mem_format_encoding,
+            self.pin_memory,
+        ) = state
 
         if mem_format_encoding == MEM_FORMAT_ENCODING.TORCH_CONTIGUOUS_FORMAT:
             memory_format = torch.contiguous_format
@@ -54,7 +63,9 @@ class TensorProperties:
         elif mem_format_encoding == MEM_FORMAT_ENCODING.TORCH_PRESERVE_FORMAT:
             memory_format = torch.preserve_format
         else:
-            raise RuntimeError(f'Invalid torch.memory_format encoding: {mem_format_encoding}')
+            raise RuntimeError(
+                f"Invalid torch.memory_format encoding: {mem_format_encoding}"
+            )
 
         self.memory_format = memory_format
 
@@ -65,8 +76,10 @@ class TensorProperties:
             layout=tensor.layout,
             requires_grad=tensor.requires_grad,
             memory_format=torch.contiguous_format,
-            pin_memory=tensor.is_pinned()
+            pin_memory=tensor.is_pinned(device=tensor.device),
         )
+
+
 @dataclass
 class ShardedTensorMetadata:
     """

@@ -33,9 +33,9 @@ if [[ -z "$DOCKER_IMAGE" ]]; then
   if [[ "$PACKAGE_TYPE" == conda ]]; then
     export DOCKER_IMAGE="pytorch/conda-cuda"
   elif [[ "$DESIRED_CUDA" == cpu ]]; then
-    export DOCKER_IMAGE="pytorch/manylinux-cpu"
+    export DOCKER_IMAGE="pytorch/manylinux:cpu"
   else
-    export DOCKER_IMAGE="pytorch/manylinux-cuda${DESIRED_CUDA:2}"
+    export DOCKER_IMAGE="pytorch/manylinux-builder:${DESIRED_CUDA:2}"
   fi
 fi
 
@@ -75,9 +75,9 @@ export PYTORCH_BUILD_NUMBER=1
 TRITON_VERSION=$(cat $PYTORCH_ROOT/.ci/docker/triton_version.txt)
 
 # Here PYTORCH_EXTRA_INSTALL_REQUIREMENTS is already set for the all the wheel builds hence append TRITON_CONSTRAINT
+TRITON_CONSTRAINT="platform_system == 'Linux' and platform_machine == 'x86_64' and python_version < '3.13'"
 if [[ "$PACKAGE_TYPE" =~ .*wheel.* &&  -n "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}" ]]; then
-  # Only linux Python < 3.12 are supported wheels for triton
-  TRITON_CONSTRAINT="platform_system == 'Linux' and platform_machine == 'x86_64' and python_version < '3.12'"
+  # Only linux Python < 3.13 are supported wheels for triton
   TRITON_REQUIREMENT="triton==${TRITON_VERSION}; ${TRITON_CONSTRAINT}"
   if [[ -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_BUILD_VERSION" =~ .*dev.* ]]; then
       TRITON_SHORTHASH=$(cut -c1-10 $PYTORCH_ROOT/.ci/docker/ci_commit_pins/triton.txt)
@@ -87,43 +87,17 @@ if [[ "$PACKAGE_TYPE" =~ .*wheel.* &&  -n "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:
 fi
 
 # Set triton via PYTORCH_EXTRA_INSTALL_REQUIREMENTS for triton rocm package
-if [[ "$PACKAGE_TYPE" =~ .*wheel.* && -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_BUILD_VERSION" =~ .*rocm.* && $(uname) == "Linux" && "$DESIRED_PYTHON" != "3.12" ]]; then
-    TRITON_REQUIREMENT="pytorch-triton-rocm==${TRITON_VERSION}"
+if [[ "$PACKAGE_TYPE" =~ .*wheel.* && -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_BUILD_VERSION" =~ .*rocm.* && $(uname) == "Linux" ]]; then
+    TRITON_REQUIREMENT="pytorch-triton-rocm==${TRITON_VERSION}; ${TRITON_CONSTRAINT}"
     if [[ -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_BUILD_VERSION" =~ .*dev.* ]]; then
         TRITON_SHORTHASH=$(cut -c1-10 $PYTORCH_ROOT/.ci/docker/ci_commit_pins/triton-rocm.txt)
-        TRITON_REQUIREMENT="pytorch-triton-rocm==${TRITON_VERSION}+${TRITON_SHORTHASH}"
+        TRITON_REQUIREMENT="pytorch-triton-rocm==${TRITON_VERSION}+${TRITON_SHORTHASH}; ${TRITON_CONSTRAINT}"
     fi
     if [[ -z "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}" ]]; then
         export PYTORCH_EXTRA_INSTALL_REQUIREMENTS="${TRITON_REQUIREMENT}"
     else
         export PYTORCH_EXTRA_INSTALL_REQUIREMENTS="${PYTORCH_EXTRA_INSTALL_REQUIREMENTS} | ${TRITON_REQUIREMENT}"
     fi
-fi
-
-JAVA_HOME=
-BUILD_JNI=OFF
-if [[ "$PACKAGE_TYPE" == libtorch ]]; then
-  POSSIBLE_JAVA_HOMES=()
-  POSSIBLE_JAVA_HOMES+=(/usr/local)
-  POSSIBLE_JAVA_HOMES+=(/usr/lib/jvm/java-8-openjdk-amd64)
-  POSSIBLE_JAVA_HOMES+=(/Library/Java/JavaVirtualMachines/*.jdk/Contents/Home)
-  # Add the Windows-specific JNI path
-  POSSIBLE_JAVA_HOMES+=("$PWD/pytorch/.circleci/windows-jni/")
-  for JH in "${POSSIBLE_JAVA_HOMES[@]}" ; do
-    if [[ -e "$JH/include/jni.h" ]] ; then
-      # Skip if we're not on Windows but haven't found a JAVA_HOME
-      if [[ "$JH" == "$PWD/pytorch/.circleci/windows-jni/" && "$OSTYPE" != "msys" ]] ; then
-        break
-      fi
-      echo "Found jni.h under $JH"
-      JAVA_HOME="$JH"
-      BUILD_JNI=ON
-      break
-    fi
-  done
-  if [ -z "$JAVA_HOME" ]; then
-    echo "Did not find jni.h"
-  fi
 fi
 
 cat >"$envfile" <<EOL
@@ -136,6 +110,7 @@ export DESIRED_PYTHON="${DESIRED_PYTHON:-}"
 export DESIRED_CUDA="$DESIRED_CUDA"
 export LIBTORCH_VARIANT="${LIBTORCH_VARIANT:-}"
 export BUILD_PYTHONLESS="${BUILD_PYTHONLESS:-}"
+export USE_SPLIT_BUILD="${USE_SPLIT_BUILD:-}"
 if [[ "${OSTYPE}" == "msys" ]]; then
   export LIBTORCH_CONFIG="${LIBTORCH_CONFIG:-}"
   if [[ "${LIBTORCH_CONFIG:-}" == 'debug' ]]; then
@@ -159,8 +134,6 @@ export TORCH_CONDA_BUILD_FOLDER='pytorch-nightly'
 export ANACONDA_USER='pytorch'
 
 export USE_FBGEMM=1
-export JAVA_HOME=$JAVA_HOME
-export BUILD_JNI=$BUILD_JNI
 export PIP_UPLOAD_FOLDER="$PIP_UPLOAD_FOLDER"
 export DOCKER_IMAGE="$DOCKER_IMAGE"
 

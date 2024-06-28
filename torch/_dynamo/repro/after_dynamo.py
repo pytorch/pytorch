@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import argparse
 import copy
 import functools
@@ -46,19 +47,30 @@ use_buck = inductor_config.is_fbcode()
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
-def wrap_backend_debug(unconfigured_compiler_fn, compiler_name: str):
-    """
-    A minifier decorator that wraps the TorchDynamo produced Fx graph modules.
-    As opposed to wrap_compiler_debug, this wrapper intercepts at the
-    TorchDynamo produced Fx Graph Module. This makes it backend-agnostic to some
-    level, e.g., it is useful for minifying issues related to Aot Autograd
-    tracing.  If an error is found, we minify and save the minified repro in
-    repro.tar.gz.
-    """
+def _accuracy_fails(gm, example_inputs, compiler_fn):
+    return backend_accuracy_fails(
+        gm,
+        example_inputs,
+        compiler_fn,
+        only_fwd=config.repro_forward_only,
+        ignore_non_fp=config.repro_ignore_non_fp,
+    )
 
-    @functools.wraps(unconfigured_compiler_fn)
-    def debug_wrapper(gm, example_inputs, **kwargs):
-        compiler_fn = functools.partial(unconfigured_compiler_fn, **kwargs)
+
+class WrapBackendDebug:
+    def __init__(self, unconfigured_compiler_fn, compiler_name: str):
+        functools.wraps(unconfigured_compiler_fn)(self)
+        self._torchdynamo_orig_callable = unconfigured_compiler_fn  # type: ignore[attr-defined]
+        self._compiler_name = compiler_name
+        if hasattr(unconfigured_compiler_fn, "__name__"):
+            self.__name__ = unconfigured_compiler_fn.__name__
+        if hasattr(unconfigured_compiler_fn, "compiler_name"):
+            self.__name__ = unconfigured_compiler_fn.compiler_name
+        if hasattr(unconfigured_compiler_fn, "get_compiler_config"):
+            self.get_compiler_config = unconfigured_compiler_fn.get_compiler_config  # type: ignore[attr-defined]
+
+    def __call__(self, gm, example_inputs, **kwargs):
+        compiler_fn = functools.partial(self._torchdynamo_orig_callable, **kwargs)
         assert config.repro_after in ("dynamo", "aot", None)
 
         if config.repro_after == "dynamo":
@@ -72,20 +84,20 @@ def wrap_backend_debug(unconfigured_compiler_fn, compiler_name: str):
                     )
 
             if config.repro_level == 3:
-                dump_to_minify_after_dynamo(gm, example_inputs, compiler_name)
+                dump_to_minify_after_dynamo(gm, example_inputs, self._compiler_name)
 
             # Check for either accuracy (level 4) or other type of failures.
             if config.repro_level == 4:
                 # Check Accuracy
                 compiled_gm = compiler_fn(copy.deepcopy(gm), example_inputs)
-                if backend_accuracy_fails(gm, example_inputs, compiler_fn):
+                if _accuracy_fails(gm, example_inputs, compiler_fn):
                     log.warning(
                         "Accuracy failed for the TorchDynamo produced graph. Creating script to minify the error."
                     )
                     dump_to_minify_after_dynamo(
                         fx.GraphModule(gm, copy.deepcopy(gm.graph)),
                         example_inputs,
-                        compiler_name,
+                        self._compiler_name,
                     )
                     exc = AccuracyError("Bad accuracy detected.")
                     add_paths(exc)
@@ -100,7 +112,7 @@ def wrap_backend_debug(unconfigured_compiler_fn, compiler_name: str):
                     )
                     if config.repro_level == 1:
                         dump_state_fn = functools.partial(
-                            dump_backend_state, compiler_name=compiler_name
+                            dump_backend_state, compiler_name=self._compiler_name
                         )
                         dump_state_fn(
                             fx.GraphModule(gm, copy.deepcopy(gm.graph)), example_inputs
@@ -109,7 +121,7 @@ def wrap_backend_debug(unconfigured_compiler_fn, compiler_name: str):
                         dump_to_minify_after_dynamo(
                             fx.GraphModule(gm, copy.deepcopy(gm.graph)),
                             example_inputs,
-                            compiler_name,
+                            self._compiler_name,
                         )
                     add_paths(exc)
                     raise
@@ -118,12 +130,17 @@ def wrap_backend_debug(unconfigured_compiler_fn, compiler_name: str):
 
         return compiled_gm
 
-    debug_wrapper._torchdynamo_orig_callable = unconfigured_compiler_fn  # type: ignore[attr-defined]
-    if hasattr(unconfigured_compiler_fn, "compiler_name"):
-        debug_wrapper.__name__ = unconfigured_compiler_fn.compiler_name
-    if hasattr(unconfigured_compiler_fn, "get_compiler_config"):
-        debug_wrapper.get_compiler_config = unconfigured_compiler_fn.get_compiler_config  # type: ignore[attr-defined]
-    return debug_wrapper
+
+def wrap_backend_debug(unconfigured_compiler_fn, compiler_name: str):
+    """
+    A minifier decorator that wraps the TorchDynamo produced Fx graph modules.
+    As opposed to wrap_compiler_debug, this wrapper intercepts at the
+    TorchDynamo produced Fx Graph Module. This makes it backend-agnostic to some
+    level, e.g., it is useful for minifying issues related to Aot Autograd
+    tracing.  If an error is found, we minify and save the minified repro in
+    repro.tar.gz.
+    """
+    return WrapBackendDebug(unconfigured_compiler_fn, compiler_name)
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -304,17 +321,14 @@ def dynamo_accuracy_minifier_backend(gm, example_inputs, compiler_name):
     gm.eval()
 
     # Check Accuracy
-    if backend_accuracy_fails(
-        gm, example_inputs, compiler_fn, only_fwd=config.repro_forward_only
-    ):
+    if _accuracy_fails(gm, example_inputs, compiler_fn):
         log.warning("Accuracy failed for the TorchDynamo produced graph")
         dump_state_fn = functools.partial(
             dump_backend_state, compiler_name=compiler_name, check_accuracy=True
         )
         fails_fn = functools.partial(
-            backend_accuracy_fails,
+            _accuracy_fails,
             compiler_fn=compiler_fn,
-            only_fwd=config.repro_forward_only,
         )
         dump_state_fn(fx.GraphModule(gm, copy.deepcopy(gm.graph)), example_inputs)
         minifier(
@@ -424,7 +438,13 @@ def repro_run(options, mod, load_args):
             # TODO: disable clone
             args = run_load_args(options, mod, load_args)
             assert same_two_models(mod, mod, args), "Eager itself failed"
-            if not same_two_models(mod, opt_mod, args):
+            if not same_two_models(
+                mod,
+                opt_mod,
+                args,
+                only_fwd=config.repro_forward_only,
+                ignore_non_fp=config.repro_ignore_non_fp,
+            ):
                 raise AccuracyError("Dynamo failed")
     else:
         with torch.cuda.amp.autocast(enabled=options.autocast):

@@ -2,11 +2,13 @@
 import os
 import re
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Set
 
 from github_utils import gh_fetch_json_dict, gh_graphql
 from gitutils import GitRepo
+
 
 SEC_IN_DAY = 24 * 60 * 60
 CLOSED_PR_RETENTION = 30 * SEC_IN_DAY
@@ -18,9 +20,9 @@ ESTIMATED_TOKENS = [0]
 
 TOKEN = os.environ["GITHUB_TOKEN"]
 if not TOKEN:
-    raise Exception("GITHUB_TOKEN is not set")
+    raise Exception("GITHUB_TOKEN is not set")  # noqa: TRY002
 
-REPO_ROOT = Path(__file__).parent.parent.parent
+REPO_ROOT = Path(__file__).parents[2]
 
 # Query for all PRs instead of just closed/merged because it's faster
 GRAPHQL_ALL_PRS_BY_UPDATED_AT = """
@@ -187,6 +189,17 @@ def get_recent_prs() -> Dict[str, Any]:
     return prs_by_branch_base
 
 
+@lru_cache(maxsize=1)
+def get_open_prs() -> List[Dict[str, Any]]:
+    return paginate_graphql(
+        GRAPHQL_OPEN_PRS,
+        {"owner": "pytorch", "repo": "pytorch"},
+        lambda data: False,
+        lambda res: res["data"]["repository"]["pullRequests"]["nodes"],
+        lambda res: res["data"]["repository"]["pullRequests"]["pageInfo"],
+    )
+
+
 def get_branches_with_magic_label_or_open_pr() -> Set[str]:
     pr_infos: List[Dict[str, Any]] = paginate_graphql(
         GRAPHQL_NO_DELETE_BRANCH_LABEL,
@@ -196,15 +209,7 @@ def get_branches_with_magic_label_or_open_pr() -> Set[str]:
         lambda res: res["data"]["repository"]["label"]["pullRequests"]["pageInfo"],
     )
 
-    pr_infos.extend(
-        paginate_graphql(
-            GRAPHQL_OPEN_PRS,
-            {"owner": "pytorch", "repo": "pytorch"},
-            lambda data: False,
-            lambda res: res["data"]["repository"]["pullRequests"]["nodes"],
-            lambda res: res["data"]["repository"]["pullRequests"]["pageInfo"],
-        )
-    )
+    pr_infos.extend(get_open_prs())
 
     # Get the most recent PR for each branch base (group gh together)
     branch_bases = set()
@@ -270,5 +275,41 @@ def delete_branches() -> None:
         delete_branch(git_repo, branch)
 
 
+def delete_old_ciflow_tags() -> None:
+    # Deletes ciflow tags if they are associated with a closed PR or a specific
+    # commit.  Lightweight tags don't have information about the date they were
+    # created, so we can't check how old they are.  The script just assumes that
+    # ciflow tags should be deleted regardless of creation date.
+    git_repo = GitRepo(str(REPO_ROOT), "origin", debug=True)
+
+    def delete_tag(tag: str) -> None:
+        print(f"Deleting tag {tag}")
+        ESTIMATED_TOKENS[0] += 1
+        delete_branch(git_repo, f"refs/tags/{tag}")
+
+    tags = git_repo._run_git("tag").splitlines()
+    open_pr_numbers = [x["number"] for x in get_open_prs()]
+
+    for tag in tags:
+        try:
+            if ESTIMATED_TOKENS[0] > 400:
+                print("Estimated tokens exceeded, exiting")
+                break
+            if not tag.startswith("ciflow/"):
+                continue
+            re_match_pr = re.match(r"^ciflow\/.*\/(\d{5,6})$", tag)
+            re_match_sha = re.match(r"^ciflow\/.*\/([0-9a-f]{40})$", tag)
+            if re_match_pr:
+                pr_number = int(re_match_pr.group(1))
+                if pr_number in open_pr_numbers:
+                    continue
+                delete_tag(tag)
+            elif re_match_sha:
+                delete_tag(tag)
+        except Exception as e:
+            print(f"Failed to check tag {tag}: {e}")
+
+
 if __name__ == "__main__":
     delete_branches()
+    delete_old_ciflow_tags()

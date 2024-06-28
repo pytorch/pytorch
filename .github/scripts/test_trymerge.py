@@ -180,6 +180,9 @@ def mock_gh_get_info() -> Any:
     return {
         "closed": False,
         "isCrossRepository": False,
+        "headRefName": "foo",
+        "baseRefName": "bar",
+        "baseRepository": {"defaultBranchRef": {"name": "bar"}},
         "files": {"nodes": [], "pageInfo": {"hasNextPage": False}},
         "changedFiles": 0,
     }
@@ -394,10 +397,11 @@ class TestTryMerge(TestCase):
         # self.assertGreater(len(pr.get_checkrun_conclusions()), 3)
         self.assertGreater(pr.get_commit_count(), 60)
 
+    @skip("GitHub doesn't keep this data anymore")
     def test_gql_retrieve_checksuites(self, *args: Any) -> None:
         "Fetch comments and conclusions for PR with 60 commits"
         pr = GitHubPR("pytorch", "pytorch", 94787)
-        self.assertEqual(len(pr.get_checkrun_conclusions()), 183)
+        self.assertEqual(len(pr.get_checkrun_conclusions()), 182)
 
     def test_team_members(self, *args: Any) -> None:
         "Test fetching team members works"
@@ -741,6 +745,30 @@ class TestBypassFailures(TestCase):
         self.assertTrue(len(failed) == 0)
         self.assertTrue(len(ignorable["UNSTABLE"]) == 1)
 
+        # Add another test case where there is no unstable keyword in the job name, but
+        # the job has already been marked as unstable
+        pr = GitHubPR("pytorch", "executorch", 3318)
+        checks = pr.get_checkrun_conclusions()
+        checks = get_classifications(
+            pr.pr_num,
+            pr.project,
+            checks,
+            [],
+        )
+        print(checks)
+        workflow_name = "test-llama-app"
+        job_name = "mobile-job (android)"
+        self.assertTrue(
+            checks[f"Android / {workflow_name} / {job_name}"].classification
+            == "UNSTABLE"
+        )
+        pending, failed, ignorable = categorize_checks(
+            checks, list(checks.keys()), ok_failed_checks_threshold=1
+        )
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 0)
+        self.assertTrue(len(ignorable["UNSTABLE"]) == 1)
+
     def test_get_classifications_broken_trunk(self, *args: Any) -> None:
         # The mock merge base is the actual value returned by gh_fetch_merge_base
         test_cases = [
@@ -749,13 +777,13 @@ class TestBypassFailures(TestCase):
                 # than the one on the base commit. This should still count as broken trunk
                 "pr_num": 104214,
                 "related_failure_count": 0,
-                "unrelated_failure_count": 1,
+                "flaky_or_broken_trunk": 1,
             },
             {
                 # This PR had one broken trunk failure and it used ghstack
                 "pr_num": 105145,
                 "related_failure_count": 0,
-                "unrelated_failure_count": 1,
+                "flaky_or_broken_trunk": 1,
             },
             {
                 # The failure on the merge base was retried successfully and
@@ -764,20 +792,20 @@ class TestBypassFailures(TestCase):
                 # be used to detect broken trunk
                 "pr_num": 107160,
                 "related_failure_count": 0,
-                "unrelated_failure_count": 4,
+                "flaky_or_broken_trunk": 1,
             },
             {
                 # This PR used Dr.CI broken trunk classification
                 "pr_num": 111253,
                 "related_failure_count": 1,
-                "unrelated_failure_count": 2,
+                "flaky_or_broken_trunk": 1,
             },
         ]
 
         for case in test_cases:
             pr_num = case["pr_num"]
             related_failure_count = case["related_failure_count"]
-            unrelated_failure_count = case["unrelated_failure_count"]
+            flaky_or_broken_trunk = case["flaky_or_broken_trunk"]
 
             pr = GitHubPR("pytorch", "pytorch", pr_num)
             checks = pr.get_checkrun_conclusions()
@@ -799,7 +827,7 @@ class TestBypassFailures(TestCase):
             )
             self.assertTrue(len(pending) == 0)
             self.assertTrue(
-                len(failed) == unrelated_failure_count + related_failure_count
+                len(failed) == flaky_or_broken_trunk + related_failure_count
             )
 
     def test_ignore_current(self, *args: Any) -> None:
@@ -831,6 +859,59 @@ class TestBypassFailures(TestCase):
         self.assertTrue(len(ignorable["IGNORE_CURRENT_CHECK"]) == 0)
         self.assertTrue(len(ignorable["FLAKY"]) == 4)
         self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 2)
+
+    def test_get_classifications_wrong_workflow_name(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 123104)
+        checks = pr.get_checkrun_conclusions()
+
+        check_name = "linux-binary-conda / conda-py3_8-cuda11_8-build / build"
+        check_name_workflow_path = ".github/workflows/generated-linux-binary-conda-nightly.yml / conda-py3_8-cuda11_8-build / build"
+
+        # Mock a check where the workflow name uses the full path
+        checks[check_name_workflow_path] = JobCheckState(
+            check_name_workflow_path,
+            checks[check_name].url,
+            checks[check_name].status,
+            checks[check_name].classification,
+            checks[check_name].job_id,
+            checks[check_name].title,
+            checks[check_name].summary,
+        )
+        del checks[check_name]
+
+        checks = get_classifications(
+            pr.pr_num,
+            pr.project,
+            checks,
+            [],
+        )
+        pending, failed, ignorable = categorize_checks(
+            checks,
+            list(checks.keys()),
+        )
+
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 0)
+        self.assertTrue(len(ignorable["FLAKY"]) == 1)
+        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 0)
+
+    def test_ignore_failures_older_run_same_workflow(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 129013)
+        checks = pr.get_checkrun_conclusions()
+        checks = get_classifications(
+            pr.pr_num,
+            pr.project,
+            checks,
+            [],
+        )
+        pending, failed, ignorable = categorize_checks(
+            checks,
+            list(checks.keys()),
+        )
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 0)
+        self.assertTrue(len(ignorable["FLAKY"]) == 2)
+        self.assertTrue(len(ignorable["UNSTABLE"]) == 13)
 
     @mock.patch("trymerge.read_merge_rules", side_effect=xla_merge_rules)
     def test_dont_ignore_flaky_failures(self, *args: Any) -> None:
@@ -960,7 +1041,7 @@ class TestGitHubPRGhstackDependencies(TestCase):
         )
 
     @skip(
-        reason="This test is run against a mutalbe PR that has changed, so it no longer works. The test should be changed"
+        reason="This test is run against a mutable PR that has changed, so it no longer works. The test should be changed"
     )
     @mock.patch("trymerge.read_merge_rules")
     @mock.patch("trymerge.GitRepo")

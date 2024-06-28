@@ -42,7 +42,7 @@ list(APPEND NEW_PYTHONPATH "${CMAKE_CURRENT_LIST_DIR}/..")
 set(ENV{PYTHONPATH} ${NEW_PYTHONPATH})
 execute_process(
   COMMAND
-  "${PYTHON_EXECUTABLE}"
+  "${Python_EXECUTABLE}"
   ${CMAKE_CURRENT_LIST_DIR}/../tools/gen_vulkan_spv.py
   --glsl-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/vulkan/glsl
   --output-path ${VULKAN_GEN_OUTPUT_PATH}

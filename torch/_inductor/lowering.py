@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import itertools
 import logging
@@ -15,7 +16,7 @@ import torch
 import torch.ao.quantization.fx._decomposed
 import torch.fx
 import torch.utils._pytree as pytree
-from torch._dynamo.create_parameter_op import _bind_nn_parameter
+from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import (
     triton_kernel_wrapper_functional,
     triton_kernel_wrapper_mutation,
@@ -34,7 +35,13 @@ from torch._prims_common import (
     Number,
 )
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
-from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
+from torch.utils._sympy.functions import (
+    CeilDiv,
+    FloorDiv,
+    Identity,
+    IntTrueDiv,
+    ModularIndexing,
+)
 from .._dynamo.utils import import_submodule
 
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
@@ -56,10 +63,12 @@ from .utils import (
     ceildiv,
     decode_device,
     is_dynamic,
+    is_gpu,
     is_pointwise_use,
+    needs_fallback_due_to_atomic_add_limitations,
     pad_listlike,
-    parallel_num_threads,
     sympy_product,
+    use_scatter_fallback,
 )
 from .virtualized import ops, V
 
@@ -87,8 +96,9 @@ def add_needs_realized_inputs(fn):
         return [add_needs_realized_inputs(x) for x in fn]
     needs_realized_inputs.add(fn)
     if isinstance(fn, torch._ops.OpOverloadPacket):
-        for overload in fn.overloads():
-            needs_realized_inputs.add(getattr(fn, overload))
+        needs_realized_inputs.update(
+            getattr(fn, overload) for overload in fn.overloads()
+        )
 
 
 def add_layout_constraint(fn, constraint):
@@ -102,6 +112,7 @@ def add_layout_constraint(fn, constraint):
 add_needs_realized_inputs(
     [
         aten.as_strided,
+        aten.as_strided_copy,
         aten.avg_pool2d,
         aten.avg_pool2d_backward,
         aten.bmm,
@@ -167,7 +178,7 @@ def is_boolean_type(x):
 
 def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND):
     def construct_input(inp):
-        if isinstance(inp, (Number, sympy.Expr)):
+        if isinstance(inp, (Number, sympy.Basic)):
             return inp
         else:
             assert hasattr(inp, "get_dtype")
@@ -206,7 +217,8 @@ def transform_args(args, broadcast, type_promotion_kind, convert_input_to_bool):
             promoting_args = [
                 a
                 for a in args
-                if isinstance(a, (Number, sympy.Expr)) or hasattr(a, "dtype")
+                if isinstance(a, (Number, sympy.Basic))
+                or getattr(a, "dtype", None) is not None
             ]
             dtype = get_promoted_dtype(
                 *promoting_args, type_promotion_kind=type_promotion_kind
@@ -280,14 +292,13 @@ def _register_lowering(
             unpacked = True
             args = args[0]
 
-        # explicitly assert for "out=" ops for better error messages
-        assert not any(
-            x == "out" for x in kwargs.keys()
-        ), "out= ops aren't yet supported"
         # kwargs tensors not supported yet unless it's a fallback op
-        assert not any(isinstance(x, TensorBox) for x in kwargs.values()) or all(
-            fn in fallbacks for fn in aten_fn
-        )
+        if not all(fn in fallbacks for fn in aten_fn):
+            assert not any(isinstance(x, TensorBox) for x in kwargs.values())
+            # explicitly assert for "out=" ops for better error messages
+            assert not any(
+                x == "out" for x in kwargs.keys()
+            ), "out= ops aren't yet supported"
 
         args = transform_args(
             args, broadcast, type_promotion_kind, convert_input_to_bool
@@ -357,15 +368,15 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
     if override_return_dtype is None and type_promotion_kind is None:
         type_promotion_kind = ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
 
-    if not any(isinstance(x, (sympy.Expr, int, float)) for x in inputs):
+    if not any(isinstance(x, (sympy.Basic, int, float)) for x in inputs):
         return inputs
-    if all(isinstance(x, (int, float, sympy.Expr)) for x in inputs):
+    if all(isinstance(x, (int, float, sympy.Basic)) for x in inputs):
         dtype = override_return_dtype or get_promoted_dtype(
             *inputs, type_promotion_kind=type_promotion_kind
         )
 
         def const_func(x):
-            if isinstance(x, sympy.Expr):
+            if isinstance(x, sympy.Basic):
                 return ir.IndexingConstant(x, dtype, decode_device(None))
             else:
                 return ir.Constant(x, dtype, decode_device(None))
@@ -380,7 +391,7 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
                     ir.Constant(x, ex.get_dtype(), ex.get_device()), list(ex.get_size())
                 )
             )
-        elif isinstance(x, sympy.Expr):
+        elif isinstance(x, sympy.Basic):
             out.append(
                 ExpandView.create(
                     IndexingConstant(x, ex.get_dtype(), ex.get_device()),
@@ -436,7 +447,7 @@ def make_pointwise(
         if not override_device:
             device = None
             for i in inputs:
-                if i.get_device().type == "cuda":
+                if is_gpu(i.get_device().type):
                     device = i.get_device()
                     break
             if not device:
@@ -515,7 +526,11 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
 
                 outputs[output_ind] = output
 
-                if device.type == "cuda" and use_foreach and realize_outputs:
+                if (
+                    V.graph.has_feature(device, BackendFeature.FOREACH)
+                    and use_foreach
+                    and realize_outputs
+                ):
                     buffer_list.append(output.realize())
 
             if buffer_list:
@@ -543,7 +558,7 @@ def _convert_element_type(x: TensorBox, dtype: torch.dtype):
     if dtype.is_complex or x.get_dtype().is_complex:
         if x.get_size():
             # Decompose since aa aten fallback is more friendly for c++ codegen.
-            # This decompostion doesn't work for empty tensor, which needs more investigation.
+            # This decomposition doesn't work for empty tensor, which needs more investigation.
             dst = empty_like(x, dtype=dtype)
             ir.InplaceCopyFallback.create(dst, x)
             return dst
@@ -826,6 +841,8 @@ def trunc(x):
 
 @register_lowering(aten.expand, type_promotion_kind=None)
 def expand(x, sizes):
+    from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
     (x,) = promote_constants([x])
     if isinstance(x, ir.BaseConstant):
         return ExpandView.create(x, tuple(sizes))
@@ -834,15 +851,13 @@ def expand(x, sizes):
     if tuple(x.get_size()) == tuple(sizes):
         return x
 
-    if not any(V.graph.sizevars.shape_env.is_unbacked_symint(s) for s in x.get_size()):
+    if not free_unbacked_symbols(x.get_size()):
         x_size_product = V.graph.sizevars.size_hint(sympy_product(x.get_size()))
         # TODO: It would be better to realize the input if any of its sizes
         # are unbacked, because typically the size will be non-zero.  However,
         # this cannot be done directly as below as we'll choke on the size_hint
         # here
-        if x_size_product > 0 and not any(
-            V.graph.sizevars.shape_env.is_unbacked_symint(s) for s in sizes
-        ):
+        if x_size_product > 0 and not free_unbacked_symbols(sizes):
             # maybe realize input before broadcasting it
             x.mark_reuse(
                 V.graph.sizevars.size_hint(sympy_product(sizes)) // x_size_product
@@ -888,7 +903,7 @@ def repeat(x, repeats):
     if zero_tensor:
         return empty(new_size, dtype=x.get_dtype(), device=x.get_device())
     if all((a == 1 or b == 1) for a, b in zip(repeats, old_size)):
-        return expand(x, new_size)
+        return clone(expand(x, new_size))
 
     x_loader: Callable[[Any], Any]
 
@@ -1011,7 +1026,9 @@ def pointwise_cat(inputs, dim=0):
 
             # if we're concatting [4], [2]
             # when we index the second tensor for 5 we want to index 5 - 4
-            idx_load[dim] -= inputs_ranges[i][0]
+            # Use Identity to prevent expansion of index * stride to keep expression
+            # in same int bitwidth as shape
+            idx_load[dim] = Identity(idx_load[dim] - inputs_ranges[i][0])
 
             masked_loads.append(
                 ops.masked(
@@ -1139,9 +1156,176 @@ def quantized_decomposed_dequantize_per_channel(
     )
 
 
+@register_lowering(
+    quantized_decomposed.quantize_per_tensor.default, type_promotion_kind=None
+)
+def quantized_decomposed_quantize_per_tensor_default(
+    input: TensorBox,
+    scale: float,
+    zero_point: int,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+) -> TensorBox:
+    if input.get_dtype() == torch.bfloat16:
+        input = to_dtype(input, torch.float32)
+    assert (
+        input.get_dtype() == torch.float32
+    ), f"Expecting input to have dtype torch.float32, but got dtype: {input.get_dtype()}"
+
+    input_loader = input.make_loader()
+
+    def inner_fn(idx, scale, zero_point):
+        input = input_loader(idx)
+        inv_scale, zero_point = _create_constants(
+            1.0 / scale, zero_point, dtype=torch.float32
+        )
+        val = ops.round(input * inv_scale) + zero_point
+        qmin, qmax = _create_constants(quant_min, quant_max, dtype=torch.float32)
+        clamped = ops.minimum(ops.maximum(val, qmin), qmax)
+        return ops.to_dtype(clamped, dtype)
+
+    return Pointwise.create(
+        device=input.get_device(),
+        dtype=dtype,
+        inner_fn=functools.partial(
+            inner_fn, scale=float(scale), zero_point=int(zero_point)
+        ),
+        ranges=input.get_size(),
+    )
+
+
+@register_lowering(
+    quantized_decomposed.dequantize_per_tensor.default, type_promotion_kind=None
+)
+def quantized_decomposed_dequantize_per_tensor_default(
+    input: TensorBox,
+    scale: float,
+    zero_point: int,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+) -> TensorBox:
+    assert (
+        input.get_dtype() == dtype
+    ), f"Expecting input to have dtype {dtype}, but got dtype: {input.get_dtype()}"
+
+    input_loader = input.make_loader()
+
+    def inner_fn(idx, scale, zero_point):
+        input = input_loader(idx)
+        scale, zero_point = _create_constants(scale, zero_point, dtype=torch.float32)
+        val = ops.sub(ops.to_dtype(input, torch.float32), zero_point) * scale
+        return val
+
+    return Pointwise.create(
+        device=input.get_device(),
+        dtype=torch.float32,
+        inner_fn=functools.partial(
+            inner_fn, scale=float(scale), zero_point=int(zero_point)
+        ),
+        ranges=input.get_size(),
+    )
+
+
+@register_lowering(
+    quantized_decomposed.quantize_per_tensor.tensor, type_promotion_kind=None
+)
+def quantized_decomposed_quantize_per_tensor_tensor(
+    input: TensorBox,
+    scale: TensorBox,
+    zero_point: TensorBox,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+) -> TensorBox:
+    if input.get_dtype() == torch.bfloat16:
+        input = to_dtype(input, torch.float32)
+    assert (
+        input.get_dtype() == torch.float32
+    ), f"Expecting input to have dtype torch.float32, but got dtype: {input.get_dtype()}"
+    assert len(scale.get_size()) == 0 or (
+        len(scale.get_size()) == 1 and scale.get_size()[0] == 1
+    ), "expect scale as scalar tensor"
+    assert len(zero_point.get_size()) == 0 or (
+        len(zero_point.get_size()) == 1 and zero_point.get_size()[0] == 1
+    ), "expect zero_point as scalar tensor"
+
+    input_loader = input.make_loader()
+    scale_loader = scale.make_loader()
+    zero_point_loader = zero_point.make_loader()
+
+    def inner_fn(idx):
+        input = input_loader(idx)
+        _scale = scale_loader((0,) if len(scale.get_size()) == 1 else ())
+        _zero_point = zero_point_loader((0,) if len(scale.get_size()) == 1 else ())
+        if scale.dtype != torch.float32:
+            _scale = ops.to_dtype(_scale, torch.float32)
+        if zero_point.dtype != torch.float32:
+            _zero_point = ops.to_dtype(_zero_point, torch.float32)
+        val = ops.round(input * ops.reciprocal(_scale)) + _zero_point
+        qmin, qmax = _create_constants(quant_min, quant_max, dtype=torch.float32)
+        clamped = ops.minimum(ops.maximum(val, qmin), qmax)
+        return ops.to_dtype(clamped, dtype)
+
+    return Pointwise.create(
+        device=input.get_device(),
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=input.get_size(),
+    )
+
+
+@register_lowering(
+    quantized_decomposed.dequantize_per_tensor.tensor, type_promotion_kind=None
+)
+def quantized_decomposed_dequantize_per_tensor_tensor(
+    input: TensorBox,
+    scale: TensorBox,
+    zero_point: TensorBox,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+) -> TensorBox:
+    assert len(scale.get_size()) == 0 or (
+        len(scale.get_size()) == 1 and scale.get_size()[0] == 1
+    ), "expect scale as scalar tensor"
+    assert len(zero_point.get_size()) == 0 or (
+        len(zero_point.get_size()) == 1 and zero_point.get_size()[0] == 1
+    ), "expect zero_point as scalar tensor"
+    assert (
+        input.get_dtype() == dtype
+    ), f"Expecting input to have dtype {dtype}, but got dtype: {input.get_dtype()}"
+
+    input_loader = input.make_loader()
+    scale_loader = scale.make_loader()
+    zero_point_loader = zero_point.make_loader()
+
+    def inner_fn(idx):
+        input = input_loader(idx)
+        _scale = scale_loader((0,) if len(scale.get_size()) == 1 else ())
+        _zero_point = zero_point_loader((0,) if len(scale.get_size()) == 1 else ())
+        if scale.dtype != torch.float32:
+            _scale = ops.to_dtype(_scale, torch.float32)
+        if zero_point.dtype != torch.float32:
+            _zero_point = ops.to_dtype(_zero_point, torch.float32)
+        val = ops.sub(ops.to_dtype(input, torch.float32), _zero_point) * _scale
+        return val
+
+    return Pointwise.create(
+        device=input.get_device(),
+        dtype=torch.float32,
+        inner_fn=inner_fn,
+        ranges=input.get_size(),
+    )
+
+
 @register_lowering(aten.cat)
 def cat(inputs, dim=0):
-    if all(input.get_dtype() in [torch.int8, torch.uint8] for input in inputs):
+    cpu_device = inputs[0].get_device().type == "cpu"
+    if cpu_device and all(
+        input.get_dtype() in [torch.int8, torch.uint8] for input in inputs
+    ):
         # TODO <leslie> Remove this fallback when we support vectorization
         # code gen with uint8 data type directly.
         for input in inputs:
@@ -1171,21 +1355,6 @@ def cat(inputs, dim=0):
 
         return x
 
-    def should_lower_cat_input(x) -> bool:
-        # Unrealized inputs will not be storage and layouts, and we dont want to realize
-        # them in case we want to fuse
-        if ir.is_storage_and_layout(x):
-            storage, _ = ir.as_storage_and_layout(x, freeze=False)
-            return not ir.ConcatKernel.can_realize_into_without_copy(storage)
-
-        if isinstance(x, (TensorBox, ir.StorageBox)):
-            return should_lower_cat_input(unwrap_tensor(x))
-
-        if isinstance(x, ir.Pointwise):
-            return True
-
-        return False
-
     def is_reduction(t):
         return isinstance(t, ir.ComputedBuffer) and isinstance(t.data, ir.Reduction)
 
@@ -1204,9 +1373,24 @@ def cat(inputs, dim=0):
     # fusing reducutions into computed concat buffer can cause regressions.
     fusable_reduction = any(can_fuse_reduction(t) for t in inputs)
 
+    def should_lower_cat_input(x) -> bool:
+        # Unrealized inputs will not be storage and layouts, and we dont want to realize
+        # them in case we want to fuse
+        if ir.is_storage_and_layout(x):
+            storage, _ = ir.as_storage_and_layout(x, freeze=False)
+            return not ir.ConcatKernel.can_realize_into_without_copy(storage)
+
+        if isinstance(x, (TensorBox, ir.StorageBox)):
+            return should_lower_cat_input(unwrap_tensor(x))
+
+        if isinstance(x, ir.Pointwise):
+            return True
+
+        return False
+
     # TODO: We observed negative performance impact of pointwise_cat optimization on CPU so disabled it.
     #             We will revisit this later after enabling vectorization on index_expr.
-    if inputs[0].get_device().type == "cpu" or fusable_reduction:
+    if cpu_device:
         return TensorBox(ir.ConcatKernel.create(inputs, dim))
 
     def op_count(x):
@@ -1235,10 +1419,18 @@ def cat(inputs, dim=0):
         and all(op_count(t) <= MAX_SIMPLE_OP_COUNT for t in inputs)
     ):
         pointwise_uses = all(is_pointwise_use(use) for use in V.current_node.users)
-        all_pointwise_inputs = all(should_lower_cat_input(inp) for inp in inputs)
-        any_pointwise_inputs = any(should_lower_cat_input(inp) for inp in inputs)
+        # fuse in case we will be used in a pointwise node, and there are any inputs we
+        # we can prevent materialization of.
+        fuse_pointwise_use = (
+            any(should_lower_cat_input(inp) for inp in inputs) and pointwise_uses
+        )
 
-        if all_pointwise_inputs or (any_pointwise_inputs and pointwise_uses):
+        # horizontal fuse in case all inputs will require a copy kernel anyway.
+        # only horizontally fuse pointwise kernels
+        horizontal_fuse_cat = all(
+            should_lower_cat_input(inp) for inp in inputs
+        ) and not any(can_fuse_reduction(t) for t in inputs)
+        if fuse_pointwise_use or (horizontal_fuse_cat and not fusable_reduction):
             return pointwise_cat(inputs, dim)
 
     return TensorBox(ir.ConcatKernel.create(inputs, dim))
@@ -1321,12 +1513,12 @@ def select(x, dim, idx):
 @register_lowering(aten.split, type_promotion_kind=None)
 def split(x, sizes, dim=0, clamp=True):
     dim = _validate_dim(x, dim, 0)
-    x_size = V.graph.sizevars.evaluate_static_shape(x.get_size()[dim])
     if isinstance(sizes, sympy.Expr):
         # TODO: We don't have to guard on sizes per se, but the number
         # of splits must stay constant
         sizes = V.graph.sizevars.evaluate_static_shape(sizes)
     if isinstance(sizes, (int, sympy.Integer)):
+        x_size = V.graph.sizevars.evaluate_static_shape(x.get_size()[dim])
         sizes = [sizes] * ((x_size + sizes - 1) // sizes)
     result = []
     start = 0
@@ -1413,363 +1605,6 @@ def glu(x, dim=-1):
     a = slice_(x, dim, 0, new_len)
     b = slice_(x, dim, new_len, new_len * 2)
     return mul(a, sigmoid(b))
-
-
-def register_onednn_fusion_ops():
-    if torch._C._has_mkldnn:
-        cpu_needs_realized_inputs = [
-            torch.ops.mkldnn._convolution_pointwise,
-            torch.ops.mkldnn._convolution_pointwise_,
-            torch.ops.mkldnn._convolution_transpose_pointwise,
-            torch.ops.mkldnn._linear_pointwise,
-            aten.mkldnn_rnn_layer.default,
-            torch.ops.onednn.qconv2d_pointwise,
-        ]
-
-        @register_lowering(torch.ops.mkldnn._convolution_pointwise)
-        def convolution_unary(
-            x: TensorBox,
-            weight: TensorBox,
-            bias: TensorBox,
-            padding,
-            stride,
-            dilation,
-            groups,
-            attr,
-            scalars,
-            algorithm,
-        ):
-            return TensorBox.create(
-                ir.ConvolutionUnary.create(
-                    x,
-                    weight,
-                    bias,
-                    padding,
-                    stride,
-                    dilation,
-                    groups,
-                    attr,
-                    scalars,
-                    algorithm,
-                )
-            )
-
-        @register_lowering(torch.ops.mkldnn._convolution_pointwise.binary)
-        def convolution_binary(
-            x: TensorBox,
-            other: TensorBox,
-            weight: TensorBox,
-            bias: TensorBox,
-            padding,
-            stride,
-            dilation,
-            groups,
-            binary_attr,
-            binary_alpha,
-            unary_attr,
-            unary_scalars,
-            unary_algorithm,
-        ):
-            return TensorBox.create(
-                ir.ConvolutionBinary.create(
-                    x,
-                    other,
-                    weight,
-                    bias,
-                    padding,
-                    stride,
-                    dilation,
-                    groups,
-                    binary_attr,
-                    binary_alpha,
-                    unary_attr,
-                    unary_scalars,
-                    unary_algorithm,
-                )
-            )
-
-        @register_lowering(torch.ops.mkldnn._convolution_pointwise_.binary)
-        def convolution_binary_inplace(
-            x: TensorBox,
-            other: TensorBox,
-            weight: TensorBox,
-            bias: TensorBox,
-            padding,
-            stride,
-            dilation,
-            groups,
-            binary_attr,
-            binary_alpha,
-            unary_attr,
-            unary_scalars,
-            unary_algorithm,
-        ):
-            return TensorBox.create(
-                ir.ConvolutionBinaryInplace.create(
-                    x,
-                    other,
-                    weight,
-                    bias,
-                    padding,
-                    stride,
-                    dilation,
-                    groups,
-                    binary_attr,
-                    binary_alpha,
-                    unary_attr,
-                    unary_scalars,
-                    unary_algorithm,
-                )
-            )
-
-        @register_lowering(torch.ops.mkldnn._linear_pointwise)
-        def linear_unary(
-            x: TensorBox, w: TensorBox, b: TensorBox, attr, scalars, algorithm
-        ):
-            return TensorBox.create(
-                ir.LinearUnary.create(x, w, b, attr, scalars, algorithm)
-            )
-
-        @register_lowering(torch.ops.mkldnn._linear_pointwise.binary)
-        def linear_binary(x: TensorBox, y: TensorBox, w: TensorBox, b: TensorBox, attr):
-            return TensorBox.create(ir.LinearBinary.create(x, y, w, b, attr))
-
-        @register_lowering(torch.ops.mkldnn._convolution_transpose_pointwise)
-        def convolution_transpose_unary(
-            x: TensorBox,
-            weight: TensorBox,
-            bias: TensorBox,
-            padding,
-            output_padding,
-            stride,
-            dilation,
-            groups,
-            attr,
-            scalars,
-            algorithm,
-        ):
-            return TensorBox.create(
-                ir.ConvolutionTransposeUnary.create(
-                    x,
-                    weight,
-                    bias,
-                    padding,
-                    output_padding,
-                    stride,
-                    dilation,
-                    groups,
-                    attr,
-                    scalars,
-                    algorithm,
-                )
-            )
-
-        @register_lowering(aten.mkldnn_rnn_layer.default)
-        def mkldnn_rnn_layer(
-            x: TensorBox,
-            w0: TensorBox,
-            w1: TensorBox,
-            w2: TensorBox,
-            w3: TensorBox,
-            hx: TensorBox,
-            cx: TensorBox,
-            reverse: bool,
-            batch_sizes: List[int],
-            mode: int,
-            hidden_size: int,
-            num_layers: int,
-            has_biases: bool,
-            bidirectional: bool,
-            batch_first: bool,
-            train: bool,
-        ):
-            return pytree.tree_map(
-                TensorBox.create,
-                ir.MkldnnRnnLayer.create(
-                    x,
-                    w0,
-                    w1,
-                    w2,
-                    w3,
-                    hx,
-                    cx,
-                    reverse,
-                    batch_sizes,
-                    mode,
-                    hidden_size,
-                    num_layers,
-                    has_biases,
-                    bidirectional,
-                    batch_first,
-                    train,
-                ),
-            )
-
-        @register_lowering(torch.ops.onednn.qconv2d_pointwise, type_promotion_kind=None)
-        def qconvolution_unary(
-            x: TensorBox,
-            x_scale,
-            x_zp,
-            packed_weight: TensorBox,
-            w_scale: TensorBox,
-            w_zp: TensorBox,
-            bias: TensorBox,
-            stride,
-            padding,
-            dilation,
-            groups,
-            o_inv_scale,
-            o_zero_point,
-            output_dtype,
-            attr,
-            scalars,
-            algorithm,
-        ):
-            return TensorBox.create(
-                ir.QConvPointWisePT2E.create(
-                    x,
-                    x_scale,
-                    x_zp,
-                    packed_weight,
-                    w_scale,
-                    w_zp,
-                    bias,
-                    stride,
-                    padding,
-                    dilation,
-                    groups,
-                    o_inv_scale,
-                    o_zero_point,
-                    output_dtype,
-                    attr,
-                    scalars,
-                    algorithm,
-                )
-            )
-
-        @register_lowering(
-            torch.ops.onednn.qconv2d_pointwise.binary, type_promotion_kind=None
-        )
-        def qconvolution_binary(
-            x: TensorBox,
-            x_scale,
-            x_zp,
-            accum: TensorBox,
-            accum_scale,
-            accum_zp,
-            packed_weight: TensorBox,
-            w_scale: TensorBox,
-            w_zp: TensorBox,
-            bias: TensorBox,
-            stride,
-            padding,
-            dilation,
-            groups,
-            o_inv_scale,
-            o_zero_point,
-            output_dtype,
-            binary_attr,
-            alpha,
-            unary_attr,
-            unary_scalars,
-            unary_algorithmm,
-        ):
-            if (
-                binary_attr == "sum"
-                and output_dtype in [torch.float32, torch.bfloat16]
-                and accum.get_dtype() in [torch.float32, torch.bfloat16]
-                and accum.get_dtype() != output_dtype
-            ):
-                # For int8-mixed-bf16 quantization and inplace add,
-                # there is case when accum dtype is float32 but output dtype is bfloat16.
-                # Since the accum will be inplaced changed with post op sum,
-                # we will do accum dtype convertion here.
-                accum = to_dtype(accum, output_dtype)
-            return TensorBox.create(
-                ir.QConvPointWiseBinaryPT2E.create(
-                    x,
-                    x_scale,
-                    x_zp,
-                    accum,
-                    accum_scale,
-                    accum_zp,
-                    packed_weight,
-                    w_scale,
-                    w_zp,
-                    bias,
-                    stride,
-                    padding,
-                    dilation,
-                    groups,
-                    o_inv_scale,
-                    o_zero_point,
-                    output_dtype,
-                    binary_attr,
-                    alpha,
-                    unary_attr,
-                    unary_scalars,
-                    unary_algorithmm,
-                )
-            )
-
-        @register_lowering(torch.ops.onednn.qlinear_pointwise, type_promotion_kind=None)
-        def qlinear_unary(
-            x: TensorBox,
-            x_scale,
-            x_zp,
-            packed_weight: TensorBox,
-            w_scale: TensorBox,
-            w_zp: TensorBox,
-            bias: TensorBox,
-            o_inv_scale,
-            o_zero_point,
-            output_dtype,
-            attr,
-            scalars,
-            algorithm,
-        ):
-            return TensorBox.create(
-                ir.QLinearPointwisePT2E.create(
-                    x,
-                    x_scale,
-                    x_zp,
-                    packed_weight,
-                    w_scale,
-                    w_zp,
-                    bias,
-                    o_inv_scale,
-                    o_zero_point,
-                    output_dtype,
-                    attr,
-                    scalars,
-                    algorithm,
-                )
-            )
-
-        if torch._C.has_mkl:
-            cpu_needs_realized_inputs.append(torch.ops.mkl._mkl_linear)
-
-            @register_lowering(torch.ops.mkl._mkl_linear)
-            def mkl_packed_linear(
-                x: TensorBox,
-                packed_w: TensorBox,
-                orig_w: TensorBox,
-                b: TensorBox,
-                batch_size,
-            ):
-                result = TensorBox.create(
-                    ir.MKLPackedLinear.create(x, packed_w, orig_w, batch_size)
-                )
-                if b is not None:
-                    result = add(result, b)
-                return result
-
-        add_needs_realized_inputs(cpu_needs_realized_inputs)
-    else:
-        pass
-
-
-register_onednn_fusion_ops()
 
 
 def fallback_handler(kernel, add_to_fallback_set=True):
@@ -1966,7 +1801,12 @@ def bernoulli_(x, *args):
         "cpu"
     ), "this should be handled in decomps unless config.fallback_random or the device is CPU"
     x.realize()
-    ir.InplaceBernoulliFallback(x, *args)
+    op_overload = (
+        aten.bernoulli_.float
+        if len(args) == 0 or isinstance(args[0], float)
+        else aten.bernoulli_.Tensor
+    )
+    ir.InplaceBernoulliFallback(op_overload, x, *args)
     return x
 
 
@@ -1981,7 +1821,7 @@ def bernoulli_p(x, *args):
 # This shouldn't be called in general
 @register_lowering(aten._foobar)
 def _foobar(_):
-    raise AssertionError()
+    raise AssertionError
 
 
 @functools.lru_cache(1)
@@ -2118,7 +1958,10 @@ def bucketize(
 ):
     assert len(boundaries.get_size()) == 1
 
-    if not (is_triton(input) and is_triton(boundaries)):
+    if not (
+        V.graph.has_feature(input, BackendFeature.BUCKETIZE)
+        and V.graph.has_feature(boundaries, BackendFeature.BUCKETIZE)
+    ):
         return fallback_handler(aten.bucketize.Tensor, add_to_fallback_set=False)(
             input, boundaries, out_int32=out_int32, right=right
         )
@@ -2129,7 +1972,6 @@ def bucketize(
     # we call boundaries.realize().
     boundaries.realize()
     boundaries_size = boundaries.get_size()[0]
-    boundaries_loader = boundaries.make_loader()
     device = input.get_device()
     input_loader = input.make_loader()
 
@@ -2205,8 +2047,9 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             return arg
 
         meta_val = fx_arg.meta["val"]
+        meta_stride = meta_val.stride()
 
-        stride_order = ir.get_stride_order(meta_val.stride())
+        stride_order = ir.get_stride_order(meta_stride)
         if stride_order and stride_order[-1] != 0:
             # contiguous stride order
             stride_order = list(reversed(range(len(arg.get_size()))))
@@ -2234,7 +2077,9 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         try:
             arg.get_stride()
             if is_aligned_realized_tensor(arg):
-                return arg
+                return V.graph.try_match_insignificant_strides(
+                    ir.ExternKernel.realize_input(arg), meta_stride
+                )
         except AttributeError:
             pass
 
@@ -2244,7 +2089,9 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         if isinstance(arg.data, ir.BaseView):
             if not is_aligned(arg):
                 if is_aligned(arg.unwrap_view()):
-                    return arg
+                    return V.graph.try_match_insignificant_strides(
+                        ir.ExternKernel.realize_input(arg), meta_stride
+                    )
 
         return ir.ExternKernel.require_stride_order(arg, stride_order)
 
@@ -2256,7 +2103,6 @@ def sdpa_constraint(fx_node, *args, **kwargs):
 
 
 # WIP
-make_fallback(aten.index_reduce)  # @pearu
 make_fallback(aten._adaptive_avg_pool3d)  # @isuruf
 make_fallback(aten.adaptive_max_pool3d)  # @isuruf
 make_fallback(aten.fractional_max_pool3d)  # @isuruf
@@ -2315,7 +2161,6 @@ make_fallback(aten._fused_moving_avg_obs_fq_helper_functional)
 
 
 # 4) Backwards (try py_impl'ing them) when fwd is written as a decomp
-make_fallback(aten.avg_pool3d_backward)
 make_fallback(aten.max_pool3d_with_indices_backward)
 make_fallback(aten._adaptive_avg_pool2d_backward, require_dense)
 make_fallback(aten._adaptive_avg_pool3d_backward)
@@ -2403,7 +2248,6 @@ make_fallback(aten._to_sparse)
 # Needs dimname support
 make_fallback(aten.zeros.names)
 
-
 # 6) Pattern-matched
 make_fallback(
     aten._scaled_dot_product_efficient_attention.default,
@@ -2440,6 +2284,9 @@ make_fallback(aten._flash_attention_backward.default, sdpa_constraint)
 make_fallback(aten._efficient_attention_forward.default, sdpa_constraint)
 make_fallback(aten._efficient_attention_backward.default, sdpa_constraint)
 make_fallback(aten._scaled_mm.default, constrain_to_fx_strides)
+
+# index_reduce requires fallback when use_scatter_fallback(...) returns True
+make_fallback(aten.index_reduce)
 
 
 # Register with type_promotion_kind None.
@@ -2588,7 +2435,7 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
                     ops.index_expr(
                         ModularIndexing(idx[dim] - start, 1, step), torch.int64
                     ),
-                    ops.constant(0, torch.torch.int64),
+                    ops.constant(0, torch.int64),
                 )
             )
         assert mask
@@ -2629,7 +2476,7 @@ def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
 
     ranges: List[sympy.Expr] = []
 
-    if isinstance(data, sympy.Expr):
+    if isinstance(data, sympy.Basic):
 
         def inner_fn(index):
             return ops.index_expr(data, dtype)
@@ -2693,6 +2540,8 @@ def long_tensor(data):
 
 @register_lowering(aten._local_scalar_dense)
 def _local_scalar_dense(data):
+    from torch.fx.experimental.symbolic_shapes import resolve_unbacked_bindings
+
     # This is interesting!  Most lowerings return tensors, so you can just
     # return the buffer you allocated and it will get used (or not used, if
     # it's dead.)  But _local_scalar_dense (aka item) returns an int,
@@ -2703,18 +2552,44 @@ def _local_scalar_dense(data):
     # solely responsible for generating this .item().  The buffer is
     # not used for anything (notice we discard it); at codegen time,
     # the "buffer" just gets assigned None.
-    sym = V.graph.current_node.meta["val"].node.expr
-    buffer = ir.DynamicScalar(sym, data)
+    unbacked_bindings = resolve_unbacked_bindings(
+        V.graph.sizevars.shape_env, V.graph.current_node.meta["unbacked_bindings"]
+    )
+    assert len(unbacked_bindings) == 1, unbacked_bindings
+    # NB: Have to be very careful here.  V.graph.current_node.meta["val"]
+    # seemingly also contains a symbol which you want to do binding for,
+    # but it actually isn't.  In particular, if we have later performed
+    # a deferred runtime assert saying that u0 == s0, you will actually
+    # see s0 from expr!  This is bad because we need to actually generate
+    # the assert that says u0 == s0, so we need to know where to get u0
+    # from (this call).  In particular, we must use unbacked_bindings, which
+    # is guaranteed to have the original, unreplaced symbol in question.
+    #
+    # NB2: Another thing we have to be very careful about are symbol bindings
+    # that require nontrivial refinement, e.g., when you have a binding site
+    # x: Sym(u0 * 4) = y.item().  Here, the code generation must do a division
+    # in order to appropriately bind u0.  This is communicated via the keypath
+    # in unbacked_bindings, and we need to hold onto it in order to generate
+    # code appropriately for this case.
+    binding_sym, keypath = next(iter(unbacked_bindings.items()))
+    buffer = ir.DynamicScalar(binding_sym, keypath, data)
     buffer.name = V.graph.register_buffer(buffer)
-    return sym
+    # NB: the replaced expr is OK to use directly downstream, we want
+    # simplifications in this case!
+    val = V.graph.current_node.meta["val"]
+    if isinstance(val, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+        return val.node.expr
+    else:
+        return sympy.sympify(val)
 
 
 @register_lowering(aten._assert_scalar)
 def _assert_scalar(data, msg):
-    buffer = ir.AssertScalar(data, msg)
-    # This buffer isn't used by anyone (it returns None), so we must explicitly register it
-    buffer.name = V.graph.register_buffer(buffer)
-    return buffer
+    # NB: These will be handled at codegen time
+    # Not sure if we are guaranteed to be able to serve out truth from the
+    # deferred_runtime_asserts, TODO: try this assert out
+    # assert bool(data.scalar), data
+    return None
 
 
 def _full(fill_value, device, dtype, size):
@@ -2727,7 +2602,7 @@ def _full(fill_value, device, dtype, size):
         def inner_fn(index):
             return ops.constant(value, dtype)
 
-    elif isinstance(value, sympy.Expr):
+    elif isinstance(value, sympy.Basic):
 
         def inner_fn(index):
             return ops.index_expr(value, dtype)
@@ -2919,18 +2794,29 @@ def gather(x, dim, index, sparse_grad=False):
     # sparse_grad doesn't affect forward computation,
     # and backward tracing is taken care of by AOT Autograd
     assert isinstance(x, TensorBox)
+    if index.get_numel() == 0:
+        # Empty index case. Return an empty array with the same shape
+        return new_empty(x, index.get_size())
+
     assert index.get_dtype() == torch.int64
     size = x.get_size()
     offset = len(size) == 0
     dim = _validate_dim(x, dim, offset)
+
+    if offset:
+        x = expand(x, [1])
+        size = [1]
 
     x_loader = x.make_loader()
     index_loader = index.make_loader()
 
     def fn(idx):
         idx = list(idx)
-        if len(idx) != 0:
-            idx[dim] = ops.indirect_indexing(index_loader(idx), size[dim])
+        gather_idx = ops.indirect_indexing(index_loader(idx), size[dim])
+        if len(idx) == 0:
+            idx = [gather_idx]
+        else:
+            idx[dim] = gather_idx
         return x_loader(idx)
 
     return Pointwise.create(
@@ -3066,6 +2952,17 @@ def index_output_size_and_inner_fn(
 
 
 def index_impl(x, indices, check):
+    output_size, inner_fn, _ = index_impl_helper(x, indices, check)
+
+    return Pointwise.create(
+        device=x.get_device(),
+        dtype=x.get_dtype(),
+        inner_fn=inner_fn,
+        ranges=output_size,
+    )
+
+
+def index_impl_helper(x, indices, check):
     assert isinstance(indices, (list, tuple))
     x_loader = x.make_loader()
     indices, tensor_indices = check_and_broadcast_indices(indices, x.get_device())
@@ -3080,27 +2977,25 @@ def index_impl(x, indices, check):
     x_size = x.get_size()
 
     indexed_size = [x_size[i] for i in range(len(indices)) if indices[i] is not None]
-    if 0 in indexed_size and 0 not in tensor_size:
+    if check and 0 in indexed_size and 0 not in tensor_size:
         raise IndexError("index is out of bounds for dimension with size 0")
 
     indexed_size = [x_size[i] for i in range(len(indices))]
-    output_size, inner_fn = index_output_size_and_inner_fn(
+    output_size, index_inner_fn = index_output_size_and_inner_fn(
         x_size,
         indices,
         tensor_indices,
         tensor_size,
         indices_loaders,
         indexed_size,
-        x_loader,
+        None,
         check=check,
     )
 
-    return Pointwise.create(
-        device=x.get_device(),
-        dtype=x.get_dtype(),
-        inner_fn=inner_fn,
-        ranges=output_size,
-    )
+    def inner_fn(idx):
+        return x_loader(index_inner_fn(idx))
+
+    return output_size, inner_fn, index_inner_fn
 
 
 @register_lowering(aten.index, type_promotion_kind=None)
@@ -3170,11 +3065,6 @@ def index_put_(self, indices, values, accumulate=False):
 @register_lowering(inductor_prims._unsafe_index_put_, type_promotion_kind=None)
 def _unsafe_index_put_(self, indices, values, accumulate=False):
     return index_put_impl_(self, indices, values, accumulate, check=False)
-
-
-def needs_fallback_due_to_atomic_add_limitations(dtype):
-    # tl.atomic_add does NOT support the following types
-    return dtype in {torch.int64, torch.bool, torch.bfloat16}
 
 
 def index_put_impl_(self, indices, values, accumulate, check):
@@ -3267,40 +3157,52 @@ def index_put_impl_(self, indices, values, accumulate, check):
     return self
 
 
-@register_lowering(
-    inductor_prims.masked_scatter_with_index, type_promotion_kind=None, broadcast=False
+fallback__unsafe_masked_index = fallback_handler(
+    aten._unsafe_masked_index.default, add_to_fallback_set=False
 )
-def masked_scatter_with_index(self, mask, source_idx, source):
-    self_flat, mask_flat, source_flat = (view(x, (-1,)) for x in (self, mask, source))
 
-    assert self.get_size() == mask.get_size()
-    assert mask.get_dtype() in {torch.bool, torch.uint8}
+fallback__unsafe_masked_index_put_accumulate = fallback_handler(
+    aten._unsafe_masked_index_put_accumulate.default, add_to_fallback_set=False
+)
 
-    self_loader = self_flat.make_loader()
-    mask_loader = mask_flat.make_loader()
-    source_idx_loader = source_idx.make_loader()
-    source_loader = source_flat.make_loader()
-    source_numel = source.get_numel()
+
+@register_lowering(aten._unsafe_masked_index, type_promotion_kind=None)
+def _unsafe_masked_index(self, mask, indices, fill):
+    ranges, _, _unsafe_index_fn = index_impl_helper(self, indices, check=False)
+    mask_loader = mask.make_loader()
+    self_loader = self.make_loader()
 
     def inner_fn(idx):
-        self_val = self_loader(idx)
-        mask_val = ops.to_dtype(mask_loader(idx), torch.bool)
+        if mask.dtype != torch.bool:
+            mask_val = ops.to_dtype(mask_loader(idx), torch.bool)
+        else:
+            mask_val = mask_loader(idx)
+        return ops.masked(mask_val, lambda: self_loader(_unsafe_index_fn(idx)), fill)
 
-        def load_source_val():
-            source_idx_val = source_idx_loader(idx)
-            i = ops.indirect_indexing(source_idx_val, source_numel)
-            return source_loader([i])
-
-        source_val = ops.masked(mask_val, load_source_val, 0)
-        return ops.where(mask_val, source_val, self_val)
-
-    result_flat = Pointwise.create(
+    return Pointwise.create(
         device=self.get_device(),
         dtype=self.get_dtype(),
         inner_fn=inner_fn,
-        ranges=self_flat.get_size(),
+        ranges=ranges,
     )
-    return view(result_flat, self.get_size())
+
+
+@register_lowering(aten._unsafe_masked_index_put_accumulate, type_promotion_kind=None)
+def _unsafe_masked_index_put_accumulate(x, mask, indices, values):
+    masked_value = where(mask, values, 0)
+    shape = x.get_size()
+    clamped_indices = [
+        clamp(indices[i], -shape[i], shape[i] - 1) if indices[i] else None
+        for i in range(len(indices))
+    ]
+    # TODO: use a masked store for this. currently only triton
+    # supports masked stores and cpp backend does not.
+    return _unsafe_index_put(x, clamped_indices, masked_value, accumulate=True)
+
+
+@make_pointwise
+def clamp(a, min, max):
+    return ops.maximum(min, ops.minimum(max, a))
 
 
 @register_lowering(aten.as_strided_scatter, type_promotion_kind=None)
@@ -3317,7 +3219,7 @@ def scatter(x, dim: int, index, src, **kwargs):
 
 
 def scatter_fallback(
-    fn,
+    op_overload: torch._ops.OpOverload,
     self,
     dim: int,
     index,
@@ -3326,28 +3228,17 @@ def scatter_fallback(
     reduce: Optional[str] = None,
     include_self: bool = True,
 ):
-    reduce_ty = "add" if fn == "aten.scatter_" else "sum"
-    if (
-        reduce not in {None, reduce_ty}
-        or (
-            isinstance(src, TensorBox)
-            and src.get_device().type == torch.device("cuda").type
-            and needs_fallback_due_to_atomic_add_limitations(src.get_dtype())
-        )
-        or (
-            fn == "aten.scatter_reduce_"
-            and reduce == "sum"
-            and isinstance(src, TensorBox)
-            and src.get_device() == torch.device("cpu")
-            and config.cpp.fallback_scatter_reduce_sum
-            and (config.cpp.dynamic_threads or parallel_num_threads() != 1)
-        )
-        or (reduce == reduce_ty and self.get_dtype() in {torch.bool, torch.int64})
-        or torch.are_deterministic_algorithms_enabled()
+    src_is_tensor = isinstance(src, TensorBox)
+    if use_scatter_fallback(
+        op_overload,
+        reduce,
+        self.get_dtype(),
+        src.get_dtype() if src_is_tensor else type(src),
+        src.get_device().type if src_is_tensor else "not impl",
+        src_is_tensor,
     ):
         ir.ScatterFallback(
-            V.graph.current_node.target,
-            fn,
+            op_overload,
             self,
             dim,
             index,
@@ -3363,19 +3254,18 @@ def scatter_fallback(
 @register_lowering(aten.scatter_, type_promotion_kind=None)
 def scatter_(self, dim: int, index, src, *, reduce: Optional[str] = None):
     assert reduce in {None, "add", "multiply"}
-
-    fallback_result = scatter_fallback(
-        "aten.scatter_", self, dim, index, src, reduce=reduce
-    )
-
-    if fallback_result:
-        return fallback_result
+    if reduce is None:
+        op_overload = getattr(aten.scatter_, V.graph.current_node.target._overloadname)  # type: ignore[union-attr]
+        fallback_result = scatter_fallback(
+            op_overload, self, dim, index, src, reduce=reduce
+        )
+        if fallback_result is not None:
+            return fallback_result
 
     if reduce == "add":
         reduce = "sum"
     elif reduce == "multiply":
         reduce = "prod"
-
     return scatter_reduce_(self, dim, index, src, reduce)
 
 
@@ -3397,9 +3287,16 @@ def scatter_reduce(x, dim: int, index, src, reduction_type, **kwargs):
 @register_lowering(aten.scatter_reduce_, type_promotion_kind=None)
 def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = True):
     assert reduce in {None, "sum", "prod", "mean", "amax", "amin"}
+    assert (
+        len(aten.scatter_reduce_.overloads()) == 1
+        and "two" in aten.scatter_reduce_.overloads()
+    ), "aten.scatter_reduce_.two is not the unique overload of aten.scatter_reduce_"
+
+    if isinstance(src, Number):
+        src = full_like(self, src)
 
     fallback_result = scatter_fallback(
-        "aten.scatter_reduce_",
+        aten.scatter_reduce_.two,
         self,
         dim,
         index,
@@ -3423,6 +3320,9 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
 
     if isinstance(index, TensorBox) and len(index.get_size()) == 0:
         index = view(index, [1])
+
+    if index.get_numel() == 0:
+        return self
 
     dim = _validate_dim(self, dim)
 
@@ -3838,15 +3738,14 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
     return x_out, ceil_mode
 
 
-fallback_max_pool2d_with_indices = fallback_handler(
-    aten.max_pool2d_with_indices.default,
-    add_to_fallback_set=False,
-)
+def should_fallback_max_pool2d_with_indices(kernel_size, dilation):
+    kernel_size = pad_listlike(kernel_size, 2)
+    window_size = kernel_size[0] * kernel_size[1]
+    return (window_size > 25) or any(d > 1 for d in dilation)
 
 
-@register_lowering(aten.max_pool2d_with_indices, type_promotion_kind=None)
-def max_pool2d_with_indices(
-    x, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False
+def max_pool2d_checks(
+    x, kernel_size, stride, padding, dilation, *, assert_fallback=None
 ):
     if padding == 0:
         padding = [0, 0]
@@ -3854,6 +3753,7 @@ def max_pool2d_with_indices(
         dilation = [1, 1]
     if not stride:
         stride = kernel_size
+
     kernel_size = pad_listlike(kernel_size, 2)
     stride = pad_listlike(stride, 2)
     padding = pad_listlike(padding, 2)
@@ -3866,36 +3766,58 @@ def max_pool2d_with_indices(
     assert len(dilation) == 2
     assert len(x.get_size()) in (3, 4)
 
+    use_fallback = should_fallback_max_pool2d_with_indices(kernel_size, dilation)
+    if assert_fallback is not None:
+        assert use_fallback == assert_fallback
+
+    return kernel_size, stride, padding, dilation, use_fallback
+
+
+@register_lowering(prims._low_memory_max_pool2d_with_offsets, type_promotion_kind=None)
+def _low_memory_max_pool2d_with_offsets(
+    x,
+    kernel_size,
+    stride,
+    padding,
+    dilation,
+    ceil_mode=False,
+):
+    # assert we are not on a fallback path, the inductor decomp should have guaranteed this
+    kernel_size, stride, padding, dilation, _ = max_pool2d_checks(
+        x, kernel_size, stride, padding, dilation, assert_fallback=False
+    )
+
     x.realize_hint()
     *batch, h, w = x.get_size()
 
     h_out, ceil_mode1 = pooling_size(h, 0, kernel_size, stride, padding, ceil_mode)
     w_out, ceil_mode2 = pooling_size(w, 1, kernel_size, stride, padding, ceil_mode)
 
-    if padding[0] or padding[1] or ceil_mode1 or ceil_mode2:
-        x_loader = constant_boundary_condition(x, float("-inf"), dim=2)
-    else:
-        x_loader = x.make_loader()
+    dtype = x.dtype
+    min_value = (
+        False
+        if dtype is torch.bool
+        else (float("-inf") if dtype.is_floating_point else torch.iinfo(dtype).min)
+    )
 
     new_size = list(batch) + [h_out, w_out]
-    window_size = kernel_size[0] * kernel_size[1]
-
-    if window_size > 25 or any(d != 1 for d in dilation):
-        # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
-        return fallback_max_pool2d_with_indices(
-            x, kernel_size, stride, padding, dilation, ceil_mode
-        )
+    if padding[0] or padding[1] or ceil_mode1 or ceil_mode2:
+        x_loader = constant_boundary_condition(x, min_value, dim=2)
+    else:
+        x_loader = x.make_loader()
 
     def fn(idx, return_index):
         *prefix, bh, bw = idx
         maxval = None
         maxindex = None
-        for ih, iw in itertools.product(range(kernel_size[0]), range(kernel_size[1])):
-            ih = bh * stride[0] + ih - padding[0]
-            iw = bw * stride[1] + iw - padding[1]
+        for h_inc, w_inc in itertools.product(
+            range(kernel_size[0]), range(kernel_size[1])
+        ):
+            ih = bh * stride[0] + h_inc - padding[0]
+            iw = bw * stride[1] + w_inc - padding[1]
             val = x_loader([*prefix, ih, iw])
             if return_index:
-                index = ops.index_expr(ih * w + iw, torch.int64)
+                index = ops.index_expr(h_inc * kernel_size[1] + w_inc, torch.int8)
                 if maxindex is None:
                     maxindex = index
                 else:
@@ -3909,20 +3831,58 @@ def max_pool2d_with_indices(
         else:
             return maxval
 
-    r1 = Pointwise.create(
+    out = Pointwise.create(
         device=x.get_device(),
         dtype=x.get_dtype(),
         inner_fn=functools.partial(fn, return_index=False),
         ranges=new_size,
     )
-    r2 = Pointwise.create(
+    offsets = Pointwise.create(
         device=x.get_device(),
-        dtype=torch.int64,
+        dtype=torch.int8,
         inner_fn=functools.partial(fn, return_index=True),
         ranges=new_size,
     )
-    # TODO(jansel): should we force these to be realized?
-    return r1, r2
+    return out, offsets
+
+
+@register_lowering(
+    prims._low_memory_max_pool2d_offsets_to_indices, type_promotion_kind=None
+)
+def _low_memory_max_pool2d_offsets_to_indices(
+    offsets, kernel_width, input_width, stride, padding
+):
+    # TODO: Generalize to other max pooling flavors, and arbitrary dim
+
+    offsets_loader = offsets.make_loader()
+
+    def increments_to_index(h_inc, w_inc, bh, bw):
+        w_in = ops.index_expr(input_width, torch.int64)
+        hbase = ops.index_expr(bh * stride[0] - padding[0], torch.int64)
+        wbase = ops.index_expr(bw * stride[1] - padding[1], torch.int64)
+        ih = hbase + h_inc
+        iw = wbase + w_inc
+        return ih * w_in + iw
+
+    def offsets_to_indices(idx):
+        *prefix, bh, bw = idx
+        offset = offsets_loader([*prefix, bh, bw])
+        kw_const = ops.constant(kernel_width, torch.int32)
+        h_inc = offset // kw_const
+        w_inc = offset - (h_inc * kw_const)
+        return increments_to_index(h_inc, w_inc, bh, bw)
+
+    indices = Pointwise.create(
+        device=offsets.get_device(),
+        dtype=torch.int64,
+        inner_fn=offsets_to_indices,
+        ranges=offsets.get_size(),
+    )
+    return indices
+
+
+# Fallback selected when we do not decompose to the low-memory path.
+make_fallback(aten.max_pool2d_with_indices)
 
 
 fallback_max_pool2d_with_indices_backward = fallback_handler(
@@ -3985,8 +3945,6 @@ def max_pool2d_with_indices_backward(
             grad_output, x, kernel_size, stride, padding, dilation, ceil_mode, indices
         )
 
-    indices.realize_hint()
-
     *batch, height, width = x.get_size()
     *_, pooled_height, pooled_width = grad_output.get_size()
 
@@ -3995,16 +3953,12 @@ def max_pool2d_with_indices_backward(
     new_size = list(x.get_size())
 
     h_window_size = max(
-        [
-            max(h // stride[0] - max(0, (h - kernel_size[0]) // stride[0]), 1)
-            for h in range(kernel_size[0] * 2)
-        ]
+        max(h // stride[0] - max(0, (h - kernel_size[0]) // stride[0]), 1)
+        for h in range(kernel_size[0] * 2)
     )
     w_window_size = max(
-        [
-            max(w // stride[1] - max(0, (w - kernel_size[1]) // stride[1]), 1)
-            for w in range(kernel_size[1] * 2)
-        ]
+        max(w // stride[1] - max(0, (w - kernel_size[1]) // stride[1]), 1)
+        for w in range(kernel_size[1] * 2)
     )
 
     window_size = h_window_size * w_window_size
@@ -4117,11 +4071,32 @@ def pad_adaptive_loader(x, pad_val=0.0):
     return load
 
 
-def _adaptive_pooling_idx_sum(kernel_maxes, start_index_fns, end_index_fns):
-    h_start_index_fn, w_start_index_fn = start_index_fns
-    h_end_index_fn, w_end_index_fn = end_index_fns
+def compute_indices_adaptive_pooling(start_index, end_index, h_in, w_in, h_out, w_out):
+    h_start_index = functools.partial(start_index, out_dim=h_out, inp_dim=h_in)
+    h_end_index = functools.partial(end_index, out_dim=h_out, inp_dim=h_in)
 
-    def fn_sum(idx, loader):
+    w_start_index = functools.partial(start_index, out_dim=w_out, inp_dim=w_in)
+    w_end_index = functools.partial(end_index, out_dim=w_out, inp_dim=w_in)
+
+    return h_start_index, h_end_index, w_start_index, w_end_index
+
+
+def _adaptive_pooling_fn(
+    start_index, end_index, kernel_maxes, in_sizes, out_sizes, pooling_fn
+):
+    h_in, w_in = in_sizes
+    h_out, w_out = out_sizes
+
+    (
+        h_start_index_fn,
+        h_end_index_fn,
+        w_start_index_fn,
+        w_end_index_fn,
+    ) = compute_indices_adaptive_pooling(
+        start_index, end_index, h_in, w_in, h_out, w_out
+    )
+
+    def fn(idx, loader):
         *prefix, bh, bw = idx
 
         h_start_index = h_start_index_fn(bh)
@@ -4130,7 +4105,7 @@ def _adaptive_pooling_idx_sum(kernel_maxes, start_index_fns, end_index_fns):
         w_start_index = w_start_index_fn(bw)
         w_end_index = w_end_index_fn(bw)
 
-        total = None
+        result = None
         for ih, iw in itertools.product(range(kernel_maxes[0]), range(kernel_maxes[1])):
             val = loader(
                 prefix,
@@ -4138,13 +4113,66 @@ def _adaptive_pooling_idx_sum(kernel_maxes, start_index_fns, end_index_fns):
                 [h_start_index, w_start_index],
                 [h_end_index, w_end_index],
             )
-            if total is None:
-                total = val
+            if result is None:
+                result = val
             else:
-                total = ops.add(val, total)
-        return total
+                result = pooling_fn(val, result)
+        return result
 
-    return fn_sum
+    return fn
+
+
+def _adaptive_pooling_fn_with_idx(
+    start_index, end_index, kernel_maxes, in_sizes, out_sizes, pooling_fn
+):
+    h_in, w_in = in_sizes
+    h_out, w_out = out_sizes
+
+    (
+        h_start_index_fn,
+        h_end_index_fn,
+        w_start_index_fn,
+        w_end_index_fn,
+    ) = compute_indices_adaptive_pooling(
+        start_index, end_index, h_in, w_in, h_out, w_out
+    )
+
+    def fn(idx, loader):
+        *prefix, bh, bw = idx
+
+        h_start_index = h_start_index_fn(bh)
+        h_end_index = h_end_index_fn(bh)
+
+        w_start_index = w_start_index_fn(bw)
+        w_end_index = w_end_index_fn(bw)
+
+        maxval = None
+        maxindex = None
+        for ih, iw in itertools.product(range(kernel_maxes[0]), range(kernel_maxes[1])):
+            val = loader(
+                prefix,
+                [ih, iw],
+                [h_start_index, w_start_index],
+                [h_end_index, w_end_index],
+            )
+
+            index = ops.index_expr(
+                (h_start_index + ih) * w_in + w_start_index + iw, torch.int64
+            )
+
+            if maxindex is None:
+                maxindex = index
+            else:
+                maxindex = ops.where(ops.gt(val, maxval), index, maxindex)
+
+            if maxval is None:
+                maxval = val
+            else:
+                maxval = pooling_fn(val, maxval)
+
+        return maxindex
+
+    return fn
 
 
 fallback_adaptive_avg_pool2d = fallback_handler(
@@ -4182,27 +4210,24 @@ def _adaptive_avg_pool2d(x, output_size):
     new_size = list(batch) + [h_out, w_out]
     dtype = x.get_dtype()
 
+    window_size = h_kernel_max * w_kernel_max
+    if window_size > 25:
+        # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
+        return fallback_adaptive_avg_pool2d(x, output_size)
+
     def start_index(index, out_dim, inp_dim):
         return FloorDiv((index * inp_dim), out_dim)
 
     def end_index(index, out_dim, inp_dim):
         return FloorDiv((index + 1) * inp_dim + out_dim - 1, out_dim)
 
-    h_start_index = functools.partial(start_index, out_dim=h_out, inp_dim=h_in)
-    h_end_index = functools.partial(end_index, out_dim=h_out, inp_dim=h_in)
-
-    w_start_index = functools.partial(start_index, out_dim=w_out, inp_dim=w_in)
-    w_end_index = functools.partial(end_index, out_dim=w_out, inp_dim=w_in)
-
-    window_size = h_kernel_max * w_kernel_max
-    if window_size > 25:
-        # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
-        return fallback_adaptive_avg_pool2d(x, output_size)
-
-    fn_sum = _adaptive_pooling_idx_sum(
-        [h_kernel_max, w_kernel_max],
-        [h_start_index, w_start_index],
-        [h_end_index, w_end_index],
+    fn_sum = _adaptive_pooling_fn(
+        start_index=start_index,
+        end_index=end_index,
+        kernel_maxes=[h_kernel_max, w_kernel_max],
+        in_sizes=[h_in, w_in],
+        out_sizes=[h_out, w_out],
+        pooling_fn=ops.add,
     )
 
     ones_loader = pad_adaptive_loader(ones_like(x))
@@ -4220,60 +4245,6 @@ def _adaptive_avg_pool2d(x, output_size):
     )
     # TODO: should we force these to be realized?
     return rv
-
-
-def _adaptive_pooling_idx_max(kernel_maxes, in_sizes, out_sizes, return_index, loader):
-    # NOTE: There is some duplication between this and addaptive_avg_pool2d and max_pool2d
-    # Look into refactoring/deduplication after #116418 is merged.
-    h_in, w_in = in_sizes
-    h_out, w_out = out_sizes
-
-    def start_index(index, out_dim, inp_dim):
-        return FloorDiv((index * inp_dim), out_dim)
-
-    def end_index(index, out_dim, inp_dim):
-        return FloorDiv((index + 1) * inp_dim + out_dim - 1, out_dim)
-
-    h_start_index_fn = functools.partial(start_index, out_dim=h_out, inp_dim=h_in)
-    h_end_index_fn = functools.partial(end_index, out_dim=h_out, inp_dim=h_in)
-    w_start_index_fn = functools.partial(start_index, out_dim=w_out, inp_dim=w_in)
-    w_end_index_fn = functools.partial(end_index, out_dim=w_out, inp_dim=w_in)
-
-    def fn_max(idx):
-        *prefix, bh, bw = idx
-
-        h_start_index = h_start_index_fn(bh)
-        h_end_index = h_end_index_fn(bh)
-
-        w_start_index = w_start_index_fn(bw)
-        w_end_index = w_end_index_fn(bw)
-        maxval = None
-        maxindex = None
-        for ih, iw in itertools.product(range(kernel_maxes[0]), range(kernel_maxes[1])):
-            val = loader(
-                prefix,
-                [ih, iw],
-                [h_start_index, w_start_index],
-                [h_end_index, w_end_index],
-            )
-            index = ops.index_expr(
-                (h_start_index + ih) * w_in + w_start_index + iw, torch.int64
-            )
-            if return_index:
-                if maxindex is None:
-                    maxindex = index
-                else:
-                    maxindex = ops.where(ops.gt(val, maxval), index, maxindex)
-            if maxval is None:
-                maxval = val
-            else:
-                maxval = ops.maximum(val, maxval)
-        if return_index:
-            return maxindex
-        else:
-            return maxval
-
-    return fn_max
 
 
 fallback_adaptive_max_pool2d = fallback_handler(
@@ -4301,7 +4272,21 @@ def adaptive_max_pool2d(x, output_size):
         )
     if h_in % h_out == 0 and w_in % w_out == 0:
         kernel_size = [h_in // h_out, w_in // w_out]
-        return max_pool2d_with_indices(x, kernel_size)
+        if should_fallback_max_pool2d_with_indices(kernel_size, dilation=[1, 1]):
+            return max_pool2d_with_indices(x, kernel_size)  # type: ignore[name-defined]   # noqa: F821
+        else:
+            v, offsets = _low_memory_max_pool2d_with_offsets(
+                x,
+                kernel_size,
+                stride=kernel_size,
+                padding=[0, 0],
+                dilation=[1, 1],
+                ceil_mode=False,
+            )
+            indices = _low_memory_max_pool2d_offsets_to_indices(
+                offsets, kernel_size[1], w_in, kernel_size, padding=[0, 0]
+            )
+            return v, indices
 
     h_kernel_max = ceildiv((h_in + h_out - 1), h_out)
     w_kernel_max = ceildiv((w_in + w_out - 1), w_out)
@@ -4314,32 +4299,46 @@ def adaptive_max_pool2d(x, output_size):
         # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
         return fallback_adaptive_max_pool2d(x, output_size)
 
-    inner_func_max_val = _adaptive_pooling_idx_max(
+    def start_index(index, out_dim, inp_dim):
+        return FloorDiv((index * inp_dim), out_dim)
+
+    def end_index(index, out_dim, inp_dim):
+        return FloorDiv((index + 1) * inp_dim + out_dim - 1, out_dim)
+
+    inner_func_max_val = _adaptive_pooling_fn(
+        start_index=start_index,
+        end_index=end_index,
         kernel_maxes=[h_kernel_max, w_kernel_max],
         in_sizes=[h_in, w_in],
         out_sizes=[h_out, w_out],
-        return_index=False,
-        loader=pad_adaptive_loader(x, float("-inf")),
+        pooling_fn=ops.maximum,
     )
 
-    inner_func_max_idx = _adaptive_pooling_idx_max(
+    inner_func_max_idx = _adaptive_pooling_fn_with_idx(
+        start_index=start_index,
+        end_index=end_index,
         kernel_maxes=[h_kernel_max, w_kernel_max],
         in_sizes=[h_in, w_in],
         out_sizes=[h_out, w_out],
-        return_index=True,
-        loader=pad_adaptive_loader(x, float("-inf")),
+        pooling_fn=ops.maximum,
     )
+
+    def inner_fn_max_val(idx):
+        return inner_func_max_val(idx, pad_adaptive_loader(x, float("-inf")))
+
+    def inner_fn_max_idx(idx):
+        return inner_func_max_idx(idx, pad_adaptive_loader(x, float("-inf")))
 
     rv = Pointwise.create(
         device=x.get_device(),
         dtype=dtype,
-        inner_fn=inner_func_max_val,
+        inner_fn=inner_fn_max_val,
         ranges=new_size,
     )
     ri = Pointwise.create(
         device=x.get_device(),
         dtype=torch.int64,
-        inner_fn=inner_func_max_idx,
+        inner_fn=inner_fn_max_idx,
         ranges=new_size,
     )
     return rv, ri
@@ -4354,7 +4353,7 @@ def _fractional_pooling_offsets(samples, in_sz, out_sz, kernel_sz, dim):
     out_sz = out_sz[dim]
     in_sz = in_sz[dim]
     kernel_sz = kernel_sz[dim]
-    alpha = (in_sz - kernel_sz) / (out_sz - 1)
+    alpha = IntTrueDiv(in_sz - kernel_sz, out_sz - 1)
     samples_loader = samples.make_loader()
 
     def load(prefix, i):
@@ -4464,21 +4463,18 @@ def upsample_nearest2d_backward(
     w_kernel_max = ceildiv(inp_w, out_w)
 
     def start_index(index, out_dim, inp_dim):
-        return CeilDiv(index * inp_dim, out_dim)
+        return CeilDiv(index * inp_dim, sympy.sympify(out_dim))
 
     def end_index(index, out_dim, inp_dim):
         return start_index((index + 1), out_dim, inp_dim)
 
-    h_start_index = functools.partial(start_index, out_dim=out_h, inp_dim=inp_h)
-    h_end_index = functools.partial(end_index, out_dim=out_h, inp_dim=inp_h)
-
-    w_start_index = functools.partial(start_index, out_dim=out_w, inp_dim=inp_w)
-    w_end_index = functools.partial(end_index, out_dim=out_w, inp_dim=inp_w)
-
-    fn_sum = _adaptive_pooling_idx_sum(
-        [h_kernel_max, w_kernel_max],
-        [h_start_index, w_start_index],
-        [h_end_index, w_end_index],
+    fn_sum = _adaptive_pooling_fn(
+        start_index=start_index,
+        end_index=end_index,
+        kernel_maxes=[h_kernel_max, w_kernel_max],
+        in_sizes=[inp_h, inp_w],
+        out_sizes=[out_h, out_w],
+        pooling_fn=ops.add,
     )
 
     def fn(idx):
@@ -4649,7 +4645,7 @@ def _avg_poolnd(
                 factor = ops.index_expr(hend - hstart, torch.int32)
                 divide_factors.append(factor)
             divide_factor = functools.reduce(ops.mul, divide_factors)
-            return ops.div(fn_sum(idx, x_loader), divide_factor)
+            return ops.truediv(fn_sum(idx, x_loader), divide_factor)
 
     rv = Pointwise.create(
         device=x.get_device(),
@@ -4706,16 +4702,12 @@ def avg_pool2d_backward(
     dtype = x.get_dtype()
 
     h_window_size = max(
-        [
-            max(h // stride[0] - max(0, (h - kernel_size[0]) // stride[0]), 1)
-            for h in range(kernel_size[0] * 2)
-        ]
+        max(h // stride[0] - max(0, (h - kernel_size[0]) // stride[0]), 1)
+        for h in range(kernel_size[0] * 2)
     )
     w_window_size = max(
-        [
-            max(w // stride[1] - max(0, (w - kernel_size[1]) // stride[1]), 1)
-            for w in range(kernel_size[1] * 2)
-        ]
+        max(w // stride[1] - max(0, (w - kernel_size[1]) // stride[1]), 1)
+        for w in range(kernel_size[1] * 2)
     )
 
     window_size = h_window_size * w_window_size
@@ -4822,6 +4814,207 @@ def avg_pool2d_backward(
                     gradient = ops.where(mask, part, ops.constant(0.0, torch.float32))
                 else:
                     gradient = ops.where(mask, ops.add(gradient, part), gradient)
+        assert gradient is not None
+        return gradient
+
+    rv = Pointwise.create(
+        device=grad_output.get_device(),
+        dtype=dtype,
+        inner_fn=fn,
+        ranges=new_size,
+    )
+    return rv
+
+
+fallback_avg_pool3d_backward = fallback_handler(
+    aten.avg_pool3d_backward.default, add_to_fallback_set=False
+)
+
+
+@register_lowering(aten.avg_pool3d_backward, type_promotion_kind=None)
+def avg_pool3d_backward(
+    grad_output,
+    x,
+    kernel_size,
+    stride,
+    padding,
+    ceil_mode,
+    count_include_pad,
+    divisor_override=None,
+):
+    assert divisor_override is None or divisor_override != 0, "divisor must be not zero"
+    if not stride:
+        stride = kernel_size
+    if not padding:
+        padding = [0, 0, 0]
+
+    assert isinstance(grad_output, TensorBox)
+    assert isinstance(x, TensorBox)
+    assert len(kernel_size) == 3
+    assert len(stride) == 3
+    assert len(padding) == 3
+    assert len(x.get_size()) in (4, 5)
+
+    grad_output.realize_hint()
+
+    *batch, depth, height, width = x.get_size()
+
+    d_out, ceil_mode_d = pooling_size(depth, 0, kernel_size, stride, padding, ceil_mode)
+    h_out, ceil_mode_h = pooling_size(
+        height, 1, kernel_size, stride, padding, ceil_mode
+    )
+    w_out, ceil_mode_w = pooling_size(width, 2, kernel_size, stride, padding, ceil_mode)
+
+    grad_loader = grad_output.make_loader()
+    had_padding = any(padding) or ceil_mode_d or ceil_mode_h or ceil_mode_w
+
+    *_, pooled_depth, pooled_height, pooled_width = grad_output.get_size()
+    new_size = list(x.get_size())
+    dtype = x.get_dtype()
+
+    d_window_size, h_window_size, w_window_size = (
+        max(
+            max(d // stride[i] - max(0, (d - kernel_size[i]) // stride[i]), 1)
+            for d in range(kernel_size[i] * 2)
+        )
+        for i in range(3)
+    )
+
+    window_size = d_window_size * h_window_size * w_window_size
+    if window_size > 125:
+        # Kernel size too big. Results in hard-to-optimize Triton code.
+        return fallback_avg_pool3d_backward(
+            grad_output,
+            x,
+            kernel_size,
+            stride,
+            padding,
+            ceil_mode,
+            count_include_pad,
+            divisor_override,
+        )
+
+    def compute_pool_size_without_padding(pd, ph, pw):
+        stride_d, stride_h, stride_w = (ops.constant(s, torch.int32) for s in stride)
+        pad_d, pad_h, pad_w = (ops.constant(p, torch.int32) for p in padding)
+        kernel_d, kernel_h, kernel_w = (
+            ops.constant(k, torch.int32) for k in kernel_size
+        )
+
+        dstart, hstart, wstart = (
+            ops.sub(ops.mul(p, s), pad)
+            for p, s, pad in zip(
+                [pd, ph, pw], [stride_d, stride_h, stride_w], [pad_d, pad_h, pad_w]
+            )
+        )
+        dend, hend, wend = (
+            ops.minimum(
+                ops.add(start, k), ops.add(ops.index_expr(dim, torch.int32), pad)
+            )
+            for start, k, dim, pad in zip(
+                [dstart, hstart, wstart],
+                [kernel_d, kernel_h, kernel_w],
+                [depth, height, width],
+                [pad_d, pad_h, pad_w],
+            )
+        )
+        dstart, hstart, wstart = (
+            ops.maximum(start, ops.constant(0, torch.int32))
+            for start in [dstart, hstart, wstart]
+        )
+        dend, hend, wend = (
+            ops.minimum(end, ops.index_expr(dim, torch.int32))
+            for end, dim in zip([dend, hend, wend], [depth, height, width])
+        )
+        divide_factor = ops.mul(
+            ops.mul(ops.sub(dend, dstart), ops.sub(hend, hstart)), ops.sub(wend, wstart)
+        )
+        return divide_factor
+
+    def fn(idx):
+        *prefix, d, h, w = idx
+        d, h, w = (v + pad for v, pad in zip([d, h, w], padding))
+
+        pdstart, phstart, pwstart = (
+            ops.index_expr(FloorDiv(v - k + s, s), torch.int32)
+            for v, k, s in zip([d, h, w], kernel_size, stride)
+        )
+
+        pdend, phend, pwend = (
+            ops.index_expr(FloorDiv(v, s) + 1, torch.int32)
+            for v, s in zip([d, h, w], stride)
+        )
+
+        pdstart, phstart, pwstart = (
+            ops.maximum(pstart, ops.constant(0, torch.int32))
+            for pstart in [pdstart, phstart, pwstart]
+        )
+        pdend, phend, pwend = (
+            ops.minimum(pend, ops.index_expr(pooled_dim, torch.int32))
+            for pend, pooled_dim in zip(
+                [pdend, phend, pwend], [pooled_depth, pooled_height, pooled_width]
+            )
+        )
+
+        gradient = None
+        # Iterate over the 3D region to accumulate gradients
+        for pd_ in range(d_window_size):
+            for ph_ in range(h_window_size):
+                for pw_ in range(w_window_size):
+                    pd, ph, pw = (
+                        ops.add(pstart, ops.constant(p_, torch.int32))
+                        for pstart, p_ in zip(
+                            [pdstart, phstart, pwstart], [pd_, ph_, pw_]
+                        )
+                    )
+
+                    if divisor_override is not None:
+                        scale = divisor_override
+                    elif count_include_pad or not had_padding:
+                        scale = kernel_size[0] * kernel_size[1] * kernel_size[2]
+                    else:
+                        scale = compute_pool_size_without_padding(pd, ph, pw)
+
+                    part = ops.truediv(
+                        grad_loader(
+                            [
+                                *prefix,
+                                ops.indirect_indexing(
+                                    ops.minimum(
+                                        pd, ops.sub(pdend, ops.constant(1, torch.int32))
+                                    ),
+                                    pooled_depth,
+                                    check=False,
+                                ),
+                                ops.indirect_indexing(
+                                    ops.minimum(
+                                        ph, ops.sub(phend, ops.constant(1, torch.int32))
+                                    ),
+                                    pooled_height,
+                                    check=False,
+                                ),
+                                ops.indirect_indexing(
+                                    ops.minimum(
+                                        pw, ops.sub(pwend, ops.constant(1, torch.int32))
+                                    ),
+                                    pooled_width,
+                                    check=False,
+                                ),
+                            ]
+                        ),
+                        scale,
+                    )
+
+                    mask = ops.and_(
+                        ops.and_(ops.lt(pd, pdend), ops.lt(ph, phend)),
+                        ops.lt(pw, pwend),
+                    )
+                    if gradient is None:
+                        gradient = ops.where(
+                            mask, part, ops.constant(0.0, torch.float32)
+                        )
+                    else:
+                        gradient = ops.where(mask, ops.add(gradient, part), gradient)
         assert gradient is not None
         return gradient
 
@@ -5417,7 +5610,7 @@ def logcumsumexp(x, dim):
 def cummax(x, axis=None):
     if len(x.get_size()) == 0:
         assert axis in [0, -1]
-        return clone(x), torch.empty_like(x, dtype=torch.int64)
+        return clone(x), empty_like(x, dtype=torch.int64)
 
     dtype = x.get_dtype()
     combine_fn = ir.get_reduction_combine_fn(
@@ -5447,7 +5640,7 @@ def cummax(x, axis=None):
 def cummin(x, axis=None):
     if len(x.get_size()) == 0:
         assert axis in [0, -1]
-        return clone(x), torch.empty_like(x, dtype=torch.int64)
+        return clone(x), empty_like(x, dtype=torch.int64)
 
     dtype = x.get_dtype()
     combine_fn = ir.get_reduction_combine_fn(
@@ -5525,6 +5718,49 @@ reduce_argmin = register_lowering(aten.argmin)(
 add = register_pointwise(
     aten.add, allow_alpha=True, override_fn_when_input_bool="logical_or"
 )
+
+sort_fallback = fallback_handler(aten.sort.stable, add_to_fallback_set=False)
+
+
+@register_lowering(aten.sort.stable, type_promotion_kind=None)
+def sort_stable(x, *, stable=None, dim=-1, descending=False):
+    if stable is None:
+        stable = False
+
+    shape = x.get_size()
+    device = x.get_device()
+    dim = canonicalize_dim(len(shape), dim)
+    if len(shape) == 0:
+        return clone(x), _full(0, device, torch.int64, shape)
+
+    dim_size = shape[dim] if len(shape) else 1
+    indices = iota(
+        dim_size, start=0, step=1, dtype=torch.int64, device=device, requires_grad=False
+    )
+    view_shape = [1] * len(shape)
+    if len(shape):
+        view_shape[dim] = dim_size
+    indices = view(indices, view_shape)
+    indices = expand(indices, shape)
+
+    values, indices = ir.Sort.create(
+        device=device,
+        dtypes=(x.dtype, indices.dtype),
+        inner_fns=(x.make_loader(), indices.make_loader()),
+        size=shape,
+        axis=dim,
+        stable=stable,
+        descending=descending,
+    )
+    if values is None:
+        return sort_fallback(x, stable=stable, dim=dim, descending=descending)
+
+    return values, indices
+
+
+@register_lowering(aten.sort.default, type_promotion_kind=None)
+def sort(x, dim=-1, descending=False):
+    return sort_stable(x, stable=False, dim=dim, descending=descending)
 
 
 def register_pointwise_numeric(op, name=None, triton_fallback=None):
@@ -5635,7 +5871,7 @@ register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.log2)
 register_pointwise_numeric(aten.nextafter)
 
-from .codegen.common import pointwise_overrides_data
+from .codegen.common import BackendFeature, pointwise_overrides_data
 
 
 def _get_pointwise_overrides(ns, name):
@@ -5791,11 +6027,7 @@ register_inplace(aten.__ixor__, aten.__xor__)
 
 @register_lowering(aten.sym_constrain_range)
 def sym_constrain_range(a, min=None, max=None):
-    tracing_context = torch._guards.TracingContext.try_get()
-    assert (
-        tracing_context is None or a in tracing_context.fake_mode.shape_env.var_to_range
-    )
-    return a
+    return None
 
 
 @register_lowering(aten.sym_size.int)
@@ -5850,10 +6082,11 @@ def resize_storage_bytes_(variable, new_size):
     return variable
 
 
-@register_lowering(_bind_nn_parameter)
-def create_nn_parameter(self, placeholder):
+@register_lowering(torch.ops.aten.set_.source_Tensor)
+def set__source_tensor(self, source_tensor):
     self.realize()
-    return TensorBox.create(ir.BindNNParameter(self, placeholder))
+    source_tensor.realize()
+    return TensorBox.create(ir.SetSourceTensorKernel(self, source_tensor))
 
 
 @register_lowering(torch.ops.aten.resize)
@@ -5996,62 +6229,58 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
     return list(map(TensorBox.create, result))
 
 
+@register_lowering(associative_scan_op, type_promotion_kind=None)
+def associative_scan(combine_fn: ir.Subgraph, input, dim: int):
+    from .subgraph_lowering import InputDescriptor, lower_pointwise_subgraph
+
+    subgraph_inputs = [
+        InputDescriptor(dtype=x.get_dtype(), device=x.get_device())
+        for x in itertools.chain(input, input)
+    ]
+    lowered_combine_fn = lower_pointwise_subgraph(combine_fn, subgraph_inputs)
+
+    def wrapped_combine_fn(lhs, rhs):
+        return lowered_combine_fn(
+            *pytree.tree_leaves(lhs),
+            *pytree.tree_leaves(rhs),
+        )
+
+    kwargs = _make_scan_inner(input[0], axis=dim, dtype=None)
+    kwargs["dtypes"] = tuple(x.get_dtype() for x in input)
+    kwargs["inner_fns"] = tuple(x.make_loader() for x in input)
+    result = ir.Scan.create(**kwargs, combine_fn=wrapped_combine_fn)
+    if result[0] is None:
+        raise RuntimeError("Unable to generate code for associative_scan op")
+    return result
+
+
+@register_lowering(torch.ops.prims._sink_tokens.default)
+def _sink_tokens(tokens):
+    return None
+
+
+@register_lowering(torch.ops.higher_order.with_effects)
+def with_effects(token, op, *args, **kwargs):
+    result = ir.EffectfulKernel.create(op, *args, **kwargs)
+
+    from torch._higher_order_ops.effects import get_effect_key
+
+    effect_type = get_effect_key(op, args, kwargs)
+    assert effect_type is not None
+    effectful_kernel = V.graph.effectful_ops[effect_type]
+
+    if result is None:
+        return (effectful_kernel,)
+
+    result = pytree.tree_map_only(ir.MultiOutput, TensorBox.create, result)
+    if not isinstance(result, (list, tuple)):
+        return (effectful_kernel, result)
+    else:
+        return (effectful_kernel, *result)
+
+
 try:
     import torch.distributed._functional_collectives
-
-    c10d_functional = torch.ops.c10d_functional
-
-    @register_lowering(c10d_functional.wait_tensor)
-    def wait(input):
-        return TensorBox.create(ir.Wait.create(input))
-
-    @register_lowering(c10d_functional.broadcast)
-    def broadcast(input, src, tag, ranks, group_size):
-        return ir.Broadcast.create(input, src, tag, ranks, group_size)
-
-    @register_lowering(c10d_functional.all_reduce)
-    def allreduce(input, reduce_op, tag, ranks, group_size):
-        return ir.AllReduce.create(input, reduce_op, tag, ranks, group_size)
-
-    @register_lowering(c10d_functional.all_gather_into_tensor)
-    def all_gather_into_tensor(shard, tag, ranks, group_size):
-        return TensorBox.create(
-            ir.AllGatherIntoTensor.create(
-                ir.ExternKernel.require_contiguous(shard), tag, ranks, group_size
-            )
-        )
-
-    @register_lowering(c10d_functional.reduce_scatter_tensor)
-    def reduce_scatter_tensor(input, reduce_op, tag, ranks, group_size):
-        return TensorBox.create(
-            ir.ReduceScatterTensor.create(input, reduce_op, tag, ranks, group_size)
-        )
-
-    @register_lowering(c10d_functional.all_reduce_coalesced)
-    def all_reduce_coalesced(input, reduce_op, tag, ranks, group_size):
-        return ir.AllReduceCoalesced.create(input, reduce_op, tag, ranks, group_size)
-
-    @register_lowering(c10d_functional.all_gather_into_tensor_coalesced)
-    def all_gather_into_tensor_coalesced(self, tag, ranks, group_size):
-        result = ir.AllGatherIntoTensorCoalesced.create(self, tag, ranks, group_size)
-        return list(map(TensorBox.create, result))
-
-    @register_lowering(c10d_functional.reduce_scatter_tensor_coalesced)
-    def reduce_scatter_tensor_coalesced(self, reduceOp, tag, ranks, group_size):
-        result = ir.ReduceScatterTensorCoalesced.create(
-            self, reduceOp, tag, ranks, group_size
-        )
-        return list(map(TensorBox.create, result))
-
-    @register_lowering(c10d_functional.all_to_all_single)
-    def all_to_all_single(
-        self, output_split_sizes, input_split_sizes, tag, ranks, group_size
-    ):
-        return TensorBox.create(
-            ir.AllToAllSingle.create(
-                self, output_split_sizes, input_split_sizes, tag, ranks, group_size
-            )
-        )
 
     _c10d_functional = torch.ops._c10d_functional
 
@@ -6171,7 +6400,19 @@ try:
         ir._WaitKernel.create_wait(_c10d_functional.wait_tensor.default, inp)
         return inp
 
-except ImportError:
+    @register_lowering(torch.ops._dtensor.shard_dim_alltoall)
+    def _shard_dim_alltoall(inp, gather_dim, shard_dim, group_name):
+        return ir.TensorBox.create(
+            ir._CollectiveKernel.create_out_of_place(
+                torch.ops._dtensor.shard_dim_alltoall.default,
+                inp,
+                gather_dim,
+                shard_dim,
+                group_name,
+            )
+        )
+
+except (AttributeError, ImportError):
     log.info(
         "Inductor support for distributed collectives depends on building torch.distributed"
     )
@@ -6185,3 +6426,11 @@ from . import quantized_lowerings
 
 quantized_lowerings.register_quantized_ops()
 quantized_lowerings.register_woq_mm_ops()
+
+from . import mkldnn_lowerings
+
+mkldnn_lowerings.register_onednn_fusion_ops()
+
+from . import jagged_lowerings
+
+jagged_lowerings.register_jagged_ops()

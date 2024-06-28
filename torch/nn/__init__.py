@@ -1,14 +1,20 @@
-from .modules import *  # noqa: F403
-from .parameter import (
+# mypy: allow-untyped-defs
+from torch.nn.parameter import (
     Parameter as Parameter,
-    UninitializedParameter as UninitializedParameter,
     UninitializedBuffer as UninitializedBuffer,
+    UninitializedParameter as UninitializedParameter,
 )
-from .parallel import DataParallel as DataParallel
-from . import init
-from . import functional
-from . import utils
-from . import attention
+from torch.nn.modules import *  # noqa: F403
+from torch.nn import (
+    attention as attention,
+    functional as functional,
+    init as init,
+    modules as modules,
+    parallel as parallel,
+    parameter as parameter,
+    utils as utils,
+)
+from torch.nn.parallel import DataParallel as DataParallel
 
 
 def factory_kwargs(kwargs):
@@ -47,7 +53,9 @@ def factory_kwargs(kwargs):
     for k in simple_keys:
         if k in kwargs:
             if k in r:
-                raise TypeError(f"{k} specified twice, in **kwargs and in factory_kwargs")
+                raise TypeError(
+                    f"{k} specified twice, in **kwargs and in factory_kwargs"
+                )
             r[k] = kwargs[k]
 
     return r

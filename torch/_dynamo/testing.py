@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import contextlib
 import dis
 import functools
@@ -105,7 +106,7 @@ def reduce_to_scalar_loss(out):
         # Mean does not work on integer tensors
         return out.sum() / out.numel()
     elif isinstance(out, (list, tuple)):
-        return sum([reduce_to_scalar_loss(x) for x in out]) / len(out)
+        return sum(reduce_to_scalar_loss(x) for x in out) / len(out)
     elif type(out).__name__ in (
         "MaskedLMOutput",
         "Seq2SeqLMOutput",
@@ -115,7 +116,7 @@ def reduce_to_scalar_loss(out):
     elif type(out).__name__ == "SquashedNormal":
         return out.mean.sum()
     elif isinstance(out, dict):
-        return sum([reduce_to_scalar_loss(value) for value in out.values()]) / len(
+        return sum(reduce_to_scalar_loss(value) for value in out.values()) / len(
             out.keys()
         )
     raise NotImplementedError("Don't know how to reduce", type(out))
@@ -208,7 +209,7 @@ class EagerAndRecordGraphs:
 
     def __call__(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
         self.graphs.append(gm)
-        return gm
+        return gm.forward
 
 
 def strip_comment(code) -> str:
@@ -284,7 +285,16 @@ def rand_strided(
         + extra_size
     )
     if dtype.is_floating_point:
-        buffer = torch.randn(needed_size, dtype=dtype, device=device)
+        if dtype.itemsize == 1:
+            """
+            normal distribution kernel is not implemented for fp8..
+            Workaround that by creating a fp16 tensor and then cast.
+            """
+            buffer = torch.randn(needed_size, dtype=torch.float16, device=device).to(
+                dtype=dtype
+            )
+        else:
+            buffer = torch.randn(needed_size, dtype=dtype, device=device)
     else:
         buffer = torch.zeros(size=[needed_size], dtype=dtype, device=device)
     return torch.as_strided(buffer, size, stride)
@@ -302,7 +312,9 @@ def _make_fn_with_patches(fn, *patches):
     return _fn
 
 
-def make_test_cls_with_patches(cls, cls_prefix, fn_suffix, *patches, xfail_prop=None):
+def make_test_cls_with_patches(
+    cls, cls_prefix, fn_suffix, *patches, xfail_prop=None, decorator=lambda x: x
+):
     DummyTestClass = type(f"{cls_prefix}{cls.__name__}", cls.__bases__, {})
     DummyTestClass.__qualname__ = DummyTestClass.__name__
 
@@ -317,7 +329,7 @@ def make_test_cls_with_patches(cls, cls_prefix, fn_suffix, *patches, xfail_prop=
             new_fn.__name__ = new_name
             if xfail_prop is not None and hasattr(fn, xfail_prop):
                 new_fn = unittest.expectedFailure(new_fn)
-            setattr(DummyTestClass, new_name, new_fn)
+            setattr(DummyTestClass, new_name, decorator(new_fn))
         # NB: Doesn't handle slots correctly, but whatever
         elif not hasattr(DummyTestClass, name):
             setattr(DummyTestClass, name, getattr(cls, name))
@@ -332,9 +344,21 @@ def skipIfNotPy311(fn):
     return unittest.skip(fn)
 
 
-def xfailIfPy311(fn):
-    if sys.version_info >= (3, 11):
+def skipIfNotPy312(fn):
+    if sys.version_info >= (3, 12):
+        return fn
+    return unittest.skip(fn)
+
+
+def xfailIfPy312(fn):
+    if sys.version_info >= (3, 12):
         return unittest.expectedFailure(fn)
+    return fn
+
+
+def skipIfPy312(fn):
+    if sys.version_info >= (3, 12):
+        return unittest.skip(fn)
     return fn
 
 

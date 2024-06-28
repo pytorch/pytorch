@@ -505,12 +505,12 @@ void LayerNormBackwardKernelImplInternal(
   TORCH_DCHECK_EQ(mean.numel(), M);
   TORCH_DCHECK_EQ(rstd.numel(), M);
   DCHECK(!gamma.defined() || gamma.numel() == N);
-  const T* dY_data = dY.template data_ptr<T>();
-  const T* X_data = X.template data_ptr<T>();
-  const T2* mean_data = mean.template data_ptr<T2>();
-  const T2* rstd_data = rstd.template data_ptr<T2>();
+  const T* dY_data = dY.template const_data_ptr<T>();
+  const T* X_data = X.template const_data_ptr<T>();
+  const T2* mean_data = mean.template const_data_ptr<T2>();
+  const T2* rstd_data = rstd.template const_data_ptr<T2>();
   const T2* gamma_data =
-      gamma.defined() ? gamma.template data_ptr<T2>() : nullptr;
+      gamma.defined() ? gamma.template const_data_ptr<T2>() : nullptr;
   T* dX_data = dX->defined() ? dX->template data_ptr<T>() : nullptr;
   T2* dgamma_data = dgamma->defined() ? dgamma->template data_ptr<T2>() : nullptr;
   T2* dbeta_data = dbeta->defined() ? dbeta->template data_ptr<T2>() : nullptr;

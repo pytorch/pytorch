@@ -56,7 +56,10 @@ SparseCsrTensorImpl::SparseCsrTensorImpl(
 
   TORCH_INTERNAL_ASSERT(((key_set.has(DispatchKey::SparseCsrCPU) && device().type() == kCPU)
                          || (key_set.has(DispatchKey::SparseCsrCUDA) && device().type() == kCUDA)
-                         || (key_set.has(DispatchKey::SparseCsrMeta) && device().type() == kMeta)),
+                         || (key_set.has(DispatchKey::SparseCsrMeta) && device().type() == kMeta)
+                         || (key_set.has(DispatchKey::SparseCsrCPU) && device().type() == kMeta)   // fake tensor
+                         || (key_set.has(DispatchKey::SparseCsrCUDA) && device().type() == kMeta)  // fake tensor
+                         || (key_set.has(DispatchKey::SparseCsrPrivateUse1) && device().type() == kPrivateUse1)),
                         "Inconsistent key_set (=", key_set, ") and device (=", device(), ")");
 
   set_storage_access_should_throw();

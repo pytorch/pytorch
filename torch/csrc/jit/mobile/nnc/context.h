@@ -47,8 +47,8 @@ struct TORCH_API OutputSpec {
 
   std::vector<int64_t> sizes_;
   c10::ScalarType dtype_{c10::ScalarType::Undefined};
-  c10::optional<double> qscale_;
-  c10::optional<int64_t> qzero_;
+  std::optional<double> qscale_;
+  std::optional<int64_t> qzero_;
 };
 
 // Hold the temporary buffers / states needed during the execution.

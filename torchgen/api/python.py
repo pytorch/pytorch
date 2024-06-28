@@ -17,6 +17,7 @@ from torchgen.model import (
     Variant,
 )
 
+
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
 #                           Data Models
@@ -440,9 +441,13 @@ class PythonSignature:
 
         if not have_vararg_version:
             return None
+
         # Below are the major changes in vararg vs. regular pyi signatures
         # vararg signatures also omit the asterix
-        schema_formals[0] = "*" + args[0].name + ": _int"
+        assert isinstance(vararg_type, ListType)
+        schema_formals[0] = (
+            "*" + args[0].name + ": " + argument_type_str_pyi(vararg_type.elem)
+        )
 
         returns_str = returns_str_pyi(self)
         # pyi also includes self (with no typing/defaults) for methods
@@ -1489,7 +1494,7 @@ torch::utils::maybe_initialize_device(options);
             # we're an output-arg variant, check these args against output tensor
             if not f.func.is_out_fn():
                 raise RuntimeError(
-                    f"{f.func}: dtype in tensor_options_args without output arg"
+                    f"{f.func}: dtype in tensor_options_args without output arg, {ps} {ps.arguments}"
                 )
             if not all(a in tensor_options_args_names for a in ("layout", "device")):
                 raise RuntimeError(

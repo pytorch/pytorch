@@ -936,13 +936,13 @@ void initTensorExprBindings(PyObject* module) {
       &tensorexpr::replaceListOutputWithTuple);
   te.def("trim_graph", &tensorexpr::trimGraph);
 #ifdef TORCH_ENABLE_LLVM
-  te.def("set_llvm_target_triple", [](const c10::optional<std::string>& val) {
+  te.def("set_llvm_target_triple", [](const std::optional<std::string>& val) {
     tensorexpr::LLVMTargetTriple() = val;
   });
-  te.def("set_llvm_target_cpu", [](const c10::optional<std::string>& val) {
+  te.def("set_llvm_target_cpu", [](const std::optional<std::string>& val) {
     tensorexpr::LLVMTargetCPU() = val;
   });
-  te.def("set_llvm_target_attrs", [](const c10::optional<std::string>& val) {
+  te.def("set_llvm_target_attrs", [](const std::optional<std::string>& val) {
     tensorexpr::LLVMTargetAttrs() = val;
   });
   te.def("set_llvm_aot_workflow", [](bool val) {

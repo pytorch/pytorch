@@ -138,7 +138,6 @@ struct AttentionKernel {
     const int32_t* seqstart_q_ptr = nullptr;
     const int32_t* seqstart_k_ptr = nullptr;
 
-    const int32_t* causal_diagonal_ptr = nullptr;
     const int32_t* seqlen_k_ptr = nullptr;
     uint32_t causal_diagonal_offset = 0;
 
@@ -149,47 +148,50 @@ struct AttentionKernel {
     // [num_heads, num_queries] - can be null
     lse_scalar_t* logsumexp_ptr = nullptr;
 
+    // Sliding window. ignored if == 0
+    int32_t window_size = 0;
+
     // Scale
-    accum_t scale;
+    accum_t scale = 0.0;
 
     // Dimensions/strides
-    int32_t head_dim;
-    int32_t head_dim_value;
-    int32_t num_queries;
-    int32_t num_keys;
-    int32_t num_keys_absolute;
+    int32_t head_dim = 0;
+    int32_t head_dim_value = 0;
+    int32_t num_queries = 0;
+    int32_t num_keys = 0;
+    int32_t num_keys_absolute = 0;
 
     uint8_t custom_mask_type = NoCustomMask;
 
-    int32_t q_strideM;
-    int32_t k_strideM;
-    int32_t v_strideM;
+    int32_t q_strideM = 0;
+    int32_t k_strideM = 0;
+    int32_t v_strideM = 0;
     int32_t bias_strideM = 0;
 
     int32_t o_strideM = 0;
 
     // Everything below is only used in `advance_to_block`
     // and shouldn't use registers
-    int32_t q_strideH;
-    int32_t k_strideH;
-    int32_t v_strideH;
+    int32_t q_strideH = 0;
+    int32_t k_strideH = 0;
+    int32_t v_strideH = 0;
     int64_t bias_strideH = 0;
 
-    int64_t q_strideB;
-    int64_t k_strideB;
-    int64_t v_strideB;
+    int64_t q_strideB = 0;
+    int64_t k_strideB = 0;
+    int64_t v_strideB = 0;
     int64_t bias_strideB = 0;
 
-    int32_t num_batches;
-    int32_t num_heads;
+    int32_t num_batches = 0;
+    int32_t num_heads = 0;
 
     // dropout
-    bool use_dropout;
-    unsigned long long dropout_batch_head_rng_offset;
-    float dropout_prob;
-    at::PhiloxCudaState rng_engine_inputs;
-    int64_t* extragraph_offset;
-    int64_t* seed;
+    bool use_dropout = false;
+    unsigned long long dropout_batch_head_rng_offset = 0;
+    float dropout_prob = 0.0f;
+    at::PhiloxCudaState rng_engine_inputs = at::PhiloxCudaState(0, 0);
+    int64_t* extragraph_offset = nullptr;
+    int64_t* seed = nullptr;
 
     // Moves pointers to what we should process
     // Returns "false" if there is no work to do
@@ -206,7 +208,7 @@ struct AttentionKernel {
             head_id * num_queries * num_keys;
       }
 
-      int64_t q_start, k_start;
+      int64_t q_start = 0, k_start = 0;
       // Advance to current batch - in case of different sequence lengths
       if (seqstart_q_ptr != nullptr) {
         assert(seqstart_k_ptr != nullptr);
@@ -271,11 +273,8 @@ struct AttentionKernel {
       }
 
       // Custom masking
-      if (causal_diagonal_ptr) {
-        causal_diagonal_offset = causal_diagonal_ptr[batch_id];
-      }
       if (custom_mask_type == CausalFromBottomRight) {
-        causal_diagonal_offset += num_keys - num_queries;
+        causal_diagonal_offset = num_keys - num_queries;
       }
       // We use num_keys_absolute to index into the rng_state
       // We need this index to match between forward and backwards
@@ -299,7 +298,7 @@ struct AttentionKernel {
       //  - we only launch kernels for head_id % kQueriesPerBlock == 0
       //  - we iterate over heads instead of queries (strideM = strideH)
       if (num_queries == 1 && k_strideH == 0 && v_strideH == 0 &&
-          logsumexp_ptr == nullptr) {
+          logsumexp_ptr == nullptr && window_size == 0) {
         if (head_id % kQueriesPerBlock != 0) {
           return false;
         }
@@ -315,6 +314,7 @@ struct AttentionKernel {
 
       // Make sure the compiler knows these variables are the same on all
       // the threads of the warp.
+      // Only worth doing if they could have been modified above.
       query_ptr = warp_uniform(query_ptr);
       key_ptr = warp_uniform(key_ptr);
       value_ptr = warp_uniform(value_ptr);
@@ -327,8 +327,6 @@ struct AttentionKernel {
       num_queries = warp_uniform(num_queries);
       num_keys = warp_uniform(num_keys);
       num_heads = warp_uniform(num_heads);
-      head_dim = warp_uniform(head_dim);
-      head_dim_value = warp_uniform(head_dim_value);
       o_strideM = warp_uniform(o_strideM);
       custom_mask_type = warp_uniform(custom_mask_type);
       return true;
@@ -612,11 +610,14 @@ struct AttentionKernel {
         p.num_heads <= 1 || p.v_strideH % kAlignmentV == 0,
         "value is not correctly aligned (strideH)");
     TORCH_CHECK(
-        p.causal_diagonal_ptr == nullptr || p.custom_mask_type != NoCustomMask,
-        "`causal_diagonal_ptr` is only useful when `custom_mask_type` is causal");
-    TORCH_CHECK(
         p.custom_mask_type < NumCustomMaskTypes,
         "invalid value for `custom_mask_type`");
+    if (p.window_size > 0) {
+      TORCH_CHECK(
+          p.custom_mask_type == CausalFromTopLeft ||
+              p.custom_mask_type == CausalFromBottomRight,
+          "custom_mask_type not supported");
+    }
     return true;
   }
 
@@ -699,6 +700,13 @@ struct AttentionKernel {
     // Iterate through keys
     for (int32_t iter_key_start = 0; iter_key_start < p.num_keys;
          iter_key_start += kKeysPerBlock) {
+      if (p.window_size > 0) {
+        // don't compute anything if below attention band
+        if (iter_key_start + kKeysPerBlock <
+            int32_t(query_start + p.causal_diagonal_offset) - p.window_size) {
+          continue;
+        }
+      }
       int32_t problem_size_0_m =
           cutlass::fast_min((int32_t)kQueriesPerBlock, p.num_queries);
       int32_t problem_size_0_n = cutlass::fast_min(
@@ -856,6 +864,40 @@ struct AttentionKernel {
             },
             [&](int accum_m) {});
       }
+
+      // Mask out lower left corner of block if window_size > 0
+      // only required if current block intersects with the lower left corner
+      // block starts at x_lowerleft = iter_key_start // y = query_start +
+      // kQueriesPerBlock first non masked value at this y is : x_first =
+      // query_start + kQueriesPerBlock - window_size mask if x_fist >
+      // x_lowerleft
+
+      if (p.window_size > 0 &&
+          (query_start + p.causal_diagonal_offset +
+               cutlass::fast_min(
+                   int32_t(kQueriesPerBlock), int32_t(p.num_queries)) -
+               p.window_size >=
+           iter_key_start)) {
+        auto query_start = blockIdx.x * kQueriesPerBlock;
+        auto lane_offset = MM0::AccumLambdaIterator::get_lane_offset(
+            my_lane_id, my_warp_id, iteratorC_tile_offset);
+        int32_t first_col;
+        const int32_t offset = query_start + p.causal_diagonal_offset -
+            p.window_size - iter_key_start;
+        MM0::AccumLambdaIterator::iterateRows(
+            lane_offset,
+            [&](int accum_m) { first_col = accum_m + offset; },
+            [&](int accum_m, int accum_n, int idx) {
+              if (accum_n <= first_col) {
+                accum[idx] =
+                    -cutlass::platform::numeric_limits<accum_t>::infinity();
+              }
+            },
+            [&](int accum_m) {});
+        // print_warp_accum<MM0::AccumLambdaIterator>(accum, lane_offset, 12,
+        // 12);
+      }
+
       // Update `mi` from accum stored in registers
       // Also does accum[i] <- exp(accum[i] - mi)
       iterative_softmax<typename MM0::Mma::Operator::IteratorC>(
@@ -995,8 +1037,20 @@ struct AttentionKernel {
         }
 
         if (!kKeepOutputInRF) {
+          int first_key = 0;
+          if (p.window_size > 0) {
+            first_key = (cutlass::fast_max(
+                             int(query_start + p.causal_diagonal_offset) -
+                                 p.window_size + 1,
+                             0) /
+                         kKeysPerBlock) *
+                kKeysPerBlock;
+          }
+
+          // int first_key_block = 0;
+          // MM1::Mma::drain_cp_asyncs(); # TODO figure out if this is needed for correctness
           DISPATCH_BOOL(
-              iter_key_start == 0, kIsFirst, ([&] {
+              iter_key_start == first_key, kIsFirst, ([&] {
                 DISPATCH_BOOL(
                     (iter_key_start + kKeysPerBlock) >= p.num_keys,
                     kIsLast,

@@ -1,4 +1,5 @@
 #include <ATen/Context.h>
+#include <ATen/record_function.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <torch/csrc/cuda/memory_snapshot.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
@@ -96,6 +97,34 @@ CapturedTraceback* getFromContext(
       "attempting to gather stack context from the wrong StackContext type.");
 }
 
+void _initRecordAnnotations() {
+  static c10::once_flag ra_init;
+  c10::call_once(ra_init, [&] {
+    // Save user annotations to CCA memory snapshot tool
+    at::addThreadLocalCallback(at::RecordFunctionCallback(
+        [](const at::RecordFunction& fn)
+            -> std::unique_ptr<at::ObserverContext> {
+          if (fn.scope() != at::RecordScope::USER_SCOPE) {
+            return nullptr; // only record user-defined scopes.
+          }
+          unwind::Frame frame{fn.name(), "START", 0};
+          auto r = std::make_shared<CapturedTraceback>();
+          r->recordUserDefinedFrame(frame);
+          c10::cuda::CUDACachingAllocator::recordAnnotation(r);
+          return nullptr;
+        },
+        [](const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) {
+          if (fn.scope() != at::RecordScope::USER_SCOPE) {
+            return; // only record user-defined scopes.
+          }
+          unwind::Frame frame{fn.name(), "END", 0};
+          auto r = std::make_shared<CapturedTraceback>();
+          r->recordUserDefinedFrame(frame);
+          c10::cuda::CUDACachingAllocator::recordAnnotation(r);
+        }));
+  });
+}
+
 } // namespace
 
 void _record_memory_history(
@@ -117,6 +146,7 @@ void _record_memory_history(
     when = c10::cuda::CUDACachingAllocator::RecordContext::STATE;
   }
   at::globalContext().lazyInitCUDA();
+  _initRecordAnnotations();
   c10::cuda::CUDACachingAllocator::recordHistory(
       enabled, recorder, trace_alloc_max_entries, when);
 }
@@ -130,8 +160,8 @@ static void checkOptionIn(
 }
 
 void _record_memory_history(
-    c10::optional<std::string> enabled,
-    c10::optional<std::string> context,
+    std::optional<std::string> enabled,
+    std::optional<std::string> context,
     const std::string& stacks,
     size_t max_entries) {
   if (enabled) {
@@ -167,6 +197,7 @@ void _record_memory_history(
     }
   }
   at::globalContext().lazyInitCUDA();
+  _initRecordAnnotations();
   c10::cuda::CUDACachingAllocator::recordHistory(
       enabled.has_value(), recorder, max_entries, when);
 }
@@ -275,6 +306,7 @@ std::string _memory_snapshot_pickled() {
   IValue snapshot_s = "snapshot";
   IValue oom_s = "oom";
   IValue device_free_s = "device_free";
+  IValue user_defined_s = "user_defined";
 
   using namespace c10::cuda::CUDACachingAllocator;
 
@@ -298,6 +330,8 @@ std::string _memory_snapshot_pickled() {
         return segment_unmap_s;
       case TraceEntry::SEGMENT_MAP:
         return segment_map_s;
+      case TraceEntry::USER_DEFINED:
+        return user_defined_s;
     }
     throw std::runtime_error("unreachable");
   };

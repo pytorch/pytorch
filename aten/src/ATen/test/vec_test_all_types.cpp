@@ -978,26 +978,6 @@ namespace {
             b[i] = b[i - 1] + (T)(1.0);
         }
     }
-    template<>
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-    void blend_init<Complex<float>, 4>(Complex<float>(&a)[4], Complex<float>(&b)[4]) {
-        auto add = Complex<float>(1., 100.);
-        a[0] = Complex<float>(1., 100.);
-        b[0] = Complex<float>(5., 1000.);
-        for (const auto i : c10::irange(1, 4)) {
-            a[i] = a[i - 1] + add;
-            b[i] = b[i - 1] + add;
-        }
-    }
-    template<>
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-    void blend_init<Complex<double>, 2>(Complex<double>(&a)[2], Complex<double>(&b)[2]) {
-        auto add = Complex<double>(1.0, 100.0);
-        a[0] = Complex<double>(1.0, 100.0);
-        b[0] = Complex<double>(3.0, 1000.0);
-        a[1] = a[0] + add;
-        b[1] = b[0] + add;
-    }
     TYPED_TEST(BitwiseFloatsAdditional, Blendv) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -1636,7 +1616,8 @@ namespace {
         CACHE_ALIGN dst_t y[N];                                        \
         CACHE_ALIGN dst_t ref[N];                                      \
         auto seed = TestSeed();                                        \
-        ValueGen<src_t> generator(src_t(-100), src_t(100), seed);      \
+        auto low = std::is_signed_v<dst_t> ? src_t(-100) : 0;          \
+        ValueGen<src_t> generator(low, src_t(100), seed);              \
         for (const auto i : c10::irange(N)) {                          \
           x[i] = generator.get();                                      \
         }                                                              \
@@ -1650,7 +1631,8 @@ namespace {
         y_vec.store(y, num_dst_elements);                              \
         for (const auto i : c10::irange(num_dst_elements)) {           \
           ASSERT_EQ(y[i], ref[i])                                      \
-              << "Failure Details:\nTest Seed to reproduce: " << seed; \
+              << "Failure Details:\nTest Seed to reproduce: " << seed  \
+              << " x[" << i << "]=" << x[i] << " dst_t=" #dst_t;       \
         }                                                              \
         constexpr int dst_n = N / num_dst_elements;                    \
         auto y_vec_n = at::vec::convert<dst_t, dst_n, src_t, 1>(       \
@@ -1658,7 +1640,8 @@ namespace {
         y_vec_n.store(y, N);                                           \
         for (const auto i : c10::irange(N)) {                          \
           ASSERT_EQ(y[i], ref[i])                                      \
-              << "Failure Details:\nTest Seed to reproduce: " << seed; \
+              << "Failure Details:\nTest Seed to reproduce: " << seed  \
+              << " x[" << i << "]=" << x[i] << " dst_t=" #dst_t;       \
         }                                                              \
       } while (0)
       TEST_CONVERT_TO(int8_t);

@@ -12,6 +12,7 @@ from torchgen.model import (
     Type,
 )
 
+
 # This file generates the code for unboxing wrappers, i.e., the glue logic to unbox a boxed operator and convert the
 # ivalues from stack to correct arguments to the unboxed kernel, based on corresponding JIT schema. This codegen is
 # an alternative way to generate unboxing wrappers similar to the existing C++ metaprogramming approach but gets the
@@ -117,7 +118,7 @@ def convert_arguments(f: NativeFunction) -> Tuple[List[Binding], List[str]]:
     for arg in args:
         # expecting only Argument
         if not isinstance(arg.argument, Argument):
-            raise Exception(
+            raise Exception(  # noqa: TRY002
                 f"Unexpected argument type, expecting `Argument` but got {arg}"
             )
         argument: Argument = arg.argument
@@ -165,7 +166,7 @@ def argumenttype_ivalue_convert(
             ctype=ctype,
         )
     else:
-        raise Exception(f"Cannot handle type {t}. arg_name: {arg_name}")
+        raise Exception(f"Cannot handle type {t}. arg_name: {arg_name}")  # noqa: TRY002
     return out_name, ctype, code, decl
 
 

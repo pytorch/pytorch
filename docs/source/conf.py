@@ -579,6 +579,7 @@ coverage_ignore_functions = [
     "barrier",
     "get_all",
     "synchronize",
+    "store_timeout",
     # torch.distributed.fsdp.wrap
     "always_wrap_policy",
     "enable_wrap",
@@ -605,45 +606,6 @@ coverage_ignore_functions = [
     # torch.distributed.optim.utils
     "as_functional_optim",
     "register_functional_optim",
-    # torch.distributed.pipeline.sync.checkpoint
-    "checkpoint",
-    "enable_checkpointing",
-    "enable_recomputing",
-    "is_checkpointing",
-    "is_recomputing",
-    "restore_rng_states",
-    "save_rng_states",
-    # torch.distributed.pipeline.sync.dependency
-    "fork",
-    "join",
-    # torch.distributed.pipeline.sync.microbatch
-    "check",
-    "gather",
-    "scatter",
-    # torch.distributed.pipeline.sync.phony
-    "get_phony",
-    # torch.distributed.pipeline.sync.skip.layout
-    "inspect_skip_layout",
-    # torch.distributed.pipeline.sync.skip.tracker
-    "current_skip_tracker",
-    "use_skip_tracker",
-    # torch.distributed.pipeline.sync.stream
-    "as_cuda",
-    "current_stream",
-    "default_stream",
-    "get_device",
-    "is_cuda",
-    "new_stream",
-    "record_stream",
-    "use_device",
-    "use_stream",
-    "wait_stream",
-    # torch.distributed.pipeline.sync.utils
-    "partition_model",
-    # torch.distributed.pipeline.sync.worker
-    "create_workers",
-    "spawn_workers",
-    "worker",
     # torch.distributed.rendezvous
     "register_rendezvous_handler",
     "rendezvous",
@@ -1300,7 +1262,6 @@ coverage_ignore_functions = [
     "args_have_same_dtype",
     "check_training_mode",
     "dequantize_helper",
-    "is_caffe2_aten_fallback",
     "is_complex_value",
     "quantize_helper",
     "quantized_args",
@@ -2647,52 +2608,6 @@ coverage_ignore_classes = [
     "PostLocalSGDOptimizer",
     # torch.distributed.optim.zero_redundancy_optimizer
     "ZeroRedundancyOptimizer",
-    # torch.distributed.pipeline.sync.batchnorm
-    "DeferredBatchNorm",
-    # torch.distributed.pipeline.sync.checkpoint
-    "Checkpoint",
-    "Checkpointing",
-    "Context",
-    "Function",
-    "Recompute",
-    "ThreadLocal",
-    # torch.distributed.pipeline.sync.copy
-    "Context",
-    "Copy",
-    "Wait",
-    # torch.distributed.pipeline.sync.dependency
-    "Fork",
-    "Join",
-    # torch.distributed.pipeline.sync.microbatch
-    "Batch",
-    "NoChunk",
-    # torch.distributed.pipeline.sync.pipe
-    "BalanceError",
-    "Pipe",
-    "PipeSequential",
-    "WithDevice",
-    # torch.distributed.pipeline.sync.pipeline
-    "Pipeline",
-    # torch.distributed.pipeline.sync.skip.layout
-    "SkipLayout",
-    # torch.distributed.pipeline.sync.skip.namespace
-    "Namespace",
-    # torch.distributed.pipeline.sync.skip.portal
-    "Context",
-    "Portal",
-    "PortalBlue",
-    "PortalCopy",
-    "PortalOrange",
-    # torch.distributed.pipeline.sync.skip.skippable
-    "Skippable",
-    # torch.distributed.pipeline.sync.skip.tracker
-    "SkipTracker",
-    "SkipTrackerThroughPotals",
-    "ThreadLocal",
-    # torch.distributed.pipeline.sync.stream
-    "CPUStreamType",
-    # torch.distributed.pipeline.sync.worker
-    "Task",
     # torch.distributed.rpc.api
     "AllGatherStates",
     "RRef",
@@ -2795,7 +2710,9 @@ coverage_ignore_classes = [
     "ConstraintViolationError",
     "DynamicDimConstraintPrinter",
     "GuardOnDataDependentSymNode",
+    "PendingUnbackedSymbolNotFound",
     "LoggingShapeGuardPrinter",
+    "SymExprPrinter",
     "RelaxedUnspecConstraint",
     "RuntimeAssert",
     "ShapeGuardPrinter",
@@ -3557,6 +3474,15 @@ html_css_files = [
 
 from sphinx.ext.coverage import CoverageBuilder
 
+# NB: Due to some duplications of the following modules/functions, we keep
+# them as expected failures for the time being instead of return 1
+ignore_duplicated_modules = {
+    "torch.nn.utils.weight_norm",
+    "torch.nn.utils.spectral_norm",
+    "torch.nn.parallel.data_parallel",
+    "torch.ao.quantization.quantize",
+}
+
 
 def coverage_post_process(app, exception):
     if exception is not None:
@@ -3597,7 +3523,7 @@ def coverage_post_process(app, exception):
         path=torch.__path__, prefix=torch.__name__ + "."
     ):
         if is_not_internal(modname):
-            if modname not in modules:
+            if modname not in modules and modname not in ignore_duplicated_modules:
                 missing.add(modname)
 
     output = []

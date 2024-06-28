@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """This file exports ONNX ops for opset 11."""
 from __future__ import annotations
 
@@ -210,10 +211,6 @@ def index_put(
         indices_list = symbolic_helper._unpack_list(indices_list_value)
     else:
         indices_list = [indices_list_value]
-    if symbolic_helper.is_caffe2_aten_fallback():
-        args = [self] + indices_list + [values, accumulate]
-        return g.at("index_put", *args)
-
     accumulate = symbolic_helper._parse_arg(accumulate, "b")
 
     if len(indices_list) == 0:
@@ -397,8 +394,6 @@ def __interpolate(
 def gather(g: jit_utils.GraphContext, self, dim, index, sparse_grad=False):
     if symbolic_helper._maybe_get_const(sparse_grad, "i"):
         return symbolic_helper._unimplemented("gather", "sparse_grad == True")
-    if symbolic_helper.is_caffe2_aten_fallback():
-        return g.at("gather", self, dim, index, sparse_grad)
     return g.op("GatherElements", self, index, axis_i=dim)
 
 
@@ -406,8 +401,6 @@ def gather(g: jit_utils.GraphContext, self, dim, index, sparse_grad=False):
 @symbolic_helper.parse_args("v", "i", "v", "v")
 @_beartype.beartype
 def scatter(g: jit_utils.GraphContext, self, dim, index, src):
-    if symbolic_helper.is_caffe2_aten_fallback():
-        return g.at("scatter", self, dim, index, src, overload_name="src")
     src_type = _type_utils.JitScalarType.from_value(src)
     src = symbolic_helper._maybe_get_scalar(src)
     if symbolic_helper._is_value(src):
@@ -897,8 +890,6 @@ def _dim_arange(g: jit_utils.GraphContext, like, dim):
     stop = g.op(
         "Gather", like_shape, g.op("Constant", value_t=torch.tensor(dim)), axis_i=0
     )
-    if symbolic_helper.is_caffe2_aten_fallback():
-        return g.op("_caffe2::Range", stop)
     return arange(g, stop, 4, None, None, None)
 
 
@@ -981,9 +972,6 @@ def mm(g: jit_utils.GraphContext, self, other):
 @_onnx_symbolic("aten::index")
 @_beartype.beartype
 def index(g: jit_utils.GraphContext, self, index):
-    if symbolic_helper.is_caffe2_aten_fallback():
-        return g.at("index", self, index, overload_name="Tensor")
-
     if symbolic_helper._is_packed_list(index):
         indices = symbolic_helper._unpack_list(index)
     else:
@@ -1006,16 +994,6 @@ def index(g: jit_utils.GraphContext, self, index):
 @_beartype.beartype
 def index_fill(g: jit_utils.GraphContext, self, dim, index, value):
     dim_value = symbolic_helper._parse_arg(dim, "i")
-    if symbolic_helper.is_caffe2_aten_fallback():
-        return g.at(
-            "index_fill",
-            self,
-            index,
-            value,
-            overload_name="int_Scalar",
-            dim_i=dim_value,
-        )
-
     expanded_index_shape, expanded_index = symbolic_helper._index_fill_reshape_helper(
         g, self, dim, index
     )
@@ -1029,14 +1007,13 @@ def index_fill(g: jit_utils.GraphContext, self, dim, index, value):
 @_beartype.beartype
 def index_copy(g: jit_utils.GraphContext, self, dim, index, source):
     dim_value = symbolic_helper._parse_arg(dim, "i")
-    if symbolic_helper.is_caffe2_aten_fallback():
-        return g.at("index_copy", self, index, source, dim_i=dim_value)
     expanded_index_shape, expanded_index = symbolic_helper._index_fill_reshape_helper(
         g, self, dim, index
     )
     return scatter(g, self, dim, expanded_index, source)
 
 
+@_onnx_symbolic("aten::bitwise_right_shift")
 @_onnx_symbolic("aten::__rshift_")
 @_beartype.beartype
 def __rshift_(g: jit_utils.GraphContext, self, other):
@@ -1071,6 +1048,7 @@ def __rshift_(g: jit_utils.GraphContext, self, other):
     return rshift
 
 
+@_onnx_symbolic("aten::bitwise_left_shift")
 @_onnx_symbolic("aten::__lshift_")
 @_beartype.beartype
 def __lshift_(g: jit_utils.GraphContext, self, other):
@@ -1379,10 +1357,10 @@ def normal(
     pin_memory=None,
 ):
     # If you can sample from a given distribution with mean 0 and variance 1, then you can easily sample from a
-    # scale-location transformation of that distribution, which has mean μ and variance σ's square. If x is a sample
+    # scale-location transformation of that distribution, which has mean mu and variance sigma's square. If x is a sample
     # from a mean 0 and variance 1 distribution then
-    #       σx+μ
-    # is a sample with mean μ and variance σ's square.
+    #       sigma x+mu
+    # is a sample with mean mu and variance sigma's square.
     if sizes is not None and not symbolic_helper._is_none(sizes):
         mean = opset9.expand(g, mean, sizes, None)
     result = opset9.mul(g, std, g.op("RandomNormalLike", mean))

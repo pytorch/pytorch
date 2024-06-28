@@ -42,6 +42,15 @@
 #define __FORCE_INLINE __forceinline
 #endif
 
+#if defined(_MSC_FULL_VER)
+/*
+https://learn.microsoft.com/en-us/cpp/overview/compiler-versions?view=msvc-170
+Use _MSC_FULL_VER to identify current compiler is msvc,
+Windows llvm will not have this defination.
+*/
+#define __msvc_cl__
+#endif
+
 // These macros helped us unify vec_base.h
 #ifdef CPU_CAPABILITY_AVX512
 #if defined(__GNUC__)
@@ -89,6 +98,16 @@ struct is_reduced_floating_point:
 
 template <typename T>
 constexpr bool is_reduced_floating_point_v = is_reduced_floating_point<T>::value;
+
+template <typename T>
+struct is_8bit_integer:
+    std::integral_constant<bool,
+      std::is_same_v<T, unsigned char> ||
+      std::is_same_v<T, signed char>> {
+};
+
+template <typename T>
+constexpr bool is_8bit_integer_v = is_8bit_integer<T>::value;
 
 template<size_t n> struct int_of_size;
 

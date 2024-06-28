@@ -1,7 +1,7 @@
 import contextlib
 import weakref
 from enum import Enum
-from typing import Any, Dict, Generator, List, Optional, Tuple, Union
+from typing import Any, Dict, Generator, List, Optional, Protocol, Tuple, Union
 
 import torch
 import torch.distributed as dist
@@ -10,6 +10,7 @@ from torch import nn
 from torch.distributed._tensor import distribute_module, DTensor, Replicate
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor.parallel.style import ParallelStyle
+
 
 aten = torch.ops.aten
 
@@ -54,6 +55,10 @@ def _merge_sdpa(
     """
     assert len(chunks) == len(logsumexps)
 
+    # LSE may be padded in the sequence dimension such as with memory efficient attention.
+    seq_len = chunks[0].size(2)
+    logsumexps = [lse[:, :, :seq_len] for lse in logsumexps]
+
     softmax_lse = torch.stack([lse.exp() for lse in logsumexps]).sum(dim=0).log_()
 
     out = []
@@ -80,18 +85,147 @@ def _scaled_dot_product_ring_flash_attention(
     if return_debug_mask:
         raise NotImplementedError("return_debug_mask is not supported yet")
 
+    return _templated_ring_attention(
+        mesh,
+        torch.ops.aten._scaled_dot_product_flash_attention,
+        query=query,
+        key=key,
+        value=value,
+        dropout_p=dropout_p,
+        is_causal=is_causal,
+        scale=scale,
+    )
+
+
+def _scaled_dot_product_ring_efficient_attention(
+    mesh: DeviceMesh,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    attn_bias: Optional[torch.Tensor] = None,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    compute_log_sumexp: bool = True,
+    *,
+    scale: Optional[float] = None,
+) -> Tuple[torch.Tensor, ...]:
+    if attn_bias is not None:
+        raise NotImplementedError("attn_bias is not supported yet")
+    if not compute_log_sumexp:
+        raise NotImplementedError("compute_log_sumexp must be set")
+
+    return _templated_ring_attention(
+        mesh,
+        torch.ops.aten._scaled_dot_product_efficient_attention,
+        query=query,
+        key=key,
+        value=value,
+        attn_bias=attn_bias,
+        dropout_p=dropout_p,
+        is_causal=is_causal,
+        scale=scale,
+        compute_log_sumexp=compute_log_sumexp,
+    )
+
+
+def _scaled_dot_product_ring_cudnn_attention(
+    mesh: DeviceMesh,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    attn_bias: Optional[torch.Tensor] = None,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    return_debug_mask: bool = True,
+    *,
+    scale: Optional[float] = None,
+) -> Tuple[torch.Tensor, ...]:
+    if not return_debug_mask:
+        raise NotImplementedError("return_debug_mask must be set")
+
+    return _templated_ring_attention(
+        mesh,
+        torch.ops.aten._scaled_dot_product_cudnn_attention,
+        query=query,
+        key=key,
+        value=value,
+        dropout_p=dropout_p,
+        is_causal=is_causal,
+        return_debug_mask=return_debug_mask,
+        scale=scale,
+    )
+
+
+def _ring_rotate(block: torch.Tensor, pg: dist.ProcessGroup) -> torch.Tensor:
+    rank = dist.get_rank(pg)
+    size = dist.get_world_size(pg)
+
+    # rank 0 sends to rank 1, rank 1 sends to rank 2, ..., rank n-1 sends to rank 0
+    input_split_sizes = [0] * size
+    input_split_sizes[(rank + 1) % size] = len(block)
+    output_split_sizes = [0] * size
+    output_split_sizes[(rank - 1) % size] = len(block)
+
+    out = ft_c.all_to_all_single_autograd(
+        block, input_split_sizes, output_split_sizes, pg
+    )
+    return out
+
+
+class AttentionOp(Protocol):
+    def __call__(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        *args: object,
+        is_causal: bool = False,
+        **kwargs: object,
+    ) -> Tuple[torch.Tensor, ...]:
+        ...
+
+
+def _templated_ring_attention(
+    mesh: DeviceMesh,
+    op: AttentionOp,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    *args: object,
+    is_causal: bool = False,
+    **kwargs: object,
+) -> Tuple[torch.Tensor, ...]:
+    """
+    This is a generalized ring attention implementation that can support multiple attention ops.
+
+    Parameters
+    ----------
+    op:
+        The attention op to use
+    *args:
+        additional args are passed to the op
+    **kwargs:
+        additional kwargs are passed to the op
+
+    Returns
+    -------
+    out:
+        The merged attention output
+    softmax_lse:
+        The logsumexp of the merged attention output
+    """
     if is_causal and (query.size(2) != key.size(2)):
         raise NotImplementedError(
             "is_causal requires the same query and context sequence lengths"
         )
 
-    pg = mesh.get_group()
-    assert isinstance(pg, dist.ProcessGroup), "must be single dimension"
+    if isinstance(mesh, dist.ProcessGroup):
+        pg: Union[dist.ProcessGroup, List[dist.ProcessGroup]] = mesh
+    else:
+        pg = mesh.get_group()
+    assert isinstance(pg, dist.ProcessGroup), "process group must be single dimension"
     rank = dist.get_rank(pg)
     size = dist.get_world_size(pg)
-
-    # rank 0 sends to rank 1, rank 1 sends to rank 2, ..., rank n-1 sends to rank 0
-    right_dsts = list(range(1, size)) + [0]
 
     next_kv = None
 
@@ -106,20 +240,20 @@ def _scaled_dot_product_ring_flash_attention(
 
         if i < (size - 1):
             next_kv = torch.cat([key.flatten(), value.flatten()])
-            next_kv = ft_c.permute_tensor(next_kv, right_dsts, pg)
+            next_kv = _ring_rotate(next_kv, pg)
 
         is_causal_behavior = _is_causal_behavior(
             rank=rank, world_size=size, i=i, is_causal=is_causal
         )
 
         if is_causal_behavior != _CausalBehavior.SKIP:
-            local_results = torch.ops.aten._scaled_dot_product_flash_attention(
+            local_results = op(
                 query,
                 key,
                 value,
-                dropout_p=dropout_p,
+                *args,
                 is_causal=is_causal_behavior.value,
-                scale=scale,
+                **kwargs,
             )
             chunks.append(local_results[0])
             logsumexps.append(local_results[1])

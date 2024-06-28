@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import hashlib
 
@@ -19,7 +20,10 @@ def has_triton() -> bool:
     def cuda_extra_check(device_interface):
         return device_interface.Worker.get_device_properties().major >= 7
 
-    triton_supported_devices = {"cuda": cuda_extra_check}
+    def _return_true(device_interface):
+        return True
+
+    triton_supported_devices = {"cuda": cuda_extra_check, "xpu": _return_true}
 
     def is_device_compatible_with_triton():
         for device, extra_check in triton_supported_devices.items():
@@ -58,7 +62,9 @@ def triton_hash_with_backend():
 
     backend = triton_backend()
     key = f"{triton_key()}-{backend.hash()}"
-    return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+    # Hash is upper case so that it can't contain any Python keywords.
+    return hashlib.sha256(key.encode("utf-8")).hexdigest().upper()
 
 
 def dtype_to_string(dtype):

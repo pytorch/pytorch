@@ -47,12 +47,13 @@ import matplotlib.pyplot as plt
 
 import numpy as np
 import pandas as pd
-import torch
-
-import torch._dynamo
 from matplotlib import rcParams
 from scipy.stats import gmean
 from tabulate import tabulate
+
+import torch
+
+import torch._dynamo
 
 rcParams.update({"figure.autolayout": True})
 plt.rc("axes", axisbelow=True)
@@ -384,16 +385,15 @@ def get_skip_tests(suite, device, is_training: bool):
             skip_tests.update(
                 module.TorchBenchmarkRunner().skip_not_suitable_for_training_models
             )
+        if device == "cpu":
+            skip_tests.update(module.TorchBenchmarkRunner().skip_models_for_cpu)
+        elif device == "cuda":
+            skip_tests.update(module.TorchBenchmarkRunner().skip_models_for_cuda)
     else:
         if hasattr(module, "SKIP"):
             skip_tests.update(module.SKIP)
         if is_training and hasattr(module, "SKIP_TRAIN"):
             skip_tests.update(module.SKIP_TRAIN)
-
-    if device == "cpu":
-        skip_tests.update(module.TorchBenchmarkRunner().skip_models_for_cpu)
-    elif device == "cuda":
-        skip_tests.update(module.TorchBenchmarkRunner().skip_models_for_cuda)
 
     skip_tests = (f"-x {name}" for name in skip_tests)
     skip_str = " ".join(skip_tests)
@@ -776,12 +776,18 @@ class ParsePerformanceLogs(Parser):
                         if not perf_row.empty:
                             if acc_row.empty:
                                 perf_row[compiler] = 0.0
+                            elif acc_row[compiler].iloc[0] in (
+                                "model_fail_to_load",
+                                "eager_fail_to_run",
+                            ):
+                                perf_row = pd.DataFrame()
                             elif acc_row[compiler].iloc[0] not in (
                                 "pass",
                                 "pass_due_to_skip",
                             ):
                                 perf_row[compiler] = 0.0
-                    perf_rows.append(perf_row)
+                    if not perf_row.empty:
+                        perf_rows.append(perf_row)
                 df = pd.concat(perf_rows)
             df = df.sort_values(by=list(reversed(self.compilers)), ascending=False)
 
@@ -1453,7 +1459,7 @@ class DashboardUpdater:
             try:
                 RegressionTracker(self.args).diff()
             except Exception as e:
-                logging.exception(e)
+                logging.exception("")
                 with open(f"{self.args.output_dir}/gh_regression.txt", "w") as gh_fh:
                     gh_fh.write("")
 

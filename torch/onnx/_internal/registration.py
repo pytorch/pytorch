@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Module for handling symbolic function registration."""
 
 import warnings
@@ -61,7 +62,7 @@ _K = TypeVar("_K")
 _V = TypeVar("_V")
 
 
-class OverrideDict(Generic[_K, _V], Collection[_K]):
+class OverrideDict(Collection[_K], Generic[_K, _V]):
     """A dictionary that merges built-in and custom symbolic functions.
 
     It supports overriding and un-overriding built-in symbolic functions with custom

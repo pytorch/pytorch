@@ -1,15 +1,24 @@
-import torch
-from torch.amp.grad_scaler import OptState
+from typing_extensions import deprecated
 
-__all__ = ["GradScaler", "OptState"]
+import torch
+
+# We need to keep this unused import for BC reasons
+from torch.amp.grad_scaler import OptState  # noqa: F401
+
+__all__ = ["GradScaler"]
 
 
 class GradScaler(torch.amp.GradScaler):
     r"""
     See :class:`torch.amp.GradScaler`.
-    ``torch.cuda.amp.GradScaler(args...)`` is equivalent to ``torch.amp.GradScaler("cuda", args...)``
+    ``torch.cuda.amp.GradScaler(args...)`` is deprecated. Please use ``torch.amp.GradScaler("cuda", args...)`` instead.
     """
 
+    @deprecated(
+        "`torch.cuda.amp.GradScaler(args...)` is deprecated. "
+        "Please use `torch.amp.GradScaler('cuda', args...)` instead.",
+        category=FutureWarning,
+    )
     def __init__(
         self,
         init_scale: float = 2.0**16,

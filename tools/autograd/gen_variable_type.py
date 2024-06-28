@@ -226,6 +226,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "select",
     "where",
     "as_strided",
+    "as_strided_copy",
     "as_strided_scatter",
     "slice",
     "constant_pad_nd",
@@ -305,6 +306,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "linalg_eig",
     "diagonal_copy",
     "diagonal_scatter",
+    "alias_copy",
     "select_backward",
     "diagonal_backward",
     "slice_backward",
@@ -375,6 +377,10 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "linalg_lu_solve",
     "_linalg_slogdet",
     "_linalg_solve_ex",
+    "_unsafe_index",
+    "_unsafe_index_put",
+    "_unsafe_masked_index",
+    "_unsafe_masked_index_put_accumulate",
 }
 
 GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
@@ -1252,7 +1258,7 @@ def emit_body(
                 if a.name == derivative_var_name:
                     break
             else:
-                raise AssertionError()
+                raise AssertionError
             return f"grad_fn->should_compute_output({edge_off})"
 
         if is_inplace_foreach:
