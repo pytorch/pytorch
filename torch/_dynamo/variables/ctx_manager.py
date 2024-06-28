@@ -26,6 +26,7 @@ from .functions import (
     WrappedUserFunctionVariable,
     WrappedUserMethodVariable,
 )
+from .user_defined import UserDefinedObjectVariable
 
 
 @dataclasses.dataclass
@@ -88,9 +89,7 @@ class ContextWrappingVariable(VariableTracker):
         )
 
     def reconstruct(self, codegen):
-        if sys.version_info >= (3, 11):
-            codegen.append_output(create_instruction("PUSH_NULL"))
-        self.reconstruct_type(codegen)
+        codegen.add_push_null(lambda: self.reconstruct_type(codegen))
         target_values = self.target_values
         if not target_values:
             target_values = ()
@@ -118,20 +117,32 @@ class ContextWrappingVariable(VariableTracker):
             return WrappedUserFunctionVariable(args[0], self)
 
 
-class GenericContextWrappingVariable(ContextWrappingVariable):
-    def __init__(self, target_values, initial_values=None, *, cm_obj=None, **kwargs):
+class GenericContextWrappingVariable(
+    ContextWrappingVariable, UserDefinedObjectVariable
+):
+    # Some methods in ContextWrappingVariable assumes the arguments are
+    # python contants. Which might not always be the case here.
+    def __init__(self, cm_obj, **kwargs):
         assert cm_obj is not None
         super().__init__(
-            target_values=target_values, initial_values=initial_values, **kwargs
+            target_values=None,
+            initial_values=None,
+            value=cm_obj,
+            value_type=cm_obj.__class__,
+            **kwargs,
         )
         self.cm_obj = cm_obj
+
+    def reconstruct(self, codegen):
+        # throw NotImplementedError
+        UserDefinedObjectVariable.reconstruct(self, codegen)
 
     def enter(self, tx):
         source = None if self.source is None else AttrSource(self.source, "__enter__")
         try:
             return variables.UserMethodVariable(
-                self.cm_obj.value.__enter__.__func__,
-                self.cm_obj,
+                self.cm_obj.__enter__.__func__,
+                self,
                 source=source,
             ).call_function(tx, [], {})
         except Unsupported as e:
@@ -144,8 +155,8 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
         source = None if self.source is None else AttrSource(self.source, "__exit__")
         try:
             x = variables.UserMethodVariable(
-                self.cm_obj.value.__exit__.__func__,
-                self.cm_obj,
+                self.cm_obj.__exit__.__func__,
+                self,
                 source=source,
             ).call_function(
                 tx,
@@ -387,10 +398,10 @@ class CatchWarningsCtxManagerVariable(ContextWrappingVariable):
         return variables.ConstantVariable.create(ctx_val.__enter__())
 
     def reconstruct(self, cg):
-        cg.load_import_from("warnings", "catch_warnings")
+        cg.add_push_null(lambda: cg.load_import_from("warnings", "catch_warnings"))
         cg.foreach(self.catch_warnings_args.values())
         keys = tuple(self.catch_warnings_args.keys())
-        cg.extend_output(cg.create_call_function_kw(len(keys), keys, True))
+        cg.extend_output(cg.create_call_function_kw(len(keys), keys, False))
 
 
 class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
@@ -969,9 +980,7 @@ class StreamVariable(VariableTracker):
         # design, to unblock current work, we lift the stream into a global and then codegen bytecode to load it from there.
         prefix = f"_stream_{self.device}"
         name = codegen.tx.output.install_global_by_id(prefix, self.value)
-        codegen.append_output(
-            codegen.create_load_global(name, push_null=False, add=True)
-        )
+        codegen.append_output(codegen.create_load_global(name, add=True))
 
 
 class EventVariable(VariableTracker):
@@ -1038,7 +1047,8 @@ class WithExitFunctionVariable(VariableTracker):
         if codegen.tx.output.partial_convert:
             if sys.version_info >= (3, 11):
                 codegen.append_output(create_instruction("PUSH_NULL"))
-                codegen.append_output(create_instruction("SWAP", arg=2))
+                if sys.version_info < (3, 13):
+                    codegen.append_output(create_instruction("SWAP", arg=2))
             codegen.extend_output(
                 [codegen.create_load_const(val) for val in self.ctx.target_values]
             )

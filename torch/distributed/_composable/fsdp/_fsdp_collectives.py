@@ -5,6 +5,7 @@ import torch._dynamo.compiled_autograd as ca
 import torch.distributed as dist
 from torch.distributed._tensor import DTensor
 from torch.distributed.distributed_c10d import ReduceOp
+
 from ._fsdp_common import (
     _get_dim0_padded_size,
     _raise_assert_with_print,
@@ -63,6 +64,7 @@ def all_gather_copy_in_meta(
 
 
 @torch.library.impl(lib, "all_gather_copy_in", "CUDA")
+@torch.library.impl(lib, "all_gather_copy_in", "CPU")
 def all_gather_copy_in_cuda(
     all_gather_inputs: List[torch.Tensor],
     inp_split_sizes: List[int],
@@ -91,6 +93,7 @@ lib.define(
 
 @torch.library.impl(lib, "split_with_sizes_copy", "Meta")
 @torch.library.impl(lib, "split_with_sizes_copy", "CUDA")
+@torch.library.impl(lib, "split_with_sizes_copy", "CPU")
 def split_with_sizes_copy(
     all_gather_output: torch.Tensor,
     all_gather_input_split_sizes: List[int],
@@ -109,6 +112,7 @@ lib.define(
 
 @torch.library.impl(lib, "chunk_cat", "Meta")
 @torch.library.impl(lib, "chunk_cat", "CUDA")
+@torch.library.impl(lib, "chunk_cat", "CPU")
 def chunk_cat(
     tensors: List[torch.Tensor],
     dim: int,
@@ -336,6 +340,12 @@ def foreach_reduce(
                     new_sharded_grad
                 )
                 fsdp_param.sharded_param.grad = new_sharded_dtensor_grad
+            if not ca.compiled_autograd_enabled:
+                for hook in (
+                    getattr(fsdp_param.sharded_param, "_post_accumulate_grad_hooks", {})
+                    or {}
+                ).values():
+                    hook(fsdp_param.sharded_param)
             padded_sharded_numel = padded_unsharded_size.numel() // world_size
             flat_grad_offset += padded_sharded_numel
         post_reduce_event = post_reduce_stream.record_event()
