@@ -3,12 +3,10 @@
 import unittest
 
 import torch
-
 from torch._inductor.ir import Pointwise
 from torch._inductor.lowering import register_lowering
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.virtualized import ops
-
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 

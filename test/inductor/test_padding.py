@@ -1,6 +1,5 @@
 # Owner(s): ["module: inductor"]
 import copy
-
 import functools
 import os
 import unittest
@@ -16,6 +15,7 @@ from torch._inductor.runtime.runtime_utils import do_bench
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import serialTest
 from torch.testing._internal.inductor_utils import HAS_CUDA
+
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 DO_ACC_TEST = os.environ.get("DO_ACC_TEST", "1") == "1"

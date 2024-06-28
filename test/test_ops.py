@@ -8,7 +8,6 @@ import os
 import re
 import unittest
 import warnings
-
 from collections import defaultdict
 from collections.abc import Sequence
 from functools import partial
@@ -16,16 +15,13 @@ from importlib import import_module
 from typing import Dict, List
 
 import torch
-
 import torch._prims as prims
-
 import torch.utils._pytree as pytree
 from torch._prims.context import TorchRefsMode
 from torch._prims_common.wrappers import _maybe_remove_out_wrapper
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch._subclasses.fake_utils import outputs_alias_inputs
 from torch.testing import make_tensor
-
 from torch.testing._internal import composite_compliance, opinfo
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
@@ -55,7 +51,6 @@ from torch.testing._internal.common_methods_invocations import (
     UnaryUfuncInfo,
     xfail,
 )
-
 from torch.testing._internal.common_utils import (
     clone_input_helper,
     first_sample,
@@ -81,6 +76,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
+
 
 assert torch.get_default_dtype() == torch.float32
 

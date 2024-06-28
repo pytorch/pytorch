@@ -11,7 +11,6 @@ import torch.nn.functional as F
 from torch._dynamo.utils import count_calls, counters
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.fx_passes import joint_graph
-
 from torch._inductor.pattern_matcher import (
     Arg,
     CallFunction,
@@ -31,6 +30,7 @@ from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_utils import IS_LINUX, LazyVal, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.utils import _pytree as pytree
+
 
 # NVIDIA A100-SXM4-40GB
 is_a100_linux = LazyVal(

@@ -40,6 +40,7 @@ from torch.testing._internal.inductor_utils import (
 )
 from torch.utils._triton import has_triton
 
+
 HAS_TRITON = has_triton()
 
 if HAS_TRITON:
