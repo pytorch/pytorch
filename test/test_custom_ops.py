@@ -17,6 +17,7 @@ import torch.utils.cpp_extension
 from functorch import make_fx
 from torch import Tensor
 from torch._custom_op.impl import custom_op, CustomOp, infer_schema
+from torch._library.infer_schema import tuple_to_list
 from torch._utils_internal import get_file_path_2
 from torch.testing._internal import custom_op_db
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -864,6 +865,24 @@ class TestCustomOp(CustomOpTestCaseBase):
                 raise NotImplementedError
 
             del foo
+
+        with self.assertRaisesRegex(ValueError, r"For example, typing.List\[int\]"):
+            # test that we propose a correct and supported type.
+            @torch.library.custom_op(f"{TestCustomOp.test_ns}::foo", mutates_args={})
+            def foo(x: Tensor, y: Tuple[int, int]) -> Tensor:
+                raise NotImplementedError
+
+            del foo
+
+        with self.assertRaises(ValueError) as cm:
+
+            @torch.library.custom_op(f"{TestCustomOp.test_ns}::foo", mutates_args={})
+            def foo(x: Tensor, y: Tuple[int, float]) -> Tensor:
+                raise NotImplementedError
+
+            del foo
+
+            self.assertNotIn("example", str(cm.exception), "")
 
         with self.assertRaisesRegex(ValueError, "unsupported type"):
 
@@ -3215,6 +3234,51 @@ opcheck(op, args, kwargs, test_utils="test_schema")
                assert 'torch.testing._internal.common_utils' not in sys.modules",
         ]
         subprocess.check_output(cmd, shell=False)
+
+
+class TestTypeConversion(TestCase):
+    """In infer_schema(), we try to suggest a correct type when the type annotation is wrong."""
+
+    def setUp(self):
+        self.supported_base_types = [
+            int,
+            float,
+            bool,
+            str,
+            torch.device,
+            torch.Tensor,
+            torch.dtype,
+            torch.types.Number,
+        ]
+
+    def test_simple_tuple(self):
+        self.assertEqual(List, tuple_to_list(Tuple))
+
+    def test_supported_types(self):
+        for t in self.supported_base_types:
+            result_type = tuple_to_list(Tuple[t, t, t])
+            self.assertEqual(result_type, List[t])
+
+            result_type = tuple_to_list(Tuple[t])
+            self.assertEqual(result_type, List[t])
+
+    def test_optional(self):
+        for t in self.supported_base_types:
+            result_type = tuple_to_list(Tuple[t, Optional[t]])
+            self.assertEqual(result_type, List[Optional[t]])
+
+            result_type = tuple_to_list(Tuple[t, t, Optional[t]])
+            self.assertEqual(result_type, List[Optional[t]])
+
+            result_type = tuple_to_list(Tuple[t, ...])
+            self.assertEqual(result_type, List[t])
+
+    def test_mixed_types(self):
+        result_type = tuple_to_list(Tuple[int, float])
+        self.assertEqual(result_type, List[typing.Union[int, float]])
+
+        result_type = tuple_to_list(Tuple[int, float, str])
+        self.assertEqual(result_type, List[typing.Union[int, float, str]])
 
 
 only_for = ("cpu", "cuda")

@@ -15,7 +15,7 @@ from torch.ao.quantization.backend_config.utils import (
 
 # Create a directory for the images, if it doesn't exist
 QUANTIZATION_BACKEND_CONFIG_IMAGE_PATH = os.path.join(
-    os.path.realpath(os.path.join(__file__, "..")), "quantization_backend_configs"
+    os.path.realpath(os.path.dirname(__file__)), "quantization_backend_configs"
 )
 
 if not os.path.exists(QUANTIZATION_BACKEND_CONFIG_IMAGE_PATH):
