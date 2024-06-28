@@ -134,6 +134,10 @@ def _get_cpp_compiler() -> str:
     return compiler
 
 
+def cpp_compiler() -> str:
+    return _get_cpp_compiler()
+
+
 def _is_gcc(cpp_compiler) -> bool:
     return bool(re.search(r"(gcc|g\+\+)", cpp_compiler))
 
