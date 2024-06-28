@@ -2,7 +2,6 @@ import functools
 import os
 import warnings
 
-
 try:
     import lxml.etree
 

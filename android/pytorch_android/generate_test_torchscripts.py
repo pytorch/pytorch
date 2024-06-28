@@ -3,7 +3,6 @@ from typing import Dict, List, Optional, Tuple
 import torch
 from torch import Tensor
 
-
 OUTPUT_DIR = "src/androidTest/assets/"
 
 

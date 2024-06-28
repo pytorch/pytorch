@@ -29,8 +29,11 @@ ISORT_WHITELIST = re.compile(
                 fnmatch.translate,
                 [
                     # **
+                    "**",
                     # .ci/**
+                    ".ci/**",
                     # .github/**
+                    ".github/**",
                     # benchmarks/**
                     # functorch/**
                     "functorch/**",
