@@ -717,8 +717,7 @@ class TestConverter(TestCase):
         # Super nested module testing.
         inp = (torch.ones(1),)
         orig_m = SuperNestedM()
-        # TODO: fix trace: state_dict is not equal.
-        ep_list = self._check_equal_ts_ep_converter(orig_m, inp, ["script"])
+        ep_list = self._check_equal_ts_ep_converter(orig_m, inp)
 
         t = inp[0]
         t -= 1
@@ -796,12 +795,11 @@ class TestConverter(TestCase):
         # Nested module testing.
         inp = (torch.ones(3),)
         orig_m = NestedM(3)
-        # TODO: fix trace: state_dict is not equal.
-        ep_list = self._check_equal_ts_ep_converter(orig_m, inp, ["script"])
+        ep_list = self._check_equal_ts_ep_converter(orig_m, inp)
 
         t = inp[0]
         t -= 0.8
-        for ep in ep_list:
+        for ep in ep_list[1:]:
             torch.testing.assert_close(
                 ep.module()(*inp),
                 orig_m(*inp),
@@ -810,12 +808,11 @@ class TestConverter(TestCase):
         # Super nested module testing.
         inp = (torch.ones(3),)
         orig_m = SuperNestedM1(3)
-        # TODO: fix trace: state_dict is not equal.
-        ep_list = self._check_equal_ts_ep_converter(orig_m, inp, ["script"])
+        ep_list = self._check_equal_ts_ep_converter(orig_m, inp)
 
         t = inp[0]
         t -= 0.8
-        for ep in ep_list:
+        for ep in ep_list[1:]:
             torch.testing.assert_close(
                 ep.module()(*inp),
                 orig_m(*inp),
@@ -824,12 +821,11 @@ class TestConverter(TestCase):
         # Super nested module testing.
         inp = (torch.ones(3),)
         orig_m = SuperNestedM2(3)
-        # TODO: fix trace: state_dict is not equal.
-        ep_list = self._check_equal_ts_ep_converter(orig_m, inp, ["script"])
+        ep_list = self._check_equal_ts_ep_converter(orig_m, inp)
 
         t = inp[0]
         t -= 0.8
-        for ep in ep_list:
+        for ep in ep_list[1:]:
             torch.testing.assert_close(
                 ep.module()(*inp),
                 orig_m(*inp),
