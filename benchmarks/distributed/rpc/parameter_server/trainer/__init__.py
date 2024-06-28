@@ -6,7 +6,6 @@ from .iteration_steps import basic_iteration_step
 from .preprocess_data import preprocess_dummy_data
 from .trainer import DdpTrainer
 
-
 criterion_map = {"cel": cel}
 
 ddp_hook_map = {

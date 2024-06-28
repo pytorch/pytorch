@@ -12,7 +12,6 @@ import torch._library.utils as utils
 from torch import ops
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
 
-
 torch.ops.import_module("pointwise")
 
 

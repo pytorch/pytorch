@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-
 from __future__ import annotations
 
 import abc
+
 import argparse
 import collections
 import contextlib
@@ -22,6 +22,7 @@ import sys
 import time
 import weakref
 from contextlib import contextmanager
+
 from typing import (
     Any,
     Callable,
@@ -59,7 +60,6 @@ from torch._dynamo.testing import (
     same,
 )
 
-
 try:
     from torch._dynamo.utils import (
         clone_inputs,
@@ -80,7 +80,6 @@ from torch._inductor import config as inductor_config, metrics
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map, tree_map_only
-
 
 try:
     import torch_xla
@@ -2390,6 +2389,7 @@ class BenchmarkRunner:
         from diffusers.models.transformer_2d import Transformer2DModel
         from torchbenchmark.models.nanogpt.model import Block
         from transformers.models.llama.modeling_llama import LlamaDecoderLayer
+
         from transformers.models.t5.modeling_t5 import T5Block
         from transformers.models.whisper.modeling_whisper import WhisperEncoderLayer
 

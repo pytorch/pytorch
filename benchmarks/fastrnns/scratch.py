@@ -45,7 +45,6 @@ recurrent_scaleshift.graph_for(x, scale, shift)
 
 import torch
 
-
 x = torch.tensor([])
 x.requires_grad = True
 x.mean().backward()  # no error triggered
