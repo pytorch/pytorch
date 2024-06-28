@@ -5649,24 +5649,57 @@ Tensor igammac_backward(
 
   int n_asympt_terms = 9;
   int max_series_terms = 1E5;
-  double series_precision = 1E-10;
+  double series_precision = 1E-6;
 
-  auto output = at::empty_like(grad);
-  auto log_other = at::log(other);
-  auto digamma_self = at::special_digamma(self);
-  auto gammaln_self = at::special_gammaln(self);
-  auto other_is_large = at::logical_and(other >= 8, other >= self);
+  // Mask for NaN values
+  auto nan_mask = (
+    at::isnan(grad).logical_or(
+    at::isnan(result).logical_or(
+    at::isnan(self).logical_or(
+    at::isnan(other).logical_or(
+    (self <= 0).logical_or(
+    (other < 0))))))
+  );
+  // Mask for when asymptotic expansion can be used
+  auto use_asympt = (
+    at::logical_and(other >= 8, other >= self).logical_and(
+    at::logical_not(nan_mask))
+  );
+  // Mask for when series expansion must be used
+  auto use_series = (
+    at::logical_not(use_asympt).logical_and(
+    at::logical_not(nan_mask))
+  );
 
-  // Instable when result is close to 0 or 1,
-  // due to floating point computation.
+  // output gradient tensor
+  auto output = at::where(
+    nan_mask,
+    at::empty_like(self).fill_(std::numeric_limits<double>::quiet_NaN()),
+    at::empty_like(self)
+  );
+
+  // Return early if all outputs are NaN
+  if (nan_mask.all().item<bool>()) {
+    return grad * output;
+  }
+
+  // Instable when result close to 0 or 1, due to floating point computation.
   // So, replace result with calculated value when this is the case.
   auto eps = std::numeric_limits<double>::epsilon();
-  auto is_result_invalid = at::logical_or(result < eps, (1 - result) < eps);
+  auto is_result_invalid = at::logical_and(
+    result.isnan().logical_not(),
+    at::logical_or(result < eps, (1 - result) < eps)
+  );
   auto safe_result = at::where(
     is_result_invalid,
     at::special_gammaincc(self, other),
     result
   );
+
+  // calculate outside loops to avoid recalculation
+  auto log_other = at::log(other);
+  auto digamma_self = at::special_digamma(self);
+  auto gammaln_self = at::special_gammaln(self);
 
   // case: other (z) is large and self (a) is bounded by other (z)
   // - use asymptotic expansion of gammac: dlmf 8.11.2
@@ -5690,7 +5723,7 @@ Tensor igammac_backward(
   //     uk = u_k
   //     du = (d/da)u_k
   //     u_term = (a-k)
-  if (other_is_large.any().item<bool>()) {
+  if (use_asympt.any().item<bool>()) {
     auto sum_asympt = at::zeros_like(self);
     auto uk = at::ones_like(self);
     auto du = at::ones_like(self);
@@ -5713,9 +5746,9 @@ Tensor igammac_backward(
     }
 
     output = at::where(
-      other_is_large,
+      use_asympt,
       safe_result * (log_other - digamma_self) + 
-      sum_asympt * at::exp((self - 1) * log_other - other - gammaln_self),
+        sum_asympt * at::exp((self - 1) * log_other - other - gammaln_self),
       output
     );
   }
@@ -5738,12 +5771,12 @@ Tensor igammac_backward(
   //     term_sign = (-1)^k
   //     series_term = k log(z) - 2 log(a+k) - log(k) - log(k-1) - ...
   //     subseries_term = log(z) + log(z) + ... - log(k) - log(k-1) - ...
-  if (other_is_large.logical_not().any().item<bool>()) {
+  if (use_series.any().item<bool>()) {
+    double term_sign = +1;
     auto sum_series = at::zeros_like(self);
     auto subseries_term = at::zeros_like(self);
     auto series_term = at::zeros_like(self);
     auto is_converged = at::zeros_like(self);
-    double term_sign = +1;
 
     for (int k = 0; k <= max_series_terms; ++k) {
       // update subseries term by adding another log_other (giving us k log(z))
@@ -5763,15 +5796,15 @@ Tensor igammac_backward(
 
       // if sum_series updated by less than precision everywhere, break
       is_converged = at::where(
-        other_is_large.logical_not(),
+        use_series,
         series_term <= std::log(series_precision),
         at::ones_like(self)
       );
       if (is_converged.all().item<bool>()) {
         output = at::where(
-          other_is_large.logical_not(),
+          use_series,
           (1 - safe_result) * (digamma_self - log_other) + 
-          sum_series * at::exp(self * log_other - gammaln_self),
+            sum_series * at::exp(self * log_other - gammaln_self),
           output
         );
         break;
@@ -5797,22 +5830,52 @@ Tensor igamma_backward(
     const Tensor& other) {
 
   int max_terms = 1E5;
-  double precision = 1E-10;
+  double precision = 1E-6;
 
-  auto output = at::empty_like(grad);
-  auto use_gammac_grad = at::logical_or(
-    at::logical_or(
-      at::logical_and(self < 0.8, other > 15.0), 
-      at::logical_and(self < 12.0, other > 30.0)
-    ),
-    self < at::sqrt(60.0 * other - other.pow(2.0) - 756.0)
+  // Mask for NaN values
+  auto nan_mask = (
+    at::isnan(grad).logical_or(
+    at::isnan(result).logical_or(
+    at::isnan(self).logical_or(
+    at::isnan(other).logical_or(
+    (self <= 0).logical_or(
+    (other < 0))))))
+  );
+  // Mask for when gammac_grad is more computationally stable
+  auto use_gammac_grad = (
+    (
+      at::logical_and(self < 0.8, other > 15.0).logical_or(
+      at::logical_and(self < 12.0, other > 30.0).logical_or(
+      (self < at::sqrt(60.0 * other - other.pow(2.0) - 756.0))))
+    ).logical_and(
+      at::logical_not(nan_mask)
+    )
+  );
+  // Mask for when calculation should be done using series expansion
+  auto do_calculation = (
+    at::logical_not(use_gammac_grad).logical_and(
+    at::logical_not(nan_mask))
   );
 
-  // Instable when result is close to 0 or 1,
-  // due to floating point computation.
+  // output gradient tensor
+  auto output = at::where(
+    nan_mask,
+    at::empty_like(self).fill_(std::numeric_limits<double>::quiet_NaN()),
+    at::empty_like(self)
+  );
+
+  // Return early if all outputs are NaN
+  if (nan_mask.all().item<bool>()) {
+    return grad * output;
+  }
+
+  // Instable when result close to 0 or 1, due to floating point computation.
   // So, replace result with calculated value when this is the case.
   auto eps = std::numeric_limits<double>::epsilon();
-  auto is_result_invalid = at::logical_or(result < eps, (1 - result) < eps);
+  auto is_result_invalid = at::logical_and(
+    result.isnan().logical_not(),
+    at::logical_or(result < eps, (1 - result) < eps)
+  );
   auto safe_result = at::where(
     is_result_invalid,
     at::special_gammainc(self, other),
@@ -5824,8 +5887,7 @@ Tensor igamma_backward(
   if (use_gammac_grad.any().item<bool>()) {
     output = at::where(
       use_gammac_grad,
-      -grad.reciprocal() * 
-      igammac_backward(grad, 1 - safe_result, self, other),
+      -igammac_backward(grad, 1 - safe_result, self, other) * grad.reciprocal(),
       output
     );
   }
@@ -5848,10 +5910,13 @@ Tensor igamma_backward(
   //
   //   variables:
   //     term_gammaln = log(\Gamma(a+k+1))
+  //     term_dgammaln = (d/da)log(\Gamma(a+k+1))
   //     term_exp = exp[(a+k) log(z) - log(\Gamma(a+k+1))]
-  //     series_term = k log(z) - 2 log(a+k) - log(k) - log(k-1) - ...
-  //     subseries_term = log(z) + log(z) + ... - log(k) - log(k-1) - ...
-  if (use_gammac_grad.logical_not().any().item<bool>()) {
+  //     term_a = log_other * term_exp
+  //     term_b = (d/da)log(\Gamma(a+k+1)) * term_exp
+  //     sum_a = cumulative sum of term_a until convergence
+  //     sum_b = cumulative sum of term_b until convergence
+  if (do_calculation.any().item<bool>()) {
     auto log_other = at::log(other);
     auto term_gammaln = at::special_gammaln(self);
     auto term_dgammaln = at::special_digamma(self);
@@ -5860,8 +5925,9 @@ Tensor igamma_backward(
     auto term_b = at::zeros_like(self);
     auto sum_a = at::zeros_like(self);
     auto sum_b = at::zeros_like(self);
-    bool is_converged_a = false;
-    bool is_converged_b = false;
+    auto is_converged_a = at::zeros_like(self);
+    auto is_converged_b = at::zeros_like(self);
+    auto is_converged = at::zeros_like(self);
 
     for (int k = 0; k <= max_terms; ++k) {
       // calculate term in exponential
@@ -5869,32 +5935,33 @@ Tensor igamma_backward(
       term_exp = at::exp((self + k) * log_other - term_gammaln);
 
       // update first sum term
-      if (!is_converged_a) {
+      if (!is_converged_a.any().item<bool>()) {
         term_a = term_exp * log_other;
         sum_a += term_a;
         is_converged_a = at::where(
-          use_gammac_grad.logical_not(),
+          do_calculation,
           term_a <= precision,
           at::ones_like(self)
-        ).all().item<bool>();
+        );
       }
 
       // update second sum term 
-      if (!is_converged_b) {
+      if (!is_converged_b.any().item<bool>()) {
         term_dgammaln += (self + k).reciprocal();
         term_b = term_exp * term_dgammaln;
         sum_b += term_b;
         is_converged_b = at::where(
-          use_gammac_grad.logical_not(),
+          do_calculation,
           term_b <= precision,
           at::ones_like(self)
-        ).all().item<bool>();
+        );
       }
 
       // if both sums updated by less than precision everywhere, break
-      if (is_converged_a && is_converged_b) {
+      is_converged = at::logical_and(is_converged_a, is_converged_b);
+      if (is_converged.all().item<bool>()) {
         output = at::where(
-          use_gammac_grad.logical_not(),
+          do_calculation,
           at::exp(-other) * (sum_a - sum_b),
           output
         );
