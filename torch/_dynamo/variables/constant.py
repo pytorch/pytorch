@@ -12,6 +12,7 @@ from ..guards import GuardBuilder, install_guard
 from ..utils import common_constant_types, istype, np
 from .base import typestr, VariableTracker
 
+
 _type_to_assert_reason = {
     # NB - We CAN have ConstantVariable.create(set) because of how sets interact with guards.
     # A locally created set should always become a SetVariable, as the items in the set will already either be sourced
