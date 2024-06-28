@@ -6,7 +6,6 @@ import timeit
 from collections import namedtuple
 
 import benchmark_utils
-
 import numpy as np
 
 import torch

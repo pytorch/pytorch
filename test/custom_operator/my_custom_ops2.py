@@ -2,7 +2,6 @@ from model import get_custom_op_library_path
 
 import torch
 
-
 torch.ops.load_library(get_custom_op_library_path())
 
 
