@@ -55,7 +55,7 @@ time python test/run_test.py --verbose -i distributed/_composable/fsdp/test_full
 time python test/run_test.py --verbose -i distributed/pipelining/test_composability.py
 
 # 3D composability tests
-time python test/run_test.py --verbose -i distributed/_composable/test_composability/test_fsdp_tp_dp_composable
+time python test/run_test.py --verbose -i distributed/_composable/test_composability/test_2d_composable
 
 # Other tests
 time python test/run_test.py --verbose -i test_cuda_primary_ctx
