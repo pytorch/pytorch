@@ -3765,7 +3765,7 @@ print(f"{torch.cuda.device_count()}")
             {"CUDA_VISIBLE_DEVICES": None, "HIP_VISIBLE_DEVICES": "0"},
             {"CUDA_VISIBLE_DEVICES": "0,1,2,3", "HIP_VISIBLE_DEVICES": "0"},
         ]
-        
+
         for env_config in custom_envs:
             env = os.environ.copy()
             for key, value in env_config.items():
@@ -3779,7 +3779,7 @@ print(f"{torch.cuda.device_count()}")
                 .strip()
             )
             self.assertEqual("1", r)
-            
+
     @unittest.skipIf(not TEST_MULTIGPU, "requires multiple devices")
     def test_device_count_not_cached_pre_init(self):
         visible_devices = (
