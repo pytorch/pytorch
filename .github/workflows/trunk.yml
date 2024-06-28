@@ -19,17 +19,19 @@ concurrency:
 permissions: read-all
 
 jobs:
-  llm-td:
-    name: before-test
-    uses: ./.github/workflows/llm_td_retrieval.yml
-    permissions:
-      id-token: write
-      contents: read
+  # Often fails due to conda availability issues
+  # See https://github.com/pytorch/pytorch/issues/129717
+  # llm-td:
+  #  name: before-test
+  #  uses: ./.github/workflows/llm_td_retrieval.yml
+  #  permissions:
+  #    id-token: write
+  #    contents: read
 
   target-determination:
     name: before-test
     uses: ./.github/workflows/target_determination.yml
-    needs: llm-td
+    # needs: llm-td
     permissions:
       id-token: write
       contents: read
@@ -38,8 +40,10 @@ jobs:
     name: get-label-type
     uses: ./.github/workflows/_runner-determinator.yml
     with:
-      user_name: ${{ github.actor }}
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
 
   linux-focal-cuda12_4-py3_10-gcc9-sm86-build:
     name: linux-focal-cuda12.4-py3.10-gcc9-sm86

@@ -27,6 +27,7 @@
 #include <utility>
 
 #ifdef USE_KINETO
+#include <ApproximateClock.h>
 #include <libkineto.h>
 #include <time_since_epoch.h>
 
@@ -385,6 +386,9 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
 
     std::lock_guard<std::mutex> guard(state_mutex_);
     auto converter = clockConverter.makeConverter();
+#ifdef USE_KINETO
+    libkineto::get_time_converter() = converter;
+#endif
     auto records_and_trace =
         recordQueue.getRecords(std::move(converter), startTime, end_time);
 
@@ -784,6 +788,10 @@ const c10::ArrayRef<std::string> KinetoEvent::moduleHierarchy() const {
     return p->jit_modules_;
   }
   return {};
+}
+
+uint64_t KinetoEvent::endNs() const {
+  return result_->endTimeNS();
 }
 
 uint64_t KinetoEvent::durationNs() const {
