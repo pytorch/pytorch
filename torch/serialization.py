@@ -2,7 +2,6 @@
 import difflib
 import functools
 import os
-import pickle
 import re
 import shutil
 import struct
