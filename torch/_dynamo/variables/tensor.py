@@ -334,6 +334,15 @@ class TensorVariable(VariableTracker):
             tx, [self], {}
         )
 
+    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+        from . import ConstantVariable
+
+        try:
+            self.var_getattr(tx, name)
+            return ConstantVariable.create(True)
+        except AttributeError:
+            return ConstantVariable.create(False)
+
     def var_getattr(self, tx, name):
         from . import UserDefinedClassVariable
 
