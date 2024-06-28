@@ -3881,28 +3881,25 @@ class CppScheduling(BaseScheduling):
                         )
 
                         def is_all_write_read_contiguous(scheduler_node):
-                            def is_contiguous_index(index_expr, sizes):
-                                index = sorted(
-                                    index_expr.free_symbols, key=lambda s: s.name
-                                )
-                                return all(
-                                    stride_at(index_expr, index[idx]) == sizes[idx + 1]
-                                    if ((idx + 1) < len(sizes))
-                                    else 1
-                                    for idx in range(len(sizes))
-                                )
-
+                            contiguous_index_expr = 0
+                            stride = 1
+                            for var, range in reversed(
+                                scheduler_node._body.var_ranges.items()
+                            ):
+                                contiguous_index_expr += stride * var
+                                stride *= range
                             write_index_expr = scheduler_node._body.writes_name2expr[
                                 scheduler_node.get_name()
                             ]
-                            sizes = scheduler_node._sizes[0]
 
-                            return is_contiguous_index(write_index_expr, sizes) and all(
+                            def is_contiguous_index(x):
+                                return x == contiguous_index_expr
+
+                            return is_contiguous_index(write_index_expr) and all(
                                 is_contiguous_index(
                                     user.node._body.reads_name2expr[
                                         scheduler_node.get_name()
                                     ],
-                                    sizes,
                                 )
                                 for user in scheduler_node.users
                             )
