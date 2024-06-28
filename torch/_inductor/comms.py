@@ -2,6 +2,8 @@
 # pyre-strict
 from __future__ import annotations
 
+import operator
+
 from collections import defaultdict
 from typing import Dict, List, Set, Tuple, TYPE_CHECKING
 
@@ -9,12 +11,146 @@ import torch
 
 from . import config, ir
 from .dependencies import WeakDep
+from .pattern_matcher import (
+    CallFunction,
+    KeywordArg,
+    Match,
+    PatternMatcherPass,
+    register_graph_pattern,
+)
 from .utils import is_collective, is_wait, tuple_sorted
 
 overlap_log = torch._logging.getArtifactLogger(__name__, "overlap")
 
 if TYPE_CHECKING:
     from .scheduler import BaseSchedulerNode
+
+
+def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
+    """
+    # File: torch/distributed/_composable/fsdp/_fsdp_collectives.py:152 in foreach_all_gather, code: all_gather_input, all_gather_output = torch.ops.fsdp.all_gather_copy_in(
+    all_gather_copy_in = torch.ops.fsdp.all_gather_copy_in.default([primals_2, primals_3, primals_4, primals_5], [64, 128, 8, 8], 208, 2, 0, torch.float32, device(type='cuda', index=0));
+    getitem: "f32[208][1]cuda:0" = all_gather_copy_in[0];
+
+    # File: torch/distributed/_functional_collectives.py:204 in all_gather_tensor, code: tensor = torch.ops._c10d_functional.all_gather_into_tensor(
+    all_gather_into_tensor: "f32[416][1]cuda:0" = torch.ops._c10d_functional.all_gather_into_tensor.default(getitem, 2, '0');
+
+    ->
+
+    all_gather_copy_in = torch.ops.fsdp.all_gather_copy_in.default([primals_2, primals_3, primals_4, primals_5], [64, 128, 8, 8], 208, 2, 0, torch.float32, device(type='cuda', index=0));
+    getitem: "f32[208][1]cuda:0" = all_gather_copy_in[0];
+    getitem_1: "f32[416][1]cuda:0" = all_gather_copy_in[1];
+
+    all_gather_into_tensor: "f32[416][1]cuda:0" = torch.ops._c10d_functional.all_gather_into_tensor_out.default(getitem, 2, '0', out=getitem_1);
+    """
+    graph_pass = PatternMatcherPass()
+
+    def is_valid_match(match):
+        return match.kwargs["item_idx"] == 0
+
+    @register_graph_pattern(
+        CallFunction(
+            torch.ops._c10d_functional.all_gather_into_tensor.default,
+            CallFunction(
+                operator.getitem,
+                CallFunction(
+                    torch.ops.fsdp.all_gather_copy_in.default,
+                    KeywordArg("all_gather_inputs"),
+                    KeywordArg("inp_split_sizes"),
+                    KeywordArg("all_gather_input_numel"),
+                    KeywordArg("world_size"),
+                    KeywordArg("rank"),
+                    KeywordArg("dtype"),
+                    KeywordArg("device"),
+                ),
+                KeywordArg("item_idx"),
+            ),
+            KeywordArg("group_size"),
+            KeywordArg("group_name"),
+        ),
+        pass_dict=graph_pass,
+        extra_check=is_valid_match,
+    )
+    def replacement(match: Match, *args, **kwargs):
+        all_gather_inputs = kwargs["all_gather_inputs"]
+        inp_split_sizes = kwargs["inp_split_sizes"]
+        all_gather_input_numel = kwargs["all_gather_input_numel"]
+        world_size = kwargs["world_size"]
+        rank = kwargs["rank"]
+        dtype = kwargs["dtype"]
+        device = kwargs["device"]
+        group_size = kwargs["group_size"]
+        group_name = kwargs["group_name"]
+
+        def repl(
+            all_gather_inputs,
+            inp_split_sizes,
+            all_gather_input_numel,
+            world_size,
+            rank,
+            dtype,
+            device,
+            group_size,
+            group_name,
+        ):
+            all_gather_copy_in = torch.ops.fsdp.all_gather_copy_in.default(
+                all_gather_inputs,
+                inp_split_sizes,
+                all_gather_input_numel,
+                world_size,
+                rank,
+                dtype,
+                device,
+            )
+            getitem = all_gather_copy_in[0]
+            getitem_1 = all_gather_copy_in[1]
+            all_gather_into_tensor = (
+                torch.ops._c10d_functional.all_gather_into_tensor_out.default(
+                    getitem, group_size, group_name, out=getitem_1
+                )
+            )
+            return all_gather_into_tensor
+
+        match.replace_by_example(
+            repl,
+            [
+                all_gather_inputs,
+                inp_split_sizes,
+                all_gather_input_numel,
+                world_size,
+                rank,
+                dtype,
+                device,
+                group_size,
+                group_name,
+            ],
+        )
+
+    graph_pass.apply(graph)  # type: ignore[arg-type]
+
+
+"""
+        node_list = list(graph.nodes)
+        for i, n in enumerate(node_list):
+            if n.target == torch.ops.fsdp.all_gather_copy_in.default:
+                all_gather_copy_in_node = n
+                getitem_0_node = node_list[i+1]
+                assert getitem_0_node.target == operator.getitem and getitem_0_node.args[0] == all_gather_copy_in_node
+                all_gather_node_start_index = None
+                for k in range(i+3, len(node_list)):
+                    if node_list[k].target is torch.ops._c10d_functional.all_gather_into_tensor.default and node_list[k].args[0] == getitem_0_node:
+                        all_gather_node_start_index = k
+                        break
+                if all_gather_node_start_index is None:
+                    continue
+                all_gather_node = node_list[all_gather_node_start_index]
+                with graph.inserting_before(all_gather_node):
+                    getitem_1_node = graph.call_function(operator.getitem, (all_gather_copy_in_node, 1))
+                with graph.inserting_before(all_gather_node):
+                    inplace_all_gather_node = graph.call_function(torch.ops._c10d_functional.all_gather_into_tensor_out.default, (getitem_0_node, *all_gather_node.args[1:]), {"out": getitem_1_node})
+                all_gather_node.replace_all_uses_with(inplace_all_gather_node, propagate_meta=True)
+                graph.erase_node(all_gather_node)
+"""
 
 
 def sink_waits(

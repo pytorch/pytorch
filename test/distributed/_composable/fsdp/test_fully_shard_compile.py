@@ -10,6 +10,8 @@ import torch._dynamo.testing
 import torch.distributed._composable.fsdp._fsdp_param
 from torch import nn
 from torch._dynamo import compiled_autograd
+from torch._dynamo.utils import counters
+from torch._inductor import comms
 
 from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._composable.fsdp._fsdp_common import TrainingState
@@ -23,6 +25,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     Transformer,
 )
 from torch.utils._triton import has_triton
+
 
 
 class TestFullyShardCompileCompute(FSDPTest):
@@ -132,6 +135,18 @@ class TestFullyShardCompile(FSDPTest):
         f(ref_x)
         torch.compile(f, backend="aot_eager")(x)
         self.assertEqual(x, ref_x)
+
+    def _check_op_in_graph(self, graph, op, exist=True):
+        if exist:
+            self.assertTrue(any(node.target is op for node in graph.nodes))
+        else:
+            self.assertFalse(any(node.target is op for node in graph.nodes))
+
+    def _reinplace_all_gather_with_checks(self, graph):
+        self._check_op_in_graph(graph, torch.ops._c10d_functional.all_gather_into_tensor_out.default, exist=False)
+        comms.reinplace_fsdp_all_gather(graph)
+        print(f"after: graph: {graph}")
+        self._check_op_in_graph(graph, torch.ops._c10d_functional.all_gather_into_tensor_out.default, exist=True)
 
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
     @torch._functorch.config.patch(recompute_views=True)
@@ -243,9 +258,12 @@ class TestFullyShardCompile(FSDPTest):
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_simple_mlp_fullgraph_backend_inductor(self):
-        self._test_traceable_fsdp(
-            *self._create_simple_mlp_factory_fns(), "inductor", fullgraph=True
-        )
+        with torch._inductor.config.patch(
+            post_grad_custom_post_reinplace_pass=self._reinplace_all_gather_with_checks
+        ):
+            self._test_traceable_fsdp(
+                *self._create_simple_mlp_factory_fns(), "inductor", fullgraph=True
+            )
 
     def _create_transformer_factory_fns(self):
         seq_len = 16
@@ -298,10 +316,12 @@ class TestFullyShardCompile(FSDPTest):
     # TODO: native_dropout causes CUDA IMA error, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_fullgraph_backend_inductor(self):
-        self._test_traceable_fsdp(
-            *self._create_transformer_factory_fns(), "inductor", fullgraph=True
-        )
-
+        with torch._inductor.config.patch(
+            post_grad_custom_post_reinplace_pass=self._reinplace_all_gather_with_checks
+        ):
+            self._test_traceable_fsdp(
+                *self._create_transformer_factory_fns(), "inductor", fullgraph=True
+            )
 
 if __name__ == "__main__":
     run_tests()
