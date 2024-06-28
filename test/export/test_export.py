@@ -277,7 +277,16 @@ class TestExport(TestCase):
 
         f = Module()
         inp = ([torch.ones(1, 3)], 1)
-        self._test_export_same_as_eager(f, inp)
+        ep = export(f, inp)
+        self.assertEqual(ep.module()(*inp), f(*inp))
+        self.assertExpectedInline(
+            str(ep.graph).strip(),
+            """\
+graph():
+    %x_0 : [num_users=0] = placeholder[target=x_0]
+    %y : [num_users=0] = placeholder[target=y]
+    return (1,)""",
+        )
 
     def test_no_tensor_computation_2(self):
         class Module(torch.nn.Module):
@@ -286,7 +295,16 @@ class TestExport(TestCase):
 
         f = Module()
         inp = (torch.randn(3), 1)
-        self._test_export_same_as_eager(f, inp)
+        ep = export(f, inp)
+        self.assertEqual(ep.module()(*inp), f(*inp))
+        self.assertExpectedInline(
+            str(ep.graph).strip(),
+            """\
+graph():
+    %x : [num_users=1] = placeholder[target=x]
+    %y : [num_users=0] = placeholder[target=y]
+    return (x,)""",
+        )
 
     def test_no_tensor_computation_3(self):
         class Module(torch.nn.Module):
@@ -295,7 +313,16 @@ class TestExport(TestCase):
 
         f = Module()
         inp = (2, 1)
-        self._test_export_same_as_eager(f, inp)
+        ep = export(f, inp)
+        self.assertEqual(ep.module()(*inp), f(*inp))
+        self.assertExpectedInline(
+            str(ep.graph).strip(),
+            """\
+graph():
+    %x : [num_users=0] = placeholder[target=x]
+    %y : [num_users=0] = placeholder[target=y]
+    return (5,)""",
+        )
 
 
     def test_no_tensor_computation_4(self):
@@ -305,7 +332,16 @@ class TestExport(TestCase):
 
         f = Module()
         inp = ([torch.randn(3)], 1)
-        self._test_export_same_as_eager(f, inp)
+        ep = export(f, inp)
+        self.assertEqual(ep.module()(*inp), f(*inp))
+        self.assertExpectedInline(
+            str(ep.graph).strip(),
+            """\
+graph():
+    %x_0 : [num_users=1] = placeholder[target=x_0]
+    %y : [num_users=0] = placeholder[target=y]
+    return (x_0,)""",
+        )
 
     # Errors because non-strict is not supported in training IR (T193692164)
     @testing.expectedFailureTrainingIRToRunDecomp
