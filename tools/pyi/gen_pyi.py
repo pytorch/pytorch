@@ -1659,7 +1659,7 @@ def gen_pyi(
         "torch/_C/__init__.pyi",
         "torch/_C/__init__.pyi.in",
         lambda: {
-            "generated_comment": "@generated from torch/_C/__init__.pyi.in",
+            "generated_comment": "@" + "generated from torch/_C/__init__.pyi.in",
             **env,
         },
     )
@@ -1667,7 +1667,7 @@ def gen_pyi(
         "torch/_C/_VariableFunctions.pyi",
         "torch/_C/_VariableFunctions.pyi.in",
         lambda: {
-            "generated_comment": "@generated from torch/_C/_VariableFunctions.pyi.in",
+            "generated_comment": "@" + "generated from torch/_C/_VariableFunctions.pyi.in",
             **env,
         },
     )
@@ -1675,7 +1675,7 @@ def gen_pyi(
         "torch/_VF.pyi",
         "torch/_C/_VariableFunctions.pyi.in",
         lambda: {
-            "generated_comment": "@generated from torch/_C/_VariableFunctions.pyi.in",
+            "generated_comment": "@" + "generated from torch/_C/_VariableFunctions.pyi.in",
             **env,
         },
     )
@@ -1683,7 +1683,7 @@ def gen_pyi(
         "torch/return_types.pyi",
         "torch/_C/return_types.pyi.in",
         lambda: {
-            "generated_comment": "@generated from torch/_C/return_types.pyi",
+            "generated_comment": "@" + "generated from torch/_C/return_types.pyi",
             **env,
         },
     )
