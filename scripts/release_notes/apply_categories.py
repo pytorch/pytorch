@@ -6,7 +6,6 @@ import csv
 
 import commitlist
 
-
 category_csv = "results/category_data.csv"
 commitlist_csv = "results/commitlist.csv"
 
