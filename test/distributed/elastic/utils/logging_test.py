@@ -9,7 +9,6 @@
 import torch.distributed.elastic.utils.logging as logging
 from torch.testing._internal.common_utils import run_tests, TestCase
 
-
 log = logging.get_logger()
 
 

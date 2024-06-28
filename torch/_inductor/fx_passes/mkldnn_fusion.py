@@ -5,9 +5,11 @@ from functools import reduce
 from typing import Any, Tuple
 
 import torch
+
 from torch.fx.experimental.symbolic_shapes import has_free_symbols
 
 from .. import ir
+
 from ..lowering import lowerings as L
 from ..pattern_matcher import (
     Arg,
@@ -25,7 +27,6 @@ from .quantization import (
     _register_quantization_weight_pack_pass,
     _register_woq_lowerings,
 )
-
 
 if torch._C._has_mkldnn:
     aten = torch.ops.aten

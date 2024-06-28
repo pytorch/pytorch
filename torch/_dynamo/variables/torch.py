@@ -2,6 +2,7 @@
 import functools
 import inspect
 import logging
+
 import math
 import re
 from typing import Dict, List
@@ -12,8 +13,8 @@ import torch.fx
 import torch.nn
 import torch.onnx.operators
 from torch._logging import warning_once
-from torch._streambase import _StreamBase
 
+from torch._streambase import _StreamBase
 from ..._guards import TracingContext
 from .. import config, polyfill, variables
 from ..codegen import PyCodegen
@@ -44,7 +45,6 @@ from .ctx_manager import (
 from .distributed import DistributedVariable, ProcessGroupVariable
 from .lists import ListVariable, TupleVariable
 from .torch_function import can_dispatch_torch_function, dispatch_torch_function
-
 
 try:
     import numpy as np
@@ -346,7 +346,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             return _register
 
         from torch.backends.cuda import SDPAParams
-
         from . import (
             ConstantVariable,
             DeterministicAlgorithmsVariable,

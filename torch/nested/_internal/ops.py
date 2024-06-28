@@ -2,15 +2,14 @@
 import functools
 import math
 import operator
-from typing import *  # noqa: F403
 
 import torch
-import torch.nn.functional as F
-from torch.fx.operator_schemas import normalize_function
 from torch.nested._internal.sdpa import jagged_scaled_dot_product_attention
 
 from .nested_tensor import _tensor_symint_registry, NestedTensor
-
+from typing import *  # noqa: F403
+import torch.nn.functional as F
+from torch.fx.operator_schemas import normalize_function
 
 __all__: List[Any] = []
 

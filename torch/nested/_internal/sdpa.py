@@ -17,7 +17,6 @@ from torch.nn.attention import SDPBackend
 
 from .nested_tensor import NestedTensor
 
-
 log = logging.getLogger(__name__)
 
 

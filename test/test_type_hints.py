@@ -11,7 +11,6 @@ from pathlib import Path
 import torch
 from torch.testing._internal.common_utils import run_tests, set_cwd, TestCase
 
-
 try:
     import mypy.api
 
