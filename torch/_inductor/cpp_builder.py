@@ -25,10 +25,9 @@ from torch._inductor.codecache import (
     _LINKER_SCRIPT,
     _transform_cuda_paths,
     get_lock_dir,
-    invalid_vec_isa,
     LOCK_TIMEOUT,
-    VecISA,
 )
+from torch._inductor.cpu_vec_isa import invalid_vec_isa, VecISA
 from torch._inductor.runtime.runtime_utils import cache_dir
 
 if config.is_fbcode():
