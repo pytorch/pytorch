@@ -21,7 +21,7 @@ from test_cuda import (  # noqa: F401
 from tools.stats.import_test_stats import get_disabled_tests
 
 # Make the helper files in test/ importable
-pytorch_test_dir = os.path.dirname(os.path.realpath(__file__))
+pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 
 from dynamo.test_cudagraphs import TestAotCudagraphs  # noqa: F401
@@ -33,5 +33,6 @@ if __name__ == "__main__":
 
         torch.cuda.memory._set_allocator_settings("expandable_segments:True")
         TestCuda.expandable_segments = lambda _: True
+        TestBlockStateAbsorption.expandable_segments = lambda _: True
 
         run_tests()
