@@ -3957,7 +3957,7 @@ class KernelGroup:
         )
         if enable_kernel_profile:
             code.writelines(["#include <ATen/record_function.h>"])
-        code.writeline(cpu_vec_isa.cpp_prefix())
+        code.writeline(codecache.cpp_prefix())
 
         # 2. Function definition
         kernel_decl_name = str(Placeholder.KERNEL_NAME) if name is None else name

@@ -108,7 +108,7 @@ cdll.LoadLibrary("__lib_path__")
     def __hash__(self) -> int:
         return hash(str(self))
 
-    def check_build(self, code) -> bool:
+    def check_build(self, code: str) -> bool:
         from torch._inductor.codecache import get_lock_dir, LOCK_TIMEOUT, write
         from torch._inductor.cpp_builder import CppBuilder, CppTorchOptions
 
@@ -286,7 +286,7 @@ def x86_isa_checker() -> List[str]:
 
     def _check_and_append_supported_isa(
         dest: List[str], isa_supported: bool, isa_name: str
-    ):
+    ) -> None:
         if isa_supported:
             dest.append(isa_name)
 

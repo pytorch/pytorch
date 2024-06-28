@@ -3183,7 +3183,7 @@ class ROCmCodeCache:
         """
         if not cls._logged_compiler_version:
             cls._logged_compiler_version = True
-            log.debug(get_compiler_version_info(rocm_compiler()))
+            log.debug(get_compiler_version_info(str(rocm_compiler())))
 
         key, input_path = cls.write(source_code, dst_file_ext)
         if key not in cls.cache:
