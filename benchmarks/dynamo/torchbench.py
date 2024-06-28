@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 import functools
 import gc
 import importlib
@@ -14,6 +15,7 @@ import yaml
 
 import torch
 
+
 try:
     from .common import BenchmarkRunner, main
 except ImportError:
@@ -21,6 +23,7 @@ except ImportError:
 
 from torch._dynamo.testing import collect_results, reduce_to_scalar_loss
 from torch._dynamo.utils import clone_inputs
+
 
 # We are primarily interested in tf32 datatype
 torch.backends.cuda.matmul.allow_tf32 = True
