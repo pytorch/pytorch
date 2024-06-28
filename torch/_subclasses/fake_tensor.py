@@ -51,6 +51,7 @@ from torch.fx.immutable_collections import immutable_dict
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
+from torch.types import IntLikeType
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
@@ -66,7 +67,6 @@ if TYPE_CHECKING:
     from torch._guards import Source
     from torch._ops import OpOverload
     from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymbolicContext
-    from torch.types import IntLikeType
 
 log = logging.getLogger(__name__)
 
@@ -150,13 +150,28 @@ def unset_fake_temporarily() -> Generator[Optional[TorchDispatchMode], None, Non
             torch._C._set_dispatch_mode(old)
 
 
+def get_plain_tensors(subclass: Tensor) -> List[Tensor]:
+    assert is_traceable_wrapper_subclass(subclass)
+    plain_tensors = []
+    todo = [subclass]
+    while todo:
+        curr = todo.pop()
+        inner_keys, _ = curr.__tensor_flatten__()
+        for key in inner_keys:
+            val = getattr(curr, key)
+            if not is_traceable_wrapper_subclass(val):
+                plain_tensors.append(val)
+            else:
+                todo.append(val)
+    return plain_tensors
+
+
 def is_fake(x: object) -> TypeGuard[Tensor]:
     if isinstance(x, FakeTensor):
         return True
     if is_traceable_wrapper_subclass(x):
         attrs, _ = type(x).__tensor_flatten__(x)
         flattened_tensors = [getattr(x, attr) for attr in attrs]
-        # need to recurse because we could have nested subclasses
         all_fake = all(is_fake(x) for x in flattened_tensors)
         any_fake = any(is_fake(x) for x in flattened_tensors)
         assert all_fake == any_fake, "got mixed fake and real tensors!"
@@ -459,8 +474,10 @@ class FakeTensorConverter:
 def init_cuda_context() -> None:
     # Backward will error with cuda Fake Tensors if no cuda tensors have been initialized first
     if torch.cuda.is_available():
-        torch.empty(1, device="cuda") if torch.version.hip is None else torch.zeros(
-            1, device="cuda"
+        (
+            torch.empty(1, device="cuda")
+            if torch.version.hip is None
+            else torch.zeros(1, device="cuda")
         )
 
 
@@ -864,49 +881,23 @@ class FakeTensor(Tensor):
         return out
 
 
-# Build _flatten, _unflatten, and _flatten_with_keys for the wrapped dataclass.
-def _make_pytree(cls: typing.Any) -> Type:
-    def _flatten_with_keys(
-        obj: cls,
-    ) -> Tuple[List[Tuple[pytree.KeyEntry, object]], pytree.Context]:
-        context = None
-        result: List[Tuple[pytree.KeyEntry, object]] = []
-        for field in cls.__dataclass_fields__.keys():
-            result.append((pytree.GetAttrKey(field), getattr(obj, field)))
-        return (result, context)
-
-    def _flatten(obj: object) -> Tuple[List[object], pytree.Context]:
-        context = None
-        result = []
-        for field in cls.__dataclass_fields__.keys():
-            result.append(getattr(obj, field))
-        return (result, context)
-
-    def _unflatten(values: Iterable[object], context: pytree.Context) -> object:
-        return cls(*values)
-
-    pytree.register_pytree_node(
-        cls, _flatten, _unflatten, flatten_with_keys_fn=_flatten_with_keys
-    )
-
-    return cls
+_MetadataIntLike = Union[IntLikeType, "_PySymInputStub", "_SymIntOutputStub"]
 
 
-@_make_pytree
-@dataclass(frozen=True)
+@dataclass
 class TensorMetadata:
     """
     The Tensor metadata relevant to hashing FakeTensors when caching.
     """
 
     dtype: torch.dtype
-    shape: Tuple[Union[IntLikeType, _PySymInputStub, _SymIntOutputStub], ...]
-    stride: Tuple[Union[IntLikeType, _PySymInputStub, _SymIntOutputStub], ...]
+    shape: Tuple[_MetadataIntLike, ...]
+    stride: Tuple[_MetadataIntLike, ...]
     device: torch.device
     layout: torch.layout
     memory_format: Optional[torch.memory_format]
-    storage_offset: Union[IntLikeType, _PySymInputStub, _SymIntOutputStub]
-    storage_bytes: Optional[Union[IntLikeType, _PySymInputStub, _SymIntOutputStub]]
+    storage_offset: _MetadataIntLike
+    storage_bytes: Optional[_MetadataIntLike]
     requires_grad: bool
     is_quantized: bool
     is_conj: bool
@@ -916,6 +907,27 @@ class TensorMetadata:
     is_coalesced: Optional[bool]
     dense_dim: Optional[int]
     sparse_dim: Optional[int]
+
+    def flatten_into(self, result: List[object], state: _CacheKeyState) -> None:
+        result.append(self.dtype)
+        for v in self.shape:
+            state.convert_input(result, v)
+        for v in self.stride:
+            state.convert_input(result, v)
+        result.append(self.device)
+        result.append(self.layout)
+        result.append(self.memory_format)
+        state.convert_input(result, self.storage_offset)
+        state.convert_input(result, self.storage_bytes)
+        result.append(self.requires_grad)
+        result.append(self.is_quantized)
+        result.append(self.is_conj)
+        result.append(self.is_neg)
+        result.append(self.is_inference)
+        result.append(self.is_sparse)
+        result.append(self.is_coalesced)
+        result.append(self.dense_dim)
+        result.append(self.sparse_dim)
 
 
 def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
@@ -935,24 +947,24 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
     storage_offset = t.storage_offset()
 
     return TensorMetadata(
-        dtype=t.dtype,
-        shape=t.shape,
-        stride=t.stride() if t.layout == torch.strided else (),
-        device=t.device,
-        layout=t.layout,
-        memory_format=memory_format,
-        storage_offset=storage_offset,
+        t.dtype,  # dtype
+        t.shape,  # shape
+        t.stride() if t.layout == torch.strided else (),  # stride
+        t.device,  # device
+        t.layout,  # layout
+        memory_format,  # memory_format
+        storage_offset,  # storage_offset
         # Only set storage_bytes for tensors that have storage (not sparse)
-        storage_bytes=t.untyped_storage().nbytes() if not t.is_sparse else None,
-        requires_grad=t.requires_grad,
-        is_quantized=t.is_quantized,
-        is_conj=t.is_conj(),
-        is_neg=t.is_neg(),
-        is_inference=t.is_inference(),
-        is_sparse=t.is_sparse,
-        is_coalesced=t.is_coalesced() if t.is_sparse else None,
-        dense_dim=t.dense_dim() if t.is_sparse else None,
-        sparse_dim=t.sparse_dim() if t.is_sparse else None,
+        t.untyped_storage().nbytes() if not t.is_sparse else None,  # storage_bytes
+        t.requires_grad,  # requires_grad
+        t.is_quantized,  # is_quantized
+        t.is_conj(),  # is_conj
+        t.is_neg(),  # is_neg
+        t.is_inference(),  # is_inference
+        t.is_sparse,  # is_sparse
+        t.is_coalesced() if t.is_sparse else None,  # is_coalesced
+        t.dense_dim() if t.is_sparse else None,  # dense_dim
+        t.sparse_dim() if t.is_sparse else None,  # sparse_dim
     )
 
 
@@ -1008,7 +1020,7 @@ class _SymIntOutputStub:
     """
 
     value: SymInt
-    key_path: Optional[pytree.KeyPath]
+    key_path: Optional[int]
 
     def __repr__(self) -> str:
         return f"_SymIntOutputStub({self.value}, {self.key_path})"
@@ -1067,10 +1079,28 @@ class _CacheKeyState:
 
     # We track the SymNodes so when we get the output we can see if it exactly
     # matches one of the inputs so we can uncache it properly.
-    sym_node_lookup: Dict[int, pytree.KeyPath]  # id(SymNode) -> index
+    sym_node_lookup: Dict[int, int]  # id(SymNode) -> index
 
     def __init__(self) -> None:
         self.sym_node_lookup = {}
+
+    def convert_sym_int(self, result: List[object], arg: SymInt) -> None:
+        self.sym_node_lookup[id(arg.node)] = len(result)
+        result.append(_PySymInputStub(arg))
+
+    def convert_input(
+        self, result: List[object], arg: Optional[_MetadataIntLike]
+    ) -> None:
+        if isinstance(arg, SymInt):
+            self.convert_sym_int(result, arg)
+        else:
+            result.append(arg)
+
+    def convert_output(self, arg: _MetadataIntLike) -> _MetadataIntLike:
+        if isinstance(arg, SymInt):
+            return _SymIntOutputStub(arg, self.sym_node_lookup.get(id(arg.node), None))
+        else:
+            return arg
 
 
 # We keep one instantiation of `fake_tensor_converter` active
@@ -1339,11 +1369,8 @@ class FakeTensorMode(TorchDispatchMode):
         Create a cache key given the dispatch args. Raises _BypassDispatchCache
         for any situation that precludes caching.
         """
-        key_values = (
+        key_values = [
             func,
-            # Translate any FakeTensor args to metadata.
-            self._prep_args_for_hash(args) if args else (),
-            self._prep_args_for_hash(kwargs) if kwargs else (),
             # Capture the default_dtype mode since that can affect the output tensor,
             # e.g., when operating on constant float values.
             torch.get_default_dtype(),
@@ -1357,17 +1384,14 @@ class FakeTensorMode(TorchDispatchMode):
             # Disallowing dynamic shapes can introduce a DynamicOutputShapeException
             # where it wasn't seen on a previous instance of the same op.
             self.shape_env.settings if self.shape_env else None,
-        )
+        ]
+        # Translate any FakeTensor args to metadata.
+        if args:
+            self._prep_args_for_hash(state, key_values, args)
+        if kwargs:
+            self._prep_args_for_hash(state, key_values, kwargs)
 
-        def replace_syms(path: pytree.KeyPath, value: object) -> object:
-            if isinstance(value, py_sym_types):
-                state.sym_node_lookup[id(value.node)] = path
-                return _PySymInputStub(value)
-            return value
-
-        key_values = pytree.tree_map_with_path(replace_syms, key_values)
-
-        return _DispatchCacheKey(key_values)
+        return _DispatchCacheKey(tuple(key_values))
 
     def _validate_cache_key(
         self,
@@ -1412,8 +1436,11 @@ class FakeTensorMode(TorchDispatchMode):
             raise _BypassDispatchCache("CompositeImplicitAutograd")
 
     def _prep_args_for_hash(
-        self, args: Union[Mapping[str, object], Sequence[object]]
-    ) -> Tuple[object, ...]:
+        self,
+        state: _CacheKeyState,
+        result: List[object],
+        args: Union[Mapping[str, object], Sequence[object], Iterable[object]],
+    ) -> None:
         """
         Translate the provided args into a form suitable for caching at FakeTensor
         dispatch, i.e., convert unhashable types like lists & dicts into tuples and
@@ -1421,15 +1448,16 @@ class FakeTensorMode(TorchDispatchMode):
         unsupported cases that should bypass caching.
         """
         if isinstance(args, dict):
-            args = list(args.keys()) + list(args.values())
+            self._prep_args_for_hash(state, result, args.keys())
+            self._prep_args_for_hash(state, result, args.values())
+            return
 
-        result: List[object] = []
         for arg in args:
             if isinstance(arg, FakeTensor):
                 if not self.is_our_fake(arg):
                     raise _BypassDispatchCache("not our fake")
                 # if arg._has_symbolic_sizes_strides:  # TODO: how to we reconstitute this?
-                #    raise _BypassDispatchCache("symbolic shape")
+                #     raise _BypassDispatchCache("symbolic shape")
                 if arg.constant is not None:
                     raise _BypassDispatchCache("constant attribute")
                 if arg.is_sparse:
@@ -1447,20 +1475,22 @@ class FakeTensorMode(TorchDispatchMode):
                 #    raise _BypassDispatchCache("symbolic nbytes")
                 if is_sparse_compressed(arg):
                     raise _BypassDispatchCache("sparse compressed tensor")
-                result.append(extract_tensor_metadata(arg))
+                metadata = extract_tensor_metadata(arg)
+                metadata.flatten_into(result, state)
             elif isinstance(arg, Tensor):
                 raise _BypassDispatchCache("non-fake tensor")
-            # elif isinstance(arg, (SymBool, SymInt, SymFloat)):
-            #    raise _BypassDispatchCache("symbolic shape")
+            elif isinstance(arg, SymInt):
+                state.convert_sym_int(result, arg)
+            elif isinstance(arg, (SymBool, SymFloat)):
+                raise _BypassDispatchCache("symbolic shape")
             elif isinstance(arg, (list, tuple, dict)):
-                result.extend(self._prep_args_for_hash(arg))
+                self._prep_args_for_hash(state, result, arg)
             else:
                 # It's important to capture the type of the arg since, e.g., 1 and 1.0
                 # hash to the same value, but can produce different dtypes for the
                 # output tensor.
-                result.append((type(arg), arg))
-
-        return tuple(result)
+                result.append(type(arg))
+                result.append(arg)
 
     def _make_cache_entry(
         self,
@@ -1517,17 +1547,14 @@ class FakeTensorMode(TorchDispatchMode):
             view_idx = idxs[0]
 
         metadata = extract_tensor_metadata(output)
-
-        # Look through the metadata to see if we have any SymNodes hiding in there.
-        def replace_syms(path: pytree.KeyPath, value: object) -> object:
-            if isinstance(value, SymInt):
-                # There's a SymInt in the output. Does it map to an input node?
-                return _SymIntOutputStub(
-                    value, state.sym_node_lookup.get(id(value.node), None)
-                )
-            return value
-
-        metadata = pytree.tree_map_with_path(replace_syms, metadata)
+        metadata.shape = tuple(state.convert_output(v) for v in metadata.shape)
+        metadata.stride = tuple(state.convert_output(v) for v in metadata.stride)
+        metadata.storage_offset = state.convert_output(metadata.storage_offset)
+        metadata.storage_bytes = (
+            None
+            if metadata.storage_bytes is None
+            else state.convert_output(metadata.storage_bytes)
+        )
 
         entry = _DispatchCacheEntry(
             inplace_idx=None,
@@ -1574,17 +1601,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         assert not metadata.is_sparse
 
-        def check_value_opt(
-            value: Optional[Union[IntLikeType, _PySymInputStub, _SymIntOutputStub]]
-        ) -> Optional[IntLikeType]:
-            if value is None:
-                return None
-            else:
-                return check_value(value)
-
-        def check_value(
-            value: Union[IntLikeType, _PySymInputStub, _SymIntOutputStub]
-        ) -> Union[IntLikeType]:
+        def check_value(value: _MetadataIntLike) -> Union[IntLikeType]:
             if isinstance(value, _SymIntOutputStub):
                 if value.key_path is None:
                     # It's important for this to not return the cached SymNode -
@@ -1592,24 +1609,23 @@ class FakeTensorMode(TorchDispatchMode):
                     res = value.value
                     return type(res)(copy.copy(res.node))
                 else:
-                    res = pytree.key_get(key.key, value.key_path)
-                    assert isinstance(res, _PySymInputStub) and isinstance(
-                        res.value, SymInt
+                    src = key.key[value.key_path]
+                    assert isinstance(src, _PySymInputStub) and isinstance(
+                        src.value, SymInt
                     )
-                    return res.value
+                    return src.value
             else:
                 assert not isinstance(value, _PySymInputStub)
                 return value
 
-        def check_list(
-            value: Sequence[Union[IntLikeType, _PySymInputStub, _SymIntOutputStub]]
-        ) -> Tuple[IntLikeType, ...]:
-            return tuple(check_value(v) for v in value)
-
-        shape = check_list(metadata.shape)
-        stride = check_list(metadata.stride)
+        shape = tuple(check_value(v) for v in metadata.shape)
+        stride = tuple(check_value(v) for v in metadata.stride)
         storage_offset = check_value(metadata.storage_offset)
-        storage_bytes = check_value_opt(metadata.storage_bytes)
+        storage_bytes = (
+            None
+            if metadata.storage_bytes is None
+            else check_value(metadata.storage_bytes)
+        )
 
         maybe_suppress: Callable[[], typing.ContextManager] = contextlib.nullcontext
         if self.shape_env is not None:

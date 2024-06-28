@@ -200,6 +200,9 @@ class NestedTensor(torch.Tensor):
     def _min_seqlen(self):
         return self._get_min_seqlen()
 
+    def data_ptr(self) -> int:
+        return self._values.data_ptr()
+
     def __repr__(self):
         # We should implement this in torch/_tensor_str.py instead
         grad_fn_str = (
@@ -519,7 +522,7 @@ def nested_view_from_values_offsets(
     if max_seqlen is not None:
         max_seqlen_tensor = _store_val_in_tensor(max_seqlen)
 
-    return torch._nested_view_from_jagged(  # type: ignore[attr-defined, call-arg]
+    return torch._nested_view_from_jagged(  # type: ignore[attr-defined]
         values,
         offsets,
         _nt_view_dummy(),
@@ -541,7 +544,7 @@ def nested_view_from_values_offsets_lengths(
     if max_seqlen is not None:
         max_seqlen_tensor = _store_val_in_tensor(max_seqlen)
 
-    return torch._nested_view_from_jagged(  # type: ignore[attr-defined, call-arg]
+    return torch._nested_view_from_jagged(  # type: ignore[attr-defined]
         values,
         offsets,
         _nt_view_dummy(),

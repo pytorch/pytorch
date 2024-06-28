@@ -1207,9 +1207,11 @@ class DistributedDataParallel(Module, Joinable):
             param_to_name_mapping,
             # User can set dist._DEFAULT_FIRST_BUCKET_BYTES to tune DDP first
             # bucket.
-            dist._DEFAULT_FIRST_BUCKET_BYTES
-            if self.bucket_bytes_cap_default
-            else self.bucket_bytes_cap,
+            (
+                dist._DEFAULT_FIRST_BUCKET_BYTES
+                if self.bucket_bytes_cap_default
+                else self.bucket_bytes_cap
+            ),
         )
 
         self.logger = dist.Logger(self.reducer)
