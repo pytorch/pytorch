@@ -947,6 +947,40 @@ def forward(self, primals_1):
         self.assertTrue(torch.allclose(x_nested_compile.grad, x_nested.grad))
         self.assertTrue(torch.allclose(custom_aa_compile.grad, custom_aa.grad))
 
+    @skipIfTorchDynamo("This test suite already uses dynamo")
+    def test_composite_impl_compile(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, a):
+                return self.linear(a)
+
+        inp = [torch.ones(3, 3, requires_grad=True)]
+        fw_graph = self.verify_aot_autograd(Foo(), inp, test_mutation=True)
+        inp = [torch.ones(3, 3, requires_grad=False)]
+        self.assertExpectedInline(
+            fw_graph.code.strip(),
+            """\
+def forward(self, primals_1, primals_2, primals_3):
+    t = torch.ops.aten.t.default(primals_1);  primals_1 = None
+    addmm = torch.ops.aten.addmm.default(primals_2, primals_3, t);  primals_2 = None
+    return [addmm, primals_3, t]""",
+        )
+
+        with torch.inference_mode():
+            fw_graph = self.verify_aot_autograd(Foo(), inp, test_mutation=True)
+            inp = [torch.ones(3, 3, requires_grad=False)]
+            self.assertExpectedInline(
+                fw_graph.code.strip(),
+                """\
+def forward(self, arg0_1, arg1_1, arg2_1):
+    t = torch.ops.aten.t.default(arg0_1);  arg0_1 = None
+    addmm = torch.ops.aten.addmm.default(arg1_1, arg2_1, t);  arg1_1 = arg2_1 = t = None
+    return (addmm,)""",
+            )
+
     def test_outputs_are_aliased(self):
         # Tensor, None, int
         def f(a):
@@ -4203,7 +4237,7 @@ def forward(self, arg0_1, arg1_1):
                         return x.cos()
 
                     return torch.cond(
-                        y.cos().shape[0] > 5, true_true_fn, true_false_fn, [y.cos()]
+                        y.cos().sum() > 5, true_true_fn, true_false_fn, [y.cos()]
                     )
 
                 def false_fn(x):
@@ -4211,7 +4245,7 @@ def forward(self, arg0_1, arg1_1):
                     z.add_(6)
                     return z.sin()
 
-                a = torch.cond(x.shape[0] > 4, true_fn, false_fn, [x])
+                a = torch.cond(x.sum() > 4, true_fn, false_fn, [x])
                 return (a + 3, a + 4)
 
         inp = torch.randn(2, 2)
@@ -4220,10 +4254,12 @@ def forward(self, arg0_1, arg1_1):
             str(gm.code).strip(),
             """\
 def forward(self, arg0_1):
+    sum_1 = torch.ops.aten.sum.default(arg0_1)
+    gt = torch.ops.aten.gt.Scalar(sum_1, 4);  sum_1 = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [arg0_1]);  true_graph_0 = false_graph_0 = arg0_1 = None
-    getitem = conditional[0];  conditional = None
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [arg0_1]);  gt = true_graph_0 = false_graph_0 = arg0_1 = None
+    getitem = cond[0];  cond = None
     add = torch.ops.aten.add.Tensor(getitem, 3)
     add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
     return (add, add_1)""",  # noqa: B950
@@ -4236,11 +4272,13 @@ def forward(self, arg0_1):
     sin = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
     add = torch.ops.aten.add.Tensor(sin, 5);  sin = None
     cos = torch.ops.aten.cos.default(add)
+    sum_1 = torch.ops.aten.sum.default(cos);  cos = None
+    gt = torch.ops.aten.gt.Scalar(sum_1, 5);  sum_1 = None
     cos_1 = torch.ops.aten.cos.default(add);  add = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [cos_1]);  true_graph_0 = false_graph_0 = cos_1 = None
-    getitem = conditional[0];  conditional = None
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [cos_1]);  gt = true_graph_0 = false_graph_0 = cos_1 = None
+    getitem = cond[0];  cond = None
     return (getitem,)""",  # noqa: B950
         )
 
@@ -4283,7 +4321,7 @@ def forward(self, arg0_1):
                         + control_flow.map(f, z, r).sum()
                     )
 
-                a = torch.cond(x.shape[0] > 4, true_fn, false_fn, [x, y])
+                a = torch.cond(x.sum() > 4, true_fn, false_fn, [x, y])
                 return (a + 3, a + 4)
 
         inps = [torch.randn(2, 2), torch.ones(2)]
@@ -4292,10 +4330,12 @@ def forward(self, arg0_1):
             str(gm.code).strip(),
             """\
 def forward(self, arg0_1, arg1_1):
+    sum_1 = torch.ops.aten.sum.default(arg0_1)
+    gt = torch.ops.aten.gt.Scalar(sum_1, 4);  sum_1 = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [arg0_1, arg1_1]);  true_graph_0 = false_graph_0 = arg0_1 = arg1_1 = None
-    getitem = conditional[0];  conditional = None
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [arg0_1, arg1_1]);  gt = true_graph_0 = false_graph_0 = arg0_1 = arg1_1 = None
+    getitem = cond[0];  cond = None
     add = torch.ops.aten.add.Tensor(getitem, 3)
     add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
     return (add, add_1)""",  # noqa: B950
@@ -4400,7 +4440,7 @@ def forward(self, arg0_1, arg1_1):
                     z.add_(6)
                     return z.sin()
 
-                a = torch.cond(x.shape[0] > 4, true_fn, false_fn, [x])
+                a = torch.cond(x.sum() > 4, true_fn, false_fn, [x])
                 return (a + 3, a + 4)
 
         inp = torch.randn(2, 2)
@@ -4409,10 +4449,12 @@ def forward(self, arg0_1, arg1_1):
             str(gm.code).strip(),
             """\
 def forward(self, arg0_1):
+    sum_1 = torch.ops.aten.sum.default(arg0_1)
+    gt = torch.ops.aten.gt.Scalar(sum_1, 4);  sum_1 = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [arg0_1]);  true_graph_0 = false_graph_0 = arg0_1 = None
-    getitem = conditional[0];  conditional = None
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [arg0_1]);  gt = true_graph_0 = false_graph_0 = arg0_1 = None
+    getitem = cond[0];  cond = None
     add = torch.ops.aten.add.Tensor(getitem, 3)
     add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
     return (add, add_1)""",  # noqa: B950
@@ -4833,7 +4875,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                     y.add_(6)
                     return x.sin()
 
-                a = torch.cond(x.shape[0] > 4, true_fn, false_fn, [x])
+                a = torch.cond(x.sum() > 4, true_fn, false_fn, [x])
                 return (a + 3, a + 4)
 
         inp = torch.randn(3, 4)
@@ -4842,10 +4884,12 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             gm.code.strip(),
             """\
 def forward(self, arg0_1):
+    sum_1 = torch.ops.aten.sum.default(arg0_1)
+    gt = torch.ops.aten.gt.Scalar(sum_1, 4);  sum_1 = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [arg0_1]);  true_graph_0 = false_graph_0 = arg0_1 = None
-    getitem = conditional[0];  conditional = None
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [arg0_1]);  gt = true_graph_0 = false_graph_0 = arg0_1 = None
+    getitem = cond[0];  cond = None
     add = torch.ops.aten.add.Tensor(getitem, 3)
     add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
     return (add, add_1)""",  # noqa: B950
