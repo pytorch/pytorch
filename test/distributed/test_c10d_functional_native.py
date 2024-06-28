@@ -4,7 +4,6 @@ import unittest
 from typing import List
 
 import torch
-
 import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 from torch._C import FileCheck
@@ -48,6 +47,7 @@ def load_test_module(name):
 AOTIRunnerUtil = load_test_module("inductor.test_aot_inductor_utils").AOTIRunnerUtil
 
 import sys
+
 
 if not dist.is_available():
     print("distributed package not available, skipping tests", file=sys.stderr)
