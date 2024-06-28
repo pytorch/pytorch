@@ -1,7 +1,6 @@
 # Owner(s): ["module: functorch"]
 
 import torch
-
 from functorch import make_fx
 from functorch.compile import minifier
 from torch._functorch.compile_utils import get_outputs, get_placeholders
