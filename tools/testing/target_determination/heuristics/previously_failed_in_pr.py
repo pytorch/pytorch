@@ -1,7 +1,9 @@
+from __future__ import annotations
+
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Set
+from typing import Any
 
 from tools.stats.import_test_stats import (
     ADDITIONAL_CI_FILES_FOLDER,
@@ -22,17 +24,17 @@ REPO_ROOT = Path(__file__).absolute().parents[4]
 
 
 class PreviouslyFailedInPR(HeuristicInterface):
-    def __init__(self, **kwargs: Dict[str, Any]):
+    def __init__(self, **kwargs: dict[str, Any]) -> None:
         super().__init__(**kwargs)
 
-    def get_prediction_confidence(self, tests: List[str]) -> TestPrioritizations:
+    def get_prediction_confidence(self, tests: list[str]) -> TestPrioritizations:
         critical_tests = get_previous_failures() | read_additional_test_failures_file()
         return TestPrioritizations(
             tests, {TestRun(test): 1 for test in critical_tests if test in tests}
         )
 
 
-def get_previous_failures() -> Set[str]:
+def get_previous_failures() -> set[str]:
     path = REPO_ROOT / ADDITIONAL_CI_FILES_FOLDER / TD_HEURISTIC_PREVIOUSLY_FAILED
     if not os.path.exists(path):
         print(f"could not find path {path}")
@@ -43,7 +45,7 @@ def get_previous_failures() -> Set[str]:
         )
 
 
-def _parse_prev_failing_test_files(last_failed_tests: Dict[str, bool]) -> Set[str]:
+def _parse_prev_failing_test_files(last_failed_tests: dict[str, bool]) -> set[str]:
     prioritized_tests = set()
 
     # The keys are formatted as "test_file.py::test_class::test_method[params]"
@@ -57,7 +59,7 @@ def _parse_prev_failing_test_files(last_failed_tests: Dict[str, bool]) -> Set[st
     return prioritized_tests
 
 
-def gen_additional_test_failures_file(tests: List[str]) -> None:
+def gen_additional_test_failures_file(tests: list[str]) -> None:
     # Segfaults usually result in no xml and some tests don't run through pytest
     # (ex doctests).  In these cases, there will be no entry in the pytest
     # cache, so we should generate a separate file for them and upload it to s3
@@ -69,7 +71,7 @@ def gen_additional_test_failures_file(tests: List[str]) -> None:
         json.dump(tests, f, indent=2)
 
 
-def read_additional_test_failures_file() -> Set[str]:
+def read_additional_test_failures_file() -> set[str]:
     path = (
         REPO_ROOT
         / ADDITIONAL_CI_FILES_FOLDER

@@ -1,9 +1,10 @@
+from __future__ import annotations
+
 import argparse
 import os
 import re
 import subprocess
 from pathlib import Path
-from typing import Optional, Union
 
 from setuptools import distutils  # type: ignore[import]
 
@@ -12,7 +13,7 @@ UNKNOWN = "Unknown"
 RELEASE_PATTERN = re.compile(r"/v[0-9]+(\.[0-9]+)*(-rc[0-9]+)?/")
 
 
-def get_sha(pytorch_root: Union[str, Path]) -> str:
+def get_sha(pytorch_root: str | Path) -> str:
     try:
         rev = None
         if os.path.exists(os.path.join(pytorch_root, ".git")):
@@ -30,7 +31,7 @@ def get_sha(pytorch_root: Union[str, Path]) -> str:
     return UNKNOWN
 
 
-def get_tag(pytorch_root: Union[str, Path]) -> str:
+def get_tag(pytorch_root: str | Path) -> str:
     try:
         tag = subprocess.run(
             ["git", "describe", "--tags", "--exact"],
@@ -46,7 +47,7 @@ def get_tag(pytorch_root: Union[str, Path]) -> str:
         return UNKNOWN
 
 
-def get_torch_version(sha: Optional[str] = None) -> str:
+def get_torch_version(sha: str | None = None) -> str:
     pytorch_root = Path(__file__).absolute().parent.parent
     version = open(pytorch_root / "version.txt").read().strip()
 

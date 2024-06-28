@@ -5,10 +5,13 @@
 # - ninja -j1 -v -n torch_python | sed -e 's/-O[23]/-g/g' -e 's#\[[0-9]\+\/[0-9]\+\] \+##' |sh
 # - Copy libs from build/lib to torch/lib folder
 
+from __future__ import annotations
+
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, List, Optional, Tuple
+from typing import Any
+
 
 PYTORCH_ROOTDIR = Path(__file__).absolute().parent.parent
 TORCH_DIR = PYTORCH_ROOTDIR / "torch"
@@ -17,7 +20,7 @@ BUILD_DIR = PYTORCH_ROOTDIR / "build"
 BUILD_LIB_DIR = BUILD_DIR / "lib"
 
 
-def check_output(args: List[str], cwd: Optional[str] = None) -> str:
+def check_output(args: list[str], cwd: str | None = None) -> str:
     return subprocess.check_output(args, cwd=cwd).decode("utf-8")
 
 
@@ -63,7 +66,7 @@ def is_devel_setup() -> bool:
     return output.strip() == str(TORCH_DIR / "__init__.py")
 
 
-def create_build_plan() -> List[Tuple[str, str]]:
+def create_build_plan() -> list[tuple[str, str]]:
     output = check_output(
         ["ninja", "-j1", "-v", "-n", "torch_python"], cwd=str(BUILD_DIR)
     )

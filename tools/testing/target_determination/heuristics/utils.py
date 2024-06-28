@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import os
 import re
@@ -5,17 +7,19 @@ import subprocess
 from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
-from typing import cast, Dict, List, Optional, Set, Union
+from typing import cast, Dict, TYPE_CHECKING
 from urllib.request import Request, urlopen
 from warnings import warn
 
-from tools.testing.test_run import TestRun
+
+if TYPE_CHECKING:
+    from tools.testing.test_run import TestRun
 
 
 REPO_ROOT = Path(__file__).absolute().parents[4]
 
 
-def python_test_file_to_test_name(tests: Set[str]) -> Set[str]:
+def python_test_file_to_test_name(tests: set[str]) -> set[str]:
     prefix = f"test{os.path.sep}"
     valid_tests = {f for f in tests if f.startswith(prefix) and f.endswith(".py")}
     valid_tests = {f[len(prefix) : -len(".py")] for f in valid_tests}
@@ -24,7 +28,7 @@ def python_test_file_to_test_name(tests: Set[str]) -> Set[str]:
 
 
 @lru_cache(maxsize=None)
-def get_pr_number() -> Optional[int]:
+def get_pr_number() -> int | None:
     pr_number = os.environ.get("PR_NUMBER", "")
     if pr_number == "":
         re_match = re.match(r"^refs/tags/.*/(\d+)$", os.environ.get("GITHUB_REF", ""))
@@ -69,7 +73,7 @@ def get_merge_base() -> str:
     return merge_base
 
 
-def query_changed_files() -> List[str]:
+def query_changed_files() -> list[str]:
     base_commit = get_merge_base()
 
     proc = subprocess.run(
@@ -118,8 +122,8 @@ def get_issue_or_pr_body(number: int) -> str:
 
 
 def normalize_ratings(
-    ratings: Dict[TestRun, float], max_value: float, min_value: float = 0
-) -> Dict[TestRun, float]:
+    ratings: dict[TestRun, float], max_value: float, min_value: float = 0
+) -> dict[TestRun, float]:
     # Takse the ratings, makes the max value into max_value, and proportionally
     # distributes the rest of the ratings.
     # Ex [1,2,3,4] and max_value 8 gets converted to [2,4,6,8]
@@ -139,7 +143,7 @@ def normalize_ratings(
     return normalized_ratings
 
 
-def get_ratings_for_tests(file: Union[str, Path]) -> Dict[str, float]:
+def get_ratings_for_tests(file: str | Path) -> dict[str, float]:
     path = REPO_ROOT / file
     if not os.path.exists(path):
         print(f"could not find path {path}")
@@ -151,14 +155,14 @@ def get_ratings_for_tests(file: Union[str, Path]) -> Dict[str, float]:
     except Exception as e:
         warn(f"Can't query changed test files due to {e}")
         return {}
-    ratings: Dict[str, float] = defaultdict(float)
+    ratings: dict[str, float] = defaultdict(float)
     for file in changed_files:
         for test_file, score in test_file_ratings.get(file, {}).items():
             ratings[test_file] += score
     return ratings
 
 
-def get_correlated_tests(file: Union[str, Path]) -> List[str]:
+def get_correlated_tests(file: str | Path) -> list[str]:
     ratings = get_ratings_for_tests(file)
     prioritize = sorted(ratings, key=lambda x: -ratings[x])
     return prioritize

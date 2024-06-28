@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 
+from __future__ import annotations
+
 import datetime
 import json
 import os
 import shutil
 from pathlib import Path
-from typing import Any, Callable, cast, Dict, List, Optional, Union
+from typing import Any, Callable, cast, Dict
 from urllib.request import urlopen
 
 
 REPO_ROOT = Path(__file__).absolute().parents[2]
 
 
-def get_disabled_issues() -> List[str]:
+def get_disabled_issues() -> list[str]:
     reenabled_issues = os.getenv("REENABLED_ISSUES", "")
     issue_numbers = reenabled_issues.split(",")
     print("Ignoring disabled issues: ", issue_numbers)
@@ -35,11 +37,11 @@ FILE_CACHE_LIFESPAN_SECONDS = datetime.timedelta(hours=3).seconds
 
 
 def fetch_and_cache(
-    dirpath: Union[str, Path],
+    dirpath: str | Path,
     name: str,
     url: str,
-    process_fn: Callable[[Dict[str, Any]], Dict[str, Any]],
-) -> Dict[str, Any]:
+    process_fn: Callable[[dict[str, Any]], dict[str, Any]],
+) -> dict[str, Any]:
     """
     This fetch and cache utils allows sharing between different process.
     """
@@ -77,7 +79,7 @@ def fetch_and_cache(
 
 def get_slow_tests(
     dirpath: str, filename: str = SLOW_TESTS_FILE
-) -> Optional[Dict[str, float]]:
+) -> dict[str, float] | None:
     url = "https://ossci-metrics.s3.amazonaws.com/slow-tests.json"
     try:
         return fetch_and_cache(dirpath, filename, url, lambda x: x)
@@ -86,7 +88,7 @@ def get_slow_tests(
         return {}
 
 
-def get_test_times() -> Dict[str, Dict[str, float]]:
+def get_test_times() -> dict[str, dict[str, float]]:
     return get_from_test_infra_generated_stats(
         "test-times.json",
         TEST_TIMES_FILE,
@@ -94,7 +96,7 @@ def get_test_times() -> Dict[str, Dict[str, float]]:
     )
 
 
-def get_test_class_times() -> Dict[str, Dict[str, float]]:
+def get_test_class_times() -> dict[str, dict[str, float]]:
     return get_from_test_infra_generated_stats(
         "test-class-times.json",
         TEST_CLASS_TIMES_FILE,
@@ -104,8 +106,8 @@ def get_test_class_times() -> Dict[str, Dict[str, float]]:
 
 def get_disabled_tests(
     dirpath: str, filename: str = DISABLED_TESTS_FILE
-) -> Optional[Dict[str, Any]]:
-    def process_disabled_test(the_response: Dict[str, Any]) -> Dict[str, Any]:
+) -> dict[str, Any] | None:
+    def process_disabled_test(the_response: dict[str, Any]) -> dict[str, Any]:
         # remove re-enabled tests and condense even further by getting rid of pr_num
         disabled_issues = get_disabled_issues()
         disabled_test_from_issues = dict()
@@ -125,7 +127,7 @@ def get_disabled_tests(
         return {}
 
 
-def get_test_file_ratings() -> Dict[str, Any]:
+def get_test_file_ratings() -> dict[str, Any]:
     return get_from_test_infra_generated_stats(
         "file_test_rating.json",
         TEST_FILE_RATINGS_FILE,
@@ -133,7 +135,7 @@ def get_test_file_ratings() -> Dict[str, Any]:
     )
 
 
-def get_test_class_ratings() -> Dict[str, Any]:
+def get_test_class_ratings() -> dict[str, Any]:
     return get_from_test_infra_generated_stats(
         "file_test_class_rating.json",
         TEST_CLASS_RATINGS_FILE,
@@ -141,7 +143,7 @@ def get_test_class_ratings() -> Dict[str, Any]:
     )
 
 
-def get_td_heuristic_historial_edited_files_json() -> Dict[str, Any]:
+def get_td_heuristic_historial_edited_files_json() -> dict[str, Any]:
     return get_from_test_infra_generated_stats(
         "td_heuristic_historical_edited_files.json",
         TD_HEURISTIC_HISTORICAL_EDITED_FILES,
@@ -149,7 +151,7 @@ def get_td_heuristic_historial_edited_files_json() -> Dict[str, Any]:
     )
 
 
-def get_td_heuristic_profiling_json() -> Dict[str, Any]:
+def get_td_heuristic_profiling_json() -> dict[str, Any]:
     return get_from_test_infra_generated_stats(
         "td_heuristic_profiling.json",
         TD_HEURISTIC_PROFILING_FILE,
@@ -183,7 +185,7 @@ def copy_additional_previous_failures() -> None:
 
 def get_from_test_infra_generated_stats(
     from_file: str, to_file: str, failure_explanation: str
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     url = f"https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/{from_file}"
     try:
         return fetch_and_cache(

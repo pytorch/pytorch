@@ -1,7 +1,9 @@
+from __future__ import annotations
+
 from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable
 from warnings import warn
 
 from tools.testing.target_determination.heuristics.interface import (
@@ -17,7 +19,7 @@ from tools.testing.test_run import TestRun
 
 REPO_ROOT = Path(__file__).absolute().parents[3]
 
-keyword_synonyms: Dict[str, List[str]] = {
+keyword_synonyms: dict[str, list[str]] = {
     "amp": ["mixed_precision"],
     "quant": ["quantized", "quantization", "quantize"],
     "decomp": ["decomposition", "decompositions"],
@@ -39,14 +41,14 @@ not_keyword = [
     "internal",
 ]
 
-custom_matchers: Dict[str, Callable[[str], bool]] = {
+custom_matchers: dict[str, Callable[[str], bool]] = {
     "nn": lambda x: "nn" in x.replace("onnx", "_"),
     "c10": lambda x: "c10" in x.replace("c10d", "_"),
 }
 
 
 @lru_cache(maxsize=1)
-def get_keywords(file: str) -> List[str]:
+def get_keywords(file: str) -> list[str]:
     keywords = []
     for folder in Path(file).parts[:-1]:
         folder = sanitize_folder_name(folder)
@@ -79,11 +81,11 @@ def file_matches_keyword(file: str, keyword: str) -> bool:
 class Filepath(HeuristicInterface):
     # Heuristic based on folders in the file path.  Takes each folder of each
     # changed file and attempts to find matches based on those folders
-    def __init__(self, **kwargs: Dict[str, Any]) -> None:
+    def __init__(self, **kwargs: dict[str, Any]) -> None:
         super().__init__(**kwargs)
 
-    def get_prediction_confidence(self, tests: List[str]) -> TestPrioritizations:
-        keyword_frequency: Dict[str, int] = defaultdict(int)
+    def get_prediction_confidence(self, tests: list[str]) -> TestPrioritizations:
+        keyword_frequency: dict[str, int] = defaultdict(int)
         try:
             changed_files = query_changed_files()
         except Exception as e:
@@ -95,7 +97,7 @@ class Filepath(HeuristicInterface):
             for keyword in keywords:
                 keyword_frequency[keyword] += 1
 
-        test_ratings: Dict[str, float] = defaultdict(float)
+        test_ratings: dict[str, float] = defaultdict(float)
 
         for test in tests:
             for keyword, frequency in keyword_frequency.items():

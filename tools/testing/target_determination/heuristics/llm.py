@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 import json
 import os
 import re
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 from tools.stats.import_test_stats import ADDITIONAL_CI_FILES_FOLDER
 from tools.testing.target_determination.heuristics.interface import (
@@ -18,10 +20,10 @@ REPO_ROOT = Path(__file__).absolute().parents[4]
 
 
 class LLM(HeuristicInterface):
-    def __init__(self, **kwargs: Dict[str, Any]):
+    def __init__(self, **kwargs: dict[str, Any]) -> None:
         super().__init__(**kwargs)
 
-    def get_prediction_confidence(self, tests: List[str]) -> TestPrioritizations:
+    def get_prediction_confidence(self, tests: list[str]) -> TestPrioritizations:
         critical_tests = self.get_mappings()
         filter_valid_tests = {
             TestRun(test): score
@@ -31,7 +33,7 @@ class LLM(HeuristicInterface):
         normalized_scores = normalize_ratings(filter_valid_tests, 0.25)
         return TestPrioritizations(tests, normalized_scores)
 
-    def get_mappings(self) -> Dict[str, float]:
+    def get_mappings(self) -> dict[str, float]:
         path = (
             REPO_ROOT
             / ADDITIONAL_CI_FILES_FOLDER
