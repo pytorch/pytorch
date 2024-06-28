@@ -1,12 +1,11 @@
 # flake8: noqa
-
 import triton
 from prettytable import PrettyTable
 
 import torch
+
 import torch._dynamo
 import torch._inductor.config
-
 
 # torch._inductor.config.debug = True
 torch._inductor.config.triton.dense_indexing = True

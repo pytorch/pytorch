@@ -2,7 +2,6 @@ import difflib
 import io
 
 import numpy as np
-
 import onnx
 import onnx.helper
 

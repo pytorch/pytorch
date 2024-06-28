@@ -2,7 +2,6 @@ import operator_benchmark as op_bench
 
 import torch
 
-
 intraop_bench_configs = op_bench.config_list(
     attrs=[
         [8, 16],

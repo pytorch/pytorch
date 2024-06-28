@@ -30,20 +30,35 @@ ISORT_WHITELIST = re.compile(
                 [
                     # **
                     # .ci/**
+                    ".ci/**",
                     # .github/**
+                    ".github/**",
                     # benchmarks/**
+                    "benchmarks/**",
                     # functorch/**
+                    "functorch/**",
                     # tools/**
+                    "tools/**",
                     # torchgen/**
+                    "torchgen/**",
                     # test/**
+                    "test/**",
                     # test/[a-c]*/**
+                    "test/[a-c]*/**",
                     # test/d*/**
+                    "test/d*/**",
                     # test/dy*/**
+                    "test/dy*/**",
                     # test/[e-h]*/**
+                    "test/[e-h]*/**",
                     # test/i*/**
+                    "test/i*/**",
                     # test/j*/**
+                    "test/j*/**",
                     # test/[k-p]*/**
+                    "test/[k-p]*/**",
                     # test/[q-z]*/**
+                    "test/[q-z]*/**",
                     # torch/**
                     "torch/**",
                     # torch/_[a-c]*/**
