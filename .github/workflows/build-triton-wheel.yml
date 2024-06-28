@@ -14,8 +14,6 @@ on:
       - .github/ci_commit_pins/triton.txt
       - .ci/docker/ci_commit_pins/triton.txt
       - .ci/docker/ci_commit_pins/triton-rocm.txt
-      - .circleci/scripts/binary_upload.sh
-      - .github/workflows/build-triton-wheel.yml
   pull_request:
     paths:
       - .github/workflows/build-triton-wheel.yml
@@ -23,8 +21,6 @@ on:
       - .github/ci_commit_pins/triton.txt
       - .ci/docker/ci_commit_pins/triton.txt
       - .ci/docker/ci_commit_pins/triton-rocm.txt
-      - .circleci/scripts/binary_upload.sh
-      - .github/workflows/build-triton-wheel.yml
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
