@@ -250,7 +250,7 @@ def foreach_reduce(
     all_reduce_stream: torch.cuda.Stream,
     all_reduce_grads: bool,
     partial_reduce_output: Optional[torch.Tensor],  # only used for HSDP
-) -> Tuple[torch.cuda.Event, Optional[torch.Tensor]]:
+) -> Tuple[torch.Tensor, torch.cuda.Event, torch.cuda.Event, Optional[torch.Tensor]]:
     """
     ``unsharded_grads`` owns the references to the gradients computed by
     autograd, so clearing the list frees the gradients.
@@ -299,7 +299,12 @@ def foreach_reduce(
                     partial_reduce_output += reduce_output
                 else:
                     partial_reduce_output = reduce_output
-                return post_reduce_stream.record_event(), partial_reduce_output
+                return (
+                    reduce_scatter_input,
+                    reduce_scatter_event,
+                    post_reduce_stream.record_event(),
+                    partial_reduce_output,
+                )
             if partial_reduce_output is not None:
                 reduce_output += partial_reduce_output
             post_reduce_stream = all_reduce_stream
