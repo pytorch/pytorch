@@ -1522,7 +1522,7 @@ class CPUReproTests(TestCase):
     def test_int_div(self):
         def fn(x, y):
             s3 = x.size(1)
-            a = torch.zeros((1 + s3) // 2)
+            a = torch.ones((1 + s3) // 2)
             a += y
             return a, s3
 

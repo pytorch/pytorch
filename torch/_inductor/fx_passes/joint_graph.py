@@ -276,9 +276,9 @@ class UniformValueConstantFolder(ConstantFolder):
             return s
 
         # pointwise ops
-        if (
-            isinstance(node.target, torch._ops.OpOverload)
-            and torch.Tag.pointwise in node.target.tags
+        if isinstance(node.target, torch._ops.OpOverload) and (
+            torch.Tag.pointwise in node.target.tags
+            or node.target is torch.ops.aten.scalar_tensor.default
         ):
             args, kwargs = self.fetch_args_kwargs_from_env(node)
             flattened_inputs = pytree.arg_tree_leaves(*args, **kwargs)
