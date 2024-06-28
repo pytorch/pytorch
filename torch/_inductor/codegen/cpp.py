@@ -3923,7 +3923,6 @@ class CppScheduling(BaseScheduling):
                         )
 
                         def try_share_local_buffer(local_buffer_layout, local_buffers):
-                            shared_buffers = []
                             for local_buf in local_buffers:
                                 if local_buffer_layout == local_buf.layout and all(
                                     all(
@@ -3937,8 +3936,8 @@ class CppScheduling(BaseScheduling):
                                     ]
                                     if global_buffer.name is not None
                                 ):
-                                    shared_buffers.append(local_buf)
-                            return shared_buffers[0] if shared_buffers else None
+                                    return local_buf
+                            return None
 
                         local_buf_prefix = "local_buffer_data"
                         # Share existing local buffer

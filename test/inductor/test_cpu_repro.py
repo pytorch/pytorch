@@ -1588,8 +1588,12 @@ class CPUReproTests(TestCase):
     )
     @patch("torch.cuda.is_available", lambda: False)
     def test_auto_simd(self):
+        vec_amx = codecache.supported_vec_isa_list[0]
         vec_avx512 = codecache.supported_vec_isa_list[1]
         vec_avx2 = codecache.supported_vec_isa_list[2]
+        self.assertTrue(vec_amx.bit_width() == 512)
+        self.assertTrue(vec_amx.nelements() == 16)
+        self.assertTrue(vec_amx.nelements(torch.bfloat16) == 32)
         self.assertTrue(vec_avx512.bit_width() == 512)
         self.assertTrue(vec_avx2.bit_width() == 256)
         self.assertTrue(vec_avx512.nelements() == 16)
@@ -1599,7 +1603,9 @@ class CPUReproTests(TestCase):
 
         with config.patch({"cpp.simdlen": None}):
             isa = codecache.pick_vec_isa()
-            if vec_avx512 in codecache.valid_vec_isa_list():
+            if vec_amx in codecache.valid_vec_isa_list():
+                self.assertTrue(isa == vec_amx)
+            elif vec_avx512 in codecache.valid_vec_isa_list():
                 self.assertTrue(isa == vec_avx512)
             else:
                 self.assertTrue(isa == vec_avx2)
@@ -1623,8 +1629,10 @@ class CPUReproTests(TestCase):
 
         with config.patch({"cpp.simdlen": 512}):
             isa_list = codecache.valid_vec_isa_list()
-            if vec_avx512 in isa_list:
-                isa = codecache.pick_vec_isa()
+            isa = codecache.pick_vec_isa()
+            if vec_amx in isa_list:
+                self.assertTrue(isa == vec_amx)
+            elif vec_avx512 in isa_list:
                 self.assertTrue(isa == vec_avx512)
 
         with config.patch({"cpp.simdlen": 256}):

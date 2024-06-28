@@ -203,10 +203,28 @@ def get_safe_globals() -> List[Any]:
 
 def add_safe_globals(safe_globals: List[Any]) -> None:
     """
-    Marks the given globals as safe for ``weights_only`` load.
+    Marks the given globals as safe for ``weights_only`` load. For example, functions
+    added to this list can be called during unpickling, classes could be instantiated
+    and have state set.
 
     Args:
         safe_globals (List[Any]): list of globals to mark as safe
+
+    Example:
+        >>> # xdoctest: +SKIP("Can't torch.save(t, ...) as doctest thinks MyTensor is defined on torch.serialization")
+        >>> import tempfile
+        >>> class MyTensor(torch.Tensor):
+        ...     pass
+        >>> t = MyTensor(torch.randn(2, 3))
+        >>> with tempfile.NamedTemporaryFile() as f:
+        ...     torch.save(t, f.name)
+        # Running `torch.load(f.name, weights_only=True)` will fail with
+        # Unsupported global: GLOBAL __main__.MyTensor was not an allowed global by default.
+        # Check the code and make sure MyTensor is safe to be used when loaded from an arbitrary checkpoint.
+        ...     torch.serialization.add_safe_globals([MyTensor])
+        ...     torch.load(f.name, weights_only=True)
+        # MyTensor([[-0.5024, -1.8152, -0.5455],
+        #          [-0.8234,  2.0500, -0.3657]])
     """
     _weights_only_unpickler._add_safe_globals(safe_globals)
 
@@ -273,7 +291,9 @@ def register_package(
 
 
 def check_module_version_greater_or_equal(
-    module, req_version_tuple, error_if_malformed=True
+    module,
+    req_version_tuple,
+    error_if_malformed=True,
 ):
     """
     Check if a module's version satisfies requirements
@@ -424,7 +444,9 @@ def _deserialize(backend_name, obj, location):
 
 register_package(10, _cpu_tag, _cpu_deserialize)
 register_package(
-    20, functools.partial(_backend_tag, "cuda"), functools.partial(_deserialize, "cuda")
+    20,
+    functools.partial(_backend_tag, "cuda"),
+    functools.partial(_deserialize, "cuda"),
 )
 register_package(21, _mps_tag, _mps_deserialize)
 register_package(22, _meta_tag, _meta_deserialize)
@@ -434,15 +456,19 @@ register_package(
     functools.partial(_deserialize, "privateuse1"),
 )
 register_package(
-    24, functools.partial(_backend_tag, "hpu"), functools.partial(_deserialize, "hpu")
+    24,
+    functools.partial(_backend_tag, "hpu"),
+    functools.partial(_deserialize, "hpu"),
 )
 register_package(
-    25, functools.partial(_backend_tag, "xpu"), functools.partial(_deserialize, "xpu")
+    25,
+    functools.partial(_backend_tag, "xpu"),
+    functools.partial(_deserialize, "xpu"),
 )
 
 
 def location_tag(
-    storage: Union[Storage, torch.storage.TypedStorage, torch.UntypedStorage]
+    storage: Union[Storage, torch.storage.TypedStorage, torch.UntypedStorage],
 ):
     for _, tagger, _ in _package_registry:
         location = tagger(storage)
@@ -977,7 +1003,7 @@ def load(
     map_location: MAP_LOCATION = None,
     pickle_module: Any = None,
     *,
-    weights_only: bool = False,
+    weights_only: Optional[bool] = None,
     mmap: Optional[bool] = None,
     **pickle_load_args: Any,
 ) -> Any:
@@ -1087,6 +1113,11 @@ def load(
         " with `weights_only` please check the recommended steps in the following error message."
         " WeightsUnpickler error: "
     )
+    if weights_only is None:
+        weights_only, warn_weights_only = False, True
+    else:
+        warn_weights_only = False
+
     # Add ability to force safe only weight loads via environment variable
     if os.getenv("TORCH_FORCE_WEIGHTS_ONLY_LOAD", "0").lower() in [
         "1",
@@ -1103,6 +1134,21 @@ def load(
             )
     else:
         if pickle_module is None:
+            if warn_weights_only:
+                warnings.warn(
+                    "You are using `torch.load` with `weights_only=False` (the current default value), which uses "
+                    "the default pickle module implicitly. It is possible to construct malicious pickle data "
+                    "which will execute arbitrary code during unpickling (See "
+                    "https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). "
+                    "In a future release, the default value for `weights_only` will be flipped to `True`. This "
+                    "limits the functions that could be executed during unpickling. Arbitrary objects will no "
+                    "longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the "
+                    "user via `torch.serialization.add_safe_globals`. We recommend you start setting "
+                    "`weights_only=True` for any use case where you don't have full control of the loaded file. "
+                    "Please open an issue on GitHub for any issues related to this experimental feature.",
+                    FutureWarning,
+                    stacklevel=2,
+                )
             pickle_module = pickle
 
     # make flipping default BC-compatible
