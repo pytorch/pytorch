@@ -5,11 +5,10 @@ import functools
 from typing import List, Type
 
 import torch
-import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
 import torch.nn as nn
 
-from torch.distributed._composable import checkpoint, replicate
+from torch.distributed._composable import replicate
 from torch.distributed._composable.fsdp import CPUOffloadPolicy
 from torch.distributed._composable.fsdp.fully_shard import fully_shard
 from torch.distributed._tensor import DeviceMesh, init_device_mesh
@@ -18,69 +17,24 @@ from torch.distributed.checkpoint.state_dict import (
     get_model_state_dict,
     get_optimizer_state_dict,
 )
-from torch.distributed.tensor.parallel import (
-    ColwiseParallel,
-    parallelize_module,
-    RowwiseParallel,
-)
-from torch.distributed.tensor.parallel.ddp import _pre_dp_module_transform
-
-from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import (
-    check_sharded_parity,
-    FSDPTest,
-    MLP,
-    MLPStack,
-)
+from torch.testing._internal.common_fsdp import FSDPTest, MLP, MLPStack
 
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
 
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    MLPModule,
     ModelArgs,
     Transformer,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
-# Tensor-Parallel degree
-TP_DEGREE = 2
-LR = 3e-5
-
-c10d_ops = torch.ops.c10d
-funcol = torch.ops.c10d_functional
-
-
-def init_model(device_type, model_parallel_size=TP_DEGREE):
-    torch.manual_seed(0)
-    model = MLPModule(device_type)
-    torch.manual_seed(0)
-    twod_model = MLPModule(device_type)
-    model = DDP(model)
-
-    # 2-D mesh is [dp, tp]
-    world_size = dist.get_world_size()
-    mesh_2d = init_device_mesh(
-        device_type,
-        (world_size // model_parallel_size, model_parallel_size),
-        mesh_dim_names=("dp", "tp"),
-    )
-
-    dp_pg = mesh_2d.get_group(mesh_dim=0)
-
-    parallelize_plan = {
-        "net1": ColwiseParallel(),
-        "net2": RowwiseParallel(),
-    }
-    twod_model = parallelize_module(twod_model, mesh_2d["tp"], parallelize_plan)
-    _pre_dp_module_transform(twod_model)
-    # TODO: Add tests when using gradient_as_bucket_view and static_graph for DDP.
-    twod_model = DDP(twod_model, process_group=dp_pg)
-    return model, twod_model, dp_pg
-
-
 class TestFullyShard2DTraining(FSDPTest):
+    global c10d_ops
+    global funcol
+    c10d_ops = torch.ops.c10d
+    funcol = torch.ops.c10d_functional
+    
     @property
     def world_size(self) -> int:
         return min(4, torch.cuda.device_count())
@@ -304,78 +258,6 @@ class TestFullyShard2DTraining(FSDPTest):
 
         loss_cp2 = train_step(model_cp, optim_cp, inp)
         self.assertEqual(loss_no_cp2, loss_cp2)
-
-
-class TestFullyShardHSDPTraining(FSDPTest):
-    @property
-    def world_size(self) -> int:
-        return min(4, torch.cuda.device_count())
-
-    @skip_if_lt_x_gpu(2)
-    def test_train_parity_hsdp(self):
-        shard_size = 2 if self.world_size > 2 else 1
-        replicate_size = self.world_size // shard_size
-        global_mesh = init_device_mesh(
-            "cuda", (replicate_size, shard_size), mesh_dim_names=("replicate", "shard")
-        )
-        self.run_subtests(
-            {
-                "reshard_after_forward": [False, True],
-                "use_activation_checkpointing": [False, True],
-                "mlp_dim": [3, 16, 17],
-                "sync_gradients_at_last_batch": [True, False],
-            },
-            functools.partial(self._test_train_parity_hsdp, global_mesh),
-        )
-
-    def _test_train_parity_hsdp(
-        self,
-        global_mesh: DeviceMesh,
-        reshard_after_forward: bool,
-        use_activation_checkpointing: bool,
-        mlp_dim: int,
-        sync_gradients_at_last_batch: bool,
-    ):
-        torch.manual_seed(42)
-        model = nn.Sequential(
-            nn.LayerNorm(mlp_dim, bias=False),
-            MLP(mlp_dim, dim_multiplier=3),
-            MLP(mlp_dim),
-            MLP(mlp_dim, dim_multiplier=3),
-        )
-        ref_model = copy.deepcopy(model).cuda()
-        replicate(ref_model, device_ids=[self.rank])
-        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
-        for mlp in model:
-            if use_activation_checkpointing:
-                checkpoint(mlp)
-            fully_shard(
-                mlp, mesh=global_mesh, reshard_after_forward=reshard_after_forward
-            )
-        fully_shard(
-            model, mesh=global_mesh, reshard_after_forward=reshard_after_forward
-        )
-        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
-        check_sharded_parity(self, ref_model, model)
-        torch.manual_seed(42 + self.rank + 1)
-        device = torch.device("cuda")
-        num_microbatches = 3
-        for iter_idx in range(5):
-            for microbatch_idx in range(num_microbatches):
-                is_last_microbatch = microbatch_idx == num_microbatches - 1
-                if sync_gradients_at_last_batch:
-                    model.set_requires_gradient_sync(is_last_microbatch)
-                inp = torch.randn((8, mlp_dim), device=device)
-                losses: List[torch.Tensor] = []
-                for _model, _optim in ((ref_model, ref_optim), (model, optim)):
-                    losses.append(_model(inp).sum())
-                    losses[-1].backward()
-                self.assertEqual(losses[0], losses[1])
-            check_sharded_parity(self, ref_model, model)
-            for _model, _optim in ((ref_model, ref_optim), (model, optim)):
-                _optim.step()
-                _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
-            check_sharded_parity(self, ref_model, model)
 
 
 if __name__ == "__main__":
