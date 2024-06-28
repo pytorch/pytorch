@@ -3935,24 +3935,51 @@ class TestCudaMallocAsync(TestCase):
         finally:
             random.setstate(state)
 
-    @unittest.skipIf(TEST_PYNVML, "pynvml is not available")
+    @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_nvml_get_handler(self):
         if not torch.version.hip:
             self.assertTrue(torch.cuda._get_pynvml_handler() is not None)
         else:
             self.assertTrue(torch.cuda._get_amdsmi_handler() is not None)
 
-    @unittest.skipIf(TEST_PYNVML, "pynvml is not available")
+    @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_temperature(self):
         self.assertTrue(0 <= torch.cuda.temperature() <= 150)
 
-    @unittest.skipIf(TEST_PYNVML, "pynvml is not available")
+    @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_power_draw(self):
         self.assertTrue(torch.cuda.power_draw() >= 0)
 
-    @unittest.skipIf(TEST_PYNVML, "pynvml is not available")
+    @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_clock_speed(self):
         self.assertTrue(torch.cuda.clock_rate() >= 0)
+
+    @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
+    @unittest.skipIf(not TEST_WITH_ROCM, "amdsmi specific test")
+    def test_raw_amdsmi_device_count(self):
+        raw_device_cnt = int(
+            subprocess.check_output(
+                "amd-smi list | grep 'GPU' | wc -l", shell=True
+            ).strip()
+        )
+        self.assertEqual(torch.cuda._raw_device_count_amdsmi(), raw_device_cnt)
+
+    @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
+    @unittest.skipIf(not TEST_WITH_ROCM, "amdsmi specific test")
+    def test_raw_amdsmi_device_uuids(self):
+        cmd = "rocminfo | grep -o 'Uuid:.*GPU-.*' | sed 's/Uuid:.*GPU-//'"
+        uuids = (
+            subprocess.check_output(cmd, shell=True, universal_newlines=True)
+            .strip()
+            .split("\n")
+        )
+        uuids = [s.strip() for s in uuids]
+        raw_uuids = torch.cuda._raw_device_uuid_amdsmi()
+        for uuid in uuids:
+            matching = True
+            if not any(uuid in raw_id for raw_id in raw_uuids):
+                matching = False
+        self.assertEqual(True, matching)
 
 
 MIN_BLOCK_SIZE = 512

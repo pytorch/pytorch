@@ -750,11 +750,15 @@ def _raw_device_uuid_amdsmi() -> Optional[List[str]]:
             warnings.warn("Cannot get amd device handler")
             return None
         try:
-            uuid = amdsmi.amdsmi_get_gpu_device_uuid(handler)
+            uuid = amdsmi.amdsmi_get_gpu_asic_info(handler)["asic_serial"][
+                2:
+            ]  # Removes 0x prefix
         except amdsmi.AmdSmiException:
             warnings.warn("Cannot get uuid for amd device")
             return None
-        uuids.append(str(uuid))
+        uuids.append(
+            str(uuid).lower()
+        )  # Lower-case to match expected HIP_VISIBLE_DEVICES uuid input
     return uuids
 
 
@@ -806,6 +810,10 @@ def _transform_uuid_to_ordinals(candidates: List[str], uuids: List[str]) -> List
 
     rc: List[int] = []
     for candidate in candidates:
+        if torch.version.hip:
+            candidate = candidate.replace(
+                "GPU-", "", 1
+            )  # Remove GPU-prefix to match amdsmi asic seria
         idx = uuid_to_orinal(candidate, uuids)
         # First invalid ordinal stops parsing
         if idx < 0:
@@ -823,7 +831,12 @@ def _device_count_amdsmi() -> int:
         return 0
     try:
         if type(visible_devices[0]) is str:
-            return -1
+            uuids = _raw_device_uuid_amdsmi()
+            if uuids is None:
+                return -1
+            visible_devices = _transform_uuid_to_ordinals(
+                cast(List[str], visible_devices), uuids
+            )
         else:
             raw_cnt = _raw_device_count_amdsmi()
             if raw_cnt <= 0:
@@ -1082,7 +1095,10 @@ def _get_amdsmi_device_index(device: Optional[Union[int, Device]]) -> int:
     idx = _get_device_index(device, optional=True)
     visible_devices = _parse_visible_devices()
     if type(visible_devices[0]) is str:
-        raise RuntimeError("HIP_VISIBLE_DEVICES should be indices and not strings")
+        uuids = _raw_device_uuid_amdsmi()
+        if uuids is None:
+            raise RuntimeError("Can't get device UUIDs")
+        visible_devices = _transform_uuid_to_ordinals(visible_devices, uuids)
     idx_map = dict(enumerate(cast(List[int], visible_devices)))
     if idx not in idx_map:
         raise RuntimeError(
