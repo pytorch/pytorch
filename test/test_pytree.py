@@ -22,7 +22,6 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
-
 if IS_FBCODE:
     # optree is not yet enabled in fbcode, so just re-test the python implementation
     cxx_pytree = py_pytree

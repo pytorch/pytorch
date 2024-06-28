@@ -11,6 +11,7 @@ from torch.testing._internal.common_device_type import (
     ops,
 )
 from torch.testing._internal.common_methods_invocations import op_db
+
 from torch.testing._internal.common_utils import (
     IS_MACOS,
     run_tests,
@@ -19,7 +20,6 @@ from torch.testing._internal.common_utils import (
     TestGradients,
     unMarkDynamoStrictTest,
 )
-
 
 # TODO: mitigate flaky issue on macOS https://github.com/pytorch/pytorch/issues/66033
 # AFAIK, c10::ThreadPool looks correct in the way it uses condition_variable wait. The

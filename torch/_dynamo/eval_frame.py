@@ -54,8 +54,8 @@ from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
 from ..fx import GraphModule
 from .backends.registry import CompilerFn, lookup_backend
-from .hooks import Hooks
 
+from .hooks import Hooks
 
 # see discussion at https://github.com/pytorch/pytorch/issues/120699
 reset_code = torch._C._dynamo.eval_frame.reset_code  # noqa: F401
@@ -70,11 +70,9 @@ from .exc import CondOpArgsMismatchError, UserError, UserErrorType
 from .mutation_guard import install_generation_tagging_init
 from .utils import common_constant_types, compile_times
 
-
 log = logging.getLogger(__name__)
 
 from torch._dispatch.python import enable_python_dispatcher
-
 
 always_optimize_code_objects = utils.ExactWeakKeyDictionary()
 null_context = contextlib.nullcontext
@@ -82,10 +80,8 @@ null_context = contextlib.nullcontext
 
 import sympy
 
-
 if TYPE_CHECKING:
     from torch._subclasses import fake_tensor
-
     from .types import CacheEntry, DynamoCallback
 
 

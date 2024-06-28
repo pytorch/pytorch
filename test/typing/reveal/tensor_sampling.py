@@ -1,7 +1,6 @@
 # flake8: noqa
 import torch
 
-
 # seed
 reveal_type(torch.seed())  # E: int
 
