@@ -1,6 +1,5 @@
 import operator_benchmark as op_bench
 
-
 """
 Configs shared by multiple benchmarks
 """
