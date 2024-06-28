@@ -1,6 +1,5 @@
 import torch
 
-
 RPC_SPARSE = "rpc_sparse"
 RPC_DENSE = "rpc_dense"
 
