@@ -2006,13 +2006,12 @@ torch.cuda.synchronize()
         input = torch.rand(
             (8, 8), device="cuda", dtype=torch.float16, requires_grad=True
         )
-        with torch.autocast(
-            "cuda",
-        ):
-            output = checkpoint_sequential(model, 2, input, use_reentrant=True)
-        self.assertTrue(output.requires_grad)
-        self.assertTrue(output.dtype is torch.float16)
-        output.sum().backward()
+        for reentrant in (True, False):
+            with torch.autocast("cuda"):
+                output = checkpoint_sequential(model, 2, input, use_reentrant=reentrant)
+            self.assertTrue(output.requires_grad)
+            self.assertTrue(output.dtype is torch.float16)
+            output.sum().backward()
 
     def test_cuda_autocast_deprecated_warning(self):
         with self.assertWarnsRegex(
@@ -2318,6 +2317,9 @@ exit(2)
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        IS_JETSON, "oom reporting has issues on jetson igx due to partial nvml support"
     )
     def test_graph_capture_oom(self):
         oom_regex = (
