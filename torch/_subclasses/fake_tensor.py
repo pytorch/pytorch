@@ -144,13 +144,28 @@ def unset_fake_temporarily() -> Generator[Optional[TorchDispatchMode], None, Non
             torch._C._set_dispatch_mode(old)
 
 
+def get_plain_tensors(subclass: Tensor) -> List[Tensor]:
+    assert is_traceable_wrapper_subclass(subclass)
+    plain_tensors = []
+    todo = [subclass]
+    while todo:
+        curr = todo.pop()
+        inner_keys, _ = curr.__tensor_flatten__()
+        for key in inner_keys:
+            val = getattr(curr, key)
+            if not is_traceable_wrapper_subclass(val):
+                plain_tensors.append(val)
+            else:
+                todo.append(val)
+    return plain_tensors
+
+
 def is_fake(x: object) -> TypeGuard[Tensor]:
     if isinstance(x, FakeTensor):
         return True
     if is_traceable_wrapper_subclass(x):
         attrs, _ = type(x).__tensor_flatten__(x)
         flattened_tensors = [getattr(x, attr) for attr in attrs]
-        # need to recurse because we could have nested subclasses
         all_fake = all(is_fake(x) for x in flattened_tensors)
         any_fake = any(is_fake(x) for x in flattened_tensors)
         assert all_fake == any_fake, "got mixed fake and real tensors!"
@@ -453,8 +468,10 @@ class FakeTensorConverter:
 def init_cuda_context() -> None:
     # Backward will error with cuda Fake Tensors if no cuda tensors have been initialized first
     if torch.cuda.is_available():
-        torch.empty(1, device="cuda") if torch.version.hip is None else torch.zeros(
-            1, device="cuda"
+        (
+            torch.empty(1, device="cuda")
+            if torch.version.hip is None
+            else torch.zeros(1, device="cuda")
         )
 
 

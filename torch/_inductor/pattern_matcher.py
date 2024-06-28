@@ -107,20 +107,17 @@ NodeOrConstant = Union[Constant, torch.fx.Node]
 class SearchFn(Protocol):
     __name__: str
 
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        ...
+    def __call__(self, *args: Any, **kwargs: Any) -> Any: ...
 
 
 class ReplaceFn(Protocol):
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        ...
+    def __call__(self, *args: Any, **kwargs: Any) -> Any: ...
 
 
 class TraceFn(Protocol):
     def __call__(
         self, fn: Union[SearchFn, ReplaceFn], *args: Any, **kwargs: Any
-    ) -> torch.fx.GraphModule:
-        ...
+    ) -> torch.fx.GraphModule: ...
 
 
 T = TypeVar("T")
@@ -202,7 +199,7 @@ class Match:
 
     def erase_nodes(self, graph: torch.fx.Graph) -> None:
         for n in reversed(self.nodes):
-            if not n._erased:
+            if not n._erased and not n.users:
                 graph.erase_node(n)
 
     def output_nodes(self) -> List[Optional[torch.fx.Node]]:
@@ -333,8 +330,7 @@ class PatternExpr(ABC):
     """
 
     @abstractmethod
-    def _match(self, node: torch.fx.Node, ctx: MatchContext) -> MatchResult:
-        ...
+    def _match(self, node: torch.fx.Node, ctx: MatchContext) -> MatchResult: ...
 
     def match(self, node: torch.fx.Node) -> MatchResult:
         try:
@@ -457,8 +453,7 @@ class _TargetExpr(PatternExpr):
 
     @property
     @abstractmethod
-    def op(self) -> str:
-        ...
+    def op(self) -> str: ...
 
     def fns_repr(self) -> str:
         first_repr = self.fns[0]
@@ -950,8 +945,9 @@ class PatternPrettyPrinter:
 
 
 class _PassDictsType(Protocol):
-    def __getitem__(self, k: Tuple[str, torch.fx.node.Target]) -> List[PatternEntry]:
-        ...
+    def __getitem__(
+        self, k: Tuple[str, torch.fx.node.Target]
+    ) -> List[PatternEntry]: ...
 
 
 @dataclasses.dataclass
@@ -1060,7 +1056,10 @@ class ReplacementPatternEntry(PatternEntry):
             last_node = min(indices, key=operator.itemgetter(0))[1]
 
         def percolate_tags(
-            node: torch.fx.Node, recompute_tag: str, input_stops: Set[torch.fx.Node]
+            node: torch.fx.Node,
+            tag_name: str,
+            tag_value: str,
+            input_stops: Set[torch.fx.Node],
         ) -> None:
             queue = [node]
             visited = set()
@@ -1073,7 +1072,7 @@ class ReplacementPatternEntry(PatternEntry):
                     and hasattr(arg, "meta")
                 ):
                     visited.add(arg)
-                    arg.meta["recompute"] = recompute_tag
+                    arg.meta[tag_name] = tag_value
                     queue.extend(arg.all_input_nodes)
 
         with graph.inserting_before(last_node):
@@ -1113,8 +1112,9 @@ class ReplacementPatternEntry(PatternEntry):
                     # many to many, there is no easy way to correctly map the
                     # recomputable tags. It is possible in some scenarios that we
                     # incorrectly tag some nodes as recomputables.
-                    if "recompute" in old.meta:
-                        percolate_tags(new, old.meta["recompute"], set(args))
+                    for tag_name in ["recompute", "ac_graph_id"]:
+                        if tag_name in old.meta:
+                            percolate_tags(new, tag_name, old.meta[tag_name], set(args))
 
                     old.replace_all_uses_with(new)
                     graph.erase_node(old)
