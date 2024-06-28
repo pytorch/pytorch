@@ -273,7 +273,12 @@ class CppTemplateKernel(CppKernel):
             with LocalBufferContext(self.args) as scope:
                 assert orig_src is not None
                 if orig_src.get_name() != src.get_name():
-                    scope.add_local_buffer(src, orig_src)
+                    scope.add_local_buffer(
+                        src,
+                        [
+                            orig_src,
+                        ],
+                    )
                     epilogue_nodes = scope.localize_nodes(epilogue_nodes)
                 return self.store_pointwise_nodes(
                     dst, epilogue_nodes, offsets, reindexers  # type: ignore[arg-type]
