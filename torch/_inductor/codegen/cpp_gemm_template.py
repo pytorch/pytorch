@@ -253,6 +253,13 @@ class CppPackedGemmTemplate(CppTemplate):
         def reorder_and_filter(inputs, layout_or_out):
             if _is_int8_gemm(inputs):
                 # No need to reorder for int8 gemm
+                if has_bias:
+                    inp_idx = input_indices[6]
+                    return [
+                        *[inputs[idx] for idx in input_indices[:6]],
+                        inputs[inp_idx],
+                        *[inputs[idx] for idx in input_indices[7:]],
+                    ], layout_or_out
                 return inputs, layout_or_out
 
             if has_bias:
