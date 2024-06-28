@@ -48,6 +48,7 @@ def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
     def is_valid_match(match):
         return match.kwargs["item_idx"] == 0
 
+    TODO: need another pass (before this pass) to remove unneeded all_gather_copy_in[1] node from the graph, before applying this pass.
     @register_graph_pattern(
         CallFunction(
             torch.ops._c10d_functional.all_gather_into_tensor.default,
