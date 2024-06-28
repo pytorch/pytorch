@@ -11,6 +11,7 @@ from . import config, ir
 from .dependencies import WeakDep
 from .utils import is_collective, is_wait, tuple_sorted
 
+
 overlap_log = torch._logging.getArtifactLogger(__name__, "overlap")
 
 if TYPE_CHECKING:

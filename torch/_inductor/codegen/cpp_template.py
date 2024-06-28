@@ -3,7 +3,6 @@ import ctypes
 import functools
 import itertools
 import logging
-
 import sys
 from typing import Callable, List, Optional
 from unittest.mock import patch
@@ -16,6 +15,7 @@ from ..utils import IndentedBuffer, Placeholder, unique
 from ..virtualized import V
 from .common import KernelTemplate
 from .cpp_template_kernel import CppTemplateCaller, CppTemplateKernel
+
 
 log = logging.getLogger(__name__)
 

@@ -8,13 +8,14 @@ from unittest.mock import patch
 import sympy
 
 import torch
+
 from ...autotune_process import CUDABenchmarkRequest, TensorMeta
 from ...ir import Buffer, CUDATemplateBuffer, IRNode, Layout
-
 from ...utils import IndentedBuffer, unique
 from ...virtualized import V
 from ..common import KernelTemplate
 from .cuda_kernel import CUDATemplateCaller, CUDATemplateKernel
+
 
 log = logging.getLogger(__name__)
 

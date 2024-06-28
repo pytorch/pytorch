@@ -6,7 +6,6 @@ import inspect
 import itertools
 import json
 import logging
-
 import math
 import operator
 import os
@@ -16,7 +15,6 @@ import time
 from collections import namedtuple
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
-
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from unittest.mock import patch
 
@@ -32,7 +30,6 @@ from . import config, ir
 from .autotune_process import TensorMeta, TritonBenchmarkRequest
 from .codecache import code_hash, PersistentCache, PyCodeCache
 from .codegen.common import IndentedBuffer, KernelTemplate
-
 from .codegen.triton import (
     gen_common_triton_imports,
     texpr,
@@ -40,7 +37,6 @@ from .codegen.triton import (
     TritonPrinter,
     TritonScheduling,
 )
-
 from .codegen.triton_utils import config_of, signature_to_meta
 from .exc import CUDACompileError
 from .ir import ChoiceCaller, PrimitiveInfoType
@@ -57,6 +53,7 @@ from .utils import (
     unique,
 )
 from .virtualized import V
+
 
 log = logging.getLogger(__name__)
 

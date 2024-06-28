@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from typing import cast, List, Set, Tuple, Union
 
 import torch
-from .. import inductor_prims
 
+from .. import inductor_prims
 from ..pattern_matcher import (
     CallFunction,
     Ignored,
@@ -15,6 +15,7 @@ from ..pattern_matcher import (
     PatternMatcherPass,
     register_graph_pattern,
 )
+
 
 aten = torch.ops.aten
 patterns = PatternMatcherPass()
