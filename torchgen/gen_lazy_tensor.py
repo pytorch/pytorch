@@ -1,19 +1,10 @@
+from __future__ import annotations
+
 import argparse
 import os
 from collections import namedtuple
 from pathlib import Path
-from typing import (
-    Any,
-    Callable,
-    Iterable,
-    Iterator,
-    List,
-    Optional,
-    Sequence,
-    Tuple,
-    Type,
-    Union,
-)
+from typing import Any, Callable, Iterable, Iterator, Sequence
 
 import yaml
 
@@ -102,8 +93,8 @@ ParsedExternalYaml = namedtuple(
 
 def parse_native_functions_keys(
     backend_yaml_path: str,
-    grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
-) -> Tuple[List[OperatorName], List[Any], List[OperatorName]]:
+    grouped_native_functions: Sequence[NativeFunction | NativeFunctionsGroup],
+) -> tuple[list[OperatorName], list[Any], list[OperatorName]]:
     with open(backend_yaml_path) as f:
         yaml_values = yaml.load(f, Loader=YamlLoader)
     assert isinstance(yaml_values, dict)
@@ -120,7 +111,7 @@ def parse_native_functions_keys(
 
 
 def validate_shape_inference_header(
-    shape_inference_hdr: str, expected_shape_infr_decls: List[str]
+    shape_inference_hdr: str, expected_shape_infr_decls: list[str]
 ) -> None:
     try:
         with open(shape_inference_hdr) as f:
@@ -180,12 +171,12 @@ std::vector<at::Tensor> to_meta(at::ITensorListRef t_list) {
 
 class default_args:
     node_base: str = "Node"
-    node_base_hdr: Optional[str] = None
+    node_base_hdr: str | None = None
     shape_inference_hdr: str = "torch/csrc/lazy/core/shape_inference.h"
     tensor_class: str = "torch::lazy::LazyTensor"
     tensor_class_hdr: str = "torch/csrc/lazy/core/tensor.h"
-    lazy_ir_generator: Type[GenLazyIR] = GenLazyIR
-    native_func_definition_generator: Type[
+    lazy_ir_generator: type[GenLazyIR] = GenLazyIR
+    native_func_definition_generator: type[
         GenLazyNativeFuncDefinition
     ] = GenLazyNativeFuncDefinition
     backend_name: str = "TorchScript"
@@ -263,10 +254,10 @@ def main() -> None:
     # Assumes that this file lives at PYTORCH_ROOT/torchgen/gen_backend_stubs.py
     torch_root = Path(__file__).absolute().parents[2]
     aten_path = str(torch_root / "aten" / "src" / "ATen")
-    lazy_ir_generator: Type[GenLazyIR] = default_args.lazy_ir_generator
+    lazy_ir_generator: type[GenLazyIR] = default_args.lazy_ir_generator
     if options.gen_ts_lowerings:
         lazy_ir_generator = GenTSLazyIR
-    native_func_definition_generator: Type[
+    native_func_definition_generator: type[
         GenLazyNativeFuncDefinition
     ] = default_args.native_func_definition_generator
 
@@ -292,14 +283,14 @@ def run_gen_lazy_tensor(
     source_yaml: str,
     output_dir: str,
     dry_run: bool,
-    impl_path: Optional[str],
+    impl_path: str | None,
     node_base: str = default_args.node_base,
-    node_base_hdr: Optional[str] = default_args.node_base_hdr,
+    node_base_hdr: str | None = default_args.node_base_hdr,
     tensor_class: str = default_args.tensor_class,
     tensor_class_hdr: str = default_args.tensor_class_hdr,
     shape_inference_hdr: str = default_args.shape_inference_hdr,
-    lazy_ir_generator: Type[GenLazyIR] = default_args.lazy_ir_generator,
-    native_func_definition_generator: Type[
+    lazy_ir_generator: type[GenLazyIR] = default_args.lazy_ir_generator,
+    native_func_definition_generator: type[
         GenLazyNativeFuncDefinition
     ] = default_args.native_func_definition_generator,
     # build_in_tree is true for TS backend and affects include paths
@@ -347,7 +338,7 @@ def run_gen_lazy_tensor(
     )
     grouped_native_functions = get_grouped_native_functions(native_functions)
 
-    def sort_native_function(f: Union[NativeFunctionsGroup, NativeFunction]) -> str:
+    def sort_native_function(f: NativeFunctionsGroup | NativeFunction) -> str:
         """
         We sort the native function because of the note in concat_map_codegen.
         TODO(alanwaketan): Remove this sorting hack once all ops are grouped properly.
@@ -377,8 +368,8 @@ def run_gen_lazy_tensor(
 
     def concat_map_codegen(
         func: Callable[[NativeFunction], Sequence[str]],
-        xs: Iterable[Union[NativeFunctionsGroup, NativeFunction]],
-        ops_list: List[OperatorName] = full_codegen,
+        xs: Iterable[NativeFunctionsGroup | NativeFunction],
+        ops_list: list[OperatorName] = full_codegen,
     ) -> Iterator[str]:
         """
         We code-gen for the functional variant, which is all we need for IR classes/lowerings/shape inferences, but we
