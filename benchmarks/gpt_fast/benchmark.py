@@ -10,7 +10,6 @@ import torch
 import torch.nn as nn
 from torch.utils.flop_counter import FlopCounterMode
 
-
 WARMUP_ITER = 5
 
 A100_80G_BF16_TFLOPS = 312
