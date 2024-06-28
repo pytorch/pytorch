@@ -8,7 +8,6 @@
 
 import confu
 
-
 parser = confu.standard_parser("clog configuration script")
 
 

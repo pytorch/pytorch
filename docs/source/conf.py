@@ -24,8 +24,8 @@ from os import path
 
 # source code directory, relative to this file, for sphinx-autobuild
 # sys.path.insert(0, os.path.abspath('../..'))
-import torch
 
+import torch
 
 try:
     import torchvision  # noqa: F401
@@ -37,7 +37,6 @@ except ImportError:
 RELEASE = os.environ.get("RELEASE", False)
 
 import pytorch_sphinx_theme
-
 
 # -- General configuration ------------------------------------------------
 
@@ -3475,7 +3474,6 @@ html_css_files = [
 
 from sphinx.ext.coverage import CoverageBuilder
 
-
 # NB: Due to some duplications of the following modules/functions, we keep
 # them as expected failures for the time being instead of return 1
 ignore_duplicated_modules = {
@@ -3720,14 +3718,13 @@ intersphinx_mapping = {
 }
 
 import sphinx.ext.doctest
-from docutils import nodes
-from sphinx import addnodes
-from sphinx.util.docfields import TypedField
-
 
 # -- A patch that prevents Sphinx from cross-referencing ivar tags -------
 # See http://stackoverflow.com/a/41184353/3343043
 
+from docutils import nodes
+from sphinx import addnodes
+from sphinx.util.docfields import TypedField
 
 # Without this, doctest adds any example with a `>>>` as a test
 doctest_test_doctest_blocks = ""

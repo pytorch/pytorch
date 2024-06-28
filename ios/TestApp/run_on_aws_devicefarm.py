@@ -12,7 +12,6 @@ from typing import Any
 import boto3
 import requests
 
-
 POLLING_DELAY_IN_SECOND = 5
 MAX_UPLOAD_WAIT_IN_SECOND = 600
 
