@@ -786,20 +786,14 @@ class TestConverter(TestCase):
 
         # match non-strict export behavior that errors when the given input leads to
         # RaiseException.
-        with self.assertRaisesRegex(RuntimeError, "test"):
+        with self.assertRaisesRegex(torch.jit.Error, "builtins.RuntimeError"):
             inp = (torch.randn(3, 2), 1)
             self._check_equal_ts_ep_converter(Module(), inp, ["script"])
 
-        # TODO: This should not error. Need control flow op update to support this case.
-        # Depend on landing this PR: https://github.com/pytorch/pytorch/pull/128709
-        # Currently, control flow op always run both branches, leading to a RuntimeError
-        # even if y <= 0.
-        # By contrary, non-strict export only execute 1 branch according to the given input.
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.TorchRuntimeError, "builtins.RuntimeError"
-        ):
-            inp = (torch.randn(3, 2), 0)
-            self._check_equal_ts_ep_converter(Module(), inp, ["script"])
+        # Matching non-strict export behavior that only executes 1 if-branch according
+        # to the given input.
+        inp = (torch.randn(3, 2), 0)
+        self._check_equal_ts_ep_converter(Module(), inp, ["script"])
 
         class Module(torch.nn.Module):
             def forward(self, x: torch.Tensor, y: int) -> torch.Tensor:
@@ -811,23 +805,18 @@ class TestConverter(TestCase):
                     z = x + y
                 return x + y + z
 
-        scripted = torch.jit.script(Module())
-        print(scripted.graph)
-
         # match non-strict export behavior that errors when the given input leads to
         # RaiseException.
         with self.assertRaisesRegex(
-            torch._dynamo.exc.TorchRuntimeError, "builtins.RuntimeError"
+            torch.jit.Error, "builtins.RuntimeError"
         ):
             inp = (torch.randn(3, 2), 1)
             self._check_equal_ts_ep_converter(Module(), inp, ["script"])
 
-        # TODO: Should not error. Depend on landing this PR: https://github.com/pytorch/pytorch/pull/128709
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.TorchRuntimeError, "builtins.RuntimeError"
-        ):
-            inp = (torch.randn(3, 2), 0)
-            self._check_equal_ts_ep_converter(Module(), inp, ["script"])
+        # Matching non-strict export behavior that only executes 1 if-branch according
+        # to the given input.
+        inp = (torch.randn(3, 2), 0)
+        self._check_equal_ts_ep_converter(Module(), inp, ["script"])
 
 
 if __name__ == "__main__":
