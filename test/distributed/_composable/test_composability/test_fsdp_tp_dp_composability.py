@@ -16,6 +16,7 @@ from torch.distributed._composable.fsdp import CPUOffloadPolicy
 from torch.distributed._composable.fsdp.fully_shard import fully_shard
 from torch.distributed._tensor import (
     DeviceMesh,
+    DTensor,
     DTensor as DT,
     init_device_mesh,
     Replicate,
@@ -796,6 +797,58 @@ class TestNew2dParallelStateDict(DTensorTestBase):
                     )
                 else:
                     self.assertEqual(new_state, state)
+
+
+class Test2dParallelIntegration(DTensorTestBase):
+    def _check_module(self, m1, m2, check_grad=False):
+        named_parameters = dict(m1.named_parameters())
+        for name, param_m2 in m2.named_parameters():
+            if name not in named_parameters:
+                print(name, named_parameters.keys())
+            self.assertTrue(name in named_parameters)
+            param_m1 = named_parameters[name]
+            if check_grad:
+                param_m2 = param_m2.grad
+                param_m1 = param_m1.grad
+            if isinstance(param_m2, DTensor):
+                replicate = [Replicate()]
+                param_m2 = param_m2.redistribute(
+                    device_mesh=param_m2.device_mesh, placements=replicate
+                ).to_local()
+            self.assertEqual(param_m2, param_m1)
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_2d_ddp_integration_functionality(self) -> None:
+        model, twod_model, dp_pg = init_model(self.device_type)
+        optim = torch.optim.Adam(model.parameters(), lr=LR)
+        twod_optim = torch.optim.Adam(twod_model.parameters(), lr=LR)
+
+        # Create Input
+        input_seed = dist.get_rank(dp_pg)
+        torch.manual_seed(input_seed + 1)
+        input = torch.rand(4, 10, device=self.device_type)
+
+        output = model(input)
+        twod_output = twod_model(input)
+        self.assertEqual(output, twod_output)
+
+        output.sum().backward()
+        twod_output.sum().backward()
+        self._check_module(model, twod_model, check_grad=True)
+
+        optim.step()
+        twod_optim.step()
+        self._check_module(model, twod_model)
+
+        torch.manual_seed(input_seed + 1004)
+        input = torch.rand(16, 10, device=self.device_type)
+
+        output = model(input)
+        twod_output = twod_model(input)
+        self.assertEqual(output, twod_output)
+
+        # TODO: Add save/load of 2D verification.
 
 
 instantiate_parametrized_tests(TestNew2dParallelStateDict)
