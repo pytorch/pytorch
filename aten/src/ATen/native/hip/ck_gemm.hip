@@ -17,6 +17,8 @@
 //#include <c10/cuda/CUDAStream.h>
 #include <ATen/hip/impl/HIPStreamMasqueradingAsCUDA.h>
 #include <torch/torch.h>
+#include <ATen/native/hip/ck_gemm.h>
+
 
 #include "ck/ck.hpp"
 #include "ck/tensor_operation/gpu/device/gemm_specialization.hpp"
@@ -44,6 +46,58 @@ using PassThrough = ck::tensor_operation::element_wise::PassThrough;
 using Add = ck::tensor_operation::element_wise::Add;
 
 namespace at::native {
+
+template <>
+void gemm_internal_ck<double>(CUDABLAS_GEMM_ARGTYPES(double)) {
+  return;
+}
+
+template <>
+void gemm_internal_ck<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
+  return;
+}
+
+template <>
+void gemm_internal_ck<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<double>)) {
+  return;
+}
+
+template <>
+void gemm_internal_ck<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>)) {
+  return;
+}
+
+template <>
+void gemm_internal_ck<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
+  return;
+}
+
+template <>
+void gemm_internal_ck<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
+  return;
+}
+
+/*
+TODO - Remove this blurb
+Parameters traditionally being passed to gemms
+- char transa
+- char transb
+- int64 m
+- int64 n
+- int64 k
+- opMath_type alpha
+
+- const dtype * a
+- int64 lda
+- const dtype * b
+- int64 ldb
+- opMath_type beta
+- dtype * c
+- ldc
+
+*/
+
+
 
 template <
     int BLOCK_SIZE,
