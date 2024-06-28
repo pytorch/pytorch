@@ -2,7 +2,7 @@
 
 import unittest
 from collections import OrderedDict
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Tuple, Union
 
 import torch
 
@@ -23,7 +23,7 @@ class TestConverter(TestCase):
         inp,
         option: Union[List[str]] = None,
         check_persistent=False,
-        lifted_tensor_constants: Optional[OrderedDict[str, torch.Tensor]] = None,
+        lifted_tensor_constants=None,
     ) -> ExportedProgram:
         # By default, it tests both jit.trace and jit.script.
         if option is None:
