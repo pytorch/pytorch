@@ -6,7 +6,6 @@ from typing import Any, Callable, List, NamedTuple
 import torch
 from torch.autograd import functional
 
-
 try:
     import functorch as ft
 

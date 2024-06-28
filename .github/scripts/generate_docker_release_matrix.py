@@ -16,7 +16,6 @@ from typing import Dict, List
 
 import generate_binary_build_matrix
 
-
 DOCKER_IMAGE_TYPES = ["runtime", "devel"]
 
 
