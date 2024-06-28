@@ -6137,11 +6137,11 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         b_bf16 = torch.rand((k, n), dtype=torch.bfloat16, device=device)
 
         def convert_weight_to_int4pack(b):
-            b_int32, b_scales_and_zeros = _group_quantize_tensor(
+            b_uint8, b_scales_and_zeros = _group_quantize_tensor(
                 b, n_bit=4, q_group_size=q_group
             )
             b_int4pack = torch._convert_weight_to_int4pack(
-                b_int32, inner_k_tiles
+                b_uint8, inner_k_tiles
             )
 
             return b_int4pack, b_scales_and_zeros

@@ -3442,14 +3442,14 @@ Tensor _convert_weight_to_int4pack_cpu(
 
   TORCH_CHECK(in.dim() == 2,
       __func__, " : expect weight to be 2D tensor.");
-  TORCH_CHECK(in.dtype() == at::kInt,
-      __func__, " : expect weight to be kInt.");
+  TORCH_CHECK(in.dtype() == at::kByte,
+      __func__, " : expect weight to be kByte.");
   TORCH_CHECK(innerKTiles == 2 || innerKTiles == 4 || innerKTiles == 8,
       __func__, " : innerKTiles need to be 2, 4, or 8, got ", innerKTiles);
 
   auto weight = in.contiguous();
   auto N = weight.size(0);
-  auto K = weight.size(1);
+  auto K = weight.size(1) * 2;
 
   // Create fake shapes for cpu. The meta registration in dynamo requires
   // operator has the same output shape for each device. So creating a fake
@@ -3470,6 +3470,7 @@ Tensor _convert_weight_to_int4pack_cpu(
       at::TensorOptions().dtype(at::kInt));
 
   weight_to_int4pack_stub(kCPU, weight_packed, weight, N, K);
+  std::cout<<"stub end\n";
   return weight_packed;
 }
 
