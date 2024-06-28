@@ -1155,7 +1155,7 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
         return False
 
     int8_gemm = mat1.get_dtype() == torch.uint8
-    layout_dtypes = [torch.float32, torch.bfloat16, torch.half]
+    layout_dtypes = [torch.float32, torch.bfloat16, torch.half, torch.uint8]
     m, n, k, layout, mat1, mat2 = mm_args(
         mat1, mat2, out_dtype=layout.dtype if int8_gemm else None
     )
