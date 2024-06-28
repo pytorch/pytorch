@@ -4981,7 +4981,7 @@ class CommonTemplate:
         def fn(x, y):
             z = y.item()
             torch._check(z // 2 == 3)
-            return x + x.new_zeros(z)
+            return x + x.new_ones(z)
 
         self.common(
             fn,
