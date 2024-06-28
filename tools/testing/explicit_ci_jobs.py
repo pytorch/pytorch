@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 
+from __future__ import annotations
+
 import argparse
 import fnmatch
 import subprocess
 import textwrap
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 import yaml
 
@@ -28,11 +30,11 @@ WORKFLOWS_TO_CHECK = [
 
 
 def add_job(
-    workflows: Dict[str, Any],
+    workflows: dict[str, Any],
     workflow_name: str,
     type: str,
-    job: Dict[str, Any],
-    past_jobs: Dict[str, Any],
+    job: dict[str, Any],
+    past_jobs: dict[str, Any],
 ) -> None:
     """
     Add job 'job' under 'type' and 'workflow_name' to 'workflow' in place. Also
@@ -57,14 +59,14 @@ def add_job(
 
 
 def get_filtered_circleci_config(
-    workflows: Dict[str, Any], relevant_jobs: List[str]
-) -> Dict[str, Any]:
+    workflows: dict[str, Any], relevant_jobs: list[str]
+) -> dict[str, Any]:
     """
     Given an existing CircleCI config, remove every job that's not listed in
     'relevant_jobs'
     """
-    new_workflows: Dict[str, Any] = {}
-    past_jobs: Dict[str, Any] = {}
+    new_workflows: dict[str, Any] = {}
+    past_jobs: dict[str, Any] = {}
     for workflow_name, workflow in workflows.items():
         if workflow_name not in WORKFLOWS_TO_CHECK:
             # Don't care about this workflow, skip it entirely
@@ -91,7 +93,7 @@ def get_filtered_circleci_config(
     return new_workflows
 
 
-def commit_ci(files: List[str], message: str) -> None:
+def commit_ci(files: list[str], message: str) -> None:
     # Check that there are no other modified files than the ones edited by this
     # tool
     stdout = subprocess.run(
