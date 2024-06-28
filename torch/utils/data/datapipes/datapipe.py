@@ -20,17 +20,17 @@ __all__ = [
     "MapDataPipe",
 ]
 
-T = TypeVar('T')
-T_co = TypeVar('T_co', covariant=True)
+T = TypeVar("T")
+T_co = TypeVar("T_co", covariant=True)
 
 dill = import_dill()
 HAS_DILL = dill is not None
 
 UNTRACABLE_DATAFRAME_PIPES = [
-    'batch',  # As it returns DataChunks
-    'groupby',   # As it returns DataChunks
-    '_dataframes_as_tuples',  # As it unpacks DF
-    'trace_as_dataframe',  # As it used to mark DF for tracing
+    "batch",  # As it returns DataChunks
+    "groupby",  # As it returns DataChunks
+    "_dataframes_as_tuples",  # As it unpacks DF
+    "trace_as_dataframe",  # As it used to mark DF for tracing
 ]
 
 
@@ -125,16 +125,22 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
             functools.update_wrapper(wrapper=function, wrapped=f, assigned=("__doc__",))
             return function
         else:
-            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{attribute_name}")
+            raise AttributeError(
+                f"'{self.__class__.__name__}' object has no attribute '{attribute_name}"
+            )
 
     @classmethod
     def register_function(cls, function_name, function):
         cls.functions[function_name] = function
 
     @classmethod
-    def register_datapipe_as_function(cls, function_name, cls_to_register, enable_df_api_tracing=False):
+    def register_datapipe_as_function(
+        cls, function_name, cls_to_register, enable_df_api_tracing=False
+    ):
         if function_name in cls.functions:
-            raise Exception(f"Unable to add DataPipe function name {function_name} as it is already taken")  # noqa: TRY002
+            raise Exception(  # noqa: TRY002
+                f"Unable to add DataPipe function name {function_name} as it is already taken"
+            )
 
         def class_function(cls, enable_df_api_tracing, source_dp, *args, **kwargs):
             result_pipe = cls(source_dp, *args, **kwargs)
@@ -176,13 +182,13 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
     @classmethod
     def set_getstate_hook(cls, hook_fn):
         if IterDataPipe.getstate_hook is not None and hook_fn is not None:
-            raise Exception("Attempt to override existing getstate_hook")  # noqa: TRY002
+            raise RuntimeError("Attempt to override existing getstate_hook")
         IterDataPipe.getstate_hook = hook_fn
 
     @classmethod
     def set_reduce_ex_hook(cls, hook_fn):
         if IterDataPipe.reduce_ex_hook is not None and hook_fn is not None:
-            raise Exception("Attempt to override existing reduce_ex_hook")  # noqa: TRY002
+            raise RuntimeError("Attempt to override existing reduce_ex_hook")
         IterDataPipe.reduce_ex_hook = hook_fn
 
     def __repr__(self):
@@ -268,7 +274,9 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
             functools.update_wrapper(wrapper=function, wrapped=f, assigned=("__doc__",))
             return function
         else:
-            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{attribute_name}")
+            raise AttributeError(
+                f"'{self.__class__.__name__}' object has no attribute '{attribute_name}"
+            )
 
     @classmethod
     def register_function(cls, function_name, function):
@@ -277,7 +285,9 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
     @classmethod
     def register_datapipe_as_function(cls, function_name, cls_to_register):
         if function_name in cls.functions:
-            raise Exception(f"Unable to add DataPipe function name {function_name} as it is already taken")  # noqa: TRY002
+            raise Exception(  # noqa: TRY002
+                f"Unable to add DataPipe function name {function_name} as it is already taken"
+            )
 
         def class_function(cls, source_dp, *args, **kwargs):
             result_pipe = cls(source_dp, *args, **kwargs)
@@ -312,13 +322,13 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
     @classmethod
     def set_getstate_hook(cls, hook_fn):
         if MapDataPipe.getstate_hook is not None and hook_fn is not None:
-            raise Exception("Attempt to override existing getstate_hook")  # noqa: TRY002
+            raise RuntimeError("Attempt to override existing getstate_hook")
         MapDataPipe.getstate_hook = hook_fn
 
     @classmethod
     def set_reduce_ex_hook(cls, hook_fn):
         if MapDataPipe.reduce_ex_hook is not None and hook_fn is not None:
-            raise Exception("Attempt to override existing reduce_ex_hook")  # noqa: TRY002
+            raise RuntimeError("Attempt to override existing reduce_ex_hook")
         MapDataPipe.reduce_ex_hook = hook_fn
 
     def __repr__(self):
@@ -395,7 +405,7 @@ class DataChunk(List[T]):
         super().__init__(items)
         self.items = items
 
-    def as_str(self, indent: str = '') -> str:
+    def as_str(self, indent: str = "") -> str:
         return indent + "[" + ", ".join(str(i) for i in iter(self)) + "]"
 
     def __iter__(self) -> Iterator[T]:

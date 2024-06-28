@@ -2001,6 +2001,7 @@ class _CudaDeviceProperties:
     is_multi_gpu_board: _int
     max_threads_per_multi_processor: _int
     gcnArchName: str
+    uuid: str
 
 # Functions related to SDPA
 class _SDPAParams:
@@ -2027,7 +2028,6 @@ class _SDPBackend(Enum):
     EFFICIENT_ATTENTION = 2
     CUDNN_ATTENTION = 3
 
-def _can_use_cudnn_attention(params: _SDPAParams, debug: _bool) -> _bool: ...
 def _can_use_flash_attention(params: _SDPAParams, debug: _bool) -> _bool: ...
 def _can_use_mem_efficient_attention(params: _SDPAParams, debug: _bool) -> _bool: ...
 
