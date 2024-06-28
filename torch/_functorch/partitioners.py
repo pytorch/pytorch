@@ -1268,6 +1268,8 @@ def get_default_op_list() -> OpTypes:
         aten.addmm,
         aten._scaled_dot_product_flash_attention,
         aten._scaled_dot_product_efficient_attention,
+        aten._flash_attention_forward,
+        aten._efficient_attention_forward,
         aten.upsample_bilinear2d,
     ]  # noqa: E501,B950
 
