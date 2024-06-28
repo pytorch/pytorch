@@ -416,6 +416,10 @@ def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
                     ), f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
                     placeholders.remove(n.args[0])
                 mutation_count += 1
+            elif n.target in [torch.ops.aten.split_with_sizes_copy.out]:
+                # These are mutation ops that can show up in the middle of the graph,
+                # because they are ops that we explicitly do **not** functinoalize
+                continue
             else:
                 assert (
                     not n.target._schema.is_mutable

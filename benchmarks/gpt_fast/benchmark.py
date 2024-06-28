@@ -76,7 +76,7 @@ def run_mlp_layer_norm_gelu(device: str = "cuda"):
         dtype_str = str(dtype).replace("torch.", "")
         results.append(
             Experiment(
-                f"mlp_layer_norm_gelu_{dtype_str}",
+                "mlp_layer_norm_gelu",
                 "flops_utilization",
                 expected_flops_utilization,
                 f"{flops_utilization:.02f}",
@@ -113,7 +113,7 @@ def run_layer_norm(device: str = "cuda"):
         dtype_str = str(dtype).replace("torch.", "")
         results.append(
             Experiment(
-                f"layer_norm_{dtype_str}",
+                "layer_norm",
                 "memory_bandwidth(GB/s)",
                 expected_memory_bandwidth,
                 f"{memory_bandwidth:.02f}",
@@ -156,7 +156,7 @@ def run_gather_gemv(device: str = "cuda"):
         dtype_str = str(dtype).replace("torch.", "")
         results.append(
             Experiment(
-                f"gather_gemv_{dtype_str}",
+                "gather_gemv",
                 "memory_bandwidth(GB/s)",
                 expected_memory_bandwidth,
                 f"{memory_bandwidth:.02f}",
@@ -197,7 +197,7 @@ def run_gemv(device: str = "cuda"):
         dtype_str = str(dtype).replace("torch.", "")
         results.append(
             Experiment(
-                f"gemv_{dtype_str}",
+                "gemv",
                 "memory_bandwidth(GB/s)",
                 expected_memory_bandwidth,
                 f"{memory_bandwidth:.02f}",

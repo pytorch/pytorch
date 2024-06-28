@@ -5382,6 +5382,26 @@ def forward(self, x, y):
                 _disable_forced_specializations=True,
             )
 
+    # TODO requires_grad doesn't seem to work with serialization.
+    @testing.expectedFailureSerDer
+    def test_preserve_requires_grad_placeholders(self):
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p = torch.nn.Parameter(torch.randn(3, 3))
+
+            def forward(self, x, y):
+                return self.p + x + y
+
+        m = Module()
+        ep = export(m, (torch.randn(3, 3), torch.randn(3, 3, requires_grad=True)))
+        placeholders = [
+            node for node in ep.graph_module.graph.nodes if node.op == "placeholder"
+        ]
+        self.assertTrue(placeholders[0].meta["val"].requires_grad)
+        self.assertFalse(placeholders[1].meta["val"].requires_grad)
+        self.assertTrue(placeholders[2].meta["val"].requires_grad)
+
     def test_reshape_view_helper(self):
         # see: https://github.com/pytorch/pytorch/issues/126607
         class Model(torch.nn.Module):

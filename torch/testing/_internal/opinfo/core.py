@@ -727,6 +727,9 @@ class OpInfo:
     # dtypes this function is expected to work with on ROCM
     dtypesIfROCM: _dispatch_dtypes = None
 
+    # dtypes this function is expected to work with on XPU
+    dtypesIfXPU: _dispatch_dtypes = None
+
     # backward dtypes this function is expected to work with
     backward_dtypes: _dispatch_dtypes = None
 
@@ -891,7 +894,12 @@ class OpInfo:
 
         assert self.dtypes is not None, f"OpInfo for {self.name} has no dtypes!"
 
-        dtypes_args = (self.dtypes, self.dtypesIfCUDA, self.dtypesIfROCM)
+        dtypes_args = (
+            self.dtypes,
+            self.dtypesIfCUDA,
+            self.dtypesIfROCM,
+            self.dtypesIfXPU,
+        )
 
         # Validates the dtypes are generated from the dispatch-related functions
         for dtype_list in dtypes_args:
@@ -959,6 +967,9 @@ class OpInfo:
             set(self.dtypesIfROCM)
             if self.dtypesIfROCM is not None
             else self.dtypesIfCUDA
+        )
+        self.dtypesIfXPU = (
+            set(self.dtypesIfXPU) if self.dtypesIfXPU is not None else self.dtypesIfCUDA
         )
 
         # NOTE: if the op is unspecified it is assumed to be under the torch namespace
@@ -1346,6 +1357,8 @@ class OpInfo:
         device_type = torch.device(device_type).type
         if device_type == "cuda":
             return self.dtypesIfROCM if TEST_WITH_ROCM else self.dtypesIfCUDA
+        if device_type == "xpu":
+            return self.dtypesIfXPU
         return self.dtypes
 
     def supported_backward_dtypes(self, device_type):
@@ -2631,6 +2644,7 @@ class ShapeFuncInfo(OpInfo):
         dtypes=floating_types(),
         dtypesIfCUDA=None,
         dtypesIfROCM=None,
+        dtypesIfXPU=None,
         sample_inputs_func=None,
         **kwargs,
     ):
@@ -2639,6 +2653,7 @@ class ShapeFuncInfo(OpInfo):
             dtypes=dtypes,
             dtypesIfCUDA=dtypesIfCUDA,
             dtypesIfROCM=dtypesIfROCM,
+            dtypesIfXPU=dtypesIfXPU,
             sample_inputs_func=sample_inputs_func,
             **kwargs,
         )
