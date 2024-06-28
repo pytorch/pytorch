@@ -26,7 +26,7 @@ from typing import (
     Callable as _Callable,
     Dict as _Dict,
     Optional as _Optional,
-    overload,
+    overload as _overload,
     Set as _Set,
     Tuple as _Tuple,
     Type as _Type,
@@ -2196,7 +2196,7 @@ _InputT = _ParamSpec("_InputT")
 _RetT = _TypeVar("_RetT")
 
 
-@overload
+@_overload
 def compile(
     model: _Callable[_InputT, _RetT],
     *,
@@ -2210,7 +2210,7 @@ def compile(
     ...
 
 
-@overload
+@_overload
 def compile(
     model: None = None,
     *,
