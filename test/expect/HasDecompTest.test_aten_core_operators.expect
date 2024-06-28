@@ -22,6 +22,9 @@ aten::_softmax
 aten::_softmax.out
 aten::_to_copy
 aten::_to_copy.out
+aten::_upsample_nearest_exact1d.out
+aten::_upsample_nearest_exact2d.out
+aten::_upsample_nearest_exact3d.out
 aten::abs
 aten::abs.out
 aten::abs_
@@ -58,6 +61,8 @@ aten::any.out
 aten::arange.out
 aten::arange.start_out
 aten::arange.start_step
+aten::as_strided_copy
+aten::as_strided_copy.out
 aten::as_strided_scatter
 aten::as_strided_scatter.out
 aten::asin
@@ -508,6 +513,10 @@ aten::uniform.out
 aten::uniform_
 aten::unsqueeze
 aten::upsample_bicubic2d
+aten::upsample_bicubic2d.out
+aten::upsample_nearest1d.out
+aten::upsample_nearest2d.out
+aten::upsample_nearest3d.out
 aten::var.correction
 aten::var.correction_out
 aten::var_mean.correction

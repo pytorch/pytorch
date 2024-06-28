@@ -1,5 +1,4 @@
 from collections import defaultdict
-
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import torchgen.api.dispatcher as dispatcher
@@ -26,6 +25,7 @@ from torchgen.model import (
     Variant,
 )
 from torchgen.utils import concatMap
+
 
 # See Note: [Out ops with functional variants that don't get grouped properly]
 OUT_OPS_THAT_DONT_GET_GROUPED_PROPERLY = [
@@ -81,6 +81,7 @@ FUNCTIONAL_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
     "_chunk_grad_outputs_efficient_attention",  # returns a bool
     "_fused_sdp_choice",  # returns an int
     "_print",  # no return
+    "_sink_tokens",  # no return
     "_nested_get_ragged_idx",  # returns an int
 ]
 

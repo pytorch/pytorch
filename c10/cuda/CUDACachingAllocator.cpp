@@ -66,9 +66,9 @@ namespace Native {
 //   smallest available free block or allocate a new block using cudaMalloc.
 // - To reduce fragmentation, requests between 1MB and 10MB will allocate and
 //   split a 20MB block, if no free block of sufficient size is available.
-// - To further reduce fragmentation, blocks >= 200MB are not allowed to be
-//   split. These oversize cached blocks will still satisfy requests within
-//   20MB of the oversize cached block size.
+// - To further reduce fragmentation, blocks >= max_split_size are not allowed
+//   to be split. These oversize cached blocks will still satisfy requests
+//   within 1MB of the oversize cached block size.
 //
 // With this allocator, allocations and frees should logically be considered
 // "usages" of the memory segment associated with streams, just like kernel
@@ -550,7 +550,7 @@ struct ExpandableSegment {
   CUdeviceptr ptr_{};
   size_t max_handles_{0};
   size_t segment_size_;
-  std::vector<c10::optional<CUmemGenericAllocationHandle>> handles_;
+  std::vector<std::optional<CUmemGenericAllocationHandle>> handles_;
   // devices on which this memory should be mapped in addition
   // to the device where the physical memory lives (device_).
   std::vector<c10::DeviceIndex> peers_;
@@ -742,7 +742,8 @@ struct PrivatePool {
 };
 
 BlockState::BlockState(Block* block)
-    : stream(block->stream),
+    : device(block->device),
+      stream(block->stream),
       stream_uses(block->stream_uses),
       size(block->size),
       ptr(block->ptr),
@@ -778,12 +779,9 @@ struct MempoolIdHash {
 };
 
 cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
-#if !defined(USE_ROCM) || ROCM_VERSION >= 50300
   if (at::cuda::currentStreamCaptureStatusMayInitCtx() ==
       at::cuda::CaptureStatus::None) {
-#endif
     return C10_CUDA_ERROR_HANDLED(cudaMalloc(p, size));
-#if !defined(USE_ROCM) || ROCM_VERSION >= 50300
   } else {
     // It's ok to capture cudaMallocs, as long as we never cudaFree those
     // addresses before replay.
@@ -792,7 +790,6 @@ cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
     at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
     return C10_CUDA_ERROR_HANDLED(cudaMalloc(p, size));
   }
-#endif
 }
 
 } // anonymous namespace
@@ -929,6 +926,10 @@ class DeviceCachingAllocator {
 
   std::vector<AllocatorTraceTracker> trace_trackers_;
 
+  // mapping from block to a stream_set, containing streams on which the block
+  // was used while cudagraph capturing
+  std::unordered_map<Block*, stream_set> block_to_cudagraph_stream_uses;
+
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   DeviceCachingAllocator()
@@ -955,6 +956,10 @@ class DeviceCachingAllocator {
       alloc_trace_next = 0;
       alloc_trace->clear();
     }
+  }
+
+  void recordAnnotation(const std::shared_ptr<GatheredContext>& name) {
+    record_trace(TraceEntry::USER_DEFINED, 0, 0, nullptr, 0, name);
   }
 
   bool isHistoryEnabled() {
@@ -1111,6 +1116,26 @@ class DeviceCachingAllocator {
               .current;
       auto observers_local = oom_observers_;
 
+      size_t allocated_in_private_pools = 0;
+      auto get_size_block = [](const BlockPool& pool) {
+        size_t res = 0;
+        for (const auto& block : pool.blocks) {
+          res += block->size;
+        }
+        return res;
+      };
+      for (const auto& p : graph_pools) {
+        allocated_in_private_pools += get_size_block(p.second->large_blocks);
+        allocated_in_private_pools += get_size_block(p.second->small_blocks);
+      }
+
+      std::string private_pool_msg;
+
+      if (allocated_in_private_pools > 0) {
+        private_pool_msg = "with " + format_size(allocated_in_private_pools) +
+            " allocated in private pools (e.g., CUDA Graphs), ";
+      }
+
       // Make sure we do not have the device lock before calling our
       // observers which might need hold the GIL
       // It is safe to release at this point because will no longer
@@ -1149,7 +1174,7 @@ class DeviceCachingAllocator {
           "CUDA out of memory. Tried to allocate ",
           format_size(alloc_size),
           ". GPU ",
-          device,
+          static_cast<int>(device),
           " has a total capacity of ",
           format_size(device_total),
           " of which ",
@@ -1157,9 +1182,12 @@ class DeviceCachingAllocator {
           " is free. ",
           proc_info,
           "Of the allocated memory ",
-          format_size(allocated_bytes),
-          " is allocated by PyTorch, and ",
-          format_size(reserved_bytes - allocated_bytes),
+          format_size(allocated_bytes + allocated_in_private_pools),
+          " is allocated by PyTorch, ",
+          private_pool_msg,
+          "and ",
+          format_size(
+              reserved_bytes - allocated_bytes - allocated_in_private_pools),
           " is reserved by PyTorch but unallocated.",
           " If reserved but unallocated memory is large try setting",
           " PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid"
@@ -1343,6 +1371,9 @@ class DeviceCachingAllocator {
       return;
     }
     block->stream_uses.insert(stream);
+    if (C10_UNLIKELY(!captures_underway.empty())) {
+      block_to_cudagraph_stream_uses[block].insert(stream);
+    }
   }
 
   /** set memory fraction to limit maximum allocated memory **/
@@ -1435,7 +1466,9 @@ class DeviceCachingAllocator {
   /* Checkpoint the state of a private pool necessary to return it to its
    * current state */
   std::unique_ptr<PrivatePoolState> getCheckpointState(MempoolId_t id) {
+    auto context = maybeGatherContext(RecordContext::ALL);
     std::lock_guard<std::recursive_mutex> lock(mutex);
+    insert_events_deferred_until_no_capture(context);
 
     auto pool = graph_pools.find(id);
     if (pool != graph_pools.end()) {
@@ -1759,12 +1792,11 @@ class DeviceCachingAllocator {
   // them, the values are 1024, 1280, 1536, and 1792. So the function will
   // return 1280 as the nearest ceiling of power-2 divison.
   static size_t roundup_power2_next_division(size_t size, size_t divisions) {
-    if (C10_UNLIKELY(size <= 4 || divisions <= 1)) {
-      return size;
-    }
     if (llvm::isPowerOf2_64(size)) {
       return size;
     }
+
+    TORCH_CHECK(divisions >= 2, "Only 2 or more divisions are supported");
 
     // divide the space between these 2's power into equal divisions
     // If division is zero, return the power-of-2 ceiling.
@@ -1784,7 +1816,7 @@ class DeviceCachingAllocator {
       return kMinBlockSize;
     } else {
       auto divisions = CUDAAllocatorConfig::roundup_power2_divisions(size);
-      if (divisions > 0 && size > (kMinBlockSize * divisions)) {
+      if (divisions > 1 && size > (kMinBlockSize * divisions)) {
         return roundup_power2_next_division(size, divisions);
       } else {
         return kMinBlockSize * ((size + kMinBlockSize - 1) / kMinBlockSize);
@@ -2183,7 +2215,6 @@ class DeviceCachingAllocator {
   }
 
   BlockPool& get_pool(size_t size, cudaStream_t stream) {
-#if !defined(USE_ROCM) || ROCM_VERSION >= 50300
     // captures_underway is a conservative guess that the current stream may be
     // capturing. It's only non-empty if some thread has begun and not yet ended
     // a capture, so it's usually 0, and we can short-circuit
@@ -2201,7 +2232,6 @@ class DeviceCachingAllocator {
         }
       }
     }
-#endif
     if (size <= kSmallSize) {
       return small_blocks;
     } else {
@@ -2688,7 +2718,7 @@ class DeviceCachingAllocator {
     // This function syncs, so capture should not be underway. Might as well
     // make sure capture-deferred end of life events get processed too.
     TORCH_INTERNAL_ASSERT(captures_underway.empty());
-    insert_events_deferred_until_no_capture();
+    insert_events_deferred_until_no_capture(context);
 
     for (auto& st : cuda_events) {
       for (auto& e : st.second) {
@@ -2705,6 +2735,24 @@ class DeviceCachingAllocator {
     }
 
     cuda_events.clear();
+  }
+
+  void remove_cudagraph_stream_uses(Block* block) {
+    // remove stream uses added during cudagraph capture
+    // (i.e., block->stream_uses - block->cudagraph_stream_uses)
+    if (C10_UNLIKELY(
+            block_to_cudagraph_stream_uses.find(block) !=
+            block_to_cudagraph_stream_uses.end())) {
+      stream_set streams(std::move(block->stream_uses));
+      AT_ASSERT(block->stream_uses.empty());
+      for (auto& stream : streams) {
+        if (block_to_cudagraph_stream_uses[block].find(stream) ==
+            block_to_cudagraph_stream_uses[block].end()) {
+          block->stream_uses.insert(stream);
+        }
+      }
+      block_to_cudagraph_stream_uses.erase(block);
+    }
   }
 
   void insert_events(Block* block) {
@@ -2726,18 +2774,27 @@ class DeviceCachingAllocator {
     C10_CUDA_CHECK(c10::cuda::MaybeSetDevice(prev_device));
   }
 
-  void insert_events_deferred_until_no_capture() {
+  void insert_events_deferred_until_no_capture(
+      const std::shared_ptr<GatheredContext>& context) {
     if (C10_UNLIKELY(!needs_events_deferred_until_no_capture.empty())) {
       for (auto* block : needs_events_deferred_until_no_capture) {
         TORCH_INTERNAL_ASSERT(!block->stream_uses.empty());
+        // only streams recorded before cudagraph will be used to insert events
+        // since we know all streams recorded during cudagraph must have
+        // completed (refer to Section 3.2.8.7.3.1 Cross-stream Dependencies and
+        // Events in CUDA Programming Guide).
+        remove_cudagraph_stream_uses(block);
         insert_events(block);
+        if (block->event_count == 0) {
+          free_block(block, context);
+        }
       }
       needs_events_deferred_until_no_capture.clear();
     }
   }
 
   void process_events(const std::shared_ptr<GatheredContext>& context) {
-    insert_events_deferred_until_no_capture();
+    insert_events_deferred_until_no_capture(context);
 
     // Process outstanding cudaEvents. Events that are completed are
     // removed from the queue, and the 'event_count' for the
@@ -2970,6 +3027,12 @@ class NativeCachingAllocator : public CUDAAllocator {
     for (auto& allocator : device_allocator) {
       allocator->recordHistory(
           enabled, context_recorder, alloc_trace_max_entries, when);
+    }
+  }
+
+  void recordAnnotation(const std::shared_ptr<GatheredContext>& name) override {
+    for (auto& allocator : device_allocator) {
+      allocator->recordAnnotation(name);
     }
   }
 

@@ -258,7 +258,9 @@ static void _validate_sparse_compressed_tensor_args_worker(const Tensor& compres
       compressed_indices_name, " and ", plain_indices_name, " dtype must be Int or Long, but got ",
       compressed_indices_type);
 
-  if (!compressed_indices.is_meta()) {
+  if (compressed_indices.is_meta()) {
+    TORCH_CHECK(values_nnz == 0, "expected nnz to be 0 for sparse ", layout_name, " meta tensor but got ", values_nnz);
+  } else {
     // Indices invariants
     at::_validate_compressed_sparse_indices(
         /*is_crow = */layout == kSparseCsr || layout == kSparseBsr,
@@ -345,6 +347,9 @@ static SparseCsrTensor new_compressed_tensor(const TensorOptions& options) {
   case kMeta:
     dispatch_key = DispatchKey::SparseCsrMeta;
     break;
+  case kPrivateUse1:
+    dispatch_key = DispatchKey::SparseCsrPrivateUse1;
+    break;
   default:
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Could not run 'new_compressed_tensor' from the '", options.device(), "' device.)");
   }
@@ -358,10 +363,10 @@ Tensor sparse_compressed_tensor_with_dims(
      c10::IntArrayRef size,
      c10::IntArrayRef blocksize,
      ScalarType index_dtype,
-     c10::optional<ScalarType> dtype,
-     c10::optional<Layout> layout,
-     c10::optional<Device> device,
-     c10::optional<bool> pin_memory) {
+     std::optional<ScalarType> dtype,
+     std::optional<Layout> layout,
+     std::optional<Device> device,
+     std::optional<bool> pin_memory) {
   // sparse_compressed_tensor_with_dims is a generalization of empty
   // that enables the specification of nnz, dense_dim, blocksize, and
   // index_dtype for sparse compressed tensors.
@@ -430,10 +435,10 @@ Tensor _sparse_compressed_tensor_unsafe_symint(
      const Tensor& plain_indices,
      const Tensor& values,
      c10::SymIntArrayRef size,
-     c10::optional<ScalarType> dtype,
-     c10::optional<Layout> layout,
-     c10::optional<Device> device,
-     c10::optional<bool> pin_memory) {
+     std::optional<ScalarType> dtype,
+     std::optional<Layout> layout,
+     std::optional<Device> device,
+     std::optional<bool> pin_memory) {
   if (!layout) {
     AT_ERROR("sparse_compressed_tensor_unsafe expected sparse compressed tensor layout but got none");
   }
@@ -453,10 +458,10 @@ Tensor _sparse_compressed_tensor_unsafe_template(const Tensor& compressed_indice
                                                  const Tensor& plain_indices,
                                                  const Tensor& values,
                                                  IntArrayRef size,
-                                                 c10::optional<ScalarType> dtype,
-                                                 c10::optional<Layout> layout,
-                                                 c10::optional<Device> device,
-                                                 c10::optional<bool> pin_memory) {
+                                                 std::optional<ScalarType> dtype,
+                                                 std::optional<Layout> layout,
+                                                 std::optional<Device> device,
+                                                 std::optional<bool> pin_memory) {
   Layout layout_ = layout.value_or(required_layout);
   TORCH_CHECK(layout_ == required_layout, "sparse compressed layout must be ",required_layout, " but got ", layout_);
   if (at::globalContext().checkSparseTensorInvariants()) {
@@ -473,10 +478,10 @@ Tensor _sparse_compressed_tensor_unsafe_template(const Tensor& compressed_indice
                                         const Tensor& plain_indices,    \
                                         const Tensor& values,           \
                                         IntArrayRef size,               \
-                                        c10::optional<ScalarType> dtype, \
-                                        c10::optional<Layout> layout,   \
-                                        c10::optional<Device> device,   \
-                                        c10::optional<bool> pin_memory) { \
+                                        std::optional<ScalarType> dtype, \
+                                        std::optional<Layout> layout,   \
+                                        std::optional<Device> device,   \
+                                        std::optional<bool> pin_memory) { \
     return _sparse_compressed_tensor_unsafe_template<REQUIRED_LAYOUT>(compressed_indices, plain_indices, values, size, dtype, layout, device, pin_memory); \
   }
 
@@ -549,10 +554,10 @@ Tensor sparse_compressed_tensor(
     const Tensor& plain_indices,
     const Tensor& values,
     IntArrayRef size,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory) {
 
   if (!layout) {
     AT_ERROR("sparse_compressed_tensor expected sparse compressed tensor layout but got none");
@@ -578,10 +583,10 @@ Tensor sparse_compressed_tensor(
     const Tensor& compressed_indices,
     const Tensor& plain_indices,
     const Tensor& values,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory) {
 
   if (!layout) {
     AT_ERROR("sparse_compressed_tensor expected sparse compressed tensor layout but got none");
@@ -609,28 +614,28 @@ Tensor sparse_compressed_tensor(
   Tensor sparse_##KIND##_tensor(const Tensor& compressed_indices,       \
                                 const Tensor& plain_indices,            \
                                 const Tensor& values,                   \
-                                c10::optional<ScalarType> dtype,        \
-                                c10::optional<Layout> layout,           \
-                                c10::optional<Device> device,           \
-                                c10::optional<bool> pin_memory) {       \
+                                std::optional<ScalarType> dtype,        \
+                                std::optional<Layout> layout,           \
+                                std::optional<Device> device,           \
+                                std::optional<bool> pin_memory) {       \
     if (layout) {                                                       \
       TORCH_CHECK(layout.value() == REQUIRED_LAYOUT, "sparse " # KIND " layout must be ", REQUIRED_LAYOUT, " but got ", layout.value()); \
     }                                                                   \
-    c10::optional<Layout> layout_(REQUIRED_LAYOUT);                     \
+    std::optional<Layout> layout_(REQUIRED_LAYOUT);                     \
     return at::native::sparse_compressed_tensor(compressed_indices, plain_indices, values, dtype, layout_, device, pin_memory); \
   }                                                                     \
   Tensor sparse_##KIND##_tensor(const Tensor& compressed_indices,       \
                                 const Tensor& plain_indices,            \
                                 const Tensor& values,                   \
                                 IntArrayRef size,                       \
-                                c10::optional<ScalarType> dtype,        \
-                                c10::optional<Layout> layout,           \
-                                c10::optional<Device> device,           \
-                                c10::optional<bool> pin_memory) {       \
+                                std::optional<ScalarType> dtype,        \
+                                std::optional<Layout> layout,           \
+                                std::optional<Device> device,           \
+                                std::optional<bool> pin_memory) {       \
     if (layout) {                                                       \
       TORCH_CHECK(layout.value() == REQUIRED_LAYOUT, "sparse " # KIND " layout must be ", REQUIRED_LAYOUT, " but got ", layout.value()); \
     }                                                                   \
-    c10::optional<Layout> layout_(REQUIRED_LAYOUT);                     \
+    std::optional<Layout> layout_(REQUIRED_LAYOUT);                     \
     return at::native::sparse_compressed_tensor(compressed_indices, plain_indices, values, size, dtype, layout_, device, pin_memory); \
   }
 
@@ -645,11 +650,11 @@ SPARSE_COMPRESSED_TENSOR(bsc, kSparseBsc)
 // indices. The implementation below is kept for BC.
 Tensor empty_sparse_compressed(
     IntArrayRef size,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory,
-    c10::optional<MemoryFormat> optional_memory_format) {
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory,
+    std::optional<MemoryFormat> optional_memory_format) {
   check_size_nonnegative(size);
   TORCH_CHECK(size.size() >= 2, "torch.empty: Only batched sparse compressed (non-block) tensors are supported, but got size ", size);
 
@@ -694,7 +699,7 @@ Tensor empty_sparse_compressed(
 const Tensor& resize_sparse_csr_(
     const Tensor& self,
     IntArrayRef size,
-    c10::optional<MemoryFormat> optional_memory_format) {
+    std::optional<MemoryFormat> optional_memory_format) {
   check_size_nonnegative(size);
   TORCH_CHECK(size.size() >= 2, "torch.resize_: Only batched sparse CSR matrices are supported, but got size ", size);
   TORCH_CHECK(
@@ -831,7 +836,7 @@ const SparseCsrTensor& resize_as_sparse_compressed_(
 
 SparseCsrTensor clone_sparse_compressed(
                                         const SparseCsrTensor& self,
-                                        c10::optional<c10::MemoryFormat> optional_memory_format) {
+                                        std::optional<c10::MemoryFormat> optional_memory_format) {
   TORCH_CHECK(
       !optional_memory_format.has_value(),
       "unsupported memory format option ",
@@ -858,11 +863,11 @@ SparseCsrTensor clone_sparse_compressed(
 
 Tensor empty_like_sparse_csr(
     const Tensor& self,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory,
+    std::optional<c10::MemoryFormat> optional_memory_format) {
   TensorOptions options_ = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
   TensorOptions options =
       self.options()

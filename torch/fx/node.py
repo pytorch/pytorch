@@ -11,6 +11,7 @@ import inspect
 import warnings
 from torch.fx.operator_schemas import normalize_function, normalize_module, ArgsKwargsPair
 from .._ops import ops as _ops
+from torch._C import _NodeBase
 
 if TYPE_CHECKING:
     from .graph import Graph
@@ -47,6 +48,7 @@ _side_effectful_functions: Set[Callable] = {
     _ops.aten._assert_async.msg,
     _ops.aten._assert_scalar.default,
     _ops.aten.copy_.default,
+    _ops.aten.set_.source_Tensor,
     _ops.aten.index_put_.default,
     _ops.aten.sym_constrain_range.default,
     _ops.aten.sym_constrain_range_for_size.default,
@@ -54,12 +56,13 @@ _side_effectful_functions: Set[Callable] = {
     _ops.profiler._record_function_enter_new,
     _ops.profiler._record_function_exit,
     _ops.inductor.accumulate_grad_.default,
-    _ops.inductor.resize_storage_bytes_.default,
 } | _side_effectful_need_to_be_preserved_pre_dispatch
+if hasattr(_ops.inductor, "resize_storage_bytes_"):
+    _side_effectful_functions.add(_ops.inductor.resize_storage_bytes_.default)
 
 
 @compatibility(is_backward_compatible=False)
-def has_side_effect(fn: Callable) -> None:
+def has_side_effect(fn: Callable) -> Callable:
     _side_effectful_functions.add(fn)
     return fn
 
@@ -138,7 +141,7 @@ def _format_arg(arg, max_list_len=float('inf')) -> str:
         return str(arg)
 
 @compatibility(is_backward_compatible=True)
-class Node:
+class Node(_NodeBase):
     """
     ``Node`` is the data structure that represents individual operations within
     a ``Graph``. For the most part, Nodes represent callsites to various entities,
@@ -196,6 +199,7 @@ class Node:
                 annotation of values in the generated code or for other types
                 of analyses.
         """
+        super().__init__()
         self.graph = graph
         self.name = name  # unique name of value being created
         assert op in ['placeholder', 'call_method', 'call_module', 'call_function', 'get_attr', 'output', 'root']
@@ -234,10 +238,7 @@ class Node:
         # does not produce a value, it's more of a notation. Thus, this value
         # describes the type of args[0] in the ``return`` node.
         self.type : Optional[Any] = return_type
-        self._prev = self
-        self._next = self
-        self._erased = False
-        self._sort_key = ()
+        self._sort_key: Any = ()
 
         # If set, use this fn to print this node
         self._repr_fn : Optional[Callable[[Node], str]] = None
@@ -245,6 +246,22 @@ class Node:
         # Dictionary to store metadata passes need to do their
         # transformations. This metadata is preserved across node copies
         self.meta : Dict[str, Any] = {}
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state["_erased"] = self._erased
+        state["_prev"] = self._prev
+        state["_next"] = self._next
+        return state
+
+    def __setstate__(self, state):
+        _erased = state.pop("_erased")
+        _prev = state.pop("_prev")
+        _next = state.pop("_next")
+        self.__dict__.update(state)
+        self._erased = _erased
+        self._prev = _prev
+        self._next = _next
 
     @property
     def next(self) -> 'Node':
@@ -294,6 +311,7 @@ class Node:
         psk = x._prev._sort_key
         nsk = x._next._sort_key
         if len(psk) > len(nsk):
+            idx: int
             *prefix, idx = psk[:len(nsk) + 1]
             x._sort_key = (*prefix, idx + 1)
         elif len(psk) < len(nsk):
@@ -420,7 +438,7 @@ class Node:
 
         self._args = args_left + (arg,) + args_right
 
-        _new_input_nodes = {}
+        _new_input_nodes: Dict[Node, None] = {}
         map_arg(arg, _new_input_nodes.setdefault)
 
         for new_use in _new_input_nodes.keys():
@@ -721,8 +739,17 @@ class Node:
                 assert isinstance(value, str)
                 for user in self.users:
                     m._replace_hook(old=self, new=value, user=user)
+        update = False
+        if (
+                hasattr(self, name) and
+                hasattr(self.graph, "_find_nodes_lookup_table") and
+                self in self.graph._find_nodes_lookup_table
+        ):
+            update = True
+            self.graph._find_nodes_lookup_table.remove(self)
         object.__setattr__(self, name, value)
-
+        if update:
+            self.graph._find_nodes_lookup_table.insert(self)
 
 @compatibility(is_backward_compatible=True)
 def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:

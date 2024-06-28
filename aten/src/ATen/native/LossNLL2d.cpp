@@ -262,8 +262,9 @@ void nll_loss2d_forward_out_cpu_template(
   check_inputs_nll_loss2d(input, target, weight);
   total_weight.resize_({});
 
-  AT_DISPATCH_FLOATING_TYPES_AND(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::BFloat16,
+      ScalarType::Half,
       input.scalar_type(),
       "nll_loss2d_forward_out_frame",
       [&] {
@@ -289,7 +290,7 @@ static void nll_loss2d_backward_out_frame(
     int64_t ignore_index,
     const Tensor& total_weight) {
   auto weight_contiguous = optional_contiguous(weight);
-  const scalar_t* weight_data = optional_data<scalar_t>(weight_contiguous);
+  const scalar_t* weight_data = optional_data<const scalar_t>(weight_contiguous);
 
   if (reduction == at::Reduction::None) {
     check_gradout_shape_nll_loss2d(grad_output, target);
@@ -299,8 +300,8 @@ static void nll_loss2d_backward_out_frame(
     const int64_t W = input.size(3);
 
     auto grad_input_acc = grad_input.accessor<scalar_t, 4>();
-    auto grad_output_acc = grad_output.accessor<scalar_t, 3>();
-    auto target_acc = target.accessor<int64_t, 3>();
+    auto grad_output_acc = grad_output.accessor<const scalar_t, 3>();
+    auto target_acc = target.accessor<const int64_t, 3>();
 
     at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
       for (const auto b : c10::irange(start, end)) {
@@ -323,17 +324,17 @@ static void nll_loss2d_backward_out_frame(
     return;
   }
 
-  const scalar_t total_weight_value = *total_weight.data_ptr<scalar_t>();
+  const scalar_t total_weight_value = *total_weight.const_data_ptr<scalar_t>();
 
   TORCH_CHECK(
       grad_output.dim() <= 1 && grad_output.numel() == 1,
       "Expected a single element grad_output tensor, but got: ",
       grad_output.sizes());
 
-  const scalar_t grad_output_value = *grad_output.data_ptr<scalar_t>();
+  const scalar_t grad_output_value = *grad_output.const_data_ptr<scalar_t>();
 
   const auto target_contiguous = target.contiguous();
-  const int64_t* target_data = target_contiguous.data_ptr<int64_t>();
+  const int64_t* target_data = target_contiguous.const_data_ptr<int64_t>();
 
   scalar_t* grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
 
@@ -383,8 +384,9 @@ void nll_loss2d_backward_out_cpu_template(
       total_weight.numel(),
       " elements)");
 
-  AT_DISPATCH_FLOATING_TYPES_AND(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::BFloat16,
+      ScalarType::Half,
       input.scalar_type(),
       "nll_loss2d_backward_out_frame",
       [&] {
@@ -403,7 +405,7 @@ void nll_loss2d_backward_out_cpu_template(
 } // namespace
 
 std::tuple<Tensor&, Tensor&> nll_loss2d_forward_out_cpu(const Tensor& self,
-    const Tensor& target, const c10::optional<Tensor>& weight_opt,
+    const Tensor& target, const std::optional<Tensor>& weight_opt,
     int64_t reduction,
     int64_t ignore_index,
     Tensor& output,
@@ -419,7 +421,7 @@ std::tuple<Tensor&, Tensor&> nll_loss2d_forward_out_cpu(const Tensor& self,
 
 std::tuple<Tensor, Tensor> nll_loss2d_forward_cpu(
     const Tensor& self,
-    const Tensor& target, const c10::optional<Tensor>& weight_opt,
+    const Tensor& target, const std::optional<Tensor>& weight_opt,
     int64_t reduction,
     int64_t ignore_index) {
   // See [Note: hacky wrapper removal for optional tensor]
@@ -435,7 +437,7 @@ std::tuple<Tensor, Tensor> nll_loss2d_forward_cpu(
 
 Tensor& nll_loss2d_backward_out_cpu(const Tensor& grad_output,
     const Tensor& self,
-    const Tensor& target, const c10::optional<Tensor>& weight_opt,
+    const Tensor& target, const std::optional<Tensor>& weight_opt,
     int64_t reduction,
     int64_t ignore_index,
     const Tensor& total_weight,
@@ -459,7 +461,7 @@ Tensor& nll_loss2d_backward_out_cpu(const Tensor& grad_output,
 Tensor nll_loss2d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& self,
-    const Tensor& target, const c10::optional<Tensor>& weight_opt,
+    const Tensor& target, const std::optional<Tensor>& weight_opt,
     int64_t reduction,
     int64_t ignore_index,
     const Tensor& total_weight) {
@@ -480,7 +482,7 @@ Tensor nll_loss2d_backward_cpu(
   return grad_input;
 }
 
-Tensor & nll_loss2d_out(const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index, Tensor & output) {
+Tensor & nll_loss2d_out(const Tensor & self, const Tensor & target, const std::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index, Tensor & output) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
@@ -489,21 +491,12 @@ Tensor & nll_loss2d_out(const Tensor & self, const Tensor & target, const c10::o
   return std::get<0>(at::nll_loss2d_forward_out(output, total_weight, self, target, weight, reduction, ignore_index));
 }
 
-Tensor nll_loss2d_symint(const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, c10::SymInt ignore_index) {
+Tensor nll_loss2d_symint(const Tensor & self, const Tensor & target, const std::optional<Tensor>& weight_opt, int64_t reduction, c10::SymInt ignore_index) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
 
   return std::get<0>(at::nll_loss2d_forward_symint(self, target, weight, reduction, std::move(ignore_index)));
-}
-
-// Duplicate of above code for non-symbolic ints. Kept for BC purposes and to minimize breakages.
-static Tensor nll_loss2d(const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-
-  return std::get<0>(at::nll_loss2d_forward_symint(self, target, weight, reduction, ignore_index));
 }
 
 } // namespace at::native

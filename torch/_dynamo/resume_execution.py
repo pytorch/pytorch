@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import copy
 import dataclasses
 import sys
@@ -34,6 +35,13 @@ CO_ASYNC_GENERATOR = 0x0200
 TORCH_DYNAMO_RESUME_IN_PREFIX = "torch_dynamo_resume_in"
 
 
+def _initial_push_null(insts):
+    if sys.version_info >= (3, 11):
+        insts.append(create_instruction("PUSH_NULL"))
+        if sys.version_info < (3, 13):
+            insts.append(create_instruction("SWAP", arg=2))
+
+
 @dataclasses.dataclass(frozen=True)
 class ReenterWith:
     stack_index: int
@@ -51,6 +59,7 @@ class ReenterWith:
         finally:
             exit context
         """
+        # NOTE: we assume that TOS is a context manager CLASS!
         load_args = []
         if self.target_values:
             load_args = [
@@ -69,15 +78,21 @@ class ReenterWith:
         )
         cleanup_complete_jump_target = create_instruction("NOP")
 
-        setup_finally = [
-            *load_args,
-            *create_call_function(len(load_args), True),
-            create_instruction("STORE_FAST", argval=ctx_name),
-            create_instruction("LOAD_FAST", argval=ctx_name),
-            create_load_method("__enter__"),
-            *create_call_method(0),
-            create_instruction("POP_TOP"),
-        ]
+        setup_finally: List[Instruction] = []
+        _initial_push_null(setup_finally)
+
+        # TODO(williamwen42) call method order is wrong for 3.13+ - will fix later
+        setup_finally.extend(
+            [
+                *load_args,
+                *create_call_function(len(load_args), False),
+                create_instruction("STORE_FAST", argval=ctx_name),
+                create_instruction("LOAD_FAST", argval=ctx_name),
+                create_load_method("__enter__"),
+                *create_call_method(0),
+                create_instruction("POP_TOP"),
+            ]
+        )
 
         if sys.version_info < (3, 11):
             setup_finally.append(
@@ -156,6 +171,7 @@ class ReenterWith:
         with ctx(args):
             (rest)
         """
+        # NOTE: we assume that TOS is a context manager CLASS!
         load_args = []
         if self.target_values:
             load_args = [
@@ -274,12 +290,17 @@ class ReenterWith:
                 cleanup_complete_jump_target,
             ] + cleanup
 
-            return [
-                *load_args,
-                *create_call_function(len(load_args), True),
-                create_instruction("BEFORE_WITH"),
-                exn_tab_1_begin,  # POP_TOP
-            ], exn_tab_1_target
+            ret: List[Instruction] = []
+            _initial_push_null(ret)
+            ret.extend(
+                [
+                    *load_args,
+                    *create_call_function(len(load_args), False),
+                    create_instruction("BEFORE_WITH"),
+                    exn_tab_1_begin,  # POP_TOP
+                ]
+            )
+            return ret, exn_tab_1_target
 
 
 @dataclasses.dataclass
@@ -305,7 +326,7 @@ def _filter_iter(l1, l2, cond):
     returns the instructions with offsets in sorted_offsets
     """
     it = iter(l2)
-    res = []
+    res: List[Instruction] = []
     try:
         cur = next(it)
         for val in l1:
@@ -315,6 +336,15 @@ def _filter_iter(l1, l2, cond):
     except StopIteration:
         pass
     return res
+
+
+def _load_tuple_and_call(tup):
+    insts: List[Instruction] = []
+    _initial_push_null(insts)
+    for val in tup:
+        insts.append(create_instruction("LOAD_CONST", argval=val))
+    insts.extend(create_call_function(len(tup), False))
+    return insts
 
 
 class ContinueExecutionCache:
@@ -339,7 +369,10 @@ class ContinueExecutionCache:
         setup_fn_target_offsets: Tuple[int],  # only used in Python 3.11+
         nstack: int,
         argnames: Tuple[str],
+        argnames_null: Tuple[str],
         setup_fns: Tuple[ReenterWith],
+        stack_ctx_vars: Tuple[int, Tuple[Any]],
+        argnames_ctx_vars: Tuple[str, Tuple[Any]],
         null_idxes: Tuple[int],
     ) -> types.CodeType:
         assert offset is not None
@@ -356,7 +389,10 @@ class ContinueExecutionCache:
                 setup_fn_target_offsets,
                 nstack,
                 argnames,
+                argnames_null,
                 setup_fns,
+                stack_ctx_vars,
+                argnames_ctx_vars,
                 null_idxes,
             )
 
@@ -371,6 +407,7 @@ class ContinueExecutionCache:
             freevars = tuple(code_options["co_cellvars"] or []) + tuple(
                 code_options["co_freevars"] or []
             )
+            freevars = tuple(sorted(freevars))
             code_options[
                 "co_name"
             ] = f"{TORCH_DYNAMO_RESUME_IN_PREFIX}_{code_options['co_name']}_at_{lineno}"
@@ -391,7 +428,9 @@ class ContinueExecutionCache:
             code_options["co_posonlyargcount"] = 0
             code_options["co_kwonlyargcount"] = 0
             code_options["co_varnames"] = tuple(
-                args + [v for v in code_options["co_varnames"] if v not in args]
+                args
+                + [v for v in argnames_null if v not in args]
+                + [v for v in code_options["co_varnames"] if v not in args]
             )
             code_options["co_flags"] = code_options["co_flags"] & ~(
                 CO_VARARGS | CO_VARKEYWORDS
@@ -416,6 +455,7 @@ class ContinueExecutionCache:
             # map old hook targets to new targets generated by the hook
             old_hook_target_remap = {}
             null_idxes_i = 0
+            stack_ctx_vars_d = dict(stack_ctx_vars)  # type: ignore[var-annotated,arg-type]
             for i in range(nstack):
                 while (
                     null_idxes_i < len(null_idxes)
@@ -433,6 +473,12 @@ class ContinueExecutionCache:
                         old_hook_target = offset_to_inst[hook_target_offset]
                         meta.prefix_block_target_offset_remap.append(hook_target_offset)
                         old_hook_target_remap[old_hook_target] = exn_target
+                real_i = i + null_idxes_i
+                if real_i in stack_ctx_vars_d:
+                    # NOTE: we assume that current stack var is a context manager CLASS!
+                    # Load args for context variable and construct it
+                    prefix.extend(_load_tuple_and_call(stack_ctx_vars_d[real_i]))
+
             if is_py311_plus:
                 # reverse the mapping since targets of later/nested contexts are inserted
                 # into the mapping later, but show up earlier in the prefix.
@@ -441,6 +487,25 @@ class ContinueExecutionCache:
                 )
 
             assert not hooks
+
+            # NOTE: we assume that local var is a context manager CLASS!
+            # initialize inactive context vars in argnames
+            for name, vals in argnames_ctx_vars:
+                prefix.append(create_instruction("LOAD_FAST", argval=name))
+                prefix.extend(_load_tuple_and_call(vals))
+                prefix.append(create_instruction("STORE_FAST", argval=name))
+
+            # 3.12+: store NULL into variables that were NULL
+            if argnames_null:
+                assert sys.version_info >= (3, 12)
+                for v in argnames_null:
+                    assert v not in args
+                    prefix.extend(
+                        [
+                            create_instruction("PUSH_NULL"),
+                            create_instruction("STORE_FAST", argval=v),
+                        ]
+                    )
 
             prefix.append(create_jump_absolute(target))
 

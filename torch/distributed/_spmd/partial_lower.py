@@ -6,12 +6,11 @@ import logging
 import operator
 from typing import Callable, List, Optional, Set, Tuple
 
-from functorch import make_fx
-
 import torch
-
+from functorch import make_fx
 from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.decomposition import select_decomp_table
+
 
 MIN_ATEN_OPS_TO_LOWER = 10
 

@@ -1,9 +1,12 @@
+# mypy: allow-untyped-defs
+import os
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Sequence, Union
 
 import torch
 from torch.distributed.checkpoint.stateful import StatefulT
+
 
 __all__ = [
     "ChunkStorageMetadata",
@@ -12,6 +15,7 @@ __all__ = [
     "Metadata",
     "MetadataIndex",
     "TensorProperties",
+    "StorageMeta",
 ]
 
 
@@ -101,7 +105,7 @@ class TensorProperties:
             layout=tensor.layout,
             requires_grad=tensor.requires_grad,
             memory_format=torch.contiguous_format,
-            pin_memory=tensor.is_pinned(),
+            pin_memory=tensor.is_pinned(device=tensor.device),
         )
 
 
@@ -122,6 +126,13 @@ STATE_DICT_TYPE = Dict[str, Union[StatefulT, Any]]
 
 
 @dataclass
+class StorageMeta:
+    checkpoint_id: Union[str, os.PathLike, None] = None
+    save_id: Optional[str] = None
+    load_id: Optional[str] = None
+
+
+@dataclass
 class Metadata:
     """This class represents the metadata of the checkpoint."""
 
@@ -133,6 +144,7 @@ class Metadata:
     # the metadata of the built-in planner and storage plugins.
     planner_data: Any = None
     storage_data: Any = None
+    storage_meta: Optional[StorageMeta] = None
 
 
 @dataclass(frozen=True)

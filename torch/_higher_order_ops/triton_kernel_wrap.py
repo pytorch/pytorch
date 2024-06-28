@@ -1,8 +1,8 @@
+# mypy: allow-untyped-defs
 import dataclasses
 import inspect
 import logging
 import threading
-import warnings
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Union
 
@@ -17,6 +17,7 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
+
 
 log = logging.getLogger("torch._dynamo")
 
@@ -112,12 +113,14 @@ def generate_ttir(kernel, kwargs):
     """
     Uses Triton's internal code generation to create TTIR
     """
+    import sympy
     import triton
     from triton.compiler.compiler import ASTSource
     from triton.runtime.autotuner import Autotuner
     from triton.runtime.jit import JITFunction
 
     import torch
+    import torch._inductor.ir
     from torch._subclasses.fake_tensor import FakeTensor
 
     if isinstance(kernel, Autotuner):
@@ -133,14 +136,14 @@ def generate_ttir(kernel, kwargs):
         raise ValueError("Incorrect number of arguments passed to kernel")
 
     # Replace all SymExprs with a regular value for TTIR generation
-    # Replace all FakeTensor with real tensors
+    # Replace all FakeTensor/TensorBox with real tensors
     # These replacements are needed for triton's type, key and config functions
     ordered_args: Dict[str, Any] = {}
     for name in kernel.arg_names:
         a = kwargs[name]
-        if isinstance(a, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+        if isinstance(a, (torch.SymInt, torch.SymFloat, torch.SymBool, sympy.Expr)):
             ordered_args[name] = 2
-        elif isinstance(a, FakeTensor):
+        elif isinstance(a, (FakeTensor, torch._inductor.ir.TensorBox)):
             with torch._C._DisableTorchDispatch():
                 ordered_args[name] = torch.empty(2, dtype=a.dtype)
         else:
@@ -287,7 +290,27 @@ def ttir_to_functions(ttir_module) -> Dict[str, Dict[Intermediate, List[Op]]]:
                 # child block to return the block result
                 return_ops = []
                 for block_id in child_block_ids:
-                    if name.startswith("scf."):
+                    if name == "scf.for":
+                        # example:
+                        # %result = scf.for %iv = %lb to %ub step %step iter_args(%arg = %init) -> (i32) ...
+                        # block args: 2 (%iv, %arg)
+                        # op operands: 4 (%lb, %ub, %step, %init)
+                        # `%arg` is mapping to `%init`
+                        for i, idx in enumerate(block_id_to_block_arg_ids[block_id]):
+                            if i == 0:
+                                next_fake_intermediate -= 1
+                                replacements[idx] = Intermediate(next_fake_intermediate)
+                            else:
+                                replacements[idx] = Intermediate(operand_ids[i + 2])
+                    elif name == "scf.while":
+                        # example:
+                        # %3:3 = scf.while (%arg2 = %1, %arg3 = %2, %arg4 = %c0_i32_8) ...
+                        # block args: 3 (%arg2, %arg3, %arg4)
+                        # op operands: 3 (%1, %2, %c0_i32_8)
+                        # `%arg2` is mapping to `%1`, `%arg3` is mapping to `%2`, ...
+                        for i, idx in enumerate(block_id_to_block_arg_ids[block_id]):
+                            replacements[idx] = Intermediate(operand_ids[i])
+                    elif name == "scf.if":
                         # the scf block args are ignored by the pass. but, as they
                         # may be used as operands of the ops inside the block
                         # (and nested blocks inlined in the current block by now),
@@ -360,193 +383,6 @@ def ttir_to_functions(ttir_module) -> Dict[str, Dict[Intermediate, List[Op]]]:
 
     ttir_module.walk(mlir_to_functions)
 
-    return functions
-
-
-def parse_ttir(ttir, kwargs):
-    """
-    Given a Triton emitted TTIR text, this function lexes and parses the
-    code using a minimal grammar defined inside. During the lexing/parsing,
-    we drop any constant value and type information as they are not
-    necessary to us.
-    Being able to choose what we need makes this not a general purpose TTIR
-    parser which further makes parsing much simpler.
-    """
-    # TODO(oulgen):
-    # - Support closures (e.g. "tt.reduce")
-
-    try:
-        import lark  # type: ignore[import-not-found]
-        from lark import Lark, Transformer, v_args
-    except ModuleNotFoundError:
-        warnings.warn(
-            "Using slow path for user-defined Triton kernels. `pip install lark` to fix this."
-        )
-        raise
-
-    # Ops looks like one of the following forms:
-    #
-    # %14 = tt.addptr %13, %4 : tensor<4x!tt.ptr<f32, 1>>, tensor<4xi32>
-    # tt.store %14, %12, %5 {cache = 1 : i32, evict = 1 : i32} : tensor<4xf32>
-    # %15 = "tt.atomic_rmw"(%14, %12, %5) <{atomic_rmw_op = 5 : i32, scope = 1 : i32, sem = 4 : i32}> : (tensor<4x!tt.ptr<f32, 1>>, tensor<4xf32>, tensor<4xi1>) -> tensor<4xf32>  # noqa: B950
-    grammar = """
-        start: (module_block | loc_line)+
-
-        loc_line: "#loc" /.+/ NEWLINE
-
-        module_block: "module" "{" func_block+ "}" LOC
-
-        func_block: "tt.func" ("public"|"private") FN_NAME "(" /.+/ NEWLINE stmt* "}" LOC -> process_func
-
-        ?stmt: op | if | for | while | condition_stmt | label_stmt | cf_stmt
-
-        if: [assign_lhs "="] "scf.if" args rest stmt* "}" "else" "{" stmt* "}" LOC -> process_if
-        for: [assign_lhs "="] "scf.for" args rest stmt* "}" divisibility_annot? LOC -> process_for
-        while: [assign_lhs "="] "scf.while" args rest stmt* "}" "do" "{" stmt* "}" LOC -> process_while
-
-        condition_stmt: "scf.condition" "(" arg ")" args rest
-        label_stmt: LABEL ":" "// pred:" LABEL
-                  | LABEL "(" /.+/ NEWLINE
-        cf_stmt: "cf" "." NAME /.+/ NEWLINE
-
-        op: OP_NAME LOC
-          | [assign_lhs "="] OP_NAME [FN_NAME] args rest?  -> process_op
-
-        ?rest: (":" | "{" | "\\"" | "->" | "<" | "=") /.+/ NEWLINE
-        divisibility_annot: "{" "tt.divisibility_arg1" /[^}]+/ "}"
-
-        args: | "(" ")" | "("? arg ("," arg)* ")"?
-
-        ?arg: INTERMEDIATE
-            | INTERMEDIATE_CONSTANT
-            | CONSTANT
-            | PARAM
-            | "[" args "]"
-            | arg_with_index
-
-        ?arg_with_index: arg "#" DIGIT+
-
-        ?assign_lhs: (INTERMEDIATE | INTERMEDIATE_CONSTANT) [":" DIGIT+]
-
-        PARAM.5: "%arg" DIGIT+
-        INTERMEDIATE.4: "%" DIGIT+
-        INTERMEDIATE_CONSTANT.3: "%" NAME
-        CONSTANT: FLOAT | DIGIT+ | NAME ("<" DIGIT+ ">")?
-        LABEL: "^bb" DIGIT+
-
-        NAME: (LETTER | DIGIT | "_")+
-        NON_CF_NAME: /(?!(cf))/ NAME
-        FN_NAME: "@" (NAME | ESCAPED_STRING)
-        OP_NAME: "\\""? NON_CF_NAME ("." NAME)+ "\\""?
-
-        LOC.5: "loc(#loc" DIGIT* ")"
-
-        %import common.LETTER
-        %import common.DIGIT
-        %import common.WS
-        %import common.NEWLINE
-        %import common.ESCAPED_STRING
-        %import common.FLOAT
-        %ignore WS
-    """
-
-    next_fake_intermediate = 0
-
-    def convert(token):
-        if isinstance(token, lark.tree.Tree):
-            if token.data == "args":
-                res = []
-                for a in token.children:
-                    c = convert(a)
-                    if isinstance(c, list):
-                        res.extend(c)
-                    else:
-                        res.append(c)
-                return res
-            elif token.data in {"assign_lhs", "arg_with_index"}:
-                # Drop length/index qualifier
-                return convert(token.children[0])
-            else:
-                raise AssertionError(f"Tree node with {token.data}")
-
-        if token is None or (
-            isinstance(token, lark.lexer.Token)
-            and token.type in ("CONSTANT", "INTERMEDIATE_CONSTANT")
-        ):
-            nonlocal next_fake_intermediate
-            next_fake_intermediate -= 1
-            return Intermediate(next_fake_intermediate)
-
-        assert isinstance(token, lark.lexer.Token)
-
-        if token.type == "INTERMEDIATE":
-            return Intermediate(int(token.value[len("%") :]))
-        if token.type == "PARAM":
-            return Param(int(token.value[len("%arg") :]))
-
-        raise AssertionError(f"{type(token.type)} => {token.value} invalid")
-
-    # In alternative representation, function names are quoted.
-    # It should be possible to move this into the grammar alltogether.
-    def convert_name(token):
-        if token is None:
-            return None
-        s = token.value
-        if len(s) > 2 and s[0] == '"' and s[-1] == '"':
-            return s[1:-1]
-        return s
-
-    functions: Dict[str, Dict[Intermediate, List[Op]]] = {}
-
-    def extend_dict_list(d1, d2):
-        for key, values in d2.items():
-            d1[key].extend(values)
-
-    @v_args(inline=True)
-    class TransformOps(Transformer):
-        def process_op(self, ret, op_name, fn_name, args, *rest):
-            return Op(
-                convert_name(op_name),
-                convert_name(fn_name),
-                convert(args),
-                convert(ret),
-            )
-
-        def process_func(self, name, _args, *stmts):
-            ops: Dict[Intermediate, List[Op]] = defaultdict(list)
-            for e in stmts:
-                if isinstance(e, Op):
-                    ops[e.ret].append(e)
-                elif isinstance(e, dict):
-                    extend_dict_list(ops, e)
-            functions[name.value] = ops
-
-        def _process_scf(self, ret, stmts):
-            ret = convert(ret)
-            ops: Dict[Intermediate, List[Op]] = defaultdict(list)
-            for e in stmts:
-                if isinstance(e, Op):
-                    if e.name == "scf.yield":
-                        ops[ret].append(Op(e.name, None, e.args, ret))
-                    else:
-                        ops[e.ret].append(e)
-                elif isinstance(e, dict):
-                    extend_dict_list(ops, e)
-            return ops
-
-        def process_if(self, ret, _args, _rest, *stmts):
-            return self._process_scf(ret, stmts)
-
-        def process_for(self, ret, _args, _rest, *stmts):
-            return self._process_scf(ret, stmts)
-
-        def process_while(self, ret, _args, _rest, *stmts):
-            return self._process_scf(ret, stmts)
-
-    parser = Lark(
-        grammar, parser="lalr", maybe_placeholders=True, transformer=TransformOps()
-    )
-    parser.parse(ttir)
     return functions
 
 
@@ -637,20 +473,10 @@ def identify_mutated_tensors(kernel, kwargs):
     ttir_module = None
     functions = None
     try:
-        from torch._dynamo import config
-
-        if not config.optimize_user_defined_triton_kernels:
-            raise ValueError("optimize_user_defined_triton_kernels is False")
-
         ttir_module, ordered_tensor_names = generate_ttir(kernel, kwargs)
 
-        # extract functions from TTIR
-        if hasattr(ttir_module, "walk"):
-            # use MLIR bindings exposed by Triton code
-            functions = ttir_to_functions(ttir_module)
-        else:
-            # parse string representation of Triton IR
-            functions = parse_ttir(str(ttir_module), kwargs)
+        # extract functions from TTIR using MLIR bindings exposed by Triton code
+        functions = ttir_to_functions(ttir_module)
 
         assert functions is not None
         kernel_name = next(iter(functions.keys()))
@@ -811,9 +637,6 @@ def triton_kernel_wrapper_mutation_functionalize(
         ctx.mark_mutation_hidden_from_autograd(input_arg)
         ctx.commit_update(input_arg)
         ctx.sync(input_arg)
-        # sync calls replace_ under the hood, so again indicate that
-        # this indirect replace is hidden from autograd
-        ctx.mark_mutation_hidden_from_autograd(input_arg)
     return None
 
 

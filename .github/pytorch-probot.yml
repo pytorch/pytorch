@@ -7,6 +7,9 @@ ciflow_push_tags:
 - ciflow/binaries_wheel
 - ciflow/inductor
 - ciflow/inductor-perf-compare
+- ciflow/inductor-micro-benchmark
+- ciflow/inductor-cu124
+- ciflow/linux-aarch64
 - ciflow/mps
 - ciflow/nightly
 - ciflow/periodic
@@ -17,9 +20,10 @@ ciflow_push_tags:
 - ciflow/xpu
 - ciflow/torchbench
 retryable_workflows:
-- lint
 - pull
 - trunk
 - linux-binary
 - windows-binary
 labeler_config: labeler.yml
+label_to_label_config: label_to_label.yml
+mergebot: True

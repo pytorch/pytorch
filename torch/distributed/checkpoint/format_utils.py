@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import argparse
 import os
 from enum import Enum
@@ -98,7 +99,8 @@ class BroadcastingTorchSaveReader(StorageReader):
 
             #  Broadcast the tensor from the coordinator rank
             if self.is_coordinator:
-                tensor = torch_state_dict[req.storage_index.fqn].cuda()
+                pg_device = dist.distributed_c10d._get_pg_default_device()
+                tensor = torch_state_dict[req.storage_index.fqn].to(pg_device)
             else:
                 tensor = torch.empty_like(planner.state_dict[req.storage_index.fqn])
 
@@ -167,8 +169,8 @@ class DynamicMetaLoadPlanner(DefaultLoadPlanner):
     def set_up_planner(
         self,
         state_dict: STATE_DICT_TYPE,
-        metadata: Metadata,
-        is_coordinator: bool,
+        metadata: Optional[Metadata] = None,
+        is_coordinator: bool = False,
     ) -> None:
         """Setups of the planner, extnding default behavior by creating the Metadata object from the state dict"""
         super().set_up_planner(state_dict, metadata, is_coordinator)
@@ -205,7 +207,6 @@ def dcp_to_torch_save(
         To avoid OOM, it's recommended to only run this function on a single rank.
     """
     sd: STATE_DICT_TYPE = {}
-
     _load_state_dict(
         sd,
         storage_reader=FileSystemReader(dcp_checkpoint_dir),
@@ -223,8 +224,8 @@ def torch_save_to_dcp(
     Given the location of a torch save file, converts it into a DCP checkpoint.
 
     Args:
-        torch_save_path: Filename to store the converted Torch save file.
-        dcp_checkpoint_dir: Directory containing the DCP checkpoint.
+        torch_save_path: Filename of the Torch save file.
+        dcp_checkpoint_dir: Directory to store the DCP checkpoint.
 
     .. warning::
         To avoid OOM, it's recommended to only run this function on a single rank.
@@ -263,13 +264,15 @@ if __name__ == "__main__":
     checkpoint_missing_warning = (
         f"No checkpoint found at {args.src}. Skipping conversion."
     )
-    if args.mode == FormatMode.TORCH_TO_DCP:
+    if args.mode == FormatMode.TORCH_TO_DCP.value:
         if os.path.isfile(args.src):
             torch_save_to_dcp(args.src, args.dst)
         else:
             print(checkpoint_missing_warning)
-    elif args.mode == FormatMode.DCP_TO_TORCH:
+    elif args.mode == FormatMode.DCP_TO_TORCH.value:
         if os.path.isdir(args.src):
             dcp_to_torch_save(args.src, args.dst)
         else:
             print(checkpoint_missing_warning)
+    else:
+        raise ValueError(f"Unknown conversion mode: {args.mode}")

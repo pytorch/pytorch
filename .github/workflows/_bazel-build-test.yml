@@ -27,6 +27,11 @@ on:
         type: string
         description: |
           A JSON description of what configs to run later on.
+      runner:
+        required: false
+        type: string
+        default: "linux.large"
+        description: Runner type
 
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -34,7 +39,7 @@ env:
 jobs:
   filter:
     if: github.repository_owner == 'pytorch'
-    runs-on: [self-hosted, linux.large]
+    runs-on: ${{ inputs.runner }}
     outputs:
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
       is-test-matrix-empty: ${{ steps.filter.outputs.is-test-matrix-empty }}
@@ -86,9 +91,14 @@ jobs:
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
+      - name: Check if in a ARC runner
+        shell: bash
+        id: check_arc_runner
+        run: echo "IN_ARC_RUNNER=$([ -f /.inarc ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         uses: pytorch/test-infra/.github/actions/setup-nvidia@main
-        if: ${{ inputs.cuda-version != 'cpu' }}
+        if: ${{ inputs.cuda-version != 'cpu' && steps.check_arc_runner.outputs.IN_ARC_RUNNER == 'false' }}
 
       - name: Output disk space left
         run: |

@@ -1,12 +1,12 @@
 import dataclasses
 import itertools
 import re
-
 from dataclasses import dataclass
 from enum import auto, Enum
 from typing import Callable, Dict, Iterator, List, Optional, Sequence, Set, Tuple, Union
 
 from torchgen.utils import assert_never, NamespaceHelper, OrderedSet
+
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
@@ -79,7 +79,7 @@ class DispatchKey(Enum):
     CatchAll = Undefined
 
     FPGA = auto()
-    ORT = auto()
+    MAIA = auto()
     Vulkan = auto()
     Metal = auto()
     MKLDNN = auto()
@@ -626,6 +626,9 @@ class NativeFunction:
         assert device_check_s is None or isinstance(
             device_check_s, str
         ), f"not a str: {device_check_s}"
+        assert (
+            device_check_s is None or device_check_s in DeviceCheckType.__members__
+        ), f"illegal device_check: {device_check_s}"
         device_check: DeviceCheckType
         if device_check_s is None:
             device_check = DeviceCheckType.ExactSame
@@ -706,7 +709,12 @@ class NativeFunction:
             for ks, v in raw_dispatch.items():
                 if ks == "__line__":
                     continue  # not worth tracking line numbers for dispatch entries
-                assert isinstance(ks, str), e
+                assert isinstance(
+                    ks, str
+                ), f"illegal dispatch key '{ks}' in {raw_dispatch}"
+                assert isinstance(
+                    v, str
+                ), f"illegal dispatch value '{v}' in {raw_dispatch}"
                 for k in ks.split(","):
                     dispatch_key = DispatchKey.parse(k.strip())
                     num_dispatch_keys += 1
@@ -1363,6 +1371,17 @@ class FunctionSchema:
     # TODO: Need to handle collisions with argument names at some point
     returns: Tuple["Return", ...]
 
+    @property
+    def is_mutable(self) -> bool:
+        def is_write(arg: "Argument") -> bool:
+            if arg.annotation is None:
+                return False
+            return arg.annotation.is_write
+
+        # Corresponds to torch._C._FunctionSchema.is_mutable
+        # See aten/src/ATen/core/function_schema.h (keep these in sync)
+        return any(is_write(a) for a in self.arguments.flat_all)
+
     def schema_order_arguments(self) -> Iterator["Argument"]:
         return itertools.chain(
             self.arguments.flat_positional,
@@ -1987,12 +2006,20 @@ class Argument:
     # model will have to change!
     annotation: Optional[Annotation]
 
+    @property
+    def alias_info(self) -> Optional[Annotation]:
+        return self.annotation
+
     @staticmethod
     def parse(arg: str) -> "Argument":
         name: str
         default: Optional[str]
+        assert " " in arg, f"illegal argument '{arg}'"
         type_and_annot, name_and_default = arg.rsplit(" ", 1)
         if "=" in name_and_default:
+            assert (
+                name_and_default.count("=") == 1
+            ), f"illegal argument with default value: '{name_and_default}'"
             name, default = name_and_default.split("=")
         else:
             name = name_and_default
@@ -2045,6 +2072,10 @@ class Return:
     name: Optional[str]
     type: Type
     annotation: Optional[Annotation]
+
+    @property
+    def alias_info(self) -> Optional[Annotation]:
+        return self.annotation
 
     @staticmethod
     def parse(arg: str) -> "Return":
@@ -2773,6 +2804,9 @@ class Precompute:
             )
 
             arg, with_list_raw = raw_replace_item.split(" -> ")
+            assert (
+                " " not in arg
+            ), f"illegal kernel param name '{arg}' in precomputed parameters'"
             with_list = with_list_raw.split(",")
             with_list_args = [Argument.parse(name.strip()) for name in with_list]
             replace[arg] = with_list_args

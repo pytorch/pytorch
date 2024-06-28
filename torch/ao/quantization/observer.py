@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 This module implements observers which are used to collect statistics about
 the values observed during calibration (PTQ) or training (QAT).
@@ -244,6 +245,8 @@ class UniformQuantizationObserverBase(ObserverBase):
             torch.uint8,
             torch.int16,
             torch.int32,
+            torch.float8_e5m2,
+            torch.float8_e4m3fn,
         )
 
         assert self.dtype in _ALLOWED_DTYPES, f"Default Observer only works for {_ALLOWED_DTYPES} data type"
@@ -1189,6 +1192,18 @@ class HistogramObserver(UniformQuantizationObserverBase):
         orig_hist = orig_hist + interpolated_histogram.to(torch.float)
         return orig_hist
 
+    def reset_histogram(self, x: torch.Tensor, min_val: torch.Tensor, max_val: torch.Tensor) -> None:
+        self.min_val.resize_(min_val.shape)
+        self.min_val.copy_(min_val)
+        self.max_val.resize_(max_val.shape)
+        self.max_val.copy_(max_val)
+        assert (
+            min_val.numel() == 1 and max_val.numel() == 1
+        ), "histogram min/max values must be scalar."
+        torch.histc(
+            x, self.bins, min=min_val, max=max_val, out=self.histogram  # type: ignore[arg-type]
+        )
+
     def forward(self, x_orig: torch.Tensor) -> torch.Tensor:
         if x_orig.numel() == 0:
             return x_orig
@@ -1212,16 +1227,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
         is_uninitialized = min_val == float("inf") and max_val == float("-inf")
         if is_uninitialized or same_values or close_values:
             min_val, max_val = x_min, x_max
-            self.min_val.resize_(min_val.shape)
-            self.min_val.copy_(min_val)
-            self.max_val.resize_(max_val.shape)
-            self.max_val.copy_(max_val)
-            assert (
-                min_val.numel() == 1 and max_val.numel() == 1
-            ), "histogram min/max values must be scalar."
-            torch.histc(
-                x, self.bins, min=min_val, max=max_val, out=self.histogram  # type: ignore[arg-type]
-            )
+            self.reset_histogram(x, min_val, max_val)
         else:
             new_min, new_max = x_min, x_max
             combined_min = torch.min(new_min, min_val)
@@ -1249,21 +1255,29 @@ class HistogramObserver(UniformQuantizationObserverBase):
             if combined_min == min_val and combined_max == max_val:
                 combined_histogram += self.histogram
             else:
-                combined_histogram = self._combine_histograms(
-                    combined_histogram,
-                    self.histogram,
-                    self.upsample_rate,
-                    downsample_rate,
-                    start_idx,
-                    self.bins,
-                )
+                MAX_HISTOGRAM_SIZE = 1e9  # 1 GB
+                histogram_size = self.bins * downsample_rate * 4
+                if histogram_size > MAX_HISTOGRAM_SIZE:
+                    warnings.warn(
+                        "Fail to combine histograms. Fall back to reset histogram."
+                    )
+                    self.reset_histogram(x, x_min, x_max)
+                else:
+                    combined_histogram = self._combine_histograms(
+                        combined_histogram,
+                        self.histogram,
+                        self.upsample_rate,
+                        downsample_rate,
+                        start_idx,
+                        self.bins,
+                    )
+                    self.histogram.detach_().resize_(combined_histogram.shape)
+                    self.histogram.copy_(combined_histogram)
+                    self.min_val.detach_().resize_(combined_min.shape)
+                    self.min_val.copy_(combined_min)
+                    self.max_val.detach_().resize_(combined_max.shape)
+                    self.max_val.copy_(combined_max)
 
-            self.histogram.detach_().resize_(combined_histogram.shape)
-            self.histogram.copy_(combined_histogram)
-            self.min_val.detach_().resize_(combined_min.shape)
-            self.min_val.copy_(combined_min)
-            self.max_val.detach_().resize_(combined_max.shape)
-            self.max_val.copy_(combined_max)
         return x_orig
 
     @torch.jit.export
@@ -1442,7 +1456,7 @@ class PlaceholderObserver(ObserverBase):
 
     @torch.jit.export
     def calculate_qparams(self):
-        raise Exception(
+        raise Exception(  # noqa: TRY002
             "calculate_qparams should not be called for PlaceholderObserver"
         )
 
@@ -1468,7 +1482,7 @@ class RecordingObserver(ObserverBase):
 
     @torch.jit.export
     def calculate_qparams(self):
-        raise Exception("calculate_qparams should not be called for RecordingObserver")
+        raise Exception("calculate_qparams should not be called for RecordingObserver")  # noqa: TRY002
 
     @torch.jit.export
     def get_tensor_value(self):
@@ -1499,7 +1513,7 @@ class NoopObserver(ObserverBase):
 
     @torch.jit.export
     def calculate_qparams(self):
-        raise Exception("calculate_qparams should not be called for NoopObserver")
+        raise Exception("calculate_qparams should not be called for NoopObserver")  # noqa: TRY002
 
 class ReuseInputObserver(ObserverBase):
     r""" This observer is used when we want to reuse the observer from the operator
@@ -1522,7 +1536,7 @@ class ReuseInputObserver(ObserverBase):
 
     @torch.jit.export
     def calculate_qparams(self):
-        raise Exception("calculate_qparams should not be called for ReuseInputObserver")
+        raise Exception("calculate_qparams should not be called for ReuseInputObserver")  # noqa: TRY002
 
 def _is_observer_script_module(mod, obs_type_name):
     """Returns true if given mod is an instance of Observer script module."""
@@ -1593,10 +1607,10 @@ def load_observer_state_dict(mod, obs_dict):
                 )
     for k in missing_keys:
         if "observer" in k or "activation_post_process" in k:
-            raise Exception(f"Missing keys for observer {k} in state_dict")
+            raise Exception(f"Missing keys for observer {k} in state_dict")  # noqa: TRY002
     for k in unexpected_keys:
         if "observer" in k or "activation_post_process" in k:
-            raise Exception(f"Unexpected keys for observer {k} in state_dict")
+            raise Exception(f"Unexpected keys for observer {k} in state_dict")  # noqa: TRY002
 
 
 # Restrict activations to be in the range (0,127)

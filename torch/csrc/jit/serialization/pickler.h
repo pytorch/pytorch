@@ -14,8 +14,7 @@
 #include <c10/util/string_view.h>
 #include <torch/csrc/Export.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // See Python's pickletools.py for a detailed description of each of these codes
 enum class PickleOpCode : char {
@@ -221,7 +220,7 @@ class TORCH_API Pickler {
   // does not)
   static CONSTEXPR_EXCEPT_WIN_CUDA size_t kBufferSize = 256;
   template <typename T>
-  void push(typename std::common_type<T>::type value) {
+  void push(std::common_type_t<T> value) {
     const char* begin = reinterpret_cast<const char*>(&value);
     if (bufferPos_ + sizeof(T) > buffer_.size()) {
       flushNonEmpty();
@@ -311,14 +310,14 @@ inline std::unordered_set<c10::DeviceType>& GetBackendMetaAllowlist() {
 // Dynamically obtain serialization function pairs
 // that require the corresponding backend.
 inline std::array<
-    c10::optional<std::pair<BackendMetaPtr, BackendMetaPtr>>,
+    std::optional<std::pair<BackendMetaPtr, BackendMetaPtr>>,
     at::COMPILE_TIME_MAX_DEVICE_TYPES>&
 GetBackendMetaSerialization() {
   // The array to save function pointer for BackendMeta serialization.
   // key is the DeviceType, value is std::pair obj.
   // value.first represent get function and value.seconde represent set function
   static std::array<
-      c10::optional<std::pair<BackendMetaPtr, BackendMetaPtr>>,
+      std::optional<std::pair<BackendMetaPtr, BackendMetaPtr>>,
       at::COMPILE_TIME_MAX_DEVICE_TYPES>
       BackendMetaSerialization;
   return BackendMetaSerialization;
@@ -348,7 +347,7 @@ TORCH_API inline void TensorBackendMetaRegistry(
       t,
       " has been registered.");
   BackendMetaSerialization[device_type] =
-      c10::optional<std::pair<BackendMetaPtr, BackendMetaPtr>>(
+      std::optional<std::pair<BackendMetaPtr, BackendMetaPtr>>(
           std::make_pair(get_fptr, set_fptr));
 }
 
@@ -425,5 +424,4 @@ inline void setTensorMetadata(
   setTensorMetadata(t, std::move(metadata));
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

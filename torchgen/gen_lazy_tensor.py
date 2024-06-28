@@ -1,7 +1,7 @@
 import argparse
 import os
-import pathlib
 from collections import namedtuple
+from pathlib import Path
 from typing import (
     Any,
     Callable,
@@ -18,22 +18,21 @@ from typing import (
 import yaml
 
 import torchgen.dest as dest
-
 from torchgen.api.lazy import setValueT
 from torchgen.api.types import BaseCppType
 from torchgen.dest.lazy_ir import GenLazyIR, GenLazyNativeFuncDefinition, GenTSLazyIR
 from torchgen.gen import get_grouped_native_functions, parse_native_yaml
-
-from torchgen.model import NativeFunction, NativeFunctionsGroup, OperatorName
-from torchgen.selective_build.selector import SelectiveBuilder
-from torchgen.utils import FileManager, NamespaceHelper
-from torchgen.yaml_utils import YamlLoader
-from .gen_backend_stubs import (
+from torchgen.gen_backend_stubs import (
     error_on_missing_kernels,
     gen_dispatcher_registrations,
     gen_dispatchkey_nativefunc_headers,
     parse_backend_yaml,
 )
+from torchgen.model import NativeFunction, NativeFunctionsGroup, OperatorName
+from torchgen.selective_build.selector import SelectiveBuilder
+from torchgen.utils import FileManager, NamespaceHelper
+from torchgen.yaml_utils import YamlLoader
+
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
@@ -138,7 +137,7 @@ def validate_shape_inference_header(
         decl for decl in expected_shape_infr_decls if decl not in shape_infr_decl_lines
     ]
     if missing_decls:
-        raise Exception(
+        raise Exception(  # noqa: TRY002
             f"""Missing shape inference function.\n
 Please add declare this function in {shape_inference_hdr}:\n
 and implement it in the corresponding shape_inference.cpp file.\n
@@ -262,7 +261,7 @@ def main() -> None:
     options = parser.parse_args()
 
     # Assumes that this file lives at PYTORCH_ROOT/torchgen/gen_backend_stubs.py
-    torch_root = pathlib.Path(__file__).parent.parent.parent.absolute()
+    torch_root = Path(__file__).absolute().parents[2]
     aten_path = str(torch_root / "aten" / "src" / "ATen")
     lazy_ir_generator: Type[GenLazyIR] = default_args.lazy_ir_generator
     if options.gen_ts_lowerings:

@@ -1,9 +1,12 @@
+# mypy: allow-untyped-defs
 import dataclasses
 import inspect
 import sys
-from typing import Any, Callable, Tuple
+from typing import Any, Callable, Dict, Iterable, Tuple
 
 import torch
+from torch import _C, _utils_internal
+from torch._ops import OpOverload
 
 
 @dataclasses.dataclass
@@ -53,7 +56,7 @@ def parse_namespace(qualname: str) -> Tuple[str, str]:
     return splits[0], splits[1]
 
 
-def lookup_op(qualname: str) -> torch._ops.OpOverload:
+def lookup_op(qualname: str) -> OpOverload:
     namespace, name = parse_namespace(qualname)
     if "." in name:
         name, overload = name.split(".")
@@ -64,8 +67,8 @@ def lookup_op(qualname: str) -> torch._ops.OpOverload:
     return getattr(packet, overload)
 
 
-def is_builtin(op: torch._ops.OpOverload) -> bool:
-    assert isinstance(op, torch._ops.OpOverload)
+def is_builtin(op: OpOverload) -> bool:
+    assert isinstance(op, OpOverload)
     return op.namespace in {"aten", "prim", "prims"}
 
 
@@ -78,27 +81,47 @@ def is_functional_schema(schema: Any) -> bool:
     - it has at least one return
     """
 
-    # Lazy import because not all PyTorch builds have torchgen
-    from torchgen.model import FunctionSchema, SchemaKind
+    def is_functional(schema):
+        if schema.is_mutable:
+            return False
+        rets = schema.returns
+        is_non_mutating_view = len(rets) > 0 and any(
+            r.alias_info is not None and not r.alias_info.is_write for r in rets
+        )
+        if is_non_mutating_view:
+            return False
+        if not schema.returns:
+            return False
+        return True
 
-    assert isinstance(schema, (str, FunctionSchema))
+    if isinstance(schema, torch._C.FunctionSchema):
+        return is_functional(schema)
+
+    # Lazy import because not all PyTorch builds have torchgen
+    from torchgen.model import FunctionSchema
+
     if isinstance(schema, str):
         schema = FunctionSchema.parse(schema)
+    assert isinstance(schema, FunctionSchema)
+    return is_functional(schema)
 
-    if schema.kind() != SchemaKind.functional:
-        return False
-    rets = schema.returns
-    is_non_mutating_view = len(rets) > 0 and any(
-        r.annotation is not None and not r.annotation.is_write for r in rets
+
+# should be torch._C.JitType but that annotation is busted
+def is_tensorlist_like_type(typ: Any) -> bool:
+    return (
+        typ == _C.ListType(_C.TensorType.get())
+        or typ == _C.ListType(_C.OptionalType(_C.TensorType.get()))
+        or typ == _C.OptionalType(_C.ListType(_C.TensorType.get()))
+        or typ == _C.OptionalType(_C.ListType(_C.OptionalType(_C.TensorType.get())))
     )
-    if is_non_mutating_view:
-        return False
-    if not schema.returns:
-        return False
-    return True
 
 
-def mutates_and_returns_first_arg(op: torch._ops.OpOverload):
+# should be torch._C.JitType but that annotation is busted
+def is_tensor_like_type(typ: Any) -> bool:
+    return typ == _C.TensorType.get() or typ == _C.OptionalType(_C.TensorType.get())
+
+
+def mutates_and_returns_first_arg(op: OpOverload):
     """Check if an op is an inplace aten op, i.e. it mutates and returns the first arg.
 
     TODO: torchgen/model.py's FunctionSchema.parse is the source of truth for this,
@@ -136,7 +159,27 @@ def mutates_and_returns_first_arg(op: torch._ops.OpOverload):
     return True
 
 
-def zip_schema(schema, args, kwargs):
+def fill_defaults(schema, args, kwargs):
+    new_args = []
+    new_kwargs = {}
+    for i in range(len(schema.arguments)):
+        info = schema.arguments[i]
+        if info.kwarg_only:
+            if info.name in kwargs:
+                new_kwargs[info.name] = kwargs[info.name]
+            else:
+                new_kwargs[info.name] = info.default_value
+        else:
+            if i < len(args):
+                new_args.append(args[i])
+            else:
+                new_args.append(info.default_value)
+    return tuple(new_args), new_kwargs
+
+
+def zip_schema(
+    schema: _C.FunctionSchema, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+) -> Iterable[Tuple[_C.Argument, Any]]:
     """zips schema.arguments and (args, kwargs) together.
 
     Assumes that (args, kwargs) were the inputs to some torch._ops.OpOverload:
@@ -156,3 +199,60 @@ def zip_schema(schema, args, kwargs):
             continue
         yield info, args[i]
     return
+
+
+def can_generate_trivial_fake_impl(op: OpOverload) -> bool:
+    assert isinstance(op, OpOverload)
+    if is_builtin(op):
+        # We control the built-ins. These may (in rare cases)
+        # do input metadata mutation (which we have banned on custom ops)
+        return False
+    schema = op._schema
+    # It's suspicious if the op is not mutable but returns nothing, so we return False out of an abundance of caution
+    if not schema.is_mutable:
+        return False
+    if len(schema.returns) > 0:
+        return False
+    # If the op returns nothing, then it has a trivial fake impl.
+    return True
+
+
+def requires_set_python_module() -> bool:
+    """If an op was defined in C++ and extended from Python using the
+    torch.library APIs, returns if we require that there have been a
+    m.set_python_module("mylib.ops") call from C++ that associates
+    the C++ op with a python module.
+    """
+    return getattr(_utils_internal, "REQUIRES_SET_PYTHON_MODULE", True)
+
+
+def handle_dispatch_mode(curr_mode, op_overload, *args, **kwargs):
+    assert isinstance(curr_mode, torch.utils._python_dispatch.TorchDispatchMode)
+    overload_types = []
+    args_flattened, _ = torch.utils._pytree.tree_flatten((args, kwargs.values()))
+    for a in args_flattened:
+        # TODO: need to double check the semantics of the "types" argument to torch_dispatch.
+        # It's generated in PyInterpreter.cpp, but seems to be generated in two places,
+        # where in one case we only include tensors with the python key, and in another
+        # we include **all** tensors.
+        if isinstance(a, torch.Tensor) and torch._C._dispatch_keys(a).has(
+            torch._C.DispatchKey.Python
+        ):
+            overload_types.append(type(a))
+    # TODO: check that I got these args correct (in C++, we pass in "0000"??)
+
+    return curr_mode.__torch_dispatch__(op_overload, overload_types, args, kwargs)
+
+
+def has_kwarg_only_args(schema: _C.FunctionSchema):
+    return any(a.kwarg_only for a in schema.arguments)
+
+
+def has_kwarg_only_tensors(schema: _C.FunctionSchema):
+    for a in schema.arguments:
+        if not (is_tensor_like_type(a.type) or is_tensorlist_like_type(a.type)):
+            continue
+        if not a.kwarg_only:
+            continue
+        return True
+    return False

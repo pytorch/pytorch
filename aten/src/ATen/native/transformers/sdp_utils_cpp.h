@@ -44,7 +44,7 @@ struct sdp_params {
   at::Tensor query;
   at::Tensor key;
   at::Tensor value;
-  c10::optional<at::Tensor> attn_mask;
+  std::optional<at::Tensor> attn_mask;
   double dropout;
   bool is_causal;
 };
@@ -53,7 +53,7 @@ SDPBackend select_sdp_backend_cpp(sdp_params const& kernel_params);
 
 inline c10::SymFloat calculate_scale(
     const at::Tensor& query,
-    c10::optional<double> scale) {
+    std::optional<double> scale) {
   const auto softmax_scale = scale.has_value()
       ? scale.value()
       : (c10::SymFloat(1.0) / (c10::SymFloat(query.sym_size(-1)).sqrt()));

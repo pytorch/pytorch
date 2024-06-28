@@ -16,14 +16,11 @@ endif()
 # ATen parallelism settings
 #  OMP - OpenMP for intra-op, native thread pool for inter-op parallelism
 #  NATIVE - using native thread pool for intra- and inter-op parallelism
-#  TBB - using TBB for intra- and native thread pool for inter-op parallelism
 if(INTERN_BUILD_MOBILE)
   set(ATEN_THREADING "NATIVE" CACHE STRING "ATen parallel backend")
 else()
   if(USE_OPENMP)
     set(ATEN_THREADING "OMP" CACHE STRING "ATen parallel backend")
-  elseif(USE_TBB)
-    set(ATEN_THREADING "TBB" CACHE STRING "ATen parallel backend")
   else()
     set(ATEN_THREADING "NATIVE" CACHE STRING "ATen parallel backend")
   endif()
@@ -31,19 +28,12 @@ endif()
 
 set(AT_PARALLEL_OPENMP 0)
 set(AT_PARALLEL_NATIVE 0)
-set(AT_PARALLEL_NATIVE_TBB 0)
 
 message(STATUS "Using ATen parallel backend: ${ATEN_THREADING}")
 if("${ATEN_THREADING}" STREQUAL "OMP")
   set(AT_PARALLEL_OPENMP 1)
 elseif("${ATEN_THREADING}" STREQUAL "NATIVE")
   set(AT_PARALLEL_NATIVE 1)
-elseif("${ATEN_THREADING}" STREQUAL "TBB")
-  if(NOT USE_TBB)
-    message(FATAL_ERROR "Using TBB backend but USE_TBB is off")
-  endif()
-  message(WARNING "ATEN TBB Threading is deprectated.")
-  set(AT_PARALLEL_NATIVE_TBB 1)
 else()
   message(FATAL_ERROR "Unknown ATen parallel backend: ${ATEN_THREADING}")
 endif()
@@ -59,27 +49,14 @@ if(INTERN_BUILD_ATEN_OPS)
 
   # Generate the headers wrapped by our operator
   file(GLOB_RECURSE torchgen_python "${PROJECT_SOURCE_DIR}/torchgen/*.py")
-  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/contrib/aten/aten_op.h
-  COMMAND
-  "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/gen_op.py
-    --aten_root=${CMAKE_CURRENT_SOURCE_DIR}/../aten
-    --template_dir=${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten
-    --yaml_dir=${CMAKE_BINARY_DIR}/aten/src/ATen
-    --install_dir=${CMAKE_CURRENT_BINARY_DIR}/contrib/aten
-  DEPENDS
-  ${torchgen_python}
-  ${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml
-  ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/gen_op.py
-  ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/aten_op_template.h)
 
-  add_custom_target(__aten_op_header_gen
-    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/contrib/aten/aten_op.h)
-  add_library(aten_op_header_gen INTERFACE)
-  add_dependencies(aten_op_header_gen __aten_op_header_gen)
 
   # Add source, includes, and libs to lists
   list(APPEND Caffe2_CPU_SRCS ${ATen_CPU_SRCS})
   list(APPEND Caffe2_GPU_SRCS ${ATen_CUDA_CPP_SRCS})
+  list(APPEND Caffe2_XPU_SRCS ${ATen_XPU_SRCS})
+  list(APPEND Caffe2_XPU_INCLUDE ${ATen_XPU_INCLUDE})
+  list(APPEND Caffe2_XPU_DEPENDENCY_LIBS ${ATen_XPU_DEPENDENCY_LIBS})
   list(APPEND Caffe2_GPU_SRCS_W_SORT_BY_KEY ${ATen_CUDA_SRCS_W_SORT_BY_KEY})
   list(APPEND Caffe2_GPU_CU_SRCS ${ATen_CUDA_CU_SRCS})
   list(APPEND Caffe2_GPU_CU_SRCS_W_SORT_BY_KEY ${ATen_CUDA_CU_SRCS_W_SORT_BY_KEY})
@@ -123,50 +100,8 @@ endif()
 add_subdirectory(core)
 add_subdirectory(serialize)
 add_subdirectory(utils)
-if(BUILD_CAFFE2 OR (NOT USE_FBGEMM))
+if(NOT USE_FBGEMM)
   add_subdirectory(perfkernels)
-endif()
-
-# Skip modules that are not used by libtorch mobile yet.
-if(BUILD_CAFFE2 AND NOT INTERN_BUILD_MOBILE)
-  add_subdirectory(contrib)
-  add_subdirectory(predictor)
-  add_subdirectory(predictor/emulator)
-  add_subdirectory(core/nomnigraph)
-  if(USE_NVRTC)
-    add_subdirectory(cuda_rtc)
-  endif()
-  add_subdirectory(db)
-  add_subdirectory(distributed)
-  # add_subdirectory(experiments) # note, we may remove this folder at some point
-  add_subdirectory(ideep)
-  add_subdirectory(image)
-  add_subdirectory(video)
-  add_subdirectory(mobile)
-  add_subdirectory(mpi)
-  add_subdirectory(observers)
-  add_subdirectory(onnx)
-  if(BUILD_CAFFE2_OPS)
-    add_subdirectory(operators)
-    add_subdirectory(operators/rnn)
-    if(USE_FBGEMM)
-      add_subdirectory(quantization/server)
-    endif()
-    if(USE_QNNPACK)
-      add_subdirectory(operators/quantized)
-    endif()
-  endif()
-  add_subdirectory(opt)
-  add_subdirectory(proto)
-  add_subdirectory(python)
-  add_subdirectory(queue)
-  add_subdirectory(sgd)
-  add_subdirectory(share)
-  # add_subdirectory(test) # todo: use caffe2_gtest_main instead of gtest_main because we will need to call GlobalInit
-  add_subdirectory(transforms)
-endif()
-if(NOT BUILD_CAFFE2 AND NOT INTERN_BUILD_MOBILE)
-  add_subdirectory(proto)
 endif()
 
 # Advanced: if we have allow list specified, we will do intersections for all
@@ -174,6 +109,7 @@ endif()
 if(CAFFE2_ALLOWLISTED_FILES)
   caffe2_do_allowlist(Caffe2_CPU_SRCS CAFFE2_ALLOWLISTED_FILES)
   caffe2_do_allowlist(Caffe2_GPU_SRCS CAFFE2_ALLOWLISTED_FILES)
+  caffe2_do_allowlist(Caffe2_XPU_SRCS CAFFE2_ALLOWLISTED_FILES)
   caffe2_do_allowlist(Caffe2_GPU_SRCS_W_SORT_BY_KEY CAFFE2_ALLOWLISTED_FILES)
   caffe2_do_allowlist(Caffe2_GPU_CU_SRCS CAFFE2_ALLOWLISTED_FILES)
   caffe2_do_allowlist(Caffe2_GPU_CU_SRCS_W_SORT_BY_KEY CAFFE2_ALLOWLISTED_FILES)
@@ -276,44 +212,6 @@ if(PRINT_CMAKE_DEBUG_INFO)
     message(STATUS "  " ${tmp})
   endforeach()
 
-endif()
-
-if(NOT INTERN_BUILD_MOBILE)
-  # ---[ List of libraries to link with
-  add_library(caffe2_protos STATIC $<TARGET_OBJECTS:Caffe2_PROTO>)
-  add_dependencies(caffe2_protos Caffe2_PROTO)
-  # If we are going to link protobuf locally inside caffe2 libraries, what we will do is
-  # to create a helper static library that always contains libprotobuf source files, and
-  # link the caffe2 related dependent libraries to it.
-  target_include_directories(caffe2_protos INTERFACE $<INSTALL_INTERFACE:include>)
-  # Reason for this public dependency is as follows:
-  # (1) Strictly speaking, we should not expose any Protobuf related functions. We should
-  #     only use function interfaces wrapped with our own public API, and link protobuf
-  #     locally.
-  # (2) However, currently across the Caffe2 codebase, we have extensive use of protobuf
-  #     functionalities. For example, not only libcaffe2.so uses it, but also other
-  #     binaries such as python extensions etc. As a result, we will have to have a
-  #     transitive dependency to libprotobuf.
-  #
-  # Good thing is that, if we specify CAFFE2_LINK_LOCAL_PROTOBUF, then we do not need to
-  # separately deploy protobuf binaries - libcaffe2.so will contain all functionalities
-  # one needs. One can verify this via ldd.
-  #
-  # TODO item in the future includes:
-  # (1) Enable using lite protobuf
-  # (2) Properly define public API that do not directly depend on protobuf itself.
-  # (3) Expose the libprotobuf.a file for dependent libraries to link to.
-  #
-  # What it means for users/developers?
-  # (1) Users: nothing affecting the users, other than the fact that CAFFE2_LINK_LOCAL_PROTOBUF
-  #     avoids the need to deploy protobuf.
-  # (2) Developers: if one simply uses core caffe2 functionality without using protobuf,
-  #     nothing changes. If one has a dependent library that uses protobuf, then one needs to
-  #     have the right protobuf version as well as linking to libprotobuf.a.
-  target_link_libraries(caffe2_protos PUBLIC protobuf::libprotobuf)
-  if(NOT BUILD_SHARED_LIBS)
-    install(TARGETS caffe2_protos ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
-  endif()
 endif()
 
 # ==========================================================
@@ -448,7 +346,7 @@ add_custom_command(
   OUTPUT
   ${TORCH_GENERATED_CODE}
   COMMAND
-  "${PYTHON_EXECUTABLE}" tools/setup_helpers/generate_code.py
+  Python::Interpreter tools/setup_helpers/generate_code.py
     --native-functions-path "aten/src/ATen/native/native_functions.yaml"
     --tags-path "aten/src/ATen/native/tags.yaml"
     $<$<BOOL:${INTERN_DISABLE_AUTOGRAD}>:--disable-autograd>
@@ -507,6 +405,9 @@ if(BUILD_LITE_INTERPRETER)
   append_filelist("libtorch_lite_cmake_sources" LIBTORCH_CMAKE_SRCS)
   list(APPEND LIBTORCH_CMAKE_SRCS ${LITE_EAGER_SYMOBLICATION_SRCS})
   list(APPEND LIBTORCH_CMAKE_SRCS ${LITE_PROFILER_SRCS})
+  if(USE_LITE_AOTI)
+    append_filelist("inductor_core_resources" LIBTORCH_CMAKE_SRCS)
+  endif()
   set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 else()
   append_filelist("libtorch_cmake_sources" LIBTORCH_CMAKE_SRCS)
@@ -625,17 +526,6 @@ if(NOT INTERN_BUILD_MOBILE AND NOT BUILD_LITE_INTERPRETER)
     ${TORCH_SRC_DIR}/csrc/utils/byte_order.cpp
   )
 
-  # Disable legacy import of building without Caffe2 support
-  if(BUILD_CAFFE2)
-    list(APPEND TORCH_SRCS
-      ${TORCH_SRC_DIR}/csrc/jit/serialization/import_legacy.cpp
-    )
-  else()
-    set_source_files_properties(
-      ${TORCH_SRC_DIR}/csrc/jit/serialization/import.cpp
-      PROPERTIES COMPILE_FLAGS "-DC10_DISABLE_LEGACY_IMPORT"
-    )
-  endif()
   if(USE_DISTRIBUTED)
     append_filelist("libtorch_distributed_base_sources" TORCH_SRCS)
     if(NOT WIN32)
@@ -658,7 +548,7 @@ if(USE_CUDA)
     set(DELAY_LOAD_FLAGS "")
   endif()
 
-  target_link_libraries(caffe2_nvrtc ${CUDA_CUDA_LIB} ${CUDA_NVRTC_LIB} ${DELAY_LOAD_FLAGS})
+  target_link_libraries(caffe2_nvrtc PRIVATE caffe2::nvrtc ${DELAY_LOAD_FLAGS})
   install(TARGETS caffe2_nvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
   if(USE_NCCL)
     list(APPEND Caffe2_GPU_SRCS
@@ -670,6 +560,8 @@ if(USE_CUDA)
       append_filelist("libtorch_cuda_distributed_extra_sources" Caffe2_GPU_SRCS)
       set_source_files_properties(
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/intra_node_comm.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/CudaDMAConnectivity.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/CUDASymmetricMemory.cu
         PROPERTIES COMPILE_FLAGS "-DPYTORCH_C10_DRIVER_API_SUPPORTED=1"
       )
     endif()
@@ -843,17 +735,41 @@ set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS_NON_AVX} ${Caffe2_CPU_SRCS_AVX2} ${Caffe2_
 # END formerly-libtorch sources
 # ==========================================================
 
+if(BUILD_LIBTORCHLESS)
+  find_library(TORCH_LIB torch PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
+  find_library(TORCH_CPU_LIB torch_cpu PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
+
+  if(USE_CUDA)
+    find_library(TORCH_CUDA_LIB torch_cuda PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
+  endif()
+
+  if(USE_ROCM)
+    find_library(TORCH_HIP_LIB torch_hip PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
+  endif()
+
+  if(USE_XPU)
+    find_library(TORCH_XPU_LIB torch_xpu PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
+  endif()
+  add_subdirectory(../torch torch)
+  # ---[ Torch python bindings build
+  set(TORCH_PYTHON_COMPILE_OPTIONS ${TORCH_PYTHON_COMPILE_OPTIONS} PARENT_SCOPE)
+  set(TORCH_PYTHON_LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS} PARENT_SCOPE)
+else()
+  set(TORCH_LIB torch)
+  set(TORCH_CPU_LIB torch_cpu)
+  set(TORCH_CUDA_LIB torch_cuda)
+  set(TORCH_HIP_LIB torch_hip)
+  set(TORCH_XPU_LIB torch_xpu)
+endif()
+
+
+if(NOT BUILD_LIBTORCHLESS)
 add_library(torch_cpu ${Caffe2_CPU_SRCS})
 if(HAVE_SOVERSION)
   set_target_properties(torch_cpu PROPERTIES
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
 endif()
 torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
-if(BUILD_CAFFE2 AND NOT MSVC)
-  # Caffe2 has too many signed-unsigned violation, but the framework is dead
-  # So no point in fixing those
-  target_compile_options(torch_cpu PRIVATE "-Wno-sign-compare")
-endif()
 
 # Ignore Wdeprecated-XXX errors from third-party libraries
 if(NOT MSVC)
@@ -861,7 +777,7 @@ if(NOT MSVC)
   set_source_files_properties(${PROJECT_SOURCE_DIR}/torch/csrc/distributed/c10d/socket.cpp PROPERTIES COMPILE_OPTIONS "-Wno-error=deprecated")
 endif()
 
-if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_VULKAN AND NOT USE_IOS AND NOT USE_PYTORCH_METAL AND NOT USE_COREML_DELEGATE)
+if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_VULKAN AND NOT USE_IOS AND NOT USE_COREML_DELEGATE)
   target_compile_options_if_supported(torch_cpu "-Wmissing-prototypes")
   target_compile_options_if_supported(torch_cpu "-Werror=missing-prototypes")
   get_target_property(TORCH_CPU_SOURCES torch_cpu SOURCES)
@@ -986,7 +902,6 @@ if(USE_ROCM)
   hip_add_library(torch_hip ${Caffe2_HIP_SRCS})
   if(USE_FLASH_ATTENTION)
     target_link_libraries(torch_hip PRIVATE __caffe2_aotriton)
-    add_dependencies(torch_hip aotriton_external)
   endif()
   set(CUDA_LINK_LIBRARIES_KEYWORD)
   torch_compile_options(torch_hip)  # see cmake/public/utils.cmake
@@ -1090,6 +1005,14 @@ elseif(USE_CUDA)
     target_precompile_headers(torch_cuda PRIVATE
         "$<$<COMPILE_LANGUAGE:CXX>:ATen/core/ATen_pch.h>")
   endif()
+
+  # Apply suggestion from comment https://github.com/pytorch/pytorch/issues/113053#issuecomment-2115375714
+  if(LINUX)
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/CUDASparseDescriptors.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/CUDASparseBlas.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/sparse/cuda/SparseCUDABlas.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/sparse/cuda/SparseBlasImpl.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+  endif()
 endif()
 
 if(USE_XPU)
@@ -1144,8 +1067,15 @@ if(USE_XPU)
     message(WARNING "Failed to include ATen XPU implementation target")
   else()
     target_link_libraries(torch_xpu PRIVATE torch_xpu_ops)
-    target_link_libraries(torch_xpu PRIVATE
-      "-Wl,--whole-archive,\"$<TARGET_FILE:torch_xpu_ops>\" -Wl,--no-whole-archive")
+    if(MSVC)
+      # Windows
+      target_link_libraries(torch_xpu PRIVATE
+      "-WHOLEARCHIVE:\"$<TARGET_FILE:torch_xpu_ops>\"")
+    else()
+      # Linux
+      target_link_libraries(torch_xpu PRIVATE
+        "-Wl,--whole-archive,\"$<TARGET_FILE:torch_xpu_ops>\" -Wl,--no-whole-archive")
+    endif()
   endif()
 endif()
 
@@ -1157,13 +1087,6 @@ endif()
 # formerly-libtorch flags
 # ==========================================================
 
-if(NOT INTERN_BUILD_MOBILE)
-  # Forces caffe2.pb.h to be generated before its dependents are compiled.
-  # Adding the generated header file to the ${TORCH_SRCS} list is not sufficient
-  # to establish the dependency, since the generation procedure is declared in a different CMake file.
-  # See https://samthursfield.wordpress.com/2015/11/21/cmake-dependencies-between-targets-and-files-and-custom-commands/#custom-commands-in-different-directories
-  add_dependencies(torch_cpu Caffe2_PROTO)
-endif()
 
 # Build model tracer for tracing-based selective build
 if(TRACING_BASED AND NOT BUILD_LITE_INTERPRETER AND NOT INTERN_BUILD_MOBILE)
@@ -1183,7 +1106,7 @@ if(BUILD_LITE_INTERPRETER AND SELECTED_OP_LIST)
     add_custom_command(
       OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
       COMMAND
-        "${PYTHON_EXECUTABLE}"
+        Python::Interpreter
         -m tools.code_analyzer.gen_oplist
         --model_file_list_path "${SELECTED_OP_LIST}"
         --output_dir "${CMAKE_BINARY_DIR}/aten/src/ATen"
@@ -1198,7 +1121,7 @@ if(BUILD_LITE_INTERPRETER AND SELECTED_OP_LIST)
     add_custom_command(
       OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
       COMMAND
-        "${PYTHON_EXECUTABLE}"
+        Python::Interpreter
         -m tools.lite_interpreter.gen_selected_mobile_ops_header
         --yaml_file_path "${SELECTED_OP_LIST}"
         --output_file_path "${CMAKE_BINARY_DIR}/aten/src/ATen"
@@ -1252,16 +1175,6 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
   set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/quantized/qlinear_unpack.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
 endif()
 
-if(USE_TBB)
-  list(APPEND ATen_CPU_INCLUDE ${TBB_INCLUDE_DIR})
-  target_link_libraries(torch_cpu PUBLIC TBB::tbb)
-endif()
-
-if(BUILD_CAFFE2 AND BUILD_CAFFE2_OPS AND USE_FBGEMM)
-  # FIXME: quantization/server/conv_dnnlowp_op.cc depends on fbgemm/src/RefImplementations.h
-  target_include_directories(torch_cpu PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../third_party)
-endif()
-
 target_include_directories(torch_cpu PRIVATE ${ATen_CPU_INCLUDE})
 
 target_include_directories(torch_cpu PRIVATE
@@ -1277,6 +1190,12 @@ if(USE_KINETO)
   target_include_directories(torch_cpu PRIVATE
     ${TORCH_ROOT}/third_party/kineto/libkineto/src)
 endif()
+
+target_include_directories(torch_cpu PRIVATE
+  ${TORCH_ROOT}/third_party/cpp-httplib)
+
+target_include_directories(torch_cpu PRIVATE
+  ${TORCH_ROOT}/third_party/nlohmann/include)
 
 install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
   DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
@@ -1332,8 +1251,11 @@ if(BUILD_TEST)
   endif()
   if(BUILD_AOT_INDUCTOR_TEST)
     add_subdirectory(
-      ${TORCH_ROOT}/test/cpp/aot_inductor
-      ${CMAKE_BINARY_DIR}/test_aot_inductor)
+      ${TORCH_ROOT}/test/cpp/aoti_abi_check
+      ${CMAKE_BINARY_DIR}/test_aoti_abi_check)
+    add_subdirectory(
+      ${TORCH_ROOT}/test/cpp/aoti_inference
+      ${CMAKE_BINARY_DIR}/test_aoti_inference)
   endif()
 endif()
 
@@ -1355,12 +1277,10 @@ install(FILES
   ${PROJECT_BINARY_DIR}/TorchConfig.cmake
   DESTINATION share/cmake/Torch)
 
-
 # ---[ Torch python bindings build
 add_subdirectory(../torch torch)
 set(TORCH_PYTHON_COMPILE_OPTIONS ${TORCH_PYTHON_COMPILE_OPTIONS} PARENT_SCOPE)
 set(TORCH_PYTHON_LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS} PARENT_SCOPE)
-
 # ==========================================================
 # END formerly-libtorch flags
 # ==========================================================
@@ -1406,6 +1326,9 @@ if(USE_ROCM)
     )
   if(USE_FLASH_ATTENTION)
     target_compile_definitions(torch_hip PRIVATE USE_FLASH_ATTENTION)
+  endif()
+  if(USE_MEM_EFF_ATTENTION)
+    target_compile_definitions(torch_hip PRIVATE USE_MEM_EFF_ATTENTION)
   endif()
 endif()
 
@@ -1460,8 +1383,6 @@ if(USE_DISTRIBUTED)
 endif()
 
 if(NOT INTERN_BUILD_MOBILE)
-  caffe2_interface_library(caffe2_protos caffe2_protos_whole)
-  target_link_libraries(torch_cpu PRIVATE caffe2_protos_whole)
   if(${CAFFE2_LINK_LOCAL_PROTOBUF})
     target_link_libraries(torch_cpu INTERFACE protobuf::libprotobuf)
   else()
@@ -1607,9 +1528,7 @@ if(USE_CUDA)
   caffe2_interface_library(torch_cuda torch_cuda_library)
 elseif(USE_ROCM)
   caffe2_interface_library(torch_hip torch_hip_library)
-endif()
-
-if(USE_XPU)
+elseif(USE_XPU)
   caffe2_interface_library(torch_xpu torch_xpu_library)
 endif()
 
@@ -1621,9 +1540,7 @@ if(USE_CUDA)
   install(TARGETS torch_cuda torch_cuda_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 elseif(USE_ROCM)
   install(TARGETS torch_hip torch_hip_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
-endif()
-
-if(USE_XPU)
+elseif(USE_XPU)
   install(TARGETS torch_xpu torch_xpu_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 endif()
 
@@ -1683,12 +1600,15 @@ endif()
 # ---[ XPU library.
 if(USE_XPU)
   target_link_libraries(torch_xpu INTERFACE torch::xpurt)
+
   target_link_libraries(torch_xpu PUBLIC c10_xpu)
 
   target_include_directories(
       torch_xpu INTERFACE $<INSTALL_INTERFACE:include>)
   target_include_directories(
       torch_xpu PRIVATE ${Caffe2_XPU_INCLUDE})
+  target_link_libraries(
+      torch_xpu PRIVATE ${Caffe2_XPU_DEPENDENCY_LIBS})
 
   target_link_libraries(torch_xpu PUBLIC torch_cpu_library)
 endif()
@@ -1737,10 +1657,6 @@ if(BUILD_SHARED_LIBS)
     target_link_libraries(torch_global_deps ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
     target_link_libraries(torch_global_deps torch::cudart torch::nvtoolsext)
   endif()
-  if(USE_TBB)
-    target_link_libraries(torch_global_deps TBB::tbb)
-  endif()
-
   install(TARGETS torch_global_deps DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 endif()
 
@@ -1760,6 +1676,7 @@ if(USE_ROCM)
 
   # Since PyTorch files contain HIP headers, these flags are required for the necessary definitions to be added.
   target_compile_options(torch_hip PUBLIC ${HIP_CXX_FLAGS})  # experiment
+
   target_link_libraries(torch_hip PUBLIC c10_hip)
 
   if(NOT INTERN_BUILD_MOBILE)
@@ -1823,7 +1740,7 @@ if(BUILD_TEST)
         if(NOT MSVC)
           add_executable(${test_name}_${CPU_CAPABILITY} "${test_src}" ../aten/src/ATen/native/quantized/AffineQuantizerBase.cpp)
           # TODO: Get rid of c10 dependency (which is only needed for the implementation of AT_ERROR)
-          target_link_libraries(${test_name}_${CPU_CAPABILITY} c10 sleef gtest_main)
+          target_link_libraries(${test_name}_${CPU_CAPABILITY} c10 sleef gtest_main nlohmann)
           if(USE_FBGEMM)
             target_link_libraries(${test_name}_${CPU_CAPABILITY} fbgemm)
           endif()
@@ -1861,9 +1778,6 @@ if(BUILD_TEST)
     target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
     target_include_directories(${test_name} PRIVATE $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>)
     target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
-    if(NOT MSVC)
-      target_compile_options(${test_name} PRIVATE -Wno-unused-variable)
-    endif()
     add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
     if(INSTALL_TEST)
       install(TARGETS ${test_name} DESTINATION test)
@@ -1965,14 +1879,6 @@ if(BUILD_TEST)
       endif()
     endforeach()
   endif()
-
-  # For special tests that explicitly uses dependencies, we add them here
-  if(BUILD_CAFFE2 AND USE_MPI)
-    target_link_libraries(mpi_test MPI::MPI_CXX)
-    if(USE_CUDA)
-      target_link_libraries(mpi_gpu_test MPI::MPI_CXX)
-    endif()
-  endif()
 endif()
 
 if(MSVC)
@@ -1988,239 +1894,4 @@ if(MSVC)
     set_source_files_properties(${tmp_path} PROPERTIES COMPILE_FLAGS "-Xcompiler /Zc:lambda")
   endforeach()
 endif()
-
-# Note: we only install the caffe2 python files if BUILD_CAFFE2_OPS is ON
-# This is because the build rules here written in such a way that they always
-# appear to need to be re-run generating >600 pieces of work during the pytorch
-# rebuild step. The long-term fix should be to clean up these rules so they
-# only rerun when needed.
-
-if(BUILD_PYTHON)
-  # Python site-packages
-  # Get canonical directory for python site packages (relative to install
-  # location).  It varies from system to system.
-  # We should pin the path separator to the forward slash on Windows.
-  # More details can be seen at
-  # https://github.com/pytorch/pytorch/tree/main/tools/build_pytorch_libs.bat#note-backslash-munging-on-windows
-  pycmd(PYTHON_SITE_PACKAGES "
-      import os
-      import sysconfig
-      relative_site_packages = sysconfig.get_path('purelib').replace(sysconfig.get_path('data'), '').lstrip(os.path.sep)
-      print(relative_site_packages)
-  ")
-  file(TO_CMAKE_PATH ${PYTHON_SITE_PACKAGES} PYTHON_SITE_PACKAGES)
-  set(PYTHON_SITE_PACKAGES ${PYTHON_SITE_PACKAGES} PARENT_SCOPE) # for Summary
-  # ---[ Options.
-  set(PYTHON_LIB_REL_PATH "${PYTHON_SITE_PACKAGES}" CACHE STRING "Python installation path (relative to CMake installation prefix)")
-  message(STATUS "Using ${PYTHON_LIB_REL_PATH} as python relative installation path")
-  # Python extension suffix
-  # Try to get from python through sysconfig.get_env_var('EXT_SUFFIX') first,
-  # fallback to ".pyd" if windows and ".so" for all others.
-  pycmd(PY_EXT_SUFFIX "
-      def get_ext_suffix():
-          import sys
-          import sysconfig
-          return sysconfig.get_config_var('EXT_SUFFIX')
-
-      suffix = get_ext_suffix()
-      if suffix is not None:
-          print(suffix)
-      else:
-          print()
-  ")
-  if("${PY_EXT_SUFFIX}" STREQUAL "")
-    if(MSVC)
-      set(PY_EXT_SUFFIX ".pyd")
-    else()
-      set(PY_EXT_SUFFIX ".so")
-    endif()
-  endif()
-
-  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
-    set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
-    set_source_files_properties(${TORCH_SRC_DIR}/../caffe2/operators/box_with_nms_limit_op.cc PROPERTIES COMPILE_FLAGS -Wno-attributes)
-  endif()
-  # Allow different install locations for libcaffe2
-  # For setuptools installs (that all build Python), install libcaffe2 into
-  # site-packages, alongside the torch libraries. The pybind11 library needs
-  # an rpath to the torch library folder
-  # For cmake installs, including c++ only installs, install libcaffe2 into
-  # CMAKE_INSTALL_PREFIX/lib . The pybind11 library can have a hardcoded
-  # rpath
-  set(caffe2_pybind11_rpath "${_rpath_portable_origin}")
-  if(${BUILDING_WITH_TORCH_LIBS})
-    # site-packages/caffe2/python/caffe2_pybind11_state
-    # site-packages/torch/lib
-    set(caffe2_pybind11_rpath "${_rpath_portable_origin}/../../torch/lib")
-  endif(${BUILDING_WITH_TORCH_LIBS})
-
-  # Must also include `CMAKE_SHARED_LINKER_FLAGS` in linker flags for
-  # `caffe2_pybind11_state_*` targets because paths to required libraries may
-  # need to be found there (e.g., specifying path to `libiomp5` with `LDFLAGS`).
-  set(_caffe2_pybind11_state_linker_flags "${CMAKE_SHARED_LINKER_FLAGS}")
-  if(APPLE)
-    set(_caffe2_pybind11_state_linker_flags "${_caffe2_pybind11_state_linker_flags} -undefined dynamic_lookup")
-  endif()
-
-  # ---[ Python.
-  if(BUILD_CAFFE2)
-  add_library(caffe2_pybind11_state MODULE ${Caffe2_CPU_PYTHON_SRCS})
-  target_compile_definitions(torch PRIVATE BUILD_CAFFE2)
-  target_compile_definitions(torch_python PRIVATE BUILD_CAFFE2)
-  if(USE_NUMPY)
-    target_compile_options(caffe2_pybind11_state PRIVATE "-DUSE_NUMPY")
-    target_link_libraries(caffe2_pybind11_state  PRIVATE numpy::numpy)
-  endif()
-  if(NOT MSVC)
-    set_target_properties(caffe2_pybind11_state PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
-  endif()
-  set_target_properties(caffe2_pybind11_state PROPERTIES PREFIX "" DEBUG_POSTFIX "")
-  set_target_properties(caffe2_pybind11_state PROPERTIES SUFFIX ${PY_EXT_SUFFIX})
-  set_target_properties(caffe2_pybind11_state PROPERTIES LINK_FLAGS "${_caffe2_pybind11_state_linker_flags}")
-  target_include_directories(caffe2_pybind11_state PRIVATE $<INSTALL_INTERFACE:include>)
-  target_include_directories(caffe2_pybind11_state PRIVATE ${Caffe2_CPU_INCLUDE})
-
-  target_link_libraries(caffe2_pybind11_state PRIVATE
-      torch_library python::python pybind::pybind11)
-  if(USE_MKLDNN)
-      target_link_libraries(caffe2_pybind11_state PRIVATE caffe2::mkldnn)
-  endif()
-  if(WIN32)
-    target_link_libraries(caffe2_pybind11_state PRIVATE onnx_proto)
-  endif(WIN32)
-
-  # Install caffe2_pybind11_state(_gpu|hip) in site-packages/caffe2/python,
-  # so it needs an rpath to find libcaffe2
-  set_target_properties(
-      caffe2_pybind11_state PROPERTIES LIBRARY_OUTPUT_DIRECTORY
-      ${CMAKE_BINARY_DIR}/caffe2/python)
-  install(TARGETS caffe2_pybind11_state DESTINATION "${PYTHON_LIB_REL_PATH}/caffe2/python")
-  if(MSVC AND BUILD_SHARED_LIBS)
-    install(FILES $<TARGET_PDB_FILE:caffe2_pybind11_state> DESTINATION "${PYTHON_LIB_REL_PATH}/caffe2/python" OPTIONAL)
-  endif()
-  set_target_properties(caffe2_pybind11_state PROPERTIES INSTALL_RPATH "${caffe2_pybind11_rpath}")
-
-  if(USE_CUDA)
-    add_library(caffe2_pybind11_state_gpu MODULE ${Caffe2_GPU_PYTHON_SRCS})
-    if(USE_NUMPY)
-      target_compile_options(caffe2_pybind11_state_gpu PRIVATE "-DUSE_NUMPY")
-      target_link_libraries(caffe2_pybind11_state_gpu PRIVATE numpy::numpy)
-    endif()
-    if(NOT MSVC)
-      set_target_properties(caffe2_pybind11_state_gpu PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
-    endif()
-    set_target_properties(caffe2_pybind11_state_gpu PROPERTIES PREFIX "" DEBUG_POSTFIX "")
-    set_target_properties(caffe2_pybind11_state_gpu PROPERTIES SUFFIX ${PY_EXT_SUFFIX})
-    set_target_properties(caffe2_pybind11_state_gpu PROPERTIES LINK_FLAGS "${_caffe2_pybind11_state_linker_flags}")
-    target_include_directories(caffe2_pybind11_state_gpu PRIVATE $<INSTALL_INTERFACE:include>)
-    target_include_directories(caffe2_pybind11_state_gpu PRIVATE ${Caffe2_CPU_INCLUDE})
-    target_link_libraries(caffe2_pybind11_state_gpu PRIVATE
-        torch_library python::python pybind::pybind11)
-    if(USE_MKLDNN)
-        target_link_libraries(caffe2_pybind11_state_gpu PRIVATE caffe2::mkldnn)
-    endif()
-    if(WIN32)
-      target_link_libraries(caffe2_pybind11_state_gpu PRIVATE onnx_proto)
-    endif(WIN32)
-
-    # Install with same rpath as non-gpu caffe2_pybind11_state
-    set_target_properties(
-        caffe2_pybind11_state_gpu PROPERTIES LIBRARY_OUTPUT_DIRECTORY
-        ${CMAKE_BINARY_DIR}/caffe2/python)
-    install(TARGETS caffe2_pybind11_state_gpu DESTINATION "${PYTHON_LIB_REL_PATH}/caffe2/python")
-    if(MSVC AND BUILD_SHARED_LIBS)
-      install(FILES $<TARGET_PDB_FILE:caffe2_pybind11_state_gpu> DESTINATION "${PYTHON_LIB_REL_PATH}/caffe2/python" OPTIONAL)
-    endif()
-    set_target_properties(caffe2_pybind11_state_gpu PROPERTIES INSTALL_RPATH "${caffe2_pybind11_rpath}")
-  endif()
-
-  if(USE_ROCM)
-    add_library(caffe2_pybind11_state_hip MODULE ${Caffe2_HIP_PYTHON_SRCS})
-    if(USE_NUMPY)
-      target_compile_options(caffe2_pybind11_state_hip PRIVATE "-DUSE_NUMPY")
-      target_link_libraries(caffe2_pybind11_state_hip PRIVATE numpy::numpy)
-    endif()
-    if(NOT MSVC)
-      target_compile_options(caffe2_pybind11_state_hip PRIVATE ${HIP_CXX_FLAGS} -fvisibility=hidden)
-    endif()
-    set_target_properties(caffe2_pybind11_state_hip PROPERTIES PREFIX "")
-    set_target_properties(caffe2_pybind11_state_hip PROPERTIES SUFFIX ${PY_EXT_SUFFIX})
-    set_target_properties(caffe2_pybind11_state_hip PROPERTIES LINK_FLAGS "${_caffe2_pybind11_state_linker_flags}")
-    target_include_directories(caffe2_pybind11_state_hip PRIVATE $<INSTALL_INTERFACE:include>)
-    target_include_directories(caffe2_pybind11_state_hip PRIVATE ${Caffe2_CPU_INCLUDE} ${Caffe2_HIP_INCLUDE})
-    target_link_libraries(caffe2_pybind11_state_hip PRIVATE
-        torch_library python::python pybind::pybind11)
-
-    # Install with same rpath as non-hip caffe2_pybind11_state
-    set_target_properties(
-        caffe2_pybind11_state_hip PROPERTIES LIBRARY_OUTPUT_DIRECTORY
-        ${CMAKE_BINARY_DIR}/caffe2/python)
-    install(TARGETS caffe2_pybind11_state_hip DESTINATION "${PYTHON_LIB_REL_PATH}/caffe2/python")
-    set_target_properties(caffe2_pybind11_state_hip PROPERTIES INSTALL_RPATH "${caffe2_pybind11_rpath}")
-  endif()
-
-  if(MSVC AND CMAKE_GENERATOR MATCHES "Visual Studio")
-    # If we are building under windows, we will copy the file from
-    # build/caffe2/python/{Debug,Release}/caffe2_pybind11_state.pyd
-    # to its parent folder so that we can do in-build execution.
-    add_custom_target(windows_python_copy_lib ALL)
-    add_dependencies(windows_python_copy_lib caffe2_pybind11_state)
-    add_custom_command(
-        TARGET windows_python_copy_lib POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy
-        $<TARGET_FILE:caffe2_pybind11_state>
-        ${CMAKE_BINARY_DIR}/caffe2/python)
-    if(USE_CUDA)
-      add_dependencies(windows_python_copy_lib caffe2_pybind11_state_gpu)
-      add_custom_command(
-          TARGET windows_python_copy_lib POST_BUILD
-          COMMAND ${CMAKE_COMMAND} -E copy
-          $<TARGET_FILE:caffe2_pybind11_state_gpu>
-          ${CMAKE_BINARY_DIR}/caffe2/python)
-    endif()
-    if(USE_ROCM)
-      add_dependencies(windows_python_copy_lib caffe2_pybind11_state_hip)
-      add_custom_command(
-          TARGET windows_python_copy_lib POST_BUILD
-          COMMAND ${CMAKE_COMMAND} -E copy
-          $<TARGET_FILE:caffe2_pybind11_state_hip>
-          ${CMAKE_BINARY_DIR}/caffe2/python)
-    endif()
-  endif()
-
-  # Finally, Copy all python files to build directory
-  # Create a custom target that copies all python files.
-  file(GLOB_RECURSE PYTHON_SRCS RELATIVE ${PROJECT_SOURCE_DIR}
-       "${PROJECT_SOURCE_DIR}/caffe2/*.py")
-  endif()
-
-  # generated pb files are copied from build/caffe2 to caffe2
-  # if we copied them back to build this would create a build cycle
-  # consider removing the need for globs
-  filter_list_exclude(PYTHON_SRCS PYTHON_SRCS "proto/.*_pb")
-
-  set(build_files)
-  foreach(python_src ${PYTHON_SRCS})
-    add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/${python_src}
-                       DEPENDS ${PROJECT_SOURCE_DIR}/${python_src}
-                       COMMAND ${CMAKE_COMMAND} -E copy
-                       ${PROJECT_SOURCE_DIR}/${python_src}
-                       ${CMAKE_BINARY_DIR}/${python_src})
-    list(APPEND build_files ${CMAKE_BINARY_DIR}/${python_src})
-  endforeach()
-
-  add_custom_target(python_copy_files ALL DEPENDS ${build_files})
-
-
-  # Install commands
-  # Pick up static python files
-  install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe2 DESTINATION ${PYTHON_LIB_REL_PATH}
-          FILES_MATCHING PATTERN "*.py")
-  # Caffe proto files
-  install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe DESTINATION ${PYTHON_LIB_REL_PATH}
-          FILES_MATCHING PATTERN "*.py")
-  # Caffe2 proto files
-  install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe2 DESTINATION ${PYTHON_LIB_REL_PATH}
-          FILES_MATCHING PATTERN "*.py")
 endif()

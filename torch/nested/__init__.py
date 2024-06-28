@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import List, Optional, Tuple, Union
 
 import torch
@@ -186,7 +187,7 @@ Example::
 
 def nested_tensor(tensor_list, *, dtype=None, layout=None, device=None, requires_grad=False, pin_memory=False) -> Tensor:
     r"""
-Constructs a nested tensor with no autograd history (also known as a “leaf tensor”, see
+Constructs a nested tensor with no autograd history (also known as a "leaf tensor", see
 :ref:`Autograd mechanics <autograd-mechanics>`) from :attr:`tensor_list` a list of tensors.
 
 Args:
@@ -388,3 +389,13 @@ Example::
     from torch.nested._internal.nested_tensor import nested_view_from_values_offsets_lengths
 
     return nested_view_from_values_offsets_lengths(values, offsets, lengths, ragged_idx=jagged_dim)
+
+
+# This library impl is here so pytorch picks it up when initializing, otherwise users had to import
+# torch.nested._internal.ops to get it, which is not ideal. Importing all of ops here results in a
+# fun circular dependency hell, so this is the next best thing
+@torch.library.impl("aten::_nested_get_jagged_dummy", ["default", "NestedTensorCPU", "NestedTensorCUDA"])  # type: ignore[has-type]
+def _aten_nested_get_jagged_dummy(x) -> Tensor:
+    from torch.nested._internal.nested_tensor import _nt_view_dummy
+
+    return _nt_view_dummy()

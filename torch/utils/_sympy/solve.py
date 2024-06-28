@@ -88,6 +88,7 @@ def try_solve(
 
         # Return if we were able to isolate 'thing' on the left-hand side.
         if isinstance(e, sympy.Rel) and e.lhs == thing:
+            log.debug("solved: %s ---> %s", expr, e)
             return e, e.rhs
 
     return None
@@ -102,7 +103,7 @@ def _try_isolate_lhs(
     if isinstance(e, sympy.Rel):
         # Move any constants in the left-hand side to the right-hand side.
         lhs_not_thing = (
-            sum([a for a in e.lhs.args if not a.has(thing)])
+            sum(a for a in e.lhs.args if not a.has(thing))
             if isinstance(e.lhs, sympy.Add)
             else 0
         )

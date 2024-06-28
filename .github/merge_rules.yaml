@@ -27,13 +27,12 @@
   - third_party/onnx
   - caffe2/python/onnx/**
   approved_by:
-  - BowenBao
-  - abock
   - justinchuby
+  - liqunfu
   - shubhambhokare1
-  - thiagocrepaldi
   - titaiwangms
   - wschin
+  - xadupre
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -243,7 +242,9 @@
   - torch/csrc/xpu/**
   - torch/xpu/**
   - test/xpu/**
+  - test/test_xpu.py
   - third_party/xpu.txt
+  - .ci/docker/ci_commit_pins/triton-xpu.txt
   approved_by:
   - EikanWang
   - jgong5
@@ -374,12 +375,22 @@
 
 - name: CPU inductor
   patterns:
+  - torch/_inductor/mkldnn_ir.py
+  - torch/_inductor/mkldnn_lowerings.py
   - torch/_inductor/fx_passes/mkldnn_fusion.py
   - torch/_inductor/fx_passes/quantization.py
+  - torch/_inductor/codegen/cpp_prefix.h
   - torch/_inductor/codegen/cpp.py
+  - torch/_inductor/codegen/cpp_utils.py
+  - torch/_inductor/codegen/cpp_micro_gemm.py
+  - torch/_inductor/codegen/cpp_template_kernel.py
+  - torch/_inductor/codegen/cpp_template.py
+  - torch/_inductor/codegen/cpp_gemm_template.py
   - test/inductor/test_mkldnn_pattern_matcher.py
   - test/inductor/test_cpu_repo.py
   - test/inductor/test_cpu_cpp_wrapper.py
+  - test/inductor/test_cpu_select_algorithm.py
+  - aten/src/ATen/cpu/**
   - aten/src/ATen/native/quantized/cpu/**
   - test/quantization/core/test_quantized_op.py
   - torch/ao/quantization/quantizer/x86_inductor_quantizer.py

@@ -1,10 +1,11 @@
+# mypy: allow-untyped-defs
 """Distributed Collective Communication (c10d)."""
 
-import itertools
 import collections.abc
 import contextlib
 import hashlib
 import io
+import itertools
 import logging
 import os
 import pickle
@@ -13,18 +14,26 @@ import time
 import warnings
 from collections import namedtuple
 from datetime import timedelta
-from typing import Any, Callable, Dict, Optional, Tuple, Union, List, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing_extensions import deprecated
 
 import torch
+from torch._C import _DistStoreError as DistStoreError
 from torch._C._distributed_c10d import (
+    _DistributedBackendOptions,
+    _register_process_group,
+    _resolve_process_group,
+    _unregister_all_process_groups,
+    _unregister_process_group,
     AllgatherOptions,
     AllreduceCoalescedOptions,
     AllreduceOptions,
     AllToAllOptions,
-    _DistributedBackendOptions,
     BarrierOptions,
     BroadcastOptions,
+    DebugLevel,
     GatherOptions,
+    get_debug_level,
     PrefixStore,
     ProcessGroup,
     ReduceOp,
@@ -32,41 +41,88 @@ from torch._C._distributed_c10d import (
     ReduceScatterOptions,
     ScatterOptions,
     Store,
-    DebugLevel,
-    get_debug_level,
     Work,
-    _register_process_group,
-    _resolve_process_group,
-    _unregister_all_process_groups,
-    _unregister_process_group,
 )
 from torch._utils_internal import set_pytorch_distributed_envs_from_justknobs
-from .constants import default_pg_timeout, default_pg_nccl_timeout
+from torch.utils._typing_utils import not_none
+
 from .c10d_logger import _exception_logger, _time_logger
+from .constants import default_pg_nccl_timeout, default_pg_timeout
 from .rendezvous import register_rendezvous_handler, rendezvous  # noqa: F401
-from ..utils._typing_utils import not_none
-DistStoreError = torch._C._DistStoreError
+
 
 __all__ = [
-    'Backend', 'BackendConfig', 'GroupMember', 'P2POp', 'all_gather', 'all_gather_coalesced',
-    'all_gather_object', 'all_reduce',
-    'all_reduce_coalesced', 'all_to_all',
-    'all_to_all_single', 'barrier', 'batch_isend_irecv', 'broadcast',
-    'broadcast_object_list', 'destroy_process_group',
-    'gather', 'gather_object', 'get_backend_config', 'get_backend', 'get_rank',
-    'get_world_size', 'get_pg_count', 'group', 'init_process_group', 'irecv',
-    'is_gloo_available', 'is_initialized', 'is_mpi_available', 'is_backend_available',
-    'is_nccl_available', 'is_torchelastic_launched', 'is_ucc_available',
-    'isend', 'monitored_barrier', 'new_group', 'new_subgroups',
-    'new_subgroups_by_enumeration', 'recv', 'reduce',
-    'reduce_scatter', 'scatter',
-    'scatter_object_list', 'send', 'supports_complex',
-    'AllreduceCoalescedOptions', 'AllreduceOptions', 'AllToAllOptions',
-    'BarrierOptions', 'BroadcastOptions', 'GatherOptions', 'PrefixStore',
-    'ProcessGroup', 'ReduceOp', 'ReduceOptions', 'ReduceScatterOptions',
-    'ScatterOptions', 'Store', 'DebugLevel', 'get_debug_level', 'Work',
-    'default_pg_timeout', 'get_group_rank', 'get_global_rank', 'get_process_group_ranks',
-    'reduce_op', 'all_gather_into_tensor', 'reduce_scatter_tensor',
+    "Backend",
+    "BackendConfig",
+    "GroupMember",
+    "P2POp",
+    "all_gather",
+    "all_gather_coalesced",
+    "all_gather_object",
+    "all_reduce",
+    "all_reduce_coalesced",
+    "all_to_all",
+    "all_to_all_single",
+    "barrier",
+    "batch_isend_irecv",
+    "broadcast",
+    "send_object_list",
+    "recv_object_list",
+    "broadcast_object_list",
+    "destroy_process_group",
+    "gather",
+    "gather_object",
+    "get_backend_config",
+    "get_backend",
+    "get_rank",
+    "get_world_size",
+    "get_pg_count",
+    "group",
+    "init_process_group",
+    "irecv",
+    "is_gloo_available",
+    "is_initialized",
+    "is_mpi_available",
+    "is_backend_available",
+    "is_nccl_available",
+    "is_torchelastic_launched",
+    "is_ucc_available",
+    "isend",
+    "monitored_barrier",
+    "new_group",
+    "new_subgroups",
+    "new_subgroups_by_enumeration",
+    "recv",
+    "reduce",
+    "reduce_scatter",
+    "scatter",
+    "scatter_object_list",
+    "send",
+    "supports_complex",
+    "AllreduceCoalescedOptions",
+    "AllreduceOptions",
+    "AllToAllOptions",
+    "BarrierOptions",
+    "BroadcastOptions",
+    "GatherOptions",
+    "PrefixStore",
+    "ProcessGroup",
+    "ReduceOp",
+    "ReduceOptions",
+    "ReduceScatterOptions",
+    "ScatterOptions",
+    "Store",
+    "DebugLevel",
+    "get_debug_level",
+    "Work",
+    "default_pg_timeout",
+    "get_group_rank",
+    "get_global_rank",
+    "get_process_group_ranks",
+    "reduce_op",
+    "all_gather_into_tensor",
+    "reduce_scatter_tensor",
+    "get_node_local_rank",
 ]
 
 _MPI_AVAILABLE = True
@@ -76,6 +132,7 @@ _UCC_AVAILABLE = True
 
 _pickler = pickle.Pickler
 _unpickler = pickle.Unpickler
+
 
 # Change __module__ of all imported types from torch._C._distributed_c10d that are public
 def _export_c_types() -> None:
@@ -95,14 +152,17 @@ def _export_c_types() -> None:
         Store,
         DebugLevel,
         get_debug_level,
-        Work
+        Work,
     ]
     for type in _public_types_to_change_module:
         type.__module__ = "torch.distributed.distributed_c10d"
+
+
 _export_c_types()
 
 try:
     from torch._C._distributed_c10d import ProcessGroupMPI
+
     ProcessGroupMPI.__module__ = "torch.distributed.distributed_c10d"
     __all__ += ["ProcessGroupMPI"]
 except ImportError:
@@ -110,14 +170,15 @@ except ImportError:
 
 try:
     from torch._C._distributed_c10d import ProcessGroupNCCL
+
     ProcessGroupNCCL.__module__ = "torch.distributed.distributed_c10d"
     __all__ += ["ProcessGroupNCCL"]
 except ImportError:
     _NCCL_AVAILABLE = False
 
 try:
-    from torch._C._distributed_c10d import ProcessGroupGloo
-    from torch._C._distributed_c10d import _ProcessGroupWrapper
+    from torch._C._distributed_c10d import _ProcessGroupWrapper, ProcessGroupGloo
+
     ProcessGroupGloo.__module__ = "torch.distributed.distributed_c10d"
     __all__ += ["ProcessGroupGloo"]
 except ImportError:
@@ -125,6 +186,7 @@ except ImportError:
 
 try:
     from torch._C._distributed_c10d import ProcessGroupUCC
+
     ProcessGroupUCC.__module__ = "torch.distributed.distributed_c10d"
     __all__ += ["ProcessGroupUCC"]
 except ImportError:
@@ -187,20 +249,20 @@ class Backend(str):
     backend_list = [UNDEFINED, GLOO, NCCL, UCC, MPI]
 
     default_device_backend_map: Dict[str, str] = {
-        'cpu' : GLOO,
-        'cuda' : NCCL,
+        "cpu": GLOO,
+        "cuda": NCCL,
     }
 
     backend_capability: Dict[str, List[str]] = {
-        GLOO : ["cpu", "cuda"],
-        NCCL : ["cuda"],
-        UCC : ["cpu", "cuda"],
-        MPI : ["cpu", "cuda"],
+        GLOO: ["cpu", "cuda"],
+        NCCL: ["cuda"],
+        UCC: ["cpu", "cuda"],
+        MPI: ["cpu", "cuda"],
     }
 
     backend_type_map: Dict[str, ProcessGroup.BackendType] = {
         UNDEFINED: ProcessGroup.BackendType.UNDEFINED,
-        GLOO : ProcessGroup.BackendType.GLOO,
+        GLOO: ProcessGroup.BackendType.GLOO,
         NCCL: ProcessGroup.BackendType.NCCL,
         UCC: ProcessGroup.BackendType.UCC,
     }
@@ -216,7 +278,13 @@ class Backend(str):
         return value
 
     @classmethod
-    def register_backend(cls, name, func, extended_api=False, devices: Optional[Union[str, List[str]]] = None) -> None:
+    def register_backend(
+        cls,
+        name,
+        func,
+        extended_api=False,
+        devices: Optional[Union[str, List[str]]] = None,
+    ) -> None:
         """
         Register a new backend with the given name and instantiating function.
 
@@ -243,19 +311,19 @@ class Backend(str):
         """
         # Allow UCC plugin if Pytorch is not built with native support.
         # TODO: remove this exception once UCC plugin is fully deprecated.
-        if (name != Backend.UCC or (name == Backend.UCC and is_ucc_available())):
-            assert not hasattr(Backend, name.upper()), (
-                f"{name.upper()} c10d backend already exist"
-            )
-        assert name.upper() not in Backend._plugins, (
-            f"{name.upper()} c10d backend creator function already exist"
-        )
+        if name != Backend.UCC or (name == Backend.UCC and is_ucc_available()):
+            assert not hasattr(
+                Backend, name.upper()
+            ), f"{name.upper()} c10d backend already exist"
+        assert (
+            name.upper() not in Backend._plugins
+        ), f"{name.upper()} c10d backend creator function already exist"
 
         setattr(Backend, name.upper(), name.lower())
         Backend.backend_list.append(name.lower())
         if devices is not None:
             for device in devices:
-                if device != 'cpu' and device != 'cuda':
+                if device != "cpu" and device != "cuda":
                     Backend.default_device_backend_map[device] = name.lower()
         Backend.backend_type_map[name.lower()] = ProcessGroup.BackendType.CUSTOM
 
@@ -277,6 +345,7 @@ class Backend(str):
 
         Backend._plugins[name.upper()] = Backend._BackendPlugin(func, extended_api)
 
+
 class BackendConfig:
     """Backend configuration class."""
 
@@ -290,7 +359,10 @@ class BackendConfig:
             # supported since PyTorch 2.0
             for device, default_backend in Backend.default_device_backend_map.items():
                 if is_backend_available(default_backend):
-                    if default_backend == Backend.NCCL and not torch.cuda.is_available():
+                    if (
+                        default_backend == Backend.NCCL
+                        and not torch.cuda.is_available()
+                    ):
                         continue
                     self.device_backend_map[device] = Backend(default_backend)
         elif backend.lower() in Backend.backend_list:
@@ -312,12 +384,16 @@ class BackendConfig:
             for device_backend_pair_str in backend.lower().split(","):
                 device_backend_pair = device_backend_pair_str.split(":")
                 if len(device_backend_pair) != 2:
-                    raise ValueError(f"Invalid device:backend pairing: \
-                                     {device_backend_pair_str}. {backend_str_error_message}")
+                    raise ValueError(
+                        f"Invalid device:backend pairing: \
+                                     {device_backend_pair_str}. {backend_str_error_message}"
+                    )
                 device, backend = device_backend_pair
                 if device in self.device_backend_map:
-                    raise ValueError(f"Duplicate device type {device} \
-                                     in backend string: {backend}. {backend_str_error_message}")
+                    raise ValueError(
+                        f"Duplicate device type {device} \
+                                     in backend string: {backend}. {backend_str_error_message}"
+                    )
                 self.device_backend_map[device] = Backend(backend)
         else:
             # User specified a single backend name whose device capability is
@@ -330,22 +406,23 @@ class BackendConfig:
             )
             backend_val = Backend(backend)
             self.device_backend_map = {
-                "cpu" : backend_val,
-                "cuda" : backend_val,
-                "xpu" : backend_val,
+                "cpu": backend_val,
+                "cuda": backend_val,
+                "xpu": backend_val,
             }
 
-        logger.info(
-            "Using backend config: %s", self.device_backend_map
-        )
+        logger.info("Using backend config: %s", self.device_backend_map)
 
     def __repr__(self):
         """Return all the device:backend pairs separated by commas."""
-        return ",".join(f"{device}:{backend}" for device, backend in self.device_backend_map.items())
+        return ",".join(
+            f"{device}:{backend}" for device, backend in self.device_backend_map.items()
+        )
 
     def get_device_backend_map(self) -> Dict[str, Backend]:
         """Return backend map of the device."""
         return self.device_backend_map
+
 
 class _reduce_op:
     r"""
@@ -362,11 +439,12 @@ class _reduce_op:
             setattr(self, k, v)
         self.__members__ = ReduceOp.RedOpType.__members__
 
+    @deprecated(
+        "`torch.distributed.reduce_op` is deprecated, "
+        "please use `torch.distributed.ReduceOp` instead",
+        category=FutureWarning,
+    )
     def __getattribute__(self, key):
-        warnings.warn(
-            "torch.distributed.reduce_op is deprecated, please use "
-            "torch.distributed.ReduceOp instead"
-        )
         return object.__getattribute__(self, key)
 
 
@@ -392,8 +470,14 @@ class P2POp:
         tag (int, optional): Tag to match send with recv.
     """
 
-    def __init__(self, op: Callable, tensor: torch.Tensor, peer: int,
-                 group: Optional[ProcessGroup] = None, tag: int = 0):
+    def __init__(
+        self,
+        op: Callable,
+        tensor: torch.Tensor,
+        peer: int,
+        group: Optional[ProcessGroup] = None,
+        tag: int = 0,
+    ):
         """Init."""
         self.op = op
         self.tensor = tensor
@@ -401,12 +485,36 @@ class P2POp:
         self.group = group
         self.tag = tag
 
-    def __new__(cls, op: Callable, tensor: torch.Tensor, peer: int,
-                group: Optional[ProcessGroup] = None, tag: int = 0):
+    def __new__(
+        cls,
+        op: Callable,
+        tensor: torch.Tensor,
+        peer: int,
+        group: Optional[ProcessGroup] = None,
+        tag: int = 0,
+    ):
         """Create and return a new instance of the class."""
         _check_op(op)
         _check_single_tensor(tensor, "tensor")
         return object.__new__(cls)
+
+    def __repr__(self):
+        my_group_rank = get_rank(self.group)
+        peer_group_rank = (
+            get_group_rank(self.group, self.peer) if self.group else self.peer
+        )
+        op_name = self.op.__name__
+        group_name = self.group.group_name if self.group else "default_pg"
+        if "send" in op_name:
+            s = my_group_rank
+            d = peer_group_rank
+        elif "recv" in op_name:
+            s = peer_group_rank
+            d = my_group_rank
+        else:
+            return super().__repr__()
+
+        return f"P2POp({op_name} pg={group_name}, s={s}, d={d},  {self.tensor.shape}, {self.tensor.dtype})"
 
 
 class _CollOp:
@@ -421,8 +529,14 @@ class _CollOp:
         root (int, optional): root of broadcast or reduce.
     """
 
-    def __init__(self, op: Callable, tensor: torch.Tensor, dst_tensor: Optional[torch.Tensor] = None,
-                 redop: Optional[ReduceOp] = None, root: Optional[int] = None):
+    def __init__(
+        self,
+        op: Callable,
+        tensor: torch.Tensor,
+        dst_tensor: Optional[torch.Tensor] = None,
+        redop: Optional[ReduceOp] = None,
+        root: Optional[int] = None,
+    ):
         self.op = op
         self.tensor = tensor
         self.dst_tensor = dst_tensor
@@ -441,6 +555,7 @@ _group_count = 0
 _tags_to_pg: Dict[str, List[ProcessGroup]] = {}
 _pg_to_tag: Dict[ProcessGroup, str] = {}
 _backend: Optional[str] = None
+
 
 class _World:
     """
@@ -562,7 +677,7 @@ class _World:
             config_info.append(
                 {
                     "pg_name": self.pg_names[pg],
-                    "uid": _get_process_group_uid(pg),
+                    "pg_desc": pg.group_desc,
                     "backend_config": self.pg_backend_config[pg],
                     "ranks": list(ranks.keys())
                     if len(ranks) != default_pg_size
@@ -576,6 +691,7 @@ class _World:
 
 _world = _World()
 """Holds the singleton instance of ``_World`` used by c10. Experimental extension point to override it"""
+
 
 class _WorldMeta(type):
     """
@@ -593,10 +709,12 @@ class _WorldMeta(type):
     def WORLD(cls, pg: Optional[ProcessGroup]):
         _world.default_pg = pg
 
+
 class group(metaclass=_WorldMeta):
     """Group class. Placeholder."""
 
     pass
+
 
 class GroupMember(metaclass=_WorldMeta):
     """Group member class."""
@@ -610,11 +728,14 @@ def _get_default_timeout(backend: Backend) -> timedelta:
         if not isinstance(default_pg_nccl_timeout, timedelta):
             # TODO moco benchmark on CPU initializes pgnccl backend today, triggered this assert in CI before it was
             # changed to be a warning.  We should fix the moco model.
-            warnings.warn("Attempted to get default timeout for nccl backend, but NCCL support is not compiled")
+            warnings.warn(
+                "Attempted to get default timeout for nccl backend, but NCCL support is not compiled"
+            )
             return default_pg_timeout
         return default_pg_nccl_timeout
     else:
         return default_pg_timeout
+
 
 def _check_valid_timeout(timeout: Any) -> None:
     if not isinstance(timeout, timedelta):
@@ -622,10 +743,12 @@ def _check_valid_timeout(timeout: Any) -> None:
             f"Expected timeout argument to be of type datetime.timedelta, got {timeout}"
         )
 
+
 # Default process group state
 _default_pg_init_method: Optional[str] = None
 
 STORE_BASED_BARRIER_PREFIX = "store_based_barrier_key"
+
 
 def _get_pg_default_device(group: Optional[ProcessGroup] = None) -> torch.device:
     """
@@ -658,7 +781,9 @@ def _get_pg_default_device(group: Optional[ProcessGroup] = None) -> torch.device
         warnings.warn(
             f"You are using a Backend {type(group)} as a ProcessGroup. "
             "This usage is deprecated since PyTorch 2.0. Please use a public API "
-            "of PyTorch Distributed instead."
+            "of PyTorch Distributed instead.",
+            FutureWarning,
+            stacklevel=3,
         )
         # Most users create Gloo with private API for object collectives
         _world.pg_default_device[group] = torch.device("cpu")
@@ -689,14 +814,20 @@ def _get_pg_default_device(group: Optional[ProcessGroup] = None) -> torch.device
         _world.pg_default_device[group] = devices[0]
 
     logger.info(
-        "Using device %s for object "
-        "collectives.", _world.pg_default_device[group]
+        "Using device %s for object " "collectives.", _world.pg_default_device[group]
     )
     return _world.pg_default_device[group]
 
 
 @_time_logger
-def _store_based_barrier(rank, store, group_name, rendezvous_count, timeout, logging_interval=timedelta(seconds=10)) -> None:
+def _store_based_barrier(
+    rank,
+    store,
+    group_name,
+    rendezvous_count,
+    timeout,
+    logging_interval=timedelta(seconds=10),
+) -> None:
     """
     Store based barrier for synchronizing processes.
 
@@ -733,19 +864,26 @@ def _store_based_barrier(rank, store, group_name, rendezvous_count, timeout, log
             logger.debug(
                 "Waiting in store based barrier to initialize process group for "
                 "rank: %s, key: %s (world_size=%s, num_workers_joined=%s, timeout=%s error=%s)",
-                rank, store_key, world_size, worker_count, timeout, e
+                rank,
+                store_key,
+                world_size,
+                worker_count,
+                timeout,
+                e,
             )
 
             if timedelta(seconds=(time.time() - start)) > timeout:
-                raise DistStoreError(  # noqa: TRY200
+                raise DistStoreError(  # noqa: B904
                     "Timed out initializing process group in store based barrier on "
-                    "rank {}, for key: {} (world_size={}, num_workers_joined={}, timeout={} error={})".format(
-                        rank, store_key, world_size, worker_count, timeout, e
-                    )
+                    f"rank {rank}, for key: {store_key} (world_size={world_size}, "
+                    f"num_workers_joined={worker_count}, timeout={timeout} error={e})"
                 )
 
     logger.info(
-        "Rank %s: Completed store-based barrier for key:%s with %s nodes.", rank, store_key, world_size
+        "Rank %s: Completed store-based barrier for key:%s with %s nodes.",
+        rank,
+        store_key,
+        world_size,
     )
 
 
@@ -782,12 +920,15 @@ def get_group_rank(group: ProcessGroup, global_rank: int) -> int:
     if group is GroupMember.WORLD:
         return global_rank
     if group not in _world.pg_group_ranks:
-        raise ValueError(f"Group {group} is not registered, please create group with torch.distributed.new_group API")
+        raise ValueError(
+            f"Group {group} is not registered, please create group with torch.distributed.new_group API"
+        )
     group_ranks = _world.pg_group_ranks[group]
     if global_rank not in group_ranks:
         raise ValueError(f"Global rank {global_rank} is not part of group {group}")
 
     return group_ranks[global_rank]
+
 
 def get_global_rank(group: ProcessGroup, group_rank: int) -> int:
     """
@@ -807,19 +948,23 @@ def get_global_rank(group: ProcessGroup, group_rank: int) -> int:
     if group is GroupMember.WORLD:
         return group_rank
     if group not in _world.pg_group_ranks:
-        raise ValueError(f"Group {group} is not registered, please create group with torch.distributed.new_group API")
+        raise ValueError(
+            f"Group {group} is not registered, please create group with torch.distributed.new_group API"
+        )
     for rank, grp_rank in _world.pg_group_ranks[group].items():
         if grp_rank == group_rank:
             return rank
     raise ValueError(f"Group rank {group_rank} is not part of group {group}")
 
+
 # TODO: remove this once the ecosystem moves away from it.
+@deprecated(
+    "`torch.distributed.distributed_c10d._get_global_rank` is deprecated, "
+    "please use `torch.distributed.distributed_c10d.get_global_rank` instead",
+    category=FutureWarning,
+)
 def _get_global_rank(group, rank) -> int:
     """Use get_global_rank as this method is deprecated."""
-    warnings.warn(
-        "torch.distributed.distributed_c10d._get_global_rank is deprecated "
-        "please use torch.distributed.distributed_c10d.get_global_rank instead"
-    )
     return get_global_rank(group, rank)
 
 
@@ -834,6 +979,7 @@ def get_process_group_ranks(group: ProcessGroup) -> List[int]:
         List of global ranks ordered by group rank.
     """
     return list(_world.pg_group_ranks[group].keys())
+
 
 def _get_group_size(group) -> int:
     """Get a given group's world size."""
@@ -883,13 +1029,16 @@ def _check_tensor_list(param, param_name) -> None:
 def _as_iterable(obj) -> collections.abc.Iterable:
     return obj if isinstance(obj, list) else (obj,)
 
+
 def _ensure_all_tensors_same_dtype(*tensors) -> None:
     last_dtype = None
     for tensor in itertools.chain.from_iterable(map(_as_iterable, tensors)):
         tensor_dtype = tensor.dtype
         # Mixing complex and its element type is allowed
         if tensor_dtype.is_complex:
-            tensor_dtype = torch.float32 if tensor_dtype == torch.complex64 else torch.complex128
+            tensor_dtype = (
+                torch.float32 if tensor_dtype == torch.complex64 else torch.complex128
+            )
 
         if last_dtype is None:
             last_dtype = tensor_dtype
@@ -996,12 +1145,6 @@ def _is_barrier_after_init() -> int:
     return int(os.getenv("TORCH_DIST_INIT_BARRIER", "0"))
 
 
-def _abort_in_destroy_pg() -> bool:
-    # Environment variable to control whether to abort the communicators when users call destroy_process_group()
-    env = os.getenv("TORCH_NCCL_ABORT_IN_DESTROY_PG", "0")
-    return env == "1" or env.lower() == "true"
-
-
 def _get_default_group() -> ProcessGroup:
     """Get the default process group created by init_process_group."""
     if not is_initialized():
@@ -1032,6 +1175,7 @@ def _update_default_pg(pg) -> None:
     rank = pg.rank() if pg is not None and pg != GroupMember.NON_GROUP_MEMBER else -1
     torch._C._distributed_c10d._set_global_rank(rank)
 
+
 def get_backend_config(group: Optional[ProcessGroup] = None) -> str:
     """
     Return the backend configuration of the given process group.
@@ -1053,6 +1197,7 @@ def get_backend_config(group: Optional[ProcessGroup] = None) -> str:
         raise ValueError("Invalid process group specified")
     backend_config = _world.pg_backend_config.get(pg)
     return str(not_none(backend_config))
+
 
 def get_backend(group: Optional[ProcessGroup] = None) -> Backend:
     """
@@ -1076,6 +1221,7 @@ def get_backend(group: Optional[ProcessGroup] = None) -> Backend:
     pg_store = _world.pg_map[pg] if pg in _world.pg_map else None
     return Backend(not_none(pg_store)[0])
 
+
 def _get_process_group_uid(pg: ProcessGroup) -> int:
     backend = None
     try:
@@ -1085,6 +1231,7 @@ def _get_process_group_uid(pg: ProcessGroup) -> int:
     if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
         return backend.uid
     return -1
+
 
 def _get_pg_config(group: Optional[ProcessGroup] = None) -> Dict[str, Any]:
     """
@@ -1097,11 +1244,12 @@ def _get_pg_config(group: Optional[ProcessGroup] = None) -> Dict[str, Any]:
         pg = group
     return {
         "pg_name": _get_process_group_name(pg),
-        "uid": _get_process_group_uid(pg),
+        "pg_desc": pg.group_desc,
         "backend_config": get_backend_config(pg),
         "pg_size": _get_group_size(pg),
         "ranks": get_process_group_ranks(pg),
     }
+
 
 def _get_all_pg_configs() -> List[Dict[str, Any]]:
     """
@@ -1113,12 +1261,40 @@ def _get_all_pg_configs() -> List[Dict[str, Any]]:
         config_info.append(_get_pg_config(pg))
     return config_info
 
+
 def get_pg_count() -> int:
     """
     Return the number of process groups.
 
     """
     return _world.group_count
+
+
+def get_node_local_rank(fallback_rank: Optional[int] = None) -> int:
+    """
+    Return the local rank of the current process relative to the node.
+
+    Semantically, this is a useful concept for mapping processes to devices.
+    For example, on a node with 8 accelerator you could use the node local rank to decide
+    which accelerator device to bind the process to.
+
+    In practice, the actual assignment of node local ranks is handled by the process launcher outside of pytorch,
+    and communicated via the `LOCAL_RANK` environment variable.
+
+    Torchrun will automatically populate `LOCAL_RANK`, but other launchers may not.  If `LOCAL_RANK` is unspecified,
+    this API will fall back to the provided kwarg 'fallback_rank' if specified, otherwise it will raise an error. The
+    intent is to allow writing an application that runs either in single or multi device contexts without error.
+
+    """
+    if "LOCAL_RANK" in os.environ:
+        return int(os.environ["LOCAL_RANK"])
+    elif fallback_rank is not None:
+        return int(fallback_rank)
+    raise RuntimeError(
+        "LOCAL_RANK is not in the environment. Consider passing fallback_rank to allow `get_node_local_rank` to work, "
+        "assuming you are not running in a multi-device context and want the code to run locally instead."
+    )
+
 
 def _set_pg_timeout(timeout: timedelta, group: Optional[ProcessGroup] = None) -> None:
     """
@@ -1261,6 +1437,17 @@ def init_process_group(
 
     set_pytorch_distributed_envs_from_justknobs()
 
+    # Depending on the import order, some trace_rules functions may be evaluated
+    # during the import phase. In such a case, these functions may not correctly
+    # add the distributed related rules due to import circular dependency.
+    # We need to clear the lru_cache during the runtime to ensure the correctness
+    # of these trace_rules.
+    #
+    # Since this API must be called before all distributed code being compiled,
+    # clearing the cache here should be safe.
+    if "torch._dynamo" in sys.modules:
+        torch._dynamo.trace_rules.clear_lru_cache()
+
     assert (store is None) or (
         init_method is None
     ), "Cannot specify both init_method and store."
@@ -1296,7 +1483,14 @@ def init_process_group(
             )
 
         default_pg, _ = _new_process_group_helper(
-            -1, -1, [], backend, None, group_name, timeout=timeout
+            -1,
+            -1,
+            [],
+            backend,
+            None,
+            group_name,
+            timeout=timeout,
+            group_desc="default_pg",
         )
         _update_default_pg(default_pg)
     else:
@@ -1322,6 +1516,7 @@ def init_process_group(
             pg_options=pg_options,
             timeout=timeout,
             device_id=device_id,
+            group_desc="default_pg",
         )
         _update_default_pg(default_pg)
 
@@ -1330,6 +1525,7 @@ def init_process_group(
     _default_pg_init_method = init_method
 
     old_hook = sys.excepthook
+    excepthook_prefix = f"[rank{get_rank()}]"
 
     def _distributed_excepthook(*args):
         old_stderr = sys.stderr
@@ -1339,8 +1535,9 @@ def init_process_group(
         finally:
             sys.stderr = old_stderr
         msg = buf.getvalue()
-        prefix = f"[rank{get_rank()}]"
-        msg = "\n".join(f"{prefix}: {s}" if s != "" else "" for s in msg.split("\n"))
+        msg = "\n".join(
+            f"{excepthook_prefix}: {s}" if s != "" else "" for s in msg.split("\n")
+        )
         sys.stderr.write(msg)
         sys.stderr.flush()
 
@@ -1367,6 +1564,7 @@ def init_process_group(
             # default devices and messes up NCCL internal state.
             _store_based_barrier(rank, store, group_name, world_size, timeout)
 
+
 def _get_split_source(pg):
     split_from = None
     if pg.bound_device_id:
@@ -1383,10 +1581,11 @@ def _get_split_source(pg):
 
     # If necessary, find a backend to split from by peeling process
     # group wrappers from our potentially wrapped process group.
-    while isinstance(split_from, _ProcessGroupWrapper):
+    while _GLOO_AVAILABLE and isinstance(split_from, _ProcessGroupWrapper):
         split_from = split_from.wrapped_pg
 
     return split_from
+
 
 def _shutdown_backend(pg):
     """
@@ -1399,9 +1598,10 @@ def _shutdown_backend(pg):
         backend = pg._get_backend(torch.device("cuda"))
     except RuntimeError:
         pass
-    if isinstance(backend, ProcessGroupNCCL):
+    if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
         # explictly call shutdown to ensure that NCCL resources are released
         backend._shutdown()
+
 
 def _new_process_group_helper(
     group_size,
@@ -1414,6 +1614,7 @@ def _new_process_group_helper(
     timeout=None,
     pg_tag=None,
     device_id=None,
+    group_desc=None,
 ):
     """
     Create a new distributed process group.
@@ -1432,9 +1633,11 @@ def _new_process_group_helper(
             "created, please use a different group name"
         )
 
-    if device_id is not None and (device_id.index is None or device_id.type != 'cuda'):
-        raise ValueError("init_process_group device_id parameter must be a cuda device with an "
-                         "id, e.g. cuda:0, not just cuda or cpu")
+    if device_id is not None and (device_id.index is None or device_id.type != "cuda"):
+        raise ValueError(
+            "init_process_group device_id parameter must be a cuda device with an "
+            "id, e.g. cuda:0, not just cuda or cpu"
+        )
 
     # Note: _new_process_group_helper is only called from init_process_group, which always provides a timeout value
     _check_valid_timeout(timeout)
@@ -1445,6 +1648,8 @@ def _new_process_group_helper(
         if existing_group:
             _, prefix_store = _world.pg_map[existing_group]
             return existing_group, prefix_store
+
+    group_desc = "undefined" if group_desc is None else group_desc
 
     # The list of group ranks is empty if we're creating the default group.
     is_default_group = len(global_ranks_in_group) == 0
@@ -1457,8 +1662,10 @@ def _new_process_group_helper(
     # ranks_.  We can only know this if the group we are making is the
     # entire world or if we have bound a device id to the world (which
     # causes early connection initialization).
-    if (is_initialized() and
-            (len(global_ranks_in_group) == _get_default_group().size() or _get_default_group().bound_device_id)):
+    if is_initialized() and (
+        len(global_ranks_in_group) == _get_default_group().size()
+        or _get_default_group().bound_device_id
+    ):
         split_from = _get_split_source(_get_default_group())
     else:
         split_from = None
@@ -1481,7 +1688,9 @@ def _new_process_group_helper(
     prefix_store = PrefixStore(f"{group_name}/", store)
     base_pg_options = ProcessGroup.Options(backend=str(backend))
     base_pg_options._timeout = timeout
-    pg: ProcessGroup = ProcessGroup(prefix_store, group_rank, group_size, base_pg_options)
+    pg: ProcessGroup = ProcessGroup(
+        prefix_store, group_rank, group_size, base_pg_options
+    )
     if device_id:
         pg.bound_device_id = device_id
     backend_config = BackendConfig(backend)
@@ -1504,12 +1713,19 @@ def _new_process_group_helper(
                 return GroupMember.NON_GROUP_MEMBER, None
             # create new process group with accurate rank and size
             if pg.rank() == -1 and pg.size() == -1:
-                pg = ProcessGroup(backend_prefix_store, backend_class.rank(), backend_class.size(), base_pg_options)
+                pg = ProcessGroup(
+                    backend_prefix_store,
+                    backend_class.rank(),
+                    backend_class.size(),
+                    base_pg_options,
+                )
         elif backend_str == Backend.GLOO:
             # TODO: remove this check after lazy initialization is supported
             # if pg_options is not None:
             #     raise RuntimeError("GLOO options not supported")
-            backend_class = ProcessGroupGloo(backend_prefix_store, group_rank, group_size, timeout=timeout)
+            backend_class = ProcessGroupGloo(
+                backend_prefix_store, group_rank, group_size, timeout=timeout
+            )
             backend_type = ProcessGroup.BackendType.GLOO
         elif backend_str == Backend.NCCL:
             if not is_nccl_available():
@@ -1533,20 +1749,24 @@ def _new_process_group_helper(
                 pg_options.split_from = split_from
                 pg_options.split_color = _process_group_color(global_ranks_in_group)
             pg_options.global_ranks_in_group = global_ranks_in_group
+            pg_options.group_name = group_name
             backend_class = ProcessGroupNCCL(
-                backend_prefix_store, group_rank, group_size, pg_options)
+                backend_prefix_store, group_rank, group_size, pg_options
+            )
             backend_type = ProcessGroup.BackendType.NCCL
         elif backend_str == Backend.UCC and is_ucc_available():
             # TODO: once UCC plugin is fully deprecated, remove
             # is_ucc_available() from above elif-condition and raise
             # RuntimeError if is_ucc_available() returns false.
 
-            backend_class = ProcessGroupUCC(backend_prefix_store, group_rank, group_size, timeout=timeout)
+            backend_class = ProcessGroupUCC(
+                backend_prefix_store, group_rank, group_size, timeout=timeout
+            )
             backend_type = ProcessGroup.BackendType.UCC
         else:
-            assert backend_str.upper() in Backend._plugins, (
-                f"Unknown c10d backend type {backend_str.upper()}"
-            )
+            assert (
+                backend_str.upper() in Backend._plugins
+            ), f"Unknown c10d backend type {backend_str.upper()}"
 
             backend_plugin = Backend._plugins[backend_str.upper()]
             creator_fn = backend_plugin.creator_fn
@@ -1554,7 +1774,9 @@ def _new_process_group_helper(
             backend_type = ProcessGroup.BackendType.CUSTOM
 
             if not extended_api:
-                backend_class = creator_fn(backend_prefix_store, group_rank, group_size, timeout)
+                backend_class = creator_fn(
+                    backend_prefix_store, group_rank, group_size, timeout
+                )
             else:
                 dist_backend_opts = _DistributedBackendOptions()
                 dist_backend_opts.store = backend_prefix_store
@@ -1582,7 +1804,10 @@ def _new_process_group_helper(
             break
 
         # Process group wrapper initialization for supported PGs when TORCH_DISTRIBUTED_DEBUG is set
-        if backend_str in [Backend.GLOO, Backend.NCCL, Backend.UCC]:
+        if (
+            backend_str in [Backend.GLOO, Backend.NCCL, Backend.UCC]
+            or backend_str.upper() in Backend._plugins
+        ):
             # In debug mode and if GLOO is available, wrap in a wrapper PG that
             # enables enhanced collective checking for debuggability.
             if get_debug_level() == DebugLevel.DETAIL:
@@ -1613,15 +1838,19 @@ def _new_process_group_helper(
 
         pg._register_backend(torch.device(device), backend_type, backend_class)
 
+    # set group_name and group_dsec to backend
+    assert group_name is not None
+    assert group_desc is not None
+    pg._set_group_name(group_name)
+    pg._set_group_desc(group_desc)
+
     if device_id and pg._get_backend(device_id).supports_splitting:
         eager_backend = pg._get_backend(device_id)
         eager_backend.eager_connect_single_device(device_id)
 
     # update global state
-    assert group_name is not None
     _world.pg_map[pg] = (backend, prefix_store)
     _world.pg_names[pg] = group_name
-    pg._set_group_name(group_name)
     _register_process_group(group_name, pg)
 
     _world.pg_backend_config[pg] = str(backend_config)
@@ -1635,6 +1864,7 @@ def _new_process_group_helper(
     _world.tags_to_pg.setdefault(pg_tag, []).append(pg)
     _world.pg_to_tag[pg] = pg_tag
     return pg, prefix_store
+
 
 def destroy_process_group(group: Optional[ProcessGroup] = None):
     """
@@ -1672,11 +1902,12 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         pg._wait_for_pending_works()
 
     if group is None or group == GroupMember.WORLD:
-        if _abort_in_destroy_pg():
-            # shutdown all backends in the order of pg names. shutting down in order because
-            # ncclCommAbort() was a 'collective' call in some versions of NCCL.
-            for pg_to_shutdown in sorted(_world.pg_names, key=lambda x: _world.pg_names[x], reverse=True):
-                _shutdown_backend(pg_to_shutdown)
+        # shutdown all backends in the order of pg names. shutting down in order because
+        # ncclCommAbort() was a 'collective' call in some versions of NCCL.
+        for pg_to_shutdown in sorted(
+            _world.pg_names, key=lambda x: _world.pg_names[x], reverse=True
+        ):
+            _shutdown_backend(pg_to_shutdown)
 
         _update_default_pg(None)
         _world.pg_map.clear()
@@ -1699,8 +1930,7 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         # process group is in good state, we aren't dealing with failures.
         _world.group_count = 0
     else:
-        if _abort_in_destroy_pg():
-            _shutdown_backend(pg)
+        _shutdown_backend(pg)
         del _world.pg_map[pg]
         del _world.pg_names[pg]
         del _world.pg_group_ranks[pg]
@@ -1772,7 +2002,9 @@ def get_world_size(group: Optional[ProcessGroup] = None) -> int:
     return _get_group_size(group)
 
 
-def isend(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, tag: int = 0) -> Optional[Work]:
+def isend(
+    tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, tag: int = 0
+) -> Optional[Work]:
     """
     Send a tensor asynchronously.
 
@@ -1811,7 +2043,13 @@ def isend(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, 
 
     return pg.send([tensor], dst, tag)
 
-def irecv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[ProcessGroup] = None, tag: int = 0) -> Optional[Work]:
+
+def irecv(
+    tensor: torch.Tensor,
+    src: Optional[int] = None,
+    group: Optional[ProcessGroup] = None,
+    tag: int = 0,
+) -> Optional[Work]:
     """
     Receives a tensor asynchronously.
 
@@ -1853,10 +2091,16 @@ def irecv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[Proce
             group_src_rank = get_group_rank(pg, src)
             return pg.recv([tensor], group_src_rank, tag)
 
+
 @_exception_logger
-def send(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, tag: int = 0) -> None:
+def send(
+    tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, tag: int = 0
+) -> None:
     """
     Send a tensor synchronously.
+
+    .. warning::
+        ``tag`` is not supported with the NCCL backend.
 
     Args:
         tensor (Tensor): Tensor to send.
@@ -1888,10 +2132,19 @@ def send(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, t
         group_dst_rank = get_group_rank(group, dst)
         group.send([tensor], group_dst_rank, tag).wait()
 
+
 @_exception_logger
-def recv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[ProcessGroup] = None, tag: int = 0) -> int:
+def recv(
+    tensor: torch.Tensor,
+    src: Optional[int] = None,
+    group: Optional[ProcessGroup] = None,
+    tag: int = 0,
+) -> int:
     """
     Receives a tensor synchronously.
+
+    .. warning::
+        ``tag`` is not supported with the NCCL backend.
 
     Args:
         tensor (Tensor): Tensor to fill with received data.
@@ -1938,7 +2191,15 @@ def recv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[Proces
 
 class _IllegalWork(Work):
     def __getattribute__(self, name):
-        if name in ["is_success", "exception", "wait", "source_rank", "_source_rank", "result", "synchronize"]:
+        if name in [
+            "is_success",
+            "exception",
+            "wait",
+            "source_rank",
+            "_source_rank",
+            "result",
+            "synchronize",
+        ]:
             raise ValueError(f"Illegal to call {name} on IllegalWork object")
 
 
@@ -1991,7 +2252,9 @@ def _coalescing_manager(
     group = group or _get_default_group()
     op_list = _world.pg_coalesce_state.setdefault(group, [])
     if op_list:
-        raise ValueError("ProcessGroup has non-empty op list at the start of coalescing")
+        raise ValueError(
+            "ProcessGroup has non-empty op list at the start of coalescing"
+        )
     if device:
         group._start_coalescing(device)
     cm = _CoalescingManager()
@@ -2146,6 +2409,7 @@ def broadcast(tensor, src, group=None, async_op=False):
     else:
         work.wait()
 
+
 @_exception_logger
 def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
     """
@@ -2226,7 +2490,14 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
     else:
         work.wait()
 
+
 @_exception_logger
+@deprecated(
+    "`torch.distributed.all_reduce_coalesced` will be deprecated. If you must "
+    "use it, please revisit our documentation later at "
+    "https://pytorch.org/docs/main/distributed.html#collective-functions",
+    category=FutureWarning,
+)
 def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
     """
     WARNING: at this time individual shape checking is not implemented across nodes.
@@ -2261,11 +2532,6 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
         None, if not async_op or if not part of the group.
 
     """
-    warnings.warn(
-        "torch.distributed.all_reduce_coalesced will be deprecated. If you must "
-        "use it, please revisit our documentation later at "
-        "https://pytorch.org/docs/main/distributed.html#collective-functions"
-    )
     if isinstance(tensors, torch.Tensor):
         tensors = [tensors]
     _check_tensor_list(tensors, "tensor")
@@ -2291,6 +2557,7 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
         return work.get_future()
     else:
         work.wait()
+
 
 @_exception_logger
 def reduce(tensor, dst, op=ReduceOp.SUM, group=None, async_op=False):
@@ -2337,6 +2604,7 @@ def reduce(tensor, dst, op=ReduceOp.SUM, group=None, async_op=False):
     else:
         work.wait()
 
+
 def _object_to_tensor(obj, device, group):
     f = io.BytesIO()
     _pickler(f).dump(obj)
@@ -2349,7 +2617,9 @@ def _object_to_tensor(obj, device, group):
         backend = get_backend(group)
         if backend == Backend.NCCL:
             hash = torch._C._distributed_c10d._hash_tensors([byte_tensor])
-            logger.warning("_object_to_tensor size: %s hash value: %s", byte_tensor.numel(), hash)
+            logger.warning(
+                "_object_to_tensor size: %s hash value: %s", byte_tensor.numel(), hash
+            )
     local_size = torch.LongTensor([byte_tensor.numel()]).to(device)
     return byte_tensor, local_size
 
@@ -2359,7 +2629,9 @@ def _tensor_to_object(tensor, tensor_size, group):
         backend = get_backend(group)
         if backend == Backend.NCCL:
             hash = torch._C._distributed_c10d._hash_tensors([tensor])
-            logger.warning("_tensor_to_object size: %s hash value: %s", tensor.numel(), hash)
+            logger.warning(
+                "_tensor_to_object size: %s hash value: %s", tensor.numel(), hash
+            )
     tensor = tensor.cpu()
     buf = tensor.numpy().tobytes()[:tensor_size]
     return _unpickler(io.BytesIO(buf)).load()
@@ -2568,6 +2840,195 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
 
 
 @_exception_logger
+def send_object_list(object_list, dst, group=None, device=None):
+    """
+    Sends picklable objects in ``object_list`` synchronously.
+
+    Similar to :func:`send`, but Python objects can be passed in.
+    Note that all objects in ``object_list`` must be picklable in order to be
+    sent.
+
+    Args:
+        object_list (List[Any]): List of input objects to sent.
+            Each object must be picklable. Receiver must provide lists of equal sizes.
+        dst (int): Destination rank to send ``object_list`` to.
+            Destination rank is based on global process group (regardless of ``group`` argument)
+        group: (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used. Default is ``None``.
+        device (``torch.device``, optional): If not None, the objects are
+            serialized and converted to tensors which are moved to the
+            ``device`` before sending. Default is ``None``.
+
+    Returns:
+        ``None``.
+
+    .. note:: For NCCL-based process groups, internal tensor representations
+        of objects must be moved to the GPU device before communication takes
+        place. In this case, the device used is given by
+        ``torch.cuda.current_device()`` and it is the user's responsibility to
+        ensure that this is set so that each rank has an individual GPU, via
+        ``torch.cuda.set_device()``.
+
+    .. warning::
+        :func:`send_object_list` uses ``pickle`` module implicitly, which
+        is known to be insecure. It is possible to construct malicious pickle
+        data which will execute arbitrary code during unpickling. Only call this
+        function with data you trust.
+
+    .. warning::
+        Calling :func:`send_object_list` with GPU tensors is not well supported
+        and inefficient as it incurs GPU -> CPU transfer since tensors would be
+        pickled. Please consider using :func:`send` instead.
+
+    Example::
+        >>> # xdoctest: +SKIP("need process group init")
+        >>> # Note: Process group initialization omitted on each rank.
+        >>> import torch.distributed as dist
+        >>> # Assumes backend is not NCCL
+        >>> device = torch.device("cpu")
+        >>> if dist.get_rank() == 0:
+        >>>     # Assumes world_size of 2.
+        >>>     objects = ["foo", 12, {1: 2}] # any picklable object
+        >>>     dist.send_object_list(objects, dst=1, device=device)
+        >>> else:
+        >>>     objects = [None, None, None]
+        >>>     dist.recv_object_list(objects, src=0, device=device)
+        >>> objects
+        ['foo', 12, {1: 2}]
+    """
+    if get_rank() == dst:
+        raise ValueError(
+            "Invalid destination rank: destination rank should not be the same as "
+            "the rank of the current process."
+        )
+
+    if _rank_not_in_group(group):
+        _warn_not_in_group("send_object_list")
+        return
+
+    # Current device selection.
+    # To preserve backwards compatibility, ``device`` is default to ``None``
+    # in which case we run current logic of device selection, i.e.
+    # ``current_device`` is CUDA if backend is NCCL otherwise CPU device. In the
+    # case it is not ``None`` we move the size and object tensors to be
+    # sent to this device.
+    current_device = device or _get_pg_default_device(group)
+    # Serialize object_list elements to tensors on src rank.
+    tensor_list, size_list = zip(
+        *[_object_to_tensor(obj, current_device, group) for obj in object_list]
+    )
+    object_sizes_tensor = torch.cat(size_list)
+
+    # Send object sizes
+    send(object_sizes_tensor, dst=dst, group=group)
+
+    # Concatenate and send serialized object tensors
+    # Note: torch.cat will do an extra memory copy to the current device, if the tensor_list
+    # has only one element, we can skip the copy.
+    if len(tensor_list) == 1:  # type: ignore[possibly-undefined]
+        object_tensor = tensor_list[0]
+    else:
+        object_tensor = torch.cat(tensor_list)
+
+    send(object_tensor, dst=dst, group=group)
+
+
+@_exception_logger
+def recv_object_list(object_list, src=None, group=None, device=None):
+    """
+    Receives picklable objects in ``object_list`` synchronously.
+
+    Similar to :func:`recv`, but can receive Python objects.
+
+    Args:
+        object_list (List[Any]): List of objects to receive into.
+            Must provide a list of sizes equal to the size of the list being sent.
+        src (int, optional): Source rank from which to recv ``object_list``.
+            Source rank is based on global process group (regardless of ``group`` argument)
+            Will receive from any rank if set to None. Default is ``None``.
+        group: (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used. Default is ``None``.
+        device (``torch.device``, optional): If not None, receives on this device.
+            Default is ``None``.
+
+    Returns:
+        Sender rank. -1 if rank is not part of the group. If rank is part of the group,
+        ``object_list`` will contain the sent objects from ``src`` rank.
+
+    .. note:: For NCCL-based process groups, internal tensor representations
+        of objects must be moved to the GPU device before communication takes
+        place. In this case, the device used is given by
+        ``torch.cuda.current_device()`` and it is the user's responsibility to
+        ensure that this is set so that each rank has an individual GPU, via
+        ``torch.cuda.set_device()``.
+
+    .. warning::
+        :func:`recv_object_list` uses ``pickle`` module implicitly, which
+        is known to be insecure. It is possible to construct malicious pickle
+        data which will execute arbitrary code during unpickling. Only call this
+        function with data you trust.
+
+    .. warning::
+        Calling :func:`recv_object_list` with GPU tensors is not well supported
+        and inefficient as it incurs GPU -> CPU transfer since tensors would be
+        pickled. Please consider using :func:`recv` instead.
+
+    Example::
+        >>> # xdoctest: +SKIP("need process group init")
+        >>> # Note: Process group initialization omitted on each rank.
+        >>> import torch.distributed as dist
+        >>> # Assumes backend is not NCCL
+        >>> device = torch.device("cpu")
+        >>> if dist.get_rank() == 0:
+        >>>     # Assumes world_size of 2.
+        >>>     objects = ["foo", 12, {1: 2}] # any picklable object
+        >>>     dist.send_object_list(objects, dst=1, device=device)
+        >>> else:
+        >>>     objects = [None, None, None]
+        >>>     dist.recv_object_list(objects, src=0, device=device)
+        >>> objects
+        ['foo', 12, {1: 2}]
+    """
+    if _rank_not_in_group(group):
+        _warn_not_in_group("recv_object_list")
+        return -1
+
+    # Current device selection.
+    # To preserve backwards compatibility, ``device`` is default to ``None``
+    # in which case we run current logic of device selection, i.e.
+    # ``current_device`` is CUDA if backend is NCCL otherwise CPU device. In the
+    # case it is not ``None`` we move the size and object tensors to be
+    # received to this device.
+    current_device = device or _get_pg_default_device(group)
+    object_sizes_tensor = torch.empty(
+        len(object_list), dtype=torch.long, device=current_device
+    )
+
+    # Receive object sizes
+    rank_sizes = recv(object_sizes_tensor, src=src, group=group)
+
+    # Tensor to receive serialized objects into.
+    object_tensor = torch.empty(  # type: ignore[call-overload]
+        torch.sum(object_sizes_tensor).item(),  # type: ignore[arg-type]
+        dtype=torch.uint8,
+        device=current_device,
+    )
+
+    rank_objects = recv(object_tensor, src=src, group=group)
+    assert (
+        rank_sizes == rank_objects
+    ), "Mismatch in return ranks for object sizes and objects."
+    # Deserialize objects using their stored sizes.
+    offset = 0
+    for i, obj_size in enumerate(object_sizes_tensor):
+        obj_view = object_tensor[offset : offset + obj_size]
+        obj_view = obj_view.type(torch.uint8)
+        offset += obj_size
+        object_list[i] = _tensor_to_object(obj_view, obj_size, group)
+    return rank_objects
+
+
+@_exception_logger
 def broadcast_object_list(object_list, src=0, group=None, device=None):
     """
     Broadcasts picklable objects in ``object_list`` to the whole group.
@@ -2599,7 +3060,7 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
         ensure that this is set so that each rank has an individual GPU, via
         ``torch.cuda.set_device()``.
 
-    .. note:: Note that this API differs slightly from the :func:`all_gather`
+    .. note:: Note that this API differs slightly from the :func:`broadcast`
         collective since it does not provide an ``async_op`` handle and thus
         will be a blocking call.
 
@@ -2643,10 +3104,14 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
     my_rank = get_rank()
     # Serialize object_list elements to tensors on src rank.
     if my_rank == src:
-        tensor_list, size_list = zip(*[_object_to_tensor(obj, current_device, group) for obj in object_list])
+        tensor_list, size_list = zip(
+            *[_object_to_tensor(obj, current_device, group) for obj in object_list]
+        )
         object_sizes_tensor = torch.cat(size_list)
     else:
-        object_sizes_tensor = torch.empty(len(object_list), dtype=torch.long, device=current_device)
+        object_sizes_tensor = torch.empty(
+            len(object_list), dtype=torch.long, device=current_device
+        )
 
     # Broadcast object sizes
     broadcast(object_sizes_tensor, src=src, group=group)
@@ -2663,7 +3128,7 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
         object_tensor = torch.empty(  # type: ignore[call-overload]
             torch.sum(object_sizes_tensor).item(),  # type: ignore[arg-type]
             dtype=torch.uint8,
-            device=current_device
+            device=current_device,
         )
 
     broadcast(object_tensor, src=src, group=group)
@@ -2751,7 +3216,10 @@ def scatter_object_list(
     pg_device = _get_pg_default_device(group)
     if my_rank == src:
         tensor_list, tensor_sizes = zip(
-            *[_object_to_tensor(obj, pg_device, group) for obj in scatter_object_input_list]
+            *[
+                _object_to_tensor(obj, pg_device, group)
+                for obj in scatter_object_input_list
+            ]
         )
         tensor_list, tensor_sizes = list(tensor_list), list(tensor_sizes)
 
@@ -2766,7 +3234,9 @@ def scatter_object_list(
     broadcast(max_tensor_size, src=src, group=group)
 
     # Scatter actual serialized objects
-    output_tensor = torch.empty(max_tensor_size.item(), dtype=torch.uint8, device=pg_device)
+    output_tensor = torch.empty(
+        max_tensor_size.item(), dtype=torch.uint8, device=pg_device
+    )
     scatter(
         output_tensor,
         scatter_list=None if my_rank != src else tensor_list,  # type: ignore[possibly-undefined]
@@ -2784,7 +3254,9 @@ def scatter_object_list(
     )
 
     # Deserialize back to object
-    scatter_object_output_list[0] = _tensor_to_object(output_tensor, obj_tensor_size, group)
+    scatter_object_output_list[0] = _tensor_to_object(
+        output_tensor, obj_tensor_size, group
+    )
 
 
 @_exception_logger
@@ -2792,11 +3264,12 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
     """
     Gathers tensors from the whole group in a list.
 
-    Complex tensors are supported.
+    Complex and uneven sized tensors are supported.
 
     Args:
         tensor_list (list[Tensor]): Output list. It should contain
             correctly-sized tensors to be used for output of the collective.
+            Uneven sized tensors are supported.
         tensor (Tensor): Tensor to be broadcast from current process.
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
@@ -2868,6 +3341,8 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
 def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=False):
     """
     Gather tensors from all ranks and put them in a single output tensor.
+
+    This function requires all tensors to be the same size on each process.
 
     Args:
         output_tensor (Tensor): Output tensor to accommodate tensor elements
@@ -2957,6 +3432,11 @@ def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=Fal
 
 
 @_exception_logger
+@deprecated(
+    "`torch.distributed._all_gather_base` is a private function and will be deprecated. "
+    "Please use `torch.distributed.all_gather_into_tensor` instead.",
+    category=FutureWarning,
+)
 def _all_gather_base(output_tensor, input_tensor, group=None, async_op=False):
     """
     Single tensor all gather. Gathers a single tensor from all ranks, and puts them in a single output tensor.
@@ -2978,15 +3458,16 @@ def _all_gather_base(output_tensor, input_tensor, group=None, async_op=False):
         `all_gather_into_tensor` instead.
 
     """
-    warnings.warn(
-        "torch.distributed._all_gather_base is a private function and will be "
-        "deprecated. Please use torch.distributed.all_gather_into_tensor "
-        "instead."
-    )
     return all_gather_into_tensor(output_tensor, input_tensor, group, async_op)
 
 
 @_exception_logger
+@deprecated(
+    "`torch.distributed.all_gather_coalesced` will be deprecated. If you must use it, "
+    "please revisit our documentation later at "
+    "https://pytorch.org/docs/main/distributed.html#collective-functions",
+    category=FutureWarning,
+)
 def all_gather_coalesced(
     output_tensor_lists, input_tensor_list, group=None, async_op=False
 ):
@@ -3033,11 +3514,6 @@ def all_gather_coalesced(
     performance improvements but users of this function should take extra care
     to ensure that each node passes in tensors whose shapes match across nodes.
     """
-    warnings.warn(
-        "torch.distributed.all_gather_coalesced will be deprecated. If you must "
-        "use it, please revisit our documentation later at "
-        "https://pytorch.org/docs/main/distributed.html#collective-functions"
-    )
     # We only check basic compatibility with C++ params here, C++ code will
     # do shape and type checking.
     if _rank_not_in_group(group):
@@ -3091,11 +3567,13 @@ def gather(tensor, gather_list=None, dst=0, group=None, async_op=False):
     """
     Gathers a list of tensors in a single process.
 
+    This function requires all tensors to be the same size on each process.
+
     Args:
         tensor (Tensor): Input tensor.
-        gather_list (list[Tensor], optional): List of appropriately-sized
-            tensors to use for gathered data (default is None, must be specified
-            on the destination rank)
+        gather_list (list[Tensor], optional): List of appropriately,
+            same-sized tensors to use for gathered data
+            (default is None, must be specified on the destination rank)
         dst (int, optional): Destination rank on global process group (regardless of ``group`` argument). (default is 0)
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
@@ -3367,6 +3845,11 @@ def reduce_scatter_tensor(output, input, op=ReduceOp.SUM, group=None, async_op=F
         work.wait()
 
 
+@deprecated(
+    "`torch.distributed._reduce_scatter_base` is a private function and will be deprecated. "
+    "Please use `torch.distributed.reduce_scatter_tensor` instead.",
+    category=FutureWarning,
+)
 def _reduce_scatter_base(output, input, op=ReduceOp.SUM, group=None, async_op=False):
     """
     Reduces, then scatters a flattened tensor to all processes in a group.
@@ -3387,11 +3870,6 @@ def _reduce_scatter_base(output, input, op=ReduceOp.SUM, group=None, async_op=Fa
         `reduce_scatter_tensor` instead.
 
     """
-    warnings.warn(
-        "torch.distributed._reduce_scatter_base is a private function and will "
-        "be deprecated. Please use torch.distributed.reduce_scatter_tensor "
-        "instead."
-    )
     return reduce_scatter_tensor(output, input, op, group, async_op)
 
 
@@ -3645,6 +4123,7 @@ def all_to_all(output_tensor_list, input_tensor_list, group=None, async_op=False
     else:
         work.wait()
 
+
 @_exception_logger
 def barrier(group=GroupMember.WORLD, async_op=False, device_ids=None):
     """
@@ -3774,6 +4253,8 @@ def _create_process_group_wrapper(
     world_size: int,
     timeout: timedelta = default_pg_timeout,
 ):
+    assert _GLOO_AVAILABLE, "ProcessGroupWrapper unsupported without GLOO backend."
+
     # (whc) this appears to be just for the gloo backend? if so, `default_pg_timeout` is appropriate...
 
     # Create a separate prefix store for the helper process group.
@@ -3784,14 +4265,17 @@ def _create_process_group_wrapper(
     wrapped_pg = _ProcessGroupWrapper(wrapped_pg, helper_pg)
     return wrapped_pg
 
+
 # helper function for deterministically hashing a list of ranks
 def _hash_ranks(ranks: List[int]):
     return hashlib.sha1(bytes("_".join(map(str, ranks)), "utf-8")).hexdigest()
+
 
 # Takes a list of ranks and computes an integer color
 def _process_group_color(ranks: List[int]) -> int:
     # Convert our hash to an int, but avoid negative numbers by shifting a bit.
     return int(_hash_ranks(ranks), 16) % (sys.maxsize >> 1)
+
 
 def _process_group_name(ranks, use_hashed_name):
     global _world
@@ -3804,6 +4288,7 @@ def _process_group_name(ranks, use_hashed_name):
         _world.group_count += 1
     return pg_name
 
+
 def _get_backend_from_str(backend: Optional[str] = None) -> Backend:
     # Default to the same backend as the global process group
     #  if backend is not specified.
@@ -3813,7 +4298,14 @@ def _get_backend_from_str(backend: Optional[str] = None) -> Backend:
 
 
 @_time_logger
-def new_group(ranks=None, timeout=None, backend=None, pg_options=None, use_local_synchronization=False):
+def new_group(
+    ranks=None,
+    timeout=None,
+    backend=None,
+    pg_options=None,
+    use_local_synchronization=False,
+    group_desc=None,
+):
     """
     Create a new distributed group.
 
@@ -3854,9 +4346,11 @@ def new_group(ranks=None, timeout=None, backend=None, pg_options=None, use_local
             barrier at the end of the process group creation. This is different
             in that non-member ranks don't need to call into API and don't
             join the barrier.
+        group_desc (str, optional): a string to describe the process group.
 
     Returns:
-        A handle of distributed group that can be given to collective calls or None if the rank is not part of ``ranks``.
+        A handle of distributed group that can be given to collective calls or
+        GroupMember.NON_GROUP_MEMBER if the rank is not part of ``ranks``.
 
     N.B. use_local_synchronization doesn't work with MPI.
 
@@ -3868,7 +4362,16 @@ def new_group(ranks=None, timeout=None, backend=None, pg_options=None, use_local
     multiple overlaping process groups. To avoid that, make sure all ranks follow the
     same global creation order.
     """
-    return _new_group_with_tag(ranks, timeout, backend, pg_options, None, use_local_synchronization=use_local_synchronization)
+    return _new_group_with_tag(
+        ranks,
+        timeout,
+        backend,
+        pg_options,
+        None,
+        use_local_synchronization=use_local_synchronization,
+        group_desc=group_desc,
+    )
+
 
 def _new_group_with_tag(
     ranks=None,
@@ -3876,7 +4379,8 @@ def _new_group_with_tag(
     backend=None,
     pg_options=None,
     pg_tag=None,
-    use_local_synchronization=False
+    use_local_synchronization=False,
+    group_desc=None,
 ):
     """
     Variant of ``new_group`` that exposes tag creation.
@@ -3887,10 +4391,10 @@ def _new_group_with_tag(
     global _world
 
     default_pg = _get_default_group()
+    device_id = default_pg.bound_device_id
     default_backend, default_store = _world.pg_map[default_pg]
     global_rank = default_pg.rank()
     global_world_size = default_pg.size()
-
 
     # Default to the same backend as the global process group
     # if the backend is not specified.
@@ -3907,7 +4411,9 @@ def _new_group_with_tag(
     if use_local_synchronization:
         # MPI backend doesn't have have a way for us to perform a partial sync
         if backend == Backend.MPI:
-            raise ValueError("MPI backend doesn't support use_local_synchronization=True")
+            raise ValueError(
+                "MPI backend doesn't support use_local_synchronization=True"
+            )
         if ranks is not None and get_rank() not in ranks:
             return None
 
@@ -3948,7 +4454,9 @@ def _new_group_with_tag(
         group_name,
         pg_options=pg_options,
         timeout=timeout,
-        pg_tag=pg_tag
+        pg_tag=pg_tag,
+        device_id=device_id,
+        group_desc=group_desc,
     )
 
     # Create the global rank to group rank mapping
@@ -3977,7 +4485,9 @@ def _new_group_with_tag(
             world_size = len(ranks) if use_local_synchronization else get_world_size()
             # Use store based barrier here since barrier() used a bunch of
             # default devices and messes up NCCL internal state.
-            _store_based_barrier(global_rank, barrier_store, group_name, world_size, timeout)
+            _store_based_barrier(
+                global_rank, barrier_store, group_name, world_size, timeout
+            )
 
     return pg
 
@@ -3988,6 +4498,7 @@ def new_subgroups(
     timeout=None,
     backend=None,
     pg_options=None,
+    group_desc=None,
 ):
     """
     Create subgroups of equal size.
@@ -4040,6 +4551,8 @@ def new_subgroups(
             the construction of specific process groups. i.e. for the ``nccl``
             backend, ``is_high_priority_stream`` can be specified so that
             process group can pick up high priority cuda streams.
+        group_desc (str, optional): A string describing the group. Each subgroup will
+            inherit its group_desc
 
     Returns:
         The subgroup containing the current rank, and all the subgroups used for cleanup.
@@ -4053,23 +4566,27 @@ def new_subgroups(
         >>> tensor = torch.ones(1, device=rank) * rank
         >>> dist.all_reduce(tensor, group=cur_subgroup)
         >>> tensor
-        tensor([8])     # Assume 8 is the number of CUDA devices per machine.
+        tensor([28])  # Assume 8 CUDA devices per machine.  28 is sum(range(8)).
         >>> # Cleanup.
         >>> for subgroup in subgroups:
         >>>     dist.destroy_process_group(subgroup)
     """
     if group_size is None:
         if not torch.cuda.is_available():
-            raise ValueError("Default group size only takes effect when CUDA is available."
-                             "If your subgroup using a backend that does not depend on CUDA,"
-                             "please pass in 'group_size' correctly.")
+            raise ValueError(
+                "Default group size only takes effect when CUDA is available."
+                "If your subgroup using a backend that does not depend on CUDA,"
+                "please pass in 'group_size' correctly."
+            )
         group_size = torch.cuda.device_count()
     if group_size <= 0:
         raise ValueError(f"The arg 'group_size' ({group_size}) must be positive")
 
     world_size = get_world_size()
     if world_size < group_size:
-        raise ValueError(f"The arg 'group_size' ({group_size}) must not exceed the world size ({world_size})")
+        raise ValueError(
+            f"The arg 'group_size' ({group_size}) must not exceed the world size ({world_size})"
+        )
     if world_size % group_size != 0:
         raise ValueError("The world size must be divisible by 'group_size'")
 
@@ -4085,16 +4602,14 @@ def new_subgroups(
             timeout=timeout,
             backend=backend,
             pg_options=pg_options,
+            group_desc=group_desc,
         )
         subgroups.append(subgroup)
 
         rank = get_rank()
         if rank in ranks_in_subgroup:
             cur_subgroup = subgroup
-            logger.info(
-                "Rank %s is assigned to subgroup %s",
-                rank, ranks_in_subgroup
-            )
+            logger.info("Rank %s is assigned to subgroup %s", rank, ranks_in_subgroup)
 
     return cur_subgroup, subgroups
 
@@ -4104,6 +4619,7 @@ def new_subgroups_by_enumeration(
     timeout=None,
     backend=None,
     pg_options=None,
+    group_desc=None,
 ):
     """
     Create subgroups by dividing the global world.
@@ -4144,6 +4660,8 @@ def new_subgroups_by_enumeration(
             the construction of specific process groups. i.e. for the ``nccl``
             backend, ``is_high_priority_stream`` can be specified so that
             process group can pick up high priority cuda streams.
+        group_desc (str, optional): A string describing the group. Each subgroup will
+            inherit its group_desc.
 
     Returns:
         The subgroup containing the current rank, and all the subgroups used for cleanup.
@@ -4172,6 +4690,7 @@ def new_subgroups_by_enumeration(
             timeout=timeout,
             backend=backend,
             pg_options=pg_options,
+            group_desc=group_desc,
         )
         subgroups.append(subgroup)
         my_rank = get_rank()
@@ -4202,8 +4721,13 @@ def _find_pg_by_ranks_and_tag(tag: str, ranks: List[int]) -> Optional[ProcessGro
             return group
     return None
 
-def _find_or_create_pg_by_ranks_and_tag(tag: str, ranks: List[int], stride: int) -> ProcessGroup:
-    assert len(ranks) % stride == 0, f"Ranks length ({len(ranks)}) must be divisible by stride ({stride})"
+
+def _find_or_create_pg_by_ranks_and_tag(
+    tag: str, ranks: List[int], stride: int
+) -> ProcessGroup:
+    assert (
+        len(ranks) % stride == 0
+    ), f"Ranks length ({len(ranks)}) must be divisible by stride ({stride})"
 
     my_rank = get_rank()
     my_ranks = None
@@ -4228,6 +4752,7 @@ def _find_or_create_pg_by_ranks_and_tag(tag: str, ranks: List[int], stride: int)
     # TODO copy settings and timeout from default PG
     return _new_group_with_tag(my_ranks, pg_tag=tag)
 
+
 def _get_group_tag(pg: ProcessGroup) -> str:
     """Return the tag associated with ``pg``."""
     tag = _world.pg_to_tag[pg]
@@ -4235,11 +4760,14 @@ def _get_group_tag(pg: ProcessGroup) -> str:
         tag = tag[5:]
     return tag
 
+
 def _get_process_group_name(pg: ProcessGroup) -> str:
     return _world.pg_names.get(pg, "None")
 
+
 def _get_process_group_store(pg: ProcessGroup) -> Store:
     return _world.pg_map[pg][1]
+
 
 # This ops are not friendly to TorchDynamo. So, we decide to disallow these ops
 # in FX graph, allowing them to run them on eager, with torch.compile.
@@ -4253,6 +4781,8 @@ dynamo_unsupported_distributed_c10d_ops = [
     all_to_all,
     all_reduce_coalesced,
     gather,
+    send_object_list,
+    recv_object_list,
     broadcast_object_list,
     barrier,
     scatter,

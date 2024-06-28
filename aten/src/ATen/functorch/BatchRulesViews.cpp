@@ -149,7 +149,7 @@ std::tuple<Tensor,optional<int64_t>> flip_batch_rule(const Tensor& self, optiona
 const Tensor& resize__plumbing(
     const Tensor& self,
     IntArrayRef size,
-    c10::optional<MemoryFormat> optional_memory_format) {
+    std::optional<MemoryFormat> optional_memory_format) {
   TORCH_CHECK(
       !optional_memory_format.has_value() ||
       optional_memory_format == c10::MemoryFormat::Contiguous,
@@ -217,7 +217,7 @@ std::tuple<Tensor, optional<int64_t>> squeeze_batch_rule(const Tensor& self, opt
   }
 
   auto result = self.view_symint(squeezed_sizes);
-  return std::make_tuple(std::move(result), c10::optional<int64_t>(new_batch_idx));
+  return std::make_tuple(std::move(result), std::optional<int64_t>(new_batch_idx));
 }
 
 std::tuple<Tensor, optional<int64_t>> squeeze_dims_batch_rule(
@@ -291,7 +291,7 @@ std::tuple<Tensor, optional<int64_t>> roll_batch_rule(const Tensor& self, option
     return std::make_tuple(at::roll_symint(self_, shifts, new_dims), 0);
   }
   // We will do something like: t.reshape(a, -1).roll(1, dims=[1, ]).reshape(old_shape)
-  auto old_shape = self_.sizes();
+  auto old_shape = self_.sym_sizes();
   new_dims.push_back(1);
   auto logical_rank = rankWithoutBatchDim(self, bdim);
   if (logical_rank == 0) {
@@ -301,7 +301,7 @@ std::tuple<Tensor, optional<int64_t>> roll_batch_rule(const Tensor& self, option
   auto output = at::roll_symint(self_.flatten(1), shifts, new_dims);
   // NOTE: For scalar tensor, we don't need to unsqueeze as reshape
   // with `old_shape` takes care of it.
-  output = output.reshape(old_shape);
+  output = output.reshape_symint(old_shape);
   return std::make_tuple(output, 0);
 }
 
@@ -335,8 +335,8 @@ std::tuple<Tensor,optional<int64_t>> slice_batch_rule(
     const Tensor& self,
     optional<int64_t> self_bdim,
     int64_t dim,
-    c10::optional<c10::SymInt> start,
-    c10::optional<c10::SymInt> end,
+    std::optional<c10::SymInt> start,
+    std::optional<c10::SymInt> end,
     c10::SymInt step) {
   auto self_ = moveBatchDimToFront(self, self_bdim);
   dim = getPhysicalDim(self, self_bdim.has_value(), dim);

@@ -1,13 +1,16 @@
+# mypy: allow-untyped-defs
+from typing import Sized, Tuple, TypeVar
+
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import MapDataPipe
-from typing import Sized, Tuple, TypeVar
+
 
 __all__ = ["ConcaterMapDataPipe", "ZipperMapDataPipe"]
 
-T_co = TypeVar('T_co', covariant=True)
+T_co = TypeVar("T_co", covariant=True)
 
 
-@functional_datapipe('concat')
+@functional_datapipe("concat")
 class ConcaterMapDataPipe(MapDataPipe):
     r"""
     Concatenate multiple Map DataPipes (functional name: ``concat``).
@@ -55,7 +58,7 @@ class ConcaterMapDataPipe(MapDataPipe):
         return sum(len(dp) for dp in self.datapipes)
 
 
-@functional_datapipe('zip')
+@functional_datapipe("zip")
 class ZipperMapDataPipe(MapDataPipe[Tuple[T_co, ...]]):
     r"""
     Aggregates elements into a tuple from each of the input DataPipes (functional name: ``zip``).
@@ -92,7 +95,9 @@ class ZipperMapDataPipe(MapDataPipe[Tuple[T_co, ...]]):
             try:
                 res.append(dp[index])
             except IndexError as e:
-                raise IndexError(f"Index {index} is out of range for one of the input MapDataPipes {dp}.") from e
+                raise IndexError(
+                    f"Index {index} is out of range for one of the input MapDataPipes {dp}."
+                ) from e
         return tuple(res)
 
     def __len__(self) -> int:

@@ -26,7 +26,7 @@ env:
   PYTORCH_FINAL_PACKAGE_DIR: /artifacts
   PYTORCH_ROOT: /pytorch
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-  SKIP_ALL_TESTS: 1
+  SKIP_ALL_TESTS: 0
 concurrency:
   group: linux-binary-libtorch-pre-cxx11-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true

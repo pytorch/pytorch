@@ -1,13 +1,13 @@
 #pragma once
 
+#ifdef USE_C10D_NCCL
+
 #if defined(__linux__)
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 #endif
-
-#ifdef USE_C10D_NCCL
 
 #include <atomic>
 #include <chrono>
@@ -36,6 +36,10 @@
 #include <torch/custom_class.h>
 
 namespace c10d {
+
+// Control whether to always use high priority streams
+static std::vector<std::string> TORCH_NCCL_HIGH_PRIORITY = {
+    "TORCH_NCCL_HIGH_PRIORITY"};
 
 // Control whether or not wait() is blocking or non-blocking.
 static std::vector<std::string> TORCH_NCCL_BLOCKING_WAIT = {
@@ -81,6 +85,10 @@ static std::vector<std::string> TORCH_NCCL_ENABLE_MONITORING = {
 static std::vector<std::string> TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC = {
     "TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"};
 
+// Whether to rethrow CUDA Errors in the watchdog (default true)
+static std::vector<std::string> TORCH_NCCL_RETHROW_CUDA_ERRORS = {
+    "TORCH_NCCL_RETHROW_CUDA_ERRORS"};
+
 // The maximum number of events we store in the flight recorder's ring buffer.
 // (One event could be the start or end of a collective, for example).
 static std::vector<std::string> TORCH_NCCL_TRACE_BUFFER_SIZE = {
@@ -96,11 +104,7 @@ static std::vector<std::string> TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC = {
 static std::vector<std::string> TORCH_NCCL_COORD_CHECK_MILSEC = {
     "TORCH_NCCL_COORD_CHECK_MILSEC"};
 
-// Whether to abort the communicators when users call destroy_process_group().
-// If yes, communicators will be aborted when destroy_process_group is called,
-// but not in destructor.
-static std::vector<std::string> TORCH_NCCL_ABORT_IN_DESTROY_PG = {
-    "TORCH_NCCL_ABORT_IN_DESTROY_PG"};
+static std::vector<std::string> TORCH_NCCL_NAN_CHECK = {"TORCH_NCCL_NAN_CHECK"};
 
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
@@ -250,7 +254,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
         OpType opType,
         uint64_t seq,
         const char* profilingTitle = nullptr,
-        const c10::optional<std::vector<at::Tensor>>& inputs = c10::nullopt,
+        const std::optional<std::vector<at::Tensor>>& inputs = c10::nullopt,
         bool desyncDebug = false,
         bool enableTiming = false,
         DebugLevel distDebugLevel = DebugLevel::Off);
@@ -307,7 +311,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // and False otherwise.
     // In case of timeout, set exception on the WorkNCCL object.
     bool checkTimeout(
-        c10::optional<std::chrono::milliseconds> timeout = c10::nullopt);
+        std::optional<std::chrono::milliseconds> timeout = c10::nullopt);
 
     std::vector<at::Tensor> result() override;
 
@@ -401,7 +405,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     bool timingEnabled_;
     // unique id used to tell the trace buffer that this
     // work has completed
-    c10::optional<uint64_t> trace_id_;
+    std::optional<uint64_t> trace_id_;
     DebugLevel distDebugLevel_;
     friend class ProcessGroupNCCL;
   };
@@ -430,6 +434,35 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     std::shared_ptr<ProcessGroupNCCL> split_from;
     int64_t split_color{0};
     std::vector<uint64_t> global_ranks_in_group;
+    std::string group_name;
+  };
+
+  // A struct to hold the latest status of the process group.
+  struct ProcessGroupStatus {
+    // the sequential number of the last collective enqueued into workMetaList_
+    // This is useful for indentifying a rank that has not join a collective
+    // initialized to be -1 to indicate no collective has been enqueued
+    int64_t lastEnqueuedSeq{-1};
+    // the sequential number of the last collective started as the kernel
+    int64_t lastStartedSeq{-1};
+    // the sequential number of the last colletive completed marked by
+    // the watchdog thread
+    // initialized to be -1 to indicate no collective has been completed
+    int64_t lastCompletedSeq{-1};
+
+    // the name of the last collective enqueued into workMetaList_
+    std::string lastEnqueuedWorkName;
+    // the name of the last collective started as the kernel
+    std::string lastStartedWorkName;
+    // the name of the last collective completed
+    std::string lastCompletedWorkName;
+
+    // the sizes of the last work enqueued
+    size_t lastEnqueuedNumelIn;
+    size_t lastEnqueuedNumelOut;
+    // the sizes of the last work completed
+    size_t lastCompletedNumelIn;
+    size_t lastCompletedNumelOut;
   };
 
   // If you wish to create multiple process groups, each with a potentially
@@ -610,7 +643,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   uint64_t getSequenceNumberForGroup() override;
 
   // Return the total number of splits the communicators held by this process
-  // group have performed.
+  // group have performed.  Counts ncclCommCreateFromRanks() for ncclx v2.21.5+
   uint64_t getCommSplitCounter() const;
 
   void registerOnCompletionHook(
@@ -622,16 +655,16 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Helper function for iteratively aborting communicators in the provided map
   void abortCommsFromMap(
       std::unordered_map<std::string, std::shared_ptr<NCCLComm>>& ncclCommsMap,
-      c10::optional<std::string> abortReason);
+      std::optional<std::string> abortReason);
 
   c10::intrusive_ptr<intra_node_comm::IntraNodeComm> initIntraNodeComm();
 
   // Provides an API to abort the ProcessGroup (similar to ncclCommAbort)
   // instead of relying on ProcessGroupNCCL destructor.
   // return true if abort is successful, otherwise false
-  bool abort(c10::optional<std::string> abortReason = c10::nullopt);
+  bool abort(std::optional<std::string> abortReason = c10::nullopt);
 
-  void shutdown(c10::optional<std::string> reason = c10::nullopt);
+  void shutdown(std::optional<std::string> reason = c10::nullopt);
 
   void eagerConnectSingleDevice(at::Device device) override;
 
@@ -875,6 +908,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // communication, the key will be "1:2" on both processes. Note: this is for
   // the scenario where there is only 1 GPU per process. When it comes to
   // multiple GPUs per process, this part may need to redesigned.
+  // TODO: we probably need a separte map for P2P comms
   std::unordered_map<std::string, std::shared_ptr<NCCLComm>> devNCCLCommMap_;
 
   // The NCCL communicators currently in process of being initialized.
@@ -1010,11 +1044,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // for the operation to complete.
   bool blockingWait_ = false;
 
-  // Whether to abort the communicators when users call destroy_process_group().
-  // If yes, communicators will be aborted when destroy_process_group is called,
-  // but not in destructor.
-  bool abortInDestroyProcessGroup_ = false;
-
   // Whether or not to hook the cache allocator to register all allocated
   // tensors
   bool useTensorRegisterAllocatorHook_ = false;
@@ -1030,6 +1059,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // timeout and nccl errors.
   bool dumpOnException_;
 
+  // Whether or not to enable nan check for input tensors to collectives.
+  bool enableNanCheck_;
+
   // Whether or not to create start CUDAEvent and enable timing for start
   // and end events. Note that enableTiming_ is always true if desyncDebug_
   // is set to true.
@@ -1041,6 +1073,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Whether or not TORCH_NCCL_AVOID_RECORD_STREAMS was set
   bool avoidRecordStreams_ = false;
+
+  // Whether the NCCL watchdog should rethrow CUDA errors.
+  bool rethrowCUDAErrors_ = false;
 
   // Set of communicators that this process group has aborted and their
   // ncclUniqueId has been written to the store. We don't need a lock
@@ -1056,21 +1091,14 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Counting for the sequential number of NCCL collective call.
   // (specifically, how many actual kernels we launched, which differs from
   // op_id_ when coalescing is enabled)
-  uint64_t seq_{0};
+  uint64_t seqCollective_{0};
+
+  // Counting for the sequential number of NCCL P2P calls.
+  uint64_t seqP2P_{0};
 
   // Incrementing counter for logical operations (collective or p2p) issued on
   // the ProcessGroup
   uint64_t op_id_{0};
-
-  // the sequential number of the last colletive enqueued into workMetaList_
-  // This is useful for indentifying a rank that has not join a collective
-  // initialized to be -1 to indicate no collective has been enqueued
-  int64_t lastEnqueuedSeq_{-1};
-
-  // the sequential number of the last colletive completed marked by
-  // the watchdog thread
-  // initialized to be -1 to indicate no collective has been completed
-  int64_t lastCompletedSeq_{-1};
 
   std::exception_ptr watchDogException_ = nullptr;
 
@@ -1079,15 +1107,26 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::string logPrefix_;
 
   c10::intrusive_ptr<intra_node_comm::IntraNodeComm> intraNodeComm_;
+
+  // Number of devices on this node.
+  int localDeviceCount_{0};
+
+  ProcessGroupStatus pgStatus_;
 };
 
-TORCH_API std::string dump_nccl_trace();
+// Dumps the NCCL comm traces and additional information about the Process
+// Group.
+TORCH_API std::string dump_nccl_trace(
+    bool includeCollectives,
+    bool includeStackTraces,
+    bool onlyActive);
 
-// Gets a mutable reference to a global optional function.  Heartbeat Monitor
-// will query this function and if available, call it to dump traces. Inside
-// fbcode, we store a function here that uses an internal tool for process
-// tracing
-TORCH_API c10::optional<std::function<std::string()>>& get_cpp_trace_dumper();
+// Gets a mutable reference to a global optional function.Heartbeat Monitor
+// will use this function to dump traces, if available. Inside fbcode, we
+// store a function here that uses an internal tool for process tracing
+TORCH_API std::optional<
+    std::function<void(std::function<void(const std::string&)>)>>&
+get_cpp_trace_dumper();
 
 // Similar to get_cpp_trace_dumper, this stores a function defined in
 // torch-python layer that lets us check whether the GIL can be acquired,

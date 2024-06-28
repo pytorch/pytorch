@@ -2,8 +2,7 @@
 
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 
-namespace c10d {
-namespace tcputil {
+namespace c10d::tcputil {
 
 #define CONNECT_SOCKET_OFFSET 2
 
@@ -23,5 +22,4 @@ inline struct ::pollfd getPollfd(int socket, short events) {
   return res;
 }
 
-} // namespace tcputil
-} // namespace c10d
+} // namespace c10d::tcputil

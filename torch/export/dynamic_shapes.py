@@ -1,15 +1,19 @@
-import builtins
+# mypy: allow-untyped-defs
 import dataclasses
 import inspect
-import math
 import sys
 import weakref
 from collections import defaultdict
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 
 import torch
-from torch._subclasses.fake_tensor import FakeTensor
-from torch.utils._pytree import SUPPORTED_NODES
+from torch.utils._pytree import (
+    _get_node_type,
+    BUILTIN_TYPES,
+    SUPPORTED_NODES,
+    tree_flatten,
+    tree_map,
+)
 
 from .exported_program import ExportedProgram
 
@@ -20,7 +24,13 @@ if TYPE_CHECKING:
 
     from ..fx.experimental.symbolic_shapes import ShapeEnv, StrictMinMaxConstraint
 
-__all__ = ["Constraint", "Dim", "dims", "dynamic_dim"]
+__all__ = [
+    "Constraint",
+    "Dim",
+    "dims",
+    "dynamic_dim",
+    "refine_dynamic_shapes_from_suggested_fixes",
+]
 
 
 class _Dim(type):
@@ -30,9 +40,11 @@ class _Dim(type):
 
     @staticmethod
     def readable(name, min_, max_):
+        from torch.utils._sympy.numbers import int_oo
+
         if min_ == 2:
             min_ = None
-        if max_ == sys.maxsize - 1:
+        if max_ == int_oo:
             max_ = None
         if min_ is None and max_ is None:
             return f"Dim('{name}')"
@@ -129,11 +141,17 @@ class _DerivedDim(_Dim):
         # TODO(avik): use sympy value range analysis instead?
         from sympy import Integer
 
+        from torch.utils._sympy.numbers import int_oo
+
+        if self.root.min is -int_oo:  # type: ignore[attr-defined]
+            return -int_oo  # fn not needed cuz increasing
+
         _min_symint = self.fn(Integer(self.root.min))  # type: ignore[attr-defined]
+        root = self.root  # type: ignore[attr-defined]
         assert _min_symint >= 0, (
             f"Expected derived min value of {self.__name__} to be >= 0. "
-            f"Please specify an appropriate min value for {self.root.__name__} "  # type: ignore[attr-defined]
-            f"(currently {self.root.min})."  # type: ignore[attr-defined]
+            f"Please specify an appropriate min value for {root.__name__} "
+            f"(currently {root.min})."
         )
         return int(_min_symint)
 
@@ -143,11 +161,17 @@ class _DerivedDim(_Dim):
         # TODO(avik): use sympy value range analysis instead?
         from sympy import Integer
 
+        from torch.utils._sympy.numbers import int_oo
+
+        if self.root.max is int_oo:  # type: ignore[attr-defined]
+            return int_oo  # fn not needed cuz increasing
+
         _max_symint = self.fn(Integer(self.root.max))  # type: ignore[attr-defined]
+        root = self.root  # type: ignore[attr-defined]
         assert _max_symint <= sys.maxsize - 1, (
             f"Expected derived max value of {self.__name__} to be <= {sys.maxsize - 1}. "
-            f"Please specify an appropriate max value for {self.root.__name__} "  # type: ignore[attr-defined]
-            f"(currently {self.root.max})."  # type: ignore[attr-defined]
+            f"Please specify an appropriate max value for {root.__name__} "
+            f"(currently {root.max})."
         )
         return int(_max_symint)
 
@@ -177,8 +201,10 @@ def Dim(name: str, *, min: Optional[int] = None, max: Optional[int] = None):
     Returns:
         A type that can be used in dynamic shape specifications for tensors.
     """
+    from torch.utils._sympy.numbers import int_oo
+
     _min = 0 if min is None else min
-    _max = sys.maxsize - 1 if max is None else builtins.min(max, sys.maxsize - 1)
+    _max = int_oo if max is None else max
     assert _max > _min, f"Cannot create Dim with inconsistent min={min}, max={max}"
     dim = _Dim(name, (int,), {"min": _min, "max": _max})
     dim.__module__ = getattr(
@@ -253,10 +279,14 @@ class _Constraint(_ConstraintTarget, metaclass=_ConstraintFactory):
     shared: Optional[_ConstraintTarget] = None
     debug_name: Optional[str] = None
 
-    def _clone_with_range(self, lower=0, upper=math.inf):
+    def _clone_with_range(self, lower=0, upper=None):
         # Import sympy locally
         from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
+        from torch.utils._sympy.numbers import int_oo
         from torch.utils._sympy.value_ranges import ValueRanges
+
+        if upper is None:
+            upper = int_oo
 
         constraint_range = StrictMinMaxConstraint(
             vr=self.constraint_range.vr & ValueRanges(lower=lower, upper=upper),
@@ -485,18 +515,16 @@ def dynamic_dim(t: torch.Tensor, index: int, debug_name: Optional[str] = None):
         )
 
     # Import sympy locally
-    import sympy
 
     from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
+    from torch.utils._sympy.numbers import int_oo
     from torch.utils._sympy.value_ranges import ValueRanges
 
     return _create_constraint(
         weakref.ref(t),
         id(t),
         index,
-        StrictMinMaxConstraint(
-            vr=ValueRanges(lower=0, upper=sympy.oo), warn_only=False
-        ),
+        StrictMinMaxConstraint(vr=ValueRanges(lower=0, upper=int_oo), warn_only=False),
         debug_name=debug_name,
     )
 
@@ -552,72 +580,153 @@ def _process_equalities(
         derived_equalities.append((source, root, fn))
 
 
+def _tree_map(
+    func: Callable[..., Any],
+    tree: Any,
+    *dynamic_shapes: Any,
+) -> Any:
+    """
+    Customized tree_map for mapping pytrees to dynamic_shapes.
+
+    For built-in types (e.g., standard collections) this behaves exactly like tree_map.
+
+    OTOH for a user-defined class C registered with pytree, we cannot assume that a C
+    containing tensors can be mapped to a C containing dynamic shapes (i.e., C may not
+    be a polymorphic container). In that case we use the flattened form of C instead.
+    Thus a C(**tensors) that flattens to (**tensors) will map to (**dynamic_shapes).
+
+    Args:
+        func: function to apply to each (int, float, str, bool, None, torch.Tensor)
+        tree: input pytree
+        dynamic_shapes: zero or more (typically one) dynamic_shapes to match
+
+    Returns:
+        output pytree mapping func to each (int, float, str, bool, None, torch.Tensor)
+    """
+
+    def is_leaf(t):
+        # BUILTIN_TYPES is a subset of SUPPORTED_NODES, the latter being all types
+        # registered with pytree. Types *not* in BUILTIN_TYPES include primitive types
+        # (int, float, str, bool, None, torch.Tensor), which are not in SUPPORTED_NODES,
+        # as well as user-defined classes registered with pytree, which are.
+        return _get_node_type(t) not in BUILTIN_TYPES
+
+    def f(t, *dynamic_shapes):
+        typ = _get_node_type(t)
+        # typ is not in BUILTIN_TYPES
+        if typ in SUPPORTED_NODES:
+            # thus typ is a user-defined class registered with pytree,
+            # in which case flatten and recurse
+            return tree_map(
+                f,
+                SUPPORTED_NODES[typ].flatten_fn(t)[0],
+                *dynamic_shapes,
+                is_leaf=is_leaf,
+            )
+        else:
+            return func(t, *dynamic_shapes)
+
+    return tree_map(f, tree, *dynamic_shapes, is_leaf=is_leaf)
+
+
+def _combine_args(f, args, kwargs, _is_torch_jit_trace=False):
+    # combine args and kwargs following the signature of f, as it happens
+    # in the body of f when called with *args, **kwargs
+    if isinstance(f, ExportedProgram):
+        f = f.module()
+    if not _is_torch_jit_trace:
+        signature = (
+            inspect.signature(f.forward)
+            if isinstance(f, torch.nn.Module)
+            else inspect.signature(f)
+        )
+        kwargs = kwargs if kwargs is not None else {}
+        return signature.bind(*args, **kwargs).arguments
+    return args
+
+
+class ShapesCollection:
+    """
+    Builder for dynamic_shapes.
+    Used to assign dynamic shape specifications to tensors that appear in inputs.
+
+    Example::
+        args = ({"x": tensor_x, "others": [tensor_y, tensor_z]})
+
+        dim = torch.export.Dim(...)
+        dynamic_shapes = torch.export.ShapesCollection()
+        dynamic_shapes[tensor_x] = (dim, dim + 1, 8)
+        dynamic_shapes[tensor_y] = {0: dim * 2}
+        # This is equivalent to the following (now auto-generated):
+        # dynamic_shapes = {"x": (dim, dim + 1, 8), "others": [{0: dim * 2}, None]}
+
+        torch.export(..., args, dynamic_shapes=dynamic_shapes)
+    """
+
+    def __init__(self):
+        self._shapes = {}
+
+    def __setitem__(self, t, shape):
+        assert isinstance(
+            t, torch.Tensor
+        ), f"Cannot assign shape to non-tensor type {type(t)}"
+        # TODO(avik): check that shape is indeed a Shape
+        t_id = id(t)
+        if t_id in self._shapes:
+            _shape = self._shapes[t_id]
+            assert (
+                shape == _shape
+            ), f"Shapes assigned to tensor do not match: expected {_shape}, got {shape}"
+        else:
+            self._shapes[id(t)] = shape
+
+    def __getitem__(self, t):
+        t_id = id(t)
+        if t_id in self._shapes:
+            return self._shapes[t_id]
+        else:
+            return None
+
+    def __len__(self):
+        return len(self._shapes)
+
+    def dynamic_shapes(self, m, args, kwargs=None):
+        """
+        Generate dynamic_shapes.
+        """
+
+        t_ids = set()
+
+        def find_shape(t):
+            t_id = id(t)
+            if t_id in self._shapes:
+                t_ids.add(t_id)
+                return self._shapes[t_id]
+            else:
+                return None
+
+        combined_args = _combine_args(m, args, kwargs)
+        dynamic_shapes = _tree_map(find_shape, combined_args)
+        if any(t_id not in t_ids for t_id in self._shapes):
+            raise ValueError(
+                "Some tensors that were assigned shapes were not found in args. "
+                "Maybe such tensors were copied when passing them as args? "
+                "Maybe such tensors are contained in classes that were not registered with pytree?"
+            )
+        return dynamic_shapes
+
+
 def _process_dynamic_shapes(
     f: Callable,
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
     dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
+    _is_torch_jit_trace=False,
 ) -> Optional[List[Constraint]]:
-    from collections import defaultdict
-    from collections.abc import Mapping, Sequence
-
     from torch._dynamo.exc import UserError, UserErrorType
 
     if dynamic_shapes is None or len(dynamic_shapes) == 0:
         return None
-
-    kwargs = kwargs if kwargs is not None else {}
-
-    def tree_zip(combined_args, dynamic_shapes):
-        if isinstance(combined_args, (tuple, list)):
-            if not isinstance(dynamic_shapes, Sequence):
-                raise UserError(
-                    UserErrorType.INVALID_INPUT,
-                    f"Expected dynamic_shapes of a {type(combined_args)} to be a Sequence, "
-                    f"got {dynamic_shapes} instead",
-                )
-            if len(combined_args) != len(dynamic_shapes):
-                raise UserError(
-                    UserErrorType.INVALID_INPUT,
-                    f"Expected {dynamic_shapes} to have {len(combined_args)} items",
-                )
-            for i, shape in enumerate(dynamic_shapes):
-                yield from tree_zip(combined_args[i], shape)
-        elif isinstance(combined_args, dict):
-            if not isinstance(dynamic_shapes, Mapping):
-                raise UserError(
-                    UserErrorType.INVALID_INPUT,
-                    f"Expected dynamic_shapes of a {type(combined_args)} to be a Mapping, "
-                    f"got {dynamic_shapes} instead",
-                )
-            if len(combined_args) != len(dynamic_shapes):
-                raise UserError(
-                    UserErrorType.INVALID_INPUT,
-                    f"Expected {dynamic_shapes} to have {len(combined_args)} items",
-                )
-            for k, shape in dynamic_shapes.items():
-                yield from tree_zip(combined_args[k], shape)
-        elif type(combined_args) in SUPPORTED_NODES:
-            if not isinstance(dynamic_shapes, Sequence):
-                raise UserError(
-                    UserErrorType.INVALID_INPUT,
-                    f"Expected dynamic_shapes of a user-registered class (e.g., "
-                    f"{type(combined_args)}) to be a Sequence that matches the "
-                    f"flattened structure, but got {dynamic_shapes} instead",
-                )
-            yield from tree_zip(
-                SUPPORTED_NODES[type(combined_args)].flatten_fn(combined_args)[0],
-                dynamic_shapes,
-            )
-        elif isinstance(combined_args, torch.Tensor):
-            yield (combined_args, dynamic_shapes)
-        else:
-            if dynamic_shapes is not None:
-                raise UserError(
-                    UserErrorType.INVALID_INPUT,
-                    f"Expected dynamic_shapes of a {type(combined_args)} to be None, "
-                    f"got {dynamic_shapes} instead",
-                )
 
     # map of Dim names representing input shape dimensions to constraints on them
     symbols: Dict[str, List[Constraint]] = defaultdict(list)
@@ -629,6 +738,7 @@ def _process_dynamic_shapes(
         import sympy
 
         from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
+        from torch.utils._sympy.numbers import int_oo
         from torch.utils._sympy.solve import try_solve
         from torch.utils._sympy.value_ranges import ValueRanges
 
@@ -641,7 +751,7 @@ def _process_dynamic_shapes(
             if solution is not None:
                 return int(solution[1])  # type: ignore[call-overload]
             else:
-                raise UserError(  # noqa: TRY200
+                raise UserError(  # noqa: B904
                     UserErrorType.CONSTRAINT_VIOLATION,
                     f"Expected shape[{i}] = {tensor.shape[i]} of input Tensor to be "
                     f"of the form {expr}, where {symbol} is an integer",
@@ -703,7 +813,7 @@ def _process_dynamic_shapes(
             constraint = dynamic_dim(tensor, i, debug_name=dim.__name__)
             if dim.min != 0:
                 constraint = constraint >= dim.min
-            if dim.max != sys.maxsize - 1:
+            if dim.max != int_oo:
                 constraint = constraint <= dim.max
         return constraint
 
@@ -765,21 +875,27 @@ def _process_dynamic_shapes(
                     f"Unexpected dynamic_shape {shape} of Tensor, " "try None instead",
                 )
 
-    import inspect
+    def assoc_shapes(combined_args, dynamic_shapes):
+        def assoc_shape(t, dynamic_shape):
+            if isinstance(t, torch.Tensor):
+                update_symbols(t, dynamic_shape)
+            else:
+                if dynamic_shape is not None:
+                    raise UserError(
+                        UserErrorType.INVALID_INPUT,
+                        f"Cannot associate shape {dynamic_shape} to non-tensor type {type(t)}, "
+                        f"expected None",
+                    )
 
-    if isinstance(f, ExportedProgram):
-        f = f.module()
-    signature = (
-        inspect.signature(f.forward)
-        if isinstance(f, torch.nn.Module)
-        else inspect.signature(f)
+        _tree_map(assoc_shape, combined_args, dynamic_shapes)
+
+    combined_args = _combine_args(
+        f, args, kwargs, _is_torch_jit_trace=_is_torch_jit_trace
     )
-    combined_args = signature.bind(*args, **kwargs).arguments
-
-    # This means user didn't specify dynamic shapes with argument names.
-    combined_args = combined_args if isinstance(dynamic_shapes, Mapping) else list(combined_args.values())  # type: ignore[assignment]
-    for tensor, shape in tree_zip(combined_args, dynamic_shapes):
-        update_symbols(tensor, shape)
+    if not isinstance(dynamic_shapes, dict):
+        assert isinstance(dynamic_shapes, (tuple, list))
+        combined_args = type(dynamic_shapes)(combined_args.values())  # type: ignore[assignment, misc]
+    assoc_shapes(combined_args, dynamic_shapes)
 
     constraints = []
     for derived_constraint_with_phantom_root in derived_constraints_with_phantom_root:
@@ -810,104 +926,154 @@ def _process_dynamic_shapes(
     return constraints  # type: ignore[return-value]
 
 
-def _process_constraints(
-    fake_mode,
-    graph_module: torch.fx.GraphModule,
-    num_lifted_params_buffers: int,
-    example_inputs: List[torch.Tensor],
-) -> Dict:
+def _get_dim_name_mapping(
+    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any], None]
+):
+    name_to_dim = {}
+    for dim in tree_flatten(
+        dynamic_shapes,
+        is_leaf=lambda x: isinstance(x, _Dim),
+    )[0]:
+        if dim is None or isinstance(dim, int):
+            continue
+        name_to_dim[dim.__name__] = dim
+        if isinstance(dim, _DerivedDim):
+            name_to_dim[dim.root.__name__] = dim.root  # type: ignore[attr-defined]
+    return name_to_dim
+
+
+def refine_dynamic_shapes_from_suggested_fixes(
+    msg: str,
+    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any]],
+) -> Union[Dict[str, Any], Tuple[Any], List[Any]]:
     """
-    Process the constraints stored in the graph module to return something more readable.
+    For working with export's dynamic shapes suggested fixes, and/or automatic dynamic shapes.
+    Refines the given dynamic shapes spec, given a ConstraintViolation error message and the original dynamic shapes.
 
-    Args:
-        graph_module (torch.fx.GraphModule): GraphModule returned from
-            dynamo.export, which contains the "input_shape_constraints" and
-            "inline_constraints" metadata
+    For most cases behavior is straightforward - i.e. for suggested fixes that specialize or refine a Dim's range,
+    or fixes that suggest a derived relation, the new dynamic shapes spec will be updated as such.
 
-        example_inputs: Flattened list of example inputs used to export the graph module
+    e.g.
+    Suggested fixes:
 
-    Returns:
-        range_constraints (Dict[sympy.Symbol, ValueRanges]): Mapping of
-            symbols (from SymInts) appearing in the fake tensors in
-            node.meta["val"] to their range constraints, which are a tuple
-            containing (lower, upper) constraints.
+        dim = Dim('dim', min=3, max=6) -> this just refines the dim's range
+        dim = 4 -> this specializes to a constant
+        dy = dx + 1 -> dy was specified as an independent dim, but is actually tied to dx with this relation
+
+    However, suggested fixes associated with derived dims can be more complicated.
+    For example, if a suggested fix is provided for a root dim, the new derived dim value is evaluated based on the root.
+
+    e.g.
+    dx = Dim('dx')
+    dy = dx + 2
+    dynamic_shapes = {"x": (dx,), "y": (dy,)}
+
+    Suggested fixes:
+
+        dx = 4  # specialization will lead to dy also specializing = 6
+        dx = Dim('dx', max=6)  # dy now has max = 8
+
+    Derived dims suggested fixes can also be used to express divisibility constraints.
+    This involves creating new root dims that aren't tied to a particular input shape.
+    In this case the root dims won't appear directly in the new spec, but as a root of
+    one of the dims.
+
+    e.g.
+    Suggested fixes:
+
+        _dx = Dim('_dx', max=1024)  # this won't appear in the return result, but dx will
+        dx = 4*_dx  # dx is now divisible by 4, with a max value of 4096
     """
-    from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
-        InputDim,
-    )
 
-    # Import sympy locally
-    from torch.fx.experimental.symbolic_shapes import SymInt
-    from torch.utils._sympy.value_ranges import ValueRanges
+    import re
 
-    input_shape_constraints = graph_module.meta.get("input_shape_constraints", [])
-    inline_constraints = graph_module.meta.get("inline_constraints", [])
+    import sympy
 
-    # Create dict mapping tensor_id to node names
-    tensor_id_to_nodes: Dict[int, List[str]] = defaultdict(list)
-    # Create dict mapping placeholder node names to their nodes
-    placeholder_nodes: Dict[str, torch.fx.Node] = {}
-    for i, node in enumerate(graph_module.graph.nodes):
-        if node.op != "placeholder":
-            # All placeholder nodes should be together in the beginning of the
-            # graph
-            break
-        if i >= num_lifted_params_buffers:
-            example_input = example_inputs[i - num_lifted_params_buffers]
-            tensor_id_to_nodes[id(example_input)].append(node.name)
-            placeholder_nodes[node.name] = node
+    from torch._dynamo.exc import UserError, UserErrorType
+    from torch.fx.experimental.symbolic_shapes import _is_supported_equivalence
 
-    # Create dict mapping (node name, dim) a list of range (lower, upper)
-    # constraints
-    multi_range_constraints: Dict[InputDim, List[ValueRanges]] = defaultdict(list)
-    for constraint in input_shape_constraints:
-        for node in tensor_id_to_nodes[constraint["t_id"]]:
-            # skip static shape constraints
-            if constraint["min"] == constraint["max"]:
-                continue
-            node_dim = InputDim(node, constraint["dim"])
+    try:
+        shape_fixes_msg = msg.split("Suggested fixes:")[1].strip()
+    except Exception as exc:
+        raise UserError(
+            UserErrorType.INVALID_INPUT,
+            "Suggested fixes not found in error message given to refine_dynamic_shapes_from_suggested_fixes()",
+        ) from exc
 
-            # Accumulate range constraints
-            multi_range_constraints[node_dim].append(
-                ValueRanges(constraint["min"], constraint["max"])
-            )
+    # build shape_fixes dictionary
+    shape_fixes = {}
+    for fix in shape_fixes_msg.split("\n"):
+        fix = fix.strip()
+        if match := re.match(r"(.*) = Dim\('(.*)'.*\)", fix):
+            name = match.group(1)
+            _min, _max = None, None
+            if match_min := re.match(r".* = Dim\('.*', min\=([0-9]+).*\)", fix):
+                _min = int(match_min.group(1))
+            if match_max := re.match(r".* = Dim\('.*'.*max\=([0-9]+)\)", fix):
+                _max = int(match_max.group(1))
+            shape_fixes[name] = Dim(name, min=_min, max=_max)
+        else:
+            name, expr = fix.split(" = ")
+            expr = sympy.sympify(expr)
+            if isinstance(expr, sympy.Number):
+                shape_fixes[name] = int(expr)  # static, integer
+            else:
+                shape_fixes[name] = expr  # relation or derived dim
 
-    # Create dict mapping symbol to a singular range (lower, upper)
-    range_constraints: Dict[Any, ValueRanges] = {}
+    name_to_dim = _get_dim_name_mapping(dynamic_shapes)
 
-    # Add inline constraints to range_constraints
-    range_constraints = {
-        symbol: inline_constraints[symbol] for symbol in inline_constraints
-    }
+    # track derived dim roots
+    roots: Set[str] = set()
+    for k, c in shape_fixes.items():
+        assert isinstance(c, (int, _Dim, _DerivedDim, sympy.Expr))
+        if isinstance(c, sympy.Expr):  # check dim/derived dim expression
+            assert _is_supported_equivalence(c)
+            shape_fixes[k] = c
+            roots.add(str(next(iter(c.free_symbols))))
+        if isinstance(c, _DerivedDim):
+            roots.add(c.root.__name__)  # type: ignore[attr-defined]
 
-    free_symbols: Set["Symbol"] = set()
-    # Add input range constraints to range_constraints
-    for input_dim, multi_range_constraint in multi_range_constraints.items():  # type: ignore[assignment]
-        # Simplify the range constraints into a single range constraint
-        # Ex. ranges [2, 10] and [3, 11] would get merged to [3, 10]
-        min_vals = [rc.lower for rc in multi_range_constraint]
-        max_vals = [rc.upper for rc in multi_range_constraint]
-        min_val = max(min_vals)  # type: ignore[type-var]
-        max_val = min(max_vals)  # type: ignore[type-var]
-        assert min_val <= max_val  # type: ignore[operator]
+    # check keys are existing dims or new roots
+    for k, c in shape_fixes.items():
+        assert k in name_to_dim or k in roots
 
-        # Add input node range constraints
-        val = placeholder_nodes[input_dim.input_name].meta["val"]
-        assert isinstance(val, FakeTensor)
-        symint = val.shape[input_dim.dim]
-        assert isinstance(
-            symint, SymInt
-        ), f"Expected SymInt but got {symint}: {type(symint)}"
-        symbol = symint.node.expr
-        range_constraints[symbol] = ValueRanges(min_val, max_val)
-        free_symbols.update(symbol.free_symbols)
+    # cache so we don't produce multiple derived dim objects
+    derived_dim_cache: Dict[str, _DerivedDim] = {}
 
-    for symbol in free_symbols:
-        if symbol not in range_constraints:
-            # Placeholders can have symbolic shapes that are derived expressions.
-            # The above code will record direct range constraints for them
-            # so that we can do runtime assertions. In addition, for serde checks
-            # we want to record range constraints for their root symbols.
-            range_constraints[symbol] = fake_mode.shape_env.var_to_range[symbol]
+    def apply_fixes(dim, dummy):
+        if dim is None or isinstance(dim, int):  # not dynamic
+            return dim
+        elif dim.__name__ in shape_fixes:  # directly fix
+            fix = shape_fixes[dim.__name__]
+            if isinstance(fix, sympy.Expr):  # now derived or related
+                if str(fix) in derived_dim_cache:
+                    return derived_dim_cache[str(fix)]
+                else:
+                    symbol = next(iter(fix.free_symbols))
+                    # try to locate symbol
+                    if symbol.name in shape_fixes:  # type: ignore[attr-defined]
+                        root = shape_fixes[symbol.name]  # type: ignore[attr-defined]
+                    else:
+                        assert symbol.name in name_to_dim  # type: ignore[attr-defined]
+                        root = name_to_dim[symbol.name]  # type: ignore[attr-defined]
+                    # figure out value of fix
+                    modulus, remainder = sympy.polys.polytools.div(fix, symbol)
+                    dim = root
+                    if modulus != 1:
+                        dim = int(modulus) * dim
+                    if remainder != 0:
+                        dim = dim + int(remainder)
+                    derived_dim_cache[str(fix)] = dim
+                    return dim
+            else:
+                return fix
+        elif isinstance(dim, _DerivedDim) and dim.root.__name__ in shape_fixes:  # type: ignore[attr-defined]
+            if dim.__name__ in derived_dim_cache:
+                return derived_dim_cache[dim.__name__]
+            else:  # evaluate new derived value based on root
+                _dim = dim.fn(shape_fixes[dim.root.__name__])  # type: ignore[attr-defined]
+                derived_dim_cache[dim.__name__] = _dim
+                return _dim
+        return dim  # unchanged dim
 
-    return range_constraints
+    return _tree_map(apply_fixes, dynamic_shapes, dynamic_shapes)

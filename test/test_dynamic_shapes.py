@@ -2,13 +2,14 @@
 
 import contextlib
 import copy
-import itertools
 import inspect
+import itertools
 import math
 import operator
 import re
 
 import sympy
+
 import torch
 import torch.fx
 import torch.nn.functional as F
@@ -16,8 +17,9 @@ from torch import sym_int, SymBool, SymFloat, SymInt
 from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental import sym_node
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.sym_node import to_node, SymNode, method_to_operator
+from torch.fx.experimental.sym_node import method_to_operator, SymNode, to_node
 from torch.fx.experimental.symbolic_shapes import (
+    _constrain_range_for_size,
     DimConstraints,
     DimDynamic,
     expect_true,
@@ -25,11 +27,11 @@ from torch.fx.experimental.symbolic_shapes import (
     guard_float,
     guard_int,
     GuardOnDataDependentSymNode,
-    ShapeEnv,
+    hint_int,
     is_symbolic,
+    ShapeEnv,
     StatelessSymbolicContext,
     statically_known_true,
-    _constrain_range_for_size,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -38,9 +40,13 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TestCase,
 )
-from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils import _pytree as pytree
-from torch.utils._sympy.functions import FloorDiv, Mod
+from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils._sympy.functions import (
+    FloorDiv,
+    IsNonOverlappingAndDenseIndicator,
+    Mod,
+)
 
 aten = torch.ops.aten
 
@@ -51,8 +57,10 @@ def register_meta(op):
     def decorator(f):
         def add_func(op):
             meta_funcs[op] = f
+
         pytree.tree_map_(add_func, op)
         return f
+
     return decorator
 
 
@@ -101,13 +109,26 @@ def create_contiguous(shape):
 
 class FakeSymbolicTensor(torch.Tensor):
     @staticmethod
-    def __new__(cls, sym_shape, sym_strides, dtype, layout, requires_grad, device, storage_offset=0):
+    def __new__(
+        cls,
+        sym_shape,
+        sym_strides,
+        dtype,
+        layout,
+        requires_grad,
+        device,
+        storage_offset=0,
+    ):
         # TODO: this is wrong in general
         sym_stride = create_contiguous(sym_shape)
         r = torch.Tensor._make_wrapper_subclass(
-            cls, sym_shape,
-            sym_stride, storage_offset,
-            dtype=dtype, layout=layout, requires_grad=requires_grad,
+            cls,
+            sym_shape,
+            sym_stride,
+            storage_offset,
+            dtype=dtype,
+            layout=layout,
+            requires_grad=requires_grad,
             device=device,
         )
         return r
@@ -115,7 +136,9 @@ class FakeSymbolicTensor(torch.Tensor):
     __torch_function__ = _disabled_torch_function_impl
 
     def new_empty(self, shape):
-        return FakeSymbolicTensor(shape, None, self.dtype, self.layout, self.requires_grad, self.device)
+        return FakeSymbolicTensor(
+            shape, None, self.dtype, self.layout, self.requires_grad, self.device
+        )
 
     @classmethod
     def __torch_dispatch__(cls, func_overload, types, args=(), kwargs=None):
@@ -125,7 +148,14 @@ class FakeSymbolicTensor(torch.Tensor):
         if func_overload == torch.ops.aten.new_empty.default:
             self = args[0]
             shape = args[1]
-            return FakeSymbolicTensor(shape, self.stride(), self.dtype, self.layout, self.requires_grad, self.device)
+            return FakeSymbolicTensor(
+                shape,
+                self.stride(),
+                self.dtype,
+                self.layout,
+                self.requires_grad,
+                self.device,
+            )
 
         raise RuntimeError(f"operator {func_overload} not supported")
 
@@ -138,58 +168,86 @@ def create_symbolic_tensor(name, arg, shape_env, source=None, dynamic_dims=None)
     constraint_dims = [None] * arg.dim()
     if dynamic_dims is None:
         dynamic_dims = [DimDynamic.DUCK] * arg.dim()
-    sym_shapes, sym_strides, sym_storage_offset = \
-        shape_env.create_symbolic_sizes_strides_storage_offset(
-            arg,
-            source=source,
-            symbolic_context=StatelessSymbolicContext(
-                dynamic_sizes=dynamic_dims,
-                constraint_sizes=constraint_dims
-            ),
-        )
-    return FakeSymbolicTensor(sym_shapes, sym_strides, arg.dtype, arg.layout, arg.requires_grad, arg.device, sym_storage_offset)
+    (
+        sym_shapes,
+        sym_strides,
+        sym_storage_offset,
+    ) = shape_env.create_symbolic_sizes_strides_storage_offset(
+        arg,
+        source=source,
+        symbolic_context=StatelessSymbolicContext(
+            dynamic_sizes=dynamic_dims, constraint_sizes=constraint_dims
+        ),
+    )
+    return FakeSymbolicTensor(
+        sym_shapes,
+        sym_strides,
+        arg.dtype,
+        arg.layout,
+        arg.requires_grad,
+        arg.device,
+        sym_storage_offset,
+    )
+
 
 def create_symtype(cls, pytype, shape_env, val, duck=True):
     from torch._dynamo.source import ConstantSource
+
     symbol = shape_env.create_symbol(
         val,
         source=ConstantSource(f"__testing_only{len(shape_env.var_to_val)}"),
         dynamic_dim=DimDynamic.DUCK if duck else DimDynamic.DYNAMIC,
         constraint_dim=None,
     )
-    return cls(SymNode(
-        symbol,
-        shape_env,
-        pytype,
-        hint=val,
-    ))
+    return cls(
+        SymNode(
+            symbol,
+            shape_env,
+            pytype,
+            hint=val,
+        )
+    )
+
 
 # TODO: default duck to False
-def create_symint(shape_env, i: int, duck=True):
+def create_symint(shape_env, i: int, duck=True) -> SymInt:
     return create_symtype(SymInt, int, shape_env, i, duck=duck)
 
-def create_symbool(shape_env, b: bool):
+
+def create_symbool(shape_env, b: bool) -> SymBool:
     return create_symtype(SymBool, bool, shape_env, b)
 
-def create_symfloat(shape_env, f: float):
+
+def create_symfloat(shape_env, f: float) -> SymFloat:
     return create_symtype(SymFloat, float, shape_env, f)
 
-@skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")
-class TestPySymInt(TestCase):
 
+@skipIfTorchDynamo(
+    "Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)"
+)
+class TestPySymInt(TestCase):
     def test_arith_ops(self):
         shape_env = ShapeEnv()
         symints = []
         for i in range(2, 5):
             symints.append((i, create_symint(shape_env, i)))
 
-        ops = [operator.add, operator.sub, operator.floordiv, operator.mul, operator.mod]
+        ops = [
+            operator.add,
+            operator.sub,
+            operator.floordiv,
+            operator.mul,
+            operator.mod,
+        ]
 
         for op in ops:
             for args in itertools.permutations(symints, 2):
-                if not isinstance(args[0][1], int) and ((op != operator.mod or op != operator.floordiv) and args[1][0] != 0):
-                    self.assertTrue(op(args[0][1], args[1][1]) == op(args[0][0], args[1][0]))
-
+                if not isinstance(args[0][1], int) and (
+                    (op != operator.mod or op != operator.floordiv) and args[1][0] != 0
+                ):
+                    self.assertTrue(
+                        op(args[0][1], args[1][1]) == op(args[0][0], args[1][0])
+                    )
 
     def test_reverse_arith_ops(self):
         shape_env = ShapeEnv()
@@ -199,7 +257,6 @@ class TestPySymInt(TestCase):
 
         a = create_symint(shape_env, 2)
         self.assertTrue(5 * a == 5 * 2)
-
 
     def test_roundtrip(self):
         shape_env = ShapeEnv()
@@ -217,7 +274,9 @@ class TestPySymInt(TestCase):
         # Should be simplifiable to an integer.
         # Ref: https://github.com/pytorch/pytorch/pull/107492
         self.assertTrue(isinstance(x.size()[1], SymInt))
-        self.assertTrue(isinstance(x.size()[1].node.maybe_as_int(), int))  # due to guard above
+        self.assertTrue(
+            isinstance(x.size()[1].node.maybe_as_int(), int)
+        )  # due to guard above
         self.assertTrue(x.size()[2] == 3)
 
         self.assertTrue(x.size(0) == 5)
@@ -327,6 +386,17 @@ class TestPySymInt(TestCase):
         self.assertTrue(str(expand_x.shape[1]), str(x.shape[0]))
         self.assertTrue(str(expand_x.shape[1]), str(result.shape[0]))
 
+    def test_floordiv_static(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 8)
+        # This was extracted from
+        # python test/inductor/test_cuda_cpp_wrapper.py -k
+        # DynamicShapesCudaWrapperCudaTests.test_insignificant_strides_cuda_dynamic_shapes_cuda_wrapper
+        bool(s0 % 2 == 0)
+        bool(s0 % (s0 // 2) == 0)
+        bool(2 * (s0 // 2) == s0)
+        self.assertTrue(statically_known_true(s0 // (s0 // 2) == 2))
+
     def test_numel(self):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5), shape_env)
@@ -344,7 +414,6 @@ class TestPySymInt(TestCase):
         self.assertIsInstance(r, torch.SymFloat, msg=type(r))
 
     def test_aten_ops(self):
-
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5), shape_env)
         torch.ops.aten.narrow_copy.default(x, 0, 0, x.shape[0])
@@ -368,7 +437,7 @@ class TestPySymInt(TestCase):
     def test_meta_symint(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 2)
-        r = torch.empty(a0, device='meta')
+        r = torch.empty(a0, device="meta")
         self.assertIsInstance(r.shape[0], SymInt)
 
     def test_guard_int(self):
@@ -389,7 +458,7 @@ class TestPySymInt(TestCase):
         self.assertEqual(len(shape_env.guards), 0)
         self.assertExpectedInline(
             str([ra.expr for ra in shape_env.deferred_runtime_asserts[None]]),
-            """[Eq(s0, 2)]"""
+            """[Eq(s0, 2)]""",
         )
 
     def test_sym_int(self):
@@ -404,13 +473,17 @@ class TestPySymInt(TestCase):
         r = sym_int(a1 / 2)
         self.assertEqual(guard_int(r), 3)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
-        self.assertExpectedInline(str(shape_env.guards[1][0]), """Eq(floor(s1/2), 3)""")
+        self.assertExpectedInline(
+            str(shape_env.guards[1][0]), """Eq(TruncToInt(IntTrueDiv(s1, 2)), 3)"""
+        )
 
         a3 = create_symint(shape_env, 3)
         r = sym_int(2.0 * torch.sym_float(a3))
         self.assertEqual(guard_int(r), 6)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
-        self.assertExpectedInline(str(shape_env.guards[2][0]), """Eq(2*s2, 6)""")
+        self.assertExpectedInline(
+            str(shape_env.guards[2][0]), """Eq(TruncToInt(2.0*ToFloat(s2)), 6)"""
+        )
 
     def test_sym_sqrt(self):
         shape_env = ShapeEnv()
@@ -418,7 +491,9 @@ class TestPySymInt(TestCase):
         r = torch._sym_sqrt(a0)
         self.assertEqual(r, 2)
         self.assertIsInstance(r, torch.SymFloat, msg=type(r))
-        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(OpaqueUnaryFn_sqrt(s0), 2)""")
+        self.assertExpectedInline(
+            str(shape_env.guards[0][0]), """Eq(OpaqueUnaryFn_sqrt(s0), 2.0)"""
+        )
 
     def test_sym_floor(self):
         shape_env = ShapeEnv()
@@ -426,11 +501,33 @@ class TestPySymInt(TestCase):
         r = math.floor(a0 / 2)
         self.assertEqual(r, 2)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
-        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(floor(s0/2), 2)""")
+        self.assertExpectedInline(
+            str(shape_env.guards[0][0]),
+            """Eq(FloorToInt(IntTrueDiv(s0, 2)), 2)""",
+        )
         r = math.floor(3.0 * a0)
         self.assertEqual(r, 15)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
-        self.assertExpectedInline(str(shape_env.guards[1][0]), """Eq(3*s0, 15)""")
+        self.assertExpectedInline(
+            str(shape_env.guards[1][0]),
+            """Eq(FloorToInt(3.0*ToFloat(s0)), 15)""",
+        )
+
+    def test_sym_trunc(self):
+        shape_env = ShapeEnv()
+        a0 = create_symint(shape_env, 5)
+        r = math.trunc(a0 / 2)
+        self.assertEqual(r, 2)
+        self.assertIsInstance(r, torch.SymInt, msg=type(r))
+        self.assertExpectedInline(
+            str(shape_env.guards[0][0]), """Eq(TruncToInt(IntTrueDiv(s0, 2)), 2)"""
+        )
+        r = torch.sym_int(torch.sym_sqrt(a0))
+        self.assertEqual(r, 2)
+        self.assertIsInstance(r, torch.SymInt, msg=type(r))
+        self.assertExpectedInline(
+            str(shape_env.guards[1][0]), """Eq(TruncToInt(OpaqueUnaryFn_sqrt(s0)), 2)"""
+        )
 
     def test_sym_ceil(self):
         shape_env = ShapeEnv()
@@ -438,11 +535,18 @@ class TestPySymInt(TestCase):
         r = math.ceil(a0 / 2)
         self.assertEqual(r, 3)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
-        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(ceiling(s0/2), 3)""")
-        r = math.floor(3.0 * a0)
+        self.assertExpectedInline(
+            str(shape_env.guards[0][0]),
+            """Eq(CeilToInt(IntTrueDiv(s0, 2)), 3)""",
+        )
+        r1 = 3.0 * a0
+        r = math.floor(r1)
         self.assertEqual(r, 15)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
-        self.assertExpectedInline(str(shape_env.guards[1][0]), """Eq(3*s0, 15)""")
+        self.assertExpectedInline(
+            str(shape_env.guards[1][0]),
+            """Eq(FloorToInt(3.0*ToFloat(s0)), 15)""",
+        )
 
     def test_sym_ite(self):
         shape_env = ShapeEnv()
@@ -459,13 +563,19 @@ class TestPySymInt(TestCase):
         self.assertEqual(len(shape_env.guards), 0)
         self.assertEqual(r3, 5)
         self.assertEqual(type(t), type(r3))
-        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(Piecewise((s0, Eq(s0, 5)), (s1, True)), 5)""")
+        self.assertExpectedInline(
+            str(shape_env.guards[0][0]),
+            """Eq(Piecewise((s0, Eq(s0, 5)), (s1, True)), 5)""",
+        )
         b4 = f == 5
         r4 = torch.sym_ite(b4, t, f)
         self.assertEqual(len(shape_env.guards), 1)
         self.assertEqual(r4, 4)
         self.assertEqual(type(f), type(r4))
-        self.assertExpectedInline(str(shape_env.guards[1][0]), """Eq(Piecewise((s0, Eq(s1, 5)), (s1, True)), 4)""")
+        self.assertExpectedInline(
+            str(shape_env.guards[1][0]),
+            """Eq(Piecewise((s0, Eq(s1, 5)), (s1, True)), 4)""",
+        )
 
     def test_tracing_sym_ite(self):
         def f(x):
@@ -475,13 +585,16 @@ class TestPySymInt(TestCase):
 
         gm = make_fx(f, tracing_mode="symbolic")(torch.ones(4, 5))
         self.assertEqual(len(gm.shape_env.guards), 0)
-        self.assertExpectedInline(gm.code.strip(), """\
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
 def forward(self, x_1):
     sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
     eq = sym_size_int == 5
     sym_size_int_1 = torch.ops.aten.sym_size.int(x_1, 1);  x_1 = None
     sym_ite = torch.sym_ite(eq, sym_size_int, sym_size_int_1);  eq = sym_size_int = sym_size_int_1 = None
-    return sym_ite""")
+    return sym_ite""",
+        )
         r1 = gm(torch.ones(4, 5))
         self.assertIsInstance(r1, int)
         self.assertEqual(r1, 5)
@@ -499,6 +612,12 @@ def forward(self, x_1):
         shape_env = ShapeEnv()
         s0 = shape_env.create_unbacked_symint()
         self.assertRaises(GuardOnDataDependentSymNode, lambda: bool(s0 == 0))
+
+    def test_data_dependent_guard_propagate_real_tensors(self):
+        shape_env = ShapeEnv()
+        s0 = shape_env.create_unbacked_symint()
+        shape_env.set_unbacked_var_to_val(s0.node.expr, 0)
+        self.assertEqual(bool(s0 == 0), True)
 
     def test_expect_true_basic(self):
         shape_env = ShapeEnv()
@@ -518,7 +637,7 @@ def forward(self, x_1):
         self.assertTrue(expect_true(i0 < s0))
         self.assertExpectedInline(
             str([ra.expr for ra in shape_env.deferred_runtime_asserts[i0.node.expr]]),
-            """[-s0 + u0 < 0]"""
+            """[u0 < s0]""",
         )
         self.assertTrue(i0 < s0)
         self.assertTrue(i0 != s0)
@@ -534,7 +653,7 @@ def forward(self, x_1):
         # Importantly, this is put in i1, not i0!
         self.assertExpectedInline(
             str([ra.expr for ra in shape_env.deferred_runtime_asserts[i1_sym]]),
-            """[Eq(u0 + u1, 10)]"""
+            """[Eq(u0 + u1, 10)]""",
         )
         self.assertTrue(i0 + i1 == 10)
         # NB: We currently don't support deriving that we can substitute
@@ -550,14 +669,14 @@ def forward(self, x_1):
         _constrain_range_for_size(i0)
         _constrain_range_for_size(i1)
         self.assertTrue(expect_true(i0 == i1 * 4))
-        self.assertExpectedInline(str(i0), """4*u1""")
+        self.assertExpectedInline(str(i0), """u0""")
 
         i2 = shape_env.create_unbacked_symint()
         i3 = shape_env.create_unbacked_symint()
         _constrain_range_for_size(i2)
         _constrain_range_for_size(i3)
         self.assertTrue(expect_true(i2 * 4 == i3))
-        self.assertExpectedInline(str(i3), """4*u2""")
+        self.assertExpectedInline(str(i3), """u3""")
 
     def test_avoid_unbacked_substitution(self):
         shape_env = ShapeEnv()
@@ -577,7 +696,9 @@ def forward(self, x_1):
 
     def test_expect_true_refine_range(self):
         shape_env = ShapeEnv()
-        for i, rel in enumerate([lambda x: x > 4, lambda x: 4 < x, lambda x: x >= 5, lambda x: 5 <= x]):
+        for i, rel in enumerate(
+            [lambda x: x > 4, lambda x: 4 < x, lambda x: x >= 5, lambda x: 5 <= x]
+        ):
             with self.subTest(f"i = {i}"):
                 i0 = shape_env.create_unbacked_symint()
                 self.assertTrue(expect_true(rel(i0)))
@@ -588,7 +709,9 @@ def forward(self, x_1):
                 self.assertTrue(statically_known_true(i0 > 4))
                 self.assertTrue(statically_known_true(i0 >= 5))
 
-        for i, rel in enumerate([lambda x: x < 4, lambda x: 4 > x, lambda x: x <= 3, lambda x: 3 >= x]):
+        for i, rel in enumerate(
+            [lambda x: x < 4, lambda x: 4 > x, lambda x: x <= 3, lambda x: 3 >= x]
+        ):
             with self.subTest(f"i = {i}"):
                 i0 = shape_env.create_unbacked_symint()
                 self.assertTrue(expect_true(rel(i0)))
@@ -601,7 +724,9 @@ def forward(self, x_1):
 
     def test_guard_refine_range(self):
         shape_env = ShapeEnv()
-        for i, rel in enumerate([lambda x: x > 4, lambda x: 4 < x, lambda x: x >= 5, lambda x: 5 <= x]):
+        for i, rel in enumerate(
+            [lambda x: x > 4, lambda x: 4 < x, lambda x: x >= 5, lambda x: 5 <= x]
+        ):
             with self.subTest(f"i = {i}"):
                 i0 = create_symint(shape_env, 10, duck=False)
                 self.assertTrue(bool(rel(i0)))
@@ -612,7 +737,9 @@ def forward(self, x_1):
                 self.assertTrue(statically_known_true(i0 > 4))
                 self.assertTrue(statically_known_true(i0 >= 5))
 
-        for i, rel in enumerate([lambda x: x > 4, lambda x: 4 < x, lambda x: x >= 5, lambda x: 5 <= x]):
+        for i, rel in enumerate(
+            [lambda x: x > 4, lambda x: 4 < x, lambda x: x >= 5, lambda x: 5 <= x]
+        ):
             with self.subTest(f"i = {i}"):
                 i0 = create_symint(shape_env, 2, duck=False)
                 self.assertFalse(bool(rel(i0)))
@@ -623,7 +750,9 @@ def forward(self, x_1):
                 self.assertTrue(statically_known_true(i0 <= 4))
                 self.assertTrue(statically_known_true(i0 < 5))
 
-        for i, rel in enumerate([lambda x: x < 4, lambda x: 4 > x, lambda x: x <= 3, lambda x: 3 >= x]):
+        for i, rel in enumerate(
+            [lambda x: x < 4, lambda x: 4 > x, lambda x: x <= 3, lambda x: 3 >= x]
+        ):
             with self.subTest(f"i = {i}"):
                 i0 = create_symint(shape_env, 2, duck=False)
                 self.assertTrue(bool(rel(i0)))
@@ -634,7 +763,9 @@ def forward(self, x_1):
                 self.assertTrue(statically_known_true(i0 < 4))
                 self.assertTrue(statically_known_true(i0 <= 3))
 
-        for i, rel in enumerate([lambda x: x < 4, lambda x: 4 > x, lambda x: x <= 3, lambda x: 3 >= x]):
+        for i, rel in enumerate(
+            [lambda x: x < 4, lambda x: 4 > x, lambda x: x <= 3, lambda x: 3 >= x]
+        ):
             with self.subTest(f"i = {i}"):
                 i0 = create_symint(shape_env, 10, duck=False)
                 self.assertFalse(bool(rel(i0)))
@@ -648,8 +779,72 @@ def forward(self, x_1):
     def test_non_overlapping_and_dense(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 5)
-        r = torch.empty_strided((a0, 7), (1, a0), device='meta')
+        r = torch.empty_strided((a0, 7), (1, a0), device="meta")
         self.assertTrue(torch.ops.aten.is_non_overlapping_and_dense.default(r))
+
+    def test_non_overlapping_and_dense_unbacked(self):
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        torch._check_is_size(u0)
+        cf = torch.ops.aten.is_non_overlapping_and_dense.default
+
+        self.assertEqual(IsNonOverlappingAndDenseIndicator(u0.node.expr, 2, 2, 1), 1)
+        self.assertEqual(IsNonOverlappingAndDenseIndicator(2, u0.node.expr, 1, 2), 1)
+        self.assertTrue(cf(torch.empty_strided((u0, 2), (2, 1), device="meta")))
+        self.assertTrue(cf(torch.empty_strided((2, u0), (1, 2), device="meta")))
+
+        self.assertEqual(IsNonOverlappingAndDenseIndicator(u0.node.expr, 1), 1)
+        self.assertEqual(IsNonOverlappingAndDenseIndicator(1, u0.node.expr), 1)
+        self.assertTrue(cf(torch.empty_strided((u0,), (1,), device="meta")))
+        self.assertTrue(cf(torch.empty_strided((1,), (u0,), device="meta")))
+
+        Max = torch.sym_max
+        # NB: This only works because we're able to determine this tensor is
+        # contiguous. transpose(0, 1) makes it stop working
+        self.assertTrue(
+            cf(
+                torch.empty_strided(
+                    (
+                        2,
+                        3,
+                        1,
+                        u0,
+                    ),
+                    (3 * Max(1, u0), Max(1, u0), Max(1, u0), 1),
+                    device="meta",
+                )
+            )
+        )
+
+    def test_debug_has_internal_overlap_unbacked(self):
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        torch._check_is_size(u0)
+        cf = torch._debug_has_internal_overlap
+        self.assertEqual(cf(torch.empty_strided((u0, 2), (2, 1), device="meta")), 0)
+        self.assertEqual(cf(torch.empty_strided((2, u0), (1, 2), device="meta")), 0)
+        self.assertEqual(cf(torch.empty_strided((u0,), (1,), device="meta")), 0)
+        self.assertEqual(cf(torch.empty_strided((1,), (u0,), device="meta")), 0)
+        Max = torch.sym_max
+        self.assertEqual(
+            cf(
+                torch.empty_strided(
+                    (
+                        2,
+                        3,
+                        1,
+                        u0,
+                    ),
+                    (3 * Max(1, u0), Max(1, u0), Max(1, u0), 1),
+                    device="meta",
+                )
+            ),
+            0,
+        )
+
+        # Wobbling these to zero is OK too
+        self.assertEqual(cf(torch.empty_strided((u0, 2), (3, 1), device="meta")), 2)
+        self.assertEqual(cf(torch.empty_strided((2, u0), (1, 3), device="meta")), 2)
 
     def test_specialize_zero_one(self):
         shape_env = ShapeEnv(specialize_zero_one=True)
@@ -723,7 +918,9 @@ def forward(self, x_1):
         fx_g = make_fx(f, tracing_mode="symbolic")(torch.randn(5, 3), torch.randn(4, 3))
         out = fx_g.print_readable(print_output=False)
 
-        self.assertExpectedInline(out.strip(), """\
+        self.assertExpectedInline(
+            out.strip(),
+            """\
 class f(torch.nn.Module):
     def forward(self, a_1: "f32[s0, s1]", b_1: "f32[s2, s1]"):
         # No stacktrace found for following nodes
@@ -737,7 +934,8 @@ class f(torch.nn.Module):
         native_dropout = torch.ops.aten.native_dropout.default(new_empty, 0.5, True);  new_empty = None
         getitem: "f32[s0 + s2, 2*s1]" = native_dropout[0]
         getitem_1: "b8[s0 + s2, 2*s1]" = native_dropout[1];  native_dropout = None
-        return (getitem, getitem_1)""")  # noqa: B950
+        return (getitem, getitem_1)""",  # noqa: B950
+        )
 
     def test_statically_known_true(self):
         shape_env = ShapeEnv()
@@ -774,8 +972,8 @@ class f(torch.nn.Module):
 
         # For full robustness, ensure the ephemeral source symbols are simplified out regardless
         # of construction order or check order.
-        for construct_ephemeral_first, x_first_in_check in (
-            itertools.product([False, True], [False, True])
+        for construct_ephemeral_first, x_first_in_check in itertools.product(
+            [False, True], [False, True]
         ):
             shape_env = ShapeEnv()
             shape = (5, 10)
@@ -798,10 +996,13 @@ class f(torch.nn.Module):
 
             def _get_ephemeral_source_symbols(t):
                 return [
-                    s.node.expr for s in itertools.chain(t.shape, t.stride(), (t.storage_offset(),))
-                    if isinstance(s, torch.SymInt) and s.node.expr in shape_env.var_to_sources
+                    s.node.expr
+                    for s in itertools.chain(t.shape, t.stride(), (t.storage_offset(),))
+                    if isinstance(s, torch.SymInt)
+                    and s.node.expr in shape_env.var_to_sources
                     and any(
-                        source.is_ephemeral() for source in shape_env.var_to_sources[s.node.expr]
+                        source.is_ephemeral()
+                        for source in shape_env.var_to_sources[s.node.expr]
                     )
                 ]
 
@@ -851,12 +1052,20 @@ class f(torch.nn.Module):
             self.assertEqual(x.storage_offset(), y.storage_offset())
 
 
-@skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")
+@skipIfTorchDynamo(
+    "Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)"
+)
 class TestSymNumberMagicMethods(TestCase):
     def _do_test(self, fn, inp1, inp2, shape_env, is_unary_fn):
+        with self.subTest(fn=fn, inp1=inp1, inp2=inp2, is_unary_fn=is_unary_fn):
+            return self._do_test2(fn, inp1, inp2, shape_env, is_unary_fn)
+
+    def _do_test2(self, fn, inp1, inp2, shape_env, is_unary_fn):
         # Helper function
         # NB: don't use one as that will get specialized
-        seed_node = (create_symint(shape_env, 2) / 2.).node
+        # TODO: We don't have to circuitously create the float, can just
+        # create a symfloat directly
+        seed_node = (create_symint(shape_env, 2) / 2.0).node
         bool_seed_node = (create_symint(shape_env, 2) == 2).node
 
         def get_sym_inp(inp):
@@ -868,26 +1077,44 @@ class TestSymNumberMagicMethods(TestCase):
             else:
                 return torch.SymFloat(to_node(seed_node, inp))
 
+        if fn == "float_pow":
+            if inp1 < 0:
+                return
+
+        if fn == "pow_by_natural":
+            if isinstance(inp1, float) or isinstance(inp2, float):
+                return
+            if inp2 < 0:
+                return
+
         def maybe_xfail(inp1, inp2):
             if fn == "sym_sqrt" and inp1 < 0:
                 # ValueError: math domain error
                 return self.assertRaises((ValueError,))
-            elif fn in ("truediv", "floordiv", "mod") and inp2 == 0:
+            elif (
+                fn in ("float_truediv", "int_truediv", "int_floordiv", "mod")
+                and inp2 == 0
+            ):
                 # ZeroDivisionError: division by zero
                 return self.assertRaises((ZeroDivisionError,))
-            elif fn == "pow" and inp1 == 0 and inp2 < 0:
+            elif fn in ["float_pow", "pow_by_natural"] and inp1 == 0 and inp2 < 0:
                 # ZeroDivisionError: 0.0 cannot be raised to a negative power
                 return self.assertRaises((ZeroDivisionError,))
-            elif fn == "pow" and inp1 < 0 and inp2 in (2.5, -2.5) and (
-                type(inp1) in (SymFloat, SymInt) or
-                type(inp2) in (SymFloat, SymInt)
+            elif (
+                # TODO: dear catastrophe waitress,
+                # this doesn't work
+                fn in ["float_pow", "pow_by_natural"]
+                and inp1 < 0
+                and (
+                    type(inp1) is (SymInt, SymFloat) or type(inp2) is (SymInt, SymFloat)
+                )
+                and (type(inp1) is (SymFloat, float) or type(inp2) is (SymFloat, float))
             ):
                 # Complex result, which we do not support:
                 # TypeError: Cannot convert complex to float
-                return self.assertRaises((TypeError,))
+                return self.assertRaises((RuntimeError,))
             elif fn in ("lshift", "rshift") and not (
-                isinstance(inp1, (SymInt, int)) and
-                isinstance(inp2, (SymInt, int))
+                isinstance(inp1, (SymInt, int)) and isinstance(inp2, (SymInt, int))
             ):
                 # TypeError: unsupported operand type(s)
                 return self.assertRaises((TypeError,))
@@ -946,7 +1173,6 @@ class TestSymNumberMagicMethods(TestCase):
             out = guard_fn(out)
             self.assertEqual(out, ref_out)
 
-
     @parametrize("fn", list(sym_node.magic_methods.keys()))
     def test_bool_method(self, fn):
         # sym_ite has its own tests
@@ -957,7 +1183,6 @@ class TestSymNumberMagicMethods(TestCase):
         shape_env = ShapeEnv()
         self._do_test(fn, True, False, shape_env, is_unary_fn)
 
-
     @parametrize("fn", list(sym_node.magic_methods.keys()))
     @parametrize("first_type", ["int", "float"])
     @parametrize("second_type", ["int", "float"])
@@ -966,8 +1191,13 @@ class TestSymNumberMagicMethods(TestCase):
             # TODO: Hmm, this looks like we skip all floats
             self.skipTest(f"{fn} is not a float magic method")
 
-        if (first_type == "int" or second_type == "int") and fn in sym_node.only_float_magic_methods:
+        if (
+            first_type == "int" or second_type == "int"
+        ) and fn in sym_node.only_float_magic_methods:
             self.skipTest(f"{fn} is not an int method")
+
+        if second_type == "float" and fn in ["mod"]:
+            self.skipTest(f"{fn} only handles int")
 
         is_unary_fn = fn in sym_node.unary_methods or fn == "round"
         # Second argument is ignored for unary function. So only run for one type
@@ -982,7 +1212,7 @@ class TestSymNumberMagicMethods(TestCase):
         values = (
             0.0,
             1.0,
-            0.5 if fn in ("sym_acos", "sym_asin") else 2.5  # avoid math domain error
+            0.5 if fn in ("sym_acos", "sym_asin") else 2.5,  # avoid math domain error
         )
 
         neg_values = tuple(-x for x in values)
@@ -1043,6 +1273,13 @@ class TestSymNumberMagicMethods(TestCase):
         hash(n)
         hash(m)
 
+    def test_symint_deepcopy(self):
+        shape_env = ShapeEnv()
+
+        symnodes = (torch._C._get_nested_int(1, 1),)
+        deepcopied_symnodes = copy.deepcopy(symnodes)
+        self.assertEqual(symnodes, deepcopied_symnodes)
+
     def test_non_symbolic_symnode(self):
         j1 = torch._C._get_nested_int(1, 1)
         j2 = torch._C._get_nested_int(1, 1)
@@ -1051,7 +1288,9 @@ class TestSymNumberMagicMethods(TestCase):
         self.assertIsInstance(j1, torch.SymInt)
         self.assertNotIsInstance(j1, int)
 
-        with self.assertRaisesRegex(RuntimeError, "add not supported by NestedIntSymNode"):
+        with self.assertRaisesRegex(
+            RuntimeError, "add not supported by NestedIntSymNode"
+        ):
             j1 + 3
 
         self.assertFalse(j1 == 3)
@@ -1105,7 +1344,9 @@ class TestSymNumberMagicMethods(TestCase):
         self.assertIs(sz1 == sz2, True)
         self.assertIs(sz1 != sz2, False)
 
+
 instantiate_parametrized_tests(TestSymNumberMagicMethods)
+
 
 class TestFloorDiv(TestCase):
     @staticmethod
@@ -1129,109 +1370,26 @@ class TestFloorDiv(TestCase):
                 yield (-x, -y)
 
     def test_floordiv_float_int(self):
-        values = (
-            (2.5, 2.1),
-            (2.1, 2.5),
-            (2.0, 2.1),
-            (7, 2.5),
-            (2.1, 7),
-            (7, 2),
-        )
+        values = ((7, 2),)
 
         for x, y in TestFloorDiv.yield_test_cases(values):
-            self.assertEqual(TestFloorDiv.python_floordiv(x, y), TestFloorDiv.torch_floordiv(x, y))
-
-    def test_floordiv_bool(self):
-        values = (
-            (False, True),
-            (True, 2.5),
-            (2.5, True),
-            (False, 7),
-            (7, True),
-        )
-
-        for x, y in TestFloorDiv.yield_test_cases(values, negate=False):
-            # Compares to int since our FloorDiv has no bool support
-            self.assertEqual(TestFloorDiv.python_floordiv(x, y), TestFloorDiv.torch_floordiv(int(x), int(y)))
-            # Tests that our impl throws
-            self.assertRaisesRegex(
-                TypeError,
-                (rf"unsupported operand type\(s\) for //: "
-                 rf"'{type(sympy.sympify(x)).__name__}' and '{type(sympy.sympify(y)).__name__}'"
-                 rf", expected integer or real"),
-                lambda: TestFloorDiv.torch_floordiv(x, y))
-
-    def test_floordiv_complex(self):
-        values = (
-            (1.5 + 2.5j, 1.3 + 3.5j),
-            (1.5 + 2.5j, 2.5),
-            (2.5, 1.5 + 2.5j),
-            (1.5 + 2.5j, 7),
-            (7, 1.5 + 2.5j),
-        )
-
-        for x, y in TestFloorDiv.yield_test_cases(values):
-            # We don't test error messages to avoid depending on Python
-            # interpreter version
-            self.assertRaises(TypeError, lambda: TestFloorDiv.python_floordiv(x, y))
-            self.assertRaisesRegex(
-                TypeError,
-                (rf"unsupported operand type\(s\) for //: "
-                 rf"'{type(sympy.sympify(x)).__name__}' and '{type(sympy.sympify(y)).__name__}'"
-                 rf", expected integer or real"),
-                lambda: TestFloorDiv.torch_floordiv(x, y))
-
-    def test_floordiv_div_by_zero(self):
-        values = (
-            (2.5, 0),
-            (2.1, 0.0),
-            (2.3, sympy.Symbol("s", zero=True)),
-        )
-
-        for x, y in TestFloorDiv.yield_test_cases(values, negate=False):
-            # We don't test error messages to avoid depending on Python
-            # interpreter version
-            if type(y) is not sympy.Symbol:
-                self.assertRaises(ZeroDivisionError, lambda: TestFloorDiv.python_floordiv(x, y))
-            self.assertRaisesRegex(
-                ZeroDivisionError,
-                "division by zero",
-                lambda: TestFloorDiv.torch_floordiv(x, y))
-
-    def test_floordiv_zero_base(self):
-        values = (
-            (0, 2.5),
-            (0.0, 2.1),
-            (sympy.Symbol("s", zero=True), 2.3),
-        )
-
-        for x, y in TestFloorDiv.yield_test_cases(values, negate=False):
-            if type(x) is not sympy.Symbol:
-                self.assertEqual(TestFloorDiv.python_floordiv(x, y), TestFloorDiv.torch_floordiv(x, y))
-            else:
-                self.assertEqual(0, TestFloorDiv.torch_floordiv(x, y))
+            self.assertEqual(
+                TestFloorDiv.python_floordiv(x, y), TestFloorDiv.torch_floordiv(x, y)
+            )
 
     def test_floordiv_div_by_one(self):
-        values = (
-            (2.5, 1),
-            (2.1, 1.0),
-            (2, 1.0),
-            (2, 1),
-        )
+        values = ((2, 1),)
 
         for x, y in TestFloorDiv.yield_test_cases(values):
-            self.assertEqual(TestFloorDiv.python_floordiv(x, y), TestFloorDiv.torch_floordiv(x, y))
+            self.assertEqual(
+                TestFloorDiv.python_floordiv(x, y), TestFloorDiv.torch_floordiv(x, y)
+            )
 
     def test_floordiv_simplify(self):
         # Tests how we simplify or evaluate FloorDiv without free variables
         shape_env = ShapeEnv()
         result = 21
-        exprs = (
-            7 * FloorDiv(6, 2),
-            7 * FloorDiv(6.28, 2),
-            7 * FloorDiv(6.28, 2.0),
-            7 * FloorDiv(6.28, (FloorDiv(6.28, 3.14))),
-        )
+        exprs = (7 * FloorDiv(6, 2),)
 
         for expr in exprs:
             self.assertEqual(expr, result)
@@ -1241,36 +1399,14 @@ class TestFloorDiv(TestCase):
             self.assertEqual(shape_env.simplify(expr), result)
             self.assertEqual(shape_env.evaluate_expr(expr), result)
 
-    def test_floordiv_simplify_rational(self):
-        result = 21
-
-        a = sympy.Symbol("a", integer=True)
-        b = sympy.Symbol("b")
-
-        cases = [
-            (FloorDiv(a, sympy.Rational(1, 8)), 8 * a),
-            (FloorDiv(b, sympy.Rational(1, 8)), sympy.floor(8 * b)),
-        ]
-
-        for expr, expected in cases:
-            self.assertEqual(expr, expected)
-
     def test_floordiv_assumptions(self):
-        # We define two Symbols (with different names) for each type to make
-        # sure the behavior is consistent regardless of whether both arguments
-        # are the same object or not.
         cases = (
             sympy.Symbol("i1", integer=True),
             sympy.Symbol("i2", integer=True),
-            sympy.Symbol("r1", real=True),
-            sympy.Symbol("r2", real=True),
-            sympy.Symbol("c1", complex=True, real=False, integer=False),
-            sympy.Symbol("c2", complex=True, real=False, integer=False),
-            sympy.Symbol("s1"),
-            sympy.Symbol("s2"),
         )
 
         for base, divisor in itertools.product(cases, repeat=2):
+
             def op():
                 return FloorDiv(base, divisor)
 
@@ -1280,9 +1416,12 @@ class TestFloorDiv(TestCase):
             if is_complex(base) or is_complex(divisor):
                 self.assertRaisesRegex(
                     TypeError,
-                    (r"unsupported operand type\(s\) for //: 'Symbol' and 'Symbol',"
-                     r" expected integer or real"),
-                    op)
+                    (
+                        r"unsupported operand type\(s\) for //: 'Symbol' and 'Symbol',"
+                        r" expected integer or real"
+                    ),
+                    op,
+                )
                 continue
 
             op = op()
@@ -1346,7 +1485,12 @@ class TestDimConstraints(TestCase):
 
         from sympy import Symbol
         from sympy.solvers.inequalities import reduce_inequalities
-        from torch._dynamo.source import LocalSource, TensorProperty, TensorPropertySource
+
+        from torch._dynamo.source import (
+            LocalSource,
+            TensorProperty,
+            TensorPropertySource,
+        )
         from torch.fx.experimental.symbolic_shapes import DynamicDimConstraintPrinter
 
         s0 = Symbol("s0", positive=True, integer=True)
@@ -1373,7 +1517,12 @@ class TestDimConstraints(TestCase):
 
     def test_dim_constraints_solve_full(self):
         from sympy import Eq, Integer, Ne, Symbol
-        from torch._dynamo.source import LocalSource, TensorProperty, TensorPropertySource
+
+        from torch._dynamo.source import (
+            LocalSource,
+            TensorProperty,
+            TensorPropertySource,
+        )
 
         src0 = TensorPropertySource(
             base=LocalSource(local_name="a"), prop=TensorProperty.SIZE, idx=0
@@ -1431,7 +1580,9 @@ class TestDimConstraints(TestCase):
         }
         var_to_val = {s0: 8, s1: 96, s5: 22, s6: 21}
         marked_dynamic = {s0, s1, s5, s6}
-        dim_constraints = DimConstraints(symbol_to_source, var_to_val, marked_dynamic, {})
+        dim_constraints = DimConstraints(
+            symbol_to_source, var_to_val, marked_dynamic, {}
+        )
         dim_constraints.add_equality(src2, s0)
         dim_constraints.add_equality(src3, s0)
         dim_constraints.add_equality(src4, s0)
@@ -2156,7 +2307,9 @@ class TestDimConstraints(TestCase):
                 FloorDiv(s0, 2),
             )
         )
-        dim_constraints.add(Ne(64 * (Mod(FloorDiv((FloorDiv(s1, 2) - 1), 8) + 1, 4)), 0))
+        dim_constraints.add(
+            Ne(64 * (Mod(FloorDiv((FloorDiv(s1, 2) - 1), 8) + 1, 4)), 0)
+        )
         dim_constraints.add(
             Eq(
                 64
@@ -2250,29 +2403,35 @@ class TestDimConstraints(TestCase):
 
         dim_constraints.solve()
         dim_constraints.remove_redundant_dynamic_results()
-        self.assertEqual(dim_constraints._static_results, {
-            "L['c'].size()[0] == 8",
-            "L['d'].size()[0] == 8",
-            "L['a'].size()[2] == 96",
-            "L['f'].size()[1] == 1",
-            "L['a'].size()[3] == 96",
-            "L['b'].size()[2] == 3",
-            "L['b'].size()[1] == 22",
-            "L['b'].size()[0] == 8",
-            "L['a'].size()[1] == 22",
-            "L['a'].size()[0] == 8",
-        })
-        self.assertEqual(dim_constraints._dynamic_results, {
-            "dynamic_dim(L['e'], 1) == dynamic_dim(L['c'], 1)",
-            "dynamic_dim(L['d'], 1) == dynamic_dim(L['c'], 1)",
-        })
+        self.assertEqual(
+            dim_constraints._static_results,
+            {
+                "L['c'].size()[0] == 8",
+                "L['d'].size()[0] == 8",
+                "L['a'].size()[2] == 96",
+                "L['f'].size()[1] == 1",
+                "L['a'].size()[3] == 96",
+                "L['b'].size()[2] == 3",
+                "L['b'].size()[1] == 22",
+                "L['b'].size()[0] == 8",
+                "L['a'].size()[1] == 22",
+                "L['a'].size()[0] == 8",
+            },
+        )
+        self.assertEqual(
+            dim_constraints._dynamic_results,
+            {
+                "dynamic_dim(L['e'], 1) == dynamic_dim(L['c'], 1)",
+                "dynamic_dim(L['d'], 1) == dynamic_dim(L['c'], 1)",
+            },
+        )
 
         def dummy_fn(a, b, c, d, e, f):
             pass
 
-        action_code = dim_constraints.prettify_results(inspect.signature(dummy_fn))
+        action_code = dim_constraints.prettify_results(inspect.signature(dummy_fn), {})
         static_code, dynamic_code = re.findall(r"```(.*?)```", action_code, re.DOTALL)
-        expected_static = '''
+        expected_static = """
 def specializations(a, b, c, d, e, f):
     # a:
     assert a.size()[0] == 8
@@ -2293,8 +2452,8 @@ def specializations(a, b, c, d, e, f):
 
     # f:
     assert f.size()[1] == 1
-'''
-        expected_dynamic = '''
+"""
+        expected_dynamic = """
 def specify_constraints(a, b, c, d, e, f):
     return [
         # d:
@@ -2303,12 +2462,45 @@ def specify_constraints(a, b, c, d, e, f):
         # e:
         dynamic_dim(e, 1) == dynamic_dim(c, 1),
     ]
-'''
+"""
 
         self.assertEqual(static_code, expected_static)
         self.assertEqual(dynamic_code, expected_dynamic)
 
 
+class TestGuardsExpressions(TestCase):
+    """
+    Tests the guards-related methods used by the inductor FX graph cache.
+    """
 
-if __name__ == '__main__':
+    def test_guards_gt_lt(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 6)
+        s1 = create_symint(shape_env, 7)
+        s2 = create_symint(shape_env, 5)
+
+        guard_int(sym_int(s0 > 5))
+        guard_int(sym_int(s0 < 7))
+
+        guards = shape_env.produce_guards_expression([s0])
+
+        self.assertTrue(shape_env.evaluate_guards_expression(guards, [hint_int(s0)]))
+        self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s1)]))
+        self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s2)]))
+
+    def test_guards_float_div(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 8)
+        s1 = create_symint(shape_env, 7)
+
+        guard_int(sym_int(s0 / 2.0))
+        guards = shape_env.produce_guards_expression([s0])
+
+        self.assertIn("ToFloat", guards)
+        self.assertIn("FloatTrueDiv", guards)
+        self.assertTrue(shape_env.evaluate_guards_expression(guards, [hint_int(s0)]))
+        self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s1)]))
+
+
+if __name__ == "__main__":
     run_tests()
