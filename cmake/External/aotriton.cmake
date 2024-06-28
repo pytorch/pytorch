@@ -22,10 +22,10 @@ if(NOT __AOTRITON_INCLUDED)
       -DAOTRITON_COMPRESS_KERNEL=OFF
       -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
       -DAOTRITON_NO_PYTHON=ON
-      -DAOTRITON_NO_SHARED=ON
+      -DAOTRITON_NO_SHARED=OFF
       # CONFIGURE_COMMAND ""
       BUILD_COMMAND ""  # No build, install command will repeat the build process due to problems in the build system.
-      BUILD_BYPRODUCTS "${__AOTRITON_INSTALL_DIR}/lib/libaotriton_v2.a"
+      BUILD_BYPRODUCTS "${__AOTRITON_INSTALL_DIR}/lib/libaotriton_v2.so"
       USES_TERMINAL_DOWNLOAD TRUE
       USES_TERMINAL_CONFIGURE TRUE
       USES_TERMINAL_BUILD TRUE
