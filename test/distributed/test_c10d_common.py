@@ -17,7 +17,6 @@ from typing import Callable, Dict, Optional
 import torch
 import torch.distributed as dist
 
-
 if not dist.is_available():
     print("distributed package not available, skipping tests", file=sys.stderr)
     sys.exit(0)
