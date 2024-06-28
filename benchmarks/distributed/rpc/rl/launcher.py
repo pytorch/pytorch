@@ -1,5 +1,4 @@
 import argparse
-
 import json
 import os
 import time
@@ -8,6 +7,7 @@ from coordinator import CoordinatorBase
 
 import torch.distributed.rpc as rpc
 import torch.multiprocessing as mp
+
 
 COORDINATOR_NAME = "coordinator"
 AGENT_NAME = "agent"
