@@ -1,7 +1,5 @@
 import operator_benchmark as op_bench
-
 import torch
-
 
 qcomparators_configs = op_bench.cross_product_configs(
     N=(8, 64),
