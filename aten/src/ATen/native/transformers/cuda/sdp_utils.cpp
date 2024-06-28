@@ -579,7 +579,7 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
       check_requires_grad_and_head_dim_gt192_constraints_on_sm86_89,
       check_flash_causal_non_square_seqlens,
       check_dtypes_low_precision,
-      check_batch_size_and_num_heads_dense<true> // supports_grouped_query_attention = true,
+      check_batch_size_and_num_heads_dense<true /*supports_grouped_query_attention=*/>
       );
   for (auto& constraint : general_constraints) {
     if (!constraint(params, debug)) {
@@ -600,7 +600,7 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
   }
   if (has_only_dense_inputs(params)) {
     constexpr auto dense_constraints = array_of<bool (*)(sdp_params const&, bool)>(
-        check_batch_size_and_num_heads_dense<true>, // supports_grouped_query_attention = true,
+        check_batch_size_and_num_heads_dense<true /*supports_grouped_query_attention=*/>,
         check_nonzero_sequence_lengths_dense,
         check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim=*/>);
     for (auto& constraint : dense_constraints) {
