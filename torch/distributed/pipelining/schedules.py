@@ -30,15 +30,20 @@ logger = logging.getLogger(__name__)
 
 
 class _ComputationType(Enum):
+    # TODO(whc) rename to _ActType?
     FORWARD = 1
     BACKWARD = 2
     WEIGHT = 3
+    UNSHARD = 4
+    RESHARD = 5
 
     def __str__(self):
         str_map = {
             _ComputationType.FORWARD: "F",
             _ComputationType.BACKWARD: "B",
             _ComputationType.WEIGHT: "W",
+            _ComputationType.UNSHARD: "UNSHARD",
+            _ComputationType.RESHARD: "RESHARD",
         }
         return str_map[self]
 
@@ -50,6 +55,10 @@ class _ComputationType(Enum):
             return _ComputationType.BACKWARD
         elif action == "W":
             return _ComputationType.WEIGHT
+        elif action == "UNSHARD":
+            return _ComputationType.UNSHARD
+        elif action == "RESHARD":
+            return _ComputationType.RESHARD
         else:
             raise RuntimeError(f"Invalid computation type {action}")
 
@@ -57,18 +66,21 @@ class _ComputationType(Enum):
 F = _ComputationType.FORWARD
 B = _ComputationType.BACKWARD
 W = _ComputationType.WEIGHT
+UNSHARD = _ComputationType.UNSHARD
+RESHARD = _ComputationType.RESHARD
 
-
-_action_regex = re.compile(r"(\d+)([F,B,W])(\d+)")
+_action_regex = re.compile(r"(\d+)([F,B,W]|UNSHARD|RESHARD)(\d*)")
 
 
 class _Action(NamedTuple):
-    computation_type: _ComputationType
-    microbatch_index: int
     stage_index: int
+    computation_type: _ComputationType
+    microbatch_index: Optional[int] = None
 
     def __repr__(self):
-        return f"{self.stage_index}{self.computation_type}{self.microbatch_index}"
+        if self.microbatch_index is not None:
+            return f"{self.stage_index}{self.computation_type}{self.microbatch_index}"
+        return f"{self.stage_index}{self.computation_type}"
 
     @staticmethod
     def from_str(str):
@@ -76,9 +88,9 @@ class _Action(NamedTuple):
         if match := _action_regex.match(str):
             stage_index, computation_type, microbatch_index = match.groups()
             return _Action(
-                _ComputationType.from_str(computation_type),
-                int(microbatch_index),
                 int(stage_index),
+                _ComputationType.from_str(computation_type),
+                int(microbatch_index) if len(microbatch_index) else None,
             )
         elif str == "":
             return None
@@ -801,7 +813,12 @@ class PipelineScheduleMulti(_PipelineSchedule):
         for time_step, action in enumerate(self.pipeline_order[self.rank]):
             ops: List[dist.P2POp] = []
             if action is not None:
-                computation_type, mb_index, stage_index = action
+                computation_type = action.computation_type
+                mb_index = action.microbatch_index
+                stage_index = action.stage_index
+                assert (
+                    mb_index is not None
+                ), "All currently supported action types require valid microbatch_index"
                 if computation_type == _ComputationType.FORWARD:
                     # perform forward computation
                     stage = stage_index_to_stage[stage_index]
@@ -838,7 +855,12 @@ class PipelineScheduleMulti(_PipelineSchedule):
                 if time_step < len(prev_rank_ops):
                     prev_rank_action = prev_rank_ops[time_step]
                 if prev_rank_action is not None:
-                    computation_type, mb_index, stage_index = prev_rank_action
+                    computation_type = prev_rank_action.computation_type
+                    mb_index = prev_rank_action.microbatch_index
+                    stage_index = prev_rank_action.stage_index
+                    assert (
+                        mb_index is not None
+                    ), "All currently supported action types require valid microbatch_index"
                     # Only handle sends for the forward from a previous rank
                     if computation_type == _ComputationType.FORWARD:
                         # If not the last stage, then receive fwd activations
@@ -862,7 +884,12 @@ class PipelineScheduleMulti(_PipelineSchedule):
                 if time_step < len(next_rank_ops):
                     next_rank_action = next_rank_ops[time_step]
                 if next_rank_action is not None:
-                    computation_type, mb_index, stage_index = next_rank_action
+                    computation_type = next_rank_action.computation_type
+                    mb_index = next_rank_action.microbatch_index
+                    stage_index = next_rank_action.stage_index
+                    assert (
+                        mb_index is not None
+                    ), "All currently supported action types require valid microbatch_index"
                     # Only handle receives for the backwards from a next rank
                     if (
                         computation_type == _ComputationType.FORWARD
@@ -935,7 +962,7 @@ class ScheduleLoopedBFS(PipelineScheduleMulti):
         for stage_index in stage_indices:
             for mb_index in range(self._n_microbatches):
                 rank_ops.append(
-                    _Action(_ComputationType.FORWARD, mb_index, stage_index)
+                    _Action(stage_index, _ComputationType.FORWARD, mb_index)
                 )
 
         # wait for the first backward to trickle up
@@ -946,7 +973,7 @@ class ScheduleLoopedBFS(PipelineScheduleMulti):
         for stage_index in reversed(stage_indices):
             for mb_index in reversed(range(self._n_microbatches)):
                 rank_ops.append(
-                    _Action(_ComputationType.BACKWARD, mb_index, stage_index)
+                    _Action(stage_index, _ComputationType.BACKWARD, mb_index)
                 )
         return rank_ops
 
@@ -1074,7 +1101,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
                     mb_index := fwd_stage_mb_index[fwd_stage_index]
                 ) + 1
                 rank_ops.append(
-                    _Action(_ComputationType.FORWARD, mb_index, fwd_stage_index)
+                    _Action(fwd_stage_index, _ComputationType.FORWARD, mb_index)
                 )
                 if op == warmup_ops - 1:
                     # This is the last step in the warmup phase, so we need to wait for the backward to trickle back up
@@ -1086,7 +1113,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
                     fwd_mb_index := fwd_stage_mb_index[fwd_stage_index]
                 ) + 1
                 rank_ops.append(
-                    _Action(_ComputationType.FORWARD, fwd_mb_index, fwd_stage_index)
+                    _Action(fwd_stage_index, _ComputationType.FORWARD, fwd_mb_index)
                 )
 
                 bwd_stage_index = backward_stage_index(op)
@@ -1094,7 +1121,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
                     bwd_mb_index := bwd_stage_mb_index[bwd_stage_index]
                 ) + 1
                 rank_ops.append(
-                    _Action(_ComputationType.BACKWARD, bwd_mb_index, bwd_stage_index)
+                    _Action(bwd_stage_index, _ComputationType.BACKWARD, bwd_mb_index)
                 )
             # Cooldown phase
             else:
@@ -1106,7 +1133,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
                     bwd_mb_index := bwd_stage_mb_index[bwd_stage_index]
                 ) + 1
                 rank_ops.append(
-                    _Action(_ComputationType.BACKWARD, bwd_mb_index, bwd_stage_index)
+                    _Action(bwd_stage_index, _ComputationType.BACKWARD, bwd_mb_index)
                 )
 
         # Post padding

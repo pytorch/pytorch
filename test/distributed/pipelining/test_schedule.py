@@ -21,7 +21,15 @@ from torch.distributed.pipelining import (
     ScheduleInterleaved1F1B,
     ScheduleLoopedBFS,
 )
-from torch.distributed.pipelining.schedules import _Action, _ComputationType
+from torch.distributed.pipelining.schedules import (
+    _Action,
+    _ComputationType,
+    B,
+    F,
+    RESHARD,
+    UNSHARD,
+    W,
+)
 from torch.distributed.pipelining.stage import _PipelineStageBase
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
@@ -691,7 +699,7 @@ class TestSchedulePlan(unittest.TestCase):
 
             # Ensure that no microbatch is operated on twice in current_timestep_actions
             unique_microbatch_indices = {
-                action[1] for action in current_timestep_actions
+                action.microbatch_index for action in current_timestep_actions
             }
             if len(unique_microbatch_indices) != len(current_timestep_actions):
                 error_msg.append(
@@ -700,7 +708,11 @@ class TestSchedulePlan(unittest.TestCase):
 
             # Add additional checks for other rules here...
             for action in current_timestep_actions:
-                computation_type, mb_index, stage_index = action
+                stage_index, computation_type, mb_index = (
+                    action.stage_index,
+                    action.computation_type,
+                    action.microbatch_index,
+                )
 
                 if mb_index >= num_microbatches:
                     error_msg.append(f"Microbatch index {mb_index} out of range")
@@ -805,6 +817,29 @@ class TestSchedulePlan(unittest.TestCase):
 
 
 instantiate_parametrized_tests(TestSchedulePlan)
+
+
+class TestScheduleLowering(unittest.TestCase):
+    """Tests lowering passes that convert simple compute-only (FBW) schedules into compute+comms schedules"""
+
+    @parametrize(
+        "action_str_and_ref",
+        [
+            ("1F0", _Action(1, F, 0)),
+            ("2B1", _Action(2, B, 1)),
+            ("0W3", _Action(0, W, 3)),
+            ("1UNSHARD", _Action(1, UNSHARD)),
+            ("3RESHARD", _Action(3, RESHARD)),
+        ],
+    )
+    def test_action_parse(self, action_str_and_ref):
+        act_str, ref = action_str_and_ref
+        act = _Action.from_str(act_str)
+        self.assertEqual(act, ref)
+        self.assertEqual(act_str, act.__repr__())
+
+
+instantiate_parametrized_tests(TestScheduleLowering)
 
 if __name__ == "__main__":
     # Run only the TestSchedulePlan tests (single process)
