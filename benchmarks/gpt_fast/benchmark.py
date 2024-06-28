@@ -23,6 +23,7 @@ class Experiment:
     actual: float
     dtype: str
     device: str
+    is_model: bool = False
 
 
 class SimpleMLP(nn.Module):
