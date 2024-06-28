@@ -333,6 +333,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 self.value, "__exit__"
             )  # TODO(voz): These can invoke user code!
             and self.value.__new__ == object.__new__
+            and SideEffects.cls_supports_mutation_side_effects(self.value)
             and self.source is not None
         ):
             # import here to avoid an unfortunate circular dependency.
