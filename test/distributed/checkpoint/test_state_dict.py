@@ -910,7 +910,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         ptd_state_dict.set_model_state_dict(
             meta_model,
             model_state_dict=full_sd,
-            options=ptd_state_dict.StateDictOptions(full_state_dict=True, strict=False)
+            options=ptd_state_dict.StateDictOptions(full_state_dict=True, strict=False),
         )
 
 
