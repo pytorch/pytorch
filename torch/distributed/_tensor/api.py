@@ -380,6 +380,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
                     placement = cast(Shard, placement)
                     if placement.dim < 0:
                         placements[idx] = Shard(placement.dim + local_tensor.ndim)
+                    local_tensor = placement._shard_tensor(local_tensor, device_mesh, idx)
 
         # `from_local` is differentiable, and the gradient of the dist tensor this function
         # created should flow back the gradients to the local_tensor, so we call an autograd
