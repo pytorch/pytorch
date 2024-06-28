@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
+import logging
 from typing import Any, cast, Dict, List, NamedTuple, Optional, Set, Tuple
 
 import torch
@@ -22,6 +23,8 @@ from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo, TrainingState
 from ._fsdp_param import FSDPParam, ParamModuleInfo, ShardedState
 
 
+logger = logging.getLogger("torch.distributed._composable.fsdp")
+
 _ModuleToHandleDict = Dict[nn.Module, RemovableHandle]  # for state dict
 
 
@@ -40,10 +43,12 @@ reference to avoid holding onto memory after forward.
 class FSDPCommContext:
     """This has the communication state shared across FSDP states/parameter groups."""
 
-    def init(self):
+    def lazy_init(self):
+        if not torch.cuda.is_available():
+            raise RuntimeError("FSDP requires CUDA for streams")
         # Setting the all-gather/reduce-scatter streams to be higher priority
         # can help avoid some issues where their copies in/out are delayed and
-        # block computation
+        # block computation (this is different from high-pri NCCL streams)
         high_priority = -1
         # All-gather state and copy-in stream allow overlapping the next
         # copy-in with the current all-gather in forward; copy-in overlaps with
@@ -246,8 +251,11 @@ class FSDPParamGroup:
         self._all_gather_result = None  # free unless saved in `all_gather_state`
 
     def _wait_all_gather_streams_on_event(self, event: torch.cuda.Event):
-        self.comm_ctx.all_gather_copy_in_stream.wait_event(event)
-        self.comm_ctx.all_gather_stream.wait_event(event)
+        # Calling `unshard` before lazy init means streams are not initialized
+        if hasattr(self.comm_ctx, "all_gather_copy_in_stream"):
+            self.comm_ctx.all_gather_copy_in_stream.wait_event(event)
+        if hasattr(self.comm_ctx, "all_gather_stream"):
+            self.comm_ctx.all_gather_stream.wait_event(event)
 
     def reshard(self):
         if self._training_state == TrainingState.FORWARD:
@@ -263,6 +271,8 @@ class FSDPParamGroup:
     def pre_forward(
         self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+        if not ca.compiled_autograd_enabled:
+            logger.debug("%s", self._with_fqn("FSDP::pre_forward"))
         with record_function(self._with_fqn("FSDP::pre_forward")):
             self._training_state = TrainingState.FORWARD
             self.unshard()
@@ -271,6 +281,8 @@ class FSDPParamGroup:
             return args, kwargs
 
     def post_forward(self, module: nn.Module, input: Any, output: Any):
+        if not ca.compiled_autograd_enabled:
+            logger.debug("%s", self._with_fqn("FSDP::post_forward"))
         with record_function(self._with_fqn("FSDP::post_forward")):
             self.reshard()
             self._record_post_forward()
@@ -287,6 +299,8 @@ class FSDPParamGroup:
     def pre_backward(self, default_prefetch: bool, *unused: Any):
         if self._training_state == TrainingState.PRE_BACKWARD:
             return
+        if not ca.compiled_autograd_enabled:
+            logger.debug("%s", self._with_fqn("FSDP::pre_backward"))
         with record_function(self._with_fqn("FSDP::pre_backward")):
             self._training_state = TrainingState.PRE_BACKWARD
             self.unshard()  # no-op if prefetched
@@ -295,6 +309,8 @@ class FSDPParamGroup:
                 self._backward_prefetch()
 
     def post_backward(self, *unused: Any):
+        if not ca.compiled_autograd_enabled:
+            logger.debug("%s", self._with_fqn("FSDP::post_backward"))
         self._training_state = TrainingState.POST_BACKWARD
         with record_function(self._with_fqn("FSDP::post_backward_accumulate")):
             for fsdp_param in self.fsdp_params:

@@ -15,14 +15,12 @@ import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncComp
 import torch._ops
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey
 from .. import config, ir
-from ..codecache import CudaKernelParamCache
 from ..utils import _align, ALIGN_BYTES, cache_on_self, sympy_product
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import IndentedBuffer
 from .cpp_utils import (
     cexpr,
-    CppPrinter,
     DEVICE_TO_ATEN,
     DTYPE_TO_ATEN,
     DTYPE_TO_CPP,
@@ -71,20 +69,6 @@ class CppWrapperCpu(WrapperCodeGen):
         self.custom_op_wrapper_loaded = False
         self.expr_printer = cexpr
 
-        # CppPrinter sometimes calls at::native functions which causes problems in
-        # the ABI-compatible mode. Currently we are hitting this problem when codegen
-        # Grid computation expressions, but we my need to fix other size computation
-        # as well.
-        class GridExprCppPrinter(CppPrinter):
-            def _print_FloorDiv(self, expr):
-                x, div = expr.args
-                x = self.paren(self.doprint(x))
-                div = self.paren(self.doprint(div))
-                assert expr.is_integer, "Expect integers in GridExprPrinter"
-                return f"({x}/{div})"
-
-        self.grid_expr_printer = GridExprCppPrinter().doprint
-
     def generate_kernel_call(
         self,
         name,
@@ -94,6 +78,7 @@ class CppWrapperCpu(WrapperCodeGen):
         cuda=True,
         triton=True,
         arg_types=None,
+        raw_args=None,
         grid_fn: str = "grid",
         triton_meta=None,
     ):
@@ -1298,34 +1283,6 @@ class CppWrapperCpu(WrapperCodeGen):
             self.generate_c_shim_extern_kernel_call(kernel, args)
         else:
             self.writeline(self.wrap_kernel_call(kernel, args))
-
-    def generate_user_defined_triton_kernel(
-        self, kernel_name, grid, configs, args, triton_meta, arg_types=None
-    ):
-        assert len(grid) != 0
-        if len(grid) == 1:
-            grid_decision = grid[0]
-        else:
-            meta = CudaKernelParamCache.get(kernel_name)
-            assert meta is not None
-            grid_decision = None
-            for i, c in enumerate(configs):
-                if all(arg == meta["meta"][key] for key, arg in c.kwargs.items()):
-                    grid_decision = grid[i]
-                    break
-            assert grid_decision is not None
-
-        current_device = V.graph.scheduler.get_current_device_or_throw()
-        self.generate_kernel_call(
-            kernel_name,
-            args,
-            arg_types=arg_types,
-            grid=grid_decision,
-            device_index=current_device.index,
-            cuda=True,
-            triton=True,
-            triton_meta=triton_meta,
-        )
 
     def generate_scatter_fallback(
         self,

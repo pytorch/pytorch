@@ -14,7 +14,6 @@ from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -215,7 +214,6 @@ class TritonBlockPointerTest(InductorTestCase):
         # Expect 3 block pointers: 2 inputs one output
         self.run_and_compare(foo, x, y, expected_num_block_pointers=3)
 
-    @skipIfXpu
     @parametrize(
         "view_size,num_block_pointers,num_triton_kernels",
         [
