@@ -927,6 +927,12 @@ class FxGraphCache:
 
         GraphLowering.save_output_code(code)
         output_code_log.debug("Output code: \n%s", code)
+        # On cache hit, use artifact path as filename
+        trace_structured(
+            "inductor_output_code",
+            lambda: {"filename": artifact_path},
+            payload_fn=lambda: code,
+        )
 
         return graph
 
@@ -2952,12 +2958,20 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
     @classmethod
     @functools.lru_cache(None)
     def config_hash(cls):
+        from torch._inductor.cpp_builder import CppBuilder, CppOptions
+
+        command_gen = CppBuilder(
+            name="O",
+            sources="I",
+            BuildOption=CppOptions(compile_only=False),
+        )
+        command_line = command_gen.get_command_line()
         return sha256_hash(
             "\n".join(
                 [
                     cls.glue_template,
                     f"{cls.cpu_cache_size()}",
-                    cpp_compile_command("I", "O"),
+                    command_line,
                 ]
             ).encode("utf-8")
         )
