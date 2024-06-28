@@ -12,7 +12,6 @@ import unittest
 from typing import List, Optional, Sequence, Union
 from unittest.mock import patch
 
-
 np: Optional[types.ModuleType] = None
 try:
     import numpy as np
@@ -32,7 +31,6 @@ from .bytecode_transformation import (
 )
 from .guards import CheckFunctionManager, GuardedCode
 from .utils import same
-
 
 unsupported = eval_frame.unsupported
 three = 3
