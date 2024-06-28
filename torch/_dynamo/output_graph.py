@@ -476,12 +476,14 @@ class OutputGraph:
         example_value = fn(*args)
         varname = self.new_var()
         cg = PyCodegen(self.root_tx)
-        cg.load_import_from(
-            fn.__module__,
-            fn.__name__,
+        cg.add_push_null(
+            lambda: cg.load_import_from(
+                fn.__module__,
+                fn.__name__,
+            )
         )
         cg.foreach(map(variables.ConstantVariable.create, args))
-        cg.call_function(len(args), True)
+        cg.call_function(len(args), False)
         cg.store(varname)
         self.pregraph_bytecode.extend(cg.get_instructions())
         source = SyntheticLocalSource(varname)
@@ -1155,10 +1157,10 @@ class OutputGraph:
 
         # Return variables used for logging at the end
         for debug_var, args in tx.debug_locals:
-            cg(debug_var)
+            cg.add_push_null(lambda: cg(debug_var))
             for arg in args:
                 cg(arg)
-            cg.extend_output(create_call_function(len(args), True))
+            cg.extend_output(create_call_function(len(args), False))
             cg.extend_output([create_instruction("POP_TOP")])
 
         cg.restore_stack(stack_values, value_from_source=not tx.export)
