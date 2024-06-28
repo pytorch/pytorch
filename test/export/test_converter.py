@@ -807,9 +807,7 @@ class TestConverter(TestCase):
 
         # match non-strict export behavior that errors when the given input leads to
         # RaiseException.
-        with self.assertRaisesRegex(
-            torch.jit.Error, "builtins.RuntimeError"
-        ):
+        with self.assertRaisesRegex(torch.jit.Error, "builtins.RuntimeError"):
             inp = (torch.randn(3, 2), 1)
             self._check_equal_ts_ep_converter(Module(), inp, ["script"])
 
