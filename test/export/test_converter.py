@@ -713,8 +713,19 @@ class TestConverter(TestCase):
                 1, dtype=torch.float
             )
 
-        def func6(x):
-            return x.numel()
+        def func6(x1, x2, x3, x4):
+            return (
+                x1.numel(),
+                x1.size(),
+                x2.numel(),
+                x2.size(),
+                x3.numel(),
+                x3.size(),
+                x4.numel(),
+                x4.size(),
+                torch.ones(x1.numel()),  # Just make sure downstream ops still work.
+                torch.ones(x1.size()),  # Just make sure downstream ops still work.
+            )
 
         class M1(torch.nn.Module):
             def __init__(self, value):
@@ -743,10 +754,13 @@ class TestConverter(TestCase):
         self._check_equal_ts_ep_converter(M2(), inp)
 
         self._check_equal_ts_ep_converter(func5, ())
-        # TODO: NumToTensor now returns a tensor based on dtype of input
-        # tensor, but it should always be Long.
-        # inp = (torch.randn([2, 3, 4]),)
-        # self._check_equal_ts_ep_converter(func6, inp)
+        inp = (
+            torch.randn([2, 3, 4]).to(torch.int8),
+            torch.randn([2, 3, 4]).to(torch.int32),
+            torch.randn([2, 3, 4]).to(torch.float32),
+            torch.randn([2, 3, 4]).to(torch.float64),
+        )
+        self._check_equal_ts_ep_converter(func6, inp)
 
     def test_prim_tolist(self):
         class Module(torch.nn.Module):
