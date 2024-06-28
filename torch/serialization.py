@@ -1147,6 +1147,7 @@ def load(
                     "`weights_only=True` for any use case where you don't have full control of the loaded file. "
                     "Please open an issue on GitHub for any issues related to this experimental feature.",
                     FutureWarning,
+                    stacklevel=2,
                 )
             pickle_module = pickle
 

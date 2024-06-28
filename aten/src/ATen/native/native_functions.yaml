@@ -6224,6 +6224,33 @@
     CompositeExplicitAutogradNonFunctional: _nested_get_values_copy
   autogen: _nested_get_values_copy.out
 
+- func: _nested_strided_to_jagged(Tensor(a) self) -> Tensor(a)
+  variants: function
+  device_check: NoCheck
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: _nested_strided_to_jagged
+
+- func: _nested_strided_to_jagged_copy(Tensor self) -> Tensor
+  variants: function
+  device_check: NoCheck
+  tags: view_copy
+  dispatch:
+    CompositeExplicitAutogradNonFunctional: _nested_strided_to_jagged_copy
+  autogen: _nested_strided_to_jagged_copy.out
+
+- func: _nested_jagged_to_strided(Tensor(a) self) -> Tensor(a)
+  variants: function
+  device_check: NoCheck
+  dispatch: {}
+
+- func: _nested_jagged_to_strided_copy(Tensor self) -> Tensor
+  variants: function
+  device_check: NoCheck
+  tags: view_copy
+  dispatch:
+    CompositeExplicitAutogradNonFunctional: _nested_jagged_to_strided_copy
+  autogen: _nested_jagged_to_strided_copy.out
+
 - func: _nested_get_offsets(Tensor self) -> Tensor
   variants: function
   device_check: NoCheck
@@ -10061,9 +10088,10 @@
 - func: argsort.stable(Tensor self, *, bool stable, int dim=-1, bool descending=False) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
-  dispatch:
-    CPU, CUDA, MPS: argsort_stable
-  autogen: argsort.stable_out
+
+- func: argsort.stable_out(Tensor self, *, bool stable, int dim=-1, bool descending=False, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  variants: function
 
 - func: argsort.dimname(Tensor self, Dimname dim, bool descending=False) -> Tensor
   variants: method, function
@@ -14734,6 +14762,11 @@
     CPU: _scaled_dot_product_flash_attention_cpu
   tags: nondeterministic_seeded
 
+- func: _scaled_dot_product_fused_attention_overrideable(Tensor query, Tensor key, Tensor value, Tensor? attn_bias, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor output, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
+  dispatch:
+    CompositeExplicitAutograd: _scaled_dot_product_fused_attention_overrideable
+  tags: nondeterministic_seeded
+
 - func: _scaled_dot_product_flash_attention_backward(Tensor grad_out, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, float dropout_p, bool is_causal, Tensor philox_seed, Tensor philox_offset, *, float? scale=None) -> (Tensor grad_query, Tensor grad_key, Tensor grad_value)
   device_check: NoCheck
   variants: function
@@ -14746,6 +14779,12 @@
   variants: function
   dispatch:
     CPU: _scaled_dot_product_flash_attention_cpu_backward
+
+- func: _scaled_dot_product_fused_attention_overrideable_backward(Tensor grad_out, Tensor query, Tensor key, Tensor value, Tensor attn_bias, bool[4] grad_input_mask, Tensor out, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, float dropout_p, bool is_causal, Tensor philox_seed, Tensor philox_offset, *, float? scale=None) -> (Tensor grad_query, Tensor grad_key, Tensor grad_value, Tensor grad_attn_bias)
+  device_check: NoCheck
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: _scaled_dot_product_fused_attention_overrideable_backward
 
 - func: _scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_bias, bool compute_log_sumexp, float dropout_p=0.0, bool is_causal=False, *, float? scale=None) -> (Tensor output, Tensor log_sumexp, Tensor philox_seed, Tensor philox_offset)
   dispatch:
@@ -15632,6 +15671,7 @@
   dispatch:
     CPU: _fused_sgd_kernel_cpu_
     CUDA: _fused_sgd_kernel_cuda_
+    MPS: _fused_sgd_kernel_mps_
   autogen: _fused_sgd, _fused_sgd.out
 
 - func: _fused_sgd_.tensor_lr(Tensor(a!)[] self, Tensor(b!)[] grads, Tensor(c!)[] momentum_buffer_list, *, float weight_decay, float momentum, Tensor lr, float dampening, bool nesterov, bool maximize, bool is_first_step, Tensor? grad_scale=None, Tensor? found_inf=None) -> ()
@@ -15642,6 +15682,7 @@
   dispatch:
     CPU: _fused_sgd_kernel_cpu_
     CUDA: _fused_sgd_kernel_cuda_
+    MPS: _fused_sgd_kernel_mps_
   autogen: _fused_sgd.tensor_lr, _fused_sgd.tensor_lr_out
 
 - func: _fused_adagrad_(Tensor(a!)[] self, Tensor(b!)[] grads, Tensor(c!)[] state_sums, Tensor(d!)[] state_steps, *, float lr, float lr_decay, float weight_decay, float eps, bool maximize, Tensor? grad_scale=None, Tensor? found_inf=None) -> ()
