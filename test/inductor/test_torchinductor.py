@@ -10557,7 +10557,7 @@ class CommonTemplate:
 
         x = torch.rand([4, 4, 3], dtype=torch.float64)
         self.common(fn, (x,))
-    
+
     @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
     def test_dtypeview(self):
         # https://github.com/pytorch/pytorch/issues/126338
@@ -10566,8 +10566,9 @@ class CommonTemplate:
             x = x.view(torch.float16)
             y = y.view(torch.float16) + 1
             return x @ y
-        x = torch.randn((2,2), device=self.device, dtype=torch.bfloat16)
-        y = torch.randn((2,2), device=self.device, dtype=torch.bfloat16)
+
+        x = torch.randn((2, 2), device=self.device, dtype=torch.bfloat16)
+        y = torch.randn((2, 2), device=self.device, dtype=torch.bfloat16)
         fn(x, y)
 
     def test_float16_to_int16(self):
