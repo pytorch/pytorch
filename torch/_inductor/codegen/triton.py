@@ -636,7 +636,8 @@ class TritonOverrides(OpOverrides):
         if src_dtype in (torch.float16, torch.bfloat16):
             triton_src_dtype = str(src_dtype).split(".")[-1]
             cast_x = f"{x}.to(tl.{triton_src_dtype})"
-            cast_x = f"{cast_x}.to({triton_dtype}, bitcast=True)"
+            if triton_dtype != "tl.float32":
+                cast_x = f"{cast_x}.to({triton_dtype}, bitcast=True)"
             return f"{cast_x}.to(tl.float32)"
         else:
             return f"{x}.to({triton_dtype}, bitcast=True)"
