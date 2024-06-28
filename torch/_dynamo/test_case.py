@@ -5,7 +5,7 @@ import logging
 
 import torch
 import torch.testing
-from torch.testing._internal.common_utils import (
+from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     IS_WINDOWS,
     TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
