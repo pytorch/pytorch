@@ -477,6 +477,11 @@ def _group_quantize_tensor(w, n_bit=4, q_group_size=16):
 
     out = out.to(dtype=torch.int32).reshape(w.shape)
 
+    out_uint8 = torch.empty((w.shape[0], w.shape[1] // 2), dtype=torch.uint8)
+    for n in range(w.shape[0]):
+        for j in range(w.shape[1] // 2):
+            out_uint8[n][j] = out[n][j * 2] << 4 | out[n][j * 2 + 1]
+
     # Scales and zeros for the same q-group should be contiguous, so we can
     # load as a 32-bit word
     scales = scales.view(w.shape[0], -1)
@@ -491,7 +496,7 @@ def _group_quantize_tensor(w, n_bit=4, q_group_size=16):
         ).transpose(0, 1).contiguous()
     )
 
-    return out, scales_and_zeros
+    return out_uint8, scales_and_zeros
 
 
 def _dynamically_quantize_per_channel(x, quant_min, quant_max, target_dtype):
