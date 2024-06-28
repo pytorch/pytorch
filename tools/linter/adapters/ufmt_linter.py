@@ -23,24 +23,53 @@ IS_WINDOWS: bool = os.name == "nt"
 REPO_ROOT = Path(__file__).absolute().parents[3]
 ISORT_WHITELIST = re.compile(
     "|".join(
-        map(
-            fnmatch.translate,
-            [
-                "test/d*/**",
-                "test/dy*/**",
-                "test/i*/**",
-                "test/j*/**",
-                "torch/**",
-                "torch/_[a-c]*/**",
-                "torch/_d*/**",
-                "torch/_[e-h]*/**",
-                "torch/_i*/**",
-                "torch/_[j-z]*/**",
-                "torch/[a-c]*/**",
-                "torch/d*/**",
-                "torch/[e-n]*/**",
-                "torch/[o-z]*/**",
-            ],
+        (
+            r"\A\Z",  # empty string
+            *map(
+                fnmatch.translate,
+                [
+                    # **
+                    # .ci/**
+                    # .github/**
+                    # benchmarks/**
+                    # functorch/**
+                    # tools/**
+                    # torchgen/**
+                    # test/**
+                    # test/[a-c]*/**
+                    # test/d*/**
+                    "test/d*/**",
+                    # test/dy*/**
+                    "test/dy*/**",
+                    # test/[e-h]*/**
+                    # test/i*/**
+                    "test/i*/**",
+                    # test/j*/**
+                    "test/j*/**",
+                    # test/[k-p]*/**
+                    # test/[q-z]*/**
+                    # torch/**
+                    "torch/**",
+                    # torch/_[a-c]*/**
+                    "torch/_[a-c]*/**",
+                    # torch/_d*/**
+                    "torch/_d*/**",
+                    # torch/_[e-h]*/**
+                    "torch/_[e-h]*/**",
+                    # torch/_i*/**
+                    "torch/_i*/**",
+                    # torch/_[j-z]*/**
+                    "torch/_[j-z]*/**",
+                    # torch/[a-c]*/**
+                    "torch/[a-c]*/**",
+                    # torch/d*/**
+                    "torch/d*/**",
+                    # torch/[e-n]*/**
+                    "torch/[e-n]*/**",
+                    # torch/[o-z]*/**
+                    "torch/[o-z]*/**",
+                ],
+            ),
         )
     )
 )
