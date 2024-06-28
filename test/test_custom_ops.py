@@ -2440,15 +2440,16 @@ class TestCustomOpAPI(TestCase):
             g: torch.dtype = torch.float32,
             h: torch.dtype = torch.int,
             i: torch.device = torch.device("cpu:0"),
+            j: torch.device = "cpu",
         ) -> Tensor:
-            defaults.extend([a, b, c, d, e, f, g, h, i])
+            defaults.extend([a, b, c, d, e, f, g, h, i, j])
             return x.clone()
 
         x = torch.randn(3)
         f(x)
         self.assertEqual(
             defaults,
-            [None, 3.14, True, 3, "foo", torch.float, torch.float32, torch.int, torch.device("cpu:0")],
+            [None, 3.14, True, 3, "foo", torch.float, torch.float32, torch.int, torch.device("cpu:0"), "cpu"],
         )
 
     def test_mutated_error(self):
