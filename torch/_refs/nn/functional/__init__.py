@@ -264,6 +264,8 @@ def relu(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
 
 
 @register_decomposition(aten.channel_shuffle)
+@aten.channel_shuffle.default.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten.channel_shuffle.default.py_impl(DispatchKey.Autograd)
 @out_wrapper()
 def channel_shuffle(input: TensorLikeType, groups: int) -> TensorLikeType:
     """
