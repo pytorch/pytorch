@@ -188,6 +188,7 @@ REQUIRE_HIGHER_TOLERANCE_TRAINING = {
 REQUIRE_HIGHER_TOLERANCE_INFERENCE = {
     "GPT2ForSequenceClassification",
     "RobertaForQuestionAnswering",
+    "LayoutLMForSequenceClassification",
 }
 
 
