@@ -2,13 +2,12 @@
 from __future__ import annotations
 
 import logging
-
 import tempfile
-
 from typing import Mapping, Tuple
 
 import onnx
 import onnx.inliner
+
 import pytorch_test_common
 import transformers  # type: ignore[import]
 

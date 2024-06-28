@@ -22,11 +22,10 @@ from typing import (
 )
 
 from torch._higher_order_ops.utils import autograd_not_implemented
-
 from torch._library.fake_class_registry import FakeScriptObject
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
-
 from torch.fx.immutable_collections import immutable_dict, immutable_list
+
 
 if TYPE_CHECKING:
     # Import the following modules during type checking to enable code intelligence features,
@@ -40,13 +39,10 @@ if TYPE_CHECKING:
 import torch
 import torch.utils._pytree as pytree
 from torch._subclasses.functional_tensor import FunctionalTensor
-
 from torch.export._tree_utils import is_equivalent, reorder_kwargs
 from torch.fx._compatibility import compatibility
-
 from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.experimental.proxy_tensor import maybe_disable_fake_tensor_mode
-
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.infra.pass_manager import PassManager
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
@@ -330,7 +326,6 @@ def _decompose_and_get_gm_with_new_signature_constants(
     )
     from torch._functorch.aot_autograd import aot_export_module
     from torch._guards import detect_fake_mode
-
     from torch.export._trace import (
         _export_to_aten_ir,
         _get_params_buffers,
@@ -544,7 +539,6 @@ def _decompose_exported_program(
         _node_metadata_hook,
         _set_node_metadata_hook,
     )
-
     from torch._export.passes.lift_constants_pass import (
         ConstantAttrMap,
         lift_constants_pass,

@@ -1,10 +1,11 @@
 # mypy: allow-untyped-defs
 from functools import lru_cache as _lru_cache
-
 from typing import Optional
 
 import torch
+
 from ...library import Library as _Library
+
 
 __all__ = ["is_built", "is_available", "is_macos13_or_newer", "is_macos_or_newer"]
 

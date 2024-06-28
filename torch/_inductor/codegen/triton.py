@@ -27,14 +27,13 @@ import sympy
 import torch
 import torch._logging
 from torch._dynamo.utils import preserve_rng_state
-
 from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties
 from torch._prims_common import is_integer_dtype
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from torch.utils._triton import has_triton_package
+
 from ...utils._sympy.symbol import free_symbol_is_type, prefix_str, symbol_is_type, SymT
 from ...utils._sympy.value_ranges import ValueRanges
-
 from .. import config, ir
 from ..codecache import code_hash, get_path, PyCodeCache
 from ..metrics import is_metric_table_enabled, log_kernel_metadata
@@ -72,6 +71,7 @@ from .simd import (
     SIMDScheduling,
 )
 from .triton_utils import config_of, signature_of, signature_to_meta
+
 
 if TYPE_CHECKING:
     from ..ir import IRNode

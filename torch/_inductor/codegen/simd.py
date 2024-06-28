@@ -28,13 +28,12 @@ import sympy
 
 import torch
 import torch._logging
-
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
+
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
 from ..codecache import code_hash
-
 from ..dependencies import Dep, MemoryDep, StarDep, WeakDep
 from ..ir import TritonTemplateBuffer
 from ..optimize_indexing import indexing_dtype_strength_reduction
