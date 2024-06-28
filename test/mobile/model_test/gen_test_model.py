@@ -29,11 +29,7 @@ from nn_ops import (
     NNUtilsModule,
     NNVisionModule,
 )
-from quantization_ops import (
-    FusedQuantModule,
-    GeneralQuantModule,
-    StaticQuantModule,
-)
+from quantization_ops import FusedQuantModule, GeneralQuantModule, StaticQuantModule
 from sampling_ops import SamplingOpsModule
 from tensor_ops import (
     TensorCreationOpsModule,
