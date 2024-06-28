@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import logging
 import operator
 import warnings
 
@@ -18,6 +19,8 @@ from torch.export.graph_signature import (
 )
 from torch.fx import subgraph_rewriter
 from torch.onnx.utils import _create_jit_graph
+
+log = logging.getLogger(__name__)
 
 
 def inplace_optimize_sym_size_div(gm: torch.fx.GraphModule):
@@ -561,12 +564,16 @@ class TS2FXGraphConverter:
         self.name_to_node[output_name] = fx_node
 
     def convert_prim_NumToTensor(self, node: torch._C.Node):
-        # converts prim::NumToTensor as aten.scalar_tensor
+        # Converts prim::NumToTensor as aten.scalar_tensor.
+        # prim::NumToTensor IRs are currently triggered by:
+        # .size() https://github.com/pytorch/pytorch/blob/main/torch/csrc/jit/frontend/tracer.cpp#L950
+        # .numel() https://github.com/pytorch/pytorch/blob/main/torch/csrc/jit/frontend/tracer.cpp#L971
+        # For both of those APIs, torch.jit.trace implicitly sets the output tensor type
+        # to be LongTensor.
         target = torch.ops.aten.scalar_tensor
         args = tuple(self.get_fx_value(input) for input in node.inputs())
 
-        fx_node = self.fx_graph.call_function(target, args)
-
+        fx_node = self.fx_graph.call_function(target, args, {"dtype": torch.long})
         output_name = node.output().debugName()
         self.name_to_node[output_name] = fx_node
 
@@ -764,7 +771,16 @@ class TS2FXGraphConverter:
         # matching converter for that.
         handler_func_name = ir_name_to_func_name(node_kind)
         handler_func = getattr(self, handler_func_name, self.convert_call_function_op)
-        handler_func(node)
+
+        # str calls print function implemented in CPP. To avoid repeating
+        # the entire logic here, we simply keep first line from node string (getting rid
+        # of sub-blocks IR prints).
+        node_str = "".join(str(node).split("\n")[:1])
+        log.debug(f"[{handler_func.__name__}] converts [{node_str}]")  # noqa: G004
+        try:
+            handler_func(node)
+        except Exception as e:
+            raise RuntimeError(f"TS2EPConverter failed for node {node_kind}") from e
 
     def convert_graph_outputs(self):
         args = []
@@ -806,8 +822,21 @@ class TS2EPConverter:
         sample_args: Tuple[Any, ...],
         sample_kwargs: Optional[Dict[str, Any]] = None,
     ):
+        log.info(
+            """
+TS2EPConverter logging starts from here.
+
+INFO: (TORCH_LOGS="export" <cmd>)
+    * Log TorchScript IR.
+
+DEBUG: (TORCH_LOGS="+export" <cmd>), additionaly
+    * Log conversion IR by IR in a format of [<conversion handler name>] converts [<IR>].
+        """
+        )
+
         self.ts_model = ts_model
         self.ts_graph, self.params, _, _ = _create_jit_graph(ts_model, sample_args)
+        log.info(f"TorchScript graph\n\n{self.ts_graph}\n")  # noqa: G004
 
         self.sample_args = sample_args
         self.sample_kwargs = sample_kwargs
