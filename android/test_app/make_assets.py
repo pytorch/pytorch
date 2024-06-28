@@ -2,7 +2,6 @@ from torchvision import models
 
 import torch
 
-
 print(torch.version.__version__)
 
 resnet18 = models.resnet18(weights=models.ResNet18_Weights.IMAGENET1K_V1)

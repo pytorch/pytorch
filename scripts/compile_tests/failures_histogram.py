@@ -2,6 +2,7 @@ import argparse
 import re
 
 from common import download_reports, get_testcases, key, open_test_results, skipped_test
+
 from passrate import compute_pass_rate
 
 
