@@ -1,10 +1,9 @@
 import argparse
 
 from pt_wrapper_module import WrapperModule
+
 from SimpleAddModule import add_tensors_loop, SimpleAddModule
-
 from utils import benchmark_module, BenchmarkConfig, ModuleConfig, ms_to_us
-
 
 """ Framework overhead benchmark script.
 Benchmark framework overhead.
