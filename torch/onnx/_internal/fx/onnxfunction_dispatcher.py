@@ -29,6 +29,7 @@ from torch.onnx._internal.fx import (
     type_utils as fx_type_utils,
 )
 
+
 if TYPE_CHECKING:
     import onnxscript  # type: ignore[import]
 
@@ -36,8 +37,8 @@ if TYPE_CHECKING:
 
 
 # For beartype
-from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
-    graph_building as onnxscript_graph_building,
+from onnxscript.function_libs.torch_lib import (
+    graph_building as onnxscript_graph_building,  # type: ignore[import]
 )
 
 

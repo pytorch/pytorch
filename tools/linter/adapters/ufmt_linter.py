@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
-import fnmatch
 import json
 import logging
 import os
@@ -21,16 +20,6 @@ from usort import Config as UsortConfig
 
 IS_WINDOWS: bool = os.name == "nt"
 REPO_ROOT = Path(__file__).absolute().parents[3]
-ISORT_WHITELIST = re.compile(
-    "|".join(
-        map(
-            fnmatch.translate,
-            [
-                "torch/[o-z]*/**",
-            ],
-        )
-    )
-)
 
 
 def eprint(*args: Any, **kwargs: Any) -> None:
@@ -82,9 +71,7 @@ def check_file(filename: str) -> list[LintMessage]:
         usort_config = UsortConfig.find(path)
         black_config = make_black_config(path)
 
-        if not path.samefile(__file__) and not ISORT_WHITELIST.match(
-            path.absolute().relative_to(REPO_ROOT).as_posix()
-        ):
+        if not path.samefile(__file__):
             isorted_replacement = re.sub(
                 r"(#.*\b)isort: split\b",
                 r"\g<1>usort: skip",

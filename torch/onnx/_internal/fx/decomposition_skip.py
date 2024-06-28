@@ -15,16 +15,16 @@ from __future__ import annotations
 
 import abc
 import contextlib
-
 from typing import Callable, Sequence, Type
 
-from onnxscript.function_libs.torch_lib.ops import (  # type: ignore[import-not-found]
-    core as torchlib_core,
+from onnxscript.function_libs.torch_lib.ops import (
+    core as torchlib_core,  # type: ignore[import-not-found]
     nn as torchlib_nn,
 )
 
 import torch
 from torch._decomp import decompositions
+
 
 _NEW_OP_NAMESPACE: str = "onnx_export"
 """The namespace for the custom operator."""

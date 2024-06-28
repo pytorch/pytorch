@@ -10,6 +10,7 @@ import torch
 from torch.onnx import _type_utils as jit_type_utils
 from torch.onnx._internal import _beartype
 
+
 if TYPE_CHECKING:
     import onnx
 

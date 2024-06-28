@@ -9,8 +9,8 @@ import types
 from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import onnxscript  # type: ignore[import]
-from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
-    graph_building as onnxscript_graph_building,
+from onnxscript.function_libs.torch_lib import (
+    graph_building as onnxscript_graph_building,  # type: ignore[import]
 )
 
 import torch

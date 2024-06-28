@@ -31,6 +31,7 @@ from typing_extensions import deprecated
 
 import torch
 
+
 if torch._running_with_deploy():  # type: ignore[no-untyped-call]
     raise ImportError("C++ pytree utilities do not work with torch::deploy.")
 
