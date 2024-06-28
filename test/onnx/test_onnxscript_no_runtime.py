@@ -5,6 +5,7 @@ import io
 from typing import List
 
 import onnx
+
 import onnxscript
 from onnxscript.onnx_types import FLOAT
 

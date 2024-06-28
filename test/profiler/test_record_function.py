@@ -27,6 +27,7 @@ from torch.autograd.profiler import profile as _profile
 from torch.profiler import kineto_available, record_function
 from torch.testing._internal.common_utils import run_tests, TestCase
 
+
 Json = Dict[str, Any]
 
 
