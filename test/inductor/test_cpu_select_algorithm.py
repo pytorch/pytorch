@@ -116,7 +116,15 @@ def _get_epilogue(epilogue: str, other: Optional[torch.Tensor] = None):
         return lambda x: x / other
 
 
-class TestSelectAlgorithm(TestCase):
+class BaseTestSelectAlgorithm(TestCase):
+    def _check_amx_counter(self, vec_amx):
+        if vec_amx:
+            self.assertTrue(counters["inductor"]["cpp_micro_gemm_amx_counter"] > 0)
+        else:
+            self.assertEqual(counters["inductor"]["cpp_micro_gemm_amx_counter"], 0)
+
+
+class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     common = check_model
 
     @inductor_config.patch({"freezing": True})
@@ -358,10 +366,7 @@ class TestSelectAlgorithm(TestCase):
             self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         vec_amx = VecAMX()
-        if vec_amx:
-            self.assertTrue(counters["inductor"]["cpp_micro_gemm_amx_counter"] > 0)
-        else:
-            self.assertEqual(counters["inductor"]["cpp_micro_gemm_amx_counter"], 0)
+        self._check_amx_counter(vec_amx)
 
     @inductor_config.patch({"freezing": True})
     @patches
@@ -549,9 +554,38 @@ class TestSelectAlgorithm(TestCase):
                 0,
             )
 
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @parametrize("batch_size", (3, 16, 32, 49))
+    @parametrize("in_features", (4, 68, 128))  # k should be a multiple of 4
+    @parametrize("out_features", (32, 64))  # n should be a multiple of block_n
+    @parametrize("bias", (True, False))
+    def test_quantized_linear_amx(self, batch_size, in_features, out_features, bias):
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        counters.clear()
+        v = torch.randn(batch_size, in_features).to(dtype=torch.float32)
+        ref_quantized_mod = _generate_qdq_quantized_model(
+            M(bias=bias).eval(),
+            (v,),
+        )
+        atol, rtol = 1e-2, 1e-2
+        with patch.object(select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)):
+            self.common(ref_quantized_mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        vec_amx = VecAMX()
+        self._check_amx_counter(vec_amx)
+
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
-class _DynamicShapesTestBase(TestCase):
+class _DynamicShapesTestBase(BaseTestSelectAlgorithm):
     pass
 
 
@@ -576,6 +610,9 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
     )
     test_quantized_linear_with_pointwise_binary_dynamic_shapes = (
         TestSelectAlgorithm.test_quantized_linear_with_pointwise_binary
+    )
+    test_quantized_linear_amx_dynamic_shapes = (
+        TestSelectAlgorithm.test_quantized_linear_amx
     )
 
 

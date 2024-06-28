@@ -19,6 +19,7 @@ from .cpp_utils import DTYPE_TO_CPP, GemmBlocking, value_to_cpp
 class LayoutType(Enum):
     NORMAL = 0
     VNNI2 = 1
+    VNNI4 = 2
 
 
 class CppMicroGemm:
@@ -87,6 +88,8 @@ inline void {{kernel_name}}(
             "compute_t": DTYPE_TO_CPP[self.compute_dtype],
             "alpha": self.alpha,
             "kernel_extra_args_declare": self.get_kernel_extra_args_declare(),
+            "int8_gemm": self.input_dtype == torch.uint8,
+            "vnni_size": 4 if self.input_dtype == torch.uint8 else 2,
         }
 
     def get_kernel_declaration(self):
@@ -427,7 +430,10 @@ inline void {{kernel_name}}_kernel(
 
 # extra check for CppMicroGemmAMX
 def check_amx_extra(config, m, n, k, alpha, num_threads):
-    return n % config.register_blocking.block_n == 0 and k % 2 == 0 and alpha == 1
+    vnni_size = 4 if config.input_dtype == torch.uint8 else 2
+    return (
+        n % config.register_blocking.block_n == 0 and k % vnni_size == 0 and alpha == 1
+    )
 
 
 @register_micro_gemm(
@@ -436,6 +442,14 @@ def check_amx_extra(config, m, n, k, alpha, num_threads):
         [(32, 32, 32), (48, 16, 32), (16, 48, 32)],
         input_dtype=torch.bfloat16,
         output_dtype=torch.float,
+        extra_check=check_amx_extra,
+    ),
+    *generate_gemm_config(
+        VecAMX,
+        [(32, 32, 64), (48, 16, 64)],
+        input_dtype=torch.uint8,
+        output_dtype=torch.int32,
+        compute_dtype=torch.int32,
         extra_check=check_amx_extra,
     ),
 )
@@ -499,7 +513,7 @@ template <bool accum>
 inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
     AMXState& amx_state,
     const {{input_t}}* __restrict__ A,
-    const {{input_t}}* __restrict__ B,
+    const {{input2_t}}* __restrict__ B,
     {{output_t}}* __restrict__ C,
     int64_t K,
     int64_t lda,
@@ -553,9 +567,13 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         _tile_loadd({{tile_idx_a}}, A + {{tile_row * 16}} * lda + k, lda * sizeof({{input_t}}));
         {%- endif %}
         {%- if tile_row == 0 %}
-        _tile_loadd({{tile_idx_b}}, B + k * ldb + {{tile_col * 16 * 2}}, ldb * 2 * sizeof({{input_t}}));
+        _tile_loadd({{tile_idx_b}}, B + k * ldb + {{tile_col * 16 * vnni_size}}, ldb * {{vnni_size}} * sizeof({{input_t}}));
         {%- endif %}
+        {%- if int8_gemm %}
+        _tile_dpbusd({{tile_idx_c}}, {{tile_idx_a}}, {{tile_idx_b}});
+        {%- else %}
         _tile_dpbf16ps({{tile_idx_c}}, {{tile_idx_a}}, {{tile_idx_b}});
+        {%- endif %}
         {%- endfor %}
     {%- endfor %}
     };
@@ -593,7 +611,10 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         block_m, block_n, block_k = self.register_blocking
         assert block_m % 16 == 0, "Only support block_m % 16 == 0 for AMX"
         assert block_n % 16 == 0, "Only support block_n % 16 == 0 for AMX"
-        assert block_k == 32, "Only support block_k = 32 for AMX"
+        if self.input_dtype == torch.uint8:
+            assert block_k == 64, "Only support block_k = 64 for AMX INT8"
+        else:
+            assert block_k == 32, "Only support block_k = 32 for AMX Bfloat16/Float16"
         num_columns = block_n // 16
         options = {
             "declare_kernel": self.get_kernel_declaration(),
@@ -634,7 +655,10 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         return "amx_state,"
 
     def get_b_layout(self):
-        return LayoutType.VNNI2
+        if self.input_dtype == torch.uint8:
+            return LayoutType.VNNI4
+        else:
+            return LayoutType.VNNI2
 
 
 def create_micro_gemm(
