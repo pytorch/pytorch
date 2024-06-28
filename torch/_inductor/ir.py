@@ -6427,7 +6427,7 @@ class LoopBody:
         new_sizes = (new_iter_size, reduce_size)
 
         (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
-            *old_sizes, prefix="t"
+            *new_sizes, prefix="t"
         )
 
         inverse_order = {b: a for a, b in enumerate(new_order)}

@@ -15,8 +15,11 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.scheduler import SchedulerNode
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.test_operators import realize
-from torch._inductor.virtualized import V
+
+from torch._inductor.utils import sympy_index_symbol
+from torch._inductor.virtualized import ops, V
 from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.utils._sympy.functions import ModularIndexing
 
 if HAS_CUDA:
     torch.set_default_device("cuda")
@@ -117,6 +120,47 @@ class ImplDetailTest(TestCase):
         new_body = old_body.merge_loops()
         new_sizes = new_body.sizes
         self.assertTrue(tuple(new_sizes[0]) == (np.prod(sizes),), f"{new_sizes=}")
+
+    def test_reorder_modular_indexing(self):
+        """
+        There was a bug that we wrongly map i0 to the dimension with size 49
+        when reordering the loop and cause ModularIndexing get optimized away
+        as an no-op.
+        """
+
+        def _create_computed_buffer():
+            def inner_fn(index):
+                i0, i1, i2, i3 = index
+                return ops.load(
+                    "primal", i3 + 49 * i2 + 2401 * ModularIndexing(i0, 1, 64)
+                )
+
+            buf = ir.Pointwise.create(
+                device=torch.device("cuda"),
+                dtype=torch.float32,
+                inner_fn=inner_fn,
+                ranges=[128, 4, 49, 49],
+            )
+            buf.realize()
+            cbuf = buf.data.data
+            cbuf.decide_layout()
+            return cbuf
+
+        buf = _create_computed_buffer()
+        _, body = buf.simplify_and_reorder()
+        new_body = body.reorder_iter_loops([1, 2, 3, 0])
+
+        y0, y1, y2, y3 = (sympy_index_symbol(f"y{i}") for i in range(4))
+        self.assertEqual(body.var_ranges, {y0: 128, y1: 4, y2: 49, y3: 49})
+        self.assertEqual(
+            body.indexing_exprs["index0"],
+            y3 + 49 * y2 + 2401 * ModularIndexing(y0, 1, 64),
+        )
+        self.assertEqual(new_body.var_ranges, {y0: 4, y1: 49, y2: 49, y3: 128})
+        self.assertEqual(
+            new_body.indexing_exprs["index0"],
+            y2 + 49 * y1 + 2401 * ModularIndexing(y3, 1, 64),
+        )
 
 
 @inductor_config.patch(
