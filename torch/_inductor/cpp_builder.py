@@ -20,15 +20,16 @@ from typing import List, Sequence, Tuple, Union
 
 import torch
 from torch._inductor import config, exc
+
+# TODO: import below objects in function scope, in further optimization
 from torch._inductor.codecache import (
     _get_python_include_dirs,
     _LINKER_SCRIPT,
     _transform_cuda_paths,
     get_lock_dir,
-    invalid_vec_isa,
     LOCK_TIMEOUT,
-    VecISA,
 )
+from torch._inductor.cpu_vec_isa import invalid_vec_isa, VecISA
 from torch._inductor.runtime.runtime_utils import cache_dir
 
 if config.is_fbcode():
