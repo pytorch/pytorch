@@ -5,7 +5,9 @@ from dataclasses import dataclass
 from typing import Sequence, TYPE_CHECKING
 
 from torchgen import dest
-from torchgen.api.types import DispatcherSignature
+
+# disable import sorting to avoid circular dependency.
+from torchgen.api.types import DispatcherSignature  # usort:skip
 from torchgen.context import method_with_native_function
 from torchgen.model import BaseTy, BaseType, DispatchKey, NativeFunction, Variant
 from torchgen.utils import concatMap, Target
