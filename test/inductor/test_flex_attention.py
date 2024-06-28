@@ -1259,15 +1259,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.assertTrue(compiled_lse.dtype == torch.float32)
         ref_lse = ref_lse * torch.log2(torch.tensor(torch.e))
         eager_lse = eager_lse * torch.log2(torch.tensor(torch.e))
-
-        eager_error = (eager_lse - ref_lse).abs().mean()
-        compiled_error = (compiled_lse - ref_lse).abs().mean()
-        fudge_factor = 15  # Our logsumexp error is pretty high.
-        if compiled_error > fudge_factor * eager_error:
-            self.assertTrue(
-                False,
-                f"Compiled error {compiled_error} is too high compared to eager error {eager_error}",
-            )
+        tolerance = Tolerances(atol=2e-1, rtol=2e-1)
+        torch.testing.assert_close(
+            eager_lse, compiled_lse, atol=tolerance.atol, rtol=tolerance.rtol
+        )
 
     @supported_platform
     def test_logsumexp_only_return(self):
