@@ -3,6 +3,7 @@
 # Owner(s): ["module: numpy"]
 
 import sys
+
 from itertools import product
 
 import numpy as np
@@ -16,6 +17,7 @@ from torch.testing._internal.common_device_type import (
     skipMeta,
 )
 from torch.testing._internal.common_dtype import all_types_and_complex_and
+
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
 

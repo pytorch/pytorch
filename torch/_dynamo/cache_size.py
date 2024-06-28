@@ -7,7 +7,6 @@ from typing import Tuple
 
 from . import config
 
-
 log = logging.getLogger(__name__)
 """
 [Note on cache size limit]

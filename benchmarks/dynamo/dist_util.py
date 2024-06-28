@@ -15,7 +15,6 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 
-
 try:
     from .torchbench import setup_torchbench_cwd
 except ImportError:

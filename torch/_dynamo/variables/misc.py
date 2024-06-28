@@ -12,7 +12,6 @@ from typing import Dict, List
 import torch._C
 import torch._numpy as tnp
 import torch.utils._pytree as pytree
-
 from .. import config, variables
 from ..bytecode_transformation import (
     add_push_null_call_function_ex,
