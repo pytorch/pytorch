@@ -47,6 +47,8 @@ cpp_outer_loop_fused_inner_counts: List[int] = []
 
 num_comprehensive_padding = 0
 
+num_loop_reordering = 0
+
 
 # reset all counters
 def reset():
@@ -57,6 +59,7 @@ def reset():
     global cpp_to_dtype_count
     global cpp_outer_loop_fused_inner_counts
     global num_comprehensive_padding
+    global num_loop_reordering
 
     generated_kernel_count = 0
     generated_cpp_vec_kernel_count = 0
@@ -67,6 +70,7 @@ def reset():
     cpp_to_dtype_count = 0
     cpp_outer_loop_fused_inner_counts.clear()
     num_comprehensive_padding = 0
+    num_loop_reordering = 0
 
 
 @dataclass
