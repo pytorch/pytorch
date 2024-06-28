@@ -21,6 +21,7 @@ from torch.export.exported_program import (
     TensorArgument,
 )
 from torch.fx._symbolic_trace import is_fx_tracing
+from torch.fx.experimental.proxy_tensor import py_sym_types
 from torch.utils._pytree import GetAttrKey, SequenceKey
 
 from ._remove_effect_tokens_pass import _remove_effect_tokens
@@ -792,16 +793,55 @@ class _ModuleFrame:
         placeholder_node.meta = copy.copy(x.meta)
         self.node_to_placeholder[x] = placeholder_node
 
+    def copy_sym_call_function(self, x):
+        # This only exists because we deduplicate sym_size nodes in the flat export graph,
+        # and if preserve_module_call_signature is set, we may not be able to pass sym_size
+        # nodes, or their downstream users, as inputs to submodule calls.
+        # To avoid this we copy these call_function nodes with sym_type results.
+        # This should however only be done for sym_type nodes - call_function nodes on tensors
+        # should not be deduplicated in the first place.
+        assert isinstance(x.meta["val"], py_sym_types)
+        args = tuple(
+            self.remap_input(_x) if isinstance(_x, torch.fx.Node) else _x
+            for _x in x.args
+        )
+        kwargs = {
+            k: self.remap_input(_x) if isinstance(_x, torch.fx.Node) else _x
+            for k, _x in x.kwargs.items()
+        }
+        node = self.graph.call_function(x.target, args, kwargs)
+        node.meta = copy.copy(x.meta)
+        self.node_map[x] = node
+        return node
+
     def remap_input(self, x):
         assert x.graph is self.flat_graph
         if x in self.node_map:
             return self.node_map[x]
-        if x not in self.node_to_placeholder:
+        self.print(f"remap_input({x})")
+        if x in self.node_to_placeholder:
+            return self.node_to_placeholder[x]
+        elif (
+            x.op == "placeholder"
+            or self.module_call_graph.get(self.fqn) is None
+            # allow placeholder creation if we are not preserving module call signature
+        ):
             self.add_placeholder(x)
             if self.parent_call_module is not None:
                 # Important to *prepend* the output to match how we are
                 # inserting placeholder nodes.
-                self.parent_call_module.insert_arg(0, self.parent.remap_input(x))
+                with self.parent.graph.inserting_before(self.parent_call_module):
+                    self.parent_call_module.insert_arg(0, self.parent.remap_input(x))
+            return self.node_to_placeholder[x]
+        elif x.op == "call_function":
+            # export deduplicates sym_size nodes, and may need to re-copy them
+            # if module call signature needs to be preserved
+            self.copy_sym_call_function(x)
+            return self.node_map[x]
+        else:
+            raise RuntimeError(
+                f"Could not run remap_input() on op type: {x.op} for node {x}"
+            )
         return self.node_to_placeholder[x]
 
     def finalize_outputs(self):

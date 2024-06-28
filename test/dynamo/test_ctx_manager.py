@@ -13,7 +13,7 @@ from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTIO
 from torch.testing._internal.common_utils import TEST_WITH_ROCM
 
 
-class CutomizedCtxManager:
+class CustomizedCtxManager:
     def __init__(self, mode):
         self.prev = torch.is_grad_enabled()
         self.mode = mode
@@ -23,6 +23,12 @@ class CutomizedCtxManager:
 
     def __exit__(self, exc_type, exc_value, traceback):
         torch._C._set_grad_enabled(self.prev)
+
+
+class CustomizedCtxManagerWithGraphBreak(CustomizedCtxManager):
+    def __enter__(self):
+        torch._dynamo.graph_break()
+        super().__enter__()
 
 
 class CtxManagerTests(torch._dynamo.test_case.TestCase):
@@ -863,9 +869,20 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(res[0].dtype == torch.float16)
         self.assertTrue(res[1].dtype == torch.float16)
 
+    def test_generic_ctx_manager_with_graph_break(self):
+        def fn(x):
+            with CustomizedCtxManagerWithGraphBreak(False):
+                y = x * 2
+                z = y.sin() + 3
+            return z
+
+        x = torch.randn(2, 3)
+        opt_fn = torch.compile(backend="eager", fullgraph=False)(fn)
+        self.assertEqual(fn(x), opt_fn(x))
+
     def test_generic_context_manager(self):
         def fn(x):
-            with CutomizedCtxManager(True):
+            with CustomizedCtxManager(True):
                 x = x + 1
                 if torch.is_grad_enabled():
                     x = x * 2
@@ -874,7 +891,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
         x = torch.rand(2, 3)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(backend=cnts, fullgraph=False)(fn)
+        opt_fn = torch.compile(backend=cnts, fullgraph=True)(fn)
 
         with torch.no_grad():
             ref = fn(x)
@@ -892,11 +909,11 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
     def test_nested_generic_context_manager(self):
         def fn(x):
-            with CutomizedCtxManager(True):
+            with CustomizedCtxManager(True):
                 x = x + 1
                 if torch.is_grad_enabled():
                     x = x * 2
-                with CutomizedCtxManager(False):
+                with CustomizedCtxManager(False):
                     if torch.is_grad_enabled():
                         x = x - 3
                     x = x * 1.5
@@ -905,7 +922,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
         x = torch.rand(2, 3)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(backend=cnts, fullgraph=False)(fn)
+        opt_fn = torch.compile(backend=cnts, fullgraph=True)(fn)
 
         with torch.no_grad():
             ref = fn(x)
@@ -923,7 +940,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
     def test_generic_context_manager_with_graph_break(self):
         def fn(x):
-            with CutomizedCtxManager(True):
+            with CustomizedCtxManager(True):
                 x = x + 1
                 if torch.is_grad_enabled():
                     x = x * 2
@@ -951,11 +968,11 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
     def test_nested_generic_context_manager_with_graph_break(self):
         def fn(x):
-            with CutomizedCtxManager(True):
+            with CustomizedCtxManager(True):
                 x = x + 1
                 if torch.is_grad_enabled():
                     x = x * 2
-                with CutomizedCtxManager(False):
+                with CustomizedCtxManager(False):
                     if torch.is_grad_enabled():
                         x = x - 3
                     torch._dynamo.graph_break()

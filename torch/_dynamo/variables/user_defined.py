@@ -57,9 +57,9 @@ from ..utils import (
     object_has_getattribute,
     proxy_args_kwargs,
     tensortype_to_dtype,
+    unpatched_nn_module_getattr,
 )
 from .base import MutableLocal, VariableTracker
-from .ctx_manager import GenericContextWrappingVariable, NullContextVariable
 from .dicts import DefaultDictVariable
 
 
@@ -284,6 +284,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif self.value is torch.nn.CrossEntropyLoss:
             return self._call_cross_entropy_loss(tx, args, kwargs)
         elif self.value is contextlib.nullcontext:
+            # import here to avoid circular dependency
+            from .ctx_manager import NullContextVariable
+
             return NullContextVariable()
         elif self.value is collections.OrderedDict:
             return BuiltinVariable.call_custom_dict(
@@ -330,16 +333,16 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 self.value, "__exit__"
             )  # TODO(voz): These can invoke user code!
             and self.value.__new__ == object.__new__
+            and self.source is not None
         ):
+            # import here to avoid an unfortunate circular dependency.
+            from .ctx_manager import GenericContextWrappingVariable
+
             cm_obj = tx.output.side_effects.track_object_new(
-                self.source, self.value, UserDefinedObjectVariable, {}
+                self.source, self.value, GenericContextWrappingVariable, {}
             )
             cm_obj.call_method(tx, "__init__", args, kwargs)
-
-            return GenericContextWrappingVariable(
-                args,
-                cm_obj=cm_obj,
-            )
+            return cm_obj
 
         elif is_namedtuple_cls(self.value):
             fields = namedtuple_fields(self.value)
@@ -825,6 +828,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         return key in self.value.__dict__
 
+    def is_supported_nn_module_method(self, method):
+        return torch._dynamo.config.inline_inbuilt_nn_modules and method in (
+            torch.nn.Module.parameters,
+        )
+
     def var_getattr(self, tx, name):
         from .. import trace_rules
         from . import ConstantVariable
@@ -849,12 +857,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if isinstance(getattr_fn, types.FunctionType):
                 # Dynamo is going to trace the __getattr__ function with
                 # args=name. Set the source accordingly.
-                new_source = None
-                if self.source:
-                    new_source = AttrSource(self.source, "__getattr__")
-                out = variables.UserMethodVariable(
-                    getattr_fn, self, source=new_source
-                ).call_function(tx, [ConstantVariable.create(name)], {})
+                if getattr_fn is unpatched_nn_module_getattr and isinstance(
+                    self, variables.UnspecializedNNModuleVariable
+                ):
+                    # Manually trace out the nn module __getattr__ to avoid large compilation latency.
+                    out = self.manually_trace_nn_module_getattr(tx, name)
+                else:
+                    new_source = None
+                    if self.source:
+                        new_source = AttrSource(self.source, "__getattr__")
+                    out = variables.UserMethodVariable(
+                        getattr_fn, self, source=new_source
+                    ).call_function(tx, [ConstantVariable.create(name)], {})
 
                 if self.source and getattr_fn is torch.nn.Module.__getattr__:
                     if isinstance(
@@ -903,6 +917,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             isinstance(subobj, types.MethodType)
             and isinstance(self.value, torch.nn.Module)
         ):
+            if self.is_supported_nn_module_method(subobj):
+                return variables.GetAttrVariable(self, name, source=source)
+
             # Since we get subobj via self._getattr_static, which may not trigger dynamic lookup.
             # Static lookup can't tell us it's a method or function correctly,
             # so we trigger dynamic lookup here to get the correct type.
@@ -959,7 +976,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return SourcelessBuilder.create(tx, subobj)
 
         if (
-            name not in getattr(value, "__dict__", {})
+            subobj is not NO_SUCH_SUBOBJ
+            and name not in getattr(value, "__dict__", {})
             and (
                 type(value).__module__.startswith("torch.")
                 or isinstance(subobj, re.Pattern)
@@ -1165,8 +1183,12 @@ class RemovableHandleVariable(VariableTracker):
     def reconstruct(self, codegen):
         if self.idx == self.REMOVED:
             # Hook has already been removed, return a dummy handle
-            codegen.load_import_from("torch._dynamo.utils", "invalid_removeable_handle")
-            codegen.extend_output(create_call_function(0, True))
+            codegen.add_push_null(
+                lambda: codegen.load_import_from(
+                    "torch._dynamo.utils", "invalid_removeable_handle"
+                )
+            )
+            codegen.extend_output(create_call_function(0, False))
             return
         # unreachable due to codegen.add_cache() when the hook is installed
         super().reconstruct(codegen)
