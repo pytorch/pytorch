@@ -2,9 +2,9 @@ import argparse
 import functools
 import json
 import os
-import pathlib
 from collections import defaultdict, namedtuple, OrderedDict
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import (
     Any,
     Callable,
@@ -2715,12 +2715,12 @@ def gen_declarations_yaml(
     )
 
 
-def get_torchgen_root() -> pathlib.Path:
+def get_torchgen_root() -> Path:
     """
     If you're depending on torchgen out-of-tree, you can use the root to figure
     out the path to native_functions.yaml
     """
-    return pathlib.Path(__file__).absolute().parent
+    return Path(__file__).absolute().parent
 
 
 def main() -> None:
@@ -2882,11 +2882,11 @@ def main() -> None:
     #
     #   Invalid character escape '\c'.
     core_install_dir = f"{options.install_dir}/core"
-    pathlib.Path(core_install_dir).mkdir(parents=True, exist_ok=True)
+    Path(core_install_dir).mkdir(parents=True, exist_ok=True)
     ops_install_dir = f"{options.install_dir}/ops"
-    pathlib.Path(ops_install_dir).mkdir(parents=True, exist_ok=True)
+    Path(ops_install_dir).mkdir(parents=True, exist_ok=True)
     aoti_install_dir = f"{options.aoti_install_dir}"
-    pathlib.Path(aoti_install_dir).mkdir(parents=True, exist_ok=True)
+    Path(aoti_install_dir).mkdir(parents=True, exist_ok=True)
 
     core_fm = make_file_manager(options=options, install_dir=core_install_dir)
     cpu_fm = make_file_manager(options=options)
@@ -2973,7 +2973,7 @@ def main() -> None:
         gen_declarations_yaml(native_functions=native_functions, cpu_fm=cpu_fm)
 
     if options.output_dependencies:
-        depfile_path = pathlib.Path(options.output_dependencies).resolve()
+        depfile_path = Path(options.output_dependencies).resolve()
         depfile_name = depfile_path.name
         depfile_stem = depfile_path.stem
 
