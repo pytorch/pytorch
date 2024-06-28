@@ -21,7 +21,6 @@ from torch.onnx._internal.fx import (
 )
 from torch.testing._internal import common_utils
 
-
 # TODO: this can only be global. https://github.com/microsoft/onnxscript/issues/805
 TCustomFloat = TypeVar("TCustomFloat", bound=Union[FLOAT16, FLOAT, DOUBLE, BFLOAT16])
 

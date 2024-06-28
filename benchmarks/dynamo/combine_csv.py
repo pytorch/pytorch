@@ -6,7 +6,6 @@ import csv
 import sys
 from collections import defaultdict
 
-
 assert len(sys.argv) == 3
 
 RESULTS = defaultdict(dict)

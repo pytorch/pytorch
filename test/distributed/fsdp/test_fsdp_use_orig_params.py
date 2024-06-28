@@ -45,7 +45,6 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils._triton import has_triton
 
-
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)

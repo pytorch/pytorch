@@ -19,6 +19,7 @@ from random import randint
 
 import torch
 import torch.cuda
+
 from torch import inf, nan
 from torch.cuda._memory_viz import (
     _profile_to_snapshot,
@@ -69,7 +70,6 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils.checkpoint import checkpoint_sequential
 from torch.utils.viz._cycles import observe_tensor_cycles
-
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
