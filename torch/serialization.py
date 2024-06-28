@@ -2,6 +2,7 @@
 import difflib
 import functools
 import os
+import io
 import re
 import shutil
 import struct
