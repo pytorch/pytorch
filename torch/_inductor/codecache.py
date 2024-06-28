@@ -2371,7 +2371,7 @@ class AotCodeCompiler:
 @clear_on_fresh_inductor_cache
 @functools.lru_cache
 def cpp_prefix_path() -> str:
-    path = Path(__file__).absolute().parent / "codegen/cpp_prefix.h"
+    path = Path(__file__).parent / "codegen/cpp_prefix.h"
     with path.open() as f:
         content = f.read()
         _, filename = write(
@@ -2952,12 +2952,20 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
     @classmethod
     @functools.lru_cache(None)
     def config_hash(cls):
+        from torch._inductor.cpp_builder import CppBuilder, CppOptions
+
+        command_gen = CppBuilder(
+            name="O",
+            sources="I",
+            BuildOption=CppOptions(compile_only=False),
+        )
+        command_line = command_gen.get_command_line()
         return sha256_hash(
             "\n".join(
                 [
                     cls.glue_template,
                     f"{cls.cpu_cache_size()}",
-                    cpp_compile_command("I", "O"),
+                    command_line,
                 ]
             ).encode("utf-8")
         )
