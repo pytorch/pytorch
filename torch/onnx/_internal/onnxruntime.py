@@ -31,10 +31,9 @@ from torch.fx.passes.tools_common import CALLABLE_NODE_OPS
 from torch.utils import _pytree
 
 
+# Use try-except to initialize package-dependent global variables.
 try:
     import onnx
-
-    # Use try-except to initialize package-dependent global variables.
     import onnxruntime  # type: ignore[import]
     from onnxruntime.capi import _pybind_state as ORTC  # type: ignore[import]
 
@@ -925,8 +924,8 @@ class OrtBackend:
 
             try:
                 from onnxscript import optimizer  # type: ignore[import]
-                from onnxscript.rewriter import (
-                    onnxruntime as ort_rewriter,  # type: ignore[import]
+                from onnxscript.rewriter import (  # type: ignore[import]
+                    onnxruntime as ort_rewriter,
                 )
 
                 onnx_model = optimizer.optimize(onnx_model)
