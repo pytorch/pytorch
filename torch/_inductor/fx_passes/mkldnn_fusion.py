@@ -801,6 +801,12 @@ if torch._C._has_mkldnn:
             bias_meta = add_node.args[1].meta.get("val")
             if weight_meta is None or bias_meta is None:
                 return False
+            assert weight_meta.dtype in (
+                torch.bfloat16,
+                torch.float16,
+            )
+            if bias_meta.dtype != weight_meta.dtype:
+                return False
             return (
                 linear_node.args[2] is None
                 and bias_meta.dim() == 1
