@@ -3032,9 +3032,17 @@ exit(2)
                 # These two cases hit an edge case where the PyTorch allocator won't immediately unmap part of an
                 # expandable segment (and as a result reduce the number of reserved bytes) if the block to unmap is
                 # smaller than the page size
-                if self.expandable_segments and "reserved" in stat and numel == cases[3][0]:
+                if (
+                    self.expandable_segments
+                    and "reserved" in stat
+                    and numel == cases[3][0]
+                ):
                     expected = 2 * kLargeBuffer
-                if self.expandable_segments and "reserved" in stat and numel == cases[4][0]:
+                if (
+                    self.expandable_segments
+                    and "reserved" in stat
+                    and numel == cases[4][0]
+                ):
                     expected = kLargeBuffer
 
                 self.assertEqual(
