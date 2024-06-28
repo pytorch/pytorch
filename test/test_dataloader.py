@@ -62,14 +62,15 @@ try:
     import psutil
 
     HAS_PSUTIL = True
-except ImportError:
+except ModuleNotFoundError:
     HAS_PSUTIL = False
+    psutil = None
     err_msg = (
         "psutil not found. Some critical data loader tests relying on it "
         "(e.g., TestDataLoader.test_proper_exit) will not run."
     )
     if IS_CI:
-        raise ImportError(err_msg) from None
+        raise ModuleNotFoundError(err_msg) from None
     else:
         warnings.warn(err_msg)
 
@@ -78,8 +79,9 @@ try:
     import numpy as np
 
     HAS_NUMPY = True
-except ImportError:
+except ModuleNotFoundError:
     HAS_NUMPY = False
+    np = None
 skipIfNoNumpy = unittest.skipIf(not HAS_NUMPY, "no NumPy")
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for

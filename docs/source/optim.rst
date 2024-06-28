@@ -188,7 +188,7 @@ Below is a table showing the available and default implementations of each algor
     :class:`RAdam`;foreach;yes;no
     :class:`RMSprop`;foreach;yes;no
     :class:`Rprop`;foreach;yes;no
-    :class:`SGD`;foreach;yes;yes (CPU and CUDA only)
+    :class:`SGD`;foreach;yes;yes
 
 Below table is showing the stability status for fused implementations:
 
@@ -209,7 +209,7 @@ Below table is showing the stability status for fused implementations:
     :class:`RAdam`;unsupported;unsupported;unsupported
     :class:`RMSprop`;unsupported;unsupported;unsupported
     :class:`Rprop`;unsupported;unsupported;unsupported
-    :class:`SGD`;beta;beta;unsupported
+    :class:`SGD`;beta;beta;beta
 
 How to adjust learning rate
 ---------------------------
