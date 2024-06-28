@@ -10,6 +10,7 @@ from typing import Any, List, Optional, Tuple, Union
 import torch.utils._pytree as pytree
 
 from torch import SymInt, Tensor
+from torch._subclasses.fake_tensor import get_plain_tensors
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .schemas import MutationType, SubclassCreationMeta, ViewAndMutationMeta
@@ -34,11 +35,51 @@ def requires_subclass_dispatch(args, fw_metadata: ViewAndMutationMeta) -> bool:
     return any_subclass_args or any_subclass_outputs
 
 
+def create_subclass_metadata(a, start_idx, extra_sizes_offset):
+    if not is_traceable_wrapper_subclass(a):
+        return None, start_idx + 1
+
+    inner_keys, metadata = a.__tensor_flatten__()
+    new_start_idx = start_idx
+    attrs = {}
+    for key in inner_keys:
+        new_subclass_meta, new_start_idx = create_subclass_metadata(
+            getattr(a, key), new_start_idx, extra_sizes_offset=0  # TODO: test this
+        )
+        attrs[key] = new_subclass_meta
+
+    return (
+        SubclassCreationMeta(
+            flat_tensor_start_idx=start_idx,
+            arg_count=new_start_idx - start_idx,
+            flat_tensor_extra_sizes_offset=extra_sizes_offset,
+            attrs=attrs,
+            meta=metadata,
+            outer_size=a.size(),
+            outer_stride=a.stride(),
+            original_subclass=a,
+        ),
+        new_start_idx,
+    )
+
+
+# Given a real tensor subclass, returns a nested list of Plain tensor types
+def get_types_for_subclass(tensor_subclass):
+    if not is_traceable_wrapper_subclass(tensor_subclass):
+        return ["Tensor"]
+    inner_keys, _ = tensor_subclass.__tensor_flatten__()
+    result = []
+    for key in inner_keys:
+        inner_tensor = getattr(tensor_subclass, key)
+        result.extend(get_types_for_subclass(inner_tensor))
+    return result
+
+
 # Given a flat list of arguments, some of which may be tensor subclasses,
 # computes metadata about "how to reconstruct the current list of subclasses,
 # if we were given their flattened dense tensors instead"
 def create_subclass_meta(
-    curr_args: Union[List[Any], Tuple[Any, ...]],
+    curr_args: Union[List[Any], Tuple[Any, ...]]
 ) -> List[Union[int, SubclassCreationMeta]]:
     idx = 0
     infos: List[Union[int, SubclassCreationMeta]] = []
@@ -54,25 +95,14 @@ def create_subclass_meta(
 
     for a in curr_args:
         if isinstance(a, Tensor) and is_traceable_wrapper_subclass(a):
-            attrs, meta = a.__tensor_flatten__()  # type: ignore[attr-defined]
             start_idx = idx
-            cnt = len(attrs)
-            curr_cnt = cnt
-            # Compute the offset of the first extra size w.r.t the current tensor "a"
-            offset = num_extra_sizes - extra_sizes_count
+            extra_sizes_offset = num_extra_sizes - extra_sizes_count
             extra_sizes_count += len(a.shape)
-            infos.append(
-                SubclassCreationMeta(
-                    flat_tensor_start_idx=start_idx,
-                    arg_count=curr_cnt,
-                    flat_tensor_extra_sizes_offset=offset,
-                    original_subclass=a,
-                    meta=meta,
-                    inner_keys=attrs,
-                    outer_size=a.shape,
-                    outer_stride=a.stride(),
-                )
+            subclass_meta, _ = create_subclass_metadata(
+                a, start_idx, extra_sizes_offset
             )
+            infos.append(subclass_meta)
+            cnt = subclass_meta.arg_count
         else:
             infos.append(idx)
             cnt = 1
@@ -103,11 +133,10 @@ def unwrap_tensor_subclasses(
         xs_inner = []
 
         for x in xs:
-            if isinstance(x, Tensor) and is_traceable_wrapper_subclass(x):
-                attrs, _ = x.__tensor_flatten__()  # type: ignore[attr-defined]
-                xs_inner += [getattr(x, attr) for attr in attrs]
+            if is_traceable_wrapper_subclass(x):
+                xs_inner.extend(get_plain_tensors(x))
             else:
-                xs_inner += [x]
+                xs_inner.append(x)
 
         # While tracing, unwrap_tensor_subclasses may add extra SymInts corresponding
         # to subclass tensor sizes (See PyTorch issue #124619 for the motivation).

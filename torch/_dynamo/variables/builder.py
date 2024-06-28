@@ -85,6 +85,7 @@ from ..utils import (
     get_locals_to_steal,
     get_static_address_type,
     is_function_or_wrapper,
+    is_lru_cache_wrapped_function,
     is_namedtuple,
     is_typing,
     is_utils_checkpoint,
@@ -131,6 +132,7 @@ from .functions import (
     TritonKernelVariable,
     UserFunctionVariable,
     UserMethodVariable,
+    WrapperUserFunctionVariable,
 )
 from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .iter import ItertoolsVariable
@@ -274,8 +276,10 @@ class BackwardStateGraphArg(GraphArg):
 
     def reconstruct(self, codegen):
         assert codegen.tx.output.backward_state_var
-        codegen.load_import_from(BackwardState.__module__, "BackwardState")
-        codegen.call_function(0, True)
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(BackwardState.__module__, "BackwardState")
+        )
+        codegen.call_function(0, False)
         codegen.dup_top()
         codegen.store(codegen.tx.output.backward_state_var)
 
@@ -392,6 +396,7 @@ class VariableBuilder:
             (re.Pattern, cls.wrap_regex_pattern),
             (weakref.ReferenceType, cls.wrap_weakref),
             (torch.utils.hooks.RemovableHandle, cls.wrap_removable_handle),
+            (torch.jit.ScriptFunction, cls.wrap_jit_function),
         ]
 
         if config.trace_numpy and np:
@@ -420,6 +425,12 @@ class VariableBuilder:
         # the same frame. So graph break.
         # Related test - PYTORCH_TEST_WITH_DYNAMO=1 python test/test_autograd.py -k TestAutograd.test_hooks
         unimplemented("unregistered hook removable handle")
+
+    def wrap_jit_function(self, value):
+        self.install_guards(GuardBuilder.TYPE_MATCH)
+        return WrapperUserFunctionVariable(
+            value, "_torchdynamo_inline", source=self.source
+        )
 
     @classmethod
     @functools.lru_cache(None)
@@ -519,17 +530,7 @@ class VariableBuilder:
             result.source = self.source
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
-            if not value and self.get_source().is_nn_module():
-                # It is faster to guard on 'false' property than to guard
-                # on actual dict keys, but we can't do this fast guard in general because
-                # it omits a crucial type check that ensures the value is actually still a dict at runtime.
-
-                # Why is this OK for (specialized) nnmodules? We set up a setattr hook
-                # to check for module property mutations, which does a reasonable,
-                # but not completely secure job ensuring a property wasn't changed.
-                self.install_guards(GuardBuilder.BOOL_FALSE)
-            else:
-                self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
+            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
             # Optimisation for the common case strings, ints, etc
             all_const = all(ConstantVariable.is_literal(k) for k in value.keys())
@@ -899,6 +900,14 @@ class VariableBuilder:
         elif TorchCtxManagerClassVariable.is_matching_cls(value):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return TorchCtxManagerClassVariable(value, source=self.source)
+        elif inspect.getattr_static(value, "__script_if_tracing_wrapper", False):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            return WrapperUserFunctionVariable(
+                value, "__original_fn", source=self.source
+            )
+        elif is_lru_cache_wrapped_function(value):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            return WrapperUserFunctionVariable(value, "__wrapped__", source=self.source)
         elif is_function_or_wrapper(value):
             value, attr_name = unwrap_with_attr_name_if_wrapper(value)
             # For these wrappers, Dynamo points to the wrapped function,
@@ -1164,7 +1173,34 @@ class VariableBuilder:
             and not config.allow_rnn
         ):
             unimplemented("TorchDynamo purposely graph breaks on RNN, GRU, LSTMs")
-        if mutation_guard.is_dynamic_nn_module(value, self.tx.export):
+
+        if getattr(value, "_is_fsdp_managed_module", False):
+            # See note [Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
+            # in fully_sharded_data_parallel.py for more information
+
+            # we can't do this assert inside FSDP constructor,
+            # since we don't know yet whether dynamo will be used
+            assert getattr(
+                value, "_fsdp_use_orig_params", False
+            ), "Dynamo only supports FSDP with use_orig_params=True"
+
+            # Note on FSDP guarding
+            # Eager FSDP already assumes (requires, but without enforcement)
+            # that users don't mutate their model parameters/structure after
+            # FSDP wrapping, because FSDP wouldn't notice or update its
+            # FlatParams.
+            #
+            # Therefore, torch.compile can skip guarding on params or submodule
+            # structure of fsdp_managed modules, by using FSDPNNModuleSource as
+            # the guard source.  This behavior is gated on
+            # config.skip_fsdp_guards.
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            result = FSDPManagedNNModuleVariable(value, source=self.get_source())
+            if not SideEffects.cls_supports_mutation_side_effects(type(value)):
+                # don't allow STORE_ATTR mutation with custom __setattr__
+                return result
+            return self.tx.output.side_effects.track_object_existing(value, result)
+        elif mutation_guard.is_dynamic_nn_module(value, self.tx.export):
             # created dynamically, don't specialize on it
             self.install_guards(GuardBuilder.TYPE_MATCH)
             if (
@@ -1195,34 +1231,6 @@ class VariableBuilder:
         ):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return UnspecializedNNModuleVariable(value, source=self.get_source())
-        elif getattr(value, "_is_fsdp_managed_module", False):
-            # See note [Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
-            # in fully_sharded_data_parallel.py for more information
-
-            # we can't do this assert inside FSDP constructor,
-            # since we don't know yet whether dynamo will be used
-            assert getattr(
-                value, "_fsdp_use_orig_params", False
-            ), "Dynamo only supports FSDP with use_orig_params=True"
-
-            # Note on FSDP guarding
-            # 1. We expect FSDP wrapping mutates an nn module irreversably (no way to de-wrap).
-            # 2. Eager FSDP already assumes (requires, but without enforcement) that users don't mutate their
-            #    model parameters/structure after FSDP wrapping, because FSDP wouldn't notice or update its FlatParams.
-            #
-            # Due to (1), once we enter this path we expect not to go back nor have to guard on type
-            # or _is_fsdp_managed_module.
-            #
-            # TODO(whc) We could add a guard on the opposite case, where a user compiled/ran
-            # pre-FSDP-wrapped model, then wrapped, to ensure that we recompile with the FSDP handling.
-            #
-            # Due to (2), we skip guards on inner contents of fsdp_managed modules, by using FSDPNNModuleSource as the
-            # guard source.  This behavior is gated on config.skip_fsdp_guards.
-            #
-            # ID_MATCH is required to disambiguate cases as simple as a unit test that constructs 2 models and wraps
-            # them differently with different FSDP configs.  (test_dynamo_distributed.py -k test_fsdp_aot_eager)
-            self.install_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.ID_MATCH)
-            return FSDPManagedNNModuleVariable(value, source=self.get_source())
         else:
             return self.tx.output.register_attr_or_module(
                 value,
@@ -2104,15 +2112,14 @@ def _automatic_dynamic(
         )
 
         # Get symbolic contexts for inner tensors
-        attrs, _ = type(e).__tensor_flatten__(e)
         inner_contexts = {}  # mapping from attr -> symbolic context
+        attrs, _ = type(e).__tensor_flatten__(e)
         for attr in attrs:
             inner_tensor = getattr(e, attr)
             inner_source = AttrSource(source, attr)
-            inner_context = _automatic_dynamic(
+            inner_contexts[attr] = _automatic_dynamic(
                 inner_tensor, tx, inner_source, static_shapes
             )
-            inner_contexts[attr] = inner_context
 
         return SubclassSymbolicContext(
             dynamic_sizes=outer_context.dynamic_sizes,

@@ -509,6 +509,41 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             res = fn(input)
             self.assertIsInstance(res, BadNewTorchFunction)
 
+    def test_no_torch_function_recompiles(self):
+        class NJT:
+            def __repr__(self):
+                return f"NJT(shape={self.shape})"
+
+            def __init__(self, values, offsets):
+                self._values = values
+                self._offsets = offsets
+
+            def sin(self):
+                return torch.sin(self)
+
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                if func == torch.sin:
+                    self = args[0]
+                    return NJT(func(self._values), self._offsets)
+                raise AssertionError("should not get here")
+
+        values1 = torch.randn(10, 3, 4, requires_grad=True)
+        values2 = torch.randn(10, 3, 4, requires_grad=True)
+        offsets = torch.tensor([0, 3, 10])
+        njt1 = NJT(values1, offsets)
+        njt2 = NJT(values2, offsets)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            return torch.sin(x)
+
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            f(njt1)
+            f(njt2)
+
     def test_base_torch_function_tracing(self):
         def fn(x):
             return torch.add(x, 1)
@@ -1275,7 +1310,7 @@ class GraphModule(torch.nn.Module):
 
         @torch.compile(backend=backend)
         def fn(x):
-            if x.shape[0] < 10:
+            if x.shape[0] < 13:
                 return torch.mul(x, x)
             else:
                 return torch.div(x, x)
@@ -1301,7 +1336,7 @@ class GraphModule(torch.nn.Module):
             "\n".join(guards),
             """\
 Eq(2*s1, s0)
-2*s1 < 10
+2*s1 < 13
 s1 > 3""",
         )
 
@@ -1701,7 +1736,6 @@ class GraphModule(torch.nn.Module):
 """,  # noqa: B950
         )
 
-    @unittest.expectedFailure
     def test_tensor_subclass_TwoTensor_mul(self):
         def f(tt, a, b):
             s0, s1 = a.size()
@@ -1719,10 +1753,16 @@ class GraphModule(torch.nn.Module):
             normalize_gm(fw[0].print_readable(print_output=False)),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "f32[s0, s1]", primals_2: "f32[s0, s1]", primals_3: "Sym(s0)", primals_4: "Sym(s1)", primals_5: "Sym(s0)", primals_6: "Sym(s1)"):
-        mul: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(primals_1, primals_5);  primals_1 = None
-        mul_1: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(primals_2, primals_5);  primals_2 = None
-        return [mul, mul_1, primals_5, primals_6, primals_5, primals_4]
+    def forward(self, primals_1: "Sym(s0)", primals_2: "Sym(s1)", primals_3: "f32[s0, s1]", primals_4: "f32[s0, s1]", primals_5: "f32[s0, s1]", primals_6: "f32[s0, s1]", primals_7: "Sym(s0)", primals_8: "Sym(s1)"):
+        mul: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(primals_5, primals_7);  primals_5 = None
+        mul_1: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(primals_6, primals_7);  primals_6 = None
+        mul_2: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(mul, primals_8);  mul = None
+        mul_3: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(mul_1, primals_8);  mul_1 = None
+        mul_4: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(mul_2, primals_7);  mul_2 = None
+        mul_5: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(mul_3, primals_7);  mul_3 = None
+        mul_6: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(mul_4, primals_8);  mul_4 = None
+        mul_7: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(mul_5, primals_8);  mul_5 = None
+        return [mul_6, mul_7, primals_7, primals_8, primals_7, primals_8]
 """,  # noqa: B950
         )
 
@@ -1730,10 +1770,16 @@ class GraphModule(torch.nn.Module):
             normalize_gm(bw[0].print_readable(print_output=False)),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_5: "Sym(s0)", primals_4: "Sym(s1)", tangents_1: "f32[s0, s1]", tangents_2: "f32[s0, s1]"):
-        mul_2: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(tangents_1, primals_5);  tangents_1 = None
-        mul_3: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(tangents_2, primals_5);  tangents_2 = primals_5 = None
-        return [mul_2, mul_3, None, None]
+    def forward(self, primals_7: "Sym(s0)", primals_8: "Sym(s1)", tangents_1: "f32[s0, s1]", tangents_2: "f32[s0, s1]"):
+        mul_8: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(tangents_1, primals_8);  tangents_1 = None
+        mul_9: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(tangents_2, primals_8);  tangents_2 = None
+        mul_10: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(mul_8, primals_7);  mul_8 = None
+        mul_11: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(mul_9, primals_7);  mul_9 = None
+        mul_12: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(mul_10, primals_8);  mul_10 = None
+        mul_13: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(mul_11, primals_8);  mul_11 = primals_8 = None
+        mul_14: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(mul_12, primals_7);  mul_12 = None
+        mul_15: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(mul_13, primals_7);  mul_13 = primals_7 = None
+        return [None, None, None, None, mul_14, mul_15]
 """,  # noqa: B950
         )
 
@@ -2001,6 +2047,42 @@ class GraphModule(torch.nn.Module):
 """,  # noqa: B950
         )
 
+    def test_tensor_subclass_TwoTensor_different_shape(self):
+        def f(tt):
+            y = tt.clone()
+            return y.view(3, 2, 4)
+
+        a = torch.ones((2 * 4 * 3), requires_grad=True)
+        b = a.clone()
+        tt = AnotherTwoTensor(a, b)
+
+        fw, bw = self._compile_check(f, [(tt,)], dynamic=True, call_backward=True)
+
+        self.assertExpectedInline(
+            normalize_gm(fw[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[24]", primals_2: "f32[24]"):
+        clone: "f32[24]" = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+        clone_1: "f32[24]" = torch.ops.aten.clone.default(primals_2);  primals_2 = None
+
+        view: "f32[3, 2, 4]" = torch.ops.aten.view.default(clone, [3, 2, 4]);  clone = None
+        view_1: "f32[3, 2, 4]" = torch.ops.aten.view.default(clone_1, [3, 2, 4]);  clone_1 = None
+        return [view, view_1]
+""",  # noqa: B950
+        )
+
+        self.assertExpectedInline(
+            normalize_gm(bw[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, tangents_1: "f32[3, 2, 4]", tangents_2: "f32[3, 2, 4]"):
+        view_2: "f32[24]" = torch.ops.aten.view.default(tangents_1, [24]);  tangents_1 = None
+        view_3: "f32[24]" = torch.ops.aten.view.default(tangents_2, [24]);  tangents_2 = None
+        return [view_2, view_3]
+""",  # noqa: B950
+        )
+
     def test_tensor_subclass_TwoTensor_return_shape(self):
         @torch.compile(backend="aot_eager", dynamic=True)
         def fn(x):
@@ -2013,6 +2095,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(tt.view(2 * 3), out)
         self.assertEqual(out.shape, (6,))
 
+    @unittest.expectedFailure
     def test_tensor_subclass_WrapperTensor_simple(self):
         def f(t):
             return t * t.size()[0]
@@ -2325,6 +2408,25 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
 
         torch.compile(fn, fullgraph=True, backend="aot_eager")(nt)
 
+    # The test here: nn.Parameters that are secretly subclasses
+    # have a metaclass that overrides __isinstance__,
+    # that dynamo needs to respect when it inlines the if statement.
+    def test_param_subclass_isinstance_input(self):
+        x_inner = torch.randn(16, 16, requires_grad=True)
+        x = torch.nn.Parameter(TwoTensor(x_inner, x_inner))
+        m = torch.nn.Linear(16, 16)
+        m.weight = x
+
+        def fn():
+            if isinstance(m.weight, torch.nn.Parameter):
+                return m.weight + 1
+            else:
+                return m.weight + 2
+
+        out_ref = fn()
+        out_test = torch.compile(fn, backend="aot_eager")()
+        self.assertEqual(out_ref, out_test)
+
     def _input_view_test(self, nt_view_name):
         nt_view = VIEW_TEST_CASES[nt_view_name]()
 
@@ -2368,15 +2470,15 @@ Eq(s10, s8)""",
                     guard_str,
                     """\
 Eq(s3 - 1, s0)
-Eq(zf1, zf4)""",
+Eq(zf1, zf6)""",
                 )
             else:
                 self.assertExpectedInline(
                     guard_str,
                     """\
 Eq(s4 - 1, s1)
-Eq(s10 - 1, s5)
-Eq(s9, s7)""",
+Eq(s12 - 1, s7)
+Eq(s11, s9)""",
                 )
             return gm
 

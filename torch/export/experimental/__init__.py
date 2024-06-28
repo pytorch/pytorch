@@ -1,24 +1,12 @@
 import copy
 
 import torch
-from torch.export import ExportedProgram
-from torch.export.exported_program import (
-    _decompose_exported_program,
-    _get_updated_range_constraints,
-)
-from torch.export.graph_signature import (
-    ConstantArgument,
-    ExportGraphSignature,
-    InputKind,
-    InputSpec,
-    OutputKind,
-    OutputSpec,
-    SymIntArgument,
-    TensorArgument,
-)
+from torch.export.exported_program import _decompose_exported_program
 
 
-def _remove_detach_pass(gm: torch.fx.GraphModule, sig: ExportGraphSignature) -> None:
+def _remove_detach_pass(
+    gm: torch.fx.GraphModule, sig: torch.export.graph_signature.ExportGraphSignature
+) -> None:
     with gm._set_replace_hook(sig.get_replace_hook()):
         for node in list(reversed(gm.graph.nodes)):
             if node.op != "call_function":
@@ -35,15 +23,18 @@ def _remove_detach_pass(gm: torch.fx.GraphModule, sig: ExportGraphSignature) -> 
 
 
 def _export_forward_backward(
-    ep: ExportedProgram, joint_loss_index: int = 0
-) -> ExportedProgram:
+    ep: torch.export.ExportedProgram, joint_loss_index: int = 0
+) -> torch.export.ExportedProgram:
     """
     WARNING: This API is highly unstable and will be subject to change in the future.
     """
     from torch._decomp import core_aten_decompositions
 
     ep = _decompose_exported_program(
-        ep, decomp_table=core_aten_decompositions(), joint_loss_index=joint_loss_index
+        ep,
+        decomp_table=core_aten_decompositions(),
+        _preserve_ops=(),  # type: ignore[arg-type]
+        joint_loss_index=joint_loss_index,
     )
     gm = copy.deepcopy(ep.graph_module)
     new_graph_signature = copy.deepcopy(ep.graph_signature)
