@@ -1,4 +1,6 @@
 # mypy: disallow-untyped-defs
+from __future__ import annotations
+
 import collections
 import dataclasses
 import functools
@@ -68,7 +70,7 @@ class BaseSchedulerNode:
     read_writes: dependencies.ReadWrites
     unmet_dependencies: Set[Dep]
 
-    def __init__(self, scheduler: "Scheduler", node: ir.Buffer) -> None:
+    def __init__(self, scheduler: Scheduler, node: ir.Buffer) -> None:
         self.scheduler: Scheduler = scheduler
         self.node: Optional[ir.Buffer] = node
         self.users: List[NodeUser] = []
@@ -137,7 +139,7 @@ class BaseSchedulerNode:
     def add_fake_dep(self, dep: Dep) -> None:
         self.set_read_writes(self.read_writes.with_read(dep))
 
-    def set_users(self, users: List["NodeUser"]) -> None:
+    def set_users(self, users: List[NodeUser]) -> None:
         # deduplicate
         result: Dict[int, NodeUser] = {}
         for use in users:
@@ -211,7 +213,7 @@ class BaseSchedulerNode:
         self.set_read_writes(self.read_writes.remove_reads(to_remove))
 
     def prune_redundant_deps(
-        self, name_to_fused_node: Dict[str, "BaseSchedulerNode"]
+        self, name_to_fused_node: Dict[str, BaseSchedulerNode]
     ) -> None:
         _prune_redundant_deps(self, name_to_fused_node)
 
@@ -225,7 +227,7 @@ class BaseSchedulerNode:
     def get_names(self) -> Set[str]:
         return {self.get_name()}
 
-    def get_nodes(self) -> Sequence["BaseSchedulerNode"]:
+    def get_nodes(self) -> Sequence[BaseSchedulerNode]:
         return [self]
 
     def get_device(self) -> torch.device:
@@ -740,7 +742,7 @@ class NopKernelSchedulerNode(BaseSchedulerNode):
 class SchedulerNode(BaseSchedulerNode):
     def __init__(
         self,
-        scheduler: "Scheduler",
+        scheduler: Scheduler,
         node: Union[ir.ComputedBuffer, ir.TemplateBuffer],
     ) -> None:
         super().__init__(scheduler, node)
@@ -905,7 +907,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
     @classmethod
     def fuse(
         cls, node1: BaseSchedulerNode, node2: BaseSchedulerNode
-    ) -> "FusedSchedulerNode":
+    ) -> FusedSchedulerNode:
         assert node1.scheduler is node2.scheduler
         assert isinstance(node1, (SchedulerNode, FusedSchedulerNode))
         assert isinstance(node2, (SchedulerNode, FusedSchedulerNode))
@@ -913,7 +915,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
         return cls(node1.scheduler, nodes)
 
     def __init__(
-        self, scheduler: "Scheduler", snodes: Sequence[BaseSchedulerNode]
+        self, scheduler: Scheduler, snodes: Sequence[BaseSchedulerNode]
     ) -> None:
         # NB: No need to call super().__init__() because we don't need to re-use any of its logic.
         self.snodes = snodes
@@ -1035,7 +1037,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
     def add_fake_dep(self, name: Dep) -> None:
         raise NotImplementedError
 
-    def set_users(self, users: List["NodeUser"]) -> None:
+    def set_users(self, users: List[NodeUser]) -> None:
         raise NotImplementedError
 
     def get_aliases(self) -> Sequence[str]:
@@ -1145,7 +1147,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
     @classmethod
     def fuse(
         cls, producer: BaseSchedulerNode, consumer: BaseSchedulerNode
-    ) -> "ForeachKernelSchedulerNode":
+    ) -> ForeachKernelSchedulerNode:
         assert producer.is_foreach() or consumer.is_foreach()
         prev_node_1 = None
         prev_node_2 = None
@@ -1190,7 +1192,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
 
     def __init__(
         self,
-        scheduler: "Scheduler",
+        scheduler: Scheduler,
         nodes: Sequence[BaseSchedulerNode],
         prev_node_1: Optional[BaseSchedulerNode] = None,
         prev_node_2: Optional[BaseSchedulerNode] = None,
@@ -1352,7 +1354,7 @@ class NodeUser:
     def get_name(self) -> str:
         return self.node.get_name()
 
-    def merge(self, other: "NodeUser") -> "NodeUser":
+    def merge(self, other: NodeUser) -> NodeUser:
         assert self.node is other.node
         return NodeUser(
             self.node,
@@ -1547,7 +1549,7 @@ class Scheduler:
                 self.items.append(node_user)
                 self.membership.add(node_user)
 
-            def __add__(self, other: "DedupList[T]") -> "DedupList[T]":
+            def __add__(self, other: DedupList[T]) -> DedupList[T]:
                 new_membership = set.union(self.membership, other.membership)
                 new_items = self.items + [
                     x for x in other.items if x not in self.membership
@@ -1581,21 +1583,6 @@ class Scheduler:
             if n in self.mutation_renames:
                 return rename(self.mutation_renames[n])
             return n
-
-        def dep_closure(node_name: str) -> Set[str]:
-            reachable_names = {node_name}
-            node = self.name_to_node[node_name]
-            write_dep = next(iter(node.read_writes.writes))
-            for read_dep in node.read_writes.reads:
-                if (
-                    read_dep.name in self.name_to_node
-                    and isinstance(read_dep, dependencies.MemoryDep)
-                    and isinstance(write_dep, dependencies.MemoryDep)
-                    and read_dep.index == write_dep.index
-                    and read_dep.size == write_dep.size
-                ):
-                    reachable_names.update(dep_closure(read_dep.name))
-            return reachable_names
 
         def add_user(
             used_by_name: str,
@@ -1663,13 +1650,12 @@ class Scheduler:
                 node.add_fake_dep(StarDep(alt_name, mode=node_mode))
                 for other_node in name_to_users[alt_name].items:
                     # this node must run after all prior readers
+                    if other_node.get_name() == node.get_name():
+                        continue
+
                     other_name = rename(other_node.get_name())
-                    known_dep_node_names = dep_closure(node.get_name())
-                    if other_name not in known_dep_node_names:
-                        # If this node already directly or indirectly depends on other_node,
-                        # we don't need to insert an extra dep.
-                        node.add_fake_dep(WeakDep(other_name))
-                        add_user(other_name, node, is_weak=True)
+                    node.add_fake_dep(WeakDep(other_name, mutating_buf=node.get_name()))
+                    add_user(other_name, node, is_weak=True)
 
             # add normal non-mutation dependencies
             for read in node.read_writes.reads:
@@ -1765,27 +1751,27 @@ class Scheduler:
         """
         Remove any nodes without users
         """
-        again = True  # repeat until a fixed point
-        while again:
-            updated_nodes = []
-            for node in self.nodes:
+        # self.nodes is in topological order, so by iterating in reverse order
+        # we have visited (and potentially removed) all users before visiting a
+        # given node.
+        updated_nodes = []
+        for node in reversed(self.nodes):
 
-                def can_eliminate_user(user: NodeUser) -> bool:
-                    return user.is_weak or user.get_name() in V.graph.removed_buffers
+            def can_eliminate_user(user: NodeUser) -> bool:
+                return user.is_weak or user.get_name() in V.graph.removed_buffers
 
-                can_eliminate = not node.has_side_effects() and all(
-                    can_eliminate_user(u) for u in node.users
-                )
+            can_eliminate = not node.has_side_effects() and all(
+                can_eliminate_user(u) for u in node.users
+            )
 
-                if not can_eliminate:
-                    updated_nodes.append(node)
-                else:
-                    # dead code
-                    log.debug("removed dead node: %s", node.get_name())
-                    V.graph.removed_buffers.add(node.get_name())
+            if not can_eliminate:
+                updated_nodes.append(node)
+            else:
+                # dead code
+                log.debug("removed dead node: %s", node.get_name())
+                V.graph.removed_buffers.add(node.get_name())
 
-            again = len(self.nodes) > len(updated_nodes)
-            self.nodes = updated_nodes
+        self.nodes = list(reversed(updated_nodes))
 
         # Prune any WeakDeps no longer needed
         for node in self.nodes:
@@ -2386,9 +2372,6 @@ class Scheduler:
         We can fuse them if all the reads of node2 either match
         corresponding writes in node1, or are written by nodes that can
         be scheduled before the fusion of node1 and node2.
-
-        We also disable fusion of a write subsequent to a read if the reads
-        and writes do not align.
         """
         node1_names = node1.get_names()
         computed_deps = set()
@@ -2400,6 +2383,10 @@ class Scheduler:
             for rd in node2.unmet_dependencies:
                 if self.fusable_read_and_write(rd, cd):
                     computed_deps.add(rd)
+
+        for dep in node2.unmet_dependencies:
+            if isinstance(dep, WeakDep) and self.fusable_weak_dep(dep, node1, node2):
+                computed_deps.add(dep)
 
         remaining_deps = {dep.name for dep in node2.unmet_dependencies - computed_deps}
         if remaining_deps & node1_names:
@@ -2414,21 +2401,38 @@ class Scheduler:
                 why("intermediate nodes between node1 & node2")
                 return False
 
-        # similar to can_inplace, if we are going to fuse a write subsequent to a read
-        # require that the indexing and size is the same
-        for write in node2.read_writes.writes:
-            if not isinstance(write, MemoryDep):
-                continue
-            for read in node1.read_writes.reads:
-                if write.name != self.mutation_renames.get(read.name, read.name):
-                    continue
-
-                # bail on StarDep
-                if not self.fusable_read_and_write(read, write):
-                    why("fusing a write into a read with different indexing formula")
-                    return False
-
         return True
+
+    def fusable_weak_dep(
+        self, weak_dep: WeakDep, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        # A weak dep can be fused if and only if the fused operation acts inplace
+        # on the buffer being mutated. i.e. the same index is being read then mutated
+        mutating_writes = [
+            write
+            for write in node2.read_writes.writes
+            if write.name == weak_dep.mutating_buf
+        ]
+        if len(mutating_writes) != 1:
+            return False
+        write = mutating_writes[0]
+        assert isinstance(write, MemoryDep)
+
+        if free_symbol_is_type(write.index, SymT.TMP):
+            return False
+
+        relevant_reads = (
+            read
+            for read in node1.read_writes.reads
+            if self.mutation_renames.get(read.name, read.name) == weak_dep.mutating_buf
+        )
+        return all(
+            isinstance(read, MemoryDep)
+            and not free_symbol_is_type(read.index, SymT.TMP)
+            and read.index == write.index
+            and read.size == write.size
+            for read in relevant_reads
+        )
 
     # StarDep doesn't match MemoryDep, different indices don't match
     # However, broadcasting sometimes strips dimensions, and if that's the case
@@ -2657,7 +2661,7 @@ class Scheduler:
         node.codegen(V.graph.wrapper_code)
         self.free_buffers()
 
-    def create_backend(self, device: torch.device) -> "BaseScheduling":
+    def create_backend(self, device: torch.device) -> BaseScheduling:
         assert (
             not is_gpu(device.type) or device.index is not None
         ), f"{device} should have been normalized in lowering"
@@ -2682,7 +2686,7 @@ class Scheduler:
 
         return device_scheduling(self)
 
-    def get_backend(self, device: torch.device) -> "BaseScheduling":
+    def get_backend(self, device: torch.device) -> BaseScheduling:
         if device not in self.backends:
             self.backends[device] = self.create_backend(device)
         return self.backends[device]

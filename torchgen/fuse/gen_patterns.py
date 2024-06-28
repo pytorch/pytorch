@@ -4,6 +4,7 @@ import os
 from torch._inductor import pattern_matcher
 from torch._inductor.fx_passes import joint_graph
 
+
 if __name__ == "__main__":
     # Start by deleting all the existing patterns.
     for file in os.listdir(pattern_matcher.SERIALIZED_PATTERN_PATH):

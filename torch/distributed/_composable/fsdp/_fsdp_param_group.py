@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
-
+import logging
 from typing import Any, cast, Dict, List, NamedTuple, Optional, Set, Tuple
 
 import torch
@@ -11,6 +11,7 @@ from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicat
 from torch.profiler import record_function
 from torch.utils._pytree import tree_flatten, tree_unflatten
 from torch.utils.hooks import RemovableHandle
+
 from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_collectives import (
     AllGatherResult,
@@ -20,6 +21,9 @@ from ._fsdp_collectives import (
 )
 from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo, TrainingState
 from ._fsdp_param import FSDPParam, ParamModuleInfo, ShardedState
+
+
+logger = logging.getLogger("torch.distributed._composable.fsdp")
 
 _ModuleToHandleDict = Dict[nn.Module, RemovableHandle]  # for state dict
 
@@ -262,6 +266,8 @@ class FSDPParamGroup:
     def pre_forward(
         self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+        if not ca.compiled_autograd_enabled:
+            logger.debug("%s", self._with_fqn("FSDP::pre_forward"))
         with record_function(self._with_fqn("FSDP::pre_forward")):
             self._training_state = TrainingState.FORWARD
             self.unshard()
@@ -270,6 +276,8 @@ class FSDPParamGroup:
             return args, kwargs
 
     def post_forward(self, module: nn.Module, input: Any, output: Any):
+        if not ca.compiled_autograd_enabled:
+            logger.debug("%s", self._with_fqn("FSDP::post_forward"))
         with record_function(self._with_fqn("FSDP::post_forward")):
             self.reshard()
             self._record_post_forward()
@@ -283,16 +291,21 @@ class FSDPParamGroup:
         self.comm_ctx.post_forward_order.append(self)
         self._post_forward_indices.append(post_forward_index)
 
-    def pre_backward(self, *unused: Any):
+    def pre_backward(self, default_prefetch: bool, *unused: Any):
         if self._training_state == TrainingState.PRE_BACKWARD:
             return
+        if not ca.compiled_autograd_enabled:
+            logger.debug("%s", self._with_fqn("FSDP::pre_backward"))
         with record_function(self._with_fqn("FSDP::pre_backward")):
             self._training_state = TrainingState.PRE_BACKWARD
             self.unshard()  # no-op if prefetched
             self.wait_for_unshard()
-            self._prefetch_unshard()
+            if default_prefetch:
+                self._backward_prefetch()
 
     def post_backward(self, *unused: Any):
+        if not ca.compiled_autograd_enabled:
+            logger.debug("%s", self._with_fqn("FSDP::post_backward"))
         self._training_state = TrainingState.POST_BACKWARD
         with record_function(self._with_fqn("FSDP::post_backward_accumulate")):
             for fsdp_param in self.fsdp_params:
@@ -348,7 +361,7 @@ class FSDPParamGroup:
                 fsdp_param.grad_offload_event = None
         self._post_forward_indices.clear()
 
-    def _prefetch_unshard(self):
+    def _backward_prefetch(self) -> None:
         if self._training_state == TrainingState.PRE_BACKWARD:
             if not self._post_forward_indices:
                 # Can be cleared if running multiple `backward`s
@@ -360,11 +373,23 @@ class FSDPParamGroup:
             # have mistargeted prefetches if not all modules used in forward
             # are used in this backward
             target_fsdp_param_group = self.comm_ctx.post_forward_order[target_index]
-            target_fqn = target_fsdp_param_group._module_fqn
-            with record_function(
-                self._with_fqn(f"FSDP::backward_prefetch for {target_fqn}")
-            ), target_fsdp_param_group.use_training_state(TrainingState.PRE_BACKWARD):
-                target_fsdp_param_group.unshard()
+            self._prefetch_unshard(target_fsdp_param_group, "backward")
+
+    @staticmethod
+    def _prefetch_unshard(
+        target_fsdp_param_group: "FSDPParamGroup", pass_type: str
+    ) -> None:
+        if pass_type == "backward":
+            training_state = TrainingState.PRE_BACKWARD
+        elif pass_type == "forward":
+            training_state = TrainingState.FORWARD
+        else:
+            raise ValueError(f"Unknown pass type: {pass_type}")
+        target_fqn = target_fsdp_param_group._module_fqn
+        with record_function(
+            f"FSDP::{pass_type}_prefetch for {target_fqn}"
+        ), target_fsdp_param_group.use_training_state(training_state):
+            target_fsdp_param_group.unshard()
 
     # Utilities #
     def _to_sharded(self):
