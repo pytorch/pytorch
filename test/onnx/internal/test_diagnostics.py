@@ -16,7 +16,6 @@ from torch.onnx._internal.diagnostics.infra import formatter, sarif
 from torch.onnx._internal.fx import diagnostics as fx_diagnostics
 from torch.testing._internal import common_utils, logging_utils
 
-
 if typing.TYPE_CHECKING:
     import unittest
 
