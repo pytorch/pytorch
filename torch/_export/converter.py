@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import logging
 import operator
+import warnings
 
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
@@ -39,8 +40,19 @@ def inplace_optimize_sym_size_div(gm: torch.fx.GraphModule):
     replaced_patterns = subgraph_rewriter.replace_pattern(gm, pattern, replacement)
 
 
+def is_valid_for_codegen(name):
+    if len(name) == 0:
+        return False
+    if name[0].isdigit():
+        return False
+    return True
+
+
 def normalize_name(name: str) -> str:
-    return name.replace(".", "_")
+    name = name.replace(".", "_")
+    if is_valid_for_codegen(name):
+        return name
+    return f"rename_{name}"
 
 
 def ir_name_to_func_name(name: str) -> str:
@@ -269,6 +281,7 @@ class TS2FXGraphConverter:
 
     def get_fx_value(self, value: torch._C.Value):
         value_name = value.debugName()
+
         if value_name in self.name_to_node:
             input_node = self.name_to_node[value_name]
             return input_node
@@ -338,6 +351,8 @@ class TS2FXGraphConverter:
                     self.fx_graph, name, self.is_top_level_graph()
                 )
             else:
+                if not is_valid_for_codegen(normalized_name):
+                    normalized_name = f"input_{normalized_name}"
                 self.input_specs.append(
                     InputSpec(
                         InputKind.USER_INPUT,
@@ -575,19 +590,30 @@ class TS2FXGraphConverter:
         assert len(inputs) == 1
         predicate = self.get_fx_value(inputs[0])
 
-        # Get union of inputs to blocks
-        arguments = set()
-        for block in node.blocks():
-            block_args = set()
+        def _identify_inputs_as_arguments(entry):
+            """
+            Identify inputs from the innermost sub-block. This is needed
+            for nested sub-blocks when the input is hidden in the nested sub-block.
+            E.g., example IR of input is hidden in the nested sub-block.
+            Graph[x.1]
+            %1 = ...
+                Block[]
+                    Block[x.1]
+                        %2 = x.1 ...
+            """
+            arguments: Set[str] = set()
+            for block in entry.blocks():
+                for block_node in block.nodes():
+                    for block_node_in in block_node.inputs():
+                        if block_node_in.debugName() in self.name_to_node:
+                            arguments.add(block_node_in.debugName())
+                    arguments = arguments.union(
+                        _identify_inputs_as_arguments(block_node)
+                    )
+            return arguments
 
-            # TODO: block.inputs(), not sure what theyre used for
-
-            for block_node in block.nodes():
-                for block_node_in in block_node.inputs():
-                    if block_node_in.debugName() in self.name_to_node:
-                        block_args.add(block_node_in.debugName())
-
-            arguments.update(block_args)
+        # Find inputs.
+        arguments = _identify_inputs_as_arguments(node)
 
         # Lift parameters as inputs.
         for block in node.blocks():
@@ -753,16 +779,14 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionaly
         self.sample_args = sample_args
         self.sample_kwargs = sample_kwargs
 
-        self.name_to_param_map: Dict[str, torch.Tensor] = (
-            dict(ts_model.named_parameters())
-            if isinstance(ts_model, torch.jit.ScriptModule)
-            else dict()
-        )
-        self.name_to_buffer_map: Dict[str, torch.Tensor] = (
-            dict(ts_model.named_buffers())
-            if isinstance(ts_model, torch.jit.ScriptModule)
-            else dict()
-        )
+        self.name_to_param_map: Dict[str, torch.Tensor] = {}
+        self.name_to_buffer_map: Dict[str, torch.Tensor] = {}
+        if not isinstance(self.ts_model, torch._C.ScriptFunction):
+            for k, tensor in self.ts_model.state_dict().items():  # type: ignore[union-attr]
+                if tensor.requires_grad:
+                    self.name_to_param_map[k] = tensor
+                else:
+                    self.name_to_buffer_map[k] = tensor
 
     def convert(self) -> ExportedProgram:
         blocks_to_lifted_attrs = get_block_to_lifted_attrs(self.ts_graph)
@@ -775,6 +799,19 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionaly
         )
         gm = graph_converter.convert()
         ep = self.retrace_as_exported_program(gm, graph_converter.tensor_constants)
+        log.info(f"{ep}")  # noqa: G004
+
+        # Post-processing step to ensure ExportedProgram has the same state_dict as
+        # the original TorchScript model. Throw warnings for additionally populated
+        # state_dict entries.
+        if not isinstance(self.ts_model, torch._C.ScriptFunction):
+            for k, tensor in self.ts_model.state_dict().items():  # type: ignore[union-attr]
+                if k not in ep.state_dict:
+                    warnings.warn(
+                        f"Manually populate {k} into state_dict ExportedProgram, but it is never used by the ExportedProgram."
+                    )
+                    ep.state_dict[k] = tensor
+
         return ep
 
     def retrace_as_exported_program(
