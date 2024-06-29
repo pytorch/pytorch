@@ -2450,7 +2450,7 @@ class ShapeEnv:
         specialize_zero_one=True,
         # When True, assume input sizes which have the same size are
         # symbolically equal.
-        duck_shape=None,
+        duck_shape: Optional[bool] = None,
         # For debugging
         co_fields=None,
         # When True, whenever safe, we will generate a deferred runtime assert
