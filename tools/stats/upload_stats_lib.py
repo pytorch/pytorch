@@ -5,7 +5,7 @@ import os
 import zipfile
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import boto3  # type: ignore[import]
 import requests
@@ -13,6 +13,7 @@ import rockset  # type: ignore[import]
 
 PYTORCH_REPO = "https://api.github.com/repos/pytorch/pytorch"
 S3_RESOURCE = boto3.resource("s3")
+DYNAMO_RESOURCE = boto3.resource("dynamodb")
 
 # NB: In CI, a flaky test is usually retried 3 times, then the test file would be rerun
 # 2 more times
@@ -137,6 +138,21 @@ def upload_to_rockset(
         index += BATCH_SIZE
 
     print("Done!")
+
+
+def upload_to_dynamodb(
+    dynamodb_table: str,
+    repo: str,
+    docs: List[Any],
+    generate_partition_key: Optional[Callable[[str, Dict[str, Any]], str]],
+) -> None:
+    print(f"Writing {len(docs)} documents to DynamoDB {dynamodb_table}")
+    # https://boto3.amazonaws.com/v1/documentation/api/latest/guide/dynamodb.html#batch-writing
+    with DYNAMO_RESOURCE.Table(dynamodb_table).batch_writer() as batch:
+        for doc in docs:
+            if generate_partition_key:
+                doc["dynamoKey"] = generate_partition_key(repo, doc)
+            batch.put_item(Item=doc)
 
 
 def upload_to_s3(
