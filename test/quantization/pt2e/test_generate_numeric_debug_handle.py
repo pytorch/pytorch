@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: quantization"]
 
 import unittest
+from typing import Dict
 
 import torch
 from torch._export import capture_pre_autograd_graph
@@ -20,39 +21,14 @@ from torch.fx.passes.utils.matcher_with_name_node_map_utils import (
 )
 from torch.testing._internal.common_quantization import TestHelperModules
 from torch.testing._internal.common_utils import IS_WINDOWS, TestCase
+from collections import Counter
 
+def _extract_debug_handles(model) -> Dict[torch.fx.Node, int]:
+    debug_handle_map: Dict[torch.fx.Node, int] = {}
 
-def _extract_conv2d_pattern_debug_handle_map(model):
-    """Returns a debug_handle_map from input/weight/bias/output to numeric_debug_handle
-    for conv2d pattern, extracted from the model
-    """
-
-    def conv_pattern(input, weight, bias):
-        output = torch.nn.functional.conv2d(input, weight, bias)
-        return output, {
-            "output": output,
-        }
-
-    conv_pattern_example_inputs = (
-        torch.randn(1, 1, 3, 3),  # input
-        torch.randn(1, 1, 1, 1),  # weight
-        torch.randn(1),  # bias
-    )
-    conv_gm = capture_pre_autograd_graph(
-        _WrapperModule(conv_pattern), conv_pattern_example_inputs
-    )
-    conv_pm = SubgraphMatcherWithNameNodeMap(conv_gm)
-    matches = conv_pm.match(model.graph)
-    assert len(matches) == 1, "Expecting to have one match"
-    match = matches[0]
-    name_node_map = match.name_node_map
-
-    debug_handle_map = {}
-    names = ["output"]
-    for name in names:
-        node = name_node_map[name]
+    for node in model.graph.nodes:
         if NUMERIC_DEBUG_HANDLE_KEY in node.meta:
-            debug_handle_map[name] = node.meta[NUMERIC_DEBUG_HANDLE_KEY]
+            debug_handle_map[node] = node.meta[NUMERIC_DEBUG_HANDLE_KEY]
 
     return debug_handle_map
 
@@ -78,15 +54,25 @@ class TestGenerateNumericDebugHandle(TestCase):
         m = capture_pre_autograd_graph(m, example_inputs)
         generate_numeric_debug_handle(m)
 
-        debug_handle_map_ref = _extract_conv2d_pattern_debug_handle_map(m)
-
         quantizer = XNNPACKQuantizer().set_global(
             get_symmetric_quantization_config(is_per_channel=False)
         )
         m = prepare_pt2e(m, quantizer)
-        debug_handle_map = _extract_conv2d_pattern_debug_handle_map(m)
-        self.assertEqual(debug_handle_map, debug_handle_map_ref)
+        debug_handle_map = _extract_debug_handles(m)
+        res_counter = Counter(debug_handle_map.values())
+        repeated_debug_handle_ids = [2, 3, 6]
+        # 3 ids were repeated because we copy over the id from node to its output observer
+        # torch.ops.aten.conv2d.default, torch.ops.aten.squeeze.dim, torch.ops.aten.conv1d.default
+        for dh_id in repeated_debug_handle_ids:
+            self.assertEqual(res_counter[dh_id], 2)
+
+
         m(*example_inputs)
         m = convert_pt2e(m)
-        debug_handle_map = _extract_conv2d_pattern_debug_handle_map(m)
-        self.assertEqual(debug_handle_map, debug_handle_map_ref)
+        debug_handle_map = _extract_debug_handles(m)
+        res_counter = Counter(debug_handle_map.values())
+        # same set of ids where repeated, because we copy over the id from observer/fake_quant to
+        # dequantize node
+        repeated_debug_handle_ids = [2, 3, 6]
+        for dh_id in repeated_debug_handle_ids:
+            self.assertEqual(res_counter[dh_id], 2)

@@ -367,9 +367,6 @@ def _maybe_insert_input_observers_for_node(
         new_arg = _maybe_insert_input_observer_for_arg_or_kwarg(
             node, arg, qconfig, model, named_modules, obs_or_fq_map, is_qat,
         )
-        # propagate numeric debug handle from original node to observer/fake_quant node
-        if isinstance(node, Node) and isinstance(new_arg, Node) and NUMERIC_DEBUG_HANDLE_KEY in node.meta:
-            new_arg.meta[NUMERIC_DEBUG_HANDLE_KEY] = node.meta[NUMERIC_DEBUG_HANDLE_KEY]
         new_args.append(new_arg)
 
     # Clone has a memory_format kwarg, zeros_like has a pin_memory kwarg, and
@@ -395,7 +392,11 @@ def _maybe_insert_output_observer_for_node(
 ) -> Optional[Node]:
     if node in obs_or_fq_map:
         output_act_obs_or_fq = obs_or_fq_map[node]
-        return _insert_obs_or_fq(node, output_act_obs_or_fq, model, named_modules, graph)
+        new_output = _insert_obs_or_fq(node, output_act_obs_or_fq, model, named_modules, graph)
+        # propagate numeric debug handle from original node to observer/fake_quant node
+        if isinstance(node, Node) and isinstance(new_output, Node) and NUMERIC_DEBUG_HANDLE_KEY in node.meta:
+            new_output.meta[NUMERIC_DEBUG_HANDLE_KEY] = node.meta[NUMERIC_DEBUG_HANDLE_KEY]
+        return new_output
     return None
 
 def _maybe_insert_input_and_output_observers_for_node(

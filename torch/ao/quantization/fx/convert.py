@@ -76,6 +76,7 @@ from .lower_to_fbgemm import lower_to_fbgemm
 # importing the lib so that the quantized_decomposed ops are registered
 from ._decomposed import quantized_decomposed_lib  # noqa: F401
 import operator
+from torch.ao.quantization.pt2e.generate_numeric_debug_handle import NUMERIC_DEBUG_HANDLE_KEY
 
 __all__ = [
     "convert",
@@ -225,6 +226,9 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
                 return dequantized_node if x is node else x
 
             node.replace_all_uses_with(dequantized_node)
+            # propagate numeric debug handle from observer/fake_quant node to dequantize node
+            if NUMERIC_DEBUG_HANDLE_KEY in node.meta:
+                dequantized_node.meta[NUMERIC_DEBUG_HANDLE_KEY] = node.meta[NUMERIC_DEBUG_HANDLE_KEY]
             graph.erase_node(node)
     elif is_dynamic:
 
@@ -328,6 +332,9 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
                 return dequantized_node if x is node else x
 
             node.replace_all_uses_with(dequantized_node)
+            # propagate numeric debug handle from observer/fake_quant node to dequantize node
+            if NUMERIC_DEBUG_HANDLE_KEY in node.meta:
+                dequantized_node.meta[NUMERIC_DEBUG_HANDLE_KEY] = node.meta[NUMERIC_DEBUG_HANDLE_KEY]
             graph.erase_node(node)
     elif dtype == torch.float16:
         raise NotImplementedError("decomposed to float16 op not implemented yet")
