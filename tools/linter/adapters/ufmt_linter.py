@@ -42,7 +42,6 @@ ISORT_WHITELIST = re.compile(
                     # torchgen/**
                     "torchgen/**",
                     # test/**
-                    "test/**",
                     # test/[a-c]*/**
                     "test/[a-c]*/**",
                     # test/d*/**

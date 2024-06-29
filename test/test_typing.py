@@ -5,7 +5,6 @@ import itertools
 import os
 import re
 import shutil
-
 import unittest
 from collections import defaultdict
 from threading import Lock
@@ -17,6 +16,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
 )
+
 
 try:
     from mypy import api

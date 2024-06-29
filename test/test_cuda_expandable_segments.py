@@ -4,8 +4,8 @@
 import os
 
 import torch
-
 from torch.testing._internal.common_cuda import IS_JETSON
+
 
 if torch.cuda.is_available() and not IS_JETSON:
     torch.cuda.memory._set_allocator_settings("expandable_segments:True")

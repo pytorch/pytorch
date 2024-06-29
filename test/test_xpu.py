@@ -26,6 +26,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils.checkpoint import checkpoint_sequential
 
+
 if not TEST_XPU:
     print("XPU not available, skipping tests", file=sys.stderr)
     TestCase = NoTest  # noqa: F811

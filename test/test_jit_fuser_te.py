@@ -12,6 +12,7 @@ import torch
 import torch.nn.functional as F
 from torch.testing import FileCheck
 
+
 # these needs to be set before `common_utils`
 # infers `GRAPH_EXECUTOR`.
 # this file **requires** these settings
@@ -22,11 +23,9 @@ torch._C._jit_set_profiling_executor(True)
 torch._C._get_graph_executor_optimize(True)
 
 from itertools import combinations, permutations, product
-
 from textwrap import dedent
 
 from jit.test_fuser_common import TestFuserCommon  # noqa: F401
-
 from test_jit import (
     backward_graph,
     get_lstm_inputs,
@@ -44,7 +43,6 @@ from torch.testing._internal.common_device_type import (
     ops,
 )
 from torch.testing._internal.common_jit import JitCommonTestCase
-
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     enable_profiling_mode_for_profiling_tests,
@@ -70,6 +68,7 @@ from torch.testing._internal.jit_utils import (
     TensorExprTestOptions,
     warmup_backward,
 )
+
 
 FUSION_GROUP = "prim::TensorExprGroup"
 LLVM_ENABLED = torch._C._llvm_enabled()
