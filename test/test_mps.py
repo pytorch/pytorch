@@ -1591,6 +1591,13 @@ class TestMPS(TestCaseMPS):
             a = torch.tensor(v, dtype=dtype, device="mps") * b
             self.compare_with_numpy(torch.exp, np.exp, a)
 
+    def test_conv_raises_error(self, device='mps', dtype=torch.float):
+        conv = nn.Conv1d(1, 65537, 3, padding=1).to('mps')
+
+        x = torch.ones([1, 1, 3])
+        with self.assertRaises(NotImplementedError):
+            y = conv(x.to("mps"))
+
     def test_triu_inf(self, device="mps", dtype=torch.float):
         for diag in [-1, 0, 1]:
             mask = torch.full((3, 6, 6), float("-inf"))
