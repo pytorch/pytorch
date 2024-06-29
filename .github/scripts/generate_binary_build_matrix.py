@@ -13,7 +13,6 @@ architectures:
 import os
 from typing import Dict, List, Optional, Tuple
 
-
 CUDA_ARCHES = ["11.8", "12.1", "12.4"]
 
 
@@ -86,7 +85,7 @@ def get_nccl_submodule_version() -> str:
     from pathlib import Path
 
     nccl_version_mk = (
-        Path(__file__).absolute().parents[2]
+        Path(__file__).absolute().parent.parent.parent
         / "third_party"
         / "nccl"
         / "nccl"
