@@ -533,6 +533,7 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
   return false;
 #elif defined(CUDNN_VERSION) && CUDNN_VERSION < 90000
   //if (debug) {
+  fail on windows?
   TORCH_WARN(CUDNN_VERSION, "cuDNN version too old to use Flash Attention! (< v9.0.0)");
   //}
   return false;
