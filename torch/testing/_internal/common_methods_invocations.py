@@ -21058,6 +21058,7 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         allow_cow_input_materialize_forward=[0],
+        allow_cow_input_materialize_backward=[0, 'output grad 0'],
         skips=(
             # Skip due to NotImplementedError for MPS device.
             DecorateInfo(unittest.expectedFailure, 'TestConsistency'),
