@@ -30,12 +30,15 @@ logger = logging.getLogger(__name__)
 class _ComputationType(Enum):
     FORWARD = 1
     BACKWARD = 2
+    WEIGHT = 3
 
     def __str__(self):
-        if self == _ComputationType.FORWARD:
-            return "F"
-        else:
-            return "B"
+        str_map = {
+            _ComputationType.FORWARD: "F",
+            _ComputationType.BACKWARD: "B",
+            _ComputationType.WEIGHT: "W",
+        }
+        return str_map[self]
 
 
 class _Action(NamedTuple):
@@ -600,6 +603,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
 
         # This will be set during init of derived schedules
         self.pipeline_order: Dict[int, List[Optional[_Action]]] = {}
+        self.use_full_backward = True
 
         # TODO: later replace this with lazy shape inference during forward
         # Prepare forward send/recv infrastructure for stage
@@ -691,8 +695,19 @@ class PipelineScheduleMulti(_PipelineSchedule):
                     # perform backward computation
                     stage = stage_index_to_stage[stage_index]
                     loss = self._maybe_get_loss(stage, mb_index)
-                    stage.backward_one_chunk(mb_index, loss=loss)
+                    stage.backward_one_chunk(
+                        mb_index, loss=loss, full_backward=self.use_full_backward
+                    )
                     ops.extend(stage.get_bwd_send_ops(mb_index))
+                elif computation_type == _ComputationType.WEIGHT:
+                    # perform weight update
+                    if self.use_full_backward:
+                        raise ValueError(
+                            f"We detected a weight update in the pipeline schedule, but \
+                            {self.use_full_backward=}"
+                        )
+                    stage = stage_index_to_stage[stage_index]
+                    stage.backward_weight_one_chunk(mb_index)
                 else:
                     raise ValueError(f"Unknown computation type {computation_type}")
 
@@ -713,8 +728,11 @@ class PipelineScheduleMulti(_PipelineSchedule):
                             # however that is not necessarily true of get_fwd_recv_ops
                             stage = stage_index_to_stage[stage_index + 1]
                             ops.extend(stage.get_fwd_recv_ops(mb_index))
-                    elif computation_type == _ComputationType.BACKWARD:
-                        # Previous rank doing backward has no influence for the current rank forward recv
+                    elif (
+                        computation_type == _ComputationType.BACKWARD
+                        or computation_type == _ComputationType.WEIGHT
+                    ):
+                        # Previous rank doing backward or weight update has no influence for the current rank forward recv
                         pass
                     else:
                         raise ValueError(f"Unknown computation type {computation_type}")
@@ -727,8 +745,11 @@ class PipelineScheduleMulti(_PipelineSchedule):
                 if next_rank_action is not None:
                     computation_type, mb_index, stage_index = next_rank_action
                     # Only handle receives for the backwards from a next rank
-                    if computation_type == _ComputationType.FORWARD:
-                        # Next rank doing forward has no influence for the current rank backward recv
+                    if (
+                        computation_type == _ComputationType.FORWARD
+                        or computation_type == _ComputationType.WEIGHT
+                    ):
+                        # Next rank doing forward or weight update has no influence for the current rank backward recv
                         pass
                     elif computation_type == _ComputationType.BACKWARD:
                         # If not the first stage, then receive bwd gradients
