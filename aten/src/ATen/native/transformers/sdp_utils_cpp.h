@@ -407,7 +407,18 @@ inline bool check_batch_size_and_num_heads_dense(sdp_params const& params, bool 
   auto k_num_heads = params.key.sym_size(1);
   auto v_num_heads = params.value.sym_size(1);
 
-  if (!(same_batch_size)){
+  bool same_num_heads =
+      q_num_heads == k_num_heads && q_num_heads == v_num_heads;
+
+  bool is_nested_input = params.query.is_nested() || params.key.is_nested() || params.value.is_nested();
+
+  if(supports_gqa && same_batch_size && !is_nested_input){
+    std::cout << "Inside the gqa check" << std::endl;
+    return check_grouped_query_attention<supports_gqa>(params, debug);
+  }
+
+  if (!(same_batch_size && same_num_heads)){
+    std::cout << "Inside the batch size check" << std::endl;
     if (debug) {
       TORCH_WARN(
           "For dense inputs, both fused kernels require query, key and value to have the same batch_size. ",
@@ -421,26 +432,7 @@ inline bool check_batch_size_and_num_heads_dense(sdp_params const& params, bool 
     }
     return false;
   }
-  if(supports_gqa)
-  {
-    return check_grouped_query_attention<supports_gqa>(params, debug);
-  }
-  // If grouped query attention is not supported, ensure query and key have the
-  // same number of heads
-  else if (!supports_gqa && q_num_heads != k_num_heads) {
-    if (debug) {
-      TORCH_WARN(
-          "MemoryEfficient attention requires query, key and value to have the same num_heads but got: ",
-          "Query.sizes(): ",
-          params.query.sym_size(-3),
-          ", Key sizes(): ",
-          params.key.sym_size(-3),
-          ", Value sizes(): ",
-          params.value.sym_size(-3),
-          " instead.");
-    }
-    return false;
-  }
+  std::cout << "Returning true" << std::endl;
   // If all checks pass, return true
   return true;
 }
