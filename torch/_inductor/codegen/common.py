@@ -153,6 +153,7 @@ class BackendFeature(Enum):
     SORT = auto()
     TUPLE_REDUCTION = auto()
     PREFER_STORE_LOOP_ORDER = auto()
+    TRITON_TEMPLATES = auto()
 
 
 def get_backend_features(device: Union[torch.device, str]):
@@ -210,9 +211,10 @@ def init_backend_registration():
 
     if get_scheduling_for_device("cuda") is None:
         # CUDACombinedScheduling combines Triton and CUDA C++ scheduling for CUDA devices via delegation
+        cuda_backends = {"triton": CUDACombinedScheduling, "halide": HalideScheduling}
         register_backend_for_device(
             "cuda",
-            CUDACombinedScheduling,
+            lambda *args, **kwargs: cuda_backends[config.cuda_backend](*args, **kwargs),
             WrapperCodeGen,
             CppWrapperCuda,
         )
@@ -1341,7 +1343,6 @@ class KernelArgs:
             arg_defs.append("ws_ptr")
             call_args.append("workspace")
             precompile_args.append(self.workspace_arg)
-
         return arg_defs, call_args, precompile_args, arg_types
 
     def aliases(self):

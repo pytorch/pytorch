@@ -1152,7 +1152,10 @@ class HalideKernel(SIMDKernel):
 
         if isinstance(value, tuple):
             assert reduction_type == "welford_combine"
-            raise NotImplementedError("welford_combine")
+            self.cse.reduction_cache[
+                cache_key
+            ] = result_tuple = self.welford_combine_impl(*value)
+            return result_tuple
 
         assert isinstance(value, HalideCSEVariable) and value.used_dims is not None
         reduction_vars = {*self.reduction_renames}
@@ -1205,6 +1208,44 @@ class HalideKernel(SIMDKernel):
 
         self.cse.reduction_cache[cache_key] = result_var
         return result_var
+
+    def welford_combine_impl(self, mean, m2, weight):
+        assert isinstance(mean, HalideCSEVariable) and mean.used_dims is not None
+        assert isinstance(m2, HalideCSEVariable) and m2.used_dims is not None
+        assert isinstance(weight, HalideCSEVariable) and weight.used_dims is not None
+        used_dims = {*mean.used_dims, *m2.used_dims, *weight.used_dims} or {
+            *self.halide_vars
+        }
+        used_dims -= {*self.reduction_renames}
+        result_var = self.newfunc(self.sort_used_dims(used_dims))
+        default = [f"hl.cast({x.name}.type(), 0)" for x in (mean, m2, weight)]
+        pfx = result_var.name
+        self.body.writeline(f"{result_var} = hl.Tuple([{', '.join(default)}])")
+        self.body.writeline(f"{pfx}_mean_1 = {result_var}[0]")
+        self.body.writeline(f"{pfx}_m2_1 = {result_var}[1]")
+        self.body.writeline(f"{pfx}_weight_1 = {result_var}[2]")
+        self.body.writeline(f"{pfx}_mean_2 = {mean.subs_str(self.reduction_renames)}")
+        self.body.writeline(f"{pfx}_m2_2 = {m2.subs_str(self.reduction_renames)}")
+        self.body.writeline(
+            f"{pfx}_weight_2 = {weight.subs_str(self.reduction_renames)}"
+        )
+        self.body.writeline(f"{pfx}_delta = {pfx}_mean_2 - {pfx}_mean_1")
+        self.body.writeline(f"{pfx}_new_weight = {pfx}_weight_1 + {pfx}_weight_2")
+        self.body.writeline(
+            f"{pfx}_w2_over_w = hl.select({pfx}_new_weight == 0.0, 0.0, {pfx}_weight_2 / {pfx}_new_weight)"
+        )
+        update = [
+            f"{pfx}_mean_1 + {pfx}_delta * {pfx}_w2_over_w",
+            f"{pfx}_m2_1 + {pfx}_m2_2 + {pfx}_delta * {pfx}_delta * {pfx}_weight_1 * {pfx}_w2_over_w",
+            f"{pfx}_new_weight",
+        ]
+        self.body.writeline(f"{result_var} = hl.Tuple([{', '.join(update)}])")
+
+        unpacked = []
+        for i in range(3):
+            unpacked.append(self.newfunc(result_var.used_dims))
+            self.body.writeline(f"{unpacked[-1]} = {result_var}[{i}]")
+        return tuple(unpacked)
 
     def genfunc(
         self, line, used_dims, *, bounds=ValueRanges.unknown()
@@ -1410,7 +1451,9 @@ class HalideKernel(SIMDKernel):
                 dims = self.buffer_dimensions[arg.name]
                 range_hints = []
                 for i, dim in enumerate(dims):
-                    hint = V.graph.sizevars.size_hint(dim.size, fallback=1)
+                    hint = self._autoscheduler_workarounds(
+                        V.graph.sizevars.size_hint(dim.size, fallback=1), dims
+                    )
                     range_hints.append(f"hl.Range(0, {hint})")
                     if "out" not in arg.name:
                         code.writeline(f"{arg.name}.dim({i}).set_min(0)")
@@ -1450,6 +1493,17 @@ class HalideKernel(SIMDKernel):
             """
         )
         return code.getvalue()
+
+    @staticmethod
+    def _autoscheduler_workarounds(n, dims):
+        if (
+            len(dims) == 1
+            and config.halide.scheduler_cuda == "Anderson2021"
+            and V.graph.scheduler.get_current_device_or_throw().type == "cuda"
+        ):
+            # workaround https://github.com/halide/Halide/issues/8246
+            n = max(2, n)
+        return n
 
     def call_kernel(self, name: str, node=None):
         """Codegen a call to this kernel"""
