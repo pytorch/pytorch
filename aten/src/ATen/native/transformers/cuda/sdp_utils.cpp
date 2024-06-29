@@ -539,6 +539,7 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
 #endif
   // Define gate functions that determine if a flash kernel can be ran
   // Replace with std::to_array when we migrate to c++20
+  debug = true;
   constexpr auto general_constraints =
       array_of<bool (*)(sdp_params const&, bool)>(
           check_runtime_disabled_cudnn,
