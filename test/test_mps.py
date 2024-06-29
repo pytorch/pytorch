@@ -93,6 +93,7 @@ def mps_ops_grad_modifier(ops):
         'cdist': [torch.float32],
         'masked.scatter': [torch.float16, torch.float32],
         'index_fill': [torch.float16, torch.float32],  # missing `aten::_unique`.
+        'linalg.lu_factor': [torch.float16, torch.float32],  # missing `aten::lu_unpack`.
         'aminmax': [torch.float32, torch.float16],
 
         # Correctness issues
@@ -699,7 +700,6 @@ def mps_ops_modifier(ops):
         'linalg.lstsq': None,
         'linalg.lstsqgrad_oriented': None,
         'linalg.lu': None,
-        'linalg.lu_factor': None,
         'linalg.lu_factor_ex': None,
         'linalg.lu_solve': None,
         'linalg.matrix_norm': [torch.float32],
