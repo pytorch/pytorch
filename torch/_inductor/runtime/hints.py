@@ -139,13 +139,15 @@ class HalideInputSpec(typing.NamedTuple):
     alias_of: Optional[str] = None
 
     def bindings_type(self):
-        if self.ctype == "half*":
-            return "void*"  # half not defined
+        if self.ctype in ("half*", "bfloat16*"):
+            return "uint16_t*"  # half not defined
         return self.ctype
 
     def halide_type(self):
         if self.ctype == "half*":
             return "halide_type_t(halide_type_float, 16)"  # half not defined
+        if self.ctype == "bfloat16*":
+            return "halide_type_t(halide_type_bfloat, 16)"  # half not defined
         return f"halide_type_of<{self.ctype.replace('*', '')}>()"
 
     def is_scalar(self):
