@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Any, Literal
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 from typing_extensions import TypeAlias
 
 from torch._C import device, dtype, layout
@@ -55,10 +55,10 @@ class _EventType(Enum):
 class _ExperimentalConfig:
     def __init__(
         self,
-        profiler_metrics: list[str] = ...,
+        profiler_metrics: List[str] = ...,
         profiler_measure_per_kernel: bool = ...,
         verbose: bool = ...,
-        performance_events: list[str] = ...,
+        performance_events: List[str] = ...,
         enable_cuda_sync_events: bool = ...,
     ) -> None: ...
 
@@ -77,23 +77,31 @@ class ProfilerConfig:
 class _ProfilerEvent:
     start_tid: int
     start_time_ns: int
-    children: list[_ProfilerEvent]
+    children: List[_ProfilerEvent]
 
     # TODO(robieta): remove in favor of `self.typed`
-    extra_fields: _ExtraFields_TorchOp | _ExtraFields_Backend | _ExtraFields_Allocation | _ExtraFields_OutOfMemory | _ExtraFields_PyCall | _ExtraFields_PyCCall | _ExtraFields_Kineto
+    extra_fields: Union[
+        _ExtraFields_TorchOp,
+        _ExtraFields_Backend,
+        _ExtraFields_Allocation,
+        _ExtraFields_OutOfMemory,
+        _ExtraFields_PyCall,
+        _ExtraFields_PyCCall,
+        _ExtraFields_Kineto,
+    ]
 
     @property
     def typed(
         self,
-    ) -> (
-        tuple[Literal[_EventType.TorchOp], _ExtraFields_TorchOp]
-        | tuple[Literal[_EventType.Backend], _ExtraFields_Backend]
-        | tuple[Literal[_EventType.Allocation], _ExtraFields_Allocation]
-        | tuple[Literal[_EventType.OutOfMemory], _ExtraFields_OutOfMemory]
-        | tuple[Literal[_EventType.PyCall], _ExtraFields_PyCall]
-        | tuple[Literal[_EventType.PyCCall], _ExtraFields_PyCCall]
-        | tuple[Literal[_EventType.Kineto], _ExtraFields_Kineto]
-    ): ...
+    ) -> Union[
+        Tuple[Literal[_EventType.TorchOp], _ExtraFields_TorchOp],
+        Tuple[Literal[_EventType.Backend], _ExtraFields_Backend],
+        Tuple[Literal[_EventType.Allocation], _ExtraFields_Allocation],
+        Tuple[Literal[_EventType.OutOfMemory], _ExtraFields_OutOfMemory],
+        Tuple[Literal[_EventType.PyCall], _ExtraFields_PyCall],
+        Tuple[Literal[_EventType.PyCCall], _ExtraFields_PyCCall],
+        Tuple[Literal[_EventType.Kineto], _ExtraFields_Kineto],
+    ]: ...
     @property
     def name(self) -> str: ...
     @property
@@ -101,7 +109,7 @@ class _ProfilerEvent:
     @property
     def id(self) -> int: ...
     @property
-    def parent(self) -> _ProfilerEvent | None: ...
+    def parent(self) -> Optional[_ProfilerEvent]: ...
     @property
     def correlation_id(self) -> int: ...
     @property
@@ -110,12 +118,12 @@ class _ProfilerEvent:
     def duration_time_ns(self) -> int: ...
 
 class _TensorMetadata:
-    impl_ptr: int | None
-    storage_data_ptr: int | None
-    id: int | None
+    impl_ptr: Optional[int]
+    storage_data_ptr: Optional[int]
+    id: Optional[int]
 
     @property
-    def allocation_id(self) -> int | None: ...
+    def allocation_id(self) -> Optional[int]: ...
     @property
     def layout(self) -> layout: ...
     @property
@@ -123,12 +131,12 @@ class _TensorMetadata:
     @property
     def dtype(self) -> dtype: ...
     @property
-    def sizes(self) -> list[int]: ...
+    def sizes(self) -> List[int]: ...
     @property
-    def strides(self) -> list[int]: ...
+    def strides(self) -> List[int]: ...
 
-Scalar: TypeAlias = int | float | bool | complex
-Input: TypeAlias = _TensorMetadata | list[_TensorMetadata] | Scalar | None
+Scalar: TypeAlias = Union[int, float, bool, complex]
+Input: TypeAlias = Optional[Union[_TensorMetadata, List[_TensorMetadata], Scalar]]
 
 class _ExtraFields_TorchOp:
     name: str
@@ -136,7 +144,7 @@ class _ExtraFields_TorchOp:
     allow_tf32_cublas: bool
 
     @property
-    def inputs(self) -> list[Input]: ...
+    def inputs(self) -> List[Input]: ...
     @property
     def scope(self) -> RecordScope: ...
 
@@ -144,13 +152,13 @@ class _ExtraFields_Backend: ...
 
 class _ExtraFields_Allocation:
     ptr: int
-    id: int | None
+    id: Optional[int]
     alloc_size: int
     total_allocated: int
     total_reserved: int
 
     @property
-    def allocation_id(self) -> int | None: ...
+    def allocation_id(self) -> Optional[int]: ...
     @property
     def device(self) -> device: ...
 
@@ -173,22 +181,22 @@ class _NNModuleInfo:
     @property
     def parameters(
         self,
-    ) -> list[tuple[str, _TensorMetadata, _TensorMetadata | None]]: ...
+    ) -> List[Tuple[str, _TensorMetadata, Optional[_TensorMetadata]]]: ...
 
 class _OptimizerInfo:
     @property
     def parameters(
         self,
-    ) -> list[
-        tuple[
+    ) -> List[
+        Tuple[
             # Parameter
             _TensorMetadata,
             #
             # Gradient (if present during optimizer.step())
-            _TensorMetadata | None,
+            Optional[_TensorMetadata],
             #
             # Optimizer state for Parameter as (name, tensor) pairs
-            list[tuple[str, _TensorMetadata]],
+            List[Tuple[str, _TensorMetadata]],
         ]
     ]: ...
 
@@ -202,9 +210,9 @@ class _ExtraFields_PyCall:
     @property
     def caller(self) -> _PyFrameState: ...
     @property
-    def module(self) -> _NNModuleInfo | None: ...
+    def module(self) -> Optional[_NNModuleInfo]: ...
     @property
-    def optimizer(self) -> _OptimizerInfo | None: ...
+    def optimizer(self) -> Optional[_OptimizerInfo]: ...
 
 class _ExtraFields_Kineto: ...
 
@@ -222,15 +230,15 @@ def gather_traceback(python: bool, script: bool, cpp: bool) -> CapturedTraceback
 
 # The Dict has name, filename, line
 def symbolize_tracebacks(
-    to_symbolize: list[CapturedTraceback],
-) -> list[list[dict[str, str]]]: ...
+    to_symbolize: List[CapturedTraceback],
+) -> List[List[Dict[str, str]]]: ...
 
 class _RecordFunctionFast:
     def __init__(
         self,
         name: str,
-        input_values: list | tuple | None = None,
-        keyword_values: dict | None = None,
+        input_values: Optional[Union[list, tuple]] = None,
+        keyword_values: Optional[dict] = None,
     ) -> None: ...
     def __enter__(self) -> None: ...
-    def __exit__(self, *args: Any) -> None: ...
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None: ...
