@@ -239,7 +239,7 @@ def foreach_reduce(
     all_reduce_stream: torch.cuda.Stream,
     all_reduce_grads: bool,
     partial_reduce_output: Optional[torch.Tensor],  # only used for HSDP
-) -> Tuple[torch.cuda.Event, Optional[torch.Tensor]]:
+) -> Tuple[torch.Tensor, torch.cuda.Event, torch.cuda.Event, Optional[torch.Tensor]]:
     """
     ``unsharded_grads`` owns the references to the gradients computed by
     autograd, so clearing the list frees the gradients.
@@ -262,19 +262,15 @@ def foreach_reduce(
     )
     reduce_scatter_input_numel = sum(s.numel() for s in padded_unsharded_sizes)
     reduce_scatter_output_numel = reduce_scatter_input_numel // world_size
+    reduce_scatter_input = torch.empty(
+        (reduce_scatter_input_numel,), dtype=reduce_dtype, device=device
+    )
+    foreach_reduce_scatter_copy_in(unsharded_grads, reduce_scatter_input, world_size)
     current_stream = torch.cuda.current_stream()
+    # Only after the copy-in finishes can we free the gradients
+    unsharded_grads.clear()
     reduce_scatter_stream.wait_stream(current_stream)
     with torch.cuda.stream(reduce_scatter_stream):
-        reduce_scatter_input = torch.empty(
-            (reduce_scatter_input_numel,), dtype=reduce_dtype, device=device
-        )
-        foreach_reduce_scatter_copy_in(
-            unsharded_grads, reduce_scatter_input, world_size
-        )
-        # Only after the copy-in finishes can we free the gradients, which were
-        # computed in the default stream
-        current_stream.wait_stream(reduce_scatter_stream)
-        unsharded_grads.clear()
         reduce_output = reduce_scatter_input.new_empty((reduce_scatter_output_numel,))
         _div_if_needed(reduce_scatter_input, predivide_factor)
         dist.reduce_scatter_tensor(
@@ -283,6 +279,7 @@ def foreach_reduce(
             group=reduce_scatter_group,
             op=ReduceOp.AVG if predivide_factor is None else ReduceOp.SUM,
         )
+        reduce_scatter_event = reduce_scatter_stream.record_event()
         post_reduce_stream = reduce_scatter_stream
         if all_reduce_group is not None:  # HSDP
             # Accumulations must run in the reduce-scatter stream
@@ -291,7 +288,12 @@ def foreach_reduce(
                     partial_reduce_output += reduce_output
                 else:
                     partial_reduce_output = reduce_output
-                return post_reduce_stream.record_event(), partial_reduce_output
+                return (
+                    reduce_scatter_input,
+                    reduce_scatter_event,
+                    post_reduce_stream.record_event(),
+                    partial_reduce_output,
+                )
             if partial_reduce_output is not None:
                 reduce_output += partial_reduce_output
             post_reduce_stream = all_reduce_stream
@@ -353,7 +355,7 @@ def foreach_reduce(
     # stream (for optimizer). To ensure its memory is not reused for later
     # RSs, we do not need extra synchronization since the sharded parameters
     # hold refs through the end of backward.
-    return post_reduce_event, None
+    return reduce_scatter_input, reduce_scatter_event, post_reduce_event, None
 
 
 def foreach_reduce_scatter_copy_in(
