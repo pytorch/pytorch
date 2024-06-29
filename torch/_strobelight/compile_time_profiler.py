@@ -2,12 +2,12 @@
 
 import logging
 import os
-
 from datetime import datetime
 from socket import gethostname
 from typing import Any, Optional
 
 from torch._strobelight.cli_function_profiler import StrobelightCLIFunctionProfiler
+
 
 logger = logging.getLogger("strobelight_compile_time_profiler")
 

@@ -26,7 +26,6 @@ import torch
 import torch._custom_op
 import torch._logging
 from torch._C._functorch import is_functorch_wrapped_tensor, is_legacy_batchedtensor
-
 from torch._guards import Source
 from torch._ops import OpOverload
 from torch._prims_common import suggest_memory_format
@@ -49,6 +48,7 @@ from torch.utils._python_dispatch import (
 from torch.utils._pytree import PyTree, tree_map, tree_map_
 from torch.utils._stats import count
 from torch.utils._traceback import CapturedTraceback
+
 
 if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -2105,10 +2105,10 @@ _DISPATCH_HANDLE_DIRECTLY = ordered_set(
 )
 
 from torch._subclasses.fake_impls import (  # noqa: F401
-    _device_not_kwarg_ops,  # noqa: F401
-    _is_tensor_constructor,  # noqa: F401
-    _like_tensor_constructors,  # noqa: F401
-    contains_tensor_types,  # noqa: F401
+    _device_not_kwarg_ops,
+    _is_tensor_constructor,
+    _like_tensor_constructors,
+    contains_tensor_types,
     get_fast_op_impls,
     has_meta,
     op_implementations_checks,

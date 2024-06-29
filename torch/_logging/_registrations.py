@@ -1,6 +1,7 @@
 # flake8: noqa: B950
 from ._internal import register_artifact, register_log
 
+
 DYNAMIC = [
     "torch.fx.experimental.symbolic_shapes",
     "torch.fx.experimental.sym_node",

@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from .fake_impl import FakeImplHolder
 
+
 __all__ = ["SimpleLibraryRegistry", "SimpleOperatorEntry", "singleton"]
 
 
