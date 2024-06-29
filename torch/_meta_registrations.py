@@ -6100,18 +6100,8 @@ def meta_polygamma(n: int, self: Tensor) -> Tensor:
 
 @register_meta(aten.channel_shuffle.default)
 def meta_channel_shuffle(input, groups):
-    # Assume the input shape is (*, C, H, W), where * represents any number of leading dimensions
-    *leading_dims, C, H, W = input.size()
-    # The output shape is the same as the input
-    return torch.empty(
-        *leading_dims,
-        C,
-        H,
-        W,
-        dtype=input.dtype,
-        layout=input.layout,
-        device=input.device,
-    )
+    # The output shape is the same as the input, but is contiguous
+    return input.new_empty(input.size())
 
 
 @register_meta(aten._local_scalar_dense)

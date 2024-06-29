@@ -277,20 +277,19 @@ def channel_shuffle(input: TensorLikeType, groups: int) -> TensorLikeType:
         groups > 0,
         lambda: f"Number of groups to divide channels in must be positive. Value of groups:{groups}",
     )
-    batches = input.shape[:-3]
-    C = input.shape[-3]
-    Cg = C // groups
-    H, W = input.shape[-2:]
-    g_dim = len(batches)
+    n = input.shape[0]
+    c = input.shape[1]
+    cg = c // groups
+    dhw = input.shape[2:]
 
     if input.numel() == 0 or (
-        device_hint(input) == "cuda" and (groups == 1 or groups == C)
+        device_hint(input) == "cuda" and (groups == 1 or groups == c)
     ):
         return input.view(input.shape)
 
-    result = torch.empty_like(input)
-    result.view(*batches, Cg, groups, H, W).copy_(
-        input.view(*batches, groups, Cg, H, W).transpose(g_dim, g_dim + 1)
+    result = input.new_empty(input.shape)
+    result.view(n, cg, groups, *dhw).copy_(
+        input.reshape(n, groups, cg, *dhw).transpose(1, 2)
     )
     return result
 
