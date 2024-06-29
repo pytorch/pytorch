@@ -29,6 +29,7 @@ from torch.onnx._internal.fx import (
     type_utils as fx_type_utils,
 )
 
+
 if TYPE_CHECKING:
     import onnxscript  # type: ignore[import]
 

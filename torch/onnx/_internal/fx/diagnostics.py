@@ -2,10 +2,8 @@
 from __future__ import annotations
 
 import dataclasses
-
 import functools
 import logging
-
 from typing import Any, Optional
 
 import onnxscript  # type: ignore[import]
@@ -17,6 +15,7 @@ from torch.onnx._internal import diagnostics
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.diagnostics.infra import decorator, formatter
 from torch.onnx._internal.fx import registration, type_utils as fx_type_utils
+
 
 # NOTE: The following limits are for the number of items to display in diagnostics for
 # a list, tuple or dict. The limit is picked such that common useful scenarios such as

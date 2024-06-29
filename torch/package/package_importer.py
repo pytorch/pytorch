@@ -38,6 +38,7 @@ from ._package_unpickler import PackageUnpickler
 from .file_structure_representation import _create_directory_from_file_list, Directory
 from .importer import Importer
 
+
 if TYPE_CHECKING:
     from .glob_group import GlobPattern
 

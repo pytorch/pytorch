@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import contextlib
-
 from typing import Callable, Mapping, Optional
 
 import torch

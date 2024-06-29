@@ -17,6 +17,7 @@ from typing import (
 from torch.onnx import _constants, errors
 from torch.onnx._internal import _beartype
 
+
 OpsetVersion = int
 
 

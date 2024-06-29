@@ -13,9 +13,7 @@ import unittest
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
-
 import torch._dynamo
-
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import clone_input
 from torch._library.custom_ops import CustomOpDef

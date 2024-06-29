@@ -74,7 +74,6 @@ ISORT_WHITELIST = re.compile(
                     # torch/[e-n]*/**
                     "torch/[e-n]*/**",
                     # torch/[o-z]*/**
-                    "torch/[o-z]*/**",
                 ],
             ),
         )

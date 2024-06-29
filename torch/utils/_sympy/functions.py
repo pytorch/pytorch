@@ -9,6 +9,7 @@ from sympy import S
 
 from .numbers import int_oo
 
+
 __all__ = [
     "FloorDiv",
     "ModularIndexing",

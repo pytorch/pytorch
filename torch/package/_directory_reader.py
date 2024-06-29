@@ -6,6 +6,7 @@ from typing import cast
 import torch
 from torch.types import Storage
 
+
 __serialization_id_record_name__ = ".data/serialization_id"
 
 

@@ -11,6 +11,7 @@ import typing
 import warnings
 from types import ModuleType
 
+
 try:
     import beartype as _beartype_lib  # type: ignore[import]
     from beartype import roar as _roar  # type: ignore[import]

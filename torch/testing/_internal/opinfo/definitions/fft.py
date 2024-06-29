@@ -7,7 +7,6 @@ from typing import List
 import numpy as np
 
 import torch
-
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import SM53OrLater
 from torch.testing._internal.common_device_type import precisionOverride
@@ -30,6 +29,7 @@ from torch.testing._internal.opinfo.refs import (
     _inherit_constructor_args,
     PythonRefInfo,
 )
+
 
 has_scipy_fft = False
 if TEST_SCIPY:
