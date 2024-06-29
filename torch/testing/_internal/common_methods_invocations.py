@@ -21053,18 +21053,15 @@ op_db: List[OpInfo] = [
     OpInfo(
         "nn.functional.channel_shuffle",
         sample_inputs_func=sample_inputs_channel_shuffle,
-        dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
-        backward_dtypes=integral_types_and(torch.bool),
+        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         supports_out=False,
-        supports_autograd=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         allow_cow_input_materialize_forward=[0],
+        allow_cow_input_materialize_backward=[0, 'output grad 0'],
         skips=(
             # Skip due to NotImplementedError for MPS device.
             DecorateInfo(unittest.expectedFailure, 'TestConsistency'),
-            # vmap: calling random operator not supported
-            DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
-            DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
-            DecorateInfo(unittest.expectedFailure, 'TestInductorOpInfo', 'test_comprehensive'),
             DecorateInfo(unittest.expectedFailure, 'TestDTensorOps', 'test_dtensor_op_db'),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
         ),
@@ -22389,6 +22386,11 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.celu",
         torch_opinfo_name="nn.functional.celu",
+        supports_out=True,
+    ),
+    PythonRefInfo(
+        "_refs.nn.functional.channel_shuffle",
+        torch_opinfo_name="nn.functional.channel_shuffle",
         supports_out=True,
     ),
     ElementwiseUnaryPythonRefInfo(

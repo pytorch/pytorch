@@ -2276,6 +2276,10 @@
   self: pixel_shuffle(grad, downscale_factor)
   result: auto_linear
 
+- name: channel_shuffle(Tensor self, SymInt groups) -> Tensor
+  self: channel_shuffle_symint(grad, grad.sym_sizes()[self.dim() - 3] / groups)
+  result: auto_linear
+
 - name: _adaptive_avg_pool2d(Tensor self, SymInt[2] output_size) -> Tensor
   self: _adaptive_avg_pool2d_backward(grad, self)
   result: auto_linear

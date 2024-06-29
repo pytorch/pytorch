@@ -374,6 +374,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "linalg_lu",
     "pixel_shuffle",
     "pixel_unshuffle",
+    "channel_shuffle",
     "linalg_lu_solve",
     "_linalg_slogdet",
     "_linalg_solve_ex",
