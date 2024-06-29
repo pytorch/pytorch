@@ -2,7 +2,7 @@
 
 import datetime
 from enum import Enum
-from typing import Callable
+from typing import Callable, Dict, List, Union
 
 class Aggregation(Enum):
     VALUE = ...
@@ -18,22 +18,22 @@ class Stat:
     def __init__(
         self,
         name: str,
-        aggregations: list[Aggregation],
+        aggregations: List[Aggregation],
         window_size: int,
         max_samples: int = -1,
     ) -> None: ...
     def add(self, v: float) -> None: ...
-    def get(self) -> dict[Aggregation, float]: ...
+    def get(self) -> Dict[Aggregation, float]: ...
 
 class Event:
     name: str
     timestamp: datetime.datetime
-    data: dict[str, int | float | bool | str]
+    data: Dict[str, Union[int, float, bool, str]]
     def __init__(
         self,
         name: str,
         timestamp: datetime.datetime,
-        data: dict[str, int | float | bool | str],
+        data: Dict[str, Union[int, float, bool, str]],
     ) -> None: ...
 
 def log_event(e: Event) -> None: ...
