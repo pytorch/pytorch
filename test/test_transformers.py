@@ -2542,13 +2542,13 @@ class TestSDPACudaOnly(NNTestCase):
         key = key.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
 
         if type != "nested" and PLATFORM_SUPPORTS_CUDNN_ATTENTION and SM90OrLater:
-            assert torch._fused_sdp_choice(query, key, value) == SDPBackend.CUDNN_ATTENTION.value
+            self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.CUDNN_ATTENTION.value)
         elif PLATFORM_SUPPORTS_FLASH_ATTENTION:
-            assert torch._fused_sdp_choice(query, key, value) == SDPBackend.FLASH_ATTENTION.value
+            self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.FLASH_ATTENTION.value)
         elif type != "nested" and PLATFORM_SUPPORTS_CUDNN_ATTENTION:  # e.g., we're on Windows
-            assert torch._fused_sdp_choice(query, key, value) == SDPBackend.CUDNN_ATTENTION.value
+            self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.CUDNN_ATTENTION.value)
         else:
-            assert torch._fused_sdp_choice(query, key, value) == SDPBackend.EFFICIENT_ATTENTION.value
+            self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.EFFICIENT_ATTENTION.value)
 
         # Change dtype to float32 so that efficient attention should get chosen
         make_tensor = partial(rand_sdpa_tensor, device=device, dtype=torch.float32, packed=True)
