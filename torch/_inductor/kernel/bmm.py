@@ -16,10 +16,9 @@ from ..utils import (
     use_triton_template,
 )
 from ..virtualized import V
-
 from .mm import _is_static_problem
-
 from .mm_common import addmm_epilogue, mm_args, mm_configs, mm_options
+
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten

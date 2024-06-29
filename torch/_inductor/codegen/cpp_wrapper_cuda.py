@@ -19,6 +19,7 @@ from .cpp_utils import DTYPE_TO_CPP
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .wrapper import SymbolicCallArg
 
+
 if TYPE_CHECKING:
     from ..graph import GraphLowering
 

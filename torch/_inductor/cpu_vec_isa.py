@@ -2,7 +2,6 @@ import dataclasses
 import functools
 import os
 import platform
-
 import re
 import subprocess
 import sys
@@ -10,6 +9,7 @@ from typing import Any, Callable, Dict, List
 
 import torch
 from torch._inductor import config
+
 
 _IS_WINDOWS = sys.platform == "win32"
 

@@ -15,6 +15,7 @@ from .exc import SubgraphLoweringException
 from .ops_handler import SimpleCSEHandler
 from .virtualized import ops, V, WrapperHandler
 
+
 T = TypeVar("T")
 
 

@@ -1,13 +1,13 @@
 # mypy: allow-untyped-defs
 import functools
-
 from typing import Dict, Set, Tuple
 
 import torch
 from torch._dynamo.utils import counters
-
 from torch._ops import OpOverload, OpOverloadPacket
+
 from ..pattern_matcher import fwd_only, register_replacement
+
 
 aten = torch.ops.aten
 

@@ -30,6 +30,7 @@ from .. import config
 from ..fx_utils import get_fake_args_kwargs
 from ..virtualized import V
 
+
 aten = torch.ops.aten
 logger: logging.Logger = logging.getLogger("comm_fusion")
 

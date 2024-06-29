@@ -12,6 +12,7 @@ import torch.optim as optim
 
 from .. import config
 
+
 logger: logging.Logger = logging.getLogger(__name__)
 
 MAIN_RANDOM_SEED = 1337

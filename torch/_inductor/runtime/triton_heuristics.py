@@ -19,7 +19,6 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 import torch
 
 from .coordinate_descent_tuner import CoordescTuner
-
 from .hints import (
     _NUM_THREADS_PER_WARP,
     AutotuneHint,
@@ -42,6 +41,7 @@ from .runtime_utils import (
     next_power_of_2,
     triton_config_to_hashable,
 )
+
 
 try:
     import triton

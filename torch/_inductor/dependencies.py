@@ -25,6 +25,7 @@ from .utils import (
 )
 from .virtualized import OpsHandler, ReductionType, V
 
+
 log = logging.getLogger(__name__)
 is_indirect = re.compile(r"indirect|tmp").search
 

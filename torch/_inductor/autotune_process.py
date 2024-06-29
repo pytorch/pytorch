@@ -28,7 +28,6 @@ import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch import multiprocessing
 from torch._dynamo.testing import rand_strided
-
 from torch._inductor import ir
 from torch._inductor.codecache import (
     CppCodeCache,
@@ -37,6 +36,7 @@ from torch._inductor.codecache import (
     get_hash,
     PyCodeCache,
 )
+
 
 if TYPE_CHECKING:
     from multiprocessing.process import BaseProcess
@@ -48,6 +48,7 @@ if TYPE_CHECKING:
 from . import config
 from .runtime.runtime_utils import do_bench_cpu, do_bench_gpu
 from .virtualized import V
+
 
 CUDA_VISIBLE_DEVICES = "CUDA_VISIBLE_DEVICES"
 EXIT_HANDLER_REGISTERED = False

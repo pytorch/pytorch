@@ -5,8 +5,8 @@ import logging
 from typing import Callable, Optional
 
 from .hints import TRITON_MAX_BLOCK
-
 from .runtime_utils import red_text, triton_config_to_hashable
+
 
 try:
     import triton
