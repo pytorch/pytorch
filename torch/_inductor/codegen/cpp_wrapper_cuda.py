@@ -78,15 +78,8 @@ class CppWrapperCuda(CppWrapperCpu):
         return super().generate(is_inference)
 
     def generate_user_defined_triton_kernel(
-        self, kernel_name, raw_args, grid, configs, triton_meta, constexprs
+        self, kernel_name, grid, configs, args, triton_meta, raw_args
     ):
-        # in C++ wrapper, we don't pass constexpr args, as they don't
-        # get added as parameters to the PTX code compiled from the
-        # user-defined Triton kernel (only non-constexpr args do)
-        raw_args = [
-            raw_arg for i, raw_arg in enumerate(raw_args) if i not in constexprs
-        ]
-
         assert len(grid) != 0
         if len(grid) == 1:
             grid_decision = grid[0]
@@ -100,7 +93,6 @@ class CppWrapperCuda(CppWrapperCpu):
                     break
             assert grid_decision is not None
 
-        args = [self.val_to_arg_str(v) for v in raw_args]
         arg_types = [
             arg.get_dtype() if hasattr(arg, "get_dtype") else type(arg)
             for arg in raw_args
@@ -275,17 +267,20 @@ class CppWrapperCuda(CppWrapperCpu):
         if grid_uses_symbolic_shapes:
             self.writeline(f"if ({grid_name}.is_non_zero()) {{")
         kernel_var_name = f"kernels.{name}" if V.graph.aot_mode else name
-        self.writeline(
-            "launchKernel({}, {}, {}, {}, {}, {}, {}, {});".format(
-                kernel_var_name,
-                f"{grid_name}.grid_x",
-                f"{grid_name}.grid_y",
-                f"{grid_name}.grid_z",
-                params["num_warps"],
-                params["shared_mem"],
-                kernel_args_var,
-                stream,
-            )
+        launch_kernel_call = """launchKernel({}, {}, {}, {}, {}, {}, {}, {});""".format(
+            kernel_var_name,
+            f"{grid_name}.grid_x",
+            f"{grid_name}.grid_y",
+            f"{grid_name}.grid_z",
+            params["num_warps"],
+            params["shared_mem"],
+            kernel_args_var,
+            stream,
         )
         if grid_uses_symbolic_shapes:
+            # TODO: Use codegen `do_indent()` to properly generate the indentation.
+            # This works in this case as there's only one `if` condition.
+            self.writeline("    " + launch_kernel_call)
             self.writeline("}")
+        else:
+            self.writeline(launch_kernel_call)

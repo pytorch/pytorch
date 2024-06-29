@@ -4809,13 +4809,25 @@ class UserDefinedTritonKernel(ExternKernel):
         new_name, triton_meta = wrapper.define_user_defined_triton_kernel(
             kernel, configs, self.kwargs
         )
-        raw_args = [
-            self.get_kwargs_value(k) for k in self.ordered_kwargs_for_cpp_kernel
-        ]
+
+        args = self.codegen_kwargs()
+        raw_args = list(self.kwargs.values())
+
+        if V.graph.cpp_wrapper:
+            # in C++ wrapper, we don't pass constexpr args, as they don't
+            # get added as parameters to the PTX code compiled from the
+            # user-defined Triton kernel (only non-constexpr args do)
+            args = [arg for i, arg in enumerate(args) if i not in kernel.constexprs]
+            # Unify raw_args computation between cpp wrapper and python wrapper
+            raw_args = []
+            for i, arg_name in enumerate(self.ordered_kwargs_for_cpp_kernel):
+                if i not in kernel.constexprs:
+                    raw_args.append(self.get_kwargs_value(arg_name))
+
         # Call to kernel
         self.codegen_comment(wrapper)
         wrapper.generate_user_defined_triton_kernel(
-            new_name, raw_args, self.grid, configs, triton_meta, kernel.constexprs
+            new_name, self.grid, configs, args, triton_meta, raw_args
         )
 
     def should_allocate(self):
@@ -5330,7 +5342,6 @@ has_c_shim = {
     aten._fft_c2c.default,
     aten._scaled_dot_product_efficient_attention.default,
     aten._scaled_dot_product_flash_attention.default,
-    aten._scaled_dot_product_cudnn_attention.default,
     aten._scaled_mm.default,
     aten.addmm.out,
     aten.bmm.out,
@@ -5442,6 +5453,9 @@ class FallbackKernel(ExternKernelAlloc):
             is_optional_tensor = isinstance(
                 info.type, torch.OptionalType
             ) and isinstance(info.type.getElementType(), torch.TensorType)
+            is_list_tensor = isinstance(info.type, torch.ListType) and isinstance(
+                info.type.getElementType(), torch.TensorType
+            )
             if is_optional_tensor or isinstance(info.type, torch.TensorType):
                 # PyTorch also accepts None and scalar types for args marked as "Tensor".
                 # We're not going to check all of them here.
@@ -5451,12 +5465,15 @@ class FallbackKernel(ExternKernelAlloc):
                 return
             if info.alias_info is None:
                 return
-            # can_auto_functionalize already filters out mutable List[Tensor].
-            # We can support this in the future, but this is very uncommon.
-            assert isinstance(info.type, torch.TensorType) or is_optional_tensor
-            self.alias_names.append(arg.get_name())
-            if info.alias_info.is_write:
-                mark_node_as_mutating(self, arg)
+            if is_list_tensor:
+                for tensor_arg in arg:
+                    self.alias_names.append(tensor_arg.get_name())
+                    mark_node_as_mutating(self, tensor_arg)
+            else:
+                assert isinstance(info.type, torch.TensorType) or is_optional_tensor
+                self.alias_names.append(arg.get_name())
+                if info.alias_info.is_write:
+                    mark_node_as_mutating(self, arg)
 
         for info, arg in torch._library.utils.zip_schema(schema, args, kwargs):
             handle_aliasing_and_mutation(info, arg)
