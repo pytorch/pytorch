@@ -22,7 +22,12 @@ from torch.testing._internal.common_device_type import (
     ops,
 )
 from torch.testing._internal.common_methods_invocations import op_db
-from torch.testing._internal.common_utils import *  # noqa: F403
+from torch.testing._internal.common_utils import (
+    first_sample,
+    IS_WINDOWS,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.custom_op_db import custom_op_db
 from torch.testing._internal.logging_tensor import (
     capture_logs,
