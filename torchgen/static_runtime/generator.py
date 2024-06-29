@@ -1,9 +1,7 @@
-from __future__ import annotations
-
 import json
 import logging
 import math
-from typing import Sequence
+from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import torchgen.api.cpp as cpp
 from torchgen.context import native_function_manager
@@ -27,7 +25,7 @@ logger: logging.Logger = logging.getLogger()
 
 
 def has_alias(
-    arguments: Sequence[Argument | SelfArgument | TensorOptionsArguments],
+    arguments: Sequence[Union[Argument, SelfArgument, TensorOptionsArguments]]
 ) -> bool:
     for arg in arguments:
         annotation = getattr(arg, "annotation", None)
@@ -239,7 +237,7 @@ BLOCKED_OPS = frozenset(
 )
 
 
-def is_supported(g: NativeFunctionsGroup | NativeFunctionsViewGroup) -> bool:
+def is_supported(g: Union[NativeFunctionsGroup, NativeFunctionsViewGroup]) -> bool:
     base_op_name = ""
     func = None
     if isinstance(g, NativeFunctionsViewGroup):
@@ -300,8 +298,8 @@ def is_supported(g: NativeFunctionsGroup | NativeFunctionsViewGroup) -> bool:
 
 
 def ivalue_type_conversion_method(
-    arg_type: BaseType | OptionalType | Type,
-) -> tuple[bool, str] | None:
+    arg_type: Union[BaseType, OptionalType, Type]
+) -> Optional[Tuple[bool, str]]:
     """
     Return the method call expression of `c10::ivalue' to convert its contained value to
     the expected value of `arg_type` type. For example, for `arg_type` == BaseTy.Tensor,
@@ -396,7 +394,7 @@ def test_tensor_dim(op_name: str) -> int:
 
 
 test_tensor_shapes_string = '{"view_as_complex": "{2, 2}"}'
-test_tensor_shape_json: dict[str, str] = json.loads(test_tensor_shapes_string)
+test_tensor_shape_json: Dict[str, str] = json.loads(test_tensor_shapes_string)
 
 
 def test_tensor_shape(op_name: str) -> str:
@@ -407,7 +405,7 @@ def test_tensor_shape(op_name: str) -> str:
 
 
 def test_value_expression(
-    arg_type: BaseType | OptionalType | Type, index: int, op_name: str
+    arg_type: Union[BaseType, OptionalType, Type], index: int, op_name: str
 ) -> str:
     tensor_size_ex = test_tensor_shape(op_name)
     if tensor_size_ex == "":
@@ -477,8 +475,8 @@ generate_test_ir_arguments_base_ty_to_type_str_ = {
 
 def generate_test_ir_arguments(
     schema: FunctionSchema,
-) -> list[tuple[str, str | None]]:
-    def ir_argument(arg: Argument) -> tuple[str, str | None]:
+) -> List[Tuple[str, Optional[str]]]:
+    def ir_argument(arg: Argument) -> Tuple[str, Optional[str]]:
         t = arg.type
         add_optional = False
         if isinstance(t, OptionalType):
