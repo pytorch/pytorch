@@ -32,16 +32,16 @@ if TYPE_CHECKING:
 
 # Convenience aliases for common composite types that we need
 # to talk about in PyTorch
-_TensorOrTensors: TypeAlias = Union[Tensor, Sequence[Tensor]]
-_TensorOrTensorsOrGradEdge: TypeAlias = Union[
+_TensorOrTensors: TypeAlias = Union[Tensor, Sequence[Tensor]]  # noqa: PYI047
+_TensorOrTensorsOrGradEdge: TypeAlias = Union[  # noqa: PYI047
     Tensor,
     Sequence[Tensor],
     "GradientEdge",
     Sequence["GradientEdge"],
 ]
 
-_size: TypeAlias = Union[Size, List[int], Tuple[int, ...]]
-_dispatchkey: TypeAlias = Union[str, DispatchKey]
+_size: TypeAlias = Union[Size, List[int], Tuple[int, ...]]  # noqa: PYI042,PYI047
+_dispatchkey: TypeAlias = Union[str, DispatchKey]  # noqa: PYI042,PYI047
 
 # Meta-type for "numeric" things; matches our docs
 Number: TypeAlias = Union[int, float, bool]

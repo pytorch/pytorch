@@ -31,6 +31,7 @@ line_length = 88
 lines_after_imports = 2
 multi_line_output = 3
 include_trailing_comma = true
+combine_as_imports = true
 
 
 [tool.usort.known]
@@ -151,6 +152,7 @@ select = [
 ]
 "test/torch_np/numpy_tests/**" = [
     "F821",
+    "NPY201",
 ]
 "test/dynamo/test_bytecode_utils.py" = [
     "F821",
@@ -182,10 +184,7 @@ select = [
     "TCH004",
     "UP037", # ONNX does runtime type checking
 ]
-"torch/types.py" = [
-    "PYI042", # type alias should be CamelCase
-    "PYI047", # private TypeAlias is never used
-]
+
 "torchgen/api/types/__init__.py" = [
     "F401",
     "F403",
