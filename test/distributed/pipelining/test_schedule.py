@@ -9,7 +9,7 @@ import unittest
 from typing import Dict, List, Optional, Tuple
 
 from model_registry import ModelWithKwargs, MultiMLP
-from schedule_registry import ScheduleUnbalanced, ScheduleVShaped
+from schedule_registry import ScheduleUnbalanced, ScheduleVShaped, ScheduleWithW
 
 import torch
 import torch.distributed as dist
@@ -473,6 +473,115 @@ class ScheduleTest(MultiProcContinousTest):
 
         # Last rank checks result
         if self.rank == 0:
+            # Check output
+            torch.testing.assert_close(out, ref_out)
+            # Check loss
+            # Since the reduction used in the loss function above is "sum", we use
+            # "sum" here to reduce microbatch losses into a single value too.
+            pipe_loss = sum(losses)
+            torch.testing.assert_close(pipe_loss, ref_loss)
+
+        # Every rank checks gradients
+        for stage_module, submod_name in zip(stage_modules, submod_names):
+            # Get corresponding submodule from reference model
+            ref_submod = ref_mod.get_submodule(submod_name)
+            # Check gradients per parameter
+            for name, p in stage_module.named_parameters():
+                ref_p = ref_submod.get_parameter(name)
+                try:
+                    torch.testing.assert_close(p.grad, ref_p.grad, rtol=1e-5, atol=4e-5)
+                except AssertionError:
+                    print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
+                    raise
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize("ScheduleClass", [ScheduleWithW])
+    def test_schedule_with_weight_update(self, ScheduleClass):
+        stages_per_rank = 2
+        n_stages = stages_per_rank * self.world_size
+        full_mod = MultiMLP(d_hid, n_layers=n_stages)
+        full_mod.to(self.device)
+
+        ref_mod = copy.deepcopy(full_mod)
+        x = torch.randn(batch_size, d_hid, device=self.device)
+        with torch.no_grad():
+            y = ref_mod(x)
+            # Add a small perturbation
+            target = y + torch.randn(batch_size, d_hid, device=self.device)
+
+        loss_fn = torch.nn.MSELoss(reduction="sum")
+
+        # Run reference
+        for _ in range(2):
+            ref_mod.zero_grad()
+            ref_out = ref_mod(x)
+            ref_loss = loss_fn(ref_out, target)
+            ref_loss.backward()
+
+        # Get a submodule, e.g. `layers.0` or `layers.1`
+        stage_indices = [
+            self.rank + i * self.world_size for i in range(stages_per_rank)
+        ]
+        print(f"Rank {self.rank} stages: {stage_indices}")
+        submod_names = [f"layers.{i}" for i in stage_indices]
+        stage_modules = [
+            full_mod.get_submodule(submod_name) for submod_name in submod_names
+        ]
+
+        class CustomState:
+            def __init__(self):
+                self.i = 0
+
+            def dw_builder(self):
+                """This simulates a function attached to a model with a custom backward.
+                Each call to builder gives a new dw_runner that has some updated state to compute the latest dw.
+                """
+
+                def dw_runner():
+                    # This inner function would be called by PipelineStage during `backward_weight_one_chunk`
+                    print(f"dw called {self.i}th time")
+                    self.i += 1
+
+                return dw_runner
+
+        cs = CustomState()
+
+        # Create a pipeline stage to wrap that submodule
+        chunks = 2
+        input_args = x.chunk(chunks)[0]
+        stages = [
+            PipelineStage(
+                stage_module,
+                stage_idx,
+                n_stages,
+                self.device,
+                input_args=input_args,
+                dw_builder=cs.dw_builder,
+            )
+            for stage_module, stage_idx in zip(stage_modules, stage_indices)
+        ]
+
+        # Attach to a schedule
+        schedule = ScheduleClass(stages, chunks, loss_fn=loss_fn)
+
+        # Run
+        for _ in range(2):
+            # Zero gradients
+            for stage_module in stage_modules:
+                stage_module.zero_grad()
+            if self.rank == 0:
+                schedule.step(x)
+            elif self.rank == self.world_size - 1:
+                losses = []
+                out = schedule.step(target=target, losses=losses)
+            else:
+                schedule.step()
+
+        dist.barrier()
+
+        # Last rank checks result
+        if self.rank == self.world_size - 1:
             # Check output
             torch.testing.assert_close(out, ref_out)
             # Check loss
