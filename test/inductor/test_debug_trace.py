@@ -1,16 +1,15 @@
 # Owner(s): ["module: inductor"]
 import logging
 import os
+import pathlib
 import re
 import shutil
 import sys
 import unittest
-from pathlib import Path
 
 import torch
 from torch._inductor import config, test_operators
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
-
 
 try:
     try:
@@ -23,7 +22,7 @@ except unittest.SkipTest:
     raise
 
 
-def filesize(filename: Path):
+def filesize(filename: pathlib.Path):
     assert filename.exists(), f"{filename} is missing"
     return os.stat(filename).st_size
 
@@ -44,7 +43,7 @@ class TestDebugTrace(test_torchinductor.TestCase):
         self.assertEqual(len(cm.output), 1)
         m = re.match(r"WARNING.* debug trace: (.*)", cm.output[0])
         self.assertTrue(m)
-        filename = Path(m.group(1))
+        filename = pathlib.Path(m.group(1))
         self.assertTrue(filename.is_dir())
         self.assertGreater(filesize(filename / "fx_graph_readable.py"), 512)
         self.assertGreater(filesize(filename / "fx_graph_runnable.py"), 512)
