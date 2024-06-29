@@ -5,10 +5,13 @@ import unittest
 from pathlib import Path
 from typing import Any
 
+
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 sys.path.append(str(REPO_ROOT))
+
 import tools.testing.target_determination.heuristics.interface as interface
 from tools.testing.test_run import TestRun
+
 
 sys.path.remove(str(REPO_ROOT))
 
