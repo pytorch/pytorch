@@ -34,8 +34,8 @@ from functorch.einops._parsing import (
     ParsedExpression,
     validate_rearrange_expressions,
 )
-
 from torch.testing._internal.common_utils import run_tests, TestCase
+
 
 mock_anonymous_axis_eq: Callable[[AnonymousAxis, object], bool] = (
     lambda self, other: isinstance(other, AnonymousAxis) and self.value == other.value

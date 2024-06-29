@@ -6,14 +6,12 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 import gc
-
 from unittest import skip, skipIf
 
 from attn_ft import BertSelfAttention as BertSelfAttentionA, Linear
 from attn_positional import BertSelfAttention as BertSelfAttentionB
 
 import torch
-
 from functorch._C import dim as _C
 from functorch.dim import (
     Dim,
@@ -24,13 +22,13 @@ from functorch.dim import (
     stack,
     Tensor,
 )
-
 from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
     TEST_CUDA,
     TestCase,
 )
+
 
 try:
     from torchvision.models import resnet18
@@ -45,6 +43,7 @@ _test_c, _parse_test, _set_pointwise_optimize = (
 
 from contextlib import contextmanager
 from time import perf_counter
+
 
 measure_perf = False
 if measure_perf:
