@@ -2387,6 +2387,7 @@ class ShapeEnv:
         tracked_fakes: Optional[List[Any]] = None,
         **kwargs
     ) -> None:
+        kwargs['duck_shape'] = config.use_duck_shape
         self._init(**kwargs)
 
         # Disable event recording when replaying.
