@@ -9153,10 +9153,11 @@ class TestLinalgMPS(TestCaseMPS):
                     raise e
 
     @parametrize("m", [1, 32, 64])
-    @parametrize("k", [32, 64])
     @parametrize("n", [48, 64])
-    def test__int4_mm(self, m, k, n):
-        q_group = 32
+    @parametrize("q_group", [32, 64, 128, 256])
+    @parametrize("num_groups", [1, 2])
+    def test__int4_mm(self, m, n, q_group, num_groups):
+        k = q_group * num_groups
         inner_k_tiles = 2
 
         torch.manual_seed(1)
