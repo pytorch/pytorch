@@ -13,10 +13,10 @@ import sys
 import threading
 import types
 import warnings
-
 from typing import Dict, Generic, List
 
 from ..bytecode_transformation import create_call_function
+
 
 try:
     import numpy as np
@@ -29,7 +29,6 @@ except ImportError:
     PyTreeSpec = type(None)
 
 import torch._dynamo.config
-
 import torch.nn
 from torch._guards import TracingContext
 

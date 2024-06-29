@@ -14,6 +14,7 @@ class SDPAParamsVariable(VariableTracker):
     @staticmethod
     def create(tx, value, source):
         from torch.backends.cuda import SDPAParams
+
         from ..source import AttrSource
         from .builder import VariableBuilder
         from .torch import TorchInGraphFunctionVariable
@@ -59,6 +60,7 @@ class SDPAParamsVariable(VariableTracker):
 
     def var_getattr(self, tx, name: str) -> VariableTracker:
         import torch._C
+
         from ..source import AttrSource
         from .builder import wrap_fx_proxy
         from .misc import GetAttrVariable

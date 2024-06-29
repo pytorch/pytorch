@@ -15,12 +15,12 @@ from ..source import (
     GradSource,
 )
 from ..utils import GLOBAL_KEY_PREFIX
-
 from .constant import ConstantVariable
 from .dicts import ConstDictVariable
 from .lists import ListVariable
 from .misc import GetAttrVariable
 from .user_defined import UserDefinedObjectVariable
+
 
 if TYPE_CHECKING:
     from .base import VariableTracker

@@ -16,9 +16,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKIN
 import sympy
 
 import torch._guards
-
 import torch._logging
-
 import torch.nn
 import torch.utils._pytree as pytree
 from torch import fx
@@ -101,8 +99,8 @@ from .variables.tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-
 from .variables.torch_function import TensorWithTFOverrideVariable
+
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase

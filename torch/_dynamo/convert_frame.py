@@ -20,11 +20,11 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set
 
 from torch._utils_internal import maybe_upload_prof_stats_to_manifold
-
 from torch.fx._lazy_graph_module import (  # type: ignore[attr-defined]
     _use_lazy_graph_module,
 )
 from torch.utils._traceback import CapturedTraceback
+
 
 try:
     import numpy as np
@@ -101,6 +101,7 @@ from .utils import (
     troubleshooting_url,
     write_record_to_file,
 )
+
 
 log = logging.getLogger(__name__)
 bytecode_log = torch._logging.getArtifactLogger(__name__, "bytecode")
@@ -501,6 +502,7 @@ def convert_frame_assert(
 from collections import OrderedDict
 
 from torch.utils.hooks import RemovableHandle
+
 
 if typing.TYPE_CHECKING:
     from .output_graph import OutputGraph
