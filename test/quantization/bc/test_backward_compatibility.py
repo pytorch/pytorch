@@ -12,7 +12,6 @@ import torch.ao.nn.quantized as nnq
 import torch.ao.nn.quantized.dynamic as nnqd
 import torch.ao.quantization.quantize_fx as quantize_fx
 import torch.nn as nn
-
 from torch.ao.quantization import MinMaxObserver, PerChannelMinMaxObserver
 from torch.fx import GraphModule
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM

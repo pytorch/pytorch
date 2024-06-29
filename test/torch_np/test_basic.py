@@ -8,12 +8,10 @@ import numpy as _np
 from pytest import raises as assert_raises
 
 import torch
-
 import torch._numpy as w
 import torch._numpy._ufuncs as _ufuncs
 import torch._numpy._util as _util
 from torch._numpy.testing import assert_allclose, assert_equal
-
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,

@@ -5,7 +5,6 @@ import torch
 from torch import Tensor
 from torch._export import capture_pre_autograd_graph
 from torch.ao.quantization import observer, ObserverOrFakeQuantize, QConfigMapping
-
 from torch.ao.quantization.qconfig import (
     default_per_channel_symmetric_qnnpack_qconfig,
     float_qparams_weight_only_qconfig,
@@ -13,7 +12,6 @@ from torch.ao.quantization.qconfig import (
     QConfig,
     weight_observer_range_neg_127_to_127,
 )
-
 from torch.ao.quantization.quantize_pt2e import (
     convert_pt2e,
     prepare_pt2e,
@@ -42,7 +40,6 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
     QuantizationConfig,
 )
 from torch.fx import Node
-
 from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
     PT2EQuantizationTestCase,

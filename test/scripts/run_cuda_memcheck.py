@@ -24,6 +24,7 @@ import tqdm
 
 import torch
 
+
 ALL_TESTS = []
 GPUS = torch.cuda.device_count()
 

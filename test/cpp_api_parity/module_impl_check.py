@@ -21,7 +21,6 @@ import types
 from string import Template
 
 import torch
-
 from cpp_api_parity.sample_module import SAMPLE_MODULE_CPP_SOURCE
 from cpp_api_parity.utils import (
     add_test,
@@ -39,6 +38,7 @@ from cpp_api_parity.utils import (
     TorchNNModuleTestParams,
     try_remove_folder,
 )
+
 
 # Expected substitutions:
 #

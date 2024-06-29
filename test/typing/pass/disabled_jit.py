@@ -6,6 +6,7 @@ import pytest
 
 from torch import jit, nn, ScriptDict, ScriptFunction, ScriptList
 
+
 P = ParamSpec("P")
 R = TypeVar("R", covariant=True)
 

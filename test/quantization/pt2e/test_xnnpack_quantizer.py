@@ -30,7 +30,6 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer import (
     get_symmetric_quantization_config,
     XNNPACKQuantizer,
 )
-
 from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
     PT2EQuantizationTestCase,

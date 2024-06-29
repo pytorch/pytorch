@@ -6,19 +6,11 @@ import itertools
 import operator
 import sys
 import warnings
-
 from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
 
 import numpy
-
-# from numpy._utils import _pep440
 import pytest
 from pytest import raises as assert_raises
-
-# from hypothesis import given, settings
-# from hypothesis.strategies import sampled_from
-# from hypothesis.extra import numpy as hynp
-
 
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -31,6 +23,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xpassIfTorchDynamo,
 )
+
 
 if TEST_WITH_TORCHDYNAMO:
     import numpy as np
@@ -47,8 +40,6 @@ else:
         assert_,
         assert_almost_equal,
         assert_equal,
-        #    assert_array_equal, suppress_warnings, _gen_alignment_data,
-        #    assert_warns,
     )
 
 

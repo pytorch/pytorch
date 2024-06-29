@@ -10,13 +10,10 @@ import subprocess
 import sys
 import textwrap
 import traceback
-
 from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
 
 import numpy
-
 import pytest
-
 from numpy.linalg.linalg import _multi_dot_matrix_chain_order
 from pytest import raises as assert_raises
 
@@ -51,14 +48,13 @@ if TEST_WITH_TORCHDYNAMO:
         swapaxes,
     )
     from numpy.linalg import LinAlgError, matrix_power, matrix_rank, multi_dot, norm
-    from numpy.testing import (
+    from numpy.testing import (  # assert_raises_regex, HAS_LAPACK64, IS_WASM
         assert_,
         assert_allclose,
         assert_almost_equal,
         assert_array_equal,
         assert_equal,
         suppress_warnings,
-        #  assert_raises_regex, HAS_LAPACK64, IS_WASM
     )
 
 else:
@@ -92,7 +88,6 @@ else:
         assert_array_equal,
         assert_equal,
         suppress_warnings,
-        #  assert_raises_regex, HAS_LAPACK64, IS_WASM
     )
 
 
