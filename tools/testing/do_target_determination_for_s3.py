@@ -1,10 +1,10 @@
 import json
 import os
-import pathlib
 import sys
+from pathlib import Path
 
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from tools.stats.import_test_stats import (
