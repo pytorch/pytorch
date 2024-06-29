@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import decimal
 import inspect
-import pathlib
 import sys
 import unittest
+from pathlib import Path
 from typing import Any
 from unittest import mock
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 from tools.stats.upload_metrics import add_global_metric, emit_metric
 
