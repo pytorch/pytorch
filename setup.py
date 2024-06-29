@@ -1125,7 +1125,6 @@ def main():
         "networkx",
         "jinja2",
         "fsspec",
-        'mkl>=2021.1.1,<=2021.4.0; platform_system == "Windows"',
     ]
 
     if sys.version_info >= (3, 12, 0):
@@ -1203,6 +1202,7 @@ def main():
         "fx/*.pyi",
         "optim/*.pyi",
         "autograd/*.pyi",
+        "jit/*.pyi",
         "nn/*.pyi",
         "nn/modules/*.pyi",
         "nn/parallel/*.pyi",
