@@ -496,7 +496,7 @@ def register_multi_grad_hook(
 
                 if count[id] == 0:
                     # On the first call, compute the actual nb_calls and buffer
-                    nb_calls = sum(torch._C._will_engine_execute_node(g) for g in grad_fns)  # type: ignore[attr-defined]
+                    nb_calls = sum(map(torch._C._will_engine_execute_node, grad_fns))
 
                 buffer[id][idx] = grad
                 count[id] += 1
