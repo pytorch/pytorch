@@ -18,6 +18,7 @@
 #include <ATen/ops/baddbmm_native.h>
 #include <ATen/ops/bmm_native.h>
 #include <ATen/ops/linalg_lu_factor_native.h>
+#include <ATen/ops/linalg_lu_solve_native.h>
 #include <ATen/ops/linalg_solve_triangular_native.h>
 #include <ATen/ops/mm_native.h>
 #include <ATen/ops/stack.h>
@@ -877,6 +878,103 @@ std::tuple<Tensor, Tensor> linalg_lu_factor_mps(const Tensor& A, bool pivot) {
   Tensor pivots = at::empty({0}, A.options().dtype(kInt));
   mps::linalg_lu_factor_out_mps_impl(A, pivot, LU, pivots);
   return std::make_tuple(std::move(LU), std::move(pivots));
+}
+
+TORCH_IMPL_FUNC(linalg_lu_solve_out_mps)
+(const Tensor& LU, const Tensor& pivots, const Tensor& B, bool left, bool adjoint, const Tensor& result) {
+  using namespace mps;
+
+  TORCH_CHECK(!c10::isComplexType(LU.scalar_type()) && !c10::isComplexType(B.scalar_type()) &&
+                  !c10::isComplexType(result.scalar_type()),
+              "linalg.lu_solve(): MPS doesn't support complex types.");
+  TORCH_CHECK(left, "inalg.lu_solve(): MPS doesn't support left = false.")
+  TORCH_INTERNAL_ASSERT(pivots.scalar_type() == at::ScalarType::Int)
+
+  uint64_t aRows = LU.size(-2);
+  uint64_t aCols = LU.size(-1);
+  uint64_t bRows = B.size(-2);
+  uint64_t bCols = B.size(-1);
+  uint64_t resultRows = result.size(-2);
+  uint64_t resultCols = result.size(-1);
+
+  uint64_t aElemSize = LU.element_size();
+  uint64_t bElemSize = B.element_size();
+  uint64_t resultElemSize = result.element_size();
+
+  uint64_t numPivots = std::min(aRows, aCols);
+  uint64_t batchSize = batchCount(LU);
+
+  auto pivots_ = pivots.clone();
+  pivots_ -= 1; // PyTorch's `pivots` is 1-index.
+  auto LU_ = LU.clone(); //at::native::borrow_else_clone(LU.mT().is_contiguous(), LU, LU, /*row_major=*/false);
+
+  MPSStream* mpsStream = getCurrentMPSStream();
+  id<MTLDevice> device = MPSDevice::getInstance()->device();
+
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      mpsStream->endKernelCoalescing();
+      id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
+      MPSMatrixSolveLU* filter = [[[MPSMatrixSolveLU alloc] initWithDevice:device
+                                                                 transpose:adjoint
+                                                                     order:left ? bRows : bCols
+                                                    numberOfRightHandSides:left ? bCols : bRows] autorelease];
+
+      MPSMatrixDescriptor* sourceMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:aRows
+                                                                                    columns:aCols
+                                                                                   matrices:batchSize
+                                                                                   rowBytes:aCols * aElemSize
+                                                                                matrixBytes:aRows * aCols * aElemSize
+                                                                                   dataType:getMPSDataType(LU_)];
+      MPSMatrixDescriptor* rightHandSideMatrixDesc =
+          [MPSMatrixDescriptor matrixDescriptorWithRows:bRows
+                                                columns:bCols
+                                               matrices:batchSize
+                                               rowBytes:bCols * bElemSize
+                                            matrixBytes:bRows * bCols * bElemSize
+                                               dataType:getMPSDataType(B)];
+      MPSMatrixDescriptor* solutionMatrixDesc =
+          [MPSMatrixDescriptor matrixDescriptorWithRows:resultRows
+                                                columns:resultCols
+                                               matrices:batchSize
+                                               rowBytes:resultCols * resultElemSize
+                                            matrixBytes:resultRows * resultCols * resultElemSize
+                                               dataType:getMPSDataType(result)];
+      MPSMatrixDescriptor* pivotsMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:1
+                                                                                    columns:numPivots
+                                                                                   matrices:batchSize
+                                                                                   rowBytes:numPivots * sizeof(uint32_t)
+                                                                                matrixBytes:numPivots * sizeof(uint32_t)
+                                                                                   dataType:MPSDataTypeUInt32];
+
+      for (const auto i : c10::irange(batchSize)) {
+        const uint64_t aBatchOffset = i * aRows * aCols;
+        const uint64_t bBatchOffset = i * bRows * bCols;
+        const uint64_t resultBatchOffset = i * resultRows * resultCols;
+        const uint64_t pivotOffset = i * numPivots;
+        MPSMatrix* sourceMatrix = [[[MPSMatrix alloc] initWithBuffer:getMTLBufferStorage(LU_)
+                                                              offset:(LU_.storage_offset() + aBatchOffset) * aElemSize
+                                                          descriptor:sourceMatrixDesc] autorelease];
+        MPSMatrix* pivotIndices =
+            [[[MPSMatrix alloc] initWithBuffer:getMTLBufferStorage(pivots_)
+                                        offset:(pivots_.storage_offset() + pivotOffset) * sizeof(uint32_t)
+                                    descriptor:pivotsMatrixDesc] autorelease];
+        MPSMatrix* rightHandSideMatrix =
+            [[[MPSMatrix alloc] initWithBuffer:getMTLBufferStorage(B)
+                                        offset:(B.storage_offset() + bBatchOffset) * bElemSize
+                                    descriptor:rightHandSideMatrixDesc] autorelease];
+        MPSMatrix* solutionMatrix =
+            [[[MPSMatrix alloc] initWithBuffer:getMTLBufferStorage(result)
+                                        offset:(result.storage_offset() + resultBatchOffset) * resultElemSize
+                                    descriptor:solutionMatrixDesc] autorelease];
+        [filter encodeToCommandBuffer:commandBuffer
+                         sourceMatrix:sourceMatrix
+                  rightHandSideMatrix:rightHandSideMatrix
+                         pivotIndices:pivotIndices
+                       solutionMatrix:solutionMatrix];
+      }
+    }
+  });
 }
 
 } // namespace at::native

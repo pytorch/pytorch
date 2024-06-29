@@ -701,7 +701,6 @@ def mps_ops_modifier(ops):
         'linalg.lstsqgrad_oriented': None,
         'linalg.lu': None,
         'linalg.lu_factor_ex': None,
-        'linalg.lu_solve': None,
         'linalg.matrix_norm': [torch.float32],
         'linalg.norm': [torch.float32],
         'linalg.normsubgradients_at_zero': [torch.float32],
