@@ -1,7 +1,5 @@
-from __future__ import annotations
-
 import sys
-from typing import Any
+from typing import Any, List
 
 from tools.testing.target_determination.heuristics import (
     AggregatedHeuristics as AggregatedHeuristics,
@@ -11,7 +9,7 @@ from tools.testing.target_determination.heuristics import (
 
 
 def get_test_prioritizations(
-    tests: list[str], file: Any = sys.stdout
+    tests: List[str], file: Any = sys.stdout
 ) -> AggregatedHeuristics:
     aggregated_results = AggregatedHeuristics(tests)
     print(f"Received {len(tests)} tests to prioritize", file=file)

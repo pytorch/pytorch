@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
 
-from __future__ import annotations
-
 import argparse
 import re
 import sys
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from typing_extensions import TypedDict  # Python 3.11+
 
 import yaml
-
 
 Step = Dict[str, Any]
 
@@ -20,7 +17,7 @@ class Script(TypedDict):
     script: str
 
 
-def extract(step: Step) -> Script | None:
+def extract(step: Step) -> Optional[Script]:
     run = step.get("run")
 
     # https://docs.github.com/en/actions/reference/workflow-syntax-for-github-actions#using-a-specific-shell

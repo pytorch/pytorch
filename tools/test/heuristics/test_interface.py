@@ -1,9 +1,7 @@
-from __future__ import annotations
-
 import sys
 import unittest
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, List
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -18,7 +16,7 @@ sys.path.remove(str(REPO_ROOT))
 
 class TestTD(unittest.TestCase):
     def assert_test_scores_almost_equal(
-        self, d1: dict[TestRun, float], d2: dict[TestRun, float]
+        self, d1: Dict[TestRun, float], d2: Dict[TestRun, float]
     ) -> None:
         # Check that dictionaries are the same, except for floating point errors
         self.assertEqual(set(d1.keys()), set(d2.keys()))
@@ -29,7 +27,7 @@ class TestTD(unittest.TestCase):
         # Create a dummy heuristic class
         class Heuristic(interface.HeuristicInterface):
             def get_prediction_confidence(
-                self, tests: list[str]
+                self, tests: List[str]
             ) -> interface.TestPrioritizations:
                 # Return junk
                 return interface.TestPrioritizations([], {})
@@ -264,9 +262,9 @@ class TestTestPrioritizations(TestTD):
 class TestAggregatedHeuristics(TestTD):
     def check(
         self,
-        tests: list[str],
-        test_prioritizations: list[dict[TestRun, float]],
-        expected: dict[TestRun, float],
+        tests: List[str],
+        test_prioritizations: List[Dict[TestRun, float]],
+        expected: Dict[TestRun, float],
     ) -> None:
         aggregated_heuristics = interface.AggregatedHeuristics(tests)
         for i, test_prioritization in enumerate(test_prioritizations):
@@ -434,7 +432,7 @@ class TestAggregatedHeuristicsTestStats(TestTD):
         stats3 = aggregator.get_test_stats(TestRun("test3"))
         stats5 = aggregator.get_test_stats(TestRun("test5::classA"))
 
-        def assert_valid_dict(dict_contents: dict[str, Any]) -> None:
+        def assert_valid_dict(dict_contents: Dict[str, Any]) -> None:
             for key, value in dict_contents.items():
                 self.assertTrue(isinstance(key, str))
                 self.assertTrue(

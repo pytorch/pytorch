@@ -1,14 +1,12 @@
-from __future__ import annotations
-
-from typing import Any, NamedTuple
+import typing as t
 
 
-class CoverageRecord(NamedTuple):
+class CoverageRecord(t.NamedTuple):
     filepath: str
-    covered_lines: list[int]
-    uncovered_lines: list[int] | None = None
+    covered_lines: t.List[int]
+    uncovered_lines: t.Optional[t.List[int]] = None
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> t.Dict[str, t.Any]:
         return {
             "filepath": self.filepath,
             "covered_lines": self.covered_lines,

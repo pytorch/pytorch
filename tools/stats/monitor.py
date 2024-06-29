@@ -1,17 +1,14 @@
 #!/usr/bin/env python3
-
-from __future__ import annotations
-
 import datetime
 import json
 import signal
 import time
-from typing import Any
+from typing import Any, Dict, List
 
 import psutil  # type: ignore[import]
 
 
-def get_processes_running_python_tests() -> list[Any]:
+def get_processes_running_python_tests() -> List[Any]:
     python_processes = []
     for process in psutil.process_iter():
         try:
@@ -23,7 +20,7 @@ def get_processes_running_python_tests() -> list[Any]:
     return python_processes
 
 
-def get_per_process_cpu_info() -> list[dict[str, Any]]:
+def get_per_process_cpu_info() -> List[Dict[str, Any]]:
     processes = get_processes_running_python_tests()
     per_process_info = []
     for p in processes:
@@ -52,7 +49,7 @@ def get_per_process_cpu_info() -> list[dict[str, Any]]:
     return per_process_info
 
 
-def get_per_process_gpu_info(handle: Any) -> list[dict[str, Any]]:
+def get_per_process_gpu_info(handle: Any) -> List[Dict[str, Any]]:
     processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
     per_process_info = []
     for p in processes:
@@ -61,7 +58,7 @@ def get_per_process_gpu_info(handle: Any) -> list[dict[str, Any]]:
     return per_process_info
 
 
-def rocm_get_per_process_gpu_info(handle: Any) -> list[dict[str, Any]]:
+def rocm_get_per_process_gpu_info(handle: Any) -> List[Dict[str, Any]]:
     processes = amdsmi.amdsmi_get_gpu_process_list(handle)
     per_process_info = []
     for p in processes:

@@ -1,6 +1,5 @@
 "Manages CMake."
 
-from __future__ import annotations
 
 import multiprocessing
 import os
@@ -10,7 +9,7 @@ import sysconfig
 from distutils.version import LooseVersion
 from pathlib import Path
 from subprocess import CalledProcessError, check_call, check_output
-from typing import Any, cast
+from typing import Any, cast, Dict, List, Optional
 
 from . import which
 from .cmake_utils import CMakeValue, get_cmake_cache_variables_from_file
@@ -79,7 +78,7 @@ class CMake:
         return cmake_command
 
     @staticmethod
-    def _get_version(cmd: str | None) -> Any:
+    def _get_version(cmd: Optional[str]) -> Any:
         "Returns cmake version."
 
         if cmd is None:
@@ -89,7 +88,7 @@ class CMake:
                 return LooseVersion(line.strip().split(" ")[2])
         raise RuntimeError("no version found")
 
-    def run(self, args: list[str], env: dict[str, str]) -> None:
+    def run(self, args: List[str], env: Dict[str, str]) -> None:
         "Executes cmake with arguments and an environment."
 
         command = [self._cmake_command] + args
@@ -103,13 +102,13 @@ class CMake:
             sys.exit(1)
 
     @staticmethod
-    def defines(args: list[str], **kwargs: CMakeValue) -> None:
+    def defines(args: List[str], **kwargs: CMakeValue) -> None:
         "Adds definitions to a cmake argument list."
         for key, value in sorted(kwargs.items()):
             if value is not None:
                 args.append(f"-D{key}={value}")
 
-    def get_cmake_cache_variables(self) -> dict[str, CMakeValue]:
+    def get_cmake_cache_variables(self) -> Dict[str, CMakeValue]:
         r"""Gets values in CMakeCache.txt into a dictionary.
         Returns:
           dict: A ``dict`` containing the value of cached CMake variables.
@@ -119,11 +118,11 @@ class CMake:
 
     def generate(
         self,
-        version: str | None,
-        cmake_python_library: str | None,
+        version: Optional[str],
+        cmake_python_library: Optional[str],
         build_python: bool,
         build_test: bool,
-        my_env: dict[str, str],
+        my_env: Dict[str, str],
         rerun: bool,
     ) -> None:
         "Runs cmake to generate native build files."
@@ -181,7 +180,7 @@ class CMake:
         _mkdir_p(self.build_dir)
 
         # Store build options that are directly stored in environment variables
-        build_options: dict[str, CMakeValue] = {}
+        build_options: Dict[str, CMakeValue] = {}
 
         # Build options that do not start with "BUILD_", "USE_", or "CMAKE_" and are directly controlled by env vars.
         # This is a dict that maps environment variables to the corresponding variable name in CMake.
@@ -340,7 +339,7 @@ class CMake:
         args.append(base_dir)
         self.run(args, env=my_env)
 
-    def build(self, my_env: dict[str, str]) -> None:
+    def build(self, my_env: Dict[str, str]) -> None:
         "Runs cmake to build binaries."
 
         from .env import build_type
