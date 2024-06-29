@@ -2033,11 +2033,10 @@ def compiled_with_cxx11_abi() -> builtins.bool:
 
 
 from torch import _library as _library, _ops as _ops
-
-# Import the ops "namespace"
 from torch._classes import classes as classes
 
 
+# Import the ops "namespace"
 from torch._ops import ops as ops  # usort: skip
 
 # quantization depends on torch.fx and torch.ops
