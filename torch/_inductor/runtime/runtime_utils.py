@@ -153,6 +153,9 @@ def do_bench_gpu(fn_or_fns, estimation_iters=5, memory_warmup_iters=100, benchma
     if interleaved:
         fns = fn_or_fns
 
+        if len(fns) == 0:
+            return []
+
         estimation_timings = benchmark_interleaved(fns, buffer, estimation_iters)
         benchmark_iters = min(benchmark_iters, max(int(max_benchmark_duration / max(estimation_timings)), 1))
 
