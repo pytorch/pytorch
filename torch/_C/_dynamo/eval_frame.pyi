@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import types
-from typing import NewType
+from typing import List, NewType, Optional
 
 from torch._dynamo.types import DynamoCallback, DynamoGuardHook
 
@@ -17,11 +17,11 @@ def set_guard_error_hook(hook: DynamoGuardHook) -> None: ...
 class _CacheEntry:
     def check_fn(self, *args, **kwargs): ...
     code: types.CodeType
-    next: _CacheEntry | None
+    next: Optional[_CacheEntry]
 
 class _ExtraState:
     def invalidate(self, cache_entry: _CacheEntry): ...
 
-def _debug_get_cache_entry_list(code: types.CodeType) -> list[_CacheEntry]: ...
+def _debug_get_cache_entry_list(code: types.CodeType) -> List[_CacheEntry]: ...
 
-py_opcode_caches: list[int]
+py_opcode_caches: List[int]
