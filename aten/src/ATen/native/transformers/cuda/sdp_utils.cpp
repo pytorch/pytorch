@@ -527,14 +527,14 @@ bool check_cudnn_deterministic(const sdp_params& params, bool debug) {
 bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
 #if defined(USE_ROCM) || !AT_CUDNN_ENABLED() || \
     !defined(CUDNN_VERSION)
-  if (debug) {
-    TORCH_WARN("Torch was not compiled with cuDNN attention.");
-  }
+  //if (debug) {
+  TORCH_WARN("Torch was not compiled with cuDNN attention.");
+  //}
   return false;
 #elif defined(CUDNN_VERSION) && CUDNN_VERSION < 90000
-  if (debug) {
-    TORCH_WARN(!debug, "cuDNN version too old to use Flash Attention! (< v9.0.0)");
-  }
+  //if (debug) {
+  TORCH_WARN(CUDNN_VERSION, "cuDNN version too old to use Flash Attention! (< v9.0.0)");
+  //}
   return false;
 #endif
   // Define gate functions that determine if a flash kernel can be ran
