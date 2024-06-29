@@ -1,4 +1,4 @@
-from __future__ import annotations
+from typing import List, Optional, Union
 
 import torchgen.api.meta as meta
 import torchgen.api.structured as structured
@@ -9,7 +9,7 @@ from torchgen.utils import mapMaybe
 
 
 @with_native_function_and_index
-def gen_unstructured(f: NativeFunction, backend_index: BackendIndex) -> str | None:
+def gen_unstructured(f: NativeFunction, backend_index: BackendIndex) -> Optional[str]:
     sig = kernel_signature(f, backend_index)
     metadata = backend_index.get_kernel(f)
     if metadata is None:
@@ -22,7 +22,7 @@ def gen_unstructured(f: NativeFunction, backend_index: BackendIndex) -> str | No
 
 
 @with_native_function_and_index
-def gen_structured(g: NativeFunctionsGroup, backend_index: BackendIndex) -> list[str]:
+def gen_structured(g: NativeFunctionsGroup, backend_index: BackendIndex) -> List[str]:
     meta_name = meta.name(g)
     out_args = structured.impl_arguments(g)
     metadata = backend_index.get_kernel(g)
@@ -42,8 +42,8 @@ void impl({', '.join(a.decl() for a in out_args)});
 # actual kernel definitions we keep in aten/src/ATen/native/
 @with_native_function_and_index
 def compute_native_function_declaration(
-    g: NativeFunctionsGroup | NativeFunction, backend_index: BackendIndex
-) -> list[str]:
+    g: Union[NativeFunctionsGroup, NativeFunction], backend_index: BackendIndex
+) -> List[str]:
     metadata = backend_index.get_kernel(g)
     if isinstance(g, NativeFunctionsGroup):
         if metadata is not None and metadata.structured:
