@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
+import pathlib
 from typing import Any
 
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent.parent
 
 
 def gen_ci_artifact(included: list[Any], excluded: list[Any]) -> None:
