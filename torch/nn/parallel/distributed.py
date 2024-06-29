@@ -1236,6 +1236,13 @@ class DistributedDataParallel(Module, Joinable):
         # passing a handle to torch.nn.SyncBatchNorm layer
         self._passing_sync_batchnorm_handle(self.module)
 
+    def __getattr__(self, name: str) -> Any:
+        """Forward missing attributes to the wrapped module."""
+        try:
+            return super().__getattr__(name)  # defer to nn.Module's logic
+        except AttributeError:
+            return getattr(self.module, name)
+
     def __getstate__(self):
         self._check_default_group()
         attrs = copy.copy(self.__dict__)
