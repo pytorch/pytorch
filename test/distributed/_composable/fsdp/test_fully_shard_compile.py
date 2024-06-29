@@ -346,6 +346,7 @@ class TestFullyShardCompile(FSDPTest):
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_nested_fully_shard_fullgraph_backend_inductor(self):
+        # TODO: This pass causes CUDA IMA, why?
         with torch._inductor.config.patch(
             post_grad_custom_post_reinplace_pass=self._reinplace_all_gather_with_checks
         ):

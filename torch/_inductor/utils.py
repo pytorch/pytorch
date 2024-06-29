@@ -504,6 +504,13 @@ def get_fused_kernel_name(node_schedule, descriptive_names):
     sources = sources
     return "_".join(["fused"] + sources)
 
+def cuda_sync_and_print(msg):
+    torch.cuda.synchronize()
+    import time
+    time.sleep(0.5)  # secs
+    print(msg)  # In the log, pay attention to where this prints
+
+yf225_debug_comment_count = 0
 
 def get_kernel_metadata(node_schedule, wrapper):
     all_origins = aggregate_origins(node_schedule)
@@ -518,10 +525,12 @@ def get_kernel_metadata(node_schedule, wrapper):
         if "from_node" in node.meta:
             key = node.meta["from_node"][0][0]
             from_node_dict[key].append(node.name)
-    metadata = (
-        f"{wrapper.comment} Source Nodes: [{', '.join(sorted(from_node_dict.keys()))}], "
-        f"Original ATen: [{', '.join(sorted(original_aten_dict.keys()))}]"
-    )
+    # metadata = (
+    #     f"{wrapper.comment} Source Nodes: [{', '.join(sorted(from_node_dict.keys()))}], "
+    #     f"Original ATen: [{', '.join(sorted(original_aten_dict.keys()))}]"
+    # )
+    metadata = f"cuda_sync_and_print('yf225_here{yf225_debug_comment_count}')"
+    yf225_debug_comment_count += 1
     # trace back to original node here
     detailed_metadata = []
     for original_node, nodes in sorted(from_node_dict.items()):
