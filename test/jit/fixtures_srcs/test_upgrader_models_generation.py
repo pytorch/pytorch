@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: mobile"]
 
 import torch
-
 from test.jit.fixtures_srcs.generate_models import ALL_MODULES
 from torch.testing._internal.common_utils import run_tests, TestCase
 

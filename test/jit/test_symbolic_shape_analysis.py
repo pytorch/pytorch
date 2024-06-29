@@ -12,6 +12,7 @@ from torch.testing._internal.common_methods_invocations import sample_inputs_cat
 from torch.testing._internal.common_utils import make_tensor
 from torch.testing._internal.jit_utils import execWrapper, JitTestCase
 
+
 if __name__ == "__main__":
     raise RuntimeError(
         "This test file is not meant to be run directly, use:\n\n"

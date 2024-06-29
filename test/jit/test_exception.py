@@ -3,6 +3,7 @@ import torch
 from torch import nn
 from torch.testing._internal.common_utils import TestCase
 
+
 r"""
 Test TorchScript exception handling.
 """
