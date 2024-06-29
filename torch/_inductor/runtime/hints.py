@@ -134,6 +134,9 @@ class HalideInputSpec(typing.NamedTuple):
     ctype: str
     name: str
     shape: Optional[List[str]] = None
+    stride: Optional[List[str]] = None
+    offset: Optional[str] = None
+    alias_of: Optional[str] = None
 
     def bindings_type(self):
         if self.ctype == "half*":
