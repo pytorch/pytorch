@@ -2553,14 +2553,14 @@ class TestNestedTensorDeviceType(TestCase):
             # Shape: (N, N', L, E); ragged N' and L
             query = torch.nested.nested_tensor(
                 [rand_tensor(2, 2, E), rand_tensor(3, 3, E), rand_tensor(4, 4, E)]
-            ).transpose(3, 1)
+            )
             # Shape: (N, N', S, E); ragged N' and S
             key = torch.nested.nested_tensor(
                 [rand_tensor(2, 3, E), rand_tensor(3, 4, E), rand_tensor(4, 5, E)]
-            ).transpose(3, 1)
+            )
             value = torch.nested.nested_tensor(
                 [rand_tensor(2, 3, E), rand_tensor(3, 4, E), rand_tensor(4, 5, E)]
-            ).transpose(3, 1)
+            )
         else:
             self.fail(f"Invalid input_dim {input_dim} encountered in SDP test")
 

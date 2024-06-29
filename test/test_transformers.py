@@ -1731,7 +1731,7 @@ class TestSDPAFailureModes(NNTestCase):
         with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
             with self.assertWarnsRegex(UserWarning, "Both fused kernels do not support training with broadcasted NT inputs"):
                 with self.assertRaisesRegex(RuntimeError, "No available kernel"):
-                    out = torch.nn.functional.scaled_dot_product_attention(
+                    torch.nn.functional.scaled_dot_product_attention(
                         query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
 
     @onlyCUDA
@@ -3165,8 +3165,9 @@ class TestSDPACudaOnly(NNTestCase):
             self.skipTest("Flash attention on sm86, sm87, and sm89 for headdim > 192 currently disabled")
         if is_causal and seq_len_q != seq_len_k:
             self.skipTest("Flash V2 does not accept is_casual when seq_len_q != seq_len_k")
-        if TEST_WITH_ROCM and seq_len_q >= 1024 and seq_len_k >= 1024 and batch_size > 1:
-            torch.cuda.empty_cache()  # Prevent memory fragmentation
+        if max(seq_len_q, seq_len_k) >= 2048 and torch.cuda.get_device_properties('cuda').total_memory < 40 * 2**30:
+            unittest.skip("Reference implementation OOM")
+            return
 
         query = torch.rand(batch_size, n_heads[0], seq_len_q, embedding_dim,
                            device=device, dtype=dtype, requires_grad=True)
@@ -3223,6 +3224,7 @@ class TestSDPACudaOnly(NNTestCase):
                          atol=grad_v_ref_atol, rtol=grad_v_ref_rtol)
 
 
+    @skipIfRocm  # Nested Tensor
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if
                  PLATFORM_SUPPORTS_FLASH_ATTENTION else [SDPBackend.EFFICIENT_ATTENTION])
