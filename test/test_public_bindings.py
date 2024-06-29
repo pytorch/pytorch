@@ -72,7 +72,9 @@ class TestPublicBindings(TestCase):
             for k, v in vars(torch).items()
             if callable(v) and not v.__module__.startswith('torch')
         )
-        self.assertTrue(all(k.startswith('_') for k in reexported_callables), reexported_callables)
+        self.assertTrue(
+            all(k.startswith('_') for k in reexported_callables), reexported_callables
+        )
 
     def test_no_new_bindings(self):
         """
