@@ -1,11 +1,9 @@
-from __future__ import annotations
-
 import os
 import platform
 import struct
 import sys
 from itertools import chain
-from typing import cast, Iterable
+from typing import cast, Iterable, List, Optional
 
 
 IS_WINDOWS = platform.system() == "Windows"
@@ -32,11 +30,11 @@ def check_negative_env_flag(name: str, default: str = "") -> bool:
     return os.getenv(name, default).upper() in ["OFF", "0", "NO", "FALSE", "N"]
 
 
-def gather_paths(env_vars: Iterable[str]) -> list[str]:
+def gather_paths(env_vars: Iterable[str]) -> List[str]:
     return list(chain(*(os.getenv(v, "").split(os.pathsep) for v in env_vars)))
 
 
-def lib_paths_from_base(base_path: str) -> list[str]:
+def lib_paths_from_base(base_path: str) -> List[str]:
     return [os.path.join(base_path, s) for s in ["lib/x64", "lib", "lib64"]]
 
 
@@ -56,7 +54,7 @@ class BuildType:
 
     """
 
-    def __init__(self, cmake_build_type_env: str | None = None) -> None:
+    def __init__(self, cmake_build_type_env: Optional[str] = None) -> None:
         if cmake_build_type_env is not None:
             self.build_type_string = cmake_build_type_env
             return

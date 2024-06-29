@@ -1,9 +1,8 @@
 # Owner(s): ["module: codegen"]
 
-from __future__ import annotations
-
 import tempfile
 import unittest
+from typing import Optional
 
 import expecttest
 
@@ -25,7 +24,7 @@ class TestGenBackendStubs(expecttest.TestCase):
             run(fp.name, "", True)
 
     def get_errors_from_gen_backend_stubs(
-        self, yaml_str: str, *, kernels_str: str | None = None
+        self, yaml_str: str, *, kernels_str: Optional[str] = None
     ) -> str:
         with tempfile.NamedTemporaryFile(mode="w") as fp:
             fp.write(yaml_str)

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import argparse
 import concurrent.futures
 import json
@@ -8,7 +6,7 @@ import os
 import sys
 from enum import Enum
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, List, NamedTuple, Optional
 
 from ufmt.core import ufmt_string
 from ufmt.util import make_black_config
@@ -30,15 +28,15 @@ class LintSeverity(str, Enum):
 
 
 class LintMessage(NamedTuple):
-    path: str | None
-    line: int | None
-    char: int | None
+    path: Optional[str]
+    line: Optional[int]
+    char: Optional[int]
     code: str
     severity: LintSeverity
     name: str
-    original: str | None
-    replacement: str | None
-    description: str | None
+    original: Optional[str]
+    replacement: Optional[str]
+    description: Optional[str]
 
 
 def as_posix(name: str) -> str:
@@ -61,7 +59,7 @@ def format_error_message(filename: str, err: Exception) -> LintMessage:
 
 def check_file(
     filename: str,
-) -> list[LintMessage]:
+) -> List[LintMessage]:
     with open(filename, "rb") as f:
         original = f.read().decode("utf-8")
 
