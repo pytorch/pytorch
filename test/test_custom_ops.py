@@ -4,13 +4,17 @@ import collections
 import itertools
 import os
 import re
+import subprocess
+import sys
 import typing
+import unittest
 from typing import *  # noqa: F403
 
 import numpy as np
 
 import torch._custom_ops as custom_ops
 import torch.testing._internal.optests as optests
+import torch.utils._pytree as pytree
 import torch.utils.cpp_extension
 from functorch import make_fx
 from torch import Tensor
@@ -19,8 +23,20 @@ from torch._library.infer_schema import tuple_to_list
 from torch._utils_internal import get_file_path_2
 from torch.testing._internal import custom_op_db
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_device_type import *  # noqa: F403
-from torch.testing._internal.common_utils import *  # noqa: F403
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    OpDTypes,
+    ops,
+)
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    IS_WINDOWS,
+    parametrize,
+    run_tests,
+    skipIfTorchDynamo,
+    subtest,
+    TestCase,
+)
 from torch.testing._internal.custom_op_db import numpy_nonzero
 
 
