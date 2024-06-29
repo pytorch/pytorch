@@ -26,11 +26,9 @@ from unittest import mock
 import numpy as np
 
 import torch
-
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
-
 import torch._functorch.config
 import torch.library
 import torch.utils._pytree as pytree
@@ -39,7 +37,6 @@ from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import CompileCounter, rand_strided, same
 from torch._inductor.utils import fresh_inductor_cache
 from torch.nn import functional as F
-
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,

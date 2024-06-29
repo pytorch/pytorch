@@ -6,7 +6,6 @@ from textwrap import dedent
 from unittest.mock import patch
 
 import torch
-
 import torch._dynamo
 import torch._dynamo.test_case
 import torch.fx.traceback as fx_traceback

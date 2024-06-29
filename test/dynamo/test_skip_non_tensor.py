@@ -2,10 +2,10 @@
 from unittest.mock import patch
 
 import torch
-
 import torch._dynamo
 import torch._dynamo.test_case
 from torch._dynamo.testing import CompileCounter
+
 
 _variable = 0
 _variable_2 = 0

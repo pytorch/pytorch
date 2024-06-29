@@ -1,6 +1,5 @@
 # Owner(s): ["module: dynamo"]
 import torch
-
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.onnx.operators

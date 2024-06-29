@@ -16,7 +16,6 @@ from unittest.mock import patch
 import numpy as np
 
 import torch
-
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch import sub
@@ -29,7 +28,6 @@ from torch._dynamo.testing import (
 from torch._dynamo.utils import ifdynstaticdefault, same
 from torch._dynamo.variables import ConstantVariable
 from torch._dynamo.variables.lists import RangeVariable
-
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
@@ -39,6 +37,7 @@ from torch.testing._internal.common_utils import (
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
+
 
 d = torch.ones(10, 10)
 e = torch.nn.Linear(10, 10)
