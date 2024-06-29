@@ -2182,7 +2182,6 @@ make_fallback(aten._pdist_backward)
 # Sorting / Sorting-like
 make_fallback(aten.sort)
 make_fallback(aten.sort.stable)
-make_fallback(aten.argsort.stable)
 make_fallback(aten.kthvalue)
 make_fallback(aten.topk)
 make_fallback(aten.mode)
@@ -2267,16 +2266,6 @@ make_fallback(
 )
 make_fallback(
     aten._scaled_dot_product_flash_attention_backward.default,
-    sdpa_constraint,
-    warn=False,
-)
-make_fallback(
-    aten._scaled_dot_product_cudnn_attention.default,
-    sdpa_constraint,
-    warn=False,
-)
-make_fallback(
-    aten._scaled_dot_product_cudnn_attention_backward.default,
     sdpa_constraint,
     warn=False,
 )
