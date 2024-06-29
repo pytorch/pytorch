@@ -342,10 +342,7 @@ class MultiKernelCall:
         Unit test may mock this method to force a specific kernel to
         be picked.
         """
-        return [
-            do_bench_gpu(lambda: kernel_call(True))
-            for kernel_call in kernel_calls
-        ]
+        return do_bench_gpu([lambda: kernel_call(True) for kernel_call in kernel_calls])
 
     # record_choice and lookup_choice are helper functions for cpp-wrapper
     # codegen. The first pass use record_choice to keep the choice and

@@ -87,7 +87,7 @@ def do_bench(fn, fn_args, fn_kwargs, **kwargs):
         return do_bench_gpu(lambda: fn(*fn_args, **fn_kwargs), **kwargs)
 
 
-def do_bench_gpu(fn, estimation_iters=5, memory_warmup_iters=100, benchmark_iters=20, max_benchmark_duration=10):
+def do_bench_gpu(fn_or_fns, estimation_iters=5, memory_warmup_iters=100, benchmark_iters=100, max_benchmark_duration=25, testing=False):
     @functools.lru_cache(None)
     def get_cache_size():
         device = torch.cuda.current_device()
@@ -103,8 +103,18 @@ def do_bench_gpu(fn, estimation_iters=5, memory_warmup_iters=100, benchmark_iter
             for _ in range(iters)
         ]
     
+    def get_interleaved_event_pairs(fns, iters):
+        return [get_event_pairs(len(fns)) for _ in range(iters)]
+    
     def get_timing(event_pairs):
         return min([start_event.elapsed_time(end_event) for start_event, end_event in event_pairs])
+    
+    def get_interleaved_timing(interleaved_event_pairs):
+        return [get_timing(event_pairs) for event_pairs in zip(*interleaved_event_pairs)]
+    
+    def memory_warmup(buffer, iters):
+        for _ in range(iters):
+            buffer.zero_()
     
     def benchmark(fn, buffer, iters):
         event_pairs = get_event_pairs(iters)
@@ -116,19 +126,70 @@ def do_bench_gpu(fn, estimation_iters=5, memory_warmup_iters=100, benchmark_iter
         torch.cuda.synchronize()
         return get_timing(event_pairs)
     
+    def benchmark_interleaved(fns, buffer, iters):
+        interleaved_event_pairs = [get_event_pairs(len(fns)) for _ in range(iters)]
+        for event_pairs in interleaved_event_pairs:
+            for fn, (start_event, end_event) in zip(fns, event_pairs):
+                buffer.zero_()
+                start_event.record()
+                fn()
+                end_event.record()
+        torch.cuda.synchronize()
+        return get_interleaved_timing(interleaved_event_pairs)
+    
+    def do_noninterleaved(fn, buffer, memory_warmup_iters, benchmark_iters):
+        memory_warmup(buffer, memory_warmup_iters)
+        timing = benchmark(fn, buffer, benchmark_iters)
+        return timing
+
+    def do_interleaved(fns, buffer, memory_warmup_iters, benchmark_iters):
+        memory_warmup(buffer, memory_warmup_iters)
+        timings = benchmark_interleaved(fns, buffer, benchmark_iters)
+        return timings
+
     buffer = torch.empty(int(get_cache_size() // 4), dtype=torch.int, device="cuda")
 
-    estimation_timing = benchmark(fn, buffer, estimation_iters)
-    benchmark_iters = min(benchmark_iters, max(int(max_benchmark_duration / estimation_timing), 1))
+    interleaved = isinstance(fn_or_fns, list)
+    if interleaved:
+        fns = fn_or_fns
 
-    for _ in range(memory_warmup_iters):
-        buffer.zero_()
-    benchmark_timing = benchmark(fn, buffer, benchmark_iters)
+        estimation_timings = benchmark_interleaved(fns, buffer, estimation_iters)
+        benchmark_iters = min(benchmark_iters, max(int(max_benchmark_duration / max(estimation_timings)), 1))
 
-    del buffer
+        groups = 5
+        iters_per_group = max(benchmark_iters // groups, 1)
+        
+        grouped_timings = []
+        for _ in range(groups):
+            memory_warmup(buffer, memory_warmup_iters)
+            timings = benchmark_interleaved(fns, buffer, iters_per_group)
+            grouped_timings.append(timings)
+        
+        del buffer
+        
+        timings = [min(ungrouped_timings) for ungrouped_timings in zip(*grouped_timings)]
+       
+        return timings
+    else:
+        fn = fn_or_fns
 
-    timing = min(estimation_timing, benchmark_timing)
-    return timing
+        estimation_timing = benchmark(fn, buffer, estimation_iters)
+        benchmark_iters = min(benchmark_iters, max(int(max_benchmark_duration / estimation_timing), 1))
+
+        groups = 5
+        iters_per_group = max(benchmark_iters // groups, 1)
+
+        grouped_timings = []
+        for _ in range(groups):
+            memory_warmup(buffer, memory_warmup_iters)
+            timings = benchmark(fn, buffer, iters_per_group)
+            grouped_timings.append(timings)
+
+        del buffer
+
+        timing = min(grouped_timings)
+
+        return timing
 
 
 def do_bench_cpu(fn, warmup=5, times=20):
