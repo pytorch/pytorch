@@ -4,7 +4,10 @@ import unittest
 
 import torch
 from torch._export import capture_pre_autograd_graph
-from torch.ao.quantization import generate_numeric_debug_handle
+from torch.ao.quantization import (
+    generate_numeric_debug_handle,
+    NUMERIC_DEBUG_HANDLE_KEY,
+)
 from torch.ao.quantization.pt2e.export_utils import _WrapperModule
 from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
 from torch.ao.quantization.quantizer.xnnpack_quantizer import (
@@ -27,9 +30,6 @@ def _extract_conv2d_pattern_debug_handle_map(model):
     def conv_pattern(input, weight, bias):
         output = torch.nn.functional.conv2d(input, weight, bias)
         return output, {
-            "input": input,
-            "weight": weight,
-            "bias": bias,
             "output": output,
         }
 
@@ -46,20 +46,14 @@ def _extract_conv2d_pattern_debug_handle_map(model):
     assert len(matches) == 1, "Expecting to have one match"
     match = matches[0]
     name_node_map = match.name_node_map
-    input_node = name_node_map["input"]
-    weight_node = name_node_map["weight"]
-    bias_node = name_node_map["bias"]
-    output_node = name_node_map["output"]
 
     debug_handle_map = {}
-    conv_node = output_node
-    if input_node not in conv_node.meta["numeric_debug_handle"]:
-        return debug_handle_map
-    debug_handle_map["input"] = conv_node.meta["numeric_debug_handle"][input_node]
-    debug_handle_map["weight"] = conv_node.meta["numeric_debug_handle"][weight_node]
-    if bias_node is not None:
-        debug_handle_map["bias"] = conv_node.meta["numeric_debug_handle"][bias_node]
-    debug_handle_map["output"] = conv_node.meta["numeric_debug_handle"]["output"]
+    names = ["output"]
+    for name in names:
+        node = name_node_map[name]
+        if NUMERIC_DEBUG_HANDLE_KEY in node.meta:
+            debug_handle_map[name] = node.meta[NUMERIC_DEBUG_HANDLE_KEY]
+
     return debug_handle_map
 
 
@@ -73,12 +67,8 @@ class TestGenerateNumericDebugHandle(TestCase):
         unique_ids = set()
         count = 0
         for n in m.graph.nodes:
-            if "numeric_debug_handle" in n.meta:
-                for arg in n.args:
-                    if isinstance(arg, Node):
-                        unique_ids.add(n.meta["numeric_debug_handle"][arg])
-                        count += 1
-                unique_ids.add(n.meta["numeric_debug_handle"]["output"])
+            if NUMERIC_DEBUG_HANDLE_KEY in n.meta:
+                unique_ids.add(n.meta[NUMERIC_DEBUG_HANDLE_KEY])
                 count += 1
         self.assertEqual(len(unique_ids), count)
 
