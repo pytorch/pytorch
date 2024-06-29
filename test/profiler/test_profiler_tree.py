@@ -21,6 +21,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils._pytree import tree_map
 
+
 # These functions can vary from based on platform and build (e.g. with CUDA)
 # and generally distract from rather than adding to the test.
 PRUNE_ALL = 1

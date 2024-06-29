@@ -2,6 +2,7 @@
 
 import torch
 
+
 try:
     from torchvision.models import resnet18
 

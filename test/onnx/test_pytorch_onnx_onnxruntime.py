@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import functools
-
 import io
 import itertools
 import os
@@ -12,6 +11,7 @@ from collections import OrderedDict
 from typing import Dict, List, Optional, Tuple, Type, Union
 
 import numpy as np
+
 import onnx
 import onnx_test_common
 import parameterized
@@ -38,7 +38,6 @@ from pytorch_test_common import (
 )
 
 import torch
-
 from torch import Tensor
 from torch.nn.utils import rnn as rnn_utils
 from torch.onnx import errors, verification

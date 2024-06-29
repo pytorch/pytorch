@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import onnx
 import onnx.inliner
+
 import pytorch_test_common
 
 import torch

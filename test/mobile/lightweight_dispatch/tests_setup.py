@@ -1,12 +1,12 @@
 import functools
 import os
 import shutil
-
 import sys
 from io import BytesIO
 
 import torch
 from torch.jit.mobile import _export_operator_list, _load_for_lite_interpreter
+
 
 _OPERATORS = set()
 _FILENAMES = []
