@@ -526,20 +526,19 @@ bool check_cudnn_deterministic(const sdp_params& params, bool debug) {
 
 bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
 #if defined(USE_ROCM) || !AT_CUDNN_ENABLED() || !defined(CUDNN_VERSION)
-  //if (debug) {
-  TORCH_WARN("Torch was not compiled with cuDNN attention.");
-  //}
+  if (debug) {
+    TORCH_WARN("Torch was not compiled with cuDNN attention.");
+  }
   return false;
 #endif
 #if defined(CUDNN_VERSION) && CUDNN_VERSION < 90000
-  //if (debug) {
-  TORCH_WARN(CUDNN_VERSION, "cuDNN version too old to use Flash Attention! (< v9.0.0)");
-  //}
+  if (debug) {
+    TORCH_WARN(CUDNN_VERSION, "cuDNN version too old to use Flash Attention! (< v9.0.0)");
+  }
   return false;
 #endif
   // Define gate functions that determine if a flash kernel can be ran
   // Replace with std::to_array when we migrate to c++20
-  debug = true;
   constexpr auto general_constraints =
       array_of<bool (*)(sdp_params const&, bool)>(
           check_runtime_disabled_cudnn,
