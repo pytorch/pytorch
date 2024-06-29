@@ -4,9 +4,9 @@ from collections import OrderedDict
 
 import torch
 from torch import nn
-
 from torch.jit.annotations import Dict
 from torch.nn import functional as F
+
 
 try:
     from scipy.optimize import linear_sum_assignment
