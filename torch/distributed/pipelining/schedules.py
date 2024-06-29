@@ -974,7 +974,9 @@ class PipelineScheduleMulti(_PipelineSchedule):
                     stage = stage_index_to_stage[stage_index]
                     stage.backward_weight_one_chunk(mb_index)
                 else:
-                    raise ValueError(f"Unknown computation type {computation_type}")
+                    raise ValueError(
+                        f"Unknown computation type {computation_type}, type {type(computation_type)}, action {action}"
+                    )
 
             # Look at the neighboring ranks for this current timestep and determine whether
             # this current rank needs to do any recv communication
