@@ -243,9 +243,7 @@ def sdpa_flop_count(query_shape, key_shape, value_shape):
     return total_flops
 
 
-@register_flop_formula([aten._scaled_dot_product_efficient_attention,
-                        aten._scaled_dot_product_flash_attention,
-                        aten._scaled_dot_product_cudnn_attention])
+@register_flop_formula([aten._scaled_dot_product_efficient_attention, aten._scaled_dot_product_flash_attention])
 def sdpa_flop(query_shape, key_shape, value_shape, *args, out_shape=None, **kwargs) -> int:
     """Count flops for self-attention."""
     # NB: We aren't accounting for causal attention here
@@ -437,9 +435,7 @@ def sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape
     return total_flops
 
 
-@register_flop_formula([aten._scaled_dot_product_efficient_attention_backward,
-                        aten._scaled_dot_product_flash_attention_backward,
-                        aten._scaled_dot_product_cudnn_attention_backward])
+@register_flop_formula([aten._scaled_dot_product_efficient_attention_backward, aten._scaled_dot_product_flash_attention_backward])
 def sdpa_backward_flop(grad_out_shape, query_shape, key_shape, value_shape, *args, out_shape=None, **kwargs) -> int:
     """Count flops for self-attention backward."""
     return sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape)
@@ -520,10 +516,8 @@ flop_registry = {
     aten.convolution_backward: conv_backward_flop,
     aten._scaled_dot_product_efficient_attention: sdpa_flop,
     aten._scaled_dot_product_flash_attention: sdpa_flop,
-    aten._scaled_dot_product_cudnn_attention: sdpa_flop,
     aten._scaled_dot_product_efficient_attention_backward: sdpa_backward_flop,
     aten._scaled_dot_product_flash_attention_backward: sdpa_backward_flop,
-    aten._scaled_dot_product_cudnn_attention_backward: sdpa_backward_flop,
     aten._flash_attention_forward: _flash_attention_forward_flop,
     aten._efficient_attention_forward: _efficient_attention_forward_flop,
     aten._flash_attention_backward: _flash_attention_backward_flop,
