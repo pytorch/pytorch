@@ -430,8 +430,16 @@ class TS2FXGraphConverter:
         # TODO: covnert sourceRange() into stack_trace
         # fx_node.meta["stack_trace"] = node.sourceRange()
 
-        output_name = node.output().debugName()
-        self.name_to_node[output_name] = fx_node
+        if node.outputsSize() == 1:
+            output_name = node.output().debugName()
+            self.name_to_node[output_name] = fx_node
+        else:
+            for i, outp in enumerate(node.outputs()):
+                output_name = outp.debugName()
+                next_fx_node = self.fx_graph.call_function(
+                    operator.getitem, (fx_node, i)
+                )
+                self.name_to_node[output_name] = next_fx_node
 
     def convert_prim_TupleConstruct(self, node: torch._C.Node):
         self._convert_prim_iterator(node)
@@ -627,11 +635,10 @@ class TS2FXGraphConverter:
 
         cond_node = self.fx_graph.call_function(torch.cond, args, {})
 
-        output_name = node.output().debugName()
-        self.name_to_node[output_name] = cond_node
-
-    def convert_aten_Bool(self, node: torch._C.Node):
-        self._convert_as_noop(node)
+        # prim::If can also have zero output.
+        if node.outputsSize() == 1:
+            output_name = node.output().debugName()
+            self.name_to_node[output_name] = cond_node
 
     def _convert_as_noop(self, node: torch._C.Node):
         # Converts the node as a no-op by mapping its output node as arg[0]
@@ -694,6 +701,9 @@ class TS2FXGraphConverter:
         except Exception as e:
             raise RuntimeError(f"TS2EPConverter failed for node {node_kind}") from e
 
+    def convert_prim_RaiseException(self, node: torch._C.Node):
+        pass
+
     def convert_graph_outputs(self):
         args = []
         for graph_output in self.ts_graph.outputs():
@@ -721,9 +731,13 @@ class TS2FXGraphConverter:
             else:
                 raise ValueError(f"Output {output_name} not found")
 
-        self.fx_graph.output(
-            args[0]
-        )  # Get rid of an extra list wrapped around final output.
+        if len(args) == 1:
+            self.fx_graph.output(
+                args[0]
+            )  # Get rid of an extra list wrapped around final output.
+        else:
+            # Sub-block of prim::If can have zero output.
+            self.fx_graph.output([])
 
 
 class TS2EPConverter:
