@@ -2,6 +2,7 @@
 import math
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
+
 number = Union[int, float]
 # flake8: noqa
 

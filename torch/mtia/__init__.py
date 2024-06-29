@@ -7,12 +7,12 @@ import threading
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
-
 from torch.types import Device
 
 from .. import device as _device, Tensor
 from .._utils import _dummy_type, _LazySeedTracker, classproperty
 from ._utils import _get_device_index
+
 
 _device_t = Union[_device, str, int, None]
 

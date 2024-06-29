@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 from textwrap import dedent
-
 from typing import Any, Dict
 
 import torch.jit

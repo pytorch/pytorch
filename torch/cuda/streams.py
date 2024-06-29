@@ -3,6 +3,7 @@ import ctypes
 
 import torch
 from torch._streambase import _EventBase, _StreamBase
+
 from .._utils import _dummy_type
 
 

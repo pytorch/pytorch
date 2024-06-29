@@ -24,16 +24,15 @@ from typing import (
 import torch
 import torch.utils._pytree as pytree
 from torch.fx._compatibility import compatibility
-
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.infra.pass_manager import PassManager
-
 from torch.utils._pytree import (
     FlattenFunc,
     FromDumpableContextFn,
     ToDumpableContextFn,
     UnflattenFunc,
 )
+
 
 if TYPE_CHECKING:
     # Import the following modules during type checking to enable code intelligence features,

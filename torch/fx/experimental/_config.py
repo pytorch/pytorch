@@ -1,7 +1,7 @@
 import os
 import sys
-
 from typing import Optional
+
 
 # [@compile_ignored: debug] Uses z3 for validating the guard optimizations transformations.
 translation_validation = (
@@ -72,5 +72,6 @@ validate_shape_env_version_key = False
 symbol_guard_limit_before_specialize: Optional[int] = None
 
 from torch.utils._config_module import install_config_module
+
 
 install_config_module(sys.modules[__name__])

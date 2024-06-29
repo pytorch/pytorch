@@ -2,7 +2,6 @@
 import os
 
 import torch
-
 from torch.jit._serialization import validate_map_location
 
 

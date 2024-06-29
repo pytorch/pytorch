@@ -7,6 +7,7 @@ from torch.fx.graph_module import GraphModule
 
 from .graph_drawer import FxGraphDrawer
 
+
 __all__ = ["GraphTransformObserver"]
 
 

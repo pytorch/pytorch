@@ -23,7 +23,6 @@ from torch.ao.quantization.quantizer import (
     QuantizationSpecBase,
     SharedQuantizationSpec,
 )
-
 from torch.ao.quantization.quantizer.utils import (
     _annotate_input_qspec_map,
     _annotate_output_qspec,
