@@ -5,7 +5,7 @@ import logging
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from enum import Enum
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, Union
 
 import torch
 import torch.distributed as dist
@@ -565,6 +565,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
         args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None,
         kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
         output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
+        stage_index_to_group_rank: Optional[Dict[int, int]] = None,
     ):
         if len(stages) <= 1:
             raise ValueError(
@@ -583,6 +584,12 @@ class PipelineScheduleMulti(_PipelineSchedule):
         self._num_stages = stages[0].num_stages
         self.pp_group_size = stages[0].group_size
         self.rank = stages[0].group_rank
+        # Set the pipeline stage states
+        if stage_index_to_group_rank is not None:
+            for stage in self._stages:
+                stage.stage_index_to_group_rank = stage_index_to_group_rank
+        self.stage_index_to_group_rank = stages[0].stage_index_to_group_rank
+
         # Set the same has_backward flag for stage object
         for stage in self._stages:
             stage.has_backward = self._has_backward
@@ -656,12 +663,19 @@ class PipelineScheduleMulti(_PipelineSchedule):
         stage_index_to_stage: Dict[int, _PipelineStageBase] = {
             stage.stage_index: stage for stage in self._stages
         }
-        prev_rank: int = (self.rank - 1) % self.pp_group_size
-        next_rank: int = (self.rank + 1) % self.pp_group_size
+
+        # determine prev_rank and next_rank based on which ranks are next to
+        # the stages in the pipeline_order
+        all_prev_ranks: Set[int] = set()
+        all_next_ranks: Set[int] = set()
+        for stage_index in stage_index_to_stage.keys():
+            # TODO: assumption that stages only communicate from distances of +1/-1 (no skip connections)
+            if stage_index > 0:
+                all_prev_ranks.add(self.stage_index_to_group_rank[stage_index - 1])
+            if stage_index < self._num_stages - 1:
+                all_next_ranks.add(self.stage_index_to_group_rank[stage_index + 1])
 
         for time_step, action in enumerate(self.pipeline_order[self.rank]):
-            prev_rank_ops = self.pipeline_order[prev_rank]
-            next_rank_ops = self.pipeline_order[next_rank]
             ops: List[dist.P2POp] = []
             if action is not None:
                 computation_type, mb_index, stage_index = action
@@ -684,43 +698,47 @@ class PipelineScheduleMulti(_PipelineSchedule):
 
             # Look at the neighboring ranks for this current timestep and determine whether
             # this current rank needs to do any recv communication
-            prev_rank_action = None
-            if time_step < len(prev_rank_ops):
-                prev_rank_action = prev_rank_ops[time_step]
-            if prev_rank_action is not None:
-                computation_type, mb_index, stage_index = prev_rank_action
-                # Only handle sends for the forward from a previous rank
-                if computation_type == _ComputationType.FORWARD:
-                    # If not the last stage, then receive fwd activations
-                    if stage_index != self._num_stages - 1:
-                        # TODO: We are assuming that stage will always receive from stage-1
-                        # however that is not necessarily true of get_fwd_recv_ops
-                        stage = stage_index_to_stage[stage_index + 1]
-                        ops.extend(stage.get_fwd_recv_ops(mb_index))
-                elif computation_type == _ComputationType.BACKWARD:
-                    # Previous rank doing backward has no influence for the current rank forward recv
-                    pass
-                else:
-                    raise ValueError(f"Unknown computation type {computation_type}")
+            for prev_rank in all_prev_ranks:
+                prev_rank_ops = self.pipeline_order[prev_rank]
+                prev_rank_action = None
+                if time_step < len(prev_rank_ops):
+                    prev_rank_action = prev_rank_ops[time_step]
+                if prev_rank_action is not None:
+                    computation_type, mb_index, stage_index = prev_rank_action
+                    # Only handle sends for the forward from a previous rank
+                    if computation_type == _ComputationType.FORWARD:
+                        # If not the last stage, then receive fwd activations
+                        if stage_index + 1 in stage_index_to_stage:
+                            # TODO: We are assuming that stage will always receive from stage-1
+                            # however that is not necessarily true of get_fwd_recv_ops
+                            stage = stage_index_to_stage[stage_index + 1]
+                            ops.extend(stage.get_fwd_recv_ops(mb_index))
+                    elif computation_type == _ComputationType.BACKWARD:
+                        # Previous rank doing backward has no influence for the current rank forward recv
+                        pass
+                    else:
+                        raise ValueError(f"Unknown computation type {computation_type}")
 
-            next_rank_action = None
-            if time_step < len(next_rank_ops):
-                next_rank_action = next_rank_ops[time_step]
-            if next_rank_action is not None:
-                computation_type, mb_index, stage_index = next_rank_action
-                # Only handle receives for the backwards from a next rank
-                if computation_type == _ComputationType.FORWARD:
-                    # Next rank doing forward has no influence for the current rank backward recv
-                    pass
-                elif computation_type == _ComputationType.BACKWARD:
-                    # If not the first stage, then receive bwd gradients
-                    if stage_index != 0:
-                        # TODO: We are assuming that stage will always receive from stage+1
-                        # however that is not necessarily true of get_bwd_recv_ops
-                        stage = stage_index_to_stage[stage_index - 1]
-                        ops.extend(stage.get_bwd_recv_ops(mb_index))
-                else:
-                    raise ValueError(f"Unknown computation type {computation_type}")
+            for next_rank in all_next_ranks:
+                next_rank_ops = self.pipeline_order[next_rank]
+                next_rank_action = None
+                if time_step < len(next_rank_ops):
+                    next_rank_action = next_rank_ops[time_step]
+                if next_rank_action is not None:
+                    computation_type, mb_index, stage_index = next_rank_action
+                    # Only handle receives for the backwards from a next rank
+                    if computation_type == _ComputationType.FORWARD:
+                        # Next rank doing forward has no influence for the current rank backward recv
+                        pass
+                    elif computation_type == _ComputationType.BACKWARD:
+                        # If not the first stage, then receive bwd gradients
+                        if stage_index - 1 in stage_index_to_stage:
+                            # TODO: We are assuming that stage will always receive from stage+1
+                            # however that is not necessarily true of get_bwd_recv_ops
+                            stage = stage_index_to_stage[stage_index - 1]
+                            ops.extend(stage.get_bwd_recv_ops(mb_index))
+                    else:
+                        raise ValueError(f"Unknown computation type {computation_type}")
 
             # do the communication
             if ops:

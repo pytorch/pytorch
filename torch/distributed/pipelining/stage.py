@@ -142,15 +142,6 @@ class _PipelineStageBase(ABC):
         # Caching chunk outputs for final output merge or reduction
         self.output_chunks: List[Any] = []
 
-        # Create stage id to group rank mapping
-        # In interleaved case, `group_rank` is stage index % group size.
-        self.stage_index_to_group_rank: Dict[int, int] = {}
-        pg_world_size = dist.get_world_size(group)
-        for i in range(self.num_stages):
-            # We only support wrapped-around interleaving
-            peer_rank = i % pg_world_size
-            self.stage_index_to_group_rank.setdefault(i, peer_rank)
-
         # Initialize has_backward to false; this will be set to true if loss
         # function is passed to pipeline schedule
         self.has_backward = False
@@ -170,8 +161,11 @@ class _PipelineStageBase(ABC):
         # grad reduction in DDP or FSDP.
         self._seen_bwd_chunks = 0
 
-        # To be populated later
+        # To be populated later by the Schedule
         self.chunks: Optional[int] = None
+        self.stage_index_to_group_rank: Dict[int, int] = {
+            i: i % self.group_size for i in range(self.num_stages)
+        }
 
     @property
     def has_backward(self) -> bool:
