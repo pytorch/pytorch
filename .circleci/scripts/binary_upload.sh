@@ -25,7 +25,7 @@ if [[ "${DRY_RUN}" = "disabled" ]]; then
   AWS_S3_CP="aws s3 cp"
 fi
 
-if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
+if [[ "${USE_SPLIT_BUILD:-false}" == "true" ]]; then
   UPLOAD_SUBFOLDER="${UPLOAD_SUBFOLDER}_pypi_pkg"
 fi
 
