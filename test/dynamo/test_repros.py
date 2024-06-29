@@ -1318,11 +1318,11 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             def forward(self, x: torch.Tensor, val: int) -> torch.Tensor:
                 return x + val
 
-        main_model = TestModel().cuda().to(memory_format=torch.channels_last)
-        opt_model = torch.compile(main_model, dynamic=True)
+        main_model = TestModel().to(memory_format=torch.channels_last)
+        opt_model = torch.compile(main_model, backend="eager", dynamic=True)
 
-        x1 = torch.rand(2, 5, 10, 10).cuda().to(memory_format=torch.channels_last)
-        x2 = torch.rand(2, 5, 4, 8).cuda().to(memory_format=torch.channels_last)
+        x1 = torch.rand(2, 5, 10, 10).to(memory_format=torch.channels_last)
+        x2 = torch.rand(2, 5, 4, 8).to(memory_format=torch.channels_last)
 
         o1_ref = main_model(x1, 4)
         o1 = opt_model(x1, 4)

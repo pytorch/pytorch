@@ -2387,7 +2387,6 @@ class ShapeEnv:
         tracked_fakes: Optional[List[Any]] = None,
         **kwargs
     ) -> None:
-        kwargs['duck_shape'] = config.use_duck_shape
         self._init(**kwargs)
 
         # Disable event recording when replaying.
@@ -2451,7 +2450,7 @@ class ShapeEnv:
         specialize_zero_one=True,
         # When True, assume input sizes which have the same size are
         # symbolically equal.
-        duck_shape=True,
+        duck_shape=None,
         # For debugging
         co_fields=None,
         # When True, whenever safe, we will generate a deferred runtime assert
@@ -2469,6 +2468,9 @@ class ShapeEnv:
         # XXX Add any new settings that could affect FakeTensor evaluation
         # to: torch._subclasses.fake_tensor._ShapeEnvSettings
     ):
+        if duck_shape is None:
+            duck_shape = config.use_duck_shape
+
         self.settings = ShapeEnvSettings(
             # Not directly used by ShapeEnv; indirectly used by FakeTensor
             allow_scalar_outputs=allow_scalar_outputs,
