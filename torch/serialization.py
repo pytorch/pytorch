@@ -5,6 +5,7 @@ import functools
 import io
 import os
 import pickle
+import re
 import shutil
 import struct
 import sys
@@ -1107,12 +1108,33 @@ def load(
     """
     torch._C._log_api_usage_once("torch.load")
     UNSAFE_MESSAGE = (
-        "Weights only load failed. Re-running `torch.load` with `weights_only` set to `False`"
-        " will likely succeed, but it can result in arbitrary code execution."
-        " Do it only if you get the file from a trusted source. Alternatively, to load"
-        " with `weights_only` please check the recommended steps in the following error message."
-        " WeightsUnpickler error: "
+        "Re-running `torch.load` with `weights_only` set to `False` will likely succeed, "
+        "but it can result in arbitrary code execution. Do it only if you got the file from a "
+        "trusted source."
     )
+    DOCS_MESSAGE = (
+        "\n\nCheck the documentation of torch.load to learn more about types accepted by default with "
+        "weights_only https://pytorch.org/docs/stable/generated/torch.load.html."
+    )
+
+    def _get_wo_message(message: str) -> str:
+        pattern = r"GLOBAL (\S+) was not an allowed global by default."
+        has_unsafe_global = re.search(pattern, message) is not None
+        if has_unsafe_global:
+            updated_message = (
+                "Weights only load failed. This file can still be loaded, to do so you have two options "
+                f"\n\t(1) {UNSAFE_MESSAGE}\n\t(2) Alternatively, to load with `weights_only=True` please check "
+                "the recommended steps in the following error message.\n\tWeightsUnpickler error: "
+                + message
+            )
+        else:
+            updated_message = (
+                f"Weights only load failed. {UNSAFE_MESSAGE}\n Please file an issue with the following "
+                "so that we can make `weights_only=True` compatible with your use case: WeightsUnpickler "
+                "error: " + message
+            )
+        return updated_message + DOCS_MESSAGE
+
     if weights_only is None:
         weights_only, warn_weights_only = False, True
     else:
@@ -1200,7 +1222,7 @@ def load(
                             **pickle_load_args,
                         )
                     except RuntimeError as e:
-                        raise pickle.UnpicklingError(UNSAFE_MESSAGE + str(e)) from None
+                        raise pickle.UnpicklingError(_get_wo_message(str(e))) from None
                 return _load(
                     opened_zipfile,
                     map_location,
@@ -1224,7 +1246,7 @@ def load(
                     **pickle_load_args,
                 )
             except RuntimeError as e:
-                raise pickle.UnpicklingError(UNSAFE_MESSAGE + str(e)) from None
+                raise pickle.UnpicklingError(_get_wo_message(str(e))) from None
         return _legacy_load(
             opened_file, map_location, pickle_module, **pickle_load_args
         )
