@@ -54,7 +54,6 @@ class FSDPCommContext:
         # copy-in with the current all-gather in forward; copy-in overlaps with
         # reduce-scatter in backward without the separate copy-in stream
         self.all_gather_copy_in_stream = torch.cuda.Stream(priority=high_priority)
-        self.all_gather_state: Optional[AllGatherState] = None
         # All-gather stream allows overlapping next all-gather with current
         # forward compute
         self.all_gather_stream = torch.cuda.Stream(priority=high_priority)
@@ -65,6 +64,11 @@ class FSDPCommContext:
         # since collectives use different network resources and can overlap
         # in the typical intra-node sharding / inter-node replication case
         self.all_reduce_stream = torch.cuda.Stream()
+        # All-gather/reduce-scatter states keep references to collective
+        # tensors produced in one stream and used in another and accompanying
+        # CUDA events for synchronization
+        self.all_gather_state: Optional[AllGatherState] = None
+        self.reduce_scatter_state: Optional[ReduceScatterState] = None
         # Post-forward order for explicit backward prefetching
         self.post_forward_order: List[FSDPParamGroup] = []  # will cause ref cycles
 
@@ -82,6 +86,11 @@ class FSDPCommContext:
 class AllGatherState(NamedTuple):
     all_gather_result: AllGatherResult
     event: torch.cuda.Event  # all-gather copy-out
+
+
+class ReduceScatterState(NamedTuple):
+    reduce_scatter_input: torch.Tensor
+    event: torch.cuda.Event  # reduce-scatter event
 
 
 class FSDPParamGroup:
@@ -342,7 +351,17 @@ class FSDPParamGroup:
         if len(fsdp_params_with_grad) == 0:
             return
         with record_function(self._with_fqn("FSDP::post_backward_reduce")):
-            self._post_reduce_event, self._partial_reduce_output = foreach_reduce(
+            if self.comm_ctx.reduce_scatter_state is not None:
+                torch.cuda.current_stream().wait_event(
+                    self.comm_ctx.reduce_scatter_state.event
+                )
+                self.comm_ctx.reduce_scatter_state = None
+            (
+                reduce_scatter_input,
+                reduce_scatter_event,
+                self._post_reduce_event,
+                self._partial_reduce_output,
+            ) = foreach_reduce(
                 fsdp_params_with_grad,
                 unsharded_grads,
                 self._reduce_scatter_process_group,
@@ -354,6 +373,9 @@ class FSDPParamGroup:
                 self.comm_ctx.all_reduce_stream,
                 self.all_reduce_grads,
                 self._partial_reduce_output,
+            )
+            self.comm_ctx.reduce_scatter_state = ReduceScatterState(
+                reduce_scatter_input, reduce_scatter_event
             )
 
     def finalize_backward(self):
