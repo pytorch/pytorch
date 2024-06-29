@@ -49,6 +49,7 @@ struct TORCH_API KinetoEvent {
   int deviceIndex() const;
   int64_t nBytes() const;
   uint64_t startNs() const;
+  uint64_t endNs() const;
   uint64_t durationNs() const;
   bool isAsync() const;
   uint64_t correlationId() const;
