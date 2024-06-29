@@ -14,7 +14,6 @@ import importlib
 import itertools
 import logging
 import os
-import pathlib
 import shutil
 import signal
 import subprocess
@@ -22,6 +21,7 @@ import sys
 import time
 import weakref
 from contextlib import contextmanager
+from pathlib import Path
 from typing import (
     Any,
     Callable,
@@ -921,7 +921,7 @@ def speedup_experiment_onnx(
         2. Running ORT with OnnxModel.
 
     Writes to ./{output_filename}, which should be
-        `pathlib.Path(self.output_dir) / f"{self.compiler}_{suite}_{self.dtype}_{self.mode}_{self.device}_{self.testing}.csv".
+        `Path(self.output_dir) / f"{self.compiler}_{suite}_{self.dtype}_{self.mode}_{self.device}_{self.testing}.csv".
 
     TODO(bowbao): Record export time and export peak memory usage.
     """
@@ -1348,8 +1348,8 @@ class OnnxModel(abc.ABC):
     @classmethod
     def _generate_onnx_model_directory(
         cls, output_directory: str, compiler_name: str, model_name: str
-    ) -> pathlib.Path:
-        model_path = pathlib.Path(
+    ) -> Path:
+        model_path = Path(
             output_directory,
             ".onnx_models",
             model_name,
