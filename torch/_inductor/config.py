@@ -913,6 +913,15 @@ class rocm:
     use_preselected_instances: bool = False
 
 
+# Backend to use for CPU codegen either "cpp" or "halide" (experimental)
+cpu_backend = "cpp"
+
+
+class halide:
+    # Controls `no_asserts` flag passed to Halide target (warning: can false positive)
+    asserts = False
+
+
 # create a directory containing lots of debug information
 class trace:
     # master switch for all debugging flags below
