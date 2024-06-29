@@ -3,7 +3,7 @@
 import logging
 import operator
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 import torch
 import torch.distributed as dist
@@ -91,6 +91,7 @@ class _PipelineStageBase(ABC):
         num_stages: int,
         device: torch.device,
         group: Optional[dist.ProcessGroup] = None,
+        dw_builder: Optional[Callable[[], Callable[[], None]]] = None,
     ):
         """
         Args:
@@ -101,6 +102,13 @@ class _PipelineStageBase(ABC):
             group (Optional[dist.ProcessGroup]): The process group to use for communication.
                 If `None`, the default process group will be used.
                 Default: `None`.
+            dw_builder (Optional[Callable[[], Callable[[], None]]): If provided, dw_runner is a builder function
+                that will build a new dw_runner function that will run parts of module backward that were intentionally
+                skipped during the module's actual backward pass.  builder must be invoked by stage after stage runs
+                model backwards, and stage should save the latest dw_runner to run during weight pass.
+                When used with schedules that only have F and B steps, the fresh dw_runner function will be called as
+                part of B.
+                When used with F,B,W schedules, the dw_runner function implements 'W'.
         """
         super().__init__()
         if stage_index >= num_stages:
@@ -113,6 +121,11 @@ class _PipelineStageBase(ABC):
         self.num_stages = num_stages
         self.device = device
         self.group = group
+
+        self.dw_builder = dw_builder
+
+        # store dw_runner per microbatch_id
+        self.dw_runner: Dict[int, Callable[[], None]] = {}
 
         # `group_rank` is rank in process group `group`.
         self.group_rank = dist.get_rank(self.group)
@@ -555,14 +568,22 @@ class _PipelineStageBase(ABC):
         return output
 
     def backward_one_chunk(
-        self,
-        bwd_chunk_id: int,
-        loss=None,
+        self, bwd_chunk_id: int, loss=None, full_backward: bool = True
     ):
         """
         Perform backward pass on the module.
         This should only be called once per microbatch.
+
+        If full_backward is True (the default), the full backward pass including weight and input gradients will be run,
+        and it is an error to call `backward_weight_one_chunk` for this bwd_chunk_id.
+
+        If full_backward is False, it is required that `dw_runner` was provided to the PipelineStage at __init__ time,
+        and a subsequent call to `backward_weight_one_chunk` is required to invoke dw_runner and complete the backward.
         """
+
+        if not full_backward:
+            assert self.dw_builder, "Must provide dw_builder to run partial backward"
+
         self._check_chunk_id(bwd_chunk_id)
 
         (
@@ -593,6 +614,24 @@ class _PipelineStageBase(ABC):
 
         self.grads_input = self.backward_maybe_with_nosync(bwd_kwargs)
         logger.debug(f"{self.log_prefix} Backwarded chunk {bwd_chunk_id}")  # noqa: G004
+
+        if not full_backward:
+            assert self.dw_builder, "Must provide dw_builder to run partial backward"
+            assert bwd_chunk_id not in self.dw_runner, (
+                f"{self.log_prefix} Attempted to run partial backward for chunk {bwd_chunk_id}"
+                " repeatedly without calling `backward_weight_one_chunk`"
+            )
+            dw_runner = self.dw_builder()
+            self.dw_runner[bwd_chunk_id] = dw_runner
+        elif self.dw_builder:
+            self.dw_builder()()
+
+    def backward_weight_one_chunk(self, bwd_chunk_id: int):
+        assert bwd_chunk_id in self.dw_runner, (
+            f"{self.log_prefix} Attempted to run backward_weight_one_chunk for chunk {bwd_chunk_id}"
+            " without first calling `backward_one_chunk(full_backward=False)`"
+        )
+        self.dw_runner.pop(bwd_chunk_id)()
 
     def _validate_fwd_input(self, args, kwargs):
         """Raises a RuntimeError if shapes of input args/kwargs do not match the shapes configured for this stage."""
@@ -1103,6 +1142,7 @@ class PipelineStage(_PipelineStageBase):
         input_args (Union[torch.Tensor, Tuple[torch.tensor]], optional): The input arguments for the submodule.
         output_args (Union[torch.Tensor, Tuple[torch.tensor]], optional): The output arguments for the submodule.
         group (dist.ProcessGroup, optional): The process group for distributed training. If None, default group.
+        dw_builder: TODO clean up comments
     """
 
     def __init__(
@@ -1114,8 +1154,9 @@ class PipelineStage(_PipelineStageBase):
         input_args: Union[torch.Tensor, Tuple[torch.Tensor, ...]],
         output_args: Optional[Union[torch.Tensor, Tuple[torch.Tensor, ...]]] = None,
         group: Optional[dist.ProcessGroup] = None,
+        dw_builder: Optional[Callable[[], Callable[[], None]]] = None,
     ):
-        super().__init__(submodule, stage_index, num_stages, device, group)
+        super().__init__(submodule, stage_index, num_stages, device, group, dw_builder)
         self.submod.to(self.device)
         # When we materialize the model partition on cuda, we call reset_parameters() if it is available
         self.inputs: List[torch.Tensor] = []
