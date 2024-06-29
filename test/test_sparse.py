@@ -5386,22 +5386,41 @@ class TestSparseAny(TestCase):
                 enable_batch=False,  # TODO: remove after gh-104868 is resolved
         ):
             t = t_.pin_memory(pin_memory_device)
+            self.assertTrue(t.is_pinned(pin_memory_device))
+
+            # registering a non-pinned tensor with CUDA memory is a
+            # clone operation
+            self.assertFalse(t_.is_pinned(pin_memory_device))
+
+            # registering already pinned tensor with CUDA memory is an
+            # identity operation:
+            t2 = t.pin_memory(pin_memory_device)
+            self.assertTrue(t2 is t)
+
             if layout is torch.sparse_coo:
                 self.assertTrue(t._indices().is_pinned(pin_memory_device))
                 self.assertTrue(t._values().is_pinned(pin_memory_device))
+                self.assertFalse(t_._indices().is_pinned(pin_memory_device))
+                self.assertFalse(t_._values().is_pinned(pin_memory_device))
             elif layout in {torch.sparse_csr, torch.sparse_bsr}:
                 self.assertTrue(t.crow_indices().is_pinned(pin_memory_device))
                 self.assertTrue(t.col_indices().is_pinned(pin_memory_device))
                 self.assertTrue(t.values().is_pinned(pin_memory_device))
+                self.assertFalse(t_.crow_indices().is_pinned(pin_memory_device))
+                self.assertFalse(t_.col_indices().is_pinned(pin_memory_device))
+                self.assertFalse(t_.values().is_pinned(pin_memory_device))
             elif layout in {torch.sparse_csc, torch.sparse_bsc}:
                 self.assertTrue(t.ccol_indices().is_pinned(pin_memory_device))
                 self.assertTrue(t.row_indices().is_pinned(pin_memory_device))
                 self.assertTrue(t.values().is_pinned(pin_memory_device))
+                self.assertFalse(t_.ccol_indices().is_pinned(pin_memory_device))
+                self.assertFalse(t_.row_indices().is_pinned(pin_memory_device))
+                self.assertFalse(t_.values().is_pinned(pin_memory_device))
             elif layout is torch.strided:
                 pass
             else:
                 assert 0  # unreachable
-            self.assertTrue(t.is_pinned(pin_memory_device))
+
 
     @unittest.skipIf(not torch.cuda.is_available(), 'requires cuda')
     @onlyCPU
@@ -5433,6 +5452,42 @@ class TestSparseAny(TestCase):
             else:
                 assert 0  # unreachable
             self.assertTrue(t.is_pinned(pin_memory_device))
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'requires cuda')
+    @onlyCPU
+    @all_sparse_layouts('layout', include_strided=False)
+    def test_constructor_mismatched_pinned_memory(self, device, layout):
+        """Test the failure to construct sparse tensor from indices and values
+        that have different pinning states.
+        """
+        def generic_constructor(*args, **kwargs):
+            if layout in {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}:
+                kwargs.update(layout=layout)
+                return torch.sparse_compressed_tensor(*args, **kwargs)
+            elif layout is torch.sparse_coo:
+                return torch.sparse_coo_tensor(*args, **kwargs)
+            else:
+                raise NotImplementedError(layout)
+
+        for args, kwargs in self.generate_simple_inputs(
+                layout, device=device, dtype=torch.float64,
+                enable_zero_sized=False,     # pinning zero-sized tensors is a no-op
+                enable_batch=False,  # TODO: remove after gh-104868 is resolved
+                output_tensor=False):
+
+            # indices are pinned, values is a non-pinned tensor
+            args1 = (args[0].pin_memory(), *args[1:])
+
+            # indices are non-pinned, values is a pinned tensor
+            args2 = (*args[:-1], args[-1].pin_memory())
+
+            with self.assertRaisesRegex(
+                    RuntimeError, r"memory pinning of \w*indices \(=1\) must match memory pinning of values \(=0\)"):
+                generic_constructor(*args1, **kwargs)
+
+            with self.assertRaisesRegex(
+                    RuntimeError, r"memory pinning of \w*indices \(=0\) must match memory pinning of values \(=1\)"):
+                generic_constructor(*args2, **kwargs)
 
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA

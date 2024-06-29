@@ -292,8 +292,22 @@ static void _validate_sparse_compressed_tensor_args_worker(const Tensor& compres
       compressed_indices.get_device() == plain_indices.get_device(),
       "device of ", compressed_indices_name, " (=",
       compressed_indices.device(),
-      ") must match device of ", plain_indices_name," (=",
+      ") must match device of ", plain_indices_name, " (=",
       plain_indices.device(),
+      ")");
+  TORCH_CHECK(
+      compressed_indices.is_pinned() == values.is_pinned(),
+      "memory pinning of ", compressed_indices_name, " (=",
+      compressed_indices.is_pinned(),
+      ") must match memory pinning of values (=",
+      values.is_pinned(),
+      ")");
+  TORCH_CHECK(
+      compressed_indices.is_pinned() == plain_indices.is_pinned(),
+      "memory pinning of ", compressed_indices_name, " (=",
+      compressed_indices.is_pinned(),
+      ") must match memory pinning of ", plain_indices_name, " (=",
+      plain_indices.is_pinned(),
       ")");
 
   // Autograd Invariants
@@ -1239,6 +1253,9 @@ bool is_pinned_sparse_compressed(const Tensor& self, std::optional<Device> devic
 
 Tensor _pin_memory_sparse_compressed(const Tensor& self, std::optional<Device> device) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!device.has_value() || device->is_cuda());
+  // pinning of sparse tensor is equivalent to cloning indices and
+  // values that will not change the sparse tensor invariants. Hence,
+  // we can skip checking the sparse tensor invariants for efficiency.
   CheckSparseTensorInvariants _(false);
   TensorOptions options = self.options().pinned_memory(true);
   auto impl = get_sparse_csr_impl(self);

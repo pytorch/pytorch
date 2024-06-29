@@ -6,6 +6,7 @@
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/Layout.h>
 #include <ATen/Parallel.h>
+#include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/native/SparseTensorUtils.h>
 #include <ATen/native/sparse/SparseStubs.h>
@@ -383,6 +384,14 @@ void _validate_sparse_coo_tensor_args(
       dense_dim,
       "), but got ",
       size.size());
+
+  TORCH_CHECK(
+      indices.is_pinned() == values.is_pinned(),
+      "memory pinning of indices (=",
+      indices.is_pinned(),
+      ") must match memory pinning of values (=",
+      values.is_pinned(),
+      ")");
 
   // Check to make sure all indices are within the boundaries of `size`
   if (indices.numel() > 0) {
@@ -858,6 +867,10 @@ bool is_pinned_sparse_coo(const Tensor& self, std::optional<Device> device) {
 
 Tensor _pin_memory_sparse_coo(const Tensor& self, std::optional<Device> device) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!device.has_value() || device->is_cuda());
+  // pinning of sparse tensor is equivalent to cloning indices and
+  // values that will not change the sparse tensor invariants. Hence,
+  // we can skip checking the sparse tensor invariants for efficiency.
+  at::sparse_csr::CheckSparseTensorInvariants _(false);
   TensorOptions options = self.options().pinned_memory(true);
   return at::_sparse_coo_tensor_with_dims_and_tensors(
       self.sparse_dim(),
