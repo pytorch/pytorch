@@ -23,7 +23,7 @@ from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from ..._dynamo.utils import counters
 
-from .. import codecache, config, cpu_vec_isa, ir, metrics
+from .. import codecache, config, cpp_builder, cpu_vec_isa, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
 from ..optimize_indexing import range_expressable_in_32_bits
 from ..scheduler import (
@@ -2293,7 +2293,7 @@ class CppVecKernel(CppKernel):
                     load_mask = f"{self._load_mask}.is_masked({itervar_inner})"
                 else:
                     load_mask = f"{self._load_mask} != 0"
-            if codecache.is_gcc():
+            if cpp_builder.is_gcc():
                 code.writeline(f"#pragma GCC unroll {self.tiling_factor}")
             else:
                 code.writeline(f"#pragma unroll {self.tiling_factor}")
@@ -4208,7 +4208,7 @@ class LoopLevel:
             line1 = ""
         elif self.simd_omp:
             line1 = f"#pragma omp {simd}"
-        elif not self.is_reduction and codecache.is_gcc():
+        elif not self.is_reduction and cpp_builder.is_gcc():
             line1 = "#pragma GCC ivdep"
         else:
             line1 = ""
