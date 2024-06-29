@@ -3,7 +3,7 @@
 import functools
 import itertools
 import os
-import pathlib
+from pathlib import Path
 from typing import Sequence
 from unittest import skip
 
@@ -36,7 +36,7 @@ def remove_suffixes(l):
 
 
 def init_lists():
-    path_to_script = pathlib.Path(os.path.abspath(os.path.dirname(__file__)))
+    path_to_script = Path(os.path.abspath(os.path.dirname(__file__)))
     TS_NATIVE_FUNCTIONS_PATH = (
         path_to_script.parent.parent / "aten/src/ATen/native/ts_native_functions.yaml"
     )
