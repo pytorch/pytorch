@@ -17,7 +17,6 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import subprocess
 import textwrap
 from dataclasses import dataclass
-from itertools import product
 from typing import Any
 
 import yaml
