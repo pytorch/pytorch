@@ -2,6 +2,7 @@
 from torch.distributions import constraints
 from torch.distributions.gamma import Gamma
 
+
 __all__ = ["Chi2"]
 
 
