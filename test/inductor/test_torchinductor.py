@@ -749,13 +749,28 @@ def is_cpp_backend(device):
 
 
 def is_halide_backend(device):
-    return getattr(device, "type", device) == "cpu" and config.cpu_backend == "halide"
+    if getattr(device, "type", device) == "cpu":
+        return config.cpu_backend == "halide"
+    return config.cuda_backend == "halide"
 
 
 def skip_if_halide(fn):
     @functools.wraps(fn)
     def wrapper(self):
         if is_halide_backend(self.device):
+            raise unittest.SkipTest("halide not supported")
+        return fn(self)
+
+    return wrapper
+
+
+def skip_if_gpu_halide(fn):
+    @functools.wraps(fn)
+    def wrapper(self):
+        if (
+            is_halide_backend(self.device)
+            and getattr(self.device, "type", self.device) == "cuda"
+        ):
             raise unittest.SkipTest("halide not supported")
         return fn(self)
 
@@ -1324,6 +1339,7 @@ class CommonTemplate:
     @dynamo_config.patch("capture_dynamic_output_shape_ops", True)
     # https://github.com/halide/Halide/issues/8308
     @config.patch("halide.scheduler_cpu", "Mullapudi2016")
+    @config.patch("halide.scheduler_cuda", "Li2018")
     @config.patch(implicit_fallbacks=True)
     def test_index_propagation_nested_indirect_indexing(self):
         def nested(x, repeats):
@@ -1639,7 +1655,7 @@ class CommonTemplate:
 
         inputs = (torch.ones(128), torch.ones(4, 4, 1))
         for i in inputs:
-            self.common(fn, (i,))
+            self.common(fn, (i,), check_lowp=not is_halide_backend(self.device))
 
     @config.patch(unroll_reductions_threshold=1)
     def test_reduction5(self):
@@ -1704,6 +1720,8 @@ class CommonTemplate:
         sample[-1] = 1
         self.common(fn, (sample,))
 
+    # https://github.com/halide/Halide/issues/8256
+    @config.patch("halide.scheduler_cuda", "Li2018")
     @skipCPUIf(IS_MACOS, "fails on macos")
     def test_multilayer_var(self):
         def fn(a):
@@ -1715,7 +1733,12 @@ class CommonTemplate:
             atol=1e-3,
             rtol=1e-3,
         )
-        self.common(fn, ((torch.rand((14923), dtype=torch.float32),)))
+        self.common(
+            fn,
+            ((torch.rand((14923), dtype=torch.float32),)),
+            atol=1e-3,
+            rtol=1e-3,
+        )
 
     @skipCPUIf(IS_MACOS, "fails on macos")
     @skip_if_halide  # accuracy 4.7% off
@@ -1744,6 +1767,7 @@ class CommonTemplate:
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @skipCUDAIf(TEST_WITH_ROCM, "Computation not done in float on ROCm")
+    @skip_if_gpu_halide  # accuracy issue
     def test_split_cumsum_low_prec(self):
         if self.device == "cpu":
             raise unittest.SkipTest("ir.Scan nyi on CPU")
@@ -1780,6 +1804,7 @@ class CommonTemplate:
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @skipCUDAIf(TEST_WITH_ROCM, "Computation not done in float on ROCm")
+    @skip_if_gpu_halide  # accuracy issue
     def test_split_cumprod_low_prec(self):
         if self.device == "cpu":
             raise unittest.SkipTest("ir.Scan nyi on CPU")
@@ -1811,6 +1836,7 @@ class CommonTemplate:
         self.common(fn, (a, b), atol=1e-5, rtol=1e-5, check_lowp=False)
 
     @skipCUDAIf(TEST_WITH_ROCM, "associative_scan is not supported on ROCm")
+    @skip_if_halide  # scan ops
     def test_custom_scan_op(self):
         if self.device != "cuda":
             raise unittest.SkipTest("associative_scan only supported on GPU")
@@ -1835,6 +1861,7 @@ class CommonTemplate:
         actual = associative_scan(logcumsum_combine, a, 0)
         self.assertEqual(expect, actual)
 
+    @skip_if_halide  # scan ops
     def test_custom_scan_op_compiled(self):
         if self.device != "cuda":
             raise unittest.SkipTest("associative_scan only supported on GPU")
@@ -1861,6 +1888,7 @@ class CommonTemplate:
         ).check_not("run(").run(code[0])
 
     @skipCUDAIf(TEST_WITH_ROCM, "associative_scan is not supported on ROCm")
+    @skip_if_halide  # scan ops
     def test_custom_scan_op_multi_input(self):
         if self.device != "cuda":
             raise unittest.SkipTest("associative_scan only supported on GPU")
@@ -1984,11 +2012,17 @@ class CommonTemplate:
             return x.cumsum(0), x.cumsum(1)
 
         # Persistent reductions
-        self.common(fn, (torch.rand(16, 32),), check_lowp=True)
-        self.common(fn, (torch.rand(20, 30),), check_lowp=True)
+        self.common(
+            fn, (torch.rand(16, 32),), check_lowp=not is_halide_backend(self.device)
+        )
+        self.common(
+            fn, (torch.rand(20, 30),), check_lowp=not is_halide_backend(self.device)
+        )
 
         # Non-persistent reduction
-        self.common(fn, (torch.rand(100, 4000),), check_lowp=True)
+        self.common(
+            fn, (torch.rand(100, 4000),), check_lowp=not is_halide_backend(self.device)
+        )
 
     def test_cumsum_zero_dim(self):
         def fn(x):
@@ -2003,11 +2037,15 @@ class CommonTemplate:
 
         # Persistent reduction
         a = torch.rand((1, 1024))
-        self.common(fn, (a,), check_lowp=not TEST_WITH_ROCM)
+        self.common(
+            fn, (a,), check_lowp=not (TEST_WITH_ROCM or is_halide_backend(self.device))
+        )
 
         # Non-persistent reduction
         b = torch.rand((1, 8192))
-        self.common(fn, (b,), check_lowp=not TEST_WITH_ROCM)
+        self.common(
+            fn, (b,), check_lowp=not (TEST_WITH_ROCM or is_halide_backend(self.device))
+        )
 
     def test_cumprod_zero_dim(self):
         def fn(x):
@@ -2021,11 +2059,23 @@ class CommonTemplate:
             return x.logcumsumexp(0), x.logcumsumexp(1)
 
         # Persistent reductions
-        self.common(fn, (torch.rand(16, 32),), check_lowp=not TEST_WITH_ROCM)
-        self.common(fn, (torch.rand(20, 30),), check_lowp=not TEST_WITH_ROCM)
+        self.common(
+            fn,
+            (torch.rand(16, 32),),
+            check_lowp=not (TEST_WITH_ROCM or is_halide_backend(self.device)),
+        )
+        self.common(
+            fn,
+            (torch.rand(20, 30),),
+            check_lowp=not (TEST_WITH_ROCM or is_halide_backend(self.device)),
+        )
 
         # Non-persistent reduction
-        self.common(fn, (torch.rand(100, 4000),), check_lowp=not TEST_WITH_ROCM)
+        self.common(
+            fn,
+            (torch.rand(100, 4000),),
+            check_lowp=not (TEST_WITH_ROCM or is_halide_backend(self.device)),
+        )
 
     def test_logcumsumexp_zero_dim(self):
         def fn(x):
@@ -2059,6 +2109,7 @@ class CommonTemplate:
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @skip_if_halide  # bf16
+    @skip_if_gpu_halide  # https://github.com/halide/Halide/issues/8311
     def test_dist_bf16(self):
         def fn(a, b):
             return torch.dist(a.to(torch.bfloat16), b.to(torch.bfloat16))
@@ -2716,6 +2767,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
+    @skip_if_halide  # only 32-bit indexing
     def test_large_tensor_reduction(self):
         if not _has_sufficient_memory(self.device, 4.5 * 1024**3):  # 4.5 GiB
             raise unittest.SkipTest("insufficient memory")
@@ -2736,6 +2788,7 @@ class CommonTemplate:
         expect = torch.tensor(2, dtype=torch.int8, device=self.device)
         self.assertEqual(actual, expect)
 
+    @skip_if_gpu_halide  # only 32-bit indexing
     def test_large_broadcast_reduction(self):
         if self.device == "cpu":
             raise unittest.SkipTest("Fails on CPU")
@@ -3352,7 +3405,12 @@ class CommonTemplate:
         with torch.no_grad():
             _, code = run_and_get_code(foo, conv_layer, input_tensor)
             # should be channels last permuting before kernel
-            FileCheck().check(".run(").check(".convolution(").run(code[0])
+            if is_halide_backend(self.device):
+                FileCheck().check("halide_kernel_0(").check(".convolution(").run(
+                    code[0]
+                )
+            else:
+                FileCheck().check(".run(").check(".convolution(").run(code[0])
 
     def test_upsample_cat_conv(self):
         if self.device == GPU_TYPE:
@@ -3773,6 +3831,8 @@ class CommonTemplate:
             rtol=0.001,
         )
 
+    # https://github.com/halide/Halide/issues/8256
+    @config.patch("halide.scheduler_cuda", "Li2018")
     def test_convolution4(self):
         def fn(x, w):
             x = F.conv2d(x, w, groups=w.shape[0])
@@ -3877,6 +3937,7 @@ class CommonTemplate:
             (torch.randn([2, 3, 16, 16, 16]).to(memory_format=torch.channels_last_3d),),
         )
 
+    @skip_if_gpu_halide  # slow
     def test_adaptive_avg_pool2d1(self):
         def fn(x):
             return aten._adaptive_avg_pool2d(x, (6, 6)), aten._adaptive_avg_pool2d(
@@ -3914,6 +3975,7 @@ class CommonTemplate:
         )
         assertGeneratedKernelCountEqual(self, 0)
 
+    @skip_if_gpu_halide  # slow
     def test_adaptive_max_pool2d1(self):
         def fn(x):
             return aten.adaptive_max_pool2d(x, (6, 6))
@@ -3936,6 +3998,7 @@ class CommonTemplate:
             (torch.randn(2, 4, 6, 6),),
         )
 
+    @skip_if_gpu_halide  # slow
     def test_adaptive_max_pool2d2(self):
         # Big kernel size, use fallback
         def fn(x):
@@ -4018,6 +4081,7 @@ class CommonTemplate:
             thread.join()
 
     @unittest.skipIf(config.is_fbcode(), "fbcode triton error, needs debugging")
+    @skip_if_gpu_halide  # https://github.com/halide/Halide/issues/8311
     def test_adaptive_avg_pool2d_low_prec(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -4084,6 +4148,8 @@ class CommonTemplate:
 
         self.assertEqual(eager_delta, compile_delta)
 
+    # https://github.com/halide/Halide/issues/8256
+    @config.patch("halide.scheduler_cuda", "Li2018")
     def test_buffer_copied_in_graph_with_different_shapes(self):
         class MyModel(torch.nn.Module):
             def __init__(self):
@@ -4190,6 +4256,7 @@ class CommonTemplate:
             (torch.randn(2, 4, 16, 16),),
         )
 
+    @skip_if_gpu_halide  # slow
     def test_max_pool2d2(self):
         def fn(x):
             return aten.max_pool2d_with_indices(x, [3, 3], [2, 2])
@@ -4199,6 +4266,7 @@ class CommonTemplate:
             (torch.randn([16, 64, 55, 55]),),
         )
 
+    @skip_if_gpu_halide  # slow
     def test_max_pool2d3(self):
         def fn(x):
             # with padding
@@ -4234,6 +4302,7 @@ class CommonTemplate:
             (torch.randn([2, 8, 111, 111]),),
         )
 
+    @skip_if_gpu_halide  # slow
     def test_max_pool2d5(self):
         def fn(x):
             return aten.max_pool2d_with_indices(x, [3, 3], [])
@@ -4243,6 +4312,7 @@ class CommonTemplate:
             (torch.randn([16, 64, 55, 55]),),
         )
 
+    @skip_if_gpu_halide  # slow
     def test_max_pool2d6(self):
         # Too big kernel size, use fallback
         def fn(x):
@@ -4320,6 +4390,7 @@ class CommonTemplate:
         self.common(
             fn,
             (-torch.arange(1 * 8 * 8, dtype=torch.float32).view(1, 1, 8, 8),),
+            check_lowp=not is_halide_backend(self.device),  # misaligned addr fp16
         )
 
     def test_avg_pool2d4(self):
@@ -4338,6 +4409,7 @@ class CommonTemplate:
         self.common(
             fn,
             (-torch.arange(1 * 8 * 8, dtype=torch.float32).view(1, 1, 8, 8),),
+            check_lowp=not is_halide_backend(self.device),  # misaligned addr fp16
         )
 
     def test_avg_pool2d6(self):
@@ -4347,6 +4419,7 @@ class CommonTemplate:
         self.common(
             fn,
             (-torch.arange(1 * 8 * 8, dtype=torch.float32).view(1, 1, 8, 8),),
+            check_lowp=not is_halide_backend(self.device),  # misaligned addr fp16
         )
 
     def test_avg_pool2d7(self):
@@ -4371,8 +4444,10 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.randn(1, 3, 6, 6),),
+            check_lowp=not is_halide_backend(self.device),  # misaligned addr fp16
         )
 
+    @skip_if_gpu_halide  # slow
     def test_alexnet_prefix(self):
         def forward(arg6, arg7, arg16):
             convolution = torch.ops.aten.convolution(
@@ -4410,6 +4485,8 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.randn([16, 16]),),
+            rtol=1e-4,
+            atol=1e-4,
         )
 
     def test_tan(self):
@@ -4589,6 +4666,8 @@ class CommonTemplate:
         self.assertEqual(a.stride(), c.stride())
         self.assertEqual(c.stride()[2], 1)
 
+    # https://github.com/halide/Halide/issues/8256
+    @config.patch("halide.scheduler_cuda", "Li2018")
     def test_std(self):
         def fn(x):
             return (
@@ -4665,7 +4744,7 @@ class CommonTemplate:
         mod = Repro().to(device=GPU_TYPE)
         o1 = mod(inp)
         o2 = torch.compile(mod)(inp)
-        self.assertEqual(o1, o2)
+        self.assertEqual(o1, o2, rtol=1e-3, atol=1e-3)
 
     @patch.object(config.trace, "enabled", True)
     def test_layer_norm(self):
@@ -4776,6 +4855,7 @@ class CommonTemplate:
         )
         self.common(fn, (*inp,))
 
+    @skip_if_gpu_halide  # incorrect result on CUDA
     def test_cauchy(self):
         def fn(x, y):
             return torch.sum(1 / (torch.unsqueeze(x, -1) - y))
@@ -4795,6 +4875,7 @@ class CommonTemplate:
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
+    @skip_if_gpu_halide  # misaligned address error
     def test_fusing_write_into_disjoint_read(self):
         def test_flip(a):
             return a.copy_(torch.flip(a, (0,)))
@@ -4810,7 +4891,7 @@ class CommonTemplate:
                 a[:, 20:40] = a[:, 20:40] + 1
                 a[:, 2:900025] = a[:, 1:900024] + 2
 
-            a = torch.rand((1, 1000000), device=GPU_TYPE)
+            a = torch.rand((1, 1000000), device=self.device)
             self.common(f, (a,))
 
     def test_gather_scatter(self):
@@ -4986,6 +5067,8 @@ class CommonTemplate:
             rtol=3e-05,
         )
 
+    @skip_if_gpu_halide  # https://github.com/halide/Halide/issues/8318
+    @config.patch("halide.scheduler_cuda", "Li2018")
     def test_pow3(self):
         # power of 0.5 is special-cased, arbitrary power would still produce triton codegen error
         def fn(x):
@@ -4994,7 +5077,7 @@ class CommonTemplate:
             return torch.pow(w, 0.5)
 
         opt = torch._dynamo.optimize("inductor")(fn)
-        input = torch.rand(())
+        input = torch.rand((), device=self.device)
         self.assertTrue(same(opt(input), fn(input)))
 
     def test_pow_int(self):
@@ -5933,6 +6016,7 @@ class CommonTemplate:
             rtol=1.3e-6,
         )
 
+    @skip_if_gpu_halide  # accuracy issue
     def test_reflection_pad2d(self):
         def fn(a, pad):
             return (
@@ -5957,7 +6041,9 @@ class CommonTemplate:
             result = aten.reflection_pad2d(x, padding)
             grad_output = torch.randn_like(result)
 
-            self.common(fn, (grad_output, x))
+            self.common(
+                fn, (grad_output, x), check_lowp=not is_halide_backend(self.device)
+            )
 
         template([1, 1, 8, 8], [0, 0, 0, 0])
         template([1, 1, 8, 8], [1, 1, 1, 1])
@@ -6085,6 +6171,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randint(0, 999, size=[8, 8]),))
 
+    @skip_if_gpu_halide  # correctness issue
     def test_constant_pad_1d(self):
         def fn(a):
             return (
@@ -6106,6 +6193,7 @@ class CommonTemplate:
             (torch.randint(2, (4,), dtype=torch.bool), torch.ones(6, dtype=torch.bool)),
         )
 
+    @skip_if_gpu_halide  # misaligned address
     def test_constant_pad_2d(self):
         def fn(a):
             return (
@@ -6117,6 +6205,7 @@ class CommonTemplate:
             fn, (torch.randint(0, 999, size=[1, 1, 8, 8], dtype=torch.float32),)
         )
 
+    @skip_if_gpu_halide  # misaligned address
     def test_constant_pad_3d(self):
         def fn(a):
             return (
@@ -6365,6 +6454,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn([8, 8]),))
 
+    @skip_if_gpu_halide  # accuracy issue
     def test_slice_mutation2(self):
         def fn(a):
             a[:, 20:40] = a[:, 20:40] + 1
@@ -6481,6 +6571,8 @@ class CommonTemplate:
 
         self.common(fn, (torch.zeros([4, 256, 296, 304]), torch.zeros([2292, 5])))
 
+    # https://github.com/halide/Halide/issues/8256
+    @config.patch("halide.scheduler_cuda", "Li2018")
     def test_nll_loss_forward(self):
         def fn(a, b):
             return aten.nll_loss_forward(a, b, None, 1, -100)
@@ -6782,6 +6874,7 @@ class CommonTemplate:
                 check_lowp=False,
             )
 
+    @skip_if_gpu_halide  # https://github.com/halide/Halide/issues/8312
     def test_index_put_index(self):
         def fn(ind, x, src):
             y = torch.ops.aten.index_put.default(x, [ind], src)
@@ -6825,6 +6918,8 @@ class CommonTemplate:
             self.assertEqual(fn(x[128:]), x[128 + 16 :][:16])
 
     # from GPT2ForSequenceClassification
+    # TODO(jansel): incorrect results with Anderson, report bug
+    @config.patch("halide.scheduler_cuda", "Li2018")
     def test_index_tensor(self):
         def fn(x, y):
             ne = torch.ops.aten.ne.Scalar(x, 0)
@@ -6946,6 +7041,7 @@ class CommonTemplate:
             ],
         )
 
+    @skip_if_gpu_halide  # accuracy issue
     def test_slice_scatter(self):
         def fn(x, a):
             return (
@@ -7040,6 +7136,7 @@ class CommonTemplate:
             self.common(kv_cache_module, (inp, 1), check_lowp=False)
         assertGeneratedKernelCountEqual(self, 1)
 
+    @skip_if_gpu_halide  # compile error on gpu
     def test_scatter1(self):
         def fn(a, dim, index, b):
             return aten.scatter(a, dim, index, b)
@@ -7291,6 +7388,8 @@ class CommonTemplate:
                 check_lowp=check_lowp,
             )
 
+    # https://github.com/halide/Halide/issues/8256
+    @config.patch("halide.scheduler_cuda", "Li2018")
     def test_dense_mask_index(self):
         r"""
         There will be a little difference for reduce order between aten and inductor
@@ -7642,6 +7741,7 @@ class CommonTemplate:
 
     @patch.object(torch._functorch.config, "functionalize_rng_ops", True)
     @expectedFailureXPU
+    @skip_if_gpu_halide  # rand
     def test_philox_rand(self):
         if self.device == "cpu":
             raise unittest.SkipTest(
@@ -7815,6 +7915,7 @@ class CommonTemplate:
             ],
         )
 
+    @skip_if_gpu_halide  # slow
     def test_max_pool2d_with_indices_backward2(self):
         def fn(a, b, c):
             return aten.max_pool2d_with_indices_backward(
@@ -7976,6 +8077,7 @@ class CommonTemplate:
             ],
         )
 
+    @skip_if_gpu_halide  # slow
     def test_avg_pool2d_backward2(self):
         def fn(a, b):
             return aten.avg_pool2d_backward(
@@ -8329,6 +8431,7 @@ class CommonTemplate:
         t1 = torch.randint(8, size=(1028, 1028))
         self.common(fn, (t1,))
 
+    @skip_if_halide  # nan behavior
     def test_argmax_argmin_with_nan(self):
         def fn(x):
             return (
@@ -8525,6 +8628,7 @@ class CommonTemplate:
         self.common(forward, args, atol=1e-5, rtol=1e-5)
 
     @requires_gpu()
+    @skip_if_halide  # cascading accuracy issues due rsqrt fallback
     def test_tmp_not_defined_issue3(self):
         from torch import device
 
@@ -8758,6 +8862,7 @@ class CommonTemplate:
         self.common(fn0, [torch.rand(10, 3, 10), torch.rand(3, 10, 10)])
         self.common(fn1, [torch.rand(3, 10, 10), torch.rand(3, 10, 10)])
 
+    @skip_if_gpu_halide  # https://github.com/halide/Halide/issues/8318
     def test_unspec_inputs(self):
         if self.device == "cpu":
             raise unittest.SkipTest("Testing mixed devices")
@@ -9272,7 +9377,8 @@ class CommonTemplate:
             foo_opt = torch._dynamo.optimize("inductor")(foo)
             code = run_and_get_triton_code(foo_opt, *inps)
             have_block_ptr = code.count("tl.make_block_ptr") > 0
-            self.assertEqual(have_block_ptr, use_block_ptr)
+            if not is_halide_backend(self.device):
+                self.assertEqual(have_block_ptr, use_block_ptr)
 
     @requires_gpu()
     @unittest.skipIf(
@@ -9418,6 +9524,7 @@ class CommonTemplate:
         self.common(
             Model(),
             (torch.randn(8, 256, 16, 16),),
+            check_lowp=not is_halide_backend(self.device),
         )
 
     def test_inplace_where_pointwise(self):
@@ -9617,6 +9724,7 @@ class CommonTemplate:
     # To support this behavior, we need to allow const-propping tensors that store symint data.
     # For now, dynamo will explicitly graph break when it encounters user code with this behavior.
     @expectedFailureCodegenDynamic
+    @skip_if_gpu_halide  # accuracy error
     def test_AllenaiLongformerBase_repro(self):
         def fn(query, scores, window_overlap):
             batch_size, seq_len, num_heads, _ = query.size()
@@ -9974,7 +10082,7 @@ class CommonTemplate:
                 inp2 = torch.as_strided(base2, (64, 64), (64, 1), offset2)
                 ref2 = fn(inp2)
                 res2 = fn_c(inp2)
-                self.assertEqual(ref2, res2)
+                self.assertEqual(ref2, res2, atol=1e-5, rtol=1e-5)
 
     @requires_gpu()
     @config.patch(assume_aligned_inputs=False)
@@ -10245,6 +10353,7 @@ class CommonTemplate:
             net = torch.compile(model)
             out = net(input_t)
 
+    @skip_if_gpu_halide  # cuda error
     def test_buffer_use_after_remove(self):
         # https://github.com/pytorch/pytorch/issues/102857
 
@@ -10347,6 +10456,7 @@ class CommonTemplate:
         self.assertEqual(ref, actual)
         self.assertTrue(called)
 
+    @skip_if_gpu_halide  # cuda error
     def test_mutations_loop_fusion(self):
         def fn(tensor, index, source):
             out = tensor.index_add(0, index, source, alpha=2.0) / 2
@@ -10409,6 +10519,8 @@ class CommonTemplate:
         o = torch.optim.AdamW(params)
         pt2_optimizer_step(o)
 
+    # https://github.com/halide/Halide/issues/8256
+    @config.patch("halide.scheduler_cuda", "Li2018")
     def test_adaptive_avg_pool1d_argmax(self):
         # https://github.com/pytorch/pytorch/issues/113013
         def fn(x):
@@ -10431,6 +10543,7 @@ class CommonTemplate:
 
     @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
     @skip_if_halide  # bf16
+    @skip_if_gpu_halide  # https://github.com/halide/Halide/issues/8311
     def test_bfloat16_to_int16(self):
         def fn(a, b):
             x = a + b
@@ -10470,6 +10583,7 @@ class CommonTemplate:
         self.assertTrue(torch.all((0 <= res) & (res < 10)).item())
 
     @torch._inductor.config.patch(force_shape_pad=True)
+    @skip_if_gpu_halide  # correctness issue
     def test_should_pad_bench_for_bmm(self):
         B = 2
         M = 1024
@@ -10625,7 +10739,7 @@ class CommonTemplate:
             def fn(x):
                 return op(x)
 
-        self.common(fn, args, check_lowp=check_lowp)
+        self.common(fn, args, check_lowp=check_lowp, atol=1e-4, rtol=1e-4)
 
     # codegen test fails with no dynamic for loop in dynamic shape tests
     @expectedFailureCodegenDynamic

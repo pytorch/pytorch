@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: pt2"]
+import os
 import sys
 import textwrap
 import unittest
@@ -38,8 +39,11 @@ except ImportError:
 
 
 make_halide = config.patch(
-    cpu_backend="halide",
-    fallback_random=True,  # TODO(jansel): support random
+    {
+        "cpu_backend": "halide",
+        "cuda_backend": "halide",
+        "fallback_random": True,  # TODO(jansel): support random
+    }
 )
 
 
@@ -120,6 +124,14 @@ class HalideTests(TestCase):
 if test_torchinductor.HAS_CPU and HAS_HALIDE:
     SweepInputsCpuHalideTest = make_halide(test_torchinductor.SweepInputsCpuTest)
     CpuHalideTests = make_halide(test_torchinductor.CpuTests)
+
+if (
+    test_torchinductor.HAS_GPU
+    and HAS_HALIDE
+    and os.environ.get("TEST_HALIDE_GPU") == "1"
+):
+    SweepInputsGPUHalideTest = make_halide(test_torchinductor.SweepInputsGPUTest)
+    GPUHalideTests = make_halide(test_torchinductor.GPUTests)
 
 if __name__ == "__main__":
     if HAS_CPU and not IS_MACOS and HAS_HALIDE:
