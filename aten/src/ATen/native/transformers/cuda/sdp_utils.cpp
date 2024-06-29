@@ -582,10 +582,7 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
       check_batch_size_and_num_heads_dense<true /*supports_grouped_query_attention=*/>
       );
   for (auto& constraint : general_constraints) {
-    std::cout << constraint << std::endl;
     if (!constraint(params, debug)) {
-      std::cout << "flash_attention_hardware_support check 1 failed" << std::endl;
-      std::cout << constraint << std::endl;
       return false;
     }
   }
@@ -597,7 +594,6 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
         check_for_seq_len_0_nested_tensor);
     for (auto& constraint : nested_constraints) {
       if (!constraint(params, debug)) {
-        std::cout << "flash_attention_hardware_support check 2 failed" << std::endl;
         return false;
       }
     }
@@ -609,7 +605,6 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
         check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim=*/>);
     for (auto& constraint : dense_constraints) {
       if (!constraint(params, debug)) {
-        std::cout << "flash_attention_hardware_support check 3 failed" << std::endl;
         return false;
       }
     }

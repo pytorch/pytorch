@@ -413,12 +413,10 @@ inline bool check_batch_size_and_num_heads_dense(sdp_params const& params, bool 
   bool is_nested_input = params.query.is_nested() || params.key.is_nested() || params.value.is_nested();
 
   if(supports_gqa && same_batch_size && !is_nested_input){
-    std::cout << "Inside the gqa check" << std::endl;
     return check_grouped_query_attention<supports_gqa>(params, debug);
   }
 
-  if (!(same_batch_size && same_num_heads)){
-    std::cout << "Inside the batch size check" << std::endl;
+  if (!(same_batch_size && same_num_heads) && !(is_nested_input)){
     if (debug) {
       TORCH_WARN(
           "For dense inputs, both fused kernels require query, key and value to have the same batch_size. ",
@@ -432,7 +430,6 @@ inline bool check_batch_size_and_num_heads_dense(sdp_params const& params, bool 
     }
     return false;
   }
-  std::cout << "Returning true" << std::endl;
   // If all checks pass, return true
   return true;
 }
