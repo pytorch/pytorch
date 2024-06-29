@@ -3,7 +3,6 @@
 import functools
 
 import torch
-
 from torch.distributed._composable.fsdp import (
     CPUOffloadPolicy,
     fully_shard,

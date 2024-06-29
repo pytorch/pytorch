@@ -2,7 +2,6 @@
 
 import copy
 import functools
-
 from typing import Dict, List, Optional, Union
 
 import torch

@@ -3,7 +3,6 @@
 import copy
 import functools
 import itertools
-
 from typing import List, Union
 
 import torch

@@ -5,7 +5,6 @@ import io
 import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
-
 from torch.distributed._state_dict_utils import (
     _check_state_dict_similarity,
     _copy_state_dict,
