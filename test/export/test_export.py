@@ -727,7 +727,7 @@ def forward(self, p_linear_weight, p_linear_bias, x):
                 return x.sin()
 
             def forward(self, x):
-                return cond(x.sum() <= 2, self.subm.forward, self.bar, [x])
+                return cond(x.shape[0] <= 2, self.subm.forward, self.bar, [x])
 
         example_inputs = (torch.randn(1, 3, 3, 3),)
         m = CondBranchClassMethod()
@@ -3527,7 +3527,7 @@ def forward(self, x):
         ):
             torch.export.export(exported_v2.module(), (torch.randn(2, 2),))
 
-    def test_export_cond_symbool_pred(self):
+    def test_export_cond(self):
         class A(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -3550,20 +3550,10 @@ def forward(self, x):
 
                 return cond(x.shape[0] > 4, true_fn, false_fn, [x])
 
-        dim0 = torch.export.Dim("dim0", min=3)
         inp = torch.ones(6, 4)
-        ep = export(Foo(), (inp,), dynamic_shapes={"x": {0: dim0}})
-        self.assertExpectedInline(
-            ep.graph_module.code.strip(),
-            """\
-def forward(self, b_a_buffer, x):
-    sym_size_int = torch.ops.aten.sym_size.int(x, 0)
-    gt = sym_size_int > 4;  sym_size_int = None
-    true_graph_0 = self.true_graph_0
-    false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [x, b_a_buffer]);  gt = true_graph_0 = false_graph_0 = x = b_a_buffer = None
-    getitem = cond[0];  cond = None
-    return (getitem,)""",
+        ep = export(
+            Foo(),
+            (inp,),
         )
         self.assertTrue(
             torch.allclose(ep.module()(torch.ones(6, 4)), Foo()(torch.ones(6, 4)))
@@ -4925,7 +4915,7 @@ graph():
                 def false_fn(x):
                     return self.linear(x).sin()
 
-                return torch.cond(x.sum() > 4, true_fn, false_fn, [x])
+                return torch.cond(x.shape[0] > 4, true_fn, false_fn, [x])
 
         class CondExport(torch.nn.Module):
             def __init__(self):
@@ -4942,12 +4932,10 @@ graph():
             """\
 def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
     cos = torch.ops.aten.cos.default(x)
-    sum_1 = torch.ops.aten.sum.default(x)
-    gt = torch.ops.aten.gt.Scalar(sum_1, 4);  sum_1 = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [p_bar_linear_bias, p_bar_linear_weight, x]);  gt = true_graph_0 = false_graph_0 = p_bar_linear_bias = p_bar_linear_weight = x = None
-    getitem = cond[0];  cond = None
+    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [p_bar_linear_bias, p_bar_linear_weight, x]);  true_graph_0 = false_graph_0 = p_bar_linear_bias = p_bar_linear_weight = x = None
+    getitem = conditional[0];  conditional = None
     add = torch.ops.aten.add.Tensor(cos, getitem);  cos = getitem = None
     return (add,)""",
         )
@@ -5042,8 +5030,8 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
 def forward(self, b_pred, b_t, x, y):
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(b_pred, true_graph_0, false_graph_0, [b_t, x, y]);  b_pred = true_graph_0 = false_graph_0 = b_t = x = y = None
-    getitem = cond[0];  cond = None
+    conditional = torch.ops.higher_order.cond(b_pred, true_graph_0, false_graph_0, [b_t, x, y]);  b_pred = true_graph_0 = false_graph_0 = b_t = x = y = None
+    getitem = conditional[0];  conditional = None
     return (getitem,)""",
         )  # noqa: B950
 

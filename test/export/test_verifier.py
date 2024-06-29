@@ -66,7 +66,7 @@ class TestVerifier(TestCase):
                 def false_fn(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
                     return x - y
 
-                return control_flow.cond(x.sum() > 2, true_fn, false_fn, [x, y])
+                return control_flow.cond(x.shape[0] > 2, true_fn, false_fn, [x, y])
 
         f = Foo()
 
@@ -85,7 +85,7 @@ class TestVerifier(TestCase):
                 def false_fn(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
                     return x - y
 
-                return control_flow.cond(x.sum() > 2, true_fn, false_fn, [x, y])
+                return control_flow.cond(x.shape[0] > 2, true_fn, false_fn, [x, y])
 
         f = Foo()
 
