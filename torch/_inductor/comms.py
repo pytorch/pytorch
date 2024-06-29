@@ -43,12 +43,20 @@ def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
 
     all_gather_into_tensor: "f32[416][1]cuda:0" = torch.ops._c10d_functional.all_gather_into_tensor_out.default(getitem, 2, '0', out=getitem_1);
     """
+
+    def remove_unused_getitem(g):
+        # Remove `getitem_X = all_gather_copy_in[1]` which is never used.
+        node_list = list(g.nodes)
+        for n in node_list:
+            if (
+                n.target == operator.getitem
+                and n.args[0].target is torch.ops.fsdp.all_gather_copy_in.default
+                and n.args[1] == 1
+            ):
+                g.erase_node(n)
+
     graph_pass = PatternMatcherPass()
 
-    def is_valid_match(match):
-        return match.kwargs["item_idx"] == 0
-
-    TODO: need another pass (before this pass) to remove unneeded all_gather_copy_in[1] node from the graph, before applying this pass.
     @register_graph_pattern(
         CallFunction(
             torch.ops._c10d_functional.all_gather_into_tensor.default,
@@ -70,9 +78,9 @@ def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
             KeywordArg("group_name"),
         ),
         pass_dict=graph_pass,
-        extra_check=is_valid_match,
+        extra_check=lambda match: match.kwargs["item_idx"] == 0,
     )
-    def replacement(match: Match, *args, **kwargs):
+    def reinplace_all_gather(match: Match, *args, **kwargs):
         all_gather_inputs = kwargs["all_gather_inputs"]
         inp_split_sizes = kwargs["inp_split_sizes"]
         all_gather_input_numel = kwargs["all_gather_input_numel"]
@@ -127,6 +135,9 @@ def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
             ],
         )
 
+        # TODO: maybe you want to replace downstream usage of AGO with all_gather_copy_in[1]
+
+    remove_unused_getitem(graph)
     graph_pass.apply(graph)  # type: ignore[arg-type]
 
 

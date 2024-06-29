@@ -26,6 +26,10 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 from torch.utils._triton import has_triton
 
 
+def _is_op_in_graph(graph, op):
+    return any(node.target is op for node in graph.nodes)
+
+
 class TestFullyShardCompileCompute(FSDPTest):
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
@@ -134,28 +138,29 @@ class TestFullyShardCompile(FSDPTest):
         torch.compile(f, backend="aot_eager")(x)
         self.assertEqual(x, ref_x)
 
-    def _check_op_in_graph(self, graph, op, exist=True):
-        if exist:
-            self.assertTrue(any(node.target is op for node in graph.nodes))
-        else:
-            self.assertFalse(any(node.target is op for node in graph.nodes))
-
     def _reinplace_all_gather_with_checks(self, graph):
         import logging
+
         torch_log = logging.getLogger("torch")
-        self._check_op_in_graph(
+        if _is_op_in_graph(
             graph,
-            torch.ops._c10d_functional.all_gather_into_tensor_out.default,
-            exist=False,
-        )
-        torch_log.warning(f"before: graph: {graph}")
-        comms.reinplace_fsdp_all_gather(graph)
-        torch_log.warning(f"after: graph: {graph}")
-        self._check_op_in_graph(
-            graph,
-            torch.ops._c10d_functional.all_gather_into_tensor_out.default,
-            exist=True,
-        )
+            torch.ops._c10d_functional.all_gather_into_tensor.default,
+        ):
+            torch_log.warning(f"before: graph: {graph}")
+            comms.reinplace_fsdp_all_gather(graph)
+            torch_log.warning(f"after: graph: {graph}")
+            self.assertFalse(
+                _is_op_in_graph(
+                    graph,
+                    torch.ops._c10d_functional.all_gather_into_tensor.default,
+                )
+            )
+            self.assertTrue(
+                _is_op_in_graph(
+                    graph,
+                    torch.ops._c10d_functional.all_gather_into_tensor_out.default,
+                )
+            )
 
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
     @torch._functorch.config.patch(recompute_views=True)
@@ -267,9 +272,12 @@ class TestFullyShardCompile(FSDPTest):
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_simple_mlp_fullgraph_backend_inductor(self):
-        self._test_traceable_fsdp(
-            *self._create_simple_mlp_factory_fns(), "inductor", fullgraph=True
-        )
+        with torch._inductor.config.patch(
+            post_grad_custom_post_reinplace_pass=self._reinplace_all_gather_with_checks
+        ):
+            self._test_traceable_fsdp(
+                *self._create_simple_mlp_factory_fns(), "inductor", fullgraph=True
+            )
 
     def _create_nested_fully_shard_factory_fns(self):
         hidden_dim = 16
@@ -277,7 +285,9 @@ class TestFullyShardCompile(FSDPTest):
         class TestSubmodule(nn.Module):
             def __init__(self, hidden_dim):
                 super().__init__()
-                self.param = nn.Parameter(torch.randn(hidden_dim, hidden_dim, device="cuda"))
+                self.param = nn.Parameter(
+                    torch.randn(hidden_dim, hidden_dim, device="cuda")
+                )
 
             def forward(self, x):
                 ret = torch.matmul(x, self.param)
@@ -303,7 +313,9 @@ class TestFullyShardCompile(FSDPTest):
             model = TestModule(n_layers=3)
             for layer_id, mod in enumerate(model.layers):
                 fully_shard(mod, mesh=mesh, reshard_after_forward=True, **fsdp_config)
-            model = fully_shard(model, mesh=mesh, reshard_after_forward=True, **fsdp_config)
+            model = fully_shard(
+                model, mesh=mesh, reshard_after_forward=True, **fsdp_config
+            )
             optim = torch.optim.SGD(model.parameters(), lr=1e-4)
             return model, optim
 
@@ -338,9 +350,11 @@ class TestFullyShardCompile(FSDPTest):
             post_grad_custom_post_reinplace_pass=self._reinplace_all_gather_with_checks
         ):
             self._test_traceable_fsdp(
-                *self._create_nested_fully_shard_factory_fns(), "inductor", fullgraph=True
+                *self._create_nested_fully_shard_factory_fns(),
+                "inductor",
+                fullgraph=True,
             )
-    
+
     def _create_transformer_factory_fns(self):
         seq_len = 16
         vocab_size = 8
