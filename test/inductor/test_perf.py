@@ -3,7 +3,6 @@ import contextlib
 from unittest.mock import patch
 
 import functorch
-
 import torch
 import torch._inductor.config as config
 import torch.autograd
@@ -25,9 +24,10 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 #
 # That may still be aceeptable, but be aware that you are likely lowering
 # performance for that setting.
-
+#
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
+
 
 if HAS_CUDA:
     from torch.testing._internal.triton_utils import add_kernel

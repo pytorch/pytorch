@@ -6,7 +6,6 @@ import torch._inductor
 import torch._inductor.decomposition
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch._inductor.test_case import run_tests, TestCase
-
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
 
 

@@ -20,7 +20,6 @@ from torch._inductor import config
 from torch._inductor.exc import CppWrapperCodeGenError
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import TestCase
-
 from torch.export import Dim, export
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
@@ -37,9 +36,9 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     TEST_WITH_ROCM,
 )
-
 from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
 from torch.utils import _pytree as pytree
+
 
 if HAS_CUDA:
     import triton

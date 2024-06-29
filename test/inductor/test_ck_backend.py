@@ -6,12 +6,12 @@ import unittest
 import torch
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
-
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+
 
 torch.set_float32_matmul_precision("high")
 if HAS_CUDA:

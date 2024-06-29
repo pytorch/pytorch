@@ -4,14 +4,12 @@ import contextlib
 import sympy
 
 import torch
-
 import torch._inductor.config as inductor_config
 from torch._inductor.codegen import triton_utils
 from torch._inductor.codegen.common import SizeArg
 from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.virtualized import V
-
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_GPU
 
 

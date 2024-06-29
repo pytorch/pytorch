@@ -20,6 +20,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 from torch.testing._internal.logging_utils import logs_to_string
 
+
 # note: these tests are not run on windows due to inductor_utils.HAS_CPU
 
 

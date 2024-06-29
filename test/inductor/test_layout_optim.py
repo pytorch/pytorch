@@ -11,6 +11,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_cuda import tf32_off
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
+
 USE_DDP_WRAPPER = os.environ.get("USE_DDP_WRAPPER", "1") == "1"
 
 

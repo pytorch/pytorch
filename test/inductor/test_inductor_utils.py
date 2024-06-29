@@ -5,10 +5,9 @@ import logging
 
 import torch
 from torch._inductor.runtime.runtime_utils import do_bench
-
 from torch._inductor.test_case import run_tests, TestCase
-
 from torch._inductor.utils import do_bench_using_profiling
+
 
 log = logging.getLogger(__name__)
 

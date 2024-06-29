@@ -2,7 +2,6 @@
 import unittest
 
 import torch
-
 import torch._inductor.config as inductor_config
 from torch._dynamo.testing import rand_strided
 from torch._inductor.fx_passes.pad_mm import (
@@ -11,7 +10,6 @@ from torch._inductor.fx_passes.pad_mm import (
     get_padded_length,
     should_pad_common,
 )
-
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
 from torch.testing import FileCheck

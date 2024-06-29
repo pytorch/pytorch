@@ -8,7 +8,6 @@ import unittest
 import warnings
 
 import torch
-
 import torch._dynamo.config as dynamo_config
 import torch.nn as nn
 from torch._dynamo.utils import counters
@@ -18,7 +17,6 @@ from torch._inductor.cudagraph_trees import cudagraphify_impl as tree_cudagraphi
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
-
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -32,6 +30,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 
+
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
         "Windows CI does not have necessary dependencies for test_torchinductor yet\n"
@@ -44,6 +43,7 @@ importlib.import_module("functorch")
 importlib.import_module("filelock")
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+
 
 aten = torch.ops.aten
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
