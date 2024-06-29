@@ -241,6 +241,7 @@ def boolean_ops():
     return (
         "is_inf",
         "is_nan",
+        "bitwise_xor",
         "logical_not",
         "signbit",
         "le",
