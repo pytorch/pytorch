@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, List, Set
 from github_utils import gh_fetch_json_dict, gh_graphql
 from gitutils import GitRepo
 
+
 SEC_IN_DAY = 24 * 60 * 60
 CLOSED_PR_RETENTION = 30 * SEC_IN_DAY
 NO_PR_RETENTION = 1.5 * 365 * SEC_IN_DAY

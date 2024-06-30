@@ -13,6 +13,7 @@ architectures:
 import os
 from typing import Dict, List, Optional, Tuple
 
+
 CUDA_ARCHES = ["11.8", "12.1", "12.4"]
 
 
