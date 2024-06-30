@@ -34,7 +34,9 @@ register_log(
 register_log("pp", ["torch.distributed.pipelining"])
 register_log("fsdp", ["torch.distributed.fsdp", "torch.distributed._composable.fsdp"])
 register_log("onnx", "torch.onnx")
-register_log("export", ["torch._dynamo", "torch.export", *DYNAMIC])
+register_log(
+    "export", ["torch._dynamo", "torch.export", *DYNAMIC, "torch._export.converter"]
+)
 
 register_artifact(
     "guards",

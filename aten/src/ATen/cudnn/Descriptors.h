@@ -357,6 +357,24 @@ struct TORCH_CUDA_CPP_API CTCLossDescriptor
     AT_CUDNN_CHECK(
         cudnnSetCTCLossDescriptorEx(mut_desc(), datatype, normMode, gradMode));
   }
+  void set_v8_v9(
+      cudnnDataType_t datatype,
+      cudnnLossNormalizationMode_t normMode,
+      cudnnNanPropagation_t gradMode,
+      int maxLabelLength) {
+#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 90000
+    auto gradModev9 = CUDNN_CTC_ZERO_OOB_GRADIENTS;
+    if (gradMode == cudnnNanPropagation_t::CUDNN_PROPAGATE_NAN) {
+      gradModev9 = CUDNN_CTC_SKIP_OOB_GRADIENTS;
+    }
+    AT_CUDNN_CHECK(
+        cudnnSetCTCLossDescriptor_v9(mut_desc(), datatype, normMode, gradModev9, maxLabelLength));
+#else
+    AT_CUDNN_CHECK(
+        cudnnSetCTCLossDescriptor_v8(mut_desc(), datatype, normMode, gradMode, maxLabelLength));
+#endif
+  }
+
 };
 
 struct TORCH_CUDA_CPP_API ActivationDescriptor

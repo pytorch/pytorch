@@ -169,11 +169,10 @@ except ImportError:
     _MPI_AVAILABLE = False
 
 try:
-    from torch._C._distributed_c10d import ProcessGroupCudaP2P, ProcessGroupNCCL
+    from torch._C._distributed_c10d import ProcessGroupNCCL
 
     ProcessGroupNCCL.__module__ = "torch.distributed.distributed_c10d"
-    ProcessGroupCudaP2P.__module__ = "torch.distributed.distributed_c10d"
-    __all__ += ["ProcessGroupNCCL", "ProcessGroupCudaP2P"]
+    __all__ += ["ProcessGroupNCCL"]
 except ImportError:
     _NCCL_AVAILABLE = False
 
@@ -1599,9 +1598,7 @@ def _shutdown_backend(pg):
         backend = pg._get_backend(torch.device("cuda"))
     except RuntimeError:
         pass
-    if is_nccl_available() and isinstance(
-        backend, (ProcessGroupNCCL, ProcessGroupCudaP2P)
-    ):
+    if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
         # explictly call shutdown to ensure that NCCL resources are released
         backend._shutdown()
 
@@ -4394,6 +4391,7 @@ def _new_group_with_tag(
     global _world
 
     default_pg = _get_default_group()
+    device_id = default_pg.bound_device_id
     default_backend, default_store = _world.pg_map[default_pg]
     global_rank = default_pg.rank()
     global_world_size = default_pg.size()
@@ -4457,6 +4455,7 @@ def _new_group_with_tag(
         pg_options=pg_options,
         timeout=timeout,
         pg_tag=pg_tag,
+        device_id=device_id,
         group_desc=group_desc,
     )
 

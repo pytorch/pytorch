@@ -5,6 +5,9 @@ archive is downloaded from some sites like GitHub because it can change. Specifi
 GitHub gives no guarantee to keep the same value forever. Check for more details at
 https://github.com/community/community/discussions/46034.
 """
+
+from __future__ import annotations
+
 import argparse
 import json
 import re
@@ -13,7 +16,7 @@ import subprocess
 import sys
 import xml.etree.ElementTree as ET
 from enum import Enum
-from typing import List, NamedTuple, Optional, Set
+from typing import NamedTuple
 from urllib.parse import urlparse
 
 
@@ -30,18 +33,18 @@ class LintSeverity(str, Enum):
 
 
 class LintMessage(NamedTuple):
-    path: Optional[str]
-    line: Optional[int]
-    char: Optional[int]
+    path: str | None
+    line: int | None
+    char: int | None
     code: str
     severity: LintSeverity
     name: str
-    original: Optional[str]
-    replacement: Optional[str]
-    description: Optional[str]
+    original: str | None
+    replacement: str | None
+    description: str | None
 
 
-def is_required_checksum(urls: List[Optional[str]]) -> bool:
+def is_required_checksum(urls: list[str | None]) -> bool:
     if not urls:
         return False
 
@@ -58,7 +61,7 @@ def is_required_checksum(urls: List[Optional[str]]) -> bool:
 
 def get_disallowed_checksums(
     binary: str,
-) -> Set[str]:
+) -> set[str]:
     """
     Return the set of disallowed checksums from all http_archive rules
     """
@@ -96,8 +99,8 @@ def get_disallowed_checksums(
 
 def check_bazel(
     filename: str,
-    disallowed_checksums: Set[str],
-) -> List[LintMessage]:
+    disallowed_checksums: set[str],
+) -> list[LintMessage]:
     original = ""
     replacement = ""
 

@@ -12801,7 +12801,7 @@ dedent """
         tracemalloc.stop()
 
         # Check if the peak sizes at most differ by an empirically obtained factor
-        assert peak_from_file < peak_from_string * 500
+        self.assertLess(peak_from_file, peak_from_string * 500)
 
     # for each type, the input type annotation and corresponding return type annotation
     def type_input_return_pairs(self):

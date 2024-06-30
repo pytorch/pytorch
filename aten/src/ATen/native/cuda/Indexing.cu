@@ -503,25 +503,11 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
       if (sliceSize == 1) {
         // This implementation is faster with high amounts of duplicates but could overflow
         // if FP16 / BF16 is used
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16,
-        expandedValue.scalar_type(), "indexing_backward_kernel_stride_1", [&] {
-          indexing_backward_kernel_stride_1<scalar_t><<<grid, block, 0, stream>>>(
-            sorted_indices.const_data_ptr<int64_t>(),
-            orig_indices.const_data_ptr<int64_t>(),
-            expandedValue.const_data_ptr<scalar_t>(),
-            src_.mutable_data_ptr<scalar_t>(),
-            num_indices,
-            sliceSize,
-            strideBefore,
-            nElemBefore,
-            accumulate);
-          C10_CUDA_KERNEL_LAUNCH_CHECK();
-        });
-      } else {
-        if (sliceSize <= warp_size) {
-          AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16,
-          expandedValue.scalar_type(), "indexing_backward_kernel_small_stride", [&] {
-            indexing_backward_kernel_small_stride<scalar_t><<<grid, block, 0, stream>>>(
+        AT_DISPATCH_V2(
+          expandedValue.scalar_type(),
+          "indexing_backward_kernel_stride_1",
+          AT_WRAP([&] {
+            indexing_backward_kernel_stride_1<scalar_t><<<grid, block, 0, stream>>>(
               sorted_indices.const_data_ptr<int64_t>(),
               orig_indices.const_data_ptr<int64_t>(),
               expandedValue.const_data_ptr<scalar_t>(),
@@ -532,10 +518,42 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
               nElemBefore,
               accumulate);
             C10_CUDA_KERNEL_LAUNCH_CHECK();
-            });
+          }),
+          AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
+          AT_EXPAND(AT_FLOAT8_TYPES),
+          kComplexHalf,
+          kHalf,
+          kBool,
+          kBFloat16);
+      } else {
+        if (sliceSize <= warp_size) {
+          AT_DISPATCH_V2(
+            expandedValue.scalar_type(),
+            "indexing_backward_kernel_small_stride",
+            AT_WRAP([&] {
+              indexing_backward_kernel_small_stride<scalar_t><<<grid, block, 0, stream>>>(
+                sorted_indices.const_data_ptr<int64_t>(),
+                orig_indices.const_data_ptr<int64_t>(),
+                expandedValue.const_data_ptr<scalar_t>(),
+                src_.mutable_data_ptr<scalar_t>(),
+                num_indices,
+                sliceSize,
+                strideBefore,
+                nElemBefore,
+                accumulate);
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
+            }),
+            AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
+            AT_EXPAND(AT_FLOAT8_TYPES),
+            kComplexHalf,
+            kHalf,
+            kBool,
+            kBFloat16);
         } else {
-            AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16,
-            expandedValue.scalar_type(), "indexing_backward", [&] {
+          AT_DISPATCH_V2(
+            expandedValue.scalar_type(),
+            "indexing_backward",
+            AT_WRAP([&] {
               indexing_backward_kernel<scalar_t, UNROLL><<<grid, block, 0, stream>>>(
                 sorted_indices.const_data_ptr<int64_t>(),
                 orig_indices.const_data_ptr<int64_t>(),
@@ -547,7 +565,13 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
                 nElemBefore,
                 accumulate);
               C10_CUDA_KERNEL_LAUNCH_CHECK();
-            });
+            }),
+            AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
+            AT_EXPAND(AT_FLOAT8_TYPES),
+            kComplexHalf,
+            kHalf,
+            kBool,
+            kBFloat16);
           }
         }
 

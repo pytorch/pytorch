@@ -16,6 +16,8 @@ MPS Environment Variables
     - High watermark ratio for MPS allocator. By default, it is set to 1.7.
   * - ``PYTORCH_MPS_LOW_WATERMARK_RATIO``
     - Low watermark ratio for MPS allocator. By default, it is set to 1.4 if the memory is unified and set to 1.0 if the memory is discrete.
+  * - ``PYTORCH_MPS_FAST_MATH``
+    - If set to ``1``, enable fast math for MPS metal kernels. See section 1.6.3 in https://developer.apple.com/metal/Metal-Shading-Language-Specification.pdf for precision implications.
   * - ``PYTORCH_MPS_PREFER_METAL``
     - If set to ``1``, force using metal kernels instead of using MPS Graph APIs. For now this is only used for matmul op.
   * - ``PYTORCH_ENABLE_MPS_FALLBACK``

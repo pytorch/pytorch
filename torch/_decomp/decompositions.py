@@ -9,6 +9,7 @@ from itertools import chain, product
 from typing import Any, Callable, cast, Iterable, List, Optional, Tuple, Union
 
 import torch
+import torch._meta_registrations
 import torch._prims as prims
 import torch._prims_common as utils
 import torch.nn.functional as F
@@ -781,6 +782,70 @@ def slice_forward(
         )
     else:
         return self.as_strided(sizes, strides, storage_offset)
+
+
+def _normalize_start_end(
+    x: Tensor, dim: int, start: Optional[int], end: Optional[int]
+) -> Tuple[int, int]:
+    """
+    Normalize start and end such that both are in the range
+    [0, x.get_size()[dim]] and start <= end.
+    """
+    dim_size = x.shape[dim]
+
+    def clamp_wrap(val, lower, upper, default) -> int:
+        if val is None:
+            return default
+        if val < 0:
+            val = val + dim_size
+        return min(max(val, lower), upper)
+
+    start = clamp_wrap(start, 0, dim_size, 0)
+    end = clamp_wrap(end, start, dim_size, dim_size)
+    return start, end
+
+
+# This is not in torch._refs because aten.index used by
+# aten._unsafe_masked_index does not have a decomposition.
+@register_decomposition(aten.slice_scatter)
+@out_wrapper()
+def slice_scatter(
+    input: Tensor,
+    src: Tensor,
+    dim: int = 0,
+    start: Optional[int] = None,
+    end: Optional[int] = None,
+    step: int = 1,
+):
+    dim = utils.canonicalize_dim(input.ndim, dim)
+    dim_size = input.shape[dim]
+    start, end = _normalize_start_end(input, dim, start, end)
+
+    src_size = list(input.shape)
+    src_size[dim] = (end - start + (step - 1)) // step
+    src = src.expand(src_size)
+
+    if start == 0 and end == dim_size and step == 1:
+        return src.clone()
+
+    indices = [None] * input.dim()
+    idx = torch.arange(dim_size, device=input.device)
+    indices[dim] = (idx - start) // step
+
+    mask = torch.ones(dim_size, device=input.device, dtype=torch.bool)
+    if start != 0:
+        mask = torch.logical_and(mask, idx >= start)
+
+    if end != dim_size:
+        mask = torch.logical_and(mask, idx < end)
+
+    if step != 1:
+        mask = torch.logical_and(mask, (idx - start) % step == 0)
+
+    mask_shape = [1] * input.dim()
+    mask_shape[dim] = -1
+    mask = mask.view(mask_shape)
+    return aten.where(mask, aten._unsafe_masked_index(src, mask, indices, 0), input)
 
 
 @register_decomposition(aten.select_backward)
@@ -3720,8 +3785,60 @@ def _reshape_alias(x, shape, *args):
 
 
 @register_decomposition([aten._unsafe_index])
-def _index(x, indices):
+def _unsafe_index(x, indices):
     return aten.index(x, indices)
+
+
+@register_decomposition([aten._unsafe_masked_index])
+def _unsafe_masked_index(x, mask, indices, fill):
+    for index in indices:
+        if index is not None:
+            torch._check(
+                index.dtype in [torch.long, torch.int],
+                lambda: "tensors used as indices must be long or int tensors",
+            )
+
+    torch._check(
+        mask.dtype == torch.bool,
+        lambda: "tensors used as masks must be bool tensors",
+    )
+
+    if x.numel() == 0:
+        meta_result = torch._meta_registrations.meta_index_Tensor(x, indices)
+        return x.new_full(meta_result.shape, fill)
+
+    for i in range(len(indices)):
+        index = indices[i]
+        if index is not None:
+            indices[i] = index.clamp(min=0, max=x.size(i) - 1)
+
+    return aten._unsafe_index(x, indices).masked_fill(~mask, fill)
+
+
+@register_decomposition([aten._unsafe_masked_index_put_accumulate])
+def _unsafe_masked_index_put_accumulate(x, mask, indices, values):
+    for index in indices:
+        if index is not None:
+            torch._check(
+                index.dtype in [torch.long, torch.int],
+                lambda: "tensors used as indices must be long or int tensors",
+            )
+
+    torch._check(
+        mask.dtype == torch.bool,
+        lambda: "tensors used as masks must be bool tensors",
+    )
+
+    if x.numel() == 0:
+        return x.clone()
+
+    for i in range(len(indices)):
+        index = indices[i]
+        if index is not None:
+            indices[i] = index.clamp(min=-x.size(i), max=x.size(i) - 1)
+
+    masked_value = values.masked_fill(~mask, 0)
+    return aten._unsafe_index_put(x, indices, masked_value, accumulate=True)
 
 
 def _nll_loss_forward(

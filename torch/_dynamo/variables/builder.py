@@ -69,6 +69,7 @@ from ..source import (
     OptimizerSource,
     RandomValueSource,
     Source,
+    SubclassAttrListSource,
     TupleIteratorGetItemSource,
 )
 from ..trace_rules import (
@@ -1396,6 +1397,10 @@ class VariableBuilder:
         # and recursively install corresponding guard for each inner attribute.
         if is_traceable_wrapper_subclass(value):
             self.install_guards(GuardBuilder.TYPE_MATCH)
+            install_guard(
+                SubclassAttrListSource(source).make_guard(GuardBuilder.EQUALS_MATCH)
+            )
+
             attrs, _ = value.__tensor_flatten__()
             for attr in attrs:
                 inner_value = getattr(value, attr)
@@ -2112,15 +2117,14 @@ def _automatic_dynamic(
         )
 
         # Get symbolic contexts for inner tensors
-        attrs, _ = type(e).__tensor_flatten__(e)
         inner_contexts = {}  # mapping from attr -> symbolic context
+        attrs, _ = type(e).__tensor_flatten__(e)
         for attr in attrs:
             inner_tensor = getattr(e, attr)
             inner_source = AttrSource(source, attr)
-            inner_context = _automatic_dynamic(
+            inner_contexts[attr] = _automatic_dynamic(
                 inner_tensor, tx, inner_source, static_shapes
             )
-            inner_contexts[attr] = inner_context
 
         return SubclassSymbolicContext(
             dynamic_sizes=outer_context.dynamic_sizes,

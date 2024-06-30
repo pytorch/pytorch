@@ -257,6 +257,107 @@ class StageTest(MultiProcContinousTest):
             with self.assertRaisesRegex(PipeliningShapeError, "dtype mismatch"):
                 _run_step(x)
 
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_custom_dw_with_fb_schedule(self):
+        """Tests that separate weight grad function 'dw_runner' gets run under a schedule that's only aware of F/B."""
+        full_mod = MultiMLP(d_hid, n_layers=self.world_size)
+        full_mod.to(self.device)
+        stage_mod = full_mod.get_submodule(f"layers.{self.rank}")
+
+        x = torch.randn(batch_size, d_hid, device=self.device)
+        target = torch.randn(batch_size, d_hid, device=self.device)
+
+        class CustomState:
+            def __init__(self):
+                self.i = 0
+
+            def dw_builder(self):
+                """This simulates a function attached to a model with a custom backward.
+                Each call to builder gives a new dw_runner that has some updated state to compute the latest dw.
+                """
+
+                def dw_runner():
+                    # This inner function would be called by PipelineStage during `backward_weight_one_chunk`
+                    print(f"dw called {self.i}th time")
+                    self.i += 1
+
+                return dw_runner
+
+        cs = CustomState()
+
+        stage = PipelineStage(
+            stage_mod,
+            self.rank,
+            self.world_size,
+            self.device,
+            input_args=x.chunk(chunks)[0],
+            dw_builder=cs.dw_builder,
+        )
+
+        # Attach to a schedule
+        schedule = ScheduleGPipe(
+            stage, chunks, loss_fn=torch.nn.MSELoss(reduction="sum")
+        )
+
+        # Run
+        def _run_step(x):
+            if self.rank == 0:
+                return schedule.step(x)
+            elif self.rank == self.world_size - 1:
+                return schedule.step(target=target)
+            else:
+                return schedule.step()
+
+        out = _run_step(x)
+
+        self.assertEqual(cs.i, chunks)
+
+        # Last rank checks result
+        if self.rank == self.world_size - 1:
+            ref_out = full_mod(x)
+            torch.testing.assert_close(out, ref_out)
+
+        if self.rank == 0:
+            with self.assertRaisesRegex(PipeliningShapeError, "shape mismatch"):
+                _run_step(torch.randn(batch_size + 1, d_hid, device=self.device))
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_custom_dw_errors(self):
+        """Tests expected errors are raised"""
+        full_mod = MultiMLP(d_hid, n_layers=self.world_size)
+        full_mod.to(self.device)
+        stage_mod = full_mod.get_submodule(f"layers.{self.rank}")
+
+        x = torch.randn(batch_size, d_hid, device=self.device)
+        target = torch.randn(batch_size, d_hid, device=self.device)
+
+        stage_with_dw_builder = PipelineStage(
+            stage_mod,
+            self.rank,
+            self.world_size,
+            self.device,
+            input_args=x.chunk(chunks)[0],
+            dw_builder=lambda: None,
+        )
+        with self.assertRaisesRegex(AssertionError, "backward_one_chunk"):
+            stage_with_dw_builder.backward_weight_one_chunk(bwd_chunk_id=0)
+
+        stage_without_dw_builder = PipelineStage(
+            stage_mod,
+            self.rank,
+            self.world_size,
+            self.device,
+            input_args=x.chunk(chunks)[0],
+            dw_builder=None,
+        )
+
+        with self.assertRaisesRegex(AssertionError, "dw_builder"):
+            stage_without_dw_builder.backward_one_chunk(
+                bwd_chunk_id=0, full_backward=False
+            )
+
 
 instantiate_parametrized_tests(StageTest)
 

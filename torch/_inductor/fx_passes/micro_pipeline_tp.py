@@ -209,7 +209,7 @@ def fuse_all_gather_matmul(match, shard, gather_dim, group_name):
 
     into
 
-        A, Cs = torch.ops.cuda_p2p.fused_all_gather_matmul(
+        A, Cs = torch.ops.symm_mem.fused_all_gather_matmul(
             A_shard, [B_0, B_1, B_2, ...], gather_dim, group_name,
         )
     """
@@ -220,17 +220,16 @@ def fuse_all_gather_matmul(match, shard, gather_dim, group_name):
         return
 
     c10d = torch.ops._c10d_functional
-    from torch.distributed._cuda_p2p import (
-        is_cuda_p2p_group,
+    from torch.distributed._symmetric_memory import (
+        is_symm_mem_enabled_for_group,
         restride_A_shard_for_fused_all_gather_matmul,
     )
-    from torch.distributed.distributed_c10d import _resolve_process_group
 
     if gather_dim >= len(shard.meta["val"].shape) - 1:
         # Decomposing the matmul on the K dimension is not supported
         return
 
-    if not is_cuda_p2p_group(_resolve_process_group(group_name)):
+    if not is_symm_mem_enabled_for_group(group_name):
         return
 
     # Normalize zero-dim and non-zero-dim all_gather_tensor
@@ -258,7 +257,7 @@ def fuse_all_gather_matmul(match, shard, gather_dim, group_name):
             )
 
         fused_node = graph.call_function(
-            torch.ops.cuda_p2p.fused_all_gather_matmul.default,
+            torch.ops.symm_mem.fused_all_gather_matmul.default,
             args=(shard_node, B_nodes, gather_dim, group_name),
         )
         new_ag_node = graph.call_function(
@@ -305,7 +304,7 @@ def fuse_matmul_reduce_scatter(match, rs_input, reduce_op, scatter_dim, group_na
 
     into
 
-        torch.ops.cuda_p2p.fused_matmul_reduce_scatter(
+        torch.ops.symm_mem.fused_matmul_reduce_scatter(
             A, B, scatter_dim, group_name,
         )
     """
@@ -316,13 +315,12 @@ def fuse_matmul_reduce_scatter(match, rs_input, reduce_op, scatter_dim, group_na
         return
 
     c10d = torch.ops._c10d_functional
-    from torch.distributed._cuda_p2p import (
-        is_cuda_p2p_group,
+    from torch.distributed._symmetric_memory import (
+        is_symm_mem_enabled_for_group,
         restride_A_for_fused_matmul_reduce_scatter,
     )
-    from torch.distributed.distributed_c10d import _resolve_process_group
 
-    if not is_cuda_p2p_group(_resolve_process_group(group_name)):
+    if not is_symm_mem_enabled_for_group(group_name):
         return
 
     # Currently fused_matmul_reduce_scatter doesn't return the matmul result,
@@ -367,7 +365,7 @@ def fuse_matmul_reduce_scatter(match, rs_input, reduce_op, scatter_dim, group_na
             )
 
         fused_node = graph.call_function(
-            torch.ops.cuda_p2p.fused_matmul_reduce_scatter.default,
+            torch.ops.symm_mem.fused_matmul_reduce_scatter.default,
             args=(A_node, B_node, reduce_op, scatter_dim, group_name),
         )
         rs_res_node.replace_all_uses_with(fused_node)

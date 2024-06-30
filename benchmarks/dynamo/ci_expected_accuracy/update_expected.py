@@ -18,12 +18,12 @@ Known limitations:
 import argparse
 import json
 import os
-import pathlib
 import subprocess
 import sys
 import urllib
 from io import BytesIO
 from itertools import product
+from pathlib import Path
 from urllib.request import urlopen
 from zipfile import ZipFile
 
@@ -34,7 +34,7 @@ import requests
 # https://console.rockset.com/lambdas/details/commons.artifacts
 ARTIFACTS_QUERY_URL = "https://api.usw2a1.rockset.com/v1/public/shared_lambdas/4ca0033e-0117-41f5-b043-59cde19eff35"
 CSV_LINTER = str(
-    pathlib.Path(__file__).absolute().parent.parent.parent.parent
+    Path(__file__).absolute().parent.parent.parent.parent
     / "tools/linter/adapters/no_merge_conflict_csv_linter.py"
 )
 

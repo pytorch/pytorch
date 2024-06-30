@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 from abc import abstractmethod
 from copy import copy
-from typing import Any, Dict, FrozenSet, Iterable, Iterator, List, Tuple
+from typing import Any, Iterable, Iterator
 
 from tools.testing.test_run import TestRun
 
@@ -18,13 +20,13 @@ class TestPrioritizations:
                otherwise it breaks the test sharding logic
     """
 
-    _original_tests: FrozenSet[str]
-    _test_scores: Dict[TestRun, float]
+    _original_tests: frozenset[str]
+    _test_scores: dict[TestRun, float]
 
     def __init__(
         self,
         tests_being_ranked: Iterable[str],  # The tests that are being prioritized.
-        scores: Dict[TestRun, float],
+        scores: dict[TestRun, float],
     ) -> None:
         self._original_tests = frozenset(tests_being_ranked)
         self._test_scores = {TestRun(test): 0.0 for test in self._original_tests}
@@ -59,7 +61,7 @@ class TestPrioritizations:
             files.keys()
         ), "The set of tests in the TestPrioritizations must be identical to the set of tests passed in"
 
-    def _traverse_scores(self) -> Iterator[Tuple[float, TestRun]]:
+    def _traverse_scores(self) -> Iterator[tuple[float, TestRun]]:
         # Sort by score, then alphabetically by test name
         for test, score in sorted(
             self._test_scores.items(), key=lambda x: (-x[1], str(x[0]))
@@ -70,7 +72,7 @@ class TestPrioritizations:
         if test_run.test_file not in self._original_tests:
             return  # We don't need this test
 
-        relevant_test_runs: List[TestRun] = [
+        relevant_test_runs: list[TestRun] = [
             tr for tr in self._test_scores.keys() if tr & test_run and tr != test_run
         ]
 
@@ -90,7 +92,7 @@ class TestPrioritizations:
         if test_run.test_file not in self._original_tests:
             return
 
-        relevant_test_runs: List[TestRun] = [
+        relevant_test_runs: list[TestRun] = [
             tr for tr in self._test_scores.keys() if tr & test_run
         ]
 
@@ -108,11 +110,11 @@ class TestPrioritizations:
 
         self.validate()
 
-    def get_all_tests(self) -> List[TestRun]:
+    def get_all_tests(self) -> list[TestRun]:
         """Returns all tests in the TestPrioritizations"""
         return [x[1] for x in self._traverse_scores()]
 
-    def get_top_per_tests(self, n: int) -> Tuple[List[TestRun], List[TestRun]]:
+    def get_top_per_tests(self, n: int) -> tuple[list[TestRun], list[TestRun]]:
         """Divides list of tests into two based on the top n% of scores.  The
         first list is the top, and the second is the rest."""
         tests = [x[1] for x in self._traverse_scores()]
@@ -132,7 +134,7 @@ class TestPrioritizations:
     def print_info(self) -> None:
         print(self.get_info_str())
 
-    def get_priority_info_for_test(self, test_run: TestRun) -> Dict[str, Any]:
+    def get_priority_info_for_test(self, test_run: TestRun) -> dict[str, Any]:
         """Given a failing test, returns information about it's prioritization that we want to emit in our metrics."""
         for idx, (score, test) in enumerate(self._traverse_scores()):
             #  Different heuristics may result in a given test file being split
@@ -142,7 +144,7 @@ class TestPrioritizations:
                 return {"position": idx, "score": score}
         raise AssertionError(f"Test run {test_run} not found")
 
-    def get_test_stats(self, test: TestRun) -> Dict[str, Any]:
+    def get_test_stats(self, test: TestRun) -> dict[str, Any]:
         return {
             "test_name": test.test_file,
             "test_filters": test.get_pytest_filter(),
@@ -154,7 +156,7 @@ class TestPrioritizations:
             },
         }
 
-    def to_json(self) -> Dict[str, Any]:
+    def to_json(self) -> dict[str, Any]:
         """
         Returns a JSON dict that describes this TestPrioritizations object.
         """
@@ -169,7 +171,7 @@ class TestPrioritizations:
         return json_dict
 
     @staticmethod
-    def from_json(json_dict: Dict[str, Any]) -> "TestPrioritizations":
+    def from_json(json_dict: dict[str, Any]) -> TestPrioritizations:
         """
         Returns a TestPrioritizations object from a JSON dict.
         """
@@ -182,7 +184,7 @@ class TestPrioritizations:
         )
         return test_prioritizations
 
-    def amend_tests(self, tests: List[str]) -> None:
+    def amend_tests(self, tests: list[str]) -> None:
         """
         Removes tests that are not in the given list from the
         TestPrioritizations.  Adds tests that are in the list but not in the
@@ -210,13 +212,13 @@ class AggregatedHeuristics:
     It saves the individual results from each heuristic and exposes an aggregated view.
     """
 
-    _heuristic_results: Dict[
-        "HeuristicInterface", TestPrioritizations
+    _heuristic_results: dict[
+        HeuristicInterface, TestPrioritizations
     ]  # Key is the Heuristic's name. Dicts will preserve the order of insertion, which is important for sharding
 
-    _all_tests: FrozenSet[str]
+    _all_tests: frozenset[str]
 
-    def __init__(self, all_tests: List[str]) -> None:
+    def __init__(self, all_tests: list[str]) -> None:
         self._all_tests = frozenset(all_tests)
         self._heuristic_results = {}
         self.validate()
@@ -229,7 +231,7 @@ class AggregatedHeuristics:
             ), f"Tests in {heuristic.name} are not the same as the tests in the AggregatedHeuristics"
 
     def add_heuristic_results(
-        self, heuristic: "HeuristicInterface", heuristic_results: TestPrioritizations
+        self, heuristic: HeuristicInterface, heuristic_results: TestPrioritizations
     ) -> None:
         if heuristic in self._heuristic_results:
             raise ValueError(f"We already have heuristics for {heuristic.name}")
@@ -257,11 +259,11 @@ class AggregatedHeuristics:
         new_tp.validate()
         return new_tp
 
-    def get_test_stats(self, test: TestRun) -> Dict[str, Any]:
+    def get_test_stats(self, test: TestRun) -> dict[str, Any]:
         """
         Returns the aggregated statistics for a given test.
         """
-        stats: Dict[str, Any] = {
+        stats: dict[str, Any] = {
             "test_name": test.test_file,
             "test_filters": test.get_pytest_filter(),
         }
@@ -287,11 +289,11 @@ class AggregatedHeuristics:
 
         return stats
 
-    def to_json(self) -> Dict[str, Any]:
+    def to_json(self) -> dict[str, Any]:
         """
         Returns a JSON dict that describes this AggregatedHeuristics object.
         """
-        json_dict: Dict[str, Any] = {}
+        json_dict: dict[str, Any] = {}
         for heuristic, heuristic_results in self._heuristic_results.items():
             json_dict[heuristic.name] = heuristic_results.to_json()
 
@@ -321,7 +323,7 @@ class HeuristicInterface:
         return self.name
 
     @abstractmethod
-    def get_prediction_confidence(self, tests: List[str]) -> TestPrioritizations:
+    def get_prediction_confidence(self, tests: list[str]) -> TestPrioritizations:
         """
         Returns a float ranking ranging from -1 to 1, where negative means skip,
         positive means run, 0 means no idea, and magnitude = how confident the

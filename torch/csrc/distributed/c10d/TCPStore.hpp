@@ -68,6 +68,8 @@ struct TCPStoreOptions {
 
 class TORCH_API TCPStore : public Store {
  public:
+  static constexpr std::chrono::milliseconds kConnectRetryDelay{1000};
+
   explicit TCPStore(std::string host, const TCPStoreOptions& opts = {});
 
   [[deprecated("Use TCPStore(host, opts) instead.")]] explicit TCPStore(

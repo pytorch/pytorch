@@ -43,8 +43,8 @@ from torch._inductor.cudagraph_utils import (
     get_placeholders,
     log_cudagraph_skip_and_bump_counter,
 )
-
 from torch._inductor.debug import save_args_for_compile_fx_inner
+from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import (
     BoxedBool,
     count_tangents,
@@ -420,13 +420,19 @@ def get_patched_config_dict(config_patches=None) -> Dict[str, Any]:
         return config.get_config_copy()
 
 
-@functools.wraps
-def with_fresh_cache_if_config(f):
-    if config.force_disable_caches:
-        with fresh_inductor_cache():
-            return f
-    else:
-        return f
+def with_fresh_cache_if_config(fn):
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if config.force_disable_caches:
+            # Don't delete the cache dir because it has to survive beyond the
+            # compile_fx call. Let's put the temp dirs under the default cache
+            # dir so they're easier to locate.
+            with fresh_inductor_cache(dir=cache_dir(), delete=False):
+                return fn(*args, **kwargs)
+        else:
+            return fn(*args, **kwargs)
+
+    return wrapper
 
 
 @DebugContext.wrap
@@ -858,6 +864,7 @@ def fx_codegen_and_compile(
                     else:
                         output_strides.append(None)
 
+            _check_triton_bf16_support(graph)
             compiled_fn = graph.compile_to_fn()
             num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
             metrics.num_bytes_accessed += num_bytes
@@ -1300,7 +1307,14 @@ def compile_fx(
         with config.patch(
             {
                 "cpp_wrapper": False,
-                "triton.autotune_at_compile_time": True,
+                # For triton.autotune_at_compile_time, disable by default for
+                # FBCode, but enabled by default for OSS.
+                "triton.autotune_at_compile_time": config.triton.autotune_at_compile_time
+                if config.is_fbcode()
+                else os.environ.get(
+                    "TORCHINDUCTOR_TRITON_AUTOTUNE_AT_COMPILE_TIME", "1"
+                )
+                == "1",
                 "triton.autotune_cublasLt": False,
                 "triton.cudagraphs": False,
                 "triton.store_cubin": True,
@@ -1628,3 +1642,34 @@ def handle_dynamo_export_graph(
         return codegen.process_outputs(compiled_fn(*codegen.process_inputs(*args)))
 
     return wrapper
+
+
+def _check_triton_bf16_support(graph: GraphLowering) -> None:
+    def warn_and_skip(device) -> None:
+        from torch._dynamo.exc import SkipFrame
+
+        device_props = torch.cuda.get_device_properties(device)
+        warnings.warn(
+            f"{device_props.name} does not support bfloat16 compilation natively, skipping"
+        )
+        raise SkipFrame("BF16 is not supported")
+
+    for inp in graph.graph_inputs.values():
+        device = getattr(inp, "get_device", lambda: torch.device("meta"))()
+        if device.type != "cuda" or inp.get_dtype() != torch.bfloat16:
+            continue
+        # Print warning and skip frame if attempting to compile for bfloat16
+        # on device without hardware support for dtype
+        if torch.cuda.is_bf16_supported(including_emulation=False):
+            return
+        warn_and_skip(device)
+
+    for out in graph.graph_outputs:
+        device = getattr(out, "get_device", lambda: torch.device("meta"))()
+        if device.type != "cuda" or out.get_dtype() != torch.bfloat16:
+            continue
+        # Print warning and skip frame if attempting to compile for bfloat16
+        # on device without hardware support for dtype
+        if torch.cuda.is_bf16_supported(including_emulation=False):
+            return
+        warn_and_skip(device)

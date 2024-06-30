@@ -9,10 +9,109 @@
 #include <c10/cuda/driver_api.h>
 #endif
 
+#include <sys/socket.h>
 #include <sys/syscall.h>
+#include <sys/un.h>
 #include <unistd.h>
 
 namespace {
+
+class IpcChannel {
+ public:
+  IpcChannel() : socket_name_(get_socket_name(getpid())) {
+    TORCH_CHECK(
+        (socket_ = socket(AF_UNIX, SOCK_DGRAM, 0)) != 0,
+        "Failed to create socket");
+
+    struct sockaddr_un addr = {.sun_family = AF_UNIX};
+    std::copy(socket_name_.begin(), socket_name_.end(), addr.sun_path);
+
+    TORCH_CHECK(
+        bind(socket_, (struct sockaddr*)&addr, SUN_LEN(&addr)) == 0,
+        "Failed to bind socket");
+  }
+
+  ~IpcChannel() {
+    close(socket_);
+    unlink(socket_name_.c_str());
+  }
+
+  void send_fd(int dst_pid, int fd) {
+    struct sockaddr_un addr = {.sun_family = AF_UNIX};
+    auto socket_name = get_socket_name(dst_pid);
+    std::copy(socket_name.begin(), socket_name.end(), addr.sun_path);
+
+    struct iovec io = {.iov_base = (void*)("fd"), .iov_len = 2};
+
+    char cbuf[CMSG_SPACE(sizeof(int))];
+    memset(cbuf, 0, sizeof(cbuf));
+
+    struct msghdr msg {
+      .msg_name = (void*)&addr, .msg_namelen = sizeof(struct sockaddr_un),
+      .msg_iov = &io, .msg_iovlen = 1, .msg_control = cbuf,
+      .msg_controllen = sizeof(cbuf)
+    };
+
+    auto cmsg = CMSG_FIRSTHDR(&msg);
+    cmsg->cmsg_len = CMSG_LEN(sizeof(int));
+    cmsg->cmsg_level = SOL_SOCKET;
+    cmsg->cmsg_type = SCM_RIGHTS;
+    memcpy(CMSG_DATA(cmsg), &fd, sizeof(fd));
+
+    TORCH_CHECK(sendmsg(socket_, &msg, 0) > 0, "Failed to send fd");
+  }
+
+  int recv_fd() {
+    char buf[2];
+    struct iovec io = {.iov_base = (void*)buf, .iov_len = sizeof(buf)};
+
+    char cbuf[CMSG_SPACE(sizeof(int))];
+    memset(cbuf, 0, sizeof(cbuf));
+
+    struct msghdr msg = {
+        .msg_iov = &io,
+        .msg_iovlen = 1,
+        .msg_control = cbuf,
+        .msg_controllen = sizeof(cbuf)};
+
+    TORCH_CHECK(recvmsg(socket_, &msg, 0) > 0, "Failed to receive fd");
+
+    auto cmsg = CMSG_FIRSTHDR(&msg);
+    TORCH_CHECK(cmsg != NULL);
+    TORCH_CHECK(cmsg->cmsg_len == CMSG_LEN(sizeof(int)));
+    TORCH_CHECK(
+        cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SCM_RIGHTS);
+    return *reinterpret_cast<int*>(CMSG_DATA(cmsg));
+  }
+
+  std::vector<int> all_gather_fds(
+      int rank,
+      const std::vector<int>& pids,
+      int fd) {
+    size_t world_size = pids.size();
+    std::vector<int> fds(pids.size());
+    fds[rank] = fd;
+
+    int dst_rank = (rank + 1) % world_size;
+    for (size_t step = 1; step < world_size; ++step) {
+      int src_rank = (rank + world_size - step) % world_size;
+      send_fd(pids[dst_rank], fd);
+      fd = recv_fd();
+      fds[src_rank] = fd;
+    }
+    return fds;
+  }
+
+ private:
+  static std::string get_socket_name(int pid) {
+    std::ostringstream oss;
+    oss << "symm_mem-" << pid;
+    return oss.str();
+  }
+
+  std::string socket_name_;
+  int socket_;
+};
 
 constexpr size_t signal_pad_size = 2048;
 const std::string store_comm_prefix = "CUDASymmetricMemory";
@@ -63,18 +162,6 @@ void store_barrier(
     int rank,
     int world_size) {
   store_all_gather(store, rank, world_size, 0);
-}
-
-int import_remote_fd(int pid, int fd) {
-#if defined(SYS_pidfd_open) and defined(SYS_pidfd_getfd)
-  int pidfd = syscall(SYS_pidfd_open, pid, 0);
-  return syscall(SYS_pidfd_getfd, pidfd, fd, 0);
-#else
-  TORCH_CHECK(
-      false,
-      "CUDASymmetricMemory requires pidfd_open ",
-      "and pidfd_getfd support");
-#endif
 }
 
 void map_block(
@@ -408,7 +495,6 @@ size_t CUDASymmetricMemoryAllocator::get_alloc_size(void* ptr) {
 
 struct RendezvousRequest {
   int device_idx;
-  int block_fd;
   int pid;
   size_t block_size;
   size_t buffer_size;
@@ -453,7 +539,12 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
     return block->symm_mem;
   }
 
+  IpcChannel ipc_channel;
   auto group_info = get_group_info(block->group_name);
+  auto store = group_info.store;
+  int rank = group_info.rank;
+  int world_size = group_info.world_size;
+
   auto driver_api = c10::cuda::DriverAPI::get();
   int block_fd;
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemExportToShareableHandle_(
@@ -461,35 +552,39 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
 
   auto local_req = RendezvousRequest{
       .device_idx = block->device_idx,
-      .block_fd = block_fd,
       .pid = getpid(),
       .block_size = block->block_size,
       .buffer_size = block->buffer_size,
       .signal_pad_offset = block->signal_pad_offset};
-  auto reqs = store_all_gather(
-      group_info.store, group_info.rank, group_info.world_size, local_req);
-  validate_rendezvous_requests(reqs, group_info.world_size);
+  auto reqs = store_all_gather(store, rank, world_size, local_req);
+  validate_rendezvous_requests(reqs, world_size);
 
-  std::vector<HandleType> handles(group_info.world_size);
-  std::vector<void*> buffers(group_info.world_size, nullptr);
-  std::vector<void*> signal_pads(group_info.world_size, nullptr);
-  for (int r = 0; r < group_info.world_size; ++r) {
-    if (r == group_info.rank) {
+  std::vector<int> pids(world_size);
+  for (int r = 0; r < world_size; ++r) {
+    pids[r] = reqs[r].pid;
+  }
+  auto imported_fds = ipc_channel.all_gather_fds(rank, pids, block_fd);
+
+  std::vector<HandleType> handles(world_size);
+  std::vector<void*> buffers(world_size, nullptr);
+  std::vector<void*> signal_pads(world_size, nullptr);
+
+  for (int r = 0; r < world_size; ++r) {
+    if (r == rank) {
       handles[r] = block->handle;
       buffers[r] = ptr;
       signal_pads[r] = (void*)((uintptr_t)ptr + block->signal_pad_offset);
       continue;
     }
-    int imported_fd = import_remote_fd(reqs[r].pid, reqs[r].block_fd);
     C10_CUDA_DRIVER_CHECK(driver_api->cuMemImportFromShareableHandle_(
         &handles[r],
-        (void*)(uintptr_t)imported_fd,
+        (void*)(uintptr_t)imported_fds[r],
         CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR));
     map_block(&buffers[r], handles[r], block->block_size, block->device_idx);
     signal_pads[r] = (void*)((uintptr_t)buffers[r] + block->signal_pad_offset);
-    close(imported_fd);
+    close(imported_fds[r]);
   }
-  store_barrier(group_info.store, group_info.rank, group_info.world_size);
+  store_barrier(store, rank, world_size);
   close(block_fd);
 
   // Initializing CUDASymmetricMemory with an allocation transfers its

@@ -7,8 +7,8 @@ from torch import nn
 from torch._dynamo import compiled_autograd
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter
-from torch.testing._internal.common_utils import IS_MACOS, skipIfRocm
-from torch.testing._internal.inductor_utils import HAS_CPU, requires_gpu
+from torch.testing._internal.common_utils import IS_MACOS, skipIfRocm, skipIfXpu
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, requires_gpu
 
 # Fake distributed
 WORLD_SIZE = 2
@@ -186,8 +186,8 @@ class DistributedPatternTests(TestCase):
 
     @skipIfRocm
     @requires_gpu()
-    def test_storage_resize_zero_cuda(self):
-        self._test_storage_resize_zero("cuda")
+    def test_storage_resize_zero_gpu(self):
+        self._test_storage_resize_zero(GPU_TYPE)
 
     @torch.no_grad()
     def _test_storage_resize_nonzero(self, device):
@@ -211,8 +211,8 @@ class DistributedPatternTests(TestCase):
 
     @skipIfRocm
     @requires_gpu()
-    def test_storage_resize_nonzero_cuda(self):
-        self._test_storage_resize_nonzero("cuda")
+    def test_storage_resize_nonzero_gpu(self):
+        self._test_storage_resize_nonzero(GPU_TYPE)
 
     @torch.no_grad()
     def test_unsafe_set_version_counter1(self):
@@ -461,14 +461,15 @@ class DistributedPatternTests(TestCase):
         self.assertEqual(bw_cnt.frame_count, 2)
 
     @skipIfRocm
+    @skipIfXpu
     @requires_gpu()
     @torch._functorch.config.patch(recompute_views=True)
     def test_fake_distributed_inductor(self):
         # TODO: fix .set_ lowering in CPU inductor, and enable the CPU test.
-        m1, inp1 = init_fake_distributed("cuda")
+        m1, inp1 = init_fake_distributed(GPU_TYPE)
         out1 = steps(m1, inp1)
 
-        m2, inp2 = init_fake_distributed("cuda")
+        m2, inp2 = init_fake_distributed(GPU_TYPE)
         m2 = torch.compile(m2, fullgraph=True)
         with compiled_autograd.enable(torch.compile(fullgraph=True)):
             out2 = steps(m2, inp2)

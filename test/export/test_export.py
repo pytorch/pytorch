@@ -151,6 +151,7 @@ NON_STRICT_SUFFIX = "_non_strict"
 RETRACEABILITY_SUFFIX = "_retraceability"
 SERDES_SUFFIX = "_serdes"
 PREDISPATCH_SUFFIX = "_pre_dispatch"
+TRAINING_IR_DECOMP_SUFFIX = "_training_ir_to_decomp"
 
 
 def is_non_strict_test(test_name):
@@ -268,6 +269,8 @@ class TestExport(TestCase):
         inp = ([torch.ones(1, 3)], torch.ones(1, 3))
         self._test_export_same_as_eager(f, inp)
 
+    # Errors because non-strict is not supported in training IR (T193692164)
+    @testing.expectedFailureTrainingIRToRunDecomp
     def test_external_call_non_strict_real_tensor(self):
         class ExternalMethod:
             def add(self, x):
@@ -338,6 +341,8 @@ class TestExport(TestCase):
         args = (torch.randn(15, 3, 256, 256), torch.ones(15, 32, 256, 256))
         self.assertEqual(gm(*args), m(*args))
 
+    # Errors because non-strict is not supported in training IR (T193692164)
+    @testing.expectedFailureTrainingIRToRunDecomp
     def test_basic_non_strict_real_tensor(self):
         class Basic(torch.nn.Module):
             def __init__(self):
@@ -352,6 +357,8 @@ class TestExport(TestCase):
         ep = export(f, args, strict=False)
         self.assertEqual(ep.module()(*args), f(*args))
 
+    # Errors because non-strict is not supported in training IR (T193692164)
+    @testing.expectedFailureTrainingIRToRunDecomp
     def test_basic_non_strict_fake_tensor(self):
         class Basic(torch.nn.Module):
             def __init__(self):
@@ -607,6 +614,7 @@ class TestExport(TestCase):
         )
 
     # Predispatch has different expected results
+    @testing.expectedFailureTrainingIRToRunDecomp  # T193700910
     def test_torch_fn(self):
         class M1(torch.nn.Module):
             def __init__(self):
@@ -661,6 +669,38 @@ class TestExport(TestCase):
                 actual_result.append(node.meta.get("torch_fn"))
         self.assertEqual(actual_result, expected_result)
 
+    def test_export_preserve_linear_at_aot_level(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                x = self.linear(x)
+                return torch.ops.aten.chunk.default(x, 3, 0)
+
+        gm = (
+            torch.export.export(
+                Foo(),
+                (torch.randn(3, 3),),
+            )
+            .run_decompositions({}, _preserve_ops=(torch.ops.aten.linear.default,))
+            .graph_module
+        )
+        # linear is CompositeImplicitAutograd functional op so we should preserve it
+        # chunk is CompositeImplicitAutograd non-functional op we decompose.
+        self.assertExpectedInline(
+            str(gm.code).strip(),
+            """\
+def forward(self, p_linear_weight, p_linear_bias, x):
+    linear = torch.ops.aten.linear.default(x, p_linear_weight, p_linear_bias);  x = p_linear_weight = p_linear_bias = None
+    split = torch.ops.aten.split.Tensor(linear, 1);  linear = None
+    getitem = split[0]
+    getitem_1 = split[1]
+    getitem_2 = split[2];  split = None
+    return (getitem, getitem_1, getitem_2)""",
+        )
+
     # TODO(yidi)
     # Expected failure for test cases that calls run_decomposition().
     # The top-level cond node has pre-existing metadata,
@@ -669,6 +709,7 @@ class TestExport(TestCase):
     # by copying current node's metadata for all nodes created during interpreting.
     @testing.expectedFailurePreDispatchRunDecomp
     @testing.expectedFailureRetraceability
+    @testing.expectedFailureTrainingIRToRunDecomp  # T193700910
     def test_export_cond_preserve_torch_fn_for_subgraphs(self):
         class MySubModule(torch.nn.Module):
             def foo(self, x):
@@ -1015,6 +1056,225 @@ class TestExport(TestCase):
                 "dy - 6 = 6" not in exc.args[0]
             )  # don't suggest fix for non-root dim
 
+    def test_keep_composite_ops_invalid(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                x = self.linear(x)
+                return torch.ops.aten.chunk.default(x, 3, 0)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "aten.chunk.default is a mutating/aliasing op"
+        ):
+            _ = torch.export.export(
+                Foo(),
+                (torch.randn(3, 3),),
+            ).run_decompositions({}, _preserve_ops=(torch.ops.aten.chunk.default,))
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "aten.add.Tensor is not CompositeImplicitAutograd op, so we will preserve it as",
+        ):
+            _ = torch.export.export(
+                Foo(),
+                (torch.randn(3, 3),),
+            ).run_decompositions({}, _preserve_ops=(torch.ops.aten.add.Tensor,))
+
+        with self.assertRaisesRegex(
+            RuntimeError, "aten.sym_size.default is a metadata query function"
+        ):
+            _ = torch.export.export(
+                Foo(),
+                (torch.randn(3, 3),),
+            ).run_decompositions({}, _preserve_ops=(torch.ops.aten.sym_size.default,))
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "We can't detect aten.native_batch_norm.default as a functional op statically",
+        ):
+            _ = torch.export.export(
+                Foo(),
+                (torch.randn(3, 3),),
+            ).run_decompositions(
+                {}, _preserve_ops=(torch.ops.aten.native_batch_norm.default,)
+            )
+
+    def test_keep_composite_ops_linear_convd(self):
+        class MyLinear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.randn(20, 98)
+                self.bias = torch.randn(20)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.weight, self.bias)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(16, 33, 3)
+                self.conv1d = torch.nn.Conv1d(16, 33, 3)
+                self.linear = MyLinear()
+
+            def forward(self, x, y):
+                x_conv = self.conv(x)
+                y_conv_1d = self.conv1d(y)
+                x_linear = self.linear(x_conv)
+                return x_linear.cos() + y_conv_1d.sum()
+
+        ep = torch.export.export(
+            Foo(), (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50))
+        )
+        ep_has_linear_convd = ep.run_decompositions(
+            decomp_table={},
+            _preserve_ops=testing._COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY,
+        )
+        self.assertExpectedInline(
+            str(ep_has_linear_convd.graph_module.code).strip(),
+            """\
+def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_weight, c_linear_bias, x, y):
+    conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
+    conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
+    linear = torch.ops.aten.linear.default(conv2d, c_linear_weight, c_linear_bias);  conv2d = c_linear_weight = c_linear_bias = None
+    cos = torch.ops.aten.cos.default(linear);  linear = None
+    sum_1 = torch.ops.aten.sum.default(conv1d);  conv1d = None
+    add = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
+    return (add,)""",
+        )
+
+        ep_has_convd = ep.run_decompositions(
+            decomp_table=None,
+            _preserve_ops=[
+                torch.ops.aten.conv2d.default,
+                torch.ops.aten.conv1d.default,
+            ],
+        )
+        self.assertExpectedInline(
+            str(ep_has_convd.graph_module.code).strip(),
+            """\
+def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_weight, c_linear_bias, x, y):
+    conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
+    conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
+    view = torch.ops.aten.view.default(conv2d, [31680, 98]);  conv2d = None
+    permute = torch.ops.aten.permute.default(c_linear_weight, [1, 0]);  c_linear_weight = None
+    addmm = torch.ops.aten.addmm.default(c_linear_bias, view, permute);  c_linear_bias = view = permute = None
+    view_1 = torch.ops.aten.view.default(addmm, [20, 33, 48, 20]);  addmm = None
+    cos = torch.ops.aten.cos.default(view_1);  view_1 = None
+    sum_1 = torch.ops.aten.sum.dim_IntList(conv1d, []);  conv1d = None
+    add = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
+    return (add,)""",
+        )
+
+        ep_has_convd = ep_has_convd.run_decompositions(
+            decomp_table=None, _preserve_ops=[torch.ops.aten.conv2d.default]
+        )
+        self.assertExpectedInline(
+            str(ep_has_convd.graph_module.code).strip(),
+            """\
+def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_weight, c_linear_bias, x, y):
+    conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
+    convolution = torch.ops.aten.convolution.default(y, p_conv1d_weight, p_conv1d_bias, [1], [0], [1], False, [0], 1);  y = p_conv1d_weight = p_conv1d_bias = None
+    view = torch.ops.aten.view.default(conv2d, [31680, 98]);  conv2d = None
+    permute = torch.ops.aten.permute.default(c_linear_weight, [1, 0]);  c_linear_weight = None
+    addmm = torch.ops.aten.addmm.default(c_linear_bias, view, permute);  c_linear_bias = view = permute = None
+    view_1 = torch.ops.aten.view.default(addmm, [20, 33, 48, 20]);  addmm = None
+    cos = torch.ops.aten.cos.default(view_1);  view_1 = None
+    sum_1 = torch.ops.aten.sum.dim_IntList(convolution, []);  convolution = None
+    add = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
+    return (add,)""",
+        )
+
+    def test_keep_composite_ops_linear_convd_for_training_ir(self):
+        class MyLinear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("weight", torch.randn(20, 98))
+                self.register_buffer("bias", torch.randn(20))
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.weight, self.bias)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(16, 33, 3)
+                self.conv1d = torch.nn.Conv1d(16, 33, 3)
+                self.linear = MyLinear()
+
+            def forward(self, x, y):
+                x_conv = self.conv(x)
+                y_conv_1d = self.conv1d(y)
+                x_linear = self.linear(x_conv)
+                return x_linear.cos() + y_conv_1d.sum()
+
+        ep = torch.export._trace._export_for_training(
+            Foo(), (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50))
+        )
+        ep_has_linear_convd = ep.run_decompositions(
+            decomp_table={},
+            _preserve_ops=testing._COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY,
+        )
+        self.assertExpectedInline(
+            str(ep_has_linear_convd.graph_module.code).strip(),
+            """\
+def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_linear_weight, b_linear_bias, x, y):
+    convolution = torch.ops.aten.convolution.default(x, p_conv_weight, p_conv_bias, [1, 1], [0, 0], [1, 1], False, [0, 0], 1);  x = p_conv_weight = p_conv_bias = None
+    convolution_1 = torch.ops.aten.convolution.default(y, p_conv1d_weight, p_conv1d_bias, [1], [0], [1], False, [0], 1);  y = p_conv1d_weight = p_conv1d_bias = None
+    view = torch.ops.aten.view.default(convolution, [31680, 98]);  convolution = None
+    t = torch.ops.aten.t.default(b_linear_weight);  b_linear_weight = None
+    addmm = torch.ops.aten.addmm.default(b_linear_bias, view, t);  b_linear_bias = view = t = None
+    view_1 = torch.ops.aten.view.default(addmm, [20, 33, 48, 20]);  addmm = None
+    cos = torch.ops.aten.cos.default(view_1);  view_1 = None
+    sum_1 = torch.ops.aten.sum.default(convolution_1);  convolution_1 = None
+    add = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
+    return (add,)""",
+        )
+
+        ep_has_convd = ep.run_decompositions(
+            decomp_table=None,
+            _preserve_ops=[
+                torch.ops.aten.conv2d.default,
+                torch.ops.aten.conv1d.default,
+            ],
+        )
+        self.assertExpectedInline(
+            str(ep_has_convd.graph_module.code).strip(),
+            """\
+def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_linear_weight, b_linear_bias, x, y):
+    convolution = torch.ops.aten.convolution.default(x, p_conv_weight, p_conv_bias, [1, 1], [0, 0], [1, 1], False, [0, 0], 1);  x = p_conv_weight = p_conv_bias = None
+    convolution_1 = torch.ops.aten.convolution.default(y, p_conv1d_weight, p_conv1d_bias, [1], [0], [1], False, [0], 1);  y = p_conv1d_weight = p_conv1d_bias = None
+    view = torch.ops.aten.view.default(convolution, [31680, 98]);  convolution = None
+    t = torch.ops.aten.t.default(b_linear_weight);  b_linear_weight = None
+    addmm = torch.ops.aten.addmm.default(b_linear_bias, view, t);  b_linear_bias = view = t = None
+    view_1 = torch.ops.aten.view.default(addmm, [20, 33, 48, 20]);  addmm = None
+    cos = torch.ops.aten.cos.default(view_1);  view_1 = None
+    sum_1 = torch.ops.aten.sum.default(convolution_1);  convolution_1 = None
+    add = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
+    return (add,)""",
+        )
+
+        ep_has_convd = ep_has_convd.run_decompositions(
+            decomp_table=None, _preserve_ops=[torch.ops.aten.conv2d.default]
+        )
+        self.assertExpectedInline(
+            str(ep_has_convd.graph_module.code).strip(),
+            """\
+def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_linear_weight, b_linear_bias, x, y):
+    convolution = torch.ops.aten.convolution.default(x, p_conv_weight, p_conv_bias, [1, 1], [0, 0], [1, 1], False, [0, 0], 1);  x = p_conv_weight = p_conv_bias = None
+    convolution_1 = torch.ops.aten.convolution.default(y, p_conv1d_weight, p_conv1d_bias, [1], [0], [1], False, [0], 1);  y = p_conv1d_weight = p_conv1d_bias = None
+    view = torch.ops.aten.view.default(convolution, [31680, 98]);  convolution = None
+    permute = torch.ops.aten.permute.default(b_linear_weight, [1, 0]);  b_linear_weight = None
+    addmm = torch.ops.aten.addmm.default(b_linear_bias, view, permute);  b_linear_bias = view = permute = None
+    view_1 = torch.ops.aten.view.default(addmm, [20, 33, 48, 20]);  addmm = None
+    cos = torch.ops.aten.cos.default(view_1);  view_1 = None
+    sum_1 = torch.ops.aten.sum.dim_IntList(convolution_1, []);  convolution_1 = None
+    add = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
+    return (add,)""",
+        )
+
     def test_derived_dim_out_of_order_simplified(self):
         _dimz = torch.export.Dim("_dimz", min=6, max=8)
         dimy = _dimz - 1
@@ -1060,6 +1320,180 @@ class TestExport(TestCase):
 
         self.assertEqual(
             ep.module()(torch.randn(6), torch.randn(7), torch.randn(8)).size()[0], 6
+        )
+
+    def test_simple_export_for_training(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        eager_model = Foo()
+        ep_for_training = torch.export._trace._export_for_training(
+            eager_model, (torch.ones(2, 2),)
+        )
+        self.assertExpectedInline(
+            str(ep_for_training.graph_module.code).strip(),
+            """\
+def forward(self, p_linear_weight, p_linear_bias, x):
+    linear = torch.ops.aten.linear.default(x, p_linear_weight, p_linear_bias);  x = p_linear_weight = p_linear_bias = None
+    return (linear,)""",
+        )
+        gm = ep_for_training.module()
+        self.assertExpectedInline(
+            str(gm.code).strip(),
+            """\
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    linear_weight = self.linear.weight
+    linear_bias = self.linear.bias
+    linear = torch.ops.aten.linear.default(x, linear_weight, linear_bias);  x = linear_weight = linear_bias = None
+    return pytree.tree_unflatten((linear,), self._out_spec)""",
+        )
+
+        self.assertTrue(
+            torch.allclose(gm(torch.ones(2, 2)), eager_model(torch.ones(2, 2)))
+        )
+
+    def test_export_for_training_with_mutation(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.ones(4, 4))
+
+            def forward(self, x):
+                x.add_(5)
+                self.buffer.add_(5)
+                return x + self.buffer
+
+        eager_model_for_export = Foo()
+        eager_model_for_testing = Foo()
+        ep_for_training = torch.export._trace._export_for_training(
+            eager_model_for_export, (torch.ones(4, 4),)
+        )
+        self.assertExpectedInline(
+            str(ep_for_training.graph_module.code).strip(),
+            """\
+def forward(self, b_buffer, x):
+    add_ = torch.ops.aten.add_.Tensor(x, 5);  x = None
+    add__1 = torch.ops.aten.add_.Tensor(b_buffer, 5);  b_buffer = None
+    add = torch.ops.aten.add.Tensor(add_, add__1);  add_ = add__1 = None
+    return (add,)""",
+        )
+        gm = ep_for_training.module()
+        self.assertExpectedInline(
+            str(gm.code).strip(),
+            """\
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    buffer = self.buffer
+    add_ = torch.ops.aten.add_.Tensor(x, 5);  x = None
+    add__1 = torch.ops.aten.add_.Tensor(buffer, 5);  buffer = None
+    add = torch.ops.aten.add.Tensor(add_, add__1);  add_ = add__1 = None
+    return pytree.tree_unflatten((add,), self._out_spec)""",
+        )
+
+        self.assertTrue(
+            torch.allclose(
+                gm(torch.ones(4, 4)), eager_model_for_testing(torch.ones(4, 4))
+            )
+        )
+
+    def test_export_for_training_with_dynamic_shapes(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.ones(4, 4))
+
+            def forward(self, x):
+                x.add_(5)
+                self.buffer.add_(5)
+                return x + self.buffer.sum()
+
+        eager_model_for_export_training = Foo()
+        eager_model_for_export_inference = Foo()
+        eager_model_for_testing = Foo()
+        ep_for_training = torch.export._trace._export_for_training(
+            eager_model_for_export_training,
+            (torch.ones(4, 4),),
+            dynamic_shapes=({0: Dim("x")},),
+        )
+
+        self.assertTrue(
+            torch.allclose(
+                ep_for_training.module()(torch.ones(2, 4)),
+                eager_model_for_testing(torch.ones(2, 4)),
+            )
+        )
+
+        ep_for_real = export(
+            eager_model_for_export_inference,
+            (torch.ones(4, 4),),
+            dynamic_shapes=({0: Dim("x")},),
+        )
+
+        self.assertEqual(
+            str(ep_for_training.range_constraints), str(ep_for_real.range_constraints)
+        )
+
+    def test_export_for_training_with_container_type(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.ones(4, 4))
+
+            def forward(self, container):
+                x = container[0][0]
+                y = container[0][1]
+                x.add_(5)
+                y.add_(5)
+                return x + y + self.buffer.sum()
+
+        eager_model = Foo()
+        ep_for_training = torch.export._trace._export_for_training(
+            eager_model,
+            ([torch.ones(4, 4), torch.ones(4, 4)],),
+        )
+
+        self.assertTrue(
+            torch.allclose(
+                ep_for_training.module()(
+                    ([torch.ones(4, 4), torch.ones(4, 4)]),
+                ),
+                eager_model(([torch.ones(4, 4), torch.ones(4, 4)])),
+            )
+        )
+
+    def test_export_for_training_run_decomp(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.ones(2, 2))
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                self.buffer.add_(5)
+                return self.linear(x) + self.buffer.sum()
+
+        eager_model = Foo()
+        ep_for_training = torch.export._trace._export_for_training(
+            eager_model,
+            (torch.ones(2, 2),),
+        )
+        ep_for_inference = ep_for_training.run_decompositions()
+        self.assertExpectedInline(
+            str(ep_for_inference.graph_module.code).strip(),
+            """\
+def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
+    add = torch.ops.aten.add.Tensor(b_buffer, 5);  b_buffer = None
+    t = torch.ops.aten.t.default(p_linear_weight);  p_linear_weight = None
+    addmm = torch.ops.aten.addmm.default(p_linear_bias, x, t);  p_linear_bias = x = t = None
+    sum_1 = torch.ops.aten.sum.default(add)
+    add_1 = torch.ops.aten.add.Tensor(addmm, sum_1);  addmm = sum_1 = None
+    return (add, add_1)""",
         )
 
     def test_derived_dim_out_of_order_simplified_repeat_non_derived(self):
@@ -1208,6 +1642,7 @@ class TestExport(TestCase):
             if node.op == "placeholder":
                 self.assertEqual(str(tuple(node.meta["val"].shape)), f"({sym},)")
 
+    @testing.expectedFailureTrainingIRToRunDecomp  # T193693183
     def test_dynamic_shapes_builder_kwargs(self):
         class M(torch.nn.Module):
             def forward(self, x, y, z):
@@ -1448,6 +1883,7 @@ class TestExport(TestCase):
         args = (torch.rand(3, 700, 700), 150, 150)
         self.assertEqual(ecrop.module()(*args), ecrop(*args))
 
+    @testing.expectedFailureTrainingIRToRunDecomp  # T193693183
     def test_export_func_with_kwargs(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, kw1, kw2):
@@ -1458,6 +1894,7 @@ class TestExport(TestCase):
         kwargs = {"kw1": torch.ones(1, 1), "kw2": torch.ones(6, 4)}
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
+    @testing.expectedFailureTrainingIRToRunDecomp  # T193693183
     def test_export_func_with_pytree_kwargs(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, a, b):
@@ -1471,6 +1908,7 @@ class TestExport(TestCase):
         }
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
+    @testing.expectedFailureTrainingIRToRunDecomp  # T193693183
     def test_export_func_with_default_kwargs(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, a, b=1):
@@ -1501,6 +1939,7 @@ class TestExport(TestCase):
         args = (torch.ones(2, 3), torch.ones(3, 4), torch.ones(2, 3), torch.ones(3, 4))
         self._test_export_same_as_eager(kw_func, args)
 
+    @testing.expectedFailureTrainingIRToRunDecomp  # T193693183
     def test_export_func_with_keyword_only_args(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, *args, kw1, kw2):
@@ -1511,6 +1950,7 @@ class TestExport(TestCase):
         kwargs = {"kw1": torch.ones(2, 3), "kw2": torch.ones(3, 4)}
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
+    @testing.expectedFailureTrainingIRToRunDecomp  # T193693183
     def test_export_func_with_var_keyword_args(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, *args, kw1, kw2, **kwargs):
@@ -1605,6 +2045,7 @@ class TestExport(TestCase):
         self.assertTrue(torch.allclose(orig_res[1], ep_res[1]))
         self.assertTrue(torch.allclose(orig_res[2], ep_res[2]))
 
+    @testing.expectedFailureTrainingIRToRunDecomp  # T193693183
     def test_export_func_with_var_keyword_pytree_args(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, *args, kw1, kw2, **kwargs):
@@ -1630,6 +2071,7 @@ class TestExport(TestCase):
 
     @testing.expectedFailureSerDer  # we don't save placeholder metadata
     @testing.expectedFailureNonStrict
+    @testing.expectedFailureTrainingIRToRunDecomp  # T193692674
     def test_linear_conv(self):
         class MyLinear(torch.nn.Module):
             def __init__(self):
@@ -2288,6 +2730,7 @@ class TestExport(TestCase):
         self.assertEqual(params[0].shape, [1, 10])  # weight
         self.assertEqual(params[1].shape, [1])  # bias
 
+    @testing.expectedFailureTrainingIRToRunDecomp  # T193700631
     def test_buffer_util(self):
         ep = export(
             torch.nn.BatchNorm2d(100, affine=False), (torch.ones(20, 100, 35, 45),)
@@ -2305,6 +2748,7 @@ class TestExport(TestCase):
         self.assertEqual(buffer[1].shape, torch.Size([100]))  # running_var
         self.assertEqual(buffer[2].shape, torch.Size([]))  # num_batches_tracked
 
+    @testing.expectedFailureTrainingIRToRunDecomp  # T193701564
     def test_export_dynamo_config(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -2339,6 +2783,7 @@ class TestExport(TestCase):
             ):
                 _ = export(mod, inp, strict=True)
 
+    @testing.expectedFailureTrainingIRToRunDecomp  # T193700396
     def test_device_to_static(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -2353,6 +2798,7 @@ class TestExport(TestCase):
         for op in ops:
             self.assertIn(op, (torch.ops.aten._to_copy.default,))
 
+    @testing.expectedFailureTrainingIRToRunDecomp  # T193700396
     def test_device_to_dynamic(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -2371,6 +2817,7 @@ class TestExport(TestCase):
         for op in ops:
             self.assertIn(op, (torch.ops.aten._to_copy.default,))
 
+    @testing.expectedFailureTrainingIRToRunDecomp  # T193700396
     def test_device_to_mutation(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -2383,6 +2830,7 @@ class TestExport(TestCase):
         ):
             export(Module(), (torch.tensor(1, device="cpu"),))
 
+    @testing.expectedFailureTrainingIRToRunDecomp  # T193700396
     def test_float_conversion(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -2397,6 +2845,7 @@ class TestExport(TestCase):
         for op in ops:
             self.assertIn(op, (torch.ops.aten._to_copy.default,))
 
+    @testing.expectedFailureTrainingIRToRunDecomp  # T193700396
     def test_device_to_mutation_float(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -2409,6 +2858,7 @@ class TestExport(TestCase):
         ):
             export(Module(), (torch.tensor(1, dtype=torch.float),))
 
+    @testing.expectedFailureTrainingIRToRunDecomp  # T193692674
     def test_module(self):
         class MyLinear(torch.nn.Module):
             def __init__(self):
@@ -2454,6 +2904,7 @@ class TestExport(TestCase):
             )
         )
 
+    @testing.expectedFailureTrainingIRToRunDecomp  # T193701564
     def test_module_with_dict_container_inp_out(self):
         class MyLinear(torch.nn.Module):
             def __init__(self):
@@ -2966,6 +3417,7 @@ def forward(self, x):
             _ = exported.module()(torch.randn(4, 4), torch.randn(4), "floor")
         self.assertTrue(torch.allclose(exported.module()(*inps), foo(*inps)))
 
+    @testing.expectedFailureTrainingIRToRunDecomp  # T193701923
     def test_to_module_with_mutated_buffer_multiple_update_sub_later(self):
         class Bar(torch.nn.Module):
             def __init__(self):
@@ -3265,6 +3717,8 @@ def forward(self, x):
         ):
             graph_module.eval()
 
+    # TODO Retracing a module with constant attrs don't work.(T193692674)
+    @testing.expectedFailureTrainingIRToRunDecomp
     @testing.expectedFailureRetraceability  # T183144788
     def test_lifted_constants(self) -> None:
         class Module(torch.nn.Module):
@@ -3300,6 +3754,7 @@ def forward(self, x):
         self.assertTrue(torch.allclose(ep.module()(*inp), transform.module()(*inp)))
 
     @testing.expectedFailureRetraceability  # T183144788
+    @testing.expectedFailureTrainingIRToRunDecomp  # T193701164
     def test_tensor_attribute_zero_args(self):
         class Foo(torch.nn.Module):
             def __init__(self, value):
@@ -3646,6 +4101,7 @@ graph():
         self.assertTrue(torch.allclose(unflattened(*inps), M2()(*inps)))
 
     @testing.expectedFailureRetraceability  # Retracing tensor constants results in buffers
+    @testing.expectedFailureTrainingIRToRunDecomp  # T193692674
     def test_nested_module_with_constant_buffer(self):
         class M1(torch.nn.Module):
             def __init__(self):
@@ -3794,6 +4250,8 @@ graph():
         inp = (torch.tensor(6), torch.randn(13))
         self.assertTrue(torch.allclose(ep.module()(*inp), M()(*inp)))
 
+    # TODO Retracing a module with constant attrs don't work.(T193692674)
+    @testing.expectedFailureTrainingIRToRunDecomp
     def test_issue_113041(self):
         class TestModule(torch.nn.Module):
             def __init__(self):
@@ -4057,6 +4515,7 @@ graph():
         optimized_model = torch.compile(exported_model)
         optimized_model(tensor_cpu, mask_cpu)
 
+    @testing.expectedFailureTrainingIRToRunDecomp  # T193701923
     def test_export_input_mutation_static_shape(self):
         class MutationModel(torch.nn.Module):
             def forward(self, x, y):
@@ -4414,6 +4873,7 @@ graph():
             )
         )
 
+    @testing.expectedFailureTrainingIRToRunDecomp  # T193702033
     def test_sym_stack_trace(self):
         # TODO(avik): update this test with torch._check*
         class Foo(torch.nn.Module):
@@ -4670,6 +5130,7 @@ def forward(self, x, b_t, y):
         self.assertEqual(copied_m.state_dict(), m.state_dict())
         self.assertEqual(ep.state_dict, m.state_dict())
 
+    @testing.expectedFailureTrainingIRToRunDecomp  # T193692674
     def test_non_persistent_buffer(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -4735,6 +5196,8 @@ def forward(self, x, b_t, y):
         for n1, n2 in zip(list(ep.graph.nodes), list(ep2.graph.nodes)):
             self.assertEqual(n1.meta.get("stack_trace"), n2.meta.get("stack_trace"))
 
+    # TODO Retracing a module with constant attrs don't work.(T193692674)
+    @testing.expectedFailureTrainingIRToRunDecomp
     def test_fake_weights(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -4793,6 +5256,8 @@ def forward(self, x, b_t, y):
             # under a new FakeTensorMode.
             ep = torch.export.export(m, (inp,))
 
+    # Errors because non-strict is not supported in training IR (T193692164)
+    @testing.expectedFailureTrainingIRToRunDecomp
     def test_compiling_state(self):
         class TestModule1(torch.nn.Module):
             def forward(self, x):
@@ -4842,6 +5307,7 @@ def forward(self, x, b_t, y):
         self.assertEqual(mod.foo, ep.module().foo)
         self.assertEqual(mod(torch.ones(4, 4)), ep.module()(torch.ones(4, 4)))
 
+    @testing.expectedFailureTrainingIRToRunDecomp  # T193702033
     def test_symint_tensor_return(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -4944,7 +5410,9 @@ def forward(self, x):
 
     # original input names aren't retraceable:
     # compilation will succeed, but names won't match forward() signature.
+    # TODO Retracing a module with constant attrs don't work.(T193692674)
     @testing.expectedFailureRetraceability
+    @testing.expectedFailureTrainingIRToRunDecomp
     def test_placeholder_naming_collisions(self):
         # test collisions between nested user inputs
         class Foo(torch.nn.Module):

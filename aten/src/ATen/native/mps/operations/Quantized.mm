@@ -165,22 +165,16 @@ kernel void int4pack_mm(constant T *A [[buffer(0)]],
   // affecting performance. This is the trick applied in MLX kernels.
   float4 act_div_scales = {1.f, 1 / 16.f, 1 / 256.f, 1 / 4096.f};
 
-  // Find specific group to which channels handled by this thread
-  // belong.
-  uint k_block_index = k / group_size;
-  // Since scales_and_zeros are packed as [num_groups, N, 2].
-  // Finding a specific's group's scales and zero points requires jump by factor
-  // of N*2
-  uint scales_group_offset = (k_block_index * N + n) * 2;
-  uint zeros_gruop_offset = scales_group_offset + 1;
-  const uint scales_jump =
-      N * 2 *
-      (k_jump /
-       group_size); /* the last term accounts for identifying the group this
-                      thread will have to process in each iteration. This mean
-                      each iteration it must jump to a different group. Thus
-                      k_jump must be > group_size */
   for (; k < K; k += k_jump) {
+    // Find specific group to which channels handled by this thread
+    // belong.
+    uint k_block_index = k / group_size;
+    // Since scales_and_zeros are packed as [num_groups, N, 2].
+    // Finding a specific's group's scales and zero points requires jump by factor
+    // of N*2
+    uint scales_group_offset = (k_block_index * N + n) * 2;
+    uint zeros_gruop_offset = scales_group_offset + 1;
+
     const T scale0 = scales_and_zeros[scales_group_offset];
     // Adding zero point results in 10% perf penalty.
     const T zero0 = scales_and_zeros[zeros_gruop_offset] - scale0 * T(8);
@@ -193,9 +187,6 @@ kernel void int4pack_mm(constant T *A [[buffer(0)]],
 
     const T scale3 = scales_and_zeros[scales_group_offset + 6];
     const T zero3 = scales_and_zeros[zeros_gruop_offset + 6] - scale3 * T(8);
-
-    scales_group_offset += scales_jump;
-    zeros_gruop_offset += scales_jump;
 
     const float4 zeros = float4(zero0, zero1, zero2, zero3);
 
@@ -240,9 +231,9 @@ kernel void int4pack_mm(constant T *A [[buffer(0)]],
   int4pack_mm<DTYPE, GSIZE>(                                                   \
       constant DTYPE * A [[buffer(0)]], constant uchar * B [[buffer(1)]],      \
       constant DTYPE * scales_and_zeros [[buffer(2)]],                         \
-      device DTYPE * output_data [[buffer(3)]],                                 \
+      device DTYPE * output_data [[buffer(3)]],                                \
       constant uint3 & sizes [[buffer(4)]],                                    \
-      uint3 thread_index [[thread_position_in_grid]],                           \
+      uint3 thread_index [[thread_position_in_grid]],                          \
       uint tid_in_simdgroup [[thread_index_in_simdgroup]])
 
 INSTANTIATE_INT4MV(float, 32);

@@ -69,6 +69,17 @@ PLATFORM_SUPPORTS_FUSED_SDPA: bool = TEST_CUDA and not TEST_WITH_ROCM
 
 PLATFORM_SUPPORTS_BF16: bool = LazyVal(lambda: TEST_CUDA and SM80OrLater)
 
+def evaluate_platform_supports_fp8():
+    if torch.cuda.is_available():
+        if torch.version.hip:
+            return 'gfx94' in torch.cuda.get_device_properties(0).gcnArchName
+        else:
+            return SM90OrLater or torch.cuda.get_device_capability() == (8, 9)
+    return False
+
+PLATFORM_SUPPORTS_FP8: bool = LazyVal(lambda: evaluate_platform_supports_fp8())
+
+
 if TEST_NUMBA:
     try:
         import numba.cuda

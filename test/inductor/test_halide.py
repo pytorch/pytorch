@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: pt2"]
+import os
 import sys
 import textwrap
 import unittest
@@ -38,8 +39,11 @@ except ImportError:
 
 
 make_halide = config.patch(
-    cpu_backend="halide",
-    fallback_random=True,  # TODO(jansel): support random
+    {
+        "cpu_backend": "halide",
+        "cuda_backend": "halide",
+        "fallback_random": True,  # TODO(jansel): support random
+    }
 )
 
 
@@ -116,9 +120,92 @@ class HalideTests(TestCase):
         fn(a, b, c)
         self.assertEqual(c, a + b)
 
+    def test_manual_schedule(self):
+        fn = HalideCodeCache.generate_halide(
+            HalideMeta(
+                argtypes=[
+                    HalideInputSpec(
+                        ctype="float*",
+                        name="in_ptr0",
+                        shape=["1024L"],
+                        stride=["1L"],
+                        offset="0",
+                    ),
+                    HalideInputSpec(
+                        ctype="float*",
+                        name="in_ptr1",
+                        shape=["1024L"],
+                        stride=["1L"],
+                        offset="0",
+                    ),
+                    HalideInputSpec(
+                        ctype="float*",
+                        name="out_ptr0",
+                        shape=["1024L"],
+                        stride=["1L"],
+                        offset="0",
+                    ),
+                ],
+                target="host-no_runtime",
+                scheduler=None,
+            ),
+            textwrap.dedent(
+                """
+                import halide as hl
 
-SweepInputsCpuHalideTest = make_halide(test_torchinductor.SweepInputsCpuTest)
-CpuHalideTests = make_halide(test_torchinductor.CpuTests)
+                @hl.generator(name="kernel")
+                class Kernel:
+                    in_ptr0 = hl.InputBuffer(hl.Float(32), 1)
+                    in_ptr1 = hl.InputBuffer(hl.Float(32), 1)
+                    out_ptr0 = hl.OutputBuffer(hl.Float(32), 1)
+
+                    def generate(g):
+                        in_ptr0 = g.in_ptr0
+                        in_ptr1 = g.in_ptr1
+                        out_ptr0 = g.out_ptr0
+                        xindex = hl.Var('xindex')
+                        x0 = xindex
+                        tmp0 = hl.Func()
+                        tmp0[xindex] = in_ptr0[x0]
+                        tmp1 = hl.Func()
+                        tmp1[xindex] = in_ptr1[x0]
+                        tmp2 = hl.Func()
+                        tmp2[xindex] = tmp0[xindex] + tmp1[xindex]
+                        out_ptr0[x0] = tmp2[xindex]
+
+                        assert not g.using_autoscheduler()
+                        i = hl.Var()
+                        j = hl.Var()
+                        out_ptr0.compute_root()
+                        out_ptr0.split(xindex, i, j, 32)
+                        out_ptr0.parallel(i)
+                        out_ptr0.vectorize(j)
+                        tmp2.compute_at(out_ptr0, i)
+                        tmp2.store_at(out_ptr0, i)
+                        tmp1.compute_inline()
+
+                __name__ == '__main__' and hl.main()
+                """
+            ),
+        )
+        a = torch.randn(1024)
+        b = torch.randn(1024)
+        c = torch.randn(1024)
+        fn(a, b, c)
+        self.assertEqual(c, a + b)
+
+
+if test_torchinductor.HAS_CPU and HAS_HALIDE:
+    SweepInputsCpuHalideTest = make_halide(test_torchinductor.SweepInputsCpuTest)
+    CpuHalideTests = make_halide(test_torchinductor.CpuTests)
+
+if (
+    test_torchinductor.HAS_GPU
+    and HAS_HALIDE
+    and os.environ.get("TEST_HALIDE_GPU") == "1"
+):
+    SweepInputsGPUHalideTest = make_halide(test_torchinductor.SweepInputsGPUTest)
+    GPUHalideTests = make_halide(test_torchinductor.GPUTests)
 
 if __name__ == "__main__":
     if HAS_CPU and not IS_MACOS and HAS_HALIDE:

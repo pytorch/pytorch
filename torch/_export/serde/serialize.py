@@ -2616,7 +2616,7 @@ def _canonicalize_graph(
         for i in node.inputs:
             a = i.arg
             if a.type == "as_graph":
-                a.as_graph.graph = _canonicalize_graph(
+                a.as_graph.graph, _ = _canonicalize_graph(
                     a.as_graph.graph.inputs, a.as_graph.graph.outputs, a.as_graph.graph
                 )
                 a.as_graph.name = f"_g{counter}"

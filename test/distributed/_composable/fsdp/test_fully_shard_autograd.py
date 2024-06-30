@@ -2,6 +2,9 @@
 
 import collections
 import copy
+import functools
+import itertools
+import unittest
 
 from typing import Any, List, Optional, Type, Union
 
@@ -11,13 +14,20 @@ import torch.nn as nn
 
 from torch.distributed._composable.fsdp import fully_shard
 from torch.nn.parallel.scatter_gather import _is_namedtuple
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     DoubleLinear,
     FSDPTest,
+    FSDPTestMultiThread,
+    MLP,
 )
 from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.distributed._tensor.common_dtensor import (
+    ModelArgs,
+    Transformer,
+)
 
 
 class TestFullyShardAutograd(FSDPTest):
@@ -230,6 +240,92 @@ class TestFullyShardAutograd(FSDPTest):
             for _optim in (optim, ref_optim):
                 _optim.step()
                 _optim.zero_grad(set_to_none=(iter_idx % 2))
+
+
+class TestFullyShardPostAccGradHookMultiThread(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_post_acc_grad_hook_runs(self):
+        param_name_to_hook_count = collections.defaultdict(int)
+
+        def hook(param_name: str, param: torch.Tensor) -> None:
+            nonlocal param_name_to_hook_count
+            param_name_to_hook_count[param_name] += 1
+
+        model = MLP(8)
+        for module in (model.in_proj, model.out_proj, model):
+            fully_shard(module)
+        for param_name, param in model.named_parameters():
+            param_hook = functools.partial(hook, param_name)
+            param.register_post_accumulate_grad_hook(param_hook)
+
+        inp = torch.randn((2, 8), device="cuda")
+        model(inp).sum().backward()
+        param_names = {param_name for param_name, _ in model.named_parameters()}
+        self.assertEqual(param_names, set(param_name_to_hook_count.keys()))
+        for param_name, count in param_name_to_hook_count.items():
+            self.assertEqual(count, 1)
+
+
+class TestFullyShardPostAccGradHookMultiProcess(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return min(torch.cuda.device_count(), 2)
+
+    @skip_if_lt_x_gpu(2)
+    def test_post_acc_grad_hook_optim_parity(self):
+        """
+        Tests parity of running the optimizer via the post-accumulate-grad
+        hook vs. normally.
+        """
+        torch.manual_seed(42)
+        model_args = ModelArgs(dropout_p=0.0)
+        model = Transformer(model_args)
+
+        ref_model = copy.deepcopy(model).cuda()
+        for module in itertools.chain(ref_model.layers, [ref_model]):
+            fully_shard(module)
+        optim_kwargs = {"lr": 1e-2, "foreach": False}
+        ref_optim = torch.optim.AdamW(ref_model.parameters(), **optim_kwargs)
+        lr_scheduler_kwargs = {"step_size": 5}
+        ref_lr_scheduler = torch.optim.lr_scheduler.StepLR(
+            ref_optim, **lr_scheduler_kwargs
+        )
+
+        for module in itertools.chain(model.layers, [model]):
+            fully_shard(module)
+        param_to_optim = {}
+        param_to_lr_scheduler = {}
+        for param in model.parameters():
+            param_to_optim[param] = torch.optim.AdamW([param], **optim_kwargs)
+            param_to_lr_scheduler[param] = torch.optim.lr_scheduler.StepLR(
+                param_to_optim[param], **lr_scheduler_kwargs
+            )
+
+        def optim_hook(param: nn.Parameter) -> None:
+            param_to_optim[param].step()
+            param_to_optim[param].zero_grad()
+            param_to_lr_scheduler[param].step()
+
+        for param in model.parameters():
+            param.register_post_accumulate_grad_hook(optim_hook)
+
+        torch.manual_seed(42 + self.rank)
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
+        for _ in range(10):
+            ref_loss = ref_model(inp).sum()
+            ref_loss.backward()
+            ref_optim.step()
+            ref_optim.zero_grad()
+            ref_lr_scheduler.step()
+            loss = model(inp).sum()
+            loss.backward()
+            self.assertTrue(torch.equal(ref_loss, loss))
+            for ref_param, param in zip(ref_model.parameters(), model.parameters()):
+                self.assertTrue(torch.equal(ref_param, param))
 
 
 if __name__ == "__main__":

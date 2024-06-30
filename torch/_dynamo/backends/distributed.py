@@ -128,90 +128,7 @@ def has_higher_order_op(gm):
     return False
 
 
-# 3 (lazy compile): Replace submodules with lazily compiling submodule
-class SubmoduleReplacer(torch.fx.interpreter.Interpreter):
-    def __init__(self, module, compiler):
-        super().__init__(module)
-        self.compiler = compiler
-
-    def lazily_compiled_submod(self, input_mod):
-        """
-        Create a wrapper around submodules which:
-        - lazily compiles each of the partitioned submodules using the user-provided compiler
-        - unpacks singleton tuples/lists into flat arg
-        """
-
-        class LazilyCompiledModule(torch.nn.Module):
-            def __init__(self, submod, compiler, unwrap_singleton_tuple):
-                super().__init__()
-                self.submod = submod
-                self.compiler = compiler
-                self.compiled = False
-                self.unwrap_singleton_tuple = unwrap_singleton_tuple
-
-            def forward(self, *args):
-                if not self.compiled:
-                    # First compile with args as example_inputs
-                    # These args will be fakeified if using Inductor/AOTAutograd
-                    new_submod = self.compiler(self.submod, args)
-                    del self.submod
-                    self.submod = new_submod
-                    self.compiled = True
-                    self.compiler = None
-
-                x = self.submod(*args)
-                # we must let 'input_mod' return a tuple, to make AOT happy.
-                # (aot_autograd compile_fn literally requires that the output of a graph it compiles is a tuple).
-                # however, we don't acutally want this tuple to be returned, since the fx logic that calls the submod
-                # will again wrap outputs from the submod in a tuple.  So we unwrap it, and count on it being re-wrapped
-                if self.unwrap_singleton_tuple and isinstance(x, (tuple, list)):
-                    return x[0]
-                return x
-
-        unwrap_singleton_tuple = False
-        for sn in input_mod.graph.nodes:
-            if sn.op == "output":
-                if not isinstance(sn.args[0], tuple):
-                    unwrap_singleton_tuple = True
-                    sn.args = (sn.args,)
-
-        input_mod.recompile()
-        input_mod.compile_subgraph_reason = GraphCompileReason(
-            "DDPOptimizer intentional graph-break (See Note [DDPOptimizer])."
-            " Set `torch._dynamo.config.optimize_ddp = False` to disable.",
-            [
-                # it's close to useless to get a real stacktrace here, and quite verbose.
-                traceback.FrameSummary(__file__, 0, DDPOptimizer),
-            ],
-        )
-        wrapper = LazilyCompiledModule(
-            input_mod,
-            self.compiler,
-            unwrap_singleton_tuple,
-        )
-        return wrapper
-
-    # We replace the submodules with lazy submodules which compile
-    # the corresponding submodules when they are run with real values
-    # Always returns `None` - we do not need to propagate values in order
-    # to replace submodules.
-    def run_node(self, n: Node) -> Any:
-        if n.op == "call_module":
-            real_mod = self.fetch_attr(n.target)
-
-            ddp_graph_log.debug("\n---%s graph---\n%s", n.target, real_mod.graph)
-
-            assert len(n.kwargs) == 0, "We assume only args for these modules"
-            lazily_compiled_submod = self.lazily_compiled_submod(real_mod)
-
-            # We update the original (outer) graph with a call into the compiled module
-            # instead of the uncompiled one.
-            self.module.delete_submodule(n.target)
-            n.target = "compiled_" + n.target
-            self.module.add_submodule(n.target, lazily_compiled_submod)
-
-
-# 3 (no lazy compile): compile each of the partitioned submodules using the user-provided compiler
+# compile each of the partitioned submodules using the user-provided compiler
 class SubmodCompiler(torch.fx.interpreter.Interpreter):
     def __init__(self, module, compiler, fake_mode):
         super().__init__(module)
@@ -620,32 +537,11 @@ class DDPOptimizer:
                     payload_fn=lambda: module.print_readable(print_output=False),
                 )
 
-        # NOTE, we want to enable `optimize_ddp_lazy_compile` by default as soon as possible,
-        # becuase it will fix stride mismatch errors (see motivation: https://github.com/pytorch/pytorch/pull/114154).
-        # However, lazy compile currently causes shape mismatch in other cases (`test_graph_split_inductor_transpose`)
-        # and we need to fix them before we can enable it by default.
-        if not torch._dynamo.config.optimize_ddp_lazy_compile:
-            # Today, optimize_ddp=True and keep_output_stride=False can lead to silent
-            # correctness issues. The problem is that ddp_optimizer works by partitioning
-            # the dynamo graph, sending each subgraph through aot autograd to inductor,
-            # and creates example inputs by eagerly interpreting each subgraph to get
-            # an output that with the same metadata that we'd get from eager mode.
-            # This is a problem though, for torch._inductor.config.keep_output_stride.
-            # The above config can cause the outputs of the first graph to have
-            # **different** strides from eager, causing the inputs that we pass
-            # to the second graph to be wrong.
-            # To really fix this, we would need to faithfully ask inductor
-            # what the outputs to each graph it expects are.
-            fake_mode = detect_fake_mode(example_inputs)
-            if fake_mode is None:
-                fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+        fake_mode = detect_fake_mode(example_inputs)
+        if fake_mode is None:
+            fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
 
-        if torch._dynamo.config.optimize_ddp_lazy_compile:
-            submod_compiler = SubmoduleReplacer(split_gm, self.backend_compile_fn)
-        else:
-            submod_compiler = SubmodCompiler(
-                split_gm, self.backend_compile_fn, fake_mode
-            )
+        submod_compiler = SubmodCompiler(split_gm, self.backend_compile_fn, fake_mode)
         submod_compiler.run(*example_inputs)
         split_gm.recompile()
 

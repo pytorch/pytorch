@@ -503,8 +503,8 @@ class profile:
             if _filter_name(kineto_event.name()):
                 continue
             rel_start_ns = kineto_event.start_ns() - trace_start_ns
-            rel_end_ns = rel_start_ns + kineto_event.duration_ns()
-            abs_end_ns = kineto_event.start_ns() + kineto_event.duration_ns()
+            rel_end_ns = kineto_event.end_ns() - trace_start_ns
+            abs_end_ns = kineto_event.end_ns()
 
             cpu_memory_usage = 0
             device_memory_usage = 0

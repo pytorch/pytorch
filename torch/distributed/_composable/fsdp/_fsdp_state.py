@@ -146,7 +146,7 @@ class FSDPState(_State):
                 state._fsdp_param_group.lazy_init()
 
     def _init_shared_state(self) -> None:
-        self._comm_ctx.init()
+        self._comm_ctx.lazy_init()
         for state in self._state_ctx.all_states:
             state._state_ctx = self._state_ctx
             state._comm_ctx = self._comm_ctx
@@ -249,6 +249,7 @@ class FSDPState(_State):
                     state._finalize_backward()
             if self._state_ctx.is_last_backward:
                 self._comm_ctx.post_forward_order.clear()
+                self._comm_ctx.reduce_scatter_state = None
             self._state_ctx.post_backward_final_callback_queued = False
 
     def _finalize_backward(self) -> None:

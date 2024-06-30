@@ -30,6 +30,7 @@
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/logger.hpp>
+#include <torch/csrc/monitor/instrumentation.h>
 #include <torch/torch.h>
 
 namespace c10d {
@@ -575,6 +576,8 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
 
 bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
     std::optional<std::chrono::milliseconds> timeout) {
+  STATIC_SCOPED_WAIT_COUNTER(
+      pytorch.wait_counter.ProcessGroupNCCL__checkTimeout);
   auto currentTimepoint = std::chrono::steady_clock::now();
   auto timeElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
       currentTimepoint - workStartTime_);
@@ -1457,6 +1460,8 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     // Leave another two mins for desync report generation or process group
     // destroy.
     std::this_thread::sleep_for(std::chrono::seconds(heartbeatTimeoutInSec_));
+    LOG(INFO) << logPrefix() << "slept for " << heartbeatTimeoutInSec_
+              << " waiting for desync report or process group destroy.";
   }
 
   // At this point, we either already sleep for another `heartbeatTimeoutInSec_`
@@ -1686,6 +1691,8 @@ void ProcessGroupNCCL::watchdogHandler() {
             // exception
             std::this_thread::sleep_for(
                 std::chrono::seconds(heartbeatTimeoutInSec_));
+            LOG(INFO) << logPrefix() << "slept for " << heartbeatTimeoutInSec_
+                      << " giving time for flight recorder dumps to finish.";
           } catch (const std::exception& e) {
             LOG(ERROR) << logPrefix()
                        << "Failed to set dump signal in tcpstore. "

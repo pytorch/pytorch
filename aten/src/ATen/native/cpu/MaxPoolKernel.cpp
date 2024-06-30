@@ -11,6 +11,7 @@
 #include <c10/util/irange.h>
 #include <type_traits>
 #include <ATen/OpMathType.h>
+#include <ATen/native/ReduceOpsUtils.h>
 
 namespace at::native {
 
@@ -85,7 +86,9 @@ compute_internal(
   using iVec = vec::Vectorized<integer_t>;
   // Pass I: init out lane
   iVec index0_vec = iVec(id0 * input_height * input_width + ih0 * input_width + iw0);
-  Vec out_vec = Vec(-std::numeric_limits<scalar_t>::infinity());
+
+  scalar_t min_value = lower_bound<scalar_t>();
+  Vec out_vec = Vec(min_value);
   int64_t d1 = 0;
   for (; d1 < len; d1 += Vec::size()) {
     index0_vec.store(index_ptr + d1);
@@ -93,7 +96,7 @@ compute_internal(
   }
   for (; d1 < size; d1++) {
     ind[d1] = ih0 * input_width + iw0;
-    out_data[d1] = -std::numeric_limits<scalar_t>::infinity();
+    out_data[d1] = min_value;
   }
   // Pass II: compute local max
   for (int64_t id = id0; id < id1; id += dilationD) {

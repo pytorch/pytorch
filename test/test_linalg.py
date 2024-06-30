@@ -4534,7 +4534,7 @@ class TestLinalg(TestCase):
             try:
                 import os
                 os.remove(filename)
-            finally:
+            except FileNotFoundError:
                 pass
 
         # disables TunableOp, no file will be written, restore to default values
@@ -4544,6 +4544,90 @@ class TestLinalg(TestCase):
         torch.cuda.tunable.set_max_tuning_iterations(100)
         assert torch.cuda.tunable.is_enabled() is False, "TunableOp should be off after resetting"
         assert torch.cuda.tunable.get_max_tuning_iterations() == 100
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @dtypes(torch.float)
+    def test_bmm_tunableop_rocm(self, device, dtype):
+        # buffer rotation (on by default) with strided batched gemm tunableop was causing a mem fault
+        torch.cuda.tunable.enable(True)
+        ordinal = torch.cuda.current_device()
+        filename = f"tunableop_results{ordinal}.csv"
+        torch.cuda.tunable.set_filename(filename)
+        iterations = torch.cuda.tunable.get_max_tuning_iterations()
+        torch.cuda.tunable.set_max_tuning_iterations(10)
+        # the following 3 cases cover all previous failure cases and are here to catch regressions
+        B = 16
+        N = M = K = 256
+        dtype = torch.bfloat16
+        device = torch.device("cuda:0")
+        # case 1
+        i1 = torch.randn((B, N, M), device=device, dtype=dtype)
+        i2 = torch.randn((B, M, K), device=device, dtype=dtype)
+        out = torch.bmm(i1, i2)
+        # case 2
+        i1 = torch.randn((B, N, M), device=device, dtype=dtype)
+        i1 = torch.permute(i1, (1, 2, 0))
+        i2 = torch.randn((B, M, K), device=device, dtype=dtype)
+        i2 = torch.permute(i2, (1, 0, 2))
+        out = torch.bmm(i1, i2)
+        # case 3
+        i1 = torch.randn((N, B, M), device=device, dtype=dtype)
+        i1 = torch.permute(i1, (1, 0, 2))
+        i2 = torch.randn((M, B, K), device=device, dtype=dtype)
+        i2 = torch.permute(i2, (1, 2, 0))
+        out = torch.bmm(i1, i2)
+        # clean up, remove any file that was generated
+        try:
+            import os
+            os.remove(filename)
+        except FileNotFoundError:
+            pass
+        # reset back to prior settings
+        torch.cuda.tunable.set_max_tuning_iterations(iterations)
+        torch.cuda.tunable.enable(False)
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @dtypes(torch.float)
+    def test_numeric_check_leak_tunableop_rocm(self, device, dtype):
+        from torch.testing._internal.common_utils import CudaMemoryLeakCheck
+        import os
+        # run operator first without tuning to ensure all rocm libs are loaded,
+        # otherwise false positive mem leak
+        B = 16
+        N = M = K = 256
+        dtype = torch.bfloat16
+        device = torch.device("cuda:0")
+        i1 = torch.randn((B, N, M), device=device, dtype=dtype)
+        i2 = torch.randn((B, M, K), device=device, dtype=dtype)
+        out = torch.bmm(i1, i2)
+        # enable tunableop numeric check via env variable.
+        PYTORCH_TUNABLEOP_NUMERICAL_CHECK = "PYTORCH_TUNABLEOP_NUMERICAL_CHECK"
+        prev_val = os.getenv(PYTORCH_TUNABLEOP_NUMERICAL_CHECK)
+        try:
+            os.environ[PYTORCH_TUNABLEOP_NUMERICAL_CHECK] = "1"
+            torch.cuda.tunable.enable(True)
+            ordinal = torch.cuda.current_device()
+            filename = f"tunableop_results{ordinal}.csv"
+            torch.cuda.tunable.set_filename(filename)
+            iterations = torch.cuda.tunable.get_max_tuning_iterations()
+            torch.cuda.tunable.set_max_tuning_iterations(10)
+            with CudaMemoryLeakCheck(self):
+                out = torch.bmm(i1, i2)
+                torch.cuda.tunable.set_max_tuning_iterations(iterations)
+                torch.cuda.tunable.enable(False)
+                # clean up, remove any file that was generated
+                try:
+                    os.remove(filename)
+                except FileNotFoundError:
+                    pass
+        finally:
+            if prev_val is None:
+                del os.environ[PYTORCH_TUNABLEOP_NUMERICAL_CHECK]
+            else:
+                os.environ[PYTORCH_TUNABLEOP_NUMERICAL_CHECK] = prev_val
+
 
     @dtypes(torch.float, torch.complex64)
     def test_matmul_out_kernel_errors_with_autograd(self, device, dtype):

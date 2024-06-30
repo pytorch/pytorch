@@ -671,6 +671,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
             "(Tensor(a!) x) -> ()",
             "(Tensor(a!) x, Tensor y, Tensor(b!) z, SymInt w, Tensor(c!)? n) -> ()",
             "(Tensor(a!) x, Tensor[] y, Tensor(b!) z, SymInt w, Tensor(c!)? n) -> ()",
+            "(Tensor(a!) x, Tensor y, Tensor(b!)[] z, SymInt w) -> ()",
             "(Tensor(a!) x, Tensor y, Tensor(b!) z, SymInt w, Tensor(c!)? n) -> Tensor",
             "(Tensor(a!) x, Tensor y, Tensor(b!) z, SymInt w, Tensor(c!)? n) -> (Tensor, Tensor)",
         ]
@@ -678,7 +679,6 @@ class MiscTests(torch._inductor.test_case.TestCase):
             "(Tensor x) -> ()",
             "(Tensor(a) x) -> Tensor(a)",
             "(Tensor(a!) x) -> Tensor(a!)",
-            "(Tensor(a!) x, Tensor y, Tensor(b!)[] z, SymInt w) -> ()",
             "(Tensor(a!) x, Tensor y, Tensor(b!) z, SymInt w, Tensor(c!)? n) -> Tensor(a)",
             "(Tensor(a!) x, Tensor y, Tensor(b!) z, SymInt w, Tensor(c!)? n) -> (Tensor, Tensor(a))",
             "(Tensor(a) x, Tensor y, Tensor(b!) z, SymInt w, Tensor(c!)? n) -> (Tensor, Tensor(a))",
@@ -912,6 +912,39 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
         finally:
             cleanup_op("mylib::foo")
             del lib
+
+    def test_auto_functionalize_tensorlist(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor all_gather_output, SymInt[] all_gather_input_split_sizes, int dim, Tensor(a!)[] out) -> ()",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            @torch._dynamo.disable
+            def foo_impl(all_gather_output, all_gather_input_split_sizes, dim, out):
+                for o in out:
+                    o.copy_(all_gather_output)
+
+            def f(all_gather_output, all_gather_input_split_sizes, dim, out):
+                torch.ops.mylib.foo(
+                    all_gather_output, all_gather_input_split_sizes, dim, out
+                )
+
+            a = torch.ones(4)
+            b = [2, 3]
+            c = 0
+            d = [torch.empty(4) for _ in range(2)]
+            orig_args = (a, b, c, d)
+
+            compiled_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
+            torch.compile(f, backend="inductor", fullgraph=True)(*compiled_args)
+
+            eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
+            f(*eager_args)
+            self.assertEqual(compiled_args, eager_args)
 
     def test_shape_int_inplace_binops(self):
         def fn(x):
@@ -6309,7 +6342,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
     def test_guard_failure_fn_shape_control(self):
         def fn(x, y):
-            if x.shape[0] < 3:
+            if x.shape[0] < 4:
                 if y.shape[0] < 3:
                     return x * y
                 else:
@@ -6344,7 +6377,7 @@ utils_device.CURRENT_DEVICE == None""".split(
                 first_guard_failure,
             )
         else:
-            self.assertIn("""2 <= L['x'].size()[0] <= 2""", first_guard_failure)
+            self.assertIn("""L['x'].size()[0] < 3""", first_guard_failure)
 
     def test_guard_failure_fn2(self):
         def fn(x, y):
@@ -7149,6 +7182,20 @@ utils_device.CURRENT_DEVICE == None""".split(
         torch._dynamo.mark_dynamic(y, 0)
         with self.assertRaises(ConstraintViolationError):
             torch._dynamo.optimize("eager")(my_dyn_fn)(y)
+
+    def test_raise_guard_indirect_full_constraint(self):
+        y = torch.randn([3, 3, 3])
+
+        def dyn_fn(x):
+            if x.shape[0] > 3:
+                return x.cos()
+            if x.shape[0] < 3:
+                return x * 2
+            return x.sin()
+
+        torch._dynamo.mark_dynamic(y, 0)
+        with self.assertRaises(ConstraintViolationError):
+            torch._dynamo.optimize("eager")(dyn_fn)(y)
 
     # Translation validation changes the exception type, don't run with it
     @torch.fx.experimental._config.patch(translation_validation=False)

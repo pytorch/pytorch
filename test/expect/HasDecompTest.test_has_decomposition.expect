@@ -502,6 +502,8 @@ aten::_scaled_dot_product_efficient_attention_backward
 aten::_scaled_dot_product_flash_attention
 aten::_scaled_dot_product_flash_attention_backward
 aten::_scaled_dot_product_flash_attention_for_cpu_backward
+aten::_scaled_dot_product_fused_attention_overrideable
+aten::_scaled_dot_product_fused_attention_overrideable_backward
 aten::_scaled_mm
 aten::_scaled_mm.out
 aten::_segment_reduce_backward
@@ -656,8 +658,6 @@ aten::argmax
 aten::argmax.out
 aten::argmin
 aten::argmin.out
-aten::argsort.stable
-aten::argsort.stable_out
 aten::as_strided
 aten::as_strided_
 aten::avg_pool2d
@@ -1167,8 +1167,6 @@ aten::set_.source_Tensor
 aten::slice_copy.Tensor
 aten::slice_copy.Tensor_out
 aten::slice_inverse
-aten::slice_scatter
-aten::slice_scatter.out
 aten::slow_conv3d_forward
 aten::slow_conv3d_forward.output
 aten::slow_conv_dilated2d

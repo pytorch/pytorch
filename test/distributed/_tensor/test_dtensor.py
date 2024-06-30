@@ -536,6 +536,16 @@ class DTensorTest(DTensorTestBase):
         buffer.seek(0)
         reloaded_st = torch.load(buffer)
         self.assertEqual(sharded_tensor, reloaded_st)
+        # Test weights_only load
+        try:
+            torch.serialization.add_safe_globals(
+                [DTensor, DeviceMesh, Shard, DTensorSpec, TensorMeta]
+            )
+            buffer.seek(0)
+            reloaded_st = torch.load(buffer, weights_only=True)
+            self.assertEqual(sharded_tensor, reloaded_st)
+        finally:
+            torch.serialization.clear_safe_globals()
 
 
 class DTensorMeshTest(DTensorTestBase):
@@ -774,7 +784,9 @@ class DTensorMeshTest(DTensorTestBase):
         from torch.distributed._tensor.experimental import implicit_replication
 
         with implicit_replication():
-            out_dt = sharded_dtensor + torch.ones(3, device=self.device_type)
+            # We put the scalar tensor as the left operand so we can test out
+            # when a non-dtensor is a the arg in the args list.
+            out_dt = torch.ones(3, device=self.device_type) + sharded_dtensor
             self.assertEqual(out_dt.placements, [Shard(0)])
             self.assertEqual(out_dt.shape, (4 * self.world_size, 3))
             local_shard = out_dt.to_local()
@@ -792,7 +804,7 @@ class DTensorMeshTest(DTensorTestBase):
         ndim_0_tensor = torch.tensor(1, device=self.device_type)
 
         def add_scalar_tensor_with_dtensor():
-            return sharded_dtensor + ndim_0_tensor
+            return ndim_0_tensor + sharded_dtensor
 
         result = add_scalar_tensor_with_dtensor().to_local()
         self.assertEqual(result, local_tensor + ndim_0_tensor)
@@ -804,7 +816,7 @@ class DTensorMeshTest(DTensorTestBase):
         # automatically turn tensor to DTensor replicate when ndim = 1 and numel = 1
         numel_1_tensor = torch.tensor([1], device=self.device_type)
         self.assertEqual(
-            (sharded_dtensor + numel_1_tensor).to_local(), local_tensor + numel_1_tensor
+            (numel_1_tensor + sharded_dtensor).to_local(), numel_1_tensor + local_tensor
         )
 
 

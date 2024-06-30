@@ -1,5 +1,6 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Dict
 
 from torchgen.api.types import (
     BaseCppType,
@@ -40,7 +41,7 @@ contextArg = Binding(
     default=None,
 )
 
-BaseTypeToCppMapping: Dict[BaseTy, BaseCppType] = {
+BaseTypeToCppMapping: dict[BaseTy, BaseCppType] = {
     BaseTy.int: longT,
     BaseTy.float: doubleT,
     BaseTy.bool: boolT,
@@ -54,7 +55,7 @@ BaseTypeToCppMapping: Dict[BaseTy, BaseCppType] = {
 
 @dataclass(frozen=True)
 class OptionalCType(CType):
-    elem: "CType"
+    elem: CType
 
     def cpp_type(self, *, strip_ref: bool = False) -> str:
         # Do not pass `strip_ref` recursively.
@@ -63,13 +64,13 @@ class OptionalCType(CType):
     def cpp_type_registration_declarations(self) -> str:
         return f"torch::executor::optional<{self.elem.cpp_type_registration_declarations()}>"
 
-    def remove_const_ref(self) -> "CType":
+    def remove_const_ref(self) -> CType:
         return OptionalCType(self.elem.remove_const_ref())
 
 
 @dataclass(frozen=True)
 class ArrayRefCType(CType):
-    elem: "CType"
+    elem: CType
 
     def cpp_type(self, *, strip_ref: bool = False) -> str:
         # Do not pass `strip_ref` recursively.
@@ -78,5 +79,5 @@ class ArrayRefCType(CType):
     def cpp_type_registration_declarations(self) -> str:
         return f"torch::executor::ArrayRef<{self.elem.cpp_type_registration_declarations()}>"
 
-    def remove_const_ref(self) -> "CType":
+    def remove_const_ref(self) -> CType:
         return ArrayRefCType(self.elem.remove_const_ref())

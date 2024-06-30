@@ -539,12 +539,16 @@ Tensor ctc_loss(const Tensor& log_probs_, const Tensor& targets, IntArrayRef inp
 
 // Convenience function accepting Tensors
 Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, const Tensor& input_lengths, const Tensor& target_lengths, int64_t BLANK, int64_t reduction, bool zero_infinity) {
+  // we don't want to convert to IntArrayRef if we can dispatch to cuDNN (this allows graph-capturable ctc_loss)
+  bool use_cudnn =
+      (log_probs.device().type() == at::kCUDA) &&
+      at::_use_cudnn_ctc_loss(
+          log_probs, targets, input_lengths, target_lengths, BLANK);
   if (at::areAnyTensorSubclassLike(
-          {log_probs, targets, input_lengths, target_lengths})) {
+          {log_probs, targets, input_lengths, target_lengths}) || use_cudnn) {
     // Composite Compliant path for TensorSubclasses
     return ctc_loss_impl(log_probs, targets, input_lengths, target_lengths, BLANK, reduction, zero_infinity);
   }
-
   // Fast path (which accesses data_ptr) and less operator dispatches for
   // regular tensors
   TORCH_CHECK(isIntegralType(input_lengths.scalar_type(), /*includeBool=*/false), "input_lengths must be integral");

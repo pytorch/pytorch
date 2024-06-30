@@ -3,14 +3,23 @@ name: Check whether the workflow owner can use ARC runners
 on:
   workflow_call:
     inputs:
-      user_name:
+      triggering_actor:
         required: true
         type: string
-        description: The name of the workflow owner.
+        description: The triggering_actor for the workflow. Use github.triggering_actor
+      issue_owner:
+        required: true
+        type: string
+        description: The owner of the issue. Use github.event.pull_request.user.login || github.event.issue.user.login
       curr_branch:
         required: true
         type: string
-        description: Current branch.
+        description: Current branch or tag.
+      curr_ref_type:
+        required: false
+        type: string
+        default: branch
+        description: The value of "github.ref_type", "branch" or "tag"
       issue_number:
         required: false
         type: string
@@ -26,13 +35,14 @@ on:
 
 jobs:
   runner-determinator:
-    runs-on: linux.4xlarge
+    runs-on: ubuntu-latest
     outputs:
       label-type: ${{ steps.set-condition.outputs.label-type }}
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       ISSUE_NUMBER: ${{ inputs.issue_number }}
-      USERNAME: ${{ inputs.user_name }}
+      TRIGGERING_ACTOR: ${{ inputs.triggering_actor }}
+      ISSUE_OWNER: ${{ inputs.issue_owner }}
     steps:
       # - name: Checkout PyTorch
       #   uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
@@ -42,13 +52,13 @@ jobs:
 
       # TODO: Remove the hardcoded step below
       # Hardcoding below is temporary for testing ALI runners
-      # This file below should match the script found in .github/scripts/get_workflow_type.py
+      # This file below should match the script found in .github/scripts/runner_determinator.py
       - name: Hardcode runner-determinator script
         run: |
-          cat <<EOF > get_workflow_type.py
+          cat <<EOF > runner_determinator.py
           import json
           from argparse import ArgumentParser
-          from typing import Any, Tuple
+          from typing import Any, Iterable, Tuple
 
           from github import Auth, Github
           from github.Issue import Issue
@@ -65,20 +75,35 @@ jobs:
               parser = ArgumentParser("Get dynamic rollout settings")
               parser.add_argument("--github-token", type=str, required=True, help="GitHub token")
               parser.add_argument(
-                  "--github-repo",
+                  "--github-issue-repo",
                   type=str,
                   required=False,
                   default="pytorch/test-infra",
                   help="GitHub repo to get the issue",
               )
               parser.add_argument(
-                  "--github-issue", type=int, required=True, help="GitHub issue umber"
+                  "--github-repo",
+                  type=str,
+                  required=True,
+                  help="GitHub repo where CI is running",
               )
               parser.add_argument(
-                  "--github-user", type=str, required=True, help="GitHub username"
+                  "--github-issue", type=int, required=True, help="GitHub issue number"
               )
               parser.add_argument(
-                  "--github-branch", type=str, required=True, help="Current GitHub branch"
+                  "--github-actor", type=str, required=True, help="GitHub triggering_actor"
+              )
+              parser.add_argument(
+                  "--github-issue-owner", type=str, required=True, help="GitHub issue owner"
+              )
+              parser.add_argument(
+                  "--github-branch", type=str, required=True, help="Current GitHub branch or tag"
+              )
+              parser.add_argument(
+                  "--github-ref-type",
+                  type=str,
+                  required=True,
+                  help="Current GitHub ref type, branch or tag",
               )
 
               return parser.parse_args()
@@ -94,26 +119,62 @@ jobs:
               return repo.get_issue(number=issue_num)
 
 
+          def get_potential_pr_author(
+              gh: Github, repo: str, username: str, ref_type: str, ref_name: str
+          ) -> str:
+              # If the trigger was a new tag added by a bot, this is a ciflow case
+              # Fetch the actual username from the original PR. The PR number is
+              # embedded in the tag name: ciflow/<name>/<pr-number>
+              if username == "pytorch-bot[bot]" and ref_type == "tag":
+                  split_tag = ref_name.split("/")
+                  if (
+                      len(split_tag) == 3
+                      and split_tag[0] == "ciflow"
+                      and split_tag[2].isnumeric()
+                  ):
+                      pr_number = split_tag[2]
+                      try:
+                          repository = gh.get_repo(repo)
+                          pull = repository.get_pull(number=int(pr_number))
+                      except Exception as e:
+                          raise Exception(  # noqa: TRY002
+                              f"issue with pull request {pr_number} from repo {repository}"
+                          ) from e
+                      return pull.user.login
+              # In all other cases, return the original input username
+              return username
+
+
           def is_exception_branch(branch: str) -> bool:
               return branch.split("/")[0] in {"main", "nightly", "release", "landchecks"}
 
 
-          def get_workflow_type(issue: Issue, username: str) -> Tuple[str, str]:
+          def get_workflow_type(
+              issue: Issue, workflow_requestors: Iterable[str]
+          ) -> Tuple[str, str]:
               try:
-                  user_list = issue.get_comments()[0].body.split()
+                  first_comment = issue.get_comments()[0].body.strip("\n\t ")
 
-                  if user_list[0] == "!":
+                  if first_comment[0] == "!":
                       MESSAGE = "LF Workflows are disabled for everyone. Using meta runners."
                       return WORKFLOW_LABEL_META, MESSAGE
-                  elif user_list[0] == "*":
+                  elif first_comment[0] == "*":
                       MESSAGE = "LF Workflows are enabled for everyone. Using LF runners."
                       return WORKFLOW_LABEL_LF, MESSAGE
-                  elif username in user_list:
-                      MESSAGE = f"LF Workflows are enabled for {username}. Using LF runners."
-                      return WORKFLOW_LABEL_LF, MESSAGE
                   else:
-                      MESSAGE = f"LF Workflows are disabled for {username}. Using meta runners."
-                      return WORKFLOW_LABEL_META, MESSAGE
+                      all_opted_in_users = {
+                          usr_raw.strip("\n\t@ ") for usr_raw in first_comment.split()
+                      }
+                      opted_in_requestors = {
+                          usr for usr in workflow_requestors if usr in all_opted_in_users
+                      }
+                      if opted_in_requestors:
+                          MESSAGE = f"LF Workflows are enabled for {', '.join(opted_in_requestors)}. Using LF runners."
+                          return WORKFLOW_LABEL_LF, MESSAGE
+                      else:
+                          MESSAGE = f"LF Workflows are disabled for {', '.join(workflow_requestors)}. Using meta runners."
+                          return WORKFLOW_LABEL_META, MESSAGE
+
               except Exception as e:
                   MESSAGE = f"Failed to get determine workflow type. Falling back to meta runners. Exception: {e}"
                   return WORKFLOW_LABEL_META, MESSAGE
@@ -122,7 +183,7 @@ jobs:
           def main() -> None:
               args = parse_args()
 
-              if is_exception_branch(args.github_branch):
+              if args.github_ref_type == "branch" and is_exception_branch(args.github_branch):
                   output = {
                       LABEL_TYPE_KEY: WORKFLOW_LABEL_META,
                       MESSAGE_KEY: f"Exception branch: '{args.github_branch}', using meta runners",
@@ -131,8 +192,21 @@ jobs:
                   try:
                       gh = get_gh_client(args.github_token)
                       # The default issue we use - https://github.com/pytorch/test-infra/issues/5132
-                      issue = get_issue(gh, args.github_repo, args.github_issue)
-                      label_type, message = get_workflow_type(issue, args.github_user)
+                      issue = get_issue(gh, args.github_issue_repo, args.github_issue)
+                      username = get_potential_pr_author(
+                          gh,
+                          args.github_repo,
+                          args.github_actor,
+                          args.github_ref_type,
+                          args.github_branch,
+                      )
+                      label_type, message = get_workflow_type(
+                          issue,
+                          (
+                              args.github_issue_owner,
+                              username,
+                          ),
+                      )
                       output = {
                           LABEL_TYPE_KEY: label_type,
                           MESSAGE_KEY: message,
@@ -150,7 +224,8 @@ jobs:
           if __name__ == "__main__":
               main()
           EOF
-          cat get_workflow_type.py
+
+          cat runner_determinator.py
 
       - name: Install dependencies
         run: python3 -m pip install urllib3==1.26.18 PyGithub==2.3.0
@@ -159,13 +234,17 @@ jobs:
         id: set-condition
         run: |
           curr_branch="${{ inputs.curr_branch }}"
+          curr_ref_type="${{ inputs.curr_ref_type }}"
           echo "Current branch is '$curr_branch'"
 
-          output="$(python3 get_workflow_type.py \
+          output="$(python3 runner_determinator.py \
             --github-token "$GITHUB_TOKEN" \
             --github-issue "$ISSUE_NUMBER" \
             --github-branch "$curr_branch" \
-            --github-user "$USERNAME")"
+            --github-actor "$TRIGGERING_ACTOR" \
+            --github-issue-owner "$ISSUE_OWNER" \
+            --github-ref-type "$curr_ref_type" \
+            --github-repo "$GITHUB_REPOSITORY")"
 
           echo "Output: '${output}'"
 

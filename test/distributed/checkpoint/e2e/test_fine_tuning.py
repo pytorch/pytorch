@@ -9,7 +9,9 @@ import torch.distributed.checkpoint as dist_cp
 import torch.nn as nn
 from torch.distributed._tensor import init_device_mesh
 from torch.distributed.checkpoint.state_dict import (
+    get_model_state_dict,
     get_state_dict,
+    set_model_state_dict,
     set_state_dict,
     StateDictOptions,
 )
@@ -120,7 +122,7 @@ class TestFineTuning(DTensorTestBase):
         # Simulate that the fine tuning restart after 3 iterations
         for i in range(2):
             # Load pretrain submodules checkpoint
-            pretrain_state_dict, _ = get_state_dict(
+            pretrain_state_dict = get_model_state_dict(
                 model,
                 submodules={model.pretrain},
                 options=StateDictOptions(keep_submodule_prefixes=False),
@@ -129,7 +131,7 @@ class TestFineTuning(DTensorTestBase):
                 {"model": pretrain_state_dict},
                 storage_reader=dist_cp.FileSystemReader(pretrain_dir),
             )
-            set_state_dict(
+            set_model_state_dict(
                 model,
                 model_state_dict={model.pretrain: pretrain_state_dict},
                 options=StateDictOptions(strict=False),

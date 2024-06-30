@@ -1580,6 +1580,8 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._unpack_dual",
         "torch._unsafe_index_put",
         "torch._unsafe_index",
+        "torch._unsafe_masked_index_put_accumulate",
+        "torch._unsafe_masked_index",
         "torch._use_cudnn_ctc_loss",
         "torch._use_cudnn_rnn_flatten_weight",
         "torch._values_copy",

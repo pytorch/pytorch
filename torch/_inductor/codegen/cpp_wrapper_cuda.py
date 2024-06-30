@@ -77,6 +77,36 @@ class CppWrapperCuda(CppWrapperCpu):
             self.prefix.writeline("\n")
         return super().generate(is_inference)
 
+    def generate_user_defined_triton_kernel(
+        self, kernel_name, grid, configs, args, triton_meta, raw_args
+    ):
+        assert len(grid) != 0
+        if len(grid) == 1:
+            grid_decision = grid[0]
+        else:
+            meta = CudaKernelParamCache.get(kernel_name)
+            assert meta is not None
+            grid_decision = None
+            for i, c in enumerate(configs):
+                if all(arg == meta["meta"][key] for key, arg in c.kwargs.items()):
+                    grid_decision = grid[i]
+                    break
+            assert grid_decision is not None
+
+        arg_types = [
+            arg.get_dtype() if hasattr(arg, "get_dtype") else type(arg)
+            for arg in raw_args
+        ]
+        self.generate_kernel_call(
+            kernel_name,
+            args,
+            arg_types=arg_types,
+            grid=grid_decision,
+            cuda=True,
+            triton=True,
+            triton_meta=triton_meta,
+        )
+
     @functools.lru_cache(None)  # noqa: B019
     def generate_load_kernel_once(
         self,
@@ -237,17 +267,20 @@ class CppWrapperCuda(CppWrapperCpu):
         if grid_uses_symbolic_shapes:
             self.writeline(f"if ({grid_name}.is_non_zero()) {{")
         kernel_var_name = f"kernels.{name}" if V.graph.aot_mode else name
-        self.writeline(
-            "launchKernel({}, {}, {}, {}, {}, {}, {}, {});".format(
-                kernel_var_name,
-                f"{grid_name}.grid_x",
-                f"{grid_name}.grid_y",
-                f"{grid_name}.grid_z",
-                params["num_warps"],
-                params["shared_mem"],
-                kernel_args_var,
-                stream,
-            )
+        launch_kernel_call = """launchKernel({}, {}, {}, {}, {}, {}, {}, {});""".format(
+            kernel_var_name,
+            f"{grid_name}.grid_x",
+            f"{grid_name}.grid_y",
+            f"{grid_name}.grid_z",
+            params["num_warps"],
+            params["shared_mem"],
+            kernel_args_var,
+            stream,
         )
         if grid_uses_symbolic_shapes:
+            # TODO: Use codegen `do_indent()` to properly generate the indentation.
+            # This works in this case as there's only one `if` condition.
+            self.writeline("    " + launch_kernel_call)
             self.writeline("}")
+        else:
+            self.writeline(launch_kernel_call)

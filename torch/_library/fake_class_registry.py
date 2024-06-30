@@ -10,11 +10,12 @@ log = logging.getLogger(__name__)
 
 
 class FakeScriptObject:
-    def __init__(self, wrapped_obj: Any, script_class_name: str):
+    def __init__(self, wrapped_obj: Any, script_class_name: str, x: torch.ScriptObject):
         self.wrapped_obj = wrapped_obj
 
         # The fully qualified name of the class of original script object
         self.script_class_name = script_class_name
+        self.real_obj = x
 
 
 class FakeScriptMethod:
@@ -100,8 +101,14 @@ def _check_valid_flat_script_obj(flat_x):
 
 def to_fake_obj(fake_mode, x: torch.ScriptObject) -> FakeScriptObject:
     import torch.utils._pytree as pytree
+    from torch.utils._python_dispatch import _disable_current_modes
 
-    flat_x = x.__obj_flatten__()  # type: ignore[attr-defined]
+    # x.__obj_flatten__() could be calling some tensor operations inside but we don't
+    # want to call these ops in surrounding dispatch modes when executing it.
+    # Otherwise, for example, the fake tensor modes will error out when the tensors inside
+    # script obeject execute some operations like clone if allow_non_fake_input flag is set.
+    with _disable_current_modes():
+        flat_x = x.__obj_flatten__()  # type: ignore[attr-defined]
 
     _check_valid_flat_script_obj(flat_x)
 
@@ -113,7 +120,7 @@ def to_fake_obj(fake_mode, x: torch.ScriptObject) -> FakeScriptObject:
 
     fake_x = _find_fake_class_for_script_object(x).__obj_unflatten__(fake_flattened)
 
-    fake_x_wrapped = FakeScriptObject(fake_x, x._type().qualified_name())  # type: ignore[attr-defined]
+    fake_x_wrapped = FakeScriptObject(fake_x, x._type().qualified_name(), x)  # type: ignore[attr-defined]
 
     for name in x._method_names():  # type: ignore[attr-defined]
         attr = getattr(fake_x, name, None)
