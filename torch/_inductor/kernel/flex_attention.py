@@ -69,8 +69,8 @@ def index_to_other_buffers(cnt: int, graph_type: SubgraphType) -> int:
     #   *other_buffers
     # ]
     # For fwd_graphs we have 5 dummy values this when the first lifted args
-    # is seen cnt = 5 and the start of the index_buffers is at args[10]
-    # thus we add 5 from the current cnt
+    # is seen cnt = 5 and the start of the index_buffers is at args[5]
+    # thus we add 0 from the current cnt
     if graph_type == SubgraphType.FWD:
         return cnt + 0
 
@@ -86,11 +86,11 @@ def index_to_other_buffers(cnt: int, graph_type: SubgraphType) -> int:
     #   block_mask,
     #   *other_buffers
     # ]
-    # We have 5 dummy values but the start of other_buffers is at index 14
+    # We have 5 dummy values but the start of other_buffers is at index 9
     if graph_type == SubgraphType.JOINT_FWD:
         return cnt + 4
 
-    # Same bwd args but now with 6 dummy values while other_buffers still start at 14
+    # Same bwd args but now with 6 dummy values while other_buffers still start at 9
     if graph_type == SubgraphType.JOINT_BWD:
         return cnt + 3
 
