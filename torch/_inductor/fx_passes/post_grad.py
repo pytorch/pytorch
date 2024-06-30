@@ -137,6 +137,14 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     reinplace_inplaceable_ops(gm.graph)
     decompose_auto_functionalized(gm.graph)
 
+    if config.post_grad_custom_post_reinplace_pass is not None:
+        with GraphTransformObserver(
+            gm,
+            "post_grad_custom_post_reinplace_pass",
+            config.trace.log_url_for_graph_xform,
+        ):
+            config.post_grad_custom_post_reinplace_pass(gm.graph)
+
     gm.recompile()
     optimus_scuba_log["after_recompile_post_grad"] = upload_graph(gm.graph)
     gm.graph.lint()
